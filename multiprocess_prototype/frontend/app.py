@@ -280,6 +280,7 @@ def run_gui(process: "GuiProcess") -> None:
     # RecipeEngine читает/пишет recipes_dir и вызывает migration_fn при load()
     # legacy-файлов (is_v1_recipe → True).
     _recipes_dir = PROJECT_ROOT / "multiprocess_prototype" / "recipes"
+    _recipe_manager = None  # G.5.1: инициализируем до try — build_app_services fail-loud при None
     try:
         from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
         from multiprocess_framework.modules.state_store_module.recipes.recipe_engine import RecipeEngine
@@ -427,12 +428,25 @@ def run_gui(process: "GuiProcess") -> None:
     ctx.extras["action_bus"] = action_bus
 
     # 3h. Phase D (Task D.1): AppServices factory — собирает 10 adapter'ов
-    # из ctx.extras в типизированный DI-контейнер.
+    # в типизированный DI-контейнер. G.5.1: фабрика принимает explicit
+    # AppServicesDeps из локалов run_gui() (не ctx.extras) — coupling factory→AppContext снят.
     # Failure = sys.exit(1) с понятным логом (аналог startup-checks).
-    from .app_services_factory import build_app_services
+    from .app_services_factory import build_app_services, AppServicesDeps
+
+    _services_deps = AppServicesDeps(
+        event_bus=event_bus,
+        topology_store=topology_store,
+        plugin_registry=PluginRegistry,
+        display_registry=_display_registry,
+        service_registry=_service_registry,
+        registers_manager=registers_manager,
+        config=dict(ctx.config),
+        recipe_manager=_recipe_manager,
+        auth_state=_auth_state,
+    )
 
     try:
-        ctx.app_services = build_app_services(ctx)
+        ctx.app_services = build_app_services(_services_deps)
     except Exception as exc:
         process._log_error(
             f"AppServices factory failed: {exc}",
