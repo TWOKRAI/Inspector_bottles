@@ -1,4 +1,5 @@
 """GraphView -- QGraphicsView с zoom, pan и wire creation."""
+
 from __future__ import annotations
 
 from enum import Enum, auto
@@ -13,6 +14,7 @@ from .temp_wire import TempWireItem
 
 class InteractionMode(Enum):
     """Режим взаимодействия с графом."""
+
     SELECT = auto()
     WIRE = auto()
 
@@ -131,6 +133,16 @@ class GraphView(QGraphicsView):
         if event.button() == Qt.MouseButton.MiddleButton:
             self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         super().mouseReleaseEvent(event)
+
+    def reveal_node(self, item) -> None:
+        """Раскрыть (показать) ноду в viewport — G.6.1 auto-reveal.
+
+        ensureVisible скроллит вид только если item вне видимой области; не
+        меняет zoom. Мягче centerOn (не дёргает камеру для уже видимых нод).
+        Вызывается tab'ом по событию ProcessAdded после full scene reload.
+        """
+        if item is not None:
+            self.ensureVisible(item, 50, 50)
 
     def fit_to_view(self) -> None:
         """Подогнать масштаб под содержимое."""

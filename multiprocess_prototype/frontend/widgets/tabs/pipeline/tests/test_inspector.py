@@ -109,18 +109,6 @@ class TestNodeInspectorPanel:
         assert not panel._placeholder.isHidden()
         assert panel._content.isHidden()
 
-    def test_update_field_suppresses_signal(self, qtbot):
-        panel = NodeInspectorPanel()
-        qtbot.addWidget(panel)
-        panel.show_node("camera", "source", params={"fps": "30"})
-
-        signals_received = []
-        panel.field_changed.connect(lambda *args: signals_received.append(args))
-
-        panel.update_field("fps", "60")
-        assert panel._field_editors["fps"].text() == "60"
-        assert len(signals_received) == 0
-
     def test_field_changed_signal(self, qtbot):
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
@@ -185,36 +173,6 @@ class TestCardsFieldFactoryBranch:
 
         assert panel._use_cards is False
         assert isinstance(panel._field_editors["fps"], QLineEdit)
-
-    def test_update_field_cards_suppresses_signal(self, qtbot):
-        """update_field через FieldEditor не тригерит field_changed."""
-        fi = _make_field_info("threshold", int, 128)
-        rm = _make_rm([fi])
-
-        panel = NodeInspectorPanel()
-        qtbot.addWidget(panel)
-        panel.set_services(_make_services_no_rm(), registers_manager=rm)
-        panel.show_node("camera", "source")
-
-        signals_received = []
-        panel.field_changed.connect(lambda *args: signals_received.append(args))
-
-        panel.update_field("threshold", 200)
-        assert len(signals_received) == 0
-
-    def test_update_field_cards_sets_value(self, qtbot):
-        """update_field через FieldEditor корректно устанавливает значение."""
-        fi = _make_field_info("threshold", int, 128)
-        rm = _make_rm([fi])
-
-        panel = NodeInspectorPanel()
-        qtbot.addWidget(panel)
-        panel.set_services(_make_services_no_rm(), registers_manager=rm)
-        panel.show_node("camera", "source")
-
-        panel.update_field("threshold", 42)
-        editor = panel._field_editors["threshold"]
-        assert editor.getter() == 42
 
     def test_cards_field_changed_signal_emitted(self, qtbot):
         """Изменение значения через FieldEditor эмитит field_changed."""

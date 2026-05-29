@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.domain.commands import (
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 
     from multiprocess_framework.modules.registers_module import RegistersManager
 
+    from .diff import TopologyDiff
     from .graph.graph_scene import GraphScene
     from .inspector.inspector_panel import NodeInspectorPanel
 
@@ -68,12 +69,16 @@ class PipelinePresenter:
         services: AppServices,
         *,
         registers_manager: "RegistersManager | None" = None,
+        notify: "Callable[[str], None] | None" = None,
     ) -> None:
         self._services = services
         # G.2: live RegistersManager — runtime-объект (FieldInfo-схемы + значения)
         # для inspector-карточек. Передаётся через RuntimeDeps (Q-F1=B), НЕ через
         # services.registers (domain RegistersBackend не может экспонировать framework FieldInfo).
         self._registers_manager = registers_manager
+        # G.6.2: callback для показа отклонённых мутаций пользователю (statusBar).
+        # presenter не знает про Qt — tab передаёт реализацию. None → только лог.
+        self._notify = notify
         self._model = PipelineModel()
         self._scene: GraphScene | None = None
         self._suppress = False
@@ -160,6 +165,7 @@ class PipelinePresenter:
                 new_value,
                 exc,
             )
+            self._report(f"Изменение поля отклонено: {exc}")
 
     def _on_target_process_changed(self, node_id: str, new_process: str) -> None:
         """Обработчик выбора нового целевого процесса для plugin-узла.
@@ -248,6 +254,7 @@ class PipelinePresenter:
                 )
             except DomainError as exc:
                 logger.warning("Ребиндинг display %s→%s отклонён: %s", old_display_id, new_display_id, exc)
+                self._report(f"Смена канала дисплея отклонена: {exc}")
 
     # ------------------------------------------------------------------ #
     #  Signal suppression (из v1)                                         #
@@ -266,6 +273,15 @@ class PipelinePresenter:
     @property
     def is_suppressed(self) -> bool:
         return self._suppress
+
+    def _report(self, message: str) -> None:
+        """G.6.2: показать сообщение пользователю (statusBar) через notify-callback.
+
+        No-op если notify не задан (тесты / headless). Лог остаётся отдельно
+        в каждом catch-сайте.
+        """
+        if self._notify is not None:
+            self._notify(message)
 
     # ------------------------------------------------------------------ #
     #  Загрузка                                                            #
@@ -358,6 +374,7 @@ class PipelinePresenter:
             self._services.commands.dispatch(cmd)
         except DomainError as exc:
             logger.error("AddProcess отклонён: %s", exc)
+            self._report(f"Не удалось добавить процесс: {exc}")
             self._gui_positions.pop(name, None)
             return None
 
@@ -390,6 +407,7 @@ class PipelinePresenter:
                         self._services.commands.dispatch(cmd)
                     except DomainError as exc:
                         logger.warning("UnbindDisplay отклонён: %s", exc)
+                        self._report(f"Не удалось отвязать дисплей: {exc}")
                 # Scene обновится из _on_topology_replaced (синхронный dispatch)
             else:
                 # G.4.2: process removal через domain dispatch
@@ -398,6 +416,7 @@ class PipelinePresenter:
                     self._services.commands.dispatch(cmd)
                 except DomainError as exc:
                     logger.error("RemoveProcess отклонён: %s", exc)
+                    self._report(f"Не удалось удалить процесс: {exc}")
                 # Scene обновится из _on_topology_replaced (синхронный)
 
     def add_wire(self, source: str, target: str, parent: "QWidget | None" = None) -> bool:
@@ -436,6 +455,7 @@ class PipelinePresenter:
                 self._services.commands.dispatch(cmd)
             except DomainError as exc:
                 logger.warning("BindDisplay отклонён: %s", exc)
+                self._report(f"Не удалось привязать дисплей: {exc}")
                 return False
             # Scene обновится из _on_topology_replaced (синхронный dispatch)
             return True
@@ -453,6 +473,7 @@ class PipelinePresenter:
         except DomainError as exc:
             # Цикл или dangling process → graceful return False, repo не мутирован
             logger.warning("ConnectWire отклонён: %s", exc)
+            self._report(f"Соединение отклонено: {exc}")
             return False
 
         # Scene обновится из _on_topology_replaced (синхронный dispatch → reload уже произошёл)
@@ -630,11 +651,34 @@ class PipelinePresenter:
         if self._suppress:
             return
         new_topology = self._services.topology.load().to_dict()
+        # G.6.3: сохранить выделение через reload — load_from_data делает clear_all,
+        # иначе после undo/redo (и любой мутации) выделение сбрасывается, inspector
+        # очищается, и пользователь не видит откатанные значения без переселекта.
+        selected_ids = self._capture_selection()
         with self._block_signals():
             self._model.from_topology_dict(new_topology)
             if self._scene:
                 nodes, edges = self._topology_to_graph(new_topology)
                 self.load_scene_with_ports(nodes, edges)
+                # Восстановить ПОСЛЕ reload, внутри suppress-окна: setSelected →
+                # selectionChanged → tab populate'ит inspector (читает обновлённую
+                # модель + синхронный rm), а field_changed-сигналы формы гасятся _suppress.
+                self._restore_selection(selected_ids)
+
+    def _capture_selection(self) -> list[str]:
+        """G.6.3: снять node_id выделенных нод ДО scene reload."""
+        if not self._scene:
+            return []
+        return [item.node_id for item in self._scene.selectedItems() if hasattr(item, "node_id")]
+
+    def _restore_selection(self, node_ids: list[str]) -> None:
+        """G.6.3: восстановить выделение ПОСЛЕ reload (узлы, пережившие мутацию)."""
+        if not self._scene:
+            return
+        for node_id in node_ids:
+            item = self._scene.get_node(node_id)
+            if item is not None:
+                item.setSelected(True)
 
     def load_scene_with_ports(
         self,
@@ -686,6 +730,28 @@ class PipelinePresenter:
     def validate(self) -> list[str]:
         """Валидация topology через PipelineModel."""
         return self._model.validate()
+
+    def compute_active_recipe_diff(self) -> "TopologyDiff | None":
+        """G.6.4: дифф текущей editor-топологии vs blueprint активного рецепта.
+
+        Returns:
+            TopologyDiff, или None если активного рецепта нет/рецепт нечитаем.
+        """
+        from .diff import topology_diff
+
+        store = self._services.recipes
+        active = store.get_active()
+        if active is None:
+            return None
+        raw = store.read_raw(active)
+        if raw is None:
+            logger.warning("compute_active_recipe_diff: рецепт '%s' нечитаем", active)
+            return None
+        # Оба формата рецепта встречаются (см. launch_active_recipe): blueprint на
+        # верхнем уровне либо внутри data.
+        saved = raw.get("blueprint") or raw.get("data", {}).get("blueprint") or {}
+        current = self._services.topology.load().to_dict()
+        return topology_diff(current, saved)
 
     def get_yaml_preview(self) -> str:
         """YAML превью."""

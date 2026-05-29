@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.domain.events import ProcessAdded
 from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import (
     DiffScrollTabLayout,
@@ -75,7 +76,11 @@ class PipelineTab(QWidget):
     ) -> None:
         super().__init__(parent)
         self._services = services
-        self._presenter = PipelinePresenter(services, registers_manager=registers_manager)
+        self._presenter = PipelinePresenter(
+            services,
+            registers_manager=registers_manager,
+            notify=self._show_status,
+        )
 
         self._tab_layout = DiffScrollTabLayout(
             title="Pipeline",
@@ -173,6 +178,7 @@ class PipelineTab(QWidget):
             ("delete", "Удалить"),
             ("auto_layout", "Раскладка"),
             ("validate", "Валидация"),
+            ("diff", "Изменения"),
             ("save_recipe", "Сохранить"),
             ("launch_recipe", "Запустить"),
             ("fit", "По размеру"),
@@ -207,6 +213,44 @@ class PipelineTab(QWidget):
         # G.4.4: field_changed → presenter._on_inspector_field_changed (dispatch
         # SetPluginConfig, G.4.3) подключается в presenter.set_inspector. Дублирующий
         # tab-коннект (только лог + stale TODO) убран.
+
+        # G.6.1: auto-reveal — раскрыть новую ноду в viewport. Подписка хранится в
+        # self (EventBus держит сильную ссылку на handler). Порядок dispatch:
+        # TopologyReplaced (presenter reload) ДО ProcessAdded → к этому моменту нода
+        # уже на scene. undo/redo НЕ переигрывает ProcessAdded → reveal только на
+        # прямое добавление (центрировать при undo было бы дезориентирующе).
+        self._process_added_sub = self._services.events.subscribe(ProcessAdded, self._on_process_added)
+
+    def _on_process_added(self, event: ProcessAdded) -> None:
+        """G.6.1: центрировать вид на только что добавленной ноде."""
+        item = self._scene.get_node(event.process_name)
+        if item is not None:
+            self._view.reveal_node(item)
+
+    def _show_diff(self) -> None:
+        """G.6.4: показать дифф текущей топологии vs активный рецепт."""
+        from PySide6.QtWidgets import QMessageBox
+
+        diff = self._presenter.compute_active_recipe_diff()
+        if diff is None:
+            QMessageBox.information(self, "Изменения", "Нет активного рецепта для сравнения")
+            return
+        if diff.is_empty:
+            QMessageBox.information(self, "Изменения", "Нет несохранённых изменений")
+            return
+        QMessageBox.information(self, "Изменения", "\n".join(diff.summary()))
+
+    def _show_status(self, message: str) -> None:
+        """G.6.2: показать сообщение в statusBar главного окна.
+
+        Передаётся в PipelinePresenter как notify-callback. Резолвит окно лениво
+        (в момент вызова окно уже существует). Guard на отсутствие QMainWindow/
+        statusBar (headless-тесты) — тогда no-op (presenter всё равно логирует).
+        """
+        window = self.window()
+        status_bar = getattr(window, "statusBar", None)
+        if callable(status_bar):
+            status_bar().showMessage(message, 5000)
 
     def _load_topology(self) -> None:
         """Загрузить topology из AppContext и отобразить.
@@ -268,6 +312,8 @@ class PipelineTab(QWidget):
                 QMessageBox.warning(self, "Валидация", "\n".join(errors))
             else:
                 QMessageBox.information(self, "Валидация", "Topology валидна")
+        elif action_id == "diff":
+            self._show_diff()
         elif action_id == "save_recipe":
             self._presenter.save_to_active_recipe(parent=self)
         elif action_id == "launch_recipe":

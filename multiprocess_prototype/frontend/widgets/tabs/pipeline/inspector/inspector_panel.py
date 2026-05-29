@@ -585,34 +585,6 @@ class NodeInspectorPanel(QWidget):
         self._display_id_form.setVisible(False)
         self._clear_params()
 
-    def update_field(self, field_name: str, value: Any) -> None:
-        """Обновить значение поля programmatically (undo/redo).
-
-        Использует signal suppression чтобы не тригерить field_changed.
-        Работает для обоих типов редакторов: FieldEditor и QLineEdit.
-        """
-        self._suppress_changes = True
-        try:
-            editor = self._field_editors.get(field_name)
-            if editor is None:
-                return
-
-            if isinstance(editor, QLineEdit):
-                # Fallback-режим: QLineEdit
-                editor.setText(str(value))
-            else:
-                # Cards-режим: FieldEditor с setter
-                try:
-                    editor.setter(value)
-                except Exception:
-                    logger.warning(
-                        "update_field: не удалось установить значение '%s' для поля '%s'",
-                        value,
-                        field_name,
-                    )
-        finally:
-            self._suppress_changes = False
-
     @property
     def current_process(self) -> str:
         """Имя текущего отображаемого процесса."""
