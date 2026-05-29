@@ -2,7 +2,7 @@
 
 - **Slug:** cross-tab-architecture / phase-g
 - **Дата:** 2026-05-28
-- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 DONE** (2026-05-29, `5dc97751` + nit, Y1, reviewer **APPROVED** — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; 2048 passed / sentrux 9-9 / quality 7133); **G.4.4 DONE** (2026-05-29, `171f1d8f`, verify ✓ 2055 passed / sentrux 9-9 / quality 7134, reviewer **APPROVED** — scope переопределён reality-аудитом: domain undo/redo UX + единая шина undo + fix dual-undo bug #2 + phantom-cleanup; удаление `frontend/actions/`/RECIPE_APPLY live отложены как big-bang); **G.5 DETAILED** (2026-05-29, Wave 6: G.5.1–G.5.3 после reality-аудита composition root — AppContext = scratch-extras + carrier + accessor-фасад; InterfaceSection мёртв в prod; `process._app_context` write-only); **G.5.1 DONE** (`63e303b6`, build_app_services → AppServicesDeps); **G.5.2 DONE** (`a4691aaf`, TabFactory(app_services,auth_ctx,runtime) + InterfaceSection request_ui_restart callback — мёртвая фича UI-restart восстановлена); **G.5.3 DONE** (`ea8f0f8d`, AppContext + _deprecated_extras удалены, composition root на локалах + AppServicesDeps/RuntimeDeps; 2012 passed / sentrux 9-9 / quality **7135** +2 / import_edges −15 / −919 LOC). **G.5 ЗАВЕРШЁН — reviewer APPROVED + live boot-smoke PASS** (qt-mcp: MainWindow 1577×941 + QTabWidget отрендерены в живом multiprocess-GUI; 0 трейсбэков). G.6 (UX) NOT DETAILED — последняя под-фаза.
+- **Статус:** G.0 DONE (`ffeca3ba`), G.1 DONE (`75a6c41f`+`64bd2cd1`), G.2 DONE (`c30cc91f`, RuntimeDeps), G.3 DONE (TopologyHolder removed, store-publishes, reviewer APPROVED); **G.4 IN PROGRESS** (Wave 5: **G.4.1 DONE** `e5aaa862`; **G.4.2 DONE** `dedb4a1f`+`05b1d3f7`, reviewer APPROVED; **G.4.2b DONE** (2026-05-29, reviewer APPROVED — display=binding + рендеринг display-боксов на scene, fan-out/fan-in, ADR DOM-001); **G.4.3 DONE** (2026-05-29, `5dc97751` + nit, Y1, reviewer **APPROVED** — FIELD_SET → SetPluginConfig в Pipeline Inspector + rm-sync listener + Plugins dead-ветка убрана; 2048 passed / sentrux 9-9 / quality 7133); **G.4.4 DONE** (2026-05-29, `171f1d8f`, verify ✓ 2055 passed / sentrux 9-9 / quality 7134, reviewer **APPROVED** — scope переопределён reality-аудитом: domain undo/redo UX + единая шина undo + fix dual-undo bug #2 + phantom-cleanup; удаление `frontend/actions/`/RECIPE_APPLY live отложены как big-bang); **G.5 DETAILED** (2026-05-29, Wave 6: G.5.1–G.5.3 после reality-аудита composition root — AppContext = scratch-extras + carrier + accessor-фасад; InterfaceSection мёртв в prod; `process._app_context` write-only); **G.5.1 DONE** (`63e303b6`, build_app_services → AppServicesDeps); **G.5.2 DONE** (`a4691aaf`, TabFactory(app_services,auth_ctx,runtime) + InterfaceSection request_ui_restart callback — мёртвая фича UI-restart восстановлена); **G.5.3 DONE** (`ea8f0f8d`, AppContext + _deprecated_extras удалены, composition root на локалах + AppServicesDeps/RuntimeDeps; 2012 passed / sentrux 9-9 / quality **7135** +2 / import_edges −15 / −919 LOC). **G.5 ЗАВЕРШЁН — reviewer APPROVED + live boot-smoke PASS** (qt-mcp: MainWindow 1577×941 + QTabWidget отрендерены в живом multiprocess-GUI; 0 трейсбэков). **G.6 (UX) DETAILED** (Wave 7, 2026-05-29, reality-аудит investigator: 3/4 премис brief §5 ложны): G.6.1 auto-reveal + G.6.2 validation-feedback + G.6.3 selection-persist + G.6.4 diff-view (safe trio+diff); G.6.5 RECIPE_APPLY live-миграция (HIGH/IPC) → G.6.6 cross-tab linking; granular scene-updates → deferred post-merge.
 - **Ветка:** `refactor/cross-tab-architecture` (та же, что A–F)
 
 ## Назначение
@@ -952,6 +952,145 @@ undo/redo → orchestrator._restore → (см. Решение по rm-sync) → 
 **Out of scope:** UX (G.6); удаление `frontend/actions/` (отложено G.4.4).
 **Риск:** **MEDIUM-HIGH** — финальный composition root reorder; митигация: G.5.1/G.5.2 уже сняли coupling, остаётся механическое удаление + live-smoke.
 **Module contract:** public-api-change (удаление публичного `AppContext`/`build_app_context`).
+
+---
+
+## Wave 7 — G.6 (UX-фишки)
+
+> **DETAILED** (2026-05-29 после reality-аудита investigator). **Премиса brief §5 СИСТЕМАТИЧЕСКИ ложна (6-й повтор урока G.2/G.4.x/G.5):** из 4 UX-фич у 3 премиса не соответствует коду. Аудит-находки ниже встроены в task-specs. Scope-решение владельца: тройка (G.6.1–G.6.3) + diff-view (G.6.4) сейчас; cross-tab linking «как полагается» = сначала RECIPE_APPLY live-миграция (G.6.5) → потом подписка Services (G.6.6); granular scene-updates → deferred post-merge (отдельный план, performance-only).
+
+### Audit-находки (investigator 2026-05-29, file:line) — исправление brief §5
+
+| Фича | Премиса brief §5 | Реальность (find) |
+|---|---|---|
+| Auto-reveal | «сейчас hardcoded позиция» | ❌ ЛОЖНА. Позиция = drop-координаты курсора (`tab.py:290` `scene_pos.x/y` → `presenter.add_process_from_plugin`, `_gui_positions[name]`). `ProcessAdded` **публикуется** в prod (`command_dispatcher.py:132`), но **0 подписчиков**. Реальная задача: подписаться → centerOn/ensureVisible новой ноды (после full reload она может быть вне viewport при zoom-out). |
+| Real-time validation | «встроить в `Project.apply()`» | ❌ ЛОЖНА. Валидация **УЖЕ встроена** (`project.py:127-244`: unique names, no-dangling-wires, no-cycles DFS, plugin/display refs). Каждый dispatch её проходит, `DomainError` отклоняет. Реальная дыра: presenter ловит `DomainError` и **молча логирует** (`presenter.py:155,360,392,400,438,455`) — пользователь видит «ничего не произошло». Задача: UI-feedback. |
+| Cross-tab linking | «`RecipeActivated` event → Services tab» | ❌ ЛОЖНА. `RecipeActivated` **НЕ публикуется** в prod: `RecipesPresenter.on_set_active` (`recipes/presenter.py:275`) → `store.set_active` + `replace_blueprint_fn`, **мимо domain dispatch**. `ActivateRecipe`/`_apply_activate_recipe` (`project.py:747`) есть, но 0 dispatch. RECIPE_APPLY live-миграция явно отложена G.4.4 (IPC-риск). ⇒ блокер: нужна сначала миграция. |
+| Diff-view | «`Topology.diff` из to_dict; `RecipeEngine.is_dirty()` уже есть» | ⚠️ ЧАСТИЧНО. `Topology.diff` **не существует** (`topology.py` — только find_*/from_dict/to_dict) → писать с нуля. `RecipeEngine.is_dirty()`/`diff()` есть (`recipe_engine.py:320,336`), НО в GUI-процессе бесполезны (изолированный пустой `TreeStore`, всегда False). ⇒ своя dict-утилита diff из двух to_dict. |
+
+**Архитектурный факт (важен для всех G.6.x):** prod-подписчиков EventBus всего 3 — `PipelinePresenter._on_topology_replaced` (presenter.py:100), `topology_bridge.on_topology_changed` (app.py:455), rm-sync `PluginConfigChanged` (app.py:481). Cross-tab подписок 0. Порядок dispatch: `save`→TopologyReplaced (шаг 4) ДО granular events (шаг 6) ⇒ при `ProcessAdded`-handler'е scene уже перерисована. undo/redo НЕ переигрывает granular (только `_emit_config_diff` PluginConfigChanged, G.4.3) ⇒ auto-reveal сработает только на прямой dispatch(AddProcess), не на undo (корректно).
+
+| Под-задача | Описание | Scope | Риск | Статус |
+|---|---|---|---|---|
+| **G.6.1** | Auto-reveal: tab подписан на `ProcessAdded` → `view` центрирует новую ноду | S (2-3) | LOW | DETAILED |
+| **G.6.2** | Validation-feedback: `DomainError` в presenter → `notify`-callback → statusBar | S (2-3) | LOW | DETAILED |
+| **G.6.3** | Selection-persist через scene reload (бывш. G.4.5) | S (2) | MEDIUM | DETAILED |
+| **G.6.4** | Diff-view: утилита `topology_diff()` + UI-диалог «Изменения» | M (4-6) | MEDIUM | DETAILED |
+| **G.6.5** | RECIPE_APPLY live-миграция: `recipes/presenter`→dispatch(ActivateRecipe) + IPC-hook на RecipeActivated | L (8-12) | HIGH | DETAILED (отдельный заход) |
+| **G.6.6** | Cross-tab linking: Services tab подписка на `RecipeActivated` + highlight API | M (4-6) | MEDIUM | DETAILED (после G.6.5) |
+| **deferred** | Гранулярные scene-апдейты (ProcessAdded/WireConnected → инкремент вместо full reload) | L (10+) | HIGH | POST-MERGE (отдельный план, performance-only) |
+
+---
+
+### Task G.6.1 — Auto-reveal новых нод
+
+**Level:** Middle (developer/director-direct) — pure View-concern (камера).
+**Goal:** При добавлении процесса вид центрируется/раскрывает новую ноду (не теряется за viewport при zoom-out/scroll).
+**Дизайн (no-crutch):** reveal — это View-concern (камера/скролл), а не presenter (модель/scene-data). ⇒ **tab** подписывается на `ProcessAdded` через `services.events`, `view` раскрывает. Presenter (TopologyReplaced) уже перерисовал scene к моменту ProcessAdded (порядок dispatch).
+**Files:**
+- `pipeline/graph/graph_view.py` — метод `reveal_node(item)` → `self.ensureVisible(item, 50, 50)` (мягко: скроллит только если нода вне viewport; не пере-зумит). Convenience поверх QGraphicsView API.
+- `pipeline/tab.py` — `_connect_signals`: `self._process_added_sub = self._services.events.subscribe(ProcessAdded, self._on_process_added)` (хранить ref — EventBus держит сильную ссылку, GC-симметрия с presenter `_topology_sub`); `_on_process_added(event)`: `item = self._scene.get_node(event.process_name)`; if item → `self._view.reveal_node(item)`.
+**Acceptance:**
+- [ ] dispatch(AddProcess) → новая нода видима в viewport (reveal_node вызван с её item)
+- [ ] undo/redo НЕ центрирует (ProcessAdded не переигрывается — проверить, что handler не дёргается на undo)
+- [ ] тест: Fake/реальный EventBus publish(ProcessAdded) → reveal_node вызван с корректным item (spy)
+- [ ] pytest pipeline зелёные; ruff; sentrux 9/9
+**Out of scope:** анимация центрирования; auto-reveal для display-боксов (BindDisplay — отдельный UX, не в scope).
+**Edge cases:** item не найден (нода уже удалена синхронно) → no-op; пустой scene.
+
+### Task G.6.2 — Validation-feedback (DomainError → пользователь)
+
+**Level:** Middle (developer/director-direct).
+**Goal:** Отклонённая доменная мутация (цикл, dangling, дубликат имени, несовместимость) даёт видимую обратную связь, а не тихий лог.
+**Дизайн (no-crutch):** presenter не знает про Qt/statusBar. ⇒ инъекция `notify: Callable[[str], None] | None = None` в `PipelinePresenter.__init__`; в 5 `except DomainError` — `if self._notify: self._notify(str(exc))` (+ оставить logger). Tab передаёт `notify=self._show_status`, который зовёт `self.window().statusBar().showMessage(msg, 5000)` (MainWindow.statusBar существует — app.py:488).
+**Files:**
+- `pipeline/presenter.py` — `__init__(..., notify=None)` хранит `self._notify`; helper `_report(msg)`; вызвать в catch-сайтах (`add_process_from_plugin`, `remove_selected`, `add_wire` ConnectWire+BindDisplay, `_on_inspector_field_changed`, `_on_display_id_changed`). Port-incompat QMessageBox (`_validate_wire_ports`) — уже UI-feedback, не трогать.
+- `pipeline/tab.py` — `_show_status(msg)` через `self.window().statusBar()` (guard на None — окно может быть не QMainWindow в тестах); передать `notify=self._show_status` в `PipelinePresenter(...)`. **NB:** presenter создаётся в `__init__` ДО добавления в окно → callback вызывается lazily (в рантайме окно уже есть), сам callback резолвит `self.window()` в момент вызова.
+**Acceptance:**
+- [ ] ConnectWire с циклом → statusBar показывает текст ошибки (не только лог)
+- [ ] notify=None (default) → старое поведение (тихий лог), без падения
+- [ ] тест: presenter с Fake notify → при DomainError notify вызван с сообщением
+- [ ] pytest зелёные; ruff; sentrux 9/9
+**Out of scope:** перманентный валидационный индикатор всей топологии (apply и так не даёт создать невалидную); подсветка проблемной ноды на canvas.
+**Edge cases:** `self.window()` не QMainWindow/без statusBar в тесте → guard, no-op.
+
+### Task G.6.3 — Selection-persist через scene reload (бывш. G.4.5)
+
+**Level:** Senior (центральный путь reload).
+**Goal:** undo/redo и любой dispatch с reload сохраняют выделение ноды; inspector показывает откатанные значения без ручного переселекта.
+**Находки (подтверждены investigator):** `_on_topology_replaced`→`load_scene_with_ports`→`graph_scene.load_from_data`→`clear_all()` (graph_scene.py:60,198) теряет выделение → `tab._on_selection_changed`→`inspector.clear()`. `inspector_panel.update_field` (inspector_panel.py:588) — **мёртвый код** (только 3 теста).
+**Дизайн (no-crutch):** в `_on_topology_replaced` (presenter.py:620) — capture `selected_ids` ДО reload, restore ПОСЛЕ `load_scene_with_ports` (внутри `with _block_signals()` — гасит спурьёзные field-dispatch при программном populate формы). `item.setSelected(True)` → selectionChanged → tab показывает inspector с актуальной моделью+rm. `update_field` — **удалить как dead code** (re-select через сигнал достаточен; убрать 3 теста-вызова или переписать).
+**Files:**
+- `pipeline/presenter.py` — `_on_topology_replaced`: capture selected (через `self._scene.selectedItems()` + hasattr node_id) до `from_topology_dict`; после `load_scene_with_ports` — restore (`get_node(id).setSelected(True)`).
+- `pipeline/inspector/inspector_panel.py` — удалить `update_field` (dead).
+- тесты inspector — убрать/переписать вызовы `update_field`.
+**Acceptance:**
+- [ ] undo/redo сохраняет выделение существующей ноды; inspector показывает откатанные значения без переселекта
+- [ ] re-select удалённой ноды (после undo RemoveProcess вернулась с тем же id=process_name) → graceful (нода есть → выделится; если нет → placeholder, не падение)
+- [ ] `update_field` удалён, grep = 0 (или только git-история); inspector-тесты зелёные
+- [ ] pytest pipeline зелёные; 🔴 **live qt-mcp smoke рекомендован** (поведение видно в живом GUI) — known caveat
+- [ ] ruff; sentrux 9/9
+**Out of scope:** in-place refresh формы без re-select (update_field-путь — удалён); гранулярные scene-апдейты (deferred).
+**Риск:** MEDIUM — центральный путь reload (каждый dispatch). Митигация: тесты на реальной QGraphicsScene + live-smoke.
+
+### Task G.6.4 — Diff-view (несохранённые изменения vs активный рецепт)
+
+**Level:** Middle+ (developer).
+**Goal:** Кнопка «Изменения» в Pipeline показывает дифф текущей editor-топологии vs blueprint активного рецепта.
+**Дизайн (no-crutch):** НЕ через framework `RecipeEngine.is_dirty()` (бесполезен в GUI — изолированный TreeStore). Чистая domain-утилита: `topology_diff(current: dict, saved: dict) -> TopologyDiff` сравнивает processes (added/removed/config-changed по `process_name`), wires (added/removed по `(source,target)`), displays (added/removed по `(node_id,display_id)`). metadata/gui_positions игнорируются (не семантика). `current = services.topology.load().to_dict()`, `saved = store.read_raw(active)["data"]["blueprint"]` (или `["blueprint"]` fallback — оба формата встречаются, см. presenter.py:973).
+**Files:**
+- `pipeline/diff.py` (NEW) — `@dataclass TopologyDiff` (processes_added/removed/changed, wires_added/removed, displays_added/removed; `is_empty` property; `summary()` → list[str] человекочитаемо) + `topology_diff(current, saved)`. Pure Python, без Qt — тестируется без QApplication.
+- `pipeline/presenter.py` — `compute_active_recipe_diff() -> TopologyDiff | None` (None если нет активного рецепта): читает current + saved blueprint через `services.recipes`, зовёт `topology_diff`.
+- `pipeline/tab.py` — кнопка `("diff", "Изменения")` в action-toolbar (после "Валидация"); `_on_toolbar_action("diff")`: diff=presenter.compute_active_recipe_diff(); None→QMessageBox «Нет активного рецепта»; is_empty→«Нет несохранённых изменений»; иначе QMessageBox/диалог со `summary()`.
+**Acceptance:**
+- [ ] `topology_diff` корректен: added/removed/config-changed процессы, added/removed wires/displays (unit-тесты на чистых dict)
+- [ ] нет активного рецепта → сообщение; нет изменений → «нет изменений»; есть → список
+- [ ] gui_positions/metadata не дают ложных diff
+- [ ] pytest зелёные; ruff; sentrux 9/9
+**Out of scope:** визуальная подсветка diff на canvas; two-way merge; diff между двумя произвольными рецептами; dirty-индикатор в реальном времени (можно follow-up).
+**Edge cases:** активный рецепт без blueprint-секции → пустой saved (всё current = added); рецепт нечитаем → None + лог.
+
+### Task G.6.5 — RECIPE_APPLY live-миграция (prerequisite cross-tab, «как полагается»)
+
+> **HIGH risk / IPC.** Отдельный аккуратный заход (G.4.4 отложил именно это). Делается ПОСЛЕ G.6.1–G.6.4 (зелёные), верифицируется изолированно. Цель — «как полагается, без костылей»: recipe-активация становится domain-командой, IPC-replace-blueprint вешается слушателем на `RecipeActivated`, persistence `set_active` сохраняется.
+
+**Level:** Senior+ (teamlead) — центральный recipe-flow + IPC + composition root. Затем reviewer (Opus).
+**Goal:** `RecipesPresenter.on_set_active` идёт через `services.commands.dispatch(ActivateRecipe(slug))` → domain заменяет editor-топологию blueprint'ом рецепта + эмитит `TopologyReplaced`+`RecipeActivated`; IPC `replace_blueprint` (горячая замена живых процессов) выполняется отдельным listener'ом на `RecipeActivated`; `store.set_active` (persist активного флага) сохраняется.
+**Аудит-факты:** `_apply_activate_recipe` (project.py:747) читает `catalogs.recipes.read(slug).blueprint`, валидирует все invariants, model_copy(topology=blueprint, active_recipe=slug), эмитит `[TopologyReplaced(reason=f"recipe:{slug}"), RecipeActivated(slug)]`. **Открытые вопросы детализации (grep ДО старта):** (1) populated ли `ApplyContext.recipes` в prod `apply_context_factory` (app.py) — иначе DomainError; (2) `RecipesPresenter` НЕ имеет AppServices (только store/view/replace_blueprint_fn/logger) → как провести `services.commands`+`services.events` (через TabFactory/конструктор); (3) сейчас replace_blueprint вызывается синхронно внутри on_set_active с обработкой success/rollback в view.show_error — при переносе в listener сохранить error-feedback; (4) undo активации рецепта (ActivateRecipe undoable?) — снапшот заменит editor-топологию, но IPC уже переключил живые процессы → решить: ActivateRecipe `undoable=False` (recipe-switch не откатывается через Ctrl+Z) либо отдельная семантика.
+**Дизайн (предв., уточнить аудитом перед кодом):**
+- `recipes/presenter.on_set_active`: `store.set_active(slug)` (persist) → `services.commands.dispatch(ActivateRecipe(slug), undoable=False)` (domain topology+events). Убрать прямой `replace_blueprint_fn` из on_set_active.
+- IPC listener (app.py, рядом с topology_bridge): `services.events.subscribe(RecipeActivated, lambda e: _do_replace_blueprint(e.slug))` — читает blueprint, зовёт `replace_blueprint_fn`, success/rollback → статус/лог. Узкий callback, не таскает весь proxy в presenter.
+- `ApplyContext.recipes` — убедиться populated (если нет — провести RecipeStore в factory).
+**Files (предв.):** `recipes/presenter.py`, `recipes/tab.py` (проводка services), `frontend/app.py` (IPC listener + apply_context recipes), возможно `frontend/tab_factory.py`/`runtime_deps.py`.
+**Acceptance (предв.):**
+- [ ] активация рецепта → dispatch(ActivateRecipe) → editor-топология = blueprint; `TopologyReplaced`+`RecipeActivated` опубликованы
+- [ ] IPC replace_blueprint выполняется listener'ом; success/error feedback сохранён
+- [ ] `store.set_active` persist сохранён (активный флаг переживает рестарт)
+- [ ] тесты на реальном orchestrator+store+EventBus: активация эмитит оба события; IPC listener дёрнут; rollback при ошибке IPC
+- [ ] 🔴 live qt-mcp smoke (recipe switch на живой системе) — критичен (IPC)
+- [ ] pytest зелёные; ruff; sentrux 9/9; reviewer APPROVED
+**Out of scope:** undo recipe-switch (undoable=False); удаление `frontend/actions/` (отложено).
+**Риск:** HIGH — IPC hot-swap + recipe-flow + composition root. Митигация: отдельный заход, аудит ДО кода, тесты на реальном store, обязательный live-smoke, reviewer.
+
+### Task G.6.6 — Cross-tab linking (RecipeActivated → Services tab)
+
+> После G.6.5 (RecipeActivated публикуется). Services tab реагирует на активацию рецепта.
+
+**Level:** Middle+ (developer), затем reviewer.
+**Goal:** При активации рецепта Services tab подсвечивает/выделяет сервисы, относящиеся к активному рецепту (`active_services` из рецепта).
+**Дизайн:** Services tab presenter подписывается на `services.events.subscribe(RecipeActivated, ...)`; читает `active_services` рецепта через store; view получает highlight API (выделить/проскроллить к сервисам). Нужно добавить highlight-метод в Services view/presenter (сейчас 0 cross-tab API).
+**Files:** `services/presenter.py` (подписка + reaction), `services/view.py`/`tab.py` (highlight API), тесты.
+**Acceptance:**
+- [ ] активация рецепта → Services tab подсвечивает active_services рецепта
+- [ ] нет active_services / сервис не в списке → graceful
+- [ ] тест: publish(RecipeActivated) → presenter дёргает highlight с корректными сервисами
+- [ ] pytest зелёные; ruff; sentrux 9/9; reviewer APPROVED
+**Out of scope:** двусторонний linking (Services→Pipeline); навигация-переключение вкладки (только highlight).
+**Риск:** MEDIUM — новый cross-tab паттерн (первая cross-tab подписка в prod).
+
+### deferred (post-merge) — Гранулярные scene-апдейты
+
+`_on_topology_replaced` (full `clear_all`+rebuild на КАЖДУЮ мутацию) → набор гранулярных handler'ов (ProcessAdded→add_node, WireConnected→add_edge, ...). События уже публикуются (0 подписчиков). **Scope L (10+ файлов, ~200+ строк), риск HIGH.** Ортогонально UX-фичам, выигрыш только performance (при 50+ нодах; текущие графы 5-20 нод — full reload быстр). ⇒ **отдельный план post-merge**, не в Phase G (иначе big-bang, brief §8).
 
 ---
 
