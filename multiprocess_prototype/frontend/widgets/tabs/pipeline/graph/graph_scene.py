@@ -7,6 +7,7 @@ from PySide6.QtGui import QTransform
 from PySide6.QtWidgets import QGraphicsScene, QMenu
 
 from .constants import GRID_SPACING_X, GRID_SPACING_Y
+from .display_node_item import DisplayNodeData, DisplayNodeItem
 from .node_item import NodeData, NodeItem
 from .edge_item import EdgeData, EdgeItem
 from .port_schema import PortSchema
@@ -31,7 +32,9 @@ class GraphScene(QGraphicsScene):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._nodes: dict[str, NodeItem] = {}
+        # Process-узлы (NodeItem) и display-боксы (DisplayNodeItem) живут в одном
+        # реестре — чтобы add_edge находил target по id (binding-ребро source→box).
+        self._nodes: dict[str, NodeItem | DisplayNodeItem] = {}
         self._edges: list[EdgeItem] = []
 
     # ------------------------------------------------------------------ #
@@ -43,16 +46,20 @@ class GraphScene(QGraphicsScene):
         nodes: list[NodeData],
         edges: list[EdgeData],
         port_schemas_map: dict[str, list[PortSchema]] | None = None,
+        display_nodes: list[DisplayNodeData] | None = None,
     ) -> None:
         """Построить граф из данных. Очищает предыдущее содержимое.
 
         port_schemas_map (node_id → схемы портов) — опционально; если задан,
         ноды строятся со Schema-Driven Ports (G.4.2: порты нужны для wire-тяжения
         после reload из TopologyReplaced). None → backward compat (1 input + 1 output).
+
+        display_nodes (G.4.2b) — display-боксы (по одному на display_id-канал).
+        Добавляются ДО рёбер, чтобы binding-ребро source→box нашло target в _nodes.
         """
         self.clear_all()
 
-        # Авто-layout если координаты нулевые
+        # Авто-layout если координаты нулевые (только process-ноды)
         need_layout = all(n.x == 0 and n.y == 0 for n in nodes)
 
         for i, nd in enumerate(nodes):
@@ -61,6 +68,10 @@ class GraphScene(QGraphicsScene):
                 nd.y = (i // 4) * GRID_SPACING_Y + 50
             ps = port_schemas_map.get(nd.node_id) if port_schemas_map else None
             self.add_node(nd, port_schemas=ps)
+
+        # Display-боксы добавляем до рёбер (add_edge ищет target в _nodes)
+        for dn in display_nodes or []:
+            self.add_display_node(dn)
 
         for ed in edges:
             self.add_edge(ed)
@@ -82,6 +93,17 @@ class GraphScene(QGraphicsScene):
                           Если None — backward compat: 1 input + 1 output.
         """
         item = NodeItem(data, port_schemas=port_schemas)
+        self.addItem(item)
+        self._nodes[data.node_id] = item
+        return item
+
+    def add_display_node(self, data: DisplayNodeData) -> DisplayNodeItem:
+        """Добавить display-бокс (SHM-канал) на сцену (G.4.2b).
+
+        Кладёт в общий реестр _nodes по node_id (= display_id канала), чтобы
+        binding-ребро source→box находило target через add_edge.
+        """
+        item = DisplayNodeItem(data)
         self.addItem(item)
         self._nodes[data.node_id] = item
         return item
@@ -153,6 +175,10 @@ class GraphScene(QGraphicsScene):
         nodes = []
         for nid, item in self._nodes.items():
             d = item.data
+            # Display-боксы не экспортируются как process-NodeData (нет title/subtitle).
+            # Их состояние живёт в topology["displays"] (binding), не в graph-NodeData.
+            if not hasattr(d, "title"):
+                continue
             # Обновить координаты из текущей позиции
             pos = item.pos()
             nodes.append(
@@ -189,7 +215,7 @@ class GraphScene(QGraphicsScene):
     def edge_count(self) -> int:
         return len(self._edges)
 
-    def get_node(self, node_id: str) -> NodeItem | None:
+    def get_node(self, node_id: str) -> NodeItem | DisplayNodeItem | None:
         return self._nodes.get(node_id)
 
     def get_all_node_positions(self) -> dict[str, tuple[float, float]]:

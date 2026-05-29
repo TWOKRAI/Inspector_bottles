@@ -318,20 +318,10 @@ class PipelineTab(QWidget):
             topo = self._presenter.model.to_topology_dict()
 
             if isinstance(node, DisplayNodeItem):
-                # Display-узел: найти запись в topology.displays
-                display_id = ""
-                display_name = ""
-                for disp in topo.get("displays", []):
-                    if isinstance(disp, dict) and disp.get("node_id") == node.node_id:
-                        display_id = disp.get("display_id", "")
-                        display_name = disp.get("display_name", "")
-                        break
-
-                # Если не найден в topology — взять из node.data
-                if not display_id and hasattr(node, "data"):
-                    display_id = getattr(node.data, "display_id", "")
-                    display_name = getattr(node.data, "display_name", "")
-
+                # G.4.2b: id бокса = display_id канала; topo["displays"] keyed по
+                # source endpoint (binding), поэтому данные берём прямо из node.data.
+                display_id = getattr(node.data, "display_id", node.node_id)
+                display_name = getattr(node.data, "display_name", "")
                 self._inspector.show_display_node(node.node_id, display_id, display_name)
             else:
                 # Plugin-узел (process node)

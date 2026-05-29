@@ -151,11 +151,17 @@ class BindDisplay:
 
 @dataclass(frozen=True, slots=True)
 class UnbindDisplay:
-    """Отвязать DisplayInstance от узла топологии."""
+    """Отвязать DisplayInstance от узла топологии.
+
+    Ключ — пара (node_id, display_id): один выход (node_id) может быть привязан
+    к нескольким дисплеям (fan-out), поэтому отвязка адресует конкретную пару,
+    а не все привязки узла. См. ADR DOM-001 (display = binding).
+    """
 
     command_type: ClassVar[str] = "UnbindDisplay"
 
     node_id: str
+    display_id: str
 
 
 # ==============================================================================

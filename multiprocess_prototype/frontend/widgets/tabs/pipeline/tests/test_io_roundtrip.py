@@ -33,10 +33,10 @@ def _make_model_two_procs_wire() -> PipelineModel:
 
 
 def _make_model_full() -> PipelineModel:
-    """Два процесса + process-wire + display-узел + display-binding wire."""
+    """Два процесса + process-wire + display-привязка (G.4.2b: binding, не wire)."""
     model = _make_model_two_procs_wire()
-    model.add_display("disp1", "main_output", display_name="Главный экран")
-    model.add_wire("proc.ColorMaskPlugin.result", "display.disp1.frame")
+    # display = binding: node_id — source endpoint выхода, display_id — канал
+    model.add_display("proc.ColorMaskPlugin.result", "main_output", display_name="Главный экран")
     return model
 
 
@@ -143,7 +143,7 @@ class TestFullRoundtripWithDisplays:
     """2 процесса + process-wire + display + display-binding."""
 
     def test_full_roundtrip_with_displays(self) -> None:
-        """Полный round-trip с display-узлом сохраняет все компоненты."""
+        """Полный round-trip с display-привязкой сохраняет все компоненты (G.4.2b)."""
         model = _make_model_full()
 
         bp, bindings, _ = graph_to_blueprint(model, name="full_test")
@@ -155,17 +155,16 @@ class TestFullRoundtripWithDisplays:
         # Процессы сохранились
         assert sorted(model2.get_process_names()) == ["cam", "proc"]
 
-        # Display-узел восстановлен
+        # Display-привязка восстановлена (binding: source endpoint → канал)
         displays = model2.get_displays()
         assert len(displays) == 1
         assert displays[0]["display_id"] == "main_output"
+        assert displays[0]["node_id"] == "proc.ColorMaskPlugin.result"
 
-        # Wire'ы: один process-wire + один display-wire
+        # Wire'ы: только один process-wire (display-wire не существует)
         wires = model2.get_wires()
-        process_wires = [w for w in wires if not w["target"].startswith("display.")]
-        display_wires = [w for w in wires if w["target"].startswith("display.")]
-        assert len(process_wires) == 1
-        assert len(display_wires) == 1
+        assert len(wires) == 1
+        assert not any(w["target"].startswith("display.") for w in wires)
 
 
 # ---------------------------------------------------------------------------
@@ -174,10 +173,10 @@ class TestFullRoundtripWithDisplays:
 
 
 class TestDisplayWiresExcludedFromBlueprint:
-    """display-wire'ы НЕ попадают в blueprint["wires"]."""
+    """display-привязки идут в display_bindings, не в blueprint["wires"]."""
 
-    def test_display_wires_excluded_from_blueprint(self) -> None:
-        """Wire к display-узлу не должен присутствовать в blueprint['wires']."""
+    def test_display_bindings_separate_from_wires(self) -> None:
+        """blueprint['wires'] не содержит display-endpoint; привязка — в bindings."""
         model = _make_model_full()
         bp, bindings, _ = graph_to_blueprint(model)
 
@@ -185,7 +184,7 @@ class TestDisplayWiresExcludedFromBlueprint:
         for wire in bp["wires"]:
             assert not wire["target"].startswith("display."), f"Wire к display найден в blueprint: {wire}"
 
-        # display-wire попал в bindings
+        # display-привязка попала в bindings
         assert len(bindings) == 1
 
 

@@ -88,28 +88,29 @@ class TestMutations:
         assert "camera" not in names
         assert "processor" in names
 
-    def test_remove_selected_display_node(self):
-        """remove_selected различает display-узел и удаляет его через legacy путь."""
-        services = make_pipeline_services_with_orchestrator()
+    def test_remove_selected_display_box(self):
+        """remove_selected различает display-бокс и снимает привязку через UnbindDisplay."""
+        services = make_pipeline_services_with_orchestrator(
+            topology={
+                "processes": [
+                    {"process_name": "camera", "plugins": [{"plugin_name": "capture"}]},
+                    {"process_name": "processor", "plugins": [{"plugin_name": "color_mask"}]},
+                ],
+                "wires": [{"source": "camera.capture.frame", "target": "processor.color_mask.frame"}],
+                "displays": [{"node_id": "processor.color_mask.frame", "display_id": "main_output"}],
+            },
+            display_ids={"main_output"},
+        )
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
-        # Добавляем display-узел и wire к нему (через модель, legacy)
-        p.model.add_display("disp1", "main_output", "Main Display")
-        p.model.add_wire("processor.color_mask.frame", "display.disp1.frame")
-
-        # Синхронизируем repo
-        services.topology.save(Topology.from_dict(p.model.to_topology_dict()))
-
         assert len(p.model.get_displays()) == 1
 
-        p.remove_selected(["disp1"])
+        # id бокса = display_id канала
+        p.remove_selected(["main_output"])
 
-        # display удалён из модели, каскадно ушёл wire к нему
+        # привязка снята, процессы не тронуты
         assert len(p.model.get_displays()) == 0
-        wires = p.model.get_wires()
-        assert all("display." not in w.get("target", "") for w in wires)
-        # процессы не тронуты
         assert "processor" in p.model.get_process_names()
 
     def test_add_wire(self):

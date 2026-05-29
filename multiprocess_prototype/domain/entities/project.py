@@ -412,7 +412,7 @@ class Project(SchemaBase):
         affected_displays = self.topology.find_display_bindings_for(cmd.process_name)
         remaining_displays = tuple(d for d in self.topology.displays if d not in affected_displays)
         for di in affected_displays:
-            events.append(DisplayUnbound(node_id=di.node_id))
+            events.append(DisplayUnbound(node_id=di.node_id, display_id=di.display_id))
 
         # Убираем процесс
         remaining_processes = tuple(p for p in self.topology.processes if p.process_name != cmd.process_name)
@@ -679,10 +679,16 @@ class Project(SchemaBase):
 
         Invariants:
           - display_id существует в каталоге (если catalogs.displays не None)
+          - пара (node_id, display_id) ещё не привязана (no-dup)
         """
         if catalogs.displays is not None:
             if catalogs.displays.resolve(cmd.display_id) is None:
                 raise DomainError(f"display '{cmd.display_id}' not found in catalog")
+
+        # No-dup: пара (node_id, display_id) уникальна (зеркало ConnectWire-цикла)
+        for di in self.topology.displays:
+            if di.node_id == cmd.node_id and di.display_id == cmd.display_id:
+                raise DomainError(f"display '{cmd.display_id}' already bound to '{cmd.node_id}'")
 
         new_display = DisplayInstance(
             node_id=cmd.node_id,
@@ -698,11 +704,17 @@ class Project(SchemaBase):
         cmd: UnbindDisplay,
         catalogs: ApplyContext,
     ) -> tuple["Project", list[ProjectEvent]]:
-        """Отвязать DisplayInstance от узла топологии."""
-        remaining = tuple(d for d in self.topology.displays if d.node_id != cmd.node_id)
+        """Отвязать DisplayInstance от узла топологии.
+
+        Ключ — пара (node_id, display_id): снимаем ровно одну привязку, не задевая
+        прочие привязки того же выхода (fan-out). См. ADR DOM-001.
+        """
+        remaining = tuple(
+            d for d in self.topology.displays if not (d.node_id == cmd.node_id and d.display_id == cmd.display_id)
+        )
         new_topology = self.topology.model_copy(update={"displays": remaining})
         new_project = self.model_copy(update={"topology": new_topology})
-        events: list[ProjectEvent] = [DisplayUnbound(node_id=cmd.node_id)]
+        events: list[ProjectEvent] = [DisplayUnbound(node_id=cmd.node_id, display_id=cmd.display_id)]
         return new_project, events
 
     def _apply_assign_target_process(

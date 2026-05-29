@@ -195,6 +195,7 @@ def test_remove_process_cascade() -> None:
     display_events = [e for e in events if isinstance(e, DisplayUnbound)]
     assert len(display_events) == 1
     assert display_events[0].node_id == "proc1.blur.output"
+    assert display_events[0].display_id == "main"
 
 
 def test_remove_process_not_found_raises() -> None:
@@ -604,13 +605,59 @@ def test_unbind_display_ok() -> None:
         displays=(DisplayInstance(node_id="proc1.blur", display_id="main"),),
     )
     project = Project(topology=topology)
-    cmd = UnbindDisplay(node_id="proc1.blur")
+    cmd = UnbindDisplay(node_id="proc1.blur", display_id="main")
     new_proj, events = project.apply(cmd, catalogs=_empty_ctx())
 
     assert len(new_proj.topology.displays) == 0
     assert len(events) == 1
     assert isinstance(events[0], DisplayUnbound)
     assert events[0].node_id == "proc1.blur"
+    assert events[0].display_id == "main"
+
+
+def test_unbind_display_fan_out_keeps_others() -> None:
+    """Fan-out: один выход привязан к двум дисплеям — unbind снимает ровно одну пару."""
+    topology = Topology(
+        processes=(Process(process_name="proc1"),),
+        displays=(
+            DisplayInstance(node_id="proc1.blur.frame", display_id="main"),
+            DisplayInstance(node_id="proc1.blur.frame", display_id="secondary"),
+        ),
+    )
+    project = Project(topology=topology)
+    cmd = UnbindDisplay(node_id="proc1.blur.frame", display_id="main")
+    new_proj, _ = project.apply(cmd, catalogs=_empty_ctx())
+
+    # Снята только пара (proc1.blur.frame, main); вторая привязка осталась
+    assert len(new_proj.topology.displays) == 1
+    assert new_proj.topology.displays[0].display_id == "secondary"
+    assert new_proj.topology.displays[0].node_id == "proc1.blur.frame"
+
+
+def test_bind_display_duplicate_pair_raises() -> None:
+    """Повторная привязка той же пары (node_id, display_id) → DomainError."""
+    topology = Topology(
+        processes=(Process(process_name="proc1"),),
+        displays=(DisplayInstance(node_id="proc1.blur.frame", display_id="main"),),
+    )
+    project = Project(topology=topology)
+    cmd = BindDisplay(node_id="proc1.blur.frame", display_id="main")
+    with pytest.raises(DomainError, match="already bound"):
+        project.apply(cmd, catalogs=_empty_ctx())
+
+
+def test_bind_display_fan_out_allowed() -> None:
+    """Fan-out разрешён: один выход → два разных дисплея."""
+    topology = Topology(
+        processes=(Process(process_name="proc1"),),
+        displays=(DisplayInstance(node_id="proc1.blur.frame", display_id="main"),),
+    )
+    project = Project(topology=topology)
+    cmd = BindDisplay(node_id="proc1.blur.frame", display_id="secondary")
+    new_proj, events = project.apply(cmd, catalogs=_empty_ctx())
+
+    assert len(new_proj.topology.displays) == 2
+    assert isinstance(events[0], DisplayBound)
 
 
 # ======================================================================

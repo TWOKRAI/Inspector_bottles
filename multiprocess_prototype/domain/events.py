@@ -140,11 +140,16 @@ class DisplayBound:
 
 @dataclass(frozen=True, slots=True)
 class DisplayUnbound:
-    """Эмитится когда DisplayInstance отвязан от узла топологии."""
+    """Эмитится когда DisplayInstance отвязан от узла топологии.
+
+    Несёт пару (node_id, display_id) — отвязка адресует конкретную привязку,
+    а не все привязки узла (fan-out). См. ADR DOM-001.
+    """
 
     event_type: ClassVar[str] = "DisplayUnbound"
 
     node_id: str
+    display_id: str
 
 
 # ==============================================================================

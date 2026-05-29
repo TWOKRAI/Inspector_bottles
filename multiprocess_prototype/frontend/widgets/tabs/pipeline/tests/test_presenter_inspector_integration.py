@@ -4,14 +4,12 @@ Task E.1: мигрировано на AppServices.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.inspector.inspector_panel import (
     NodeInspectorPanel,
 )
 
-from ._helpers import make_pipeline_services
+from ._helpers import make_pipeline_services, make_pipeline_services_with_orchestrator
 
 
 # ------------------------------------------------------------------ #
@@ -19,8 +17,11 @@ from ._helpers import make_pipeline_services
 # ------------------------------------------------------------------ #
 
 
-def _make_services_for_presenter(topology=None, display_registry=None):
-    """Создать AppServices для PipelinePresenter с опциональным display_registry."""
+def _make_services_for_presenter(topology=None):
+    """Создать AppServices для PipelinePresenter (target_process тесты).
+
+    G.4.2b: display = binding, node_id привязки — source endpoint выхода.
+    """
     topo = topology or {
         "processes": [
             {"process_name": "p1", "plugins": [{"plugin_name": "capture"}]},
@@ -28,49 +29,10 @@ def _make_services_for_presenter(topology=None, display_registry=None):
         ],
         "wires": [],
         "displays": [
-            {"node_id": "disp1", "display_id": "main_output", "display_name": "Основной"},
+            {"node_id": "p2.color_mask.frame", "display_id": "main_output", "display_name": "Основной"},
         ],
     }
-
-    # Если передан display_registry — создаём services с custom displays
-    if display_registry is not None:
-        from multiprocess_prototype.domain.tests.conftest import make_test_app_services
-        from multiprocess_prototype.domain.tests._fakes import (
-            FakeConfigStore,
-            FakeTopologyRepository,
-        )
-        from multiprocess_prototype.domain.entities import Topology
-
-        config = FakeConfigStore(initial={"topology": topo})
-        # F.2b: presenter читает топологию из services.topology — наполняем репозиторий.
-        topology_repo = FakeTopologyRepository(Topology.from_dict(topo))
-
-        # Создаём mock DisplayCatalog с resolve поддержкой
-        displays = MagicMock()
-
-        # Простой маппинг: если display_registry.get() возвращает entry с .name
-        def _resolve(did):
-            entry = display_registry.get(did)
-            if entry is not None:
-                from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
-
-                return DisplaySpec(display_id=did, display_name=getattr(entry, "name", ""))
-            return None
-
-        displays.resolve.side_effect = _resolve
-        displays.list_displays.return_value = ()
-
-        return make_test_app_services(config=config, displays=displays, topology=topology_repo)
-
     return make_pipeline_services(topology=topo)
-
-
-def _make_display_entry(display_id: str, name: str):
-    """Создать mock DisplayEntry."""
-    entry = MagicMock()
-    entry.id = display_id
-    entry.name = name
-    return entry
 
 
 # ------------------------------------------------------------------ #
@@ -134,68 +96,87 @@ class TestPresenterTargetProcessChanged:
 # ------------------------------------------------------------------ #
 
 
+def _make_orch_services_with_binding(channels=frozenset({"main_output", "secondary"})):
+    """Orchestrator-services с одной display-привязкой p2.color_mask.frame→main_output.
+
+    G.4.2b: смена канала бокса = ребиндинг через domain dispatch, поэтому нужен
+    реальный orchestrator (FakeCommandDispatcher — no-op). channels — валидные каналы
+    для BindDisplay-валидации.
+    """
+    return make_pipeline_services_with_orchestrator(
+        topology={
+            "processes": [{"process_name": "p2", "plugins": [{"plugin_name": "color_mask"}]}],
+            "wires": [],
+            "displays": [{"node_id": "p2.color_mask.frame", "display_id": "main_output"}],
+        },
+        display_ids=set(channels),
+    )
+
+
 class TestPresenterDisplayIdChanged:
-    def test_display_id_change_updates_model(self):
-        services = _make_services_for_presenter()
+    """G.4.2b: _on_display_id_changed ребиндит привязки бокса через dispatch."""
+
+    def test_display_id_change_rebinds_to_new_channel(self):
+        services = _make_orch_services_with_binding()
         presenter = PipelinePresenter(services)
         presenter.load_topology_from_config()
 
-        presenter._on_display_id_changed("disp1", "secondary")
+        # id бокса = текущий display_id канала
+        presenter._on_display_id_changed("main_output", "secondary")
 
-        topo = presenter.model.to_topology_dict()
-        disp1 = next(
-            (d for d in topo.get("displays", []) if d.get("node_id") == "disp1"),
-            None,
-        )
-        assert disp1 is not None
-        assert disp1.get("display_id") == "secondary"
+        displays = presenter.model.get_displays()
+        assert len(displays) == 1
+        assert displays[0]["display_id"] == "secondary"
+        assert displays[0]["node_id"] == "p2.color_mask.frame"
 
-    def test_display_id_change_updates_display_name_from_registry(self):
-        entries = [_make_display_entry("secondary", "Вторичный дисплей")]
-        registry_mock = MagicMock()
-        registry_mock.get.side_effect = lambda did: next((e for e in entries if e.id == did), None)
-
-        services = _make_services_for_presenter(display_registry=registry_mock)
+    def test_display_id_change_noop_when_same(self):
+        services = _make_orch_services_with_binding()
         presenter = PipelinePresenter(services)
         presenter.load_topology_from_config()
 
-        presenter._on_display_id_changed("disp1", "secondary")
+        presenter._on_display_id_changed("main_output", "main_output")
 
-        topo = presenter.model.to_topology_dict()
-        disp1 = next(
-            (d for d in topo.get("displays", []) if d.get("node_id") == "disp1"),
-            None,
-        )
-        assert disp1 is not None
-        assert disp1.get("display_id") == "secondary"
-        assert disp1.get("display_name") == "Вторичный дисплей"
+        assert presenter.model.get_displays()[0]["display_id"] == "main_output"
 
-    def test_display_id_change_nonexistent_node_logs_warning(self, caplog):
+    def test_display_id_rebind_single_undo(self):
+        """coalesce_key: один undo отменяет ребиндинг целиком (Unbind+Bind)."""
+        services = _make_orch_services_with_binding()
+        presenter = PipelinePresenter(services)
+        presenter.load_topology_from_config()
+
+        presenter._on_display_id_changed("main_output", "secondary")
+        assert presenter.model.get_displays()[0]["display_id"] == "secondary"
+
+        # Один Ctrl+Z возвращает к исходному каналу
+        assert services.commands.undo() is True
+        displays = presenter.model.get_displays()
+        assert len(displays) == 1
+        assert displays[0]["display_id"] == "main_output"
+        assert services.commands.can_undo() is False
+
+    def test_display_id_change_nonexistent_box_logs_warning(self, caplog):
         import logging
 
-        services = _make_services_for_presenter()
+        services = _make_orch_services_with_binding()
         presenter = PipelinePresenter(services)
         presenter.load_topology_from_config()
 
         with caplog.at_level(logging.WARNING):
-            presenter._on_display_id_changed("nonexistent_disp", "main")
+            presenter._on_display_id_changed("nonexistent_channel", "secondary")
 
         assert any(r.levelno >= logging.WARNING for r in caplog.records)
+        # Привязка не тронута
+        assert presenter.model.get_displays()[0]["display_id"] == "main_output"
 
     def test_display_id_suppressed_when_suppress_flag_set(self):
-        services = _make_services_for_presenter()
+        services = _make_orch_services_with_binding()
         presenter = PipelinePresenter(services)
         presenter.load_topology_from_config()
 
         presenter._suppress = True
-        presenter._on_display_id_changed("disp1", "new_display")
+        presenter._on_display_id_changed("main_output", "secondary")
 
-        topo = presenter.model.to_topology_dict()
-        disp1 = next(
-            (d for d in topo.get("displays", []) if d.get("node_id") == "disp1"),
-            None,
-        )
-        assert disp1.get("display_id") == "main_output"
+        assert presenter.model.get_displays()[0]["display_id"] == "main_output"
 
 
 # ------------------------------------------------------------------ #
@@ -220,7 +201,7 @@ class TestPresenterSetInspectorSignals:
         assert p1 is not None
 
     def test_set_inspector_connects_display_id_signal(self, qtbot):
-        services = _make_services_for_presenter()
+        services = _make_orch_services_with_binding()
         presenter = PipelinePresenter(services)
         presenter.load_topology_from_config()
 
@@ -228,15 +209,12 @@ class TestPresenterSetInspectorSignals:
         qtbot.addWidget(panel)
         presenter.set_inspector(panel)
 
-        panel.display_id_changed.emit("disp1", "new_display")
+        # G.4.2b: сигнал несёт (id бокса = текущий канал, новый канал)
+        panel.display_id_changed.emit("main_output", "secondary")
 
-        topo = presenter.model.to_topology_dict()
-        disp1 = next(
-            (d for d in topo.get("displays", []) if d.get("node_id") == "disp1"),
-            None,
-        )
-        assert disp1 is not None
-        assert disp1.get("display_id") == "new_display"
+        displays = presenter.model.get_displays()
+        assert len(displays) == 1
+        assert displays[0]["display_id"] == "secondary"
 
     def test_set_inspector_passes_services_to_panel(self, qtbot):
         services = _make_services_for_presenter()

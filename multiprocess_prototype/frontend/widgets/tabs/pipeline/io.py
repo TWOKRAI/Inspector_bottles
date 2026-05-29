@@ -45,50 +45,35 @@ def graph_to_blueprint(
     Returns:
         Кортеж из трёх элементов:
         - blueprint_dict: dict, совместимый с SystemBlueprint.model_validate().
-          Содержит ключи: name, description, processes, wires.
-          Wire'ы к display-узлам исключены — они попадают в display_bindings.
-        - display_bindings: list[dict] вида {"node_id": ..., "display_id": ...}.
-          Каждая запись соответствует wire process→display.
+          Содержит ключи: name, description, processes, wires (только process→process).
+        - display_bindings: list[dict] вида {"node_id": <source endpoint>, "display_id": ...}.
+          G.4.2b: берутся напрямую из topology["displays"] (display = binding, не wire).
         - gui_positions: dict вида {"<node_id>": [x, y]} для всех узлов.
           Заполняется из topology["gui_positions"] если ключ присутствует.
     """
     topo = model.to_topology_dict()
 
-    # --- Собираем индекс display-узлов: node_id → display_id ---
-    display_index: dict[str, str] = {}
+    # --- display_bindings = привязки модели напрямую (G.4.2b) ---
+    # display = binding: модель хранит {node_id: <source endpoint>, display_id},
+    # ровно в формате диска. Wire⇄binding-конвертер удалён (display-wire больше нет).
+    display_bindings: list[dict] = []
     for disp in topo.get("displays", []):
+        if not isinstance(disp, dict):
+            continue
         node_id = disp.get("node_id", "")
         display_id = disp.get("display_id", "")
-        if node_id:
-            display_index[node_id] = display_id
+        if node_id and display_id:
+            display_bindings.append({"node_id": node_id, "display_id": display_id})
 
-    # --- Разделяем wire'ы ---
-    process_wires: list[dict] = []  # wire'ы process→process
-    display_bindings: list[dict] = []  # wire'ы process→display
-
+    # --- Все wire'ы — process→process (display-wire не существует) ---
+    process_wires: list[dict] = []
     for wire in topo.get("wires", []):
         if not isinstance(wire, dict):
             continue
-        target: str = wire.get("target", "")
-        source: str = wire.get("source", "")
-
-        if target.startswith("display."):
-            # Парсим target = "display.<node_id>.frame"
-            parts = target.split(".")
-            node_id = parts[1] if len(parts) >= 2 else ""
-            display_id = display_index.get(node_id, node_id)  # fallback на node_id
-            display_bindings.append(
-                {
-                    "node_id": source,
-                    "display_id": display_id,
-                }
-            )
-        else:
-            # Копируем только базовые поля wire (без dtype-мусора если нужно чистый blueprint)
-            wire_entry: dict = {"source": source, "target": target}
-            if "description" in wire:
-                wire_entry["description"] = wire["description"]
-            process_wires.append(wire_entry)
+        wire_entry: dict = {"source": wire.get("source", ""), "target": wire.get("target", "")}
+        if "description" in wire:
+            wire_entry["description"] = wire["description"]
+        process_wires.append(wire_entry)
 
     # --- Собираем processes ---
     # Сохраняем все поля из topology dict без изменений.
@@ -198,18 +183,17 @@ def blueprint_to_graph(
                 stacklevel=2,
             )
 
-    # --- Загружаем display_bindings → display-узлы + wire'ы к ним ---
+    # --- Загружаем display_bindings → привязки модели напрямую (G.4.2b) ---
+    # display = binding: запись {node_id: <source endpoint>, display_id}. Никаких
+    # display-узлов и wire'ов — конвертер схлопнут (см. ADR DOM-001).
     for binding in display_bindings:
         if not isinstance(binding, dict):
             continue
-        source: str = binding.get("node_id", "")
+        source: str = binding.get("node_id", "")  # source endpoint выхода
         display_id: str = binding.get("display_id", "")
         if not display_id:
             logger.warning("blueprint_to_graph: binding без display_id — пропущен")
             continue
-
-        # node_id = display_id (один display = один узел — простое правило)
-        node_id: str = display_id
 
         # Получаем display_name из реестра если доступен
         display_name: str = ""
@@ -221,23 +205,11 @@ def blueprint_to_graph(
             except Exception as exc:
                 logger.warning("blueprint_to_graph: ошибка при обращении к display_registry: %s", exc)
 
-        # Добавляем display-узел (если уже есть — пропускаем)
         try:
-            model.add_display(node_id, display_id, display_name)
+            model.add_display(source, display_id, display_name)
         except ValueError:
-            # Дубликат — уже существует (возможно при повторном вызове)
+            # Дубликат пары (source, display_id) — пропускаем
             pass
-
-        # Wire process→display
-        if source:
-            display_target = f"display.{node_id}.frame"
-            try:
-                model.add_wire(source, display_target)
-            except ValueError as exc:
-                warnings.warn(
-                    f"blueprint_to_graph: не удалось добавить display wire {source} → {display_target}: {exc}",
-                    stacklevel=2,
-                )
 
     # --- Записываем gui_positions если переданы ---
     if gui_positions:

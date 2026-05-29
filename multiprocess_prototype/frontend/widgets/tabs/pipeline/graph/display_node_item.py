@@ -85,9 +85,12 @@ class DisplayNodeItem(QGraphicsRectItem):
         self._input_ports: list[PortItem] = []
         self._output_ports: list[PortItem] = []  # всегда пуст
 
+        # endpoint порта = "display.<node_id>.frame" — этот префикс распознаётся
+        # presenter.add_wire как display-target (→ dispatch(BindDisplay)). node_id
+        # бокса = display_id (канал). См. ADR DOM-001.
         frame_port = PortItem(
             "input",
-            f"{data.node_id}.frame",
+            f"display.{data.node_id}.frame",
             "display",
             parent=self,
         )

@@ -17,13 +17,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
 from multiprocess_prototype.domain.app_services import AppServices
-from multiprocess_prototype.domain.commands import AddProcess, ConnectWire, RemoveProcess
+from multiprocess_prototype.domain.commands import (
+    AddProcess,
+    BindDisplay,
+    ConnectWire,
+    RemoveProcess,
+    UnbindDisplay,
+)
 from multiprocess_prototype.domain.entities.plugin import PluginInstance
 from multiprocess_prototype.domain.errors import DomainError
 from multiprocess_prototype.domain.events import TopologyReplaced
 
 from .graph.node_item import NodeData
 from .graph.edge_item import EdgeData
+from .graph.display_node_item import DisplayNodeData
 from .graph.port_schema import PortSchema
 from .model import PipelineModel
 from .layout import auto_layout
@@ -74,6 +81,9 @@ class PipelinePresenter:
         # читается load_scene_with_ports. Инициализируем здесь, чтобы метод рендера
         # не падал AttributeError при вызове до первого _topology_to_graph.
         self._port_schemas_cache: dict[str, list[PortSchema]] = {}
+        # G.4.2b: кэш display-боксов (по одному на display_id), заполняется
+        # _topology_to_graph из topo["displays"], читается load_scene_with_ports.
+        self._display_nodes_cache: list[DisplayNodeData] = []
 
         # Модель телеметрии wire-соединений (Task 7b.3)
         self._wire_metrics_model = WireMetricsModel()
@@ -180,59 +190,48 @@ class PipelinePresenter:
             )
 
     def _on_display_id_changed(self, node_id: str, new_display_id: str) -> None:
-        """Обработчик выбора нового display для display-узла.
+        """Обработчик выбора нового display-канала для display-бокса.
 
-        Находит запись display в topology по node_id, обновляет display_id
-        и display_name (если DisplayRegistry доступен).
+        G.4.2b: смена канала бокса = ребиндинг всех привязок на этот бокс через
+        domain dispatch (Unbind старого + Bind нового на каждый источник). id бокса
+        = старый display_id. Undoable через services.commands.
 
         Args:
-            node_id: идентификатор display-узла.
+            node_id: идентификатор display-бокса (= старый display_id канала).
             new_display_id: новый выбранный display_id.
         """
         if self._suppress:
             return
 
-        displays = self._model._topology.get("displays", [])
+        old_display_id = node_id  # id бокса = display_id канала
+        if not new_display_id or new_display_id == old_display_id:
+            return
 
-        # Получить display_name из реестра (services.displays — DisplayCatalog Protocol)
-        new_display_name = ""
-        try:
-            spec = self._services.displays.resolve(new_display_id)
-            if spec is not None:
-                new_display_name = spec.display_name
-        except Exception:
-            logger.debug("Не удалось получить имя display '%s' из реестра", new_display_id, exc_info=True)
+        # Снимок привязок на этот бокс ДО мутаций (dispatch перестроит модель)
+        sources = [
+            d.get("node_id", "")
+            for d in self._model.get_displays()
+            if d.get("display_id") == old_display_id and d.get("node_id")
+        ]
+        if not sources:
+            logger.warning("_on_display_id_changed: бокс '%s' без привязок", old_display_id)
+            return
 
-        found = False
-        for disp in displays:
-            if isinstance(disp, dict):
-                if disp.get("node_id") == node_id:
-                    disp["display_id"] = new_display_id
-                    disp["display_name"] = new_display_name
-                    found = True
-                    break
-            else:
-                if getattr(disp, "node_id", "") == node_id:
-                    try:
-                        disp.display_id = new_display_id
-                        disp.display_name = new_display_name
-                    except AttributeError:
-                        pass
-                    found = True
-                    break
-
-        if found:
-            logger.debug(
-                "display_id обновлён: узел '%s' → display '%s' (name='%s')",
-                node_id,
-                new_display_id,
-                new_display_name,
-            )
-        else:
-            logger.warning(
-                "_on_display_id_changed: display-узел '%s' не найден в topology",
-                node_id,
-            )
+        # coalesce_key объединяет все Unbind+Bind ребиндинга в ОДНУ undo-запись —
+        # один Ctrl+Z отменяет смену канала целиком (важно при fan-in: N источников).
+        coalesce_key = f"rebind-display:{old_display_id}->{new_display_id}"
+        for src in sources:
+            try:
+                self._services.commands.dispatch(
+                    UnbindDisplay(node_id=src, display_id=old_display_id),
+                    coalesce_key=coalesce_key,
+                )
+                self._services.commands.dispatch(
+                    BindDisplay(node_id=src, display_id=new_display_id),
+                    coalesce_key=coalesce_key,
+                )
+            except DomainError as exc:
+                logger.warning("Ребиндинг display %s→%s отклонён: %s", old_display_id, new_display_id, exc)
 
     # ------------------------------------------------------------------ #
     #  Signal suppression (из v1)                                         #
@@ -350,25 +349,32 @@ class PipelinePresenter:
         return name
 
     def remove_selected(self, selected_node_ids: list[str]) -> None:
-        """Удалить выбранные ноды (включая display-узлы).
+        """Удалить выбранные ноды (process-узлы и display-боксы).
 
         G.4.2: process-ноды → dispatch(RemoveProcess) (domain каскадит wires+displays).
-        G.4.2b: display-ноды временно остаются на legacy PipelineModel+save пути.
+        G.4.2b: display-боксы → dispatch(UnbindDisplay) для каждой привязки на канал
+        (id бокса = display_id). Всё персистится и undoable через services.commands.
         """
-        # Множество известных display-узлов — чтобы развести process/display ветки
-        display_node_ids = {d.get("node_id", "") for d in self._model.get_displays()}
+        # Display-боксы адресуются по display_id (id бокса = канал), не по node_id
+        # (node_id привязки = source endpoint). Снимок — для разведения веток.
+        display_box_ids = {d.get("display_id", "") for d in self._model.get_displays()}
 
         for node_id in selected_node_ids:
-            is_display = node_id in display_node_ids
             self._gui_positions.pop(node_id, None)
 
-            if is_display:
-                # G.4.2b: display-путь временно legacy (см. phase-g.md)
-                old_topo, new_topo = self._model.remove_display(node_id)
-                from multiprocess_prototype.domain.entities.topology import Topology
-
-                self._services.topology.save(Topology.from_dict(new_topo))
-                # Scene обновится из TopologyReplaced (store публикует при save)
+            if node_id in display_box_ids:
+                # G.4.2b: удаление display-бокса = отвязать все binding на этот канал.
+                # get_displays() — снимок (deep copy) на входе в цикл: dispatch внутри
+                # перестраивает модель, но мы итерируем исходный список пар.
+                for di in self._model.get_displays():
+                    if di.get("display_id") != node_id:
+                        continue
+                    cmd = UnbindDisplay(node_id=di.get("node_id", ""), display_id=node_id)
+                    try:
+                        self._services.commands.dispatch(cmd)
+                    except DomainError as exc:
+                        logger.warning("UnbindDisplay отклонён: %s", exc)
+                # Scene обновится из _on_topology_replaced (синхронный dispatch)
             else:
                 # G.4.2: process removal через domain dispatch
                 cmd = RemoveProcess(process_name=node_id)
@@ -383,16 +389,17 @@ class PipelinePresenter:
 
         G.4.2: process→process wire → dispatch(ConnectWire). Port-валидация (QMessageBox)
         и guard дубликата сохраняются в presenter ДО dispatch.
-        G.4.2b: wire-to-display временно остаётся на legacy PipelineModel+save пути.
+        G.4.2b: wire-to-display → dispatch(BindDisplay) — соединение source→бокс есть
+        привязка (node_id=source endpoint, display_id=канал бокса), не wire.
 
         Args:
             source: endpoint источника в формате "process.plugin.port"
             target: endpoint приёмника в формате "process.plugin.port"
-                    или "display.<node_id>.frame" для display-узлов
+                    или "display.<display_id>.frame" для display-боксов
             parent: родительский виджет для QMessageBox (может быть None)
 
         Returns:
-            True если wire создан, False если заблокирован.
+            True если wire/binding создан, False если заблокирован.
         """
         # --- Валидация совместимости портов (GUI-concern, остаётся в presenter) ---
         if not self._validate_wire_ports(source, target, parent):
@@ -401,16 +408,20 @@ class PipelinePresenter:
         is_display_target = target.split(".")[0] == "display"
 
         if is_display_target:
-            # G.4.2b: display-путь временно legacy (см. phase-g.md)
-            try:
-                old_topo, new_topo = self._model.add_wire(source, target)
-            except ValueError as e:
-                logger.warning("Wire rejected (display legacy): %s", e)
+            # G.4.2b: соединение source→display-бокс = dispatch(BindDisplay).
+            # target = "display.<display_id>.frame" (id бокса = display_id).
+            parts = target.split(".")
+            display_id = parts[1] if len(parts) >= 2 else ""
+            if not display_id:
+                logger.warning("BindDisplay: некорректный display-target '%s'", target)
                 return False
-            from multiprocess_prototype.domain.entities.topology import Topology
-
-            self._services.topology.save(Topology.from_dict(new_topo))
-            # Scene обновится из TopologyReplaced (store публикует при save)
+            cmd = BindDisplay(node_id=source, display_id=display_id)
+            try:
+                self._services.commands.dispatch(cmd)
+            except DomainError as exc:
+                logger.warning("BindDisplay отклонён: %s", exc)
+                return False
+            # Scene обновится из _on_topology_replaced (синхронный dispatch)
             return True
 
         # G.4.2: process→process wire через domain dispatch
@@ -620,10 +631,18 @@ class PipelinePresenter:
         (заполняется _topology_to_graph) как port_schemas_map, чтобы ноды получили
         корректные порты. Layout-логика живёт в одном месте — в load_from_data.
         Публичный метод: вызывается также из PipelineTab при initial load.
+
+        G.4.2b: пробрасывает _display_nodes_cache (display-боксы) — scene рисует их
+        из topo["displays"], рёбра source→box уже в edges.
         """
         if not self._scene:
             return
-        self._scene.load_from_data(nodes, edges, port_schemas_map=self._port_schemas_cache)
+        self._scene.load_from_data(
+            nodes,
+            edges,
+            port_schemas_map=self._port_schemas_cache,
+            display_nodes=self._display_nodes_cache,
+        )
 
     # ------------------------------------------------------------------ #
     #  Auto-layout                                                         #
@@ -680,12 +699,17 @@ class PipelinePresenter:
         G.4.2: реконструирует port_schemas из services.plugins.resolve() при reload,
         чтобы ноды имели корректные порты после dispatch (находка #7 аудита).
         port_schemas хранятся во внутреннем кэше _port_schemas_cache для передачи
-        в scene (load_from_data не поддерживает port_schemas напрямую, поэтому
-        порты устанавливаются поэлементно после load_from_data в _on_topology_replaced).
+        в scene через load_from_data(port_schemas_map=...).
+
+        G.4.2b: рендерит display-боксы из topo["displays"] (binding-формат
+        {node_id: <source endpoint>, display_id}). Один бокс на display_id (канал),
+        binding-ребро source→box на каждый DisplayInstance. Боксы кладутся в
+        _display_nodes_cache, рёбра — в общий список edges.
         """
         nodes = []
         edges = []
         self._port_schemas_cache: dict[str, list[PortSchema]] = {}
+        self._display_nodes_cache = []
 
         processes = topo_dict.get("processes", [])
 
@@ -756,7 +780,67 @@ class PipelinePresenter:
                 target_proc = target.split(".")[0] if "." in target else target
                 edges.append(EdgeData(source_id=source_proc, target_id=target_proc))
 
+        # G.4.2b: display-боксы + binding-рёбра из topo["displays"]
+        self._build_display_nodes(topo_dict, edges)
+
         return nodes, edges
+
+    def _build_display_nodes(self, topo_dict: dict, edges: list[EdgeData]) -> None:
+        """Построить display-боксы и binding-рёбра из topo["displays"] (G.4.2b).
+
+        Binding-формат: {node_id: <source endpoint>, display_id, display_name?}.
+        Один бокс на display_id (fan-in: N источников → 1 бокс), binding-ребро
+        source-процесс → бокс на каждый DisplayInstance. Боксы накапливаются в
+        _display_nodes_cache (id бокса = display_id), рёбра дописываются в edges.
+        """
+        boxes_by_display_id: dict[str, DisplayNodeData] = {}
+        next_fallback_index = 0
+
+        for disp in topo_dict.get("displays", []):
+            if isinstance(disp, dict):
+                source_endpoint = disp.get("node_id", "")
+                display_id = disp.get("display_id", "")
+                binding_name = disp.get("display_name") or ""
+            else:
+                source_endpoint = getattr(disp, "node_id", "")
+                display_id = getattr(disp, "display_id", "")
+                binding_name = getattr(disp, "display_name", "") or ""
+
+            if not display_id:
+                continue
+
+            # Бокс на display_id (дедуп при fan-in)
+            if display_id not in boxes_by_display_id:
+                display_name = self._resolve_display_name(display_id) or binding_name
+                x, y = self._gui_positions.get(
+                    display_id,
+                    (600.0, 50.0 + next_fallback_index * 120.0),
+                )
+                next_fallback_index += 1
+                boxes_by_display_id[display_id] = DisplayNodeData(
+                    node_id=display_id,
+                    display_id=display_id,
+                    display_name=display_name,
+                    x=x,
+                    y=y,
+                )
+
+            # Binding-ребро source-процесс → бокс
+            if source_endpoint:
+                source_proc = source_endpoint.split(".")[0]
+                edges.append(EdgeData(source_id=source_proc, target_id=display_id))
+
+        self._display_nodes_cache = list(boxes_by_display_id.values())
+
+    def _resolve_display_name(self, display_id: str) -> str:
+        """Получить человекочитаемое имя канала из DisplayCatalog (best-effort)."""
+        try:
+            spec = self._services.displays.resolve(display_id)
+            if spec is not None:
+                return spec.display_name
+        except Exception:
+            logger.debug("Не удалось получить имя display '%s'", display_id, exc_info=True)
+        return ""
 
     def _blueprint_to_graph(self, bp) -> tuple[list[NodeData], list[EdgeData]]:
         """Конвертировать SystemBlueprint в граф-данные."""

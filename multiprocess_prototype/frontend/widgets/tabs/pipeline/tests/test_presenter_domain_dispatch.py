@@ -351,53 +351,157 @@ class TestUndoRedo:
 
 
 # ===========================================================================
-# РЕГРЕССИЯ: display-ветка на legacy пути (не сломана)
+# G.4.2b: display = binding — output→box через dispatch(BindDisplay/UnbindDisplay)
 # ===========================================================================
 
 
-class TestDisplayLegacyPath:
-    """Display-ветка remove + wire-to-display — legacy путь (G.4.2b)."""
+def _make_display_services(topology: dict | None = None):
+    """Services с orchestrator + каналами main/preview для BindDisplay-валидации."""
+    return make_pipeline_services_with_orchestrator(
+        topology=topology
+        or {
+            "processes": [{"process_name": "cam", "plugins": [{"plugin_name": "capture"}]}],
+            "wires": [],
+            "displays": [],
+        },
+        plugin_specs=_PLUGIN_SPECS,
+        display_ids={"main", "preview"},
+    )
 
-    def test_remove_display_legacy(self):
-        """remove_selected([display]) — legacy путь через PipelineModel+save."""
-        services = _make_orchestrator_services()
+
+class TestDisplayBindingDispatch:
+    """output→display-бокс = dispatch(BindDisplay); удаление = dispatch(UnbindDisplay)."""
+
+    def test_bind_via_add_wire_persists(self):
+        """add_wire(source → display.<id>.frame) → BindDisplay → привязка в repo."""
+        services = _make_display_services()
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
-        # Добавляем display через модель (legacy — не через domain)
-        p.model.add_display("disp1", "main_output", "Main Display")
-        p.model.add_wire("processor.color_mask.mask", "display.disp1.frame")
+        ok = p.add_wire("cam.capture.frame", "display.main.frame")
+        assert ok is True
 
-        # Синхронизируем repo (имитация того, что модель = master)
-        from multiprocess_prototype.domain.entities import Topology
+        displays = services.topology.load().to_dict().get("displays", [])
+        assert len(displays) == 1
+        assert displays[0]["node_id"] == "cam.capture.frame"
+        assert displays[0]["display_id"] == "main"
 
-        services.topology.save(Topology.from_dict(p.model.to_topology_dict()))
-
+    def test_remove_box_unbinds(self):
+        """remove_selected([display_id-бокс]) → UnbindDisplay → привязка снята."""
+        services = _make_display_services(
+            topology={
+                "processes": [{"process_name": "cam", "plugins": [{"plugin_name": "capture"}]}],
+                "wires": [],
+                "displays": [{"node_id": "cam.capture.frame", "display_id": "main"}],
+            }
+        )
+        p = PipelinePresenter(services)
+        p.load_topology_from_config()
         assert len(p.model.get_displays()) == 1
 
-        p.remove_selected(["disp1"])
-
-        # display удалён, wire к display каскадно удалён
+        p.remove_selected(["main"])  # id бокса = display_id канала
         assert len(p.model.get_displays()) == 0
-        wires = p.model.get_wires()
-        assert all("display." not in w.get("target", "") for w in wires)
 
-    def test_wire_to_display_legacy(self):
-        """add_wire(proc→display) — legacy путь через PipelineModel+save."""
-        services = _make_orchestrator_services()
+    def test_bind_undo(self):
+        """undo после BindDisplay → привязка удалена (snapshot-undo)."""
+        services = _make_display_services()
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
-        # Добавляем display через модель
-        p.model.add_display("disp1", "main_output", "Main Display")
-        from multiprocess_prototype.domain.entities import Topology
+        p.add_wire("cam.capture.frame", "display.main.frame")
+        assert len(p.model.get_displays()) == 1
 
-        services.topology.save(Topology.from_dict(p.model.to_topology_dict()))
+        services.commands.undo()
+        assert len(p.model.get_displays()) == 0
 
-        result = p.add_wire("processor.color_mask.mask", "display.disp1.frame")
-        assert result is True
+    def test_fan_in_two_sources_one_channel(self):
+        """Fan-in: два выхода → один канал = две привязки."""
+        services = _make_display_services(
+            topology={
+                "processes": [
+                    {"process_name": "cam", "plugins": [{"plugin_name": "capture"}]},
+                    {"process_name": "b", "plugins": [{"plugin_name": "blur"}]},
+                ],
+                "wires": [],
+                "displays": [],
+            }
+        )
+        p = PipelinePresenter(services)
+        p.load_topology_from_config()
 
-        # Wire к display в модели
-        wires = p.model.get_wires()
-        display_wires = [w for w in wires if isinstance(w, dict) and w.get("target", "").startswith("display.")]
-        assert len(display_wires) >= 1
+        assert p.add_wire("cam.capture.frame", "display.main.frame") is True
+        assert p.add_wire("b.blur.out", "display.main.frame") is True
+        assert len(p.model.get_displays()) == 2
+
+
+class TestDisplaySceneRendering:
+    """G.4.2b: display-боксы и binding-рёбра рендерятся из topo["displays"]."""
+
+    def _render(self, displays: list[dict], qtbot):
+        """Построить services + scene и отрисовать topology с привязками."""
+        services = _make_display_services(
+            topology={
+                "processes": [
+                    {"process_name": "cam", "plugins": [{"plugin_name": "capture"}]},
+                    {"process_name": "b", "plugins": [{"plugin_name": "blur"}]},
+                ],
+                "wires": [],
+                "displays": displays,
+            }
+        )
+        p = PipelinePresenter(services)
+        scene = GraphScene()
+        p.set_scene(scene)
+        nodes, edges = p.load_topology_from_config()
+        p.load_scene_with_ports(nodes, edges)
+        return scene
+
+    def test_display_box_rendered_on_load(self, qtbot):
+        """Бокс DisplayNodeItem появляется на scene из topo["displays"]."""
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.display_node_item import (
+            DisplayNodeItem,
+        )
+
+        scene = self._render([{"node_id": "cam.capture.frame", "display_id": "main"}], qtbot)
+        box = scene.get_node("main")
+        assert isinstance(box, DisplayNodeItem)
+
+    def test_binding_edge_source_to_box(self, qtbot):
+        """Binding-ребро source-процесс → бокс присутствует."""
+        scene = self._render([{"node_id": "cam.capture.frame", "display_id": "main"}], qtbot)
+        # cam-нода + бокс main = 1 ребро между ними
+        assert scene.edge_count() == 1
+
+    def test_fan_in_one_box_two_edges(self, qtbot):
+        """Fan-in: 2 источника → 1 бокс, 2 ребра."""
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.display_node_item import (
+            DisplayNodeItem,
+        )
+
+        scene = self._render(
+            [
+                {"node_id": "cam.capture.frame", "display_id": "main"},
+                {"node_id": "b.blur.out", "display_id": "main"},
+            ],
+            qtbot,
+        )
+        assert isinstance(scene.get_node("main"), DisplayNodeItem)
+        assert scene.get_node("preview") is None
+        assert scene.edge_count() == 2
+
+    def test_fan_out_two_boxes(self, qtbot):
+        """Fan-out: 1 источник → 2 канала = 2 бокса, 2 ребра."""
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.display_node_item import (
+            DisplayNodeItem,
+        )
+
+        scene = self._render(
+            [
+                {"node_id": "cam.capture.frame", "display_id": "main"},
+                {"node_id": "cam.capture.frame", "display_id": "preview"},
+            ],
+            qtbot,
+        )
+        assert isinstance(scene.get_node("main"), DisplayNodeItem)
+        assert isinstance(scene.get_node("preview"), DisplayNodeItem)
+        assert scene.edge_count() == 2

@@ -196,6 +196,7 @@ def make_pipeline_services_with_orchestrator(
     *,
     topology: dict[str, Any] | None = None,
     plugin_specs: "dict[str, PluginSpec] | None" = None,
+    display_ids: set[str] | None = None,
     auth: FakeAuthFacade | None = None,
 ) -> AppServices:
     """Создать AppServices с реальным CommandDispatcherOrchestrator + TopologyRepositoryStore.
@@ -205,6 +206,10 @@ def make_pipeline_services_with_orchestrator(
     Presenter подписан на TopologyReplaced → full scene reload.
 
     Цепочка: dispatch → apply → store.save → publish TopologyReplaced → presenter reload.
+
+    G.4.2b: display_ids — набор валидных каналов для FakeDisplayCatalog. Передаётся
+    и в services.displays, и в ApplyContext.displays (иначе BindDisplay-валидация
+    каталога пропускается, как и plugins при пустом specs).
     """
     from multiprocess_prototype.adapters.dispatch.command_dispatcher import (
         CommandDispatcherOrchestrator,
@@ -235,14 +240,19 @@ def make_pipeline_services_with_orchestrator(
     # PluginCatalog
     plugins = FakePluginCatalog(specs=plugin_specs) if plugin_specs else FakePluginCatalog()
 
+    # DisplayCatalog (G.4.2b: каналы для BindDisplay-валидации)
+    displays = FakeDisplayCatalog(display_ids) if display_ids else FakeDisplayCatalog()
+
     # ApplyContext factory — каталоги для Project.apply валидации.
     # Если specs пустой → plugins=None в ApplyContext (invariants пропускаются),
     # чтобы тесты без explicit plugin_specs не падали на AddProcess валидации.
     _ctx_plugins = plugins if plugins._specs else None
+    _ctx_displays = displays if display_ids else None
 
     def _ctx_factory() -> ApplyContext:
         return ApplyContext(
             plugins=_ctx_plugins,
+            displays=_ctx_displays,
         )
 
     # Orchestrator с реальным undo/redo (G.4.1 ProjectHistory)
@@ -261,7 +271,7 @@ def make_pipeline_services_with_orchestrator(
         recipes=FakeRecipeStore(),
         config=config,
         commands=orchestrator,
-        displays=FakeDisplayCatalog(),
+        displays=displays,
         auth=_auth,
         topology=topology_store,
         events=event_bus,

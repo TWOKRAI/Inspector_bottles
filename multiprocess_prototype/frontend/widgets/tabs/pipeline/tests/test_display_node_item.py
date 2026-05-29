@@ -57,12 +57,13 @@ class TestDisplayNodePorts:
         assert len(item.output_ports) == 0
 
     def test_input_port_name_is_frame(self, qtbot):
-        """Endpoint входного порта содержит «frame»."""
+        """Endpoint входного порта = «display.<node_id>.frame» (G.4.2b: распознаётся
+        presenter.add_wire как display-target → dispatch(BindDisplay))."""
         data = DisplayNodeData(node_id="disp2", display_id="ch2")
         item = DisplayNodeItem(data)
 
         port = item.input_ports[0]
-        assert port.endpoint == "disp2.frame"
+        assert port.endpoint == "display.disp2.frame"
         assert port.is_input is True
         assert port.is_output is False
 
