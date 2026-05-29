@@ -673,3 +673,83 @@ def test_undo_structural_command_no_config_events() -> None:
     dispatcher.undo()
     # Структурная мутация (добавление/удаление процесса) — не config-дифф
     assert len(config_events) == 0
+
+
+# ---------------------------------------------------------------------------
+# G.4.4: change-callback (UndoRedoController — кнопки undo/redo + History-вкладка)
+# ---------------------------------------------------------------------------
+
+
+def test_change_callback_fires_on_dispatch_undo_redo_clear() -> None:
+    """add_change_callback вызывается после dispatch/undo/redo/clear_history."""
+    dispatcher, _holder, _store, _bus, _replaced = _orchestrator_with_store()
+    calls: list[int] = []
+    dispatcher.add_change_callback(lambda: calls.append(1))
+
+    dispatcher.dispatch(AddProcess(process_name="cam"))
+    assert len(calls) == 1
+    dispatcher.undo()
+    assert len(calls) == 2
+    dispatcher.redo()
+    assert len(calls) == 3
+    dispatcher.clear_history()
+    assert len(calls) == 4
+
+
+def test_change_callback_not_fired_on_empty_undo_redo() -> None:
+    """undo/redo на пустом стеке (False) не дёргают change-callback."""
+    dispatcher, _holder, _store, _bus, _replaced = _orchestrator_with_store()
+    calls: list[int] = []
+    dispatcher.add_change_callback(lambda: calls.append(1))
+
+    assert dispatcher.undo() is False
+    assert dispatcher.redo() is False
+    assert calls == []
+
+
+def test_change_callback_remove() -> None:
+    """remove_change_callback отписывает; повторный remove не падает."""
+    dispatcher, _holder, _store, _bus, _replaced = _orchestrator_with_store()
+    calls: list[int] = []
+
+    def cb() -> None:
+        calls.append(1)
+
+    dispatcher.add_change_callback(cb)
+    dispatcher.dispatch(AddProcess(process_name="cam"))
+    assert len(calls) == 1
+
+    dispatcher.remove_change_callback(cb)
+    dispatcher.dispatch(AddProcess(process_name="cam2"))
+    assert len(calls) == 1  # больше не растёт
+
+    dispatcher.remove_change_callback(cb)  # повторно — без исключения
+
+
+def test_change_callback_exception_isolated() -> None:
+    """Исключение в одном change-callback не валит остальные и сам dispatch."""
+    dispatcher, _holder, _store, _bus, _replaced = _orchestrator_with_store()
+    calls: list[str] = []
+
+    def bad() -> None:
+        raise RuntimeError("boom")
+
+    dispatcher.add_change_callback(bad)
+    dispatcher.add_change_callback(lambda: calls.append("good"))
+
+    # dispatch не должен пробросить исключение из callback'а
+    dispatcher.dispatch(AddProcess(process_name="cam"))
+    assert calls == ["good"]
+
+
+def test_orchestrator_exposes_undo_redo_controller_api() -> None:
+    """Orchestrator предоставляет surface framework UndoRedoController (G.4.4).
+
+    Полная структурная конформность проверяется pyright (enable_undo_redo
+    принимает services.commands). Здесь — runtime-страховка, что методы контракта
+    на месте. Импорт самого Protocol не делаем — он поднял бы fan-out тест-файла
+    выше порога no_god_files (sentrux).
+    """
+    dispatcher, _holder, _store, _bus, _replaced = _orchestrator_with_store()
+    for name in ("undo", "redo", "can_undo", "can_redo", "add_change_callback"):
+        assert callable(getattr(dispatcher, name)), f"нет метода контракта: {name}"

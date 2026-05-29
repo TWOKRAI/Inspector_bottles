@@ -51,7 +51,7 @@ from .tree_nav_presenter import TreeNavTabPresenter
 if TYPE_CHECKING:
     from .section_protocol import SectionProtocol
     from .section_spec import SectionSpec
-    from .tab_layout_protocol import TabLayoutProtocol
+    from .tab_layout_protocol import TabLayoutProtocol, UndoRedoController
 
 logger = logging.getLogger(__name__)
 
@@ -209,8 +209,12 @@ class BaseTreeNavTab(BaseColumnarTab):
                 self._presenter.navigate_to(spec.key)
                 break
 
-    def enable_undo_redo(self, bus: object | None) -> None:
-        """Делегировать создание undo/redo кнопок в layout."""
+    def enable_undo_redo(self, bus: "UndoRedoController | None") -> None:
+        """Делегировать создание undo/redo кнопок в layout.
+
+        Принимает framework ``ActionBus`` либо prototype domain-диспетчер
+        (``services.commands``, G.4.4) — оба удовлетворяют ``UndoRedoController``.
+        """
         self._tab_layout.enable_undo_redo(bus)
 
     @property

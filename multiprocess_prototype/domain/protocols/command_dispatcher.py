@@ -12,6 +12,7 @@ CommandDispatcher оборачивает её вместе с EventBus в Phase 
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -75,6 +76,15 @@ class CommandDispatcher(Protocol):
 
     def clear_history(self) -> None:
         """Полностью очистить undo/redo историю."""
+        ...
+
+    def add_change_callback(self, cb: Callable[[], None]) -> None:
+        """Подписаться на уведомления об изменении истории (dispatch/undo/redo/clear).
+
+        G.4.4: UI (кнопки undo/redo, History-вкладка) рефрешит состояние по
+        этому колбэку. Позволяет диспетчеру структурно удовлетворять
+        framework-протоколу `UndoRedoController`.
+        """
         ...
 
 

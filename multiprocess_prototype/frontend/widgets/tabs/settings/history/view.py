@@ -4,6 +4,7 @@
 Presenter работает через этот интерфейс, не импортируя Qt-классы напрямую.
 Конкретная реализация — HistorySection (section.py).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -19,8 +20,8 @@ class HistoryView(TabViewProtocol, Protocol):
     без прямого импорта Qt-классов.
     """
 
-    def set_table_data(self, rows: list[tuple[str, str, str, str]]) -> None:
-        """Заполнить таблицу истории строками (Время, Вкладка, Параметр, Значение)."""
+    def set_table_data(self, rows: list[tuple[str, str, str]]) -> None:
+        """Заполнить таблицу истории строками (Время, Тип, Описание) — G.4.4 domain history."""
         ...
 
     def set_save_enabled(self, enabled: bool) -> None:

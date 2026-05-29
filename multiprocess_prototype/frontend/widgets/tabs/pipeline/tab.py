@@ -20,7 +20,6 @@ G.4.2: ActionBus bridge удалён; undo/redo через services.commands (do
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
@@ -48,8 +47,6 @@ if TYPE_CHECKING:
 
     from multiprocess_framework.modules.registers_module import RegistersManager
 
-logger = logging.getLogger(__name__)
-
 
 # Размеры колонок:
 # - action_width: 180 — нужно место под 6 кнопок управления (Delete..Zoom);
@@ -67,7 +64,7 @@ class PipelineTab(QWidget):
     Canvas + Inspector — в 3-й колонке через вертикальный сплиттер.
     """
 
-    _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "undo", "redo", "save_recipe", "launch_recipe"})
+    _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "save_recipe", "launch_recipe"})
 
     def __init__(
         self,
@@ -110,12 +107,12 @@ class PipelineTab(QWidget):
         # в её собственный wheelEvent (zoom).
         self._view.viewport().removeEventFilter(self._tab_layout)
 
-        # G.4.2: ActionBus bridge удалён. enable_undo_redo(None) создаёт кнопки
-        # в disabled-состоянии (CommandDispatcher Protocol не реализует
-        # add_change_callback, который ожидает layout). Undo/redo по-прежнему
-        # работают через keyboard shortcuts Ctrl+Z/Y → _on_toolbar_action.
-        # G.4.4: добавить change-callback для auto-refresh enable-состояния кнопок.
-        self._tab_layout.enable_undo_redo(None)
+        # G.4.4: undo/redo кнопки подключены к domain CommandDispatcher.
+        # services.commands удовлетворяет UndoRedoController (undo/redo/can_undo/
+        # can_redo/add_change_callback) → layout сам рефрешит enabled-состояние
+        # кнопок по change-callback после каждого dispatch/undo/redo.
+        # Глобальные Ctrl+Z/Y вешает MainWindow.set_undo_controller на ту же шину.
+        self._tab_layout.enable_undo_redo(self._services.commands)
 
         # Передать scene и inspector в presenter.
         self._presenter.set_scene(self._scene)
@@ -207,7 +204,9 @@ class PipelineTab(QWidget):
         """Подключить сигналы виджетов."""
         self._view.wire_created.connect(self._on_wire_created)
         self._scene.selectionChanged.connect(self._on_selection_changed)
-        self._inspector.field_changed.connect(self._on_inspector_field_changed)
+        # G.4.4: field_changed → presenter._on_inspector_field_changed (dispatch
+        # SetPluginConfig, G.4.3) подключается в presenter.set_inspector. Дублирующий
+        # tab-коннект (только лог + stale TODO) убран.
 
     def _load_topology(self) -> None:
         """Загрузить topology из AppContext и отобразить.
@@ -280,12 +279,9 @@ class PipelineTab(QWidget):
             if selected:
                 self._presenter.remove_selected(selected)
                 self._inspector.clear()
-        elif action_id == "undo":
-            # G.4.2: undo через domain CommandDispatcher (snapshot-based)
-            self._services.commands.undo()
-        elif action_id == "redo":
-            # G.4.2: redo через domain CommandDispatcher (snapshot-based)
-            self._services.commands.redo()
+        # G.4.4: undo/redo больше не toolbar-action — кнопки layout'а зовут
+        # services.commands напрямую (enable_undo_redo), а Ctrl+Z/Y — глобально
+        # через MainWindow.set_undo_controller. Единая шина undo (баг dual-undo закрыт).
 
     def _on_plugin_dropped(self, plugin_name: str, scene_pos: "QPointF") -> None:
         """D&D из палитры → создать процесс на canvas."""
@@ -343,25 +339,17 @@ class PipelineTab(QWidget):
         else:
             self._inspector.clear()
 
-    def _on_inspector_field_changed(self, process_name: str, field_name: str, value) -> None:
-        """Поле изменено в инспекторе."""
-        # TODO: через ActionBus в Phase 13+
-        logger.debug("Inspector field changed: %s.%s = %s", process_name, field_name, value)
-
     # ------------------------------------------------------------------ #
     #  Keyboard shortcuts                                                  #
     # ------------------------------------------------------------------ #
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
-        modifiers = event.modifiers()
 
+        # G.4.4: Ctrl+Z/Y обрабатываются глобально в MainWindow (domain undo/redo) —
+        # убран дублирующий per-tab путь, который конфликтовал с глобальным shortcut.
         if key == Qt.Key.Key_Delete:
             self._on_toolbar_action("delete")
-        elif key == Qt.Key.Key_Z and modifiers & Qt.KeyboardModifier.ControlModifier:
-            self._on_toolbar_action("undo")
-        elif key == Qt.Key.Key_Y and modifiers & Qt.KeyboardModifier.ControlModifier:
-            self._on_toolbar_action("redo")
         elif key == Qt.Key.Key_F:
             self._on_toolbar_action("fit")
         elif key == Qt.Key.Key_L:

@@ -1,27 +1,29 @@
 # -*- coding: utf-8 -*-
 """Тесты HistoryPresenter — pure-Python, без Qt.
 
-Task D.5: presenter мигрирован на AppServices. Тесты используют
-make_test_app_services() builder (zero MagicMock для AppContext).
-ActionBus передаётся через FakeCommandDispatcher с методом action_bus().
+G.4.4: presenter читает domain-историю (``services.commands.history()`` →
+``HistoryEntry`` label/command_type/timestamp), таблица — 3 колонки
+(Время / Тип / Описание). Фантомный ActionBus-путь (``action_bus()``) удалён.
 
 Проверяет:
-  - test_refresh_populates_table      : presenter заполняет таблицу из bus.history()
+  - test_refresh_populates_table      : presenter заполняет таблицу из commands.history()
   - test_refresh_enables_buttons      : после refresh кнопки enabled/disabled корректно
-  - test_clear_calls_bus_clear        : presenter вызывает bus.clear()
-  - test_save_to_csv_writes_file      : CSV-файл содержит правильные строки
-  - test_save_skips_when_no_path      : если view вернул None — файл не создаётся
-  - test_save_skips_when_no_actions   : если история пуста — диалог не показывается
-  - test_refresh_empty_bus            : bus=None не бросает исключений
+  - test_refresh_disables_save_when_empty
+  - test_refresh_scrolls_when_has_rows
+  - test_refresh_empty_history        : пустая история не бросает исключений
+  - test_clear_calls_clear_history    : presenter вызывает commands.clear_history()
+  - test_save_to_csv_writes_file      : CSV-файл содержит правильные строки (3 колонки)
+  - test_save_skips_when_no_path / no_history
 """
 
 from __future__ import annotations
 
 import csv
+from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from multiprocess_prototype.domain.protocols import HistoryEntry
 from multiprocess_prototype.domain.tests.conftest import make_test_app_services
 from multiprocess_prototype.frontend.widgets.tabs.settings.history.presenter import (
     HistoryPresenter,
@@ -33,61 +35,39 @@ from multiprocess_prototype.frontend.widgets.tabs.settings.history.presenter imp
 # ---------------------------------------------------------------------------
 
 
-def _make_action(
+def _entry(
     *,
+    label: str = "AddProcess: camera",
+    command_type: str = "AddProcess",
     timestamp: float = 1_700_000_000.0,
-    register_name: str = "camera",
-    action_type: str = "field_set",
-    field_name: str = "fps",
-    description: str = "camera.fps = 30",
-    forward_patch: dict | None = None,
-    backward_patch: dict | None = None,
-) -> SimpleNamespace:
-    """Фабрика mock-действия ActionBus."""
-    return SimpleNamespace(
-        timestamp=timestamp,
-        register_name=register_name,
-        action_type=action_type,
-        field_name=field_name,
-        description=description,
-        forward_patch=forward_patch or {"value": 30},
-        backward_patch=backward_patch or {"value": 25},
-    )
+) -> HistoryEntry:
+    """Фабрика domain HistoryEntry."""
+    return HistoryEntry(label=label, command_type=command_type, timestamp=timestamp)
 
 
-def _make_bus(
-    actions: list | None = None,
-    can_undo: bool = True,
-    can_redo: bool = False,
-) -> MagicMock:
-    """Фабрика mock-шины ActionBus."""
-    bus = MagicMock()
-    bus.history.return_value = actions if actions is not None else []
-    bus.can_undo.return_value = can_undo
-    bus.can_redo.return_value = can_redo
-    return bus
+class _FakeHistoryCommands:
+    """Лёгкий CommandDispatcher с настраиваемой историей (G.4.4).
 
-
-class _FakeDispatcherWithBus:
-    """FakeCommandDispatcher с методом action_bus() — имитирует production dispatcher.
-
-    Task D.5: HistoryPresenter использует services.commands.action_bus() через
-    duck typing. FakeCommandDispatcher из domain/_fakes.py не имеет action_bus(),
-    поэтому используем этот враппер в тестах с ActionBus.
+    HistoryPresenter — чистая проекция: читает history()/can_undo()/can_redo() и
+    делегирует clear_history(). Этого фейка достаточно для unit-теста presenter'а
+    без сборки реального orchestrator (его history() покрыт в test_command_dispatcher).
     """
 
-    def __init__(self, bus=None) -> None:
-        self._bus = bus
+    def __init__(
+        self,
+        entries: list[HistoryEntry] | None = None,
+        *,
+        can_undo: bool = True,
+        can_redo: bool = False,
+    ) -> None:
+        self._entries = entries or []
+        self._can_undo = can_undo
+        self._can_redo = can_redo
+        self.clear_history_calls = 0
 
-    def action_bus(self):
-        return self._bus
-
-    def dispatch(self, command):
+    def dispatch(self, command):  # noqa: ANN001 — Protocol-совместимость
         return []
 
-    # G.4.1: CommandDispatcher Protocol расширен undo/redo/history.
-    # HistoryPresenter пока читает legacy ActionBus через action_bus() (миграция — G.4.4),
-    # поэтому здесь — no-op заглушки для соответствия Protocol.
     def undo(self) -> bool:
         return False
 
@@ -95,40 +75,34 @@ class _FakeDispatcherWithBus:
         return False
 
     def can_undo(self) -> bool:
-        return False
+        return self._can_undo
 
     def can_redo(self) -> bool:
-        return False
+        return self._can_redo
 
-    def history(self, n: int = 20):
-        return []
+    def history(self, n: int = 20) -> list[HistoryEntry]:
+        # n=0 → все записи (как у ProjectHistory.entries / ActionBus.history)
+        return list(self._entries) if n == 0 else list(self._entries[-n:])
 
     def clear_history(self) -> None:
+        self.clear_history_calls += 1
+        self._entries = []
+
+    def add_change_callback(self, cb: Callable[[], None]) -> None:
         pass
 
 
 def _make_view() -> MagicMock:
-    """Фабрика mock HistoryView."""
-    view = MagicMock()
-    return view
+    return MagicMock()
 
 
 def _make_presenter(
-    bus: MagicMock | None = None,
+    commands: _FakeHistoryCommands,
     view: MagicMock | None = None,
 ) -> HistoryPresenter:
-    """Создать HistoryPresenter через make_test_app_services() builder (zero MagicMock).
-
-    Task D.5: commands переопределяется через _FakeDispatcherWithBus если bus задан,
-    иначе используется стандартный FakeCommandDispatcher (action_bus() → None).
-    """
     if view is None:
         view = _make_view()
-    if bus is not None:
-        commands = _FakeDispatcherWithBus(bus)
-        services = make_test_app_services(commands=commands)
-    else:
-        services = make_test_app_services()
+    services = make_test_app_services(commands=commands)
     return HistoryPresenter(view=view, rm=None, ui=None, services=services)
 
 
@@ -141,178 +115,141 @@ class TestHistoryPresenterRefresh:
     """Тесты метода refresh()."""
 
     def test_refresh_populates_table(self) -> None:
-        """presenter.refresh() вызывает view.set_table_data с правильными строками."""
-        action = _make_action(
-            timestamp=1_700_000_000.0,
-            register_name="camera",
-            field_name="fps",
-            forward_patch={"value": 30},
-        )
-        bus = _make_bus(actions=[action])
+        """refresh() → view.set_table_data со строками (Время, Тип, Описание)."""
+        commands = _FakeHistoryCommands([_entry(label="AddProcess: camera", command_type="AddProcess")])
         view = _make_view()
-        presenter = _make_presenter(bus=bus, view=view)
+        presenter = _make_presenter(commands, view)
 
         presenter.refresh()
 
         view.set_table_data.assert_called_once()
         rows = view.set_table_data.call_args[0][0]
         assert len(rows) == 1
-        ts, tab_name, param, value = rows[0]
-        assert tab_name == "camera"
-        assert param == "fps"
-        assert value == "30"
+        ts, command_type, label = rows[0]
+        assert command_type == "AddProcess"
+        assert label == "AddProcess: camera"
+        assert ts  # отформатированное время непустое
 
     def test_refresh_enables_buttons(self) -> None:
-        """После refresh кнопки Save и Clear корректно включены/выключены."""
-        action = _make_action()
-        bus = _make_bus(actions=[action], can_undo=True, can_redo=False)
+        """has_history → save enabled; can_undo → clear enabled."""
+        commands = _FakeHistoryCommands([_entry()], can_undo=True, can_redo=False)
         view = _make_view()
-        presenter = _make_presenter(bus=bus, view=view)
+        presenter = _make_presenter(commands, view)
 
         presenter.refresh()
 
-        # has_history=True → set_save_enabled(True)
         view.set_save_enabled.assert_called_with(True)
-        # can_undo=True → set_clear_enabled(True)
         view.set_clear_enabled.assert_called_with(True)
 
     def test_refresh_disables_save_when_empty(self) -> None:
-        """Если история пустая — set_save_enabled(False)."""
-        bus = _make_bus(actions=[], can_undo=False, can_redo=False)
+        """Пустая история → save и clear disabled."""
+        commands = _FakeHistoryCommands([], can_undo=False, can_redo=False)
         view = _make_view()
-        presenter = _make_presenter(bus=bus, view=view)
+        presenter = _make_presenter(commands, view)
 
-        presenter.refresh()
-
-        view.set_save_enabled.assert_called_with(False)
-        view.set_clear_enabled.assert_called_with(False)
-
-    def test_refresh_scrolls_when_has_rows(self) -> None:
-        """При наличии строк вызывается view.scroll_to_bottom()."""
-        action = _make_action()
-        bus = _make_bus(actions=[action])
-        view = _make_view()
-        presenter = _make_presenter(bus=bus, view=view)
-
-        presenter.refresh()
-
-        view.scroll_to_bottom.assert_called_once()
-
-    def test_refresh_empty_bus(self) -> None:
-        """Если bus=None — presenter не бросает исключений.
-
-        Task D.5: FakeCommandDispatcher не имеет action_bus() → _get_action_bus() = None.
-        """
-        view = _make_view()
-        services = make_test_app_services()  # FakeCommandDispatcher без action_bus()
-        presenter = HistoryPresenter(view=view, rm=None, ui=None, services=services)
-
-        # Не должно бросать исключений
         presenter.refresh()
 
         view.set_table_data.assert_called_with([])
         view.set_save_enabled.assert_called_with(False)
         view.set_clear_enabled.assert_called_with(False)
 
-    def test_refresh_recipe_apply_uses_recipe_name(self) -> None:
-        """Для action_type='recipe_apply' значение берётся из recipe_name."""
-        action = _make_action(
-            action_type="recipe_apply",
-            field_name=None,
-            description="Применить рецепт",
-            forward_patch={"recipe_name": "TestRecipe"},
-        )
-        bus = _make_bus(actions=[action])
+    def test_refresh_clear_enabled_on_redo_only(self) -> None:
+        """clear enabled, если есть redo (даже при пустом undo)."""
+        commands = _FakeHistoryCommands([], can_undo=False, can_redo=True)
         view = _make_view()
-        presenter = _make_presenter(bus=bus, view=view)
+        presenter = _make_presenter(commands, view)
 
         presenter.refresh()
 
-        rows = view.set_table_data.call_args[0][0]
-        _, _, _, value = rows[0]
-        assert value == "TestRecipe"
+        view.set_clear_enabled.assert_called_with(True)
+
+    def test_refresh_scrolls_when_has_rows(self) -> None:
+        """При наличии строк вызывается view.scroll_to_bottom()."""
+        commands = _FakeHistoryCommands([_entry()])
+        view = _make_view()
+        presenter = _make_presenter(commands, view)
+
+        presenter.refresh()
+
+        view.scroll_to_bottom.assert_called_once()
+
+    def test_refresh_empty_history(self) -> None:
+        """Стандартный FakeCommandDispatcher (пустая история) не бросает исключений."""
+        view = _make_view()
+        services = make_test_app_services()  # FakeCommandDispatcher: history() → []
+        presenter = HistoryPresenter(view=view, rm=None, ui=None, services=services)
+
+        presenter.refresh()
+
+        view.set_table_data.assert_called_with([])
+        view.set_save_enabled.assert_called_with(False)
+        view.set_clear_enabled.assert_called_with(False)
 
 
 class TestHistoryPresenterClear:
     """Тесты метода clear()."""
 
-    def test_clear_calls_bus_clear(self) -> None:
-        """presenter.clear() вызывает bus.clear()."""
-        bus = _make_bus()
-        presenter = _make_presenter(bus=bus)
+    def test_clear_calls_clear_history(self) -> None:
+        """presenter.clear() делегирует в commands.clear_history()."""
+        commands = _FakeHistoryCommands([_entry()])
+        presenter = _make_presenter(commands)
 
         presenter.clear()
 
-        bus.clear.assert_called_once()
+        assert commands.clear_history_calls == 1
 
-    def test_clear_noop_when_no_bus(self) -> None:
-        """presenter.clear() без bus — нет исключений.
-
-        Task D.5: FakeCommandDispatcher не имеет action_bus() → None.
-        """
+    def test_clear_noop_on_default_fake(self) -> None:
+        """clear() на стандартном FakeCommandDispatcher не бросает исключений."""
         view = _make_view()
         services = make_test_app_services()
         presenter = HistoryPresenter(view=view, rm=None, ui=None, services=services)
 
-        # Не должно бросать исключений
-        presenter.clear()
+        presenter.clear()  # clear_history() no-op в FakeCommandDispatcher
 
 
 class TestHistoryPresenterSaveToCsv:
     """Тесты метода save_to_csv()."""
 
     def test_save_to_csv_writes_file(self, tmp_path: Path) -> None:
-        """save_to_csv() создаёт CSV с правильными данными."""
+        """save_to_csv() создаёт CSV с заголовком (Время, Тип, Описание) и данными."""
         csv_path = str(tmp_path / "history.csv")
-        action = _make_action(
-            timestamp=1_700_000_000.0,
-            register_name="camera",
-            field_name="fps",
-            forward_patch={"value": 30},
+        commands = _FakeHistoryCommands(
+            [_entry(label="ConnectWire: a→b", command_type="ConnectWire", timestamp=1_700_000_000.0)]
         )
-        bus = _make_bus(actions=[action])
-        # Важно: bus.history(n=0) = все записи
-        bus.history.return_value = [action]
-
         view = _make_view()
         view.get_save_path.return_value = csv_path
 
-        presenter = _make_presenter(bus=bus, view=view)
+        presenter = _make_presenter(commands, view)
         presenter.save_to_csv()
 
-        # Проверяем содержимое CSV
         with open(csv_path, encoding="utf-8-sig") as f:
             reader = csv.reader(f, delimiter=";")
             header = next(reader)
-            assert header == ["Время", "Вкладка", "Параметр", "Значение"]
+            assert header == ["Время", "Тип", "Описание"]
             rows = list(reader)
 
         assert len(rows) == 1
-        _ts, tab, param, value = rows[0]
-        assert tab == "camera"
-        assert param == "fps"
-        assert value == "30"
+        _ts, command_type, label = rows[0]
+        assert command_type == "ConnectWire"
+        assert label == "ConnectWire: a→b"
 
     def test_save_skips_when_no_path(self) -> None:
-        """Если view.get_save_path() вернул None — файл не создаётся."""
-        action = _make_action()
-        bus = _make_bus(actions=[action])
-
+        """get_save_path() вернул None → файл не создаётся."""
+        commands = _FakeHistoryCommands([_entry()])
         view = _make_view()
         view.get_save_path.return_value = None
 
-        presenter = _make_presenter(bus=bus, view=view)
+        presenter = _make_presenter(commands, view)
 
         with patch("builtins.open") as mock_open:
             presenter.save_to_csv()
             mock_open.assert_not_called()
 
-    def test_save_skips_when_no_actions(self) -> None:
-        """Если история пустая — view.get_save_path() не вызывается."""
-        bus = _make_bus(actions=[])
-
+    def test_save_skips_when_no_history(self) -> None:
+        """Пустая история → get_save_path() не вызывается."""
+        commands = _FakeHistoryCommands([])
         view = _make_view()
-        presenter = _make_presenter(bus=bus, view=view)
+        presenter = _make_presenter(commands, view)
 
         presenter.save_to_csv()
 

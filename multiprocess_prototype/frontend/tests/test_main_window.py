@@ -168,3 +168,56 @@ def test_set_image_panel(qtbot):
 
     # Общее количество виджетов в layout осталось 4
     assert layout.count() == 4
+
+
+# -- Undo/Redo controller (G.4.4: единая шина undo) --
+
+
+class _FakeUndoController:
+    """Минимальный UndoRedoController со счётчиками вызовов."""
+
+    def __init__(self) -> None:
+        self.undo_calls = 0
+        self.redo_calls = 0
+        self.callbacks: list = []
+
+    def undo(self) -> bool:
+        self.undo_calls += 1
+        return True
+
+    def redo(self) -> bool:
+        self.redo_calls += 1
+        return True
+
+    def can_undo(self) -> bool:
+        return True
+
+    def can_redo(self) -> bool:
+        return True
+
+    def add_change_callback(self, cb) -> None:
+        self.callbacks.append(cb)
+
+
+def test_set_undo_controller_delegates_undo_redo(qtbot):
+    """G.4.4: _on_undo/_on_redo делегируют в установленный controller (единая шина)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    controller = _FakeUndoController()
+
+    window.set_undo_controller(controller)
+    window._on_undo()
+    window._on_redo()
+
+    assert controller.undo_calls == 1
+    assert controller.redo_calls == 1
+
+
+def test_on_undo_redo_noop_without_controller(qtbot):
+    """Без установленного controller _on_undo/_on_redo — безопасный no-op."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    # set_undo_controller не вызывался → _undo_controller is None
+    window._on_undo()
+    window._on_redo()  # не должно бросать исключений

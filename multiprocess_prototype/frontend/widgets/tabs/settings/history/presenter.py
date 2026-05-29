@@ -2,16 +2,16 @@
 """HistoryPresenter — презентер секции «История» для Settings таба.
 
 Отвечает за:
-- обновление таблицы из ActionBus.history()
-- очистку истории через bus.clear()
+- обновление таблицы из domain-истории (``services.commands.history()``)
+- очистку истории через ``services.commands.clear_history()``
 - экспорт истории в CSV через view.get_save_path()
 
 НЕ импортирует Qt-классы напрямую. Работает исключительно через HistoryView Protocol.
 
-Task D.5: мигрирован на AppServices. ActionBus берётся через
-services.commands.action_bus() если доступен (duck typing).
-History секция не использует EventBus для timeline — исторически работает
-на ActionBus (undo/redo store, не domain events). Phase E может пересмотреть.
+G.4.4: переведён с legacy ActionBus на domain ``CommandDispatcher``
+(``services.commands``). Запись истории — ``HistoryEntry`` (label / command_type /
+timestamp), таблица показывает 3 колонки: Время / Тип / Описание. Фантомный
+``services.commands.action_bus()`` (метода нет — всегда None) удалён.
 """
 
 from __future__ import annotations
@@ -32,12 +32,12 @@ logger = logging.getLogger(__name__)
 
 
 class HistoryPresenter(TabPresenterBase[HistoryView, None]):
-    """Презентер секции «История» — запросы ActionBus, CSV-экспорт.
+    """Презентер секции «История» — запросы domain-истории, CSV-экспорт.
 
     Получает зависимости через конструктор. Не содержит Qt-кода.
 
-    Task D.5: принимает AppServices вместо AppContext.
-    ActionBus берётся через services.commands.action_bus() если доступен.
+    G.4.4: источник истории — domain ``CommandDispatcher`` (``services.commands``),
+    единая глобальная undo/redo-история приложения.
     """
 
     def __init__(
@@ -51,59 +51,39 @@ class HistoryPresenter(TabPresenterBase[HistoryView, None]):
         super().__init__(view=view, rm=rm, ui=ui)
         self._services = services
 
-    def _get_action_bus(self):
-        """Получить ActionBus из services.commands если доступен.
-
-        В production: CommandDispatcherOrchestrator.action_bus() → ActionBus.
-        В тестах: FakeCommandDispatcher не имеет action_bus() → None (graceful).
-        """
-        bus_fn = getattr(self._services.commands, "action_bus", None)
-        if callable(bus_fn):
-            return bus_fn()
-        return None
-
     # ------------------------------------------------------------------
     # Публичный API
     # ------------------------------------------------------------------
 
     def refresh(self) -> None:
-        """Обновить таблицу из ActionBus.history(n=50).
+        """Обновить таблицу из domain-истории (последние 50 записей).
 
-        Формирует строки (Время, Вкладка, Параметр, Значение) и передаёт в view.
-        Также обновляет доступность кнопок «Сохранить» и «Очистить».
+        Формирует строки (Время, Тип, Описание) из ``HistoryEntry`` и передаёт
+        в view. Также обновляет доступность кнопок «Сохранить» и «Очистить».
         """
-        bus = self._get_action_bus()
-        if bus is None:
-            self._view.set_table_data([])
-            self._view.set_save_enabled(False)
-            self._view.set_clear_enabled(False)
-            return
-
-        actions = bus.history(n=50)
-        rows: list[tuple[str, str, str, str]] = []
-        for action in actions:
-            ts = datetime.fromtimestamp(action.timestamp).strftime("%H:%M:%S")
-            tab_name = action.register_name or action.action_type
-            param = action.field_name or action.description
-            value = action.forward_patch.get("value", "")
-            if action.action_type == "recipe_apply":
-                value = action.forward_patch.get("recipe_name", "recipe")
-            rows.append((ts, tab_name, param, str(value)))
+        commands = self._services.commands
+        entries = commands.history(50)
+        rows = [
+            (
+                datetime.fromtimestamp(entry.timestamp).strftime("%H:%M:%S"),
+                entry.command_type,
+                entry.label,
+            )
+            for entry in entries
+        ]
 
         self._view.set_table_data(rows)
 
         has_history = len(rows) > 0
         self._view.set_save_enabled(has_history)
-        self._view.set_clear_enabled(bus.can_undo() or bus.can_redo())
+        self._view.set_clear_enabled(commands.can_undo() or commands.can_redo())
 
         if has_history:
             self._view.scroll_to_bottom()
 
     def clear(self) -> None:
-        """Очистить историю через bus.clear()."""
-        bus = self._get_action_bus()
-        if bus is not None:
-            bus.clear()
+        """Очистить undo/redo-историю через domain-диспетчер."""
+        self._services.commands.clear_history()
 
     def save_to_csv(self) -> None:
         """Экспортировать историю в CSV через view.get_save_path().
@@ -111,12 +91,8 @@ class HistoryPresenter(TabPresenterBase[HistoryView, None]):
         Получает путь от view (та показывает QFileDialog), записывает CSV
         с разделителем «;» и кодировкой UTF-8-BOM для совместимости с Excel.
         """
-        bus = self._get_action_bus()
-        if bus is None:
-            return
-
-        actions = bus.history(n=0)  # все записи
-        if not actions:
+        entries = self._services.commands.history(0)  # все записи
+        if not entries:
             return
 
         path = self._view.get_save_path()
@@ -126,14 +102,9 @@ class HistoryPresenter(TabPresenterBase[HistoryView, None]):
         try:
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f, delimiter=";")
-                writer.writerow(["Время", "Вкладка", "Параметр", "Значение"])
-                for action in actions:
-                    ts = datetime.fromtimestamp(action.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-                    tab = action.register_name or action.action_type
-                    param = action.field_name or action.description
-                    value = action.forward_patch.get("value", "")
-                    if action.action_type == "recipe_apply":
-                        value = action.forward_patch.get("recipe_name", "recipe")
-                    writer.writerow([ts, tab, param, str(value)])
+                writer.writerow(["Время", "Тип", "Описание"])
+                for entry in entries:
+                    ts = datetime.fromtimestamp(entry.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+                    writer.writerow([ts, entry.command_type, entry.label])
         except OSError:
             logger.exception("Ошибка при сохранении истории в CSV: %s", path)

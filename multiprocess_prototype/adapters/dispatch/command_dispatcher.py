@@ -84,6 +84,8 @@ class CommandDispatcherOrchestrator:
         self._apply_context_factory = apply_context_factory
         # G.4.1: snapshot-based undo/redo поверх domain (замена legacy ActionBus)
         self._history = ProjectHistory(max_history=max_history)
+        # G.4.4: подписчики на изменение истории (UI кнопки undo/redo, History-вкладка)
+        self._change_callbacks: list[Callable[[], None]] = []
 
     def dispatch(
         self,
@@ -140,6 +142,9 @@ class CommandDispatcherOrchestrator:
                 coalesce_key=coalesce_key,
             )
 
+        # 8. Уведомляем UI-подписчиков об изменении истории (G.4.4)
+        self._notify_change()
+
         logger.debug(
             "dispatch %s -> %d event(s)",
             type(command).__name__,
@@ -165,6 +170,7 @@ class CommandDispatcherOrchestrator:
         if target is None:
             return False
         self._restore(target)
+        self._notify_change()
         return True
 
     def redo(self) -> bool:
@@ -177,6 +183,7 @@ class CommandDispatcherOrchestrator:
         if target is None:
             return False
         self._restore(target)
+        self._notify_change()
         return True
 
     def can_undo(self) -> bool:
@@ -194,6 +201,37 @@ class CommandDispatcherOrchestrator:
     def clear_history(self) -> None:
         """Полностью очистить undo/redo историю (например, при загрузке нового проекта)."""
         self._history.clear()
+        self._notify_change()
+
+    # ------------------------------------------------------------------
+    # Change-notification (G.4.4) — UI кнопки undo/redo, History-вкладка
+    # ------------------------------------------------------------------
+
+    def add_change_callback(self, cb: Callable[[], None]) -> None:
+        """Подписаться на уведомления об изменении истории (dispatch/undo/redo/clear).
+
+        G.4.4: позволяет UI рефрешить enable-состояние кнопок undo/redo и
+        обновлять History-вкладку по факту изменения. Зеркало framework ActionBus,
+        благодаря чему `CommandDispatcherOrchestrator` структурно удовлетворяет
+        framework-протоколу `UndoRedoController` (enable_undo_redo).
+        """
+        if cb not in self._change_callbacks:
+            self._change_callbacks.append(cb)
+
+    def remove_change_callback(self, cb: Callable[[], None]) -> None:
+        """Отписаться от уведомлений об изменении истории."""
+        try:
+            self._change_callbacks.remove(cb)
+        except ValueError:
+            pass
+
+    def _notify_change(self) -> None:
+        """Вызвать все change-callback'и. Исключение в одном не валит остальные."""
+        for cb in self._change_callbacks:
+            try:
+                cb()
+            except Exception:
+                logger.exception("Ошибка в change callback %r", cb)
 
     def _restore(self, project: Project) -> None:
         """Восстановить снимок Project: derived store + holder.

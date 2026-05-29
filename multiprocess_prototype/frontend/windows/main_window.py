@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QByteArray, QPoint, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QMouseEvent, QShortcut
 from PySide6.QtWidgets import (
@@ -18,6 +20,11 @@ from PySide6.QtWidgets import (
 from ..widgets.chrome.app_header import AppHeaderWidget
 from ..widgets.chrome.error_banner import ErrorBannerWidget
 from .config import MainWindowConfig
+
+if TYPE_CHECKING:
+    from multiprocess_framework.modules.frontend_module.widgets.tabs.tab_layout_protocol import (
+        UndoRedoController,
+    )
 
 # Высоты chrome (UI-настройки видимой плотности интерфейса)
 # ВАЖНО: QSS темы (themes/innotech_theme/main.qss) задаёт min/max-height для
@@ -166,7 +173,7 @@ class MainWindow(QMainWindow):
         # Угловой виджет: только кнопка «Скрыть».
         # Undo/Redo переехали в каждую вкладку (через StandardTabLayout) —
         # см. docs/plan: lauout-cozy-sphinx.md. Ctrl+Z / Ctrl+Y по-прежнему
-        # подвешены к окну в set_action_bus().
+        # подвешены к окну в set_undo_controller() (G.4.4: domain CommandDispatcher).
         corner = QWidget()
         corner_layout = QHBoxLayout(corner)
         corner_layout.setContentsMargins(0, 0, 4, 0)
@@ -204,8 +211,9 @@ class MainWindow(QMainWindow):
         # Счётчик кадров для расчёта FPS
         self._frame_count = 0
 
-        # ActionBus (Phase 11) — устанавливается через set_action_bus()
-        self._action_bus = None
+        # G.4.4: источник undo/redo (domain CommandDispatcher) —
+        # устанавливается через set_undo_controller()
+        self._undo_controller: "UndoRedoController | None" = None
 
         # Восстановить позицию и размер окна из прошлой сессии
         self._settings = QSettings("INNOTECH", "Inspector")
@@ -264,16 +272,18 @@ class MainWindow(QMainWindow):
         self._layout.insertWidget(idx, widget, stretch=1)
         self._image_panel = widget
 
-    # -- ActionBus (Phase 11) --
+    # -- Undo/Redo (G.4.4: domain CommandDispatcher) --
 
-    def set_action_bus(self, bus: object) -> None:
-        """Установить ActionBus и привязать Ctrl+Z / Ctrl+Y shortcuts.
+    def set_undo_controller(self, controller: "UndoRedoController") -> None:
+        """Установить источник undo/redo и привязать Ctrl+Z / Ctrl+Y shortcuts.
 
-        Сами кнопки Undo/Redo живут внутри каждой вкладки (через
-        ``StandardTabLayout.enable_undo_redo``); здесь — только глобальные
-        горячие клавиши на уровне окна.
+        G.4.4: глобальные горячие клавиши идут в domain ``CommandDispatcher``
+        (``services.commands``) — единая шина undo для всего приложения. Закрывает
+        конфликт двух параллельных undo (legacy ActionBus на уровне окна vs domain
+        в Pipeline): теперь и кнопки вкладок (``enable_undo_redo``), и Ctrl+Z/Y
+        работают с одним источником.
         """
-        self._action_bus = bus
+        self._undo_controller = controller
 
         undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         undo_shortcut.activated.connect(self._on_undo)
@@ -284,20 +294,18 @@ class MainWindow(QMainWindow):
         self._redo_shortcut = redo_shortcut  # prevent GC
 
     def _on_undo(self) -> None:
-        """Отменить последнее действие."""
-        if self._action_bus is None:
+        """Отменить последнее действие (domain undo)."""
+        if self._undo_controller is None:
             return
-        action = self._action_bus.undo()
-        if action:
-            self.statusBar().showMessage(f"Отменено: {action.description}", 3000)
+        if self._undo_controller.undo():
+            self.statusBar().showMessage("Отменено", 3000)
 
     def _on_redo(self) -> None:
-        """Повторить отменённое действие."""
-        if self._action_bus is None:
+        """Повторить отменённое действие (domain redo)."""
+        if self._undo_controller is None:
             return
-        action = self._action_bus.redo()
-        if action:
-            self.statusBar().showMessage(f"Повторено: {action.description}", 3000)
+        if self._undo_controller.redo():
+            self.statusBar().showMessage("Повторено", 3000)
 
     # -- Toggle tabs --
 

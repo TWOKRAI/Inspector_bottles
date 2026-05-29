@@ -106,16 +106,15 @@ def _users_factory(services: AppServices, auth_ctx: "AuthContext | None") -> _Se
 def _roles_factory(services: AppServices, auth_ctx: "AuthContext | None") -> _SectionAdapter:
     """Фабрика RolesPanel (ленивая).
 
-    ActionBus берётся из services.commands если поддерживает action_bus().
-    TODO Phase G (G.4): расширить CommandDispatcher Protocol методом action_bus().
+    G.4.4: ROLE_UPDATE — auth-домен; его миграция на domain-команды отложена
+    (Phase G+). У domain `services.commands` нет `action_bus()` (был фантом —
+    всегда None), поэтому передаём `bus=None` явно: редактирование permissions
+    ролей через UI неактивно (как и было — `RolesPanel._on_permissions_changed`
+    при None no-op). Будущая шина для ROLE_UPDATE — отдельная задача.
     """
     from .administration.roles_panel import RolesPanel
 
-    bus = getattr(services.commands, "action_bus", None)
-    if callable(bus):
-        bus = bus()
-
-    widget = RolesPanel(auth_ctx, bus)
+    widget = RolesPanel(auth_ctx, None)
     return _SectionAdapter(key="roles", title="Роли", widget=widget)
 
 

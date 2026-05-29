@@ -8,7 +8,7 @@
 Структура UI:
     QWidget (container)
       └── QVBoxLayout
-            └── QTableWidget  4 колонки: Время, Вкладка, Параметр, Значение
+            └── QTableWidget  3 колонки: Время, Тип, Описание (G.4.4 domain history)
 
 Кнопки «Сохранить в файл» и «Очистить историю» возвращаются через action_buttons()
 и регистрируются в action-колонке SettingsTab.
@@ -36,8 +36,8 @@ if TYPE_CHECKING:
     from .presenter import HistoryPresenter
     from multiprocess_prototype.domain.app_services import AppServices
 
-# Заголовки колонок таблицы истории
-_HISTORY_COLUMNS = ["Время", "Вкладка", "Параметр", "Значение"]
+# Заголовки колонок таблицы истории (G.4.4: domain HistoryEntry)
+_HISTORY_COLUMNS = ["Время", "Тип", "Описание"]
 
 
 class HistorySection(QWidget):
@@ -98,14 +98,13 @@ class HistorySection(QWidget):
     # HistoryView Protocol
     # ------------------------------------------------------------------
 
-    def set_table_data(self, rows: list[tuple[str, str, str, str]]) -> None:
-        """Заполнить таблицу строками из presenter'а."""
+    def set_table_data(self, rows: list[tuple[str, str, str]]) -> None:
+        """Заполнить таблицу строками (Время, Тип, Описание) из presenter'а."""
         self._table.setRowCount(len(rows))
-        for row_idx, (ts, tab_name, param, value) in enumerate(rows):
+        for row_idx, (ts, command_type, label) in enumerate(rows):
             self._table.setItem(row_idx, 0, QTableWidgetItem(ts))
-            self._table.setItem(row_idx, 1, QTableWidgetItem(tab_name))
-            self._table.setItem(row_idx, 2, QTableWidgetItem(param))
-            self._table.setItem(row_idx, 3, QTableWidgetItem(value))
+            self._table.setItem(row_idx, 1, QTableWidgetItem(command_type))
+            self._table.setItem(row_idx, 2, QTableWidgetItem(label))
 
     def set_save_enabled(self, enabled: bool) -> None:
         """Установить доступность кнопки «Сохранить в файл»."""
@@ -188,12 +187,10 @@ class HistorySection(QWidget):
         if h:
             h.setStretchLastSection(False)
             h.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-            h.resizeSection(0, 140)  # Время — пошире
+            h.resizeSection(0, 140)  # Время
             h.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-            h.resizeSection(1, 150)  # Вкладка — пошире
-            h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-            h.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-            h.resizeSection(3, 120)  # Значение — поуже
+            h.resizeSection(1, 180)  # Тип команды
+            h.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Описание — растягивается
 
         layout.addWidget(self._table)
 

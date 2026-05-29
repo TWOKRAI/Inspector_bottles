@@ -405,6 +405,10 @@ class FakeCommandDispatcher:
     def clear_history(self) -> None:
         pass
 
+    def add_change_callback(self, cb: Callable[[], None]) -> None:
+        # G.4.4: fake не держит истории → нечего нотифицировать (no-op).
+        pass
+
 
 _cd: CommandDispatcher = FakeCommandDispatcher()
 del _cd

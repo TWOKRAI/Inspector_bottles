@@ -27,7 +27,7 @@ from multiprocess_framework.modules.frontend_module.core.qt_imports import (
 )
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.actions_module.bus import ActionBus
+    from ..tab_layout_protocol import UndoRedoController
 
 _DEFAULT_ACTION_WIDTH = 120
 
@@ -60,17 +60,18 @@ class _AbstractColumnarTabLayout(QWidget):
         # Undo/Redo (создаются лениво в enable_undo_redo)
         self._undo_btn: QPushButton | None = None
         self._redo_btn: QPushButton | None = None
-        self._action_bus: ActionBus | None = None
+        self._action_bus: UndoRedoController | None = None
 
     # ------------------------------------------------------------------
     # Undo / Redo
     # ------------------------------------------------------------------
 
-    def enable_undo_redo(self, action_bus: ActionBus | None) -> None:
+    def enable_undo_redo(self, action_bus: "UndoRedoController | None") -> None:
         """Создать кнопки Undo/Redo в bottom-зоне action-колонки.
 
-        Безопасно при ``action_bus is None`` — кнопки создаются disabled
-        и не падают; их состояние просто не обновляется.
+        Принимает любой ``UndoRedoController`` — framework ``ActionBus`` либо
+        prototype domain-диспетчер (G.4.4). Безопасно при ``action_bus is None``
+        — кнопки создаются disabled и не падают; их состояние не обновляется.
         """
         if self._undo_btn is not None:
             return

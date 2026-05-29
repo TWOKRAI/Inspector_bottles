@@ -6,13 +6,13 @@
 - синхронизацию значений редакторов с конфигом
 - управление dirty-флагом
 - валидацию через SystemConfig
-- запись действий в ActionBus (undo/redo)
-- синхронизацию undo/redo с RegisterView
 
 НЕ импортирует Qt-классы напрямую. Работает исключительно через SystemSettingsView Protocol.
 
-Task D.5: мигрирован на AppServices. ActionBus берётся через
-services.commands.action_bus() если доступен (graceful degradation для тестов).
+G.4.4: undo/redo field-edit System-настроек — deferred. У domain `services.commands`
+нет `action_bus()` (был фантом — всегда None). System-настройки — отдельный домен
+(не topology), их undo требует команды `SetSystemConfig` (Phase G+). До неё
+``on_field_changed_action_bus`` / ``on_bus_undo_redo_sync`` — no-op-плейсхолдеры.
 """
 
 from __future__ import annotations
@@ -40,8 +40,7 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
     Не содержит Qt-кода.
 
     Task D.5: принимает AppServices вместо AppContext.
-    ActionBus берётся через services.commands.action_bus() если метод доступен
-    (командный диспетчер в production-режиме предоставляет его через duck typing).
+    G.4.4: undo/redo field-edit — deferred (нужна domain-команда SetSystemConfig).
     """
 
     def __init__(
@@ -130,18 +129,6 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
         """Обработать изменение любого поля редактора → пометить dirty."""
         self._set_dirty(True)
 
-    def _get_action_bus(self):
-        """Получить ActionBus из services.commands если доступен.
-
-        CommandDispatcher в production предоставляет action_bus() через duck typing
-        (CommandDispatcherOrchestrator оборачивает ActionBus).
-        В тестах FakeCommandDispatcher не имеет action_bus() → возвращаем None.
-        """
-        bus_fn = getattr(self._services.commands, "action_bus", None)
-        if callable(bus_fn):
-            return bus_fn()
-        return None
-
     def on_field_changed_action_bus(
         self,
         register_name: str,
@@ -149,38 +136,23 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
         old_value: object,
         new_value: object,
     ) -> None:
-        """Записать изменение поля в ActionBus для undo/redo."""
-        bus = self._get_action_bus()
-        if bus is None:
-            return
-        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+        """Записать изменение поля в undo/redo (System-настройки).
 
-        action = V2ActionBuilder.field_set_timed(
-            register_name,
-            field_name,
-            new_value,
-            old_value,
-            description=f"{register_name}.{field_name} = {new_value}",
-        )
-        bus.record(action)
+        G.4.4: deferred. У domain `services.commands` нет `action_bus()` (был
+        фантом — всегда None), а System-настройки — отдельный домен (не topology):
+        их undo требует команды `SetSystemConfig`, которой пока нет (Phase G+).
+        До неё field-edit System-настроек не попадает в undo/redo (как и было).
+        Метод сохранён (подключён к сигналам секции) как no-op-плейсхолдер.
+        """
+        return
 
     def on_bus_undo_redo_sync(self) -> None:
-        """Синхронизировать редакторы с ActionBus при undo/redo."""
-        bus = self._get_action_bus()
-        if bus is None:
-            return
-        event = bus.last_event
-        if event is None:
-            return
-        event_type, action = event
-        if event_type not in ("undo", "redo"):
-            return
-        if action.action_type != "field_set":
-            return
-        register_name = action.register_name or ""
-        value = action.backward_patch.get("value") if event_type == "undo" else action.forward_patch.get("value")
-        key = f"{register_name}.{action.field_name}"
-        self._view.set_editor_value(key, value)
+        """Синхронизировать редакторы с историей при undo/redo (System-настройки).
+
+        G.4.4: deferred — см. ``on_field_changed_action_bus``. No-op до
+        появления domain-команды `SetSystemConfig`.
+        """
+        return
 
     # ------------------------------------------------------------------
     # Геттеры состояния (делегируют от SettingsTab)

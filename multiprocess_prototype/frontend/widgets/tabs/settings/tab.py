@@ -46,11 +46,10 @@ class SettingsTab(BaseTreeNavTab):
         auth_ctx: "AuthContext | None" = None,
         parent: QWidget | None = None,
     ) -> None:
-        # ActionBus получаем из services.commands если оно поддерживает action_bus,
-        # иначе bus=None (graceful degradation для тестов).
-        bus = getattr(services.commands, "action_bus", None)
-        if callable(bus):
-            bus = bus()
+        # G.4.4: undo/redo на domain CommandDispatcher (services.commands
+        # удовлетворяет UndoRedoController). Единая глобальная история; кнопки
+        # рефрешат enabled-состояние по change-callback после dispatch/undo/redo.
+        commands = services.commands
 
         # Сохраняем ДО super().__init__, т.к. _make_presenter() вызывается
         # внутри BaseTreeNavTab.__init__ и требует self._services.
@@ -61,10 +60,10 @@ class SettingsTab(BaseTreeNavTab):
             sections=build_settings_sections(services, auth_ctx=auth_ctx),
             ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
-            bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
+            bus_change_subscriber=lambda cb: commands.add_change_callback(cb),
             parent=parent,
         )
-        self.enable_undo_redo(bus)
+        self.enable_undo_redo(commands)
         self.section_dirty_changed.connect(self._on_section_dirty)
         self.section_data_saved.connect(self._on_section_saved)
         self.populate()

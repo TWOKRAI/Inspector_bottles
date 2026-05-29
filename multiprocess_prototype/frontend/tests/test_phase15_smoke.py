@@ -126,7 +126,9 @@ class TestPhase15Smoke:
         # здесь не разыменовывается; полный bootstrap проверяют per-tab create-тесты.
         window = MainWindow()
         qtbot.addWidget(window)
-        window.set_action_bus(action_bus)
+        # G.4.4: set_undo_controller принимает UndoRedoController; legacy ActionBus
+        # удовлетворяет ему структурно (в production сюда идёт services.commands).
+        window.set_undo_controller(action_bus)
 
         factories = register_all_tabs()
         assert len(factories) >= 7, f"Зарегистрировано >=7 tab factories: {len(factories)}"

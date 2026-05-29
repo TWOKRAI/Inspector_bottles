@@ -408,7 +408,13 @@ def run_gui(process: "GuiProcess") -> None:
                 module="startup",
             )
 
-    # 3d. Создать ActionBus (Phase 11: undo/redo + Phase 12: bridge integration)
+    # 3d. Создать legacy ActionBus.
+    # G.4.4: глобальный undo/redo (Ctrl+Z/Y) переведён на domain CommandDispatcher
+    # (см. window.set_undo_controller ниже). Эта legacy-шина БОЛЬШЕ не управляет
+    # undo приложения; сохранена как инфраструктура ещё не мигрированных на domain
+    # доменов (forms binding-aware write через FormContext, roles ROLE_UPDATE,
+    # system-settings field-undo) — их перевод запланирован отдельными задачами
+    # (Phase G+; удаление frontend/actions/ — отдельный cleanup, big-bang здесь запрещён).
     from .actions.bus_factory import create_action_bus
 
     action_bus = create_action_bus(
@@ -478,8 +484,10 @@ def run_gui(process: "GuiProcess") -> None:
     if not _report.ok:
         window.statusBar().showMessage(_report.summary(), 10000)
 
-    # 4a. Привязать ActionBus shortcuts (Ctrl+Z / Ctrl+Y)
-    window.set_action_bus(action_bus)
+    # 4a. Привязать глобальные undo/redo shortcuts (Ctrl+Z / Ctrl+Y) к domain
+    # CommandDispatcher — единая шина undo (G.4.4). app_services.commands
+    # удовлетворяет UndoRedoController (undo/redo/can_undo/can_redo/add_change_callback).
+    window.set_undo_controller(ctx.app_services.commands)
 
     # 4a1. Кнопка входа в header (зависит от auth_state и auth_manager)
     if (auth := ctx.auth) is not None:

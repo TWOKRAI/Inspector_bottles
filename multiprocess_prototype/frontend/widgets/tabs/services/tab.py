@@ -45,21 +45,19 @@ class ServicesTab(BaseTreeNavTab):
 
     def __init__(self, services: AppServices, *, parent: QWidget | None = None) -> None:
         self._services = services
-        # ActionBus получаем из services.commands если поддерживает action_bus,
-        # иначе bus=None (graceful degradation для тестов).
-        # TODO Phase G (G.4): расширить CommandDispatcher Protocol методом action_bus().
-        bus = getattr(services.commands, "action_bus", None)
-        if callable(bus):
-            bus = bus()
+        # G.4.4: undo/redo на domain CommandDispatcher (services.commands
+        # удовлетворяет UndoRedoController). Единая глобальная история; кнопки
+        # рефрешат enabled-состояние по change-callback после dispatch/undo/redo.
+        commands = services.commands
         super().__init__(
             title="Сервисы",
             sections=build_services_sections(services),
             ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
-            bus_change_subscriber=(lambda cb: bus.add_change_callback(cb)) if bus else None,
+            bus_change_subscriber=lambda cb: commands.add_change_callback(cb),
             parent=parent,
         )
-        self.enable_undo_redo(bus)
+        self.enable_undo_redo(commands)
         self.populate()
         self._connect_paths_signal()
 
