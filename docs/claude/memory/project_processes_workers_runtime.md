@@ -18,7 +18,16 @@ metadata:
 
 **Qt-smoke verified (probe localhost:9142, QT_MCP_PROBE=1):** ProcessCard+WorkerTable рендерятся; protected `gui` — нет stop/delete + combo disabled; `camera_0` — все 4 кнопки; логи живых процессов показывают `worker.create/remove/... registered successfully`.
 
-**Долг (follow-up):** live fan-out телеметрии воркеров в GUI — heartbeat несёт `workers_status` (process_heartbeat.py:83 → ProcessMonitor), но GUI-слой не раскладывает в ключи `processes.{proc}.workers.{name}.*`. Bindings в `_panels.py._bind_worker_telemetry` подключены forward-compatible (статус/Гц оживут когда появится fan-out).
+**Долги (оба → новый чат с /plan, решение владельца 2026-05-30):**
+
+**Долг #1 — live-телеметрия GUI (АРХИТЕКТУРНЫЙ, не контейнерный!).** На прямой проверке кода: GUI live-телеметрия процессов **вообще не подключена (dormant)**, не только воркеры:
+- `process_state_path()` (`backend/state/schema.py:114`) — НЕТ вызовов-сеттеров; ключи `processes.X.state.*` backend не публикует.
+- `DataReceiverBridge.dispatch` (`frontend/bridge_impl.py:45-54`) классифицирует «state» только для `status/state_changed/fps_update`; `state_delta` уходит в «command» (не к bindings).
+- `GuiStateBindings._on_state_msg` (`frontend/state/bindings.py:172`) игнорирует всё кроме `data_type=="state_delta"`.
+- Отсюда статичные «FPS —»/«Активно: 0» в живом приложении.
+Задача = построить весь пайплайн: backend-publisher (state_proxy `processes.X.state.*` И `processes.X.workers.Y.*`) → IPC-роутинг → фикс dispatch (`state_delta`→state) → fan-out из heartbeat `workers_status` (несётся: process_heartbeat.py:83 → ProcessMonitor `_workers_status` → broadcast). `WorkerManager.get_worker_status` уже отдаёт priority/status/cycle_duration_ms/effective_hz. Bindings воркеров уже подключены forward-compatible (`_panels.py._bind_worker_telemetry`) — оживут, когда появятся ключи.
+
+**Долг #2 — runtime по `assigned_worker`.** Pipeline персистит `assigned_worker` в config плагина (`MoveWorkerCombo` → field_changed → SetPluginConfig), но рантайм назначает воркеры авто (source→source_producer, processing→pipeline_executor в GenericProcess). Нужно: GenericProcess читает `config["assigned_worker"]` и кладёт плагин в указанный воркер. Это Phase C в `plans/pipeline-node-process-worker.md`.
 
 **Pipeline-селектор воркера (DONE, e44017e8):** в инспекторе Pipeline строка «Процесс / Воркер» — два combo на одной строке (`MoveProcessCombo` + `MoveWorkerCombo`). Воркер-combo из топологии (Process.workers + message_processor); выбор → `field_changed("assigned_worker")` → SetPluginConfig (persist в config плагина). Runtime-исполнение по assigned_worker — следующий шаг.
 
