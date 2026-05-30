@@ -33,6 +33,7 @@ from .entities import (
     RecipeMeta,
     Topology,
     Wire,
+    WorkerSpec,
 )
 from .entities.project import ApplyContext
 from .errors import DomainError, EntityValidationError
@@ -124,6 +125,7 @@ def register_domain_schemas(registry: object = None) -> None:  # type: ignore[as
         target = registry if registry is not None else get_default_registry()
         _domain_classes = [
             ("PluginInstance", PluginInstance),
+            ("WorkerSpec", WorkerSpec),
             ("Wire", Wire),
             ("DisplayInstance", DisplayInstance),
             ("Process", Process),
@@ -156,6 +158,7 @@ __all__ = [
     "AppServices",
     # Entities
     "PluginInstance",
+    "WorkerSpec",
     "Wire",
     "DisplayInstance",
     "Process",

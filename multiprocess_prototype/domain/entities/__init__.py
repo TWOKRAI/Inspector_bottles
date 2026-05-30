@@ -14,9 +14,11 @@ from .project import Project
 from .recipe import Recipe, RecipeMeta
 from .topology import Topology
 from .wire import Wire
+from .worker import WorkerSpec
 
 __all__ = [
     "PluginInstance",
+    "WorkerSpec",
     "Wire",
     "DisplayInstance",
     "Process",

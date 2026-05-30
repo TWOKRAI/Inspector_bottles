@@ -17,6 +17,7 @@ from typing_extensions import Annotated, Self
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
 
 from .plugin import PluginInstance
+from .worker import WorkerSpec
 
 
 class Process(SchemaBase):
@@ -32,6 +33,10 @@ class Process(SchemaBase):
     plugins: Annotated[
         tuple[PluginInstance, ...],
         FieldMeta("Цепочка плагинов процесса (в порядке исполнения)"),
+    ] = Field(default=())
+    workers: Annotated[
+        tuple[WorkerSpec, ...],
+        FieldMeta("Воркеры (потоки) процесса — конфигурируемые сущности"),
     ] = Field(default=())
     process_class: Annotated[
         str | None,
@@ -116,6 +121,25 @@ class Process(SchemaBase):
                 else:
                     # Попытка валидации через Pydantic
                     items.append(PluginInstance.model_validate(item))
+            return tuple(items)
+        return v  # type: ignore[return-value]
+
+    @field_validator("workers", mode="before")
+    @classmethod
+    def _coerce_workers_to_tuple(cls, v: Any) -> tuple[WorkerSpec, ...]:
+        """Преобразует list[dict | WorkerSpec] → tuple[WorkerSpec, ...].
+
+        Нужно потому что YAML/JSON не различают tuple и list.
+        """
+        if isinstance(v, (list, tuple)):
+            items: list[WorkerSpec] = []
+            for item in v:
+                if isinstance(item, dict):
+                    items.append(WorkerSpec.from_dict(item))
+                elif isinstance(item, WorkerSpec):
+                    items.append(item)
+                else:
+                    items.append(WorkerSpec.model_validate(item))
             return tuple(items)
         return v  # type: ignore[return-value]
 

@@ -30,6 +30,7 @@ from multiprocess_prototype.domain import (
     RecipeMeta,
     Topology,
     Wire,
+    WorkerSpec,
 )
 
 
@@ -566,6 +567,120 @@ class TestDisplayInstanceHybridFormat:
         """
         with pytest.raises(ValidationError):
             DisplayInstance(node_id="n", display_id="d", source="s")  # type: ignore[call-arg]
+
+
+# ==============================================================================
+# WorkerSpec + Process.workers (processes-workers-runtime)
+# ==============================================================================
+
+
+class TestWorkerSpec:
+    """Тесты WorkerSpec entity и Process.workers."""
+
+    def test_worker_spec_defaults(self) -> None:
+        """WorkerSpec с одним именем — дефолты NORMAL/loop, не protected."""
+        w = WorkerSpec(worker_name="grabber")
+        assert w.worker_name == "grabber"
+        assert w.priority == "NORMAL"
+        assert w.execution_mode == "loop"
+        assert w.target_interval_ms is None
+        assert w.worker_class is None
+        assert w.protected is False
+        assert w.config == {}
+
+    def test_worker_spec_roundtrip(self) -> None:
+        """WorkerSpec: to_dict → from_dict идемпотентен (все поля)."""
+        w = WorkerSpec(
+            worker_name="inference",
+            priority="REALTIME",
+            execution_mode="loop",
+            target_interval_ms=40,
+            worker_class="pkg.mod.MyWorker",
+            protected=False,
+            description="ML инференс",
+            config={"batch": 4},
+        )
+        w2 = WorkerSpec.from_dict(w.to_dict())
+        assert w2 == w
+        assert w2.priority == "REALTIME"
+        assert w2.target_interval_ms == 40
+        assert w2.config == {"batch": 4}
+
+    def test_worker_spec_frozen(self) -> None:
+        """WorkerSpec frozen — мутация поднимает ошибку."""
+        w = WorkerSpec(worker_name="w")
+        with pytest.raises((ValidationError, TypeError)):
+            w.priority = "SYSTEM"  # type: ignore[misc]
+
+    def test_worker_spec_invalid_priority_rejected(self) -> None:
+        """Неизвестный priority → ValidationError (Literal)."""
+        with pytest.raises(ValidationError):
+            WorkerSpec(worker_name="w", priority="TURBO")  # type: ignore[arg-type]
+
+    def test_worker_spec_extra_folds_into_config(self) -> None:
+        """Плоское неизвестное поле сворачивается в config (passthrough)."""
+        w = WorkerSpec(worker_name="w", custom_param=7)  # type: ignore[call-arg]
+        assert w.config.get("custom_param") == 7
+
+    def test_worker_spec_missing_name(self) -> None:
+        """WorkerSpec без worker_name → ValidationError."""
+        with pytest.raises(ValidationError):
+            WorkerSpec()  # type: ignore[call-arg]
+
+    def test_process_workers_default_empty_tuple(self) -> None:
+        """Process.workers по умолчанию — пустой tuple."""
+        proc = Process(process_name="p")
+        assert proc.workers == ()
+        assert isinstance(proc.workers, tuple)
+
+    def test_process_workers_is_tuple_from_list(self) -> None:
+        """Process(workers=[WorkerSpec(...)]) → workers тип tuple."""
+        proc = Process(
+            process_name="p",
+            workers=[WorkerSpec(worker_name="w1")],  # type: ignore[arg-type]
+        )
+        assert isinstance(proc.workers, tuple)
+        assert proc.workers[0].worker_name == "w1"
+
+    def test_process_workers_roundtrip_from_dict(self) -> None:
+        """Process.from_dict с workers как list[dict] → tuple[WorkerSpec]."""
+        proc = Process.from_dict(
+            {
+                "process_name": "capture_proc",
+                "plugins": [{"plugin_name": "capture"}],
+                "workers": [
+                    {"worker_name": "message_processor", "priority": "NORMAL", "protected": True},
+                    {"worker_name": "grabber", "priority": "REALTIME", "target_interval_ms": 33},
+                ],
+            }
+        )
+        assert isinstance(proc.workers, tuple)
+        assert len(proc.workers) == 2
+        assert all(isinstance(w, WorkerSpec) for w in proc.workers)
+        assert proc.workers[0].protected is True
+        assert proc.workers[1].target_interval_ms == 33
+
+        # Round-trip
+        proc2 = Process.from_dict(proc.to_dict())
+        assert len(proc2.workers) == 2
+        assert proc2.workers[1].priority == "REALTIME"
+        assert proc2.workers[0].worker_name == "message_processor"
+
+    def test_process_with_workers_in_topology_roundtrip(self) -> None:
+        """Topology с процессом, у которого есть workers — round-trip lossless."""
+        topo = Topology(
+            processes=(
+                Process(
+                    process_name="cam",
+                    plugins=(PluginInstance(plugin_name="capture"),),
+                    workers=(WorkerSpec(worker_name="grabber", priority="REALTIME", target_interval_ms=33),),
+                ),
+            ),
+        )
+        topo2 = Topology.from_dict(topo.to_dict())
+        assert len(topo2.processes[0].workers) == 1
+        assert topo2.processes[0].workers[0].worker_name == "grabber"
+        assert topo2.processes[0].workers[0].priority == "REALTIME"
 
 
 # ==============================================================================
