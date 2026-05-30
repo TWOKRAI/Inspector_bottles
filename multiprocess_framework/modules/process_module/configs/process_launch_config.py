@@ -45,6 +45,14 @@ class ProcessLaunchConfig(SchemaBase):
 
     log_dir: str | None = None
 
+    workers: Annotated[
+        dict[str, Any],
+        FieldMeta(
+            "Workers",
+            info="Конфиг воркеров {name: {class, config, thread}} для спавна при старте.",
+        ),
+    ] = {}
+
     @property
     def memory(self) -> dict[str, Any] | None:
         """SharedMemory layout for proc_dict['memory']. Override in subclass."""
@@ -73,21 +81,21 @@ class ProcessLaunchConfig(SchemaBase):
         payload.pop("priority", None)
         payload.pop("queues", None)
         payload.pop("log_dir", None)
+        # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
+        workers = payload.pop("workers", None) or {}
 
         queues = self.queues if self.queues is not None else DEFAULT_QUEUES
         priority = self.priority.value if hasattr(self.priority, "value") else self.priority
 
         log_dir = self._resolve_log_dir()
-        base_managers = managers_payload_for_proc(
-            managers_from_log_dir(log_dir, model_cls=ManagersConfig)
-        )
+        base_managers = managers_payload_for_proc(managers_from_log_dir(log_dir, model_cls=ManagersConfig))
         managers = merge_managers(base_managers, self.managers_overlay())
 
         proc_dict: dict[str, Any] = {
             "class": class_path,
             "queues": queues,
             "priority": priority,
-            "workers": {},
+            "workers": workers,
             "config": payload,
             "managers": managers,
         }

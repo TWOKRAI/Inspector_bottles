@@ -31,6 +31,7 @@ class BuiltinCommands:
     def register(self) -> None:
         """Зарегистрировать все встроенные команды."""
         self._register_worker_commands()
+        self._register_worker_crud_commands()
         self._register_wire_commands()
 
     # ========================================================================
@@ -88,6 +89,199 @@ class BuiltinCommands:
             "Встроенные команды worker.pause_all/resume_all зарегистрированы",
             module="lifecycle",
         )
+
+    # ========================================================================
+    # WORKER CRUD — создание/удаление/настройка отдельных воркеров (IPC из GUI)
+    # ========================================================================
+
+    def _register_worker_crud_commands(self) -> None:
+        """Зарегистрировать worker.create / remove / update / restart / stop.
+
+        Команды адресуются конкретному процессу-владельцу (target=process_name) и
+        приходят через message_processor → CommandManager. Защищённые воркеры
+        (message_processor, SYSTEM) нельзя remove/stop/restart/update.
+        """
+        cm = self._services.command_manager
+        if not cm:
+            return
+
+        specs = [
+            ("worker.create", self._cmd_worker_create, "Создать воркер в процессе"),
+            ("worker.remove", self._cmd_worker_remove, "Удалить воркер из процесса"),
+            ("worker.update", self._cmd_worker_update, "Перенастроить воркер (приоритет/интервал)"),
+            ("worker.restart", self._cmd_worker_restart, "Перезапустить воркер"),
+            ("worker.stop", self._cmd_worker_stop, "Остановить воркер (без удаления)"),
+        ]
+        for name, handler, desc in specs:
+            cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
+        self._services._log_debug(
+            "Встроенные команды worker.create/remove/update/restart/stop зарегистрированы",
+            module="lifecycle",
+        )
+
+    @staticmethod
+    def _merge_args(data, kwargs) -> dict:
+        """Слить data-dict и kwargs (паттерн handlers data=None/**kwargs)."""
+        args: dict = {}
+        if isinstance(data, dict):
+            args.update(data)
+        args.update(kwargs)
+        return args
+
+    def _resolve_worker_target(self, worker_class: str | None, worker_cfg: dict):
+        """Создать инстанс воркера и вернуть его target callable (instance.run).
+
+        worker_class=None → generic IdleWorker. Иначе — импорт по dotted-path.
+        Возвращает (target, error_reason). target=None при ошибке.
+        """
+        try:
+            if not worker_class:
+                from ..generic.idle_worker import IdleWorker
+
+                instance = IdleWorker(process=self._services, config=worker_cfg)
+            else:
+                import importlib
+
+                module_path, class_name = worker_class.rsplit(".", 1)
+                module = importlib.import_module(module_path)
+                cls = getattr(module, class_name)
+                instance = cls(process=self._services, config=worker_cfg)
+            target = getattr(instance, "run", instance)
+            return target, None
+        except Exception as exc:  # noqa: BLE001 — возвращаем причину наверх
+            return None, str(exc)
+
+    def _build_thread_config(self, args: dict):
+        """Собрать ThreadConfig из args (priority/execution_mode/worker_type)."""
+        from multiprocess_framework.modules.worker_module.core.thread_config import ThreadConfig
+
+        return ThreadConfig.from_dict(
+            {
+                "priority": str(args.get("priority", "NORMAL")),
+                "execution_mode": str(args.get("execution_mode", "loop")),
+                "worker_type": str(args.get("worker_type", "application")),
+                "restart_on_failure": bool(args.get("restart_on_failure", False)),
+                "max_restarts": int(args.get("max_restarts", 3)),
+            }
+        )
+
+    @staticmethod
+    def _build_worker_cfg(args: dict) -> dict:
+        """Собрать payload-config воркера (target_interval_ms/execution_mode + extra)."""
+        worker_cfg = dict(args.get("config") or {})
+        if args.get("target_interval_ms") is not None:
+            worker_cfg["target_interval_ms"] = args.get("target_interval_ms")
+        worker_cfg.setdefault("execution_mode", str(args.get("execution_mode", "loop")))
+        return worker_cfg
+
+    def _cmd_worker_create(self, data=None, **kwargs) -> dict:
+        """Создать и запустить воркер. data: worker_name, priority?, execution_mode?,
+        target_interval_ms?, worker_class?, config?."""
+        args = self._merge_args(data, kwargs)
+        wm = self._services.worker_manager
+        if not wm:
+            return {"success": False, "reason": "worker_manager недоступен"}
+
+        name = str(args.get("worker_name", "")).strip()
+        if not name:
+            return {"success": False, "reason": "worker_name обязателен"}
+        if wm.has_worker(name):
+            return {"success": False, "reason": f"воркер '{name}' уже существует"}
+
+        worker_cfg = self._build_worker_cfg(args)
+        target, err = self._resolve_worker_target(args.get("worker_class"), worker_cfg)
+        if target is None:
+            return {"success": False, "reason": f"не удалось создать воркер: {err}"}
+
+        thread_config = self._build_thread_config(args)
+        ok = wm.create_worker(name, target, thread_config, auto_start=True)
+        if ok:
+            self._services._log_info(
+                f"worker.create: воркер '{name}' создан и запущен (priority={args.get('priority', 'NORMAL')})",
+                module="lifecycle",
+            )
+        return {"success": bool(ok), "worker_name": name}
+
+    def _cmd_worker_remove(self, data=None, **kwargs) -> dict:
+        """Удалить воркер (stop + unregister). Защищённые — запрещены."""
+        args = self._merge_args(data, kwargs)
+        wm = self._services.worker_manager
+        if not wm:
+            return {"success": False, "reason": "worker_manager недоступен"}
+
+        name = str(args.get("worker_name", "")).strip()
+        if not name:
+            return {"success": False, "reason": "worker_name обязателен"}
+        if wm.is_worker_protected(name):
+            return {"success": False, "reason": "protected", "worker_name": name}
+
+        ok = wm.remove_worker(name)
+        return {"success": bool(ok), "worker_name": name}
+
+    def _cmd_worker_stop(self, data=None, **kwargs) -> dict:
+        """Остановить воркер (поток), оставив в реестре. Защищённые — запрещены."""
+        args = self._merge_args(data, kwargs)
+        wm = self._services.worker_manager
+        if not wm:
+            return {"success": False, "reason": "worker_manager недоступен"}
+
+        name = str(args.get("worker_name", "")).strip()
+        if not name:
+            return {"success": False, "reason": "worker_name обязателен"}
+        if wm.is_worker_protected(name):
+            return {"success": False, "reason": "protected", "worker_name": name}
+
+        ok = wm.stop_worker(name)
+        return {"success": bool(ok), "worker_name": name}
+
+    def _cmd_worker_restart(self, data=None, **kwargs) -> dict:
+        """Перезапустить воркер. Защищённые — запрещены."""
+        args = self._merge_args(data, kwargs)
+        wm = self._services.worker_manager
+        if not wm:
+            return {"success": False, "reason": "worker_manager недоступен"}
+
+        name = str(args.get("worker_name", "")).strip()
+        if not name:
+            return {"success": False, "reason": "worker_name обязателен"}
+        if wm.is_worker_protected(name):
+            return {"success": False, "reason": "protected", "worker_name": name}
+
+        ok = wm.restart_worker(name)
+        return {"success": bool(ok), "worker_name": name}
+
+    def _cmd_worker_update(self, data=None, **kwargs) -> dict:
+        """Перенастроить воркер: remove + create с новыми параметрами.
+
+        Защищённый воркер пересоздавать нельзя (теряется IPC-lifeline) → запрет.
+        """
+        args = self._merge_args(data, kwargs)
+        wm = self._services.worker_manager
+        if not wm:
+            return {"success": False, "reason": "worker_manager недоступен"}
+
+        name = str(args.get("worker_name", "")).strip()
+        if not name:
+            return {"success": False, "reason": "worker_name обязателен"}
+        if wm.is_worker_protected(name):
+            return {"success": False, "reason": "protected", "worker_name": name}
+        if not wm.has_worker(name):
+            return {"success": False, "reason": f"воркер '{name}' не найден"}
+
+        worker_cfg = self._build_worker_cfg(args)
+        target, err = self._resolve_worker_target(args.get("worker_class"), worker_cfg)
+        if target is None:
+            return {"success": False, "reason": f"не удалось пересоздать воркер: {err}"}
+
+        wm.remove_worker(name)
+        thread_config = self._build_thread_config(args)
+        ok = wm.create_worker(name, target, thread_config, auto_start=True)
+        if ok:
+            self._services._log_info(
+                f"worker.update: воркер '{name}' перенастроен (priority={args.get('priority', 'NORMAL')})",
+                module="lifecycle",
+            )
+        return {"success": bool(ok), "worker_name": name}
 
     # ========================================================================
     # WIRE COMMANDS — runtime-настройка SHM-каналов

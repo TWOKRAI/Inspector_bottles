@@ -18,6 +18,10 @@ from .thread_config import ThreadConfig
 from ..registry import WorkerRegistry
 from ..lifecycle import WorkerLifecycle
 
+# Имена воркеров, защищённых от остановки/удаления через GUI/IPC.
+# message_processor — дефолтный воркер, опрашивающий RouterManager (IPC-lifeline процесса).
+PROTECTED_WORKER_NAMES = frozenset({"message_processor"})
+
 
 class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
     """Менеджер управления потоками-воркерами.
@@ -104,6 +108,31 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
             self._log_info(f"Worker '{worker_name}' restarted")
         return success
 
+    def remove_worker(self, worker_name: str, timeout: float = 5.0) -> bool:
+        """Остановить воркер и полностью удалить из реестра (GUI-delete).
+
+        В отличие от stop_worker (поток остановлен, но воркер остаётся в реестре
+        и может быть запущен снова) — remove_worker убирает воркер совсем.
+        """
+        if not self._worker_registry.has(worker_name):
+            return False
+        self.stop_worker(worker_name, timeout)
+        removed = self._worker_registry.unregister(worker_name)
+        if removed:
+            self._log_info(f"Worker '{worker_name}' removed")
+        return removed
+
+    def is_worker_protected(self, worker_name: str) -> bool:
+        """Защищён ли воркер от остановки/удаления (системный lifeline).
+
+        Защищены: воркеры из PROTECTED_WORKER_NAMES (message_processor) и любые
+        с типом WorkerType.SYSTEM.
+        """
+        if worker_name in PROTECTED_WORKER_NAMES:
+            return True
+        info = self._worker_registry.get(worker_name)
+        return bool(info and info.get("worker_type") == WorkerType.SYSTEM)
+
     def pause_worker(self, worker_name: str) -> bool:
         worker_info = self._worker_registry.get(worker_name)
         if not worker_info:
@@ -150,9 +179,7 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
             if exclude_system:
                 worker_type = worker_info.get("worker_type")
                 if worker_type == WorkerType.SYSTEM:
-                    self._log_debug(
-                        f"Пропуск паузы для системного воркера '{name}' (SYSTEM type)"
-                    )
+                    self._log_debug(f"Пропуск паузы для системного воркера '{name}' (SYSTEM type)")
                     continue
             self.pause_worker(name)
         self._log_info("Application workers paused (system workers excluded)")
@@ -172,9 +199,7 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
             if exclude_system:
                 worker_type = worker_info.get("worker_type")
                 if worker_type == WorkerType.SYSTEM:
-                    self._log_debug(
-                        f"Пропуск resume для системного воркера '{name}' (SYSTEM type)"
-                    )
+                    self._log_debug(f"Пропуск resume для системного воркера '{name}' (SYSTEM type)")
                     continue
             self.resume_worker(name)
         self._log_info("Application workers resumed")
@@ -191,9 +216,16 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
         worker_info = self._worker_registry.get(worker_name)
         if not worker_info:
             return None
-        return {
+
+        # Приоритет из ThreadConfig (enum → имя, для GUI/телеметрии).
+        config = worker_info.get("config")
+        priority = getattr(getattr(config, "priority", None), "name", None)
+
+        status: Dict = {
             "name": worker_name,
             "status": worker_info["status"].value,
+            "priority": priority,
+            "protected": self.is_worker_protected(worker_name),
             "worker_type": worker_info.get("worker_type", WorkerType.APPLICATION).value,
             "execution_mode": worker_info.get("execution_mode", ExecutionMode.LOOP).value,
             "is_alive": worker_info["thread"].is_alive(),
@@ -202,11 +234,22 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
             "metrics": self.get_worker_metrics(worker_name),
         }
 
+        # Live-телеметрия цикла: если target — bound-метод инстанса с
+        # get_cycle_metrics (IdleWorker и наследники), подмешиваем тайминг.
+        instance = getattr(worker_info.get("target"), "__self__", None)
+        cycle_provider = getattr(instance, "get_cycle_metrics", None)
+        if callable(cycle_provider):
+            try:
+                cycle = cycle_provider()
+                if isinstance(cycle, dict):
+                    status.update(cycle)
+            except Exception:  # nosec B110 — телеметрия не критична
+                pass
+
+        return status
+
     def get_all_workers_status(self) -> Dict[str, Dict]:
-        return {
-            name: self.get_worker_status(name)
-            for name in self._worker_registry.get_all_names()
-        }
+        return {name: self.get_worker_status(name) for name in self._worker_registry.get_all_names()}
 
     def get_worker_metrics(self, worker_name: str) -> Optional[Dict]:
         worker_info = self._worker_registry.get(worker_name)
@@ -214,10 +257,7 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
             return None
 
         current_runtime = worker_info["total_runtime"]
-        if (
-            worker_info["status"] == WorkerStatus.RUNNING
-            and worker_info["start_time"] is not None
-        ):
+        if worker_info["status"] == WorkerStatus.RUNNING and worker_info["start_time"] is not None:
             current_runtime += time.time() - worker_info["start_time"]
 
         total_runs = worker_info["successful_runs"] + worker_info["failed_runs"]
@@ -231,11 +271,7 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
             "restart_count": worker_info["restart_count"],
             "avg_run_time": round(avg_run_time, 3),
             "start_time": worker_info["start_time"],
-            "uptime": (
-                round(time.time() - worker_info["start_time"], 3)
-                if worker_info["start_time"]
-                else 0
-            ),
+            "uptime": (round(time.time() - worker_info["start_time"], 3) if worker_info["start_time"] else 0),
         }
 
     # ========================================================================
@@ -266,11 +302,13 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
     def get_stats(self) -> Dict:
         stats = super().get_stats()
         all_names = self._worker_registry.get_all_names()
-        stats.update({
-            "workers_count": len(all_names),
-            "system_workers": len(self.list_system_workers()),
-            "application_workers": len(self.list_application_workers()),
-            "running_workers": sum(1 for n in all_names if self.is_worker_running(n)),
-            "workers_status": self.get_all_workers_status(),
-        })
+        stats.update(
+            {
+                "workers_count": len(all_names),
+                "system_workers": len(self.list_system_workers()),
+                "application_workers": len(self.list_application_workers()),
+                "running_workers": sum(1 for n in all_names if self.is_worker_running(n)),
+                "workers_status": self.get_all_workers_status(),
+            }
+        )
         return stats
