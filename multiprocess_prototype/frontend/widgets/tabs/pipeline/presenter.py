@@ -309,7 +309,15 @@ class PipelinePresenter:
         F.2b: ранее читалось из config["topology"] — устаревший стартовый snapshot,
         который не обновлялся. Теперь источник один — TopologyRepository (живой).
         Dict at Boundary: presenter работает с dict, поэтому .to_dict().
+
+        follow-up ФИКС #4 (Task 2.1, шаг 4): явная загрузка топологии из config —
+        семантически «новая сессия редактора», как и активация рецепта. Сбрасываем
+        placed-but-unbound боксы здесь же: непривязанные боксы не сериализуются (binding
+        нет), поэтому при загрузке новой топологии они не должны протекать из прошлой
+        сессии. Раньше сброс был только в _on_recipe_activated.
+        См. plans/pipeline-place-display-node.md (Task 2.1, шаг 4).
         """
+        self._placed_display_ids.clear()
         topology = self._services.topology.load().to_dict()
         self._model.from_topology_dict(topology)
 
@@ -405,27 +413,57 @@ class PipelinePresenter:
         (id бокса = display_id). Всё персистится и undoable через services.commands.
         Task 2.1: placed-but-unbound боксы (нет binding) удаляются БЕЗ dispatch —
         нечего отвязывать; чистим только GUI-состояние и перерисовываем scene.
+
+        follow-up ФИКС #2 (бокс-призрак при смешанном удалении): метод двухпроходный.
+        Раньше unbound-ветка делала discard ВНУТРИ единого цикла; при смешанном
+        selected (process + чисто-unbound-бокс) и порядке «process первым» синхронный
+        _on_topology_replaced от RemoveProcess отрабатывал, когда unbound-id ещё был в
+        set → бокс дорисовывался и оставался призраком (финальная перерисовка
+        пропускалась, т.к. dispatched=True). Порядок selected_node_ids не гарантирован.
+        Решение: pre-pass очищает set/позиции для чисто-unbound ДО любого dispatch,
+        поэтому любой синхронный reload видит уже очищенный _placed_display_ids.
         """
         # Display-боксы адресуются по display_id (id бокса = канал), не по node_id
         # (node_id привязки = source endpoint). Снимок — для разведения веток.
         display_box_ids = {d.get("display_id", "") for d in self._model.get_displays()}
 
+        # ФИКС #2, проход 1 (pre-pass): чисто-unbound боксы (в _placed_display_ids,
+        # но НЕТ в topo["displays"]). Чистим GUI-состояние ДО любого dispatch, чтобы
+        # синхронный _on_topology_replaced от process/bound-ветки во втором проходе
+        # уже не дорисовал такой бокс как placed-but-unbound (иначе — призрак).
+        # pure_unbound — множество уже обработанных id: во втором проходе их нужно
+        # ПРОПУСТИТЬ, иначе узел (уже убранный из set) провалится в process-ветку и
+        # ошибочно вызовет dispatch(RemoveProcess) на несуществующий процесс.
+        pure_unbound: set[str] = set()
+        for node_id in selected_node_ids:
+            if node_id in self._placed_display_ids and node_id not in display_box_ids:
+                self._placed_display_ids.discard(node_id)
+                self._gui_positions.pop(node_id, None)
+                pure_unbound.add(node_id)
+        had_pure_unbound = bool(pure_unbound)
+
         # Task 2.1: был ли хотя бы один dispatch (bound-display / process). Если все
-        # удаляемые узлы — только unbound-боксы, _on_topology_replaced НЕ сработает
-        # (dispatch'а нет) → нужна явная перерисовка scene в конце.
+        # удаляемые узлы — только чисто-unbound-боксы, _on_topology_replaced НЕ
+        # сработает (dispatch'а нет) → нужна явная перерисовка scene в конце.
         dispatched = False
 
+        # ФИКС #2, проход 2: dispatch'ащие ветки (bound display → UnbindDisplay;
+        # process → RemoveProcess). Чисто-unbound уже обработаны в pre-pass и
+        # пропускаются явно (см. pure_unbound).
         for node_id in selected_node_ids:
-            self._gui_positions.pop(node_id, None)
+            if node_id in pure_unbound:
+                # Уже очищен pre-pass'ом — нечего dispatch'ить.
+                continue
 
             if node_id in display_box_ids:
                 # G.4.2b: удаление display-бокса = отвязать все binding на этот канал.
                 # get_displays() — снимок (deep copy) на входе в цикл: dispatch внутри
                 # перестраивает модель, но мы итерируем исходный список пар.
-                # Task 2.1 (смешанный случай): бокс мог быть сперва placed, затем
-                # привязан — он есть и в _placed_display_ids, и в topo["displays"].
-                # Снимаем его из set ДО dispatch, чтобы reload из _on_topology_replaced
-                # после UnbindDisplay не дорисовал бокс заново как placed-but-unbound.
+                # Task 2.1 (смешанный placed+bound случай): после ФИКСА #1 bound-бокс
+                # ОСТАЁТСЯ в _placed_display_ids → снимаем его из set ДО dispatch, чтобы
+                # reload из _on_topology_replaced после UnbindDisplay не дорисовал бокс
+                # заново как placed-but-unbound.
+                self._gui_positions.pop(node_id, None)
                 self._placed_display_ids.discard(node_id)
                 for di in self._model.get_displays():
                     if di.get("display_id") != node_id:
@@ -439,14 +477,13 @@ class PipelinePresenter:
                         self._report(f"Не удалось отвязать дисплей: {exc}")
                 # Scene обновится из _on_topology_replaced (синхронный dispatch)
             elif node_id in self._placed_display_ids:
-                # Task 2.1: непривязанный бокс (placed, но ещё нет binding). Его нет в
-                # topo["displays"], отвязывать нечего → БЕЗ dispatch(UnbindDisplay).
-                # Убираем только GUI-состояние; перерисовку делаем после цикла (если не
-                # было ни одного dispatch — иначе reload bound/process-ветки уже учтёт
-                # очищенный set и сам уберёт бокс).
+                # Защитный остаток: чисто-unbound уже обработан pre-pass'ом. Сюда узел
+                # дойти не должен — оставлено как страховка на случай рассинхрона.
+                self._gui_positions.pop(node_id, None)
                 self._placed_display_ids.discard(node_id)
             else:
                 # G.4.2: process removal через domain dispatch
+                self._gui_positions.pop(node_id, None)
                 cmd = RemoveProcess(process_name=node_id)
                 try:
                     self._services.commands.dispatch(cmd)
@@ -457,10 +494,10 @@ class PipelinePresenter:
                 # Scene обновится из _on_topology_replaced (синхронный)
 
         # Task 2.1: явная перерисовка нужна только если удаляли исключительно
-        # unbound-боксы (dispatch'а, а значит и _on_topology_replaced, не было).
+        # чисто-unbound боксы (dispatch'а, а значит и _on_topology_replaced, не было).
         # Тот же путь, что place_display: _topology_to_graph пройдёт по уже
         # очищенному _placed_display_ids и не дорисует удалённый бокс.
-        if not dispatched and self._scene:
+        if had_pure_unbound and not dispatched and self._scene:
             with self._block_signals():
                 nodes, edges = self._topology_to_graph(self._model.to_topology_dict())
                 self.load_scene_with_ports(nodes, edges)
@@ -503,13 +540,19 @@ class PipelinePresenter:
                 logger.warning("BindDisplay отклонён: %s", exc)
                 self._report(f"Не удалось привязать дисплей: {exc}")
                 return False
-            # Task 2.1: после успешного BindDisplay канал живёт в topo["displays"] и
-            # рисуется _build_display_nodes как «настоящий» бокс. Снимаем display_id из
-            # placed-but-unbound set: запись стала избыточной (дедуп по display_id в
-            # _build_display_nodes и так защищает от дубля, но discard держит set чистым
-            # и предотвращает воскрешение «призрака» при последующем UnbindDisplay).
-            # См. plans/pipeline-place-display-node.md (Task 2.1, шаг 3).
-            self._placed_display_ids.discard(display_id)
+            # Task 2.1 / follow-up ФИКС #1 (потеря данных при undo):
+            # display_id НАМЕРЕННО остаётся в _placed_display_ids после BindDisplay.
+            # Дедуп по display_id в _build_display_nodes и так не плодит дубль (бокс из
+            # topo["displays"] строится первым и имеет приоритет — placed-ветка
+            # пропускает уже существующий id). А сохранение записи в set держит бокс
+            # живым при Ctrl+Z: undo BindDisplay → _on_topology_replaced → topo больше
+            # НЕ содержит этот display_id, но placed-ветка дорисует бокс заново как
+            # placed-but-unbound (корректный UX — возврат в «размещён, но не привязан»).
+            # Прежний discard здесь убивал бокс из ОБОИХ источников безвозвратно.
+            # Запись чистится при явном удалении (bound-ветка remove_selected делает
+            # discard) и при смене рецепта (_on_recipe_activated.clear()). Это вариант,
+            # прямо разрешённый планом («оставить в set до смены рецепта ИЛИ снять
+            # после bind — выбрать»). См. plans/pipeline-place-display-node.md (Task 2.1).
             # Scene обновится из _on_topology_replaced (синхронный dispatch)
             return True
 
@@ -554,15 +597,23 @@ class PipelinePresenter:
         Идемпотентно: повторный вызов того же display_id лишь обновляет позицию
         (set дедуплицирует). Канал без записи в каталоге допустим — имя резолвится
         в пустое, подзаголовок бокса = display_id.
+
+        follow-up ФИКС #5 (потеря selection): reload здесь делает clear_all сцены,
+        из-за чего прежнее выделение терялось и inspector очищался (tab не проверяет
+        _suppress в _on_selection_changed). Оборачиваем reload в capture/restore
+        selection по аналогии с _on_topology_replaced — прежнее выделение сохраняется.
+        Новый размещённый бокс выделять не обязательно.
         """
         self._gui_positions[display_id] = (x, y)
         self._placed_display_ids.add(display_id)
 
         if not self._scene:
             return
+        selected_ids = self._capture_selection()
         with self._block_signals():
             nodes, edges = self._topology_to_graph(self._model.to_topology_dict())
             self.load_scene_with_ports(nodes, edges)
+            self._restore_selection(selected_ids)
 
     def _validate_wire_ports(
         self,
