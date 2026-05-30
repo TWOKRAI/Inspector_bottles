@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QScrollArea,
@@ -174,7 +175,20 @@ class NodeInspectorPanel(QWidget):
             "Перенести этот узел (его плагины) в другой процесс. Плагины в одном\n"
             "процессе исполняются последовательно; разные процессы — параллельно."
         )
-        mp_layout.addRow("Перенести в процесс:", self._move_process_combo)
+        # Воркер на той же строке, что и выбор процесса (по запросу владельца):
+        # список — воркеры выбранного/текущего процесса (из вкладки «Процессы»).
+        self._move_worker_combo = QComboBox()
+        self._move_worker_combo.setObjectName("MoveWorkerCombo")
+        self._move_worker_combo.setToolTip(
+            "Воркер процесса, в котором исполняется узел.\nСписок — воркеры выбранного процесса (вкладка «Процессы»)."
+        )
+        pw_row = QWidget()
+        pw_layout = QHBoxLayout(pw_row)
+        pw_layout.setContentsMargins(0, 0, 0, 0)
+        pw_layout.setSpacing(6)
+        pw_layout.addWidget(self._move_process_combo, 1)
+        pw_layout.addWidget(self._move_worker_combo, 1)
+        mp_layout.addRow("Процесс / Воркер:", pw_row)
         content_layout.addWidget(self._move_process_form)
         self._move_process_form.setVisible(False)
 
@@ -231,6 +245,7 @@ class NodeInspectorPanel(QWidget):
         self._target_process_combo.currentIndexChanged.connect(self._on_target_process_combo_changed)
         self._display_id_combo.currentIndexChanged.connect(self._on_display_id_combo_changed)
         self._move_process_combo.currentIndexChanged.connect(self._on_move_process_combo_changed)
+        self._move_worker_combo.currentIndexChanged.connect(self._on_move_worker_combo_changed)
 
     # ------------------------------------------------------------------ #
     #  Публичный API: show_plugin_node                                     #
@@ -302,9 +317,18 @@ class NodeInspectorPanel(QWidget):
             has_targets = bool(self._target_process_combo and self._target_process_combo.isEnabled())
             self._target_process_form.setVisible(has_targets)
 
-            # Combo «Перенести в процесс» (Phase B): показываем, если есть другие процессы.
-            self._populate_move_process_combo(available_processes)
-            self._move_process_form.setVisible(bool(available_processes))
+            # Строка «Процесс / Воркер»: combo переноса в процесс + combo воркера.
+            # Воркер-combo заполняем воркерами ТЕКУЩЕГО процесса, preselect из config
+            # (assigned_worker). Строку показываем всегда в plugin-режиме — выбор воркера
+            # релевантен независимо от наличия других процессов для переноса.
+            self._suppress_changes = True
+            try:
+                self._populate_move_process_combo(available_processes)
+                assigned_worker = str((params or {}).get("assigned_worker", "") or "")
+                self._populate_move_worker_combo(self._current_process, assigned_worker)
+            finally:
+                self._suppress_changes = False
+            self._move_process_form.setVisible(True)
 
             # Показать параметры плагина в scroll area
             self._clear_params()
@@ -667,8 +691,63 @@ class NodeInspectorPanel(QWidget):
         if self._move_process_combo is None:
             return
         to_process = self._move_process_combo.itemData(index) or ""
+        # Воркер-combo всегда отражает воркеры РЕЛЕВАНТНОГО процесса: выбранного в
+        # combo, либо текущего (когда плейсхолдер). Перезаполняем при смене процесса.
+        self._suppress_changes = True
+        try:
+            self._populate_move_worker_combo(to_process or self._current_process)
+        finally:
+            self._suppress_changes = False
         if to_process and self._current_process and to_process != self._current_process:
             self.move_to_process_requested.emit(self._current_process, to_process)
+
+    def _get_workers_for_process(self, process_name: str) -> list[str]:
+        """Имена воркеров процесса из топологии (+ синтетический message_processor).
+
+        Единый источник с вкладкой «Процессы»: services.topology → Process.workers.
+        """
+        if self._services is None or not process_name:
+            return ["message_processor"]
+        try:
+            topo = self._services.topology.load()
+            proc = topo.find_process(process_name)
+            workers = [w.worker_name for w in proc.workers] if proc is not None else []
+        except Exception:
+            logger.debug("Не удалось получить воркеры процесса '%s'", process_name, exc_info=True)
+            workers = []
+        if "message_processor" not in workers:
+            workers.insert(0, "message_processor")
+        return workers
+
+    def _populate_move_worker_combo(self, process_name: str, current_worker: str = "") -> None:
+        """Заполнить воркер-combo воркерами процесса. Пусто/нет процесса → message_processor."""
+        combo = self._move_worker_combo
+        if combo is None:
+            return
+        combo.clear()
+        workers = self._get_workers_for_process(process_name)
+        combo.setEnabled(bool(workers))
+        for name in workers:
+            combo.addItem(name, userData=name)
+        if current_worker:
+            idx = combo.findData(current_worker)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+
+    def _on_move_worker_combo_changed(self, index: int) -> None:
+        """Выбор воркера → персист assigned_worker в config плагина (через field_changed).
+
+        Переиспользуем существующий путь field_changed → SetPluginConfig (G.4.3):
+        assigned_worker сохраняется в config плагина editor-топологии. Runtime-
+        исполнение по этому полю — отдельный шаг (см. plans/pipeline-node-process-worker.md).
+        """
+        if self._suppress_changes:
+            return
+        if self._move_worker_combo is None:
+            return
+        worker = self._move_worker_combo.itemData(index) or ""
+        if worker and self._current_process:
+            self.field_changed.emit(self._current_process, "assigned_worker", worker)
 
     # ------------------------------------------------------------------ #
     #  Оригинальные методы (backward compatibility)                        #
