@@ -27,7 +27,7 @@ from multiprocess_prototype.domain.commands import (
 )
 from multiprocess_prototype.domain.entities.plugin import PluginInstance
 from multiprocess_prototype.domain.errors import DomainError
-from multiprocess_prototype.domain.events import TopologyReplaced
+from multiprocess_prototype.domain.events import RecipeActivated, TopologyReplaced
 
 from .graph.node_item import NodeData
 from .graph.edge_item import EdgeData
@@ -90,6 +90,12 @@ class PipelinePresenter:
         # G.4.2b: кэш display-боксов (по одному на display_id), заполняется
         # _topology_to_graph из topo["displays"], читается load_scene_with_ports.
         self._display_nodes_cache: list[DisplayNodeData] = []
+        # Task 1.1: GUI-состояние «размещённые, но непривязанные» display-боксы.
+        # Модель хранит дисплеи только как binding в topo["displays"]; пустой бокс
+        # там не живёт. _build_display_nodes дорисовывает боксы для этих display_id,
+        # чтобы они переживали full scene reload в рамках сессии. Полный жизненный
+        # цикл (сброс/удаление) — Task 2.1. См. plans/pipeline-place-display-node.md.
+        self._placed_display_ids: set[str] = set()
 
         # Модель телеметрии wire-соединений (Task 7b.3)
         self._wire_metrics_model = WireMetricsModel()
@@ -103,6 +109,16 @@ class PipelinePresenter:
         # при каждом save/set_topology (G.3). dispatch() внутри себя вызывает
         # topology_repo.save() → publish → _on_topology_replaced (full reload).
         self._topology_sub = services.events.subscribe(TopologyReplaced, self._on_topology_replaced)
+
+        # Task 2.1: смена рецепта = «новая сессия редактора». Очищаем placed-but-unbound
+        # боксы ИМЕННО здесь, а НЕ в _on_topology_replaced. Обоснование точкой в коде:
+        # domain Project._apply_activate_recipe (project.py:781-784) эмитит ДВА события —
+        # TopologyReplaced (общий reload, на него же завязаны add/remove/wire/undo/redo)
+        # и RecipeActivated (только при ActivateRecipe). Обычная мутация в рамках сессии
+        # шлёт ТОЛЬКО TopologyReplaced. Поэтому RecipeActivated — единственный надёжный
+        # маркер «новая сессия»: чистить set в _on_topology_replaced убило бы непривязанный
+        # бокс при первой же мутации (главный риск задачи, см. plans/pipeline-place-display-node.md).
+        self._recipe_activated_sub = services.events.subscribe(RecipeActivated, self._on_recipe_activated)
 
     def set_scene(self, scene: "GraphScene") -> None:
         """Привязать GraphScene для обновления визуализации."""
@@ -387,10 +403,17 @@ class PipelinePresenter:
         G.4.2: process-ноды → dispatch(RemoveProcess) (domain каскадит wires+displays).
         G.4.2b: display-боксы → dispatch(UnbindDisplay) для каждой привязки на канал
         (id бокса = display_id). Всё персистится и undoable через services.commands.
+        Task 2.1: placed-but-unbound боксы (нет binding) удаляются БЕЗ dispatch —
+        нечего отвязывать; чистим только GUI-состояние и перерисовываем scene.
         """
         # Display-боксы адресуются по display_id (id бокса = канал), не по node_id
         # (node_id привязки = source endpoint). Снимок — для разведения веток.
         display_box_ids = {d.get("display_id", "") for d in self._model.get_displays()}
+
+        # Task 2.1: был ли хотя бы один dispatch (bound-display / process). Если все
+        # удаляемые узлы — только unbound-боксы, _on_topology_replaced НЕ сработает
+        # (dispatch'а нет) → нужна явная перерисовка scene в конце.
+        dispatched = False
 
         for node_id in selected_node_ids:
             self._gui_positions.pop(node_id, None)
@@ -399,25 +422,48 @@ class PipelinePresenter:
                 # G.4.2b: удаление display-бокса = отвязать все binding на этот канал.
                 # get_displays() — снимок (deep copy) на входе в цикл: dispatch внутри
                 # перестраивает модель, но мы итерируем исходный список пар.
+                # Task 2.1 (смешанный случай): бокс мог быть сперва placed, затем
+                # привязан — он есть и в _placed_display_ids, и в topo["displays"].
+                # Снимаем его из set ДО dispatch, чтобы reload из _on_topology_replaced
+                # после UnbindDisplay не дорисовал бокс заново как placed-but-unbound.
+                self._placed_display_ids.discard(node_id)
                 for di in self._model.get_displays():
                     if di.get("display_id") != node_id:
                         continue
                     cmd = UnbindDisplay(node_id=di.get("node_id", ""), display_id=node_id)
                     try:
                         self._services.commands.dispatch(cmd)
+                        dispatched = True
                     except DomainError as exc:
                         logger.warning("UnbindDisplay отклонён: %s", exc)
                         self._report(f"Не удалось отвязать дисплей: {exc}")
                 # Scene обновится из _on_topology_replaced (синхронный dispatch)
+            elif node_id in self._placed_display_ids:
+                # Task 2.1: непривязанный бокс (placed, но ещё нет binding). Его нет в
+                # topo["displays"], отвязывать нечего → БЕЗ dispatch(UnbindDisplay).
+                # Убираем только GUI-состояние; перерисовку делаем после цикла (если не
+                # было ни одного dispatch — иначе reload bound/process-ветки уже учтёт
+                # очищенный set и сам уберёт бокс).
+                self._placed_display_ids.discard(node_id)
             else:
                 # G.4.2: process removal через domain dispatch
                 cmd = RemoveProcess(process_name=node_id)
                 try:
                     self._services.commands.dispatch(cmd)
+                    dispatched = True
                 except DomainError as exc:
                     logger.error("RemoveProcess отклонён: %s", exc)
                     self._report(f"Не удалось удалить процесс: {exc}")
                 # Scene обновится из _on_topology_replaced (синхронный)
+
+        # Task 2.1: явная перерисовка нужна только если удаляли исключительно
+        # unbound-боксы (dispatch'а, а значит и _on_topology_replaced, не было).
+        # Тот же путь, что place_display: _topology_to_graph пройдёт по уже
+        # очищенному _placed_display_ids и не дорисует удалённый бокс.
+        if not dispatched and self._scene:
+            with self._block_signals():
+                nodes, edges = self._topology_to_graph(self._model.to_topology_dict())
+                self.load_scene_with_ports(nodes, edges)
 
     def add_wire(self, source: str, target: str, parent: "QWidget | None" = None) -> bool:
         """Добавить wire с валидацией совместимости портов.
@@ -457,6 +503,13 @@ class PipelinePresenter:
                 logger.warning("BindDisplay отклонён: %s", exc)
                 self._report(f"Не удалось привязать дисплей: {exc}")
                 return False
+            # Task 2.1: после успешного BindDisplay канал живёт в topo["displays"] и
+            # рисуется _build_display_nodes как «настоящий» бокс. Снимаем display_id из
+            # placed-but-unbound set: запись стала избыточной (дедуп по display_id в
+            # _build_display_nodes и так защищает от дубля, но discard держит set чистым
+            # и предотвращает воскрешение «призрака» при последующем UnbindDisplay).
+            # См. plans/pipeline-place-display-node.md (Task 2.1, шаг 3).
+            self._placed_display_ids.discard(display_id)
             # Scene обновится из _on_topology_replaced (синхронный dispatch)
             return True
 
@@ -478,6 +531,38 @@ class PipelinePresenter:
 
         # Scene обновится из _on_topology_replaced (синхронный dispatch → reload уже произошёл)
         return True
+
+    def place_display(self, display_id: str, x: float, y: float) -> None:
+        """Разместить пустой (непривязанный) display-бокс на холсте (Task 1.1).
+
+        Бокс ещё НЕ имеет binding (нет источника кадра), поэтому в topo["displays"]
+        его нет и domain dispatch здесь НЕ вызывается (binding появится позже, когда
+        пользователь протянет провод → add_wire → BindDisplay). Вместо dispatch
+        фиксируем GUI-состояние:
+          - позицию в _gui_positions (чтобы бокс встал в точку клика);
+          - display_id в _placed_display_ids (чтобы _build_display_nodes дорисовал
+            бокс при каждом reload — иначе призрак исчез бы при первой мутации).
+
+        Способ перерисовки: переиспользуем штатный путь scene reload — строим
+        nodes/edges из текущей модели (_topology_to_graph) и зовём
+        load_scene_with_ports внутри _block_signals(). _topology_to_graph →
+        _build_display_nodes дорисует placed-but-unbound боксы (включая этот).
+        Это тот же конвейер, что _on_topology_replaced, поэтому поведение боксов
+        идентично «настоящему» reload. _block_signals() гасит обратные сигналы
+        scene (selectionChanged), как и в остальных programmatic-апдейтах.
+
+        Идемпотентно: повторный вызов того же display_id лишь обновляет позицию
+        (set дедуплицирует). Канал без записи в каталоге допустим — имя резолвится
+        в пустое, подзаголовок бокса = display_id.
+        """
+        self._gui_positions[display_id] = (x, y)
+        self._placed_display_ids.add(display_id)
+
+        if not self._scene:
+            return
+        with self._block_signals():
+            nodes, edges = self._topology_to_graph(self._model.to_topology_dict())
+            self.load_scene_with_ports(nodes, edges)
 
     def _validate_wire_ports(
         self,
@@ -664,6 +749,33 @@ class PipelinePresenter:
                 # selectionChanged → tab populate'ит inspector (читает обновлённую
                 # модель + синхронный rm), а field_changed-сигналы формы гасятся _suppress.
                 self._restore_selection(selected_ids)
+
+    def _on_recipe_activated(self, _event: "RecipeActivated") -> None:
+        """Task 2.1: подписчик EventBus — активирован новый рецепт (новая сессия).
+
+        Сбрасывает GUI-состояние placed-but-unbound боксов: непривязанные боксы не
+        сериализуются в рецепт (binding нет — нечего сохранять), поэтому при загрузке
+        нового рецепта они должны исчезнуть. bound-дисплеи нового рецепта рисуются из
+        topo["displays"] штатным _build_display_nodes — их не трогаем.
+
+        Порядок событий важен: domain эмитит TopologyReplaced ПЕРЕД RecipeActivated
+        (project.py:781-784). К моменту вызова этого handler scene уже перерисована
+        _on_topology_replaced'ом и могла дорисовать «старые» unbound-боксы (set ещё не
+        пуст). Поэтому после clear() инициируем повторный reload — иначе призраки
+        прошлой сессии остались бы на холсте до следующей мутации.
+
+        _gui_positions для unbound-боксов НЕ чистим точечно: позиции — безвредный кэш,
+        перезатрутся при повторном place_display, а bound-позиции нового рецепта придут
+        из его metadata через load_topology_from_config (если рецепт грузится этим путём).
+        """
+        if not self._placed_display_ids:
+            return
+        self._placed_display_ids.clear()
+        if not self._scene:
+            return
+        with self._block_signals():
+            nodes, edges = self._topology_to_graph(self._services.topology.load().to_dict())
+            self.load_scene_with_ports(nodes, edges)
 
     def _capture_selection(self) -> list[str]:
         """G.6.3: снять node_id выделенных нод ДО scene reload."""
@@ -911,6 +1023,23 @@ class PipelinePresenter:
             if source_endpoint:
                 source_proc = source_endpoint.split(".")[0]
                 edges.append(EdgeData(source_id=source_proc, target_id=display_id))
+
+        # Task 1.1: дорисовать placed-but-unbound боксы — display_id, которые
+        # пользователь разместил через меню, но ещё не привязал проводом. Их нет
+        # в topo["displays"], поэтому без этого шага они исчезли бы при reload.
+        # Идём ПОСЛЕ построения из topo["displays"] и пропускаем уже существующие
+        # display_id (дедуп) — иначе после bind на scene было бы два бокса.
+        for display_id in self._placed_display_ids:
+            if display_id in boxes_by_display_id:
+                continue
+            x, y = self._gui_positions.get(display_id, (600.0, 50.0))
+            boxes_by_display_id[display_id] = DisplayNodeData(
+                node_id=display_id,
+                display_id=display_id,
+                display_name=self._resolve_display_name(display_id),
+                x=x,
+                y=y,
+            )
 
         self._display_nodes_cache = list(boxes_by_display_id.values())
 

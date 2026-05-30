@@ -25,6 +25,9 @@ class GraphScene(QGraphicsScene):
     node_inspect_requested = Signal(str)  # node_id
     edge_delete_requested = Signal(object)  # EdgeItem
     add_process_requested = Signal(float, float)  # scene x, y
+    # Task 1.1: запрос на размещение пустого (непривязанного) display-бокса.
+    # Несёт display_id выбранного канала + scene-координаты точки клика.
+    add_display_requested = Signal(str, float, float)  # display_id, scene x, y
 
     # Сигналы жизненного цикла edges (Task 7b.3 — телеметрия)
     edge_added = Signal(object)  # EdgeItem — новый edge добавлен
@@ -36,6 +39,11 @@ class GraphScene(QGraphicsScene):
         # реестре — чтобы add_edge находил target по id (binding-ребро source→box).
         self._nodes: dict[str, NodeItem | DisplayNodeItem] = {}
         self._edges: list[EdgeItem] = []
+        # Task 1.1: доступные display-каналы для подменю «Add Display →».
+        # Пары (display_id, display_name). Заполняется из tab через
+        # set_display_channels — scene НЕ имеет доступа к services.displays
+        # (граница соблюдена: список каналов всегда приходит из tab).
+        self._display_channels: list[tuple[str, str]] = []
 
     # ------------------------------------------------------------------ #
     #  Загрузка                                                            #
@@ -218,6 +226,14 @@ class GraphScene(QGraphicsScene):
     def get_node(self, node_id: str) -> NodeItem | DisplayNodeItem | None:
         return self._nodes.get(node_id)
 
+    def set_display_channels(self, channels: list[tuple[str, str]]) -> None:
+        """Задать список display-каналов для подменю «Add Display →» (Task 1.1).
+
+        channels — пары (display_id, display_name). Передаётся из tab, который
+        читает services.displays.list_displays(). Пустой список → подменю disabled.
+        """
+        self._display_channels = list(channels)
+
     def get_all_node_positions(self) -> dict[str, tuple[float, float]]:
         """Вернуть позиции всех нод {node_id: (x, y)}."""
         return {nid: (item.pos().x(), item.pos().y()) for nid, item in self._nodes.items()}
@@ -281,10 +297,31 @@ class GraphScene(QGraphicsScene):
             self.edge_delete_requested.emit(edge_item)
 
     def _show_background_menu(self, event, pos) -> None:
-        """Контекстное меню для пустого фона."""
+        """Контекстное меню для пустого фона.
+
+        Task 1.1: помимо «Add Process...» строит подменю «Add Display →» с одним
+        пунктом на каждый display-канал из self._display_channels. Выбор display-
+        пункта эмитит add_display_requested(display_id, x, y). Если каналов нет —
+        подменю disabled.
+        """
         menu = QMenu()
         add_action = menu.addAction("Add Process...")
+
+        # Подменю выбора display-канала. display_id храним в action.setData(...),
+        # а сами display-actions — в локальном множестве, чтобы после exec точно
+        # отличить выбор display-пункта от «Add Process...» / отмены меню.
+        display_menu = menu.addMenu("Add Display →")
+        display_actions = set()
+        if self._display_channels:
+            for display_id, display_name in self._display_channels:
+                act = display_menu.addAction(display_name or display_id)
+                act.setData(display_id)
+                display_actions.add(act)
+        else:
+            display_menu.setEnabled(False)
 
         action = menu.exec(event.screenPos())
         if action == add_action:
             self.add_process_requested.emit(pos.x(), pos.y())
+        elif action in display_actions:
+            self.add_display_requested.emit(action.data(), pos.x(), pos.y())

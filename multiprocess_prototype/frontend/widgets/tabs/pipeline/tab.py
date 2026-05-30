@@ -123,6 +123,11 @@ class PipelineTab(QWidget):
         self._presenter.set_scene(self._scene)
         self._presenter.set_inspector(self._inspector)
 
+        # Task 1.1: прокинуть display-каналы в scene для подменю «Add Display →».
+        # Scene не имеет доступа к services — список каналов всегда приходит из tab.
+        channels = [(s.display_id, s.display_name) for s in self._services.displays.list_displays()]
+        self._scene.set_display_channels(channels)
+
         # Создать контроллер телеметрии edges (Task 7b.3)
         from .telemetry import WireMetricsController
 
@@ -210,6 +215,8 @@ class PipelineTab(QWidget):
         """Подключить сигналы виджетов."""
         self._view.wire_created.connect(self._on_wire_created)
         self._scene.selectionChanged.connect(self._on_selection_changed)
+        # Task 1.1: размещение пустого display-бокса через меню фона.
+        self._scene.add_display_requested.connect(self._on_add_display_requested)
         # G.4.4: field_changed → presenter._on_inspector_field_changed (dispatch
         # SetPluginConfig, G.4.3) подключается в presenter.set_inspector. Дублирующий
         # tab-коннект (только лог + stale TODO) убран.
@@ -334,6 +341,16 @@ class PipelineTab(QWidget):
         if not self._can_edit():
             return
         self._presenter.add_process_from_plugin(plugin_name, scene_pos.x(), scene_pos.y())
+
+    def _on_add_display_requested(self, display_id: str, x: float, y: float) -> None:
+        """Task 1.1: разместить пустой display-бокс в точке клика.
+
+        Permission gating: размещение — мутация, доступна только при праве
+        tabs.pipeline.edit (как и D&D плагина / wire). Без права — тихий выход.
+        """
+        if not self._can_edit():
+            return
+        self._presenter.place_display(display_id, x, y)
 
     def _on_wire_created(self, source_endpoint: str, target_endpoint: str) -> None:
         """Wire creation через GraphView.
