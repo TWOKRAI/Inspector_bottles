@@ -71,13 +71,23 @@ def merge_topologies(base_dict: dict, pipeline_dict: dict) -> dict:
         merged_procs.append(proc)
 
     merged_wires = list(base_dict.get("wires") or []) + list(pipeline_dict.get("wires") or [])
+    # displays (привязки узлов к дисплеям) — такая же суммируемая секция, как wires.
+    # Без этого display-боксы из pipeline-топологии терялись бы при merge, и в
+    # GUI-редакторе пайплайн не имел бы Display-ноды-стока на выходе.
+    merged_displays = list(base_dict.get("displays") or []) + list(pipeline_dict.get("displays") or [])
+    # metadata (gui_positions и пр.) — pipeline переопределяет фундамент.
+    merged_metadata = {**(base_dict.get("metadata") or {}), **(pipeline_dict.get("metadata") or {})}
 
-    return {
+    merged = {
         "name": pipeline_dict.get("name", "pipeline"),
         "description": pipeline_dict.get("description", ""),
         "processes": merged_procs,
         "wires": merged_wires,
+        "displays": merged_displays,
     }
+    if merged_metadata:
+        merged["metadata"] = merged_metadata
+    return merged
 
 
 def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:

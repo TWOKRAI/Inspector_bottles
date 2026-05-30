@@ -1,9 +1,10 @@
 """EdgeItem -- связь между узлами (wire) на QGraphicsScene."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsPathItem
 
@@ -12,21 +13,40 @@ from .constants import WIRE_COLOR, WIRE_COLOR_HOVER, WIRE_WIDTH
 
 @dataclass
 class EdgeData:
-    """Абстрактные данные связи."""
+    """Абстрактные данные связи.
+
+    implicit=True — внутрипроцессная стрелка цепочки (порядок плагинов внутри
+    одного процесса). Это НЕ domain-wire: рисуется пунктиром, не выделяется,
+    не удаляется пользователем, не экспортируется и не шлёт edge-телеметрию.
+    """
+
     source_id: str
     target_id: str
     label: str = ""
+    implicit: bool = False
 
 
 class EdgeItem(QGraphicsPathItem):
     """Визуальная связь (кубический Bezier) между NodeItem.
 
-    Selectable для удаления. Подсветка при hover.
+    Реальный wire — selectable, с hover-подсветкой. implicit-стрелка цепочки —
+    пунктир, не selectable, без hover (визуальный индикатор порядка плагинов).
     """
 
     def __init__(self, data: EdgeData, parent=None) -> None:
         super().__init__(parent)
         self._data = data
+
+        if data.implicit:
+            # Неявная стрелка цепочки: пунктир, неинтерактивна.
+            pen = QPen(QColor(WIRE_COLOR), WIRE_WIDTH - 0.5)
+            pen.setStyle(Qt.PenStyle.DashLine)
+            self._normal_pen = pen
+            self._hover_pen = pen
+            self._selected_pen = pen
+            self.setPen(pen)
+            self.setZValue(-0.5)  # под нодами, но над контейнером
+            return
 
         self.setFlag(QGraphicsPathItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
@@ -48,6 +68,11 @@ class EdgeItem(QGraphicsPathItem):
     @property
     def target_id(self) -> str:
         return self._data.target_id
+
+    @property
+    def implicit(self) -> bool:
+        """True — неявная стрелка цепочки (визуальная, не domain-wire)."""
+        return self._data.implicit
 
     def update_path(self, source_pos: tuple[float, float], target_pos: tuple[float, float]) -> None:
         """Обновить кривую Bezier по позициям портов."""

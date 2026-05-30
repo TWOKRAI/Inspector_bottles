@@ -29,3 +29,12 @@ GRID_SPACING_Y = 100
 
 # Цвет узла Display (SHM-канал)
 DISPLAY_CATEGORY_COLOR = "#2e7d32"
+
+# Process-контейнер (рамка вокруг плагин-нод одного процесса, D.1)
+CONTAINER_PADDING = 16  # отступ рамки от bounding-rect плагин-нод
+CONTAINER_HEADER_H = 24  # высота заголовка (имя процесса) над нодами
+CONTAINER_INNER_GAP = 40  # горизонтальный зазор между плагинами в цепочке
+CONTAINER_CORNER_RADIUS = 10
+CONTAINER_FILL = "#1e2730"  # полупрозрачная заливка (через alpha в коде)
+CONTAINER_BORDER = "#5a6b7a"
+CONTAINER_TITLE_COLOR = "#cfd8e0"

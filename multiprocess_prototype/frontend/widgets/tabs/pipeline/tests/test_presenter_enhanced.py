@@ -47,6 +47,28 @@ class TestLoad:
         assert len(topo.get("wires", [])) == 1
 
 
+class TestProtectedProcessFilter:
+    """Issue: protected-процессы (gui из base.yaml) не рисуются на графе."""
+
+    def test_protected_process_hidden_from_graph(self):
+        services = make_pipeline_services(
+            topology={
+                "processes": [
+                    {"process_name": "gui", "protected": True, "plugins": []},
+                    {"process_name": "cam", "plugins": [{"plugin_name": "capture"}]},
+                ],
+                "wires": [],
+            }
+        )
+        p = PipelinePresenter(services)
+        nodes, _edges = p.load_topology_from_config()
+
+        ids = {n.node_id for n in nodes}
+        # D.1: нода = плагин, node_id = `{process}.{plugin}`.
+        assert not any(i.startswith("gui") for i in ids)  # protected скрыт
+        assert "cam.capture" in ids  # обычный процесс виден как плагин-нода
+
+
 # ------------------------------------------------------------------ #
 #  Тесты мутаций                                                      #
 # ------------------------------------------------------------------ #
@@ -342,7 +364,11 @@ class TestSceneIntegration:
         # Проверить переданные данные (nodes — первый позиционный аргумент load_from_data)
         call_args = mock_scene.load_from_data.call_args
         nodes = call_args[0][0]
-        node_data = next(n for n in nodes if n.node_id == "my-plugin")
+        # D.1: нода = плагин, node_id = `{process}.{plugin}` = `my-plugin.my_plugin`.
+        node_data = next(n for n in nodes if n.node_id == "my-plugin.my_plugin")
         assert isinstance(node_data, NodeData)
+        assert node_data.process_name == "my-plugin"
+        assert node_data.plugin_index == 0
+        # Плагин 0 встаёт в anchor процесса (add_process_from_plugin кладёт по имени).
         assert node_data.x == 50.0
         assert node_data.y == 60.0

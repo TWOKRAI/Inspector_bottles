@@ -562,6 +562,122 @@ class TestTargetProcessCombo:
         assert panel._mode == "plugin"
 
 
+class TestExecInfo:
+    """Phase A: блок «Исполнение» — процесс + воркер/порядок по плагинам."""
+
+    def _exec_texts(self, panel) -> str:
+        from PySide6.QtWidgets import QLabel
+
+        lay = panel._exec_info_layout
+        parts = []
+        for i in range(lay.count()):
+            w = lay.itemAt(i).widget()
+            if isinstance(w, QLabel):
+                parts.append(w.text())
+        return " | ".join(parts)
+
+    def test_processing_plugin_shows_process_and_pipeline_executor(self, qtbot):
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.show_plugin_node(
+            "preprocessor",
+            "processing",
+            plugin_name="resize",
+            plugins=[{"plugin_name": "resize", "category": "processing"}],
+        )
+        texts = self._exec_texts(panel)
+        assert "preprocessor" in texts
+        assert "pipeline_executor" in texts
+
+    def test_source_plugin_shows_own_worker(self, qtbot):
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.show_plugin_node(
+            "camera_0",
+            "source",
+            plugin_name="capture",
+            plugins=[{"plugin_name": "capture", "category": "source"}],
+        )
+        assert "source_producer_capture" in self._exec_texts(panel)
+
+    def test_multi_plugin_chain_steps(self, qtbot):
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.show_plugin_node(
+            "capture_proc",
+            "source",
+            plugin_name="capture",
+            plugins=[
+                {"plugin_name": "capture", "category": "source"},
+                {"plugin_name": "resize", "category": "processing"},
+                {"plugin_name": "region_split", "category": "processing"},
+            ],
+        )
+        texts = self._exec_texts(panel)
+        # source — свой поток; два processing — шаги 1/2 и 2/2 в pipeline_executor
+        assert "source_producer_capture" in texts
+        assert "шаг 1/2" in texts and "шаг 2/2" in texts
+
+    def test_exec_info_cleared_for_display_node(self, qtbot):
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.show_plugin_node(
+            "preprocessor",
+            "processing",
+            plugin_name="resize",
+            plugins=[{"plugin_name": "resize", "category": "processing"}],
+        )
+        panel.show_display_node("main", "main", "Основной дисплей")
+        assert panel._exec_info_layout.count() == 0
+
+
+class TestPluginNameFieldResolution:
+    """Issue: поля параметров резолвятся по plugin_name (имя регистра), а не
+    по node_id (process_name) — тот же путь, что вкладка Plugins."""
+
+    def test_fields_resolved_by_plugin_name(self, qtbot):
+        """show_plugin_node(plugin_name=...) зовёт rm.get_fields с ИМЕНЕМ ПЛАГИНА."""
+        rm = _make_rm([_make_field_info("scale_factor", float, 1.0)])
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_services(_make_services_no_rm(), registers_manager=rm)
+
+        # node_id (процесс) ≠ plugin_name (регистр)
+        panel.show_plugin_node("preprocessor", "processing", plugin_name="resize")
+
+        rm.get_fields.assert_called_with("resize")
+        assert panel._use_cards is True
+        # _current_process остаётся process_name — туда уйдёт SetPluginConfig
+        assert panel.current_process == "preprocessor"
+
+    def test_plugin_name_empty_falls_back_to_node_id(self, qtbot):
+        """Без plugin_name (legacy) — fallback на node_id."""
+        rm = _make_rm([_make_field_info("threshold", int, 128)])
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_services(_make_services_no_rm(), registers_manager=rm)
+
+        panel.show_plugin_node("detector", "processing")
+
+        rm.get_fields.assert_called_with("detector")
+
+    def test_config_values_applied_to_fields(self, qtbot):
+        """params (config плагина) проставляются в редакторы полей."""
+        rm = _make_rm([_make_field_info("scale_factor", float, 1.0)])
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        panel.set_services(_make_services_no_rm(), registers_manager=rm)
+
+        panel.show_plugin_node(
+            "preprocessor",
+            "processing",
+            plugin_name="resize",
+            params={"scale_factor": 2.5},
+        )
+
+        assert "scale_factor" in panel._field_editors
+
+
 class TestDisplayIdCombo:
     """Тесты combo «Display» для display-узлов."""
 

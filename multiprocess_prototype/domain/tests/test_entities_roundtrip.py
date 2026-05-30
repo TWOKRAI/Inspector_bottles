@@ -147,11 +147,11 @@ class TestDemoRecipeRoundtrip:
 
         binding0 = recipe.display_bindings[0]
         assert binding0.node_id == "merge_proc.render_overlay.rendered_frame"
-        assert binding0.display_id == "main_output"
+        assert binding0.display_id == "main"
 
         binding1 = recipe.display_bindings[1]
         assert binding1.node_id == "capture_proc.resize.frame"
-        assert binding1.display_id == "debug_input"
+        assert binding1.display_id == "debug"
 
     def test_legacy_source_display_format_rejected(self) -> None:
         """Устаревший формат display_bindings (source/display) отклоняется.

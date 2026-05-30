@@ -11,6 +11,7 @@ from .display_node_item import DisplayNodeData, DisplayNodeItem
 from .node_item import NodeData, NodeItem
 from .edge_item import EdgeData, EdgeItem
 from .port_schema import PortSchema
+from .process_container_item import ProcessContainerData, ProcessContainerItem
 
 
 class GraphScene(QGraphicsScene):
@@ -33,12 +34,20 @@ class GraphScene(QGraphicsScene):
     edge_added = Signal(object)  # EdgeItem — новый edge добавлен
     edge_removed = Signal(object)  # EdgeItem — edge удалён (до removeItem)
 
+    # D.3: плагин-нода перетащена. (node_id, from_process, from_index, to_process, to_index).
+    # to_process == "" → дроп вне контейнеров (handler делает snap-back reload).
+    plugin_drop_requested = Signal(str, str, int, str, int)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        # Process-узлы (NodeItem) и display-боксы (DisplayNodeItem) живут в одном
+        # Plugin-ноды (NodeItem) и display-боксы (DisplayNodeItem) живут в одном
         # реестре — чтобы add_edge находил target по id (binding-ребро source→box).
         self._nodes: dict[str, NodeItem | DisplayNodeItem] = {}
         self._edges: list[EdgeItem] = []
+        # D.1: рамки-контейнеры процессов (key = process_name) + членство
+        # плагин-нод по процессу (для fit, fallback get_node, drag/reorder).
+        self._containers: dict[str, ProcessContainerItem] = {}
+        self._members_by_process: dict[str, list[NodeItem]] = {}
         # Task 1.1: доступные display-каналы для подменю «Add Display →».
         # Пары (display_id, display_name). Заполняется из tab через
         # set_display_channels — scene НЕ имеет доступа к services.displays
@@ -67,7 +76,7 @@ class GraphScene(QGraphicsScene):
         """
         self.clear_all()
 
-        # Авто-layout если координаты нулевые (только process-ноды)
+        # Авто-layout если координаты нулевые (только plugin-ноды)
         need_layout = all(n.x == 0 and n.y == 0 for n in nodes)
 
         for i, nd in enumerate(nodes):
@@ -76,6 +85,10 @@ class GraphScene(QGraphicsScene):
                 nd.y = (i // 4) * GRID_SPACING_Y + 50
             ps = port_schemas_map.get(nd.node_id) if port_schemas_map else None
             self.add_node(nd, port_schemas=ps)
+
+        # D.1: построить рамки-контейнеры по группам плагин-нод (process_name).
+        # Ноды без process_name (raw/legacy) не группируются.
+        self._rebuild_containers()
 
         # Display-боксы добавляем до рёбер (add_edge ищет target в _nodes)
         for dn in display_nodes or []:
@@ -103,6 +116,9 @@ class GraphScene(QGraphicsScene):
         item = NodeItem(data, port_schemas=port_schemas)
         self.addItem(item)
         self._nodes[data.node_id] = item
+        # D.1: членство плагин-ноды в процессе (для контейнера/fit/drag).
+        if data.process_name:
+            self._members_by_process.setdefault(data.process_name, []).append(item)
         return item
 
     def add_display_node(self, data: DisplayNodeData) -> DisplayNodeItem:
@@ -116,18 +132,69 @@ class GraphScene(QGraphicsScene):
         self._nodes[data.node_id] = item
         return item
 
+    # ------------------------------------------------------------------ #
+    #  Контейнеры процессов (D.1)                                          #
+    # ------------------------------------------------------------------ #
+
+    def _rebuild_containers(self) -> None:
+        """Пересоздать рамки-контейнеры по текущим группам плагин-нод.
+
+        Один контейнер на process_name (только непустые группы). Вызывается
+        после массового add_node в load_from_data.
+        """
+        for cont in self._containers.values():
+            self.removeItem(cont)
+        self._containers.clear()
+        for process_name, members in self._members_by_process.items():
+            if not process_name or not members:
+                continue
+            cont = ProcessContainerItem(ProcessContainerData(process_name=process_name))
+            self.addItem(cont)
+            cont.fit_to_members(members)
+            self._containers[process_name] = cont
+
+    def _refit_container(self, process_name: str) -> None:
+        """Пересчитать геометрию контейнера процесса по его членам."""
+        cont = self._containers.get(process_name)
+        if cont is not None:
+            cont.fit_to_members(self._members_by_process.get(process_name, []))
+
+    def get_container(self, process_name: str) -> ProcessContainerItem | None:
+        """Вернуть рамку-контейнер процесса (или None)."""
+        return self._containers.get(process_name)
+
+    def members_of(self, process_name: str) -> list[NodeItem]:
+        """Плагин-ноды процесса в порядке добавления (для drag/reorder)."""
+        return list(self._members_by_process.get(process_name, []))
+
     def remove_node(self, node_id: str) -> None:
         """Удалить узел и все связанные edge'ы."""
         item = self._nodes.pop(node_id, None)
         if item is None:
             return
 
+        # Снять членство в процессе + обновить/убрать контейнер.
+        process_name = getattr(item, "process_name", "")
+        if process_name and process_name in self._members_by_process:
+            members = self._members_by_process[process_name]
+            if item in members:
+                members.remove(item)
+            if members:
+                self._refit_container(process_name)
+            else:
+                self._members_by_process.pop(process_name, None)
+                cont = self._containers.pop(process_name, None)
+                if cont is not None:
+                    self.removeItem(cont)
+
         # Каскадное удаление связей
         edges_to_remove = [e for e in self._edges if e.source_id == node_id or e.target_id == node_id]
         for edge in edges_to_remove:
             self._edges.remove(edge)
-            # Уведомить до removeItem — после удаления из сцены edge недоступен (Task 7b.3)
-            self.edge_removed.emit(edge)
+            # Уведомить до removeItem — после удаления из сцены edge недоступен (Task 7b.3).
+            # implicit-стрелки телеметрию не шлют (edge_added не было) → не эмитим.
+            if not edge.implicit:
+                self.edge_removed.emit(edge)
             self.removeItem(edge)
 
         self.removeItem(item)
@@ -147,12 +214,14 @@ class GraphScene(QGraphicsScene):
         )
         self.addItem(edge)
         self._edges.append(edge)
-        # Уведомить подписчиков о добавлении нового edge (Task 7b.3)
-        self.edge_added.emit(edge)
+        # Уведомить подписчиков о добавлении нового edge (Task 7b.3).
+        # implicit-стрелки цепочки — визуальные, не шлют edge-телеметрию.
+        if not data.implicit:
+            self.edge_added.emit(edge)
         return edge
 
     def on_node_moved(self, node_id: str) -> None:
-        """Обновить все edge'ы, связанные с узлом (вызывается из NodeItem.itemChange)."""
+        """Обновить edge'ы и контейнер процесса (вызывается из NodeItem.itemChange)."""
         node = self._nodes.get(node_id)
         if node is None:
             return
@@ -165,13 +234,51 @@ class GraphScene(QGraphicsScene):
                         source.output_port_pos(),
                         target.input_port_pos(),
                     )
+        # D.1: подвинули плагин-ноду — пересчитать рамку её процесса.
+        process_name = getattr(node, "process_name", "")
+        if process_name:
+            self._refit_container(process_name)
+
+    def on_node_drag_finished(self, node_id: str) -> None:
+        """D.3: плагин-нода отпущена после перетаскивания.
+
+        Определяет целевой контейнер по центру ноды и индекс вставки по X среди
+        членов целевого процесса (исключая саму ноду). Эмитит plugin_drop_requested;
+        решение про MovePlugin/snap-back принимает presenter. Дроп вне контейнеров →
+        to_process="".
+        """
+        node = self._nodes.get(node_id)
+        if node is None or not getattr(node, "process_name", ""):
+            return
+        from_process = node.process_name
+        from_index = node.plugin_index
+        center = node.sceneBoundingRect().center()
+
+        to_process = ""
+        for pname, cont in self._containers.items():
+            if cont.sceneBoundingRect().contains(center):
+                to_process = pname
+                break
+
+        if not to_process:
+            self.plugin_drop_requested.emit(node_id, from_process, from_index, "", -1)
+            return
+
+        # Индекс вставки: число членов целевого процесса (без перетаскиваемой ноды),
+        # чей центр левее центра ноды. Совпадает с семантикой MovePlugin.to_index
+        # (вставка в список ПОСЛЕ удаления плагина из источника).
+        others = [m for m in self._members_by_process.get(to_process, []) if m is not node]
+        cx = center.x()
+        to_index = sum(1 for m in others if m.sceneBoundingRect().center().x() < cx)
+        self.plugin_drop_requested.emit(node_id, from_process, from_index, to_process, to_index)
 
     def remove_edge(self, edge: EdgeItem) -> None:
         """Удалить связь."""
         if edge in self._edges:
             self._edges.remove(edge)
-            # Уведомить до removeItem (Task 7b.3)
-            self.edge_removed.emit(edge)
+            # Уведомить до removeItem (Task 7b.3); implicit-стрелки телеметрию не шлют.
+            if not edge.implicit:
+                self.edge_removed.emit(edge)
             self.removeItem(edge)
 
     # ------------------------------------------------------------------ #
@@ -197,10 +304,14 @@ class GraphScene(QGraphicsScene):
                     category=d.category,
                     x=pos.x(),
                     y=pos.y(),
+                    process_name=getattr(d, "process_name", ""),
+                    plugin_index=getattr(d, "plugin_index", -1),
+                    plugin_name=getattr(d, "plugin_name", ""),
                 )
             )
 
-        edges = [e.edge_data for e in self._edges]
+        # implicit-стрелки цепочки — визуальные, не часть domain-топологии.
+        edges = [e.edge_data for e in self._edges if not e.implicit]
         return nodes, edges
 
     def clear_all(self) -> None:
@@ -212,10 +323,14 @@ class GraphScene(QGraphicsScene):
         ссылок на удалённые C++ объекты.
         """
         for edge in list(self._edges):
-            self.edge_removed.emit(edge)
+            # implicit-стрелки телеметрию не получали → не уведомляем о снятии.
+            if not edge.implicit:
+                self.edge_removed.emit(edge)
         self.clear()
         self._nodes.clear()
         self._edges.clear()
+        self._containers.clear()
+        self._members_by_process.clear()
 
     def node_count(self) -> int:
         return len(self._nodes)
@@ -224,7 +339,21 @@ class GraphScene(QGraphicsScene):
         return len(self._edges)
 
     def get_node(self, node_id: str) -> NodeItem | DisplayNodeItem | None:
-        return self._nodes.get(node_id)
+        """Найти узел по id.
+
+        D.1: помимо прямого совпадения по node_id (плагин-нода `proc.plugin`,
+        display-бокс `display_id`) поддержан удобный fallback по ИМЕНИ ПРОЦЕССА:
+        если node_id — имя процесса с плагин-нодами, возвращается первая нода
+        процесса. Это сохраняет совместимость с вызовами `get_node(process_name)`
+        (reveal новой ноды, тесты) после перехода node=plugin.
+        """
+        item = self._nodes.get(node_id)
+        if item is not None:
+            return item
+        members = self._members_by_process.get(node_id)
+        if members:
+            return members[0]
+        return None
 
     def set_display_channels(self, channels: list[tuple[str, str]]) -> None:
         """Задать список display-каналов для подменю «Add Display →» (Task 1.1).
@@ -272,7 +401,8 @@ class GraphScene(QGraphicsScene):
 
         if isinstance(target, (NodeItem, DisplayNodeItem)):
             self._show_node_menu(event, target)
-        elif isinstance(target, EdgeItem):
+        elif isinstance(target, EdgeItem) and not target.implicit:
+            # implicit-стрелка цепочки не удаляется пользователем → меню фона.
             self._show_edge_menu(event, target)
         else:
             self._show_background_menu(event, pos)

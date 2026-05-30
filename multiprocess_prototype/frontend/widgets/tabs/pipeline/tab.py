@@ -138,8 +138,13 @@ class PipelineTab(QWidget):
         )
         self._wire_metrics_controller.start()
 
-        # Drop target для D&D из палитры на canvas.
-        self._drop_target = PipelineDropTarget(self._view, self._on_plugin_dropped)
+        # Drop target для D&D из палитры на canvas: плагины → процесс,
+        # дисплеи → display-бокс (place_display).
+        self._drop_target = PipelineDropTarget(
+            self._view,
+            self._on_plugin_dropped,
+            on_display_drop=self._on_display_dropped,
+        )
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(8, 8, 8, 8)
@@ -221,6 +226,8 @@ class PipelineTab(QWidget):
         # Работает для NodeItem и DisplayNodeItem (оба имеют node_id).
         self._scene.node_delete_requested.connect(self._on_node_delete_requested)
         self._scene.node_inspect_requested.connect(self._on_node_inspect_requested)
+        # D.3: перетаскивание плагин-ноды между контейнерами / reorder внутри.
+        self._scene.plugin_drop_requested.connect(self._on_plugin_drop_requested)
         # G.4.4: field_changed → presenter._on_inspector_field_changed (dispatch
         # SetPluginConfig, G.4.3) подключается в presenter.set_inspector. Дублирующий
         # tab-коннект (только лог + stale TODO) убран.
@@ -273,26 +280,34 @@ class PipelineTab(QWidget):
         # G.4.2: рендер через presenter (port_schemas из PluginCatalog), не голый load_from_data
         self._presenter.load_scene_with_ports(nodes, edges)
         if nodes:
+            # Сразу раскладываем граф (Sugiyama) — без этого ноды накладываются
+            # друг на друга и непонятно, что куда идёт. Делает граф читаемым на
+            # старте и надёжным для клика (issue: карточка узла появляется только
+            # при попадании по ноде, а на «мешанине» клики промахивались).
+            self._presenter.auto_layout_scene()
             self._view.fit_to_view()
 
     def _load_palette(self) -> None:
-        """Загрузить плагины в палитру через services.plugins (PluginCatalog)."""
+        """Загрузить плагины и дисплеи в палитру (services.plugins / services.displays).
+
+        Плагины — основной список (drag → создаёт процесс). Дисплеи — отдельная
+        секция «Displays — дисплеи» (drag → создаёт display-бокс на холсте, в который
+        пользователь заводит провод от источника). Дисплеи берём из того же каталога,
+        что и подменю «Add Display →» сцены (services.displays.list_displays()).
+        """
         plugin_specs = self._services.plugins.list_plugins()
-        if not plugin_specs:
-            return
-
-        plugins = []
-        for spec in plugin_specs:
-            plugins.append(
-                {
-                    "name": spec.name,
-                    "category": spec.category,
-                    "description": spec.description,
-                }
-            )
-
+        plugins = [
+            {"name": spec.name, "category": spec.category, "description": spec.description} for spec in plugin_specs
+        ]
         if plugins:
             self._palette.load_plugins(plugins)
+
+        displays = [
+            {"display_id": s.display_id, "display_name": s.display_name}
+            for s in self._services.displays.list_displays()
+        ]
+        if displays:
+            self._palette.load_displays(displays)
 
     # ------------------------------------------------------------------ #
     #  Permissions                                                         #
@@ -346,6 +361,16 @@ class PipelineTab(QWidget):
             return
         self._presenter.add_process_from_plugin(plugin_name, scene_pos.x(), scene_pos.y())
 
+    def _on_display_dropped(self, display_id: str, scene_pos: "QPointF") -> None:
+        """D&D дисплея из палитры → разместить display-бокс в точке drop.
+
+        Тот же путь, что подменю «Add Display →» (place_display): бокс ещё без
+        привязки; пользователь заведёт в него провод от источника → BindDisplay.
+        """
+        if not self._can_edit():
+            return
+        self._presenter.place_display(display_id, scene_pos.x(), scene_pos.y())
+
     def _on_add_display_requested(self, display_id: str, x: float, y: float) -> None:
         """Task 1.1: разместить пустой display-бокс в точке клика.
 
@@ -374,6 +399,24 @@ class PipelineTab(QWidget):
             return
         self._presenter.remove_selected([node_id])
         self._inspector.clear()
+
+    def _on_plugin_drop_requested(
+        self,
+        node_id: str,
+        from_process: str,
+        from_index: int,
+        to_process: str,
+        to_index: int,
+    ) -> None:
+        """D.3: плагин-нода перетащена → presenter решает (MovePlugin / snap-back).
+
+        Мутация topology → guard по праву edit. Без права — snap-back (reload из
+        модели вернёт ноду на место, не дав визуально «перетащить» без прав).
+        """
+        if not self._can_edit():
+            self._presenter._reload_scene_from_model()
+            return
+        self._presenter.on_plugin_dropped(node_id, from_process, from_index, to_process, to_index)
 
     def _on_node_inspect_requested(self, node_id: str) -> None:
         """Контекстное меню «Inspect» для узла (NodeItem или DisplayNodeItem).
@@ -410,21 +453,58 @@ class PipelineTab(QWidget):
                 display_name = getattr(node.data, "display_name", "")
                 self._inspector.show_display_node(node.node_id, display_id, display_name)
             else:
-                # Plugin-узел (process node)
+                # Plugin-узел (D.1: node_id = `{process}.{plugin}`). Извлекаем процесс
+                # и индекс плагина из самой ноды — инспектор показывает config именно
+                # этого плагина, а не plugins[0].
+                process_name = getattr(node, "process_name", "") or node.node_id
+                plugin_index = getattr(node, "plugin_index", 0)
+
                 process_data = None
                 for proc in topo.get("processes", []):
-                    if isinstance(proc, dict) and proc.get("process_name") == node.node_id:
+                    if isinstance(proc, dict) and proc.get("process_name") == process_name:
                         process_data = proc
                         break
 
                 plugins = process_data.get("plugins", []) if process_data else []
                 category = node.data.category if hasattr(node, "data") else "utility"
                 target_process = process_data.get("target_process", "") if process_data else ""
+
+                # Поля параметров строятся по plugin_name (имя регистра) ВЫБРАННОГО
+                # плагина (D.2), значения — из его config (PluginInstance.config).
+                plugin_name = ""
+                params: dict = {}
+                if plugins and 0 <= plugin_index < len(plugins):
+                    sel = plugins[plugin_index]
+                    if isinstance(sel, dict):
+                        plugin_name = sel.get("plugin_name", "")
+                        params = sel.get("config", {}) or {}
+                    else:
+                        plugin_name = getattr(sel, "plugin_name", "")
+                        params = getattr(sel, "config", {}) or {}
+
+                # Другие процессы для combo «Перенести в процесс»
+                # (исключаем сам процесс и protected-процессы вроде gui).
+                available_processes = []
+                for proc in topo.get("processes", []):
+                    if isinstance(proc, dict):
+                        pname = proc.get("process_name", "")
+                        protected = bool(proc.get("protected", False))
+                    else:
+                        pname = getattr(proc, "process_name", "")
+                        protected = bool(getattr(proc, "protected", False))
+                    if pname and pname != process_name and not protected:
+                        available_processes.append(pname)
+
                 self._inspector.show_plugin_node(
                     node.node_id,
                     category,
                     target_process=target_process,
+                    plugin_name=plugin_name,
                     plugins=plugins,
+                    params=params,
+                    available_processes=available_processes,
+                    process_name=process_name,
+                    plugin_index=plugin_index,
                 )
         else:
             self._inspector.clear()

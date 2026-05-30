@@ -14,7 +14,18 @@ from .port_schema import PortSchema
 
 @dataclass
 class NodeData:
-    """Абстрактные данные узла (не привязан к SystemBlueprint)."""
+    """Абстрактные данные узла (не привязан к SystemBlueprint).
+
+    Pipeline node = плагин (D.1): один процесс рисуется как контейнер с N
+    отдельными нодами-плагинами. `node_id` плагин-ноды = ``{process}.{plugin}``.
+    Поля process_name/plugin_index/plugin_name несут принадлежность к процессу
+    и позицию в цепочке — нужны для группировки в контейнер (scene), drag между
+    контейнерами и маршрутизации SetPluginConfig/MovePlugin (presenter).
+
+    Поля добавлены В КОНЦЕ с дефолтами — позиционные вызовы
+    ``NodeData(node_id, title, subtitle, category, x, y)`` остаются валидны.
+    Узлы без process_name (raw-тесты, legacy) не группируются в контейнер.
+    """
 
     node_id: str
     title: str
@@ -22,6 +33,12 @@ class NodeData:
     category: str = "utility"
     x: float = 0.0
     y: float = 0.0
+    # Принадлежность к процессу (пусто → нода вне контейнера, legacy)
+    process_name: str = ""
+    # Индекс плагина в цепочке процесса (-1 → процесс без плагинов, fallback-нода)
+    plugin_index: int = -1
+    # Имя плагина (= имя регистра; пусто для process-fallback ноды)
+    plugin_name: str = ""
 
 
 class NodeItem(QGraphicsRectItem):
@@ -73,6 +90,11 @@ class NodeItem(QGraphicsRectItem):
         small_font.setPointSize(8)
         self._subtitle_text.setFont(small_font)
         self._subtitle_text.setPos(8, 28)
+
+        # D.3: флаг реального перетаскивания (отличить drag от простого клика-выбора).
+        # Сбрасывается на mousePress, взводится в itemChange при смене позиции,
+        # проверяется на mouseRelease → scene.on_node_drag_finished только при move.
+        self._drag_moved = False
 
         # Порты (визуальные)
         self._input_ports: list[PortItem] = []
@@ -164,6 +186,16 @@ class NodeItem(QGraphicsRectItem):
         return self._data
 
     @property
+    def process_name(self) -> str:
+        """Имя процесса, которому принадлежит плагин-нода (пусто → вне контейнера)."""
+        return self._data.process_name
+
+    @property
+    def plugin_index(self) -> int:
+        """Индекс плагина в цепочке процесса (-1 → process-fallback нода)."""
+        return self._data.plugin_index
+
+    @property
     def input_ports(self) -> list[PortItem]:
         """Все input-порты узла."""
         return list(self._input_ports)
@@ -202,10 +234,29 @@ class NodeItem(QGraphicsRectItem):
     def itemChange(self, change, value):
         """Обновить edge'ы при перемещении узла."""
         if change == QGraphicsRectItem.GraphicsItemChange.ItemPositionHasChanged:
+            self._drag_moved = True
             scene = self.scene()
             if scene is not None and hasattr(scene, "on_node_moved"):
                 scene.on_node_moved(self._data.node_id)
         return super().itemChange(change, value)
+
+    def mousePressEvent(self, event):
+        """Начало взаимодействия — сбросить флаг перетаскивания (D.3)."""
+        self._drag_moved = False
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """Завершение перетаскивания → уведомить scene (D.3).
+
+        Только при реальном перемещении (не простой клик-выбор): scene определит
+        целевой контейнер и решит про MovePlugin (cross-process / reorder).
+        """
+        super().mouseReleaseEvent(event)
+        if self._drag_moved:
+            self._drag_moved = False
+            scene = self.scene()
+            if scene is not None and hasattr(scene, "on_node_drag_finished"):
+                scene.on_node_drag_finished(self._data.node_id)
 
     def center_pos(self) -> tuple[float, float]:
         """Центр узла в scene coordinates."""

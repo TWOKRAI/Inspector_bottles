@@ -70,6 +70,7 @@ class TestYamlPositions:
         topology = services.topology.load().to_dict()
         nodes, edges = p._topology_to_graph(topology)
 
-        camera_node = next(n for n in nodes if n.node_id == "camera")
+        # D.1: нода = плагин (`camera.capture`); позиция по anchor процесса "camera".
+        camera_node = next(n for n in nodes if n.node_id == "camera.capture")
         assert camera_node.x == 100.0
         assert camera_node.y == 200.0

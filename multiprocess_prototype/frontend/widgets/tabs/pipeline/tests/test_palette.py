@@ -204,3 +204,168 @@ class TestPluginPalette:
         last_item = palette.tree.topLevelItem(palette.tree.topLevelItemCount() - 1)
         custom_item = palette._category_items["custom_cat"]
         assert last_item is custom_item
+
+
+# ---------------------------------------------------------------------------
+# TestPaletteDisplays — секция дисплеев (issue: дисплеи в списке Pipeline)
+# ---------------------------------------------------------------------------
+
+SAMPLE_DISPLAYS = [
+    {"display_id": "main", "display_name": "Основной дисплей"},
+    {"display_id": "debug", "display_name": "Debug дисплей"},
+    {"display_id": "headless", "display_name": ""},  # без имени → label = id
+]
+
+
+class TestPaletteDisplays:
+    def test_load_displays_adds_section(self, qtbot):
+        """load_displays добавляет секцию «Displays — дисплеи» с элементами."""
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette.palette_widget import (
+            DISPLAY_SECTION_LABEL,
+            PluginPalette as _PP,
+        )
+
+        palette = PluginPalette()
+        qtbot.addWidget(palette)
+        palette.load_plugins(SAMPLE_PLUGINS)
+        palette.load_displays(SAMPLE_DISPLAYS)
+
+        cat = palette._category_items.get(_PP._DISPLAY_KEY)
+        assert cat is not None
+        assert cat.text(0) == DISPLAY_SECTION_LABEL
+        assert cat.childCount() == len(SAMPLE_DISPLAYS)
+
+    def test_display_items_carry_id_and_kind(self, qtbot):
+        """Элементы дисплеев несут display_id (UserRole) и kind='display'."""
+        from PySide6.QtCore import Qt
+
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette.palette_widget import (
+            _KIND_ROLE,
+            PluginPalette as _PP,
+        )
+
+        palette = PluginPalette()
+        qtbot.addWidget(palette)
+        palette.load_displays(SAMPLE_DISPLAYS)
+
+        cat = palette._category_items[_PP._DISPLAY_KEY]
+        ids = {cat.child(i).data(0, Qt.ItemDataRole.UserRole) for i in range(cat.childCount())}
+        kinds = {cat.child(i).data(0, _KIND_ROLE) for i in range(cat.childCount())}
+        assert ids == {"main", "debug", "headless"}
+        assert kinds == {"display"}
+
+    def test_load_displays_idempotent(self, qtbot):
+        """Повторный load_displays не плодит дубль-секцию."""
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette.palette_widget import (
+            PluginPalette as _PP,
+        )
+
+        palette = PluginPalette()
+        qtbot.addWidget(palette)
+        palette.load_displays(SAMPLE_DISPLAYS)
+        first = palette.tree.topLevelItemCount()
+        palette.load_displays(SAMPLE_DISPLAYS)
+        assert palette.tree.topLevelItemCount() == first
+        assert palette._category_items[_PP._DISPLAY_KEY].childCount() == len(SAMPLE_DISPLAYS)
+
+    def test_empty_displays_noop(self, qtbot):
+        """Пустой список дисплеев — секция не добавляется."""
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette.palette_widget import (
+            PluginPalette as _PP,
+        )
+
+        palette = PluginPalette()
+        qtbot.addWidget(palette)
+        palette.load_displays([])
+        assert _PP._DISPLAY_KEY not in palette._category_items
+
+
+# ---------------------------------------------------------------------------
+# TestPipelineDropTarget — маршрутизация drop по типу MIME
+# ---------------------------------------------------------------------------
+
+
+def _make_drop_event(mime_type: str, payload: str):
+    """Сконструировать QDropEvent с одним MIME-форматом.
+
+    Возвращает (event, mime). QDropEvent НЕ владеет QMimeData (PySide6) — её
+    нужно держать живой на стороне вызывающего, иначе mimeData() станет dangling.
+    """
+    from PySide6.QtCore import QMimeData, QPointF, Qt
+    from PySide6.QtGui import QDropEvent
+
+    mime = QMimeData()
+    mime.setData(mime_type, payload.encode("utf-8"))
+    event = QDropEvent(
+        QPointF(10.0, 10.0),
+        Qt.DropAction.CopyAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    return event, mime
+
+
+class TestPipelineDropTarget:
+    def _make_view(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_scene import GraphScene
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_view import GraphView
+
+        view = GraphView(GraphScene())
+        qtbot.addWidget(view)
+        return view
+
+    def test_plugin_drop_routed_to_on_drop(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette import PipelineDropTarget
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette.palette_widget import MIME_TYPE
+
+        view = self._make_view(qtbot)
+        plugin_calls, display_calls = [], []
+        target = PipelineDropTarget(
+            view,
+            lambda name, pos: plugin_calls.append(name),
+            on_display_drop=lambda did, pos: display_calls.append(did),
+        )
+
+        event, _mime = _make_drop_event(MIME_TYPE, "blur")
+        handled = target.eventFilter(view.viewport(), event)
+
+        assert handled is True
+        assert plugin_calls == ["blur"]
+        assert display_calls == []
+
+    def test_display_drop_routed_to_on_display_drop(self, qtbot):
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette import PipelineDropTarget
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette.palette_widget import (
+            MIME_TYPE_DISPLAY,
+        )
+
+        view = self._make_view(qtbot)
+        plugin_calls, display_calls = [], []
+        target = PipelineDropTarget(
+            view,
+            lambda name, pos: plugin_calls.append(name),
+            on_display_drop=lambda did, pos: display_calls.append(did),
+        )
+
+        event, _mime = _make_drop_event(MIME_TYPE_DISPLAY, "main")
+        handled = target.eventFilter(view.viewport(), event)
+
+        assert handled is True
+        assert display_calls == ["main"]
+        assert plugin_calls == []
+
+    def test_display_drop_ignored_without_callback(self, qtbot):
+        """Без on_display_drop display-MIME не принимается (формат не в _accepted_formats)."""
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette import PipelineDropTarget
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.palette.palette_widget import (
+            MIME_TYPE_DISPLAY,
+        )
+
+        view = self._make_view(qtbot)
+        target = PipelineDropTarget(view, lambda name, pos: None)  # on_display_drop=None
+
+        event, _mime = _make_drop_event(MIME_TYPE_DISPLAY, "main")
+        handled = target.eventFilter(view.viewport(), event)
+
+        assert handled is not True  # событие не обработано фильтром

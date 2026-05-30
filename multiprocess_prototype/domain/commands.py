@@ -107,6 +107,26 @@ class SetPluginConfig:
     value: Any
 
 
+@dataclass(frozen=True, slots=True)
+class MovePlugin:
+    """Перенести PluginInstance из одного Process в другой (Phase B).
+
+    Атомарно: плагин убирается из ``from_process[from_index]`` и вставляется в
+    ``to_process`` (в конец при ``to_index=None``). Project.apply дополнительно
+    переписывает концы проводов/привязок ``from_process.<plugin>.*`` →
+    ``to_process.<plugin>.*`` и удаляет провода, ставшие внутрипроцессными
+    (оба конца в одном процессе → неявная цепочка). Пустой процесс-источник
+    удаляется. ``from_process == to_process`` (переупорядочивание) допустимо.
+    """
+
+    command_type: ClassVar[str] = "MovePlugin"
+
+    from_process: str
+    from_index: int
+    to_process: str
+    to_index: int | None = None
+
+
 # ==============================================================================
 # Wire-команды
 # ==============================================================================
@@ -223,6 +243,7 @@ ProjectCommand = Union[
     InsertPlugin,
     RemovePlugin,
     SetPluginConfig,
+    MovePlugin,
     ConnectWire,
     DisconnectWire,
     BindDisplay,
@@ -241,6 +262,7 @@ __all__ = [
     "InsertPlugin",
     "RemovePlugin",
     "SetPluginConfig",
+    "MovePlugin",
     "ConnectWire",
     "DisconnectWire",
     "BindDisplay",

@@ -21,6 +21,8 @@ from multiprocess_prototype.domain.commands import (
     AddProcess,
     BindDisplay,
     ConnectWire,
+    MovePlugin,
+    RemovePlugin,
     RemoveProcess,
     SetPluginConfig,
     UnbindDisplay,
@@ -130,10 +132,14 @@ class PipelinePresenter:
         Передаёт AppServices в panel и подписывается на field_changed,
         target_process_changed, display_id_changed.
         """
+        # D.2: держим ссылку на панель — _on_inspector_field_changed читает
+        # current_plugin_index (какой плагин процесса редактируется).
+        self._inspector = panel
         panel.set_services(self._services, registers_manager=self._registers_manager)
         panel.field_changed.connect(self._on_inspector_field_changed)
         panel.target_process_changed.connect(self._on_target_process_changed)
         panel.display_id_changed.connect(self._on_display_id_changed)
+        panel.move_to_process_requested.connect(self._on_move_to_process_requested)
 
     def _on_inspector_field_changed(
         self,
@@ -158,12 +164,14 @@ class PipelinePresenter:
         if self._suppress:
             return
 
-        # Convention: один плагин на процесс (AddProcess создаёт процесс с единственным
-        # PluginInstance) → plugin_index=0. Multi-plugin (index > 0) — вне scope G.4.3,
-        # см. plans/2026-05-27_cross-tab-architecture/phase-g.md.
+        # D.2: per-plugin редактирование. Индекс выбранного плагина читаем из панели
+        # (current_plugin_index) — нода=плагин, в процессе может быть цепочка. Default 0
+        # совместим с прямым field_changed.emit (тесты, 1 плагин/процесс).
+        inspector = getattr(self, "_inspector", None)
+        plugin_index = getattr(inspector, "current_plugin_index", 0) if inspector is not None else 0
         cmd = SetPluginConfig(
             process_name=process_name,
-            plugin_index=0,
+            plugin_index=plugin_index,
             field=field_name,
             value=new_value,
         )
@@ -196,18 +204,21 @@ class PipelinePresenter:
         if self._suppress:
             return
 
+        # D.1: node_id может быть плагин-нодой `{process}.{plugin}` — извлекаем процесс.
+        process_name = node_id.split(".")[0] if node_id else node_id
+
         processes = self._model._topology.get("processes", [])
 
         # Найти запись узла и записать target_process как мета-поле
         found = False
         for proc in processes:
             if isinstance(proc, dict):
-                if proc.get("process_name") == node_id:
+                if proc.get("process_name") == process_name:
                     proc["target_process"] = new_process
                     found = True
                     break
             else:
-                if getattr(proc, "process_name", "") == node_id:
+                if getattr(proc, "process_name", "") == process_name:
                     try:
                         proc.target_process = new_process
                     except AttributeError:
@@ -271,6 +282,139 @@ class PipelinePresenter:
             except DomainError as exc:
                 logger.warning("Ребиндинг display %s→%s отклонён: %s", old_display_id, new_display_id, exc)
                 self._report(f"Смена канала дисплея отклонена: {exc}")
+
+    def _on_move_to_process_requested(self, from_process: str, to_process: str) -> None:
+        """Phase B: перенести ВСЕ плагины узла в другой процесс (merge nodes).
+
+        G.4.2-стиль: dispatch(MovePlugin) → store.save → TopologyReplaced → reload.
+        Узел=процесс, поэтому «перенести ноду в процесс» = перенести все его плагины
+        туда по одному (index 0 каждый раз; на последнем источник опустеет и удалится).
+        coalesce_key объединяет серию в одну undo-запись. Domain переписывает концы
+        проводов и убирает ставшие внутрипроцессными.
+        """
+        if self._suppress or not to_process or from_process == to_process:
+            return
+
+        # Счётчик плагинов источника СНИМАЕМ до серии (модель меняется после каждого dispatch).
+        plugin_count = 0
+        for proc in self._model.to_topology_dict().get("processes", []):
+            name = proc.get("process_name", "") if isinstance(proc, dict) else getattr(proc, "process_name", "")
+            if name == from_process:
+                plugins = proc.get("plugins", []) if isinstance(proc, dict) else getattr(proc, "plugins", [])
+                plugin_count = len(plugins)
+                break
+        if plugin_count == 0:
+            return
+
+        coalesce_key = f"move-node:{from_process}->{to_process}"
+        for _ in range(plugin_count):
+            try:
+                self._services.commands.dispatch(
+                    MovePlugin(from_process=from_process, from_index=0, to_process=to_process),
+                    coalesce_key=coalesce_key,
+                )
+            except DomainError as exc:
+                logger.warning("MovePlugin %s→%s отклонён: %s", from_process, to_process, exc)
+                self._report(f"Перенос в процессе отклонён: {exc}")
+                break
+        # Scene обновится из _on_topology_replaced (синхронный dispatch)
+
+    def on_plugin_dropped(
+        self,
+        node_id: str,
+        from_process: str,
+        from_index: int,
+        to_process: str,
+        to_index: int,
+    ) -> None:
+        """D.3: плагин-нода перетащена (drag между контейнерами / reorder внутри).
+
+        Решение по сигналу scene.plugin_drop_requested:
+          - дроп вне контейнеров (to_process=="") или без изменения позиции →
+            snap-back: reload scene из модели (топология не менялась);
+          - иначе dispatch(MovePlugin(from, from_index, to, to_index)) — cross-process
+            или reorder; reload придёт из TopologyReplaced. Domain переписывает
+            концы проводов и убирает ставшие внутрипроцессными.
+        """
+        if self._suppress:
+            return
+
+        no_change = (not to_process) or (to_process == from_process and to_index == from_index)
+        if no_change:
+            self._reload_scene_from_model()  # snap-back на исходную позицию
+            return
+
+        try:
+            self._services.commands.dispatch(
+                MovePlugin(
+                    from_process=from_process,
+                    from_index=from_index,
+                    to_process=to_process,
+                    to_index=to_index,
+                )
+            )
+        except DomainError as exc:
+            logger.warning(
+                "MovePlugin (drag) %s[%d]→%s[%d] отклонён: %s",
+                from_process,
+                from_index,
+                to_process,
+                to_index,
+                exc,
+            )
+            self._report(f"Перенос плагина отклонён: {exc}")
+            self._reload_scene_from_model()  # откатить визуальный сдвиг
+        # Успех → scene обновится из _on_topology_replaced (синхронный dispatch)
+
+    def _delete_command_for(self, node_id: str):
+        """Команда удаления для плагин-ноды/процесса (D.3).
+
+        Плагин-нода `{process}.{plugin}` в процессе с >1 плагином → RemovePlugin
+        (удалить только этот плагин). Иначе (последний плагин, process-fallback нода
+        или legacy-имя процесса) → RemoveProcess. Индекс берём из scene-ноды
+        (надёжно при дубликатах plugin_name); fallback — поиск по plugin_name.
+        """
+        proc = node_id.split(".")[0] if "." in node_id else node_id
+
+        # Плагины процесса из модели.
+        plugins: list = []
+        for p in self._model.to_topology_dict().get("processes", []):
+            pn = p.get("process_name", "") if isinstance(p, dict) else getattr(p, "process_name", "")
+            if pn == proc:
+                plugins = p.get("plugins", []) if isinstance(p, dict) else getattr(p, "plugins", [])
+                break
+
+        if "." not in node_id or len(plugins) <= 1:
+            return RemoveProcess(process_name=proc)
+
+        # Индекс удаляемого плагина: из scene-ноды, иначе по plugin_name.
+        node = self._scene.get_node(node_id) if self._scene else None
+        index = getattr(node, "plugin_index", -1) if node is not None else -1
+        if index < 0:
+            plugin_name = node_id.split(".", 1)[1]
+            for i, pl in enumerate(plugins):
+                pn = pl.get("plugin_name", "") if isinstance(pl, dict) else getattr(pl, "plugin_name", "")
+                if pn == plugin_name:
+                    index = i
+                    break
+        if index < 0:
+            return RemoveProcess(process_name=proc)
+        return RemovePlugin(process_name=proc, index=index)
+
+    def _reload_scene_from_model(self) -> None:
+        """Перерисовать scene из текущей модели (без dispatch).
+
+        Используется для snap-back после drag без изменения топологии: позиции
+        восстанавливаются из gui_positions/дефолтов. Тот же конвейер, что
+        _on_topology_replaced, с сохранением выделения.
+        """
+        if not self._scene:
+            return
+        selected_ids = self._capture_selection()
+        with self._block_signals():
+            nodes, edges = self._topology_to_graph(self._model.to_topology_dict())
+            self.load_scene_with_ports(nodes, edges)
+            self._restore_selection(selected_ids)
 
     # ------------------------------------------------------------------ #
     #  Signal suppression (из v1)                                         #
@@ -482,15 +626,18 @@ class PipelinePresenter:
                 self._gui_positions.pop(node_id, None)
                 self._placed_display_ids.discard(node_id)
             else:
-                # G.4.2: process removal через domain dispatch
+                # D.1/D.3: node_id может быть плагин-нодой `{process}.{plugin}` или
+                # именем процесса (legacy/тесты). Удаление плагин-ноды:
+                #   - процесс с >1 плагином → RemovePlugin(index) (удалить ТОЛЬКО плагин);
+                #   - последний плагин / process-нода → RemoveProcess (удалить процесс).
                 self._gui_positions.pop(node_id, None)
-                cmd = RemoveProcess(process_name=node_id)
+                cmd = self._delete_command_for(node_id)
                 try:
                     self._services.commands.dispatch(cmd)
                     dispatched = True
                 except DomainError as exc:
-                    logger.error("RemoveProcess отклонён: %s", exc)
-                    self._report(f"Не удалось удалить процесс: {exc}")
+                    logger.error("%s отклонён: %s", type(cmd).__name__, exc)
+                    self._report(f"Не удалось удалить узел: {exc}")
                 # Scene обновится из _on_topology_replaced (синхронный)
 
         # Task 2.1: явная перерисовка нужна только если удаляли исключительно
@@ -872,19 +1019,70 @@ class PipelinePresenter:
     # ------------------------------------------------------------------ #
 
     def auto_layout_scene(self) -> None:
-        """Применить Sugiyama auto-layout."""
+        """Применить Sugiyama auto-layout на уровне ПРОЦЕССОВ, плагины — группой.
+
+        D.1: нода = плагин, но раскладка считается по процессам (рамкам): каждый
+        процесс — один узел Sugiyama, его плагины раскладываются слева-направо
+        внутри по индексу. Ширина узла = макс ширина контейнера (по числу
+        плагинов), чтобы колонки не накладывались. Display-боксы участвуют как
+        узлы-стоки (binding-ребро source-процесс → бокс).
+        """
         if not self._scene:
             return
-        nodes = self._model.get_process_names()
-        edges = self._model.get_edges_as_tuples()
-        positions = auto_layout(nodes, edges)
+        from .graph.constants import CONTAINER_HEADER_H, CONTAINER_INNER_GAP, CONTAINER_PADDING, NODE_WIDTH
 
+        topo = self._model.to_topology_dict()
+        # Карта процесс → число плагинов (для ширины колонки и offset плагинов).
+        plugin_counts: dict[str, int] = {}
+        for proc in topo.get("processes", []):
+            if proc.get("protected", False) if isinstance(proc, dict) else getattr(proc, "protected", False):
+                continue
+            pn = proc.get("process_name", "") if isinstance(proc, dict) else getattr(proc, "process_name", "")
+            pls = proc.get("plugins", []) if isinstance(proc, dict) else getattr(proc, "plugins", [])
+            if pn:
+                plugin_counts[pn] = len(pls)
+
+        nodes = list(plugin_counts.keys())
+        edges = list(self._model.get_edges_as_tuples())
+
+        # Display-боксы (id = display_id) + binding-рёбра source-процесс → box.
+        display_ids: set[str] = set(self._placed_display_ids)
+        for d in self._model.get_displays():
+            display_id = d.get("display_id", "")
+            if not display_id:
+                continue
+            display_ids.add(display_id)
+            source_proc = d.get("node_id", "").split(".")[0]
+            if source_proc:
+                edges.append((source_proc, display_id))
+        for display_id in display_ids:
+            if display_id not in nodes:
+                nodes.append(display_id)
+
+        # Ширина колонки = макс ширина контейнера (учесть цепочку плагинов).
+        max_plugins = max(plugin_counts.values(), default=1) or 1
+        column_width = max_plugins * (NODE_WIDTH + CONTAINER_INNER_GAP) + 2 * CONTAINER_PADDING
+        positions = auto_layout(nodes, edges, node_width=column_width)
+
+        inner_dy = CONTAINER_HEADER_H + CONTAINER_PADDING
         with self._block_signals():
-            for node_id, (x, y) in positions.items():
-                self._gui_positions[node_id] = (x, y)
-                node_item = self._scene.get_node(node_id)
-                if node_item:
-                    node_item.setPos(x, y)
+            for layout_id, (x, y) in positions.items():
+                if layout_id in plugin_counts:
+                    # Процесс: разложить его плагин-ноды слева-направо группой.
+                    members = self._scene.members_of(layout_id)
+                    # Сортируем по plugin_index для стабильного порядка цепочки.
+                    members.sort(key=lambda m: m.plugin_index)
+                    for j, member in enumerate(members):
+                        mx = x + CONTAINER_PADDING + j * (NODE_WIDTH + CONTAINER_INNER_GAP)
+                        my = y + inner_dy
+                        member.setPos(mx, my)
+                        self._gui_positions[member.node_id] = (mx, my)
+                else:
+                    # Display-бокс (или fallback) — двигаем сам узел.
+                    self._gui_positions[layout_id] = (x, y)
+                    node_item = self._scene.get_node(layout_id)
+                    if node_item is not None:
+                        node_item.setPos(x, y)
 
     # ------------------------------------------------------------------ #
     #  Валидация и утилиты                                                 #
@@ -941,24 +1139,33 @@ class PipelinePresenter:
     def _topology_to_graph(self, topo_dict: dict) -> tuple[list[NodeData], list[EdgeData]]:
         """Конвертировать topology dict → NodeData/EdgeData.
 
-        G.4.2: реконструирует port_schemas из services.plugins.resolve() при reload,
-        чтобы ноды имели корректные порты после dispatch (находка #7 аудита).
-        port_schemas хранятся во внутреннем кэше _port_schemas_cache для передачи
-        в scene через load_from_data(port_schemas_map=...).
+        D.1: **нода = плагин**. Один процесс → N плагин-нод (node_id=`{proc}.{plugin}`)
+        + рамка-контейнер (строит scene по NodeData.process_name) + неявные стрелки
+        цепочки (implicit edges) между соседними плагинами. Процесс без плагинов
+        рендерится одной process-fallback нодой (node_id=process_name, plugin_index=-1).
 
-        G.4.2b: рендерит display-боксы из topo["displays"] (binding-формат
-        {node_id: <source endpoint>, display_id}). Один бокс на display_id (канал),
-        binding-ребро source→box на каждый DisplayInstance. Боксы кладутся в
-        _display_nodes_cache, рёбра — в общий список edges.
+        G.4.2: port_schemas реконструируются из services.plugins.resolve() ПО КАЖДОМУ
+        плагину (не только первому) и кэшируются в _port_schemas_cache по node_id
+        плагин-ноды (передаётся в scene через load_from_data(port_schemas_map=...)).
+
+        Внешние wires (`proc.plugin.* → proc2.plugin2.*`) мапятся на конкретные
+        плагин-ноды (НЕ схлопываются до процесса). Display-боксы — из topo["displays"]
+        (binding-ребро source-плагин-нода → бокс).
         """
-        nodes = []
-        edges = []
-        self._port_schemas_cache: dict[str, list[PortSchema]] = {}
+        nodes: list[NodeData] = []
+        edges: list[EdgeData] = []
+        self._port_schemas_cache = {}
         self._display_nodes_cache = []
 
         processes = topo_dict.get("processes", [])
+        used_ids: set[str] = set()  # уникальность node_id (дубликаты plugin_name)
 
-        for proc in processes:
+        for pi, proc in enumerate(processes):
+            protected = proc.get("protected", False) if isinstance(proc, dict) else getattr(proc, "protected", False)
+            if protected:
+                # protected-процессы (gui из base.yaml) — фундамент, не рисуем.
+                continue
+
             if isinstance(proc, dict):
                 name = proc.get("process_name", "unnamed")
                 plugins = proc.get("plugins", [])
@@ -966,69 +1173,167 @@ class PipelinePresenter:
                 name = getattr(proc, "process_name", "unnamed")
                 plugins = getattr(proc, "plugins", [])
 
-            category = "utility"
-            port_schemas: list[PortSchema] | None = None
-            if plugins:
-                pname = (
-                    plugins[0].get("plugin_name", "")
-                    if isinstance(plugins[0], dict)
-                    else getattr(plugins[0], "plugin_name", "")
+            if not plugins:
+                # Процесс без плагинов → одна process-fallback нода (node_id=process).
+                x, y = self._node_position(name, name, pi, 0)
+                nodes.append(
+                    NodeData(
+                        node_id=name,
+                        title=name,
+                        subtitle="(пусто)",
+                        category="utility",
+                        x=x,
+                        y=y,
+                        process_name=name,
+                        plugin_index=-1,
+                        plugin_name="",
+                    )
                 )
+                used_ids.add(name)
+                continue
+
+            prev_node_id: str | None = None
+            for j, pl in enumerate(plugins):
+                pname = pl.get("plugin_name", "") if isinstance(pl, dict) else getattr(pl, "plugin_name", "")
+                category = "utility"
+                port_schemas: list[PortSchema] | None = None
                 if pname:
                     spec = self._services.plugins.resolve(pname)
                     if spec is not None:
                         category = spec.category
-                        # G.4.2: реконструкция port_schemas из PluginCatalog
                         try:
-                            schemas: list[PortSchema] = []
-                            for port_spec in spec.ports:
-                                schemas.append(
-                                    PortSchema(
-                                        name=port_spec.name,
-                                        direction=port_spec.direction,
-                                        dtype=port_spec.dtype,
-                                        optional=port_spec.optional,
-                                    )
+                            schemas = [
+                                PortSchema(
+                                    name=ps.name,
+                                    direction=ps.direction,
+                                    dtype=ps.dtype,
+                                    optional=ps.optional,
                                 )
-                            port_schemas = schemas if schemas else None
+                                for ps in spec.ports
+                            ]
+                            port_schemas = schemas or None
                         except Exception:
                             port_schemas = None
 
-            # Кэшировать port_schemas для поэлементной установки после load_from_data
-            if port_schemas:
-                self._port_schemas_cache[name] = port_schemas
+                node_id = self._unique_plugin_node_id(name, pname, j, used_ids)
+                used_ids.add(node_id)
+                if port_schemas:
+                    self._port_schemas_cache[node_id] = port_schemas
 
-            # Восстановить позицию из gui_positions
-            x, y = self._gui_positions.get(name, (0.0, 0.0))
-            nodes.append(
-                NodeData(
-                    node_id=name,
-                    title=name,
-                    subtitle=category,
-                    category=category,
-                    x=x,
-                    y=y,
+                x, y = self._node_position(node_id, name, pi, j)
+                nodes.append(
+                    NodeData(
+                        node_id=node_id,
+                        title=pname or name,
+                        subtitle=category,
+                        category=category,
+                        x=x,
+                        y=y,
+                        process_name=name,
+                        plugin_index=j,
+                        plugin_name=pname,
+                    )
                 )
-            )
 
-        wires = topo_dict.get("wires", [])
-        for w in wires:
+                # Неявная стрелка цепочки: предыдущий плагин → текущий.
+                if prev_node_id is not None:
+                    edges.append(EdgeData(source_id=prev_node_id, target_id=node_id, implicit=True))
+                prev_node_id = node_id
+
+        # Внешние wires → конкретные плагин-ноды.
+        for w in topo_dict.get("wires", []):
             if isinstance(w, dict):
                 source = w.get("source", "")
                 target = w.get("target", "")
             else:
                 source = getattr(w, "source", "")
                 target = getattr(w, "target", "")
-
             if source and target:
-                source_proc = source.split(".")[0] if "." in source else source
-                target_proc = target.split(".")[0] if "." in target else target
-                edges.append(EdgeData(source_id=source_proc, target_id=target_proc))
+                s_node = self._endpoint_to_node_id(source, topo_dict)
+                t_node = self._endpoint_to_node_id(target, topo_dict)
+                if s_node and t_node:
+                    edges.append(EdgeData(source_id=s_node, target_id=t_node))
 
         # G.4.2b: display-боксы + binding-рёбра из topo["displays"]
         self._build_display_nodes(topo_dict, edges)
 
         return nodes, edges
+
+    # ------------------------------------------------------------------ #
+    #  Хелперы node=plugin (D.1)                                           #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _unique_plugin_node_id(process: str, plugin_name: str, index: int, used: set[str]) -> str:
+        """node_id плагин-ноды = `{process}.{plugin_name}`.
+
+        Дубликаты plugin_name в одном процессе (против конвенции «1 плагин/процесс»
+        и неразличимы в endpoint-схеме domain) получают суффикс `#i` для GUI-
+        уникальности. Первое вхождение — без суффикса, чтобы wire-endpoint
+        (`proc.plugin`) мапился на него. См. план pipeline-process-container-nodes.
+        """
+        base = f"{process}.{plugin_name}" if plugin_name else f"{process}.plugin{index}"
+        if base not in used:
+            return base
+        suffixed = f"{base}#{index}"
+        logger.warning(
+            "Дубликат plugin_name '%s' в процессе '%s' — GUI node_id '%s' (endpoint неразличим)",
+            plugin_name,
+            process,
+            suffixed,
+        )
+        return suffixed
+
+    def _node_position(
+        self,
+        node_id: str,
+        process_name: str,
+        process_index: int,
+        plugin_index: int,
+    ) -> tuple[float, float]:
+        """Позиция плагин-ноды: из gui_positions или дефолтный кластер по процессу.
+
+        Приоритет: (1) позиция самой плагин-ноды (`proc.plugin`) — обычный путь
+        после auto_layout/сохранения; (2) anchor процесса в gui_positions —
+        legacy-рецепты и add_process_from_plugin кладут позицию по имени процесса,
+        плагин 0 встаёт в anchor, остальные смещаются вправо; (3) дефолтный
+        кластер (процесс=колонка). auto_layout_scene переразложит группами.
+        """
+        from .graph.constants import CONTAINER_HEADER_H, CONTAINER_INNER_GAP, CONTAINER_PADDING, NODE_WIDTH
+
+        if node_id in self._gui_positions:
+            return self._gui_positions[node_id]
+        if process_name in self._gui_positions:
+            base_x, base_y = self._gui_positions[process_name]
+        else:
+            base_x = 60.0 + process_index * 340.0
+            base_y = 60.0 + CONTAINER_HEADER_H + CONTAINER_PADDING
+        x = base_x + plugin_index * (NODE_WIDTH + CONTAINER_INNER_GAP)
+        return x, base_y
+
+    @staticmethod
+    def _endpoint_to_node_id(endpoint: str, topo_dict: dict) -> str:
+        """endpoint `proc.plugin.port` → node_id плагин-ноды (`proc.plugin`).
+
+        Процесс без плагинов → node_id = process (process-fallback нода). При
+        отсутствии plugin-сегмента берётся первый плагин процесса.
+        """
+        parts = endpoint.split(".")
+        proc = parts[0]
+        # Найти процесс и его плагины.
+        plugins: list = []
+        for p in topo_dict.get("processes", []):
+            pn = p.get("process_name", "") if isinstance(p, dict) else getattr(p, "process_name", "")
+            if pn == proc:
+                plugins = p.get("plugins", []) if isinstance(p, dict) else getattr(p, "plugins", [])
+                break
+        if not plugins:
+            return proc
+        if len(parts) >= 2:
+            return f"{proc}.{parts[1]}"
+        first = plugins[0]
+        first_name = first.get("plugin_name", "") if isinstance(first, dict) else getattr(first, "plugin_name", "")
+        return f"{proc}.{first_name}" if first_name else proc
 
     def _build_display_nodes(self, topo_dict: dict, edges: list[EdgeData]) -> None:
         """Построить display-боксы и binding-рёбра из topo["displays"] (G.4.2b).
@@ -1070,10 +1375,10 @@ class PipelinePresenter:
                     y=y,
                 )
 
-            # Binding-ребро source-процесс → бокс
+            # Binding-ребро source-плагин-нода → бокс (D.1: node=plugin).
             if source_endpoint:
-                source_proc = source_endpoint.split(".")[0]
-                edges.append(EdgeData(source_id=source_proc, target_id=display_id))
+                source_node = self._endpoint_to_node_id(source_endpoint, topo_dict)
+                edges.append(EdgeData(source_id=source_node, target_id=display_id))
 
         # Task 1.1: дорисовать placed-but-unbound боксы — display_id, которые
         # пользователь разместил через меню, но ещё не привязал проводом. Их нет

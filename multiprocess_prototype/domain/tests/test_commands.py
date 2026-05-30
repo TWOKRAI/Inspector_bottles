@@ -28,6 +28,7 @@ from multiprocess_prototype.domain import (
     DeactivateRecipe,
     DisconnectWire,
     InsertPlugin,
+    MovePlugin,
     PluginInstance,
     ProjectCommand,
     RemovePlugin,
@@ -218,6 +219,8 @@ def _dispatch(cmd: ProjectCommand) -> str:
             return "RemovePlugin"
         case SetPluginConfig():
             return "SetPluginConfig"
+        case MovePlugin():
+            return "MovePlugin"
         case ConnectWire():
             return "ConnectWire"
         case DisconnectWire():
@@ -254,6 +257,7 @@ class TestExhaustivenessMatch:
                 SetPluginConfig(process_name="p", plugin_index=0, field="k", value=42),
                 "SetPluginConfig",
             ),
+            (MovePlugin(from_process="p", from_index=0, to_process="q"), "MovePlugin"),
             (ConnectWire(source="a", target="b"), "ConnectWire"),
             (DisconnectWire(source="a", target="b"), "DisconnectWire"),
             (BindDisplay(node_id="n", display_id="d"), "BindDisplay"),
@@ -270,6 +274,7 @@ class TestExhaustivenessMatch:
             "InsertPlugin",
             "RemovePlugin",
             "SetPluginConfig",
+            "MovePlugin",
             "ConnectWire",
             "DisconnectWire",
             "BindDisplay",
@@ -373,11 +378,11 @@ class TestDefaultValues:
 
 
 class TestAll14CommandsCovered:
-    """ProjectCommand Union содержит ровно 14 типов."""
+    """ProjectCommand Union содержит ровно 15 типов (14 + MovePlugin, Phase B)."""
 
     def test_project_command_union_size(self) -> None:
-        """len(get_args(ProjectCommand)) == 14."""
+        """len(get_args(ProjectCommand)) == 15."""
         union_args = get_args(ProjectCommand)
-        assert len(union_args) == 14, (
-            f"ProjectCommand должен содержать 14 типов, найдено {len(union_args)}: {[t.__name__ for t in union_args]}"
+        assert len(union_args) == 15, (
+            f"ProjectCommand должен содержать 15 типов, найдено {len(union_args)}: {[t.__name__ for t in union_args]}"
         )

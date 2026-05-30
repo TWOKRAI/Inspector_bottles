@@ -23,6 +23,7 @@ from multiprocess_prototype.domain import (
     DisplayUnbound,
     PluginConfigChanged,
     PluginInserted,
+    PluginMoved,
     PluginInstance,
     PluginRemoved,
     Process,
@@ -225,6 +226,8 @@ def _handle(evt: ProjectEvent) -> str:
             return "PluginRemoved"
         case PluginConfigChanged():
             return "PluginConfigChanged"
+        case PluginMoved():
+            return "PluginMoved"
         case WireConnected():
             return "WireConnected"
         case WireDisconnected():
@@ -268,6 +271,16 @@ class TestExhaustivenessMatch:
                 PluginConfigChanged(process_name="p", plugin_index=0, field="k", value=42),
                 "PluginConfigChanged",
             ),
+            (
+                PluginMoved(
+                    from_process="a",
+                    from_index=0,
+                    to_process="b",
+                    to_index=0,
+                    plugin=PluginInstance(plugin_name="blur"),
+                ),
+                "PluginMoved",
+            ),
             (WireConnected(wire=Wire(source="a", target="b")), "WireConnected"),
             (WireDisconnected(source="a", target="b"), "WireDisconnected"),
             (
@@ -287,6 +300,7 @@ class TestExhaustivenessMatch:
             "PluginInserted",
             "PluginRemoved",
             "PluginConfigChanged",
+            "PluginMoved",
             "WireConnected",
             "WireDisconnected",
             "DisplayBound",
@@ -303,10 +317,10 @@ class TestExhaustivenessMatch:
         assert result == expected_label
 
     def test_all_14_events_covered(self) -> None:
-        """ProjectEvent Union содержит ровно 14 типов."""
+        """ProjectEvent Union содержит ровно 15 типов (14 + PluginMoved, Phase B)."""
         union_args = get_args(ProjectEvent)
-        assert len(union_args) == 14, (
-            f"ProjectEvent должен содержать 14 типов, найдено {len(union_args)}: {[t.__name__ for t in union_args]}"
+        assert len(union_args) == 15, (
+            f"ProjectEvent должен содержать 15 типов, найдено {len(union_args)}: {[t.__name__ for t in union_args]}"
         )
 
 

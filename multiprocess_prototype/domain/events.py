@@ -100,6 +100,23 @@ class PluginConfigChanged:
     value: Any
 
 
+@dataclass(frozen=True, slots=True)
+class PluginMoved:
+    """Эмитится когда PluginInstance перенесён из одного процесса в другой (Phase B).
+
+    source_removed=True, если процесс-источник опустел и был удалён.
+    """
+
+    event_type: ClassVar[str] = "PluginMoved"
+
+    from_process: str
+    from_index: int
+    to_process: str
+    to_index: int
+    plugin: PluginInstance
+    source_removed: bool = False
+
+
 # ==============================================================================
 # Wire-события
 # ==============================================================================
@@ -206,6 +223,7 @@ ProjectEvent = Union[
     PluginInserted,
     PluginRemoved,
     PluginConfigChanged,
+    PluginMoved,
     WireConnected,
     WireDisconnected,
     DisplayBound,
@@ -224,6 +242,7 @@ __all__ = [
     "PluginInserted",
     "PluginRemoved",
     "PluginConfigChanged",
+    "PluginMoved",
     "WireConnected",
     "WireDisconnected",
     "DisplayBound",

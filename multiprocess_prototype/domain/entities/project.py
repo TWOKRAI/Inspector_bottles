@@ -42,6 +42,7 @@ from ..commands import (
     DeactivateRecipe,
     DisconnectWire,
     InsertPlugin,
+    MovePlugin,
     ProjectCommand,
     RemovePlugin,
     RemoveProcess,
@@ -55,6 +56,7 @@ from ..events import (
     DisplayUnbound,
     PluginConfigChanged,
     PluginInserted,
+    PluginMoved,
     PluginRemoved,
     ProcessAdded,
     ProcessRemoved,
@@ -334,6 +336,8 @@ class Project(SchemaBase):
                 return self._apply_remove_plugin(cmd, catalogs)
             case SetPluginConfig() as cmd:
                 return self._apply_set_plugin_config(cmd, catalogs)
+            case MovePlugin() as cmd:
+                return self._apply_move_plugin(cmd, catalogs)
             case ConnectWire() as cmd:
                 return self._apply_connect_wire(cmd, catalogs)
             case DisconnectWire() as cmd:
@@ -568,6 +572,125 @@ class Project(SchemaBase):
                 index=cmd.index,
             )
         ]
+        return new_project, events
+
+    def _apply_move_plugin(
+        self,
+        cmd: MovePlugin,
+        catalogs: ApplyContext,
+    ) -> tuple["Project", list[ProjectEvent]]:
+        """Перенести PluginInstance из одного процесса в другой (Phase B).
+
+        Семантика:
+          - плагин убирается из from_process[from_index], вставляется в to_process
+            (в конец при to_index=None); from==to → переупорядочивание;
+          - концы проводов/привязок «from_process.<plugin>.*» переписываются на
+            «to_process.<plugin>.*» (плагин сменил процесс — endpoint меняет префикс);
+          - провод, у которого после переписывания ОБА конца в одном процессе, стал
+            внутрипроцессной (неявной) цепочкой — удаляется как явный wire;
+          - опустевший процесс-источник удаляется (эмитится ProcessRemoved);
+          - результат валидируется (_validate_topology: dangling/циклы/каталог).
+        """
+        from_proc = self.topology.find_process(cmd.from_process)
+        if from_proc is None:
+            raise DomainError(f"process '{cmd.from_process}' not found")
+        to_proc = self.topology.find_process(cmd.to_process)
+        if to_proc is None:
+            raise DomainError(f"process '{cmd.to_process}' not found")
+        if cmd.from_index < 0 or cmd.from_index >= len(from_proc.plugins):
+            raise DomainError(
+                f"plugin index {cmd.from_index} out of range "
+                f"(process '{cmd.from_process}' has {len(from_proc.plugins)} plugins)"
+            )
+
+        plugin = from_proc.plugins[cmd.from_index]
+        same_process = cmd.from_process == cmd.to_process
+
+        if same_process:
+            # Переупорядочивание внутри одного процесса.
+            plugins_list = list(from_proc.plugins)
+            plugins_list.pop(cmd.from_index)
+            to_index = cmd.to_index if cmd.to_index is not None else len(plugins_list)
+            if to_index < 0 or to_index > len(plugins_list):
+                raise DomainError(f"to_index {to_index} out of range")
+            plugins_list.insert(to_index, plugin)
+            updated_from = from_proc.model_copy(update={"plugins": tuple(plugins_list)})
+            updated_to = updated_from
+            source_removed = False
+        else:
+            from_list = list(from_proc.plugins)
+            from_list.pop(cmd.from_index)
+            to_list = list(to_proc.plugins)
+            to_index = cmd.to_index if cmd.to_index is not None else len(to_list)
+            if to_index < 0 or to_index > len(to_list):
+                raise DomainError(f"to_index {to_index} out of range")
+            to_list.insert(to_index, plugin)
+            updated_from = from_proc.model_copy(update={"plugins": tuple(from_list)})
+            updated_to = to_proc.model_copy(update={"plugins": tuple(to_list)})
+            source_removed = len(from_list) == 0
+
+        # Пересобрать процессы (источник опустел → выкинуть).
+        new_processes_list: list[Process] = []
+        for p in self.topology.processes:
+            if p.process_name == cmd.from_process:
+                if same_process:
+                    new_processes_list.append(updated_from)
+                elif not source_removed:
+                    new_processes_list.append(updated_from)
+                # source_removed → не добавляем (удаляем пустой процесс)
+            elif p.process_name == cmd.to_process:
+                new_processes_list.append(updated_to)
+            else:
+                new_processes_list.append(p)
+        new_processes = tuple(new_processes_list)
+
+        # Переписать endpoint'ы: from_process.<plugin>.* → to_process.<plugin>.*
+        plugin_name = plugin.plugin_name
+
+        def _rewrite(node_id: str) -> str:
+            parts = node_id.split(".")
+            if len(parts) >= 2 and parts[0] == cmd.from_process and parts[1] == plugin_name:
+                parts[0] = cmd.to_process
+                return ".".join(parts)
+            return node_id
+
+        new_wires_list = []
+        for w in self.topology.wires:
+            new_source = _rewrite(w.source)
+            new_target = _rewrite(w.target)
+            # Стал внутрипроцессным (оба конца в одном процессе) → неявная цепочка,
+            # убираем явный wire.
+            if _extract_process_from_node(new_source) == _extract_process_from_node(new_target):
+                continue
+            new_wires_list.append(w.model_copy(update={"source": new_source, "target": new_target}))
+        new_wires = tuple(new_wires_list)
+
+        new_displays = tuple(d.model_copy(update={"node_id": _rewrite(d.node_id)}) for d in self.topology.displays)
+
+        new_topology = self.topology.model_copy(
+            update={
+                "processes": new_processes,
+                "wires": new_wires,
+                "displays": new_displays,
+            }
+        )
+
+        # Валидация результата (dangling/циклы/уникальность/каталог).
+        _validate_topology(new_topology, catalogs)
+
+        new_project = self.model_copy(update={"topology": new_topology})
+        events: list[ProjectEvent] = [
+            PluginMoved(
+                from_process=cmd.from_process,
+                from_index=cmd.from_index,
+                to_process=cmd.to_process,
+                to_index=to_index,
+                plugin=plugin,
+                source_removed=source_removed,
+            )
+        ]
+        if source_removed:
+            events.append(ProcessRemoved(process_name=cmd.from_process))
         return new_project, events
 
     def _apply_set_plugin_config(

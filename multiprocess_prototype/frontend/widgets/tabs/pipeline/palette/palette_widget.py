@@ -21,6 +21,15 @@ if TYPE_CHECKING:
 
 # MIME тип для drag-and-drop плагинов
 MIME_TYPE = "application/x-inspector-plugin"
+# MIME тип для drag-and-drop дисплеев (отдельная секция палитры → display-бокс)
+MIME_TYPE_DISPLAY = "application/x-inspector-display"
+
+# Роль данных: тип перетаскиваемого элемента ("plugin" | "display").
+# UserRole хранит payload (имя плагина / display_id), _KIND_ROLE — тип.
+_KIND_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+
+# Подпись секции дисплеев в палитре
+DISPLAY_SECTION_LABEL = "Displays — дисплеи"
 
 # Порядок категорий в палитре
 CATEGORY_ORDER = ("source", "processing", "output", "rendering", "control", "utility", "service")
@@ -49,18 +58,25 @@ class _PaletteTree(QTreeWidget):
         self.setDragDropMode(QTreeWidget.DragDropMode.DragOnly)
 
     def startDrag(self, supportedActions):
-        """Перехватить drag: только для элементов-плагинов (не категорий)."""
+        """Перехватить drag: элементы-плагины и элементы-дисплеи (не категории).
+
+        Тип элемента (_KIND_ROLE) выбирает MIME: плагин → MIME_TYPE,
+        дисплей → MIME_TYPE_DISPLAY. payload (имя плагина / display_id) — в UserRole.
+        """
         item = self.currentItem()
         if item is None or item.childCount() > 0:
             return  # Не тащить категории
 
-        plugin_name = item.data(0, Qt.ItemDataRole.UserRole)
-        if not plugin_name:
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if not payload:
             return
+
+        kind = item.data(0, _KIND_ROLE) or "plugin"
+        mime_type = MIME_TYPE_DISPLAY if kind == "display" else MIME_TYPE
 
         drag = QDrag(self)
         mime = QMimeData()
-        mime.setData(MIME_TYPE, plugin_name.encode("utf-8"))
+        mime.setData(mime_type, payload.encode("utf-8"))
         drag.setMimeData(mime)
         drag.exec(Qt.DropAction.CopyAction)
 
@@ -119,6 +135,49 @@ class PluginPalette(QWidget):
         for cat, items in by_category.items():
             if cat not in CATEGORY_ORDER:
                 self._add_category(cat, items)
+
+        self._tree.expandAll()
+
+    # Ключ display-секции в _category_items (чтобы участвовала в _apply_filter).
+    _DISPLAY_KEY = "__displays__"
+
+    def load_displays(self, displays: list[dict[str, Any]]) -> None:
+        """Добавить секцию «Displays — дисплеи» в палитру (поверх плагинов).
+
+        Не очищает дерево — вызывается после load_plugins. Каждый элемент тащится
+        с MIME_TYPE_DISPLAY (тип "display" в _KIND_ROLE, display_id в UserRole) →
+        drop на холст создаёт display-бокс.
+
+        Args:
+            displays: список dict с ключами display_id (обяз.), display_name (opt).
+        """
+        from ..graph.constants import DISPLAY_CATEGORY_COLOR
+
+        if not displays:
+            return
+
+        # Идемпотентность: убрать прежнюю секцию, если перезагружаем
+        old = self._category_items.pop(self._DISPLAY_KEY, None)
+        if old is not None:
+            idx = self._tree.indexOfTopLevelItem(old)
+            if idx >= 0:
+                self._tree.takeTopLevelItem(idx)
+
+        cat_item = QTreeWidgetItem(self._tree, [DISPLAY_SECTION_LABEL])
+        cat_item.setFlags(cat_item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
+        cat_item.setForeground(0, QColor(DISPLAY_CATEGORY_COLOR))
+        self._category_items[self._DISPLAY_KEY] = cat_item
+
+        for d in sorted(displays, key=lambda x: x.get("display_name") or x.get("display_id", "")):
+            display_id = d.get("display_id", "")
+            if not display_id:
+                continue
+            display_name = d.get("display_name") or ""
+            label = f"{display_name} ({display_id})" if display_name else display_id
+            child = QTreeWidgetItem(cat_item, [label])
+            child.setData(0, Qt.ItemDataRole.UserRole, display_id)
+            child.setData(0, _KIND_ROLE, "display")
+            child.setToolTip(0, f"Дисплей: {label}")
 
         self._tree.expandAll()
 

@@ -161,3 +161,12 @@ wires:
   - source: process_flip.flip.region
     target: stitcher.stitcher.region
     description: "Перевёрнутый регион → склейка"
+
+# --- Дисплеи: куда направляется финальный кадр и где показывается ---
+# Сток пайплайна — Display-нода «main» (см. backend/config/displays.yaml).
+# stitcher.frame (склеенный кадр) → канал main → отрисовка в области «Main».
+# В GUI-редакторе это рисуется отдельным Display-боксом на конце графа.
+displays:
+  - node_id: stitcher.stitcher.frame
+    display_id: main
+    display_name: Основной дисплей

@@ -24,6 +24,7 @@ from multiprocess_prototype.domain.commands import (
     DeactivateRecipe,
     DisconnectWire,
     InsertPlugin,
+    MovePlugin,
     RemovePlugin,
     RemoveProcess,
     RenameProcess,
@@ -48,6 +49,7 @@ from multiprocess_prototype.domain.events import (
     DisplayUnbound,
     PluginConfigChanged,
     PluginInserted,
+    PluginMoved,
     PluginRemoved,
     ProcessAdded,
     ProcessRemoved,
@@ -908,3 +910,116 @@ def test_frozen_project_raises_on_mutation() -> None:
     project = _empty_project()
     with pytest.raises(Exception):  # Pydantic ValidationError
         project.active_recipe = "something"  # type: ignore[misc]
+
+
+# ======================================================================
+# MovePlugin (Phase B)
+# ======================================================================
+
+
+def _project_chain() -> Project:
+    """cam[capture] → proc[resize] → out[render], wired по портам."""
+    cam = Process(process_name="cam", plugins=(PluginInstance(plugin_name="capture"),))
+    proc = Process(process_name="proc", plugins=(PluginInstance(plugin_name="resize"),))
+    out = Process(process_name="out", plugins=(PluginInstance(plugin_name="render"),))
+    wires = (
+        Wire(source="cam.capture.frame", target="proc.resize.frame"),
+        Wire(source="proc.resize.frame", target="out.render.frame"),
+    )
+    return Project(topology=Topology(processes=(cam, proc, out), wires=wires))
+
+
+def _plugin_names(proc: Process) -> list[str]:
+    return [p.plugin_name for p in proc.plugins]
+
+
+def test_move_plugin_appends_and_removes_empty_source() -> None:
+    """Перенос единственного плагина → источник опустел и удалён, цель получила плагин."""
+    project = _project_chain()
+    # capture (cam[0]) → proc (в конец)
+    new_proj, events = project.apply(
+        MovePlugin(from_process="cam", from_index=0, to_process="proc"),
+        catalogs=_empty_ctx(),
+    )
+    names = {p.process_name for p in new_proj.topology.processes}
+    assert "cam" not in names  # пустой источник удалён
+    proc = new_proj.topology.find_process("proc")
+    assert _plugin_names(proc) == ["resize", "capture"]  # append в конец
+
+    moved = [e for e in events if isinstance(e, PluginMoved)]
+    assert len(moved) == 1 and moved[0].source_removed is True
+    assert any(isinstance(e, ProcessRemoved) and e.process_name == "cam" for e in events)
+
+
+def test_move_plugin_drops_intraprocess_wire() -> None:
+    """Провод cam.capture→proc.resize становится внутрипроцессным → удаляется."""
+    project = _project_chain()
+    new_proj, _ = project.apply(
+        MovePlugin(from_process="cam", from_index=0, to_process="proc"),
+        catalogs=_empty_ctx(),
+    )
+    sources = {w.source for w in new_proj.topology.wires}
+    targets = {w.target for w in new_proj.topology.wires}
+    # cam.capture.frame → proc.resize.frame стал внутрипроцессным (оба в proc) → нет
+    assert "cam.capture.frame" not in sources
+    # внешний провод proc.resize.frame → out.render.frame сохранён
+    assert "out.render.frame" in targets
+
+
+def test_move_plugin_rewrites_external_wire_endpoint() -> None:
+    """Endpoint провода, ссылающийся на перемещённый плагин, переписывается на новый процесс."""
+    project = _project_chain()
+    # resize (proc[0]) → out: теперь resize в out, источник proc опустел/удалён
+    new_proj, _ = project.apply(
+        MovePlugin(from_process="proc", from_index=0, to_process="out"),
+        catalogs=_empty_ctx(),
+    )
+    names = {p.process_name for p in new_proj.topology.processes}
+    assert "proc" not in names
+    out = new_proj.topology.find_process("out")
+    assert _plugin_names(out) == ["render", "resize"]
+    # cam.capture.frame → proc.resize.frame: proc.resize → out.resize → cam.capture→out.resize
+    assert any(w.source == "cam.capture.frame" and w.target == "out.resize.frame" for w in new_proj.topology.wires)
+
+
+def test_move_plugin_reorder_same_process() -> None:
+    """from==to → переупорядочивание внутри процесса, источник не удаляется."""
+    proc = Process(
+        process_name="p",
+        plugins=(PluginInstance(plugin_name="a"), PluginInstance(plugin_name="b")),
+    )
+    project = Project(topology=Topology(processes=(proc,)))
+    # to_index=None → append после удаления → ["b", "a"]
+    new_proj, events = project.apply(
+        MovePlugin(from_process="p", from_index=0, to_process="p"),
+        catalogs=_empty_ctx(),
+    )
+    p = new_proj.topology.find_process("p")
+    assert _plugin_names(p) == ["b", "a"]
+    assert not any(isinstance(e, ProcessRemoved) for e in events)
+
+
+def test_move_plugin_invalid_source_raises() -> None:
+    project = _project_chain()
+    with pytest.raises(DomainError, match="not found"):
+        project.apply(MovePlugin(from_process="nope", from_index=0, to_process="proc"), catalogs=_empty_ctx())
+
+
+def test_move_plugin_invalid_dest_raises() -> None:
+    project = _project_chain()
+    with pytest.raises(DomainError, match="not found"):
+        project.apply(MovePlugin(from_process="cam", from_index=0, to_process="nope"), catalogs=_empty_ctx())
+
+
+def test_move_plugin_invalid_index_raises() -> None:
+    project = _project_chain()
+    with pytest.raises(DomainError, match="out of range"):
+        project.apply(MovePlugin(from_process="cam", from_index=5, to_process="proc"), catalogs=_empty_ctx())
+
+
+def test_move_plugin_does_not_mutate_self() -> None:
+    project = _project_chain()
+    before = len(project.topology.processes)
+    project.apply(MovePlugin(from_process="cam", from_index=0, to_process="proc"), catalogs=_empty_ctx())
+    assert len(project.topology.processes) == before  # self не изменился
+    assert project.topology.find_process("cam") is not None

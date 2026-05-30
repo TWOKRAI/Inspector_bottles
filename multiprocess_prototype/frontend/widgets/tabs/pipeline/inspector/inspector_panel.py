@@ -64,10 +64,17 @@ class NodeInspectorPanel(QWidget):
     # Signal: (node_id, new_display_id) — пользователь выбрал display
     display_id_changed = Signal(str, str)
 
+    # Signal: (from_node_id, to_process) — Phase B: перенести узел (его плагины) в процесс
+    move_to_process_requested = Signal(str, str)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._current_process: str = ""
         self._current_node_id: str = ""
+        # D.2: индекс выбранного плагина в цепочке процесса (для SetPluginConfig
+        # presenter читает его как panel.current_plugin_index). По умолчанию 0 —
+        # совместимо с прямым field_changed.emit в тестах (1 плагин/процесс).
+        self._current_plugin_index: int = 0
         self._suppress_changes: bool = False
         # Хранит и QLineEdit (fallback) и FieldEditor (cards-режим)
         self._field_editors: dict[str, Any] = {}
@@ -137,20 +144,53 @@ class NodeInspectorPanel(QWidget):
         self._category_badge.setObjectName("InspectorCategoryBadge")
         content_layout.addWidget(self._category_badge)
 
+        # Блок «Исполнение» (Phase A, read-only): в каком ПРОЦЕССЕ исполняется нода
+        # и в каком ВОРКЕРЕ каждый плагин (+ порядок в цепочке). Воркеры сейчас
+        # назначаются автоматически в GenericProcess (см. plans/pipeline-node-process-worker.md):
+        # source → свой source_producer_<plugin>; processing → общий pipeline_executor
+        # (последовательно). Поэтому блок read-only — назначение придёт в Phase C.
+        self._exec_info_form = QWidget()
+        self._exec_info_layout = QFormLayout(self._exec_info_form)
+        self._exec_info_layout.setContentsMargins(0, 0, 0, 0)
+        self._exec_info_layout.setSpacing(2)
+        content_layout.addWidget(self._exec_info_form)
+
         # Разделитель
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setObjectName("InspectorDivider")
         content_layout.addWidget(line)
 
-        # Combo «Процесс назначения» (только для plugin-узлов)
+        # Combo «Перенести в процесс» (Phase B): переносит плагины узла в выбранный
+        # процесс — несколько плагинов в одном процессе = последовательная цепочка.
+        # Первый пункт — плейсхолдер «— перенести в… —» (не вызывает мутацию).
+        self._move_process_form = QWidget()
+        mp_layout = QFormLayout(self._move_process_form)
+        mp_layout.setContentsMargins(0, 0, 0, 0)
+        mp_layout.setSpacing(4)
+        self._move_process_combo = QComboBox()
+        self._move_process_combo.setObjectName("MoveProcessCombo")
+        self._move_process_combo.setToolTip(
+            "Перенести этот узел (его плагины) в другой процесс. Плагины в одном\n"
+            "процессе исполняются последовательно; разные процессы — параллельно."
+        )
+        mp_layout.addRow("Перенести в процесс:", self._move_process_combo)
+        content_layout.addWidget(self._move_process_form)
+        self._move_process_form.setVisible(False)
+
+        # Combo «IPC-таргет команд» (только для plugin-узлов; опциональная маршрутизация
+        # команд через target_process — НЕ влияет на то, в каком процессе исполняется нода).
         self._target_process_form = QWidget()
         tp_layout = QFormLayout(self._target_process_form)
         tp_layout.setContentsMargins(0, 0, 0, 0)
         tp_layout.setSpacing(4)
         self._target_process_combo = QComboBox()
         self._target_process_combo.setObjectName("TargetProcessCombo")
-        tp_layout.addRow("Процесс назначения:", self._target_process_combo)
+        self._target_process_combo.setToolTip(
+            "Куда слать команды от плагина (IPC-маршрутизация). НЕ меняет процесс,\n"
+            "в котором исполняется нода — назначение процесса/воркера будет в Phase B/C."
+        )
+        tp_layout.addRow("IPC-таргет команд:", self._target_process_combo)
         content_layout.addWidget(self._target_process_form)
         self._target_process_form.setVisible(False)
 
@@ -190,6 +230,7 @@ class NodeInspectorPanel(QWidget):
         # Подключить обработчики изменений combo
         self._target_process_combo.currentIndexChanged.connect(self._on_target_process_combo_changed)
         self._display_id_combo.currentIndexChanged.connect(self._on_display_id_combo_changed)
+        self._move_process_combo.currentIndexChanged.connect(self._on_move_process_combo_changed)
 
     # ------------------------------------------------------------------ #
     #  Публичный API: show_plugin_node                                     #
@@ -200,26 +241,42 @@ class NodeInspectorPanel(QWidget):
         node_id: str,
         category: str = "utility",
         target_process: str = "",
+        plugin_name: str = "",
         plugins: list[dict[str, Any]] | None = None,
         params: dict[str, Any] | None = None,
+        available_processes: list[str] | None = None,
+        process_name: str = "",
+        plugin_index: int = 0,
     ) -> None:
-        """Показать inspector для plugin-узла (process node).
+        """Показать inspector для выбранной плагин-ноды.
 
         Отображает combo «Процесс назначения» (заполняется из активного рецепта)
         и параметры плагина через CardsFieldFactory или QLineEdit (fallback).
 
+        D.1/D.2: нода = плагин. ``node_id`` = `{process}.{plugin}` (для заголовка),
+        ``process_name`` + ``plugin_index`` адресуют конкретный плагин для
+        SetPluginConfig (presenter читает current_plugin_index). ``process_name``
+        пусто → fallback на node_id (legacy/show_node).
+
         Args:
-            node_id: идентификатор узла.
+            node_id: идентификатор узла (плагин-нода `{process}.{plugin}`).
             category: категория плагина.
             target_process: текущее значение целевого процесса.
-            plugins: список плагинов [{plugin_name, ...}].
-            params: dict параметров {field_name: value}.
+            plugin_name: имя плагина (= имя регистра). Поля параметров резолвятся
+                ПО НЕМУ через RegistersManager.get_fields — тот же путь, что вкладка
+                Plugins. Пусто → fallback на node_id (legacy).
+            plugins: список плагинов процесса [{plugin_name, ...}] (для блока «Исполнение»).
+            params: dict значений конфигурации ВЫБРАННОГО плагина {field_name: value}.
+            available_processes: другие процессы для combo «Перенести в процесс».
+            process_name: имя процесса (цель SetPluginConfig). Пусто → node_id.
+            plugin_index: индекс выбранного плагина в цепочке процесса.
         """
         self._suppress_changes = True
         try:
             self._mode = "plugin"
             self._current_node_id = node_id
-            self._current_process = node_id
+            self._current_process = process_name or node_id
+            self._current_plugin_index = plugin_index
             self._placeholder.setVisible(False)
             self._content.setVisible(True)
 
@@ -231,12 +288,23 @@ class NodeInspectorPanel(QWidget):
             self._category_badge.setText(category)
             self._category_badge.setStyleSheet(f"background-color: {color}; color: #fff;")
 
-            # Скрыть display-combo, показать target_process-combo
-            self._display_id_form.setVisible(False)
-            self._target_process_form.setVisible(True)
+            # Блок «Исполнение»: процесс + воркер/порядок по плагинам (Phase A)
+            self._exec_info_form.setVisible(True)
+            self._populate_exec_info(node_id, category, plugins)
 
-            # Заполнить combo процессов из активного рецепта
+            # Скрыть display-combo
+            self._display_id_form.setVisible(False)
+
+            # Заполнить combo IPC-таргета из активного рецепта. Показываем форму ТОЛЬКО
+            # если есть что выбрать (иначе пустой disabled combo путает — это и была
+            # жалоба «почему не могу поменять»: combo не про исполнение и часто пуст).
             self._populate_target_process_combo(target_process)
+            has_targets = bool(self._target_process_combo and self._target_process_combo.isEnabled())
+            self._target_process_form.setVisible(has_targets)
+
+            # Combo «Перенести в процесс» (Phase B): показываем, если есть другие процессы.
+            self._populate_move_process_combo(available_processes)
+            self._move_process_form.setVisible(bool(available_processes))
 
             # Показать параметры плагина в scroll area
             self._clear_params()
@@ -247,7 +315,10 @@ class NodeInspectorPanel(QWidget):
                     label.setProperty("role", "plugin-name")
                     self._params_layout.addRow(label)
 
-            fields_used = self._try_build_cards_editors(node_id, params)
+            # Поля строим по plugin_name (имя регистра), а не node_id (process_name):
+            # RegistersManager ключует регистры по имени плагина. _current_process
+            # остаётся node_id — туда уйдёт SetPluginConfig при правке поля.
+            fields_used = self._try_build_cards_editors(plugin_name or node_id, params)
             self._use_cards = bool(fields_used)
 
             if not self._use_cards and params:
@@ -290,9 +361,14 @@ class NodeInspectorPanel(QWidget):
             self._category_badge.setText("display")
             self._category_badge.setStyleSheet(f"background-color: {DISPLAY_CATEGORY_COLOR}; color: #fff;")
 
-            # Показать display-combo, скрыть target_process-combo
+            # Показать display-combo, скрыть target_process / move-process combo
             self._target_process_form.setVisible(False)
+            self._move_process_form.setVisible(False)
             self._display_id_form.setVisible(True)
+
+            # Блок «Исполнение» не относится к display-узлам — очистить и спрятать.
+            self._clear_exec_info()
+            self._exec_info_form.setVisible(False)
 
             # Заполнить combo из DisplayRegistry
             self._populate_display_id_combo(display_id)
@@ -327,6 +403,68 @@ class NodeInspectorPanel(QWidget):
             plugins=plugins,
             params=params,
         )
+
+    # ------------------------------------------------------------------ #
+    #  Блок «Исполнение» (Phase A, read-only)                              #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _worker_for_plugin(plugin_category: str, plugin_name: str, step: int, total: int) -> str:
+        """Метка воркера плагина — соответствует авто-назначению в GenericProcess.
+
+        source → свой поток source_producer_<name> (параллельно);
+        processing → общий pipeline_executor (последовательно, шаг N/total).
+        """
+        if plugin_category == "source":
+            return f"source_producer_{plugin_name} · свой поток (параллельно)"
+        if total > 1:
+            return f"pipeline_executor · последовательно (шаг {step}/{total})"
+        return "pipeline_executor · последовательно"
+
+    def _populate_exec_info(
+        self,
+        process_name: str,
+        node_category: str,
+        plugins: list | None,
+    ) -> None:
+        """Заполнить блок «Исполнение»: процесс + воркер/порядок по плагинам.
+
+        Read-only (Phase A): воркеры назначаются автоматически в GenericProcess,
+        смена процесса/воркера придёт в Phase B/C (plans/pipeline-node-process-worker.md).
+        """
+        self._clear_exec_info()
+
+        proc_value = QLabel(process_name)
+        proc_value.setProperty("role", "exec-process")
+        self._exec_info_layout.addRow("Процесс:", proc_value)
+
+        plugin_list = plugins or []
+        # Шаг считаем только среди processing-плагинов (источники независимы, свой поток).
+        processing_total = sum(
+            1 for p in plugin_list if ((p.get("category") if isinstance(p, dict) else "") or node_category) != "source"
+        )
+        step = 0
+        for p in plugin_list:
+            if isinstance(p, dict):
+                pname = p.get("plugin_name", "")
+                pcat = p.get("category") or node_category
+            else:
+                pname = str(p)
+                pcat = node_category
+            if pcat != "source":
+                step += 1
+                worker = self._worker_for_plugin(pcat, pname, step, processing_total)
+            else:
+                worker = self._worker_for_plugin("source", pname, 0, 0)
+            self._exec_info_layout.addRow(f"{pname}:", QLabel(worker))
+
+    def _clear_exec_info(self) -> None:
+        """Очистить строки блока «Исполнение»."""
+        while self._exec_info_layout.count():
+            item = self._exec_info_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
 
     # ------------------------------------------------------------------ #
     #  Заполнение combo                                                    #
@@ -503,16 +641,50 @@ class NodeInspectorPanel(QWidget):
         if new_display_id and self._current_node_id:
             self.display_id_changed.emit(self._current_node_id, new_display_id)
 
+    def _populate_move_process_combo(self, available_processes: list[str] | None) -> None:
+        """Заполнить combo «Перенести в процесс» (Phase B).
+
+        Первый пункт — плейсхолдер (userData=""), не вызывает мутацию.
+        """
+        combo = self._move_process_combo
+        if combo is None:
+            return
+        combo.clear()
+        combo.addItem("— перенести в… —", userData="")
+        for name in available_processes or []:
+            combo.addItem(name, userData=name)
+        combo.setCurrentIndex(0)
+
+    def _on_move_process_combo_changed(self, index: int) -> None:
+        """Обработчик выбора процесса-приёмника (Phase B) → move_to_process_requested.
+
+        D.1: эмитим ИМЯ ПРОЦЕССА (_current_process), а не node_id плагин-ноды —
+        presenter._on_move_to_process_requested ждёт from_process. Per-plugin drag
+        (D.3) — основной путь; combo переносит весь процесс (его плагины).
+        """
+        if self._suppress_changes:
+            return
+        if self._move_process_combo is None:
+            return
+        to_process = self._move_process_combo.itemData(index) or ""
+        if to_process and self._current_process and to_process != self._current_process:
+            self.move_to_process_requested.emit(self._current_process, to_process)
+
     # ------------------------------------------------------------------ #
     #  Оригинальные методы (backward compatibility)                        #
     # ------------------------------------------------------------------ #
 
     def _try_build_cards_editors(
         self,
-        process_name: str,
+        plugin_name: str,
         params: dict[str, Any] | None,
     ) -> bool:
         """Попытаться создать типизированные виджеты через CardsFieldFactory.
+
+        Args:
+            plugin_name: имя плагина (= имя регистра). RegistersManager ключует
+                регистры по имени плагина — тот же путь, что вкладка Plugins
+                (PluginsPresenter.get_register_fields). НЕ имя процесса.
 
         Returns:
             True если виджеты успешно созданы, False — нужен fallback.
@@ -527,8 +699,8 @@ class NodeInspectorPanel(QWidget):
         if rm is None:
             return False
 
-        # Получить FieldInfo из RegistersManager по имени процесса
-        fields = rm.get_fields(process_name)
+        # FieldInfo из RegistersManager по имени ПЛАГИНА (= имя регистра).
+        fields = rm.get_fields(plugin_name)
         if not fields:
             return False
 
@@ -582,13 +754,24 @@ class NodeInspectorPanel(QWidget):
         self._placeholder.setVisible(True)
         self._content.setVisible(False)
         self._target_process_form.setVisible(False)
+        self._move_process_form.setVisible(False)
         self._display_id_form.setVisible(False)
+        self._clear_exec_info()
         self._clear_params()
 
     @property
     def current_process(self) -> str:
-        """Имя текущего отображаемого процесса."""
+        """Имя текущего отображаемого процесса (цель SetPluginConfig/MovePlugin)."""
         return self._current_process
+
+    @property
+    def current_plugin_index(self) -> int:
+        """Индекс выбранного плагина в цепочке процесса (D.2).
+
+        Presenter читает это значение в _on_inspector_field_changed, чтобы
+        SetPluginConfig адресовал ИМЕННО выбранный плагин (не хардкод index 0).
+        """
+        return self._current_plugin_index
 
     def _on_field_edited(self, field_name: str, editor: QLineEdit) -> None:
         """Обработчик изменения поля пользователем (QLineEdit fallback)."""
