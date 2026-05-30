@@ -41,9 +41,12 @@ blueprint:
     - source: roi_b_proc.blur.frame
       target: merge_proc.stitcher.region
 
-# Привязки узлов к дисплеям (формат v3: node_id/display_id)
+# Привязки узлов к дисплеям (формат v3: node_id/display_id).
+# Task 5.1: display_id указывают на РЕАЛЬНЫЕ каналы из backend/config/displays.yaml
+# (main, debug), чтобы _resolve_display_name отдавал человекочитаемое имя.
+# Раньше было main_output/debug_input — каналы, которых нет в каталоге.
 display_bindings:
   - node_id: merge_proc.render_overlay.rendered_frame
-    display_id: main_output
+    display_id: main
   - node_id: capture_proc.resize.frame
-    display_id: debug_input
+    display_id: debug
