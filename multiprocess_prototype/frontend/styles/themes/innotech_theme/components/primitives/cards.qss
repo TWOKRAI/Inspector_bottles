@@ -60,10 +60,10 @@ QLabel#ProcessCardPill {
     color: @text_0;
     background: @surf_1;
 }
-QLabel#ProcessCardPill[status="running"] { background: @success; color: #0c1f17; }
-QLabel#ProcessCardPill[status="ready"]   { background: @success; color: #0c1f17; }
-QLabel#ProcessCardPill[status="error"]   { background: @danger;  color: #2a0d12; }
-QLabel#ProcessCardPill[status="starting"]{ background: @warn;    color: #2a1c08; }
+QLabel#ProcessCardPill[status="running"] { background: @success; color: @bg_deep; }
+QLabel#ProcessCardPill[status="ready"]   { background: @success; color: @bg_deep; }
+QLabel#ProcessCardPill[status="error"]   { background: @danger;  color: @bg_deep; }
+QLabel#ProcessCardPill[status="starting"]{ background: @warn;    color: @bg_deep; }
 QLabel#ProcessCardPill[status="stopped"] { background: @surf_2;  color: @text_1; }
 QLabel#ProcessCardPill[status="created"] { background: @surf_2;  color: @text_1; }
 
