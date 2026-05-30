@@ -39,3 +39,6 @@
 - [Commit message format](feedback_commit_msg_format.md) — каждый trailer (Why/Layer/...) одной строкой (перенос ломает парсер); pre-commit ruff-format → re-stage + re-commit
 - [Priority: product over engine](project_priority_product_over_engine.md) — 2026-05-29 владелец: запускать прототип/функции/цепочки важнее красоты движка; constructor-maturity отложен
 - [Command-engine P1.1 audit](project_command_engine_audit.md) — ActionBus в проде мёртв (0 потребителей), domain-dispatch единственный живой; «двух движков» нет; RBAC field-edit дыра
+- [Pipeline reuse Plugins widgets](feedback_pipeline_reuse_plugins_widgets.md) — карточка ноды Pipeline переиспользует config-виджеты Plugins (поля по plugin_name); gui скрыт (protected); auto-layout на старте; дисплеи в палитре
+- [Pipeline node→process→worker](project_pipeline_node_process_worker.md) — Phase A+B done (uncommitted): блок «Исполнение» + MovePlugin/«Перенести в процесс»; Phase B+ долг и Phase C (worker A/B решение) — в новом чате
+- [Pipeline node=plugin containers](project_pipeline_node_plugin_containers.md) — Pipeline editor: нода=плагин внутри process-контейнера (node_id={proc}.{plugin}), get_node fallback по процессу, implicit-стрелки цепочки, per-plugin inspector/drag/delete; Phase D done (uncommitted)
