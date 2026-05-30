@@ -237,6 +237,197 @@ class TestDisplayNodePlacement:
         assert tab._scene.get_node("main") is not None
 
 
+class TestNodeContextMenuHandlers:
+    """Follow-up #6: обработчики контекстного меню узлов в PipelineTab.
+
+    Проверяет:
+    - node_delete_requested → presenter.remove_selected + inspector.clear (с guard edit).
+    - node_inspect_requested → узел выделен на scene + _on_selection_changed → inspector.
+    - Permission gating: Delete только при tabs.pipeline.edit, Inspect — без gating.
+    """
+
+    # ------------------------------------------------------------------ #
+    #  Delete                                                              #
+    # ------------------------------------------------------------------ #
+
+    def test_node_delete_with_edit_permission_removes_node(self, qtbot):
+        """scene.node_delete_requested + право edit → нода удалена со scene.
+
+        Использует orchestrator с реальным CommandDispatcher, чтобы dispatch(RemoveProcess)
+        → TopologyReplaced → presenter._on_topology_replaced → scene.remove_node полностью
+        отработал синхронно. FakeCommandDispatcher не эмитирует TopologyReplaced.
+        """
+        auth = FakeAuthFacade(all_permissions=True)
+        services = make_pipeline_services_with_orchestrator(auth=auth)
+        tab = PipelineTab(services)
+        qtbot.addWidget(tab)
+
+        # До удаления — два узла из дефолтной topology
+        assert tab._scene.node_count() == 2
+        assert tab._scene.get_node("camera") is not None
+
+        # Эмитируем сигнал удаления (как будто _show_node_menu выбрал Delete)
+        tab._scene.node_delete_requested.emit("camera")
+
+        # Узел должен исчезнуть со scene (через _on_topology_replaced)
+        assert tab._scene.get_node("camera") is None
+        assert tab._scene.node_count() == 1
+
+    def test_node_delete_without_edit_permission_keeps_node(self, qtbot):
+        """scene.node_delete_requested без права edit → нода остаётся на scene."""
+        auth = FakeAuthFacade(all_permissions=False)
+        services = make_pipeline_services(auth=auth)
+        tab = PipelineTab(services)
+        qtbot.addWidget(tab)
+
+        initial_count = tab._scene.node_count()
+
+        # Без права edit удаление должно быть заблокировано
+        tab._scene.node_delete_requested.emit("camera")
+
+        # Нода не удалена
+        assert tab._scene.get_node("camera") is not None
+        assert tab._scene.node_count() == initial_count
+
+    def test_node_delete_clears_inspector(self, qtbot):
+        """node_delete_requested (с правом edit) → inspector очищается."""
+        auth = FakeAuthFacade(all_permissions=True)
+        services = make_pipeline_services(auth=auth)
+        tab = PipelineTab(services)
+        qtbot.addWidget(tab)
+
+        # Сначала заполним inspector вручную
+        tab._inspector.show_node("camera", "source")
+        assert tab._inspector.current_process == "camera"
+
+        tab._scene.node_delete_requested.emit("camera")
+
+        # Inspector должен быть очищен
+        assert tab._inspector.current_process == ""
+
+    def test_display_node_delete_with_edit_permission(self, qtbot):
+        """node_delete_requested для display-бокса + право edit → бокс удалён."""
+        auth = FakeAuthFacade(all_permissions=True)
+        services = make_pipeline_services(auth=auth)
+        tab = PipelineTab(services)
+        qtbot.addWidget(tab)
+
+        # Сначала разместим display-бокс
+        tab._on_add_display_requested("main", 300.0, 200.0)
+        assert tab._scene.get_node("main") is not None
+
+        node_count_after_add = tab._scene.node_count()
+
+        # Удаляем через сигнал (как контекстное меню)
+        tab._scene.node_delete_requested.emit("main")
+
+        # Бокс должен исчезнуть
+        assert tab._scene.get_node("main") is None
+        assert tab._scene.node_count() == node_count_after_add - 1
+
+    # ------------------------------------------------------------------ #
+    #  Inspect                                                             #
+    # ------------------------------------------------------------------ #
+
+    def test_node_inspect_selects_item_on_scene(self, qtbot):
+        """scene.node_inspect_requested → соответствующий узел становится selected."""
+        services = make_pipeline_services()
+        tab = PipelineTab(services)
+        qtbot.addWidget(tab)
+
+        # До inspect — ничего не выделено
+        tab._scene.clearSelection()
+        item = tab._scene.get_node("camera")
+        assert item is not None
+        assert not item.isSelected()
+
+        # Эмитируем inspect
+        tab._scene.node_inspect_requested.emit("camera")
+
+        # Узел должен быть выделен
+        assert item.isSelected()
+
+    def test_node_inspect_does_not_require_edit_permission(self, qtbot):
+        """node_inspect_requested работает без права tabs.pipeline.edit (read-only)."""
+        auth = FakeAuthFacade(all_permissions=False)
+        services = make_pipeline_services(auth=auth)
+        tab = PipelineTab(services)
+        qtbot.addWidget(tab)
+
+        item = tab._scene.get_node("camera")
+        assert item is not None
+        tab._scene.clearSelection()
+
+        # Без права edit — Inspect должен всё равно работать
+        tab._scene.node_inspect_requested.emit("camera")
+
+        assert item.isSelected(), "Inspect должен работать без права edit (read-only операция)"
+
+    def test_node_inspect_replaces_previous_selection(self, qtbot):
+        """node_inspect_requested снимает предыдущее выделение и выделяет запрошенный узел."""
+        services = make_pipeline_services()
+        tab = PipelineTab(services)
+        qtbot.addWidget(tab)
+
+        cam_item = tab._scene.get_node("camera")
+        proc_item = tab._scene.get_node("processor")
+        assert cam_item is not None
+        assert proc_item is not None
+
+        # Сначала выделим processor
+        proc_item.setSelected(True)
+        assert proc_item.isSelected()
+
+        # Inspect camera → camera выделена, processor — нет
+        tab._scene.node_inspect_requested.emit("camera")
+
+        assert cam_item.isSelected(), "camera должна быть выделена после inspect"
+        assert not proc_item.isSelected(), "processor должен быть снят с выделения"
+
+    def test_node_inspect_unknown_id_no_crash(self, qtbot):
+        """node_inspect_requested с несуществующим id — нет исключения."""
+        services = make_pipeline_services()
+        tab = PipelineTab(services)
+        qtbot.addWidget(tab)
+
+        # Не должно бросать исключение
+        tab._scene.node_inspect_requested.emit("nonexistent_node_id")
+
+    # ------------------------------------------------------------------ #
+    #  Подключение сигналов                                               #
+    # ------------------------------------------------------------------ #
+
+    def test_signals_connected_on_init(self, qtbot):
+        """_connect_signals подключает node_delete_requested и node_inspect_requested.
+
+        Проверяем подключение сигналов через инспекцию внутреннего состояния handler'ов.
+        Для node_inspect_requested: emit → узел выделен (нет dispatch, работает с Fake).
+        Для node_delete_requested: emit с orchestrator → узел удалён.
+        """
+        # Проверяем node_inspect_requested — работает с FakeCommandDispatcher
+        services_fake = make_pipeline_services()
+        tab_inspect = PipelineTab(services_fake)
+        qtbot.addWidget(tab_inspect)
+
+        item = tab_inspect._scene.get_node("camera")
+        assert item is not None
+        tab_inspect._scene.clearSelection()
+        tab_inspect._scene.node_inspect_requested.emit("camera")
+        assert item.isSelected(), "node_inspect_requested должен быть подключён"
+
+        # Проверяем node_delete_requested — нужен orchestrator для реального удаления
+        auth = FakeAuthFacade(all_permissions=True)
+        services_orch = make_pipeline_services_with_orchestrator(auth=auth)
+        tab_delete = PipelineTab(services_orch)
+        qtbot.addWidget(tab_delete)
+
+        assert tab_delete._scene.get_node("camera") is not None
+        tab_delete._scene.node_delete_requested.emit("camera")
+        assert tab_delete._scene.get_node("camera") is None, (
+            "node_delete_requested должен быть подключён к _on_node_delete_requested"
+        )
+
+
 class TestDisplayWireBinding:
     """Task 4.2e: после _on_wire_created с display-target → в presenter.model появляется binding."""
 

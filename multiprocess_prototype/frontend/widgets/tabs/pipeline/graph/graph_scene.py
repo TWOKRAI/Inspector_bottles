@@ -257,17 +257,20 @@ class GraphScene(QGraphicsScene):
         """Контекстное меню: зависит от того, на чём кликнули."""
         from .node_item import NodeItem
         from .edge_item import EdgeItem
+        from .display_node_item import DisplayNodeItem
 
         pos = event.scenePos()
         transform = self.views()[0].transform() if self.views() else QTransform()
         item = self.itemAt(pos, transform)
 
-        # Пройти вверх по иерархии (PortItem -> NodeItem)
+        # Пройти вверх по иерархии (PortItem/TextItem -> NodeItem / DisplayNodeItem).
+        # DisplayNodeItem наследует QGraphicsRectItem напрямую (не от NodeItem),
+        # поэтому его нужно явно включить в условие остановки обхода.
         target = item
-        while target and not isinstance(target, (NodeItem, EdgeItem)):
+        while target and not isinstance(target, (NodeItem, DisplayNodeItem, EdgeItem)):
             target = target.parentItem()
 
-        if isinstance(target, NodeItem):
+        if isinstance(target, (NodeItem, DisplayNodeItem)):
             self._show_node_menu(event, target)
         elif isinstance(target, EdgeItem):
             self._show_edge_menu(event, target)

@@ -6,6 +6,9 @@ from unittest.mock import MagicMock, patch
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.edge_item import EdgeData
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_scene import GraphScene
+from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.display_node_item import (
+    DisplayNodeData,
+)
 
 
 class TestContextMenuSignals:
@@ -324,3 +327,138 @@ class TestDisplaySubmenu:
         submenu_mock.addAction.assert_called_once_with("raw_cam")
         # И setData получил правильный display_id
         display_act.setData.assert_called_once_with("raw_cam")
+
+
+class TestDisplayNodeContextMenu:
+    """Follow-up #6: контекстное меню для DisplayNodeItem (правый клик по display-боксу)."""
+
+    def _make_node_menu_mock(self, exec_result_side="delete"):
+        """Хелпер: создать mock QMenu для _show_node_menu.
+
+        Архитектура _show_node_menu:
+          menu = QMenu()
+          inspect_action = menu.addAction("Inspect")    <- 1-й addAction
+          menu.addSeparator()
+          delete_action = menu.addAction("Delete")      <- 2-й addAction
+          action = menu.exec(...)                       <- exec_result
+
+        exec_result_side: "delete" | "inspect" | "cancel"
+        """
+        mock_menu = MagicMock()
+        inspect_action = MagicMock(name="inspect_action")
+        delete_action = MagicMock(name="delete_action")
+        mock_menu.addAction.side_effect = [inspect_action, delete_action]
+
+        if exec_result_side == "delete":
+            mock_menu.exec.return_value = delete_action
+        elif exec_result_side == "inspect":
+            mock_menu.exec.return_value = inspect_action
+        else:
+            mock_menu.exec.return_value = None
+
+        MockMenuClass = MagicMock(return_value=mock_menu)
+        return MockMenuClass, mock_menu, inspect_action, delete_action
+
+    def test_display_node_delete_emits_node_delete_requested(self, qtbot):
+        """Правый клик по DisplayNodeItem + Delete → эмитится node_delete_requested(display_id)."""
+        scene = GraphScene()
+        data = DisplayNodeData(node_id="main", display_id="main", display_name="Основной")
+        display_item = scene.add_display_node(data)
+
+        received = []
+        scene.node_delete_requested.connect(lambda nid: received.append(nid))
+
+        mock_event = MagicMock()
+        mock_event.screenPos.return_value = MagicMock()
+
+        MockMenuClass, _, _, _ = self._make_node_menu_mock("delete")
+        with patch(
+            "multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_scene.QMenu",
+            MockMenuClass,
+        ):
+            scene._show_node_menu(mock_event, display_item)
+
+        assert received == ["main"], f"node_delete_requested должен эмитится с display_id='main', получено: {received}"
+
+    def test_display_node_inspect_emits_node_inspect_requested(self, qtbot):
+        """Правый клик по DisplayNodeItem + Inspect → эмитится node_inspect_requested(display_id)."""
+        scene = GraphScene()
+        data = DisplayNodeData(node_id="debug", display_id="debug", display_name="Отладочный")
+        display_item = scene.add_display_node(data)
+
+        received = []
+        scene.node_inspect_requested.connect(lambda nid: received.append(nid))
+
+        mock_event = MagicMock()
+        mock_event.screenPos.return_value = MagicMock()
+
+        MockMenuClass, _, _, _ = self._make_node_menu_mock("inspect")
+        with patch(
+            "multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_scene.QMenu",
+            MockMenuClass,
+        ):
+            scene._show_node_menu(mock_event, display_item)
+
+        assert received == ["debug"], (
+            f"node_inspect_requested должен эмитится с display_id='debug', получено: {received}"
+        )
+
+    def test_context_menu_event_calls_show_node_menu_for_display_item(self, qtbot):
+        """contextMenuEvent для DisplayNodeItem вызывает _show_node_menu (не фоновое меню)."""
+        scene = GraphScene()
+        data = DisplayNodeData(node_id="cam", display_id="cam", display_name="Камера")
+        scene.add_display_node(data)
+
+        # Отслеживаем, что _show_node_menu был вызван, а фоновое меню — нет.
+        # scene одноразовая (новый инстанс на тест) → восстанавливать методы не нужно.
+        calls = {"node": 0, "bg": 0}
+
+        def _spy_node_menu(event, item):
+            calls["node"] += 1
+
+        def _spy_bg_menu(event, pos):
+            calls["bg"] += 1
+
+        scene._show_node_menu = _spy_node_menu
+        scene._show_background_menu = _spy_bg_menu
+
+        # Создаём mock event — itemAt возвращает display_item напрямую
+        from PySide6.QtCore import QPointF
+
+        mock_event = MagicMock()
+        mock_event.scenePos.return_value = QPointF(50.0, 50.0)
+        mock_event.screenPos.return_value = MagicMock()
+
+        # Патчим itemAt и views — scene не привязана к GraphView
+        with (
+            patch.object(scene, "itemAt", return_value=scene.get_node("cam")),
+            patch.object(scene, "views", return_value=[MagicMock()]),
+        ):
+            scene.contextMenuEvent(mock_event)
+
+        assert calls["node"] == 1, "contextMenuEvent должен вызвать _show_node_menu для DisplayNodeItem"
+        assert calls["bg"] == 0, "contextMenuEvent НЕ должен вызывать фоновое меню для DisplayNodeItem"
+
+    def test_display_node_cancel_menu_no_signals(self, qtbot):
+        """Отмена контекстного меню по DisplayNodeItem → сигналы НЕ эмитятся."""
+        scene = GraphScene()
+        data = DisplayNodeData(node_id="x", display_id="x", display_name="X")
+        display_item = scene.add_display_node(data)
+
+        received_delete = []
+        received_inspect = []
+        scene.node_delete_requested.connect(lambda nid: received_delete.append(nid))
+        scene.node_inspect_requested.connect(lambda nid: received_inspect.append(nid))
+
+        mock_event = MagicMock()
+        mock_event.screenPos.return_value = MagicMock()
+
+        MockMenuClass, _, _, _ = self._make_node_menu_mock("cancel")
+        with patch(
+            "multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_scene.QMenu",
+            MockMenuClass,
+        ):
+            scene._show_node_menu(mock_event, display_item)
+
+        assert received_delete == [], "При отмене node_delete_requested НЕ должен эмититься"
+        assert received_inspect == [], "При отмене node_inspect_requested НЕ должен эмититься"

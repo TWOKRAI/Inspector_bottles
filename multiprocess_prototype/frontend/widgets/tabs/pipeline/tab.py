@@ -217,6 +217,10 @@ class PipelineTab(QWidget):
         self._scene.selectionChanged.connect(self._on_selection_changed)
         # Task 1.1: размещение пустого display-бокса через меню фона.
         self._scene.add_display_requested.connect(self._on_add_display_requested)
+        # Follow-up #6: контекстное меню узлов — Delete / Inspect.
+        # Работает для NodeItem и DisplayNodeItem (оба имеют node_id).
+        self._scene.node_delete_requested.connect(self._on_node_delete_requested)
+        self._scene.node_inspect_requested.connect(self._on_node_inspect_requested)
         # G.4.4: field_changed → presenter._on_inspector_field_changed (dispatch
         # SetPluginConfig, G.4.3) подключается в presenter.set_inspector. Дублирующий
         # tab-коннект (только лог + stale TODO) убран.
@@ -360,6 +364,29 @@ class PipelineTab(QWidget):
         if not self._can_edit():
             return
         self._presenter.add_wire(source_endpoint, target_endpoint, parent=self)
+
+    def _on_node_delete_requested(self, node_id: str) -> None:
+        """Контекстное меню «Delete» для узла (NodeItem или DisplayNodeItem).
+
+        Мутирует topology → guard по праву edit.
+        """
+        if not self._can_edit():
+            return
+        self._presenter.remove_selected([node_id])
+        self._inspector.clear()
+
+    def _on_node_inspect_requested(self, node_id: str) -> None:
+        """Контекстное меню «Inspect» для узла (NodeItem или DisplayNodeItem).
+
+        Read-only операция: выделяет узел на scene → срабатывает _on_selection_changed
+        → inspector заполняется. Permission gating НЕ нужен.
+        """
+        # Снимаем текущее выделение, затем выделяем запрошенный узел.
+        # Это тот же путь, что и клик мышью — через _on_selection_changed.
+        self._scene.clearSelection()
+        item = self._scene.get_node(node_id)
+        if item is not None:
+            item.setSelected(True)
 
     def _on_selection_changed(self) -> None:
         """Обработчик изменения выбора в scene.
