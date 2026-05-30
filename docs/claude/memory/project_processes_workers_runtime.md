@@ -20,6 +20,6 @@ metadata:
 
 **Долг (follow-up):** live fan-out телеметрии воркеров в GUI — heartbeat несёт `workers_status` (process_heartbeat.py:83 → ProcessMonitor), но GUI-слой не раскладывает в ключи `processes.{proc}.workers.{name}.*`. Bindings в `_panels.py._bind_worker_telemetry` подключены forward-compatible (статус/Гц оживут когда появится fan-out).
 
-**Запрос владельца (2026-05-30, ещё не сделано):** воркеры должны быть в Pipeline рядом с выбором процесса (два селектора на одной строке: процесс + воркер).
+**Pipeline-селектор воркера (DONE, e44017e8):** в инспекторе Pipeline строка «Процесс / Воркер» — два combo на одной строке (`MoveProcessCombo` + `MoveWorkerCombo`). Воркер-combo из топологии (Process.workers + message_processor); выбор → `field_changed("assigned_worker")` → SetPluginConfig (persist в config плагина). Runtime-исполнение по assigned_worker — следующий шаг.
 
 Связано: [[project_workers_architecture]], [[project_worker_cycle_timing]], [[project_processes_tab]], [[feedback_dict_at_boundary_gui]], [[feedback_qt_mcp_smoke_verification]].
