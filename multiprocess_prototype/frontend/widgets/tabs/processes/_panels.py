@@ -22,10 +22,12 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QDialog,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -38,6 +40,8 @@ from multiprocess_prototype.frontend.widgets.primitives import (
     CardAction,
     EntityCard,
 )
+
+from .widgets import CreateWorkerDialog, ProcessCard, WorkerTable
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
@@ -170,7 +174,13 @@ class AllProcessesPanel(QWidget):
                     title=proc.name,
                     actions=actions,
                 )
-                card.set_metrics({"Плагины": ", ".join(proc.plugins) or "—"})
+                worker_count = len(self._presenter.get_workers(proc.name))
+                card.set_metrics(
+                    {
+                        "Плагины": ", ".join(proc.plugins) or "—",
+                        "Воркеров": str(worker_count),
+                    }
+                )
                 card.set_status(proc.status)
                 card.action_clicked.connect(self.card_action_requested)
 
@@ -297,31 +307,112 @@ class SingleProcessPanel(QWidget):
     # ------------------------------------------------------------------ #
 
     def _build_cards_page(self) -> QWidget:
-        """Cards-страница: детальная EntityCard одного процесса."""
+        """Cards-страница: насыщенная ProcessCard + секция управления воркерами."""
         page = QWidget()
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.addStretch()
+        page_layout.setSpacing(8)
 
         proc = self._presenter.get_process_by_name(self._process_name)
         if proc is None:
+            page_layout.addStretch()
             return page
 
-        actions = [CardAction("start", "Запустить")]
-        if not proc.protected:
-            actions.append(CardAction("stop", "Остановить"))
-        actions.append(CardAction("restart", "Перезапустить"))
-        self._card = EntityCard(
+        # ProcessCard сам скрывает stop/delete для protected.
+        self._card = ProcessCard(
             entity_id=proc.name,
             title=proc.name,
-            actions=actions,
+            category=proc.category,
+            protected=proc.protected,
         )
-        self._card.set_metrics(self._presenter.get_detail_metrics(self._process_name))
         self._card.set_status(proc.status)
+        metrics = self._presenter.get_detail_metrics(self._process_name)
+        self._card.set_metric("FPS", metrics.get("FPS", "—"))
+        self._card.set_metric("PID", metrics.get("PID", "—"))
         self._card.action_clicked.connect(self.card_action_requested)
+        page_layout.addWidget(self._card)
 
-        page_layout.insertWidget(0, self._card)
+        # Секция воркеров (таблица CRUD).
+        workers_box = QGroupBox("Воркеры")
+        box_layout = QVBoxLayout(workers_box)
+        box_layout.setContentsMargins(6, 6, 6, 6)
+        self._worker_table = WorkerTable()
+        self._worker_table.add_requested.connect(self._on_worker_add)
+        self._worker_table.remove_requested.connect(self._on_worker_remove)
+        self._worker_table.changed.connect(self._on_worker_changed)
+        box_layout.addWidget(self._worker_table)
+        page_layout.addWidget(workers_box, stretch=1)
+
+        self._refresh_workers()
         return page
+
+    # ------------------------------------------------------------------ #
+    #  Workers                                                             #
+    # ------------------------------------------------------------------ #
+
+    def _refresh_workers(self) -> None:
+        """Перечитать воркеров из presenter и перепривязать телеметрию."""
+        if not hasattr(self, "_worker_table"):
+            return
+        self._worker_table.set_workers(self._presenter.get_workers(self._process_name))
+        self._bind_worker_telemetry()
+
+    def _on_worker_add(self) -> None:
+        dialog = CreateWorkerDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        data = dialog.result_data()
+        ok = self._presenter.add_worker(
+            self._process_name,
+            worker_name=data["worker_name"],
+            priority=data["priority"],
+            execution_mode=data["execution_mode"],
+            target_interval_ms=data["target_interval_ms"],
+        )
+        if not ok:
+            QMessageBox.warning(
+                self,
+                "Воркер",
+                f"Не удалось добавить воркер «{data['worker_name']}» (дубликат или защищённое имя).",
+            )
+        self._refresh_workers()
+
+    def _on_worker_remove(self, worker_name: str) -> None:
+        self._presenter.remove_worker(self._process_name, worker_name)
+        self._refresh_workers()
+
+    def _on_worker_changed(self, worker_name: str, field: str, value: object) -> None:
+        self._presenter.update_worker(self._process_name, worker_name, **{field: value})
+
+    def _bind_worker_telemetry(self) -> None:
+        """Привязать статус/Гц каждого воркера к StateStore (forward-compatible).
+
+        Backend публикует per-worker телеметрию в processes.{proc}.workers.{name}.*
+        (heartbeat workers_status → fan-out). Привязки переживают пересоздание строк
+        через weakref auto-cleanup GuiStateBindings.
+        """
+        bindings = self._bindings
+        if bindings is None:
+            return
+        proc = self._process_name
+        for name in self._worker_table.worker_names():
+            widgets = self._worker_table.telemetry_widgets(name)
+            status_w = widgets.get("status")
+            if status_w is not None:
+                bindings.bind(
+                    f"processes.{proc}.workers.{name}.status",
+                    status_w,
+                    "text",
+                    formatter=lambda v: str(v),
+                )
+            hz_w = widgets.get("hz")
+            if hz_w is not None:
+                bindings.bind(
+                    f"processes.{proc}.workers.{name}.effective_hz",
+                    hz_w,
+                    "text",
+                    formatter=lambda v: f"{v:.1f} Гц" if isinstance(v, (int, float)) else "—",
+                )
 
     def _build_table_page(self) -> QWidget:
         """Table-страница: key-value QTableWidget с метриками одного процесса."""

@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
+from .dialogs import CreateProcessDialog, CreateWorkerDialog
 from .process_card import ProcessCard
 from .worker_table import WorkerTable
 
-__all__ = ["ProcessCard", "WorkerTable"]
+__all__ = ["ProcessCard", "WorkerTable", "CreateProcessDialog", "CreateWorkerDialog"]

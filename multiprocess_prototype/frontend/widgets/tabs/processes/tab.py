@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
+    QDialog,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
 from multiprocess_prototype.domain.app_services import AppServices
+from multiprocess_prototype.domain.events import TopologyReplaced
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode, ViewModeToggle
 from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import DiffScrollTabLayout
@@ -30,6 +32,7 @@ from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout i
 from ._panels import AllProcessesPanel, SingleProcessPanel
 from .data import ALL_PROCESSES_KEY
 from .presenter import ProcessesPresenter
+from .widgets import CreateProcessDialog
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QIcon
@@ -101,6 +104,10 @@ class ProcessesTab(BaseListNavTab):
         # После _sync_nav AllProcessesPanel создан — пробрасываем его атрибуты
         # как алиасы на уровень tab, чтобы существующие тесты продолжали работать.
         self._publish_all_panel_aliases()
+
+        # Реакция на изменение топологии (create/delete процесса из любой вкладки).
+        # Воркер-правки не меняют набор процессов → nav не перестраивается (см. handler).
+        self._topology_sub = self._services.events.subscribe(TopologyReplaced, self._on_topology_replaced)
 
     @classmethod
     def create(
@@ -219,12 +226,7 @@ class ProcessesTab(BaseListNavTab):
 
     def _on_button_action(self, action_id: str) -> None:
         if action_id == "create":
-            # TODO: диалог создания процесса. Пока — visible-stub, чтобы клик не был немым.
-            QMessageBox.information(
-                self,
-                "Создать процесс",
-                "Диалог создания процесса будет добавлен позже.",
-            )
+            self._create_process_dialog()
             return
         if self._selected_process is None:
             return
@@ -234,12 +236,35 @@ class ProcessesTab(BaseListNavTab):
         if action_id in ("start", "stop"):
             self._presenter.on_process_action(self._selected_process, action_id)
         elif action_id == "delete":
-            # TODO: подтверждение + удаление через presenter/topology bridge.
-            QMessageBox.information(
+            self._delete_process(self._selected_process)
+
+    def _create_process_dialog(self) -> None:
+        """Показать диалог создания процесса → presenter.create_process (+ персист)."""
+        dialog = CreateProcessDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        data = dialog.result_data()
+        ok = self._presenter.create_process(data["name"], category=data["category"])
+        if not ok:
+            QMessageBox.warning(
                 self,
-                "Удалить процесс",
-                f"Удаление процесса «{self._selected_process}» будет добавлено позже.",
+                "Создать процесс",
+                f"Процесс «{data['name']}» уже существует или имя некорректно.",
             )
+        # Перестроение nav — через TopologyReplaced (набор процессов изменился).
+
+    def _delete_process(self, name: str) -> None:
+        """Подтвердить и удалить процесс (persist + live hot_remove)."""
+        if self._presenter.is_protected(name):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Удалить процесс",
+            f"Удалить процесс «{name}»?",
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._presenter.delete_process(name)
+        # Перестроение nav — через TopologyReplaced.
 
     def _update_buttons_state(self) -> None:
         has_selection = self._selected_process is not None
@@ -329,9 +354,25 @@ class ProcessesTab(BaseListNavTab):
 
     def _on_card_action(self, entity_id: str, action_id: str) -> None:
         """Обработать действие на карточке (всплывает из любой панели)."""
-        if action_id in ("stop", "delete") and self._presenter.is_protected(entity_id):
+        if action_id == "delete":
+            self._delete_process(entity_id)
+            return
+        if action_id == "stop" and self._presenter.is_protected(entity_id):
             return
         self._presenter.on_process_action(entity_id, action_id)
+
+    def _on_topology_replaced(self, _event: object = None) -> None:
+        """Перестроить nav только при изменении НАБОРА процессов (create/delete).
+
+        Воркер-правки сохраняют набор процессов → nav не трогаем (панель уже
+        обновила таблицу воркеров локально). Это избегает дорогого full-rebuild
+        и сброса выбора на каждое изменение приоритета воркера.
+        """
+        current = set(self._key_to_item.keys()) - {ALL_PROCESSES_KEY}
+        new = set(self._presenter.get_process_names())
+        if current != new:
+            self._sync_nav()
+            self._publish_all_panel_aliases()
 
     def _on_toolbar_action(self, action_id: str) -> None:
         """Legacy: обратная совместимость для тестов (start_all / stop_all)."""
