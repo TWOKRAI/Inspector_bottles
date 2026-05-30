@@ -22,3 +22,76 @@ QLabel#EntityCardTitle {
 QLabel#EntityCardKey {
     color: @text_2;
 }
+
+/* ===================== ProcessCard (насыщенная ds-card) ===================== */
+QFrame[role="process-card"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @grad_card_top, stop:1 @grad_groupbox_bot);
+    border: 1px solid @shadow_xl;
+    border-top: 1px solid @glow_2xl;
+    border-left: 4px solid @surf_2;   /* дефолт; переопределяется по категории */
+    border-radius: @radius_md;
+    margin: 2px;
+}
+/* Цветная полоса категории слева */
+QFrame[role="process-card"][category="source"]     { border-left: 4px solid @accent; }
+QFrame[role="process-card"][category="processing"] { border-left: 4px solid @warn; }
+QFrame[role="process-card"][category="rendering"]  { border-left: 4px solid @success; }
+QFrame[role="process-card"][category="output"]     { border-left: 4px solid @accent_hi; }
+QFrame[role="process-card"][category="control"]    { border-left: 4px solid @accent_lo; }
+QFrame[role="process-card"][category="service"]    { border-left: 4px solid @text_2; }
+QFrame[role="process-card"][category="utility"]    { border-left: 4px solid @text_3; }
+
+QLabel#ProcessCardTitle {
+    font-size: @font_lg;
+    font-weight: bold;
+    color: @text_0;
+}
+QLabel#ProcessCardMetric {
+    color: @text_2;
+    font-size: @font_sm;
+}
+
+/* Статус-пилюля */
+QLabel#ProcessCardPill {
+    padding: 1px 8px;
+    border-radius: @radius_sm;
+    font-size: @font_sm;
+    color: @text_0;
+    background: @surf_1;
+}
+QLabel#ProcessCardPill[status="running"] { background: @success; color: #0c1f17; }
+QLabel#ProcessCardPill[status="ready"]   { background: @success; color: #0c1f17; }
+QLabel#ProcessCardPill[status="error"]   { background: @danger;  color: #2a0d12; }
+QLabel#ProcessCardPill[status="starting"]{ background: @warn;    color: #2a1c08; }
+QLabel#ProcessCardPill[status="stopped"] { background: @surf_2;  color: @text_1; }
+QLabel#ProcessCardPill[status="created"] { background: @surf_2;  color: @text_1; }
+
+/* Кнопки-иконки действий */
+QPushButton#ProcessCardIconButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: @radius_sm;
+    font-size: @font_md;
+    color: @text_1;
+    padding: 0;
+}
+QPushButton#ProcessCardIconButton:hover {
+    background: @accent_glass_md;
+    border: 1px solid @accent_glass_lg;
+    color: @text_0;
+}
+QPushButton#ProcessCardIconButton:pressed {
+    background: @accent_glass_lg;
+}
+
+/* ===================== WorkerTable ===================== */
+QTableWidget#WorkerTable {
+    background: @surf_deep;
+    border: 1px solid @surf_1;
+    border-radius: @radius_sm;
+    gridline-color: @surf_1;
+}
+QTableWidget#WorkerTable::item:selected {
+    background: @accent_glass_lg;
+}

@@ -6,6 +6,13 @@ from dataclasses import dataclass, field
 # Sentinel для элемента "Все процессы" в навигации
 ALL_PROCESSES_KEY = "__all__"
 
+# Дефолтный системный воркер (RouterManager polling — IPC-lifeline процесса).
+DEFAULT_MAIN_WORKER = "message_processor"
+# Приоритеты воркера (совпадают с ThreadConfig фреймворка → poll_interval).
+WORKER_PRIORITIES: list[str] = ["SYSTEM", "REALTIME", "NORMAL", "BATCH", "BACKGROUND"]
+# Режимы исполнения воркера.
+WORKER_EXECUTION_MODES: list[str] = ["loop", "task"]
+
 
 @dataclass
 class ProcessInfo:
