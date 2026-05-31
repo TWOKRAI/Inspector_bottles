@@ -509,6 +509,66 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             self._buffer.flush()
 
     # =========================================================================
+    # FRAME TRACE (Option A pipeline-live-control)
+    # =========================================================================
+
+    def frame_trace(self, message: str, seq_id: Any) -> None:
+        """Записать строку в per-process snapshot последнего кадра (overwrite по seq_id).
+
+        Идёт через LoggerManager-канал ``FrameTraceChannel`` (не сырой файл): канал
+        буферизует строки текущего кадра и перезаписывает ``logs/trace/<process>.log``
+        одним write на кадр (batched + overwrite). No-op без ``INSPECTOR_FRAME_TRACE=1``.
+
+        Args:
+            message: строка цепочки (например, router-сообщение).
+            seq_id: идентификатор кадра — граница перезаписи.
+        """
+        enabled = getattr(self, "_frame_trace_enabled", None)
+        if enabled is None:
+            import os
+
+            enabled = os.environ.get("INSPECTOR_FRAME_TRACE", "").strip().lower() in ("1", "true", "yes")
+            self._frame_trace_enabled = enabled
+        if not enabled:
+            return
+
+        ch = getattr(self, "_frame_trace_channel", "unset")
+        if ch == "unset":
+            ch = self._ensure_frame_trace_channel()
+        if ch is None:
+            return
+        ch.write(
+            {
+                "module": "frame_trace",
+                "level": "INFO",
+                "message": message,
+                "timestamp": time.time(),
+                "extra": {"seq_id": seq_id},
+            }
+        )
+
+    def _ensure_frame_trace_channel(self) -> Optional[LogChannel]:
+        """Лениво создать+зарегистрировать FrameTraceChannel (per-process trace-файл)."""
+        proc = self.process.name if self.process else (self.config.app_name or "proc")
+        path = self._resolved_file_path(None, f"trace/{proc}.log")
+        try:
+            cfg = LoggerChannelSchema(
+                name=f"frame_trace_{proc}",
+                type="frame_trace",
+                enabled=True,
+                file_path=path,
+                format="%(message)s",
+            )
+            ch = create_channel(f"frame_trace_{proc}", cfg)
+            self._channel_registry.register(ch)
+            self._frame_trace_channel = ch
+            return ch
+        except Exception as e:
+            self._fallback_log("ERROR", f"frame_trace channel failed: {e}")
+            self._frame_trace_channel = None
+            return None
+
+    # =========================================================================
     # ВСПОМОГАТЕЛЬНЫЕ
     # =========================================================================
 

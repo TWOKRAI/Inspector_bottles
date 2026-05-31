@@ -4,6 +4,7 @@
 
 Все каналы наследуют ILogChannel(IChannel) — совместимы с ChannelRoutingManager.
 """
+
 import logging
 import logging.handlers
 from pathlib import Path
@@ -73,31 +74,29 @@ class FileChannel(LogChannel):
                 encoding="utf-8",
             )
         else:
-            self.handler = logging.FileHandler(
-                self.file_path, encoding="utf-8", mode="a"
-            )
+            self.handler = logging.FileHandler(self.file_path, encoding="utf-8", mode="a")
         self.handler.setFormatter(formatter)
-    
+
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
         try:
             log_record = logging.LogRecord(
-                name=record['module'],
-                level=getattr(logging, record['level']),
-                pathname='',
+                name=record["module"],
+                level=getattr(logging, record["level"]),
+                pathname="",
                 lineno=0,
-                msg=record['message'],
+                msg=record["message"],
                 args=(),
-                exc_info=None
+                exc_info=None,
             )
-            log_record.created = record['timestamp']
-            extra = record.get('extra') or {}
-            log_record.proc_name = extra.get('proc_name') or '-'
-            
+            log_record.created = record["timestamp"]
+            extra = record.get("extra") or {}
+            log_record.proc_name = extra.get("proc_name") or "-"
+
             self.handler.emit(log_record)
-            return {'status': 'success', 'channel': self.name}
+            return {"status": "success", "channel": self.name}
         except Exception as e:
-            return {'status': 'error', 'error': str(e), 'channel': self.name}
-    
+            return {"status": "error", "error": str(e), "channel": self.name}
+
     def close(self):
         """Закрывает файловый канал"""
         if self.handler:
@@ -106,33 +105,33 @@ class FileChannel(LogChannel):
 
 class ConsoleChannel(LogChannel):
     """Канал записи в консоль"""
-    
+
     def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
         self.handler = logging.StreamHandler()
         formatter = logging.Formatter(config.format)
         self.handler.setFormatter(formatter)
-    
+
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
         try:
             log_record = logging.LogRecord(
-                name=record['module'],
-                level=getattr(logging, record['level']),
-                pathname='',
+                name=record["module"],
+                level=getattr(logging, record["level"]),
+                pathname="",
                 lineno=0,
-                msg=record['message'],
+                msg=record["message"],
                 args=(),
-                exc_info=None
+                exc_info=None,
             )
-            log_record.created = record['timestamp']
-            extra = record.get('extra') or {}
-            log_record.proc_name = extra.get('proc_name') or '-'
-            
+            log_record.created = record["timestamp"]
+            extra = record.get("extra") or {}
+            log_record.proc_name = extra.get("proc_name") or "-"
+
             self.handler.emit(log_record)
-            return {'status': 'success', 'channel': self.name}
+            return {"status": "success", "channel": self.name}
         except Exception as e:
-            return {'status': 'error', 'error': str(e), 'channel': self.name}
-    
+            return {"status": "error", "error": str(e), "channel": self.name}
+
     def close(self):
         """Закрывает консольный канал"""
         if self.handler:
@@ -141,26 +140,88 @@ class ConsoleChannel(LogChannel):
 
 class HttpChannel(LogChannel):
     """Канал отправки логов по HTTP"""
-    
+
     def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
         if requests is None:
             raise ImportError("requests library is required for HttpChannel")
         self.url = config.url
-        self.headers = config.headers or {'Content-Type': 'application/json'}
-    
+        self.headers = config.headers or {"Content-Type": "application/json"}
+
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            response = requests.post(
-                self.url,
-                json=record,
-                headers=self.headers,
-                timeout=5
-            )
+            response = requests.post(self.url, json=record, headers=self.headers, timeout=5)
             response.raise_for_status()
-            return {'status': 'success', 'channel': self.name}
+            return {"status": "success", "channel": self.name}
         except Exception as e:
-            return {'status': 'error', 'error': str(e), 'channel': self.name}
+            return {"status": "error", "error": str(e), "channel": self.name}
+
+
+class FrameTraceChannel(LogChannel):
+    """Снимок ОДНОГО кадра: буферизует записи по seq_id, перезаписывает файл при смене кадра.
+
+    Мотивация (Option A pipeline-live-control): вместо append-флуда — компактный
+    снимок последнего завершённого кадра. Batched I/O: ровно ОДНА запись в файл на
+    кадр (а не на каждую строку). Overwrite: хранится только последний кадр —
+    мало данных, легко читать.
+
+    Граница кадра — смена ``record['extra']['seq_id']``. Записи без seq_id
+    игнорируются (только кадровая цепочка). На смену seq_id предыдущий (завершённый)
+    кадр пишется в файл с truncate, затем начинается новый буфер.
+    """
+
+    def __init__(self, config: LoggerChannelSchema):
+        super().__init__(config)
+        self.file_path = Path(config.file_path or f"logs/trace/{config.name}.log")
+        self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._seq: Any = None
+        self._lines: list[str] = []
+        # Постоянный хэндл (mode='w+'): открываем ОДИН раз, на каждый кадр
+        # seek(0)+truncate+write+flush — без open/close-сисколлов на кадр.
+        # Файл per-process → конкуренции за хэндл нет.
+        try:
+            self._fh = open(self.file_path, "w+", encoding="utf-8")  # noqa: SIM115
+        except Exception:
+            self._fh = None
+
+    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            extra = record.get("extra") or {}
+            seq = extra.get("seq_id")
+            if seq is None:
+                return {"status": "skipped", "channel": self.name}
+            if seq != self._seq:
+                if self._lines:
+                    self._flush_frame()
+                self._seq = seq
+                self._lines = [f"=== frame seq={seq} ==="]
+            self._lines.append(str(record.get("message", "")))
+            return {"status": "success", "channel": self.name}
+        except Exception as e:
+            return {"status": "error", "error": str(e), "channel": self.name}
+
+    def _flush_frame(self) -> None:
+        # Перезапись файла последним завершённым кадром через постоянный хэндл.
+        if self._fh is None:
+            return
+        content = "\n".join(self._lines) + "\n"
+        self._fh.seek(0)
+        self._fh.write(content)
+        self._fh.truncate()  # обрезать хвост, если новый кадр короче предыдущего
+        self._fh.flush()
+
+    def close(self) -> None:
+        # Финальный сброс незаписанного кадра + закрытие хэндла.
+        try:
+            if self._lines:
+                self._flush_frame()
+        finally:
+            if self._fh is not None:
+                try:
+                    self._fh.close()
+                except Exception:  # nosec B110 — закрытие файла на shutdown: ошибка не критична
+                    pass
+                self._fh = None
 
 
 def create_channel(channel_name: str, config: LoggerChannelSchema) -> LogChannel:
@@ -170,9 +231,9 @@ def create_channel(channel_name: str, config: LoggerChannelSchema) -> LogChannel
         "file": FileChannel,
         "console": ConsoleChannel,
         "http": HttpChannel,
+        "frame_trace": FrameTraceChannel,
     }
     channel_class = channel_types.get(cfg.type)
     if not channel_class:
         raise ValueError(f"Unknown channel type: {cfg.type}")
     return channel_class(cfg)
-

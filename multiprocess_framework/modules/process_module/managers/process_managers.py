@@ -192,6 +192,12 @@ class ProcessManagers:
         router_config = managers_config.get("router", {}) or {}
         duplicate_messages = router_config.get("duplicate_messages_to_logger", False)
 
+        # Option A frame-trace: per-process snapshot последнего кадра в файл
+        # (overwrite по seq_id) через LoggerManager-канал. Включается INSPECTOR_FRAME_TRACE=1.
+        import os as _os
+
+        frame_trace_on = _os.environ.get("INSPECTOR_FRAME_TRACE", "").strip().lower() in ("1", "true", "yes")
+
         router = RouterManager(
             manager_name=f"router_{self.process.name}",
             process=self.process,
@@ -200,7 +206,7 @@ class ProcessManagers:
         )
         router.initialize()
 
-        if duplicate_messages and logger:
+        if logger and (duplicate_messages or frame_trace_on):
 
             def _log_message_middleware(msg):
                 try:
@@ -216,10 +222,18 @@ class ProcessManagers:
                         log_parts.append(f" cmd={msg.get('command')}")
                     if msg.get("event_type"):
                         log_parts.append(f" event={msg.get('event_type')}")
+                    line = " ".join(log_parts)
                     # DEBUG, не INFO: per-message дубль — основной источник «бесконечного
-                    # терминала». На DEBUG он остаётся доступен в LoggerManager (файловые
-                    # каналы / console при DEBUG), но не засоряет INFO-консоль.
-                    logger.debug(" ".join(log_parts), module="router_messages")
+                    # терминала». На DEBUG он остаётся доступен в LoggerManager, но не флудит INFO.
+                    if duplicate_messages:
+                        logger.debug(line, module="router_messages")
+                    # Frame-trace: только кадровые сообщения (с seq_id) → overwrite-канал.
+                    if frame_trace_on:
+                        seq = msg.get("seq_id")
+                        if seq is None and isinstance(msg.get("data"), dict):
+                            seq = msg["data"].get("seq_id")
+                        if seq is not None:
+                            logger.frame_trace(line, seq)
                 except Exception:  # nosec B110 — диагностический middleware: сбой логирования не должен ронять роутинг
                     pass
                 return msg

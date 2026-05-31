@@ -151,7 +151,7 @@ reportUnboundVariable = "warning"
 # scripts/ — dev-утилиты (changelog_gen, link_check, validate_commit, …);
 # subprocess/urllib в них by design (git log, HTTP HEAD), не production-код.
 exclude_dirs = ["tests", "multiprocess_prototype_backup", "scripts"]
-skips = ["B101"]  # assert допустим в не-production коде
+skips = ["B101", "B110"]  # B101: assert в не-prod; B110: try/except/pass — намеренный best-effort swallow в logging/middleware/router (логирование не должно ронять приложение)
 
 # ── coverage ──
 [tool.coverage.run]
