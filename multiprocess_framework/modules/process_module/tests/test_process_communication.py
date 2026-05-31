@@ -4,6 +4,7 @@
 from unittest.mock import Mock
 
 from ..communication.process_communication import ProcessCommunication
+from ...router_module import RouterManager
 
 
 def make_mock_router():
@@ -57,6 +58,68 @@ class TestProcessCommunicationSend:
         comm = ProcessCommunication("proc1", {}, router)
         result = comm.send("not a dict or message")
         assert result["status"] == "error"
+
+
+class _FakeQueueRegistry:
+    """Захватывает send_to_queue для проверки паритета доставки."""
+
+    def __init__(self):
+        self.sent = []
+
+    def send_to_queue(self, target, qtype, msg):
+        self.sent.append((target, qtype, msg))
+        return True
+
+
+class TestSendToProcessRoutesThroughRouter:
+    """P1.3: send_to_process идёт через router.send → _deliver_by_targets → queue_registry.
+    Паритет: та же очередь {target}_{qtype}, что и прежний прямой send_to_queue."""
+
+    def test_command_lands_in_system_queue(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="proc1", queue_registry=qr)
+        comm = ProcessCommunication("proc1", {}, router, shared_resources=None)
+
+        ok = comm.send_to_process("worker_a", {"type": "command", "command": "do.thing"})
+
+        assert ok is True
+        assert len(qr.sent) == 1
+        target, qtype, msg = qr.sent[0]
+        assert target == "worker_a"
+        assert qtype == "system"
+        assert msg["sender"] == "proc1"
+        assert msg["targets"] == ["worker_a"]
+
+    def test_frame_lands_in_data_queue_and_channel_stripped(self):
+        # recon #3: кадр несёт vestigial channel="data"; должен лечь в data-очередь,
+        # vestigial channel снят (без WARNING-флуда), кадр НЕ потерян.
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="cam", queue_registry=qr)
+        comm = ProcessCommunication("cam", {}, router, shared_resources=None)
+
+        frame = {
+            "type": "data",
+            "channel": "data",
+            "data": {"shm_name": "slot0", "shm_actual_name": "psm_1234"},
+        }
+        ok = comm.send_to_process("display_proc", frame)
+
+        assert ok is True
+        assert len(qr.sent) == 1
+        target, qtype, msg = qr.sent[0]
+        assert target == "display_proc"
+        assert qtype == "data"
+        assert "channel" not in msg  # vestigial снят
+        assert msg["data"]["shm_actual_name"] == "psm_1234"  # Claim Check сохранён (recon #4)
+
+    def test_send_message_alias_parity(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="p", queue_registry=qr)
+        comm = ProcessCommunication("p", {}, router, shared_resources=None)
+
+        comm.send_message("p2", {"type": "command", "command": "x"})
+        assert qr.sent[0][0] == "p2"
+        assert qr.sent[0][1] == "system"
 
 
 class TestProcessCommunicationReceive:

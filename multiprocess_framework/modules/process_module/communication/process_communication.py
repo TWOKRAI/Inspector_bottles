@@ -181,11 +181,18 @@ class ProcessCommunication(IProcessCommunication):
 
     def send_to_process(self, target: str, message: Dict[str, Any]) -> bool:
         """
-        Отправить сообщение конкретному процессу.
+        Отправить сообщение конкретному процессу ЧЕРЕЗ router.send (P1.3).
+
+        Единый вход хаба: строит билет (sender + targets=[target]) и отдаёт
+        router.send → _resolve_channels → (для targets-адресации) _deliver_by_targets
+        → queue_registry.send_to_queue(target, qtype, msg). Это ТА ЖЕ очередь и тот же
+        qtype, что и прежний прямой вызов queue_registry (паритет), но один путь вместо
+        обхода роутера.
 
         Args:
             target: Имя целевого процесса
-            message: Сообщение
+            message: Сообщение (мутируется: проставляются sender/targets, снимается
+                vestigial channel — билет строится «на месте», как и в прежнем fallback)
 
         Returns:
             bool: True если отправка успешна
@@ -194,18 +201,17 @@ class ProcessCommunication(IProcessCommunication):
             if not self.router_manager:
                 return False
 
-            # Используем queue_registry если доступен
-            if hasattr(self.router_manager, "queue_registry") and self.router_manager.queue_registry:
-                msg_type = message.get("type", "")
-                queue_type = message.get("queue_type") or ("system" if msg_type == "command" else "data")
-                result = self.router_manager.queue_registry.send_to_queue(target, queue_type, message)
-                return result
-
-            # Fallback: отправка через роутер
-            message["targets"] = [target]
             message["sender"] = self.process_name
+            message["targets"] = [target]
+            # vestigial channel="data"/"system" (recon #3) — это ИМЯ qtype, а не
+            # зарегистрированный канал. Снимаем, чтобы маршрут шёл по targets+type без
+            # WARNING-флуда «channel not registered» на каждый кадр. Реальные каналы
+            # (system_events, {proc}_data, {proc}_local) называются иначе и не затронуты.
+            if message.get("channel") in ("data", "system"):
+                message.pop("channel", None)
+
             result = self.router_manager.send(message)
-            return result.get("status") == "success"
+            return bool(result.get("status") == "success")
 
         except Exception as e:
             self.logger_callback("ERROR", f"Failed to send to process '{target}': {e}", "communication")
