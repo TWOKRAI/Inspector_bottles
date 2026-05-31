@@ -4,7 +4,15 @@
 
 ## Где мы
 
-- **P0 recon ✅ DONE** — см. «P0 ИТОГ» в [plan.md](plan.md). 4 из 5 допущений зелёные, 1 жёлтое (request-response).
+- **P0 recon ✅ · P0.5 ✅ (`1a1b6b9b`) · P1 ✅ (`df8fa01f`)** — ветка `feat/backend-control-mcp`.
+  - **P0.5:** generic request-response в RouterManager (`request`/`reply_to_request`/`_resolve_pending`
+    + резолвер в `receive`). Закрыты ДВЕ дыры fire-and-forget: PM-ответ без `targets` + выброшенный
+    результат generic command-пути. Ответ едет system-очередью. 16 тестов.
+  - **P1:** `introspect.handlers/registers/status` в `BuiltinCommands` (tags=system, как worker.*).
+    Воспроизводит диагноз Этапа 2 (нет `register_update` в handlers). 10 тестов. framework 3045 passed.
+  - **P2-P3 — ПАУЗА** (решение владельца): сначала оценить headless in-process харнесс
+    (`router.request(...)` без сокета/MCP) против полного socket+MCP-стека. Ценность фронт-лоадед.
+- **P0 recon** — см. «P0 ИТОГ» в [plan.md](plan.md). 4 из 5 допущений зелёные, 1 жёлтое (request-response, закрыто P0.5).
 - **Транспорт пересмотрен (решение владельца):** НЕ driver-процесс-в-графе, а **`SocketChannel` в RouterManager** + тонкий внешний driver. Это by-design расширение (`register_channel`), под которое и делался RouterManager.
 - **Продукт-контекст:** live-параметры уже работают без этого тулинга (resize-ретрофит, commit 4327ccf8 на ветке `feat/pipeline-live-control`). Socket-driver = ускорение отладки бэкенда, держать тонким.
 
