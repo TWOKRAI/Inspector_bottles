@@ -18,16 +18,16 @@ metadata:
 
 **Qt-smoke verified (probe localhost:9142, QT_MCP_PROBE=1):** ProcessCard+WorkerTable рендерятся; protected `gui` — нет stop/delete + combo disabled; `camera_0` — все 4 кнопки; логи живых процессов показывают `worker.create/remove/... registered successfully`.
 
-**Долги (оба → новый чат с /plan, решение владельца 2026-05-30):**
+**Долги — статус 2026-05-31 (план [[../../../multiprocess_prototype/plans/processes-workers-runtime-debts]]):**
 
-**Долг #1 — live-телеметрия GUI (АРХИТЕКТУРНЫЙ, не контейнерный!).** На прямой проверке кода: GUI live-телеметрия процессов **вообще не подключена (dormant)**, не только воркеры:
-- `process_state_path()` (`backend/state/schema.py:114`) — НЕТ вызовов-сеттеров; ключи `processes.X.state.*` backend не публикует.
-- `DataReceiverBridge.dispatch` (`frontend/bridge_impl.py:45-54`) классифицирует «state» только для `status/state_changed/fps_update`; `state_delta` уходит в «command» (не к bindings).
-- `GuiStateBindings._on_state_msg` (`frontend/state/bindings.py:172`) игнорирует всё кроме `data_type=="state_delta"`.
-- Отсюда статичные «FPS —»/«Активно: 0» в живом приложении.
-Задача = построить весь пайплайн: backend-publisher (state_proxy `processes.X.state.*` И `processes.X.workers.Y.*`) → IPC-роутинг → фикс dispatch (`state_delta`→state) → fan-out из heartbeat `workers_status` (несётся: process_heartbeat.py:83 → ProcessMonitor `_workers_status` → broadcast). `WorkerManager.get_worker_status` уже отдаёт priority/status/cycle_duration_ms/effective_hz. Bindings воркеров уже подключены forward-compatible (`_panels.py._bind_worker_telemetry`) — оживут, когда появятся ключи.
+**Долг #1 — live-телеметрия GUI → ✅ DONE (feat 574017fd, полный StateStore-путь).**
+Реализовано: ProcessMonitor публикует `processes.X.state.status` и `processes.X.workers.Y.{status,effective_hz}` в локальный StateStoreManager (`_publish_state`, без IPC) → DeltaDispatcher → GuiProcess стал подписчиком (`GuiStateProxy` + `_StateDeltaEmitter` в main thread, подписка `processes.**`) → `bridge.dispatch(state_delta)` → существующие `GuiStateBindings` ожили. `dispatch` теперь гонит `state_delta`→`kind="state"` (bridge.py+bridge_impl.py).
+**Находка-фундамент (U1):** cross-process подписка StateStore в проде была **сломана** — `DeltaDispatcher` слал `state.changed` через `router.send_async` с `targets`, но `RouterManager._resolve_channels` поле `targets` НЕ читает и route для `state.changed` нет → silent drop (зелёными были только тесты через `InMemoryRouter`). Фикс: `RouterManager._deliver_by_targets` — fallback в `_do_send`: если канал не резолвится и есть `targets` → доставка через `queue_registry.send_to_queue(target, qtype, msg)` (qtype `system` для command). `DeltaDispatcher` ставит `queue_type="system"`. 788 тестов + headless-integration `test_integration_u1_delivery.py` доказал путь.
+**Вне scope (новый долг):** `processes.X.state.fps`/`latency_ms` (карточки) и `system.health.*` — нет продюсера, останутся «—».
 
-**Долг #2 — runtime по `assigned_worker`.** Pipeline персистит `assigned_worker` в config плагина (`MoveWorkerCombo` → field_changed → SetPluginConfig), но рантайм назначает воркеры авто (source→source_producer, processing→pipeline_executor в GenericProcess). Нужно: GenericProcess читает `config["assigned_worker"]` и кладёт плагин в указанный воркер. Это Phase C в `plans/pipeline-node-process-worker.md`.
+**Долг #2 — runtime по `assigned_worker` → ⏳ PENDING (Фаза 2, вариант A).** Pipeline персистит `assigned_worker`, но рантайм игнорирует (всё в один `pipeline_executor`; WorkerSpec-воркеры стартуют как IdleWorker no-op). Решение владельца: **вариант A** (воркер = параллельная ветвь, группа плагинов; обобщает B). Эпицентр `generic_process.py:_init_data_pipeline`: группировать по assigned_worker, PipelineExecutor на группу + in-process queue handoff + stop/recreate IdleWorker. См. план.
+
+**IPC-архитектура (решение владельца 2026-05-31):** «всё через RouterManager» — подтверждено; `send_message`/`broadcast` и `router.send(targets=...)` теперь сходятся на shared `queue_registry` (адресная книга оркестратора). **Push-модель** (оркестратор рассылает книгу всем + адресация до воркера) — отложена в **отдельный `/plan`** (не из этих долгов).
 
 **Pipeline-селектор воркера (DONE, e44017e8):** в инспекторе Pipeline строка «Процесс / Воркер» — два combo на одной строке (`MoveProcessCombo` + `MoveWorkerCombo`). Воркер-combo из топологии (Process.workers + message_processor); выбор → `field_changed("assigned_worker")` → SetPluginConfig (persist в config плагина). Runtime-исполнение по assigned_worker — следующий шаг.
 
