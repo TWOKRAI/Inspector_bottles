@@ -40,6 +40,7 @@ class DataReceiver:
         lag_alert_threshold_sec: float = 2.0,
         log_info: Callable[[str], None] | None = None,
         log_error: Callable[[str], None] | None = None,
+        log_debug: Callable[[str], None] | None = None,
     ) -> None:
         self._receive = receive_fn
         self._shm = shm_middleware
@@ -48,6 +49,8 @@ class DataReceiver:
         self._lag_threshold = lag_alert_threshold_sec
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
+        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль).
+        self._log_debug = log_debug or (lambda msg: None)
 
         # Метрики
         self._overload_events = 0
@@ -107,7 +110,7 @@ class DataReceiver:
 
             if do_trace:
                 data = msg.get("data", {})
-                self._log_info(
+                self._log_debug(
                     f"[TRACE] DataReceiver: msg received, "
                     f"data_type={msg.get('data_type', '?')}, "
                     f"sender={msg.get('sender', '?')}, "
@@ -120,7 +123,7 @@ class DataReceiver:
                 msg = self._shm.restore_frame(msg)
 
             if do_trace:
-                self._log_info(
+                self._log_debug(
                     f"[TRACE] DataReceiver: after restore_frame, has_frame={'frame' in msg}, "
                     f"frame_is_none={msg.get('frame') is None if 'frame' in msg else 'N/A'}"
                 )
@@ -131,7 +134,7 @@ class DataReceiver:
             if do_trace:
                 frame = item.get("frame")
                 shape = frame.shape if frame is not None and hasattr(frame, "shape") else None
-                self._log_info(
+                self._log_debug(
                     f"[TRACE] DataReceiver: item built, "
                     f"has_frame={'frame' in item}, shape={shape}, "
                     f"total_regions={item.get('total_regions', 0)}, "

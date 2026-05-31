@@ -44,6 +44,7 @@ class PipelineExecutor:
         critical_plugins: list[str] | None = None,
         log_info: Callable[[str], None] | None = None,
         log_error: Callable[[str], None] | None = None,
+        log_debug: Callable[[str], None] | None = None,
     ) -> None:
         self._plugins = plugins
         self._chain_targets = chain_targets
@@ -54,6 +55,8 @@ class PipelineExecutor:
         self._critical_plugins = set(critical_plugins or [])
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
+        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль).
+        self._log_debug = log_debug or (lambda msg: None)
 
         # Circuit breaker state per plugin
         self._consecutive_fails: dict[str, int] = {}
@@ -93,7 +96,7 @@ class PipelineExecutor:
             do_trace = self._trace_exec_cnt % 30 == 1
 
             if do_trace:
-                self._log_info(
+                self._log_debug(
                     f"[TRACE] PipelineExecutor: got {len(items)} item(s) from queue, "
                     f"plugins={[p.name for p in self._plugins]}, "
                     f"targets={self._chain_targets}"
@@ -105,11 +108,11 @@ class PipelineExecutor:
             # Если items пустой после chain — ничего не отправляем
             if not items:
                 if do_trace:
-                    self._log_info("[TRACE] PipelineExecutor: chain вернул пустой список!")
+                    self._log_debug("[TRACE] PipelineExecutor: chain вернул пустой список!")
                 continue
 
             if do_trace:
-                self._log_info(
+                self._log_debug(
                     f"[TRACE] PipelineExecutor: chain → {len(items)} item(s), sending to {self._chain_targets}"
                 )
 

@@ -91,6 +91,7 @@ class GenericProcess(ProcessModule):
                 lag_alert_threshold_sec=lag_threshold,
                 log_info=self._log_info,
                 log_error=self._log_error,
+                log_debug=self._log_debug,
             )
             # Подключить callback
             inspector._on_ready = self._data_receiver.on_items_ready
@@ -106,6 +107,7 @@ class GenericProcess(ProcessModule):
                 critical_plugins=critical,
                 log_info=self._log_info,
                 log_error=self._log_error,
+                log_debug=self._log_debug,
             )
 
             # Запуск workers через WorkerManager
@@ -137,6 +139,7 @@ class GenericProcess(ProcessModule):
                 target_fps=source_fps,
                 log_info=self._log_info,
                 log_error=self._log_error,
+                log_debug=self._log_debug,
             )
             self._source_producers.append(producer)
 

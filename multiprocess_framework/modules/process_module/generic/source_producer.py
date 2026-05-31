@@ -38,6 +38,7 @@ class SourceProducer:
         target_fps: float = 25.0,
         log_info: Callable[[str], None] | None = None,
         log_error: Callable[[str], None] | None = None,
+        log_debug: Callable[[str], None] | None = None,
     ) -> None:
         self._plugin = plugin
         self._shm = shm_middleware
@@ -46,6 +47,8 @@ class SourceProducer:
         self._target_interval = 1.0 / max(target_fps, 1.0)
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
+        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль).
+        self._log_debug = log_debug or (lambda msg: None)
 
     def run_loop(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """LOOP worker: produce() → SHM write → IPC send.
@@ -77,7 +80,7 @@ class SourceProducer:
             if items and self._trace_cnt % 30 == 1:
                 frame = items[0].get("frame")
                 shape = frame.shape if frame is not None and hasattr(frame, "shape") else None
-                self._log_info(
+                self._log_debug(
                     f"[TRACE] SourceProducer({self._plugin.name}): "
                     f"produce() → {len(items)} item(s), frame shape={shape}, "
                     f"targets={self._chain_targets}"
@@ -108,7 +111,7 @@ class SourceProducer:
             # [TRACE] Проверить что SHM write сработал
             if getattr(self, "_trace_cnt", 0) % 30 == 1:
                 has_shm = "shm_name" in item and "shm_actual_name" in item
-                self._log_info(
+                self._log_debug(
                     f"[TRACE] SourceProducer({self._plugin.name}): "
                     f"strip_and_write → shm_ok={has_shm}, "
                     f"owner={item.get('owner')}, shm_name={item.get('shm_name')}, "
