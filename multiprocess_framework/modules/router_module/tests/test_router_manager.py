@@ -996,5 +996,59 @@ class TestTargetAwareDeliveryFallback(unittest.TestCase):
         self.assertEqual(result.get("status"), "error")
 
 
+class TestHierarchicalDelivery(unittest.TestCase):
+    """P2.1: cross-process доставка по address[0]; воркер+ едет в билете (_address)."""
+
+    def test_flat_target_parity_no_address_key(self):
+        # Плоское имя → паритет: та же очередь, билет БЕЗ _address (ноль изменений).
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_h1", queue_registry=qr)
+        router.send({"type": "command", "command": "do.thing", "targets": ["worker_a"]})
+        self.assertEqual(len(qr.sent), 1)
+        process, qtype, ticket = qr.sent[0]
+        self.assertEqual(process, "worker_a")
+        self.assertEqual(qtype, "system")
+        self.assertNotIn("_address", ticket)
+
+    def test_dotted_target_delivered_to_process_queue_carries_address(self):
+        # "proc.worker" → очередь "proc", билет несёт полный address.
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_h2", queue_registry=qr)
+        router.send({"type": "data", "targets": ["display_proc.slot1"], "data": {}})
+        self.assertEqual(len(qr.sent), 1)
+        process, qtype, ticket = qr.sent[0]
+        self.assertEqual(process, "display_proc")  # address[0]
+        self.assertEqual(qtype, "data")
+        self.assertEqual(ticket["_address"], ["display_proc", "slot1"])
+
+    def test_deep_address_preserved_in_ticket(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_h3", queue_registry=qr)
+        router.send({"type": "command", "command": "c", "targets": ["p.w.sub"]})
+        process, _qtype, ticket = qr.sent[0]
+        self.assertEqual(process, "p")
+        self.assertEqual(ticket["_address"], ["p", "w", "sub"])
+
+    def test_invalid_address_skipped_not_crashing(self):
+        # Воркер без процесса (".worker") нарушает prefix-правило → пропуск, не падение.
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_h4", queue_registry=qr)
+        result = router.send({"type": "command", "command": "c", "targets": [".worker", "valid_proc"]})
+        # Невалидный пропущен, валидный доставлен.
+        self.assertEqual(len(qr.sent), 1)
+        self.assertEqual(qr.sent[0][0], "valid_proc")
+        self.assertEqual(result.get("status"), "success")
+
+    def test_multicast_per_target_address_isolated(self):
+        # Мультикаст с разными воркерами: каждая очередь несёт СВОЙ address.
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_h5", queue_registry=qr)
+        router.send({"type": "data", "targets": ["procA.w1", "procB.w2"], "data": {}})
+        self.assertEqual(len(qr.sent), 2)
+        by_proc = {process: ticket for process, _q, ticket in qr.sent}
+        self.assertEqual(by_proc["procA"]["_address"], ["procA", "w1"])
+        self.assertEqual(by_proc["procB"]["_address"], ["procB", "w2"])
+
+
 if __name__ == "__main__":
     unittest.main()

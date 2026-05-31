@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from ...channel_routing_module import ChannelRoutingManager
 from ...dispatch_module import Dispatcher, DispatchStrategy
+from ...message_module import AddressValidationError, is_broadcast, split_address
 from ..interfaces import IMessageChannel
 
 from ._sender import AsyncSender
@@ -236,6 +237,14 @@ class RouterManager(ChannelRoutingManager):
         — авторитетный адрес, доставляем по нему (раньше здесь был silent drop из-за
         guard'а на `msg["channel"]`).
 
+        **Иерархическая адресация (P2.1).** Каждый элемент `targets` — dotted-адрес
+        `process[.worker[.…]]` (см. `message_module.addressing`). Cross-process
+        доставка идёт в очередь `address[0]` (`process_of`); нижние уровни
+        (воркер и глубже, `address[1:]`) едут в билете под `_address` для
+        intra-process резолва на приёме (P2.2). Плоское имя `"proc"` →
+        `address == ["proc"]` → паритет: тот же объект билета (ноль копий —
+        важно для горячего data-path кадров), та же очередь, тот же qtype.
+
         Выбор очереди — :meth:`_select_queue_type`.
 
         Returns:
@@ -254,13 +263,22 @@ class RouterManager(ChannelRoutingManager):
 
         delivered = 0
         for target in targets:
-            if not target or target in ("all", "broadcast"):
+            if not target or is_broadcast(target):
                 continue
             try:
-                if qr.send_to_queue(target, qtype, msg_dict):
+                address = split_address(target)  # prefix-валидация dotted-адреса
+            except AddressValidationError as exc:
+                self._log_debug(f"_deliver_by_targets: невалидный адрес {target!r}: {exc}")
+                continue
+            process = address[0]
+            # len==1 (плоское имя) → исходный билет без копии (паритет, горячий путь).
+            # Иначе — per-target копия с полным address (воркер+ резолвится на приёме).
+            ticket = msg_dict if len(address) == 1 else {**msg_dict, "_address": address}
+            try:
+                if qr.send_to_queue(process, qtype, ticket):
                     delivered += 1
             except Exception as exc:
-                self._log_debug(f"_deliver_by_targets: send_to_queue('{target}', '{qtype}') failed: {exc}")
+                self._log_debug(f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc}")
 
         if delivered > 0:
             self._inc_stat("sent_ok")
