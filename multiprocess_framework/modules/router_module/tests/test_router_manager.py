@@ -902,5 +902,79 @@ class TestMiddlewareRobustness(unittest.TestCase):
         self.assertEqual(len(messages), 1)
 
 
+class _FakeQueueRegistry:
+    """Мини queue_registry для проверки target-aware fallback."""
+
+    def __init__(self) -> None:
+        self.sent: list = []
+
+    def send_to_queue(self, target, qtype, msg) -> bool:
+        self.sent.append((target, qtype, msg))
+        return True
+
+
+class TestTargetAwareDeliveryFallback(unittest.TestCase):
+    """U1: _do_send fallback — доставка по msg['targets'] через queue_registry,
+    когда channel/route не резолвится (раньше здесь был silent drop)."""
+
+    def test_targets_without_channel_delivered_via_queue_registry(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_fb1", queue_registry=qr)
+        result = router.send(
+            {
+                "type": "event",
+                "command": "state.changed",
+                "targets": ["gui"],
+                "queue_type": "system",
+                "data": {"deltas": []},
+            }
+        )
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(len(qr.sent), 1)
+        target, qtype, _msg = qr.sent[0]
+        self.assertEqual(target, "gui")
+        self.assertEqual(qtype, "system")
+
+    def test_explicit_queue_type_respected(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_fb2", queue_registry=qr)
+        router.send({"type": "event", "command": "ev", "targets": ["p"], "queue_type": "system"})
+        self.assertEqual(qr.sent[0][1], "system")
+
+    def test_command_defaults_to_system_queue(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_fb3", queue_registry=qr)
+        router.send({"type": "command", "command": "do.thing", "targets": ["worker_a"]})
+        self.assertEqual(qr.sent[0][1], "system")
+
+    def test_non_command_defaults_to_data_queue(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_fb4", queue_registry=qr)
+        router.send({"type": "event", "command": "ev", "targets": ["p"]})
+        self.assertEqual(qr.sent[0][1], "data")
+
+    def test_explicit_channel_not_hijacked_by_targets(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_fb5", queue_registry=qr)
+        ch, q = _make_channel("explicit_ch")
+        router.register_channel(ch)
+        router.send({"channel": "explicit_ch", "targets": ["gui"], "command": "x"})
+        # Канал зарезолвился → fallback не сработал, queue_registry не тронут
+        self.assertEqual(len(qr.sent), 0)
+        self.assertFalse(q.empty())
+
+    def test_no_targets_no_channel_returns_error(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_fb6", queue_registry=qr)
+        result = router.send({"type": "event", "command": "orphan_no_route"})
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(len(qr.sent), 0)
+
+    def test_fallback_skipped_when_no_queue_registry(self):
+        router = RouterManager(manager_name="r_fb7")  # queue_registry=None
+        result = router.send({"type": "event", "command": "x", "targets": ["gui"]})
+        self.assertEqual(result.get("status"), "error")
+
+
 if __name__ == "__main__":
     unittest.main()

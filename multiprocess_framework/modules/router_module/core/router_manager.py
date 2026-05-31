@@ -5,6 +5,7 @@ RouterManager — наследник ChannelRoutingManager.
 Координирует AsyncSender (outgoing pipeline), AsyncReceiver (incoming poll),
 channel_dispatcher (outgoing routing) и message_dispatcher (incoming handling).
 """
+
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -13,11 +14,12 @@ from ...channel_routing_module import ChannelRoutingManager
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ..interfaces import IMessageChannel
 
-from ._sender   import AsyncSender
+from ._sender import AsyncSender
 from ._receiver import AsyncReceiver
 from ._middleware import MiddlewarePipeline
 
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from ...message_module import Message
 
@@ -44,7 +46,7 @@ class RouterManager(ChannelRoutingManager):
             manager_name=manager_name,
             process=process,
             config=None,
-            buffer_strategy=None,          # AsyncSender handles buffering (not CRM buffer)
+            buffer_strategy=None,  # AsyncSender handles buffering (not CRM buffer)
             dispatcher_key_field="command",
             dispatcher_strategy=dispatch_strategy,
             managers=managers,
@@ -80,10 +82,10 @@ class RouterManager(ChannelRoutingManager):
         )
 
         self._stats: Dict[str, int] = {
-            "sent_attempted":     0,
-            "sent_ok":            0,
-            "received":           0,
-            "errors":             0,
+            "sent_attempted": 0,
+            "sent_ok": 0,
+            "received": 0,
+            "errors": 0,
             "middleware_dropped": 0,
         }
         self._stats_lock = threading.Lock()
@@ -103,8 +105,7 @@ class RouterManager(ChannelRoutingManager):
             self._sender.start()
             self.is_initialized = True
             self._log_info(
-                f"RouterManager '{self.manager_name}' initialized "
-                f"(channels: {self._channel_registry.names()})"
+                f"RouterManager '{self.manager_name}' initialized (channels: {self._channel_registry.names()})"
             )
             return True
         except Exception as e:
@@ -119,7 +120,7 @@ class RouterManager(ChannelRoutingManager):
             for ch in self._channel_registry.clear():
                 try:
                     ch.stop_listening()
-                except Exception:
+                except Exception:  # nosec B110 — best-effort остановка канала при shutdown
                     pass
 
             self._dispatcher.shutdown()
@@ -163,6 +164,14 @@ class RouterManager(ChannelRoutingManager):
 
             channels = self._resolve_channels(processed)
             if not channels:
+                # Fallback (U1): адресная доставка по msg["targets"] через общий
+                # queue_registry ("адресная книга" оркестратора). Срабатывает ТОЛЬКО
+                # когда channel/route не резолвится (раньше здесь был silent drop) —
+                # реализует Message(targets=[...]) → RouterManager → доставлено,
+                # не ломая существующие channel-маршруты.
+                delivered = self._deliver_by_targets(processed)
+                if delivered is not None:
+                    return delivered
                 self._inc_stat("errors")
                 return {
                     "status": "error",
@@ -178,9 +187,7 @@ class RouterManager(ChannelRoutingManager):
                 result = channels[0].send(processed)
                 if isinstance(result, dict) and result.get("status") == "error":
                     self._inc_stat("errors")
-                    self._log_debug(
-                        f"channel '{channels[0].name}' error: {result.get('reason')}"
-                    )
+                    self._log_debug(f"channel '{channels[0].name}' error: {result.get('reason')}")
                 else:
                     self._inc_stat("sent_ok")
                 return result
@@ -201,6 +208,48 @@ class RouterManager(ChannelRoutingManager):
             self._inc_stat("errors")
             self._log_error(f"_do_send exception: {e}")
             return {"status": "error", "reason": str(e)}
+
+    def _deliver_by_targets(self, msg_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Fallback-доставка по msg["targets"] через общий queue_registry.
+
+        "Адресная книга" оркестратора: queue_registry динамически хранит очереди
+        всех процессов (обновляется при их создании/удалении). Кладёт сообщение
+        напрямую в очередь каждого процесса-получателя по имени — тем же путём, что
+        и ProcessCommunication.send_message (проверенный транспорт data-трафика).
+
+        Используется только как fallback в _do_send, когда channel/route не резолвится.
+
+        Выбор очереди: msg["queue_type"] или "system" для command, иначе "data".
+
+        Returns:
+            dict-результат при успешной доставке хотя бы одному таргету;
+            None — если targets пуст, задан явный channel, queue_registry недоступен
+            или ни один таргет не доставлен (вызывающий формирует обычную ошибку).
+        """
+        targets = msg_dict.get("targets")
+        if not targets or msg_dict.get("channel"):
+            return None
+        qr = self.queue_registry
+        if qr is None:
+            return None
+
+        msg_type = msg_dict.get("type", "")
+        qtype = msg_dict.get("queue_type") or ("system" if msg_type == "command" else "data")
+
+        delivered = 0
+        for target in targets:
+            if not target or target in ("all", "broadcast"):
+                continue
+            try:
+                if qr.send_to_queue(target, qtype, msg_dict):
+                    delivered += 1
+            except Exception as exc:
+                self._log_debug(f"_deliver_by_targets: send_to_queue('{target}', '{qtype}') failed: {exc}")
+
+        if delivered > 0:
+            self._inc_stat("sent_ok")
+            return {"status": "success", "delivered_by_targets": delivered}
+        return None
 
     # ================================================================
     # RECEIVE
@@ -236,10 +285,12 @@ class RouterManager(ChannelRoutingManager):
                     self._inc_stat("middleware_dropped")
                     continue
 
-                processed.setdefault("_receive_info", {}).update({
-                    "router_id": self.router_id,
-                    "receive_time": time.time(),
-                })
+                processed.setdefault("_receive_info", {}).update(
+                    {
+                        "router_id": self.router_id,
+                        "receive_time": time.time(),
+                    }
+                )
 
                 dispatch_key = processed.get("command") or processed.get("type", "")
                 if dispatch_key:
@@ -249,13 +300,9 @@ class RouterManager(ChannelRoutingManager):
                             key_field="command" if processed.get("command") else "type",
                         )
                     except Exception as exc:
-                        self._log_warning(
-                            f"message_dispatcher error for '{dispatch_key}': {exc}"
-                        )
+                        self._log_warning(f"message_dispatcher error for '{dispatch_key}': {exc}")
 
-                result.append(
-                    Message.from_dict(processed) if return_messages else processed
-                )
+                result.append(Message.from_dict(processed) if return_messages else processed)
                 self._inc_stat("received")
 
             except Exception as e:
@@ -284,8 +331,11 @@ class RouterManager(ChannelRoutingManager):
                 continue
             if channel_types:
                 suffix = (
-                    ch_name[len(prefix):] if prefix and len(ch_name) > len(prefix)
-                    else ch_name.split("_")[-1] if "_" in ch_name else ch_name
+                    ch_name[len(prefix) :]
+                    if prefix and len(ch_name) > len(prefix)
+                    else ch_name.split("_")[-1]
+                    if "_" in ch_name
+                    else ch_name
                 )
                 if suffix not in channel_types:
                     continue
@@ -331,8 +381,7 @@ class RouterManager(ChannelRoutingManager):
         """
         if not isinstance(channel, IMessageChannel):
             self._log_warning(
-                f"[RouterManager] register_channel: expected IMessageChannel, "
-                f"got {type(channel).__name__}"
+                f"[RouterManager] register_channel: expected IMessageChannel, got {type(channel).__name__}"
             )
             return False
         if hasattr(channel, "_attach_logger"):
@@ -475,24 +524,24 @@ class RouterManager(ChannelRoutingManager):
             stats_snap = dict(self._stats)
 
         router_stats: Dict[str, Any] = {
-            "router_id":             self.router_id,
-            "is_initialized":        self.is_initialized,
-            "sender_alive":          self._sender.is_alive,
-            "listener_alive":        self._receiver.is_alive,
-            "send_queue_size":       self._sender.qsize,
-            "channels_count":        len(self._channel_registry),
-            "callbacks_count":       self._receiver.callback_count,
+            "router_id": self.router_id,
+            "is_initialized": self.is_initialized,
+            "sender_alive": self._sender.is_alive,
+            "listener_alive": self._receiver.is_alive,
+            "send_queue_size": self._sender.qsize,
+            "channels_count": len(self._channel_registry),
+            "callbacks_count": self._receiver.callback_count,
             "send_middleware_count": len(self._send_mw),
             "recv_middleware_count": len(self._recv_mw),
-            "channel_handlers":      len(ch_h),
-            "message_handlers":      len(msg_h),
-            "channel_routes":        ch_h,
-            "message_handler_list":  msg_h,
-            "queued_async":          self._sender.queued,
-            "dropped":               self._sender.dropped,
-            "processed":             self._receiver.processed,
+            "channel_handlers": len(ch_h),
+            "message_handlers": len(msg_h),
+            "channel_routes": ch_h,
+            "message_handler_list": msg_h,
+            "queued_async": self._sender.queued,
+            "dropped": self._sender.dropped,
+            "processed": self._receiver.processed,
             **stats_snap,
-            "errors":  stats_snap["errors"] + self._receiver.errors,
+            "errors": stats_snap["errors"] + self._receiver.errors,
             "channels": self._channel_registry.get_info(),
         }
 
@@ -503,23 +552,23 @@ class RouterManager(ChannelRoutingManager):
 
     def get_dispatcher_info(self) -> Dict[str, Any]:
         """Состояние обоих dispatcher'ов: handlers, scenarios, counts."""
-        ch_h  = self.channel_dispatcher.get_all_handlers()
-        ch_s  = self.channel_dispatcher.get_all_scenarios()
+        ch_h = self.channel_dispatcher.get_all_handlers()
+        ch_s = self.channel_dispatcher.get_all_scenarios()
         msg_h = self.message_dispatcher.get_all_handlers()
         msg_s = self.message_dispatcher.get_all_scenarios()
 
         return {
             "channel_dispatcher": {
-                "name":          self.channel_dispatcher.manager_name,
+                "name": self.channel_dispatcher.manager_name,
                 "handler_count": len(ch_h),
-                "handlers":      ch_h,
-                "scenarios":     ch_s,
+                "handlers": ch_h,
+                "scenarios": ch_s,
             },
             "message_dispatcher": {
-                "name":          self.message_dispatcher.manager_name,
+                "name": self.message_dispatcher.manager_name,
                 "handler_count": len(msg_h),
-                "handlers":      msg_h,
-                "scenarios":     msg_s,
+                "handlers": msg_h,
+                "scenarios": msg_s,
             },
         }
 
@@ -551,9 +600,7 @@ class RouterManager(ChannelRoutingManager):
 
         key_field = "command" if msg_dict.get("command") else "type"
         if not msg_dict.get(key_field):
-            self._log_warning(
-                "_resolve_channels: no 'channel', 'command' or 'type' in message"
-            )
+            self._log_warning("_resolve_channels: no 'channel', 'command' or 'type' in message")
             return []
 
         dispatch_result = self.channel_dispatcher.dispatch(msg_dict, key_field=key_field)
@@ -568,14 +615,13 @@ class RouterManager(ChannelRoutingManager):
         if isinstance(dispatch_result, list):
             snapshot = self._channel_registry.snapshot()
             resolved = [snapshot[n] for n in dispatch_result if n in snapshot]
-            missing  = [n for n in dispatch_result if n not in snapshot]
+            missing = [n for n in dispatch_result if n not in snapshot]
             if missing:
                 self._log_warning(f"broadcast: channels not found: {missing}")
             return resolved
 
         self._log_debug(
-            f"channel_dispatcher returned no route for "
-            f"key_field={key_field!r} value={msg_dict.get(key_field)!r}"
+            f"channel_dispatcher returned no route for key_field={key_field!r} value={msg_dict.get(key_field)!r}"
         )
         return []
 

@@ -194,3 +194,76 @@ class TestProcessMonitorLoop:
 
         # Цикл должен был завершиться без исключения
         assert not t.is_alive()
+
+
+class TestProcessMonitorStatePublish:
+    """Публикация live-телеметрии в StateStore (Фаза 1.1)."""
+
+    def test_publish_state_calls_state_store_manager(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        ssm = MagicMock()
+        mock_pm._state_store_manager = ssm
+        monitor = ProcessMonitor(mock_pm)
+
+        monitor._publish_state("processes.cam.state.status", "running")
+
+        ssm.handle_state_set.assert_called_once()
+        arg = ssm.handle_state_set.call_args[0][0]
+        assert arg["data"]["path"] == "processes.cam.state.status"
+        assert arg["data"]["value"] == "running"
+        assert arg["data"]["source"] == "ProcessMonitor"
+
+    def test_publish_state_noop_without_state_store(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        mock_pm._state_store_manager = None
+        monitor = ProcessMonitor(mock_pm)
+        # Не должно бросать исключение
+        monitor._publish_state("processes.x.state.status", "running")
+
+    def test_heartbeat_publishes_worker_telemetry(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        ssm = MagicMock()
+        mock_pm._state_store_manager = ssm
+        monitor = ProcessMonitor(mock_pm)
+
+        monitor._on_heartbeat_received(
+            {
+                "sender": "cam0",
+                "timestamp": 1.0,
+                "workers_status": {"w1": {"status": "running", "effective_hz": 12.5}},
+            }
+        )
+
+        paths = {c[0][0]["data"]["path"] for c in ssm.handle_state_set.call_args_list}
+        assert "processes.cam0.workers.w1.status" in paths
+        assert "processes.cam0.workers.w1.effective_hz" in paths
+
+    def test_heartbeat_without_hz_skips_hz_publish(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        ssm = MagicMock()
+        mock_pm._state_store_manager = ssm
+        monitor = ProcessMonitor(mock_pm)
+
+        monitor._on_heartbeat_received(
+            {
+                "sender": "cam0",
+                "timestamp": 1.0,
+                "workers_status": {"w1": {"status": "running"}},  # нет effective_hz
+            }
+        )
+
+        paths = {c[0][0]["data"]["path"] for c in ssm.handle_state_set.call_args_list}
+        assert "processes.cam0.workers.w1.status" in paths
+        assert "processes.cam0.workers.w1.effective_hz" not in paths
+
+    def test_status_change_publishes_process_state(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        ssm = MagicMock()
+        mock_pm._state_store_manager = ssm
+        mock_pm.router_manager = None  # broadcast пропустится, publish идёт первым
+        monitor = ProcessMonitor(mock_pm)
+
+        monitor._broadcast_status_change("cam0", "created", "running", {"status": "running"})
+
+        paths = {c[0][0]["data"]["path"] for c in ssm.handle_state_set.call_args_list}
+        assert "processes.cam0.state.status" in paths

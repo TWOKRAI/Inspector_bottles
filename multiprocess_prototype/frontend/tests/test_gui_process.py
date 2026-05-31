@@ -102,6 +102,24 @@ class TestDataReceiverBridgeDispatch:
         bridge.dispatch({"data_type": "fps_update", "fps": 30})
         assert len(received) == 1
 
+    def test_dispatch_state_delta_goes_to_state_updated(self, qtbot):
+        """data_type='state_delta' → signal state_updated (Фаза 1.3)."""
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+
+        bridge = DataReceiverBridge()
+        received = []
+        bridge.state_updated.connect(received.append)
+
+        msg = {
+            "data_type": "state_delta",
+            "path": "processes.cam.workers.w1.status",
+            "value": "running",
+        }
+        bridge.dispatch(msg)
+
+        assert len(received) == 1
+        assert received[0] == msg
+
     def test_dispatch_unknown_goes_to_command_response(self, qtbot):
         """Неизвестный data_type → signal command_response."""
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
@@ -473,3 +491,46 @@ class TestDataReceiverErrorRecovery:
         metric_names = [call[0][0] for call in process._record_metric.call_args_list]
         assert "data_receiver.errors" in metric_names
         assert "data_receiver.success" in metric_names
+
+
+class TestStateDeltaEmitter:
+    """_StateDeltaEmitter: дельты StateStore → bridge.dispatch(state_delta) (Фаза 1.2)."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_qapp(self, qapp):
+        pass
+
+    def test_emitter_converts_deltas_to_state_delta(self, qtbot):
+        from types import SimpleNamespace
+
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+        from multiprocess_prototype.frontend.process import _StateDeltaEmitter
+
+        bridge = DataReceiverBridge()
+        states = []
+        bridge.state_updated.connect(states.append)
+
+        emitter = _StateDeltaEmitter(bridge)
+        deltas = [
+            SimpleNamespace(path="processes.cam.workers.w1.status", new_value="running"),
+            SimpleNamespace(path="processes.cam.workers.w1.effective_hz", new_value=12.5),
+        ]
+        emitter._on_state_deltas(deltas)
+
+        assert len(states) == 2
+        assert states[0]["data_type"] == "state_delta"
+        assert states[0]["path"] == "processes.cam.workers.w1.status"
+        assert states[0]["value"] == "running"
+        assert states[1]["path"] == "processes.cam.workers.w1.effective_hz"
+        assert states[1]["value"] == 12.5
+
+    def test_emitter_empty_deltas_noop(self, qtbot):
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+        from multiprocess_prototype.frontend.process import _StateDeltaEmitter
+
+        bridge = DataReceiverBridge()
+        states = []
+        bridge.state_updated.connect(states.append)
+
+        _StateDeltaEmitter(bridge)._on_state_deltas([])
+        assert states == []

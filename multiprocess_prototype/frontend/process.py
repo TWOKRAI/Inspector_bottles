@@ -12,12 +12,33 @@ from __future__ import annotations
 import sys
 import time
 
+from PySide6.QtCore import QObject, Slot
+
 from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
 from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ThreadConfig, ThreadPriority
 
 from .bridge import DataReceiverBridge
 from . import app as gui_app
+
+
+class _StateDeltaEmitter(QObject):
+    """Qt main-thread приёмник дельт StateStore → bridge.dispatch(state_delta).
+
+    GuiStateProxy.on_state_changed (system/IO-поток) маршрутизирует дельты сюда через
+    QMetaObject.invokeMethod(QueuedConnection) — слот исполняется в main thread.
+    Каждая дельта конвертируется в state_delta-сообщение и уходит в существующий
+    bridge → GuiStateBindings (реактивные подписки виджетов карточек/воркеров).
+    """
+
+    def __init__(self, bridge: DataReceiverBridge) -> None:
+        super().__init__()
+        self._bridge = bridge
+
+    @Slot(list)
+    def _on_state_deltas(self, deltas: list) -> None:
+        for d in deltas:
+            self._bridge.dispatch({"data_type": "state_delta", "path": d.path, "value": d.new_value})
 
 
 class GuiProcess(ProcessModule):
@@ -40,13 +61,44 @@ class GuiProcess(ProcessModule):
         # SHM receive middleware: при получении данных — читать кадр из SHM
         # owner/slot — fallback, реальные координаты берутся из msg["data"]
         if self.router_manager and self.memory_manager:
-            self._recv_frame_mw = FrameShmMiddleware(
-                self.memory_manager, owner=self.name, slot="output_frames"
-            )
+            self._recv_frame_mw = FrameShmMiddleware(self.memory_manager, owner=self.name, slot="output_frames")
             self.router_manager.add_receive_middleware(self._recv_frame_mw.on_receive)
 
         # Создаём bridge в main thread — он будет использоваться из worker
         self._bridge = DataReceiverBridge()
+
+        # StateStore-подписчик: live-телеметрия процессов/воркеров.
+        # ProcessMonitor публикует processes.X.state.* / processes.X.workers.Y.* →
+        # DeltaDispatcher шлёт state.changed (через queue_registry, U1) → handler здесь →
+        # emitter (Qt main thread) → bridge → GuiStateBindings обновляют виджеты.
+        from multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy import (
+            GuiStateProxy,
+        )
+
+        self._state_emitter = _StateDeltaEmitter(self._bridge)
+        self._gui_state_proxy = GuiStateProxy(
+            process_name=self.name,
+            router=self.router_manager,
+            signal_emitter=self._state_emitter,
+            server_target="ProcessManager",
+            logger=self,
+        )
+        self._gui_state_proxy.initialize()
+        if self.router_manager:
+            # Регистрируем handler вручную (self.state_proxy оставляем None, чтобы не
+            # активировать сторонние GUI-адаптеры и не словить двойную регистрацию
+            # через _init_state_proxy / ADR-SS-006).
+            self.router_manager.register_message_handler("state.changed", self._gui_state_proxy.on_state_changed)
+            # Серверная подписка на телеметрию (callback пуст — доставку в виджеты
+            # делает emitter через bridge; подписка нужна, чтобы DeltaDispatcher слал
+            # дельты на 'gui'). Не блокирует старт: subscribe — fire-and-forget.
+            try:
+                self._gui_state_proxy.subscribe("processes.**", lambda _deltas: None, exclude_self=True)
+            except Exception as exc:
+                self._log_warning(
+                    f"GuiProcess '{self.name}': подписка на processes.** не удалась: {exc}",
+                    module="gui",
+                )
 
         # Создаём worker для получения IPC data-сообщений
         config = ThreadConfig(priority=ThreadPriority.NORMAL)
@@ -66,7 +118,7 @@ class GuiProcess(ProcessModule):
         """Цикл получения IPC data-сообщений и передачи в Qt через bridge."""
         _trace_cnt = 0
         _consecutive_errors = 0
-        _backoff = 0.1       # начальный backoff (секунды)
+        _backoff = 0.1  # начальный backoff (секунды)
         _MAX_BACKOFF = 5.0
         _ERROR_THRESHOLD = 5  # порог для вызова _log_critical
 
@@ -76,9 +128,7 @@ class GuiProcess(ProcessModule):
                 continue
             try:
                 # return_messages=False → получаем сырые dict (после middleware)
-                msgs = self.router_manager.receive(
-                    timeout=0.1, channel_types=["data"], return_messages=False
-                )
+                msgs = self.router_manager.receive(timeout=0.1, channel_types=["data"], return_messages=False)
                 for msg_dict in msgs:
                     _trace_cnt += 1
                     if _trace_cnt % 30 == 1:
@@ -107,10 +157,13 @@ class GuiProcess(ProcessModule):
                 _consecutive_errors += 1
 
                 # Трекинг через ErrorManager (единый паттерн)
-                self._track_error(exc, context={
-                    "loop": "data_receiver",
-                    "consecutive": _consecutive_errors,
-                })
+                self._track_error(
+                    exc,
+                    context={
+                        "loop": "data_receiver",
+                        "consecutive": _consecutive_errors,
+                    },
+                )
 
                 # Метрика через StatsManager
                 self._record_metric("data_receiver.errors")
@@ -118,8 +171,7 @@ class GuiProcess(ProcessModule):
                 # После порога — critical лог
                 if _consecutive_errors == _ERROR_THRESHOLD:
                     self._log_critical(
-                        f"data_receiver: {_consecutive_errors} ошибок подряд, "
-                        f"последняя: {exc}",
+                        f"data_receiver: {_consecutive_errors} ошибок подряд, последняя: {exc}",
                         module="gui",
                     )
 
@@ -163,9 +215,9 @@ class GuiProcess(ProcessModule):
             "multiprocess_prototype.frontend.bridge",
         )
         to_remove = [
-            name for name in sys.modules
-            if name.startswith("multiprocess_prototype.frontend")
-            and not any(name.startswith(p) for p in keep_prefixes)
+            name
+            for name in sys.modules
+            if name.startswith("multiprocess_prototype.frontend") and not any(name.startswith(p) for p in keep_prefixes)
         ]
         for name in to_remove:
             del sys.modules[name]
@@ -173,6 +225,7 @@ class GuiProcess(ProcessModule):
         # Перезагружаем сам app-модуль чтобы подхватить новые импорты
         importlib.invalidate_caches()
         import multiprocess_prototype.frontend.app as _app_mod
+
         importlib.reload(_app_mod)
 
         # Обновляем ссылку на уровне модуля
@@ -185,4 +238,10 @@ class GuiProcess(ProcessModule):
             f"GuiProcess '{self.name}': начало graceful shutdown",
             module="gui",
         )
+        proxy = getattr(self, "_gui_state_proxy", None)
+        if proxy is not None:
+            try:
+                proxy.shutdown()
+            except Exception:  # nosec B110 — shutdown best-effort
+                pass
         return super().shutdown()

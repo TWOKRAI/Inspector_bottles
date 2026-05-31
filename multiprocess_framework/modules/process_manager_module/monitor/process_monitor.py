@@ -37,9 +37,7 @@ def _state_snapshot_from_process_data(process_data: Any) -> dict[str, Any] | Non
     meta = getattr(process_data, "metadata", None) or {}
     cust = getattr(process_data, "custom", None) or {}
     safe_custom = {
-        k: v
-        for k, v in (dict(cust) if isinstance(cust, dict) else {}).items()
-        if k not in _CUSTOM_EXCLUDE_KEYS
+        k: v for k, v in (dict(cust) if isinstance(cust, dict) else {}).items() if k not in _CUSTOM_EXCLUDE_KEYS
     }
     return {
         "status": status_str,
@@ -121,9 +119,7 @@ class ProcessMonitor:
         через стандартный message_dispatcher (вызывается из SystemThreads._message_processing_loop).
         """
         if not self.process.router_manager:
-            self.process._log_warning(
-                "RouterManager недоступен — heartbeat handler не зарегистрирован"
-            )
+            self.process._log_warning("RouterManager недоступен — heartbeat handler не зарегистрирован")
             return
         self.process.router_manager.register_message_handler(
             "heartbeat",
@@ -150,6 +146,14 @@ class ProcessMonitor:
         workers = msg.get("workers_status")
         if workers and isinstance(workers, dict):
             self._workers_status[sender] = workers
+            # Live-телеметрия воркеров → StateStore (GUI bindings processes.X.workers.Y.*)
+            for wname, wdata in workers.items():
+                if not isinstance(wdata, dict):
+                    continue
+                self._publish_state(f"processes.{sender}.workers.{wname}.status", wdata.get("status"))
+                hz = wdata.get("effective_hz")
+                if hz is not None:
+                    self._publish_state(f"processes.{sender}.workers.{wname}.effective_hz", hz)
 
         # Обрабатываем статус из heartbeat (paused / running)
         reported_status = msg.get("status")
@@ -161,9 +165,22 @@ class ProcessMonitor:
                 snap = {"status": reported_status, "metadata": {}, "custom": {}}
                 self._handle_state_change(sender, prev, snap)
                 self.previous_states[sender] = snap.copy()
-                self.process._log_debug(
-                    f"Heartbeat от '{sender}': статус обновлён {prev_status} → {reported_status}"
-                )
+                self.process._log_debug(f"Heartbeat от '{sender}': статус обновлён {prev_status} → {reported_status}")
+
+    def _publish_state(self, path: str, value: Any) -> None:
+        """Опубликовать значение в общий StateStore (если доступен).
+
+        Идёт локально через StateStoreManager ProcessManager (без IPC):
+        handle_state_set → store.set → DeltaDispatcher → подписчики (GUI).
+        store.set отдаёт дельту только при реальном изменении — спама нет.
+        """
+        ssm = getattr(self.process, "_state_store_manager", None)
+        if ssm is None:
+            return
+        try:
+            ssm.handle_state_set({"data": {"path": path, "value": value, "source": "ProcessMonitor"}})
+        except Exception as exc:  # nosec B110 — телеметрия не критична
+            self.process._log_debug(f"_publish_state('{path}') failed: {exc}")
 
     # ----------------------------------------------------------------
     # Мониторинг: основной цикл
@@ -286,7 +303,7 @@ class ProcessMonitor:
                 psr = self.process.shared_resources.process_state_registry
                 if psr is not None and hasattr(psr, "update_state"):
                     psr.update_state(proc.name, status=new_status)
-            except Exception:
+            except Exception:  # nosec B110 — best-effort обновление статуса в SR, сбой некритичен
                 pass
 
         # Авто-рестарт при crash или логирование
@@ -333,8 +350,7 @@ class ProcessMonitor:
             return
 
         self.process._log_warning(
-            f"Process '{process_name}' не отвечает "
-            f"(heartbeat timeout: {elapsed:.1f}с > {self.heartbeat_timeout}с)"
+            f"Process '{process_name}' не отвечает (heartbeat timeout: {elapsed:.1f}с > {self.heartbeat_timeout}с)"
         )
 
         snap = {
@@ -352,7 +368,7 @@ class ProcessMonitor:
                 psr = self.process.shared_resources.process_state_registry
                 if psr is not None and hasattr(psr, "update_state"):
                     psr.update_state(process_name, status="unresponsive")
-            except Exception:
+            except Exception:  # nosec B110 — best-effort обновление статуса в SR, сбой некритичен
                 pass
 
         # Авто-рестарт при unresponsive или полная остановка
@@ -384,8 +400,7 @@ class ProcessMonitor:
         if count >= max_retries:
             # Исчерпаны попытки — статус FAILED, больше не пытаемся
             self.process._log_error(
-                f"Process '{process_name}' превысил лимит рестартов "
-                f"({count}/{max_retries}), статус -> FAILED"
+                f"Process '{process_name}' превысил лимит рестартов ({count}/{max_retries}), статус -> FAILED"
             )
             snap = {
                 "status": "failed",
@@ -401,7 +416,7 @@ class ProcessMonitor:
                     psr = self.process.shared_resources.process_state_registry
                     if psr is not None and hasattr(psr, "update_state"):
                         psr.update_state(process_name, status="failed")
-                except Exception:
+                except Exception:  # nosec B110 — best-effort обновление статуса в SR, сбой некритичен
                     pass
             return
 
@@ -428,8 +443,7 @@ class ProcessMonitor:
             else:
                 self._restart_counts[process_name] = attempt
                 self.process._log_error(
-                    f"Не удалось перезапустить процесс '{process_name}' "
-                    f"(попытка {attempt}/{max_retries})"
+                    f"Не удалось перезапустить процесс '{process_name}' (попытка {attempt}/{max_retries})"
                 )
         except Exception as exc:
             self._restart_counts[process_name] = attempt
@@ -509,6 +523,8 @@ class ProcessMonitor:
         new_status: str,
         current_state: dict[str, Any],
     ):
+        # Live-статус процесса → StateStore (GUI карточки processes.X.state.status)
+        self._publish_state(f"processes.{process_name}.state.status", new_status)
         try:
             if not self.process.router_manager:
                 return
@@ -531,13 +547,9 @@ class ProcessMonitor:
             }
             sent = self.process.communication.broadcast(msg, exclude_self=True)
             if sent > 0:
-                self.process._log_debug(
-                    f"Broadcasted status change for '{process_name}' to {sent} processes"
-                )
+                self.process._log_debug(f"Broadcasted status change for '{process_name}' to {sent} processes")
             else:
-                self.process._log_warning(
-                    f"No processes received status change for '{process_name}'"
-                )
+                self.process._log_warning(f"No processes received status change for '{process_name}'")
         except Exception as e:
             self.process._log_error(f"Failed to broadcast status change: {e}")
 
@@ -552,17 +564,11 @@ class ProcessMonitor:
             "poll_interval": self.poll_interval,
             "heartbeat_timeout": self.heartbeat_timeout,
             "restart_policy": self.restart_policy.model_dump(),
-            "last_heartbeats": {
-                name: round(time.time() - ts, 1) for name, ts in self._last_heartbeat.items()
-            },
+            "last_heartbeats": {name: round(time.time() - ts, 1) for name, ts in self._last_heartbeat.items()},
             "restart_counts": dict(self._restart_counts),
-            "crashed_processes": [
-                n for n, st in self.previous_states.items() if st.get("status") == "crashed"
-            ],
+            "crashed_processes": [n for n, st in self.previous_states.items() if st.get("status") == "crashed"],
             "unresponsive_processes": [
                 n for n, st in self.previous_states.items() if st.get("status") == "unresponsive"
             ],
-            "failed_processes": [
-                n for n, st in self.previous_states.items() if st.get("status") == "failed"
-            ],
+            "failed_processes": [n for n, st in self.previous_states.items() if st.get("status") == "failed"],
         }

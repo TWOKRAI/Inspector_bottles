@@ -4,6 +4,7 @@ DeltaDispatcher получает список дельт, матчит их по
 группирует по subscriber (с дедупликацией!) и отправляет
 каждому подписчику одно IPC-сообщение state.changed.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -94,9 +95,7 @@ class DeltaDispatcher:
         """
         return self.dispatch([delta])
 
-    def _send_state_changed(
-        self, subscriber: str, deltas: list[Delta]
-    ) -> None:
+    def _send_state_changed(self, subscriber: str, deltas: list[Delta]) -> None:
         """Отправить state.changed сообщение подписчику.
 
         При router=None — только логирование (для тестов).
@@ -109,6 +108,11 @@ class DeltaDispatcher:
             "type": "event",
             "sender": self._sender,
             "targets": [subscriber],
+            # queue_type="system": доставка в {subscriber}_system, который опрашивает
+            # штатный message_processor подписчика — message_dispatcher синхронно
+            # вызовет handler state.changed при опросе. См. U1-fallback в
+            # RouterManager._deliver_by_targets (доставка по targets через queue_registry).
+            "queue_type": "system",
             "command": "state.changed",
             "data": {
                 "deltas": [d.to_dict() for d in deltas],

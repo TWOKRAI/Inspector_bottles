@@ -3,6 +3,7 @@
 Использует внутренний Signal + явный QueuedConnection для гарантированной
 доставки из произвольного Python thread (не обязательно QThread).
 """
+
 from __future__ import annotations
 
 from typing import Callable
@@ -47,7 +48,7 @@ class DataReceiverBridge(QObject):
         data_type = msg_dict.get("data_type", "")
         if data_type in ("frame_ready", "frame") or "frame" in msg_dict:
             kind = "frame"
-        elif data_type in ("status", "state_changed", "fps_update"):
+        elif data_type in ("status", "state_changed", "fps_update", "state_delta"):
             kind = "state"
         else:
             kind = "command"
