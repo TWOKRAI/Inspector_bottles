@@ -148,3 +148,48 @@ class TestProcessModuleRunStop:
         process = ProcessModule("test_proc")
         process._stop_requested = True
         assert process.should_stop() is True
+
+
+class TestCommandHandlerReply:
+    """P0.5: обёртка handler'а команды отвечает инициатору через reply_to_request."""
+
+    def test_handler_invokes_reply_to_request_with_result(self):
+        from ..lifecycle.process_lifecycle import ProcessLifecycle
+
+        cm = Mock()
+        cm.handle_command = Mock(return_value={"success": True, "value": 42})
+        proc = Mock()
+        proc.router_manager = Mock()
+
+        handler = ProcessLifecycle._make_command_handler(cm, proc)
+        msg = {"command": "introspect.status", "sender": "driver", "request_id": "c1"}
+        result = handler(msg)
+
+        assert result == {"success": True, "value": 42}
+        cm.handle_command.assert_called_once_with(msg)
+        proc.router_manager.reply_to_request.assert_called_once_with(msg, {"success": True, "value": 42})
+
+    def test_handler_survives_reply_failure(self):
+        from ..lifecycle.process_lifecycle import ProcessLifecycle
+
+        cm = Mock()
+        cm.handle_command = Mock(return_value={"ok": 1})
+        proc = Mock()
+        proc.router_manager.reply_to_request = Mock(side_effect=RuntimeError("boom"))
+
+        handler = ProcessLifecycle._make_command_handler(cm, proc)
+        # Исключение в reply не должно ронять обработку команды.
+        result = handler({"command": "x"})
+        assert result == {"ok": 1}
+        proc._log_warning.assert_called_once()
+
+    def test_handler_without_router_just_returns(self):
+        from ..lifecycle.process_lifecycle import ProcessLifecycle
+
+        cm = Mock()
+        cm.handle_command = Mock(return_value={"ok": 1})
+        proc = Mock()
+        proc.router_manager = None
+
+        handler = ProcessLifecycle._make_command_handler(cm, proc)
+        assert handler({"command": "x"}) == {"ok": 1}

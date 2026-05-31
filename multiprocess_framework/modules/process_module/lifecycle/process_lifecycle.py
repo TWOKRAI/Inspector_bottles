@@ -114,13 +114,14 @@ class ProcessLifecycle:
         try:
             commands = self.process.command_manager.get_commands()
             cm = self.process.command_manager
+            proc = self.process
             for cmd_info in commands:
                 key = cmd_info.get("key") or cmd_info.get("key_pattern")
                 if not key:
                     continue
                 self.process.router_manager.register_message_handler(
                     key,
-                    lambda msg, _cm=cm: _cm.handle_command(msg),
+                    self._make_command_handler(cm, proc),
                     expects_full_message=True,
                 )
             if commands:
@@ -129,6 +130,28 @@ class ProcessLifecycle:
                 )
         except Exception as e:
             self.process._log_warning(f"Failed to register commands with router: {e}")
+
+    @staticmethod
+    def _make_command_handler(cm, proc):
+        """Обёртка handler'а команды: выполнить + (P0.5) ответить инициатору.
+
+        После ``cm.handle_command(msg)`` результат раньше выбрасывался — теперь
+        отправляется обратно через ``router.reply_to_request``, НО только если
+        входящий билет нёс correlation-id (иначе no-op — fire-and-forget паритет
+        для всего нынешнего GUI-трафика, нулевая регрессия).
+        """
+
+        def _handler(msg):
+            result = cm.handle_command(msg)
+            router = proc.router_manager
+            if router is not None and hasattr(router, "reply_to_request"):
+                try:
+                    router.reply_to_request(msg, result)
+                except Exception as exc:
+                    proc._log_warning(f"reply_to_request failed: {exc}")
+            return result
+
+        return _handler
 
     def shutdown(self) -> bool:
         """

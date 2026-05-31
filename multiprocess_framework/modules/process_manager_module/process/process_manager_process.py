@@ -864,20 +864,36 @@ class ProcessManagerProcess(ProcessModule):
             result = {"status": "error", "reason": str(exc)}
             success = False
 
-        # Отправить ответ через Router
+        # Отправить ответ через Router (P0.5: адресуем отправителю — раньше
+        # ответ шёл без targets и терялся). Адресат: data.reply_to или sender
+        # входящего билета. request_id (top-level) + data.correlation_id —
+        # чтобы резолвер инициатора (RouterManager._resolve_pending) совпал.
+        reply_target = data.get("reply_to") or msg.get("sender")
         response = {
+            "type": "response",
             "command": "process.command.response",
+            "sender": self.name,
+            "targets": [reply_target] if reply_target else [],
+            "queue_type": "system",
+            "request_id": correlation_id,
+            "success": success,
+            "result": result,
             "data": {
                 "correlation_id": correlation_id,
                 "success": success,
                 "result": result,
             },
         }
-        if self.router_manager:
+        if self.router_manager and reply_target:
             try:
                 self.router_manager.send(response)
             except Exception as send_exc:
                 self._log_error(f"Не удалось отправить process.command.response: {send_exc}")
+        elif not reply_target:
+            self._log_debug(
+                f"process.command.response не отправлен: во входящем билете нет sender "
+                f"(cmd={cmd!r}, correlation_id={correlation_id})"
+            )
 
     def _handle_critical_error(self, exc: Exception, context: str) -> None:
         """Логировать критическую ошибку через error_module и запустить shutdown."""

@@ -21,7 +21,7 @@ from queue import Queue
 from types import SimpleNamespace
 from typing import Callable
 
-from ..core.router_manager import RouterManager
+from ..core.router_manager import RouterManager, _PendingRequest
 from ..channels.queue_channel import QueueChannel
 
 
@@ -1124,6 +1124,171 @@ class TestWorkerHandlerRouting(unittest.TestCase):
     def test_register_rejects_empty(self):
         self.assertFalse(self.router.register_worker_handler("", lambda m: None))
         self.assertFalse(self.router.register_worker_handler("w", None))
+
+
+class TestRequestResponse(unittest.TestCase):
+    """P0.5: синхронный request-response поверх fire-and-forget транспорта."""
+
+    def test_extract_correlation_id_prefers_top_level_request_id(self):
+        self.assertEqual(
+            RouterManager._extract_correlation_id({"request_id": "top", "data": {"correlation_id": "nested"}}),
+            "top",
+        )
+        self.assertEqual(
+            RouterManager._extract_correlation_id({"data": {"correlation_id": "nested"}}),
+            "nested",
+        )
+        self.assertIsNone(RouterManager._extract_correlation_id({"command": "x"}))
+
+    def test_reply_to_request_addresses_sender_via_system_queue(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="rr_reply1", queue_registry=qr)
+        req = {
+            "type": "command",
+            "command": "introspect.handlers",
+            "sender": "driver",
+            "request_id": "cid-1",
+            "data": {},
+        }
+        router.reply_to_request(req, {"handlers": ["a"]}, success=True)
+        self.assertEqual(len(qr.sent), 1)
+        target, qtype, ticket = qr.sent[0]
+        self.assertEqual(target, "driver")
+        self.assertEqual(qtype, "system")  # ответ едет control-plane
+        self.assertEqual(ticket["request_id"], "cid-1")
+        self.assertEqual(ticket["result"], {"handlers": ["a"]})
+        self.assertTrue(ticket["success"])
+        self.assertEqual(ticket["type"], "response")
+
+    def test_reply_to_request_noop_without_correlation_id(self):
+        # Fire-and-forget паритет: команда без correlation_id → ответ НЕ шлётся.
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="rr_reply2", queue_registry=qr)
+        res = router.reply_to_request({"type": "command", "command": "x", "sender": "A"}, {"r": 1})
+        self.assertIsNone(res)
+        self.assertEqual(len(qr.sent), 0)
+
+    def test_reply_to_request_uses_nested_correlation_id(self):
+        # PM-обёртка process.command: id лежит в data.correlation_id.
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="rr_reply3", queue_registry=qr)
+        req = {
+            "type": "command",
+            "command": "process.command",
+            "sender": "gui",
+            "data": {"cmd": "process.start", "correlation_id": "c9"},
+        }
+        router.reply_to_request(req, {"ok": 1})
+        self.assertEqual(qr.sent[0][2]["request_id"], "c9")
+
+    def test_reply_to_request_honors_reply_to_override(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="rr_reply4", queue_registry=qr)
+        req = {"sender": "A", "request_id": "c", "data": {"reply_to": "B"}}
+        router.reply_to_request(req, {"x": 1})
+        self.assertEqual(qr.sent[0][0], "B")
+
+    def test_request_injects_correlation_id_top_and_nested(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="rr_req1", queue_registry=qr)
+        # Ответа не будет → быстрый таймаут; нас интересует отправленный билет.
+        router.request(
+            {"type": "command", "command": "process.command", "targets": ["B"], "sender": "A", "data": {"cmd": "y"}},
+            timeout=0.05,
+        )
+        _target, _qtype, ticket = qr.sent[0]
+        self.assertIn("request_id", ticket)
+        self.assertEqual(ticket["data"]["correlation_id"], ticket["request_id"])
+
+    def test_request_timeout_returns_error_and_cleans_pending(self):
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="rr_req2", queue_registry=qr)
+        res = router.request(
+            {"type": "command", "command": "x", "targets": ["B"], "sender": "A"},
+            timeout=0.1,
+        )
+        self.assertFalse(res["success"])
+        self.assertEqual(res["error"], "timeout")
+        self.assertEqual(len(router._pending_requests), 0)  # слот очищен
+
+    def test_request_send_error_returns_immediately(self):
+        # Без queue_registry и без канала targets не доставляются → ошибка отправки.
+        router = RouterManager(manager_name="rr_req3")
+        res = router.request(
+            {"type": "command", "command": "x", "targets": ["B"], "sender": "A"},
+            timeout=2.0,
+        )
+        self.assertFalse(res["success"])
+        self.assertNotEqual(res.get("error"), "timeout")
+        self.assertEqual(len(router._pending_requests), 0)
+
+    def test_request_resolves_when_response_received(self):
+        # Полный round-trip: request() блокирует поток-инициатор; ответ приходит
+        # каналом, receive() в другом потоке резолвит pending.
+        qr = _FakeQueueRegistry()
+        ch, q = _make_channel("rr_rt_system")
+        router = RouterManager(manager_name="rr_rt", queue_registry=qr)
+        router.register_channel(ch)
+        router.initialize()
+        try:
+            holder: dict = {}
+
+            def do_request():
+                holder["r"] = router.request(
+                    {"type": "command", "command": "x", "targets": ["B"], "sender": "A"},
+                    timeout=2.0,
+                )
+
+            t = threading.Thread(target=do_request)
+            t.start()
+
+            cid = None
+            for _ in range(200):
+                with router._pending_lock:
+                    if router._pending_requests:
+                        cid = next(iter(router._pending_requests))
+                        break
+                time.sleep(0.005)
+            self.assertIsNotNone(cid, "pending-запрос не зарегистрировался")
+
+            # Симулируем ответ приёмником.
+            q.put(
+                {
+                    "type": "response",
+                    "command": "command.response",
+                    "request_id": cid,
+                    "success": True,
+                    "result": {"ok": 1},
+                }
+            )
+            for _ in range(200):
+                router.receive(timeout=0.02)
+                if holder.get("r") is not None:
+                    break
+            t.join(timeout=2.0)
+
+            self.assertIsNotNone(holder.get("r"))
+            self.assertTrue(holder["r"]["success"])
+            self.assertEqual(holder["r"]["result"], {"ok": 1})
+        finally:
+            router.shutdown()
+
+    def test_foreign_correlation_id_not_consumed(self):
+        # Входящий билет с чужим correlation_id (нет в нашем реестре) идёт
+        # обычным путём — не «съедается» резолвером.
+        qr = _FakeQueueRegistry()
+        ch, q = _make_channel("rr_foreign_system")
+        router = RouterManager(manager_name="rr_foreign", queue_registry=qr)
+        router.register_channel(ch)
+        # Искусственно создаём pending с ДРУГИМ id, чтобы guard был активен.
+        router._pending_requests["mine"] = _PendingRequest()
+        got: list = []
+        router.register_message_handler("evt", lambda m: got.append(1))
+        q.put({"type": "command", "command": "evt", "request_id": "someone-else"})
+        messages = router.receive(timeout=0.1)
+        self.assertEqual(len(messages), 1)  # билет НЕ потреблён
+        self.assertEqual(got, [1])
+        router._pending_requests.clear()
 
 
 if __name__ == "__main__":

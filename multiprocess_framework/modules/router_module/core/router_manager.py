@@ -8,6 +8,7 @@ channel_dispatcher (outgoing routing) и message_dispatcher (incoming handling).
 
 import threading
 import time
+import uuid
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from ...channel_routing_module import ChannelRoutingManager
@@ -23,6 +24,20 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ...message_module import Message
+
+
+class _PendingRequest:
+    """Слот ожидания ответа на синхронный request (P0.5).
+
+    Поток-инициатор блокируется на ``event.wait(timeout)``; приёмный поток
+    (``receive``) кладёт ответ в ``response`` и взводит ``event``.
+    """
+
+    __slots__ = ("event", "response")
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.response: Optional[Dict[str, Any]] = None
 
 
 class RouterManager(ChannelRoutingManager):
@@ -96,6 +111,14 @@ class RouterManager(ChannelRoutingManager):
         # handler своего воркера (модель «почта»). Кадры (data) сюда НЕ попадают —
         # они едут топологией in-process очередей (модель «трубы», assigned_worker).
         self._worker_handlers: Dict[str, Callable] = {}
+
+        # P0.5: request-response поверх fire-and-forget транспорта.
+        # Реестр pending-запросов: correlation_id → _PendingRequest.
+        # Заполняется request() на инициаторе, резолвится в receive() при
+        # входящем ответе с тем же id. Пустой реестр → нулевой оверхед на
+        # горячем приёмном пути (guard `if self._pending_requests`).
+        self._pending_requests: Dict[str, _PendingRequest] = {}
+        self._pending_lock = threading.Lock()
 
     def _inc_stat(self, key: str, value: int = 1) -> None:
         with self._stats_lock:
@@ -292,6 +315,137 @@ class RouterManager(ChannelRoutingManager):
         return None
 
     # ================================================================
+    # REQUEST-RESPONSE (P0.5) — синхронный round-trip поверх fire-and-forget
+    # ================================================================
+
+    @staticmethod
+    def _extract_correlation_id(msg: Dict[str, Any]) -> Optional[str]:
+        """Достать correlation-id из билета.
+
+        Приоритет: top-level ``request_id`` (generic-путь), затем
+        ``data.correlation_id`` (PM-обёртка ``process.command``). Симметрично
+        используется и при отправке ответа (:meth:`reply_to_request`), и при
+        резолве входящего ответа (:meth:`receive`).
+        """
+        rid = msg.get("request_id")
+        if rid:
+            return rid
+        data = msg.get("data")
+        if isinstance(data, dict):
+            return data.get("correlation_id")
+        return None
+
+    def request(
+        self,
+        message: Union["Message", Dict[str, Any]],
+        timeout: float = 5.0,
+        correlation_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Синхронный request-response: отправить и дождаться ответа.
+
+        Назначает ``correlation_id`` (если не задан), регистрирует pending-слот,
+        отправляет через обычный транспорт (:meth:`send`) и блокирует поток до
+        прихода ответа с тем же id (резолвится в :meth:`receive`) или таймаута.
+
+        ВАЖНО (контракт): нельзя вызывать из того же потока, который крутит
+        :meth:`receive`/``start_listening`` — ответ некому будет разобрать
+        (дедлок до таймаута). Инициатор (GUI/driver) обязан звать request() из
+        потока, отдельного от приёмного цикла процесса.
+
+        Returns:
+            dict ответа (содержит ``success``/``result``, у PM-пути ещё
+            вложенный ``data``). При таймауте — ``{"success": False,
+            "error": "timeout", "correlation_id": cid}``. При ошибке отправки —
+            ``{"success": False, "error": <reason>, "correlation_id": cid}``.
+        """
+        msg = self._to_dict(message)
+        cid = correlation_id or self._extract_correlation_id(msg) or str(uuid.uuid4())
+        msg["request_id"] = cid
+        # Зеркалим id в data.correlation_id для приёмников, читающих вложенный id
+        # (PM-обёртка process.command). setdefault — не затираем явный id.
+        data = msg.get("data")
+        if isinstance(data, dict):
+            data.setdefault("correlation_id", cid)
+
+        pending = _PendingRequest()
+        with self._pending_lock:
+            self._pending_requests[cid] = pending
+        try:
+            send_result = self.send(msg)
+            if isinstance(send_result, dict) and send_result.get("status") == "error":
+                return {
+                    "success": False,
+                    "error": send_result.get("reason", "send failed"),
+                    "correlation_id": cid,
+                }
+            if not pending.event.wait(timeout):
+                return {"success": False, "error": "timeout", "correlation_id": cid}
+            return (
+                pending.response
+                if pending.response is not None
+                else {
+                    "success": False,
+                    "error": "empty response",
+                    "correlation_id": cid,
+                }
+            )
+        finally:
+            with self._pending_lock:
+                self._pending_requests.pop(cid, None)
+
+    def _resolve_pending(self, correlation_id: str, response: Dict[str, Any]) -> bool:
+        """Доставить ответ ожидающему request() по correlation_id.
+
+        Returns True, если pending-слот найден и взведён; False — если такого
+        запроса нет (чужой/просроченный ответ, билет идёт обычным путём).
+        """
+        with self._pending_lock:
+            pending = self._pending_requests.get(correlation_id)
+        if pending is None:
+            return False
+        pending.response = response
+        pending.event.set()
+        return True
+
+    def reply_to_request(
+        self,
+        request_msg: Dict[str, Any],
+        result: Any,
+        success: bool = True,
+        response_command: str = "command.response",
+    ) -> Optional[Dict[str, Any]]:
+        """Отправить ответ на request-билет, ЕСЛИ он его требует.
+
+        No-op (возврат None), когда в ``request_msg`` нет correlation-id —
+        сохраняет fire-and-forget совместимость для команд без ответа (весь
+        нынешний GUI-трафик). Адресат: ``data.reply_to`` / ``reply_to`` /
+        ``sender`` входящего билета. Ответ едет control-plane (system-очередь
+        приёмника, ``queue_type="system"``), где крутится его message_processor.
+        """
+        cid = self._extract_correlation_id(request_msg)
+        if not cid:
+            return None
+        data = request_msg.get("data")
+        reply_target = data.get("reply_to") if isinstance(data, dict) else None
+        reply_target = reply_target or request_msg.get("reply_to") or request_msg.get("sender")
+        if not reply_target:
+            self._log_debug("reply_to_request: нет адресата (sender/reply_to) — ответ не отправлен")
+            return None
+
+        sender_name = getattr(self.process, "name", None) or self.router_id
+        response = {
+            "type": "response",
+            "command": response_command,
+            "sender": sender_name,
+            "targets": [reply_target],
+            "queue_type": "system",
+            "request_id": cid,
+            "success": success,
+            "result": result,
+        }
+        return self.send(response)
+
+    # ================================================================
     # RECEIVE
     # ================================================================
 
@@ -331,6 +485,18 @@ class RouterManager(ChannelRoutingManager):
                         "receive_time": time.time(),
                     }
                 )
+
+                # P0.5 (request-response): входящий билет с correlation_id,
+                # совпадающим с нашим pending-запросом → это ОТВЕТ на наш
+                # request(). Резолвим pending и потребляем билет (дальше не
+                # диспетчеризуем). Guard на пустой реестр = ноль оверхеда,
+                # когда request() не используется. Чужие запросы с
+                # correlation_id безопасны: их id нет в нашем реестре.
+                if self._pending_requests:
+                    cid = self._extract_correlation_id(processed)
+                    if cid and self._resolve_pending(cid, processed):
+                        self._inc_stat("received")
+                        continue
 
                 # P2.2 (Гибрид, control-plane): билет с адресом до воркера
                 # (proc.worker[.…]) и НЕ data-кадр → доставляем worker-handler'у
