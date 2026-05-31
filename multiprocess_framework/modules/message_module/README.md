@@ -43,7 +43,7 @@ message_module/
 │   └── message.py         ← Message(SchemaBase) — создание, валидация, to_dict/from_dict
 │
 ├── types/
-│   ├── message_types.py   ← MessageType, Priority, LogLevel, MESSAGE_TYPE_* 
+│   ├── message_types.py   ← MessageType, Priority, LogLevel, MESSAGE_TYPE_*
 │   └── exceptions.py      ← MessageValidationError
 │
 ├── schemas/               ← Строгие схемы (extra='forbid'); BaseMessageSchema = алиас на Message
@@ -269,6 +269,38 @@ msg = factory.create(MessageType.LOG, "proc_1", level="info", message="hello")
 msg = create_message(MessageType.COMMAND, "proc_1", targets=["proc_2"], command="ping")
 msg = parse_message(raw_dict_or_json_string)
 ```
+
+---
+
+## Иерархическая адресация в `targets` (P0.2 transport-router-hub)
+
+Каждый элемент `Message.targets` — **dotted-адрес** получателя `process[.worker[.…]]`
+(почтовый принцип: Страна → Город → … → Человек). Новые поля `kind`/`address` **не вводятся** —
+иерархия живёт внутри существующего `targets: list[str]`.
+
+```python
+from multiprocess_framework.modules.message_module import (
+    split_address, process_of, worker_of, subpath_of, normalize_targets,
+)
+
+split_address("camera.worker_in")   # → ["camera", "worker_in"]
+process_of("camera.worker_in")       # → "camera"   (address[0] — cross-process очередь)
+worker_of("camera.worker_in")        # → "worker_in" (резолвится ВНУТРИ процесса, P2)
+subpath_of("camera.worker_in")       # → ["worker_in"] (address[1:])
+split_address("ProcessManager")      # → ["ProcessManager"]  (backward-compat: плоское имя)
+```
+
+Правила:
+- **Prefix-правило:** первый сегмент всегда процесс и обязателен. Воркер без процесса
+  (`".worker"`, висячие точки `"proc."`/`"a..b"`) → `AddressValidationError`.
+- **Нижние уровни опциональны.** Плоское `"proc"` == `["proc"]` (как сегодня — `targets`
+  ещё нигде не dotted).
+- **`normalize_targets(target=, targets=)`** сводит сосуществующие скаляр `target` и список
+  `targets` к единому `list[str]` (миграционный shim до P4).
+- Спец-адреса `all`/`broadcast` (`is_broadcast`) — не иерархические, отдельный fan-out путь.
+
+Транспортная семантика (доставка по `address[0]`, intra-process резолв воркера) реализуется
+в P1/P2 плана; здесь — только парсинг/валидация (чистые JSON-safe функции, Dict-at-Boundary).
 
 ---
 

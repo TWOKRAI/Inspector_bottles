@@ -5,7 +5,7 @@
 
 from .message_types import MessageType, Priority, LogLevel
 from .message_types import MESSAGE_TYPE_DEFAULTS, MESSAGE_TYPE_EXCLUDE_FIELDS
-from .exceptions import MessageValidationError
+from .exceptions import MessageValidationError, AddressValidationError
 
 __all__ = [
     "MessageType",
@@ -14,4 +14,5 @@ __all__ = [
     "MESSAGE_TYPE_DEFAULTS",
     "MESSAGE_TYPE_EXCLUDE_FIELDS",
     "MessageValidationError",
+    "AddressValidationError",
 ]

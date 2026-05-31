@@ -10,6 +10,7 @@ router_module — менеджер маршрутизации сообщений
     IRouterManager  — интерфейс RouterManager
     IMessageChannel — интерфейс канала
 """
+
 from .core.router_manager import RouterManager
 from .channels.base_channel import MessageChannel
 from .channels.queue_channel import QueueChannel
@@ -17,6 +18,17 @@ from .adapters.router_adapter import RouterAdapter
 from .interfaces import IRouterManager, IMessageChannel
 from .configs.router_manager_config import RouterManagerConfig
 from .middleware import FrameShmMiddleware
+
+# --- Контракт маршрутизации хаба (P0.2 transport-router-hub; проводка — P1) ---
+from .routing import (
+    MESSAGE_TYPE_TO_CHANNEL,
+    RouteDecision,
+    UnknownMessageTypeError,
+    channel_name,
+    resolve_channel_kind,
+    resolve_route,
+    resolve_routes,
+)
 
 __all__ = [
     "RouterManager",
@@ -27,4 +39,12 @@ __all__ = [
     "IMessageChannel",
     "RouterManagerConfig",
     "FrameShmMiddleware",
+    # Контракт маршрутизации (P0.2)
+    "MESSAGE_TYPE_TO_CHANNEL",
+    "RouteDecision",
+    "UnknownMessageTypeError",
+    "channel_name",
+    "resolve_channel_kind",
+    "resolve_route",
+    "resolve_routes",
 ]

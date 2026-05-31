@@ -19,7 +19,25 @@ from .core import Message
 from .factories import create_message, parse_message
 
 # --- Типы и перечисления ---
-from .types import MessageType, Priority, LogLevel, MessageValidationError
+from .types import (
+    MessageType,
+    Priority,
+    LogLevel,
+    MessageValidationError,
+    AddressValidationError,
+)
+
+# --- Иерархическая адресация (dotted targets, P0.2 transport-router-hub) ---
+from .addressing import (
+    is_broadcast,
+    join_address,
+    normalize_targets,
+    process_of,
+    split_address,
+    subpath_of,
+    validate_address,
+    worker_of,
+)
 
 # --- Pydantic-схемы (опционально, для валидации) ---
 from .schemas import BaseMessageSchema, CommandMessageSchema, LogMessageSchema
@@ -43,6 +61,16 @@ __all__ = [
     "Priority",
     "LogLevel",
     "MessageValidationError",
+    "AddressValidationError",
+    # Иерархическая адресация (dotted targets)
+    "is_broadcast",
+    "validate_address",
+    "split_address",
+    "process_of",
+    "worker_of",
+    "subpath_of",
+    "join_address",
+    "normalize_targets",
     # Pydantic-схемы
     "BaseMessageSchema",
     "CommandMessageSchema",

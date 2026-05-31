@@ -405,6 +405,46 @@ pytest modules/router_module/tests/ -v
 
 ---
 
+## Контракт хаба: routing-таблица + address-aware канал (P0.2 transport-router-hub)
+
+Подмодуль `router_module.routing` — **декларация** целевого контракта хаба (проводка
+в рантайм — P1, здесь без смены поведения). Замысел: `send` выбирает **один** канал по
+типу груза, имя канала склеивается с адресом получателя.
+
+**Две ортогональные оси билета:** `address` = *куда* (иерархия `process[.worker]`),
+`kind` = *что за груз* (канал). Имя канала = `f"{process}_{kind}"` — совпадает с
+существующими очередями `{proc}_system` / `{proc}_data`.
+
+```python
+from multiprocess_framework.modules.router_module import (
+    MESSAGE_TYPE_TO_CHANNEL, resolve_channel_kind, channel_name, resolve_routes,
+)
+
+resolve_channel_kind({"type": "command", "command": "worker.create"})  # → "system"
+resolve_channel_kind({"type": "event", "command": "state.changed"})     # → "state"  ← см. ниже
+channel_name("camera", "data")                                          # → "camera_data"
+resolve_routes({"type": "data", "target": "display"})  # → [RouteDecision(process="display", kind="data", channel="display_data", subpath=[])]
+```
+
+**Нормализация `command`/`type` → kind (находка recon #1):** на живых билетах поле `type`
+не всегда соответствует целевому каналу (диспатч исторически идёт по `command`). Резолвер
+сперва проверяет префикс `command` (`state.*` → `state`-канал), затем таблицу по
+`MessageType`. Поэтому **STATE — это channel-kind, выводимый из `command`, а не член enum
+`MessageType`** (новый `kind` план запрещает). Неизвестный `type` без покрытия префиксом →
+`UnknownMessageTypeError` (громкий отказ вместо тихого drop, требование P1.2).
+
+| Что | Символ | Статус P0.2 |
+|---|---|---|
+| Таблица `MessageType → kind` | `MESSAGE_TYPE_TO_CHANNEL` | объявлена; проводка через `register_route` — P1 |
+| Нормализатор kind | `resolve_channel_kind(msg)` | реализован (чистый), используется в `_resolve_channels` — P1 |
+| Имя канала | `channel_name(process, kind)` | реализован |
+| Резолвер маршрута (ядро `send` address-aware канала) | `resolve_route` / `resolve_routes` → `RouteDecision` | реализован (чистый); сам канал-подкласс — P1.1 |
+
+Контракт address-aware канала (подкласс `MessageChannel`, **без нового Protocol**) и решения
+по находкам recon #2/#3/#4/#6 — в docstring `routing/address_aware_channel.py`.
+
+---
+
 ## Roadmap / Что не хватает
 
 | Задача | Приоритет | Этап |
