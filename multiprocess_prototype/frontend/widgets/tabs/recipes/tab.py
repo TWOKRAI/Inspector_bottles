@@ -116,6 +116,7 @@ class RecipesTab(BaseListNavTab):
                 view=self,
                 replace_blueprint_fn=_replace_fn,
                 commands=services.commands,  # G.6.5: активация → dispatch(ActivateRecipe)
+                topology_store=services.topology,  # Этап 1: «Сохранить» (живой граф → рецепт)
             )
             self._presenter.load()
 
@@ -226,8 +227,11 @@ class RecipesTab(BaseListNavTab):
         """
         self._duplicate_btn.setEnabled(has_selection)
         self._delete_btn.setEnabled(has_selection)
-        # «Сделать активным» — enabled если есть выбор И рецепт ещё не активен
-        self._activate_btn.setEnabled(has_selection and not is_active)
+        # «Загрузить» и «Сохранить» — enabled при любом выборе. Загрузить можно
+        # повторно (re-apply к backend), даже если рецепт уже активен (is_active
+        # больше не блокирует — кнопка теперь про runtime-применение, не про метку).
+        self._activate_btn.setEnabled(has_selection)
+        self._save_btn.setEnabled(has_selection)
 
     def confirm_delete(self, slug: str) -> bool:
         """Показать диалог подтверждения удаления.
@@ -286,12 +290,21 @@ class RecipesTab(BaseListNavTab):
         self._delete_btn.clicked.connect(self._on_delete_clicked)
         action_layout.addWidget(self._delete_btn)
 
-        # Сделать активным — disabled без выбора
-        self._activate_btn = QPushButton("Сделать активным")
-        self._activate_btn.setToolTip("Применить рецепт как активный")
+        # Загрузить — активировать рецепт И применить к живому backend (Этап 1).
+        # Раньше «Сделать активным»; переименовано — кнопка реально грузит рецепт
+        # в систему (replace_blueprint через proxy), а не только метит активным.
+        self._activate_btn = QPushButton("Загрузить")
+        self._activate_btn.setToolTip("Загрузить рецепт: активировать и применить к работающей системе")
         self._activate_btn.setEnabled(False)
         self._activate_btn.clicked.connect(self._on_activate_clicked)
         action_layout.addWidget(self._activate_btn)
+
+        # Сохранить — записать текущую живую топологию (services.topology) в выбранный рецепт.
+        self._save_btn = QPushButton("Сохранить")
+        self._save_btn.setToolTip("Сохранить текущий граф системы в выбранный рецепт")
+        self._save_btn.setEnabled(False)
+        self._save_btn.clicked.connect(self._on_save_clicked)
+        action_layout.addWidget(self._save_btn)
 
         # Открыть в Pipeline — постоянно disabled (Task 7a)
         self._pipeline_btn = QPushButton("Открыть в Pipeline")
@@ -330,7 +343,14 @@ class RecipesTab(BaseListNavTab):
         self._presenter.on_delete(self._selected_slug)
 
     def _on_activate_clicked(self) -> None:
-        """Обработать нажатие «Сделать активным»."""
+        """Обработать нажатие «Загрузить» (активировать + применить к backend)."""
         if self._presenter is None:
             return
         self._presenter.on_set_active(self._selected_slug)
+
+    def _on_save_clicked(self) -> None:
+        """Обработать нажатие «Сохранить» (живой граф → выбранный рецепт)."""
+        if self._presenter is None:
+            return
+        if self._presenter.on_save(self._selected_slug):
+            QMessageBox.information(self, "Сохранение рецепта", f"Рецепт сохранён: {self._selected_slug}")

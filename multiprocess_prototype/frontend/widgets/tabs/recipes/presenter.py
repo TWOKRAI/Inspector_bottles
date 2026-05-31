@@ -83,6 +83,7 @@ class RecipesPresenter:
         replace_blueprint_fn: Callable[[dict], dict] | None = None,
         logger: Any | None = None,
         commands: "CommandDispatcher | None" = None,
+        topology_store: Any | None = None,
     ) -> None:
         """Инициализировать presenter.
 
@@ -104,6 +105,9 @@ class RecipesPresenter:
         self._replace_blueprint_fn = replace_blueprint_fn
         self._logger = logger
         self._commands = commands
+        # Этап 1 pipeline-live-control: источник текущей топологии (TopologyRepository
+        # с .load()) для кнопки «Сохранить» (живой граф → выбранный рецепт). None → no-op.
+        self._topology_store = topology_store
         self._selected_slug: str | None = None
 
     # ------------------------------------------------------------------
@@ -357,6 +361,58 @@ class RecipesPresenter:
 
         self.load()
         self._view.set_buttons_state(True, True)
+
+    def on_save(self, slug: str | None = None) -> bool:
+        """Сохранить текущую живую топологию в выбранный рецепт (Этап 1).
+
+        Источник — TopologyRepository (services.topology): он SSOT текущего графа
+        (Pipeline-редактор пишет в него через dispatch). Разворачиваем topology dict
+        обратно в recipe-формат (blueprint + display_bindings) и пишем через store.save_raw.
+        Не дублирует graph_to_blueprint: топология уже плоская, оборачиваем как рецепт.
+
+        Args:
+            slug: целевой рецепт. None → _selected_slug.
+
+        Returns:
+            True при успехе, False при ошибке / отсутствии topology_store.
+        """
+        target_slug = slug or self._selected_slug
+        if not target_slug:
+            self._view.show_error("Рецепт не выбран")
+            return False
+        if self._topology_store is None:
+            self._view.show_error("Источник топологии недоступен")
+            self._log_warning("RecipesPresenter.on_save: topology_store=None")
+            return False
+
+        topo = self._topology_store.load() or {}
+        blueprint = {
+            "processes": topo.get("processes", []),
+            "wires": topo.get("wires", []),
+        }
+        display_bindings = topo.get("displays", [])
+        gui_positions = topo.get("gui_positions", {})
+
+        raw = self._store.read_raw(target_slug)
+        if raw is None:
+            self._view.show_error(f"Рецепт '{target_slug}' не найден")
+            return False
+
+        try:
+            data = raw.get("data", {})
+            if not isinstance(data, dict):
+                data = {}
+            data["blueprint"] = blueprint
+            data["display_bindings"] = display_bindings
+            data["gui_positions"] = gui_positions
+            raw["data"] = data
+            self._store.save_raw(target_slug, raw)
+            self._log_info(f"RecipesPresenter.on_save: топология сохранена в '{target_slug}'")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self._view.show_error(f"Ошибка сохранения: {exc}")
+            self._log_error(f"RecipesPresenter.on_save: '{target_slug}': {exc}")
+            return False
 
     def on_open_in_pipeline(self, slug: str | None = None) -> None:
         """Открыть рецепт в Pipeline (заглушка — Task 7a).

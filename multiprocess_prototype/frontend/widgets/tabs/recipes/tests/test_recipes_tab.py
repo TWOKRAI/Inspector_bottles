@@ -125,24 +125,26 @@ class TestRecipesTabQt:
         assert not tab._pipeline_btn.isEnabled()
 
     def test_set_buttons_state_with_selection(self, qtbot: pytest.FixtureRequest) -> None:
-        """set_buttons_state(has_selection=True, is_active=False) -> кнопки enabled."""
+        """set_buttons_state(has_selection=True) -> Загрузить/Сохранить enabled."""
         tab = _make_tab(qtbot)
         tab.set_buttons_state(has_selection=True, is_active=False)
 
         assert tab._duplicate_btn.isEnabled()
         assert tab._delete_btn.isEnabled()
-        # is_active=False -> «Сделать активным» enabled
+        # has_selection -> «Загрузить» + «Сохранить» enabled
         assert tab._activate_btn.isEnabled()
+        assert tab._save_btn.isEnabled()
 
     def test_set_buttons_state_already_active(self, qtbot: pytest.FixtureRequest) -> None:
-        """set_buttons_state(has_selection=True, is_active=True) -> activate disabled."""
+        """Этап 1: «Загрузить» enabled даже если рецепт уже активен (re-apply к backend)."""
         tab = _make_tab(qtbot)
         tab.set_buttons_state(has_selection=True, is_active=True)
 
-        # Дублировать/Удалить активны, но «Сделать активным» — нет (уже активен)
         assert tab._duplicate_btn.isEnabled()
         assert tab._delete_btn.isEnabled()
-        assert not tab._activate_btn.isEnabled()
+        # Загрузить теперь про runtime-применение → enabled при выборе (не блокируется is_active)
+        assert tab._activate_btn.isEnabled()
+        assert tab._save_btn.isEnabled()
 
     def test_confirm_delete_returns_bool(self, qtbot: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
         """confirm_delete возвращает True при Yes, False при No."""

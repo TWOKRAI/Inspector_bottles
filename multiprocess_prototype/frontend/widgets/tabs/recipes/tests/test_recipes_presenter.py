@@ -383,6 +383,50 @@ def test_on_set_active_replace_error(
 
 
 # ---------------------------------------------------------------------------
+# Тест 13: on_save -> текущая топология (topology_store) сохраняется в рецепт
+# ---------------------------------------------------------------------------
+
+
+def test_on_save_persists_topology(mock_view: MagicMock) -> None:
+    """on_save пишет живую топологию в data.blueprint выбранного рецепта (Этап 1)."""
+    store = _make_store(slugs=["cup"])
+
+    class _FakeTopologyStore:
+        def load(self) -> dict:
+            return {
+                "processes": [{"process_name": "p1", "plugins": []}],
+                "wires": [{"source": "p1.a.out", "target": "p2.b.in"}],
+                "displays": [{"node_id": "p1.a.out", "display_id": "main"}],
+            }
+
+    presenter = RecipesPresenter(
+        store=store,
+        view=mock_view,
+        topology_store=_FakeTopologyStore(),
+    )
+    presenter._selected_slug = "cup"
+
+    ok = presenter.on_save()
+
+    assert ok is True
+    mock_view.show_error.assert_not_called()
+    saved = store.read_raw("cup")
+    assert saved["data"]["blueprint"]["processes"][0]["process_name"] == "p1"
+    assert saved["data"]["blueprint"]["wires"][0]["source"] == "p1.a.out"
+    assert saved["data"]["display_bindings"][0]["display_id"] == "main"
+
+
+def test_on_save_no_topology_store(mock_view: MagicMock) -> None:
+    """on_save без topology_store -> show_error, False (graceful)."""
+    store = _make_store(slugs=["cup"])
+    presenter = RecipesPresenter(store=store, view=mock_view, topology_store=None)
+    presenter._selected_slug = "cup"
+
+    assert presenter.on_save() is False
+    mock_view.show_error.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # G.6.5: on_set_active → dispatch(ActivateRecipe) когда commands задан
 # ---------------------------------------------------------------------------
 
