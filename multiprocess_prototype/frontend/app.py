@@ -476,29 +476,71 @@ def run_gui(process: "GuiProcess") -> None:
 
     event_bus.subscribe(TopologyReplaced, lambda _e: topology_bridge.on_topology_changed())
 
-    # 3h.2. G.4.3 (Y1): rm-sync listener — синхронизация RegistersManager из domain.
+    # 3h.2. G.4.3 (Y1) + Этап 2 pipeline-live-control: live field-write listener.
     # При dispatch(SetPluginConfig) или undo/redo field-config orchestrator публикует
-    # PluginConfigChanged → listener вызывает rm.set_value → IPC в живой процесс.
+    # PluginConfigChanged → listener (а) синхронизирует GUI-side RegistersManager
+    # (виджеты) и (б) шлёт register_update IPC в живой процесс-владелец через
+    # CommandSender → RouterManager → PluginOrchestrator._on_register_update.
+    #
+    # Этап 2: адрес плагина = имя регистра (= plugin_name), резолвится из editor-
+    # топологии по (process_name, plugin_index). Раньше listener звал только
+    # set_value(process_name, ...) — IPC НЕ уходил (единственный sender,
+    # FrontendRegistersBridge, в v3 не инстанцируется; send_callback=None). Теперь
+    # IPC идёт штатным RouterManager-путём (курс «всё через RouterManager»), а
+    # register-адрес плагин-гранулярен (multi-plugin процессы бьют в нужный регистр).
+    #
     # ПОРЯДОК ПОДПИСЧИКОВ (reviewer iter1 #3): EventBus вызывает handler'ы в порядке
     # регистрации. TopologyReplaced (save, шаг 4) приходит ПЕРЕД PluginConfigChanged
     # (шаг 6 dispatch / шаг _emit_config_diff undo). Порядок: presenter reload
-    # (suppressed при field-edit) + bridge cache reset → затем rm-sync → IPC. Не
+    # (suppressed при field-edit) + bridge cache reset → затем этот listener. Не
     # переставлять без анализа.
     from multiprocess_prototype.domain.events import PluginConfigChanged
+    from .bridge.plugin_register_resolver import resolve_plugin_register
 
     def _on_plugin_config_changed(event: PluginConfigChanged) -> None:
-        """rm-sync: domain → RegistersManager → IPC (G.4.3 Y1)."""
-        if registers_manager is not None:
-            ok = registers_manager.set_value(event.process_name, event.field, event.value)
-            if not ok:
-                import logging as _logging
+        """Live field-write: domain → GUI RegistersManager + register_update IPC."""
+        import logging as _logging
 
-                _logging.getLogger(__name__).warning(
-                    "rm-sync: не удалось установить %s.%s = %s",
-                    event.process_name,
+        _log = _logging.getLogger(__name__)
+
+        # Адрес плагина: register_name = plugin_name по (process, plugin_index).
+        # Fallback на process_name — legacy 1:1 (process == plugin == register).
+        register = (
+            resolve_plugin_register(topology_store.topology, event.process_name, event.plugin_index)
+            or event.process_name
+        )
+
+        # (а) GUI-side: обновить регистр inspector-виджетов (тот же ключ plugin_name).
+        if registers_manager is not None:
+            ok = registers_manager.set_value(register, event.field, event.value)
+            if not ok:
+                _log.warning(
+                    "live field-write: GUI rm.set_value не прошёл %s.%s = %s",
+                    register,
                     event.field,
                     event.value,
                 )
+
+        # (б) IPC в живой процесс через RouterManager (command="register_update").
+        # Контракт payload приёмника (_on_register_update): {register, field, value}.
+        # Дисптач по key_field="command" (router_manager.receive) → handler жив.
+        # Fire-and-forget: процесс может быть не запущен — graceful, лог на DEBUG.
+        try:
+            command_sender.send_command(
+                event.process_name,
+                "register_update",
+                {"register": register, "field": event.field, "value": event.value},
+            )
+            process._log_debug(
+                f"live field-write IPC → {event.process_name}: {register}.{event.field}={event.value!r}",
+                module="live",
+            )
+        except Exception as exc:  # noqa: BLE001 — IPC fire-and-forget, не валим GUI
+            _log.warning(
+                "live field-write: IPC register_update в '%s' не отправлен: %s",
+                event.process_name,
+                exc,
+            )
 
     event_bus.subscribe(PluginConfigChanged, _on_plugin_config_changed)
 
