@@ -29,11 +29,14 @@ class InspectorManager:
         on_ready: Callable[[list[dict]], None] | None = None,
         log_info: Callable[[str], None] | None = None,
         log_error: Callable[[str], None] | None = None,
+        log_debug: Callable[[str], None] | None = None,
     ) -> None:
         self._timeout_sec = timeout_sec
         self._on_ready = on_ready or (lambda items: None)
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
+        # timeout flush — per-frame диагностика; на DEBUG, чтобы не флудить INFO-консоль.
+        self._log_debug = log_debug or (lambda msg: None)
 
         # Буфер: {(camera_id, seq_id): {"region_name": item, ...}}
         self._buffer: dict[tuple[int, int], dict[str, dict]] = {}
@@ -111,7 +114,7 @@ class InspectorManager:
                     items = list(self._buffer[key].values())
                     flush_keys.append(key)
                     flush_items.append(items)
-                    self._log_info(
+                    self._log_debug(
                         f"InspectorManager: timeout flush (camera_id={key[0]}, "
                         f"seq_id={key[1]}), got {len(items)}/{self._expected[key]}"
                     )

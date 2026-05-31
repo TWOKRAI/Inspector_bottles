@@ -81,6 +81,7 @@ class GenericProcess(ProcessModule):
                 timeout_sec=0.5,
                 log_info=self._log_info,
                 log_error=self._log_error,
+                log_debug=self._log_debug,
             )
             self._data_receiver = DataReceiver(
                 receive_fn=self.receive_message,
@@ -117,15 +118,12 @@ class GenericProcess(ProcessModule):
                 )
                 self.worker_manager.create_worker(
                     worker_name="pipeline_executor",
-                    target=lambda stop, pause: self._pipeline_executor.run_loop(
-                        self._chain_queue, stop, pause
-                    ),
+                    target=lambda stop, pause: self._pipeline_executor.run_loop(self._chain_queue, stop, pause),
                     config={"execution_mode": "loop", "priority": "REALTIME"},
                     auto_start=True,
                 )
                 self._log_info(
-                    f"GenericProcess[{self.name}]: data pipeline started "
-                    f"({len(processing_plugins)} processing plugins)"
+                    f"GenericProcess[{self.name}]: data pipeline started ({len(processing_plugins)} processing plugins)"
                 )
 
         # --- SourceProducer (для каждого source-плагина) ---
@@ -150,6 +148,4 @@ class GenericProcess(ProcessModule):
                     config={"execution_mode": "loop", "priority": "REALTIME"},
                     auto_start=True,
                 )
-                self._log_info(
-                    f"GenericProcess[{self.name}]: source '{source_plugin.name}' producer started"
-                )
+                self._log_info(f"GenericProcess[{self.name}]: source '{source_plugin.name}' producer started")
