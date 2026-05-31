@@ -209,32 +209,48 @@ class RouterManager(ChannelRoutingManager):
             self._log_error(f"_do_send exception: {e}")
             return {"status": "error", "reason": str(e)}
 
+    @staticmethod
+    def _select_queue_type(msg_dict: Dict[str, Any]) -> str:
+        """Единое правило выбора очереди (qtype) для адресной доставки.
+
+        Канонизирует логику, ранее раздублированную в трёх местах (recon #5:
+        `send_to_process`, `_deliver_by_targets`, `broadcast`): явный
+        `msg["queue_type"]`, иначе "system" для команд, иначе "data". Это
+        правило-ПАРИТЕТ с нынешним `ProcessCommunication.send_to_process` —
+        менять его (на богатую таблицу `MESSAGE_TYPE_TO_CHANNEL`) будем при
+        вводе Event/State-каналов (P3), не ломая поведение сейчас.
+        """
+        return msg_dict.get("queue_type") or ("system" if msg_dict.get("type") == "command" else "data")
+
     def _deliver_by_targets(self, msg_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Fallback-доставка по msg["targets"] через общий queue_registry.
+        """Адресная доставка по msg["targets"] через общий queue_registry.
 
         "Адресная книга" оркестратора: queue_registry динамически хранит очереди
         всех процессов (обновляется при их создании/удалении). Кладёт сообщение
         напрямую в очередь каждого процесса-получателя по имени — тем же путём, что
         и ProcessCommunication.send_message (проверенный транспорт data-трафика).
 
-        Используется только как fallback в _do_send, когда channel/route не резолвится.
+        Вызывается из _do_send, КОГДА `_resolve_channels` не вернул ни одного
+        канала. Поэтому возможный остаточный `msg["channel"]` (напр. vestigial
+        `channel:"data"` у кадров — recon #3) уже доказанно НЕ зарезолвился: targets
+        — авторитетный адрес, доставляем по нему (раньше здесь был silent drop из-за
+        guard'а на `msg["channel"]`).
 
-        Выбор очереди: msg["queue_type"] или "system" для command, иначе "data".
+        Выбор очереди — :meth:`_select_queue_type`.
 
         Returns:
             dict-результат при успешной доставке хотя бы одному таргету;
-            None — если targets пуст, задан явный channel, queue_registry недоступен
-            или ни один таргет не доставлен (вызывающий формирует обычную ошибку).
+            None — если targets пуст, queue_registry недоступен или ни один таргет
+            не доставлен (вызывающий формирует обычную ошибку).
         """
         targets = msg_dict.get("targets")
-        if not targets or msg_dict.get("channel"):
+        if not targets:
             return None
         qr = self.queue_registry
         if qr is None:
             return None
 
-        msg_type = msg_dict.get("type", "")
-        qtype = msg_dict.get("queue_type") or ("system" if msg_type == "command" else "data")
+        qtype = self._select_queue_type(msg_dict)
 
         delivered = 0
         for target in targets:

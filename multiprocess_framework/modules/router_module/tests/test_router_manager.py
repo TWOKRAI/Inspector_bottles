@@ -963,6 +963,26 @@ class TestTargetAwareDeliveryFallback(unittest.TestCase):
         self.assertEqual(len(qr.sent), 0)
         self.assertFalse(q.empty())
 
+    def test_vestigial_unregistered_channel_still_delivered_by_targets(self):
+        # recon #3: кадры несут vestigial channel="data" (канал с таким именем НЕ
+        # зарегистрирован). Раньше guard на msg["channel"] дропал такие сообщения —
+        # теперь, раз канал не зарезолвился, доставляем по targets в data-очередь.
+        qr = _FakeQueueRegistry()
+        router = RouterManager(manager_name="r_fb5b", queue_registry=qr)
+        result = router.send(
+            {
+                "type": "data",
+                "channel": "data",
+                "targets": ["display_proc"],
+                "data": {"shm_name": "slot0", "shm_actual_name": "psm_1234"},
+            }
+        )
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(len(qr.sent), 1)
+        target, qtype, _msg = qr.sent[0]
+        self.assertEqual(target, "display_proc")
+        self.assertEqual(qtype, "data")
+
     def test_no_targets_no_channel_returns_error(self):
         qr = _FakeQueueRegistry()
         router = RouterManager(manager_name="r_fb6", queue_registry=qr)
