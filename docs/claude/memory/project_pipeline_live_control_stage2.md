@@ -1,6 +1,6 @@
 ---
 name: project-pipeline-live-control-stage2
-description: Этап 2 GUI-мост live field-write DONE; worker-side блокер — плагины без register_schema
+description: Этап 2 GUI-мост + worker-side контракт live field-write DONE (resize); паттерн для остальных плагинов
 metadata:
   type: project
 ---
@@ -12,5 +12,7 @@ metadata:
 **Корневой блокер (worker-side, для Этапа 2.x):** live-параметры архитектурно НЕ поддержаны плагинами region_pipeline. Эмпирически `schema loaded`=0 во всех процессах → плагины (resize и др.) не отдают `register_schema()` → `PluginOrchestrator._boot_registers` не вызван → handler `register_update` НИГДЕ не зарегистрирован → IPC доходит до очереди, но приёмника нет (тихо отбрасывается, без ошибки). Плюс `ResizePlugin.configure()` кэширует `self._scale_factor` — `process()` не перечитывает. Поля inspector берутся из @register_plugin/config-схемы (отображение) → ложное ощущение «живого» параметра.
 
 Чтобы live реально применялся: плагин (а) отдаёт `register_schema()` (появится приёмник) и (б) перечитывает значение в `process()`, не кэширует в configure(). Generic worker-side контракт во фреймворке; эталон — resize.
+
+**RESOLVED для resize (commit 4327ccf8, 2026-05-31):** ретрофит под существующий register-паттерн (эталон color_mask): `registers.py` ResizeRegisters(SchemaBase)+FieldMeta, `config.py` register_bindings, `plugin.py` register_class + **override `config_class()`** (без него base.register_schema()=[], т.к. config_class()=None — это и была дыра ВСЕХ простых плагинов), `_init_register(ctx)` вместо кэша, `process()` читает `self._reg` каждый кадр. 9 тестов. qt-mcp smoke: лог `register 'resize' schema loaded` (раньше 0) + `register_update resize.scale_factor = 0.5/2.0` долетает до preprocessor live без рестарта. **Паттерн для остальных tunable-плагинов** (negative/grayscale параметров не имеют — ретрофит не нужен). Ключ: managed-регистр из orchestrator (`ctx.registers=rm` на configure, `plugin_orchestrator.py:106`) = тот же объект, что мутирует `_on_register_update` → `self._reg` видит live.
 
 qt-mcp заметка: ноды Pipeline кликаются по **viewport** GraphView (QWidget-ребёнок), не по самой QGraphicsView. Связано: [[project-pipeline-live-control-stage1]], [[project-transport-router-hub]], [[project-backend-control-mcp]].

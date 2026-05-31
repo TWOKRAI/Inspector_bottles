@@ -158,6 +158,36 @@ RouterManager (`router.register_message_handler`).
 
 ---
 
+### Task 2.4 — Worker-side контракт live-параметров (resize) ✅ DONE (4327ccf8)
+
+**Level:** Middle+ (Sonnet) · **Assignee:** director
+**Goal:** замкнуть worker-side приёмник — плагин отдаёт `register_schema()` (появляется
+handler `register_update`) и перечитывает значение в `process()`, не кэширует в configure().
+
+**Корневая находка:** `base.register_schema()` читает `config_class().register_bindings`,
+а `config_class()` по умолчанию = None → пусто у ВСЕХ простых плагинов → RegistersManager
+процесса не создаётся → handler `register_update` не регистрируется (`schema loaded=0`).
+
+**Сделано (commit 4327ccf8):**
+- `Plugins/processing/resize/registers.py` — `ResizeRegisters(SchemaBase)` + FieldMeta
+  (scale_factor float-слайдер, target_width/height).
+- `config.py` — `register_bindings = [ResizeRegisters]`.
+- `plugin.py` — `register_class` + **override `config_class()`** (замыкает register_schema),
+  `_init_register(ctx)` вместо кэша, `process()` читает `self._reg.*` каждый кадр.
+- 9 тестов (`tests/test_registers_integration.py`), включая live-чтение и target-override.
+
+**Acceptance:**
+- [x] `register 'resize' schema loaded` в логе процесса (раньше 0)
+- [x] qt-mcp smoke: Scale Factor 1.0→0.5→2.0 → `register_update resize.scale_factor` долетает
+      до preprocessor live, без рестарта, без ERROR
+- [x] `resize/9 passed`, ruff чист
+
+**Паттерн для остальных:** tunable-плагины повторяют тот же трио-контракт. negative/grayscale
+параметров не имеют — ретрофит не нужен. flip (режим) — опционально, при необходимости live.
+**Module contract:** impl + tests
+
+---
+
 ## Связь с другими планами
 
 - **transport-router-hub P3** (`plans/2026-05-31_transport-router-hub/`): этот Этап 2 —
