@@ -91,6 +91,12 @@ class RouterManager(ChannelRoutingManager):
         }
         self._stats_lock = threading.Lock()
 
+        # P2.2 (Гибрид, control-plane): реестр обработчиков воркеров по имени.
+        # Билет с иерархическим адресом `proc.worker[.…]` на приёме уходит в
+        # handler своего воркера (модель «почта»). Кадры (data) сюда НЕ попадают —
+        # они едут топологией in-process очередей (модель «трубы», assigned_worker).
+        self._worker_handlers: Dict[str, Callable] = {}
+
     def _inc_stat(self, key: str, value: int = 1) -> None:
         with self._stats_lock:
             self._stats[key] += value
@@ -326,6 +332,14 @@ class RouterManager(ChannelRoutingManager):
                     }
                 )
 
+                # P2.2 (Гибрид, control-plane): билет с адресом до воркера
+                # (proc.worker[.…]) и НЕ data-кадр → доставляем worker-handler'у
+                # (модель «почта»). Кадры остаются на data-пути (трубы).
+                if self._route_to_worker(processed):
+                    result.append(Message.from_dict(processed) if return_messages else processed)
+                    self._inc_stat("received")
+                    continue
+
                 dispatch_key = processed.get("command") or processed.get("type", "")
                 if dispatch_key:
                     try:
@@ -344,6 +358,43 @@ class RouterManager(ChannelRoutingManager):
                 self._log_error(f"receive error: {e}")
 
         return result
+
+    def _route_to_worker(self, processed: Dict[str, Any]) -> bool:
+        """P2.2 (Гибрид, control-plane): доставить билет worker-handler'у по адресу.
+
+        Возвращает True, если билет адресован воркеру (`_address[1]`), это НЕ
+        data-кадр, и обработчик воркера зарегистрирован — тогда вызывает его и
+        билет считается доставленным (process-level dispatch пропускается).
+
+        Возвращает False (билет идёт обычным путём — «дефолт на процесс»), когда:
+          - нет ни одного worker-handler (быстрый выход, ноль накладных на горячем пути);
+          - в билете нет адреса до воркера (`_address` отсутствует или длиной < 2);
+          - билет — data-кадр (Гибрид: кадры едут трубами, не уводим в «почту»);
+          - для воркера нет обработчика (лог + fallback на process-dispatch, не падение).
+
+        Исключение в самом обработчике логируется и НЕ роняет приёмный цикл —
+        билет всё равно считается доставленным воркеру (return True).
+        """
+        if not self._worker_handlers:
+            return False
+        address = processed.get("_address")
+        if not address or len(address) < 2:
+            return False
+        if processed.get("type") == "data":
+            # Гибрид: кадры остаются на data-пути (трубы), не уводим в worker-handler.
+            return False
+        worker = address[1]
+        handler = self._worker_handlers.get(worker)
+        if handler is None:
+            self._log_debug(
+                f"receive: нет worker-handler для '{worker}' (адрес {address}) — fallback на process-dispatch"
+            )
+            return False
+        try:
+            handler(processed)
+        except Exception as exc:
+            self._log_warning(f"worker-handler '{worker}' error: {exc}")
+        return True
 
     def _poll_all_channels(
         self,
@@ -505,6 +556,27 @@ class RouterManager(ChannelRoutingManager):
             tags=tags or [],
             strategy=strategy,
         )
+
+    def register_worker_handler(self, worker_name: str, handler: Callable) -> bool:
+        """P2.2 (Гибрид, control-plane): зарегистрировать обработчик воркера.
+
+        На приёме билет с адресом до воркера (`targets=["proc.worker"]` →
+        `_address=["proc","worker"]`), не являющийся data-кадром, попадёт в
+        `handler(message_dict)` (модель «почта»). Это транспортный дом для
+        команд/конфига конкретному плагину-в-воркере; кадры (data-plane) сюда
+        НЕ заходят — они едут топологией in-process очередей (assigned_worker).
+
+        Идемпотентно: повторная регистрация заменяет обработчик. Новых
+        IPC-очередей не создаёт — это in-process реестр.
+        """
+        if not worker_name or handler is None:
+            return False
+        self._worker_handlers[worker_name] = handler
+        return True
+
+    def unregister_worker_handler(self, worker_name: str) -> bool:
+        """Снять обработчик воркера (см. :meth:`register_worker_handler`)."""
+        return self._worker_handlers.pop(worker_name, None) is not None
 
     def register_message_scenario(self, scenario_name: str, description: str = "") -> bool:
         return self.message_dispatcher.create_scenario(scenario_name, description)

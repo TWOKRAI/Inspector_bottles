@@ -1050,5 +1050,81 @@ class TestHierarchicalDelivery(unittest.TestCase):
         self.assertEqual(by_proc["procB"]["_address"], ["procB", "w2"])
 
 
+class TestWorkerHandlerRouting(unittest.TestCase):
+    """P2.2 (Гибрид, control-plane): билет с адресом до воркера на приёме уходит
+    в worker-handler («почта»); data-кадры остаются на data-пути («трубы»)."""
+
+    def setUp(self):
+        self.router = _make_router()
+        self.ch, self.q = _make_channel()
+        self.router.register_channel(self.ch)
+        self.router.initialize()
+
+    def tearDown(self):
+        self.router.shutdown()
+
+    def test_control_message_routed_to_worker_handler(self):
+        got: list = []
+        self.router.register_worker_handler("worker2", lambda m: got.append(m.get("command")))
+        self.q.put({"type": "command", "command": "cfg", "_address": ["proc", "worker2"], "data": {}})
+        self.router.receive(timeout=0.1)
+        self.assertEqual(got, ["cfg"])
+
+    def test_worker_handler_skips_process_dispatch(self):
+        # Доставлено воркеру → process-level message_dispatcher НЕ зовётся.
+        worker_got: list = []
+        proc_got: list = []
+        self.router.register_worker_handler("w", lambda m: worker_got.append(1))
+        self.router.register_message_handler("cfg", lambda m: proc_got.append(1))
+        self.q.put({"type": "command", "command": "cfg", "_address": ["proc", "w"]})
+        self.router.receive(timeout=0.1)
+        self.assertEqual(worker_got, [1])
+        self.assertEqual(proc_got, [])
+
+    def test_data_frame_with_address_not_routed_to_worker(self):
+        # Гибрид-guard: кадр (type=data) едет трубами, в worker-handler НЕ уходит.
+        got: list = []
+        self.router.register_worker_handler("w", lambda m: got.append(1))
+        self.q.put({"type": "data", "_address": ["proc", "w"], "data": {"shm_name": "s0"}})
+        self.router.receive(timeout=0.1)
+        self.assertEqual(got, [])
+
+    def test_missing_worker_handler_falls_back_to_process(self):
+        # Воркера нет в реестре → fallback на process-dispatch, без падения.
+        proc_got: list = []
+        self.router.register_message_handler("cfg", lambda m: proc_got.append(1))
+        self.q.put({"type": "command", "command": "cfg", "_address": ["proc", "ghost"]})
+        messages = self.router.receive(timeout=0.1)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(proc_got, [1])
+
+    def test_flat_message_ignores_worker_routing(self):
+        # Нет _address → обычный путь, worker-handler не зовётся.
+        got: list = []
+        self.router.register_worker_handler("w", lambda m: got.append(1))
+        self.q.put({"type": "command", "command": "cfg", "targets": ["proc"]})
+        self.router.receive(timeout=0.1)
+        self.assertEqual(got, [])
+
+    def test_handler_exception_does_not_crash_receive(self):
+        def boom(_m):
+            raise RuntimeError("boom")
+
+        self.router.register_worker_handler("w", boom)
+        self.q.put({"type": "command", "command": "cfg", "_address": ["proc", "w"]})
+        messages = self.router.receive(timeout=0.1)
+        # Билет считается доставленным воркеру (return True), цикл не упал.
+        self.assertEqual(len(messages), 1)
+
+    def test_unregister_worker_handler(self):
+        self.router.register_worker_handler("w", lambda m: None)
+        self.assertTrue(self.router.unregister_worker_handler("w"))
+        self.assertFalse(self.router.unregister_worker_handler("w"))
+
+    def test_register_rejects_empty(self):
+        self.assertFalse(self.router.register_worker_handler("", lambda m: None))
+        self.assertFalse(self.router.register_worker_handler("w", None))
+
+
 if __name__ == "__main__":
     unittest.main()
