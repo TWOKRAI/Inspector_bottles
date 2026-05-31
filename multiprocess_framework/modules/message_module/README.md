@@ -280,13 +280,12 @@ msg = parse_message(raw_dict_or_json_string)
 
 ```python
 from multiprocess_framework.modules.message_module import (
-    split_address, process_of, worker_of, subpath_of, normalize_targets,
+    split_address, process_of, worker_of, normalize_targets,
 )
 
-split_address("camera.worker_in")   # → ["camera", "worker_in"]
+split_address("camera.worker_in")   # → ["camera", "worker_in"]  (address[1:] — нижние уровни)
 process_of("camera.worker_in")       # → "camera"   (address[0] — cross-process очередь)
 worker_of("camera.worker_in")        # → "worker_in" (резолвится ВНУТРИ процесса, P2)
-subpath_of("camera.worker_in")       # → ["worker_in"] (address[1:])
 split_address("ProcessManager")      # → ["ProcessManager"]  (backward-compat: плоское имя)
 ```
 

@@ -17,7 +17,7 @@
 
 Транспортная семантика (реализуется в P1/P2 — здесь ТОЛЬКО парсинг/валидация):
   - cross-process доставка идёт по ``process_of(target)`` (``address[0]``);
-  - нижние уровни (``subpath_of(target)`` == ``address[1:]``) едут в билете и
+  - нижние уровни (``split_address(target)[1:]`` == ``address[1:]``) едут в билете и
     резолвятся ВНУТРИ процесса-получателя его Router/диспетчером, не плодя
     IPC-очереди.
 
@@ -84,31 +84,6 @@ def worker_of(target: str) -> Optional[str]:
     """Воркер-получатель — ``address[1]`` или ``None``, если адрес — только процесс."""
     parts = split_address(target)
     return parts[1] if len(parts) > 1 else None
-
-
-def subpath_of(target: str) -> List[str]:
-    """Нижние уровни адреса (``address[1:]``) — воркер и глубже.
-
-    Эти уровни резолвятся ВНУТРИ процесса-получателя (P2), не на транспорте.
-    """
-    return split_address(target)[1:]
-
-
-def depth(target: str) -> int:
-    """Число уровней в адресе (1 — только процесс, 2 — процесс+воркер, …)."""
-    return len(split_address(target))
-
-
-def join_address(parts: Iterable[str]) -> str:
-    """Собрать иерархический адрес из уровней: ``["proc", "worker"]`` → ``"proc.worker"``.
-
-    Raises:
-        AddressValidationError: если уровней нет, или какой-то пуст.
-    """
-    parts = list(parts)
-    if not parts or any(not p for p in parts):
-        raise AddressValidationError(f"Нельзя собрать адрес из {parts!r}: список пуст или содержит пустой уровень")
-    return SEPARATOR.join(parts)
 
 
 def normalize_targets(

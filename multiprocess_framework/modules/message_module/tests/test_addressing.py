@@ -9,13 +9,10 @@ Contract-тесты иерархической адресации (P0.2 transpor
 import pytest
 
 from ..addressing import (
-    depth,
     is_broadcast,
-    join_address,
     normalize_targets,
     process_of,
     split_address,
-    subpath_of,
     validate_address,
     worker_of,
 )
@@ -50,16 +47,6 @@ class TestAccessors:
     def test_worker_of(self):
         assert worker_of("proc.worker") == "worker"
         assert worker_of("proc") is None
-
-    def test_subpath_of(self):
-        assert subpath_of("proc") == []
-        assert subpath_of("proc.worker") == ["worker"]
-        assert subpath_of("proc.worker.sub") == ["worker", "sub"]
-
-    def test_depth(self):
-        assert depth("proc") == 1
-        assert depth("proc.worker") == 2
-        assert depth("proc.worker.sub") == 3
 
 
 class TestValidation:
@@ -97,21 +84,6 @@ class TestBroadcast:
         # Спец-адреса не иерархические — валидируются как есть, не падают.
         validate_address("all")
         validate_address("broadcast")
-
-
-class TestJoinAddress:
-    def test_join(self):
-        assert join_address(["proc", "worker"]) == "proc.worker"
-        assert join_address(["proc"]) == "proc"
-
-    def test_roundtrip(self):
-        for addr in ("proc", "proc.worker", "proc.worker.sub"):
-            assert join_address(split_address(addr)) == addr
-
-    @pytest.mark.parametrize("bad", [[], ["proc", ""], ["", "worker"]])
-    def test_join_rejects_empty(self, bad):
-        with pytest.raises(AddressValidationError):
-            join_address(bad)
 
 
 class TestNormalizeTargets:

@@ -30,11 +30,9 @@ from .types import (
 # --- Иерархическая адресация (dotted targets, P0.2 transport-router-hub) ---
 from .addressing import (
     is_broadcast,
-    join_address,
     normalize_targets,
     process_of,
     split_address,
-    subpath_of,
     validate_address,
     worker_of,
 )
@@ -68,8 +66,6 @@ __all__ = [
     "split_address",
     "process_of",
     "worker_of",
-    "subpath_of",
-    "join_address",
     "normalize_targets",
     # Pydantic-схемы
     "BaseMessageSchema",
