@@ -7,6 +7,8 @@ metadata:
 
 Решение владельца (2026-05-31): транспорт всей системы свести к **одному механизму** — хабу `RouterManager`, который уже спроектирован во фреймворке, но на уровне IPC его обходят. Прототип и будущие приложения должны общаться ТОЛЬКО через него.
 
+**Прогресс (2026-05-31, ветка `refactor/transport-router-hub`):** P0 ✅ (контракт + ADR-COMM-001/004) + P1 ✅ (хаб на отправке) закрыты. P1 оказался КОНСОЛИДАЦИЕЙ, не стройкой: хаб-путь `router.send→_deliver_by_targets→queue_registry` уже построен долгом #1, новый класс канала НЕ понадобился. `send_to_process`→`router.send` (обход B1 убран), channel-guard fix (recon #3), qtype DRY (recon #5). +483 прод-строки, 0 циклов (sentrux acyclicity 10000). **Smoke end-to-end:** вебкамера→split→processors→stitcher→GUI, дисплей FPS 14, 0 ERROR — кадры идут через `router.send`. Handoff для P2: `plans/2026-05-31_transport-router-hub/HANDOFF_P2.md`. **Долг:** P0.2-контракт (`resolve_route`/addressing) ещё НЕ в рантайме — это суть P2 (доставка по `process_of`/address[0]).
+
 **Ключевая находка (чтение README модулей):** хаб = уже задокументированная архитектура. Переиспользуем, НЕ изобретаем:
 - `ChannelRoutingManager` (CRM) — «телефонная станция»: `ChannelRegistry` + `register_route(key→channel)` + `route()`. База для `RouterManager`/`LoggerManager`/`ErrorManager`.
 - `RouterManager.send → _resolve_channels → IMessageChannel.send`; `receive → message_dispatcher → handler`.
