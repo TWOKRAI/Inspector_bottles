@@ -125,9 +125,7 @@ class ProcessManagers:
             and hasattr(process.shared_resources, "event_manager")
             and process.shared_resources.event_manager
         ):
-            process.shared_resources.event_manager.set_router_manager(
-                process.router_manager
-            )
+            process.shared_resources.event_manager.set_router_manager(process.router_manager)
 
     # ========================================================================
     # ПРИВАТНЫЕ МЕТОДЫ СОЗДАНИЯ МЕНЕДЖЕРОВ
@@ -218,8 +216,11 @@ class ProcessManagers:
                         log_parts.append(f" cmd={msg.get('command')}")
                     if msg.get("event_type"):
                         log_parts.append(f" event={msg.get('event_type')}")
-                    logger.info(" ".join(log_parts), module="router_messages")
-                except Exception:
+                    # DEBUG, не INFO: per-message дубль — основной источник «бесконечного
+                    # терминала». На DEBUG он остаётся доступен в LoggerManager (файловые
+                    # каналы / console при DEBUG), но не засоряет INFO-консоль.
+                    logger.debug(" ".join(log_parts), module="router_messages")
+                except Exception:  # nosec B110 — диагностический middleware: сбой логирования не должен ронять роутинг
                     pass
                 return msg
 
