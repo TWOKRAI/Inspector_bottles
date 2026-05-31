@@ -66,12 +66,16 @@ class PipelineTab(QWidget):
     """
 
     _MUTATING_ACTIONS = frozenset({"delete", "auto_layout", "save_recipe", "launch_recipe"})
+    # Этап 1 pipeline-live-control: команды управления живым backend через proxy.
+    # Привилегированные (gating под tabs.pipeline.edit), но не мутируют граф-модель.
+    _CONTROL_ACTIONS = frozenset({"restart_topology", "proc_start", "proc_stop", "proc_restart"})
 
     def __init__(
         self,
         services: AppServices,
         *,
         registers_manager: "RegistersManager | None" = None,
+        process_manager_proxy: object | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -80,6 +84,7 @@ class PipelineTab(QWidget):
             services,
             registers_manager=registers_manager,
             notify=self._show_status,
+            process_manager_proxy=process_manager_proxy,
         )
 
         self._tab_layout = DiffScrollTabLayout(
@@ -165,8 +170,13 @@ class PipelineTab(QWidget):
 
         Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
         G.2: registers_manager — runtime-объект (live-регистры) для inspector-карточек.
+        Этап 1: process_manager_proxy — IPC-фасад управления живым backend.
         """
-        return cls(services, registers_manager=runtime.registers_manager)
+        return cls(
+            services,
+            registers_manager=runtime.registers_manager,
+            process_manager_proxy=runtime.process_manager_proxy,
+        )
 
     # ------------------------------------------------------------------ #
     #  Build helpers                                                       #
@@ -191,6 +201,10 @@ class PipelineTab(QWidget):
             ("diff", "Изменения"),
             ("save_recipe", "Сохранить"),
             ("launch_recipe", "Запустить"),
+            ("restart_topology", "Перезапустить"),
+            ("proc_start", "Старт процесса"),
+            ("proc_stop", "Стоп процесса"),
+            ("proc_restart", "Рестарт процесса"),
             ("fit", "По размеру"),
             ("zoom_in", "Zoom +"),
             ("zoom_out", "Zoom −"),
@@ -203,7 +217,7 @@ class PipelineTab(QWidget):
         action_layout.addStretch(1)
 
         # Permission gating через AuthFacade Protocol (F.6).
-        for aid in ("delete", "auto_layout", "save_recipe", "launch_recipe"):
+        for aid in ("delete", "auto_layout", "save_recipe", "launch_recipe", *self._CONTROL_ACTIONS):
             install_permission_aware_enable(
                 self._action_buttons[aid],
                 "tabs.pipeline.edit",
@@ -321,8 +335,29 @@ class PipelineTab(QWidget):
     #  Action handlers                                                     #
     # ------------------------------------------------------------------ #
 
+    def _selected_process_name(self) -> str:
+        """Имя процесса выбранной ноды (Task 1.2). Пусто если нет выбора.
+
+        Плагин-нода знает свой процесс через ``process_name`` (D.1). Для управления
+        процессом (start/stop/restart) берём процесс выбранной ноды.
+        """
+        for item in self._scene.selectedItems():
+            pname = getattr(item, "process_name", "") or getattr(item, "node_id", "")
+            if pname:
+                return pname
+        return ""
+
     def _on_toolbar_action(self, action_id: str) -> None:
         if action_id in self._MUTATING_ACTIONS and not self._can_edit():
+            return
+        if action_id in self._CONTROL_ACTIONS and not self._can_edit():
+            return
+        if action_id == "restart_topology":
+            self._presenter.restart_topology(parent=self)
+            return
+        if action_id in ("proc_start", "proc_stop", "proc_restart"):
+            verb = {"proc_start": "start", "proc_stop": "stop", "proc_restart": "restart"}[action_id]
+            self._presenter.control_process(verb, self._selected_process_name(), parent=self)
             return
         if action_id == "zoom_in":
             self._view.zoom_in()

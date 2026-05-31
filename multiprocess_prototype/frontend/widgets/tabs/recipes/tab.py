@@ -61,15 +61,19 @@ class RecipesTab(BaseListNavTab):
         self,
         services: AppServices,
         *,
+        process_manager_proxy: object | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Инициализировать таб рецептов.
 
         Args:
             services: типизированный DI-контейнер AppServices.
+            process_manager_proxy: IPC-фасад управления живым backend (Этап 1).
+                None → активация рецепта только меняет state, без применения к backend.
             parent: родительский виджет.
         """
         self._services = services
+        self._pm_proxy = process_manager_proxy
         self._selected_slug: str | None = None
         self._form_stack_index: int = 0
 
@@ -99,9 +103,18 @@ class RecipesTab(BaseListNavTab):
             self._content_stack.setCurrentWidget(_unavailable_label)
             self._create_btn.setEnabled(False)
         else:
+            # Этап 1 pipeline-live-control: «Сделать активным» применяет рецепт к
+            # живому backend через proxy.replace_blueprint (fire-and-forget IPC).
+            # None → graceful: только set_active без перезапуска процессов.
+            _replace_fn = (
+                self._pm_proxy.replace_blueprint
+                if self._pm_proxy is not None and hasattr(self._pm_proxy, "replace_blueprint")
+                else None
+            )
             self._presenter = RecipesPresenter(
                 store=services.recipes,
                 view=self,
+                replace_blueprint_fn=_replace_fn,
                 commands=services.commands,  # G.6.5: активация → dispatch(ActivateRecipe)
             )
             self._presenter.load()
@@ -119,9 +132,9 @@ class RecipesTab(BaseListNavTab):
         """Фабричный метод для register_all_tabs() / TabFactory.
 
         Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
-        RecipesTab не использует runtime-зависимостей.
+        Этап 1: process_manager_proxy — применение рецепта к живому backend.
         """
-        return cls(services)
+        return cls(services, process_manager_proxy=runtime.process_manager_proxy)
 
     # ------------------------------------------------------------------ #
     #  BaseListNavTab hooks                                                #

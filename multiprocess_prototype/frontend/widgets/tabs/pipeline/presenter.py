@@ -72,8 +72,13 @@ class PipelinePresenter:
         *,
         registers_manager: "RegistersManager | None" = None,
         notify: "Callable[[str], None] | None" = None,
+        process_manager_proxy: Any = None,
     ) -> None:
         self._services = services
+        # Этап 1 pipeline-live-control: IPC-фасад управления живым backend
+        # (replace_blueprint / start / stop / restart). Runtime-объект (RuntimeDeps,
+        # Q-F1=B), не AppServices. None → кнопки управления дают понятный статус.
+        self._pm_proxy = process_manager_proxy
         # G.2: live RegistersManager — runtime-объект (FieldInfo-схемы + значения)
         # для inspector-карточек. Передаётся через RuntimeDeps (Q-F1=B), НЕ через
         # services.registers (domain RegistersBackend не может экспонировать framework FieldInfo).
@@ -1530,16 +1535,8 @@ class PipelinePresenter:
             )
             return False
 
-        # Шаг 5: найти ProcessManager-proxy
-        # By design (Q-F1=B): process_manager_proxy — runtime layer, не AppServices Protocol.
-        # Остаётся тихим bridge через config / RuntimeDeps.
-        proxy = None
-
-        # Попытка получить proxy через config extras (не deprecated ключи)
-        pm_proxy = self._services.config.get("process_manager_proxy")
-        if pm_proxy is not None:
-            proxy = pm_proxy
-
+        # Шаг 5: ProcessManager-proxy (Этап 1: RuntimeDeps, Q-F1=B runtime-layer).
+        proxy = self._pm_proxy
         if proxy is None or not hasattr(proxy, "replace_blueprint"):
             QMessageBox.warning(
                 parent,
@@ -1548,34 +1545,125 @@ class PipelinePresenter:
             )
             return False
 
-        # Шаг 6: вызвать replace_blueprint
+        # Шаг 6: отправить replace_blueprint в backend (fire-and-forget IPC).
+        # Реальный результат (replaced/rollback) приходит async через Router-ответ;
+        # здесь подтверждаем только факт отправки команды (optimistic-ack).
         try:
             result = proxy.replace_blueprint(blueprint)
-            success = result.get("success", False)
-            if success:
-                replaced = result.get("replaced", [])
-                skipped = result.get("skipped_protected", [])
+            if result.get("success", False):
                 QMessageBox.information(
                     parent,
                     "Запуск рецепта",
-                    f"Рецепт '{active_slug}' запущен.\n"
-                    f"Заменено процессов: {len(replaced)}\n"
-                    f"Пропущено (protected): {len(skipped)}",
+                    f"Команда запуска рецепта '{active_slug}' отправлена в backend.\n"
+                    "Горячая замена процессов применяется на стороне ProcessManager.",
                 )
                 return True
-            else:
-                error = result.get("error") or "неизвестная ошибка"
-                rolled_back = result.get("rolled_back", False)
-                QMessageBox.critical(
-                    parent,
-                    "Запуск рецепта",
-                    f"Ошибка: {error}\nRollback: {'выполнен' if rolled_back else 'не выполнен'}",
-                )
-                return False
+            QMessageBox.critical(
+                parent,
+                "Запуск рецепта",
+                f"Не удалось отправить команду: {result.get('error') or 'неизвестная ошибка'}",
+            )
+            return False
         except Exception as exc:
             logger.exception("launch_active_recipe failed")
             QMessageBox.critical(parent, "Запуск рецепта", f"Ошибка: {exc}")
             return False
+
+    # ------------------------------------------------------------------ #
+    #  Этап 1 pipeline-live-control — кнопки управления процессами         #
+    # ------------------------------------------------------------------ #
+
+    def restart_topology(self, parent: "QWidget | None" = None) -> bool:
+        """Применить ТЕКУЩИЙ граф редактора к живому backend (горячая замена).
+
+        В отличие от ``launch_active_recipe`` (берёт сохранённый рецепт) — берёт
+        in-memory модель редактора (``graph_to_blueprint``), тот же формат blueprint,
+        что принимает ``replace_blueprint`` (processes=list, PM:664). Fire-and-forget IPC.
+
+        Сценарий: удалить ноду → «Перезапустить» → эффект ноды пропадает на дисплее.
+
+        Args:
+            parent: родитель для QMessageBox.
+
+        Returns:
+            True если команда отправлена, False при отсутствии proxy / ошибке.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        from .io import graph_to_blueprint
+
+        proxy = self._pm_proxy
+        if proxy is None or not hasattr(proxy, "replace_blueprint"):
+            QMessageBox.warning(
+                parent,
+                "Перезапустить",
+                "ProcessManager-proxy недоступен.\nУправление возможно только при работающей системе.",
+            )
+            return False
+
+        bp_dict, _bindings, _gui_positions = graph_to_blueprint(self._model)
+        try:
+            result = proxy.replace_blueprint(bp_dict)
+            if result.get("success", False):
+                self._notify_status("Команда перезапуска топологии отправлена в backend")
+                return True
+            QMessageBox.critical(
+                parent,
+                "Перезапустить",
+                f"Не удалось отправить команду: {result.get('error') or 'неизвестная ошибка'}",
+            )
+            return False
+        except Exception as exc:
+            logger.exception("restart_topology failed")
+            QMessageBox.critical(parent, "Перезапустить", f"Ошибка: {exc}")
+            return False
+
+    def control_process(self, action: str, process_name: str, parent: "QWidget | None" = None) -> bool:
+        """Управление одним процессом по имени (Task 1.2): start / stop / restart.
+
+        Args:
+            action: "start" | "stop" | "restart".
+            process_name: имя процесса (НЕ адрес — per-worker управление это Этап 3).
+            parent: родитель для QMessageBox.
+
+        Returns:
+            True если команда отправлена, False при отсутствии proxy / неизвестном action.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        proxy = self._pm_proxy
+        method = {
+            "start": getattr(proxy, "start_process", None) if proxy else None,
+            "stop": getattr(proxy, "stop_process", None) if proxy else None,
+            "restart": getattr(proxy, "restart_process", None) if proxy else None,
+        }.get(action)
+
+        if proxy is None or method is None:
+            QMessageBox.warning(
+                parent,
+                "Управление процессом",
+                "ProcessManager-proxy недоступен или действие не поддержано.",
+            )
+            return False
+        if not process_name:
+            QMessageBox.warning(parent, "Управление процессом", "Не выбран процесс")
+            return False
+
+        try:
+            method(process_name)
+            labels = {"start": "запуск", "stop": "остановка", "restart": "перезапуск"}
+            self._notify_status(f"Команда '{labels[action]}' процесса '{process_name}' отправлена")
+            return True
+        except Exception as exc:
+            logger.exception("control_process(%s, %s) failed", action, process_name)
+            QMessageBox.critical(parent, "Управление процессом", f"Ошибка: {exc}")
+            return False
+
+    def _notify_status(self, message: str) -> None:
+        """Показать статус через notify-callback (statusBar) + лог."""
+        logger.info(message)
+        if self._notify is not None:
+            self._notify(message)
 
     # ------------------------------------------------------------------ #
     #  Legacy API compatibility                                            #

@@ -205,17 +205,12 @@ class TestLaunchCallsReplaceBlueprint:
             },
         )
 
+        # Этап 1: fire-and-forget IPC — proxy возвращает optimistic-ack.
         proxy = MagicMock()
-        proxy.replace_blueprint.return_value = {
-            "success": True,
-            "replaced": ["proc1"],
-            "skipped_protected": [],
-            "error": None,
-            "rolled_back": False,
-        }
+        proxy.replace_blueprint.return_value = {"success": True, "dispatched": True}
 
-        services = _make_services(store, config_extra={"process_manager_proxy": proxy})
-        presenter = PipelinePresenter(services)
+        services = _make_services(store)
+        presenter = PipelinePresenter(services, process_manager_proxy=proxy)
 
         info_shown = []
         from PySide6.QtWidgets import QMessageBox
@@ -234,7 +229,7 @@ class TestLaunchCallsReplaceBlueprint:
         proxy.replace_blueprint.assert_called_once_with(expected_blueprint)
         assert len(info_shown) == 1
         assert "demo_recipe" in info_shown[0]
-        assert "1" in info_shown[0]
+        assert "отправлена" in info_shown[0]
 
 
 # ---------------------------------------------------------------------------
@@ -247,17 +242,12 @@ class TestLaunchHandlesReplaceBlueprintFailure:
 
     def test_launch_handles_replace_blueprint_failure(self, monkeypatch) -> None:
         store = _make_recipe_store()
+        # Этап 1: optimistic-ack без success → critical с текстом ошибки.
         proxy = MagicMock()
-        proxy.replace_blueprint.return_value = {
-            "success": False,
-            "replaced": [],
-            "skipped_protected": [],
-            "error": "boom",
-            "rolled_back": True,
-        }
+        proxy.replace_blueprint.return_value = {"success": False, "error": "boom"}
 
-        services = _make_services(store, config_extra={"process_manager_proxy": proxy})
-        presenter = PipelinePresenter(services)
+        services = _make_services(store)
+        presenter = PipelinePresenter(services, process_manager_proxy=proxy)
 
         criticals_shown = []
         from PySide6.QtWidgets import QMessageBox
@@ -275,7 +265,6 @@ class TestLaunchHandlesReplaceBlueprintFailure:
         assert result is False
         assert len(criticals_shown) == 1
         assert "boom" in criticals_shown[0]
-        assert "выполнен" in criticals_shown[0]
 
 
 # ---------------------------------------------------------------------------
@@ -291,8 +280,8 @@ class TestLaunchHandlesException:
         proxy = MagicMock()
         proxy.replace_blueprint.side_effect = Exception("crash")
 
-        services = _make_services(store, config_extra={"process_manager_proxy": proxy})
-        presenter = PipelinePresenter(services)
+        services = _make_services(store)
+        presenter = PipelinePresenter(services, process_manager_proxy=proxy)
 
         criticals_shown = []
         from PySide6.QtWidgets import QMessageBox

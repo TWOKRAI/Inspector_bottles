@@ -107,6 +107,15 @@ def run_gui(process: "GuiProcess") -> None:
     # AppServices собирается из них через AppServicesDeps, runtime — через RuntimeDeps.
     command_sender = CommandSender(process)
 
+    # 3-bis. ProcessManagerProxy — IPC-фасад управления живым ProcessManagerProcess
+    # (Этап 1 pipeline-live-control). Тонкая обёртка над command_sender: шлёт
+    # blueprint.replace / process.start|stop|restart через RouterManager в backend.
+    # Прокидывается в табы Pipeline/Recipes через RuntimeDeps (runtime-layer, не
+    # AppServices). Закрывает корневой блокер «proxy=None» (launch_active_recipe).
+    from .bridge.process_manager_proxy import ProcessManagerProxy
+
+    process_manager_proxy = ProcessManagerProxy(command_sender)
+
     # 3b-pre. Bootstrap ServiceRegistry + ServiceStateAdapter (Task 3.6 / Phase 3)
     #
     # Порядок критичен (Reviewer zone of concern):
@@ -171,11 +180,15 @@ def run_gui(process: "GuiProcess") -> None:
     try:
         # Та же сборка, что грузит backend (фундамент ⊕ pipeline из общего манифеста)
         # — GUI-редактор показывает то же, что реально бежит.
-        from multiprocess_prototype.backend.launch import merge_topologies
+        # unwrap_recipe обязателен: manifest.pipeline указывает на РЕЦЕПТ (вложенный
+        # blueprint:), а без разворачивания GUI читает processes с верхнего уровня и
+        # видит только base (Этап 1 pipeline-live-control: иначе «Перезапустить»
+        # применял бы неполный граф и убивал живой pipeline). Зеркалит backend launch.
+        from multiprocess_prototype.backend.launch import merge_topologies, unwrap_recipe
 
-        _topology_dict = _yaml.safe_load(_manifest.pipeline.read_text(encoding="utf-8")) or {}
+        _topology_dict = unwrap_recipe(_yaml.safe_load(_manifest.pipeline.read_text(encoding="utf-8")) or {})
         if _manifest.base:
-            _base_dict = _yaml.safe_load(_manifest.base.read_text(encoding="utf-8")) or {}
+            _base_dict = unwrap_recipe(_yaml.safe_load(_manifest.base.read_text(encoding="utf-8")) or {})
             _topology_dict = merge_topologies(_base_dict, _topology_dict)
     except Exception as e:
         process._log_warning(f"Не удалось загрузить topology: {e}", module="startup")
@@ -532,6 +545,7 @@ def run_gui(process: "GuiProcess") -> None:
         plugin_manager=_plugin_manager,
         registers_manager=registers_manager,
         auth_ctx=auth_ctx,
+        process_manager_proxy=process_manager_proxy,
         request_ui_restart=_request_ui_restart,
     )
 

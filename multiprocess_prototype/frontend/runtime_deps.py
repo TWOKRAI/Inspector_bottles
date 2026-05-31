@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from multiprocess_framework.modules.registers_module import RegistersManager
     from multiprocess_prototype.frontend.auth_context import AuthContext
     from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
+    from multiprocess_prototype.frontend.bridge.process_manager_proxy import ProcessManagerProxy
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
 
@@ -52,6 +53,10 @@ class RuntimeDeps:
             value-семантику (FieldSpec), но forms-слой строит виджеты из framework FieldInfo,
             который domain не может экспонировать (запрет импорта framework). G.2 / Q-F1=B.
         auth_ctx: AuthContext (manager+state+audit) для admin-панелей (SettingsTab).
+        process_manager_proxy: IPC-фасад управления живым ProcessManagerProcess
+            (replace_blueprint / start / stop / restart). Тонкая обёртка над
+            command_sender; None → кнопки управления Pipeline/Recipes дают понятный
+            статус «backend недоступен», не падают. Этап 1 pipeline-live-control.
         request_ui_restart: узкий callback «перезапустить UI» для InterfaceSection
             (G.5.2). Заменяет прямой доступ к GuiProcess._restart_ui (Interface
             Segregation — секция знает только «перезапусти UI», не GuiProcess).
@@ -64,4 +69,5 @@ class RuntimeDeps:
     plugin_manager: Any = None
     registers_manager: "RegistersManager | None" = None
     auth_ctx: "AuthContext | None" = None
+    process_manager_proxy: "ProcessManagerProxy | None" = None
     request_ui_restart: "Callable[[], None] | None" = None
