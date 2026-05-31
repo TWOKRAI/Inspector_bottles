@@ -268,9 +268,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         if self.state_proxy is None or self.router_manager is None:
             return
         try:
-            self.router_manager.register_message_handler(
-                "state.changed", self.state_proxy.on_state_changed
-            )
+            self.router_manager.register_message_handler("state.changed", self.state_proxy.on_state_changed)
             self._log_debug(
                 f"ProcessModule '{self.name}': state_proxy handler state.changed зарегистрирован",
                 module="state",
@@ -362,9 +360,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 instance = cls(process=self, config=wc.get("config", {}))
                 target = getattr(instance, "run", instance)
                 if not callable(target):
-                    raise TypeError(
-                        f"Worker '{name}' must have run(stop_event, pause_event) or be callable"
-                    )
+                    raise TypeError(f"Worker '{name}' must have run(stop_event, pause_event) or be callable")
                 thread_dict = wc.get("thread", {})
                 thread_config = ThreadConfig.from_dict(thread_dict)
                 self.worker_manager.create_worker(name, target, thread_config)
@@ -479,11 +475,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
     def get_config(self, key: str, default: Any = None) -> Any:
         """Получить значение конфигурации."""
-        return (
-            self.config_handler.get(key, default)
-            if self.config_handler
-            else self.config.get(key, default)
-        )
+        return self.config_handler.get(key, default) if self.config_handler else self.config.get(key, default)
 
     def update_config(self, key: str, value: Any):
         """Обновить значение конфигурации."""
@@ -602,11 +594,21 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         # Встроенные команды (composition)
         from ..commands.builtin_commands import BuiltinCommands
+
         self._builtin_cmds = BuiltinCommands(self)
         self._builtin_cmds.register()
 
+        # Ре-синк команд в router.message_dispatcher: register_commands_with_router()
+        # в initialize() отрабатывает ДО регистрации builtins здесь (worker.*/wire.*/
+        # introspect.*), поэтому без повторной синхронизации эти команды есть в
+        # CommandManager, но НЕ диспатчатся из входящих IPC-сообщений (молча дропаются).
+        # register_message_handler идемпотентен (replace по ключу) — повторная
+        # синхронизация ранее зарегистрированных безопасна.
+        self._lifecycle.register_commands_with_router()
+
         # Heartbeat (composition)
         from ..heartbeat.process_heartbeat import ProcessHeartbeat
+
         self._heartbeat = ProcessHeartbeat(self)
         self._heartbeat.start()
 

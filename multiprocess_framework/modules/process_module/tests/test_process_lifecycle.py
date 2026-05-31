@@ -193,3 +193,36 @@ class TestCommandHandlerReply:
 
         handler = ProcessLifecycle._make_command_handler(cm, proc)
         assert handler({"command": "x"}) == {"ok": 1}
+
+
+class TestBuiltinCommandsReachableViaRouter:
+    """Регрессия: builtin-команды (worker.*/introspect.*), регистрируемые в run()
+    ПОСЛЕ register_commands_with_router() в initialize(), должны быть ре-синканы в
+    router.message_dispatcher — иначе входящие IPC-сообщения молча дропаются.
+
+    Раньше этот разрыв маскировался: команды звались напрямую через CommandManager,
+    а не через router.receive() → message_dispatcher.dispatch().
+    """
+
+    def test_introspect_and_worker_commands_in_message_dispatcher_after_run(self):
+        sr = make_mock_shared_resources()
+        process = ProcessModule("reach_proc", shared_resources=sr, config={})
+        assert process.initialize() is True
+        process.run()  # регистрирует BuiltinCommands + ре-синк в router
+        try:
+            md_keys = {h.get("key") for h in process.router_manager.message_dispatcher.get_all_handlers()}
+            cm_keys = {c.get("key") for c in process.command_manager.get_commands()}
+
+            # builtin-команды должны быть достижимы через router (не только в CommandManager)
+            for key in (
+                "introspect.handlers",
+                "introspect.registers",
+                "introspect.status",
+                "worker.create",
+                "worker.remove",
+                "wire.configure",
+            ):
+                assert key in cm_keys, f"{key} нет в CommandManager"
+                assert key in md_keys, f"{key} НЕ достижим через router message_dispatcher"
+        finally:
+            process.shutdown()
