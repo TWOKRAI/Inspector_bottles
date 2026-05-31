@@ -13,8 +13,11 @@ styles:
 # Фундамент (приватная топология): презентация + always-on. Суммируется с pipeline.
 base: backend/topology/base.yaml
 
-# Активный запускаемый pipeline (runnable-топология, без базовых процессов)
-pipeline: backend/topology/region_pipeline.yaml
+# Активный запускаемый pipeline. Это РЕЦЕПТ (GUI-редактируемый): загрузчик
+# разворачивает его blueprint: → топология → оркестратор собирает. Модель владельца:
+# GUI формирует рецепт-файл, бэкенд запускает его (и без GUI). Сырые topology в
+# backend/topology/ остаются для прочих pipeline; region_pipeline теперь живёт рецептом.
+pipeline: recipes/region_pipeline.yaml
 
-# Каталог GUI-редактируемых рецептов (editor-слой; запуском пока не используется)
+# Каталог GUI-редактируемых рецептов (источник запускаемых топологий)
 recipes: recipes

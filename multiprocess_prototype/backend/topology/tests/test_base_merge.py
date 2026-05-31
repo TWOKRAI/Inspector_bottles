@@ -11,17 +11,18 @@ import pytest
 import yaml
 
 from multiprocess_framework.modules.process_module.generic.blueprint import SystemBlueprint
-from multiprocess_prototype.backend.launch import merge_topologies
+from multiprocess_prototype.backend.launch import merge_topologies, unwrap_recipe
 
 TOPOLOGY_DIR = Path(__file__).resolve().parents[1]
 BASE_PATH = TOPOLOGY_DIR / "base.yaml"
+# region_pipeline переехал в recipes/ (запускаемый рецепт) — грузим через unwrap_recipe.
+RECIPE_REGION = Path(__file__).resolve().parents[3] / "recipes" / "region_pipeline.yaml"
 
 ACTIVE_PIPELINES = [
     "hello_world.yaml",
     "inspection_basic.yaml",
     "inspection_full.yaml",
     "multi_camera.yaml",
-    "region_pipeline.yaml",
 ]
 
 GUI_CLASS = "multiprocess_prototype.frontend.process.GuiProcess"
@@ -30,6 +31,12 @@ GUI_CLASS = "multiprocess_prototype.frontend.process.GuiProcess"
 def _load(name: str) -> dict:
     with open(TOPOLOGY_DIR / name, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def _load_region_pipeline() -> dict:
+    """region_pipeline теперь рецепт — разворачиваем blueprint: в топологию."""
+    with open(RECIPE_REGION, encoding="utf-8") as f:
+        return unwrap_recipe(yaml.safe_load(f))
 
 
 def _base() -> dict:
@@ -69,7 +76,7 @@ class TestBaseMerge:
     def test_region_pipeline_merge_golden_build(self):
         """Golden: merge(base, region_pipeline) собирается в configs; gui (из фундамента)
         присутствует ровно один раз с классом GuiProcess."""
-        merged = merge_topologies(_base(), _load("region_pipeline.yaml"))
+        merged = merge_topologies(_base(), _load_region_pipeline())
         configs = SystemBlueprint.model_validate(merged).build_configs()
         names = [c.process_name for c in configs]
         assert names.count("gui") == 1
@@ -77,7 +84,7 @@ class TestBaseMerge:
 
     def test_chain_targets_gui_resolves_after_merge(self):
         """chain_targets:[gui] из pipeline резолвится после слияния с фундаментом."""
-        merged = merge_topologies(_base(), _load("region_pipeline.yaml"))
+        merged = merge_topologies(_base(), _load_region_pipeline())
         names = {p["process_name"] for p in merged["processes"]}
         for proc in merged["processes"]:
             for target in proc.get("chain_targets", []):
@@ -100,13 +107,46 @@ class TestBaseMerge:
 
     def test_merge_preserves_pipeline_name(self):
         """Результат берёт name/description из pipeline (активная нагрузка)."""
-        merged = merge_topologies(_base(), _load("region_pipeline.yaml"))
+        merged = merge_topologies(_base(), _load_region_pipeline())
         assert merged["name"] == "region_pipeline"
 
     def test_pipeline_alone_is_headless(self):
         """Headless: pipeline без фундамента собирается без процесса презентации,
         цепочка обработки сохраняется (бэкенд работает без GUI)."""
-        configs = SystemBlueprint.model_validate(_load("region_pipeline.yaml")).build_configs()
+        configs = SystemBlueprint.model_validate(_load_region_pipeline()).build_configs()
         names = {c.process_name for c in configs}
         assert "gui" not in names
         assert "camera_0" in names and "stitcher" in names
+
+
+class TestUnwrapRecipe:
+    """Контракт unwrap_recipe: рецепт (editor-слой) → запускаемая топология."""
+
+    def test_recipe_unwrapped_to_blueprint(self):
+        recipe = {
+            "name": "r",
+            "version": 3,
+            "blueprint": {"name": "r", "processes": [{"process_name": "p", "plugins": []}], "wires": []},
+        }
+        topo = unwrap_recipe(recipe)
+        assert topo["name"] == "r"
+        assert [p["process_name"] for p in topo["processes"]] == ["p"]
+
+    def test_raw_topology_passthrough(self):
+        # Сырая topology (processes на верхнем уровне) НЕ трогается (backward-compat).
+        raw = {"name": "t", "processes": [{"process_name": "x", "plugins": []}]}
+        assert unwrap_recipe(raw) is raw
+
+    def test_display_bindings_folded_into_displays(self):
+        recipe = {
+            "blueprint": {"name": "r", "processes": [], "wires": []},
+            "display_bindings": [{"node_id": "p.plug.frame", "display_id": "main"}],
+        }
+        topo = unwrap_recipe(recipe)
+        assert topo["displays"] == [{"node_id": "p.plug.frame", "display_id": "main"}]
+
+    def test_real_region_pipeline_recipe_carries_params(self):
+        # Реальный рецепт region_pipeline разворачивается с сохранением параметров плагинов.
+        topo = _load_region_pipeline()
+        rs = next(p for proc in topo["processes"] for p in proc["plugins"] if p["plugin_name"] == "region_split")
+        assert len(rs["regions"]) == 2 and rs["default_region"]["target"] == "process_flip"

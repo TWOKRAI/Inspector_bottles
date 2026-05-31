@@ -7,13 +7,13 @@ import yaml
 TOPOLOGY_DIR = Path(__file__).resolve().parents[1]
 BASE_PATH = TOPOLOGY_DIR / "base.yaml"
 
-# Все рабочие topology (не TEMPLATE, не архив)
+# Все рабочие topology (не TEMPLATE, не архив).
+# region_pipeline переехал в recipes/ (запускаемый рецепт) — здесь только сырые topology.
 ACTIVE_TOPOLOGIES = [
     "hello_world.yaml",
     "inspection_basic.yaml",
     "inspection_full.yaml",
     "multi_camera.yaml",
-    "region_pipeline.yaml",
 ]
 
 

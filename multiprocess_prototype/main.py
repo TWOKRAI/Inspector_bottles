@@ -33,8 +33,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 CONFIG_PATH = HERE / "backend" / "config" / "system.yaml"
 DEFAULT_MANIFEST = HERE / "app.yaml"
-# Дефолтный pipeline для legacy bootstrap() и тестов. Основной выбор — через app.yaml.
-DEFAULT_BLUEPRINT = HERE / "backend" / "topology" / "region_pipeline.yaml"
+# Дефолтный pipeline для legacy bootstrap() и тестов — РЕЦЕПТ (load_topology_dict
+# разворачивает blueprint:). Основной выбор — через app.yaml.
+DEFAULT_BLUEPRINT = HERE / "recipes" / "region_pipeline.yaml"
 
 
 def resolve_manifest_path() -> Path:

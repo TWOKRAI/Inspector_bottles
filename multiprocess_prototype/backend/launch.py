@@ -37,15 +37,40 @@ _ORCHESTRATOR_CLASS_PATH = "multiprocess_prototype.orchestrator.ProcessManagerPr
 # ---------------------------------------------------------------------------
 
 
+def unwrap_recipe(raw: dict) -> dict:
+    """Свести GUI-рецепт (editor-слой) к запускаемой топологии.
+
+    Модель владельца: GUI лишь формирует топологию, бэкенд её запускает — и без GUI.
+    Рецепт v3 держит топологию во вложенном ``blueprint:`` (processes/wires), а привязки
+    дисплеев — на верхнем уровне (``display_bindings``). Сырая topology имеет
+    ``processes:`` на верхнем уровне. Эта функция разворачивает рецепт в плоскую
+    топологию (тот же dict-контракт, что грузит ``SystemBuilder``), оставляя сырые
+    топологии без изменений (backward-compat).
+    """
+    if not (isinstance(raw, dict) and "blueprint" in raw and "processes" not in raw):
+        return raw
+    bp = dict(raw["blueprint"])
+    # display_bindings рецепта (node_id/display_id) == секция displays топологии.
+    if raw.get("display_bindings") and not bp.get("displays"):
+        bp["displays"] = raw["display_bindings"]
+    return bp
+
+
 def load_topology_dict(bp_path: Path) -> dict:
-    """Прочитать YAML/JSON-топологию в dict (с проверкой существования)."""
+    """Прочитать YAML/JSON-топологию ИЛИ рецепт в dict (с проверкой существования).
+
+    Рецепт (вложенный ``blueprint:``) разворачивается в топологию через
+    :func:`unwrap_recipe` — так бэкенд запускает и сырую topology, и GUI-рецепт.
+    """
     if not bp_path.exists():
         print(f"[launch] ОШИБКА: топология не найдена: {bp_path}", file=sys.stderr)
         sys.exit(1)
     with open(bp_path, encoding="utf-8") as f:
         if bp_path.suffix in (".yaml", ".yml"):
-            return yaml.safe_load(f)
-        return json.load(f)
+            raw = yaml.safe_load(f)
+        else:
+            raw = json.load(f)
+    return unwrap_recipe(raw)
 
 
 def merge_topologies(base_dict: dict, pipeline_dict: dict) -> dict:

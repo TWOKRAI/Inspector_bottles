@@ -206,8 +206,11 @@ python scripts/run_framework_tests.py
 | `inspection_basic.yaml` | Камера → HSV → детекция → overlay → GUI | ⭐⭐ |
 | `inspection_full.yaml` | Полный pipeline с worker_pool + database | ⭐⭐⭐ |
 | `multi_camera.yaml` | 2 камеры с параллельными pipeline | ⭐⭐⭐ |
-| `region_pipeline.yaml` | Region split → разная обработка на регионы | ⭐⭐⭐ |
 | `TEMPLATE.yaml` | Пустой шаблон для новой topology |  |
+
+> `region_pipeline` переехал в `recipes/region_pipeline.yaml` (запускаемый рецепт): GUI
+> формирует рецепт-файл, бэкенд его запускает (загрузчик разворачивает `blueprint:` в
+> топологию). Это дефолтный pipeline в `app.yaml`.
 
 ## Документация фреймворка
 
