@@ -52,6 +52,25 @@ class _FakeWorkerManager:
         return self._statuses
 
 
+class _FakeRouterWithStats(_FakeRouter):
+    def __init__(self, handler_keys=(), stats=None) -> None:
+        super().__init__(handler_keys)
+        self._stats = stats or {}
+
+    def get_stats(self) -> dict:
+        return self._stats
+
+
+class _FakeQueue:
+    def __init__(self, size) -> None:
+        self._size = size
+
+    def qsize(self) -> int:
+        if self._size is None:
+            raise NotImplementedError
+        return self._size
+
+
 class _FakeOrchestrator:
     def __init__(self, registers_manager) -> None:
         self.registers_manager = registers_manager
@@ -68,11 +87,12 @@ class _FakeRegistersManager:
 class _FakeServices:
     """IProcessServices-совместимый фейк для introspect-команд."""
 
-    def __init__(self, *, router=None, worker_manager=None, orchestrator=None) -> None:
+    def __init__(self, *, router=None, worker_manager=None, orchestrator=None, queues=None) -> None:
         self.command_manager = _FakeCommandManager()
         self.router_manager = router
         self.worker_manager = worker_manager
         self._orchestrator = orchestrator
+        self.queues = queues
         self.name = "preprocessor"
         self._current_process_status = "running"
 
@@ -187,3 +207,51 @@ class TestIntrospectStatus:
         _svc, cm = _make(worker_manager=None)
         result = cm.dispatch("introspect.status")
         assert result["workers"] == {}
+
+
+# ====================================================================== #
+#  introspect.router_stats                                                #
+# ====================================================================== #
+
+
+class TestIntrospectRouterStats:
+    def test_returns_router_section(self) -> None:
+        router = _FakeRouterWithStats(stats={"router": {"sent_ok": 5, "errors": 0, "received": 3}})
+        _svc, cm = _make(router=router)
+        result = cm.dispatch("introspect.router_stats")
+        assert result["success"] is True
+        assert result["router_stats"]["sent_ok"] == 5
+        assert result["router_stats"]["received"] == 3
+
+    def test_note_without_router(self) -> None:
+        _svc, cm = _make(router=None)
+        result = cm.dispatch("introspect.router_stats")
+        assert result["success"] is True
+        assert result["router_stats"] == {}
+        assert "note" in result
+
+
+# ====================================================================== #
+#  introspect.queues                                                      #
+# ====================================================================== #
+
+
+class TestIntrospectQueues:
+    def test_reports_queue_sizes(self) -> None:
+        queues = {"system": _FakeQueue(2), "data": _FakeQueue(0)}
+        _svc, cm = _make(queues=queues)
+        result = cm.dispatch("introspect.queues")
+        assert result["success"] is True
+        assert result["queue_sizes"] == {"system": 2, "data": 0}
+
+    def test_qsize_unavailable_reported_as_none(self) -> None:
+        # macOS: qsize() кидает NotImplementedError → None (диагностично).
+        queues = {"system": _FakeQueue(None)}
+        _svc, cm = _make(queues=queues)
+        result = cm.dispatch("introspect.queues")
+        assert result["queue_sizes"] == {"system": None}
+
+    def test_empty_without_queues(self) -> None:
+        _svc, cm = _make(queues=None)
+        result = cm.dispatch("introspect.queues")
+        assert result["queue_sizes"] == {}

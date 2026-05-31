@@ -313,11 +313,21 @@ class BuiltinCommands:
                 "Регистры процесса (имена + поля) из RegistersManager",
             ),
             ("introspect.status", self._cmd_introspect_status, "Имя процесса, статус, воркеры (имена + статусы)"),
+            (
+                "introspect.router_stats",
+                self._cmd_introspect_router_stats,
+                "Счётчики router'а: sent_ok/received/dropped/errors (дошло ли сообщение)",
+            ),
+            (
+                "introspect.queues",
+                self._cmd_introspect_queues,
+                "Глубины очередей процесса (backpressure)",
+            ),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
         self._services._log_debug(
-            "Встроенные команды introspect.handlers/registers/status зарегистрированы",
+            "Встроенные команды introspect.* зарегистрированы",
             module="lifecycle",
         )
 
@@ -391,6 +401,41 @@ class BuiltinCommands:
             "status": getattr(svc, "_current_process_status", "unknown"),
             "workers": workers,
         }
+
+    def _cmd_introspect_router_stats(self, data=None, **kwargs) -> dict:
+        """Счётчики router'а процесса: отвечает «дошло/ушло/дропнулось ли сообщение».
+
+        Ключевая диагностика на таймауте: sent_ok/received/errors/middleware_dropped
+        показывают, добралось ли отправленное и не съела ли его middleware.
+        """
+        svc = self._services
+        router = svc.router_manager
+        if router is None or not hasattr(router, "get_stats"):
+            return {"success": True, "process": svc.name, "router_stats": {}, "note": "нет router_manager"}
+        try:
+            stats = router.get_stats()
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "reason": f"get_stats: {exc}"}
+        # get_stats() возвращает {"router": {...счётчики...}, ...}; берём router-секцию
+        router_stats = stats.get("router", stats) if isinstance(stats, dict) else {}
+        return {"success": True, "process": svc.name, "router_stats": router_stats}
+
+    def _cmd_introspect_queues(self, data=None, **kwargs) -> dict:
+        """Глубины собственных очередей процесса (backpressure-диагностика).
+
+        Растущая system/data-очередь = процесс не успевает разгребать вход —
+        частая причина «команда/кадр будто не доходит».
+        """
+        svc = self._services
+        sizes: dict = {}
+        queues = getattr(svc, "queues", None)
+        if isinstance(queues, dict):
+            for qtype, queue in queues.items():
+                try:
+                    sizes[qtype] = queue.qsize()
+                except (NotImplementedError, OSError, AttributeError):
+                    sizes[qtype] = None  # qsize недоступен (macOS) — диагностично само по себе
+        return {"success": True, "process": svc.name, "queue_sizes": sizes}
 
     # ========================================================================
     # WIRE COMMANDS — runtime-настройка SHM-каналов
