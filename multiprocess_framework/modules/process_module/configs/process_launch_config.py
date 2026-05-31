@@ -41,6 +41,14 @@ class ProcessLaunchConfig(SchemaBase):
 
     priority: str | ProcessPriorityLevel = ProcessPriorityLevel.NORMAL
 
+    protected: Annotated[
+        bool,
+        FieldMeta(
+            "Protected",
+            info="always-on процесс: replace_blueprint/hot-apply его НЕ останавливает (gui и т.п.).",
+        ),
+    ] = False
+
     queues: dict[str, Any] | None = None
 
     log_dir: str | None = None
@@ -81,6 +89,9 @@ class ProcessLaunchConfig(SchemaBase):
         payload.pop("priority", None)
         payload.pop("queues", None)
         payload.pop("log_dir", None)
+        # protected выносим на верхний уровень proc_dict — его читает
+        # ProcessManagerProcess._get_protected_names (cfg.get("protected")), а не config.
+        protected = bool(payload.pop("protected", False))
         # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
         workers = payload.pop("workers", None) or {}
 
@@ -95,6 +106,7 @@ class ProcessLaunchConfig(SchemaBase):
             "class": class_path,
             "queues": queues,
             "priority": priority,
+            "protected": protected,
             "workers": workers,
             "config": payload,
             "managers": managers,

@@ -82,6 +82,11 @@ class ProcessConfig(SchemaBase):
         FieldMeta("Класс процесса", info="Dotted path к классу (по умолчанию GenericProcess)"),
     ] = ""
 
+    protected: Annotated[
+        bool,
+        FieldMeta("Protected", info="always-on: replace_blueprint/hot-apply процесс не останавливает."),
+    ] = False
+
     # --- Data Pipeline routing (Phase 5) ---
 
     chain_targets: Annotated[
@@ -103,6 +108,9 @@ class ProcessConfig(SchemaBase):
         base_kwargs: dict = dict(priority=self.priority)
         if self.process_class:
             base_kwargs["process_class"] = self.process_class
+        # protected пробрасываем всегда (нужен PM для skip при replace_blueprint)
+        if self.protected:
+            base_kwargs["protected"] = self.protected
 
         # Data Pipeline routing
         if self.chain_targets:
@@ -124,9 +132,7 @@ class ProcessConfig(SchemaBase):
         )
 
     @classmethod
-    def from_plugins(
-        cls, process_name: str, *plugins: PluginConfig, priority: str = "normal"
-    ) -> ProcessConfig:
+    def from_plugins(cls, process_name: str, *plugins: PluginConfig, priority: str = "normal") -> ProcessConfig:
         """Удобный конструктор: принимает PluginConfig-объекты напрямую."""
         return cls(
             process_name=process_name,
@@ -191,7 +197,7 @@ class SystemBlueprint(SchemaBase):
 
         # Раздельные карты входов и выходов — плагин может иметь
         # одноимённые input/output порты (e.g. "frame" → "frame")
-        input_map: dict[str, Port] = {}   # address → Port
+        input_map: dict[str, Port] = {}  # address → Port
         output_map: dict[str, Port] = {}  # address → Port
         process_names = set()
 
@@ -272,6 +278,7 @@ class SystemBlueprint(SchemaBase):
 
 # --- Вспомогательные функции ---
 
+
 def _restore_plugin_configs(plugins_dicts: list[dict]) -> list[PluginConfig]:
     """Восстановить PluginConfig-инстансы из dict'ов."""
     import importlib
@@ -305,15 +312,11 @@ def _restore_plugin_configs(plugins_dicts: list[dict]) -> list[PluginConfig]:
 
         for attr_name in dir(config_module):
             attr = getattr(config_module, attr_name)
-            if (
-                isinstance(attr, type)
-                and issubclass(attr, PluginConfig)
-                and attr is not PluginConfig
-            ):
+            if isinstance(attr, type) and issubclass(attr, PluginConfig) and attr is not PluginConfig:
                 try:
                     configs.append(attr.model_validate(pdict))
                     break
-                except Exception:
+                except Exception:  # nosec B110 — best-effort: перебор PluginConfig-наследников, несовпадение схемы ожидаемо
                     pass
 
     return configs
