@@ -52,3 +52,17 @@
 - `register_channel_scenario` — сценарная маршрутизация (multi-step pipelines)
 - `cleanup()` — стандартный alias-паттерн для shutdown  
 **Последствия:** LOC не сокращается на ~28 строк, но API готов к Phase 8 без breaking changes.
+
+## ADR-RTR-007: Контракт routing-таблицы (`routing/`) — нормализация kind ДО таблицы
+
+**Статус:** принято  
+**Дата:** 2026-05-31  
+**Контекст:** План `transport-router-hub` (P0.2) фиксирует контракт хаба — «`send` выбирает один канал по типу груза». Глобальное решение — [ADR-COMM-001](../../DECISIONS.md). Аудит (recon #1) показал, что на живых билетах поле `type` НЕ всегда соответствует целевому каналу: state-телеметрия несёт `type="event"`/`"command"`, но семантически — STATE (диспатч по `command="state.changed"`). Прямая таблица `MessageType → channel` на таких билетах промахивается.  
+**Решение:** Подмодуль `router_module/routing/` — **декларация** контракта (без проводки в рантайм, она в P1):
+- `MESSAGE_TYPE_TO_CHANNEL: dict[MessageType, str]` — база (type → channel-kind);
+- `resolve_channel_kind(msg)` — **нормализация ДО таблицы**: сперва override по префиксу `command` (`COMMAND_PREFIX_TO_CHANNEL`, напр. `state.*` → `state`), затем таблица по `MessageType`; неизвестный `type` без покрытия → `UnknownMessageTypeError` (а НЕ тихий drop);
+- `channel_name(process, kind)` → `f"{process}_{kind}"` («склейка» осей адрес × kind, совпадает с очередями `{proc}_system`/`{proc}_data`);
+- `resolve_route(s)` → `RouteDecision(process, kind, channel, subpath)` — чистое ядро `send` будущего address-aware канала.
+**Ключевое:** STATE — это **channel-kind**, выводимый из `command="state.*"`, а **НЕ** член enum `MessageType` (его не вводим — план запрещает новый `kind`). Новый Channel-Protocol тоже не вводится — address-aware канал будет подклассом существующего `MessageChannel` (P1.1).  
+**Последствия:** Резолв канала работает на текущих (несогласованных по `type`) билетах без их немедленной миграции. `_resolve_channels` подключит `resolve_channel_kind` в P1.2. Контракт address-aware канала и решения по recon #2/#3/#4/#6 — в docstring `routing/address_aware_channel.py`.  
+**Refs:** [ADR-COMM-001](../../DECISIONS.md), [ADR-COMM-004](../../DECISIONS.md), [plans/2026-05-31_transport-router-hub/plan.md](../../../plans/2026-05-31_transport-router-hub/plan.md)

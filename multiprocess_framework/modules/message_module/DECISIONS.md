@@ -95,3 +95,15 @@
 **Последствия:** Один источник истины — `Message.model_fields`; строгие схемы `CommandMessageSchema` / `LogMessageSchema` остаются отдельными (`extra='forbid'`). Публичный API (`create`, `to_dict`, `from_dict`, `MessageAdapter`) сохранён.
 
 **Примечание:** `Message` — единственный `SchemaBase`-наследник без `FieldRouting`. Это осознанное решение: `Message` — value object для IPC-транспорта, а не регистр с маршрутизацией полей. Маршрутизация сообщений определяется полями `targets` / `channel` / `routers` напрямую, без `FieldRouting`.
+
+---
+
+## ADR-MSG-007: Иерархическая адресация — dotted-адрес внутри `targets` (`addressing/`)
+
+**Статус:** принято  
+**Дата:** 2026-05-31  
+**Контекст:** План `transport-router-hub` (P0.2) и глобальный [ADR-COMM-004](../../DECISIONS.md) вводят иерархический адрес получателя `process → worker → глубже` (память `project-hierarchical-addressing`). Нужно адресовать уровень «воркер» (долг #2 `assigned_worker`), не вводя новое поле и не ломая существующий `targets`.  
+**Решение:** Каждый элемент `Message.targets` — **dotted-адрес** `process[.worker[.…]]`. Пакет `message_module/addressing/` (чистые JSON-safe функции): `split_address`/`process_of`/`worker_of`/`subpath_of`/`depth`/`join_address`/`validate_address`/`normalize_targets`; исключение `AddressValidationError(MessageValidationError)`. Prefix-правило (процесс первым, воркер без процесса → ошибка), backward-compat плоского `"proc"` == `["proc"]`. `normalize_targets(target=, targets=)` сводит сосуществующие скаляр `target` (data-plane) и список `targets` к единому `list[str]` (recon #2).  
+**Причина:** Иерархия живёт **внутри** существующего `targets: list[str]` — мультикаст сохранён, новое поле не вводится, JSON-safe (Dict-at-Boundary, правило #1). Транспортная семантика (доставка по `address[0]`, intra-process резолв воркера) — в `router_module`/P1–P2, здесь только парсинг/валидация.  
+**Последствия:** `targets` обретает иерархию без миграции данных (плоские имена продолжают работать). `AddressValidationError` ловится существующими обработчиками `MessageValidationError`.  
+**Refs:** [ADR-COMM-004](../../DECISIONS.md), [ADR-COMM-001](../../DECISIONS.md), [plans/2026-05-31_transport-router-hub/plan.md](../../../plans/2026-05-31_transport-router-hub/plan.md)

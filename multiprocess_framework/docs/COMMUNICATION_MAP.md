@@ -243,6 +243,13 @@ Heartbeat-msg несёт избыточную типизацию: `type='system'
 
 ### 5.1 Один универсальный способ коммуникации
 
+> ⚠️ **SUPERSEDED (2026-05-31) планом [`transport-router-hub`](../../../plans/2026-05-31_transport-router-hub/plan.md) / [ADR-COMM-001](../DECISIONS.md).**
+> Эта рекомендация («оставить process-name + named-queue, channel-routing депрекейтить») была минимальной
+> «асфальтировать тропу». Владелец выбрал **противоположное** направление: достроить хаб правильно —
+> **`router.send(message)` как единственный вход, каналы по `kind` как канонический транспорт**, обходы убрать.
+> Текст ниже сохранён для истории; актуальное решение — ADR-COMM-001/004. Находки §3 (мёртвый код) и §5.2
+> (слияния дублей) остаются в силе и используются планом как материал.
+
 **Оставить ОДИН механизм cross-process транспорта: адресация по ИМЕНИ ПРОЦЕССА + named-queue (`queue_registry.send_to_queue`) на отправке, `RouterManager.receive` + `message_dispatcher` на приёме.**
 
 Обоснование (принцип владельца «меньше звеньев»): этот путь **уже несёт 99% трафика**. Channel-routing (`_resolve_channels`/channel_dispatcher/FieldRouting.channel) — надстройка, которая в проде почти не работает. Делаем фактический путь — каноническим, а не наоборот.
@@ -292,7 +299,7 @@ Heartbeat-msg несёт избыточную типизацию: `type='system'
 
 ### 5.4 Предлагаемые ADR
 
-**ADR-COMM-001 «Named-queue + RouterManager.receive — единственный канонический cross-process транспорт».**
+**ADR-COMM-001 «Named-queue + RouterManager.receive — единственный канонический cross-process транспорт».** ⚠️ *(superseded новой редакцией [ADR-COMM-001](../DECISIONS.md) 2026-05-31 — хаб строится через `router.send` + каналы по kind, а не «оставить named-queue». Текст ниже — первая редакция, для истории.)*
 Решение: адресация исключительно по имени процесса (`targets` / `send_message(target, ...)`); channel-routing (FieldRouting.channel, `register_route`, channel_dispatcher) переводится в `deprecated`/experimental и удаляется из публичного API RouterManager. RouterManager сохраняет роли: приёмный хаб (`receive`+`message_dispatcher`), отправка по targets (`_deliver_by_targets`), реестр каналов для `receive`. Why: 99% трафика уже идёт так; убираем мёртвую маршрутизацию и расхождение декларация/реальность. Layer: framework. Reversible: migration-needed.
 
 **ADR-COMM-002 «Единый GUI-движок команд/undo/RBAC/audit — domain CommandDispatcher; ActionBus удаляется».**

@@ -2241,6 +2241,56 @@
 
 ---
 
+## Коммуникационная архитектура (ADR-COMM)
+
+> Кросс-секущая серия решений о шине сообщений (план [`transport-router-hub`](../../plans/2026-05-31_transport-router-hub/plan.md)).
+> Намеренно вне числовой нумерации ADR-NNN — это архитектурный пласт «как процессы/воркеры общаются»,
+> охватывающий несколько модулей (`router_module`, `message_module`, `shared_resources_module`, `state_store_module`).
+
+## ADR-COMM-001: `router.send(message)` — единственный способ отправки; каналы по kind — канонический транспорт
+- Дата: 2026-05-31
+- Статус: принято
+- Контекст: Аудит коммуникаций ([`COMMUNICATION_MAP.md`](docs/COMMUNICATION_MAP.md), 23 подсистемы) показал, что шину спроектировали верно (`RouterManager.send → _resolve_channels → IMessageChannel.send` в каждом процессе), но **достроили наполовину**: ~80–90% сообщений и ~99% байт идут **в обход** Router (`ProcessCommunication.send_to_process → queue_registry.send_to_queue` напрямую, прямой SHM, `EventManager` dual-write), а channel-routing-by-pattern dormant. Отсюда 6+ способов отправки. Изначальный замысел владельца (подтверждён 2026-05-31): RouterManager — единая «входная дверь» (интермодальный хаб): компонент строит `Message`-билет (что за груз + куда), Router по содержимому сам выбирает **канал** и доставляет.
+- Решение: `router.send(message)` — **единственный** способ отправки. Router маршрутизирует по **channel-kind** (нормализованному из `type`/`command` — см. P0.2 `router_module.routing.resolve_channel_kind`) в **один address-aware канал** на пару (процесс, kind); канал кладёт билет в очередь `queue_registry` по `process_of(targets)` (P0.2 `message_module.addressing`). `queue_registry`/SHM становятся приватными деталями каналов. Старый channel-routing (`register_route` single-pattern, `FieldRouting.channel`, явный `msg["channel"]`-костыль) изолируется/удаляется (P4/P5, только после обсуждения). `send_message`/`broadcast` → тонкие адаптеры над `router.send` (P1.3).
+- Причина: один вход + одна реализация вместо шести способов. Целевой путь `router.send → Channel → queue` имеет ту же глубину звеньев, что нынешний `send_message → send_to_process → queue`, но без трёх дублей. Каналы по kind — переоткрытие уже спроектированного (`ChannelRoutingManager.register_route` + `IMessageChannel`), просто на отправке dormant. **Reuse, не изобретение.**
+- Отклонённые альтернативы:
+  - **§5.1/§5.4 первой редакции `COMMUNICATION_MAP.md`** («named-queue + `RouterManager.receive` — единственный канон; channel-routing депрекейтить») — отвергнута владельцем как «асфальтировать тропу»: узаконивает обход вместо достройки хаба. Эта редакция ADR-COMM-001 её **заменяет** (§5.1 помечена superseded).
+  - **Новый `kind`-field / новый Channel-Protocol / новое поле `address`** — отвергнуты: reuse `Message.type`/`targets`/`IMessageChannel` (правило плана «reuse-first»).
+- Связанные ADR: ADR-COMM-004 (иерархическая адресация), ADR-COMM-003 (frame-middleware, P3), ADR-COMM-002 (ActionBus→domain — делегировано в `constructor-maturity` P1), ADR-RTR-001/002 (CRM-наследование, name-returning handler), ADR-RTR-007 (контракт routing-таблицы), ADR-005 (correlation_id — P4), ADR-008 (Dict at Boundary), ADR-024 (channel_types system/data).
+- Refs: [plans/2026-05-31_transport-router-hub/plan.md](../../plans/2026-05-31_transport-router-hub/plan.md), [docs/COMMUNICATION_MAP.md](docs/COMMUNICATION_MAP.md) §5 (superseded §5.1)
+
+## ADR-COMM-002: Единый GUI-движок команд/undo/RBAC/audit — domain CommandDispatcher; ActionBus удаляется *(делегировано)*
+- Дата: 2026-05-31
+- Статус: принято (реализация делегирована)
+- Контекст: `ActionBus` мёртв в проде (0 прод-`execute`), но висит как «второй движок» и держит мёртвую RBAC-инфраструктуру; весь живой GUI-mutation/undo идёт через domain `CommandDispatcherOrchestrator`.
+- Решение: удаление `actions_module` (bus+handlers+middleware) из framework и перенос RBAC pre-gate/audit на domain-dispatch — **остаётся за планом [`constructor-maturity`](../../plans/2026-05-29_constructor-maturity/plan.md) P1**. Этот план (`transport-router-hub`) его НЕ дублирует.
+- Причина: разграничение ответственности планов; ActionBus — GUI-command-движок, а не транспорт сообщений.
+- Связанные ADR: ADR-COMM-001, ADR-058 (Outbound GUI-команда).
+- Refs: [plans/2026-05-29_constructor-maturity/plan.md](../../plans/2026-05-29_constructor-maturity/plan.md) P1
+
+## ADR-COMM-003: Один frame-transport middleware + один ring-buffer; SHM-payload — канонический data-plane bypass *(запланировано P3.1)*
+- Дата: 2026-05-31
+- Статус: принято (реализация — P3.1)
+- Контекст: две `FrameShmMiddleware` (в `process_module/generic/` и `router_module/middleware/`) и два ring-buffer дублируют логику Claim Check; пиксели едут в OS SHM, по очереди — только координаты.
+- Решение: слить в **одну** middleware (во `framework`) и один ring-buffer; узаконить SHM-bypass как намеренный (не дефект) внутри `DataChannel`. **Критично (recon #4):** при слиянии сохранить **оба** ключа SHM-handle — `shm_name` (slot) и `shm_actual_name` (вкл. PID на Windows): GUI-fallback открывает SHM по `shm_actual_name` из другого OS-процесса. Реализация — P3.1 этого плана.
+- Причина: устранение дубля без регресса перфа (Claim Check, нулевая копия).
+- Связанные ADR: ADR-COMM-001, ADR-019/030 (SHM по именам, PID на Windows), ADR-026/027 (SHM pipeline, rendered_frame_ready).
+- Refs: [plans/2026-05-31_transport-router-hub/plan.md](../../plans/2026-05-31_transport-router-hub/plan.md) P3.1
+
+## ADR-COMM-004: Иерархическая адресация `address = [process, worker, …]`, prefix-routing
+- Дата: 2026-05-31
+- Статус: принято
+- Контекст: получателя адресуют плоским именем процесса (`targets: list[str]`, в data-plane — скаляр `target`). Долг #2 `assigned_worker` требует адресовать уровень «воркер» внутри процесса. Память `project-hierarchical-addressing`: адрес иерархичен (процесс → воркер → глубже), нижние уровни опциональны, порядок обязателен.
+- Решение: каждый элемент `Message.targets` — **dotted-адрес** `process[.worker[.…]]` (хелперы P0.2 `message_module.addressing`: `split_address`/`process_of`/`worker_of`/`subpath_of`/`normalize_targets`). **Prefix-правило:** процесс обязателен первым; воркер без процесса невозможен (форма dotted-строки гарантирует). Cross-process доставка — по `address[0]`; **воркер и глубже** (`address[1:]`) резолвятся **внутри** процесса-получателя его Router/диспетчером, **не** плодя IPC-очереди. Backward-compat: плоское `"proc"` == `["proc"]`. Новое поле НЕ вводится — иерархия живёт внутри существующего `targets`.
+- Причина: меньше звеньев (одна IPC-очередь на процесс + intra-process handoff в стиле `chain_queue`); JSON-safe (Dict-at-Boundary); прямая стыковка с `assigned_worker` Фаза 2 (P2.2/P2.3) — «воркер как адресуемая единица».
+- Отклонённые альтернативы:
+  - **Новое поле `address: list`** — отвергнуто: дублирует `targets`, ломает мультикаст.
+  - **Отдельная IPC-очередь на воркера** — отвергнуто: плодит очереди, больше звеньев; воркер резолвится in-process.
+- Связанные ADR: ADR-COMM-001, ADR-RTR-007, ADR-MSG-007 (addressing-хелперы), ADR-024 (channel_types), ADR-008 (Dict at Boundary).
+- Refs: [plans/2026-05-31_transport-router-hub/plan.md](../../plans/2026-05-31_transport-router-hub/plan.md) (P0.2, P2), [multiprocess_prototype/plans/processes-workers-runtime-debts.md](../multiprocess_prototype/plans/processes-workers-runtime-debts.md)
+
+---
+
 ## Модульные решения
 
 **Принцип локальности:** Каждый модуль может иметь свой `modules/<module>/DECISIONS.md` для решений, касающихся только его архитектуры.
@@ -2254,8 +2304,8 @@
 | `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-CRM-001…005 (Паттерн CRM (ChannelRoutingManager), ..., Две роли конфигов (ChannelRoutingConfig vs ChannelRoutingManagerConfig)) |
 | `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-LOG-001…003 (Удаление LogDispatcher, ..., LogRecord как отдельный тип) |
 | `config_module` | [`modules/config_module/DECISIONS.md`](modules/config_module/DECISIONS.md) | Resources & Config | ADR-CFG-001…004 (Dict at Boundary для ConfigStore, ..., Env-fallback как опциональная возможность) |
-| `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-MSG-001…006 (Message как value object с опциональной Pydantic-схемой, ..., Message наследует SchemaBase (Pydantic v2)) |
-| `router_module` | [`modules/router_module/DECISIONS.md`](modules/router_module/DECISIONS.md) | Messaging | ADR-RTR-001…006 (RouterManager наследует ChannelRoutingManager, ..., Сохранение registration API (register_channel_handler, register_channel_scenario, cleanup)) |
+| `message_module` | [`modules/message_module/DECISIONS.md`](modules/message_module/DECISIONS.md) | Messaging | ADR-MSG-001…007 (Message как value object с опциональной Pydantic-схемой, ..., Иерархическая адресация — dotted-адрес внутри `targets` (`addressing/`)) |
+| `router_module` | [`modules/router_module/DECISIONS.md`](modules/router_module/DECISIONS.md) | Messaging | ADR-RTR-001…007 (RouterManager наследует ChannelRoutingManager, ..., Контракт routing-таблицы (`routing/`) — нормализация kind ДО таблицы) |
 | `worker_module` | [`modules/worker_module/DECISIONS.md`](modules/worker_module/DECISIONS.md) | Command & Work | ADR-WRK-001…004 (Удаление ложного ребра worker → dispatch, ..., WorkerInfo как TypedDict (документация) + plain dict (runtime)) |
 | `process_module` | [`modules/process_module/DECISIONS.md`](modules/process_module/DECISIONS.md) | Process | ADR-PM-001…009 (Dual Communication API (send_message vs send), ..., Return-based composition (ManagersBundle)) |
 | `command_module` | [`modules/command_module/DECISIONS.md`](modules/command_module/DECISIONS.md) | Command & Work | ADR-CMD-001…005 (CommandManager реализует ICommandManager, ..., CommandManager vs ChannelRoutingManager — разные паттерны, синхронный by design) |
