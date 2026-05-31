@@ -179,7 +179,37 @@ PM `_handle_process_command` (ответ без `targets`) **и** generic comman
 
 ---
 
+## P1.x — Reachability fix + наблюдаемость (validation-driven, 2026-06-01)
+
+**Контекст:** перед стройкой P2 проведена валидация примитивов (probe + реальные плагины
+рецепта). Дала конкретные результаты:
+
+- **🔴→🟢 Reachability fix (`a6f0221a`):** валидация вскрыла, что builtin-команды
+  (`worker.*`/`wire.*`/`introspect.*`) регистрировались в `run()` ПОСЛЕ единственного
+  `register_commands_with_router()` в `initialize()` → были в `CommandManager`, но **не в
+  router `message_dispatcher`** → входящие IPC-команды молча дропались (**introspect был
+  недостижим по IPC**; P1-тесты маскировали — звали handler напрямую). Фикс: ре-синк команд
+  в router в `run()` после builtins. Затрагивало и worker CRUD (GUI шлёт оптимистично). +regression-тест.
+- **🟢 P1.5a наблюдаемость (`abf0b65b`):** `introspect.router_stats` (sent_ok/received/errors/
+  middleware_dropped — «дошло/ушло/дропнулось ли») + `introspect.queues` (backpressure). 6 тестов.
+- **Доказательство ценности на реальных плагинах:** `resize` имеет `register_schema`
+  (→ приёмник `register_update`), а `negative/grayscale/flip` — нет → `introspect.registers/
+  handlers` мгновенно даёт диагноз Этапа 2. Архитектура подтверждена: ProcessManager —
+  отдельный OS-процесс, внешний процесс не делает request-response без двери → **SocketChannel оправдан**.
+
+**P1.5b (next, ⏳) — стрим логов/ошибок/событий через router:** наибольший множитель полезности
+(«послал команду → вижу, что произошло»). Механика найдена: `LoggerManager._route_via_router`
+уже умеет слать `Message(type=LOG, targets=["logger"])`, gated флагом `router_routing`. Стрим =
+**подписка**, добавляющая socket-канал/подписчика доп. назначением для LOG/ERROR/EVENT
+подписанного процесса. Чувствительно к перфомансу горячего log-пути → отдельный аккуратный дизайн.
+**P1.5c:** verify-probe (write→readback→diff) — как driver-side композит (после P2).
+
+---
+
 ## P2 — SocketChannel + тонкий внешний driver (вместо driver-в-графе)
+
+**Дизайн:** [`P2_socket_design.md`](P2_socket_design.md) (утверждён: driver = «GUI по сокету»,
+общий билдер протокола, всё через RouterManager). Стартовать ПОСЛЕ P1.5b.
 
 **Level:** Senior (teamlead) · **Assignee:** teamlead
 **Goal:** `SocketChannel(MessageChannel)` в `router_module/channels/` (сиблинг `QueueChannel`),
