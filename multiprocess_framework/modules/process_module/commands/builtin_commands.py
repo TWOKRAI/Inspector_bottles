@@ -33,6 +33,7 @@ class BuiltinCommands:
         self._register_worker_commands()
         self._register_worker_crud_commands()
         self._register_wire_commands()
+        self._register_introspect_commands()
 
     # ========================================================================
     # КОМАНДЫ УПРАВЛЕНИЯ ВОРКЕРАМИ
@@ -282,6 +283,114 @@ class BuiltinCommands:
                 module="lifecycle",
             )
         return {"success": bool(ok), "worker_name": name}
+
+    # ========================================================================
+    # INTROSPECT COMMANDS — «что у меня есть» (P1, backend-control-mcp)
+    # ========================================================================
+
+    def _register_introspect_commands(self) -> None:
+        """Зарегистрировать introspect.handlers / registers / status.
+
+        Generic-инструмент диагностики процесса: отвечает «какие приёмники,
+        регистры и воркеры у меня есть». Ловит баги вида «нет приёмника
+        register_update» (ключа нет в handlers) мгновенно, без драйва GUI.
+        Возвращают dict (Dict at Boundary); ответ инициатору едет через
+        request-response (P0.5: reply_to_request на generic command-пути).
+        """
+        cm = self._services.command_manager
+        if not cm:
+            return
+
+        specs = [
+            (
+                "introspect.handlers",
+                self._cmd_introspect_handlers,
+                "Router message-handlers + команды CommandManager процесса",
+            ),
+            (
+                "introspect.registers",
+                self._cmd_introspect_registers,
+                "Регистры процесса (имена + поля) из RegistersManager",
+            ),
+            ("introspect.status", self._cmd_introspect_status, "Имя процесса, статус, воркеры (имена + статусы)"),
+        ]
+        for name, handler, desc in specs:
+            cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
+        self._services._log_debug(
+            "Встроенные команды introspect.handlers/registers/status зарегистрированы",
+            module="lifecycle",
+        )
+
+    def _cmd_introspect_handlers(self, data=None, **kwargs) -> dict:
+        """Приёмники процесса: ключи router message_dispatcher + команды CommandManager.
+
+        ``router_handlers`` — это реальные ключи, по которым процесс принимает
+        IPC-сообщения (включая register_update, если плагин его зарегистрировал).
+        Отсутствие ожидаемого ключа = диагноз (находка Этапа 2).
+        """
+        svc = self._services
+        router_handlers: list = []
+        router = svc.router_manager
+        md = getattr(router, "message_dispatcher", None) if router else None
+        if md is not None:
+            try:
+                router_handlers = [h.get("key") for h in md.get_all_handlers()]
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"message_dispatcher: {exc}"}
+
+        commands: list = []
+        cm = svc.command_manager
+        if cm is not None:
+            try:
+                commands = [c.get("key") for c in cm.get_commands()]
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"command_manager: {exc}"}
+
+        return {
+            "success": True,
+            "process": svc.name,
+            "router_handlers": sorted({k for k in router_handlers if k}),
+            "commands": sorted({k for k in commands if k}),
+        }
+
+    def _cmd_introspect_registers(self, data=None, **kwargs) -> dict:
+        """Регистры процесса (имена + поля) из RegistersManager оркестратора.
+
+        Пусто, если у процесса нет плагинов с register_schema — это само по себе
+        диагностично (нет регистров → некуда применять register_update, Этап 2).
+        """
+        svc = self._services
+        orchestrator = getattr(svc, "_orchestrator", None)
+        rm = getattr(orchestrator, "registers_manager", None) if orchestrator else None
+        if rm is None:
+            return {
+                "success": True,
+                "process": svc.name,
+                "registers": {},
+                "note": "нет RegistersManager (плагины без register_schema)",
+            }
+        try:
+            registers = rm.model_dump_all()
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "reason": f"model_dump_all: {exc}"}
+        return {"success": True, "process": svc.name, "registers": registers}
+
+    def _cmd_introspect_status(self, data=None, **kwargs) -> dict:
+        """Имя процесса, статус, воркеры (имена + сериализуемые статусы)."""
+        svc = self._services
+        workers: dict = {}
+        wm = svc.worker_manager
+        if wm is not None:
+            try:
+                workers = wm.get_all_workers_status()
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"worker_manager: {exc}"}
+        return {
+            "success": True,
+            "process": svc.name,
+            "status": getattr(svc, "_current_process_status", "unknown"),
+            "workers": workers,
+        }
 
     # ========================================================================
     # WIRE COMMANDS — runtime-настройка SHM-каналов
