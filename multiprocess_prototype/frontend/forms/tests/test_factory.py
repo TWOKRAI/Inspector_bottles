@@ -157,14 +157,18 @@ class TestCardsFieldFactory:
         assert editor.getter() == long_text
 
     def test_unsupported_creates_disabled_label(self, qtbot):
-        """Неподдерживаемый тип → disabled QLabel, не падает."""
-        fi = _fi(dict, default={"key": "value"})
+        """Неподдерживаемый тип → disabled QLabel, не падает.
+
+        NOTE: dict/list теперь поддержаны (JSON-редактор), поэтому здесь
+        используется заведомо неизвестный тип (set).
+        """
+        fi = _fi(set, default={1, 2, 3})
         editor = CardsFieldFactory.create(fi)
         qtbot.addWidget(editor.widget)
 
         assert isinstance(editor.widget, QLabel)
         assert not editor.widget.isEnabled()
-        assert editor.getter() == {"key": "value"}
+        assert editor.getter() == {1, 2, 3}
 
     def test_optional_int_unwraps_to_spinbox(self, qtbot):
         """Optional[int] → QSpinBox (Optional снимается)."""
@@ -183,6 +187,73 @@ class TestCardsFieldFactory:
 
         assert isinstance(editor.widget, QLineEdit)
         assert editor.getter() == "/tmp/test"
+
+    def test_list_dict_creates_json_editor(self, qtbot):
+        """list[dict] → QPlainTextEdit (JSON-редактор), getter возвращает распарсенный list."""
+        from typing import Any
+
+        regions = [{"name": "left", "x": 0, "y": 0, "width": 320, "height": 480}]
+        fi = _fi(list[dict[str, Any]], default=regions)
+        editor = CardsFieldFactory.create(fi)
+        qtbot.addWidget(editor.widget)
+
+        assert isinstance(editor.widget, QPlainTextEdit)
+        assert editor.getter() == regions
+
+    def test_dict_creates_json_editor(self, qtbot):
+        """dict → JSON-редактор, getter возвращает dict (не строку)."""
+        fi = _fi(dict, default={"key": "value"})
+        editor = CardsFieldFactory.create(fi)
+        qtbot.addWidget(editor.widget)
+
+        assert isinstance(editor.widget, QPlainTextEdit)
+        result = editor.getter()
+        assert result == {"key": "value"}
+        assert isinstance(result, dict)
+
+    def test_json_getter_parses_edited_text(self, qtbot):
+        """После правки текста getter возвращает распарсенный объект."""
+        fi = _fi(list, default=[])
+        editor = CardsFieldFactory.create(fi)
+        qtbot.addWidget(editor.widget)
+
+        editor.widget.setPlainText('[{"x": 1}, {"x": 2}]')
+        assert editor.getter() == [{"x": 1}, {"x": 2}]
+
+    def test_json_invalid_returns_last_valid(self, qtbot):
+        """Невалидный JSON → getter возвращает последнее валидное значение, не строку."""
+        fi = _fi(list, default=[])
+        editor = CardsFieldFactory.create(fi)
+        qtbot.addWidget(editor.widget)
+
+        editor.setter([{"a": 1}])
+        editor.widget.setPlainText("{ это не json")
+        assert editor.getter() == [{"a": 1}]
+
+    def test_json_empty_returns_default(self, qtbot):
+        """Пустой текст → getter возвращает исходное значение (default)."""
+        fi = _fi(dict, default={"k": 1})
+        editor = CardsFieldFactory.create(fi)
+        qtbot.addWidget(editor.widget)
+
+        editor.widget.setPlainText("")
+        assert editor.getter() == {"k": 1}
+
+    def test_json_setter_serializes(self, qtbot):
+        """setter сериализует объект в JSON-текст редактора."""
+        fi = _fi(list, default=[])
+        editor = CardsFieldFactory.create(fi)
+        qtbot.addWidget(editor.widget)
+
+        editor.setter([{"name": "right"}])
+        assert "right" in editor.widget.toPlainText()
+
+    def test_optional_dict_resolves_to_json(self):
+        """Optional[dict] (default_region: dict | None) → kind=json."""
+        from typing import Optional
+
+        fi = _fi(Optional[dict], default=None)
+        assert CardsFieldFactory.resolve_kind(fi) == "json"
 
     def test_register_type_overrides_builder(self, qtbot):
         """register_type() переопределяет builder для kind."""

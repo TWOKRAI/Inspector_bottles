@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, get_args, get_origin
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -67,6 +68,7 @@ _KIND_FLOAT = "float"
 _KIND_STR_SHORT = "str_short"
 _KIND_STR_LONG = "str_long"
 _KIND_PATH = "path"
+_KIND_JSON = "json"
 _KIND_UNSUPPORTED = "unsupported"
 
 
@@ -109,6 +111,7 @@ _WIDGET_TO_KIND: dict[str, str] = {
     "str": _KIND_STR_SHORT,
     "text": _KIND_STR_LONG,
     "path": _KIND_PATH,
+    "json": _KIND_JSON,
     "label": _KIND_UNSUPPORTED,
 }
 
@@ -164,7 +167,11 @@ def _resolve_kind(field_info: FieldInfo) -> str:
     if t is Path:
         return _KIND_PATH
 
-    # 8. Всё остальное
+    # 8. list / dict (в т.ч. параметризованные list[...], dict[...]) → generic JSON-редактор
+    if t in (dict, list) or get_origin(t) in (dict, list):
+        return _KIND_JSON
+
+    # 9. Всё остальное
     return _KIND_UNSUPPORTED
 
 
@@ -956,6 +963,104 @@ def _build_path_binding_aware(
     )
 
 
+# ---------------------------------------------------------------------------
+# Generic JSON-редактор для list / dict полей (Вариант Б)
+# ---------------------------------------------------------------------------
+
+
+class _JsonTextEdit(QPlainTextEdit):
+    """QPlainTextEdit с commit-семантикой: committed эмитится при потере фокуса.
+
+    Нужно для generic-редактора list/dict — write выполняется на commit, а не на
+    каждый символ (иначе getter парсил бы незавершённый JSON на каждом нажатии).
+    """
+
+    committed = Signal()
+
+    def focusOutEvent(self, event: Any) -> None:  # noqa: N802 — Qt override
+        super().focusOutEvent(event)
+        self.committed.emit()
+
+
+def _json_dumps(value: Any) -> str:
+    """Сериализовать value в pretty-JSON. None → пустая строка."""
+    import json
+
+    if value is None:
+        return ""
+    try:
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _set_json_error(widget: QWidget, on: bool) -> None:
+    """Подсветить редактор красной рамкой при невалидном JSON."""
+    widget.setStyleSheet("border: 1px solid #c0392b;" if on else "")
+
+
+def _build_json(
+    field_info: FieldInfo,
+    parent: QWidget | None = None,
+    form_ctx: FormContext | None = None,
+) -> FieldEditor:
+    """Generic JSON-редактор для list/dict полей (regions, expected_regions, default_region).
+
+    КЛЮЧЕВОЕ: getter() возвращает РАСПАРСЕННЫЙ объект (list/dict), а не строку —
+    иначе в config плагина уехала бы строка вместо list[dict]. При невалидном JSON
+    getter возвращает последнее валидное значение (мусор в config не попадёт) и
+    подсвечивает редактор красной рамкой + tooltip с текстом ошибки.
+
+    change_signal = committed (потеря фокуса), а не textChanged — write на commit.
+    form_ctx игнорируется: generic-путь без binding-aware моста (как str/path legacy).
+    """
+    import json
+
+    te = _JsonTextEdit(parent)
+    te.setFixedHeight(120)
+    te.setPlaceholderText('[] или [{"name": "left", "x": 0, "y": 0, "width": 320, "height": 480}]')
+
+    default = _safe_default(field_info)
+    # Кэш последнего валидного значения — getter вернёт его при ошибке парсинга.
+    state: dict[str, Any] = {"value": default}
+    te.setPlainText(_json_dumps(default))
+
+    def _getter() -> Any:
+        text = te.toPlainText().strip()
+        if not text:
+            _set_json_error(te, False)
+            te.setToolTip("")
+            return state["value"]
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, ValueError) as exc:
+            _set_json_error(te, True)
+            te.setToolTip(f"Невалидный JSON: {exc}")
+            return state["value"]
+        state["value"] = parsed
+        _set_json_error(te, False)
+        te.setToolTip("")
+        return parsed
+
+    def _setter(v: Any) -> None:
+        state["value"] = v
+        te.blockSignals(True)
+        te.setPlainText(_json_dumps(v))
+        te.blockSignals(False)
+        _set_json_error(te, False)
+        te.setToolTip("")
+
+    label = _make_label(field_info)
+    return FieldEditor(
+        field_info=field_info,
+        widget=te,
+        getter=_getter,
+        setter=_setter,
+        change_signal=te.committed,
+        label=label,
+    )
+
+
 def _build_unsupported(
     field_info: FieldInfo,
     parent: QWidget | None = None,
@@ -990,6 +1095,7 @@ _BUILDERS: dict[str, Any] = {
     _KIND_STR_SHORT: _build_str_short,
     _KIND_STR_LONG: _build_str_long,
     _KIND_PATH: _build_path,
+    _KIND_JSON: _build_json,
     _KIND_UNSUPPORTED: _build_unsupported,
 }
 
