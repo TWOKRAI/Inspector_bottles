@@ -492,7 +492,15 @@ class RouterManager(ChannelRoutingManager):
                 # диспетчеризуем). Guard на пустой реестр = ноль оверхеда,
                 # когда request() не используется. Чужие запросы с
                 # correlation_id безопасны: их id нет в нашем реестре.
-                if self._pending_requests:
+                #
+                # ВАЖНО (self-resolve guard): резолвим ТОЛЬКО билеты type="response".
+                # Без этого самоадресованный запрос (targets=[host], когда адаптер
+                # и приёмник в одном процессе — driver→ProcessManager) ловился бы
+                # собственным pending как «ответ» и НЕ доходил до handler'а
+                # (process.command → system.shutdown/process.stop молча эхо-резолвились).
+                # Все билдеры ответов (reply_to_request/адаптер/_handle_process_command)
+                # ставят type="response", запросы — type="command"/"data".
+                if self._pending_requests and processed.get("type") == "response":
                     cid = self._extract_correlation_id(processed)
                     if cid and self._resolve_pending(cid, processed):
                         self._inc_stat("received")

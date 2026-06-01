@@ -1290,6 +1290,33 @@ class TestRequestResponse(unittest.TestCase):
         self.assertEqual(got, [1])
         router._pending_requests.clear()
 
+    def test_self_addressed_request_not_self_resolved(self):
+        # Self-resolve guard: билет с НАШИМ correlation_id, но type="command"
+        # (самоадресованный запрос: driver→ProcessManager, адаптер в том же процессе)
+        # НЕ должен резолвиться как ответ — иначе handler (system.shutdown/process.stop)
+        # не вызывается. Только type="response" резолвит pending.
+        qr = _FakeQueueRegistry()
+        ch, q = _make_channel("rr_selfresolve_system")
+        router = RouterManager(manager_name="rr_selfresolve", queue_registry=qr)
+        router.register_channel(ch)
+        pending = _PendingRequest()
+        router._pending_requests["cid-1"] = pending
+        got: list = []
+        router.register_message_handler("process.command", lambda m: got.append(m))
+
+        # type="command" с нашим cid = ЗАПРОС → должен дойти до handler, НЕ резолвить
+        q.put({"type": "command", "command": "process.command", "request_id": "cid-1"})
+        router.receive(timeout=0.1)
+        self.assertEqual(len(got), 1, "запрос должен дойти до handler, а не самрезолвиться")
+        self.assertFalse(pending.event.is_set(), "pending НЕ должен резолвиться запросом")
+
+        # type="response" с тем же cid = ОТВЕТ → резолвит pending
+        q.put({"type": "response", "command": "process.command.response", "request_id": "cid-1", "result": {"ok": 1}})
+        router.receive(timeout=0.1)
+        self.assertTrue(pending.event.is_set(), "ответ должен резолвить pending")
+        self.assertEqual(pending.response["result"], {"ok": 1})
+        router._pending_requests.clear()
+
 
 if __name__ == "__main__":
     unittest.main()
