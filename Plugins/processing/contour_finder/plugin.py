@@ -34,6 +34,8 @@ class ContourFinderPlugin(ProcessModulePlugin):
         Port(name="mask", dtype="image/gray", shape="(H, W)", description="Бинарная маска"),
     ]
     outputs = [
+        # frame пробрасывается без изменений — объявлен для подключения к рисователю
+        Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Кадр (pass-through)"),
         Port(name="detections", dtype="list[dict]", shape="N", description="Детекции (bbox, center, area)"),
         Port(name="contours", dtype="list[ndarray]", shape="N", description="Контуры для рисования"),
     ]

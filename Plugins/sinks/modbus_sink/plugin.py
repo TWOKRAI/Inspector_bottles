@@ -48,12 +48,11 @@ class ModbusSinkPlugin(ProcessModulePlugin):
     # НЕ thread_safe: держит единственное Modbus-соединение (не параллелить воркерами).
     thread_safe = False
 
+    # Универсальный вход: список детекций (или иные данные item). Лист — без выходов.
     inputs = [
-        Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Входной кадр"),
+        Port(name="data", dtype="list[dict]", shape="N", description="Данные для пакета (напр. detections)"),
     ]
-    outputs = [
-        Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Pass-through кадра"),
-    ]
+    outputs = []
 
     commands = {}
     register_class = ModbusSinkRegisters

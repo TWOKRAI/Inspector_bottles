@@ -1,0 +1,115 @@
+# Рецепт color_inspect — инспекция по цвету атомарными плагинами.
+#
+# Цепочка:
+#   camera → detector[hsv_mask → contour_finder] ──┬→ painter[contour_draw] → display
+#                                                   └→ modbus_sink (universal payload)
+#
+# detector: ДВА плагина в одном процессе (чейн out→in): hsv_mask добавляет item["mask"],
+#   contour_finder находит контуры/площадь (detections) и контуры (contours), маску
+#   дропает. Наружу идут frame(SHM) + detections + contours.
+# painter: отдельный процесс — рисует контур на кадре → дисплей.
+# modbus_sink: универсальный пакет (w,h,frame_id,count,area_sum,area_max) на 127.0.0.1:5020.
+#
+# Слайдеры в инспекторе нод: HSV (hsv_mask), min/max area (contour_finder),
+# цвет+толщина линии (contour_draw), payload (modbus_sink).
+#
+# Запуск (приёмник — отдельным терминалом, ПЕРВЫМ):
+#   1) python -m Services.modbus.server --tcp 127.0.0.1:5020
+#   2) python run.py
+# Предусловие: pip install '.[modbus]'.
+name: color_inspect
+version: 3
+description: "Camera → HSV-маска → контуры/площадь → рисование линии + Modbus (рецепт)"
+
+blueprint:
+  name: color_inspect
+  description: "Инспекция по цвету: маска → контур+площадь → линия на дисплей + Modbus"
+
+  processes:
+    # --- Камера ---
+    - process_name: camera_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - detector
+      source_target_fps: 25
+      plugins:
+        - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
+          plugin_name: capture
+          category: source
+          camera_id: 0
+          device_id: 0
+          resolution_width: 640
+          resolution_height: 480
+          fps: 25
+          auto_start: true
+
+    # --- Детектор: HSV-маска → контуры/площадь (два плагина чейном в одном процессе) ---
+    - process_name: detector
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - painter
+        - modbus_sink
+      plugins:
+        - plugin_class: Plugins.processing.hsv_mask.plugin.HsvMaskPlugin
+          plugin_name: hsv_mask
+          category: processing
+          # дефолт: любой насыщенный цвет; настраивается слайдерами в инспекторе
+          h_min: 0
+          h_max: 179
+          s_min: 80
+          v_min: 80
+        - plugin_class: Plugins.processing.contour_finder.plugin.ContourFinderPlugin
+          plugin_name: contour_finder
+          category: processing
+          min_area: 300
+          max_area: 0
+
+    # --- Художник: рисует контур на кадре → дисплей ---
+    - process_name: painter
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Plugins.processing.contour_draw.plugin.ContourDrawPlugin
+          plugin_name: contour_draw
+          category: rendering
+          color_b: 0
+          color_g: 255
+          color_r: 0
+          thickness: 2
+
+    # --- Modbus-sink: универсальный пакет (площадь, счётчик, размер) ---
+    - process_name: modbus_sink
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: low
+      chain_targets: []
+      plugins:
+        - plugin_class: Plugins.sinks.modbus_sink.plugin.ModbusSinkPlugin
+          plugin_name: modbus_sink
+          category: sink
+          transport: tcp
+          host: 127.0.0.1
+          port: 5020
+          unit_id: 1
+          base_address: 100
+          write_every_n: 1
+          auto_connect: true
+
+  wires:
+    - source: camera_0.capture.frame
+      target: detector.hsv_mask.frame
+    # fan-out от детектора: кадр+контуры → художник, детекции → modbus
+    - source: detector.contour_finder.frame
+      target: painter.contour_draw.frame
+    - source: detector.contour_finder.contours
+      target: painter.contour_draw.contours
+    - source: detector.contour_finder.detections
+      target: modbus_sink.modbus_sink.data
+
+  displays:
+    - node_id: painter.contour_draw.frame
+      display_id: main
+      display_name: Основной дисплей

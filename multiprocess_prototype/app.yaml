@@ -17,9 +17,10 @@ base: backend/topology/base.yaml
 # разворачивает его blueprint: → топология → оркестратор собирает. Модель владельца:
 # GUI формирует рецепт-файл, бэкенд запускает его (и без GUI). Сырые topology в
 # backend/topology/ остаются для прочих pipeline.
-# Активен modbus_demo (region_pipeline + узел modbus_sink параллельно дисплею);
-# переключить на другой рецепт можно во вкладке Recipes или сменой этой строки.
-pipeline: recipes/modbus_demo.yaml
+# Активен color_inspect (камера → HSV-маска → контуры/площадь → рисование линии на
+# дисплей + универсальный Modbus-пакет). Переключить на другой рецепт — во вкладке
+# Recipes или сменой этой строки (region_pipeline / modbus_demo / color_inspect).
+pipeline: recipes/color_inspect.yaml
 
 # Каталог GUI-редактируемых рецептов (источник запускаемых топологий)
 recipes: recipes
