@@ -1,9 +1,10 @@
-"""ModbusSinkPlugin — вывод метаданных кадра по Modbus (тест/симуляция).
+"""ModbusSinkPlugin — универсальный вывод данных кадра по Modbus (тест/симуляция).
 
-Лист-узел в конце цепочки (параллельно дисплею): после обработки каждого кадра
-пишет ``[width, height, frame_id]`` в holding-регистры ``base_address..+2`` через
-``Services.modbus.ModbusDevice``. Pass-through: кадр идёт дальше без изменений
-(у листа chain_targets пуст, так что фактически узел терминальный).
+Лист-узел в конце цепочки (параллельно дисплею): после обработки каждого кадра пишет
+УНИВЕРСАЛЬНЫЙ пакет в holding-регистры от ``base_address`` через
+``Services.modbus.ModbusDevice``. Что писать — задаёт ``payload`` (см. registers):
+любые поля item в любом количестве, со свёрткой списков (count/sum/max/min) и типом
+u16/u32. Pass-through: кадр идёт дальше без изменений.
 
 Заготовка под вывод результатов инспекции в PLC. Соединение открывается в
 ``start()``, закрывается в ``shutdown()``; ``process()`` только пишет. Если приёмник
@@ -26,11 +27,10 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 
 from Services.modbus import ModbusConfig, ModbusDevice, ModbusDriverError, TransportType
+from Services.modbus.sdk.datatypes import encode_uint16, encode_uint32
 
 from .registers import ModbusSinkRegisters
 
-# Регистр Modbus — 16-бит беззнаковый: значения сворачиваем по модулю.
-_U16 = 65536
 # Минимальный интервал между попытками переподключения, сек.
 _RECONNECT_THROTTLE_SEC = 2.0
 
@@ -38,10 +38,10 @@ _RECONNECT_THROTTLE_SEC = 2.0
 @register_plugin(
     "modbus_sink",
     category="sink",
-    description="Вывод метаданных кадра (width/height/frame_id) по Modbus-TCP / RS485",
+    description="Универсальный вывод данных кадра (payload) по Modbus-TCP / RS485",
 )
 class ModbusSinkPlugin(ProcessModulePlugin):
-    """Sink-плагин: пишет размер и id кадра в holding-регистры PLC/симулятора."""
+    """Sink-плагин: пишет универсальный payload в holding-регистры PLC/симулятора."""
 
     name = "modbus_sink"
     category = "sink"
@@ -147,33 +147,66 @@ class ModbusSinkPlugin(ProcessModulePlugin):
         return self._try_connect()
 
     @staticmethod
-    def _frame_size(item: dict) -> tuple[int, int]:
-        """Размер кадра: из метаданных item, иначе из frame.shape. Кламп в u16."""
-        w = item.get("width")
-        h = item.get("height")
-        if not (isinstance(w, int) and isinstance(h, int)):
-            frame = item.get("frame")
-            if frame is not None and getattr(frame, "shape", None) is not None:
-                h, w = int(frame.shape[0]), int(frame.shape[1])
+    def _reduce(values: list, reduce: str) -> int:
+        """Свернуть список числовых значений: sum | max | min (count считается выше)."""
+        nums = [int(v) for v in values if isinstance(v, (int, float))]
+        if not nums:
+            return 0
+        if reduce == "sum":
+            return sum(nums)
+        if reduce == "max":
+            return max(nums)
+        if reduce == "min":
+            return min(nums)
+        return 0
+
+    def _resolve_value(self, item: dict, entry: dict) -> int:
+        """Вычислить одно числовое значение payload-записи из item."""
+        raw = item.get(entry.get("source"))
+        reduce = entry.get("reduce")
+        if not reduce:
+            # Скаляр: берём как есть (None/нечисло → 0)
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                return 0
+        lst = raw if isinstance(raw, list) else []
+        if reduce == "count":
+            return len(lst)
+        # sum/max/min по полю элементов (по умолчанию "area")
+        field = entry.get("field", "area")
+        field_values = [d.get(field, 0) for d in lst if isinstance(d, dict)]
+        return self._reduce(field_values, reduce)
+
+    def _build_registers(self, item: dict) -> list[int]:
+        """Собрать список регистров из payload (u16=1 рег., u32=2 рег.)."""
+        word_order = "little" if str(self._reg.word_order).lower() == "little" else "big"
+        regs: list[int] = []
+        for entry in self._reg.payload:
+            if not isinstance(entry, dict):
+                continue
+            value = self._resolve_value(item, entry)
+            if str(entry.get("dtype", "u16")).lower() == "u32":
+                regs.extend(encode_uint32(int(value) & 0xFFFFFFFF, word_order))
             else:
-                w, h = 0, 0
-        return int(w) % _U16, int(h) % _U16
+                regs.extend(encode_uint16(int(value)))
+        return regs
 
     def _write_item(self, item: dict) -> None:
-        """Записать [width, height, frame_id] в holding-регистры (best-effort)."""
+        """Собрать payload и записать в holding-регистры (best-effort)."""
         if not self._ensure_connected():
             return
-        width, height = self._frame_size(item)
-        fid = int(item.get("frame_id", item.get("seq_id", 0))) % _U16
-        values = [width, height, fid]
+        regs = self._build_registers(item)
+        if not regs:
+            return
         try:
-            self._device.write_registers(self._reg.base_address, values)
+            self._device.write_registers(self._reg.base_address, regs)
         except (ModbusDriverError, ValueError, TypeError) as exc:
             self._reg.last_error = str(exc)
             self._ctx.log_error(f"ModbusSinkPlugin: write failed: {exc}")
             return
         self._reg.writes_ok += 1
-        self._reg.last_written = str(values)
+        self._reg.last_written = str(regs)
 
     # ------------------------------------------------------------------ #
     # Callbacks телеметрии
