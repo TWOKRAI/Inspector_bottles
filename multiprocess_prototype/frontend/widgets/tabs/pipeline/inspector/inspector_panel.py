@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -67,6 +68,10 @@ class NodeInspectorPanel(QWidget):
 
     # Signal: (from_node_id, to_process) — Phase B: перенести узел (его плагины) в процесс
     move_to_process_requested = Signal(str, str)
+
+    # Signal: (node_id, locked) — кнопки «Закрепить/Открепить» (дубль правого клика,
+    # удобно для сенсорного экрана — рядом с полями Процесс/Воркер).
+    node_lock_set_requested = Signal(str, bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -189,6 +194,26 @@ class NodeInspectorPanel(QWidget):
         pw_layout.addWidget(self._move_process_combo, 1)
         pw_layout.addWidget(self._move_worker_combo, 1)
         mp_layout.addRow("Процесс / Воркер:", pw_row)
+
+        # Кнопки «Закрепить/Открепить» рядом с выбором процесса/воркера (дубль
+        # правого клика по ноде; крупные — для сенсорного экрана). Действуют на
+        # текущую ноду (_current_node_id) через node_lock_set_requested.
+        self._lock_btn = QPushButton("Закрепить")
+        self._lock_btn.setObjectName("NodeLockButton")
+        self._lock_btn.setMinimumHeight(40)
+        self._lock_btn.setToolTip("Зафиксировать ноду: не двигается и пропускается авто-раскладкой")
+        self._unlock_btn = QPushButton("Открепить")
+        self._unlock_btn.setObjectName("NodeUnlockButton")
+        self._unlock_btn.setMinimumHeight(40)
+        self._unlock_btn.setToolTip("Снять фиксацию ноды")
+        lock_row = QWidget()
+        lock_layout = QHBoxLayout(lock_row)
+        lock_layout.setContentsMargins(0, 0, 0, 0)
+        lock_layout.setSpacing(6)
+        lock_layout.addWidget(self._lock_btn, 1)
+        lock_layout.addWidget(self._unlock_btn, 1)
+        mp_layout.addRow("Фиксация:", lock_row)
+
         content_layout.addWidget(self._move_process_form)
         self._move_process_form.setVisible(False)
 
@@ -246,6 +271,13 @@ class NodeInspectorPanel(QWidget):
         self._display_id_combo.currentIndexChanged.connect(self._on_display_id_combo_changed)
         self._move_process_combo.currentIndexChanged.connect(self._on_move_process_combo_changed)
         self._move_worker_combo.currentIndexChanged.connect(self._on_move_worker_combo_changed)
+        self._lock_btn.clicked.connect(lambda: self._emit_lock(True))
+        self._unlock_btn.clicked.connect(lambda: self._emit_lock(False))
+
+    def _emit_lock(self, locked: bool) -> None:
+        """Кнопки «Закрепить/Открепить» → сигнал для текущей ноды."""
+        if self._current_node_id:
+            self.node_lock_set_requested.emit(self._current_node_id, locked)
 
     # ------------------------------------------------------------------ #
     #  Публичный API: show_plugin_node                                     #

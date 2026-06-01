@@ -148,6 +148,7 @@ class PipelinePresenter:
         panel.target_process_changed.connect(self._on_target_process_changed)
         panel.display_id_changed.connect(self._on_display_id_changed)
         panel.move_to_process_requested.connect(self._on_move_to_process_requested)
+        panel.node_lock_set_requested.connect(self.set_node_lock)
 
     def _on_inspector_field_changed(
         self,
@@ -925,20 +926,25 @@ class PipelinePresenter:
             return
         self._gui_positions[node_id] = (new_x, new_y)
 
-    def toggle_node_lock(self, node_id: str) -> None:
-        """Зафиксировать/освободить ноду (session-only).
+    def set_node_lock(self, node_id: str, locked: bool) -> None:
+        """Зафиксировать/освободить ноду явно (session-only).
 
         Locked-нода не перетаскивается (ItemIsMovable=False) и пропускается
         auto_layout_scene. Состояние живёт в _locked_nodes и переприменяется в
         _topology_to_graph при reload (переживает мутации в рамках сессии).
         """
-        locked = node_id not in self._locked_nodes
+        if not node_id:
+            return
         if locked:
             self._locked_nodes.add(node_id)
         else:
             self._locked_nodes.discard(node_id)
         if self._scene:
             self._scene.set_node_locked(node_id, locked)
+
+    def toggle_node_lock(self, node_id: str) -> None:
+        """Переключить фиксацию ноды (правый клик по ноде)."""
+        self.set_node_lock(node_id, node_id not in self._locked_nodes)
 
     # ------------------------------------------------------------------ #
     #  Topology sync                                                       #

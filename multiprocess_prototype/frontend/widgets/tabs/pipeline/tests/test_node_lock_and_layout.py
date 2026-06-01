@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QGraphicsItem
 
 from multiprocess_prototype.domain.events import TopologyReplaced
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_scene import GraphScene
+from multiprocess_prototype.frontend.widgets.tabs.pipeline.inspector import NodeInspectorPanel
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
 
 from ._helpers import make_pipeline_services
@@ -84,3 +85,37 @@ def test_reload_preserves_manual_position(qtbot):
 
     node2 = scene.get_node("processor.color_mask")
     assert (round(node2.pos().x()), round(node2.pos().y())) == (500, 600)
+
+
+def test_inspector_lock_buttons_emit_signal(qtbot):
+    panel = NodeInspectorPanel()
+    qtbot.addWidget(panel)
+    received = []
+    panel.node_lock_set_requested.connect(lambda nid, locked: received.append((nid, locked)))
+
+    panel._current_node_id = "proc.plug"
+    panel._lock_btn.click()
+    panel._unlock_btn.click()
+    assert received == [("proc.plug", True), ("proc.plug", False)]
+
+    # без выбранной ноды — сигнал не эмитится
+    received.clear()
+    panel._current_node_id = ""
+    panel._lock_btn.click()
+    assert received == []
+
+
+def test_presenter_set_node_lock(qtbot):
+    p, scene = _presenter_with_scene()
+    node = scene.get_node("camera.capture")
+
+    p.set_node_lock("camera.capture", True)
+    assert "camera.capture" in p._locked_nodes
+    assert node.locked is True
+
+    p.set_node_lock("camera.capture", False)
+    assert "camera.capture" not in p._locked_nodes
+    assert node.locked is False
+
+    p.set_node_lock("", True)  # пустой id — no-op, без падения
+    assert "" not in p._locked_nodes
