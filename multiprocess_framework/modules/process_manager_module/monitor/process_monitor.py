@@ -78,6 +78,10 @@ class ProcessMonitor:
         # Ключ — имя процесса, значение — dict[worker_name, worker_status_dict]
         self._workers_status: dict[str, dict] = {}
 
+        # Время первого появления процесса в статусе "running" — для uptime.
+        # Сбрасывается при остановке/удалении процесса.
+        self._first_seen: dict[str, float] = {}
+
         # Авто-рестарт: счётчик попыток рестарта per process
         self._restart_counts: dict[str, int] = {}
 
@@ -154,6 +158,9 @@ class ProcessMonitor:
                 hz = wdata.get("effective_hz")
                 if hz is not None:
                     self._publish_state(f"processes.{sender}.workers.{wname}.effective_hz", hz)
+                cycle_ms = wdata.get("cycle_duration_ms")
+                if cycle_ms is not None:
+                    self._publish_state(f"processes.{sender}.workers.{wname}.cycle_duration_ms", cycle_ms)
 
         # Обрабатываем статус из heartbeat (paused / running)
         reported_status = msg.get("status")
@@ -181,6 +188,23 @@ class ProcessMonitor:
             ssm.handle_state_set({"data": {"path": path, "value": value, "source": "ProcessMonitor"}})
         except Exception as exc:  # nosec B110 — телеметрия не критична
             self.process._log_debug(f"_publish_state('{path}') failed: {exc}")
+
+    def _publish_uptime(self, all_states: dict[str, dict[str, Any]]) -> None:
+        """Опубликовать uptime каждого running-процесса в StateStore.
+
+        first_seen фиксируется при первом появлении статуса "running" и живёт,
+        пока процесс не остановится/исчезнет → uptime = now - first_seen.
+        """
+        now = time.time()
+        for pname, snap in all_states.items():
+            status = snap.get("status", "unknown")
+            if status == "running":
+                self._first_seen.setdefault(pname, now)
+                uptime = now - self._first_seen[pname]
+                self._publish_state(f"processes.{pname}.state.uptime", round(uptime, 1))
+            else:
+                # Процесс не работает — сбрасываем точку отсчёта.
+                self._first_seen.pop(pname, None)
 
     # ----------------------------------------------------------------
     # Мониторинг: основной цикл
@@ -215,6 +239,10 @@ class ProcessMonitor:
                 for pname in set(self.previous_states.keys()) - cur_names:
                     self.process._log_info(f"Process removed: {pname}")
                     self.previous_states.pop(pname, None)
+                    self._first_seen.pop(pname, None)
+
+                # Live-uptime процессов → StateStore (троттлится middleware до ~1 Гц).
+                self._publish_uptime(all_states)
 
                 # Проверка OS-liveness + heartbeat timeout + авто-рестарт
                 self._check_heartbeats()
@@ -252,14 +280,26 @@ class ProcessMonitor:
                 self._handle_dead_process(proc)
                 continue
 
-            # Процесс жив: обновить статус если он был "created" или "unknown"
-            # Важно: НЕ перезаписывать "paused" — он управляется через heartbeat.status
+            # Процесс жив: повысить до "running" из любого pre-running статуса.
+            # ВАЖНО: включаем "initializing"/"ready" — реестр спавна ставит процессам
+            # "initializing" и сам не двигает дальше; без этого процесс навечно застревал
+            # на "initializing" (heartbeat-переход не срабатывал) → GUI не видел "running".
+            # НЕ перезаписываем "paused" — он управляется через heartbeat.status.
             prev = self.previous_states.get(proc.name)
             prev_status = (prev or {}).get("status", "unknown")
-            if prev_status in ("created", "unknown", ""):
+            if prev_status in ("created", "unknown", "", "initializing", "ready"):
                 snap = {"status": "running", "metadata": {}, "custom": {}}
                 self._handle_state_change(proc.name, prev, snap)
                 self.previous_states[proc.name] = snap.copy()
+                # Синхронизировать реестр: иначе следующий проход loop'а перечитает
+                # старый "initializing" из registry и статус будет флапать.
+                if self.process.shared_resources:
+                    try:
+                        psr = self.process.shared_resources.process_state_registry
+                        if psr is not None and hasattr(psr, "update_state"):
+                            psr.update_state(proc.name, status="running")
+                    except Exception:  # nosec B110 — best-effort синхронизация реестра
+                        pass
 
             # Проверяем heartbeat
             self._check_heartbeat_timeout(proc.name, now)

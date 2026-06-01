@@ -80,6 +80,10 @@ class WorkerBridge:
         """Перезапустить воркер в живом процессе."""
         return self._send(process_name, "worker.restart", {"worker_name": worker_name})
 
+    def worker_start(self, process_name: str, worker_name: str) -> bool:
+        """Запустить остановленный воркер (без пересоздания) в живом процессе."""
+        return self._send(process_name, "worker.start", {"worker_name": worker_name})
+
     def worker_stop(self, process_name: str, worker_name: str) -> bool:
         """Остановить воркер (без удаления) в живом процессе."""
         return self._send(process_name, "worker.stop", {"worker_name": worker_name})

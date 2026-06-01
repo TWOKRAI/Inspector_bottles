@@ -127,30 +127,28 @@ class TestWorkerTable:
         table._emit_changed("message_processor", "priority", "BATCH")
         assert captured == []
 
-    def test_add_requested_emitted(self, qtbot) -> None:
-        table = WorkerTable()
-        qtbot.addWidget(table)
-        captured: list[bool] = []
-        table.add_requested.connect(lambda: captured.append(True))
-        table._add_btn.click()
-        assert captured == [True]
-
-    def test_remove_requested_for_selected(self, qtbot) -> None:
+    def test_selection_changed_emitted(self, qtbot) -> None:
         table = WorkerTable()
         qtbot.addWidget(table)
         table.set_workers(_workers())
-        captured: list[str] = []
-        table.remove_requested.connect(lambda n: captured.append(n))
+        captured: list[object] = []
+        table.selection_changed.connect(lambda n: captured.append(n))
         table._table.selectRow(1)  # grabber
-        table._remove_btn.click()
-        assert captured == ["grabber"]
+        assert captured and captured[-1] == "grabber"
+        assert table.selected_worker() == "grabber"
 
-    def test_remove_disabled_for_protected_selection(self, qtbot) -> None:
+    def test_selected_worker_none_without_selection(self, qtbot) -> None:
         table = WorkerTable()
         qtbot.addWidget(table)
         table.set_workers(_workers())
-        table._table.selectRow(0)  # message_processor (protected)
-        assert table._remove_btn.isEnabled() is False
+        assert table.selected_worker() is None
+
+    def test_is_worker_protected(self, qtbot) -> None:
+        table = WorkerTable()
+        qtbot.addWidget(table)
+        table.set_workers(_workers())
+        assert table.is_worker_protected("message_processor") is True
+        assert table.is_worker_protected("grabber") is False
 
     def test_telemetry_widgets_exposed(self, qtbot) -> None:
         table = WorkerTable()
@@ -159,3 +157,4 @@ class TestWorkerTable:
         widgets = table.telemetry_widgets("grabber")
         assert "status" in widgets
         assert "hz" in widgets
+        assert "cycle" in widgets

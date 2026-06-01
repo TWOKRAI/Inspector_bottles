@@ -108,6 +108,10 @@ class MockSender:
         self.field_commands: list[tuple[str, str, dict, int]] = []
         self.action_commands: list[tuple[str, str, dict | None]] = []
         self.commands: list[tuple[str, str, dict | None]] = []
+        self.system_commands: list[dict] = []
+
+    def send_system_command(self, command: dict) -> None:
+        self.system_commands.append(command)
 
     def send_field_command(
         self, target_process: str, command: str, args: dict[str, Any], *, debounce_ms: int = 0
@@ -354,25 +358,24 @@ class TestLifecycle:
     def test_start_process(self, bridge: TopologyBridge, sender: MockSender) -> None:
         ok = bridge.start_process("camera_0")
         assert ok is True
-        assert len(sender.commands) == 1
-        target, cmd, _ = sender.commands[0]
-        assert target == "camera_0"
-        assert cmd == "process.start"
+        # process.* — системная команда в ProcessManager (не send_command в процесс).
+        assert len(sender.system_commands) == 1
+        assert sender.system_commands[0] == {"cmd": "process.start", "process_name": "camera_0"}
 
     def test_stop_process(self, bridge: TopologyBridge, sender: MockSender) -> None:
         ok = bridge.stop_process("processor_0")
         assert ok is True
-        assert sender.commands[0][1] == "process.stop"
+        assert sender.system_commands[0] == {"cmd": "process.stop", "process_name": "processor_0"}
 
     def test_restart_process(self, bridge: TopologyBridge, sender: MockSender) -> None:
         ok = bridge.restart_process("camera_0")
         assert ok is True
-        assert sender.commands[0][1] == "process.restart"
+        assert sender.system_commands[0] == {"cmd": "process.restart", "process_name": "camera_0"}
 
     def test_nonexistent_process(self, bridge: TopologyBridge, sender: MockSender) -> None:
         ok = bridge.start_process("nonexistent")
         assert ok is False
-        assert len(sender.commands) == 0
+        assert len(sender.system_commands) == 0
 
 
 # --- Тесты topology_changed ---

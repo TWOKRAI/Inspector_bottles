@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QGroupBox,
@@ -66,10 +66,27 @@ _CATEGORY_ORDER = [
 ]
 
 
+# QSS подсветки выбранной карточки/строки (process-scope кнопок).
+_SELECTED_CARD_QSS = "QFrame#EntityCard { border: 2px solid #2563eb; }"
+
+
+def _format_uptime(value: object) -> str:
+    """Секунды → «MM:SS» / «H:MM:SS» для метрики uptime карточки процесса."""
+    if not isinstance(value, (int, float)):
+        return "—"
+    total = int(value)
+    hours, rem = divmod(total, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 class AllProcessesPanel(QWidget):
     """Панель для ALL_PROCESSES_KEY: health + inner-стек Cards/Table."""
 
     card_action_requested = Signal(str, str)  # (entity_id, action_id)
+    process_selected = Signal(object)  # имя выбранного процесса (str) | None
 
     def __init__(
         self,
@@ -81,6 +98,7 @@ class AllProcessesPanel(QWidget):
         self._presenter = presenter
         self._bindings = bindings
         self._cards: dict[str, EntityCard] = {}
+        self._selected_card_name: str | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -143,7 +161,9 @@ class AllProcessesPanel(QWidget):
         self._all_table = QTableWidget(0, len(_ALL_TABLE_COLUMNS))
         self._all_table.setHorizontalHeaderLabels(_ALL_TABLE_COLUMNS)
         self._all_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._all_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._all_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._all_table.itemSelectionChanged.connect(self._on_table_selection_changed)
         h = self._all_table.horizontalHeader()
         if h:
             h.setStretchLastSection(True)
@@ -186,6 +206,7 @@ class AllProcessesPanel(QWidget):
 
                 group_layout.addWidget(card)
                 self._cards[proc.name] = card
+                self._register_card_click(card)
 
             idx = self._all_scroll_layout.count() - 1
             self._all_scroll_layout.insertWidget(idx, group_box)
@@ -201,6 +222,60 @@ class AllProcessesPanel(QWidget):
             self._inner_stack.setCurrentIndex(1)
         else:
             self._inner_stack.setCurrentIndex(0)
+
+    def selected_process(self) -> str | None:
+        """Имя выбранной (карточкой/строкой) процесса или None."""
+        return self._selected_card_name
+
+    # ------------------------------------------------------------------ #
+    #  Выбор процесса (карточка/строка) → process_selected               #
+    # ------------------------------------------------------------------ #
+
+    def _register_card_click(self, card: EntityCard) -> None:
+        """Установить event-filter на карточку и её детей для перехвата клика.
+
+        EntityCard — фреймворковый примитив без сигнала клика; не модифицируем
+        его, а ловим MouseButtonPress через filter (клик по кнопке действия тоже
+        выделяет карточку — это ожидаемо, кнопка при этом отрабатывает свой сигнал).
+        """
+        card.installEventFilter(self)
+        for child in card.findChildren(QWidget):
+            child.installEventFilter(self)
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802 — Qt override
+        if event.type() == QEvent.Type.MouseButtonPress:
+            name = self._card_owner(obj)
+            if name is not None:
+                self._select_process(name)
+        return super().eventFilter(obj, event)
+
+    def _card_owner(self, obj: object) -> str | None:
+        """Найти имя процесса по виджету (поднимаясь по родителям до карточки)."""
+        widget = obj if isinstance(obj, QWidget) else None
+        while widget is not None:
+            for name, card in self._cards.items():
+                if card is widget:
+                    return name
+            widget = widget.parentWidget()
+        return None
+
+    def _select_process(self, name: str) -> None:
+        """Выделить процесс (карточку) и сообщить наружу."""
+        self._selected_card_name = name
+        for n, card in self._cards.items():
+            card.setStyleSheet(_SELECTED_CARD_QSS if n == name else "")
+        self.process_selected.emit(name)
+
+    def _on_table_selection_changed(self) -> None:
+        """Строка таблицы выбрана → синхронизировать выбор процесса."""
+        items = self._all_table.selectedItems()
+        if not items:
+            return
+        row = items[0].row()
+        name_item = self._all_table.item(row, 0)
+        if name_item is not None:
+            self._selected_card_name = name_item.text()
+            self.process_selected.emit(self._selected_card_name)
 
     # ------------------------------------------------------------------ #
     #  Internal                                                            #
@@ -278,6 +353,7 @@ class SingleProcessPanel(QWidget):
     """Панель одного процесса: inner-стек детальной карточки и key-value таблицы."""
 
     card_action_requested = Signal(str, str)  # (entity_id, action_id)
+    worker_selection_changed = Signal(object)  # worker_name (str) | None
 
     def __init__(
         self,
@@ -329,19 +405,22 @@ class SingleProcessPanel(QWidget):
         metrics = self._presenter.get_detail_metrics(self._process_name)
         self._card.set_metric("FPS", metrics.get("FPS", "—"))
         self._card.set_metric("PID", metrics.get("PID", "—"))
+        self._card.set_metric("Uptime", metrics.get("Uptime", "—"))
         self._card.action_clicked.connect(self.card_action_requested)
         page_layout.addWidget(self._card)
 
-        # Секция воркеров (таблица CRUD).
+        # Секция воркеров: компактная таблица (создание/удаление/старт/стоп — в
+        # левой панели вкладки, worker-scope по выбранной строке).
         workers_box = QGroupBox("Воркеры")
         box_layout = QVBoxLayout(workers_box)
         box_layout.setContentsMargins(6, 6, 6, 6)
         self._worker_table = WorkerTable()
-        self._worker_table.add_requested.connect(self._on_worker_add)
-        self._worker_table.remove_requested.connect(self._on_worker_remove)
+        self._worker_table.selection_changed.connect(self.worker_selection_changed)
         self._worker_table.changed.connect(self._on_worker_changed)
         box_layout.addWidget(self._worker_table)
-        page_layout.addWidget(workers_box, stretch=1)
+        page_layout.addWidget(workers_box)
+        # Карточка + таблица прижаты вверх, без растягивания таблицы на всю высоту.
+        page_layout.addStretch(1)
 
         self._refresh_workers()
         return page
@@ -356,8 +435,28 @@ class SingleProcessPanel(QWidget):
             return
         self._worker_table.set_workers(self._presenter.get_workers(self._process_name))
         self._bind_worker_telemetry()
+        # Выбор сбросился после перестроения строк → уведомить вкладку.
+        self.worker_selection_changed.emit(self._worker_table.selected_worker())
 
-    def _on_worker_add(self) -> None:
+    # ------------------------------------------------------------------ #
+    #  Worker actions (вызываются из левой панели вкладки, worker-scope)  #
+    # ------------------------------------------------------------------ #
+
+    def selected_worker(self) -> str | None:
+        """Имя выбранного воркера в таблице или None."""
+        if not hasattr(self, "_worker_table"):
+            return None
+        return self._worker_table.selected_worker()
+
+    def is_selected_worker_protected(self) -> bool:
+        """Защищён ли выбранный воркер (для логики кнопок Удалить/Остановить)."""
+        worker = self.selected_worker()
+        if not worker:
+            return False
+        return self._worker_table.is_worker_protected(worker)
+
+    def request_add_worker(self) -> None:
+        """Показать диалог создания воркера → presenter.add_worker + refresh."""
         dialog = CreateWorkerDialog(self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -377,9 +476,25 @@ class SingleProcessPanel(QWidget):
             )
         self._refresh_workers()
 
-    def _on_worker_remove(self, worker_name: str) -> None:
-        self._presenter.remove_worker(self._process_name, worker_name)
+    def request_remove_worker(self) -> None:
+        """Удалить выбранный воркер (persist + live-IPC). Protected — no-op в presenter."""
+        worker = self.selected_worker()
+        if not worker:
+            return
+        self._presenter.remove_worker(self._process_name, worker)
         self._refresh_workers()
+
+    def request_start_worker(self) -> None:
+        """Запустить выбранный воркер (live-IPC)."""
+        worker = self.selected_worker()
+        if worker:
+            self._presenter.start_worker(self._process_name, worker)
+
+    def request_stop_worker(self) -> None:
+        """Остановить выбранный воркер (live-IPC). Protected — no-op в presenter."""
+        worker = self.selected_worker()
+        if worker:
+            self._presenter.stop_worker(self._process_name, worker)
 
     def _on_worker_changed(self, worker_name: str, field: str, value: object) -> None:
         self._presenter.update_worker(self._process_name, worker_name, **{field: value})
@@ -412,6 +527,14 @@ class SingleProcessPanel(QWidget):
                     hz_w,
                     "text",
                     formatter=lambda v: f"{v:.1f} Гц" if isinstance(v, (int, float)) else "—",
+                )
+            cycle_w = widgets.get("cycle")
+            if cycle_w is not None:
+                bindings.bind(
+                    f"processes.{proc}.workers.{name}.cycle_duration_ms",
+                    cycle_w,
+                    "text",
+                    formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
                 )
 
     def _build_table_page(self) -> QWidget:
@@ -477,4 +600,12 @@ class SingleProcessPanel(QWidget):
                 latency_label,
                 "text",
                 formatter=lambda v: f"{v:.0f} ms" if isinstance(v, (int, float)) else "—",
+            )
+        uptime_label = card._metric_labels.get("Uptime")
+        if uptime_label is not None:
+            bindings.bind(
+                f"processes.{name}.state.uptime",
+                uptime_label,
+                "text",
+                formatter=_format_uptime,
             )

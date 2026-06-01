@@ -54,7 +54,7 @@ class TestProcessesPresenter:
         cmd = _cmd()
         p = ProcessesPresenter(make_processes_services(), command_sender=cmd)
         p.on_process_action("camera_0", "start")
-        cmd.send_command.assert_called_once_with("camera_0", "process.start", {})
+        cmd.send_system_command.assert_called_once_with({"cmd": "process.start", "process_name": "camera_0"})
 
     def test_get_processes_single(self):
         """Topology с одним процессом читается через services.topology."""
@@ -74,13 +74,13 @@ class TestProcessesPresenter:
         cmd = _cmd()
         p = ProcessesPresenter(make_processes_services(), command_sender=cmd)
         p.on_process_action("processor", "stop")
-        cmd.send_command.assert_called_once_with("processor", "process.stop", {})
+        cmd.send_system_command.assert_called_once_with({"cmd": "process.stop", "process_name": "processor"})
 
     def test_on_process_action_restart(self):
         cmd = _cmd()
         p = ProcessesPresenter(make_processes_services(), command_sender=cmd)
         p.on_process_action("renderer", "restart")
-        cmd.send_command.assert_called_once_with("renderer", "process.restart", {})
+        cmd.send_system_command.assert_called_once_with({"cmd": "process.restart", "process_name": "renderer"})
 
     def test_on_process_action_prefers_bridge(self):
         """topology_bridge имеет приоритет над command_sender (Phase 12 IPC)."""
@@ -174,7 +174,7 @@ class TestProcessesTab:
         tab = ProcessesTab(make_processes_services(), command_sender=cmd)
         qtbot.addWidget(tab)
         tab._on_card_action("camera_0", "start")
-        cmd.send_command.assert_called()
+        cmd.send_system_command.assert_called()
 
     def test_toolbar_start_all(self, qtbot):
         """Legacy: обратная совместимость _on_toolbar_action."""
@@ -182,7 +182,7 @@ class TestProcessesTab:
         tab = ProcessesTab(make_processes_services(), command_sender=cmd)
         qtbot.addWidget(tab)
         tab._on_toolbar_action("start_all")
-        assert cmd.send_command.call_count == 3
+        assert cmd.send_system_command.call_count == 3
 
     def test_toolbar_stop_all(self, qtbot):
         """Legacy: обратная совместимость _on_toolbar_action."""
@@ -190,7 +190,7 @@ class TestProcessesTab:
         tab = ProcessesTab(make_processes_services(), command_sender=cmd)
         qtbot.addWidget(tab)
         tab._on_toolbar_action("stop_all")
-        assert cmd.send_command.call_count == 3
+        assert cmd.send_system_command.call_count == 3
 
     def test_empty_topology(self, qtbot):
         tab = ProcessesTab(make_processes_services(topology_processes=[]), command_sender=_cmd())
@@ -275,14 +275,24 @@ class TestProcessesTab:
         assert not tab._btn_start.isEnabled()
         assert not tab._btn_stop.isEnabled()
 
-    def test_buttons_enabled_on_selection(self, qtbot):
-        """Кнопки управления активны при выборе конкретного процесса."""
+    def test_process_buttons_enabled_after_card_select(self, qtbot):
+        """В виде «Все процессы» выбор карточки включает process-scope кнопки."""
         tab = ProcessesTab(make_processes_services(), command_sender=_cmd())
         qtbot.addWidget(tab)
-        tab._nav_list.setCurrentRow(1)
+        name = next(n for n in tab._presenter.get_process_names() if not tab._presenter.is_protected(n))
+        tab._all_panel._select_process(name)
         assert tab._btn_delete.isEnabled()
         assert tab._btn_start.isEnabled()
         assert tab._btn_stop.isEnabled()
+
+    def test_worker_buttons_disabled_without_worker_selection(self, qtbot):
+        """В подвкладке процесса без выбранного воркера кнопки действий выключены."""
+        tab = ProcessesTab(make_processes_services(), command_sender=_cmd())
+        qtbot.addWidget(tab)
+        tab._nav_list.setCurrentRow(1)  # конкретный процесс → worker-scope
+        assert not tab._btn_delete.isEnabled()
+        assert not tab._btn_start.isEnabled()
+        assert not tab._btn_stop.isEnabled()
 
     def test_single_process_table_view(self, qtbot):
         """Таблица одного процесса содержит key-value строки."""
@@ -345,58 +355,55 @@ class TestProtectedProcesses:
         p = ProcessesPresenter(make_processes_services(topology_processes=_PROTECTED_PROCESSES))
         assert p.is_protected("nonexistent") is False
 
-    def test_buttons_disabled_for_protected(self, qtbot):
-        """После выбора gui: _btn_delete и _btn_stop disabled, _btn_start enabled."""
+    def test_protected_process_card_select_disables_delete_stop(self, qtbot):
+        """В виде «Все процессы»: выбор protected-карточки gui → delete/stop disabled, start enabled."""
         tab = ProcessesTab(
             make_processes_services(topology_processes=_PROTECTED_PROCESSES),
             command_sender=_cmd(),
         )
         qtbot.addWidget(tab)
-
-        gui_row = None
-        for i in range(tab._nav_list.count()):
-            if tab._nav_list.item(i).text() == "gui":
-                gui_row = i
-                break
-        assert gui_row is not None, "Процесс gui должен быть в навигации"
-
-        tab._nav_list.setCurrentRow(gui_row)
+        tab._all_panel._select_process("gui")
         assert tab._btn_delete.isEnabled() is False
         assert tab._btn_stop.isEnabled() is False
         assert tab._btn_start.isEnabled() is True
-
-    def test_protected_buttons_have_explanatory_tooltip(self, qtbot):
-        """Disabled-кнопки protected процесса несут тултип «Системный процесс …»."""
-        tab = ProcessesTab(
-            make_processes_services(topology_processes=_PROTECTED_PROCESSES),
-            command_sender=_cmd(),
-        )
-        qtbot.addWidget(tab)
-
-        gui_row = next(i for i in range(tab._nav_list.count()) if tab._nav_list.item(i).text() == "gui")
-        tab._nav_list.setCurrentRow(gui_row)
-
         assert "Системный процесс" in tab._btn_delete.toolTip()
         assert "Системный процесс" in tab._btn_stop.toolTip()
 
-    def test_buttons_enabled_for_unprotected(self, qtbot):
-        """После выбора camera_0: _btn_delete и _btn_stop enabled."""
+    def test_buttons_for_protected_worker(self, qtbot):
+        """В подвкладке: выбор защищённого воркера → start enabled, delete/stop disabled."""
         tab = ProcessesTab(
             make_processes_services(topology_processes=_PROTECTED_PROCESSES),
             command_sender=_cmd(),
         )
         qtbot.addWidget(tab)
-
-        cam_row = None
-        for i in range(tab._nav_list.count()):
-            if tab._nav_list.item(i).text() == "camera_0":
-                cam_row = i
-                break
-        assert cam_row is not None
-
+        cam_row = next(i for i in range(tab._nav_list.count()) if tab._nav_list.item(i).text() == "camera_0")
         tab._nav_list.setCurrentRow(cam_row)
+        panel = tab._single_panels[tab._selected_process]
+        row = panel._worker_table.worker_names().index("message_processor")
+        panel._worker_table._table.selectRow(row)
+        assert tab._btn_start.isEnabled() is True
+        assert tab._btn_delete.isEnabled() is False
+        assert tab._btn_stop.isEnabled() is False
+        assert "защищён" in tab._btn_delete.toolTip()
+        assert "защищён" in tab._btn_stop.toolTip()
+
+    def test_buttons_enabled_for_unprotected_worker(self, qtbot):
+        """В подвкладке: выбор незащищённого воркера → delete/stop/start enabled."""
+        tab = ProcessesTab(
+            make_processes_services(topology_processes=_PROTECTED_PROCESSES),
+            command_sender=_cmd(),
+        )
+        qtbot.addWidget(tab)
+        cam_row = next(i for i in range(tab._nav_list.count()) if tab._nav_list.item(i).text() == "camera_0")
+        tab._nav_list.setCurrentRow(cam_row)
+        panel = tab._single_panels[tab._selected_process]
+        tab._presenter.add_worker("camera_0", worker_name="grabber")
+        panel._refresh_workers()
+        row = panel._worker_table.worker_names().index("grabber")
+        panel._worker_table._table.selectRow(row)
         assert tab._btn_delete.isEnabled() is True
         assert tab._btn_stop.isEnabled() is True
+        assert tab._btn_start.isEnabled() is True
 
     def test_single_panel_no_stop_for_protected(self, qtbot):
         """SingleProcessPanel для gui не содержит CardAction('stop')."""
@@ -419,7 +426,7 @@ class TestProtectedProcesses:
         )
         qtbot.addWidget(tab)
         tab._on_toolbar_action("stop_all")
-        calls = cmd.send_command.call_args_list
-        stopped = [c[0][0] for c in calls if c[0][1] == "process.stop"]
+        calls = cmd.send_system_command.call_args_list
+        stopped = [c[0][0]["process_name"] for c in calls if c[0][0].get("cmd") == "process.stop"]
         assert "gui" not in stopped
         assert "camera_0" in stopped

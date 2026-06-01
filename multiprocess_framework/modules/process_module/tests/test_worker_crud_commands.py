@@ -212,6 +212,21 @@ class TestWorkerCrudCommands:
         assert res["success"] is True
         assert wm.has_worker("w")
 
+    def test_start_worker_via_command(self) -> None:
+        """worker.start запускает остановленный воркер (без пересоздания)."""
+        wm, cm = _make_crud()
+        cm.dispatch("worker.create", {"worker_name": "w", "target_interval_ms": 20})
+        cm.dispatch("worker.stop", {"worker_name": "w"})
+        res = cm.dispatch("worker.start", {"worker_name": "w"})
+        assert res["success"] is True
+        assert wm.has_worker("w")
+
+    def test_start_worker_requires_name(self) -> None:
+        """worker.start без worker_name → success=False."""
+        _wm, cm = _make_crud()
+        res = cm.dispatch("worker.start", {})
+        assert res["success"] is False
+
     def test_update_worker_changes_priority(self) -> None:
         wm, cm = _make_crud()
         cm.dispatch("worker.create", {"worker_name": "w", "priority": "NORMAL"})

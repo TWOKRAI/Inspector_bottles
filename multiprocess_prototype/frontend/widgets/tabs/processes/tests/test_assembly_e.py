@@ -47,7 +47,10 @@ class TestSinglePanelAssembly:
         panel = SingleProcessPanel(presenter, None, "camera_0")
         qtbot.addWidget(panel)
         assert "grabber" in panel._worker_table.worker_names()
-        panel._on_worker_remove("grabber")
+        # worker-scope удаление: выбрать строку → действие из левой панели вкладки.
+        row = panel._worker_table.worker_names().index("grabber")
+        panel._worker_table._table.selectRow(row)
+        panel.request_remove_worker()
         assert "grabber" not in panel._worker_table.worker_names()
 
     def test_worker_changed_updates_spec(self, qtbot) -> None:

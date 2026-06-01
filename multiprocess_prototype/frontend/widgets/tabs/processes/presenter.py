@@ -118,7 +118,8 @@ class ProcessesPresenter:
                 method(process_name)
                 return
 
-        # Fallback: прямой CommandSender (обратная совместимость)
+        # Fallback: прямой CommandSender (обратная совместимость).
+        # process.* — команды ProcessManager, шлём системным конвертом (НЕ в процесс).
         if self._command_sender is None:
             return
         cmd_map = {
@@ -127,7 +128,7 @@ class ProcessesPresenter:
             "restart": "process.restart",
         }
         command = cmd_map.get(action_id, action_id)
-        self._command_sender.send_command(process_name, command, {})
+        self._command_sender.send_system_command({"cmd": command, "process_name": process_name})
 
     def get_health_summary(self) -> dict[str, Any]:
         """Сводка здоровья системы.
@@ -199,6 +200,7 @@ class ProcessesPresenter:
             "Статус": proc.status,
             "PID": str(proc.pid) if proc.pid else "—",
             "FPS": f"{proc.fps:.1f}" if proc.fps else "—",
+            "Uptime": "—",  # live через StateStore (processes.{name}.state.uptime)
             "Кадры": str(proc.frame_count) if proc.frame_count else "—",
             "Плагины": ", ".join(proc.plugins) or "—",
         }
@@ -327,6 +329,31 @@ class ProcessesPresenter:
             target_interval_ms=target_interval_ms,
         )
         return True
+
+    # ------------------------------------------------------------------ #
+    #  Workers — lifecycle (live-IPC, без правки топологии)               #
+    # ------------------------------------------------------------------ #
+
+    def start_worker(self, process_name: str, worker_name: str) -> bool:
+        """Запустить остановленный воркер (live-IPC, без пересоздания).
+
+        Старт безопасен — protected-проверка не нужна. Конфиг не меняется.
+        """
+        if not worker_name:
+            return False
+        return self._worker_bridge.worker_start(process_name, worker_name)
+
+    def stop_worker(self, process_name: str, worker_name: str) -> bool:
+        """Остановить воркер (live-IPC, без удаления). Protected — запрет."""
+        if self.is_worker_protected(process_name, worker_name):
+            return False
+        return self._worker_bridge.worker_stop(process_name, worker_name)
+
+    def restart_worker(self, process_name: str, worker_name: str) -> bool:
+        """Перезапустить воркер (live-IPC). Protected — запрет."""
+        if self.is_worker_protected(process_name, worker_name):
+            return False
+        return self._worker_bridge.worker_restart(process_name, worker_name)
 
     # ------------------------------------------------------------------ #
     #  Processes — create / delete (config persist + live для delete)     #

@@ -60,7 +60,7 @@ _STATUS_TEXT = {
 }
 
 # Метрики, отображаемые в строке (порядок сохраняется).
-_METRIC_KEYS = ("FPS", "Latency", "PID")
+_METRIC_KEYS = ("FPS", "Latency", "PID", "Uptime")
 
 
 class ProcessCard(QFrame):
@@ -125,7 +125,10 @@ class ProcessCard(QFrame):
             btn = QPushButton(act.symbol)
             btn.setObjectName("ProcessCardIconButton")
             btn.setToolTip(act.tooltip)
-            btn.setFixedSize(28, 28)
+            btn.setFixedSize(56, 56)  # ×4 площади от прежних 28×28 (по запросу владельца)
+            _font = btn.font()
+            _font.setPointSize(20)  # крупнее символ под увеличенную кнопку
+            btn.setFont(_font)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(
                 lambda _checked=False, aid=act.action_id: self.action_clicked.emit(self._entity_id, aid)

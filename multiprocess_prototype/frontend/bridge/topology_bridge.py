@@ -316,12 +316,18 @@ class TopologyBridge:
         return self._send_lifecycle("process.restart", process_name)
 
     def _send_lifecycle(self, command: str, process_name: str) -> bool:
-        """Отправить lifecycle-команду после проверки topology."""
+        """Отправить lifecycle-команду (process.start/stop/restart) в ProcessManager.
+
+        process.* — команды ОРКЕСТРАТОРА (ProcessManager), а не самого процесса.
+        Отправлять их через send_command(process_name, ...) бесполезно — у процесса
+        нет такого хендлера, команда молча дропается. Используем системный конверт
+        (process.command → ProcessManager).
+        """
         if not self._process_exists(process_name):
             logger.warning("TopologyBridge: процесс '%s' не найден в topology", process_name)
             return False
 
-        self._sender.send_command(process_name, command)
+        self._sender.send_system_command({"cmd": command, "process_name": process_name})
         return True
 
     def _process_exists(self, process_name: str) -> bool:

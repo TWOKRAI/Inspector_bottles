@@ -111,12 +111,13 @@ class BuiltinCommands:
             ("worker.remove", self._cmd_worker_remove, "Удалить воркер из процесса"),
             ("worker.update", self._cmd_worker_update, "Перенастроить воркер (приоритет/интервал)"),
             ("worker.restart", self._cmd_worker_restart, "Перезапустить воркер"),
+            ("worker.start", self._cmd_worker_start, "Запустить остановленный воркер"),
             ("worker.stop", self._cmd_worker_stop, "Остановить воркер (без удаления)"),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
         self._services._log_debug(
-            "Встроенные команды worker.create/remove/update/restart/stop зарегистрированы",
+            "Встроенные команды worker.create/remove/update/restart/start/stop зарегистрированы",
             module="lifecycle",
         )
 
@@ -233,6 +234,23 @@ class BuiltinCommands:
             return {"success": False, "reason": "protected", "worker_name": name}
 
         ok = wm.stop_worker(name)
+        return {"success": bool(ok), "worker_name": name}
+
+    def _cmd_worker_start(self, data=None, **kwargs) -> dict:
+        """Запустить остановленный воркер (поток), не пересоздавая его.
+
+        Старт безопасен — protected-проверка не нужна (в отличие от stop/remove).
+        """
+        args = self._merge_args(data, kwargs)
+        wm = self._services.worker_manager
+        if not wm:
+            return {"success": False, "reason": "worker_manager недоступен"}
+
+        name = str(args.get("worker_name", "")).strip()
+        if not name:
+            return {"success": False, "reason": "worker_name обязателен"}
+
+        ok = wm.start_worker(name)
         return {"success": bool(ok), "worker_name": name}
 
     def _cmd_worker_restart(self, data=None, **kwargs) -> dict:

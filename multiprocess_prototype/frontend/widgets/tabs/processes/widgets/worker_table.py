@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
-"""WorkerTable — таблица управления воркерами одного процесса.
+"""WorkerTable — таблица воркеров одного процесса (компактная, 3-4 строки + скролл).
 
-Колонки: Имя · Приоритет(combo) · Режим(combo) · Интервал, мс(spin) · Статус · Гц.
-Кнопки «Добавить»/«Удалить». Inline-редактирование приоритета/режима/интервала
-эмитит ``changed(worker_name, field, value)``. Добавление эмитит ``add_requested``
-(панель показывает диалог имени). Удаление — ``remove_requested(worker_name)``.
+Колонки: Имя · Приоритет(combo) · Режим(combo) · Интервал, мс(spin) · Цикл, мс ·
+Статус · Гц. Inline-редактирование приоритета/режима/интервала эмитит
+``changed(worker_name, field, value)``. Выбор строки эмитит
+``selection_changed(worker_name | None)`` — левая панель вкладки на его основе
+включает/выключает кнопки Удалить/Запустить/Остановить (worker-scope).
 
-Защищённый воркер (message_processor): редактирование и удаление заблокированы
+Создание/удаление/старт/стоп воркера живут в ЛЕВОЙ панели вкладки (не в таблице) —
+таблица только показывает воркеров и отдаёт наружу выбор + protected-флаг.
+
+Защищённый воркер (message_processor): inline-редактирование заблокировано
 (он — IPC-lifeline процесса; пересоздание убило бы приём команд).
 
-GUI работает с dict (не SchemaBase). Per-row виджеты статуса/Гц экспонируются
+GUI работает с dict (не SchemaBase). Per-row виджеты статуса/Гц/цикла экспонируются
 через ``telemetry_widgets(worker_name)`` для GuiStateBindings.
 """
 
@@ -17,14 +21,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
-    QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -34,23 +37,33 @@ from PySide6.QtWidgets import (
 
 from ..data import WORKER_EXECUTION_MODES, WORKER_PRIORITIES
 
-_COLUMNS = ["Имя", "Приоритет", "Режим", "Интервал, мс", "Статус", "Гц"]
-_COL_NAME, _COL_PRIORITY, _COL_MODE, _COL_INTERVAL, _COL_STATUS, _COL_HZ = range(6)
+_COLUMNS = ["Имя", "Приоритет", "Режим", "Интервал, мс", "Цикл, мс", "Статус", "Гц"]
+(
+    _COL_NAME,
+    _COL_PRIORITY,
+    _COL_MODE,
+    _COL_INTERVAL,
+    _COL_CYCLE,
+    _COL_STATUS,
+    _COL_HZ,
+) = range(7)
 # Максимум интервала цикла (мс). 0 = «по приоритету» (special value «—»).
 _INTERVAL_MAX = 600_000
+# Высота окна таблицы фиксирована под это число строк (видно 5-6 воркеров,
+# при меньшем количестве — пустое место снизу; при большем — скролл).
+_VISIBLE_ROWS = 6
 
 
 class WorkerTable(QWidget):
-    """Таблица CRUD воркеров процесса."""
+    """Компактная таблица воркеров процесса (read + inline-edit + выбор строки)."""
 
-    add_requested = Signal()
-    remove_requested = Signal(str)  # worker_name
+    selection_changed = Signal(object)  # worker_name (str) | None
     changed = Signal(str, str, object)  # (worker_name, field, value)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._populating = False
-        # worker_name → {"status": QLabel, "hz": QLabel} для биндингов телеметрии.
+        # worker_name → {"status": QLabel, "hz": QLabel, "cycle": QLabel} для биндингов.
         self._telemetry: dict[str, dict[str, QWidget]] = {}
         # row → worker_name
         self._row_names: list[str] = []
@@ -67,26 +80,19 @@ class WorkerTable(QWidget):
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.verticalHeader().setVisible(False)
+        vheader = self._table.verticalHeader()
+        if vheader is not None:
+            vheader.setVisible(False)
         header = self._table.horizontalHeader()
         if header is not None:
             header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Stretch)
-            for col in (_COL_PRIORITY, _COL_MODE, _COL_INTERVAL, _COL_STATUS, _COL_HZ):
+            for col in (_COL_PRIORITY, _COL_MODE, _COL_INTERVAL, _COL_CYCLE, _COL_STATUS, _COL_HZ):
                 header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
-        root.addWidget(self._table, stretch=1)
-
-        button_row = QHBoxLayout()
-        button_row.setContentsMargins(0, 0, 0, 0)
-        self._add_btn = QPushButton("Добавить воркер")
-        self._add_btn.clicked.connect(self.add_requested)
-        self._remove_btn = QPushButton("Удалить")
-        self._remove_btn.setEnabled(False)
-        self._remove_btn.clicked.connect(self._on_remove_clicked)
-        button_row.addWidget(self._add_btn)
-        button_row.addWidget(self._remove_btn)
-        button_row.addStretch(1)
-        root.addLayout(button_row)
+        # Высота фиксируется по содержимому (до _VISIBLE_ROWS), без растягивания.
+        self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        root.addWidget(self._table)
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -104,15 +110,52 @@ class WorkerTable(QWidget):
                 self._append_row(worker)
         finally:
             self._populating = False
-        self._update_remove_enabled()
+        self._apply_height()
 
     def telemetry_widgets(self, worker_name: str) -> dict[str, QWidget]:
-        """Per-row виджеты {"status", "hz"} для GuiStateBindings."""
+        """Per-row виджеты {"status", "hz", "cycle"} для GuiStateBindings."""
         return self._telemetry.get(worker_name, {})
 
     def worker_names(self) -> list[str]:
         """Имена воркеров в порядке строк."""
         return list(self._row_names)
+
+    def selected_worker(self) -> str | None:
+        """Имя выбранного воркера или None."""
+        return self._selected_worker_name()
+
+    def is_worker_protected(self, worker_name: str) -> bool:
+        """Защищён ли воркер (по последним загруженным данным)."""
+        return bool(self._protected.get(worker_name, False))
+
+    # ------------------------------------------------------------------ #
+    #  Высота: компактная, 3-4 строки + скролл                            #
+    # ------------------------------------------------------------------ #
+
+    def _row_px(self) -> int:
+        vheader = self._table.verticalHeader()
+        if vheader is not None and vheader.defaultSectionSize() > 0:
+            return vheader.defaultSectionSize()
+        return 28
+
+    def _natural_height(self, rows: int) -> int:
+        header = self._table.horizontalHeader()
+        header_px = header.sizeHint().height() if header is not None else 24
+        return header_px + self._row_px() * max(rows, 1) + 2 * self._table.frameWidth() + 2
+
+    def _apply_height(self) -> None:
+        """Зафиксировать высоту окна таблицы под _VISIBLE_ROWS строк.
+
+        Высота постоянна независимо от числа воркеров: при меньшем количестве —
+        пустое место снизу, при большем (> _VISIBLE_ROWS) — вертикальный скролл.
+        """
+        height = self._natural_height(_VISIBLE_ROWS)
+        self._table.setMinimumHeight(height)
+        self._table.setMaximumHeight(height)
+        self.updateGeometry()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 — Qt override
+        return QSize(super().sizeHint().width(), self._natural_height(_VISIBLE_ROWS))
 
     # ------------------------------------------------------------------ #
     #  Build rows                                                          #
@@ -128,7 +171,7 @@ class WorkerTable(QWidget):
 
         # Имя (read-only item).
         name_item = QTableWidgetItem(name)
-        name_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemIsSelectable)
+        name_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         if protected:
             name_item.setToolTip("Системный воркер IPC — защищён от изменений")
         self._table.setItem(row, _COL_NAME, name_item)
@@ -159,6 +202,11 @@ class WorkerTable(QWidget):
         interval_spin.valueChanged.connect(lambda value, n=name: self._emit_changed(n, "target_interval_ms", value))
         self._table.setCellWidget(row, _COL_INTERVAL, interval_spin)
 
+        # Цикл, мс (label, live-телеметрия cycle_duration_ms).
+        cycle_label = QLabel("—")
+        cycle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._table.setCellWidget(row, _COL_CYCLE, cycle_label)
+
         # Статус (label, привязывается к телеметрии).
         status_label = QLabel(str(worker.get("status", "—")))
         status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -169,7 +217,7 @@ class WorkerTable(QWidget):
         hz_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setCellWidget(row, _COL_HZ, hz_label)
 
-        self._telemetry[name] = {"status": status_label, "hz": hz_label}
+        self._telemetry[name] = {"status": status_label, "hz": hz_label, "cycle": cycle_label}
 
     # ------------------------------------------------------------------ #
     #  Signals                                                            #
@@ -183,12 +231,9 @@ class WorkerTable(QWidget):
         self.changed.emit(worker_name, field, value)
 
     def _on_selection_changed(self) -> None:
-        self._update_remove_enabled()
-
-    def _on_remove_clicked(self) -> None:
-        name = self._selected_worker_name()
-        if name and not self._protected.get(name):
-            self.remove_requested.emit(name)
+        if self._populating:
+            return
+        self.selection_changed.emit(self._selected_worker_name())
 
     def _selected_worker_name(self) -> str | None:
         indexes = self._table.selectedIndexes()
@@ -198,7 +243,3 @@ class WorkerTable(QWidget):
         if 0 <= row < len(self._row_names):
             return self._row_names[row]
         return None
-
-    def _update_remove_enabled(self) -> None:
-        name = self._selected_worker_name()
-        self._remove_btn.setEnabled(bool(name) and not self._protected.get(name or "", False))

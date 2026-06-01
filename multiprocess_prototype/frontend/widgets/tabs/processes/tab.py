@@ -79,6 +79,9 @@ class ProcessesTab(BaseListNavTab):
         self._all_panel: AllProcessesPanel | None = None
         self._single_panels: dict[str, SingleProcessPanel] = {}
         self._selected_process: str | None = None  # None при ALL_PROCESSES_KEY
+        # Выбранный процесс в виде «Все процессы» (карточка/строка) — цель кнопок
+        # в process-scope. Отличается от _selected_process (= открытая подвкладка).
+        self._all_selected_process: str | None = None
         self._current_mode: ViewMode = ViewMode.CARDS
 
         # Динамические алиасы (обновляются в _on_nav_changed) — для совместимости тестов.
@@ -136,12 +139,19 @@ class ProcessesTab(BaseListNavTab):
         if key == ALL_PROCESSES_KEY:
             panel = AllProcessesPanel(self._presenter, self._bindings)
             panel.card_action_requested.connect(self._on_card_action)
+            panel.process_selected.connect(self._on_all_process_selected)
             self._all_panel = panel
             return panel
         single_panel = SingleProcessPanel(self._presenter, self._bindings, key)
         single_panel.card_action_requested.connect(self._on_card_action)
+        single_panel.worker_selection_changed.connect(lambda _name=None: self._update_buttons_state())
         self._single_panels[key] = single_panel
         return single_panel
+
+    def _on_all_process_selected(self, name: object) -> None:
+        """Карточка/строка процесса выбрана в виде «Все процессы» → цель кнопок."""
+        self._all_selected_process = name if isinstance(name, str) and name else None
+        self._update_buttons_state()
 
     def _make_nav_item(
         self,
@@ -225,18 +235,46 @@ class ProcessesTab(BaseListNavTab):
         return btn
 
     def _on_button_action(self, action_id: str) -> None:
+        """Контекст-свитч: в виде «Все процессы» кнопки = process-scope,
+        в подвкладке процесса = worker-scope (по выбранному воркеру)."""
+        if self._selected_process is None:
+            self._on_process_scope_action(action_id)
+        else:
+            self._on_worker_scope_action(action_id)
+
+    def _on_process_scope_action(self, action_id: str) -> None:
+        """Process-scope (вид «Все процессы»): действия над выбранным процессом."""
         if action_id == "create":
             self._create_process_dialog()
             return
-        if self._selected_process is None:
+        target = self._all_selected_process
+        if target is None:
             return
         # Guard: защищённый процесс нельзя удалить или остановить через GUI.
-        if action_id in ("delete", "stop") and self._presenter.is_protected(self._selected_process):
+        if action_id in ("delete", "stop") and self._presenter.is_protected(target):
             return
         if action_id in ("start", "stop"):
-            self._presenter.on_process_action(self._selected_process, action_id)
+            self._presenter.on_process_action(target, action_id)
         elif action_id == "delete":
-            self._delete_process(self._selected_process)
+            self._delete_process(target)
+
+    def _on_worker_scope_action(self, action_id: str) -> None:
+        """Worker-scope (подвкладка процесса): действия над выбранным воркером."""
+        panel = self._single_panels.get(self._selected_process) if self._selected_process else None
+        if panel is None:
+            return
+        if action_id == "create":
+            panel.request_add_worker()
+            return
+        worker = panel.selected_worker()
+        if not worker:
+            return
+        if action_id == "delete":
+            panel.request_remove_worker()
+        elif action_id == "start":
+            panel.request_start_worker()
+        elif action_id == "stop":
+            panel.request_stop_worker()
 
     def _create_process_dialog(self) -> None:
         """Показать диалог создания процесса → presenter.create_process (+ персист)."""
@@ -267,18 +305,52 @@ class ProcessesTab(BaseListNavTab):
         # Перестроение nav — через TopologyReplaced.
 
     def _update_buttons_state(self) -> None:
-        has_selection = self._selected_process is not None
-        # Явная проверка на None позволяет pyright сузить тип до str.
-        is_protected = (
-            self._presenter.is_protected(self._selected_process) if self._selected_process is not None else False
-        )
+        """Включить/выключить кнопки по контексту (process-scope vs worker-scope)."""
+        if self._selected_process is None:
+            self._update_buttons_process_scope()
+        else:
+            self._update_buttons_worker_scope()
+
+    def _update_buttons_process_scope(self) -> None:
+        """Вид «Все процессы»: кнопки действуют на выбранную карточку/строку."""
+        target = self._all_selected_process
+        has_selection = target is not None
+        is_protected = self._presenter.is_protected(target) if target is not None else False
+        self._btn_create.setToolTip("Создать новый процесс")
         self._btn_delete.setEnabled(has_selection and not is_protected)
         self._btn_start.setEnabled(has_selection)
         self._btn_stop.setEnabled(has_selection and not is_protected)
-        # Тултип для disabled-кнопок: подсказка, почему заблокировано.
-        _protected_tip = "Системный процесс защищён от изменений"
-        self._btn_delete.setToolTip(_protected_tip if is_protected else "")
-        self._btn_stop.setToolTip(_protected_tip if is_protected else "")
+        if not has_selection:
+            tip = "Выберите процесс в списке"
+            self._btn_delete.setToolTip(tip)
+            self._btn_start.setToolTip(tip)
+            self._btn_stop.setToolTip(tip)
+        else:
+            prot_tip = "Системный процесс защищён от изменений"
+            self._btn_delete.setToolTip(prot_tip if is_protected else "Удалить процесс")
+            self._btn_start.setToolTip("Запустить процесс")
+            self._btn_stop.setToolTip(prot_tip if is_protected else "Остановить процесс")
+
+    def _update_buttons_worker_scope(self) -> None:
+        """Подвкладка процесса: кнопки действуют на выбранный воркер в таблице."""
+        panel = self._single_panels.get(self._selected_process) if self._selected_process else None
+        worker = panel.selected_worker() if panel is not None else None
+        has_selection = worker is not None
+        is_protected = panel.is_selected_worker_protected() if (panel is not None and worker) else False
+        self._btn_create.setToolTip("Добавить воркер в процесс")
+        self._btn_delete.setEnabled(has_selection and not is_protected)
+        self._btn_start.setEnabled(has_selection)
+        self._btn_stop.setEnabled(has_selection and not is_protected)
+        if not has_selection:
+            tip = "Выберите воркер в таблице"
+            self._btn_delete.setToolTip(tip)
+            self._btn_start.setToolTip(tip)
+            self._btn_stop.setToolTip(tip)
+        else:
+            prot_tip = "Системный воркер IPC защищён от изменений"
+            self._btn_delete.setToolTip(prot_tip if is_protected else "Удалить воркер")
+            self._btn_start.setToolTip("Запустить воркер")
+            self._btn_stop.setToolTip(prot_tip if is_protected else "Остановить воркер")
 
     # ------------------------------------------------------------------ #
     #  View mode                                                           #
@@ -298,6 +370,8 @@ class ProcessesTab(BaseListNavTab):
 
     def _sync_nav(self) -> None:
         """Заполнить навигацию: «Все процессы» (жирно) + имена процессов."""
+        # Набор процессов меняется → прежний выбор в All-виде мог исчезнуть.
+        self._all_selected_process = None
         assert self._nav_widget is not None
         self._nav_widget.blockSignals(True)
         self._nav_widget.clear()
