@@ -78,9 +78,10 @@ class ProcessSpawner:
         # multiprocessing.Event pickle-safe и безопасно пробрасывается через spawn.
         if self._system_ready_event is not None:
             custom["system_ready_event"] = self._system_ready_event
-        # ОБЩИЙ stop — PM читает его и пробрасывает детям (ProcessRegistry).
-        if self._system_stop_event is not None:
-            custom["system_stop_event"] = self._system_stop_event
+        # ОБЩИЙ stop НЕ кладём в bundle custom (иначе сериализуется через Queue и сырой
+        # mp.Event падает на Windows-spawn). Передаём отдельным Process-аргументом —
+        # process_runner положит его в локальный custom после build, PM прочитает оттуда
+        # и пробросит детям (ProcessRegistry, тоже отдельным аргументом).
         bundle = {
             "queues": {},
             "config": process_config,
@@ -89,7 +90,14 @@ class ProcessSpawner:
 
         self._process = Process(
             target=run_process_function,
-            args=(self._orchestrator_class_path, "ProcessManager", self._stop_event, bundle),
+            # system_stop_event — отдельным аргументом (inheritance), НЕ в bundle custom.
+            args=(
+                self._orchestrator_class_path,
+                "ProcessManager",
+                self._stop_event,
+                bundle,
+                self._system_stop_event,
+            ),
             name="ProcessManager",
         )
         self._process.start()

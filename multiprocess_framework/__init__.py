@@ -139,11 +139,24 @@ from multiprocess_framework.modules.actions_module import (
     IRegistersManagerGui,
 )
 
-# === LAYER 11: UI (опционально — PySide6 может отсутствовать в headless-окружении) ===
-try:
-    from multiprocess_framework.modules.frontend_module import FrontendManager
-except ImportError:
-    FrontendManager = None  # type: ignore[assignment,misc]
+
+# === LAYER 11: UI (опционально, PySide6) — ЛЕНИВЫЙ импорт (PEP 562) ===
+# PySide6 тяжёлый (десятки-сотни МБ RAM + время импорта). Не-GUI процессы (воркеры:
+# preprocessor, region_splitter, process_* и т.д.) импортируют multiprocess_framework,
+# но PySide6 им не нужен. Жадный импорт грузил PySide6 в КАЖДОМ процессе → при спавне
+# 8 процессов это умножало память и приводило к OpenBLAS/MemoryError при старте.
+# Грузим FrontendManager только при РЕАЛЬНОМ обращении. В v3-прототипе фасадный
+# FrontendManager не используется (GUI тянет PySide6 своим путём), так что в норме
+# это не грузится вовсе. См. docs/COMMUNICATION_MAP.md.
+def __getattr__(name: str):
+    if name == "FrontendManager":
+        try:
+            from multiprocess_framework.modules.frontend_module import FrontendManager
+        except ImportError:
+            return None
+        return FrontendManager
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "__version__",

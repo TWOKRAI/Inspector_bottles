@@ -204,11 +204,15 @@ class GuiProcess(ProcessModule):
         self._request_system_shutdown()
 
     def _get_system_stop_event(self):
-        """Достать ОБЩИЙ system_stop_event из bundle custom (проброшен spawner→PM→дети)."""
+        """Достать ОБЩИЙ system_stop_event из shared_resources (проброшен Process-аргументом).
+
+        Хранится атрибутом на SRM, а НЕ в custom: custom рассылается ProcessMonitor'ом
+        через Queue, а сырой mp.Event на Windows-spawn пиклится только через inheritance.
+        """
         try:
-            pd = self.shared_resources.get_process_data(self.name) if self.shared_resources else None
-            custom = getattr(pd, "custom", None) if pd else None
-            return custom.get("system_stop_event") if isinstance(custom, dict) else None
+            sr = self.shared_resources
+            getter = getattr(sr, "get_system_stop_event", None) if sr else None
+            return getter() if callable(getter) else None
         except Exception:  # noqa: BLE001 — нет события → fallback на IPC
             return None
 

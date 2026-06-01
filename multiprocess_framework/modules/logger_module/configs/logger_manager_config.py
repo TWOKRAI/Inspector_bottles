@@ -97,7 +97,10 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         "router_messages": LoggerModuleSchema(
             enabled=True,
             file_path="messages.log",
-            min_level="DEBUG",
+            # INFO, не DEBUG: на DEBUG router_messages писал маршрут КАЖДОГО кадра
+            # (data X -> [Y]) → messages.log распухал на ~МБ/сек. Для отладки роутинга
+            # временно вернуть "DEBUG".
+            min_level="INFO",
         ),
         "database": LoggerModuleSchema(
             enabled=True,
@@ -184,18 +187,22 @@ class LoggerManagerConfig(ChannelRoutingConfig):
         "BUSINESS": LoggerScopeSchema(
             enabled=True,
             min_level=_LEVEL_ORDER[1],
-            # console добавлен в BUSINESS — все INFO видны в stdout
-            # (раньше там был только WARNING+ через SYSTEM scope).
-            # Для production можно убрать console и оставить только файлы.
-            channels=["system_file", "messages_file", "console"],
+            # console НЕ подключён к BUSINESS: пер-кадровые INFO-логи воркеров
+            # уходят только в файлы (system_file/messages_file), а не засоряют
+            # терминал. В stdout остаётся лишь SYSTEM WARNING+ через свой scope.
+            channels=["system_file", "messages_file"],
         ),
         "PERFORMANCE": LoggerScopeSchema(
             enabled=True,
             min_level=_LEVEL_ORDER[1],
             channels=["system_file"],
         ),
+        # DEBUG-scope по умолчанию ВЫКЛЮЧЕН: на DEBUG в system_file лился пер-кадровый
+        # firehose ([TRACE] PipelineExecutor, channel_dispatcher "no route" на каждый
+        # кадр) → ~100 МБ/мин, постоянная ротация затирала историю. INFO+ продолжают
+        # писаться в файлы через SYSTEM/BUSINESS. Для отладки временно enabled=True.
         "DEBUG": LoggerScopeSchema(
-            enabled=True,
+            enabled=False,
             min_level="DEBUG",
             channels=["system_file"],
         ),

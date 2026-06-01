@@ -71,7 +71,9 @@ class ProcessManagerProcess(ProcessModule):
         self._system_ready_event = custom.get("system_ready_event")
         # ОБЩИЙ system-wide stop: PM наблюдает его в lifecycle (run_process_function)
         # и пробрасывает детям через ProcessRegistry — любой процесс взвёл → все гаснут.
-        self._system_stop_event = custom.get("system_stop_event")
+        # Берём из shared_resources (НЕ из custom: custom рассылается монитором через
+        # Queue, а сырой mp.Event на Windows-spawn пиклится только через inheritance).
+        self._system_stop_event = self.shared_resources.get_system_stop_event() if self.shared_resources else None
 
         queue_registry = self._resolve_queue_registry()
 

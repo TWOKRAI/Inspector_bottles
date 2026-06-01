@@ -98,6 +98,7 @@ def run_process_function(
     process_name: str,
     stop_event: Optional[Event] = None,
     shared_resources_or_bundle: Optional[Union[SharedResourcesManager, Dict[str, Any]]] = None,
+    system_stop_event: Optional[Event] = None,
 ):
     """
     Top-level функция для запуска процесса внутри OS-процесса.
@@ -108,6 +109,16 @@ def run_process_function(
     log = _ProcessLogger(process_name)
     process_instance = None
     shared_resources = None
+
+    # Самрегистрация в PID-реестре: при жёстком убийстве главного процесса (закрытие
+    # окна терминала) finally→stop() не отрабатывает; реестр позволяет следующему старту
+    # реапнуть осиротевшие хвосты. Путь — из env INSPECTOR_PID_FILE (ставит launcher).
+    try:
+        from ..launcher.pid_registry import register_self
+
+        register_self()
+    except Exception:  # noqa: BLE001 — реестр не критичен
+        pass
 
     try:
         log.info("Process starting...")
@@ -126,6 +137,14 @@ def run_process_function(
 
         process_data = shared_resources.get_process_data(process_name)
         _attach_stop_event_to_process_data(process_data, stop_event)
+        # ОБЩИЙ system_stop_event держим АТРИБУТОМ на shared_resources, а НЕ в custom.
+        # Причина: ProcessMonitor._broadcast_status_change рассылает весь state процесса
+        # (включая custom) через Queue всем процессам — сырой mp.Event на Windows-spawn
+        # пиклится только через inheritance, иначе RuntimeError. SRM-инстанс локален для
+        # процесса и никогда не сериализуется в очередь. Событие приходит отдельным
+        # Process-аргументом (inheritance); PM/GUI читают его через get_system_stop_event().
+        if system_stop_event is not None and shared_resources is not None:
+            shared_resources._system_stop_event = system_stop_event
 
         process_config: Dict[str, Any] = {}
         if process_data:
@@ -154,10 +173,10 @@ def run_process_function(
                 _update_process_state(shared_resources, process_name, "error")
                 return
 
-        # ОБЩИЙ system-wide stop приходит через bundle custom (spawner→PM→дети).
-        system_stop_event = None
-        if process_data and getattr(process_data, "custom", None):
-            system_stop_event = process_data.custom.get("system_stop_event")
+        # ОБЩИЙ system-wide stop приходит отдельным Process-аргументом (inheritance).
+        # Fallback — атрибут на shared_resources (на случай SRM-mode без явного аргумента).
+        if system_stop_event is None and shared_resources is not None:
+            system_stop_event = getattr(shared_resources, "_system_stop_event", None)
         _run_lifecycle(process_instance, stop_event, log, system_stop_event)
         log.info("Process finished")
 

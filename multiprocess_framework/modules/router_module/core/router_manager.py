@@ -871,7 +871,10 @@ class RouterManager(ChannelRoutingManager):
           3. [] → ошибка
         """
         ch_name = msg_dict.get("channel")
-        if ch_name:
+        # "queue" — легаси-дефолт из MESSAGE_TYPE_DEFAULTS, а НЕ реальный канал Router
+        # (реальные: system_events, {proc}_data, {proc}_local). Трактуем как «канал не
+        # задан»: проваливаемся в dispatcher/targets без WARNING-шума на старте.
+        if ch_name and ch_name != "queue":
             ch = self._channel_registry.get(ch_name)
             if ch:
                 return [ch]

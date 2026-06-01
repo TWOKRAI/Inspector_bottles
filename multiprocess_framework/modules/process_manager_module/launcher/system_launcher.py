@@ -116,8 +116,24 @@ class SystemLauncher:
             spawner_kwargs["orchestrator_config"] = self._orchestrator_config
         return ProcessSpawner(**spawner_kwargs)
 
+    def _prepare_pid_registry(self) -> None:
+        """Подготовить PID-реестр: зафиксировать путь в env (наследуется детьми через
+        spawn) и реапнуть осиротевшие хвосты предыдущего запуска (если главный процесс
+        был убит жёстко и finally→stop() не отработал)."""
+        try:
+            import os as _os
+
+            from .pid_registry import pid_file_path, reap_and_reset
+
+            # Фиксируем путь в env, чтобы все дочерние процессы писали в тот же файл
+            _os.environ["INSPECTOR_PID_FILE"] = str(pid_file_path())
+            reap_and_reset(log=self._log_info)
+        except Exception:  # noqa: BLE001 — реестр не критичен для запуска
+            pass
+
     def run(self) -> None:
         """Запуск: launch_orchestrator + wait. Ctrl+C → stop."""
+        self._prepare_pid_registry()
         processes_config = self._get_processes_config()
         try:
             from ...shared_resources_module.memory.platform import cleanup_known_shm_at_startup
@@ -151,6 +167,7 @@ class SystemLauncher:
 
     def start(self) -> None:
         """Запуск (если run() не используется)."""
+        self._prepare_pid_registry()
         processes_config = self._get_processes_config()
         if not processes_config:
             raise RuntimeError("No processes. Use add_process() or pass config.")
@@ -223,6 +240,14 @@ class SystemLauncher:
             self._log_info("Stopping system...")
             self._spawner.stop()
             self._log_info("System stopped")
+        # Штатная остановка отработала — чистим PID-реестр, чтобы следующий старт не
+        # пытался реапнуть уже мёртвые PID.
+        try:
+            from .pid_registry import clear
+
+            clear()
+        except Exception:  # noqa: BLE001
+            pass
 
     def wait(self) -> None:
         """Ожидание завершения."""

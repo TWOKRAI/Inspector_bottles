@@ -19,6 +19,8 @@ def _make_mock_shared_resources() -> MagicMock:
     # process_data = None → ProcessLifecycle продолжит без лишних действий
     sr.get_process_data.return_value = None
     sr.update_process_state.return_value = None
+    # По умолчанию общий system_stop_event не проброшен (None) → fallback на IPC
+    sr.get_system_stop_event.return_value = None
     # process_state_registry — нужен ProcessState
     sr.process_state_registry = MagicMock()
     sr.process_state_registry.register.return_value = None
@@ -499,13 +501,12 @@ class TestRequestSystemShutdown:
     def test_sets_system_stop_event_when_available(self):
         """Основной путь: взводит ОБЩИЙ system_stop_event, IPC НЕ шлёт."""
         import threading
-        from types import SimpleNamespace
 
         from multiprocess_prototype.frontend.process import GuiProcess
 
         ev = threading.Event()
         sr = _make_mock_shared_resources()
-        sr.get_process_data.return_value = SimpleNamespace(custom={"system_stop_event": ev})
+        sr.get_system_stop_event.return_value = ev
         process = GuiProcess(name="gui", shared_resources=sr)
         process.send_message = MagicMock()
         process._log_info = MagicMock()

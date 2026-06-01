@@ -88,12 +88,14 @@ class ProcessRegistry:
             process_data = self.shared_resources.get_process_data(name) if self.shared_resources else None
             custom = dict(process_data.custom) if process_data and process_data.custom else {}
             custom.setdefault("process_config", process_config)
-            for key in ("stop_event", "error_manager", "pause_event", "system_ready_event"):
+            # Сырые Event/менеджеры НЕ кладём в bundle custom: custom регистрируется в
+            # process_state_registry и сериализуется через Queue внутри
+            # _build_shared_resources_from_bundle (у детей есть очереди с feeder-потоками).
+            # mp.Event/Condition на Windows-spawn пиклится только через inheritance →
+            # иначе RuntimeError "should only be shared ... through inheritance".
+            # system_stop_event передаётся отдельным Process-аргументом (см. ниже).
+            for key in ("stop_event", "error_manager", "pause_event", "system_ready_event", "system_stop_event"):
                 custom.pop(key, None)
-            # ОБЩИЙ system-wide stop в bundle ребёнка (pickle-safe Event через spawn) —
-            # его lifecycle наблюдает наравне со своим per-process stop_event.
-            if self._system_stop_event is not None:
-                custom["system_stop_event"] = self._system_stop_event
 
             all_process_memory: Dict[str, Dict[str, Any]] = {}
             if self.shared_resources:
@@ -124,7 +126,8 @@ class ProcessRegistry:
 
             process = Process(
                 target=run_process_function,
-                args=(class_path, name, stop_event, bundle),
+                # system_stop_event — отдельным аргументом (inheritance), НЕ в bundle custom.
+                args=(class_path, name, stop_event, bundle, self._system_stop_event),
                 name=name,
             )
             if self.logger:

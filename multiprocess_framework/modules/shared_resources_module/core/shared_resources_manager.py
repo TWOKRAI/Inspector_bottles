@@ -112,6 +112,19 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
             process_state_registry=self._process_state_registry,
             logger=logger,
         )
+        # ОБЩИЙ system_stop_event (mp.Event). Хранится здесь, а НЕ в process_data.custom:
+        # custom рассылается ProcessMonitor'ом через Queue всем процессам, а сырой
+        # mp.Event на Windows-spawn пиклится только через inheritance. SRM-инстанс локален
+        # для процесса и никогда не сериализуется в очередь. Ставится в process_runner.
+        self._system_stop_event = None
+
+    def get_system_stop_event(self):
+        """ОБЩИЙ system_stop_event (mp.Event) или None.
+
+        Передаётся отдельным Process-аргументом (inheritance) и ставится в
+        process_runner. PM/GUI читают его отсюда, чтобы взвести каскадный shutdown.
+        """
+        return self._system_stop_event
 
     # =========================================================================
     # ISharedResourcesManager — жизненный цикл
