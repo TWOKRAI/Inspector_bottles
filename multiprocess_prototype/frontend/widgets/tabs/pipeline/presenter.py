@@ -90,6 +90,9 @@ class PipelinePresenter:
         self._scene: GraphScene | None = None
         self._suppress = False
         self._gui_positions: dict[str, tuple[float, float]] = {}
+        # Зафиксированные ноды (session-only): не двигаются drag'ом и пропускаются
+        # авто-раскладкой. Применяется в _topology_to_graph (NodeData.locked).
+        self._locked_nodes: set[str] = set()
         # G.4.2: кэш port_schemas (node_id → схемы), заполняется _topology_to_graph,
         # читается load_scene_with_ports. Инициализируем здесь, чтобы метод рендера
         # не падал AttributeError при вызове до первого _topology_to_graph.
@@ -922,6 +925,21 @@ class PipelinePresenter:
             return
         self._gui_positions[node_id] = (new_x, new_y)
 
+    def toggle_node_lock(self, node_id: str) -> None:
+        """Зафиксировать/освободить ноду (session-only).
+
+        Locked-нода не перетаскивается (ItemIsMovable=False) и пропускается
+        auto_layout_scene. Состояние живёт в _locked_nodes и переприменяется в
+        _topology_to_graph при reload (переживает мутации в рамках сессии).
+        """
+        locked = node_id not in self._locked_nodes
+        if locked:
+            self._locked_nodes.add(node_id)
+        else:
+            self._locked_nodes.discard(node_id)
+        if self._scene:
+            self._scene.set_node_locked(node_id, locked)
+
     # ------------------------------------------------------------------ #
     #  Topology sync                                                       #
     # ------------------------------------------------------------------ #
@@ -938,6 +956,12 @@ class PipelinePresenter:
         """
         if self._suppress:
             return
+        # Сохранить ТЕКУЩИЕ позиции нод из scene перед перестройкой: ручной drag
+        # пишет позицию только в scene, а reload берёт позиции из _gui_positions.
+        # Без этого sync любая мутация (TopologyReplaced) сбрасывала бы вручную
+        # передвинутые ноды на дефолт/предыдущую позицию («ноды сами сдвигаются»).
+        if self._scene:
+            self._gui_positions.update(self._scene.get_all_node_positions())
         new_topology = self._services.topology.load().to_dict()
         # G.6.3: сохранить выделение через reload — load_from_data делает clear_all,
         # иначе после undo/redo (и любой мутации) выделение сбрасывается, inspector
@@ -1078,14 +1102,19 @@ class PipelinePresenter:
                     # Сортируем по plugin_index для стабильного порядка цепочки.
                     members.sort(key=lambda m: m.plugin_index)
                     for j, member in enumerate(members):
+                        # Зафиксированную ноду авто-раскладка не трогает.
+                        if getattr(member.data, "locked", False):
+                            continue
                         mx = x + CONTAINER_PADDING + j * (NODE_WIDTH + CONTAINER_INNER_GAP)
                         my = y + inner_dy
                         member.setPos(mx, my)
                         self._gui_positions[member.node_id] = (mx, my)
                 else:
-                    # Display-бокс (или fallback) — двигаем сам узел.
-                    self._gui_positions[layout_id] = (x, y)
+                    # Display-бокс (или fallback) — двигаем сам узел (если не locked).
                     node_item = self._scene.get_node(layout_id)
+                    if node_item is not None and getattr(getattr(node_item, "data", None), "locked", False):
+                        continue
+                    self._gui_positions[layout_id] = (x, y)
                     if node_item is not None:
                         node_item.setPos(x, y)
 
@@ -1192,6 +1221,7 @@ class PipelinePresenter:
                         process_name=name,
                         plugin_index=-1,
                         plugin_name="",
+                        locked=name in self._locked_nodes,
                     )
                 )
                 used_ids.add(name)
@@ -1237,6 +1267,7 @@ class PipelinePresenter:
                         process_name=name,
                         plugin_index=j,
                         plugin_name=pname,
+                        locked=node_id in self._locked_nodes,
                     )
                 )
 

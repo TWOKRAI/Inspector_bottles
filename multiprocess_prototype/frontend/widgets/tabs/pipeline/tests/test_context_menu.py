@@ -69,7 +69,9 @@ class TestContextMenuMethods:
             mock_menu = MockMenu.return_value
             delete_action = MagicMock()
             inspect_action = MagicMock()
-            mock_menu.addAction.side_effect = [inspect_action, delete_action]
+            lock_action = MagicMock()
+            # Порядок пунктов для плагин-ноды: Inspect, Зафиксировать, Delete.
+            mock_menu.addAction.side_effect = [inspect_action, lock_action, delete_action]
             mock_menu.exec.return_value = delete_action
 
             scene._show_node_menu(mock_event, node)
@@ -90,7 +92,9 @@ class TestContextMenuMethods:
             mock_menu = MockMenu.return_value
             inspect_action = MagicMock()
             delete_action = MagicMock()
-            mock_menu.addAction.side_effect = [inspect_action, delete_action]
+            lock_action = MagicMock()
+            # Порядок пунктов для плагин-ноды: Inspect, Зафиксировать, Delete.
+            mock_menu.addAction.side_effect = [inspect_action, lock_action, delete_action]
             mock_menu.exec.return_value = inspect_action
 
             scene._show_node_menu(mock_event, node)

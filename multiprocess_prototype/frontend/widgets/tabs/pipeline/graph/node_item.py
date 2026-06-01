@@ -39,6 +39,8 @@ class NodeData:
     plugin_index: int = -1
     # Имя плагина (= имя регистра; пусто для process-fallback ноды)
     plugin_name: str = ""
+    # Зафиксирована ли нода: не перетаскивается и пропускается авто-раскладкой.
+    locked: bool = False
 
 
 class NodeItem(QGraphicsRectItem):
@@ -64,8 +66,8 @@ class NodeItem(QGraphicsRectItem):
         # Позиция
         self.setPos(data.x, data.y)
 
-        # Флаги
-        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsMovable)
+        # Флаги. Перемещаемость зависит от lock: зафиксированную ноду не двигаем.
+        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsMovable, not data.locked)
         self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsSelectable)
         self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemSendsGeometryChanges)
 
@@ -186,6 +188,17 @@ class NodeItem(QGraphicsRectItem):
         return self._data
 
     @property
+    def locked(self) -> bool:
+        """Зафиксирована ли нода (не перетаскивается)."""
+        return self._data.locked
+
+    def set_locked(self, locked: bool) -> None:
+        """Зафиксировать/освободить ноду: меняет ItemIsMovable и перерисовывает."""
+        self._data.locked = locked
+        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsMovable, not locked)
+        self.update()
+
+    @property
     def process_name(self) -> str:
         """Имя процесса, которому принадлежит плагин-нода (пусто → вне контейнера)."""
         return self._data.process_name
@@ -223,9 +236,11 @@ class NodeItem(QGraphicsRectItem):
         # Заливка
         painter.setBrush(self.brush())
 
-        # Рамка: толще при выделении
+        # Рамка: белая при выделении, золотая у зафиксированной, иначе обычная.
         if self.isSelected():
             painter.setPen(QPen(QColor("#ffffff"), 2))
+        elif self._data.locked:
+            painter.setPen(QPen(QColor("#ffc107"), 2))  # золотая = зафиксирована
         else:
             painter.setPen(self.pen())
 

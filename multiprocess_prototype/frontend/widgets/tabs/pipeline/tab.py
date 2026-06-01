@@ -240,6 +240,8 @@ class PipelineTab(QWidget):
         # Работает для NodeItem и DisplayNodeItem (оба имеют node_id).
         self._scene.node_delete_requested.connect(self._on_node_delete_requested)
         self._scene.node_inspect_requested.connect(self._on_node_inspect_requested)
+        # Фиксация ноды (контекстное меню «Зафиксировать/Открепить»).
+        self._scene.node_lock_toggle_requested.connect(self._on_node_lock_toggle)
         # D.3: перетаскивание плагин-ноды между контейнерами / reorder внутри.
         self._scene.plugin_drop_requested.connect(self._on_plugin_drop_requested)
         # G.4.4: field_changed → presenter._on_inspector_field_changed (dispatch
@@ -294,11 +296,9 @@ class PipelineTab(QWidget):
         # G.4.2: рендер через presenter (port_schemas из PluginCatalog), не голый load_from_data
         self._presenter.load_scene_with_ports(nodes, edges)
         if nodes:
-            # Сразу раскладываем граф (Sugiyama) — без этого ноды накладываются
-            # друг на друга и непонятно, что куда идёт. Делает граф читаемым на
-            # старте и надёжным для клика (issue: карточка узла появляется только
-            # при попадании по ноде, а на «мешанине» клики промахивались).
-            self._presenter.auto_layout_scene()
+            # НЕ авто-раскладываем при загрузке: ноды встают по сохранённым позициям
+            # (gui_positions) или дефолтному кластеру. Авто-раскладка — только по
+            # кнопке «Раскладка» (пользователь сам решает, когда перестроить граф).
             self._view.fit_to_view()
 
     def _load_palette(self) -> None:
@@ -465,6 +465,13 @@ class PipelineTab(QWidget):
         item = self._scene.get_node(node_id)
         if item is not None:
             item.setSelected(True)
+
+    def _on_node_lock_toggle(self, node_id: str) -> None:
+        """Контекстное меню «Зафиксировать/Открепить» — фиксация ноды (session-only).
+
+        Не мутирует topology (GUI-состояние), permission gating не требуется.
+        """
+        self._presenter.toggle_node_lock(node_id)
 
     def _on_selection_changed(self) -> None:
         """Обработчик изменения выбора в scene.

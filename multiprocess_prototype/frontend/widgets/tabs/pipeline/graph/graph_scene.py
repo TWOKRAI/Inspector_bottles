@@ -24,6 +24,7 @@ class GraphScene(QGraphicsScene):
     # Сигналы для context menu actions
     node_delete_requested = Signal(str)  # node_id
     node_inspect_requested = Signal(str)  # node_id
+    node_lock_toggle_requested = Signal(str)  # node_id — зафиксировать/освободить
     edge_delete_requested = Signal(object)  # EdgeItem
     add_process_requested = Signal(float, float)  # scene x, y
     # Task 1.1: запрос на размещение пустого (непривязанного) display-бокса.
@@ -367,6 +368,12 @@ class GraphScene(QGraphicsScene):
         """Вернуть позиции всех нод {node_id: (x, y)}."""
         return {nid: (item.pos().x(), item.pos().y()) for nid, item in self._nodes.items()}
 
+    def set_node_locked(self, node_id: str, locked: bool) -> None:
+        """Зафиксировать/освободить плагин-ноду по id (no-op для display-боксов)."""
+        item = self._nodes.get(node_id)
+        if item is not None and hasattr(item, "set_locked"):
+            item.set_locked(locked)
+
     def port_at(self, scene_pos: tuple[float, float]):
         """Найти PortItem в точке scene_pos."""
         from .port_item import PortItem
@@ -411,6 +418,11 @@ class GraphScene(QGraphicsScene):
         """Контекстное меню для ноды."""
         menu = QMenu()
         inspect_action = menu.addAction("Inspect")
+        # Лок доступен только для плагин-нод (NodeItem с set_locked).
+        lock_action = None
+        if hasattr(node_item, "set_locked"):
+            label = "Открепить" if getattr(node_item, "locked", False) else "Зафиксировать"
+            lock_action = menu.addAction(label)
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
 
@@ -419,6 +431,8 @@ class GraphScene(QGraphicsScene):
             self.node_delete_requested.emit(node_item.node_id)
         elif action == inspect_action:
             self.node_inspect_requested.emit(node_item.node_id)
+        elif lock_action is not None and action == lock_action:
+            self.node_lock_toggle_requested.emit(node_item.node_id)
 
     def _show_edge_menu(self, event, edge_item) -> None:
         """Контекстное меню для edge."""
