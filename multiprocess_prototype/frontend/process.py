@@ -203,27 +203,45 @@ class GuiProcess(ProcessModule):
         self._stop_requested = True
         self._request_system_shutdown()
 
+    def _get_system_stop_event(self):
+        """Достать ОБЩИЙ system_stop_event из bundle custom (проброшен spawner→PM→дети)."""
+        try:
+            pd = self.shared_resources.get_process_data(self.name) if self.shared_resources else None
+            custom = getattr(pd, "custom", None) if pd else None
+            return custom.get("system_stop_event") if isinstance(custom, dict) else None
+        except Exception:  # noqa: BLE001 — нет события → fallback на IPC
+            return None
+
     def _request_system_shutdown(self) -> None:
         """Закрытие окна = выключение всей системы.
 
-        GuiProcess — дочерний процесс ProcessManager'а. Без этого сигнала закрытие
-        окна гасило бы только сам GuiProcess, а ProcessManager и воркеры остались бы
-        жить headless (launcher висит в join-цикле и не доходит до
-        ``_kill_orphan_children``). Шлём ``system.shutdown`` в ProcessManager — он
-        ставит ``stop_event`` → каскадный teardown дерева. Fire-and-forget: ответ не
-        нужен, важна доставка. Best-effort: ошибка на выходе не критична.
+        Основной путь — взвести ОБЩИЙ ``system_stop_event``: его наблюдают lifecycle-циклы
+        ВСЕХ процессов (PM + воркеры), поэтому они гаснут ПАРАЛЛЕЛЬНО сами (≤0.1с), не
+        дожидаясь команды от PM. Launcher детектит смерть PM → ``_kill_orphan_children``
+        backstop. Без сигнала закрытие окна гасило бы только сам GuiProcess.
+
+        Fallback (общий event не проброшен — старый launch): IPC ``system.shutdown`` в
+        ProcessManager. Best-effort: ошибка на выходе не критична.
         """
+        ev = self._get_system_stop_event()
+        if ev is not None:
+            ev.set()
+            self._log_info(
+                "GuiProcess: взведён общий system_stop_event (закрытие окна) — система гасится параллельно",
+                module="gui",
+            )
+            return
         try:
             from multiprocess_framework.modules.message_module import build_system_command_message
 
             msg = build_system_command_message({"cmd": "system.shutdown"}, sender=self.name)
             self.send_message("ProcessManager", msg)
             self._log_info(
-                "GuiProcess: послан system.shutdown в ProcessManager (закрытие окна)",
+                "GuiProcess: system_stop_event недоступен → послан system.shutdown (fallback)",
                 module="gui",
             )
         except Exception as exc:  # noqa: BLE001 — best-effort на выходе процесса
-            self._log_warning(f"GuiProcess: не удалось послать system.shutdown: {exc}", module="gui")
+            self._log_warning(f"GuiProcess: не удалось сигнализировать shutdown: {exc}", module="gui")
 
     def _reload_frontend_modules(self) -> None:
         """Перезагрузить Python-модули frontend для подхвата новых файлов.

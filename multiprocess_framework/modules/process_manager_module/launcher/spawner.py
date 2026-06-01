@@ -35,6 +35,7 @@ class ProcessSpawner:
         stop_timeout: float = 5.0,
         on_shutdown: Optional[Callable[[], None]] = None,
         system_ready_event: Optional[Event] = None,
+        system_stop_event: Optional[Event] = None,
         orchestrator_class_path: str = PROCESS_MANAGER_CLASS_PATH,
         orchestrator_config: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -49,6 +50,8 @@ class ProcessSpawner:
         # Event для сигнализации готовности системы (ADR-116).
         # ProcessManagerProcess выставляет его после завершения initialize().
         self._system_ready_event: Optional[Event] = system_ready_event
+        # ОБЩИЙ system-wide stop (см. SystemLauncher): проброшен PM и всем детям.
+        self._system_stop_event: Optional[Event] = system_stop_event
         # Путь к классу оркестратора (по умолчанию ProcessManagerProcess).
         # Прототип может подставить свой подкласс.
         self._orchestrator_class_path = orchestrator_class_path
@@ -75,6 +78,9 @@ class ProcessSpawner:
         # multiprocessing.Event pickle-safe и безопасно пробрасывается через spawn.
         if self._system_ready_event is not None:
             custom["system_ready_event"] = self._system_ready_event
+        # ОБЩИЙ stop — PM читает его и пробрасывает детям (ProcessRegistry).
+        if self._system_stop_event is not None:
+            custom["system_stop_event"] = self._system_stop_event
         bundle = {
             "queues": {},
             "config": process_config,
@@ -111,6 +117,11 @@ class ProcessSpawner:
 
         if self._logger:
             self._logger.info("Stopping system...")
+
+        # 0. ОБЩИЙ stop — все процессы (PM + дети) видят его в своём lifecycle и
+        # начинают граceful-стоп ПАРАЛЛЕЛЬНО, не дожидаясь команды от PM.
+        if self._system_stop_event is not None:
+            self._system_stop_event.set()
 
         # 1. Сигнал ProcessManager — он внутри shutdown() остановит дочерние
         if self._process and self._process.is_alive():

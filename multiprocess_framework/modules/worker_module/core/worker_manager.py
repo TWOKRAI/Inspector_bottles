@@ -158,9 +158,31 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
             self.start_worker(name)
         self._log_info("All workers started")
 
-    def stop_all_workers(self) -> None:
-        for name in self._worker_registry.get_all_names():
-            self.stop_worker(name)
+    def stop_all_workers(self, timeout: float = 5.0) -> None:
+        """Остановить все воркеры ПАРАЛЛЕЛЬНО: сигнал всем сразу, затем join.
+
+        Раньше было последовательно (``for name: stop_worker(name)``) — каждый
+        ``join(timeout=5с)`` суммировался, N воркеров гасились ~N×5с (главный вклад
+        в медленный shutdown). Теперь две фазы: (1) взвести stop_event ВСЕМ, (2)
+        join с ОБЩИМ дедлайном — таймауты перекрываются, итог ~timeout, а не N×timeout.
+        """
+        names = list(self._worker_registry.get_all_names())
+        # Фаза 1: сигналим стоп всем воркерам сразу
+        for name in names:
+            info = self._worker_registry.get(name)
+            if info:
+                self._worker_registry.update_status(name, WorkerStatus.STOPPING)
+                info["stop_event"].set()
+        # Фаза 2: join с общим дедлайном (перекрытие, не сумма)
+        deadline = time.monotonic() + timeout
+        for name in names:
+            info = self._worker_registry.get(name)
+            if not info:
+                continue
+            thread = info.get("thread")
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            self._worker_registry.update_status(name, WorkerStatus.STOPPED)
         self._log_info("All workers stopped")
 
     def pause_all_workers(self, exclude_system: bool = True) -> None:

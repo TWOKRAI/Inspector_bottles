@@ -69,6 +69,9 @@ class ProcessManagerProcess(ProcessModule):
         # Event для сигнализации готовности системы (ADR-116).
         # Выставляется в конце initialize() — SystemLauncher ждёт его в wait_until_ready().
         self._system_ready_event = custom.get("system_ready_event")
+        # ОБЩИЙ system-wide stop: PM наблюдает его в lifecycle (run_process_function)
+        # и пробрасывает детям через ProcessRegistry — любой процесс взвёл → все гаснут.
+        self._system_stop_event = custom.get("system_stop_event")
 
         queue_registry = self._resolve_queue_registry()
 
@@ -79,6 +82,7 @@ class ProcessManagerProcess(ProcessModule):
             queue_registry=queue_registry,
             config_manager=None,
             shared_resources=self.shared_resources,
+            system_stop_event=self._system_stop_event,
         )
         self._priority = ProcessPriority(logger=self, platform_adapter=platform_adapter)
         self._status = ProcessStatusMonitor(self._process_registry.os_processes)

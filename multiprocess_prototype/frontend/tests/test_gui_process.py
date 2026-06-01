@@ -496,11 +496,30 @@ class TestDataReceiverErrorRecovery:
 class TestRequestSystemShutdown:
     """GuiProcess._request_system_shutdown — закрытие GUI гасит всю систему."""
 
-    def test_sends_system_shutdown_to_process_manager(self):
-        """Шлёт command='process.command' с вложенным cmd='system.shutdown' в ProcessManager."""
+    def test_sets_system_stop_event_when_available(self):
+        """Основной путь: взводит ОБЩИЙ system_stop_event, IPC НЕ шлёт."""
+        import threading
+        from types import SimpleNamespace
+
         from multiprocess_prototype.frontend.process import GuiProcess
 
+        ev = threading.Event()
         sr = _make_mock_shared_resources()
+        sr.get_process_data.return_value = SimpleNamespace(custom={"system_stop_event": ev})
+        process = GuiProcess(name="gui", shared_resources=sr)
+        process.send_message = MagicMock()
+        process._log_info = MagicMock()
+
+        process._request_system_shutdown()
+
+        assert ev.is_set(), "общий system_stop_event должен быть взведён"
+        process.send_message.assert_not_called()  # IPC не нужен — event основной путь
+
+    def test_fallback_ipc_when_no_event(self):
+        """Fallback: общий event не проброшен → IPC command='process.command' с system.shutdown."""
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        sr = _make_mock_shared_resources()  # get_process_data → None → нет event
         process = GuiProcess(name="gui", shared_resources=sr)
         process.send_message = MagicMock()
         process._log_info = MagicMock()

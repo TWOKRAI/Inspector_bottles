@@ -56,6 +56,10 @@ class SystemLauncher:
         # Event, который ProcessManagerProcess выставляет после завершения
         # своего initialize() (все дочерние процессы spawned и запущены).
         self._system_ready_event: _MpEvent = _MpEvent()
+        # ОБЩИЙ system-wide stop: проброшен ВСЕМ процессам (PM + дети). Любой
+        # процесс (напр. GUI при закрытии) взводит его → каждый lifecycle-цикл
+        # видит и гасится сам, ПАРАЛЛЕЛЬНО (не последовательно по команде PM).
+        self._system_stop_event: _MpEvent = _MpEvent()
 
     def _log_info(self, message: str) -> None:
         _logger.info("[SystemLauncher] %s", message)
@@ -104,6 +108,7 @@ class SystemLauncher:
             stop_timeout=self._stop_timeout,
             on_shutdown=self._on_shutdown,
             system_ready_event=self._system_ready_event,
+            system_stop_event=self._system_stop_event,
         )
         if self._orchestrator_class_path is not None:
             spawner_kwargs["orchestrator_class_path"] = self._orchestrator_class_path
@@ -129,8 +134,15 @@ class SystemLauncher:
         self._log_info("ProcessManagerProcess started")
         self._log_info("System is running. Press Ctrl+C to stop.")
         try:
-            # Цикл с коротким join — Windows не прерывает .join() по Ctrl+C
+            # Цикл с коротким join — Windows не прерывает .join() по Ctrl+C.
+            # Также наблюдаем ОБЩИЙ system_stop_event: любой процесс (GUI при
+            # закрытии) взвёл его → выходим и зовём stop(), который force-terminate'ит
+            # PM, даже если тот завис на non-daemon потоке (иначе is_running() остался
+            # бы True вечно → подвисание при закрытии GUI).
             while self._spawner.is_running():
+                if self._system_stop_event.is_set():
+                    self._log_info("system_stop_event взведён — инициирую остановку системы")
+                    break
                 self._spawner.get_process().join(timeout=0.5)
         except KeyboardInterrupt:
             self._log_info("Ctrl+C received, stopping...")

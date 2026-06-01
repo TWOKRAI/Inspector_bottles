@@ -19,14 +19,21 @@ def _run_lifecycle(
     process_instance,
     stop_event: Optional[Event],
     log: _ProcessLogger,
+    system_stop_event: Optional[Event] = None,
 ) -> None:
-    """run() затем ожидание stop_event / should_stop()."""
+    """run() затем ожидание stop_event / system_stop_event / should_stop().
+
+    Наблюдаются ДВА события: per-process ``stop_event`` (остановка одного процесса)
+    и ОБЩИЙ ``system_stop_event`` (любой процесс взвёл → все гаснут параллельно).
+    """
     if hasattr(process_instance, "run"):
         process_instance.run()
 
     while True:
-        if stop_event and stop_event.is_set():
-            log.info("Stop signal received")
+        own = stop_event is not None and stop_event.is_set()
+        system = system_stop_event is not None and system_stop_event.is_set()
+        if own or system:
+            log.info("Stop signal received (system-wide)" if system and not own else "Stop signal received")
             if hasattr(process_instance, "stop"):
                 process_instance.stop()
             break
@@ -44,6 +51,7 @@ def _log_exception_via_error_manager(
         return
     try:
         from multiprocess_framework.modules.error_module import ErrorManager
+
         for process_name in shared_resources.process_state_registry.get_process_names():
             process_data = shared_resources.get_process_data(process_name)
             if process_data and process_data.custom:
@@ -109,9 +117,7 @@ def run_process_function(
             return
 
         if isinstance(shared_resources_or_bundle, dict):
-            shared_resources = _build_shared_resources_from_bundle(
-                process_name, shared_resources_or_bundle
-            )
+            shared_resources = _build_shared_resources_from_bundle(process_name, shared_resources_or_bundle)
         else:
             shared_resources = shared_resources_or_bundle or SharedResourcesManager()
             process_data = shared_resources.get_process_data(process_name)
@@ -123,16 +129,10 @@ def run_process_function(
 
         process_config: Dict[str, Any] = {}
         if process_data:
-            if (
-                hasattr(process_data, "config")
-                and process_data.config
-                and hasattr(process_data.config, "process")
-            ):
+            if hasattr(process_data, "config") and process_data.config and hasattr(process_data.config, "process"):
                 process_config = process_data.config.process
             elif process_data.custom:
-                process_config = process_data.custom.get(
-                    "process_config", process_data.custom.copy()
-                )
+                process_config = process_data.custom.get("process_config", process_data.custom.copy())
 
         process_instance = process_class(
             name=process_name,
@@ -154,7 +154,11 @@ def run_process_function(
                 _update_process_state(shared_resources, process_name, "error")
                 return
 
-        _run_lifecycle(process_instance, stop_event, log)
+        # ОБЩИЙ system-wide stop приходит через bundle custom (spawner→PM→дети).
+        system_stop_event = None
+        if process_data and getattr(process_data, "custom", None):
+            system_stop_event = process_data.custom.get("system_stop_event")
+        _run_lifecycle(process_instance, stop_event, log, system_stop_event)
         log.info("Process finished")
 
     except KeyboardInterrupt:
