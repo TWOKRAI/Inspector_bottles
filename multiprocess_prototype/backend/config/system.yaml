@@ -43,6 +43,7 @@ backend_ctl:
 discovery:
   plugin_paths:
     - "Plugins"
+    - "Services"   # плагины внутри Service-пакетов (напр. Services/modbus/plugin/plugin.py)
   service_paths:
     - "Services"
   auto_discover: true

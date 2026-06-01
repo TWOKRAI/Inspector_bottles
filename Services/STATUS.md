@@ -12,6 +12,7 @@
 | `sql` | production | SQLManager + Repository + UoW + QuerySet; выехал из `multiprocess_framework/modules/sql_module/` | ADR-121 |
 | `webcam_camera` | stable | WebcamCameraService — IService реализация для USB-камеры через OpenCV; зарегистрирован через @register_service; перенесён из backup в Phase 0; ADR-128 | ADR-128 |
 | `hikvision_camera` | production | Плагин-обёртка над HikSDK + core/sdk_app; выехал из плагинов | ADR-122 |
+| `modbus` | ready | Драйвер Modbus-TCP / RS485 (pymodbus 3.x); 3 слоя sdk/core/plugin + service; io-плагин `modbus`, телеметрия через API; первый Service-плагин (plugin_paths += Services) | — |
 | `auth` | foundation | User/Role storage + RBAC API (PR1) | ADR-Auth-001..004 |
 | `Operation_crop` | utility | Утилита для нарезки кадров | — |
 | `Region_processors` | utility | Регион-процессоры (заготовки для пайплайнов) | — |

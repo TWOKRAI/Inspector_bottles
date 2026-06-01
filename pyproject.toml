@@ -74,6 +74,13 @@ diagrams = [
 #     "onnxruntime>=1.20",
 # ]
 
+# Modbus-драйвер (Services/modbus) — опциональный.
+# pymodbus тянет pyserial для RS485 (RTU). Без extra драйвер импортируется,
+# но реальное подключение требует установки: pip install '.[modbus]'
+modbus = [
+    "pymodbus>=3.7",
+]
+
 [tool.uv.sources]
 # NodeGraphQt-PySide6 — fork от C3RV1, не публикуется на PyPI.
 # Sha-pin для воспроизводимости (последний коммит на master 2023-01-08).
