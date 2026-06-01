@@ -9,6 +9,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol, runtime_checkable
 
+from multiprocess_framework.modules.message_module import (
+    build_command_message,
+    build_system_command_message,
+)
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -60,14 +65,8 @@ class CommandSender:
             command: имя команды (data_type в сообщении)
             args: аргументы команды
         """
-        msg = {
-            "type": "command",
-            "command": command,
-            "data_type": command,
-            "sender": self._process.name,
-            "targets": [target_process],
-            "data": args or {},
-        }
+        # Форма сообщения — общий билдер протокола (один источник правды с driver'ом).
+        msg = build_command_message(target_process, command, args, sender=self._process.name)
         self._process.send_message(target_process, msg)
 
     # --- v2: field command с debounce ---
@@ -168,12 +167,6 @@ class CommandSender:
         управления wire'ами и прочих системных операций.
         """
         target = "ProcessManager"
-        msg = {
-            "type": "command",
-            "command": "process.command",
-            "data_type": "process.command",
-            "sender": self._process.name,
-            "targets": [target],
-            "data": command,
-        }
+        # Форма сообщения — общий билдер протокола (один источник правды с driver'ом).
+        msg = build_system_command_message(command, sender=self._process.name)
         self._process.send_message(target, msg)

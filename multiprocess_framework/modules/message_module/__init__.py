@@ -43,6 +43,9 @@ from .schemas import BaseMessageSchema, CommandMessageSchema, LogMessageSchema
 # --- Адаптер (для использования в процессах/менеджерах) ---
 from .adapters import MessageAdapter
 
+# --- Билдеры протокола (один источник правды формы команд: GUI + driver) ---
+from .builders import build_command_message, build_system_command_message
+
 # --- Публичные интерфейсы (для type hints и моков) ---
 from .interfaces import IMessage, IMessageFactory
 
@@ -51,6 +54,9 @@ __all__ = [
     "Message",
     # Адаптер
     "MessageAdapter",
+    # Билдеры протокола (GUI + driver, один источник правды)
+    "build_command_message",
+    "build_system_command_message",
     # Фабричные функции
     "create_message",
     "parse_message",

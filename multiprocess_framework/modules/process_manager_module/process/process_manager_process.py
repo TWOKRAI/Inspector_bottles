@@ -20,6 +20,10 @@ from ..core.process_registry import ProcessRegistry
 from ..core.process_status import ProcessStatusMonitor
 from ..monitor import ProcessMonitor
 from ..platforms import get_platform_adapter
+from .backend_ctl_endpoint import (
+    setup_backend_ctl_channel,
+    teardown_backend_ctl_channel,
+)
 from .topology_manager import TopologyManager
 
 
@@ -101,6 +105,8 @@ class ProcessManagerProcess(ProcessModule):
         self._console_manager: ConsoleManager | None = None
         self._topology_manager: TopologyManager | None = None
         self._state_store_manager = None
+        # backend-control endpoint (SocketChannel), поднимается при BACKEND_CTL=1
+        self._backend_ctl_channel = None
 
     def _resolve_queue_registry(self):
         """Получить QueueRegistry из shared_resources или создать новый."""
@@ -159,6 +165,14 @@ class ProcessManagerProcess(ProcessModule):
             # Router endpoint: другие процессы могут слать команды через Router (AD-8)
             if self.router_manager:
                 self.router_manager.register_message_handler("process.command", self._handle_process_command)
+
+            # backend-control endpoint (dev-инструмент, гейт BACKEND_CTL=1):
+            # внешний driver подключается по TCP и шлёт router-сообщения как GUI.
+            self._backend_ctl_channel = setup_backend_ctl_channel(
+                self.router_manager,
+                log_info=self._log_info,
+                log_error=self._log_error,
+            )
 
             # Сигнализируем SystemLauncher, что инициализация завершена (ADR-116).
             # К этому моменту: все дочерние процессы spawned и started,
@@ -951,6 +965,14 @@ class ProcessManagerProcess(ProcessModule):
             3. ConsoleManager
             4. super().shutdown() (WorkerManager, RouterManager и т.д.)
         """
+        # backend-control endpoint (PID-specific остановка, без глобального kill).
+        # getattr: shutdown может вызываться на частично сконструированном PM (тесты/ошибки init).
+        teardown_backend_ctl_channel(
+            getattr(self, "_backend_ctl_channel", None),
+            getattr(self, "router_manager", None),
+        )
+        self._backend_ctl_channel = None
+
         self._process_monitor.stop()
         shutdown_timeout = self.get_config("shutdown_timeout") or 5.0
         self._process_registry.stop_all(timeout=shutdown_timeout)
