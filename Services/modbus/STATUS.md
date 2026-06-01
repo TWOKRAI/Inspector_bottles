@@ -10,7 +10,7 @@
 | Транспорт | — | TCP + RS485 (RTU) одной либой (pymodbus 3.x) |
 | Телеметрия | 9/10 | state/ошибки/счётчики через API, callbacks, register-поля |
 | Error handling | 8/10 | ModbusDriverError-иерархия, graceful import |
-| Тесты | 8/10 | 74 unit-теста без pymodbus/железа (fake-клиент) |
+| Тесты | 8/10 | 82 unit-теста без pymodbus/железа (fake-клиент) + real round-trip |
 | Документация | 8/10 | README + STATUS |
 
 ## Структура файлов
@@ -31,8 +31,10 @@
 | `plugin/config.py` | `ModbusPluginConfig` (identity + bindings) |
 | `plugin/registers.py` | `ModbusRegisters` (config + readonly-телеметрия) |
 | `channels/modbus_channel.py` | `ModbusChannel(MessageChannel)` — драйвер как канал RouterManager |
+| `server/sim_server.py` | Тестовый Modbus-slave (приёмник) — `run_test_server` + `trace_write` |
+| `server/__main__.py` | CLI приёмника: `python -m Services.modbus.server` |
 | `__main__.py` | CLI-smoke |
-| `tests/` | 74 unit-теста |
+| `tests/` | 82 unit-теста |
 
 ## Этапы
 
@@ -40,6 +42,7 @@
 - [x] P2 — plugin-слой + `system.yaml` (`plugin_paths += Services`) + тесты (15), discovery OK
 - [x] P3 — service shell + README/STATUS + pyproject extra `[modbus]` + тесты (5)
 - [x] P4 — RouterManager как канал: `ModbusChannel(MessageChannel)` (send/poll + status/error события) + опц. регистрация в плагине + тесты (16)
+- [x] P5 — тестовый Modbus-slave (`server/`) для приёма + demo `modbus_sink` (Plugins) + рецепт `modbus_demo.yaml` + тесты (8)
 
 ## Зависимости
 

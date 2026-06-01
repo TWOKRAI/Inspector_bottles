@@ -21,6 +21,7 @@ GUI/pipeline** как плагин и сервис.
 sdk/    — тонкая обёртка над pymodbus + datatypes (int16/32/float) + errors
 core/   — ModbusConfig, ModbusDevice (state machine + телеметрия), ModbusPoller
 plugin/ — ModbusPlugin (io) + ModbusRegisters (config/телеметрия для GUI)
+server/ — тестовый Modbus-slave (приёмник) для симуляции PLC
 service.py — ModbusService (IService) для вкладки «Сервисы»
 ```
 
@@ -50,6 +51,20 @@ python -m Services.modbus --tcp 127.0.0.1:5020 read 0 10
 python -m Services.modbus --tcp 127.0.0.1:5020 write 0 42
 python -m Services.modbus --rtu COM3:9600 read 0 5
 ```
+
+## Тестовый Modbus-slave (приёмник)
+
+Сам драйвер — **master** (пишет/читает). Чтобы увидеть, что реально приходит по
+шине (например от `modbus_sink` в demo-пайплайне), есть встречный **slave**-сервер.
+Поднимается в отдельном терминале и печатает каждую входящую запись регистров:
+
+```bash
+python -m Services.modbus.server --tcp 127.0.0.1:5020
+# [16:21:07] recv holding[100..102] = [640, 480, 1234]
+```
+
+Логирование — через `trace_pdu` сервера; хранилище на нативном SimData/SimDevice
+(pymodbus 3.13). Только для теста/симуляции, не для прода.
 
 ## Использование в pipeline (плагин)
 
