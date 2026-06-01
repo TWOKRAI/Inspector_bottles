@@ -258,6 +258,7 @@ class SystemBuilder:
             orchestrator_config={
                 "initial_state": initial_state,
                 "state_throttle_rules": throttle_rules,
+                "backend_ctl": sys_config.backend_ctl.model_dump(),
             },
         )
         for cfg in configs:

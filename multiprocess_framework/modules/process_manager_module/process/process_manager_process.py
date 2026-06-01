@@ -166,10 +166,12 @@ class ProcessManagerProcess(ProcessModule):
             if self.router_manager:
                 self.router_manager.register_message_handler("process.command", self._handle_process_command)
 
-            # backend-control endpoint (dev-инструмент, гейт BACKEND_CTL=1):
-            # внешний driver подключается по TCP и шлёт router-сообщения как GUI.
+            # backend-control endpoint (dev-инструмент): гейт = system.yaml
+            # backend_ctl.enabled ИЛИ env BACKEND_CTL=1. Внешний driver подключается
+            # по TCP и шлёт router-сообщения как GUI.
             self._backend_ctl_channel = setup_backend_ctl_channel(
                 self.router_manager,
+                config=self.get_config("backend_ctl"),
                 log_info=self._log_info,
                 log_error=self._log_error,
             )

@@ -54,11 +54,46 @@ class TestGate:
         assert is_enabled({"BACKEND_CTL": "true"}) is False
         assert is_enabled({}) is False
 
+    def test_is_enabled_from_config(self) -> None:
+        # Конфиг включает без env
+        assert is_enabled({}, {"enabled": True}) is True
+        assert is_enabled({}, {"enabled": False}) is False
+        assert is_enabled({}, {}) is False
+        assert is_enabled({}, None) is False
+
+    def test_is_enabled_env_or_config(self) -> None:
+        # env=1 включает даже при config.enabled=False (escape-hatch)
+        assert is_enabled({"BACKEND_CTL": "1"}, {"enabled": False}) is True
+        # config включает при пустом env
+        assert is_enabled({"BACKEND_CTL": "0"}, {"enabled": True}) is True
+
     def test_setup_gate_closed_returns_none(self) -> None:
         router = FakeRouter()
         ch = setup_backend_ctl_channel(router, env={})
         assert ch is None
         assert router.channels == {}
+
+    def test_setup_gate_open_via_config(self) -> None:
+        # Включение через config-секцию (env пустой), порт из config
+        router = FakeRouter()
+        ch = setup_backend_ctl_channel(router, env={}, config={"enabled": True, "port": 0})
+        try:
+            assert ch is not None
+            assert BACKEND_CTL_CHANNEL in router.channels
+            assert ch.port > 0
+        finally:
+            teardown_backend_ctl_channel(ch, router)
+
+    def test_port_env_overrides_config(self) -> None:
+        # env BACKEND_CTL_PORT приоритетнее config.port
+        router = FakeRouter()
+        ch = setup_backend_ctl_channel(
+            router, env={"BACKEND_CTL": "1", "BACKEND_CTL_PORT": "0"}, config={"enabled": True, "port": 9999}
+        )
+        try:
+            assert ch is not None  # port=0 (env) → биндится на свободный, не 9999
+        finally:
+            teardown_backend_ctl_channel(ch, router)
 
     def test_setup_router_none_returns_none(self) -> None:
         ch = setup_backend_ctl_channel(None, env={"BACKEND_CTL": "1"})

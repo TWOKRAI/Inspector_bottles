@@ -27,12 +27,25 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 
 ## Запуск
 
-1. Поднять систему с открытым гейтом:
+1. Поднять систему с открытым гейтом. **Два способа** (OR):
+
+   **(a) Через `system.yaml` (основной для dev-прототипа)** —
+   `multiprocess_prototype/backend/config/system.yaml`:
+   ```yaml
+   backend_ctl:
+     enabled: true      # сокет поднимается всегда при старте
+     port: 8765
+     host: "127.0.0.1"
+   ```
+
+   **(b) Через env (escape-hatch для тестов/CI, без правки yaml):**
    ```bash
    BACKEND_CTL=1 python run.py            # порт по умолчанию 8765
    BACKEND_CTL=1 BACKEND_CTL_PORT=9001 python run.py
    ```
-   Без `BACKEND_CTL=1` endpoint не существует (в проде по умолчанию выключен).
+   Приоритет: гейт открыт если `backend_ctl.enabled` **ИЛИ** `BACKEND_CTL=1`.
+   Порт: `BACKEND_CTL_PORT` (env) > `backend_ctl.port` (yaml) > 8765.
+   В проде держать `enabled: false` и не выставлять env.
 
 2. Подключиться драйвером:
    ```python

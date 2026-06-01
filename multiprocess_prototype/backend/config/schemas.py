@@ -118,6 +118,30 @@ class DiscoverySection(SchemaBase):
     ] = True
 
 
+class BackendCtlSection(SchemaBase):
+    """Dev-инструмент: SocketChannel для headless-управления бэкендом (BackendDriver/MCP).
+
+    Гейт сокета. Включённый — поднимает TCP-endpoint в ProcessManager (localhost),
+    через который driver шлёт те же router-команды, что GUI. В проде держать выключенным.
+    Env BACKEND_CTL=1 — независимый escape-hatch (включает без правки yaml).
+    """
+
+    enabled: Annotated[
+        bool,
+        FieldMeta("Backend-control сокет", info="Поднять dev-сокет управления бэкендом (BackendDriver/MCP)."),
+    ] = False
+
+    port: Annotated[
+        int,
+        FieldMeta("Порт сокета", info="TCP-порт backend-control endpoint (localhost).", min=1024, max=65535),
+    ] = 8765
+
+    host: Annotated[
+        str,
+        FieldMeta("Bind-адрес", info="Адрес привязки сокета. Только localhost для dev-безопасности."),
+    ] = "127.0.0.1"
+
+
 class SystemConfig(SchemaBase):
     """Корневая схема system.yaml."""
 
@@ -127,6 +151,7 @@ class SystemConfig(SchemaBase):
     display: DisplayDefaults = DisplayDefaults()
     storage: StorageDefaults = StorageDefaults()
     discovery: DiscoverySection = DiscoverySection()
+    backend_ctl: BackendCtlSection = BackendCtlSection()
 
     def defaults_for_category(self, category: str) -> dict[str, Any]:
         """Получить defaults dict для категории плагина.

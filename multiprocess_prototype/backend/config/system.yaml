@@ -30,6 +30,15 @@ storage:
   db_path: data/inspector.db
   batch_size: 100
 
+# --- Backend-control сокет (dev-инструмент: BackendDriver / MCP) ---
+# enabled: true → ProcessManager поднимает TCP-endpoint на host:port (localhost).
+# Через него headless-driver шлёт те же router-команды, что GUI (отладка бэкенда
+# без GUI/qt-mcp). В проде ставить false. Env BACKEND_CTL=1 включает независимо.
+backend_ctl:
+  enabled: true
+  port: 8765
+  host: "127.0.0.1"
+
 # --- Автообнаружение плагинов и сервисов ---
 discovery:
   plugin_paths:
