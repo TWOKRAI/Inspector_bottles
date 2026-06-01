@@ -111,3 +111,4 @@ docs/diagrams/deps/per-module/*.svg
 # См. docs/tools/graphify.md §6.2
 graphify-out/
 .graphify_*
+multiprocess_framework/docs/COMMUNICATION_MAP_raw.json
