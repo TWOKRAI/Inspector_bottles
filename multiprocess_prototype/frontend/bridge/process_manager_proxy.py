@@ -15,6 +15,7 @@ GUI-редактор Pipeline менял топологию только in-memo
     restart_process(name)   → cmd="process.restart",   data={"process_name": ...}
     start_process(name)     → cmd="process.start",      data={"process_name": ...}
     stop_process(name)      → cmd="process.stop",       data={"process_name": ...}
+    shutdown_system()       → cmd="system.shutdown",    data={}
 
 Backend-приёмник: ``CommandSender.send_system_command`` шлёт сообщение
 ``command="process.command"`` в процесс ``ProcessManager``, где
@@ -76,6 +77,14 @@ class ProcessManagerProxy:
     def stop_process(self, process_name: str) -> dict[str, Any]:
         """Остановить именованный процесс."""
         return self._dispatch("process.stop", {"process_name": process_name})
+
+    def shutdown_system(self) -> dict[str, Any]:
+        """Завершить ВСЮ систему (PM ставит stop_event → каскадный teardown дерева).
+
+        Для явного «Выход» из GUI. Закрытие окна само по себе шлёт этот сигнал из
+        ``GuiProcess.run()`` — здесь дублирующий публичный API для меню/действий.
+        """
+        return self._dispatch("system.shutdown", {})
 
     # ------------------------------------------------------------------ #
     #  Внутреннее                                                         #

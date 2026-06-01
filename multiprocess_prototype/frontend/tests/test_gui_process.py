@@ -493,6 +493,44 @@ class TestDataReceiverErrorRecovery:
         assert "data_receiver.success" in metric_names
 
 
+class TestRequestSystemShutdown:
+    """GuiProcess._request_system_shutdown — закрытие GUI гасит всю систему."""
+
+    def test_sends_system_shutdown_to_process_manager(self):
+        """Шлёт command='process.command' с вложенным cmd='system.shutdown' в ProcessManager."""
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        sr = _make_mock_shared_resources()
+        process = GuiProcess(name="gui", shared_resources=sr)
+        process.send_message = MagicMock()
+        process._log_info = MagicMock()
+        process._log_warning = MagicMock()
+
+        process._request_system_shutdown()
+
+        process.send_message.assert_called_once()
+        target, msg = process.send_message.call_args[0]
+        assert target == "ProcessManager"
+        assert msg["command"] == "process.command"
+        assert msg["targets"] == ["ProcessManager"]
+        assert msg["data"] == {"cmd": "system.shutdown"}
+        assert msg["sender"] == "gui"
+
+    def test_best_effort_swallows_send_error(self):
+        """Ошибка send_message на выходе не пробрасывается (best-effort), логируется warning."""
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        sr = _make_mock_shared_resources()
+        process = GuiProcess(name="gui", shared_resources=sr)
+        process.send_message = MagicMock(side_effect=RuntimeError("router closed"))
+        process._log_info = MagicMock()
+        process._log_warning = MagicMock()
+
+        process._request_system_shutdown()  # не должно бросить
+
+        process._log_warning.assert_called_once()
+
+
 class TestStateDeltaEmitter:
     """_StateDeltaEmitter: дельты StateStore → bridge.dispatch(state_delta) (Фаза 1.2)."""
 

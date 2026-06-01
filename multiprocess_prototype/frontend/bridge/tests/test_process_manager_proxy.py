@@ -49,6 +49,16 @@ def test_process_lifecycle_commands() -> None:
     ]
 
 
+def test_shutdown_system_sends_correct_cmd() -> None:
+    sender = _FakeSender()
+    proxy = ProcessManagerProxy(sender)
+
+    result = proxy.shutdown_system()
+
+    assert sender.sent == [{"cmd": "system.shutdown"}]
+    assert result == {"success": True, "dispatched": True, "cmd": "system.shutdown"}
+
+
 def test_dict_at_boundary() -> None:
     """Аргумент команды — всегда dict (между GUI и backend только dict)."""
     sender = _FakeSender()

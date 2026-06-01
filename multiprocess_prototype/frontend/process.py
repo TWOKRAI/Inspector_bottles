@@ -198,8 +198,32 @@ class GuiProcess(ProcessModule):
             self._stop_requested = False
             self._reload_frontend_modules()
             self._log_info("GuiProcess: перезапуск UI по запросу", module="gui")
-        # После возврата из Qt — сигнализируем об остановке
+        # После возврата из Qt (реальное закрытие, НЕ _restart_ui — иначе while не
+        # вышел бы) — сигнализируем об остановке и гасим ВСЮ систему.
         self._stop_requested = True
+        self._request_system_shutdown()
+
+    def _request_system_shutdown(self) -> None:
+        """Закрытие окна = выключение всей системы.
+
+        GuiProcess — дочерний процесс ProcessManager'а. Без этого сигнала закрытие
+        окна гасило бы только сам GuiProcess, а ProcessManager и воркеры остались бы
+        жить headless (launcher висит в join-цикле и не доходит до
+        ``_kill_orphan_children``). Шлём ``system.shutdown`` в ProcessManager — он
+        ставит ``stop_event`` → каскадный teardown дерева. Fire-and-forget: ответ не
+        нужен, важна доставка. Best-effort: ошибка на выходе не критична.
+        """
+        try:
+            from multiprocess_framework.modules.message_module import build_system_command_message
+
+            msg = build_system_command_message({"cmd": "system.shutdown"}, sender=self.name)
+            self.send_message("ProcessManager", msg)
+            self._log_info(
+                "GuiProcess: послан system.shutdown в ProcessManager (закрытие окна)",
+                module="gui",
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort на выходе процесса
+            self._log_warning(f"GuiProcess: не удалось послать system.shutdown: {exc}", module="gui")
 
     def _reload_frontend_modules(self) -> None:
         """Перезагрузить Python-модули frontend для подхвата новых файлов.
