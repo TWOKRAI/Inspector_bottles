@@ -16,8 +16,10 @@ base: backend/topology/base.yaml
 # Активный запускаемый pipeline. Это РЕЦЕПТ (GUI-редактируемый): загрузчик
 # разворачивает его blueprint: → топология → оркестратор собирает. Модель владельца:
 # GUI формирует рецепт-файл, бэкенд запускает его (и без GUI). Сырые topology в
-# backend/topology/ остаются для прочих pipeline; region_pipeline теперь живёт рецептом.
-pipeline: recipes/region_pipeline.yaml
+# backend/topology/ остаются для прочих pipeline.
+# Активен modbus_demo (region_pipeline + узел modbus_sink параллельно дисплею);
+# переключить на другой рецепт можно во вкладке Recipes или сменой этой строки.
+pipeline: recipes/modbus_demo.yaml
 
 # Каталог GUI-редактируемых рецептов (источник запускаемых топологий)
 recipes: recipes

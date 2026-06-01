@@ -32,7 +32,7 @@ _KIND_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 DISPLAY_SECTION_LABEL = "Displays — дисплеи"
 
 # Порядок категорий в палитре
-CATEGORY_ORDER = ("source", "processing", "output", "rendering", "control", "utility", "service")
+CATEGORY_ORDER = ("source", "processing", "output", "rendering", "control", "utility", "service", "io", "sink")
 
 # Русские подписи категорий
 CATEGORY_LABELS: dict[str, str] = {
@@ -43,6 +43,8 @@ CATEGORY_LABELS: dict[str, str] = {
     "control": "Control — управление",
     "utility": "Utility — утилиты",
     "service": "Service — сервисы",
+    "io": "IO — драйверы/шина",
+    "sink": "Sink — приёмники",
 }
 
 UNCATEGORIZED_LABEL = "Other — прочее"

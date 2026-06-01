@@ -16,6 +16,8 @@ CATEGORY_COLORS: dict[str, str] = {
     "control": "#9c27b0",
     "utility": "#9e9e9e",
     "service": "#00bcd4",
+    "io": "#795548",  # драйверы/шина (Modbus и т.п.)
+    "sink": "#607d8b",  # приёмники-стоки (вывод данных наружу)
 }
 
 # Цвета wire
