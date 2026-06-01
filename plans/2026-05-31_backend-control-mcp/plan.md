@@ -197,19 +197,25 @@ PM `_handle_process_command` (ответ без `targets`) **и** generic comman
   handlers` мгновенно даёт диагноз Этапа 2. Архитектура подтверждена: ProcessManager —
   отдельный OS-процесс, внешний процесс не делает request-response без двери → **SocketChannel оправдан**.
 
-**P1.5b (next, ⏳) — стрим логов/ошибок/событий через router:** наибольший множитель полезности
-(«послал команду → вижу, что произошло»). Механика найдена: `LoggerManager._route_via_router`
-уже умеет слать `Message(type=LOG, targets=["logger"])`, gated флагом `router_routing`. Стрим =
-**подписка**, добавляющая socket-канал/подписчика доп. назначением для LOG/ERROR/EVENT
-подписанного процесса. Чувствительно к перфомансу горячего log-пути → отдельный аккуратный дизайн.
-**P1.5c:** verify-probe (write→readback→diff) — как driver-side композит (после P2).
+**P1.5b ⛔ ОТЛОЖЕН/ВЛИТ В P2 (решение владельца 2026-06-01).** Отдельной фазой НЕ делаем.
+Разбор: стрим логов не разблокирует отладку прототипа сейчас (логи уже пишутся в файлы; внешней
+двери в систему нет — это P2). Дизайн «реестр подписок в `ChannelRoutingManager` + `route_stream`»
+([`P1.5b_log_stream_design.md`](P1.5b_log_stream_design.md)) **отвергнут** как переусложнение
+горячего log-пути. Вместо него push-стрим вливается в P2 **бесплатно**: сокет регистрируется как
+ещё один `LogChannel` у логгера (точка схода логов `_channel_registry`/`create_channel` уже есть),
+без реестра подписок и без трогания `log()`. Ценная разведка из дока сохранена: иерархия
+`ErrorManager(LoggerManager)`/`StatsManager(CRM)`, `MessageType.EVENT` существует, `error`=LOG с
+`level≥ERROR`. **P1.5c:** verify-probe (write→readback→diff) — driver-side композит (после P2).
 
 ---
 
 ## P2 — SocketChannel + тонкий внешний driver (вместо driver-в-графе)
 
 **Дизайн:** [`P2_socket_design.md`](P2_socket_design.md) (утверждён: driver = «GUI по сокету»,
-общий билдер протокола, всё через RouterManager). Стартовать ПОСЛЕ P1.5b.
+общий билдер протокола, всё через RouterManager). **Стартуем сейчас** (P1.5b влит сюда).
+**Подпункт P2.x (опц., после ядра P2):** log-стрим в driver = регистрация сокета как `LogChannel`
+у логгера целевого процесса — БЕЗ реестра подписок (см. отвергнутый P1.5b-дизайн). Делать только
+если poll логов окажется недостаточным на отладке.
 
 **Level:** Senior (teamlead) · **Assignee:** teamlead
 **Goal:** `SocketChannel(MessageChannel)` в `router_module/channels/` (сиблинг `QueueChannel`),
@@ -224,12 +230,28 @@ queue: `send_command(target, cmd, args)`, `send_system_command`, `introspect_*` 
 - внешний driver-модуль (infra) + socket-клиент; dev-гейт `BACKEND_CTL=1` + localhost-bind.
 
 **Acceptance:**
-- [ ] Внешний процесс подключается к SocketChannel, шлёт `router.send` любому процессу и
-      **получает ответ** (correlation_id, P0.5)
-- [ ] Послать `register_update` в живой процесс и **через introspect подтвердить** применение
-- [ ] Тот же dict-протокол, что GUI (паритет); ноль дублирования логики; кадры не через сокет
-- [ ] Аккуратная остановка (PID-specific — memory `feedback_no_global_taskkill`)
-**Module contract:** full (новый канал — README + contract-тесты; + driver-модуль README)
+- [x] Внешний процесс подключается к SocketChannel, шлёт `router.send` любому процессу и
+      **получает ответ** (correlation_id, P0.5) — integration round-trip driver↔канал↔bridge (6 тестов)
+- [~] Послать `register_update` в живой процесс и **через introspect подтвердить** применение —
+      `driver.set_register()` строит верную команду (тест); подтверждение на ЖИВОМ рецепте = smoke ниже
+- [x] Тот же dict-протокол, что GUI (паритет); ноль дублирования логики; кадры не через сокет —
+      общий билдер `command_envelopes`, регрессия CommandSender байт-в-байт (23 теста)
+- [x] Аккуратная остановка (PID-specific — memory `feedback_no_global_taskkill`) —
+      `teardown_backend_ctl_channel` (close + unregister), getattr-defensive в shutdown
+**Module contract:** full (новый канал — README + contract-тесты; + driver-модуль README) ✅
+**Статус:** ✅ DONE (`25c7675c`). 6 компонентов, +39 тестов (framework 3090 passed, ruff чисто):
+`message_module/builders/command_envelopes.py` + рефактор `CommandSender`;
+`router_module/channels/socket_channel.py`; `router_module/adapters/socket_bridge_adapter.py`;
+`backend_ctl/driver.py` (+README+smoke_proof); `process_manager_module/process/backend_ctl_endpoint.py`
++ интеграция в PM; ADR-RTR-008.
+**Smoke на живом рецепте `region_pipeline` (`BACKEND_CTL=1`, headless) ✅:** 7/7 процессов отвечают
+через driver round-trip; `preprocessor` имеет router-приёмник `register_update` (плагин resize с
+register_schema), `negative/grayscale/flip/...` — нет → диагноз Этапа 2 за секунды без GUI.
+**Проверено по коду (вопрос владельца):** сокет работает параллельно Queue/SHM — accept/read в своих
+daemon-потоках, `request()` блокирует ТОЛЬКО socket-read-поток, `SocketChannel.poll()`=no-op (не
+опрашивается receive-циклом). Таймаут — на запрос, не на сессию; частота сообщений значения не имеет.
+**v1-ограничение (осознанно):** запросы в рамках ОДНОГО соединения сериализуются (один read-поток).
+Параллельные in-flight по одному сокету = опц. P2.1 (пул потоков в `on_inbound`) — отложено.
 
 ---
 
