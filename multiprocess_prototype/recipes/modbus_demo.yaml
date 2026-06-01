@@ -1,0 +1,171 @@
+# Рецепт modbus_demo — region_pipeline + узел modbus_sink в конце цепочки.
+#
+# То же демо (камера→split→negative/grayscale/flip→stitch→display), но stitcher
+# рассылает кадр ДВУМ потребителям параллельно: дисплею (gui) и modbus_sink.
+# modbus_sink после каждого кадра пишет [width, height, frame_id] в holding-регистры
+# Modbus-TCP (тест/симуляция вывода результатов в PLC).
+#
+# Запуск (приёмник — в ОТДЕЛЬНОМ терминале, ПЕРВЫМ):
+#   1) python -m Services.modbus.server --tcp 127.0.0.1:5020
+#   2) python multiprocess_prototype/run.py recipes/modbus_demo.yaml
+# В терминале приёмника появятся строки: recv holding[100..102] = [W, H, id].
+#
+# Предусловие: pip install '.[modbus]' (pymodbus).
+name: modbus_demo
+version: 3
+description: "Camera → Split → Negative/Grayscale/Flip → Stitch → GUI + Modbus-sink (рецепт)"
+
+blueprint:
+  name: modbus_demo
+  description: "Демо с выводом метаданных кадра по Modbus параллельно дисплею"
+
+  processes:
+    # --- Камера: захват кадров ---
+    - process_name: camera_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - preprocessor
+      source_target_fps: 25
+      plugins:
+        - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
+          plugin_name: capture
+          category: source
+          camera_id: 0
+          device_id: 0
+          resolution_width: 640
+          resolution_height: 480
+          fps: 25
+          auto_start: true
+
+    # --- Препроцессор: масштабирование ---
+    - process_name: preprocessor
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - region_splitter
+      plugins:
+        - plugin_class: Plugins.processing.resize.plugin.ResizePlugin
+          plugin_name: resize
+          category: processing
+          scale_factor: 1.0
+          interpolation: linear
+
+    # --- Нарезка на регионы (1:N fan-out через item["target"]) ---
+    - process_name: region_splitter
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      plugins:
+        - plugin_class: Plugins.processing.region_split.plugin.RegionSplitPlugin
+          plugin_name: region_split
+          category: processing
+          camera_id: 0
+          regions:
+            - name: region_0
+              x: 0
+              y: 0
+              width: 320
+              height: 240
+              target: process_negative
+            - name: region_1
+              x: 320
+              y: 0
+              width: 320
+              height: 240
+              target: process_grayscale
+          default_region:
+            name: region_default
+            target: process_flip
+
+    # --- Обработка: негатив (верхний левый регион) ---
+    - process_name: process_negative
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - stitcher
+      plugins:
+        - plugin_class: Plugins.processing.negative.plugin.NegativePlugin
+          plugin_name: negative
+          category: processing
+
+    # --- Обработка: чёрно-белое (верхний правый регион) ---
+    - process_name: process_grayscale
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - stitcher
+      plugins:
+        - plugin_class: Plugins.processing.grayscale.plugin.GrayscalePlugin
+          plugin_name: grayscale
+          category: processing
+
+    # --- Обработка: переворот (полный кадр) ---
+    - process_name: process_flip
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - stitcher
+      plugins:
+        - plugin_class: Plugins.processing.flip.plugin.FlipPlugin
+          plugin_name: flip
+          category: processing
+
+    # --- Склейка регионов (fan-in N:1) → дисплей + modbus_sink (fan-out) ---
+    - process_name: stitcher
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+        - modbus_sink
+      plugins:
+        - plugin_class: Plugins.processing.stitcher.plugin.StitcherPlugin
+          plugin_name: stitcher
+          category: processing
+          camera_id: 0
+          expected_regions:
+            - region_0
+            - region_1
+            - region_default
+
+    # --- Modbus-sink: вывод [width, height, frame_id] в PLC/симулятор (лист) ---
+    - process_name: modbus_sink
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: low
+      chain_targets: []
+      plugins:
+        - plugin_class: Plugins.sinks.modbus_sink.plugin.ModbusSinkPlugin
+          plugin_name: modbus_sink
+          category: sink
+          transport: tcp
+          host: 127.0.0.1
+          port: 5020
+          unit_id: 1
+          base_address: 100
+          write_every_n: 1
+          auto_connect: true
+
+  wires:
+    - source: camera_0.capture.frame
+      target: preprocessor.resize.frame
+    - source: preprocessor.resize.frame
+      target: region_splitter.region_split.frame
+    - source: region_splitter.region_split.region
+      target: process_negative.negative.region
+    - source: region_splitter.region_split.region
+      target: process_grayscale.grayscale.frame
+    - source: region_splitter.region_split.region
+      target: process_flip.flip.region
+    - source: process_negative.negative.region
+      target: stitcher.stitcher.region
+    - source: process_grayscale.grayscale.frame
+      target: stitcher.stitcher.region
+    - source: process_flip.flip.region
+      target: stitcher.stitcher.region
+    # fan-out от stitcher: кадр уходит и на дисплей, и в modbus_sink
+    - source: stitcher.stitcher.frame
+      target: modbus_sink.modbus_sink.frame
+
+  displays:
+    - node_id: stitcher.stitcher.frame
+      display_id: main
+      display_name: Основной дисплей
