@@ -7,6 +7,12 @@
 - **Источник анализа:** [`multiprocess_framework/docs/COMMUNICATION_MAP.md`](../../multiprocess_framework/docs/COMMUNICATION_MAP.md) + `COMMUNICATION_MAP_raw.json` (аудит 23 подсистем, 166 механизмов, 2026-05-31).
 - **Смежные планы:** [`constructor-maturity`](../2026-05-29_constructor-maturity/plan.md) — P1 (движок команд/ActionBus) и P6 (вынос в framework). Этот план НЕ дублирует P1; ActionBus-удаление остаётся за constructor-maturity. [`processes-workers-runtime-debts`](../../multiprocess_prototype/plans/processes-workers-runtime-debts.md) — Фаза 2 `assigned_worker` (см. §«Связь с assigned_worker»).
 
+> **Сверка с веткой `feat/backend-control-mcp` (2026-06-01):** работа backend-control-mcp двигает этот план по двум осям, не дублируя его:
+> - **request-response (P0.5 `1a1b6b9b`)** закрыл roadmap-пункт «анти fire-and-forget / correlation_id» (был отнесён к P4) — см. таблицу reuse ниже. P4 теперь переиспользует готовый механизм.
+> - **`SocketChannel` (P2 `25c7675c`)** — первый **живой не-queue `IMessageChannel`** (серверный TCP, newline-JSON, address-aware через `_deliver_by_targets`). Это **рабочий прецедент** контракта канала, на котором стоит P3 («каналы как first-class»): доказано, что `register_channel`/`router.send`-путь принимает новый тип канала без правки ядра. P3 (Frame/State/Event) идёт тем же контрактом. ADR-RTR-008.
+>
+> **Статус сместился: P3 ещё `next`**, но контракт канала валидирован вживую (socket round-trip 7/7 headless). Frame/State/Event — это новые *kind→channel* привязки поверх уже доказанного механизма.
+
 ---
 
 ## Назначение
@@ -36,7 +42,7 @@
 | Таблица kind→канал | `register_route(key, channel_name)` + `channel_dispatcher` (exact/pattern/broadcast) | ✅ механизм есть; на отправке **не задействован** (route-by-pattern dormant) |
 | Логи/ошибки — тоже каналы станции | `LoggerManager`/`ErrorManager` наследуют CRM; `ILogChannel(IChannel)` в общем `ChannelRegistry` | ✅ уже единая иерархия |
 | Per-worker адресация | `RouterAdapter.send_to_channel("process_2_worker_in", ...)`; Roadmap router_module | 🟡 предвидено, не формализовано → P2 |
-| Результат команды (анти fire-and-forget) | `correlation_id`/request-response | 🟡 Roadmap «Высокий» → учесть в P4 |
+| Результат команды (анти fire-and-forget) | `correlation_id`/request-response | ✅ **СДЕЛАНО** (backend-control-mcp P0.5 `1a1b6b9b`): `RouterManager.request()/reply_to_request()/_resolve_pending` + резолвер в `receive()` по correlation_id. Закрыты ДВЕ дыры fire-and-forget (PM-ответ без `targets`; выброшенный результат generic command-пути). Контракт: `request()` ≠ приёмный поток (дедлок). P4 здесь — переиспользует, не переоткрывает. |
 | Config-driven каналы | объявление каналов в конфиге процесса | 🟡 Roadmap «Высокий» → P1/P3 |
 
 **Что РЕАЛЬНО новое (а не переоткрытие):** (1) подключить реальные IPC-очереди `queue_registry` как `IMessageChannel` и заставить `send` резолвить канал из `targets`+`type` (сегодня `send_message` зовёт `queue_registry` напрямую, мимо роутера); (2) иерархическая адресация в `targets`; (3) `FrameChannel`/`EventChannel`/`StateChannel` как first-class каналы; (4) миграция вызовов на `router.send`; (5) `correlation_id`.
