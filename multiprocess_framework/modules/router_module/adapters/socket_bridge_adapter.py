@@ -50,6 +50,17 @@ class SocketBridgeAdapter:
         """
         corr: Optional[str] = msg.get("request_id")
         timeout = msg.get("timeout", self._default_timeout)
+
+        # Универсальность драйвера: ответ handler'а должен вернуться ХОСТУ (где
+        # живёт pending-слот request()), а не во `sender` драйвера — внешний driver
+        # не процесс с очередью, поэтому reply_to_request, адресуя ответ в sender,
+        # терял бы его → request() ловит timeout. Подставляем reply_to=<имя хоста>,
+        # чтобы ответ доехал в system-очередь хоста и резолвил pending. setdefault —
+        # не затираем явный reply_to, если driver задал свой.
+        host = getattr(getattr(self._router, "process", None), "name", None) or getattr(self._router, "router_id", None)
+        if host:
+            msg.setdefault("reply_to", host)
+
         try:
             result = self._router.request(msg, timeout=timeout)
         except Exception as exc:  # noqa: BLE001 — граница: любая ошибка → error-ответ driver'у
