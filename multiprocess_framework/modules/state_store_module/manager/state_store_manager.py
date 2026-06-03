@@ -310,7 +310,43 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
             exclude_sources=exclude_sources,
         )
         self._log_debug(f"Подписка создана: sub_id={sub_id}, subscriber={subscriber}, pattern={pattern}")
+
+        # Initial-state replay: адресно отправить новому подписчику снимок
+        # текущих значений, матчащих pattern. Без этого подписчик, подключившийся
+        # ПОСЛЕ публикации разовых дельт (типичный GUI: status публикуется один раз
+        # при старте процесса), никогда их не увидит — только будущие изменения.
+        self._replay_initial_state(pattern, subscriber)
+
         return {"status": "ok", "sub_id": sub_id}
+
+    def _replay_initial_state(self, pattern: str, subscriber: str) -> None:
+        """Отправить подписчику снимок текущих листовых значений store по pattern.
+
+        Решает startup-race реактивной телеметрии: значения, опубликованные ДО
+        подписки, иначе теряются для нового подписчика (нет реплея). Шлём адресно
+        ТОЛЬКО новому подписчику (не broadcast). Только листья (не промежуточные
+        dict-узлы) — клиентские bindings матчат конкретные пути. Best-effort:
+        сбой реплея не ломает саму подписку.
+
+        Args:
+            pattern: glob-паттерн подписки.
+            subscriber: имя процесса-подписчика (адрес доставки).
+        """
+        try:
+            from ..core.delta import MISSING, Delta
+            from ..core.glob_walker import iter_matches
+
+            snapshot = self._store.get_subtree("")  # thread-safe deep-copy всего дерева
+            deltas = [
+                Delta(path=p, old_value=MISSING, new_value=v, source="__replay__")
+                for p, v in iter_matches(snapshot, pattern)
+                if not isinstance(v, dict)
+            ]
+            if deltas:
+                self._dispatcher._send_state_changed(subscriber, deltas)
+                self._log_debug(f"Initial replay: {len(deltas)} значений → '{subscriber}' (pattern={pattern})")
+        except Exception as exc:  # nosec B110 — реплей best-effort, не критичен для подписки
+            self._log_warning(f"Initial replay для '{subscriber}' (pattern={pattern}) не удался: {exc}")
 
     def handle_state_unsubscribe(self, msg: dict) -> dict:
         """Обработчик state.unsubscribe: отписаться от подписки.

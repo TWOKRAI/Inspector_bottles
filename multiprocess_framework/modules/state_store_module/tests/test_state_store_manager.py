@@ -278,6 +278,40 @@ class TestStateStoreManagerSubscriptions:
         result = mgr.handle_state_subscribe({"data": {"pattern": "cameras.*"}})
         assert result["status"] == "error"
 
+    def test_subscribe_initial_replay_sends_snapshot(self):
+        """Initial replay: при subscribe подписчику адресно уходит снимок текущих листьев."""
+        router = MockRouter()
+        mgr = StateStoreManager(
+            router=router,
+            initial_state={"processes": {"camera_0": {"state": {"status": "running", "uptime": 12.5}}}},
+        )
+        result = mgr.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": "gui"}})
+        assert result["status"] == "ok"
+        # Ровно одно state.changed, адресно gui
+        assert len(router.sent_messages) == 1
+        msg = router.sent_messages[0]
+        assert msg["command"] == "state.changed"
+        assert msg["targets"] == ["gui"]
+        paths = {d["path"] for d in msg["data"]["deltas"]}
+        assert "processes.camera_0.state.status" in paths
+        assert "processes.camera_0.state.uptime" in paths
+        # Только листья — промежуточный dict-узел не реплеится
+        assert "processes.camera_0.state" not in paths
+
+    def test_subscribe_replay_empty_when_no_match(self):
+        """Нет значений по pattern → реплей-сообщение не отправляется."""
+        router = MockRouter()
+        mgr = StateStoreManager(router=router, initial_state={"cameras": {"0": {"fps": 30}}})
+        result = mgr.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": "gui"}})
+        assert result["status"] == "ok"
+        assert router.sent_messages == []
+
+    def test_subscribe_replay_no_router_ok(self):
+        """Без router subscribe не падает (реплей best-effort, тихо пропускается)."""
+        mgr = StateStoreManager(initial_state={"processes": {"camera_0": {"state": {"status": "running"}}}})
+        result = mgr.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": "gui"}})
+        assert result["status"] == "ok"
+
     def test_unsubscribe(self):
         """Отписка по sub_id."""
         mgr = StateStoreManager()
