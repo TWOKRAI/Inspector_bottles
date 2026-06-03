@@ -1,6 +1,6 @@
 ---
 name: project-telemetry-subscription-bug
-description: "Processes-tab telemetry «—»: SERVER+IPC+GUI-receive все РАБОТАЮТ (verified probe 2026-06-03); реальный остаток — рассогласование путей binding↔publish в _panels.py (FPS/latency/health не публикуются)"
+description: "Processes-tab telemetry «—»: SERVER+IPC+GUI-receive РАБОТАЮТ; process-level replay DONE (16e14084); остаток — widget-level late-binding (lazy tab) + нет издателей FPS/latency/health"
 metadata:
   type: project
 ---
@@ -26,7 +26,15 @@ GUI live-телеметрия (вкладка «Процессы»: статус
 - **Активно/Обрывы/Средний FPS**: bind `system.health.active/broken_wires/avg_fps` — издателя НЕТ (фреймворковый `state_store_module/health/monitor.py` публикует `system.health.overall/<name>`, другие ключи, и не подключён в прототипе). → дефолты «Активно: 0».
 - **status**: bind `processes.{name}.state.status` — издатель ЕСТЬ (`_broadcast_status_change`→`_publish_state`), но это **разовая** дельта на старте; непрерывно идёт только `state.uptime` (карточки на него не подписаны). Подозрение на startup-race + отсутствие initial-state replay на subscribe (GUI подписался — текущее значение не реплеится).
 
-**Фикс (plan-level, НЕ 1-строчник):** свести контракт publish↔bind — либо публиковать FPS/latency на `state.fps`/`state.latency_ms` (или ребиндить карточки на `workers.*.effective_hz`); издавать `system.health.*` агрегаты (или ребиндить); добавить initial-state sync на subscribe (replay текущих значений) для разовых статус-дельт.
+**Фикс (Option A — бэкенд публикует ожидаемые пути; выбор владельца 2026-06-03):**
+
+✅ **СДЕЛАНО — process-level initial replay (`16e14084`):** `handle_state_subscribe` адресно шлёт новому подписчику снимок текущих листьев store по pattern (`_replay_initial_state` + `iter_matches`). +3 теста. Решает startup-race для process-level подписки. НО визуально GUI ещё «—» — см. оставшиеся gap'ы ниже.
+
+⏳ **ОСТАЛОСЬ (verify-done скриншот: индикаторы серые, FPS/Latency «—», Активно 0):**
+1. **Widget-level late-binding gap (НОВОЕ, отдельно от process-replay).** Вкладка «Процессы» — **LazyTabWidget** (создаётся при первом открытии). `AllProcessesPanel._connect_bindings` (`_panels.py:295`) регистрирует биндинги ПОСЛЕ того, как разовые статус-дельты прошли. Process-level replay (на subscribe GuiProcess при старте) этого НЕ покрывает — нужен **widget-level replay**: при `GuiStateBindings.bind()` сразу применить закэшированное значение (bindings/GuiStateProxy._cache его уже хранят), либо ре-реплей при создании ленивой вкладки. Контракт статуса ВЕРНЫЙ: `StatusIndicator.set_state("running")`→зелёный (`status_indicator.py` DEFAULT_COLORS), просто дельта не доходит до позднего виджета.
+2. **FPS — нет источника вообще.** За ~12000 publish'ей НИ ОДНОГО `workers.*.effective_hz`/`workers.*.status` (только `state.status` 96× + `state.uptime` 11496×). Heartbeat-sender (`process_heartbeat.py:75-83`) включает `workers_status` через `get_all_workers_status()`, но `WorkerManager.get_worker_status` похоже НЕ отдаёт `effective_hz` (есть только у IdleWorker). → нужно: воркеры репортят hz → ProcessMonitor агрегирует в `processes.X.state.fps`.
+3. **Latency** `processes.X.state.latency_ms` — издателя нет (из `workers.*.cycle_duration_ms`).
+4. **system.health.active/avg_fps/broken_wires** — издателя нет (ProcessMonitor должен публиковать: active=кол-во running и т.д.).
 
 **Целевая архитектура:** «ответить на request/reply» — ответственность транспорта (RouterManager.receive), не обёртки. P2 вносит авто-reply по `request_id` в `receive()`/`message_dispatcher` → асимметрия RAW/wrapped исчезнет, флаг `auto_register_ipc` сведётся к защите от двойной регистрации. См. [[project_backend_control_mcp]], план `plans/comm-system-target-architecture.md` (P0 запись 2026-06-03 + P2).
 
