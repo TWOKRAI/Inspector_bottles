@@ -2,6 +2,7 @@
 
 Все тесты работают без реального RouterManager — используется MockRouter или None.
 """
+
 from __future__ import annotations
 
 from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta
@@ -12,6 +13,7 @@ from multiprocess_framework.modules.state_store_module.manager.state_store_manag
 # ---------------------------------------------------------------------------
 # MockRouter — мок RouterManager для тестов
 # ---------------------------------------------------------------------------
+
 
 class MockRouter:
     """Мок RouterManager для тестов."""
@@ -24,9 +26,7 @@ class MockRouter:
         if isinstance(message, dict):
             self.sent_messages.append(message)
         else:
-            self.sent_messages.append(
-                message.to_dict() if hasattr(message, "to_dict") else message
-            )
+            self.sent_messages.append(message.to_dict() if hasattr(message, "to_dict") else message)
 
     def register_message_handler(self, key, handler, expects_full_message=True):
         self.registered_handlers[key] = handler
@@ -49,6 +49,7 @@ class MockCommandManager:
 # ===========================================================================
 # Тесты StateStoreManager
 # ===========================================================================
+
 
 class TestStateStoreManagerInit:
     """Инициализация и базовые свойства StateStoreManager."""
@@ -79,6 +80,28 @@ class TestStateStoreManagerInit:
         assert "state.set" in router.registered_handlers
         assert "state.get" in router.registered_handlers
         assert "state.subscribe" in router.registered_handlers
+        assert len(router.registered_handlers) == 7
+
+    def test_initialize_auto_register_ipc_false_skips_raw(self):
+        """auto_register_ipc=False: initialize() НЕ регистрирует RAW-обработчики.
+
+        Это интерим-фикс серверного разрыва телеметрии (см.
+        plans/comm-system-target-architecture.md, P0 2026-06-03): RAW-хендлеры
+        не зовут reply_to_request и, побеждая по «первая регистрация» в
+        dispatcher, ломали request/reply state.* (timeout). При False
+        единственный владелец ключей — CommandManager + wrapped-путь.
+        """
+        router = MockRouter()
+        mgr = StateStoreManager(router=router, auto_register_ipc=False)
+        assert mgr.initialize() is True
+        # RAW-регистрации НЕТ — message_dispatcher не занят сырыми хендлерами.
+        assert router.registered_handlers == {}
+
+    def test_initialize_auto_register_ipc_true_is_default(self):
+        """Дефолт auto_register_ipc=True сохраняет legacy-поведение (RAW)."""
+        router = MockRouter()
+        mgr = StateStoreManager(router=router)  # без явного флага
+        mgr.initialize()
         assert len(router.registered_handlers) == 7
 
     def test_shutdown_clears_subscriptions(self):
@@ -137,11 +160,13 @@ class TestStateStoreManagerSet:
     def test_set_from_data_field(self):
         """Извлечение данных из msg['data'] (формат CommandManager)."""
         mgr = StateStoreManager()
-        result = mgr.handle_state_set({
-            "type": "command",
-            "command": "state.set",
-            "data": {"path": "a.b", "value": "test", "source": "gui"},
-        })
+        result = mgr.handle_state_set(
+            {
+                "type": "command",
+                "command": "state.set",
+                "data": {"path": "a.b", "value": "test", "source": "gui"},
+            }
+        )
         assert result["status"] == "ok"
         assert mgr.store.get("a.b") == "test"
 
@@ -159,9 +184,11 @@ class TestStateStoreManagerMerge:
     def test_merge_basic(self):
         """Базовый merge."""
         mgr = StateStoreManager()
-        result = mgr.handle_state_merge({
-            "data": {"path": "cameras.0", "data": {"fps": 30, "type": "webcam"}, "source": "gui"},
-        })
+        result = mgr.handle_state_merge(
+            {
+                "data": {"path": "cameras.0", "data": {"fps": 30, "type": "webcam"}, "source": "gui"},
+            }
+        )
         assert result["status"] == "ok"
         assert result["changes_count"] == 2
         assert mgr.store.get("cameras.0.fps") == 30
@@ -178,9 +205,11 @@ class TestStateStoreManagerMerge:
         router = MockRouter()
         mgr = StateStoreManager(router=router)
         mgr.handle_state_subscribe({"data": {"pattern": "cameras.**", "subscriber": "processor"}})
-        mgr.handle_state_merge({
-            "data": {"path": "cameras.0", "data": {"fps": 30, "type": "webcam"}, "source": "gui"},
-        })
+        mgr.handle_state_merge(
+            {
+                "data": {"path": "cameras.0", "data": {"fps": 30, "type": "webcam"}, "source": "gui"},
+            }
+        )
         # Одно сообщение state.changed с двумя дельтами
         assert len(router.sent_messages) == 1
         msg = router.sent_messages[0]
@@ -220,9 +249,11 @@ class TestStateStoreManagerSubscriptions:
     def test_subscribe(self):
         """Создание подписки."""
         mgr = StateStoreManager()
-        result = mgr.handle_state_subscribe({
-            "data": {"pattern": "cameras.*", "subscriber": "gui"},
-        })
+        result = mgr.handle_state_subscribe(
+            {
+                "data": {"pattern": "cameras.*", "subscriber": "gui"},
+            }
+        )
         assert result["status"] == "ok"
         assert "sub_id" in result
         assert mgr.subscription_manager.subscription_count == 1
@@ -230,13 +261,15 @@ class TestStateStoreManagerSubscriptions:
     def test_subscribe_with_exclude(self):
         """Подписка с exclude_sources."""
         mgr = StateStoreManager()
-        result = mgr.handle_state_subscribe({
-            "data": {
-                "pattern": "cameras.*",
-                "subscriber": "gui",
-                "exclude_sources": ["gui"],
-            },
-        })
+        result = mgr.handle_state_subscribe(
+            {
+                "data": {
+                    "pattern": "cameras.*",
+                    "subscriber": "gui",
+                    "exclude_sources": ["gui"],
+                },
+            }
+        )
         assert result["status"] == "ok"
 
     def test_subscribe_missing_fields(self):
@@ -248,9 +281,11 @@ class TestStateStoreManagerSubscriptions:
     def test_unsubscribe(self):
         """Отписка по sub_id."""
         mgr = StateStoreManager()
-        sub_result = mgr.handle_state_subscribe({
-            "data": {"pattern": "cameras.*", "subscriber": "gui"},
-        })
+        sub_result = mgr.handle_state_subscribe(
+            {
+                "data": {"pattern": "cameras.*", "subscriber": "gui"},
+            }
+        )
         sub_id = sub_result["sub_id"]
         result = mgr.handle_state_unsubscribe({"data": {"sub_id": sub_id}})
         assert result["status"] == "ok"
@@ -280,8 +315,13 @@ class TestStateStoreManagerRegister:
         cmd_mgr = MockCommandManager()
         mgr.register_commands(cmd_mgr)
         expected = {
-            "state.set", "state.merge", "state.get", "state.get_subtree",
-            "state.subscribe", "state.unsubscribe", "state.unsubscribe_all",
+            "state.set",
+            "state.merge",
+            "state.get",
+            "state.get_subtree",
+            "state.subscribe",
+            "state.unsubscribe",
+            "state.unsubscribe_all",
         }
         assert set(cmd_mgr.registered_commands.keys()) == expected
         # Проверяем теги
@@ -300,6 +340,7 @@ class TestStateStoreManagerRegister:
 # ===========================================================================
 # Тесты DeltaDispatcher
 # ===========================================================================
+
 
 class TestDeltaDispatcher:
     """Тесты DeltaDispatcher."""
@@ -437,6 +478,7 @@ class TestDeltaDispatcher:
 # Интеграционные тесты — StateStoreManager + DeltaDispatcher
 # ===========================================================================
 
+
 class TestIntegration:
     """Сквозные тесты: IPC-сообщение -> set -> subscribe -> dispatch."""
 
@@ -447,15 +489,19 @@ class TestIntegration:
         mgr.initialize()
 
         # 1. Подписываем processor на cameras.**
-        sub_result = mgr.handle_state_subscribe({
-            "data": {"pattern": "cameras.**", "subscriber": "processor"},
-        })
+        sub_result = mgr.handle_state_subscribe(
+            {
+                "data": {"pattern": "cameras.**", "subscriber": "processor"},
+            }
+        )
         assert sub_result["status"] == "ok"
 
         # 2. Устанавливаем значение
-        set_result = mgr.handle_state_set({
-            "data": {"path": "cameras.0.fps", "value": 30, "source": "gui"},
-        })
+        set_result = mgr.handle_state_set(
+            {
+                "data": {"path": "cameras.0.fps", "value": 30, "source": "gui"},
+            }
+        )
         assert set_result["status"] == "ok"
         assert set_result["changed"] is True
 
@@ -466,9 +512,11 @@ class TestIntegration:
         assert msg["targets"] == ["processor"]
 
         # 4. Читаем обратно
-        get_result = mgr.handle_state_get({
-            "data": {"path": "cameras.0.fps", "request_id": "check-1"},
-        })
+        get_result = mgr.handle_state_get(
+            {
+                "data": {"path": "cameras.0.fps", "request_id": "check-1"},
+            }
+        )
         assert get_result["value"] == 30
 
     def test_merge_and_subscribe_flow(self):
@@ -478,18 +526,22 @@ class TestIntegration:
         mgr.initialize()
 
         # Подписываем
-        mgr.handle_state_subscribe({
-            "data": {"pattern": "cameras.**", "subscriber": "monitor"},
-        })
+        mgr.handle_state_subscribe(
+            {
+                "data": {"pattern": "cameras.**", "subscriber": "monitor"},
+            }
+        )
 
         # Merge нескольких полей
-        mgr.handle_state_merge({
-            "data": {
-                "path": "cameras.0",
-                "data": {"fps": 30, "type": "webcam", "enabled": True},
-                "source": "recipe",
-            },
-        })
+        mgr.handle_state_merge(
+            {
+                "data": {
+                    "path": "cameras.0",
+                    "data": {"fps": 30, "type": "webcam", "enabled": True},
+                    "source": "recipe",
+                },
+            }
+        )
 
         # Одно сообщение с 3 дельтами
         assert len(router.sent_messages) == 1
@@ -502,9 +554,11 @@ class TestIntegration:
         mgr.initialize()
 
         # Подписываем и тут же отписываем
-        sub_result = mgr.handle_state_subscribe({
-            "data": {"pattern": "x.*", "subscriber": "gui"},
-        })
+        sub_result = mgr.handle_state_subscribe(
+            {
+                "data": {"pattern": "x.*", "subscriber": "gui"},
+            }
+        )
         mgr.handle_state_unsubscribe({"data": {"sub_id": sub_result["sub_id"]}})
 
         # set не вызывает рассылку

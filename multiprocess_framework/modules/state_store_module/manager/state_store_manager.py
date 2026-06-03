@@ -38,6 +38,7 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         manager_name: str = "StateStoreManager",
         logger: Any = None,
         stats: Any = None,
+        auto_register_ipc: bool = True,
     ) -> None:
         """
         Args:
@@ -46,6 +47,13 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
             manager_name: имя менеджера для BaseManager.
             logger: LoggerManager или ObservableMixin-совместимый объект.
             stats: StatsManager или ObservableMixin-совместимый объект.
+            auto_register_ipc: регистрировать ли inbound IPC-обработчики state.*
+                напрямую (RAW) в message_dispatcher при initialize(). True —
+                legacy-путь (тесты, in_memory_router). False — обработчики
+                подключаются wrapped-путём через CommandManager +
+                register_commands_with_router (с reply_to_request). RAW не
+                умеет отвечать на request/reply и, побеждая по «первая
+                регистрация» в dispatcher, ломает state.get/subscribe timeout'ом.
         """
         BaseManager.__init__(self, manager_name=manager_name)
         ObservableMixin.__init__(self, managers={"logger": logger, "stats": stats})
@@ -59,6 +67,7 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         )
         self._pipeline = MiddlewarePipeline()
         self._router = router
+        self._auto_register_ipc = auto_register_ipc
 
     @property
     def pipeline(self) -> MiddlewarePipeline:
@@ -94,7 +103,7 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         Returns:
             True если инициализация успешна.
         """
-        if self._router is not None:
+        if self._router is not None and self._auto_register_ipc:
             self.register_message_handlers(self._router)
 
         self.is_initialized = True
