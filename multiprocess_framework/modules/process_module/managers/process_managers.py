@@ -34,7 +34,7 @@ class ProcessManagers:
 
         Порядок создания менеджеров определён зависимостями:
         worker → logger → error → router(нужен logger) →
-        stats(нужен router, logger) → command(нужен logger, stats) → console.
+        stats(нужен logger) → command(нужен logger, stats) → console.
 
         Returns:
             ManagersBundle — контейнер созданных менеджеров.
@@ -45,7 +45,7 @@ class ProcessManagers:
         logger = self._create_logger_manager(managers_config)
         error = self._create_error_manager(managers_config)
         router = self._create_router_manager(managers_config, logger=logger)
-        stats = self._create_stats_manager(managers_config, router=router, logger=logger)
+        stats = self._create_stats_manager(managers_config, logger=logger)
         command = self._create_command_manager(
             managers_config,
             logger=logger,
@@ -245,7 +245,6 @@ class ProcessManagers:
     def _create_stats_manager(
         self,
         managers_config: Dict[str, Any],
-        router: Any,
         logger: Any,
     ) -> Any:
         from ...statistics_module import StatsManager, StatsManagerConfig
@@ -261,7 +260,6 @@ class ProcessManagers:
             manager_name=f"stats_{self.process.name}",
             config=stats_config,
             process=self.process,
-            router_manager=router,
             managers={"logger": logger},
         )
         stats.initialize()

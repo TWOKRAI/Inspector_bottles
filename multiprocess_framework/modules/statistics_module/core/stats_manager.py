@@ -11,8 +11,12 @@ StatsManager — менеджер статистики и метрик.
     которые маршрутизируются сюда через register_manager("stats", ...).
   - CommandManager: StatsAdapter регистрирует команды get_metrics и пр.
   - LoggerManager: LogStatsChannel логирует снапшоты через performance().
-  - RouterManager: опциональная отправка снапшотов в другой процесс.
+
+Примечание: remote-stats (отправка снапшотов в другой процесс через RouterManager)
+ещё не реализована — это capability-to-build, а не текущая возможность. До неё
+StatsManager не держит ссылку на router (см. ADR comm-system-target-architecture §9.7).
 """
+
 import threading
 from typing import Any, Dict, List, Optional, Union
 
@@ -53,14 +57,11 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         manager_name: str = "StatsManager",
         config: Optional[Union[Dict[str, Any], Any]] = None,
         process: Optional[Any] = None,
-        router_manager: Optional[Any] = None,
         managers: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> None:
         if managers is None:
             managers = {}
-        if router_manager:
-            managers["router"] = router_manager
 
         cfg = normalize_config(config, default={})
         flush_interval = cfg.get("flush_interval", 10.0)
@@ -83,7 +84,6 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         )
 
         self._config_dict = cfg
-        self._router_manager = router_manager
         self._default_tags: Dict[str, str] = cfg.get("default_tags") or {}
         self._metrics: Dict[str, MetricRecord] = {}
         self._metrics_lock = threading.Lock()

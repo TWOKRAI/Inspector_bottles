@@ -84,17 +84,11 @@ stats = StatsManager(config=cfg, managers={"logger": logger_manager})
 stats.initialize()
 ```
 
-### С router_manager для межпроцессной отправки
+### Межпроцессная отправка снапшотов (capability-to-build)
 
-```python
-stats = StatsManager(
-    manager_name="worker_stats",
-    config=cfg,
-    process=self,
-    router_manager=self.router_manager,
-    managers={"logger": self.logger_manager},
-)
-```
+Remote-stats (отправка снапшотов в другой процесс через RouterManager) пока не
+реализована — это задел, а не текущая возможность. StatsManager не принимает и не
+держит ссылку на router (см. `plans/comm-system-target-architecture.md` §9.7).
 
 ---
 
