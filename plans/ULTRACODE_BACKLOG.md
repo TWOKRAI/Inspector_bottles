@@ -13,7 +13,7 @@
 
 | # | Задача | Файлы / scope | Источник |
 |---|--------|---------------|----------|
-| 1 | **M5 целиком** — добить мёртвый wire `router_manager`/`enable_router_routing`/`messages_routed` | logger_manager + error_manager + logger_adapter + process_managers (4 файла) | HANDOFF §UNCOMMITTED; уже частично начат (logger_manager в дереве, TeamLead-агент упал) |
+| ~~1~~ | ~~**M5 целиком** — мёртвый wire `router_manager`/`enable_router_routing`/`messages_routed`~~ ✅ **СДЕЛАНО 2026-06-03 (max)** — оказалось не fan-out-задачей: 4 файла + interfaces docstring, единый последовательный проход; см. «Лог решений» | logger_manager + error_manager + logger_adapter + process_managers | HANDOFF §UNCOMMITTED |
 | 2 | **§11 quick-wins** — пачка независимых мелочей | п.2/3/4/11/13/14/16-19 | plans/comm-system §11 |
 | 3 | **Потеря сообщений** — `_route_to_worker` (критичный) | п.20-22 | plans/comm-system §11 |
 | 4 | **RolesPanel / get_field** | п.5/6 | plans/comm-system §11 |
@@ -41,3 +41,4 @@
 ## Лог решений
 
 - **2026-06-03** — список заведён. Владелец: копить hard-баги и независимую мелочь, запуск ultracode — когда я подам сигнал. Телеметрия (T1) отложена в backlog вопреки моей рекомендации добить сразу.
+- **2026-06-03** — **M5 закрыт в max-режиме** (ultracode не запускался). Удалён мёртвый router-wire из пути логирования: `enable_router_routing`/`router_manager`-параметры, `observable_config["router_routing"]`, атрибут `_router_manager`, стат `messages_routed`, метод `LoggerAdapter.set_router_routing`, проброс в `ErrorManager`, `enable_router_routing=True` в `process_managers`. Тесты 286 зелёные (logger+error+process), ruff clean. **Вывод:** задача была *не* fan-out-friendly (один связный wire через 4 файла + наследование Error←Logger) — правильно сделана одним проходом, а не залпом.

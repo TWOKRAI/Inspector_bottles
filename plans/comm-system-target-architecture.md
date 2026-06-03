@@ -91,7 +91,7 @@ CRM — общая база под `RouterManager`, `LoggerManager`, `ErrorManag
 - **Мёртвый Dispatcher в LoggerManager** — экземпляр диспетчера создаётся, но не используется (убрать).
 - **Путаница двух конфигов** `ChannelRoutingConfig` vs `ChannelRoutingManagerConfig` (похожие имена, разные роли) — задокументировать/переименовать.
 - **`AsyncSenderBuffer.flush()` — no-op** (не сбрасывает буфер фактически) — починить или задокументировать как умышленный.
-- **`LoggerManager` — НЕ дублирует записи через роутер (исправлено по ревью M5, refuted/partial):** в проде `_router_manager=None` (`process_managers.py:159-167` не передаёт router), guard `logger_manager.py:360` блокирует путь; LOG-приёмника нет. Реальный нюанс — при `enable_router_routing=True` без приёмника бесполезный `router.send()` на каждый log-record (**overhead / dead traffic, НЕ дублирование лог-файлов**). **`StatsManager`**: router передаётся и хранится (`stats_manager.py:86`), но не используется (dead wire) → §9 capability.
+- **`LoggerManager` — мёртвый router-wire УДАЛЁН (M5 done 2026-06-03):** в проде `_router_manager` всегда был `None` (приёмника LOG нет), путь был чистый overhead/dead traffic. Физически убраны `enable_router_routing`/`router_manager`-параметры, `observable_config["router_routing"]`, `_router_manager`, стат `messages_routed`, `_route_via_router`, `LoggerAdapter.set_router_routing`, проброс в `ErrorManager`, `enable_router_routing=True` в `process_managers`. Логирование теперь строго in-process (CRM-каналы + BatchBuffer). Тесты 286 зелёные. **`StatsManager`**: dead wire уже убран ранее (`d684387a`, §9.7).
 
 ---
 

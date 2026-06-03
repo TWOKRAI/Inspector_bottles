@@ -161,7 +161,6 @@ class ProcessManagers:
             config=log_config,
             process=self.process,
             config_manager=self.process.config_manager,
-            enable_router_routing=True,
         )
         logger.initialize()
         return logger

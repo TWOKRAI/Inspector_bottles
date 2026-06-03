@@ -192,7 +192,7 @@ class ILoggerManager(IBaseManager, ABC):
 
         Returns:
             Словарь с полями: app_name, messages_processed, messages_skipped,
-            messages_routed, channels_count, module_channels_count,
+            channels_count, module_channels_count,
             batching_enabled и (если батчинг включён) messages_batched, batch_stats.
         """
 

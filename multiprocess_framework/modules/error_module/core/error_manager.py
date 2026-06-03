@@ -137,9 +137,7 @@ class ErrorManager(LoggerManager):
         process: Optional[Any] = None,
         config: Optional[Union[Dict[str, Any], LoggerManagerConfig, Any]] = None,
         config_manager: Optional[Any] = None,
-        router_manager: Optional[Any] = None,
         managers: Optional[Dict[str, Any]] = None,
-        enable_router_routing: bool = False,
         **kwargs,
     ) -> None:
         resolved_name, log_config, include_stacktrace = _normalize_error_config(config)
@@ -156,9 +154,7 @@ class ErrorManager(LoggerManager):
             process=process,
             config=log_config,
             config_manager=config_manager,
-            router_manager=router_manager,
             managers=managers or {},
-            enable_router_routing=enable_router_routing,
             **kwargs,
         )
 

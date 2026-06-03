@@ -60,17 +60,11 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         process: Optional["Process"] = None,
         config: Optional[Any] = None,
         config_manager: Optional[Any] = None,
-        router_manager: Optional[Any] = None,
         managers: Optional[Dict[str, Any]] = None,
-        enable_router_routing: bool = True,
         **kwargs,
     ):
         if managers is None:
             managers = {}
-        if router_manager:
-            managers["router"] = router_manager
-
-        observable_config = {"router_routing": enable_router_routing}
 
         # --- Normalize config ---
         log_config = self._resolve_log_config(config)
@@ -84,12 +78,10 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             buffer_strategy=None,
             dispatcher_key_field="level",
             managers=managers,
-            observable_config=observable_config,
             auto_proxy=kwargs.get("auto_proxy", True),
         )
 
         self._config_manager = config_manager
-        self._router_manager = router_manager
 
         self.config = log_config
         self.app_name = log_config.app_name
@@ -106,7 +98,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             "messages_processed": 0,
             "messages_skipped": 0,
             "messages_batched": 0,
-            "messages_routed": 0,
             "module_files_created": 0,
         }
 
@@ -357,9 +348,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             extra=context,
         )
 
-        if self.is_enabled("router_routing") and self._router_manager:
-            self._route_via_router(record)
-
         if self._buffer:
             for ch_name in channels:
                 self._buffer.enqueue(ch_name, record.to_dict())
@@ -379,29 +367,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
                     ch.write(record_dict)
                 except Exception:
                     pass
-
-    def _route_via_router(self, record: LogRecord) -> None:
-        if not self._router_manager:
-            return
-        try:
-            from ....message_module import Message, MessageType
-
-            msg = Message.create(
-                MessageType.LOG,
-                sender=self.manager_name,
-                targets=["logger"],
-                level=record.level.value.lower(),
-                message=record.message,
-                module=record.module,
-            )
-            if record.extra:
-                msg.add_metadata("scope", record.scope.value)
-                msg.add_metadata("extra", record.extra)
-
-            self._router_manager.send(msg)
-            self.stats["messages_routed"] += 1
-        except Exception:
-            pass
 
     # =========================================================================
     # КОНТЕКСТ
@@ -483,7 +448,6 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             "app_name": self.app_name,
             "messages_processed": self.stats["messages_processed"],
             "messages_skipped": self.stats["messages_skipped"],
-            "messages_routed": self.stats["messages_routed"],
             "channels_count": len(self._channel_registry),
             "module_channels_count": len(self._module_channels),
             "module_files_created": self.stats["module_files_created"],
