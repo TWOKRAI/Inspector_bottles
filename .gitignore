@@ -112,3 +112,6 @@ docs/diagrams/deps/per-module/*.svg
 graphify-out/
 .graphify_*
 multiprocess_framework/docs/COMMUNICATION_MAP_raw.json
+
+# Чужой файл (кинематика робота на Lua) — попал в корень случайно, не часть проекта
+robor.lua
