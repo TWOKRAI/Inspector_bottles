@@ -6,6 +6,7 @@ setup() вызывается один раз после инициализаци
   2. Если console interactive → запускает input loop с callback в CommandManager
   3. Регистрирует встроенные команды (reg) в CommandManager
 """
+
 from typing import Any, Optional
 
 from ...base_manager.adapters.base_adapter import BaseAdapter
@@ -43,6 +44,7 @@ class ConsoleAdapter(BaseAdapter):
             # 1. ConsoleLogChannel в LoggerManager
             if config.enabled and self.process and getattr(self.process, "logger_manager", None):
                 from ..channels.console_log_channel import ConsoleLogChannel
+
                 self._console_log_channel = ConsoleLogChannel(self._console)
                 logger = self.process.logger_manager
                 if hasattr(logger, "register_channel"):
@@ -61,13 +63,15 @@ class ConsoleAdapter(BaseAdapter):
                             return
                         command = parts[0]
                         args = parts[1:]
-                        result = cmd_mgr.handle_command({
-                            "command": command,
-                            "args": args,
-                            "raw": text,
-                            "source": "console",
-                            "process": getattr(self.process, "name", "unknown"),
-                        })
+                        result = cmd_mgr.handle_command(
+                            {
+                                "command": command,
+                                "args": args,
+                                "raw": text,
+                                "source": "console",
+                                "process": getattr(self.process, "name", "unknown"),
+                            }
+                        )
                         # Если обработчик вернул строку, выводим в консоль
                         if isinstance(result, str) and result:
                             self._console.write(result + "\n")
@@ -124,8 +128,9 @@ class ConsoleAdapter(BaseAdapter):
             if hasattr(cmd_mgr, "get_commands"):
                 try:
                     registry = {
-                        name: (meta.get("description", "") if isinstance(meta, dict) else "")
-                        for name, meta in cmd_mgr.get_commands().items()
+                        cmd.get("key", ""): cmd.get("description", "")
+                        for cmd in cmd_mgr.get_commands()
+                        if isinstance(cmd, dict)
                     }
                 except Exception:
                     pass
@@ -143,10 +148,10 @@ class ConsoleAdapter(BaseAdapter):
             return self._system_command_handler.stats(stats_mgr)
 
         for name, fn, description in [
-            ("help",   _cmd_help,   "Show available commands and descriptions"),
+            ("help", _cmd_help, "Show available commands and descriptions"),
             ("status", _cmd_status, "Show current process state (name, pid, managers)"),
-            ("ps",     _cmd_ps,     "List child processes"),
-            ("stats",  _cmd_stats,  "Show aggregated metrics"),
+            ("ps", _cmd_ps, "List child processes"),
+            ("stats", _cmd_stats, "Show aggregated metrics"),
         ]:
             cmd_mgr.register_command(
                 name,
