@@ -26,7 +26,9 @@ GUI live-телеметрия (вкладка «Процессы»: статус
 - **Активно/Обрывы/Средний FPS**: bind `system.health.active/broken_wires/avg_fps` — издателя НЕТ (фреймворковый `state_store_module/health/monitor.py` публикует `system.health.overall/<name>`, другие ключи, и не подключён в прототипе). → дефолты «Активно: 0».
 - **status**: bind `processes.{name}.state.status` — издатель ЕСТЬ (`_broadcast_status_change`→`_publish_state`), но это **разовая** дельта на старте; непрерывно идёт только `state.uptime` (карточки на него не подписаны). Подозрение на startup-race + отсутствие initial-state replay на subscribe (GUI подписался — текущее значение не реплеится).
 
-**Фикс (Option A — бэкенд публикует ожидаемые пути; выбор владельца 2026-06-03):**
+**РЕШЕНИЕ (2026-06-03, 2 investigator-аудита): целевая = D (snapshot-канал) через A как Шаг 0.** Реактивное дерево StateStore в рантайме несёт почти только телеметрию (конфиг→ConfigStore, cross-tab→EventBus, 5 backend-адаптеров = `state_proxy=None` no-op). → вывести телеметрию из дерева чисто. D: `ProcessMonitor` собирает snapshot-dict → hub.send → `DataReceiverBridge` → `TelemetryViewModel` → виджеты (~6 хопов, 0 glob, масштабируется O(процессы)). A (reuse bridge, Task 1.1) = Шаг 0 (общий bridge — фундамент D, не тупик). Task 4.1 (widget-replay) ОТМЕНЯЕТСЯ при D (snapshot решает late-binding). Детали — `plans/telemetry-delivery-simplification.md` (раздел РЕШЕНИЕ) + `plans/comm-system-communication-audit.md`. «Перенести на RouterManager» — отклонено: телеметрия уже на хабе, разрыв внутрипроцессный IO→Qt.
+
+**Историческое (Option A — бэкенд публикует ожидаемые пути; промежуточный выбор, поглощён решением D):**
 
 ✅ **СДЕЛАНО — process-level initial replay (`16e14084`):** `handle_state_subscribe` адресно шлёт новому подписчику снимок текущих листьев store по pattern (`_replay_initial_state` + `iter_matches`). +3 теста. Решает startup-race для process-level подписки. НО визуально GUI ещё «—» — см. оставшиеся gap'ы ниже.
 

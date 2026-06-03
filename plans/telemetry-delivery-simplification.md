@@ -5,7 +5,34 @@
 - **Статус:** DRAFT
 - **Ветка:** feat/comm-system-target-architecture (часть comm-system, НЕ новый branch)
 - **Родительский план:** [`comm-system-target-architecture.md`](comm-system-target-architecture.md) §7 (а), §12 P0 «разблокировать телеметрию»
-- **Доказательная база:** memory `project_telemetry_subscription_bug`, рантайм-probe сессии 2026-06-03
+- **Доказательная база:** memory `project_telemetry_subscription_bug`, рантайм-probe сессии 2026-06-03, аудиты [`comm-system-communication-audit.md`](comm-system-communication-audit.md)
+
+---
+
+## РЕШЕНИЕ (2026-06-03): целевая архитектура = D (snapshot-канал), миграция через A как Шаг 0
+
+> Установка владельца: **сделать сразу ХОРОШО и масштабируемо** (навести порядок, потом масштабировать), а не «лишь бы заработало». Два investigator-аудита (read-only, Opus) дали системный ответ.
+
+**Ключевой факт (HIGH confidence):** реактивное дерево StateStore в рантайме несёт **почти только телеметрию процессов**. Конфиг → `ConfigStore`; cross-tab (recipes/services/topology) → domain `EventBus`; 5 backend-адаптеров (`cameras/services/displays/recipes/registers`) в проде создаются с `state_proxy=None` (no-op). 100% живых GUI-биндингов — на `processes.*`/`system.*`. → **вывести телеметрию из дерева архитектурно ЧИСТО** (живых cross-tab/конфиг-потребителей дерева нет; классы StateStore остаются как capability).
+
+**Целевой поток (D, ~6 хопов вместо ~20):**
+```
+ProcessMonitor собирает snapshot-dict {processes:{name:{status,fps,latency,uptime,workers}}, system:{active,avg_fps,broken_wires}}
+  → RouterManager.send (data-канал, как кадры) → message_processor
+  → DataReceiverBridge.dispatch (тот же проверенный bridge, data_type="telemetry_snapshot")
+  → TelemetryViewModel (GUI, единый владелец «снимок→виджет») → карточки/health
+```
+Ноль glob, Dict-at-Boundary естественно, единый IO→Qt bridge (как кадры), throttle не нужен (период задаёт таймер snapshot).
+
+**Почему D, а не A-навсегда:** при масштабе (20 проц × 50 метрик × 10 вкладок) A не масштабируется — двойной glob-матчинг (backend SubscriptionManager + GUI GuiStateBindings) по тысячам дельт. D = O(процессы), не O(метрики×подписки). **Почему не гибрид:** плодит ТРЕТИЙ путь данных бэкенд→GUI (frame+reactive+snapshot) против унификации §2; живого реактивного потребителя статуса вне телеметрии НЕТ.
+
+**Миграция (двухшаговая, инвариант: серверная публикация и кадры hot-path не трогаем):**
+- **Шаг 0 = A (Task 1.1+1.2):** убрать `_StateDeltaEmitter`+`invokeMethod`, гнать через bridge, multi-subscriber. Чинит видимый баг минимальным риском И кладёт общий bridge — **фундамент D, не заплатка-тупик**.
+- **Шаг 1 = D:** snapshot-publisher в ProcessMonitor (за флагом, параллельно) → `TelemetryViewModel` на GUI → перевод `_panels.py`/`main_window.py` с `bindings.bind(glob)` на чтение view-model → убрать из ПУТИ телеметрии reactive-листья (`subscribe("processes.**")`, throttle-правила, GuiStateBindings для `processes.*`/`system.*`). Классы StateStore/адаптеры — оставить (capability).
+
+**Влияние на задачи ниже:** Task 1.1/1.2/2.1 — **остаются** (Шаг 0 + fail-loud). Task 3.1/3.2 — **меняются**: ProcessMonitor агрегирует fps/health в snapshot-dict, а не в reactive-листья. **Task 4.1 (widget-replay) — ОТМЕНЯЕТСЯ**: при snapshot late-binding ленивых вкладок не проблема — новая вкладка читает текущий snapshot из view-model сразу (убирает целый класс багов «разовая дельта пропущена»).
+
+> Если реализацию откладываем — это естественная точка: решение зафиксировано, Шаг 0 (Task 1.1) — первый конкретный шаг в новой сессии. Детальная декомпозиция Шага 1 (D) — отдельным /plan когда дойдём.
 
 > Это **детализация P0-подзадачи телеметрии** из comm-system. Вынесено в отдельный файл: 4 блока задач (доставка / fail-loud / издатели метрик / late-binding) + анализ хопов + сравнение архитектур не помещаются в и без того перегруженный (529 строк) comm-system без потери читаемости. Родительский план содержит ссылку сюда.
 
