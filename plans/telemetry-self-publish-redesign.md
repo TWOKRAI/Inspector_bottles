@@ -71,6 +71,13 @@ PM агрегирует workers_status → _publish_state → дерево → I
 > перешли на `perf_counter`. camera_0 работала и раньше только потому, что её
 > цикл включает ~47 мс throttle-sleep (> гранулярности).
 
+### Task 1b — Per-worker телеметрия (доп. запрос владельца) — DONE
+**Goal:** видеть время цикла КАЖДОГО воркера (а не только агрегат процесса), чтобы находить узкие места. Процесс = время самого медленного воркера (max), воркеры — каждый своё.
+**Сделано:**
+- `61b02761` — backend: self-publish per-worker `processes.{proc}.workers.{w}.status/effective_hz/cycle_duration_ms`.
+- `7e59e259` — GUI: `GuiStateBindings.bind_fanout` (переиспользуемый fan-out с replay) + `SingleProcessPanel` обнаруживает рантайм-воркеров из телеметрии и подмешивает в таблицу read-only строками. Раньше таблица показывала только конфиг-топологию (`get_workers()`), без рантайм-воркеров пайплайна (`data_receiver`/`pipeline_executor`/`source_producer_*`).
+**Acceptance:** [x] qt-mcp: detector → data_receiver 23.3 Гц/1.4 мс, pipeline_executor 23.6 Гц/2.0 мс — живые per-worker значения.
+
 ### Task 2 — Убрать heartbeat→центральный агрегат для метрик
 **Level:** Middle+ **Assignee:** developer (после Task 1)
 **Goal:** Удалить из `ProcessMonitor` метрик-агрегацию из heartbeat (`_publish_process_aggregate` + публикацию `workers.X.effective_hz`/`state.fps`/`state.latency_ms` из `_on_heartbeat_received`), т.к. теперь публикует сам процесс. heartbeat оставить ТОЛЬКО для liveness (`_last_heartbeat`, timeout→UNRESPONSIVE) и paused/running.
