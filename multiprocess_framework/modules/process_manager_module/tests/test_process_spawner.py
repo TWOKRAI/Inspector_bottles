@@ -79,9 +79,7 @@ class TestProcessSpawner:
         """stop() устанавливает stop_event при живом процессе."""
         spawner = ProcessSpawner()
         mock_process = MagicMock()
-        mock_process.is_alive.return_value = (
-            True  # процесс жив — stop_event.set() будет вызван
-        )
+        mock_process.is_alive.return_value = True  # процесс жив — stop_event.set() будет вызван
         spawner._process = mock_process
 
         spawner.stop(timeout=0.1)
@@ -97,6 +95,53 @@ class TestProcessSpawner:
 
         spawner.stop(timeout=0.1)
         mock_process.kill.assert_called_once()
+
+    def test_stop_snapshots_descendants_before_kill(self) -> None:
+        """stop() снимает поддерево ДО убийства PM и передаёт снимок в killer.
+
+        Регрессия: внуки (воркеры) осиротевали, т.к. _kill_orphan_children
+        обходил живые PPID уже ПОСЛЕ смерти PM и не находил их.
+        """
+        spawner = ProcessSpawner(stop_timeout=0.1)
+        spawner._process = None  # PM отсутствует — фокус на снимке
+        sentinel = [MagicMock(pid=42)]
+        spawner._snapshot_descendants = MagicMock(return_value=sentinel)
+        spawner._kill_orphan_children = MagicMock()
+
+        spawner.stop(timeout=0.1)
+
+        spawner._snapshot_descendants.assert_called_once()
+        spawner._kill_orphan_children.assert_called_once_with(sentinel)
+
+    def test_kill_orphan_children_terminates_pre_kill_snapshot(self) -> None:
+        """Процессы из снимка terminate'ятся, даже если PPID-цепочка оборвана."""
+        spawner = ProcessSpawner()
+        fake_current = MagicMock(pid=1)
+        fake_current.children.return_value = []  # обход по живым PPID пуст (внуки осиротели)
+        worker = MagicMock(pid=42)
+
+        with (
+            patch("psutil.Process", return_value=fake_current),
+            patch("psutil.wait_procs", return_value=([], [])),
+        ):
+            spawner._kill_orphan_children([worker])
+
+        worker.terminate.assert_called_once()
+
+    def test_kill_orphan_children_dedups_by_pid(self) -> None:
+        """Один PID в снимке и в обходе → terminate один раз (дедуп)."""
+        spawner = ProcessSpawner()
+        worker = MagicMock(pid=42)
+        fake_current = MagicMock(pid=1)
+        fake_current.children.return_value = [worker]  # тот же объект и в обходе
+
+        with (
+            patch("psutil.Process", return_value=fake_current),
+            patch("psutil.wait_procs", return_value=([], [])),
+        ):
+            spawner._kill_orphan_children([worker])
+
+        worker.terminate.assert_called_once()
 
     # --- orchestrator_class_path ---
 
@@ -120,9 +165,7 @@ class TestProcessSpawner:
         )
         with (
             patch.object(spawner, "_platform") as _mock_platform,
-            patch(
-                "multiprocess_framework.modules.process_manager_module.launcher.spawner.Process"
-            ) as MockProcess,
+            patch("multiprocess_framework.modules.process_manager_module.launcher.spawner.Process") as MockProcess,
             patch(
                 "multiprocess_framework.modules.process_manager_module.launcher.spawner.SharedResourcesManager"
             ) as MockSRM,

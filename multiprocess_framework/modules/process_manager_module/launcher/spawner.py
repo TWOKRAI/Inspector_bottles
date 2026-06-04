@@ -126,6 +126,13 @@ class ProcessSpawner:
         if self._logger:
             self._logger.info("Stopping system...")
 
+        # Снимок ВСЕГО поддерева ДО убийства PM. Воркеры — внуки (launcher → PM →
+        # дети), и как только PM убит (шаг 1), PPID-цепочка рвётся:
+        # children(recursive=True) на шаге 2 их уже не находит → сироты. Снятые
+        # сейчас psutil.Process кэшируют create_time и проверяют идентичность при
+        # terminate(), поэтому переиспользованный ОС PID не пострадает.
+        pre_kill_descendants = self._snapshot_descendants()
+
         # 0. ОБЩИЙ stop — все процессы (PM + дети) видят его в своём lifecycle и
         # начинают граceful-стоп ПАРАЛЛЕЛЬНО, не дожидаясь команды от PM.
         if self._system_stop_event is not None:
@@ -147,8 +154,10 @@ class ProcessSpawner:
                     self._logger.warning("Force killing ProcessManager")
                 self._process.kill()
 
-        # 2. Убить все дочерние процессы-сироты (если ProcessManager не успел)
-        self._kill_orphan_children()
+        # 2. Убить все дочерние процессы-сироты (если ProcessManager не успел).
+        # Передаём снимок поддерева, снятый ДО убийства PM, — иначе обход по живым
+        # PPID не дойдёт до внуков (их родитель уже мёртв).
+        self._kill_orphan_children(pre_kill_descendants)
 
         if self._on_shutdown:
             try:
@@ -163,14 +172,41 @@ class ProcessSpawner:
         if self._logger:
             self._logger.info("System stopped")
 
-    def _kill_orphan_children(self) -> None:
-        """Убить дочерние процессы, которые не завершились вместе с ProcessManager."""
-        import psutil
+    def _snapshot_descendants(self) -> list:
+        """Снимок всего поддерева текущего процесса (psutil.Process, recursive).
+
+        Снимается ДО остановки PM, пока PPID-цепочка цела. Best-effort: при любой
+        ошибке (нет psutil/доступа) возвращает пустой список.
+        """
+        try:
+            import os
+
+            import psutil
+
+            return psutil.Process(os.getpid()).children(recursive=True)
+        except Exception:  # noqa: BLE001 — снимок не критичен
+            return []
+
+    def _kill_orphan_children(self, pre_kill: Optional[list] = None) -> None:
+        """Убить дочерние процессы, не завершившиеся вместе с ProcessManager.
+
+        Args:
+            pre_kill: снимок поддерева, снятый ДО убийства PM (см. stop()). Нужен,
+                т.к. после смерти PM внуки осиротевают и обход по живым PPID их не
+                находит. Объединяется с текущим обходом и дедуплицируется по PID.
+        """
         import os
+
+        import psutil
 
         try:
             current = psutil.Process(os.getpid())
-            children = current.children(recursive=True)
+            # Объединяем снимок «до» и текущий обход; дедуп по PID. self исключаем.
+            by_pid: dict[int, "psutil.Process"] = {}
+            for proc in list(pre_kill or []) + current.children(recursive=True):
+                if proc.pid != current.pid:
+                    by_pid[proc.pid] = proc
+            children = list(by_pid.values())
             if not children:
                 return
             if self._logger:
