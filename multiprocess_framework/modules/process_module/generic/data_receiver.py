@@ -14,6 +14,7 @@ import threading
 import time
 from typing import Callable
 
+from .cycle_metrics import CycleMetricsRecorder
 from .frame_shm_middleware import FrameShmMiddleware
 from .inspector_manager import InspectorManager
 
@@ -56,6 +57,20 @@ class DataReceiver:
         self._overload_events = 0
         self._last_timeout_check = 0.0
 
+        # Тайминг цикла приёма для телеметрии GUI. Воркер receive-driven:
+        # меряем только итерации с реально полученным сообщением, а не
+        # холостые spin'ы при пустом receive (иначе effective_hz отражал бы
+        # частоту опроса, а не реальный поток данных).
+        self._cycle_metrics = CycleMetricsRecorder(target_interval_s=0.0)
+
+    def get_cycle_metrics(self) -> dict:
+        """Снимок тайминга цикла приёма (потокобезопасно).
+
+        WorkerManager.get_worker_status подмешивает результат в статус воркера →
+        heartbeat → ProcessMonitor.state.fps/latency_ms → GUI.
+        """
+        return self._cycle_metrics.get_cycle_metrics()
+
     def on_items_ready(self, items: list[dict]) -> None:
         """Callback от InspectorManager — коллекция готова, кладём в chain_queue.
 
@@ -97,6 +112,10 @@ class DataReceiver:
             msg = self._receive(timeout=0.05, channel_types=["data"])
             if msg is None:
                 continue
+
+            # Тайминг полезной итерации (restore + build + on_item), без учёта
+            # ожидания на пустом receive.
+            t_start = time.monotonic()
 
             # Message → dict: middleware и pipeline работают с plain dict
             if hasattr(msg, "to_dict"):
@@ -143,6 +162,9 @@ class DataReceiver:
 
             # Передать в InspectorManager
             self._inspector.on_item(item)
+
+            # Полный цикл обработки одного сообщения → телеметрия.
+            self._cycle_metrics.record(time.monotonic() - t_start)
 
     def _build_item(self, msg: dict) -> dict:
         """Построить item из IPC сообщения.

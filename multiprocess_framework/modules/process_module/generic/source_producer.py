@@ -13,6 +13,7 @@ import time
 from typing import Callable
 
 from ..plugins.base import ProcessModulePlugin
+from .cycle_metrics import CycleMetricsRecorder
 from .frame_shm_middleware import FrameShmMiddleware
 
 
@@ -49,6 +50,18 @@ class SourceProducer:
         self._log_error = log_error or (lambda msg: None)
         # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль).
         self._log_debug = log_debug or (lambda msg: None)
+
+        # Тайминг цикла (produce + send + smart-sleep) для телеметрии GUI.
+        # target_interval = 1/target_fps, поэтому effective_hz ≈ фактический FPS.
+        self._cycle_metrics = CycleMetricsRecorder(target_interval_s=self._target_interval)
+
+    def get_cycle_metrics(self) -> dict:
+        """Снимок тайминга цикла (потокобезопасно).
+
+        WorkerManager.get_worker_status подмешивает результат в статус воркера →
+        heartbeat → ProcessMonitor.state.fps/latency_ms → GUI.
+        """
+        return self._cycle_metrics.get_cycle_metrics()
 
     def run_loop(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """LOOP worker: produce() → SHM write → IPC send.
@@ -102,6 +115,9 @@ class SourceProducer:
                 deadline = time.monotonic() + sleep_time
                 while time.monotonic() < deadline and not stop_event.is_set():
                     time.sleep(max(0.0, min(0.01, deadline - time.monotonic())))
+
+            # Полный цикл (produce + send + smart-sleep) → телеметрия.
+            self._cycle_metrics.record(time.monotonic() - t_start)
 
     def _send_item(self, item: dict) -> None:
         """SHM write + IPC send одного item."""

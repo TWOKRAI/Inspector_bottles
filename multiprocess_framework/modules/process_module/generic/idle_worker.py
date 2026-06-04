@@ -22,6 +22,8 @@ import threading
 import time
 from typing import Any
 
+from .cycle_metrics import CycleMetricsRecorder
+
 # Дефолтный интервал цикла, если target_interval_ms не задан (2 Гц).
 _DEFAULT_INTERVAL_S = 0.5
 # Максимальная порция сна — для отзывчивости на stop_event.
@@ -52,11 +54,9 @@ class IdleWorker:
 
         self._execution_mode = str(self._config.get("execution_mode", "loop")).lower()
 
-        # Телеметрия цикла (читается из другого потока → под lock).
-        self._metrics_lock = threading.Lock()
-        self._cycle_duration_ms = 0.0
-        self._effective_hz = 0.0
-        self._cycles = 0
+        # Телеметрия цикла — общий recorder (тот же контракт ключей, что у
+        # SourceProducer/PipelineExecutor/DataReceiver).
+        self._cycle_metrics = CycleMetricsRecorder(target_interval_s=self._target_interval)
 
     # ------------------------------------------------------------------
     # Публичный API
@@ -67,13 +67,7 @@ class IdleWorker:
 
         WorkerManager.get_worker_status подмешивает результат в статус воркера.
         """
-        with self._metrics_lock:
-            return {
-                "cycle_duration_ms": round(self._cycle_duration_ms, 2),
-                "effective_hz": round(self._effective_hz, 2),
-                "target_interval_ms": round(self._target_interval * 1000.0, 1),
-                "cycles": self._cycles,
-            }
+        return self._cycle_metrics.get_cycle_metrics()
 
     def run(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """Точка входа воркера (target для WorkerManager.create_worker).
@@ -108,11 +102,7 @@ class IdleWorker:
             while time.monotonic() < deadline and not stop_event.is_set():
                 time.sleep(max(0.0, min(_SLEEP_CHUNK_S, deadline - time.monotonic())))
 
-        cycle = time.monotonic() - t_start
-        with self._metrics_lock:
-            self._cycle_duration_ms = cycle * 1000.0
-            self._effective_hz = (1.0 / cycle) if cycle > 0 else 0.0
-            self._cycles += 1
+        self._cycle_metrics.record(time.monotonic() - t_start)
 
     def _do_work(self) -> None:
         """Хук полезной нагрузки воркера.

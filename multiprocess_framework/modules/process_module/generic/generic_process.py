@@ -118,9 +118,12 @@ class GenericProcess(ProcessModule):
                     config={"execution_mode": "loop", "priority": "REALTIME"},
                     auto_start=True,
                 )
+                # bound-метод (не lambda): иначе WorkerManager.get_worker_status
+                # не найдёт get_cycle_metrics через target.__self__ → нет FPS в GUI.
+                self._pipeline_executor.bind_queue(self._chain_queue)
                 self.worker_manager.create_worker(
                     worker_name="pipeline_executor",
-                    target=lambda stop, pause: self._pipeline_executor.run_loop(self._chain_queue, stop, pause),
+                    target=self._pipeline_executor.run,
                     config={"execution_mode": "loop", "priority": "REALTIME"},
                     auto_start=True,
                 )

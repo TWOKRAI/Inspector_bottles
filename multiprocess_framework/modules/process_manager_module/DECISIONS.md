@@ -69,3 +69,24 @@
 - Новые `_cmd_*` методы: 3-4 строки вместо 8-10
 - Public API чище: внешние модули вызывают явные public методы `get_status_for_process()`, `broadcast_full_status()`
 - SHM конфигурация динамична: изменение размеров в `shm_config` автоматически применяется без правок в коде
+
+## ADR-PMM-009: Семантика агрегата телеметрии процесса (state.fps/latency_ms) + system.health
+
+**Статус:** принято
+**Дата:** 2026-06-04
+**Refs:** plans/telemetry-delivery-simplification.md (Task 3.1, Task 3.2)
+
+**Контекст:** Карточки вкладки «Процессы» подписаны на `processes.{name}.state.fps`, `state.latency_ms` и `system.health.active/avg_fps/broken_wires`, но издателя этих путей не было (метрики показывали «—», «Активно: 0»). ProcessMonitor уже публиковал per-worker `effective_hz`/`cycle_duration_ms` из heartbeat, но не агрегировал их до уровня процесса/системы.
+
+**Решение:**
+1. **`processes.{name}.state.fps` = max(`effective_hz`)** по running-воркерам процесса. max выбран, т.к. у процесса обычно есть «ведущий» loop-воркер (source/pipeline), задающий темп; среднее или сумма размывались бы фоновыми воркерами (idle ~2 Гц, heartbeat). Воркеры в event-режиме (`effective_hz=None`/0) и не-running — пропускаются. Если ни один воркер не дал hz — путь НЕ публикуется (карточка остаётся «—», а не «0»).
+2. **`processes.{name}.state.latency_ms` = max(`cycle_duration_ms`)** — худшая (самая медленная) итерация как консервативная оценка latency.
+3. **`system.health.active`** = число running-процессов; **`avg_fps`** = среднее `state.fps` по running-процессам с известным fps (кэш `_process_fps`, guard деления на ноль — не публикуется если данных нет); **`broken_wires`** = 0 (источник WireStatus/topology runtime-у ProcessMonitor недоступен; TODO до появления реестра WireStatus в ProcessManager — данные НЕ выдумываются).
+4. Тайминг цикла обобщён с IdleWorker на остальные generic loop-раннеры (`SourceProducer`/`PipelineExecutor`/`DataReceiver`) через общий `CycleMetricsRecorder` (единый контракт ключей). `pipeline_executor` переведён с lambda-target на bound-метод `run()`, иначе `WorkerManager.get_worker_status` не находил `get_cycle_metrics` через `target.__self__`.
+
+**Отклонённые альтернативы:**
+- (1) `state.fps` = sum(hz) — отвергнута: сумма по всем воркерам не отражает воспринимаемый FPS конвейера, раздувается фоновыми воркерами.
+- (2) `state.fps` = hz конкретного «data»-воркера по имени — отвергнута: имена воркеров зависят от плагина, нет универсального признака «главного» воркера; max устойчивее.
+- (3) Публиковать 0 при отсутствии hz — отвергнута: «0» вводит в заблуждение (выглядит как «работает, но 0 кадров»); «—» честнее отражает «метрика недоступна».
+
+**Последствия:** Карточки получают живые FPS/latency и health без новых путей доставки (reuse существующего heartbeat→StateStore). Семантика max задокументирована в docstring `_publish_process_aggregate`. broken_wires остаётся заглушкой до интеграции WireStatus.

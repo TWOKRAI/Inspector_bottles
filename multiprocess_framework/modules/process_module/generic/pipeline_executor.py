@@ -15,6 +15,7 @@ import time
 from typing import Callable
 
 from ..plugins.base import ProcessModulePlugin
+from .cycle_metrics import CycleMetricsRecorder
 from .frame_shm_middleware import FrameShmMiddleware
 
 
@@ -63,6 +64,41 @@ class PipelineExecutor:
         self._bypassed: dict[str, bool] = {}
         self._bypassed_since: dict[str, float] = {}
 
+        # Тайминг цикла обработки для телеметрии GUI. Воркер queue-driven:
+        # меряем только итерации с реальной работой (получен batch), а не
+        # холостые spin'ы при пустой очереди — иначе effective_hz отражал бы
+        # частоту опроса, а не пропускную способность обработки.
+        # target_interval=0: воркер не throttle'ится, частота диктуется потоком.
+        self._cycle_metrics = CycleMetricsRecorder(target_interval_s=0.0)
+
+        # Очередь для bound-метода run() (worker target). Биндится через
+        # bind_queue() — нужно, чтобы target воркера был bound-методом инстанса
+        # (а не lambda): иначе WorkerManager.get_worker_status не находит
+        # get_cycle_metrics через target.__self__ и FPS/latency не доедут до GUI.
+        self._chain_queue: queue.Queue | None = None
+
+    def bind_queue(self, chain_queue: queue.Queue) -> None:
+        """Привязать входную очередь для bound-метода run() (worker target)."""
+        self._chain_queue = chain_queue
+
+    def run(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
+        """Worker target (bound-метод инстанса → get_cycle_metrics подхватывается).
+
+        Требует предварительного bind_queue(). Делегирует в run_loop().
+        """
+        if self._chain_queue is None:
+            raise RuntimeError("PipelineExecutor.run() вызван без bind_queue() — очередь не привязана")
+        self.run_loop(self._chain_queue, stop_event, pause_event)
+
+    def get_cycle_metrics(self) -> dict:
+        """Снимок тайминга цикла обработки (потокобезопасно).
+
+        WorkerManager.get_worker_status подмешивает результат в статус воркера →
+        heartbeat → ProcessMonitor.state.fps/latency_ms → GUI. Отражает только
+        итерации с реальной обработкой batch'а (см. CycleMetricsRecorder в __init__).
+        """
+        return self._cycle_metrics.get_cycle_metrics()
+
     def run_loop(
         self,
         chain_queue: queue.Queue,
@@ -89,6 +125,10 @@ class PipelineExecutor:
             except queue.Empty:
                 continue
 
+            # Тайминг полезной итерации (chain-обработка + send), без учёта
+            # ожидания на пустой очереди.
+            t_start = time.monotonic()
+
             # [TRACE] Логируем каждый 30-й batch
             if not hasattr(self, "_trace_exec_cnt"):
                 self._trace_exec_cnt = 0
@@ -109,6 +149,7 @@ class PipelineExecutor:
             if not items:
                 if do_trace:
                     self._log_debug("[TRACE] PipelineExecutor: chain вернул пустой список!")
+                self._cycle_metrics.record(time.monotonic() - t_start)
                 continue
 
             if do_trace:
@@ -118,6 +159,9 @@ class PipelineExecutor:
 
             # Отправить результаты по IPC
             self._send_results(items)
+
+            # Полный цикл обработки batch'а (chain + send) → телеметрия.
+            self._cycle_metrics.record(time.monotonic() - t_start)
 
     def _execute_chain(self, items: list[dict]) -> list[dict]:
         """Последовательный прогон items через все processing-плагины."""
