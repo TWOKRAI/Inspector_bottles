@@ -17,16 +17,30 @@ from multiprocess_framework.modules.process_module.plugins import SchemaBase
 class DatabaseRegisters(SchemaBase):
     """Все параметры database — путь к БД + настройки batch."""
 
-    db_path: Annotated[str, FieldMeta(
-        "DB Path", info="Путь к SQLite файлу",
-    )] = "data/inspector.db"
+    db_path: Annotated[
+        str,
+        FieldMeta(
+            "DB Path",
+            info="Путь к SQLite файлу",
+        ),
+    ] = "data/inspector.db"
 
-    batch_size: Annotated[int, FieldMeta(
-        "Batch Size", info="Размер batch для flush",
-        min=1, max=10000,
-    )] = 100
+    batch_size: Annotated[
+        int,
+        FieldMeta(
+            "Batch Size",
+            info="Размер batch для flush",
+            min=1,
+            max=10000,
+        ),
+    ] = 100
 
-    flush_interval_sec: Annotated[float, FieldMeta(
-        "Flush Interval", info="Интервал авто-flush", unit="s",
-        min=0.1,
-    )] = 2.0
+    flush_interval_sec: Annotated[
+        float,
+        FieldMeta(
+            "Flush Interval",
+            info="Интервал авто-flush",
+            unit="s",
+            min=0.1,
+        ),
+    ] = 2.0

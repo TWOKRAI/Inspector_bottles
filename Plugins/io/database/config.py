@@ -22,9 +22,7 @@ class DatabasePluginConfig(PluginConfig):
     Все параметры (db_path, batch_size, flush_interval_sec) — в DatabaseRegisters.
     """
 
-    plugin_class: str = (
-        "Plugins.io.database.plugin.DatabasePlugin"
-    )
+    plugin_class: str = "Plugins.io.database.plugin.DatabasePlugin"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [DatabaseRegisters]

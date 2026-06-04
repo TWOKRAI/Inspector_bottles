@@ -1,15 +1,24 @@
-"""DatabasePlugin -- хранение результатов обработки в SQLite.
+"""DatabasePlugin -- хранение результатов обработки в SQLite через SQLManager.
 
 Output-плагин: process(items) -> items (pass-through с side-effect записи в БД).
 Batch INSERT по таймеру или по count.
 
 V3_MY_PURE: plugin самодостаточен — создаёт локальный register
 если RegistersManager недоступен. Все параметры ВСЕГДА через self._reg.
+
+Хранилище: Services/sql (`SQLManager`) вместо сырого sqlite3 — таблица `detections`
+описана как `DetectionSchema(SchemaBase + SQLMeta)`, создаётся auto-DDL, batch-запись
+через `repo.insert_many`. Публичный контракт плагина (process pass-through, буфер,
+flush-worker, команды) сохранён без изменений.
+
+Fork-safety (КРИТИЧНО): SQLManager создаётся и initialize()/create_tables()
+вызываются ВНУТРИ start() — ПОСЛЕ fork дочернего процесса, НЕ в configure().
+Конфиг с fork_safe=True (NullPool) + check_same_thread=False (flush-worker и
+process()-поток — разные потоки одного процесса). Тот же паттерн, что telemetry_sink.
 """
 
 from __future__ import annotations
 
-import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -22,7 +31,10 @@ from multiprocess_framework.modules.process_module.plugins import Port
 from multiprocess_framework.modules.process_module.plugins import register_plugin
 from multiprocess_framework.modules.process_module.plugins import ExecutionMode, ThreadConfig
 
+from Services.sql import SQLManager, SQLManagerConfig
+
 from .registers import DatabaseRegisters
+from .schemas import DetectionSchema
 
 
 @register_plugin("database", category="output", description="Запись результатов в SQLite")
@@ -58,7 +70,8 @@ class DatabasePlugin(ProcessModulePlugin):
         # Создаём директорию
         db_file = Path(self._reg.db_path)
         db_file.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: sqlite3.Connection | None = None
+        # SQLManager создаётся в start() после fork — здесь только объявляем.
+        self._sql: SQLManager | None = None
 
         ctx.log_info(
             f"DatabasePlugin: db={self._reg.db_path}, "
@@ -66,34 +79,29 @@ class DatabasePlugin(ProcessModulePlugin):
         )
 
     def start(self, ctx: PluginContext) -> None:
-        """Открыть соединение, создать таблицу, запустить flush worker."""
-        self._conn = sqlite3.connect(self._reg.db_path, check_same_thread=False)
-        self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS detections (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp REAL NOT NULL,
-                frame_id INTEGER,
-                camera_id INTEGER,
-                event_type TEXT,
-                data TEXT,
-                created_at REAL DEFAULT (unixepoch('now'))
-            )
-        """)
-        self._conn.commit()
+        """Создать SQLManager (после fork), таблицу (auto-DDL), запустить flush worker."""
+        # SQLManager ВНУТРИ процесса, fork-safe (NullPool + check_same_thread=False).
+        config = SQLManagerConfig(
+            url=f"sqlite:///{self._reg.db_path}",
+            dialect="sqlite",
+            fork_safe=True,  # NullPool — обязательно после fork
+            connect_args={"check_same_thread": False},
+        )
+        self._sql = SQLManager(config=config, managers={}, process=None)
+        self._sql.initialize()
+        self._sql.create_tables([DetectionSchema])
 
         # Worker для периодического flush (фоновая задача, не data flow)
         cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
-        ctx.worker_manager.create_worker(
-            "db_flush_worker", self._flush_loop, cfg, auto_start=True
-        )
+        ctx.worker_manager.create_worker("db_flush_worker", self._flush_loop, cfg, auto_start=True)
         ctx.log_info("DatabasePlugin: started, таблица detections готова")
 
     def shutdown(self, ctx: PluginContext) -> None:
-        """Flush остатков и закрытие соединения."""
+        """Flush остатков и закрытие SQLManager."""
         self._flush_buffer()
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        if self._sql is not None:
+            self._sql.shutdown()
+            self._sql = None
         ctx.log_info(f"DatabasePlugin: shutdown, всего записано: {self._total_written}")
 
     def process(self, items: list[dict]) -> list[dict]:
@@ -141,33 +149,30 @@ class DatabasePlugin(ProcessModulePlugin):
         return self._do_flush(batch)
 
     def _do_flush(self, batch: list[dict]) -> int:
-        """Записать готовый batch в БД (без захвата lock)."""
+        """Записать готовый batch в БД через SQLManager (без захвата lock)."""
 
-        if not self._conn:
+        if self._sql is None:
             return 0
 
-        insert_sql = (
-            "INSERT INTO detections (timestamp, frame_id, camera_id, event_type, data) "
-            "VALUES (:timestamp, :frame_id, :camera_id, :event_type, :data)"
-        )
+        repo = self._sql.get_repository(DetectionSchema)
+        # created_at проставляется в коде (SQL-default unixepoch не переносится в DDL).
+        created = time.time()
+        rows = [DetectionSchema(created_at=created, **record) for record in batch]
         try:
-            self._conn.executemany(insert_sql, batch)
-            self._conn.commit()
-            count = len(batch)
+            repo.insert_many(rows)
+            count = len(rows)
             self._total_written += count
             return count
         except Exception as e:
             # Fallback: вставляем по одной записи
             self._ctx.log_error(f"Batch insert failed: {e}, trying one-by-one")
             saved = 0
-            for record in batch:
+            for row in rows:
                 try:
-                    self._conn.execute(insert_sql, record)
+                    repo.insert_many([row])
                     saved += 1
                 except Exception:
                     self._total_errors += 1
-            if saved > 0:
-                self._conn.commit()
             count = saved
             self._total_written += count
             return count

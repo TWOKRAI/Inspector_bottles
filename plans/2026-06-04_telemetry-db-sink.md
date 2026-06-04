@@ -90,9 +90,9 @@ TelemetrySnapshot (SchemaBase + SQLMeta):
 
 ### Phase 2: Миграция DatabasePlugin (sqlite3 → SQLManager)
 
-- **Task 2.1:** `DetectionSchema` (SchemaBase + SQLMeta) + замена raw sqlite3 на SQLManager (auto-DDL, insert_many), сохранить контракт плагина [PENDING] (зависит от 0.1 — fork-safety паттерн общий)
+- **Task 2.1:** `DetectionSchema` (SchemaBase + SQLMeta) + замена raw sqlite3 на SQLManager (auto-DDL, insert_many), сохранить контракт плагина [DONE 2026-06-04] ✅ fork-safe SQLManager в start(), auto-DDL, on-disk smoke зелёный
   - **Module contract:** impl-only
-- **Task 2.2:** Обновить команды и тесты плагина под SQLManager [PENDING] (зависит от 2.1)
+- **Task 2.2:** Обновить команды и тесты плагина под SQLManager [DONE 2026-06-04] ✅ 17 passed, in-memory SQLManager (StaticPool), raw sqlite3-mock убран
   - **Module contract:** impl-only
 
 ### Phase 3: Тесты + приёмка

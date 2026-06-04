@@ -1,35 +1,23 @@
-"""Тесты DatabasePlugin.
+"""Тесты DatabasePlugin (SQLManager-реализация).
 
-Используем in-memory SQLite и mock PluginContext — без worker_manager.
+Используем in-memory SQLManager (StaticPool — данные живут в одном соединении)
+и mock PluginContext — без worker_manager. Raw sqlite3 больше не используется.
 """
 
 from __future__ import annotations
 
-import sqlite3
 import time
-from typing import Any
-from unittest.mock import MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from Plugins.io.database.plugin import DatabasePlugin
+from Plugins.io.database.schemas import DetectionSchema
+
+from Services.sql import SQLManager, SQLManagerConfig
 
 
 # ---------------------------------------------------------------------------
 # Вспомогательные фикстуры
 # ---------------------------------------------------------------------------
-
-CREATE_TABLE_SQL = """
-    CREATE TABLE IF NOT EXISTS detections (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp REAL NOT NULL,
-        frame_id INTEGER,
-        camera_id INTEGER,
-        event_type TEXT,
-        data TEXT,
-        created_at REAL DEFAULT (unixepoch('now'))
-    )
-"""
 
 
 def make_ctx(config: dict | None = None) -> MagicMock:
@@ -44,26 +32,41 @@ def make_ctx(config: dict | None = None) -> MagicMock:
     return ctx
 
 
+def make_sql() -> SQLManager:
+    """Создать инициализированный in-memory SQLManager с таблицей detections.
+
+    fork_safe НЕ задаём: для `:memory:` фабрика выбирает StaticPool (одно
+    соединение), иначе NullPool пересоздавал бы БД на каждом запросе.
+    """
+    sql = SQLManager(
+        config=SQLManagerConfig(url="sqlite:///:memory:", dialect="sqlite"),
+        managers={},
+        process=None,
+    )
+    sql.initialize()
+    sql.create_tables([DetectionSchema])
+    return sql
+
+
 def make_plugin(config: dict | None = None) -> DatabasePlugin:
-    """Создать сконфигурированный плагин с in-memory БД."""
+    """Создать сконфигурированный плагин с in-memory SQLManager."""
     plugin = DatabasePlugin()
     ctx = make_ctx(config)
     plugin.configure(ctx)
-    # Подменяем соединение на in-memory после configure, до start
-    plugin._conn = sqlite3.connect(":memory:", check_same_thread=False)
-    plugin._conn.execute(CREATE_TABLE_SQL)
-    plugin._conn.commit()
+    # Внедряем настоящий SQLManager после configure, до start (start делает fork-конфиг).
+    plugin._sql = make_sql()
     return plugin
 
 
-def count_rows(conn: sqlite3.Connection) -> int:
-    """Подсчитать записи в таблице detections."""
-    return conn.execute("SELECT COUNT(*) FROM detections").fetchone()[0]
+def count_rows(plugin: DatabasePlugin) -> int:
+    """Подсчитать записи в таблице detections через SQLManager."""
+    return plugin._sql.query("SELECT COUNT(*) AS c FROM detections")[0]["c"]
 
 
 # ---------------------------------------------------------------------------
 # TestConfigure
 # ---------------------------------------------------------------------------
+
 
 class TestConfigure:
     def test_configure_defaults(self):
@@ -77,6 +80,8 @@ class TestConfigure:
         assert plugin._reg.db_path == "data/inspector.db"
         assert plugin._total_written == 0
         assert plugin._total_errors == 0
+        # SQLManager НЕ создаётся в configure (fork-safety) — только в start().
+        assert plugin._sql is None
 
     def test_configure_custom(self):
         """Пользовательские параметры принимаются."""
@@ -90,8 +95,24 @@ class TestConfigure:
 
 
 # ---------------------------------------------------------------------------
+# TestSchema / DDL
+# ---------------------------------------------------------------------------
+
+
+class TestSchema:
+    def test_create_tables_builds_detections(self):
+        """create_tables([DetectionSchema]) создаёт таблицу detections (auto-DDL)."""
+        sql = make_sql()
+        # Если таблицы нет — запрос упадёт; считаем успехом наличие 0 строк.
+        rows = sql.query("SELECT COUNT(*) AS c FROM detections")
+        assert rows[0]["c"] == 0
+        sql.shutdown()
+
+
+# ---------------------------------------------------------------------------
 # TestProcess
 # ---------------------------------------------------------------------------
+
 
 class TestProcess:
     def test_process_adds_to_buffer(self):
@@ -120,24 +141,28 @@ class TestProcess:
         # Буфер должен быть пустым после flush
         assert len(plugin._buffer) == 0
         assert plugin._total_written == 3
+        assert count_rows(plugin) == 3
 
 
 # ---------------------------------------------------------------------------
 # TestFlush
 # ---------------------------------------------------------------------------
 
+
 class TestFlush:
     def test_flush_writes_to_db(self):
-        """_flush_buffer() пишет записи в SQLite."""
+        """_flush_buffer() пишет записи в БД через SQLManager."""
         plugin = make_plugin()
-        plugin.process([
-            {"frame_id": 10, "timestamp": 1.0},
-            {"frame_id": 11, "timestamp": 2.0},
-        ])
+        plugin.process(
+            [
+                {"frame_id": 10, "timestamp": 1.0},
+                {"frame_id": 11, "timestamp": 2.0},
+            ]
+        )
         flushed = plugin._flush_buffer()
 
         assert flushed == 2
-        assert count_rows(plugin._conn) == 2
+        assert count_rows(plugin) == 2
         assert plugin._total_written == 2
 
     def test_flush_empty_buffer(self):
@@ -146,65 +171,67 @@ class TestFlush:
         result = plugin._flush_buffer()
 
         assert result == 0
-        assert count_rows(plugin._conn) == 0
+        assert count_rows(plugin) == 0
+
+    def test_created_at_is_set_in_code(self):
+        """created_at проставляется в коде (не SQL-default)."""
+        plugin = make_plugin()
+        before = time.time()
+        plugin.process([{"frame_id": 1, "timestamp": 1.0}])
+        plugin._flush_buffer()
+        after = time.time()
+
+        row = plugin._sql.query("SELECT created_at FROM detections")[0]
+        assert row["created_at"] is not None
+        assert before <= row["created_at"] <= after
 
     def test_fallback_on_batch_error(self):
-        """При ошибке executemany — fallback по одной записи."""
+        """При ошибке batch insert_many — fallback по одной записи."""
         plugin = make_plugin()
-
-        # Добавляем записи напрямую в буфер
         plugin._buffer = [
             {"timestamp": 1.0, "frame_id": 1, "camera_id": 0, "event_type": "test", "data": "{}"},
             {"timestamp": 2.0, "frame_id": 2, "camera_id": 0, "event_type": "test", "data": "{}"},
         ]
 
-        # Ломаем executemany — оборачиваем соединение mock'ом
-        real_conn = plugin._conn
-        mock_conn = MagicMock(wraps=real_conn)
-        mock_conn.executemany.side_effect = Exception("Simulated batch error")
-        # execute() делегируем реальному соединению
-        mock_conn.execute.side_effect = real_conn.execute
-        mock_conn.commit.side_effect = real_conn.commit
-        plugin._conn = mock_conn
+        # get_repository кэширует инстанс — патчим именно его insert_many.
+        repo = plugin._sql.get_repository(DetectionSchema)
+        real_insert_many = repo.insert_many
 
-        flushed = plugin._flush_buffer()
+        def insert_side_effect(rows):
+            if len(rows) > 1:
+                raise Exception("Simulated batch error")
+            return real_insert_many(rows)
 
-        # Обе записи должны быть сохранены через fallback
+        with patch.object(repo, "insert_many", side_effect=insert_side_effect):
+            flushed = plugin._flush_buffer()
+
+        # Обе записи сохранены через fallback one-by-one.
         assert flushed == 2
         assert plugin._total_written == 2
-        assert count_rows(real_conn) == 2
-        # log_error должен был вызваться
+        assert count_rows(plugin) == 2
         plugin._ctx.log_error.assert_called_once()
 
     def test_fallback_counts_errors_on_single_row_failure(self):
         """В fallback: ошибка отдельной строки → total_errors++."""
         plugin = make_plugin()
-
         plugin._buffer = [
             {"timestamp": 1.0, "frame_id": 1, "camera_id": 0, "event_type": "ok", "data": "{}"},
             {"timestamp": 2.0, "frame_id": 2, "camera_id": 0, "event_type": "bad", "data": "{}"},
         ]
 
-        real_conn = plugin._conn
-        mock_conn = MagicMock()
-        mock_conn.executemany.side_effect = Exception("batch fail")
+        repo = plugin._sql.get_repository(DetectionSchema)
+        real_insert_many = repo.insert_many
 
-        call_count = [0]
+        def insert_side_effect(rows):
+            if len(rows) > 1:
+                raise Exception("batch fail")
+            # frame_id==1 → успех, остальное → ошибка строки.
+            if rows[0].frame_id == 1:
+                return real_insert_many(rows)
+            raise Exception("row fail")
 
-        def selective_execute(sql, record):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                # Первая запись — успех
-                return real_conn.execute(sql, record)
-            else:
-                # Вторая запись — ошибка
-                raise Exception("row fail")
-
-        mock_conn.execute.side_effect = selective_execute
-        mock_conn.commit.side_effect = real_conn.commit
-        plugin._conn = mock_conn
-
-        flushed = plugin._flush_buffer()
+        with patch.object(repo, "insert_many", side_effect=insert_side_effect):
+            flushed = plugin._flush_buffer()
 
         assert flushed == 1
         assert plugin._total_errors == 1
@@ -213,6 +240,7 @@ class TestFlush:
 # ---------------------------------------------------------------------------
 # TestCommands
 # ---------------------------------------------------------------------------
+
 
 class TestCommands:
     def test_cmd_flush(self):
