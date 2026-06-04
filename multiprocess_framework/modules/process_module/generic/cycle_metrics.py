@@ -48,13 +48,37 @@ class CycleMetricsRecorder:
         self._cycle_duration_ms = 0.0
         self._effective_hz = 0.0
         self._cycles = 0
+        # perf_counter предыдущего record() — для расчёта реальной частоты
+        # завершения циклов (throughput) по интервалу между вызовами.
+        self._last_record_ts: float | None = None
 
     def record(self, cycle_duration_s: float) -> None:
-        """Зафиксировать длительность одного завершённого цикла (секунды)."""
+        """Зафиксировать завершение одного цикла.
+
+        ``effective_hz`` считается как **частота завершения циклов** —
+        ``1 / (интервал между последовательными record())`` через
+        ``time.perf_counter()`` (high-res). НЕ ``1 / cycle_duration``: на Windows
+        ``time.monotonic()`` имеет гранулярность ~15 мс, и для быстрых
+        consumer-итераций (DataReceiver/PipelineExecutor — работа < 1 мс)
+        переданная длительность округлялась до 0 → FPS=0. Интервал между
+        завершениями равен фактическому inter-frame времени → корректный FPS
+        и для источников (throttled-цикл), и для потребителей (поток кадров).
+
+        ``cycle_duration_ms`` — переданная длительность полезной работы итерации
+        (latency одной обработки), отдельно от частоты.
+
+        Args:
+            cycle_duration_s: длительность полезной работы цикла, секунды.
+        """
         cycle = max(0.0, float(cycle_duration_s))
+        now = time.perf_counter()
         with self._lock:
             self._cycle_duration_ms = cycle * 1000.0
-            self._effective_hz = (1.0 / cycle) if cycle > 0 else 0.0
+            if self._last_record_ts is not None:
+                interval = now - self._last_record_ts
+                if interval > 0:
+                    self._effective_hz = 1.0 / interval
+            self._last_record_ts = now
             self._cycles += 1
 
     def measure(self) -> "_CycleMeasurement":
@@ -90,10 +114,11 @@ class _CycleMeasurement:
         self._t_start = 0.0
 
     def __enter__(self) -> "_CycleMeasurement":
-        self._t_start = time.monotonic()
+        self._t_start = time.perf_counter()
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
         # Фиксируем длительность даже при исключении — цикл всё равно прошёл.
-        self._recorder.record(time.monotonic() - self._t_start)
+        # perf_counter: high-res, корректно меряет subмиллисекундные итерации.
+        self._recorder.record(time.perf_counter() - self._t_start)
         return False  # исключения не глушим

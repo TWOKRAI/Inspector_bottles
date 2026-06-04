@@ -72,20 +72,78 @@ class ProcessHeartbeat:
                 }
                 # Данные о воркерах для ProcessMonitor
                 # Dict at Boundary: get_all_workers_status() уже возвращает чистые dict
+                workers: dict = {}
                 if self._services.worker_manager:
                     get_status = getattr(self._services.worker_manager, "get_all_workers_status", None)
                     if get_status is not None:
                         try:
                             workers = get_status()
-                            # Исключаем metrics для экономии трафика IPC
+                            # Исключаем metrics для экономии трафика IPC. Тайминг цикла
+                            # (effective_hz / cycle_duration_ms) подмешан на ВЕРХНИЙ
+                            # уровень статуса воркера — НЕ внутри metrics — и сохраняется.
                             for w in workers.values():
-                                w.pop("metrics", None)
+                                if isinstance(w, dict):
+                                    w.pop("metrics", None)
                             heartbeat_msg["workers_status"] = workers
                         except Exception:
-                            pass
+                            workers = {}
                 self._services.send_message("ProcessManager", heartbeat_msg)
+
+                # Self-publish метрик процесса напрямую в дерево StateStore.
+                # Здоровый путь телеметрии — тот же канал, что и статус процесса.
+                self._publish_metrics_to_tree(workers)
             except Exception as exc:
                 _log = getattr(self._services, "log_debug", self._services.log_info)
                 _log(f"Не удалось отправить heartbeat: {exc}", module="heartbeat")
             # Ожидание с проверкой stop_event для быстрого завершения
             stop_event.wait(timeout=self._interval)
+
+    def _publish_metrics_to_tree(self, workers: dict) -> None:
+        """Опубликовать агрегат FPS/latency процесса напрямую в дерево StateStore.
+
+        Здоровый путь телеметрии: процесс САМ репортит свои метрики через
+        собственный StateProxy (``state.set`` → ProcessManager → StateStoreManager
+        → GUI) — тот же проверенный канал, что и статус процесса. Минует
+        центральную heartbeat-агрегацию в ProcessMonitor (хрупкий лишний участок).
+        См. ``plans/telemetry-self-publish-redesign.md``.
+
+        Агрегат уровня процесса:
+          - ``processes.{name}.state.fps``        = max(``effective_hz``) по
+            running-воркерам с hz > 0 (ведущий loop-воркер задаёт темп);
+          - ``processes.{name}.state.latency_ms`` = max(``cycle_duration_ms``) —
+            худшая (самая медленная) итерация как консервативная оценка latency.
+        Нет ни одного hz > 0 → не публикуем (карточка остаётся «—», не «0»).
+
+        Процессы без StateProxy (чисто системные) тихо пропускаются.
+
+        Args:
+            workers: снимок ``get_all_workers_status()`` (тайминг цикла на верхнем
+                уровне каждого статуса).
+        """
+        proxy = getattr(self._services, "_state_proxy", None)
+        if proxy is None or not workers:
+            return
+
+        hz_values: list[float] = []
+        latency_values: list[float] = []
+        for w in workers.values():
+            if not isinstance(w, dict) or w.get("status") != "running":
+                continue
+            hz = w.get("effective_hz")
+            if isinstance(hz, (int, float)) and hz > 0:
+                hz_values.append(float(hz))
+            lat = w.get("cycle_duration_ms")
+            if isinstance(lat, (int, float)) and lat > 0:
+                latency_values.append(float(lat))
+
+        if not hz_values:
+            return
+
+        name = self._services.name
+        try:
+            proxy.set(f"processes.{name}.state.fps", round(max(hz_values), 1))
+            if latency_values:
+                proxy.set(f"processes.{name}.state.latency_ms", round(max(latency_values), 1))
+        except Exception as exc:
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Не удалось self-publish метрик в дерево: {exc}", module="heartbeat")

@@ -126,8 +126,9 @@ class PipelineExecutor:
                 continue
 
             # Тайминг полезной итерации (chain-обработка + send), без учёта
-            # ожидания на пустой очереди.
-            t_start = time.monotonic()
+            # ожидания на пустой очереди. perf_counter (не monotonic): работа
+            # subмиллисекундная, а monotonic на Windows имеет ~15мс гранулярность.
+            t_start = time.perf_counter()
 
             # [TRACE] Логируем каждый 30-й batch
             if not hasattr(self, "_trace_exec_cnt"):
@@ -149,7 +150,7 @@ class PipelineExecutor:
             if not items:
                 if do_trace:
                     self._log_debug("[TRACE] PipelineExecutor: chain вернул пустой список!")
-                self._cycle_metrics.record(time.monotonic() - t_start)
+                self._cycle_metrics.record(time.perf_counter() - t_start)
                 continue
 
             if do_trace:
@@ -161,7 +162,7 @@ class PipelineExecutor:
             self._send_results(items)
 
             # Полный цикл обработки batch'а (chain + send) → телеметрия.
-            self._cycle_metrics.record(time.monotonic() - t_start)
+            self._cycle_metrics.record(time.perf_counter() - t_start)
 
     def _execute_chain(self, items: list[dict]) -> list[dict]:
         """Последовательный прогон items через все processing-плагины."""

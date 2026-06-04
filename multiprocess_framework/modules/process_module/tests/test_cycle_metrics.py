@@ -29,13 +29,29 @@ class TestCycleMetricsRecorder:
         snap = rec.get_cycle_metrics()
         assert set(snap.keys()) == _EXPECTED_KEYS
 
-    def test_record_computes_hz(self) -> None:
+    def test_record_stores_cycle_duration(self) -> None:
+        """cycle_duration_ms = переданная длительность работы (latency)."""
         rec = CycleMetricsRecorder()
-        rec.record(0.05)  # 50 мс цикл → 20 Гц
+        rec.record(0.05)  # 50 мс полезной работы
         snap = rec.get_cycle_metrics()
         assert snap["cycle_duration_ms"] == 50.0
-        assert snap["effective_hz"] == 20.0
         assert snap["cycles"] == 1
+        # Один record() — частота ещё не определена (нет предыдущего вызова).
+        assert snap["effective_hz"] == 0.0
+
+    def test_effective_hz_from_call_cadence(self) -> None:
+        """effective_hz = частота завершения циклов (интервал между record()).
+
+        НЕ 1/cycle_duration: считается по реальному интервалу между record()
+        через perf_counter, поэтому корректен и для быстрых consumer-итераций.
+        """
+        rec = CycleMetricsRecorder()
+        rec.record(0.0)
+        time.sleep(0.05)  # ~50 мс между завершениями → ~20 Гц
+        rec.record(0.0)
+        hz = rec.get_cycle_metrics()["effective_hz"]
+        # Широкий допуск: планировщик ОС джиттерит, проверяем порядок величины.
+        assert 5.0 < hz < 60.0
 
     def test_zero_cycle_no_division_error(self) -> None:
         rec = CycleMetricsRecorder()

@@ -114,8 +114,9 @@ class DataReceiver:
                 continue
 
             # Тайминг полезной итерации (restore + build + on_item), без учёта
-            # ожидания на пустом receive.
-            t_start = time.monotonic()
+            # ожидания на пустом receive. perf_counter (не monotonic): работа
+            # subмиллисекундная, а monotonic на Windows имеет ~15мс гранулярность.
+            t_start = time.perf_counter()
 
             # Message → dict: middleware и pipeline работают с plain dict
             if hasattr(msg, "to_dict"):
@@ -164,7 +165,7 @@ class DataReceiver:
             self._inspector.on_item(item)
 
             # Полный цикл обработки одного сообщения → телеметрия.
-            self._cycle_metrics.record(time.monotonic() - t_start)
+            self._cycle_metrics.record(time.perf_counter() - t_start)
 
     def _build_item(self, msg: dict) -> dict:
         """Построить item из IPC сообщения.
