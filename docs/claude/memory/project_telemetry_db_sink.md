@@ -1,6 +1,6 @@
 ---
 name: project_telemetry_db_sink
-description: Telemetry DB-sink plan — Task 0.1+1.1 DONE; framework fix activated plugin state-publishing (Phase 3.2 must verify GUI telemetry)
+description: Telemetry DB-sink plan — Phase 1 (sink) + Phase 2 (DatabasePlugin→SQLManager) DONE; remains Phase 3 (pytest sink + headless приёмка). Framework fix activated plugin state-publishing.
 metadata:
   node_type: memory
   type: project
@@ -12,7 +12,11 @@ metadata:
 **Сделано (2026-06-04):**
 - Task 0.1 (10b6b20b): runtime-proof — backend-процесс через `StateProxy.subscribe("processes.**")` реально получает дельты + initial-replay. ОСНОВНОЙ путь подтверждён, FALLBACK (вариант D) не нужен.
 - Task 1.1 (9644d2fd): `TelemetrySinkPlugin` (subscribe→семпл loop-worker→SQLManager fork-safe). Топология `backend/topology/telemetry_sink.yaml` (launchable headless). Smoke зелёный.
+- Task 1.2+1.3 (6883c6ef/957ba386): полная схема `TelemetrySnapshot` (fps/latency/uptime/status/extra JSON) + per-process строки + system-сводка; команды flush/get_stats/purge_old + retention_days. Ревью Phase 1 APPROVE.
+- **Phase 2 — Task 2.1+2.2 (476e760e): миграция `Plugins/io/database` sqlite3→SQLManager.** `DetectionSchema(SchemaBase+SQLMeta)` (auto-DDL), `SQLManager` в `start()` (fork_safe=True, NullPool, check_same_thread=False), `_do_flush`→`repo.insert_many` (fallback one-by-one сохранён), `created_at` в коде (DDLBuilder не переносит SQL-default `unixepoch`). Контракт плагина не изменён. Тесты на in-memory SQLManager, 17 passed. README+STATUS добавлены.
 
-**КРИТИЧНО для Phase 3.2 / следующих задач:** реализация Task 1.1 вскрыла, что `PluginContext.with_config()` НЕ пробрасывал `state_proxy` → у ВСЕХ плагинов `ctx.state_proxy` был None, и их `_publish_state()` (`merge()`) был **мёртвым кодом**. Фикс `with_config` + фикс `handle_state_merge` (двойной unwrap из-за коллизии ключа `data`) **активировали** публикацию у `capture`/`color_mask`/`pilot_widgets` — теперь они пишут в `processes.*.state` (тот же subtree, что ProcessMonitor). **GUI-приёмка ПРОЙДЕНА (qt-mcp, 2026-06-04):** вкладка «Процессы» в `color_inspect` здорова — FPS 15.0 live, latency 0.0ms, «Активно: 6», карточки процессов на месте, 0 Qt-warnings. Двойная запись `processes.*.state` (ProcessMonitor + capture/color_mask) панель НЕ сломала. См. [[feedback_qt_mcp_smoke_verification]].
+**Паттерн fork-safe SQLManager (общий для sink и database):** SQLManager создаётся ВНУТРИ `start()` (после fork), НЕ в `configure()`; `fork_safe=True`→NullPool; `connect_args={"check_same_thread": False}`. Для тестов `:memory:` — БЕЗ fork_safe (иначе NullPool пересоздаёт БД и теряет данные; нужен StaticPool, который фабрика выбирает для `:memory:` сама). Импорт SQL — только `from Services.sql import SQLManager, SQLManagerConfig`.
 
-**Осталось:** Task 1.2 (полная схema + system-сводка), 1.3 (команды+retention-заглушка), Phase 2 (миграция DatabasePlugin sqlite3→SQLManager), Phase 3 (pytest+GUI/headless-приёмка). Импорт SQL — только `from Services.sql import ...`. Связано: [[project_telemetry_self_publish]], [[project_telemetry_subscription_bug]].
+**КРИТИЧНО для Phase 3.2:** реализация Task 1.1 вскрыла, что `PluginContext.with_config()` НЕ пробрасывал `state_proxy` → у ВСЕХ плагинов `ctx.state_proxy` был None, и их `_publish_state()` (`merge()`) был **мёртвым кодом**. Фикс `with_config` + фикс `handle_state_merge` (двойной unwrap из-за коллизии ключа `data`) **активировали** публикацию у `capture`/`color_mask`/`pilot_widgets` — теперь они пишут в `processes.*.state` (тот же subtree, что ProcessMonitor). **GUI-приёмка ПРОЙДЕНА (qt-mcp, 2026-06-04):** вкладка «Процессы» в `color_inspect` здорова — FPS live, «Активно: 6», 0 Qt-warnings. Двойная запись `processes.*.state` панель НЕ сломала. См. [[feedback_qt_mcp_smoke_verification]].
+
+**Осталось:** Phase 3 — Task 3.1 (pytest sink: агрегация/период/schema/fork_safe→NullPool; плагин database уже покрыт в 2.2), Task 3.2 (headless/qt-mcp приёмка реальной записи `telemetry_snapshots` + `detections`). Связано: [[project_telemetry_self_publish]], [[project_telemetry_subscription_bug]], [[feedback_fix_framework_forward]].
