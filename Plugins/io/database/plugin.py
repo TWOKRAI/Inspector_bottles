@@ -45,7 +45,10 @@ class DatabasePlugin(ProcessModulePlugin):
     category = "output"
 
     inputs = [
-        Port(name="result", dtype="dict", shape="(*,)", description="Результат обработки"),
+        # shape "1" = один dict на сообщение (как отдаёт robot_control.inspection_result —
+        # единственный dict-производитель). Прежнее "(*,)" было shape-несовместимо ни с одним
+        # производителем → вход неудовлетворим, плагин нельзя было развести в валидной топологии.
+        Port(name="result", dtype="dict", shape="1", description="Результат обработки"),
     ]
     outputs = []
 

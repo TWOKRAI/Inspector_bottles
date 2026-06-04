@@ -110,6 +110,29 @@ class TestSchema:
 
 
 # ---------------------------------------------------------------------------
+# TestPortContract — вход должен быть разводим в валидной топологии
+# ---------------------------------------------------------------------------
+
+
+class TestPortContract:
+    def test_result_input_wireable_from_robot_control(self):
+        """Вход `result` совместим с robot_control.inspection_result (единственный dict-производитель).
+
+        Регрессия: раньше вход был shape="(*,)" — несовместим ни с одним производителем,
+        плагин нельзя было развести (port-валидация топологии падала). Должно быть "1".
+        """
+        from multiprocess_framework.modules.process_module.plugins.port import are_ports_compatible
+        from Plugins.control.robot_control.plugin import RobotControlPlugin
+
+        db_in = next(p for p in DatabasePlugin.inputs if p.name == "result")
+        assert db_in.dtype == "dict"
+        assert db_in.shape == "1"
+
+        rc_out = next(p for p in RobotControlPlugin.outputs if p.name == "inspection_result")
+        assert are_ports_compatible(rc_out, db_in), "database.result должен принимать robot_control.inspection_result"
+
+
+# ---------------------------------------------------------------------------
 # TestProcess
 # ---------------------------------------------------------------------------
 
