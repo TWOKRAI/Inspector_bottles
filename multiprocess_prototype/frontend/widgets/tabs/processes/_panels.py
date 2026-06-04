@@ -49,10 +49,13 @@ if TYPE_CHECKING:
     from .presenter import ProcessesPresenter
 
 # Колонки таблицы «Все процессы»
-_ALL_TABLE_COLUMNS = ["Имя", "Категория", "Статус", "FPS", "Плагины"]
+_ALL_TABLE_COLUMNS = ["Имя", "Категория", "Статус", "Циклов/с", "Плагины"]
 
 # Колонки key-value таблицы одного процесса
 _DETAIL_TABLE_COLUMNS = ["Параметр", "Значение"]
+
+# Колонки таблицы пер-сегментной трассировки кадра (frame-trace)
+_TRACE_TABLE_COLUMNS = ["Участок", "Тип", "Среднее, мс"]
 
 # Порядок групп карточек на странице «Все процессы»
 _CATEGORY_ORDER = [
@@ -107,6 +110,10 @@ class AllProcessesPanel(QWidget):
         # Health-панель sticky-сверху (до inner_stack).
         self._build_health_panel(outer)
 
+        # Разбивка кадра по участкам (frame-trace) — под health, скрыта пока
+        # нет данных (заполняется только при INSPECTOR_FRAME_TRACE=1).
+        self._build_trace_panel(outer)
+
         # Внутренний стек: Cards (0) / Table (1).
         self._inner_stack = QStackedWidget()
         self._inner_stack.addWidget(self._build_cards_page())
@@ -131,7 +138,7 @@ class AllProcessesPanel(QWidget):
         self._lbl_active = QLabel("Активно: 0")
         self._lbl_wires = QLabel("Обрывы связей: 0")
         self._lbl_wires.setTextFormat(Qt.TextFormat.RichText)
-        self._lbl_avg_fps = QLabel("Средний FPS: —")
+        self._lbl_avg_fps = QLabel("Средняя частота: —")
         # Сквозной FPS цепочки: сколько кадров/с проходят через ВСЕ процессы и
         # доходят до дисплея (выходная пропускная способность пайплайна целиком).
         self._lbl_chain_fps = QLabel("FPS цепочки: —")
@@ -147,6 +154,55 @@ class AllProcessesPanel(QWidget):
         health_layout.addStretch()
 
         parent_layout.addWidget(self._health_panel)
+
+    def _build_trace_panel(self, parent_layout: QVBoxLayout) -> None:
+        """Таблица пер-сегментной разбивки кадра (transport + process спаны).
+
+        Скрыта по умолчанию: данные приходят только при INSPECTOR_FRAME_TRACE=1.
+        Показывается при первой непустой публикации system.trace_segments.
+        """
+        self._trace_box = QGroupBox("Разбивка кадра по участкам")
+        box_layout = QVBoxLayout(self._trace_box)
+        box_layout.setContentsMargins(8, 4, 8, 4)
+
+        self._trace_table = QTableWidget(0, len(_TRACE_TABLE_COLUMNS))
+        self._trace_table.setHorizontalHeaderLabels(_TRACE_TABLE_COLUMNS)
+        self._trace_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._trace_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        h = self._trace_table.horizontalHeader()
+        if h:
+            h.setStretchLastSection(True)
+            h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        # Компактная высота: трасса обычно 5–8 участков.
+        self._trace_table.setMaximumHeight(220)
+        box_layout.addWidget(self._trace_table)
+
+        self._trace_box.setVisible(False)
+        parent_layout.addWidget(self._trace_box)
+
+    def _on_trace_segments(self, _path: str, value: object) -> None:
+        """Fan-out callback: обновить таблицу разбивки кадра + строку «Итого».
+
+        value — список {label, kind, ms} (среднее за период, порядок = ход кадра).
+        """
+        if not isinstance(value, list) or not value:
+            return
+        rows = [s for s in value if isinstance(s, dict)]
+        total = sum(s.get("ms", 0.0) for s in rows if isinstance(s.get("ms"), (int, float)))
+        self._trace_table.setRowCount(len(rows) + 1)
+        kind_ru = {"transport": "передача", "process": "обработка"}
+        for r, span in enumerate(rows):
+            ms = span.get("ms")
+            self._trace_table.setItem(r, 0, QTableWidgetItem(str(span.get("label", "?"))))
+            self._trace_table.setItem(r, 1, QTableWidgetItem(kind_ru.get(span.get("kind"), "")))
+            self._trace_table.setItem(r, 2, QTableWidgetItem(f"{ms:.2f}" if isinstance(ms, (int, float)) else "—"))
+        # Строка «Итого» — сквозная сумма средних по участкам.
+        total_item = QTableWidgetItem("Итого")
+        total_ms = QTableWidgetItem(f"{total:.2f}")
+        self._trace_table.setItem(len(rows), 0, total_item)
+        self._trace_table.setItem(len(rows), 1, QTableWidgetItem(""))
+        self._trace_table.setItem(len(rows), 2, total_ms)
+        self._trace_box.setVisible(True)
 
     def _build_cards_page(self) -> QWidget:
         """Cards-страница: контейнер с группами EntityCard по категориям.
@@ -305,30 +361,30 @@ class AllProcessesPanel(QWidget):
         if bindings is None:
             return
 
-        # Карточки: статус + FPS + Latency.
+        # Карточки: статус + Циклов/с (частота, среднее за секунду) + Время цикла.
         for name, card in self._cards.items():
-            card.set_metrics({"FPS": "—", "Latency": "—"})
+            card.set_metrics({"Циклов/с": "—", "Время цикла": "—"})
 
             bindings.bind(
                 f"processes.{name}.state.status",
                 card._indicator,
                 "set_state",
             )
-            fps_label = card._metric_labels.get("FPS")
-            if fps_label is not None:
+            hz_label = card._metric_labels.get("Циклов/с")
+            if hz_label is not None:
                 bindings.bind(
                     f"processes.{name}.state.fps",
-                    fps_label,
+                    hz_label,
                     "text",
                     formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
                 )
-            latency_label = card._metric_labels.get("Latency")
-            if latency_label is not None:
+            cycle_label = card._metric_labels.get("Время цикла")
+            if cycle_label is not None:
                 bindings.bind(
                     f"processes.{name}.state.latency_ms",
-                    latency_label,
+                    cycle_label,
                     "text",
-                    formatter=lambda v: f"{v:.0f} ms" if isinstance(v, (int, float)) else "—",
+                    formatter=lambda v: f"{v:.1f} мс" if isinstance(v, (int, float)) else "—",
                 )
 
         # Health-метки.
@@ -352,7 +408,7 @@ class AllProcessesPanel(QWidget):
             "system.health.avg_fps",
             self._lbl_avg_fps,
             "text",
-            formatter=lambda v: f"Средний FPS: {v:.1f}" if isinstance(v, (int, float)) else "Средний FPS: —",
+            formatter=lambda v: f"Средняя частота: {v:.1f}" if isinstance(v, (int, float)) else "Средняя частота: —",
         )
         # Сквозной FPS цепочки (кадров/с на выходе пайплайна, измеряется GUI по
         # прибытию кадров на дисплей; инъекция локальной state-дельты в _update_fps).
@@ -370,6 +426,9 @@ class AllProcessesPanel(QWidget):
                 f"Задержка цепочки: {v:.0f} ms" if isinstance(v, (int, float)) else "Задержка цепочки: —"
             ),
         )
+        # Пер-сегментная разбивка кадра (frame-trace) — fan-out: значение списком,
+        # не привязывается к одному виджету. Заполняет таблицу _trace_table.
+        bindings.bind_fanout("system.trace_segments", self._on_trace_segments, owner=self)
 
 
 class SingleProcessPanel(QWidget):
@@ -430,7 +489,7 @@ class SingleProcessPanel(QWidget):
         )
         self._card.set_status(proc.status)
         metrics = self._presenter.get_detail_metrics(self._process_name)
-        self._card.set_metric("FPS", metrics.get("FPS", "—"))
+        self._card.set_metric("Циклов/с", metrics.get("Циклов/с", "—"))
         self._card.set_metric("PID", metrics.get("PID", "—"))
         self._card.set_metric("Uptime", metrics.get("Uptime", "—"))
         self._card.action_clicked.connect(self.card_action_requested)
@@ -658,21 +717,21 @@ class SingleProcessPanel(QWidget):
             card._indicator,
             "set_state",
         )
-        fps_label = card._metric_labels.get("FPS")
-        if fps_label is not None:
+        hz_label = card._metric_labels.get("Циклов/с")
+        if hz_label is not None:
             bindings.bind(
                 f"processes.{name}.state.fps",
-                fps_label,
+                hz_label,
                 "text",
                 formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
             )
-        latency_label = card._metric_labels.get("Latency")
-        if latency_label is not None:
+        cycle_label = card._metric_labels.get("Время цикла")
+        if cycle_label is not None:
             bindings.bind(
                 f"processes.{name}.state.latency_ms",
-                latency_label,
+                cycle_label,
                 "text",
-                formatter=lambda v: f"{v:.0f} ms" if isinstance(v, (int, float)) else "—",
+                formatter=lambda v: f"{v:.1f} мс" if isinstance(v, (int, float)) else "—",
             )
         uptime_label = card._metric_labels.get("Uptime")
         if uptime_label is not None:

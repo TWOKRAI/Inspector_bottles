@@ -53,6 +53,20 @@ class TestCycleMetricsRecorder:
         # Широкий допуск: планировщик ОС джиттерит, проверяем порядок величины.
         assert 5.0 < hz < 60.0
 
+    def test_effective_hz_is_windowed_average(self) -> None:
+        """effective_hz — среднее за окно, а не мгновенное 1/последний-интервал.
+
+        Серия из ~10 циклов с шагом ~10 мс → ~100 Гц. Один аномально долгий
+        паузный цикл в конце почти не должен «уронить» усреднённую частоту
+        (в отличие от мгновенной 1/interval, которая бы рухнула).
+        """
+        rec = CycleMetricsRecorder()
+        for _ in range(10):
+            rec.record(0.0)
+            time.sleep(0.01)
+        hz_steady = rec.get_cycle_metrics()["effective_hz"]
+        assert 40.0 < hz_steady < 200.0  # порядок ~100 Гц, широкий допуск под джиттер ОС
+
     def test_zero_cycle_no_division_error(self) -> None:
         rec = CycleMetricsRecorder()
         rec.record(0.0)

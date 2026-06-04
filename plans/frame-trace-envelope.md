@@ -2,7 +2,7 @@
 
 - **Slug:** frame-trace-envelope
 - **Дата:** 2026-06-04
-- **Статус:** Task 1+2 DONE (48caea37), Task 3 (GUI-разбивка) — опционально
+- **Статус:** Task 1+2 DONE (48caea37), Task 3 (GUI-разбивка) DONE, Task 4 (терминология) DONE
 - **Ветка:** feat/comm-system-target-architecture (продолжение телеметрии)
 - **Родитель:** [`telemetry-self-publish-redesign.md`](telemetry-self-publish-redesign.md) (capture_ts = первое поле trace, коммит 08160b3d)
 
@@ -82,9 +82,24 @@
 transport→painter 1.03 / contour_draw 0.003 / transport→gui 4.08 мс (итого ~7.8 мс). Вывод:
 время уходит в IPC-передачу, не в CV-обработку.
 
-### Task 3 — GUI-разбивка по сегментам (вариант B)
-**Level:** Middle+ **Файлы:** `_panels.py` (детальный вид), агрегатор сегментов.
-**Acceptance:** qt-mcp: таблица «участок · среднее мс» по последним кадрам.
+### Task 3 — GUI-разбивка по сегментам (вариант B) — DONE
+**Level:** Middle+ **Файлы:** `main_window.py` (аккумулятор `record_trace_spans`/
+`reset_trace_segments`), `app.py` (накопление в `_on_frame_received` + публикация
+`system.trace_segments` раз в секунду), `_panels.py` (`AllProcessesPanel._build_trace_panel`
++ `_on_trace_segments` через `bind_fanout`).
+**Acceptance:** [x] qt-mcp live: таблица «Участок · Тип · Среднее, мс» в «Все процессы»
+со строкой «Итого», скрыта без `INSPECTOR_FRAME_TRACE=1`. Замер: contour_finder 5.43 /
+camera→detector 2.09 / detector→painter 2.80 / hsv_mask 1.36 / contour_draw 1.87 мс.
+
+### Task 4 — Терминология телеметрии (попутно) — DONE
+**Why:** «FPS» корректен только для кадров (цепочка/источник); процесс-обработчик
+не производит кадры. Разделили: частота → «Циклов/с» (среднее за секунду),
+время → «Время цикла» (мс, индикатор узкого места).
+**Файлы:** `cycle_metrics.py` (`effective_hz` = оконное среднее за 1 с вместо
+мгновенного 1/interval), `process_card.py` (`_METRIC_KEYS`), `presenter.py`,
+`_panels.py` (карточки + «Средняя частота» вместо «Средний FPS»).
+**Acceptance:** [x] qt-mcp live: карточки показывают «Циклов/с»/«Время цикла»,
+health — «Средняя частота»; «FPS цепочки»/«Задержка цепочки» сохранены (реальные кадры).
 
 ## Out of scope (v1)
 - Fan-in merge trace, распределённые часы (NTP), waterfall-виджет (вариант C).

@@ -8,8 +8,9 @@ loop-раннеры (SourceProducer, PipelineExecutor, DataReceiver), чтобы
 
 Контракт ключей ОДИН для всех воркеров (важно для агрегации в ProcessMonitor и
 для подмешивания в WorkerManager.get_worker_status):
-    - cycle_duration_ms: float — длительность последнего цикла, мс
-    - effective_hz: float — фактическая частота = 1 / длительность цикла
+    - cycle_duration_ms: float — длительность последнего цикла, мс («время цикла»)
+    - effective_hz: float — частота завершения циклов, усреднённая за последнюю
+      секунду (циклов/с); см. record() — НЕ мгновенная 1/cycle
     - target_interval_ms: float — целевой интервал цикла, мс (0 если не задан)
     - cycles: int — число завершённых циклов
 
@@ -21,7 +22,11 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from typing import Any
+
+# Окно усреднения частоты циклов (циклов/с) — среднее за последнюю секунду.
+_HZ_WINDOW_S = 1.0
 
 
 class CycleMetricsRecorder:
@@ -48,24 +53,24 @@ class CycleMetricsRecorder:
         self._cycle_duration_ms = 0.0
         self._effective_hz = 0.0
         self._cycles = 0
-        # perf_counter предыдущего record() — для расчёта реальной частоты
-        # завершения циклов (throughput) по интервалу между вызовами.
-        self._last_record_ts: float | None = None
+        # Метки завершения циклов (perf_counter) за последнюю секунду —
+        # для усреднённой частоты (циклов/с), устойчивой к джиттеру.
+        self._completions: deque[float] = deque()
 
     def record(self, cycle_duration_s: float) -> None:
         """Зафиксировать завершение одного цикла.
 
-        ``effective_hz`` считается как **частота завершения циклов** —
-        ``1 / (интервал между последовательными record())`` через
-        ``time.perf_counter()`` (high-res). НЕ ``1 / cycle_duration``: на Windows
-        ``time.monotonic()`` имеет гранулярность ~15 мс, и для быстрых
-        consumer-итераций (DataReceiver/PipelineExecutor — работа < 1 мс)
-        переданная длительность округлялась до 0 → FPS=0. Интервал между
-        завершениями равен фактическому inter-frame времени → корректный FPS
-        и для источников (throttled-цикл), и для потребителей (поток кадров).
+        ``effective_hz`` — **средняя частота завершения циклов за последнюю
+        секунду** (циклов/с): держим метки завершений в скользящем окне 1 с и
+        делим (N-1) на фактический размах окна. Так показатель не дёргается от
+        отдельных быстрых/медленных циклов (запрос владельца: «среднее за
+        секунду»). НЕ ``1 / cycle_duration``: на Windows ``time.monotonic()``
+        имеет гранулярность ~15 мс, а у быстрых consumer-итераций
+        (DataReceiver/PipelineExecutor, работа < 1 мс) длительность округлялась
+        до 0 → частота 0.
 
         ``cycle_duration_ms`` — переданная длительность полезной работы итерации
-        (latency одной обработки), отдельно от частоты.
+        («время цикла», latency одной обработки), отдельно от частоты.
 
         Args:
             cycle_duration_s: длительность полезной работы цикла, секунды.
@@ -74,11 +79,16 @@ class CycleMetricsRecorder:
         now = time.perf_counter()
         with self._lock:
             self._cycle_duration_ms = cycle * 1000.0
-            if self._last_record_ts is not None:
-                interval = now - self._last_record_ts
-                if interval > 0:
-                    self._effective_hz = 1.0 / interval
-            self._last_record_ts = now
+            self._completions.append(now)
+            # Выкинуть метки старше окна усреднения.
+            cutoff = now - _HZ_WINDOW_S
+            while self._completions and self._completions[0] < cutoff:
+                self._completions.popleft()
+            # Средняя частота = число интервалов / размах окна. При <2 метках
+            # (только-только стартовали) частота ещё не определена → 0.
+            span = now - self._completions[0]
+            n = len(self._completions)
+            self._effective_hz = (n - 1) / span if n >= 2 and span > 0 else 0.0
             self._cycles += 1
 
     def measure(self) -> "_CycleMeasurement":

@@ -215,6 +215,13 @@ class MainWindow(QMainWindow):
         self._chain_latency_sum = 0.0
         self._chain_latency_n = 0
 
+        # Аккумулятор пер-сегментной трассировки кадра (frame-trace) за секунду:
+        # label → сумма/счётчик мс. Заполняется только при INSPECTOR_FRAME_TRACE=1
+        # (иначе trace пуст). Порядок ключей = порядок появления = ход кадра.
+        self._trace_sums: dict[str, float] = {}
+        self._trace_counts: dict[str, int] = {}
+        self._trace_kinds: dict[str, str] = {}
+
         # G.4.4: источник undo/redo (domain CommandDispatcher) —
         # устанавливается через set_undo_controller()
         self._undo_controller: "UndoRedoController | None" = None
@@ -538,3 +545,50 @@ class MainWindow(QMainWindow):
         self._chain_latency_sum = 0.0
         self._chain_latency_n = 0
         return avg
+
+    def record_trace_spans(self, spans: object) -> None:
+        """Накопить пер-сегментные времена из trace одного кадра.
+
+        spans — item["trace"] (список спанов transport/process). Каждый спан
+        агрегируется по label (transport: «from→to», process: «node:plugin»)
+        для усреднения за период. Молча игнорирует не-список / битые спаны.
+        """
+        if not isinstance(spans, list):
+            return
+        for span in spans:
+            if not isinstance(span, dict):
+                continue
+            kind = span.get("kind")
+            ms = span.get("ms")
+            if not isinstance(ms, (int, float)):
+                continue
+            if kind == "transport":
+                label = f"{span.get('from')}→{span.get('to')}"
+            elif kind == "process":
+                label = f"{span.get('node')}:{span.get('plugin')}"
+            else:
+                continue
+            self._trace_sums[label] = self._trace_sums.get(label, 0.0) + ms
+            self._trace_counts[label] = self._trace_counts.get(label, 0) + 1
+            self._trace_kinds.setdefault(label, kind)
+
+    def reset_trace_segments(self) -> list[dict] | None:
+        """Средние по сегментам за период + сброс. None если трасс не было.
+
+        Возвращает список {label, kind, ms} в порядке появления сегментов
+        (= ход кадра по цепочке) для публикации в system.trace_segments.
+        """
+        if not self._trace_counts:
+            return None
+        segments = [
+            {
+                "label": label,
+                "kind": self._trace_kinds.get(label, ""),
+                "ms": self._trace_sums[label] / self._trace_counts[label],
+            }
+            for label in self._trace_sums
+        ]
+        self._trace_sums.clear()
+        self._trace_counts.clear()
+        self._trace_kinds.clear()
+        return segments

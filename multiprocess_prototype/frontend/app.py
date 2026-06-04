@@ -676,6 +676,9 @@ def _setup_bridge_callbacks(
             # таймлайна каждый 30-й кадр (под флагом INSPECTOR_FRAME_TRACE).
             if frame_trace.enabled() and isinstance(data, dict):
                 frame_trace.record_transport(data, "gui")
+                # Накопить пер-сегментные времена → таблица «участок · мс»
+                # («Все процессы»). Публикуется усреднённо раз в секунду.
+                window.record_trace_spans(data.get("trace"))
                 if _frame_trace_cnt % 30 == 1:
                     process._log_info(f"[FRAME-TRACE] {data.get('trace')}", module="gui")
 
@@ -707,6 +710,13 @@ def _setup_timers(
             if latency is not None:
                 process._bridge.dispatch(
                     {"data_type": "state_delta", "path": "system.chain_latency_ms", "value": latency}
+                )
+            # Пер-сегментная разбивка кадра (среднее за секунду) → таблица в
+            # «Все процессы». Не пусто только при INSPECTOR_FRAME_TRACE=1.
+            segments = window.reset_trace_segments()
+            if segments is not None:
+                process._bridge.dispatch(
+                    {"data_type": "state_delta", "path": "system.trace_segments", "value": segments}
                 )
         except Exception:  # noqa: BLE001 — телеметрия не критична
             pass

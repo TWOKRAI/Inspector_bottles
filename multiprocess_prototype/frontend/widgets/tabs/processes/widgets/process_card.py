@@ -2,7 +2,7 @@
 """ProcessCard — насыщенная карточка процесса (ds-card).
 
 Визуал: градиентная ds-card с цветной полосой категории слева, крупным
-заголовком + статус-пилюлей, строкой метрик (FPS/Latency/PID) и кнопками-иконками
+заголовком + статус-пилюлей, строкой метрик (Циклов/с · Время цикла · PID) и кнопками-иконками
 действий справа (▶ ⏸ ↻ 🗑). Стилизуется через qss по role="process-card" и
 динамическим свойствам category/status.
 
@@ -59,8 +59,11 @@ _STATUS_TEXT = {
     "unknown": "—",
 }
 
-# Метрики, отображаемые в строке (порядок сохраняется).
-_METRIC_KEYS = ("FPS", "Latency", "PID", "Uptime")
+# Метрики, отображаемые в строке (порядок сохраняется). Для процесса-обработчика
+# «FPS» некорректен (он не производит кадры) → частота = «Циклов/с» (среднее за
+# секунду), время = «Время цикла» (мс, показывает узкое место). FPS остаётся
+# только для кадровых метрик цепочки/источника.
+_METRIC_KEYS = ("Циклов/с", "Время цикла", "PID", "Uptime")
 
 
 class ProcessCard(QFrame):
@@ -168,7 +171,7 @@ class ProcessCard(QFrame):
         return self._indicator
 
     def metric_label(self, key: str) -> QLabel | None:
-        """QLabel метрики по ключу (FPS/Latency/PID) — для привязок."""
+        """QLabel метрики по ключу (Циклов/с · Время цикла · PID) — для привязок."""
         return self._metric_labels.get(key)
 
     def set_status(self, state: str) -> None:
@@ -182,7 +185,7 @@ class ProcessCard(QFrame):
         self._repolish(self)
 
     def set_metric(self, key: str, value: str) -> None:
-        """Обновить значение одной метрики (FPS/Latency/PID)."""
+        """Обновить значение одной метрики (Циклов/с · Время цикла · PID)."""
         label = self._metric_labels.get(key)
         if label is not None:
             label.setText(f"{key} {value}")

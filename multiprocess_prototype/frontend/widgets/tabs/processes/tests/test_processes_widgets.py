@@ -37,8 +37,8 @@ class TestProcessCard:
     def test_set_metric_updates_label(self, qtbot) -> None:
         card = ProcessCard(entity_id="p", title="p")
         qtbot.addWidget(card)
-        card.set_metric("FPS", "30.1")
-        assert "30.1" in card.metric_label("FPS").text()
+        card.set_metric("Циклов/с", "30.1")
+        assert "30.1" in card.metric_label("Циклов/с").text()
 
     def test_action_clicked_emitted(self, qtbot) -> None:
         card = ProcessCard(entity_id="cam", title="cam")

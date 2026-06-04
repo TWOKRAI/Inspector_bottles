@@ -184,7 +184,7 @@ class ProcessesPresenter:
                     "Имя": proc.name,
                     "Категория": self.category_title(proc.category),
                     "Статус": proc.status,
-                    "FPS": f"{proc.fps:.1f}" if proc.fps else "—",
+                    "Циклов/с": f"{proc.fps:.1f}" if proc.fps else "—",
                     "Плагины": ", ".join(proc.plugins) or "—",
                 }
             )
@@ -199,7 +199,7 @@ class ProcessesPresenter:
             "Категория": self.category_title(proc.category),
             "Статус": proc.status,
             "PID": str(proc.pid) if proc.pid else "—",
-            "FPS": f"{proc.fps:.1f}" if proc.fps else "—",
+            "Циклов/с": f"{proc.fps:.1f}" if proc.fps else "—",
             "Uptime": "—",  # live через StateStore (processes.{name}.state.uptime)
             "Кадры": str(proc.frame_count) if proc.frame_count else "—",
             "Плагины": ", ".join(proc.plugins) or "—",

@@ -221,3 +221,51 @@ def test_on_undo_redo_noop_without_controller(qtbot):
     # set_undo_controller не вызывался → _undo_controller is None
     window._on_undo()
     window._on_redo()  # не должно бросать исключений
+
+
+# -- Frame-trace аккумулятор (Task 3 frame-trace-envelope) --
+
+
+def test_trace_segments_none_when_empty(qtbot):
+    """reset_trace_segments → None, если трасс не накапливали."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.reset_trace_segments() is None
+
+
+def test_trace_segments_average_and_order(qtbot):
+    """Сегменты усредняются по label, порядок = порядок появления."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    frame1 = [
+        {"kind": "transport", "from": "cam", "to": "detector", "ms": 2.0},
+        {"kind": "process", "node": "detector", "plugin": "hsv", "ms": 1.0},
+    ]
+    frame2 = [
+        {"kind": "transport", "from": "cam", "to": "detector", "ms": 4.0},
+        {"kind": "process", "node": "detector", "plugin": "hsv", "ms": 3.0},
+    ]
+    window.record_trace_spans(frame1)
+    window.record_trace_spans(frame2)
+
+    segments = window.reset_trace_segments()
+    assert segments == [
+        {"label": "cam→detector", "kind": "transport", "ms": 3.0},
+        {"label": "detector:hsv", "kind": "process", "ms": 2.0},
+    ]
+    # Сброс после чтения.
+    assert window.reset_trace_segments() is None
+
+
+def test_trace_segments_ignores_garbage(qtbot):
+    """Не-список / битые спаны молча игнорируются."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.record_trace_spans(None)
+    window.record_trace_spans("nope")
+    window.record_trace_spans([{"kind": "process"}, 42, {"kind": "x", "ms": 1.0}])
+
+    assert window.reset_trace_segments() is None
