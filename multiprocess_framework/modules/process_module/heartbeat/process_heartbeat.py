@@ -99,7 +99,7 @@ class ProcessHeartbeat:
             stop_event.wait(timeout=self._interval)
 
     def _publish_metrics_to_tree(self, workers: dict) -> None:
-        """Опубликовать агрегат FPS/latency процесса напрямую в дерево StateStore.
+        """Опубликовать телеметрию процесса и каждого воркера в дерево StateStore.
 
         Здоровый путь телеметрии: процесс САМ репортит свои метрики через
         собственный StateProxy (``state.set`` → ProcessManager → StateStoreManager
@@ -107,12 +107,17 @@ class ProcessHeartbeat:
         центральную heartbeat-агрегацию в ProcessMonitor (хрупкий лишний участок).
         См. ``plans/telemetry-self-publish-redesign.md``.
 
-        Агрегат уровня процесса:
+        Per-worker (строки таблицы воркеров в детальном виде процесса):
+          - ``processes.{name}.workers.{w}.status``            — живой статус;
+          - ``processes.{name}.workers.{w}.effective_hz``      — частота воркера;
+          - ``processes.{name}.workers.{w}.cycle_duration_ms`` — время цикла (latency).
+
+        Агрегат уровня процесса (карточка):
           - ``processes.{name}.state.fps``        = max(``effective_hz``) по
             running-воркерам с hz > 0 (ведущий loop-воркер задаёт темп);
           - ``processes.{name}.state.latency_ms`` = max(``cycle_duration_ms``) —
-            худшая (самая медленная) итерация как консервативная оценка latency.
-        Нет ни одного hz > 0 → не публикуем (карточка остаётся «—», не «0»).
+            время самого медленного воркера (узкое горло процесса).
+        Нет ни одного hz > 0 → агрегат не публикуем (карточка остаётся «—»).
 
         Процессы без StateProxy (чисто системные) тихо пропускаются.
 
@@ -124,26 +129,42 @@ class ProcessHeartbeat:
         if proxy is None or not workers:
             return
 
+        name = self._services.name
         hz_values: list[float] = []
         latency_values: list[float] = []
-        for w in workers.values():
-            if not isinstance(w, dict) or w.get("status") != "running":
+
+        for wname, w in workers.items():
+            if not isinstance(w, dict):
                 continue
+            status = w.get("status")
             hz = w.get("effective_hz")
-            if isinstance(hz, (int, float)) and hz > 0:
-                hz_values.append(float(hz))
             lat = w.get("cycle_duration_ms")
-            if isinstance(lat, (int, float)) and lat > 0:
-                latency_values.append(float(lat))
+
+            # Per-worker телеметрия → строка WorkerTable. Статус — всегда;
+            # частоту/цикл — только для воркеров, реально измеряющих цикл.
+            try:
+                if status is not None:
+                    proxy.set(f"processes.{name}.workers.{wname}.status", status)
+                if isinstance(hz, (int, float)) and hz > 0:
+                    proxy.set(f"processes.{name}.workers.{wname}.effective_hz", round(hz, 1))
+                if isinstance(lat, (int, float)) and lat > 0:
+                    proxy.set(f"processes.{name}.workers.{wname}.cycle_duration_ms", round(lat, 1))
+            except Exception:  # nosec B110 — телеметрия не критична
+                pass
+
+            # Агрегат процесса: только running-воркеры с реальной частотой.
+            if status == "running" and isinstance(hz, (int, float)) and hz > 0:
+                hz_values.append(float(hz))
+                if isinstance(lat, (int, float)) and lat > 0:
+                    latency_values.append(float(lat))
 
         if not hz_values:
             return
 
-        name = self._services.name
         try:
             proxy.set(f"processes.{name}.state.fps", round(max(hz_values), 1))
             if latency_values:
                 proxy.set(f"processes.{name}.state.latency_ms", round(max(latency_values), 1))
         except Exception as exc:
             _log = getattr(self._services, "log_debug", self._services.log_info)
-            _log(f"Не удалось self-publish метрик в дерево: {exc}", module="heartbeat")
+            _log(f"Не удалось self-publish метрик процесса: {exc}", module="heartbeat")
