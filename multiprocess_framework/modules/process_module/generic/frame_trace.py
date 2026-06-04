@@ -6,9 +6,30 @@
 дописывает свой спан → на выходе цепочки читаем полную историю: сколько ушло на
 ПЕРЕДАЧУ между процессами (transport) и на ОБРАБОТКУ в каждом плагине (process).
 
-Контракт спана (plain dict — Dict at Boundary, pickle-safe):
+Контракт спана (plain dict — Dict at Boundary, pickle-safe)::
+
     {"kind": "transport", "from": "camera_0", "to": "detector", "ms": 1.8}
     {"kind": "process",   "node": "detector", "plugin": "hsv_mask", "ms": 0.6}
+    {"kind": "merge",     "node": "stitcher", "branches": 3, "chosen": "region_0", "ms": 0}
+
+Спан ``merge`` добавляется fan-in плагином (stitcher) после наследования trace
+ветви-победителя (critical path = ветвь с max суммой ``ms``). Поля:
+
+- ``branches`` — число входных ветвей (фактическое, может быть < ожидаемого
+  при timeout).
+- ``chosen`` — имя ветви-победителя (``region_name`` из метаданных item).
+- ``ms`` — время ожидания полной коллекции в fan-in буфере. ``0`` если не
+  измеримо (InspectorManager не передаёт эту метрику).
+
+Дополнительно merged-кадр может нести ``item["trace_branches"]`` — лёгкую
+сводку по всем ветвям::
+
+    [{"branch": "region_0", "total_ms": 12.5, "spans": 4},
+     {"branch": "region_1", "total_ms":  8.3, "spans": 4},
+     {"branch": "default",  "total_ms": 10.1, "spans": 4}]
+
+``trace_branches`` содержит только агрегаты (без полных спанов), размер
+O(число ветвей) — не растёт от глубины trace.
 
 Служебные поля ``_t_send`` / ``_from`` ставятся перед отправкой и снимаются на
 приёме (по ним считается transport-спан); они НЕ накапливаются.
@@ -77,6 +98,42 @@ def record_process(item: dict, node: str, plugin: str, ms: float) -> None:
     if not _ENABLED or not isinstance(item, dict):
         return
     item.setdefault("trace", []).append({"kind": "process", "node": node, "plugin": plugin, "ms": round(ms, 3)})
+
+
+def record_merge(
+    item: dict,
+    node: str,
+    branches: int,
+    chosen: str,
+    ms: float | None = None,
+) -> None:
+    """Добавить merge-спан: fan-in (N→1) в ``node``, выбрана ветвь ``chosen``.
+
+    Вызывается stitcher'ом (или аналогичным fan-in плагином) ПОСЛЕ наследования
+    trace от ветви-победителя (critical path). Спан дописывается в конец
+    наследованного trace.
+
+    Args:
+        item: merged-кадр (dict), уже содержащий наследованный trace.
+        node: имя узла (trace_node) — обычно имя процесса stitcher'а.
+        branches: число входных ветвей (фактическое).
+        chosen: имя ветви-победителя (region_name).
+        ms: время ожидания коллекции в fan-in буфере (мс). ``None`` / ``0``
+            если не измеримо.
+    """
+    if not _ENABLED or not isinstance(item, dict):
+        return
+    span: dict = {
+        "kind": "merge",
+        "node": node,
+        "branches": branches,
+        "chosen": chosen,
+    }
+    if ms is not None:
+        span["ms"] = round(ms, 3)
+    else:
+        span["ms"] = 0
+    item.setdefault("trace", []).append(span)
 
 
 def traced(fn):

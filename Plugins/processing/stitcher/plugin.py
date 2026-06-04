@@ -70,13 +70,47 @@ class StitcherPlugin(ProcessModulePlugin):
             "channels": 3,
         }
 
-        # Наследовать trace и capture_ts от items[0] — чтобы merged-кадр нёс
-        # непустой trace в GUI. Правильный critical-path выбор (max-sum ветвь)
-        # будет реализован в Task 1.2; здесь items[0] как минимальный slice.
-        # Гейт под флагом: без INSPECTOR_FRAME_TRACE поле не добавляется.
+        # --- Fan-in trace: наследование critical-path (ветвь с max суммой ms) ---
+        # Гейт под флагом: без INSPECTOR_FRAME_TRACE поведение как до Task 1.1.
         if frame_trace.enabled():
-            merged["trace"] = list(items[0].get("trace", []))
-            merged["capture_ts"] = items[0].get("capture_ts")
+            # Вычислить суммарную длительность trace каждой ветви
+            branch_stats: list[tuple[int, float, int, str]] = []  # (idx, total_ms, spans, name)
+            for idx, it in enumerate(items):
+                tr = it.get("trace", [])
+                total_ms = sum(s.get("ms", 0) for s in tr)
+                branch_name = it.get("region_name", f"branch_{idx}")
+                branch_stats.append((idx, total_ms, len(tr), branch_name))
+
+            # Выбрать ветвь-победителя: max суммы ms (critical path).
+            # Edge case: все trace пусты (spans=0) → winner = items[0].
+            winner_idx = 0
+            if branch_stats:
+                winner_idx = max(branch_stats, key=lambda x: x[1])[0]
+
+            winner = items[winner_idx]
+            winner_name = winner.get("region_name", f"branch_{winner_idx}")
+
+            # Наследовать trace (копию) от ветви-победителя
+            merged["trace"] = list(winner.get("trace", []))
+            merged["capture_ts"] = winner.get("capture_ts")
+
+            # trace_branches — лёгкая сводка по ВСЕМ ветвям (агрегаты, без спанов)
+            merged["trace_branches"] = [
+                {"branch": name, "total_ms": round(total_ms, 3), "spans": spans}
+                for _, total_ms, spans, name in branch_stats
+            ]
+
+            # merge-спан: kind="merge", дописывается в конец наследованного trace.
+            # ms = fan-in-wait (время ожидания коллекции в буфере InspectorManager).
+            # InspectorManager не передаёт эту метрику → ms=0.
+            trace_node = getattr(self, "_trace_node", None) or self.name
+            frame_trace.record_merge(
+                merged,
+                node=trace_node,
+                branches=len(items),
+                chosen=winner_name,
+                ms=0,
+            )
 
         return [merged]
 
