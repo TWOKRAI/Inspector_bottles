@@ -74,9 +74,13 @@ class GuiProcess(ProcessModule):
             # дельты на 'gui'). Не блокирует старт: subscribe — fire-and-forget.
             try:
                 self._gui_state_proxy.subscribe("processes.**", lambda _deltas: None, exclude_self=True)
+                # system.** — сводное здоровье (system.health.active/avg_fps/broken_wires)
+                # для health-панели вкладки «Процессы». Без неё дельты system.* не
+                # доходят до GUI и панель показывает дефолты («Активно: 0», «—»).
+                self._gui_state_proxy.subscribe("system.**", lambda _deltas: None, exclude_self=True)
             except Exception as exc:
                 self._log_warning(
-                    f"GuiProcess '{self.name}': подписка на processes.** не удалась: {exc}",
+                    f"GuiProcess '{self.name}': подписка на processes.**/system.** не удалась: {exc}",
                     module="gui",
                 )
 

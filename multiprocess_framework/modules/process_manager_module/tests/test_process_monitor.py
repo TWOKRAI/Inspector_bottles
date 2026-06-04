@@ -220,7 +220,12 @@ class TestProcessMonitorStatePublish:
         # Не должно бросать исключение
         monitor._publish_state("processes.x.state.status", "running")
 
-    def test_heartbeat_publishes_worker_telemetry(self) -> None:
+    def test_heartbeat_does_not_publish_telemetry(self) -> None:
+        """Task 2: heartbeat НЕ публикует телеметрию в дерево (это self-publish процесса).
+
+        Монитор лишь хранит workers_status (для legacy full-status broadcast) и
+        обновляет liveness/timeout — никаких processes.X.workers.* / state.fps.
+        """
         mock_pm = _make_mock_process_manager()
         ssm = MagicMock()
         mock_pm._state_store_manager = ssm
@@ -235,26 +240,11 @@ class TestProcessMonitorStatePublish:
         )
 
         paths = {c[0][0]["data"]["path"] for c in ssm.handle_state_set.call_args_list}
-        assert "processes.cam0.workers.w1.status" in paths
-        assert "processes.cam0.workers.w1.effective_hz" in paths
-
-    def test_heartbeat_without_hz_skips_hz_publish(self) -> None:
-        mock_pm = _make_mock_process_manager()
-        ssm = MagicMock()
-        mock_pm._state_store_manager = ssm
-        monitor = ProcessMonitor(mock_pm)
-
-        monitor._on_heartbeat_received(
-            {
-                "sender": "cam0",
-                "timestamp": 1.0,
-                "workers_status": {"w1": {"status": "running"}},  # нет effective_hz
-            }
-        )
-
-        paths = {c[0][0]["data"]["path"] for c in ssm.handle_state_set.call_args_list}
-        assert "processes.cam0.workers.w1.status" in paths
-        assert "processes.cam0.workers.w1.effective_hz" not in paths
+        assert not any(p.startswith("processes.cam0.workers.") for p in paths)
+        assert "processes.cam0.state.fps" not in paths
+        # liveness обновлён, workers_status сохранён для broadcast.
+        assert monitor._last_heartbeat["cam0"] == 1.0
+        assert monitor._workers_status["cam0"] == {"w1": {"status": "running", "effective_hz": 12.5}}
 
     def test_status_change_publishes_process_state(self) -> None:
         mock_pm = _make_mock_process_manager()
@@ -272,73 +262,6 @@ class TestProcessMonitorStatePublish:
 def _published(ssm: MagicMock) -> dict:
     """Собрать {path: value} из всех вызовов handle_state_set."""
     return {c[0][0]["data"]["path"]: c[0][0]["data"]["value"] for c in ssm.handle_state_set.call_args_list}
-
-
-class TestProcessAggregate:
-    """Task 3.1 — агрегация per-worker hz → processes.X.state.fps/latency_ms."""
-
-    def test_fps_is_max_effective_hz_of_running_workers(self) -> None:
-        mock_pm = _make_mock_process_manager()
-        ssm = MagicMock()
-        mock_pm._state_store_manager = ssm
-        monitor = ProcessMonitor(mock_pm)
-
-        monitor._on_heartbeat_received(
-            {
-                "sender": "cam0",
-                "timestamp": 1.0,
-                "workers_status": {
-                    "source": {"status": "running", "effective_hz": 25.0, "cycle_duration_ms": 40.0},
-                    "idle": {"status": "running", "effective_hz": 2.0, "cycle_duration_ms": 500.0},
-                },
-            }
-        )
-
-        pub = _published(ssm)
-        # max(25, 2) = 25
-        assert pub["processes.cam0.state.fps"] == 25.0
-        # max(40, 500) = 500
-        assert pub["processes.cam0.state.latency_ms"] == 500.0
-
-    def test_non_running_workers_excluded_from_aggregate(self) -> None:
-        mock_pm = _make_mock_process_manager()
-        ssm = MagicMock()
-        mock_pm._state_store_manager = ssm
-        monitor = ProcessMonitor(mock_pm)
-
-        monitor._on_heartbeat_received(
-            {
-                "sender": "cam0",
-                "timestamp": 1.0,
-                "workers_status": {
-                    "source": {"status": "running", "effective_hz": 10.0, "cycle_duration_ms": 100.0},
-                    "paused": {"status": "paused", "effective_hz": 999.0, "cycle_duration_ms": 1.0},
-                },
-            }
-        )
-
-        pub = _published(ssm)
-        assert pub["processes.cam0.state.fps"] == 10.0
-        assert pub["processes.cam0.state.latency_ms"] == 100.0
-
-    def test_no_hz_does_not_publish_fps(self) -> None:
-        mock_pm = _make_mock_process_manager()
-        ssm = MagicMock()
-        mock_pm._state_store_manager = ssm
-        monitor = ProcessMonitor(mock_pm)
-
-        monitor._on_heartbeat_received(
-            {
-                "sender": "cam0",
-                "timestamp": 1.0,
-                "workers_status": {"idle": {"status": "running"}},  # нет hz
-            }
-        )
-
-        pub = _published(ssm)
-        # state.fps не публикуется → карточка остаётся «—», не «0»
-        assert "processes.cam0.state.fps" not in pub
-        assert "cam0" not in monitor._process_fps
 
 
 class TestSystemHealth:
@@ -374,51 +297,8 @@ class TestSystemHealth:
         # avg_fps не публикуется без данных
         assert "system.health.avg_fps" not in pub
 
-    def test_avg_fps_averages_running_process_fps(self) -> None:
-        mock_pm = _make_mock_process_manager()
-        ssm = MagicMock()
-        mock_pm._state_store_manager = ssm
-        monitor = ProcessMonitor(mock_pm)
-
-        # Кэш fps заполняется агрегатом heartbeat'а.
-        monitor._process_fps = {"cam0": 20.0, "cam1": 10.0, "cam_stopped": 99.0}
-        all_states = {
-            "cam0": {"status": "running"},
-            "cam1": {"status": "running"},
-            "cam_stopped": {"status": "stopped"},
-        }
-        monitor._publish_health(all_states)
-
-        pub = _published(ssm)
-        assert pub["system.health.active"] == 2
-        # (20 + 10) / 2 = 15.0; остановленный cam_stopped исключён
-        assert pub["system.health.avg_fps"] == 15.0
-
-    def test_aggregate_feeds_health_end_to_end(self) -> None:
-        """heartbeat → _process_fps → health.avg_fps."""
-        mock_pm = _make_mock_process_manager()
-        ssm = MagicMock()
-        mock_pm._state_store_manager = ssm
-        monitor = ProcessMonitor(mock_pm)
-
-        monitor._on_heartbeat_received(
-            {
-                "sender": "cam0",
-                "timestamp": 1.0,
-                "workers_status": {"source": {"status": "running", "effective_hz": 30.0}},
-            }
-        )
-        monitor._publish_health({"cam0": {"status": "running"}})
-
-        pub = _published(ssm)
-        assert pub["system.health.active"] == 1
-        assert pub["system.health.avg_fps"] == 30.0
-
-
-class TestAggregateIntegrationRealStore:
-    """Интеграция с реальным StateStoreManager: дерево реально получает значения."""
-
-    def test_heartbeat_and_health_land_in_real_tree(self) -> None:
+    def test_avg_fps_averages_selfpublished_fps(self) -> None:
+        """avg_fps = среднее по self-опубликованным processes.X.state.fps (running)."""
         from multiprocess_framework.modules.state_store_module import StateStoreManager
 
         ssm = StateStoreManager(initial_state={}, logger=None)
@@ -426,21 +306,58 @@ class TestAggregateIntegrationRealStore:
         mock_pm._state_store_manager = ssm
         monitor = ProcessMonitor(mock_pm)
 
-        monitor._on_heartbeat_received(
+        # Эмулируем self-publish процессов в дерево.
+        for path, val in {
+            "processes.cam0.state.fps": 20.0,
+            "processes.cam1.state.fps": 10.0,
+            "processes.cam_stopped.state.fps": 99.0,
+        }.items():
+            ssm.handle_state_set({"data": {"path": path, "value": val, "source": "test"}})
+
+        monitor._publish_health(
             {
-                "sender": "cam0",
-                "timestamp": 1.0,
-                "workers_status": {
-                    "source": {"status": "running", "effective_hz": 25.0, "cycle_duration_ms": 40.0},
-                    "idle": {"status": "running", "effective_hz": 2.0, "cycle_duration_ms": 500.0},
-                },
+                "cam0": {"status": "running"},
+                "cam1": {"status": "running"},
+                "cam_stopped": {"status": "stopped"},
             }
         )
+
+        assert ssm.handle_state_get({"data": {"path": "system.health.active"}})["value"] == 2
+        # (20 + 10) / 2 = 15.0; остановленный cam_stopped исключён
+        assert ssm.handle_state_get({"data": {"path": "system.health.avg_fps"}})["value"] == 15.0
+
+    def test_health_avg_fps_skipped_without_selfpublished_fps(self) -> None:
+        """Нет ни одного опубликованного fps → avg_fps не публикуется (карточка «—»)."""
+        from multiprocess_framework.modules.state_store_module import StateStoreManager
+
+        ssm = StateStoreManager(initial_state={}, logger=None)
+        mock_pm = _make_mock_process_manager()
+        mock_pm._state_store_manager = ssm
+        monitor = ProcessMonitor(mock_pm)
+
         monitor._publish_health({"cam0": {"status": "running"}})
 
-        # Реальное дерево содержит агрегаты (не «—»/0).
-        assert ssm.handle_state_get({"data": {"path": "processes.cam0.state.fps"}})["value"] == 25.0
-        assert ssm.handle_state_get({"data": {"path": "processes.cam0.state.latency_ms"}})["value"] == 500.0
+        assert ssm.handle_state_get({"data": {"path": "system.health.active"}})["value"] == 1
+        assert ssm.handle_state_get({"data": {"path": "system.health.avg_fps"}})["status"] == "error"
+
+
+class TestHealthIntegrationRealStore:
+    """Интеграция с реальным StateStoreManager: health читает self-публикованный fps."""
+
+    def test_health_reads_selfpublished_fps_from_real_tree(self) -> None:
+        from multiprocess_framework.modules.state_store_module import StateStoreManager
+
+        ssm = StateStoreManager(initial_state={}, logger=None)
+        mock_pm = _make_mock_process_manager()
+        mock_pm._state_store_manager = ssm
+        monitor = ProcessMonitor(mock_pm)
+
+        # Self-publish процесса (как делает ProcessHeartbeat._publish_metrics_to_tree).
+        ssm.handle_state_set({"data": {"path": "processes.cam0.state.fps", "value": 25.0, "source": "cam0"}})
+
+        monitor._publish_health({"cam0": {"status": "running"}})
+
+        # health агрегирует из дерева (не «—»/0).
         assert ssm.handle_state_get({"data": {"path": "system.health.active"}})["value"] == 1
         assert ssm.handle_state_get({"data": {"path": "system.health.avg_fps"}})["value"] == 25.0
         assert ssm.handle_state_get({"data": {"path": "system.health.broken_wires"}})["value"] == 0

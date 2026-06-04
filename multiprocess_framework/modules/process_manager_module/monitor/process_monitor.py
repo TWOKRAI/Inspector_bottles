@@ -82,10 +82,6 @@ class ProcessMonitor:
         # Сбрасывается при остановке/удалении процесса.
         self._first_seen: dict[str, float] = {}
 
-        # Кэш последнего опубликованного fps по процессам — для system.health.avg_fps.
-        # Обновляется в _publish_process_aggregate, читается в _publish_health.
-        self._process_fps: dict[str, float] = {}
-
         # Авто-рестарт: счётчик попыток рестарта per process
         self._restart_counts: dict[str, int] = {}
 
@@ -150,24 +146,15 @@ class ProcessMonitor:
             return
         self._last_heartbeat[sender] = ts if isinstance(ts, (int, float)) else time.time()
 
-        # Сохраняем данные о воркерах процесса
+        # Сохраняем данные о воркерах процесса (для legacy full-status broadcast).
+        # Телеметрию (per-worker + агрегат fps/latency) в дерево здесь НЕ публикуем:
+        # каждый процесс делает это сам (self-publish — ProcessHeartbeat.
+        # _publish_metrics_to_tree). Heartbeat ProcessManager-у нужен только для
+        # liveness/timeout и переходов paused/running. См.
+        # plans/telemetry-self-publish-redesign.md (Task 2).
         workers = msg.get("workers_status")
         if workers and isinstance(workers, dict):
             self._workers_status[sender] = workers
-            # Live-телеметрия воркеров → StateStore (GUI bindings processes.X.workers.Y.*)
-            for wname, wdata in workers.items():
-                if not isinstance(wdata, dict):
-                    continue
-                self._publish_state(f"processes.{sender}.workers.{wname}.status", wdata.get("status"))
-                hz = wdata.get("effective_hz")
-                if hz is not None:
-                    self._publish_state(f"processes.{sender}.workers.{wname}.effective_hz", hz)
-                cycle_ms = wdata.get("cycle_duration_ms")
-                if cycle_ms is not None:
-                    self._publish_state(f"processes.{sender}.workers.{wname}.cycle_duration_ms", cycle_ms)
-
-            # Агрегат уровня процесса → карточки GUI (processes.X.state.fps/latency_ms).
-            self._publish_process_aggregate(sender, workers)
 
         # Обрабатываем статус из heartbeat (paused / running)
         reported_status = msg.get("status")
@@ -196,47 +183,6 @@ class ProcessMonitor:
         except Exception as exc:  # nosec B110 — телеметрия не критична
             self.process._log_debug(f"_publish_state('{path}') failed: {exc}")
 
-    def _publish_process_aggregate(self, sender: str, workers: dict) -> None:
-        """Агрегировать per-worker тайминг в метрики уровня процесса.
-
-        Семантика (зафиксировано владельцем, ADR PMM-телеметрия):
-        - ``processes.{name}.state.fps``     = **max** ``effective_hz`` по running-воркерам
-          процесса. max выбран потому, что у процесса обычно есть «ведущий» loop-воркер
-          (source/pipeline), задающий темп; средний или сумма размывались бы фоновыми
-          воркерами (idle/heartbeat). Воркеры в event-режиме (effective_hz=None) и не
-          running — пропускаются.
-        - ``processes.{name}.state.latency_ms`` = **max** ``cycle_duration_ms`` — худшая
-          (самая медленная) итерация среди воркеров, как консервативная оценка latency.
-
-        Если ни один воркер не отдал hz — НЕ публикуем (карточка корректно остаётся
-        «—», а не «0»). Кэшируем fps процесса для system.health.avg_fps (Task 3.2).
-        """
-        hz_values: list[float] = []
-        latency_values: list[float] = []
-        for wdata in workers.values():
-            if not isinstance(wdata, dict):
-                continue
-            if wdata.get("status") != "running":
-                continue
-            hz = wdata.get("effective_hz")
-            if isinstance(hz, (int, float)) and hz > 0:
-                hz_values.append(float(hz))
-            cycle_ms = wdata.get("cycle_duration_ms")
-            if isinstance(cycle_ms, (int, float)) and cycle_ms > 0:
-                latency_values.append(float(cycle_ms))
-
-        if hz_values:
-            fps = round(max(hz_values), 2)
-            self._publish_state(f"processes.{sender}.state.fps", fps)
-            # Кэш для health.avg_fps; живёт пока процесс шлёт hz.
-            self._process_fps[sender] = fps
-        else:
-            # Нет активного hz — снять процесс из расчёта avg_fps.
-            self._process_fps.pop(sender, None)
-
-        if latency_values:
-            self._publish_state(f"processes.{sender}.state.latency_ms", round(max(latency_values), 2))
-
     def _publish_uptime(self, all_states: dict[str, dict[str, Any]]) -> None:
         """Опубликовать uptime каждого running-процесса в StateStore.
 
@@ -259,9 +205,11 @@ class ProcessMonitor:
 
         Источник для health-меток внизу вкладки «Процессы»:
         - ``system.health.active``  = число процессов в статусе "running".
-        - ``system.health.avg_fps`` = среднее ``state.fps`` по running-процессам,
-          у которых fps опубликован (кэш _process_fps из _publish_process_aggregate).
-          Если ни у одного нет fps — НЕ публикуем (карточка остаётся «—», не «0»).
+        - ``system.health.avg_fps`` = среднее ``processes.{p}.state.fps`` по
+          running-процессам. fps больше не агрегируется здесь из heartbeat —
+          его публикует сам процесс (self-publish), а монитор лишь ЧИТАЕТ
+          опубликованное из локального дерева. Нет ни одного fps — НЕ публикуем
+          (карточка остаётся «—», не «0»). См. plans/telemetry-self-publish-redesign.md.
         - ``system.health.broken_wires`` = число оборванных связей. Источник
           (wire/topology runtime-статус) ProcessMonitor-у недоступен — публикуем 0.
           TODO(telemetry): подключить, когда появится реестр WireStatus в
@@ -270,9 +218,19 @@ class ProcessMonitor:
         running = [pname for pname, snap in all_states.items() if snap.get("status") == "running"]
         self._publish_state("system.health.active", len(running))
 
-        # avg_fps только по running-процессам с известным fps (guard деления на ноль).
-        running_set = set(running)
-        fps_values = [fps for pname, fps in self._process_fps.items() if pname in running_set and fps > 0]
+        # avg_fps: читаем self-опубликованный fps каждого running-процесса из
+        # локального дерева (guard деления на ноль — не публикуем без данных).
+        fps_values: list[float] = []
+        ssm = getattr(self.process, "_state_store_manager", None)
+        if ssm is not None:
+            for pname in running:
+                try:
+                    resp = ssm.handle_state_get({"data": {"path": f"processes.{pname}.state.fps"}})
+                    value = resp.get("value") if resp.get("status") == "ok" else None
+                    if isinstance(value, (int, float)) and value > 0:
+                        fps_values.append(float(value))
+                except Exception:  # nosec B110 — телеметрия не критична
+                    pass
         if fps_values:
             self._publish_state("system.health.avg_fps", round(sum(fps_values) / len(fps_values), 2))
 
