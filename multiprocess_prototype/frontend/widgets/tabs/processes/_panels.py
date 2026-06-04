@@ -57,6 +57,9 @@ _DETAIL_TABLE_COLUMNS = ["Параметр", "Значение"]
 # Колонки таблицы пер-сегментной трассировки кадра (frame-trace)
 _TRACE_TABLE_COLUMNS = ["Участок", "Тип", "Среднее, мс"]
 
+# Колонки мини-таблицы сводки ветвей fan-in (trace_branches)
+_BRANCHES_TABLE_COLUMNS = ["Ветвь", "total_ms, мс", "Спанов"]
+
 # Порядок групп карточек на странице «Все процессы»
 _CATEGORY_ORDER = [
     "source",
@@ -156,14 +159,23 @@ class AllProcessesPanel(QWidget):
         parent_layout.addWidget(self._health_panel)
 
     def _build_trace_panel(self, parent_layout: QVBoxLayout) -> None:
-        """Таблица пер-сегментной разбивки кадра (transport + process спаны).
+        """Таблица пер-сегментной разбивки кадра (transport + process спаны) +
+        компактный блок ветвей fan-in (trace_branches).
 
         Скрыта по умолчанию: данные приходят только при INSPECTOR_FRAME_TRACE=1.
         Показывается при первой непустой публикации system.trace_segments.
+        Блок ветвей скрыт дополнительно — показывается только при непустом
+        system.trace_branches (нелинейный пайплайн с fan-in).
         """
         self._trace_box = QGroupBox("Разбивка кадра по участкам")
         box_layout = QVBoxLayout(self._trace_box)
         box_layout.setContentsMargins(8, 4, 8, 4)
+        box_layout.setSpacing(4)
+
+        # Label «critical path» над таблицей сегментов (поясняет семантику).
+        self._trace_critical_label = QLabel("Critical path (самый медленный путь кадра):")
+        self._trace_critical_label.setObjectName("TraceCriticalLabel")
+        box_layout.addWidget(self._trace_critical_label)
 
         self._trace_table = QTableWidget(0, len(_TRACE_TABLE_COLUMNS))
         self._trace_table.setHorizontalHeaderLabels(_TRACE_TABLE_COLUMNS)
@@ -177,6 +189,28 @@ class AllProcessesPanel(QWidget):
         self._trace_table.setMaximumHeight(220)
         box_layout.addWidget(self._trace_table)
 
+        # Блок ветвей fan-in: скрыт пока нет trace_branches (линейный пайплайн).
+        self._branches_label = QLabel("Ветви fan-in:")
+        self._branches_label.setObjectName("TraceBranchesLabel")
+
+        self._branches_table = QTableWidget(0, len(_BRANCHES_TABLE_COLUMNS))
+        self._branches_table.setHorizontalHeaderLabels(_BRANCHES_TABLE_COLUMNS)
+        self._branches_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._branches_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        bh = self._branches_table.horizontalHeader()
+        if bh:
+            bh.setStretchLastSection(True)
+            bh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        # Мини-таблица: 3–5 ветвей обычно.
+        self._branches_table.setMaximumHeight(140)
+
+        box_layout.addWidget(self._branches_label)
+        box_layout.addWidget(self._branches_table)
+
+        # Блок ветвей скрыт до первых данных.
+        self._branches_label.setVisible(False)
+        self._branches_table.setVisible(False)
+
         self._trace_box.setVisible(False)
         parent_layout.addWidget(self._trace_box)
 
@@ -184,18 +218,24 @@ class AllProcessesPanel(QWidget):
         """Fan-out callback: обновить таблицу разбивки кадра + строку «Итого».
 
         value — список {label, kind, ms} (среднее за период, порядок = ход кадра).
+        Поддерживает kind=merge (merge @ node): отображается как «слияние».
         """
         if not isinstance(value, list) or not value:
             return
         rows = [s for s in value if isinstance(s, dict)]
         total = sum(s.get("ms", 0.0) for s in rows if isinstance(s.get("ms"), (int, float)))
         self._trace_table.setRowCount(len(rows) + 1)
-        kind_ru = {"transport": "передача", "process": "обработка"}
+        kind_ru = {"transport": "передача", "process": "обработка", "merge": "слияние"}
         for r, span in enumerate(rows):
             ms = span.get("ms")
+            # ms=0 отображаем как «—» согласно ТЗ (edge case merge ms=0).
+            if isinstance(ms, (int, float)) and ms > 0:
+                ms_str = f"{ms:.2f}"
+            else:
+                ms_str = "—"
             self._trace_table.setItem(r, 0, QTableWidgetItem(str(span.get("label", "?"))))
-            self._trace_table.setItem(r, 1, QTableWidgetItem(kind_ru.get(span.get("kind"), "")))
-            self._trace_table.setItem(r, 2, QTableWidgetItem(f"{ms:.2f}" if isinstance(ms, (int, float)) else "—"))
+            self._trace_table.setItem(r, 1, QTableWidgetItem(kind_ru.get(span.get("kind", ""), "")))
+            self._trace_table.setItem(r, 2, QTableWidgetItem(ms_str))
         # Строка «Итого» — сквозная сумма средних по участкам.
         total_item = QTableWidgetItem("Итого")
         total_ms = QTableWidgetItem(f"{total:.2f}")
@@ -203,6 +243,41 @@ class AllProcessesPanel(QWidget):
         self._trace_table.setItem(len(rows), 1, QTableWidgetItem(""))
         self._trace_table.setItem(len(rows), 2, total_ms)
         self._trace_box.setVisible(True)
+
+    def _on_trace_branches(self, _path: str, value: object) -> None:
+        """Fan-out callback: обновить мини-таблицу ветвей fan-in.
+
+        value — список {branch, total_ms, spans} (снимок из trace_branches
+        последнего кадра нелинейного пайплайна). Пустой список / None → скрыть.
+        """
+        if not isinstance(value, list) or not value:
+            self._branches_label.setVisible(False)
+            self._branches_table.setVisible(False)
+            return
+
+        rows = [b for b in value if isinstance(b, dict)]
+        if not rows:
+            self._branches_label.setVisible(False)
+            self._branches_table.setVisible(False)
+            return
+
+        self._branches_table.setRowCount(len(rows))
+        for r, branch in enumerate(rows):
+            name = str(branch.get("branch", "?"))
+            total_ms = branch.get("total_ms")
+            spans = branch.get("spans")
+            # total_ms=0 → «—» (edge case).
+            if isinstance(total_ms, (int, float)) and total_ms > 0:
+                ms_str = f"{total_ms:.2f}"
+            else:
+                ms_str = "—"
+            spans_str = str(spans) if isinstance(spans, int) else "—"
+            self._branches_table.setItem(r, 0, QTableWidgetItem(name))
+            self._branches_table.setItem(r, 1, QTableWidgetItem(ms_str))
+            self._branches_table.setItem(r, 2, QTableWidgetItem(spans_str))
+
+        self._branches_label.setVisible(True)
+        self._branches_table.setVisible(True)
 
     def _build_cards_page(self) -> QWidget:
         """Cards-страница: контейнер с группами EntityCard по категориям.
@@ -429,6 +504,9 @@ class AllProcessesPanel(QWidget):
         # Пер-сегментная разбивка кадра (frame-trace) — fan-out: значение списком,
         # не привязывается к одному виджету. Заполняет таблицу _trace_table.
         bindings.bind_fanout("system.trace_segments", self._on_trace_segments, owner=self)
+        # Сводка ветвей fan-in (нелинейный пайплайн) — fan-out: заполняет
+        # мини-таблицу ветвей _branches_table. Скрыта при пустом/отсутствующем.
+        bindings.bind_fanout("system.trace_branches", self._on_trace_branches, owner=self)
 
 
 class SingleProcessPanel(QWidget):

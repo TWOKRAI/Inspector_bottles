@@ -222,6 +222,11 @@ class MainWindow(QMainWindow):
         self._trace_counts: dict[str, int] = {}
         self._trace_kinds: dict[str, str] = {}
 
+        # Последняя сводка ветвей fan-in (trace_branches): хранит снимок per-frame,
+        # НЕ усредняет — branches — это агрегаты по ветвям за один кадр.
+        # Заполняется только при INSPECTOR_FRAME_TRACE=1 + нелинейный пайплайн.
+        self._trace_branches_last: list[dict] | None = None
+
         # G.4.4: источник undo/redo (domain CommandDispatcher) —
         # устанавливается через set_undo_controller()
         self._undo_controller: "UndoRedoController | None" = None
@@ -566,6 +571,9 @@ class MainWindow(QMainWindow):
                 label = f"{span.get('from')}→{span.get('to')}"
             elif kind == "process":
                 label = f"{span.get('node')}:{span.get('plugin')}"
+            elif kind == "merge":
+                # merge-спан stitcher'а: отображается как «merge @ node»
+                label = f"merge @ {span.get('node', '?')}"
             else:
                 continue
             self._trace_sums[label] = self._trace_sums.get(label, 0.0) + ms
@@ -592,3 +600,24 @@ class MainWindow(QMainWindow):
         self._trace_counts.clear()
         self._trace_kinds.clear()
         return segments
+
+    def record_trace_branches(self, branches: object) -> None:
+        """Запомнить последнюю сводку ветвей fan-in из trace_branches.
+
+        branches — item["trace_branches"]: список {branch, total_ms, spans}.
+        Хранит только ПОСЛЕДНИЙ снимок per-frame (не усредняет — это агрегаты
+        уже готовые из stitcher'а). Молча игнорирует не-список / None.
+        """
+        if not isinstance(branches, list) or len(branches) == 0:
+            return
+        self._trace_branches_last = branches
+
+    def reset_trace_branches(self) -> list[dict] | None:
+        """Вернуть последнюю сводку ветвей + сбросить. None если не было.
+
+        Используется _update_fps для публикации system.trace_branches раз в
+        секунду (последний снимок нелинейного кадра за период).
+        """
+        branches = self._trace_branches_last
+        self._trace_branches_last = None
+        return branches

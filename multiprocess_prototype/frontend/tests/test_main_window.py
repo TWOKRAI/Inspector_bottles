@@ -269,3 +269,68 @@ def test_trace_segments_ignores_garbage(qtbot):
     window.record_trace_spans([{"kind": "process"}, 42, {"kind": "x", "ms": 1.0}])
 
     assert window.reset_trace_segments() is None
+
+
+def test_trace_segments_merge_span(qtbot):
+    """Merge-спан (kind=merge) агрегируется как «merge @ node»."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.record_trace_spans(
+        [
+            {"kind": "merge", "node": "stitcher", "branches": 3, "chosen": "region_0", "ms": 5.0},
+        ]
+    )
+    segments = window.reset_trace_segments()
+    assert segments is not None
+    assert len(segments) == 1
+    assert segments[0]["label"] == "merge @ stitcher"
+    assert segments[0]["kind"] == "merge"
+    assert segments[0]["ms"] == 5.0
+
+
+# -- Trace-branches аккумулятор (Task 2.1 frame-trace-fanin) --
+
+
+def test_trace_branches_none_when_empty(qtbot):
+    """reset_trace_branches → None, если ветвей не накапливали."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.reset_trace_branches() is None
+
+
+def test_trace_branches_stores_last_snapshot(qtbot):
+    """record_trace_branches хранит последний снимок, reset сбрасывает."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    branches_v1 = [
+        {"branch": "region_0", "total_ms": 10.0, "spans": 3},
+        {"branch": "region_1", "total_ms": 7.5, "spans": 3},
+    ]
+    branches_v2 = [
+        {"branch": "region_0", "total_ms": 12.0, "spans": 3},
+    ]
+    window.record_trace_branches(branches_v1)
+    window.record_trace_branches(branches_v2)  # перезаписывает v1
+
+    result = window.reset_trace_branches()
+    assert result == branches_v2
+    # После сброса — None.
+    assert window.reset_trace_branches() is None
+
+
+def test_trace_branches_ignores_none_and_empty(qtbot):
+    """None и пустой список не перезаписывают аккумулятор."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    branches = [{"branch": "region_0", "total_ms": 5.0, "spans": 2}]
+    window.record_trace_branches(branches)
+    window.record_trace_branches(None)  # игнорируется
+    window.record_trace_branches([])  # игнорируется
+    window.record_trace_branches("nope")  # игнорируется (не список)
+
+    result = window.reset_trace_branches()
+    assert result == branches

@@ -679,6 +679,9 @@ def _setup_bridge_callbacks(
                 # Накопить пер-сегментные времена → таблица «участок · мс»
                 # («Все процессы»). Публикуется усреднённо раз в секунду.
                 window.record_trace_spans(data.get("trace"))
+                # Сводка ветвей fan-in (нелинейный пайплайн): храним последний
+                # снимок trace_branches — публикуется раз в секунду.
+                window.record_trace_branches(data.get("trace_branches"))
                 if _frame_trace_cnt % 30 == 1:
                     process._log_info(f"[FRAME-TRACE] {data.get('trace')}", module="gui")
 
@@ -717,6 +720,14 @@ def _setup_timers(
             if segments is not None:
                 process._bridge.dispatch(
                     {"data_type": "state_delta", "path": "system.trace_segments", "value": segments}
+                )
+            # Сводка ветвей fan-in (последний снимок за период) → блок ветвей в
+            # «Все процессы». Не пусто только при INSPECTOR_FRAME_TRACE=1 +
+            # нелинейный пайплайн (stitcher кладёт trace_branches).
+            branches = window.reset_trace_branches()
+            if branches is not None:
+                process._bridge.dispatch(
+                    {"data_type": "state_delta", "path": "system.trace_branches", "value": branches}
                 )
         except Exception:  # noqa: BLE001 — телеметрия не критична
             pass
