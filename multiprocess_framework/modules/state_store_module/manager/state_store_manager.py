@@ -199,6 +199,13 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
             dict с результатом операции или ошибкой.
         """
         data = self._extract_data(msg)
+        # Коллизия ключа "data": payload state.merge сам содержит ключ "data"
+        # (merge-словарь). Через CommandManager-диспетчер msg приходит уже развёрнутым
+        # ({path, data, source}), и _extract_data разворачивает ещё раз — возвращает
+        # merge-словарь без path/source. Если развёрнутое не похоже на payload merge
+        # (нет ни path, ни source) — значит msg уже был payload'ом, берём его.
+        if "path" not in data and "source" not in data:
+            data = msg
         path = data.get("path", "")
         merge_data = data.get("data")
         source = data.get("source", "")

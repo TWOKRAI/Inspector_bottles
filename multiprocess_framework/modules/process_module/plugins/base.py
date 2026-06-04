@@ -108,12 +108,19 @@ class PluginContext:
         registers: Any | None = None,
     ) -> PluginContext:
         """Создать копию контекста с plugin-specific конфигом."""
-        return PluginContext(
+        new = PluginContext(
             services=self.services,
             config=plugin_config,
             io=self.io,
             registers=registers,
         )
+        # state_proxy ставится оркестратором ПОСЛЕ __init__ (процесс хранит его как
+        # services._state_proxy — приватный атрибут, недоступный через публичный
+        # services.state_proxy, который читает __init__). Без явного проброса копия
+        # теряет proxy → per-plugin ctx.state_proxy=None, и плагины не видят дерево
+        # состояний (latent gap: затрагивал capture/color_mask/telemetry_sink).
+        new.state_proxy = self.state_proxy
+        return new
 
 
 def _noop_log(msg: str) -> None:

@@ -232,7 +232,10 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
 
         duration = time.time() - start_time
         if isinstance(result, dict) and result.get("status") == "error":
-            self._log_warning(f"Command '{command_name}' failed: {result.get('reason')}", module="command_manager")
+            self._log_warning(
+                f"Command '{command_name}' failed: {result.get('reason') or result.get('error')}",
+                module="command_manager",
+            )
             self._record_metric("command_manager.command.execution.errors", tags={"command": command_name})
         else:
             self._log_info(

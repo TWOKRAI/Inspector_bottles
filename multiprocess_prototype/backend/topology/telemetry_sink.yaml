@@ -1,0 +1,45 @@
+# telemetry_sink — демо стока истории телеметрии (Task 1.1, vertical slice)
+#
+# Pipeline:
+#   camera_0       — CameraServicePlugin (simulator) — генерирует телеметрию
+#                    (processes.camera_0.state.fps/status/uptime)
+#   telemetry_sink — TelemetrySinkPlugin: подписывается на processes.**, семплит
+#                    кэш по таймеру и пишет историю в SQLite через Services/sql
+#
+# Side-effect процесс telemetry_sink не участвует в потоке кадров (нет inputs/
+# outputs) — он лишь читает дерево StateStore и пишет в data/telemetry.db.
+#
+# Запуск (headless, без GUI):
+#   python multiprocess_prototype/run.py multiprocess_prototype/backend/topology/telemetry_sink.yaml
+# либо как pipeline-override через app.yaml.
+
+name: telemetry_sink
+description: "Демо: камера-симулятор → сток истории телеметрии в SQLite"
+
+processes:
+  - process_name: camera_0
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: normal
+    source_target_fps: 10
+    plugins:
+      - plugin_class: Plugins.sources.camera_service.plugin.CameraServicePlugin
+        plugin_name: camera_service
+        category: source
+        camera_type: simulator
+        camera_id: 0
+        resolution_width: 640
+        resolution_height: 480
+        auto_start: true
+
+  # --- Сток телеметрии: подписка на processes.** → семпл → SQLite ---
+  - process_name: telemetry_sink
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    priority: low
+    plugins:
+      - plugin_class: Plugins.io.telemetry_sink.plugin.TelemetrySinkPlugin
+        plugin_name: telemetry_sink
+        category: output
+        db_path: data/telemetry.db
+        sample_interval_sec: 5.0
+
+wires: []

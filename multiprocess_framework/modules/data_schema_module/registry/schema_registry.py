@@ -13,11 +13,12 @@ Backward compatibility:
     SchemaManager.get_instance()  →  get_default_registry()
     @register_schema("Name")      →  без изменений (использует default registry)
 """
+
 from __future__ import annotations
 
 import time
 from threading import RLock
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -32,8 +33,10 @@ from .interfaces import ISchemaManager
 try:
     from ..extensions.metrics import increment_metric, record_timing
 except ImportError:
+
     def increment_metric(*args: Any, **kwargs: Any) -> None:
         pass
+
     def record_timing(*args: Any, **kwargs: Any) -> None:
         pass
 
@@ -140,12 +143,8 @@ class SchemaRegistry(ISchemaManager):
         try:
             instance = schema(**init_data) if init_data else schema()
             duration = time.time() - start_time
-            record_timing(
-                "data_schema.instance_created", duration, {"schema_name": schema_name}
-            )
-            increment_metric(
-                "data_schema.instances_created", {"schema_name": schema_name}
-            )
+            record_timing("data_schema.instance_created", duration, {"schema_name": schema_name})
+            increment_metric("data_schema.instances_created", {"schema_name": schema_name})
             return instance
         except ValidationError as e:
             duration = time.time() - start_time
@@ -154,9 +153,7 @@ class SchemaRegistry(ISchemaManager):
                 duration,
                 {"schema_name": schema_name},
             )
-            increment_metric(
-                "data_schema.creation_errors", {"schema_name": schema_name}
-            )
+            increment_metric("data_schema.creation_errors", {"schema_name": schema_name})
             raise SchemaValidationError(schema_name, e.errors(), init_data) from e
 
     def get_defaults(self, schema_name: str) -> Dict[str, Any]:
@@ -188,10 +185,12 @@ class SchemaRegistry(ISchemaManager):
             instance = schema(**data)
             return True, instance, None
         except ValidationError as e:
-            error_msg = "; ".join([
-                f"{'.'.join(str(loc) for loc in err.get('loc', []))}: {err.get('msg', 'Unknown error')}"
-                for err in e.errors()
-            ])
+            error_msg = "; ".join(
+                [
+                    f"{'.'.join(str(loc) for loc in err.get('loc', []))}: {err.get('msg', 'Unknown error')}"
+                    for err in e.errors()
+                ]
+            )
             return False, None, error_msg
 
     def list_schemas(self) -> List[str]:
@@ -281,11 +280,14 @@ def get_default_registry() -> SchemaRegistry:
     return _default_registry
 
 
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
+
+
 def register_schema(
     schema_name: Optional[str] = None,
     auto_register: bool = True,
     registry: Optional[SchemaRegistry] = None,
-):
+) -> Callable[[Type[_ModelT]], Type[_ModelT]]:
     """
     Декоратор для автоматической регистрации Pydantic моделей.
 
@@ -306,7 +308,8 @@ def register_schema(
         class TestConfig(BaseModel):
             value: int = 0
     """
-    def decorator(model_class: Type[BaseModel]) -> Type[BaseModel]:
+
+    def decorator(model_class: Type[_ModelT]) -> Type[_ModelT]:
         name = schema_name if schema_name is not None else model_class.__name__
 
         if auto_register:
