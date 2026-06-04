@@ -366,6 +366,10 @@ class SingleProcessPanel(QWidget):
         self._presenter = presenter
         self._bindings = bindings
         self._process_name = process_name
+        # Рантайм-воркеры, обнаруженные из телеметрии (data_receiver,
+        # pipeline_executor, source_producer_* — создаются в рантайме и в
+        # конфиг-топологии отсутствуют). Подмешиваются в таблицу как read-only.
+        self._runtime_workers: set[str] = set()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -423,6 +427,15 @@ class SingleProcessPanel(QWidget):
         page_layout.addStretch(1)
 
         self._refresh_workers()
+
+        # Fan-out: обнаруживать рантайм-воркеров из телеметрии и добавлять в
+        # таблицу (их нет в конфиг-топологии get_workers()).
+        if self._bindings is not None:
+            self._bindings.bind_fanout(
+                f"processes.{self._process_name}.workers.*.status",
+                self._on_worker_discovered,
+                owner=self,
+            )
         return page
 
     # ------------------------------------------------------------------ #
@@ -430,13 +443,50 @@ class SingleProcessPanel(QWidget):
     # ------------------------------------------------------------------ #
 
     def _refresh_workers(self) -> None:
-        """Перечитать воркеров из presenter и перепривязать телеметрию."""
+        """Перечитать воркеров из presenter и перепривязать телеметрию.
+
+        К конфиг-воркерам подмешиваются рантайм-воркеры, обнаруженные из
+        телеметрии (read-only protected-строки) — чтобы видеть время цикла
+        каждого реального потока, а не только тех, что заданы в топологии.
+        """
         if not hasattr(self, "_worker_table"):
             return
-        self._worker_table.set_workers(self._presenter.get_workers(self._process_name))
+        workers = self._presenter.get_workers(self._process_name)
+        known = {w.get("worker_name") for w in workers}
+        for rname in sorted(self._runtime_workers):
+            if rname not in known:
+                workers.append(
+                    {
+                        "worker_name": rname,
+                        "priority": "NORMAL",
+                        "execution_mode": "loop",
+                        "target_interval_ms": None,
+                        "worker_class": None,
+                        "protected": True,
+                        "description": "Рантайм-воркер (только телеметрия)",
+                        "config": {},
+                    }
+                )
+        self._worker_table.set_workers(workers)
         self._bind_worker_telemetry()
         # Выбор сбросился после перестроения строк → уведомить вкладку.
         self.worker_selection_changed.emit(self._worker_table.selected_worker())
+
+    def _on_worker_discovered(self, path: str, _value: object) -> None:
+        """Fan-out callback: обнаружен воркер в телеметрии (processes.X.workers.NAME.status).
+
+        Если воркер ещё не в таблице — перестроить её с ним. Дубли отсекаются
+        (перестроение только при новом имени), поэтому storm'а нет.
+        """
+        parts = path.split(".")
+        # ['processes', proc, 'workers', NAME, 'status']
+        if len(parts) < 5:
+            return
+        name = parts[3]
+        if name in self._runtime_workers:
+            return
+        self._runtime_workers.add(name)
+        self._refresh_workers()
 
     # ------------------------------------------------------------------ #
     #  Worker actions (вызываются из левой панели вкладки, worker-scope)  #

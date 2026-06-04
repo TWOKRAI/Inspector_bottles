@@ -92,6 +92,11 @@ class GuiStateBindings:
                 (Task 4.1). При None replay не выполняется (legacy-поведение).
         """
         self._bindings: list[BindingHandle] = []
+        # Fan-out подписки: (pattern, callback) — callback(path, value) на каждую
+        # дельту с matching path. В отличие от bind (один виджет), позволяет
+        # подписчику динамически создавать виджеты по обнаруженным ключам
+        # (например строки рантайм-воркеров processes.X.workers.*).
+        self._fanouts: list[tuple[str, Callable[[str, Any], None]]] = []
         self._cache_snapshot = cache_snapshot
         bridge.set_state_callback(self._on_state_msg)
 
@@ -146,6 +151,48 @@ class GuiStateBindings:
                     self._apply_to_widget(handle, cached_value)
 
         return handle
+
+    def bind_fanout(
+        self,
+        pattern: str,
+        callback: Callable[[str, Any], None],
+        owner: QWidget | None = None,
+    ) -> None:
+        """Подписать fan-out callback на glob-паттерн (динамическое обнаружение).
+
+        В отличие от ``bind`` (привязка к одному виджету), fan-out вызывает
+        ``callback(path, value)`` на КАЖДУЮ дельту с matching path. Это нужно,
+        когда набор ключей заранее неизвестен — например рантайм-воркеры
+        ``processes.{proc}.workers.*.status``: подписчик сам решает, создать ли
+        новую строку для обнаруженного воркера.
+
+        Сразу проигрывает закэшированные значения (replay) — как ``bind``, чтобы
+        ленивые панели увидели уже опубликованные ключи.
+
+        Args:
+            pattern: glob-паттерн пути StateStore.
+            callback: вызывается как callback(path, value) на каждую matching дельту.
+            owner: опциональный виджет-владелец; при его destroyed подписка
+                автоматически снимается (защита от dangling-callback).
+        """
+        entry = (pattern, callback)
+        self._fanouts.append(entry)
+
+        if owner is not None:
+            owner.destroyed.connect(lambda *_: self._fanouts.remove(entry) if entry in self._fanouts else None)
+
+        # Replay закэшированных значений.
+        if self._cache_snapshot is not None:
+            try:
+                snapshot = self._cache_snapshot()
+            except Exception:
+                snapshot = {}
+            for cached_path, cached_value in snapshot.items():
+                if match_glob(pattern, cached_path):
+                    try:
+                        callback(cached_path, cached_value)
+                    except Exception:
+                        pass
 
     def unbind(self, handle: BindingHandle) -> None:
         """Удалить конкретную подписку по дескриптору.
@@ -220,6 +267,14 @@ class GuiStateBindings:
                 try:
                     self._bindings.remove(d)
                 except ValueError:
+                    pass
+
+        # Fan-out: динамическое обнаружение ключей (создание строк подписчиком).
+        for fpattern, fcallback in list(self._fanouts):
+            if match_glob(fpattern, path):
+                try:
+                    fcallback(path, value)
+                except Exception:
                     pass
 
     def _apply_to_widget(self, handle: BindingHandle, value: Any) -> bool:

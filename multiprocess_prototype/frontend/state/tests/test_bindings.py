@@ -369,3 +369,52 @@ class TestCacheReplayOnBind:
         # не должно бросить
         b.bind("processes.cam.state.status", label, "text")
         assert label.text() == "—"
+
+
+# ---------------------------------------------------------------------------
+# Fan-out: динамическое обнаружение ключей (рантайм-воркеры)
+# ---------------------------------------------------------------------------
+
+
+class TestFanout:
+    """bind_fanout: callback(path, value) на каждую matching дельту."""
+
+    def test_fanout_called_on_matching_delta(self, bindings):
+        seen: list[tuple[str, object]] = []
+        bindings.bind_fanout(
+            "processes.detector.workers.*.status",
+            lambda p, v: seen.append((p, v)),
+        )
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.detector.workers.data_receiver.status",
+                "value": "running",
+            }
+        )
+        assert seen == [("processes.detector.workers.data_receiver.status", "running")]
+
+    def test_fanout_ignores_nonmatching_path(self, bindings):
+        seen: list[str] = []
+        bindings.bind_fanout(
+            "processes.detector.workers.*.status",
+            lambda p, v: seen.append(p),
+        )
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.detector.state.fps",
+                "value": 20,
+            }
+        )
+        assert seen == []
+
+    def test_fanout_replays_cache_on_register(self, bridge):
+        cache = {"processes.detector.workers.pipeline_executor.status": "running"}
+        b = GuiStateBindings(bridge, cache_snapshot=lambda: cache)
+        seen: list[tuple[str, object]] = []
+        b.bind_fanout(
+            "processes.detector.workers.*.status",
+            lambda p, v: seen.append((p, v)),
+        )
+        assert seen == [("processes.detector.workers.pipeline_executor.status", "running")]
