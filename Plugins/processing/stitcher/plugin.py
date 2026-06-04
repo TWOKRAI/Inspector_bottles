@@ -13,6 +13,7 @@ import time
 
 import numpy as np
 
+from multiprocess_framework.modules.process_module.generic import frame_trace
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
     ProcessModulePlugin,
@@ -43,10 +44,7 @@ class StitcherPlugin(ProcessModulePlugin):
         self._camera_id: int = cfg.get("camera_id", 0)
         self._expected_regions: list[str] = cfg.get("expected_regions", [])
 
-        ctx.log_info(
-            f"StitcherPlugin[{self._camera_id}]: configured, "
-            f"expected_regions={self._expected_regions}"
-        )
+        ctx.log_info(f"StitcherPlugin[{self._camera_id}]: configured, expected_regions={self._expected_regions}")
 
     def process(self, items: list[dict]) -> list[dict]:
         """Склейка коллекции регионов на canvas.
@@ -61,7 +59,7 @@ class StitcherPlugin(ProcessModulePlugin):
         if canvas is None:
             return []
 
-        return [{
+        merged: dict = {
             "frame": canvas,
             "camera_id": self._camera_id,
             "seq_id": items[0].get("seq_id", 0),
@@ -70,7 +68,17 @@ class StitcherPlugin(ProcessModulePlugin):
             "width": canvas.shape[1],
             "height": canvas.shape[0],
             "channels": 3,
-        }]
+        }
+
+        # Наследовать trace и capture_ts от items[0] — чтобы merged-кадр нёс
+        # непустой trace в GUI. Правильный critical-path выбор (max-sum ветвь)
+        # будет реализован в Task 1.2; здесь items[0] как минимальный slice.
+        # Гейт под флагом: без INSPECTOR_FRAME_TRACE поле не добавляется.
+        if frame_trace.enabled():
+            merged["trace"] = list(items[0].get("trace", []))
+            merged["capture_ts"] = items[0].get("capture_ts")
+
+        return [merged]
 
     def _stitch(self, items: list[dict]) -> np.ndarray | None:
         """Склеить регионы на canvas по координатам из метаданных."""

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from multiprocess_framework.modules.process_module.generic import frame_trace
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
     ProcessModulePlugin,
@@ -48,10 +49,7 @@ class RegionSplitPlugin(ProcessModulePlugin):
         if self._default_region:
             region_names.append(self._default_region["name"])
 
-        ctx.log_info(
-            f"RegionSplitPlugin[{self._camera_id}]: "
-            f"regions={region_names}, total={self._total_regions}"
-        )
+        ctx.log_info(f"RegionSplitPlugin[{self._camera_id}]: regions={region_names}, total={self._total_regions}")
 
     @for_each
     def process(self, item: dict) -> list[dict] | None:
@@ -73,17 +71,23 @@ class RegionSplitPlugin(ProcessModulePlugin):
         for r in self._regions:
             crop, metadata = self._split_region(frame, r, canvas_w, canvas_h)
             if crop is not None:
-                result.append({
+                out_item = {
                     **item,
                     "frame": crop,
                     "target": r.get("target", "stitcher"),
                     "total_regions": self._total_regions,
                     **metadata,
-                })
+                }
+                # Независимая копия trace — каждый регион должен мутировать
+                # свой собственный список спанов, а не общий родительский.
+                # Гейт под флагом: без INSPECTOR_FRAME_TRACE копия не нужна.
+                if frame_trace.enabled():
+                    out_item["trace"] = list(item.get("trace", []))
+                result.append(out_item)
 
         # Default region -- полный кадр
         if self._default_region:
-            result.append({
+            out_item = {
                 **item,
                 "frame": frame.copy(),
                 "target": self._default_region.get("target", "stitcher"),
@@ -97,12 +101,20 @@ class RegionSplitPlugin(ProcessModulePlugin):
                 "canvas_height": canvas_h,
                 "width": canvas_w,
                 "height": canvas_h,
-            })
+            }
+            # Независимая копия trace — аналогично ROI-регионам выше.
+            if frame_trace.enabled():
+                out_item["trace"] = list(item.get("trace", []))
+            result.append(out_item)
 
         return result
 
     def _split_region(
-        self, frame: np.ndarray, region: dict, canvas_w: int, canvas_h: int,
+        self,
+        frame: np.ndarray,
+        region: dict,
+        canvas_w: int,
+        canvas_h: int,
     ) -> tuple[np.ndarray | None, dict]:
         """Вырезать один регион с safe-clamp к границам кадра."""
         name = region["name"]
