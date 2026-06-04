@@ -2,7 +2,7 @@
 
 - **Slug:** frame-trace-fanin
 - **Дата:** 2026-06-04
-- **Статус:** DRAFT
+- **Статус:** DONE (2026-06-04) — все 7 задач закрыты, qt-mcp live smoke на region_pipeline + регрессия линейного пройдены
 - **Ветка:** feat/comm-system-target-architecture (продолжение телеметрии, НЕ новая ветка)
 - **Родитель:** [`frame-trace-envelope.md`](frame-trace-envelope.md) (frame-trace v1, линейная цепочка — коммиты 48caea37 / 20b151e3 / 95a122cf), [`telemetry-self-publish-redesign.md`](telemetry-self-publish-redesign.md) (capture_ts = t0 trace)
 
@@ -133,24 +133,32 @@ trace, GUI показывает непустую таблицу для region_pi
 
 ### Phase 1: Backend — корректный trace через ветвления
 
-- Task 1.1: **[VERTICAL SLICE]** Прокинуть непустой trace через split→stitcher→gui (минимальный E2E срез) [PENDING]
+- Task 1.1: **[VERTICAL SLICE]** Прокинуть непустой trace через split→stitcher→gui (минимальный E2E срез) [DONE b0f8bc14]
   - **Module contract:** impl-only
-- Task 1.2: Merge-семантика critical-path + trace_branches в stitcher (полная) [PENDING] (углубляет 1.1)
+- Task 1.2: Merge-семантика critical-path + trace_branches в stitcher (полная) [DONE 06b12746] (углубляет 1.1)
   - **Module contract:** impl-only
-- Task 1.3: Helper'ы fan-out/fan-in в `frame_trace.py` (вынести логику из плагинов) [PENDING] (зависит от 1.1, 1.2)
+- Task 1.3: Helper'ы fan-out/fan-in в `frame_trace.py` (вынести логику из плагинов) [DONE bc89358b] (зависит от 1.1, 1.2)
   - **Module contract:** public-api-change
 
 ### Phase 2: GUI + наблюдаемость
 
-- Task 2.1: GUI-агрегатор и панель: отображение critical-path + сводки ветвей [PENDING] (зависит от 1.2)
+- Task 2.1: GUI-агрегатор и панель: отображение critical-path + сводки ветвей [DONE d4493980] (зависит от 1.2)
   - **Module contract:** impl-only
 
 ### Phase 3: Тесты и приёмка
 
-- Task 3.1: Unit-тесты fan-out/fan-in trace (pytest) [PENDING] (зависит от 1.3)
+- Task 3.1: Unit-тесты fan-out/fan-in trace (pytest) [DONE 593d5428 — 34 теста] (зависит от 1.3)
   - **Module contract:** n/a
-- Task 3.2: qt-mcp live smoke на region_pipeline + закрытие плана [PENDING] (зависит от 2.1, 3.1)
+- Task 3.2: qt-mcp live smoke на region_pipeline + закрытие плана [DONE — live verified] (зависит от 2.1, 3.1)
   - **Module contract:** n/a
+  - **qt-mcp live ПОДТВЕРДИЛ (2026-06-04):** region_pipeline с `INSPECTOR_FRAME_TRACE=1` →
+    merged-кадр несёт полный critical-path trace + merge-спан `{kind:merge,branches:3,chosen:region_*,ms:0}`
+    (лог `[FRAME-TRACE]`, chosen варьируется по кадрам = выбор самой медленной ветви).
+    GUI «Все процессы»: таблица «Critical path» (camera→preprocessor→splitter→ветвь→stitcher→gui) +
+    блок «Ветви fan-in» (region_0 5.57мс/8, region_1 4.54/8, region_default 6.92/8 — победитель
+    region_default совпал с chosen). Trace плоский (11 спанов), НЕ растёт от ширины fan-out.
+    Линейный color_inspect: таблица работает, блок ветвей СКРЫТ (нет trace_branches) — регрессии v1 нет.
+    Закрытие обоих app штатно через окно (exit 0, ProcessTreeGuard).
 
 ---
 
