@@ -152,33 +152,37 @@ class DatabasePlugin(ProcessModulePlugin):
         return self._do_flush(batch)
 
     def _do_flush(self, batch: list[dict]) -> int:
-        """Записать готовый batch в БД через SQLManager (без захвата lock)."""
+        """Записать готовый batch в БД через SQLManager (без захвата lock).
 
+        Пишем построчно, а не одним `insert_many(rows)`. Причина: `insert_many`
+        в Services/sql выполняет per-row execute+commit (НЕ атомарная транзакция,
+        см. base_repository.insert_many). При сбое в середине пакета часть строк
+        уже закоммичена, и сколько именно — из исключения не узнать. Поэтому
+        «batch + fallback переинсертом всего пакета» давал бы дубли уже записанных
+        строк и двойной инкремент _total_written. Построчная вставка с независимым
+        commit учитывает saved/errors точно и не плодит дубли. Реального batch-выигрыша
+        не теряем — insert_many и так коммитит каждую строку отдельно.
+        """
         if self._sql is None:
             return 0
 
         repo = self._sql.get_repository(DetectionSchema)
         # created_at проставляется в коде (SQL-default unixepoch не переносится в DDL).
         created = time.time()
-        rows = [DetectionSchema(created_at=created, **record) for record in batch]
-        try:
-            repo.insert_many(rows)
-            count = len(rows)
-            self._total_written += count
-            return count
-        except Exception as e:
-            # Fallback: вставляем по одной записи
-            self._ctx.log_error(f"Batch insert failed: {e}, trying one-by-one")
-            saved = 0
-            for row in rows:
-                try:
-                    repo.insert_many([row])
-                    saved += 1
-                except Exception:
-                    self._total_errors += 1
-            count = saved
-            self._total_written += count
-            return count
+        saved = 0
+        first_error_logged = False
+        for record in batch:
+            try:
+                repo.insert_many([DetectionSchema(created_at=created, **record)])
+                saved += 1
+            except Exception as e:
+                self._total_errors += 1
+                if not first_error_logged:
+                    # Логируем только первую ошибку пакета — не засорять лог при сбое БД.
+                    self._ctx.log_error(f"Detection insert failed: {e}")
+                    first_error_logged = True
+        self._total_written += saved
+        return saved
 
     # --- Команды ---
 

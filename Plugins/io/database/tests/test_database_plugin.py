@@ -208,12 +208,18 @@ class TestFlush:
         assert row["created_at"] is not None
         assert before <= row["created_at"] <= after
 
-    def test_fallback_on_batch_error(self):
-        """При ошибке batch insert_many — fallback по одной записи."""
+    def test_row_failure_does_not_drop_others_or_duplicate(self):
+        """Сбой одной строки не теряет остальные и не плодит дубли (per-row commit).
+
+        Регрессия (ревью Phase 2): при atomic-batch + fallback переинсертом всего
+        пакета сбой в середине давал дубли уже закоммиченных строк. Построчная
+        вставка пишет ровно успешные строки, ошибочная — только в total_errors.
+        """
         plugin = make_plugin()
         plugin._buffer = [
-            {"timestamp": 1.0, "frame_id": 1, "camera_id": 0, "event_type": "test", "data": "{}"},
-            {"timestamp": 2.0, "frame_id": 2, "camera_id": 0, "event_type": "test", "data": "{}"},
+            {"timestamp": 1.0, "frame_id": 1, "camera_id": 0, "event_type": "ok", "data": "{}"},
+            {"timestamp": 2.0, "frame_id": 2, "camera_id": 0, "event_type": "bad", "data": "{}"},
+            {"timestamp": 3.0, "frame_id": 3, "camera_id": 0, "event_type": "ok", "data": "{}"},
         ]
 
         # get_repository кэширует инстанс — патчим именно его insert_many.
@@ -221,43 +227,39 @@ class TestFlush:
         real_insert_many = repo.insert_many
 
         def insert_side_effect(rows):
-            if len(rows) > 1:
-                raise Exception("Simulated batch error")
+            # Ошибка ровно на frame_id==2; остальные пишутся реально.
+            if rows[0].frame_id == 2:
+                raise Exception("row fail")
             return real_insert_many(rows)
 
         with patch.object(repo, "insert_many", side_effect=insert_side_effect):
             flushed = plugin._flush_buffer()
 
-        # Обе записи сохранены через fallback one-by-one.
+        # Записаны строки 1 и 3, строка 2 — в ошибки. Никаких дублей.
         assert flushed == 2
         assert plugin._total_written == 2
+        assert plugin._total_errors == 1
         assert count_rows(plugin) == 2
+        # Лог ошибки — один раз (логируем только первую ошибку пакета).
         plugin._ctx.log_error.assert_called_once()
 
-    def test_fallback_counts_errors_on_single_row_failure(self):
-        """В fallback: ошибка отдельной строки → total_errors++."""
+    def test_first_error_only_logged_once(self):
+        """При множественных сбоях логируется только первая ошибка пакета."""
         plugin = make_plugin()
         plugin._buffer = [
-            {"timestamp": 1.0, "frame_id": 1, "camera_id": 0, "event_type": "ok", "data": "{}"},
+            {"timestamp": 1.0, "frame_id": 1, "camera_id": 0, "event_type": "bad", "data": "{}"},
             {"timestamp": 2.0, "frame_id": 2, "camera_id": 0, "event_type": "bad", "data": "{}"},
         ]
 
         repo = plugin._sql.get_repository(DetectionSchema)
-        real_insert_many = repo.insert_many
 
-        def insert_side_effect(rows):
-            if len(rows) > 1:
-                raise Exception("batch fail")
-            # frame_id==1 → успех, остальное → ошибка строки.
-            if rows[0].frame_id == 1:
-                return real_insert_many(rows)
-            raise Exception("row fail")
-
-        with patch.object(repo, "insert_many", side_effect=insert_side_effect):
+        with patch.object(repo, "insert_many", side_effect=Exception("db locked")):
             flushed = plugin._flush_buffer()
 
-        assert flushed == 1
-        assert plugin._total_errors == 1
+        assert flushed == 0
+        assert plugin._total_written == 0
+        assert plugin._total_errors == 2
+        plugin._ctx.log_error.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
