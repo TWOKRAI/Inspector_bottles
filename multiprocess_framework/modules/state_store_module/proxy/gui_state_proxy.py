@@ -1,51 +1,49 @@
-"""gui_state_proxy.py — Qt-safe StateProxy для GUI-процесса.
+"""gui_state_proxy.py — StateProxy для GUI-процесса с инъекцией delta-sink.
 
 GuiStateProxy переопределяет on_state_changed():
   - обновление кэша происходит в текущем потоке (IO/worker thread, безопасно)
-  - вызов callbacks маршрутизируется в Qt main thread через QMetaObject.invokeMethod
+  - дельты передаются в delta_sink — generic callback, инжектируемый GUI-процессом
 
-PySide6 НЕ импортируется на верхнем уровне — только lazily внутри методов.
-Это позволяет тестировать GuiStateProxy без установленного Qt.
+delta_sink отвечает за маршалинг в Qt main thread (в прототипе — через
+DataReceiverBridge, тот же проверенный механизм, что доставляет кадры). Модуль
+сам PySide6 НЕ импортирует (sink — обычный Callable), поэтому GuiStateProxy
+тестируется без установленного Qt.
 
 Пример использования в GuiProcess:
-    class GuiEmitter(QObject):
-        state_deltas = Signal(list)
+    def _on_state_deltas_to_bridge(deltas):
+        # Вызывается в IO-потоке; bridge.dispatch маршалит в Qt main thread.
+        for d in deltas:
+            bridge.dispatch({"data_type": "state_delta", "path": d.path, "value": d.new_value})
 
-        @Slot(list)
-        def _on_state_deltas(self, deltas):
-            # Вызывается в main thread
-            pass
-
-    emitter = GuiEmitter()
-    proxy = GuiStateProxy("gui", router=router, signal_emitter=emitter)
+    proxy = GuiStateProxy("gui", router=router, delta_sink=_on_state_deltas_to_bridge)
     router.register_message_handler("state.changed", proxy.on_state_changed)
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any, Callable
 
 from ..interfaces import IRouter
 from .state_proxy import StateProxy
 
-if TYPE_CHECKING:
-    from PySide6.QtCore import QObject
-
 
 class GuiStateProxy(StateProxy):
-    """Qt-safe StateProxy. Callbacks маршрутизируются в Qt main thread.
+    """StateProxy с инъекцией delta_sink для доставки дельт в GUI.
 
-    Вместо прямого вызова callback в on_state_changed(),
-    emit'ит Qt signal через QMetaObject.invokeMethod (QueuedConnection),
-    чтобы избежать race condition при обновлении GUI из worker-потока.
+    Вместо прямого вызова локальных callbacks в on_state_changed(),
+    передаёт дельты в delta_sink — callback, который сам решает, как
+    маршалить данные в Qt main thread (в прототипе — через DataReceiverBridge,
+    единый проверенный механизм пересечения IO→Qt, как у кадров).
 
-    При signal_emitter=None — fallback к прямому вызову (для тестов без Qt).
+    При delta_sink=None — fallback к прямому вызову локальных callbacks
+    (для тестов без Qt и legacy-сценариев).
     """
 
     def __init__(
         self,
         process_name: str,
         router: IRouter | None = None,
-        signal_emitter: "QObject | None" = None,
+        delta_sink: "Callable[[list], None] | None" = None,
         server_target: str = "ProcessManager",
         manager_name: str | None = None,
         logger: Any = None,
@@ -54,8 +52,10 @@ class GuiStateProxy(StateProxy):
         Args:
             process_name: имя GUI-процесса.
             router: реализация IRouter для IPC.
-            signal_emitter: QObject с методом _on_state_deltas(deltas: list).
-                            Должен быть создан в Qt main thread.
+            delta_sink: callback, принимающий список дельт (list[Delta]).
+                Вызывается в текущем (IO) потоке; ответственность за маршалинг
+                в Qt main thread — на стороне sink (через bridge). При None —
+                fallback к прямому вызову локальных callbacks.
             server_target: имя процесса-сервера StateStore (ADR-SS-002).
             manager_name: имя для BaseManager.
             logger: LoggerManager или ObservableMixin-совместимый объект.
@@ -67,20 +67,20 @@ class GuiStateProxy(StateProxy):
             manager_name=manager_name,
             logger=logger,
         )
-        self._signal_emitter = signal_emitter
+        self._delta_sink = delta_sink
 
     # -------------------------------------------------------------------
-    # Переопределение on_state_changed — Qt-safe версия
+    # Переопределение on_state_changed — доставка через delta_sink
     # -------------------------------------------------------------------
 
     def on_state_changed(self, msg: dict) -> None:
-        """Обработка state.changed с маршрутизацией callbacks в Qt main thread.
+        """Обработка state.changed с доставкой дельт в delta_sink.
 
         1. Десериализует дельты (текущий поток — безопасно).
         2. Обновляет кэш (только dict-операция — безопасно).
-        3. Если signal_emitter задан — вызывает _on_state_deltas через
-           QMetaObject.invokeMethod с QueuedConnection.
-        4. Иначе — прямой вызов callbacks (fallback для тестов без Qt).
+        3. Если delta_sink задан — передаёт дельты ему (маршалинг в Qt — на
+           стороне sink через bridge).
+        4. Иначе — прямой вызов локальных callbacks (fallback для тестов без Qt).
 
         Args:
             msg: IPC-сообщение state.changed.
@@ -92,42 +92,9 @@ class GuiStateProxy(StateProxy):
         # Обновление кэша безопасно из любого потока (только dict-операции)
         self._update_cache(deltas)
 
-        if self._signal_emitter is not None:
-            # Маршрутизация в Qt main thread через invokeMethod
-            self._dispatch_via_qt(deltas)
+        if self._delta_sink is not None:
+            # Доставка через sink; маршалинг в Qt main thread — ответственность sink
+            self._delta_sink(deltas)
         else:
-            # Fallback: прямой вызов (тесты без Qt, или нет emitter'а)
-            self._invoke_callbacks(deltas)
-
-    # -------------------------------------------------------------------
-    # Вспомогательные методы
-    # -------------------------------------------------------------------
-
-    def _dispatch_via_qt(self, deltas: list) -> None:
-        """Передать дельты в Qt main thread через QMetaObject.invokeMethod.
-
-        Использует QueuedConnection — вызов будет выполнен при следующей итерации
-        event loop главного потока. Это гарантирует thread-safety для Qt GUI.
-
-        Args:
-            deltas: список Delta для передачи в callbacks.
-        """
-        try:
-            from PySide6.QtCore import QMetaObject, Qt, Q_ARG  # type: ignore[import]
-
-            QMetaObject.invokeMethod(
-                self._signal_emitter,
-                "_on_state_deltas",
-                Qt.ConnectionType.QueuedConnection,
-                Q_ARG(list, deltas),
-            )
-        except ImportError:
-            self._log_warning(
-                f"GuiStateProxy '{self._process_name}': PySide6 недоступен, прямой вызов callbacks"
-            )
-            self._invoke_callbacks(deltas)
-        except Exception as exc:
-            self._log_error(
-                f"GuiStateProxy '{self._process_name}': ошибка invokeMethod, прямой вызов callbacks: {exc}"
-            )
+            # Fallback: прямой вызов локальных callbacks (тесты без Qt)
             self._invoke_callbacks(deltas)

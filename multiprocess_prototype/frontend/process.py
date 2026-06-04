@@ -12,33 +12,12 @@ from __future__ import annotations
 import sys
 import time
 
-from PySide6.QtCore import QObject, Slot
-
 from multiprocess_framework.modules.process_module.core.process_module import ProcessModule
 from multiprocess_framework.modules.router_module.middleware import FrameShmMiddleware
 from multiprocess_framework.modules.worker_module import ThreadConfig, ThreadPriority
 
 from .bridge import DataReceiverBridge
 from . import app as gui_app
-
-
-class _StateDeltaEmitter(QObject):
-    """Qt main-thread приёмник дельт StateStore → bridge.dispatch(state_delta).
-
-    GuiStateProxy.on_state_changed (system/IO-поток) маршрутизирует дельты сюда через
-    QMetaObject.invokeMethod(QueuedConnection) — слот исполняется в main thread.
-    Каждая дельта конвертируется в state_delta-сообщение и уходит в существующий
-    bridge → GuiStateBindings (реактивные подписки виджетов карточек/воркеров).
-    """
-
-    def __init__(self, bridge: DataReceiverBridge) -> None:
-        super().__init__()
-        self._bridge = bridge
-
-    @Slot(list)
-    def _on_state_deltas(self, deltas: list) -> None:
-        for d in deltas:
-            self._bridge.dispatch({"data_type": "state_delta", "path": d.path, "value": d.new_value})
 
 
 class GuiProcess(ProcessModule):
@@ -69,17 +48,18 @@ class GuiProcess(ProcessModule):
 
         # StateStore-подписчик: live-телеметрия процессов/воркеров.
         # ProcessMonitor публикует processes.X.state.* / processes.X.workers.Y.* →
-        # DeltaDispatcher шлёт state.changed (через queue_registry, U1) → handler здесь →
-        # emitter (Qt main thread) → bridge → GuiStateBindings обновляют виджеты.
+        # DeltaDispatcher шлёт state.changed (через queue_registry, U1) → handler здесь
+        # (IO-поток) → delta_sink → bridge.dispatch → GuiStateBindings обновляют виджеты.
+        # delta_sink использует ТОТ ЖЕ bridge-механизм, что и кадры (проверенный путь
+        # пересечения IO→Qt через _deliver.emit/AutoConnection).
         from multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy import (
             GuiStateProxy,
         )
 
-        self._state_emitter = _StateDeltaEmitter(self._bridge)
         self._gui_state_proxy = GuiStateProxy(
             process_name=self.name,
             router=self.router_manager,
-            signal_emitter=self._state_emitter,
+            delta_sink=self._on_state_deltas_to_bridge,
             server_target="ProcessManager",
             logger=self,
         )
@@ -113,6 +93,18 @@ class GuiProcess(ProcessModule):
             f"GuiProcess '{self.name}': bridge + SHM middleware + data_receiver созданы",
             module="gui",
         )
+
+    def _on_state_deltas_to_bridge(self, deltas: list) -> None:
+        """delta_sink для GuiStateProxy: гонит дельты в bridge (IO→Qt).
+
+        Вызывается из IO-потока (message_processor) при получении state.changed.
+        Каждая дельта превращается в state_delta-сообщение и уходит в тот же
+        DataReceiverBridge, что доставляет кадры — bridge.dispatch внутри делает
+        _deliver.emit (AutoConnection), что надёжно пересекает поток в Qt main
+        thread, где GuiStateBindings обновляют виджеты карточек/воркеров.
+        """
+        for d in deltas:
+            self._bridge.dispatch({"data_type": "state_delta", "path": d.path, "value": d.new_value})
 
     def _data_receiver_loop(self, stop_event, pause_event) -> None:
         """Цикл получения IPC data-сообщений и передачи в Qt через bridge."""

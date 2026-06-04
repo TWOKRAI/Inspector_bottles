@@ -551,29 +551,34 @@ class TestRequestSystemShutdown:
         process._log_warning.assert_called_once()
 
 
-class TestStateDeltaEmitter:
-    """_StateDeltaEmitter: дельты StateStore → bridge.dispatch(state_delta) (Фаза 1.2)."""
+class TestStateDeltasToBridge:
+    """GuiProcess._on_state_deltas_to_bridge: дельты StateStore → bridge.dispatch(state_delta).
+
+    Task 1.1 (telemetry-A): _StateDeltaEmitter + invokeMethod удалены; дельты гонятся
+    через тот же DataReceiverBridge, что и кадры (delta_sink из GuiStateProxy).
+    """
 
     @pytest.fixture(autouse=True)
     def _setup_qapp(self, qapp):
         pass
 
-    def test_emitter_converts_deltas_to_state_delta(self, qtbot):
+    def test_sink_converts_deltas_to_state_delta(self, qtbot):
         from types import SimpleNamespace
 
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
-        from multiprocess_prototype.frontend.process import _StateDeltaEmitter
+        from multiprocess_prototype.frontend.process import GuiProcess
 
         bridge = DataReceiverBridge()
         states = []
         bridge.state_updated.connect(states.append)
 
-        emitter = _StateDeltaEmitter(bridge)
+        # _on_state_deltas_to_bridge нужен только self._bridge — лёгкий stand-in
+        fake = SimpleNamespace(_bridge=bridge)
         deltas = [
             SimpleNamespace(path="processes.cam.workers.w1.status", new_value="running"),
             SimpleNamespace(path="processes.cam.workers.w1.effective_hz", new_value=12.5),
         ]
-        emitter._on_state_deltas(deltas)
+        GuiProcess._on_state_deltas_to_bridge(fake, deltas)
 
         assert len(states) == 2
         assert states[0]["data_type"] == "state_delta"
@@ -582,13 +587,69 @@ class TestStateDeltaEmitter:
         assert states[1]["path"] == "processes.cam.workers.w1.effective_hz"
         assert states[1]["value"] == 12.5
 
-    def test_emitter_empty_deltas_noop(self, qtbot):
+    def test_sink_empty_deltas_noop(self, qtbot):
+        from types import SimpleNamespace
+
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
-        from multiprocess_prototype.frontend.process import _StateDeltaEmitter
+        from multiprocess_prototype.frontend.process import GuiProcess
 
         bridge = DataReceiverBridge()
         states = []
         bridge.state_updated.connect(states.append)
 
-        _StateDeltaEmitter(bridge)._on_state_deltas([])
+        GuiProcess._on_state_deltas_to_bridge(SimpleNamespace(_bridge=bridge), [])
         assert states == []
+
+    def test_delta_delivery_crosses_io_to_qt_thread(self, qtbot):
+        """Регрессия Task 1.1: state.changed из НЕ-main потока доставляется в Qt main thread.
+
+        Воспроизводит точную поломку, которую чинит фикс: раньше переход IO→Qt шёл
+        через QMetaObject.invokeMethod(_StateDeltaEmitter) и МОЛЧА терялся в PySide6 6.10.
+        Теперь GuiStateProxy.on_state_changed (вызванный из отдельного Python-потока,
+        как message_processor) → delta_sink → bridge.dispatch → _deliver.emit
+        (QueuedConnection) надёжно пересекает поток, как у кадров.
+        """
+        import threading
+
+        from multiprocess_framework.modules.state_store_module.core.delta import Delta
+        from multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy import (
+            GuiStateProxy,
+        )
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+
+        bridge = DataReceiverBridge()
+        received: list = []
+        bridge.state_updated.connect(received.append)
+
+        # delta_sink идентичен GuiProcess._on_state_deltas_to_bridge
+        def sink(deltas: list) -> None:
+            for d in deltas:
+                bridge.dispatch({"data_type": "state_delta", "path": d.path, "value": d.new_value})
+
+        proxy = GuiStateProxy("gui", router=None, delta_sink=sink)
+        msg = {
+            "command": "state.changed",
+            "data": {
+                "deltas": [
+                    Delta(
+                        path="processes.cam.state.status",
+                        old_value="initializing",
+                        new_value="running",
+                        source="ProcessManager",
+                    ).to_dict()
+                ]
+            },
+        }
+
+        # Вызов из ОТДЕЛЬНОГО потока (не main, не QThread) — как message_processor в IO.
+        t = threading.Thread(target=proxy.on_state_changed, args=(msg,))
+        t.start()
+        t.join()
+
+        # Доставка поставлена в очередь Qt main thread — прокачиваем event loop.
+        qtbot.waitUntil(lambda: len(received) == 1, timeout=2000)
+        assert received[0]["data_type"] == "state_delta"
+        assert received[0]["path"] == "processes.cam.state.status"
+        assert received[0]["value"] == "running"
+        # кэш обновлён в потоке-источнике (до пересечения границы)
+        assert proxy.cache["processes.cam.state.status"] == "running"

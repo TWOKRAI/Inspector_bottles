@@ -2,7 +2,7 @@
 
 Все тесты работают без реального RouterManager — используется MockRouter.
 Интеграционные тесты используют StateStoreManager напрямую.
-GuiStateProxy тестируется без Qt через fallback-режим (signal_emitter=None).
+GuiStateProxy тестируется без Qt через fallback-режим (delta_sink=None).
 """
 
 from __future__ import annotations
@@ -657,7 +657,7 @@ class TestGuiStateProxy:
 
     def test_gui_proxy_init(self):
         """GuiStateProxy создаётся без ошибок."""
-        proxy = GuiStateProxy("gui", router=None, signal_emitter=None)
+        proxy = GuiStateProxy("gui", router=None, delta_sink=None)
         assert proxy.process_name == "gui"
 
     def test_gui_proxy_inherits_state_proxy(self):
@@ -666,8 +666,8 @@ class TestGuiStateProxy:
         assert isinstance(proxy, StateProxy)
 
     def test_gui_proxy_fallback_calls_callback(self):
-        """GuiStateProxy без signal_emitter вызывает callback напрямую (fallback)."""
-        proxy = GuiStateProxy("gui", router=None, signal_emitter=None)
+        """GuiStateProxy без delta_sink вызывает локальные callbacks напрямую (fallback)."""
+        proxy = GuiStateProxy("gui", router=None, delta_sink=None)
 
         received: list[list[Delta]] = []
         # Добавляем callback вручную (без IPC subscribe)
@@ -678,6 +678,23 @@ class TestGuiStateProxy:
 
         assert len(received) == 1
         assert received[0][0].path == "cameras.0.config.fps"
+
+    def test_gui_proxy_delta_sink_receives_deltas(self):
+        """GuiStateProxy с delta_sink передаёт дельты в sink (не в локальные callbacks)."""
+        sink_deltas: list[list[Delta]] = []
+        local_called: list = []
+        proxy = GuiStateProxy("gui", router=None, delta_sink=lambda d: sink_deltas.append(d))
+        # Локальный callback не должен вызываться, когда задан delta_sink
+        proxy._callbacks["test-sub"] = [lambda d: local_called.append(d)]
+
+        delta = _make_delta(path="system.status", new="running")
+        proxy.on_state_changed(_make_state_changed_msg([delta]))
+
+        assert len(sink_deltas) == 1
+        assert sink_deltas[0][0].path == "system.status"
+        assert local_called == []
+        # кэш обновлён независимо от пути доставки
+        assert proxy.cache["system.status"] == "running"
 
     def test_gui_proxy_updates_cache(self):
         """GuiStateProxy обновляет кэш в on_state_changed."""
