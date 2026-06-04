@@ -58,9 +58,18 @@ PM агрегирует workers_status → _publish_state → дерево → I
 - Агрегат: `state.fps` = max(`effective_hz`) по running-воркерам; `state.latency_ms` = max(`cycle_duration_ms`). Нет hz → не публиковать (карточка «—»).
 - **Нужен `state_proxy` в каждом процессе:** проверить, есть ли он у дочерних процессов (у GUI есть `GuiStateProxy`; у backend-процессов — есть ли `StateProxy`?). Если нет — добавить тонкий `StateProxy` (server_target="ProcessManager"), он уже умеет `set()` → IPC → StateStoreManager (тот же путь, что статус).
 **Acceptance:**
-- [ ] qt-mcp: вкладка «Процессы» → camera_0/detector FPS — ЧИСЛО (не «—»/«0.0»), Latency — число.
-- [ ] `state.fps` приходит из самого процесса (probe/лог), НЕ из `_on_heartbeat_received`.
+- [x] qt-mcp: вкладка «Процессы» → camera_0/detector FPS — ЧИСЛО (не «—»/«0.0»), Latency — число. **DONE b6ce2bb8** (camera_0 19.6 / detector 24.0 / painter 19.7 FPS, latency 47/2/1 ms).
+- [x] `state.fps` приходит из самого процесса (probe/лог), НЕ из `_on_heartbeat_received`. **DONE** (self-publish в `ProcessHeartbeat._publish_metrics_to_tree`).
 **Out of scope:** не трогать статус-путь (работает), не трогать кадры.
+
+> **Найдено по ходу (b6ce2bb8):** одного self-publish было мало. consumer-воркеры
+> (DataReceiver/PipelineExecutor) реально крутили ~21 цикл/с (cycles росли), но
+> `effective_hz=0.0`, т.к. `CycleMetricsRecorder` считал `1/cycle_duration`, а
+> длительность мерилась `time.monotonic()` — на Windows гранулярность ~15 мс →
+> sub-мс работа округлялась в 0. Фикс: `effective_hz` = частота **завершения**
+> циклов (интервал между `record()` через `perf_counter`); consumer-раннеры
+> перешли на `perf_counter`. camera_0 работала и раньше только потому, что её
+> цикл включает ~47 мс throttle-sleep (> гранулярности).
 
 ### Task 2 — Убрать heartbeat→центральный агрегат для метрик
 **Level:** Middle+ **Assignee:** developer (после Task 1)
