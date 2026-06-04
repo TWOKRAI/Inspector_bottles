@@ -92,6 +92,7 @@ class GenericProcess(ProcessModule):
                 log_info=self._log_info,
                 log_error=self._log_error,
                 log_debug=self._log_debug,
+                node_name=self.name,
             )
             # Подключить callback
             inspector._on_ready = self._data_receiver.on_items_ready
@@ -108,6 +109,7 @@ class GenericProcess(ProcessModule):
                 log_info=self._log_info,
                 log_error=self._log_error,
                 log_debug=self._log_debug,
+                node_name=self.name,
             )
 
             # Запуск workers через WorkerManager
@@ -143,6 +145,7 @@ class GenericProcess(ProcessModule):
                 log_info=self._log_info,
                 log_error=self._log_error,
                 log_debug=self._log_debug,
+                node_name=self.name,
             )
             self._source_producers.append(producer)
 

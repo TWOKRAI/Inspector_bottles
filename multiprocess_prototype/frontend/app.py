@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
+from multiprocess_framework.modules.process_module.generic import frame_trace
 from .auth_context import AuthContext
 from .bridge.command_sender import CommandSender
 from .windows.main_window import MainWindow
@@ -670,6 +671,13 @@ def _setup_bridge_callbacks(
             cts = data.get("capture_ts") if isinstance(data, dict) else None
             if isinstance(cts, (int, float)):
                 window.record_chain_latency((time.time() - cts) * 1000.0)
+
+            # frame-trace: финальный transport-спан (painter→gui) + дамп полного
+            # таймлайна каждый 30-й кадр (под флагом INSPECTOR_FRAME_TRACE).
+            if frame_trace.enabled() and isinstance(data, dict):
+                frame_trace.record_transport(data, "gui")
+                if _frame_trace_cnt % 30 == 1:
+                    process._log_info(f"[FRAME-TRACE] {data.get('trace')}", module="gui")
 
     process._bridge.set_frame_callback(_on_frame_received)
     # State callback занят GuiStateBindings (создан в run_gui, Phase 10A)

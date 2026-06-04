@@ -13,6 +13,7 @@ import time
 from typing import Callable
 
 from ..plugins.base import ProcessModulePlugin
+from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
 from .frame_shm_middleware import FrameShmMiddleware
 
@@ -40,11 +41,14 @@ class SourceProducer:
         log_info: Callable[[str], None] | None = None,
         log_error: Callable[[str], None] | None = None,
         log_debug: Callable[[str], None] | None = None,
+        node_name: str = "",
     ) -> None:
         self._plugin = plugin
         self._shm = shm_middleware
         self._send = send_fn
         self._chain_targets = chain_targets
+        # Имя процесса-узла — для frame-trace (transport from/to, process node).
+        self._node = node_name
         self._target_interval = 1.0 / max(target_fps, 1.0)
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
@@ -75,6 +79,7 @@ class SourceProducer:
 
             t_start = time.monotonic()
 
+            t_prod = time.perf_counter()
             try:
                 items = self._plugin.produce()
             except NotImplementedError:
@@ -104,9 +109,11 @@ class SourceProducer:
             # сквозная задержка now - capture_ts. time.time() (wall) —
             # кросс-процессно сравнимо на одной машине.
             capture_ts = time.time()
+            prod_ms = (time.perf_counter() - t_prod) * 1000.0
             for item in items:
                 if isinstance(item, dict):
                     item.setdefault("capture_ts", capture_ts)
+                    frame_trace.record_process(item, self._node, self._plugin.name, prod_ms)
 
             # Отправить каждый item
             for item in items:
@@ -146,6 +153,9 @@ class SourceProducer:
         # Routing: item["target"] → per-item, else chain_targets
         per_item_target = item.pop("target", None)
         targets = [per_item_target] if per_item_target else self._chain_targets
+
+        # frame-trace: отметить отправителя/время → receiver посчитает transport.
+        frame_trace.stamp_send(item, self._node)
 
         for target in targets:
             msg = {

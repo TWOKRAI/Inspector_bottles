@@ -15,6 +15,7 @@ import time
 from typing import Callable
 
 from ..plugins.base import ProcessModulePlugin
+from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
 from .frame_shm_middleware import FrameShmMiddleware
 
@@ -46,9 +47,12 @@ class PipelineExecutor:
         log_info: Callable[[str], None] | None = None,
         log_error: Callable[[str], None] | None = None,
         log_debug: Callable[[str], None] | None = None,
+        node_name: str = "",
     ) -> None:
         self._plugins = plugins
         self._chain_targets = chain_targets
+        # Имя процесса-узла — для frame-trace (process-спан node, transport from).
+        self._node = node_name
         self._shm = shm_middleware
         self._send = send_fn
         self._max_fails = max_consecutive_fails
@@ -179,7 +183,13 @@ class PipelineExecutor:
                 continue
 
             try:
+                t0 = time.perf_counter()
                 items = plugin.process(items)
+                # frame-trace: время обработки этим плагином (на каждый item batch'а).
+                if frame_trace.enabled():
+                    dt_ms = (time.perf_counter() - t0) * 1000.0
+                    for it in items:
+                        frame_trace.record_process(it, self._node, plugin.name, dt_ms)
                 # Успех — сбросить счётчик fails
                 self._consecutive_fails[plugin.name] = 0
             except Exception as e:
@@ -213,6 +223,9 @@ class PipelineExecutor:
             # Определить targets
             per_item_target = item.pop("target", None)
             targets = [per_item_target] if per_item_target else self._chain_targets
+
+            # frame-trace: отметить отправителя/время → receiver посчитает transport.
+            frame_trace.stamp_send(item, self._node)
 
             # Отправить в каждый target
             for target in targets:

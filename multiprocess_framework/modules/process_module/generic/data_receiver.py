@@ -14,6 +14,7 @@ import threading
 import time
 from typing import Callable
 
+from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
 from .frame_shm_middleware import FrameShmMiddleware
 from .inspector_manager import InspectorManager
@@ -42,8 +43,11 @@ class DataReceiver:
         log_info: Callable[[str], None] | None = None,
         log_error: Callable[[str], None] | None = None,
         log_debug: Callable[[str], None] | None = None,
+        node_name: str = "",
     ) -> None:
         self._receive = receive_fn
+        # Имя процесса-узла — для frame-trace transport-спана (from -> node).
+        self._node = node_name
         self._shm = shm_middleware
         self._inspector = inspector_manager
         self._chain_queue = chain_queue
@@ -150,6 +154,9 @@ class DataReceiver:
 
             # Построить item из msg
             item = self._build_item(msg)
+
+            # frame-trace: время передачи от предыдущего узла к этому.
+            frame_trace.record_transport(item, self._node)
 
             if do_trace:
                 frame = item.get("frame")
