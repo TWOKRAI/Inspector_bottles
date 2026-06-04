@@ -83,9 +83,9 @@ TelemetrySnapshot (SchemaBase + SQLMeta):
   - **Module contract:** new-lite
   - **Сопутствующие framework-фиксы (вскрыты smoke'ом, write-путь плагинов):**
     `with_config` не пробрасывал `state_proxy`; `handle_state_merge` двойной unwrap (коллизия ключа `data`); `command_manager` логировал `reason` вместо `error`; `register_schema` терял подтип (TypeVar). Детали — `Plugins/io/telemetry_sink/STATUS.md`.
-- **Task 1.2:** Полная схема `TelemetrySnapshot` + сбор всех листьев `processes.*.state.*` + сводка `system.*` [PENDING] (зависит от 1.1)
+- **Task 1.2:** Полная схема `TelemetrySnapshot` + сбор всех листьев `processes.*.state.*` + сводка `system.*` [DONE 2026-06-04] ✅ smoke: per-process строки + system, extra JSON
   - **Module contract:** impl-only
-- **Task 1.3:** Конфиг-параметры (sample_interval, batch, retention-TODO) + команды (`flush`/`get_stats`/`purge_old`-заглушка) [PENDING] (зависит от 1.1)
+- **Task 1.3:** Конфиг-параметры (sample_interval, retention) + команды (`flush`/`get_stats`/`purge_old`) [DONE 2026-06-04] ✅ purge_old — реальный on-demand DELETE (не заглушка), scheduled-ротация вне scope
   - **Module contract:** impl-only
 
 ### Phase 2: Миграция DatabasePlugin (sqlite3 → SQLManager)

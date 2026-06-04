@@ -1,9 +1,9 @@
 # STATUS — telemetry_sink
 
-- **Состояние:** Task 1.1 (vertical slice) — DONE. Headless-smoke зелёный
-  (`telemetry_sink.yaml`: rows>0, несколько `ts`), framework-блокер устранён.
+- **Состояние:** Phase 1 (Task 1.1–1.3) — DONE. Headless-smoke зелёный
+  (`telemetry_sink.yaml`: per-process строки + system-сводка), framework-блокер устранён.
 - **Контракт:** new-lite (плагин-сток, side-effect).
-- **План:** `plans/2026-06-04_telemetry-db-sink.md` (Phase 1, Task 1.1).
+- **План:** `plans/2026-06-04_telemetry-db-sink.md` (Phase 1).
 
 ## Реализовано (Task 1.1)
 
@@ -13,6 +13,21 @@
 - [x] SQLManager в `start()` (fork-safe, NullPool, sync insert_many).
 - [x] Процесс `telemetry_sink` объявлен в `backend/topology/telemetry_sink.yaml` (launchable headless).
 - [x] Edge cases: `state_proxy is None` → no-op + error; пустой кэш → не пишем.
+
+## Реализовано (Task 1.2 — полная схема + агрегация)
+
+- [x] Схема расширена: `latency_ms`, `uptime_s`, `status`, `extra` (JSON-хвост).
+- [x] Подписка добавлена на `system.**` (для строки-сводки).
+- [x] Агрегация `_sample_once`: строка на каждый процесс (`state.*` → колонки,
+      `workers.*` → extra) + строка `process_name='system'` (`avg_fps`→fps, остальное → extra).
+- [x] `config.*` и статика `system.*` фильтруются (не телеметрия).
+
+## Реализовано (Task 1.3 — команды + retention)
+
+- [x] register `retention_days` (default 0 = без ретенции).
+- [x] Команды `flush` (форс-семпл), `get_stats` (total/pending/db_path/last_ts),
+      `purge_old` (DELETE WHERE ts<cutoff при retention_days>0; иначе no-op).
+- [x] `commands` dict в классе плагина.
 
 ## Сопутствующие framework-фиксы (вскрыты на headless-smoke 2026-06-04)
 

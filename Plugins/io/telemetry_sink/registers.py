@@ -34,3 +34,13 @@ class TelemetrySinkRegisters(SchemaBase):
             min=0.5,
         ),
     ] = 5.0
+
+    retention_days: Annotated[
+        int,
+        FieldMeta(
+            "Retention Days",
+            info="Хранить историю N дней (0 = без ретенции; чистка по команде purge_old)",
+            unit="d",
+            min=0,
+        ),
+    ] = 0
