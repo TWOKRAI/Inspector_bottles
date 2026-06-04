@@ -2,7 +2,7 @@
 
 - **Slug:** frame-trace-envelope
 - **Дата:** 2026-06-04
-- **Статус:** DRAFT — на согласование
+- **Статус:** Task 1+2 DONE (48caea37), Task 3 (GUI-разбивка) — опционально
 - **Ветка:** feat/comm-system-target-architecture (продолжение телеметрии)
 - **Родитель:** [`telemetry-self-publish-redesign.md`](telemetry-self-publish-redesign.md) (capture_ts = первое поле trace, коммит 08160b3d)
 
@@ -71,14 +71,16 @@
 
 ## Задачи
 
-### Task 1 — Trace в framework-раннерах (backend)
-**Level:** Senior **Файлы:** `source_producer.py`, `data_receiver.py`, `pipeline_executor.py`
-**Goal:** наполнять `item["trace"]` транспорт- и process-спанами (per-plugin) под флагом.
-**Acceptance:** в логе детектора виден `trace` с transport(camera→detector) + process(hsv_mask/contour_finder).
+### Task 1 — Trace в framework-раннерах (backend) — DONE 48caea37
+**Файлы:** `frame_trace.py` (новый), `source_producer.py`, `data_receiver.py`, `pipeline_executor.py`, `generic_process.py`.
+**Acceptance:** [x] в логе виден полный `trace` с transport + process-спанами по плагинам.
 
-### Task 2 — Чтение/дамп на выходе (GUI) + флаг
-**Level:** Middle+ **Файлы:** `app.py` (frame callback), env/config флаг.
-**Acceptance:** при `INSPECTOR_FRAME_TRACE=1` каждый N-й кадр печатает полный таймлайн.
+### Task 2 — Чтение/дамп на выходе (GUI) + флаг — DONE 48caea37
+**Файлы:** `app.py` (frame callback), флаг `INSPECTOR_FRAME_TRACE`.
+**Acceptance:** [x] при `INSPECTOR_FRAME_TRACE=1` каждый 30-й кадр печатает полный таймлайн.
+Реальный замер: capture 0.28 / transport→detector 1.58 / hsv_mask 0.70 / contour_finder 0.14 /
+transport→painter 1.03 / contour_draw 0.003 / transport→gui 4.08 мс (итого ~7.8 мс). Вывод:
+время уходит в IPC-передачу, не в CV-обработку.
 
 ### Task 3 — GUI-разбивка по сегментам (вариант B)
 **Level:** Middle+ **Файлы:** `_panels.py` (детальный вид), агрегатор сегментов.
