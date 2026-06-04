@@ -7,6 +7,7 @@ GuiStateBindings регистрирует обратные вызовы чере
 Хранение виджетов — через weakref.ref для автоматической уборки при удалении.
 Авто-уборка также через сигнал widget.destroyed.
 """
+
 from __future__ import annotations
 
 import weakref
@@ -26,17 +27,18 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _PROP_SETTERS: dict[str, Callable[[QWidget, Any], None]] = {
-    "value":       lambda w, v: w.setValue(v),          # type: ignore[attr-defined]
-    "text":        lambda w, v: w.setText(str(v)),       # type: ignore[attr-defined]
-    "checked":     lambda w, v: w.setChecked(bool(v)),   # type: ignore[attr-defined]
-    "currentText": lambda w, v: w.setCurrentText(str(v)),# type: ignore[attr-defined]
-    "plainText":   lambda w, v: w.setPlainText(str(v)),  # type: ignore[attr-defined]
+    "value": lambda w, v: w.setValue(v),  # type: ignore[attr-defined]
+    "text": lambda w, v: w.setText(str(v)),  # type: ignore[attr-defined]
+    "checked": lambda w, v: w.setChecked(bool(v)),  # type: ignore[attr-defined]
+    "currentText": lambda w, v: w.setCurrentText(str(v)),  # type: ignore[attr-defined]
+    "plainText": lambda w, v: w.setPlainText(str(v)),  # type: ignore[attr-defined]
 }
 
 
 # ---------------------------------------------------------------------------
 # BindingHandle — дескриптор одной подписки
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class BindingHandle:
@@ -59,6 +61,7 @@ class BindingHandle:
 # GuiStateBindings — менеджер подписок
 # ---------------------------------------------------------------------------
 
+
 class GuiStateBindings:
     """Менеджер реактивных подписок GUI-виджетов на пути StateStore.
 
@@ -73,13 +76,23 @@ class GuiStateBindings:
         bindings.unbind(handle)
     """
 
-    def __init__(self, bridge: "DataReceiverBridge") -> None:
+    def __init__(
+        self,
+        bridge: "DataReceiverBridge",
+        cache_snapshot: Callable[[], dict[str, Any]] | None = None,
+    ) -> None:
         """Инициализировать и занять state_callback у bridge.
 
         Args:
             bridge: экземпляр DataReceiverBridge (уже инициализированный).
+            cache_snapshot: опциональный провайдер снимка кэша состояния
+                ({path: value}). Если задан, bind() сразу применяет к виджету
+                последнее известное значение (replay) — закрывает разрыв
+                ленивых вкладок, созданных после прохождения разовых дельт
+                (Task 4.1). При None replay не выполняется (legacy-поведение).
         """
         self._bindings: list[BindingHandle] = []
+        self._cache_snapshot = cache_snapshot
         bridge.set_state_callback(self._on_state_msg)
 
     # ------------------------------------------------------------------
@@ -120,6 +133,18 @@ class GuiStateBindings:
         # Авто-уборка при уничтожении виджета Qt
         widget.destroyed.connect(lambda *_: self.unbind_widget(widget))
 
+        # Replay: сразу применить последнее известное значение из кэша (Task 4.1).
+        # Нужно для ленивых вкладок, созданных ПОСЛЕ прохождения разовых дельт
+        # (например processes.X.state.status публикуется один раз при смене статуса).
+        if self._cache_snapshot is not None:
+            try:
+                snapshot = self._cache_snapshot()
+            except Exception:
+                snapshot = {}
+            for cached_path, cached_value in snapshot.items():
+                if match_glob(handle.pattern, cached_path):
+                    self._apply_to_widget(handle, cached_value)
+
         return handle
 
     def unbind(self, handle: BindingHandle) -> None:
@@ -142,10 +167,7 @@ class GuiStateBindings:
         Args:
             widget: Qt-виджет, чьи подписки нужно снять.
         """
-        self._bindings = [
-            h for h in self._bindings
-            if h.widget_ref() is not widget
-        ]
+        self._bindings = [h for h in self._bindings if h.widget_ref() is not widget]
 
     def clear(self) -> None:
         """Снять все подписки (очистить список)."""
@@ -182,8 +204,7 @@ class GuiStateBindings:
 
         for handle in self._bindings:
             # Проверяем, жив ли виджет
-            widget = handle.widget_ref()
-            if widget is None:
+            if handle.widget_ref() is None:
                 dead.append(handle)
                 continue
 
@@ -191,24 +212,7 @@ class GuiStateBindings:
             if not match_glob(handle.pattern, path):
                 continue
 
-            # Применяем formatter (если задан)
-            display_value = handle.formatter(value) if handle.formatter else value
-
-            # Вызываем setter
-            setter = _PROP_SETTERS.get(handle.prop)
-            if setter is not None:
-                try:
-                    setter(widget, display_value)
-                except Exception:
-                    pass  # Виджет несовместим — тихо пропускаем
-            else:
-                # Fallback: getattr(widget, prop)(value)
-                try:
-                    method = getattr(widget, handle.prop, None)
-                    if callable(method):
-                        method(display_value)
-                except Exception:
-                    pass
+            self._apply_to_widget(handle, value)
 
         # Убираем мёртвые weakref-ы
         if dead:
@@ -217,3 +221,37 @@ class GuiStateBindings:
                     self._bindings.remove(d)
                 except ValueError:
                     pass
+
+    def _apply_to_widget(self, handle: BindingHandle, value: Any) -> bool:
+        """Применить значение к виджету подписки через setter.
+
+        Общая логика для live-дельт (_on_state_msg) и replay из кэша (bind).
+
+        Args:
+            handle: дескриптор подписки.
+            value: сырое значение (formatter применяется здесь).
+
+        Returns:
+            False если виджет уже уничтожен (weakref пуст), иначе True.
+        """
+        widget = handle.widget_ref()
+        if widget is None:
+            return False
+
+        display_value = handle.formatter(value) if handle.formatter else value
+
+        setter = _PROP_SETTERS.get(handle.prop)
+        if setter is not None:
+            try:
+                setter(widget, display_value)
+            except Exception:
+                pass  # Виджет несовместим — тихо пропускаем
+        else:
+            # Fallback: getattr(widget, prop)(value)
+            try:
+                method = getattr(widget, handle.prop, None)
+                if callable(method):
+                    method(display_value)
+            except Exception:
+                pass
+        return True

@@ -219,7 +219,14 @@ def run_gui(process: "GuiProcess") -> None:
     #     (Phase 10B: табы получают bindings через RuntimeDeps.bindings)
     from .state.bindings import GuiStateBindings
 
-    bindings = GuiStateBindings(process._bridge)
+    # cache_snapshot: replay закэшированного state при bind() (Task 4.1) —
+    # ленивые вкладки сразу получают последний статус/метрики, не дожидаясь
+    # следующей дельты (разовые status-дельты проходят до создания вкладки).
+    _gui_proxy = getattr(process, "_gui_state_proxy", None)
+    bindings = GuiStateBindings(
+        process._bridge,
+        cache_snapshot=(lambda: _gui_proxy.cache) if _gui_proxy is not None else None,
+    )
 
     # 3c. Phase 12: CommandCatalog + CommandValidator + TopologyBridge
     from .bridge.command_catalog import CommandCatalog

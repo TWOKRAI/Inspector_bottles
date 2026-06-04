@@ -303,3 +303,69 @@ class TestIgnoreInvalidMessages:
         )
 
         assert label.text() == "original"
+
+
+# ---------------------------------------------------------------------------
+# Replay из кэша при bind() (Task 4.1)
+# ---------------------------------------------------------------------------
+
+
+class TestCacheReplayOnBind:
+    """bind() сразу применяет закэшированное значение (ленивые вкладки)."""
+
+    def test_exact_path_replayed_immediately(self, qtbot, bridge):
+        """bind на путь с уже закэшированным значением → setter сразу."""
+        cache = {"processes.cam.state.status": "running"}
+        b = GuiStateBindings(bridge, cache_snapshot=lambda: dict(cache))
+
+        label = QLabel("—")
+        qtbot.addWidget(label)
+        b.bind("processes.cam.state.status", label, "text")
+
+        # значение применено БЕЗ прихода новой дельты
+        assert label.text() == "running"
+
+    def test_glob_pattern_replays_all_matches(self, qtbot, bridge):
+        """glob-паттерн → replay всех совпадающих путей из снимка кэша."""
+        cache = {
+            "processes.cam.workers.w1.status": "running",
+            "processes.cam.workers.w2.status": "paused",
+            "processes.other.state.fps": 30,  # не должен матчить
+        }
+        b = GuiStateBindings(bridge, cache_snapshot=lambda: dict(cache))
+
+        label = QLabel("—")
+        qtbot.addWidget(label)
+        # последнее совпадение из снимка станет финальным текстом
+        b.bind("processes.cam.workers.*.status", label, "text")
+
+        assert label.text() in ("running", "paused")
+
+    def test_no_cached_value_keeps_default(self, qtbot, bridge):
+        """Путь не в кэше → виджет остаётся с дефолтом."""
+        b = GuiStateBindings(bridge, cache_snapshot=lambda: {})
+        label = QLabel("—")
+        qtbot.addWidget(label)
+        b.bind("processes.cam.state.status", label, "text")
+        assert label.text() == "—"
+
+    def test_no_cache_snapshot_legacy_no_replay(self, qtbot, bridge):
+        """cache_snapshot=None → bind работает как раньше (без replay)."""
+        b = GuiStateBindings(bridge)  # без cache_snapshot
+        label = QLabel("—")
+        qtbot.addWidget(label)
+        b.bind("processes.cam.state.status", label, "text")
+        assert label.text() == "—"
+
+    def test_cache_snapshot_exception_does_not_break_bind(self, qtbot, bridge):
+        """Исключение в провайдере снимка → bind не падает."""
+
+        def boom():
+            raise RuntimeError("cache unavailable")
+
+        b = GuiStateBindings(bridge, cache_snapshot=boom)
+        label = QLabel("—")
+        qtbot.addWidget(label)
+        # не должно бросить
+        b.bind("processes.cam.state.status", label, "text")
+        assert label.text() == "—"

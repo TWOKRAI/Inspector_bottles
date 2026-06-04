@@ -103,8 +103,9 @@ GUI: message_processor → message_dispatcher → GuiStateProxy.on_state_changed
 
 ### Phase 1: Упрощение и починка доставки IO→Qt (vertical slice)
 
-- Task 1.1: **[VERTICAL SLICE]** Reuse bridge-пути для state-дельт + удалить _StateDeltaEmitter [PENDING]
+- Task 1.1: **[VERTICAL SLICE]** Reuse bridge-пути для state-дельт + удалить _StateDeltaEmitter [DONE 4e186997]
   - **Module contract:** public-api-change (GuiStateProxy)
+  - Доказано: unit + threaded IO→Qt integration тест (воспроизводит исходный баг) + live smoke (0 исключений). **Находка:** видимый «зелёный» эффект требует Task 4.1 (разовая status-дельта на старте теряется для ленивой вкладки) + отдельный backend-баг «process.stop таймаут→crashed, process.start no-op».
 - Task 1.2: Multi-subscriber bridge + удалить _state_multiplexer closure [PENDING]
   - **Module contract:** public-api-change (DataReceiverBridge)
 
@@ -122,8 +123,9 @@ GUI: message_processor → message_dispatcher → GuiStateProxy.on_state_changed
 
 ### Phase 4: Widget-level late-binding для ленивых вкладок
 
-- Task 4.1: Replay закэшированного значения при GuiStateBindings.bind() [PENDING] (зависит от 1.1)
+- Task 4.1: Replay закэшированного значения при GuiStateBindings.bind() [DONE] (зависит от 1.1)
   - **Module contract:** impl-only
+  - **qt-mcp smoke ПОДТВЕРДИЛ:** статус-индикаторы ЗЕЛЁНЫЕ сразу при открытии ленивой вкладки «Процессы». Видимый баг серых индикаторов закрыт (1.1 доставка + 4.1 replay). FPS/«Активно: N» остаются «—» до Task 3.1/3.2 (издатели метрик).
 
 ---
 
