@@ -60,7 +60,8 @@ class ProcessSpawner:
         # Ключи мёржатся в process_config и доступны через self.get_config(key).
         self._orchestrator_config: Dict[str, Any] = orchestrator_config or {}
         # OS-уровневая гарантия гибели всего дерева (Job Object / process group).
-        self._guard = ProcessTreeGuard()
+        # Создаётся в launch_orchestrator (нужен logger + install ДО спавна PM).
+        self._guard: Optional[ProcessTreeGuard] = None
 
     def launch_orchestrator(self) -> bool:
         """SRM + Process(ProcessManager) + сигналы."""
@@ -138,12 +139,11 @@ class ProcessSpawner:
         if self._logger:
             self._logger.info("Stopping system...")
 
-        # Снимок ВСЕГО поддерева ДО убийства PM. Воркеры — внуки (launcher → PM →
-        # дети), и как только PM убит (шаг 1), PPID-цепочка рвётся:
-        # children(recursive=True) на шаге 2 их уже не находит → сироты. Снятые
-        # сейчас psutil.Process кэшируют create_time и проверяют идентичность при
-        # terminate(), поэтому переиспользованный ОС PID не пострадает.
-        pre_kill_descendants = self._snapshot_descendants()
+        # Снимок ВСЕГО поддерева ДО убийства PM — нужен psutil-fallback'у guard'а
+        # (после убийства PM PPID-цепочка рвётся, и обход живых PPID не найдёт
+        # внуков). Снятые psutil.Process кэшируют create_time и проверяют
+        # идентичность при terminate() → переиспользованный ОС PID не пострадает.
+        pre_kill_descendants = self._snapshot_descendants() if self._guard else None
 
         # 0. ОБЩИЙ stop — все процессы (PM + дети) видят его в своём lifecycle и
         # начинают граceful-стоп ПАРАЛЛЕЛЬНО, не дожидаясь команды от PM.
@@ -167,9 +167,13 @@ class ProcessSpawner:
                 self._process.kill()
 
         # 2. Авторитетный teardown всего дерева через OS-примитив (Job Object /
-        # process group). Снимок поддерева (снят ДО убийства PM) передаём как
-        # portable psutil-fallback на случай, если примитив ОС недоступен.
-        self._guard.kill_tree(pre_kill_descendants)
+        # process group). Снимок поддерева передаём как portable psutil-fallback
+        # на случай, если примитив ОС недоступен. close() освобождает хэндл job
+        # (после kill члены мертвы; для crash-safety хэндл и так держался открытым
+        # до этого момента — закрытие при штатном stop утечки не оставляет).
+        if self._guard:
+            self._guard.kill_tree(pre_kill_descendants)
+            self._guard.close()
 
         if self._on_shutdown:
             try:

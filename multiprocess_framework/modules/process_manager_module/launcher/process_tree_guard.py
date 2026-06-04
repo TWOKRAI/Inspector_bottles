@@ -41,6 +41,8 @@ class ProcessTreeGuard:
         self._is_windows = sys.platform == "win32"
         # Windows: HANDLE job-объекта (держим открытым → KILL_ON_JOB_CLOSE активен).
         self._job = None
+        # Кэш kernel32 с настроенными argtypes (WinDLL грузится один раз).
+        self._k32 = None
         # POSIX: pid оркестратора (= pgid после его setsid()).
         self._pm_pid: Optional[int] = None
 
@@ -100,14 +102,16 @@ class ProcessTreeGuard:
     #  Windows: Job Object                                                  #
     # ------------------------------------------------------------------ #
 
-    @staticmethod
-    def _kernel32():
-        """kernel32 с КОРРЕКТНЫМИ argtypes/restype.
+    def _kernel32(self):
+        """kernel32 с КОРРЕКТНЫМИ argtypes/restype (кэшируется на инстансе).
 
         Без явных сигнатур ctypes по умолчанию трактует аргументы как c_int (32 бит)
         и усекает 64-битные HANDLE → невалидный хэндл → access violation. Поэтому
         объявляем сигнатуры всех используемых функций явно.
         """
+        if self._k32 is not None:
+            return self._k32
+
         import ctypes
         from ctypes import wintypes
 
@@ -124,6 +128,7 @@ class ProcessTreeGuard:
         k.TerminateJobObject.restype = wintypes.BOOL
         k.CloseHandle.argtypes = [wintypes.HANDLE]
         k.CloseHandle.restype = wintypes.BOOL
+        self._k32 = k
         return k
 
     def _install_windows_job(self) -> None:
@@ -169,7 +174,6 @@ class ProcessTreeGuard:
                     ("PeakJobMemoryUsed", ctypes.c_size_t),
                 ]
 
-            kernel32.CreateJobObjectW.restype = wintypes.HANDLE
             job = kernel32.CreateJobObjectW(None, None)
             if not job:
                 self._warn("Job Object: CreateJobObject вернул NULL → fallback на psutil")
