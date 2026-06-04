@@ -135,12 +135,15 @@ class AllProcessesPanel(QWidget):
         # Сквозной FPS цепочки: сколько кадров/с проходят через ВСЕ процессы и
         # доходят до дисплея (выходная пропускная способность пайплайна целиком).
         self._lbl_chain_fps = QLabel("FPS цепочки: —")
+        # Сквозная задержка: время одного кадра capture→display (через все процессы).
+        self._lbl_chain_latency = QLabel("Задержка цепочки: —")
 
         health_layout.addWidget(self._lbl_total)
         health_layout.addWidget(self._lbl_active)
         health_layout.addWidget(self._lbl_wires)
         health_layout.addWidget(self._lbl_avg_fps)
         health_layout.addWidget(self._lbl_chain_fps)
+        health_layout.addWidget(self._lbl_chain_latency)
         health_layout.addStretch()
 
         parent_layout.addWidget(self._health_panel)
@@ -358,6 +361,14 @@ class AllProcessesPanel(QWidget):
             self._lbl_chain_fps,
             "text",
             formatter=lambda v: f"FPS цепочки: {v:.1f}" if isinstance(v, (int, float)) else "FPS цепочки: —",
+        )
+        bindings.bind(
+            "system.chain_latency_ms",
+            self._lbl_chain_latency,
+            "text",
+            formatter=lambda v: (
+                f"Задержка цепочки: {v:.0f} ms" if isinstance(v, (int, float)) else "Задержка цепочки: —"
+            ),
         )
 
 

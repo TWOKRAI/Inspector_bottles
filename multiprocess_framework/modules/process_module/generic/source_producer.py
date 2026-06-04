@@ -99,6 +99,15 @@ class SourceProducer:
                     f"targets={self._chain_targets}"
                 )
 
+            # Штамп времени захвата → метаданные кадра (едут через всю цепочку как
+            # item["capture_ts"]). На выходе пайплайна (дисплей) считается
+            # сквозная задержка now - capture_ts. time.time() (wall) —
+            # кросс-процессно сравнимо на одной машине.
+            capture_ts = time.time()
+            for item in items:
+                if isinstance(item, dict):
+                    item.setdefault("capture_ts", capture_ts)
+
             # Отправить каждый item
             for item in items:
                 self._send_item(item)

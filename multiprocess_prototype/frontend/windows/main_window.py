@@ -211,6 +211,10 @@ class MainWindow(QMainWindow):
         # Счётчик кадров для расчёта FPS
         self._frame_count = 0
 
+        # Аккумулятор сквозной задержки цепочки (capture→display, мс) за секунду.
+        self._chain_latency_sum = 0.0
+        self._chain_latency_n = 0
+
         # G.4.4: источник undo/redo (domain CommandDispatcher) —
         # устанавливается через set_undo_controller()
         self._undo_controller: "UndoRedoController | None" = None
@@ -520,3 +524,17 @@ class MainWindow(QMainWindow):
         count = self._frame_count
         self._frame_count = 0
         return count
+
+    def record_chain_latency(self, ms: float) -> None:
+        """Накопить сэмпл сквозной задержки кадра (capture→display, мс)."""
+        self._chain_latency_sum += ms
+        self._chain_latency_n += 1
+
+    def reset_chain_latency(self) -> float | None:
+        """Среднее задержки за период + сброс. None если не было кадров."""
+        if self._chain_latency_n == 0:
+            return None
+        avg = self._chain_latency_sum / self._chain_latency_n
+        self._chain_latency_sum = 0.0
+        self._chain_latency_n = 0
+        return avg

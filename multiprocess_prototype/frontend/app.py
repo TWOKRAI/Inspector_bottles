@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -662,6 +663,13 @@ def _setup_bridge_callbacks(
         if frame is not None:
             image_panel.display_frame("main", frame)
             window.increment_frame_count()
+            # Сквозная задержка: source штампует data.capture_ts = time.time() при
+            # захвате; здесь, на выходе всей цепочки, считаем now - capture_ts.
+            # time.time() (wall) — кросс-процессно сравнимо на одной машине.
+            data = msg_dict.get("data")
+            cts = data.get("capture_ts") if isinstance(data, dict) else None
+            if isinstance(cts, (int, float)):
+                window.record_chain_latency((time.time() - cts) * 1000.0)
 
     process._bridge.set_frame_callback(_on_frame_received)
     # State callback занят GuiStateBindings (создан в run_gui, Phase 10A)
@@ -686,6 +694,12 @@ def _setup_timers(
         # телеметрия): через дерево нельзя — GUI не получает свои дельты (exclude_self).
         try:
             process._bridge.dispatch({"data_type": "state_delta", "path": "system.chain_fps", "value": float(count)})
+            # Сквозная задержка цепочки (среднее за секунду, мс): capture→display.
+            latency = window.reset_chain_latency()
+            if latency is not None:
+                process._bridge.dispatch(
+                    {"data_type": "state_delta", "path": "system.chain_latency_ms", "value": latency}
+                )
         except Exception:  # noqa: BLE001 — телеметрия не критична
             pass
 
