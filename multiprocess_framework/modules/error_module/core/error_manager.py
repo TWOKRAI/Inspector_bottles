@@ -188,6 +188,23 @@ class ErrorManager(LoggerManager):
         elif has_errors:
             self._level_to_channel["WARNING"] = "errors_file"
 
+    def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
+        """Хук CRM.reconfigure: пересобрать каналы + перестроить severity-routing.
+
+        Специфика ErrorManager поверх LoggerManager:
+          - конфиг проходит через ``_normalize_error_config`` (принимает и плоский
+            error-dict, и развёрнутый LoggerManagerConfig);
+          - обновляется ``self._include_stacktrace``;
+          - переиспользуется пересборка каналов родителя
+            (``_apply_log_config_rebuild``), а затем перестраивается
+            ``_level_to_channel`` через ``_setup_level_routes()`` — иначе
+            severity-маршруты ссылались бы на закрытые каналы.
+        """
+        _name, log_config, include_stacktrace = _normalize_error_config(config)
+        self._include_stacktrace = include_stacktrace
+        self._apply_log_config_rebuild(log_config)
+        self._setup_level_routes()
+
     def log(
         self,
         scope: LogScope,

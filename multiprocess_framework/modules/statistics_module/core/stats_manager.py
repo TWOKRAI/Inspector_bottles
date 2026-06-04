@@ -110,6 +110,22 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
     # shutdown() наследуется от ChannelRoutingManager:
     # flush() → buffer.stop() (финальный flush) → _close_all_channels() → dispatcher.shutdown()
 
+    def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
+        """Хук CRM.reconfigure: пересоздать каналы агрегации из нового конфига.
+
+        Базовый ``reconfigure`` уже сделал flush() и ``_close_all_channels()``
+        (очистил реестр CRM). Здесь обновляем dict-конфиг и default_tags, затем
+        вызываем существующий ``_setup_channels()`` (reuse) — он сам добавит
+        LogStats/FileStats по новому конфигу плюс fallback-канал при необходимости.
+
+        Live-метрики (``self._metrics``) и буфер агрегации (AggregationWindow)
+        НЕ сбрасываются — метрики переживают reconfigure.
+        """
+        cfg = normalize_config(config, default={})
+        self._config_dict = cfg
+        self._default_tags = cfg.get("default_tags") or {}
+        self._setup_channels()
+
     # =========================================================================
     # SETUP КАНАЛОВ
     # =========================================================================

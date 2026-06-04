@@ -241,3 +241,66 @@ class TestFlushAndChannels:
         mgr.initialize()
         assert len(mgr.get_all_channels()) >= 1
         mgr.shutdown()
+
+
+class TestStatsReconfigure:
+    """reconfigure: каналы пересобираются, метрики переживают (Task 1.2)."""
+
+    def test_metrics_survive_reconfigure(self, tmp_path):
+        mgr = StatsManager(
+            manager_name="TestStats",
+            config={"enable_logging": False, "channels": {}},
+        )
+        mgr.initialize()
+        mgr.increment("ops")
+        mgr.increment("ops")
+        assert mgr.get_metric("ops")["count"] == 2.0
+
+        new_cfg = {
+            "enable_logging": False,
+            "channels": {
+                "primary": {
+                    "type": "file",
+                    "enabled": True,
+                    "file_path": str(tmp_path / "stats.json"),
+                }
+            },
+        }
+        assert mgr.reconfigure(new_cfg) is True
+
+        # Метрики НЕ сброшены.
+        assert mgr.get_metric("ops")["count"] == 2.0
+        # Набор каналов сменился.
+        names = {ch.name for ch in mgr.get_all_channels()}
+        assert "primary" in names
+        assert "file_stats" not in names
+        mgr.shutdown()
+
+    def test_reconfigure_updates_default_tags(self, tmp_path):
+        mgr = StatsManager(
+            manager_name="TestStats",
+            config={"enable_logging": False, "default_tags": {"env": "old"}},
+        )
+        mgr.initialize()
+        assert mgr.reconfigure({"enable_logging": False, "default_tags": {"env": "new"}}) is True
+        mgr.increment("x")
+        assert mgr.get_metric("x")["tags"]["env"] == "new"
+        mgr.shutdown()
+
+    def test_reconfigure_empty_channels_keeps_fallback(self):
+        mgr = StatsManager(
+            manager_name="TestStats",
+            config={"enable_logging": False, "channels": {}},
+        )
+        mgr.initialize()
+        assert mgr.reconfigure({"enable_logging": False, "channels": {}}) is True
+        assert len(mgr.get_all_channels()) >= 1
+        mgr.shutdown()
+
+    def test_reconfigure_before_initialize_does_not_raise(self):
+        mgr = StatsManager(
+            manager_name="TestStats",
+            config={"enable_logging": False, "channels": {}},
+        )
+        # без initialize(): буфер не запущен
+        assert mgr.reconfigure({"enable_logging": False, "channels": {}}) is True

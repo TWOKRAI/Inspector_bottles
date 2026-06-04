@@ -241,6 +241,63 @@ class TestBufferIntegration:
 
 
 # ---------------------------------------------------------------------------
+# Tests: reconfigure (full-rebuild)
+# ---------------------------------------------------------------------------
+
+
+class _RebuildableManager(ChannelRoutingManager):
+    """Наследник с реальным _rebuild_from_config для проверки full-rebuild.
+
+    Конфиг: {"channels": ["a", "b"]} → создаёт по mock-каналу на каждое имя.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__("RebuildableManager", **kwargs)
+
+    def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
+        for name in config.get("channels", []):
+            self.register_channel(_MockChannel(name))
+
+
+class TestReconfigure:
+    def test_base_reconfigure_is_noop_rebuild(self):
+        # База: _rebuild_from_config — no-op, каналы только закрываются.
+        mgr = _manager()
+        ch = _MockChannel("old")
+        mgr.register_channel(ch)
+        assert mgr.reconfigure({"anything": 1}) is True
+        assert ch.closed
+        assert mgr.get_all_channels() == []
+
+    def test_reconfigure_rebuilds_channels(self):
+        mgr = _RebuildableManager()
+        mgr.initialize()
+        mgr.register_channel(_MockChannel("legacy"))
+        old = mgr.get_channel("legacy")
+        assert mgr.reconfigure({"channels": ["a", "b"]}) is True
+        assert old.closed
+        names = {ch.name for ch in mgr.get_all_channels()}
+        assert names == {"a", "b"}
+
+    def test_reconfigure_none_returns_false(self):
+        mgr = _manager()
+        assert mgr.reconfigure(None) is False
+
+    def test_reconfigure_before_initialize_does_not_raise(self):
+        mgr = _RebuildableManager()  # без initialize()
+        assert mgr.reconfigure({"channels": ["x"]}) is True
+        assert {ch.name for ch in mgr.get_all_channels()} == {"x"}
+
+    def test_reconfigure_idempotent(self):
+        mgr = _RebuildableManager()
+        mgr.initialize()
+        assert mgr.reconfigure({"channels": ["a"]}) is True
+        assert mgr.reconfigure({"channels": ["a"]}) is True
+        names = [ch.name for ch in mgr.get_all_channels()]
+        assert names == ["a"]  # без дублей
+
+
+# ---------------------------------------------------------------------------
 # Tests: stats
 # ---------------------------------------------------------------------------
 

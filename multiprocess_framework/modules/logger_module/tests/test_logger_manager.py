@@ -11,6 +11,8 @@ import os
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.logger_module.core.log_config import (
     LoggerManagerConfig,
+    LogLevel,
+    LogScope,
 )
 
 
@@ -154,3 +156,81 @@ class TestLoggerManager:
         # Flush должен работать без ошибок
         manager.flush()
         assert True  # Если дошли сюда, значит flush работает
+
+
+class TestLoggerReconfigure:
+    """Reconfigure + инвалидация кэша should_log (Task 1.1)."""
+
+    @staticmethod
+    def _cfg(debug_min_level: str, channel_name: str) -> LoggerManagerConfig:
+        """Конфиг с одним file-каналом и заданным min_level у DEBUG scope."""
+        return LoggerManagerConfig.model_validate(
+            {
+                "enable_batching": False,
+                "channels": {
+                    channel_name: {"type": "console", "enabled": True},
+                },
+                "scopes": {
+                    "DEBUG": {
+                        "enabled": True,
+                        "min_level": debug_min_level,
+                        "channels": [channel_name],
+                    }
+                },
+            }
+        )
+
+    def test_reconfigure_invalidates_decision_cache(self):
+        # min_level=INFO → DEBUG скипается и кэшируется как False.
+        mgr = LoggerManager(
+            manager_name="TestLogger",
+            config=self._cfg("INFO", "ch_a"),
+        )
+        mgr.initialize()
+        assert mgr.should_log(LogScope.DEBUG, LogLevel.DEBUG, "test") is False
+        # Решение залегло в кэше.
+        assert mgr._decision_cache  # not empty
+
+        # Реконфигурируем: теперь DEBUG разрешён.
+        assert mgr.reconfigure(self._cfg("DEBUG", "ch_a").model_dump()) is True
+        # Кэш инвалидирован → новое решение должно быть True.
+        assert mgr.should_log(LogScope.DEBUG, LogLevel.DEBUG, "test") is True
+        mgr.shutdown()
+
+    def test_invalidate_decision_cache_clears(self):
+        mgr = LoggerManager(manager_name="TestLogger")
+        mgr.initialize()
+        mgr.should_log(LogScope.DEBUG, LogLevel.DEBUG, "test")
+        assert mgr._decision_cache
+        mgr.invalidate_decision_cache()
+        assert mgr._decision_cache == {}
+        mgr.shutdown()
+
+    def test_reconfigure_replaces_channel_set(self):
+        mgr = LoggerManager(
+            manager_name="TestLogger",
+            config=self._cfg("INFO", "old_ch"),
+        )
+        mgr.initialize()
+        assert mgr.get_channel("old_ch") is not None
+
+        assert mgr.reconfigure(self._cfg("INFO", "new_ch").model_dump()) is True
+        names = {ch.name for ch in mgr.get_all_channels()}
+        assert "new_ch" in names
+        assert "old_ch" not in names
+        mgr.shutdown()
+
+    def test_reconfigure_before_initialize_does_not_raise(self):
+        mgr = LoggerManager(
+            manager_name="TestLogger",
+            config=self._cfg("INFO", "ch"),
+        )
+        # без initialize(): буфер не запущен
+        assert mgr.reconfigure(self._cfg("DEBUG", "ch").model_dump()) is True
+
+    def test_reconfigure_empty_dict_does_not_crash(self):
+        mgr = LoggerManager(manager_name="TestLogger")
+        mgr.initialize()
+        # Пустой dict → дефолтный LoggerManagerConfig, процесс не падает.
+        assert mgr.reconfigure({}) is True
+        mgr.shutdown()

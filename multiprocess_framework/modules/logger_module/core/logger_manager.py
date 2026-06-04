@@ -136,13 +136,13 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             for channel in self._channel_registry.clear():
                 try:
                     channel.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._fallback_log("ERROR", f"channel close failed: {e}")
             for channel in list(self._module_channels.values()):
                 try:
                     channel.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._fallback_log("ERROR", f"module channel close failed: {e}")
 
             self.is_initialized = False
             return True
@@ -278,6 +278,68 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         else:
             self._buffer = None
 
+    def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
+        """Хук CRM.reconfigure: пересобрать каналы из нового конфига + сбросить кэш.
+
+        Базовый ``reconfigure`` уже сделал flush() и ``_close_all_channels()``
+        (очистил реестр CRM). Но LoggerManager держит отдельный словарь
+        ``_module_channels`` со ссылками на те же канал-объекты — их тоже надо
+        закрыть и очистить, иначе ``_setup_channels`` создаст дубли.
+
+        Повторяем именно логику ``_setup_channels`` (каналы регистрируются прямо
+        в ``_channel_registry.register``, без route в Dispatcher — в отличие от
+        CRM.register_channel), затем пересоздаём батчер и инвалидируем
+        ``_decision_cache`` (иначе старые решения should_log залипают — критический
+        баг: кэш никогда не сбрасывался).
+        """
+        self._apply_log_config_rebuild(self._resolve_log_config(config))
+
+    def _apply_log_config_rebuild(self, log_config: "LoggerManagerConfig") -> None:
+        """Воссоздать каналы/батчер из готового LoggerManagerConfig + сбросить кэш.
+
+        Выделено отдельным шагом, чтобы наследник (ErrorManager) переиспользовал
+        пересборку каналов после своей нормализации (expand_error_manager_config),
+        не дублируя логику. Предполагается, что ``reconfigure`` уже закрыл реестр
+        CRM через ``_close_all_channels()``.
+        """
+        # 1. Закрыть и очистить module-каналы (их ещё нет в очищенном реестре).
+        for channel in list(self._module_channels.values()):
+            try:
+                channel.close()
+            except Exception as e:
+                self._fallback_log("ERROR", f"module channel close failed: {e}")
+        self._module_channels.clear()
+
+        # 2. Применить новый конфиг.
+        self.config = log_config
+        self.app_name = self.config.app_name
+
+        # 3. Остановить старый батчер перед пересозданием (если запущен).
+        if self._buffer is not None:
+            try:
+                self._buffer.stop()
+            except Exception as e:
+                self._fallback_log("ERROR", f"buffer stop failed: {e}")
+            self._buffer = None
+
+        # 4. Воссоздать каналы и батчер из нового конфига.
+        self._setup_channels()
+        self._setup_batcher()
+        if self.is_initialized and self._buffer is not None:
+            self._buffer.start()
+
+        # 5. Сбросить кэш решений should_log (критический баг — раньше не сбрасывался).
+        self.invalidate_decision_cache()
+
+    def invalidate_decision_cache(self) -> None:
+        """Очистить кэш решений should_log.
+
+        После смены default_level / scope-конфигурации старые закэшированные
+        решения становятся неверными. Вызывается из ``_rebuild_from_config``;
+        также доступен публично для точечной инвалидации.
+        """
+        self._decision_cache.clear()
+
     def _flush_batch(self, channel: str, batch: List[Dict]):
         """Callback для BatchBuffer — записать пачку в канал."""
         ch = self._channel_registry.get(channel)
@@ -285,7 +347,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             for record_dict in batch:
                 try:
                     ch.write(record_dict)
-                except Exception:
+                except Exception:  # nosec B110 — глушим per-record ошибки записи, чтобы не порождать лог-шторм внутри логгера
                     pass
             return
 
@@ -294,7 +356,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             for record_dict in batch:
                 try:
                     ch.write(record_dict)
-                except Exception:
+                except Exception:  # nosec B110 — см. выше
                     pass
 
     # =========================================================================
@@ -368,7 +430,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             if ch is not None:
                 try:
                     ch.write(record_dict)
-                except Exception:
+                except Exception:  # nosec B110 — глушим ошибку записи в канал, чтобы не порождать лог-шторм внутри логгера
                     pass
 
     # =========================================================================
@@ -437,7 +499,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             channel = self._module_channels[module_name]
             try:
                 channel.close()
-            except Exception:
+            except Exception:  # nosec B110 — закрытие канала best-effort, ошибка не должна валить disable
                 pass
             self._channel_registry.unregister(f"module_{module_name}")
             del self._module_channels[module_name]
@@ -542,7 +604,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
     def _fallback_log(self, level: str, message: str, module: str = "system"):
         try:
             _fallback_logger.warning("[%s] [%s] %s", level, module, message)
-        except Exception:
+        except Exception:  # nosec B110 — это последний рубеж логирования; падать здесь нельзя
             pass
 
 

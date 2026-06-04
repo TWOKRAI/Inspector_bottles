@@ -14,6 +14,7 @@ ChannelRoutingManager — базовый менеджер маршрутизац
   - ErrorManager   — наследует LoggerManager, добавляет severity routing
   - StatsManager   — key=metric_name,  buffer=AggregationWindow, channels=IMetricChannel
 """
+
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from ...base_manager import BaseManager, ObservableMixin
@@ -87,9 +88,9 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             **kwargs,
         )
 
-        self._config    = normalize_config(config)
+        self._config = normalize_config(config)
         self._key_field = dispatcher_key_field
-        self._buffer    = buffer_strategy
+        self._buffer = buffer_strategy
 
         self._channel_registry = ChannelRegistry(
             log_warning=self._log_warning,
@@ -103,8 +104,8 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             default_strategy=dispatcher_strategy or DispatchStrategy.EXACT_MATCH,
         )
 
-        self._routed:  int = 0
-        self._errors:  int = 0
+        self._routed: int = 0
+        self._errors: int = 0
 
     # =========================================================================
     # ЖИЗНЕННЫЙ ЦИКЛ
@@ -126,6 +127,54 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         except Exception as e:
             self._log_error(f"[{self.manager_name}] initialization failed: {e}")
             return False
+
+    def reconfigure(self, config: Union[Dict[str, Any], Any]) -> bool:
+        """Пересобрать каналы/маршруты из нового конфига (full-rebuild).
+
+        Оркестрация (reuse существующих примитивов):
+            flush()  → сбросить накопленный буфер старого набора каналов;
+            _close_all_channels() → закрыть и очистить реестр каналов;
+            normalize_config()    → привести dict/RegisterBase к dict (Dict at Boundary);
+            _rebuild_from_config() → хук наследника, строящий новые каналы/маршруты.
+
+        Базовая реализация делает no-op rebuild (наследники переопределяют
+        ``_rebuild_from_config``). Метод идемпотентен и безопасен до initialize():
+        буфер может быть не запущен, flush() в этом случае ничего не делает.
+
+        Args:
+            config: None | dict | объект с build() — новый конфиг.
+
+        Returns:
+            True при успешной пересборке; False при невалидном конфиге или ошибке
+            (процесс при этом НЕ роняется — ошибка логируется).
+        """
+        if config is None:
+            self._log_warning(f"[{self.manager_name}] reconfigure: config=None — пропущено")
+            return False
+
+        normalized = normalize_config(config)
+        if not isinstance(normalized, dict):
+            self._log_warning(f"[{self.manager_name}] reconfigure: невалидный config ({type(config)!r}) — пропущено")
+            return False
+
+        try:
+            self.flush()
+            self._close_all_channels()
+            self._config = normalized
+            self._rebuild_from_config(normalized)
+            self._log_info(f"[{self.manager_name}] reconfigured: {len(self._channel_registry)} каналов")
+            return True
+        except Exception as e:
+            self._log_error(f"[{self.manager_name}] reconfigure failed: {e}")
+            return False
+
+    def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
+        """Хук пересборки каналов/маршрутов из dict (no-op по умолчанию).
+
+        Наследники переопределяют, чтобы воссоздать свой набор каналов из
+        нового конфига после того как ``reconfigure`` закрыл старые. База ничего
+        не строит — конкретные менеджеры (Logger/Stats/Error) знают свой формат.
+        """
 
     def shutdown(self) -> bool:
         """Корректное завершение: flush → stop buffer → close channels → shutdown dispatcher."""
@@ -204,9 +253,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         """
         ch = self._channel_registry.get(channel_name)
         if ch is None:
-            self._log_warning(
-                f"[{self.manager_name}] register_route: channel '{channel_name}' not found"
-            )
+            self._log_warning(f"[{self.manager_name}] register_route: channel '{channel_name}' not found")
             return False
 
         handler = self._make_handler(channel_name, ch)
@@ -239,9 +286,7 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         for name in channel_names:
             ch = self._channel_registry.get(name)
             if ch is None:
-                self._log_warning(
-                    f"[{self.manager_name}] register_broadcast: channel '{name}' not found"
-                )
+                self._log_warning(f"[{self.manager_name}] register_broadcast: channel '{name}' not found")
                 return False
             channels.append(ch)
 
@@ -311,14 +356,16 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
     def get_stats(self) -> Dict[str, Any]:
         """Статистика: базовая от BaseManager + каналы + буфер + роутинг."""
         stats = super().get_stats()
-        stats.update({
-            "channel_count": len(self._channel_registry),
-            "channels":      self._channel_registry.names(),
-            "channel_info":  self._channel_registry.get_info(),
-            "routed":        self._routed,
-            "errors":        self._errors,
-            "key_field":     self._key_field,
-        })
+        stats.update(
+            {
+                "channel_count": len(self._channel_registry),
+                "channels": self._channel_registry.names(),
+                "channel_info": self._channel_registry.get_info(),
+                "routed": self._routed,
+                "errors": self._errors,
+                "key_field": self._key_field,
+            }
+        )
         if self._buffer is not None:
             stats["buffer"] = self._buffer.stats
         return stats
@@ -338,8 +385,8 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         Иначе → прямой вызов channel.write().
         """
         if self._buffer is not None:
-            buf        = self._buffer
-            ch_name    = channel_name
+            buf = self._buffer
+            ch_name = channel_name
 
             def _buffered(data: Dict[str, Any], *, _buf=buf, _name=ch_name) -> Dict[str, Any]:
                 _buf.enqueue(_name, data)

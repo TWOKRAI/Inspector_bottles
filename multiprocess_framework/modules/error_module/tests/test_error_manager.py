@@ -21,10 +21,12 @@ class TestErrorManager:
 
     def test_init_with_dict(self) -> None:
         """Инициализация с config=dict."""
-        em = ErrorManager(config={
-            "app_name": "test_errors",
-            "default_level": "ERROR",
-        })
+        em = ErrorManager(
+            config={
+                "app_name": "test_errors",
+                "default_level": "ERROR",
+            }
+        )
         assert em.app_name == "test_errors"
 
     def test_init_with_error_manager_config(self) -> None:
@@ -36,6 +38,7 @@ class TestErrorManager:
 
     def test_init_with_build_object(self) -> None:
         """Инициализация с объектом, имеющим build()."""
+
         class MockConfig:
             def build(self):
                 return ("CustomName", {"app_name": "custom", "default_level": "ERROR"})
@@ -71,3 +74,58 @@ class TestErrorManager:
         assert "level_routes" in stats
         assert isinstance(stats["level_routes"], dict)
         assert "include_stacktrace" in stats
+
+
+class TestErrorReconfigure:
+    """reconfigure: каналы пересобраны, severity-routes перестроены (Task 1.3)."""
+
+    def test_level_routes_rebuilt_on_reconfigure(self) -> None:
+        # Старт с дефолтом: есть critical/errors/warnings → отдельный route для WARNING.
+        em = ErrorManager(config=None)
+        em.initialize()
+        before = em.get_stats()["level_routes"]
+        assert before.get("WARNING") == "warnings_file"
+        assert before.get("CRITICAL") == "critical_file"
+
+        # Reconfigure БЕЗ warnings_file_path → warnings_file отсутствует,
+        # WARNING должен упасть на errors_file.
+        assert (
+            em.reconfigure(
+                {
+                    "app_name": "errors2",
+                    "critical_file_path": "logs/c2.log",
+                    "error_file_path": "logs/e2.log",
+                }
+            )
+            is True
+        )
+
+        after = em.get_stats()["level_routes"]
+        assert after.get("WARNING") == "errors_file"
+        assert after.get("ERROR") == "errors_file"
+        assert after.get("CRITICAL") == "critical_file"
+        em.shutdown()
+
+    def test_include_stacktrace_updates(self) -> None:
+        em = ErrorManager(config={"include_stacktrace": True})
+        em.initialize()
+        assert em._include_stacktrace is True
+
+        assert em.reconfigure({"include_stacktrace": False}) is True
+        assert em._include_stacktrace is False
+        assert em.get_stats()["include_stacktrace"] is False
+        em.shutdown()
+
+    def test_reconfigure_empty_dict_uses_defaults(self) -> None:
+        em = ErrorManager(config=None)
+        em.initialize()
+        # Пустой dict → expand даёт critical+errors → процесс не падает.
+        assert em.reconfigure({}) is True
+        routes = em.get_stats()["level_routes"]
+        assert routes.get("ERROR") == "errors_file"
+        em.shutdown()
+
+    def test_reconfigure_before_initialize_does_not_raise(self) -> None:
+        em = ErrorManager(config=None)
+        # без initialize(): буфер не запущен
+        assert em.reconfigure({"critical_file_path": "logs/c.log", "error_file_path": "logs/e.log"}) is True
