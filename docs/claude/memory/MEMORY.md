@@ -53,3 +53,4 @@
 - [Backend-control MCP](project_backend_control_mcp.md) — план MCP-driver параллельно GUI, общение с бэкендом ТОЛЬКО через RouterManager; driver=процесс-сиблинг GUI; P1 introspect.handlers ловит баги вида «нет приёмника»
 - [Prototype carve-out](project_prototype_carveout.md) — вынос universal частей прототипа во framework как forcing function (split+тесты+интерфейсы); пилот SystemBuilder, domain/adapters отложены; план plans/prototype-carveout.md
 - [Telemetry subscription bug](project_telemetry_subscription_bug.md) — SERVER root-cause FIXED 2026-06-03 (RAW vs wrapped state.* registration conflict, auto_register_ipc=False); verified probe; GUI-side a/b may remain
+- [Telemetry self-publish](project_telemetry_self_publish.md) — процесс сам публикует FPS/latency+per-worker в дерево; корневой баг effective_hz (monotonic 15мс→0), фикс perf_counter; bind_fanout для рантайм-воркеров (b6ce2bb8/61b02761/7e59e259)
