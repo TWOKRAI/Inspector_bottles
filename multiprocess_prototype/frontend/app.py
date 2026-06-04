@@ -680,6 +680,14 @@ def _setup_timers(
     def _update_fps() -> None:
         count = window.reset_frame_count()
         window.update_status(fps=float(count))
+        # Сквозной FPS цепочки → health-панель «Все процессы». count = кадров/с,
+        # дошедших до дисплея через ВСЕ процессы (выходная пропускная способность
+        # пайплайна). Инъекция локальной state-дельты в bridge (тот же канал, что
+        # телеметрия): через дерево нельзя — GUI не получает свои дельты (exclude_self).
+        try:
+            process._bridge.dispatch({"data_type": "state_delta", "path": "system.chain_fps", "value": float(count)})
+        except Exception:  # noqa: BLE001 — телеметрия не критична
+            pass
 
     fps_timer.timeout.connect(_update_fps)
     fps_timer.start()

@@ -132,11 +132,15 @@ class AllProcessesPanel(QWidget):
         self._lbl_wires = QLabel("Обрывы связей: 0")
         self._lbl_wires.setTextFormat(Qt.TextFormat.RichText)
         self._lbl_avg_fps = QLabel("Средний FPS: —")
+        # Сквозной FPS цепочки: сколько кадров/с проходят через ВСЕ процессы и
+        # доходят до дисплея (выходная пропускная способность пайплайна целиком).
+        self._lbl_chain_fps = QLabel("FPS цепочки: —")
 
         health_layout.addWidget(self._lbl_total)
         health_layout.addWidget(self._lbl_active)
         health_layout.addWidget(self._lbl_wires)
         health_layout.addWidget(self._lbl_avg_fps)
+        health_layout.addWidget(self._lbl_chain_fps)
         health_layout.addStretch()
 
         parent_layout.addWidget(self._health_panel)
@@ -346,6 +350,14 @@ class AllProcessesPanel(QWidget):
             self._lbl_avg_fps,
             "text",
             formatter=lambda v: f"Средний FPS: {v:.1f}" if isinstance(v, (int, float)) else "Средний FPS: —",
+        )
+        # Сквозной FPS цепочки (кадров/с на выходе пайплайна, измеряется GUI по
+        # прибытию кадров на дисплей; инъекция локальной state-дельты в _update_fps).
+        bindings.bind(
+            "system.chain_fps",
+            self._lbl_chain_fps,
+            "text",
+            formatter=lambda v: f"FPS цепочки: {v:.1f}" if isinstance(v, (int, float)) else "FPS цепочки: —",
         )
 
 
