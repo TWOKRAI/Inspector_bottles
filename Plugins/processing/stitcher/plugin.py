@@ -71,35 +71,19 @@ class StitcherPlugin(ProcessModulePlugin):
         }
 
         # --- Fan-in trace: наследование critical-path (ветвь с max суммой ms) ---
-        # Гейт под флагом: без INSPECTOR_FRAME_TRACE поведение как до Task 1.1.
-        if frame_trace.enabled():
-            # Вычислить суммарную длительность trace каждой ветви
-            branch_stats: list[tuple[int, float, int, str]] = []  # (idx, total_ms, spans, name)
-            for idx, it in enumerate(items):
-                tr = it.get("trace", [])
-                total_ms = sum(s.get("ms", 0) for s in tr)
-                branch_name = it.get("region_name", f"branch_{idx}")
-                branch_stats.append((idx, total_ms, len(tr), branch_name))
-
-            # Выбрать ветвь-победителя: max суммы ms (critical path).
-            # Edge case: все trace пусты (spans=0) → winner = items[0].
-            winner_idx = 0
-            if branch_stats:
-                winner_idx = max(branch_stats, key=lambda x: x[1])[0]
-
-            winner = items[winner_idx]
-            winner_name = winner.get("region_name", f"branch_{winner_idx}")
-
-            # Наследовать trace (копию) от ветви-победителя
-            merged["trace"] = list(winner.get("trace", []))
-            merged["capture_ts"] = winner.get("capture_ts")
-
-            # trace_branches — лёгкая сводка по ВСЕМ ветвям (агрегаты, без спанов)
-            merged["trace_branches"] = [
-                {"branch": name, "total_ms": round(total_ms, 3), "spans": spans}
-                for _, total_ms, spans, name in branch_stats
-            ]
-
+        # merge_trace возвращает ([], [], "") без флага — нулевой overhead.
+        # capture_ts наследуется от победителя отдельно (нужен winner для этого).
+        trace, branches, chosen = frame_trace.merge_trace(items)
+        if trace or branches:
+            # Флаг включён: merge_trace вернул непустые данные
+            merged["trace"] = trace
+            merged["trace_branches"] = branches
+            # capture_ts: наследовать от ветви-победителя (identified by chosen name)
+            winner_item = next(
+                (it for it in items if it.get("region_name") == chosen),
+                items[0],
+            )
+            merged["capture_ts"] = winner_item.get("capture_ts")
             # merge-спан: kind="merge", дописывается в конец наследованного trace.
             # ms = fan-in-wait (время ожидания коллекции в буфере InspectorManager).
             # InspectorManager не передаёт эту метрику → ms=0.
@@ -108,7 +92,7 @@ class StitcherPlugin(ProcessModulePlugin):
                 merged,
                 node=trace_node,
                 branches=len(items),
-                chosen=winner_name,
+                chosen=chosen,
                 ms=0,
             )
 

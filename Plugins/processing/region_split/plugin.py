@@ -77,12 +77,10 @@ class RegionSplitPlugin(ProcessModulePlugin):
                     "target": r.get("target", "stitcher"),
                     "total_regions": self._total_regions,
                     **metadata,
+                    # fork_trace возвращает {"trace": <копию>} при включённом флаге
+                    # или {} (no-op) без флага — распаковка перезаписывает "trace" из **item.
+                    **frame_trace.fork_trace(item),
                 }
-                # Независимая копия trace — каждый регион должен мутировать
-                # свой собственный список спанов, а не общий родительский.
-                # Гейт под флагом: без INSPECTOR_FRAME_TRACE копия не нужна.
-                if frame_trace.enabled():
-                    out_item["trace"] = list(item.get("trace", []))
                 result.append(out_item)
 
         # Default region -- полный кадр
@@ -101,10 +99,9 @@ class RegionSplitPlugin(ProcessModulePlugin):
                 "canvas_height": canvas_h,
                 "width": canvas_w,
                 "height": canvas_h,
+                # fork_trace — аналогично ROI-регионам выше.
+                **frame_trace.fork_trace(item),
             }
-            # Независимая копия trace — аналогично ROI-регионам выше.
-            if frame_trace.enabled():
-                out_item["trace"] = list(item.get("trace", []))
             result.append(out_item)
 
         return result
