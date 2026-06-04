@@ -79,7 +79,6 @@ class SourceProducer:
 
             t_start = time.monotonic()
 
-            t_prod = time.perf_counter()
             try:
                 items = self._plugin.produce()
             except NotImplementedError:
@@ -108,12 +107,11 @@ class SourceProducer:
             # item["capture_ts"]). На выходе пайплайна (дисплей) считается
             # сквозная задержка now - capture_ts. time.time() (wall) —
             # кросс-процессно сравнимо на одной машине.
+            # produce-спан пишет декоратор frame_trace.traced (авто на produce()).
             capture_ts = time.time()
-            prod_ms = (time.perf_counter() - t_prod) * 1000.0
             for item in items:
                 if isinstance(item, dict):
                     item.setdefault("capture_ts", capture_ts)
-                    frame_trace.record_process(item, self._node, self._plugin.name, prod_ms)
 
             # Отправить каждый item
             for item in items:

@@ -104,6 +104,8 @@ class PluginOrchestrator:
                 # Обновить ctx с registers
                 if registers_manager is not None:
                     ctx.registers = registers_manager
+                # frame-trace: имя процесса-узла для process-спанов плагина.
+                plugin._trace_node = self._services.name
                 plugin._do_configure(ctx)
                 self._plugins.append(plugin)
                 self._contexts.append(ctx)

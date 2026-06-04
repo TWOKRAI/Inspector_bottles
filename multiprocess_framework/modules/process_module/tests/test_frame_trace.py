@@ -62,6 +62,35 @@ class TestEnabled:
         frame_trace.record_process(item, "detector", "hsv_mask", 0.6)
         assert item["trace"] == [{"kind": "process", "node": "detector", "plugin": "hsv_mask", "ms": 0.6}]
 
+    def test_traced_decorator_records_per_item(self, trace_on) -> None:
+        """traced меряет вызов и делит на батч → честное per-item время."""
+
+        class _Fake:
+            name = "blur"
+            _trace_node = "detector"
+
+            @frame_trace.traced
+            def process(self, items):
+                return [{**it} for it in items]
+
+        out = _Fake().process([{"id": 1}, {"id": 2}])
+        # Каждый выходной item получил свой process-спан blur@detector.
+        for it in out:
+            assert it["trace"][-1]["kind"] == "process"
+            assert it["trace"][-1]["plugin"] == "blur"
+            assert it["trace"][-1]["node"] == "detector"
+
+    def test_traced_decorator_noop_when_disabled(self, trace_off) -> None:
+        class _Fake:
+            name = "blur"
+
+            @frame_trace.traced
+            def process(self, items):
+                return [{**it} for it in items]
+
+        out = _Fake().process([{"id": 1}])
+        assert "trace" not in out[0]
+
     def test_full_chain_accumulates(self, trace_on) -> None:
         """Полный путь: source→detector→painter→gui накапливает спаны по порядку."""
         item: dict = {}

@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import time
 
@@ -76,3 +77,36 @@ def record_process(item: dict, node: str, plugin: str, ms: float) -> None:
     if not _ENABLED or not isinstance(item, dict):
         return
     item.setdefault("trace", []).append({"kind": "process", "node": node, "plugin": plugin, "ms": round(ms, 3)})
+
+
+def traced(fn):
+    """Декоратор: измерить вызов плагинного ``process``/``produce`` и записать
+    process-спан в КАЖДЫЙ выходной item.
+
+    Универсален: меряет строго вокруг тела метода (start→end через perf_counter),
+    делит длительность на размер батча → честное per-item время (а не общий батч
+    на каждый item). Узел берёт из ``self._trace_node`` (ставит оркестратор),
+    имя — из ``self.name``. No-op при выключенной трассировке (нулевой overhead,
+    кроме одного bool-чека).
+
+    Применяется автоматически в ``ProcessModulePlugin.__init_subclass__`` ко всем
+    плагинам — отдельно вешать на каждый плагин не нужно.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if not _ENABLED:
+            return fn(self, *args, **kwargs)
+        t0 = time.perf_counter()
+        result = fn(self, *args, **kwargs)
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        out = result if isinstance(result, list) else ([] if result is None else [result])
+        node = getattr(self, "_trace_node", "")
+        name = getattr(self, "name", "?")
+        per = dt_ms / len(out) if out else dt_ms
+        for it in out:
+            record_process(it, node, name, per)
+        return result
+
+    wrapper._traced = True  # type: ignore[attr-defined]
+    return wrapper

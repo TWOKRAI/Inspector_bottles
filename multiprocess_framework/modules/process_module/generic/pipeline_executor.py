@@ -183,13 +183,9 @@ class PipelineExecutor:
                 continue
 
             try:
-                t0 = time.perf_counter()
+                # Замер времени плагина — в декораторе frame_trace.traced
+                # (авто на process() всех плагинов), здесь не дублируем.
                 items = plugin.process(items)
-                # frame-trace: время обработки этим плагином (на каждый item batch'а).
-                if frame_trace.enabled():
-                    dt_ms = (time.perf_counter() - t0) * 1000.0
-                    for it in items:
-                        frame_trace.record_process(it, self._node, plugin.name, dt_ms)
                 # Успех — сбросить счётчик fails
                 self._consecutive_fails[plugin.name] = 0
             except Exception as e:
