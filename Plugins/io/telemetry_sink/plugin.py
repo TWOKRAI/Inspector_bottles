@@ -78,10 +78,15 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         self._ctx = ctx
         self._reg = self._init_register(ctx)
 
-        # Кэш листьев подписки: path -> value. Заполняется callback'ом, читается
-        # sample-worker'ом → защищаем lock'ом (разные потоки одного процесса).
+        # Свой кэш листьев подписки: path -> value (НЕ переиспользуем внутренний
+        # StateProxy._cache намеренно — нужен собственный lock и точка снятия снимка
+        # под семпл, независимая от внутренней логики proxy). Заполняется callback'ом,
+        # читается sample-worker'ом → под _cache_lock (разные потоки одного процесса).
         self._cache: dict[str, object] = {}
         self._cache_lock = threading.Lock()
+        # Сериализует запись (sample-worker vs _cmd_flush): без него возможны
+        # дубль-вставки снимка и потеря инкремента счётчика.
+        self._write_lock = threading.Lock()
 
         # Создаются в start() после fork — здесь только объявляем.
         self._sql: SQLManager | None = None
@@ -185,47 +190,52 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         if self._sql is None:
             return 0
 
-        # Снимок кэша под lock — дальше работаем с копией без удержания lock.
-        with self._cache_lock:
-            snapshot = dict(self._cache)
+        # _write_lock сериализует семплы из sample-worker и из _cmd_flush:
+        # иначе два потока берут снимок и пишут его параллельно → дубль-строки
+        # и потерянный инкремент _total_written (неатомарный read-modify-write).
+        with self._write_lock:
+            # Снимок кэша под cache-lock — дальше работаем с копией без удержания.
+            with self._cache_lock:
+                snapshot = dict(self._cache)
 
-        # Группируем кэш: per-process метрики + сводка system.health.
-        procs: dict[str, dict[str, object]] = {}
-        system_health: dict[str, object] = {}
-        for path, value in snapshot.items():
-            parts = path.split(".")
-            if parts[0] == "processes" and len(parts) >= 4:
-                pname, section = parts[1], parts[2]
-                if section == "state" and len(parts) == 4:
-                    entry = procs.setdefault(pname, {})
-                    metric = parts[3]
-                    if metric in self._STATE_COLS:
-                        entry[metric] = value
-                    else:
+            # Группируем кэш: per-process метрики + сводка system.health.
+            procs: dict[str, dict[str, object]] = {}
+            system_health: dict[str, object] = {}
+            for path, value in snapshot.items():
+                parts = path.split(".")
+                if parts[0] == "processes" and len(parts) >= 4:
+                    pname, section = parts[1], parts[2]
+                    if section == "state":
+                        entry = procs.setdefault(pname, {})
+                        # Ровно processes.<P>.state.<known> → колонка; неизвестный
+                        # или вложенный state-лист → extra (не теряем данные).
+                        if len(parts) == 4 and parts[3] in self._STATE_COLS:
+                            entry[parts[3]] = value
+                        else:
+                            entry.setdefault("_extra", {})[".".join(parts[2:])] = value  # type: ignore[union-attr]
+                    elif section == "workers":
+                        # Нестандартный per-worker хвост → extra JSON.
+                        entry = procs.setdefault(pname, {})
                         entry.setdefault("_extra", {})[".".join(parts[2:])] = value  # type: ignore[union-attr]
-                elif section == "workers":
-                    # Нестандартный per-worker хвост → extra JSON.
-                    entry = procs.setdefault(pname, {})
-                    entry.setdefault("_extra", {})[".".join(parts[2:])] = value  # type: ignore[union-attr]
-                # config.* и прочие секции — не телеметрия, пропускаем.
-            elif parts[0] == "system" and len(parts) >= 3 and parts[1] == "health":
-                system_health[".".join(parts[2:])] = value
-            # прочее system.* (stop_timeout/shm_budget_mb/log_dir) — статика, пропускаем.
+                    # config.* и прочие секции — не телеметрия, пропускаем.
+                elif parts[0] == "system" and len(parts) >= 3 and parts[1] == "health":
+                    system_health[".".join(parts[2:])] = value
+                # прочее system.* (stop_timeout/shm_budget_mb/log_dir) — статика, пропускаем.
 
-        ts = time.time()
-        rows: list[TelemetrySnapshot] = [self._build_proc_row(ts, pname, entry) for pname, entry in procs.items()]
-        if system_health:
-            rows.append(self._build_system_row(ts, system_health))
+            ts = time.time()
+            rows: list[TelemetrySnapshot] = [self._build_proc_row(ts, pname, entry) for pname, entry in procs.items()]
+            if system_health:
+                rows.append(self._build_system_row(ts, system_health))
 
-        # Edge case: кэш пуст → не пишем пустые строки.
-        if not rows:
-            return 0
+            # Edge case: кэш пуст → не пишем пустые строки.
+            if not rows:
+                return 0
 
-        repo = self._sql.get_repository(TelemetrySnapshot)
-        repo.insert_many(rows)
-        self._total_written += len(rows)
-        self._last_ts = ts
-        return len(rows)
+            repo = self._sql.get_repository(TelemetrySnapshot)
+            repo.insert_many(rows)
+            self._total_written += len(rows)
+            self._last_ts = ts
+            return len(rows)
 
     # --- Команды (имя → метод см. self.commands) ---
 
@@ -252,11 +262,11 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         retention_days=0 → no-op (ретенция выключена). Плановая ротация по
         расписанию — вне scope (отдельный /plan), здесь только ручная очистка.
         """
-        days = data.get("retention_days", self._reg.retention_days)
+        raw = data.get("retention_days", self._reg.retention_days)
         try:
-            days = int(days)
+            days = int(raw)
         except (TypeError, ValueError):
-            days = 0
+            return {"status": "error", "error": f"retention_days должно быть int, получено {raw!r}"}
         if days <= 0 or self._sql is None:
             return {"status": "ok", "purged": 0, "note": "ретенция выключена (retention_days=0)"}
         cutoff = time.time() - days * 86400.0

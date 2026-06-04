@@ -25,16 +25,33 @@ loop-worker (sample_interval_sec)
 |------|---------|-----------|
 | `db_path` | `data/telemetry.db` | Путь к SQLite-файлу истории |
 | `sample_interval_sec` | `5.0` | Период снятия снимка кэша (мин. 0.5) |
+| `retention_days` | `0` | Хранить N дней (0 = без ретенции; чистка по команде `purge_old`) |
 
 ## Схема (schemas.py)
 
-`TelemetrySnapshot` (wide-таблица, `telemetry_snapshots`) — минимальный slice
-(Task 1.1): `id` (autoincrement PK), `ts`, `process_name`, `fps`.
-Индексы: `(ts)`, `(process_name, ts)`.
+`TelemetrySnapshot` (wide-таблица, `telemetry_snapshots`), индексы `(ts)`,
+`(process_name, ts)`. Одна строка = снимок одного процесса в момент `ts`:
 
-Расширение до полного набора (`latency_ms`, `uptime_s`, `status`, `extra`) и
-system-сводка — Task 1.2; команды (`flush`/`get_stats`/`purge_old`) и
-retention — Task 1.3.
+| Колонка | Источник дерева | Примечание |
+|---------|-----------------|-----------|
+| `id` | — | autoincrement PK |
+| `ts` | `time.time()` | момент снимка |
+| `process_name` | `processes.<P>` / `'system'` | строка-сводка имеет `process_name='system'` |
+| `fps` | `processes.<P>.state.fps` / `system.health.avg_fps` | |
+| `latency_ms` | `processes.<P>.state.latency_ms` | |
+| `uptime_s` | `processes.<P>.state.uptime` | |
+| `status` | `processes.<P>.state.status` | |
+| `extra` | `workers.*`, нестандартный `state.*`, `system.health.*` кроме avg_fps | JSON-хвост |
+
+`config.*` и статика `system.*` (stop_timeout/shm_budget_mb/log_dir) фильтруются.
+
+## Команды
+
+| Команда | Действие |
+|---------|----------|
+| `flush` | принудительный семпл+запись вне таймера |
+| `get_stats` | `total_written`, `pending_leaves`, `db_path`, `last_ts` |
+| `purge_old` | при `retention_days>0` — `DELETE WHERE ts < cutoff`; иначе no-op. Scheduled-ротация — вне scope (отдельный /plan) |
 
 ## Fork-safety (КРИТИЧНО)
 
