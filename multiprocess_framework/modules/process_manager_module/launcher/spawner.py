@@ -13,6 +13,7 @@ from ..runner.class_loader import _ProcessLogger
 from ..runner.process_runner import run_process_function
 from ..platforms import get_platform_adapter
 from ...shared_resources_module import SharedResourcesManager
+from .process_tree_guard import ProcessTreeGuard
 
 _logger = FallbackLogger(__name__)
 
@@ -58,6 +59,8 @@ class ProcessSpawner:
         # Дополнительный конфиг оркестратора (Dict at Boundary).
         # Ключи мёржатся в process_config и доступны через self.get_config(key).
         self._orchestrator_config: Dict[str, Any] = orchestrator_config or {}
+        # OS-уровневая гарантия гибели всего дерева (Job Object / process group).
+        self._guard = ProcessTreeGuard()
 
     def launch_orchestrator(self) -> bool:
         """SRM + Process(ProcessManager) + сигналы."""
@@ -66,6 +69,9 @@ class ProcessSpawner:
         self._shared_resources.initialize()
 
         self._logger = _ProcessLogger("spawner")
+        self._guard = ProcessTreeGuard(logger=self._logger)
+        # ДО спавна оркестратора (Windows: создать job — дети наследуют по job).
+        self._guard.install()
 
         process_config = {"processes_config": self._processes_config}
         # Мёрджим дополнительный конфиг оркестратора поверх process_config.
@@ -98,9 +104,15 @@ class ProcessSpawner:
                 bundle,
                 self._system_stop_event,
             ),
+            # new_session: POSIX — оркестратор делает setsid() (новая группа для всего
+            # дерева). Windows игнорирует. Нужно ProcessTreeGuard для killpg на POSIX.
+            kwargs={"new_session": self._guard.wants_new_session()},
             name="ProcessManager",
         )
         self._process.start()
+
+        # Привязать оркестратора к дереву-гаранту (Win: assign job; POSIX: запомнить pgid).
+        self._guard.adopt(self._process.pid)
 
         self._setup_signals()
         return True
@@ -154,10 +166,10 @@ class ProcessSpawner:
                     self._logger.warning("Force killing ProcessManager")
                 self._process.kill()
 
-        # 2. Убить все дочерние процессы-сироты (если ProcessManager не успел).
-        # Передаём снимок поддерева, снятый ДО убийства PM, — иначе обход по живым
-        # PPID не дойдёт до внуков (их родитель уже мёртв).
-        self._kill_orphan_children(pre_kill_descendants)
+        # 2. Авторитетный teardown всего дерева через OS-примитив (Job Object /
+        # process group). Снимок поддерева (снят ДО убийства PM) передаём как
+        # portable psutil-fallback на случай, если примитив ОС недоступен.
+        self._guard.kill_tree(pre_kill_descendants)
 
         if self._on_shutdown:
             try:
@@ -186,45 +198,6 @@ class ProcessSpawner:
             return psutil.Process(os.getpid()).children(recursive=True)
         except Exception:  # noqa: BLE001 — снимок не критичен
             return []
-
-    def _kill_orphan_children(self, pre_kill: Optional[list] = None) -> None:
-        """Убить дочерние процессы, не завершившиеся вместе с ProcessManager.
-
-        Args:
-            pre_kill: снимок поддерева, снятый ДО убийства PM (см. stop()). Нужен,
-                т.к. после смерти PM внуки осиротевают и обход по живым PPID их не
-                находит. Объединяется с текущим обходом и дедуплицируется по PID.
-        """
-        import os
-
-        import psutil
-
-        try:
-            current = psutil.Process(os.getpid())
-            # Объединяем снимок «до» и текущий обход; дедуп по PID. self исключаем.
-            by_pid: dict[int, "psutil.Process"] = {}
-            for proc in list(pre_kill or []) + current.children(recursive=True):
-                if proc.pid != current.pid:
-                    by_pid[proc.pid] = proc
-            children = list(by_pid.values())
-            if not children:
-                return
-            if self._logger:
-                self._logger.warning(f"Killing {len(children)} orphan child process(es)...")
-            for child in children:
-                try:
-                    child.terminate()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            _, alive = psutil.wait_procs(children, timeout=2.0)
-            for child in alive:
-                try:
-                    child.kill()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-        except Exception as e:
-            if self._logger:
-                self._logger.warning(f"Orphan cleanup error: {e}")
 
     def wait(self) -> None:
         if self._process:

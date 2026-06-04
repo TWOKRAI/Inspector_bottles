@@ -97,51 +97,21 @@ class TestProcessSpawner:
         mock_process.kill.assert_called_once()
 
     def test_stop_snapshots_descendants_before_kill(self) -> None:
-        """stop() снимает поддерево ДО убийства PM и передаёт снимок в killer.
+        """stop() снимает поддерево ДО остановки PM и передаёт снимок guard'у.
 
-        Регрессия: внуки (воркеры) осиротевали, т.к. _kill_orphan_children
-        обходил живые PPID уже ПОСЛЕ смерти PM и не находил их.
+        Снимок нужен psutil-fallback'у ProcessTreeGuard: после смерти PM обход по
+        живым PPID не нашёл бы внуков. Авторитетный teardown — guard.kill_tree.
         """
         spawner = ProcessSpawner(stop_timeout=0.1)
-        spawner._process = None  # PM отсутствует — фокус на снимке
+        spawner._process = None  # PM отсутствует — фокус на снимке/делегировании
         sentinel = [MagicMock(pid=42)]
         spawner._snapshot_descendants = MagicMock(return_value=sentinel)
-        spawner._kill_orphan_children = MagicMock()
+        spawner._guard = MagicMock()
 
         spawner.stop(timeout=0.1)
 
         spawner._snapshot_descendants.assert_called_once()
-        spawner._kill_orphan_children.assert_called_once_with(sentinel)
-
-    def test_kill_orphan_children_terminates_pre_kill_snapshot(self) -> None:
-        """Процессы из снимка terminate'ятся, даже если PPID-цепочка оборвана."""
-        spawner = ProcessSpawner()
-        fake_current = MagicMock(pid=1)
-        fake_current.children.return_value = []  # обход по живым PPID пуст (внуки осиротели)
-        worker = MagicMock(pid=42)
-
-        with (
-            patch("psutil.Process", return_value=fake_current),
-            patch("psutil.wait_procs", return_value=([], [])),
-        ):
-            spawner._kill_orphan_children([worker])
-
-        worker.terminate.assert_called_once()
-
-    def test_kill_orphan_children_dedups_by_pid(self) -> None:
-        """Один PID в снимке и в обходе → terminate один раз (дедуп)."""
-        spawner = ProcessSpawner()
-        worker = MagicMock(pid=42)
-        fake_current = MagicMock(pid=1)
-        fake_current.children.return_value = [worker]  # тот же объект и в обходе
-
-        with (
-            patch("psutil.Process", return_value=fake_current),
-            patch("psutil.wait_procs", return_value=([], [])),
-        ):
-            spawner._kill_orphan_children([worker])
-
-        worker.terminate.assert_called_once()
+        spawner._guard.kill_tree.assert_called_once_with(sentinel)
 
     # --- orchestrator_class_path ---
 
@@ -169,6 +139,8 @@ class TestProcessSpawner:
             patch(
                 "multiprocess_framework.modules.process_manager_module.launcher.spawner.SharedResourcesManager"
             ) as MockSRM,
+            # ProcessTreeGuard мокаем — иначе launch создал бы реальный Job Object (Windows).
+            patch("multiprocess_framework.modules.process_manager_module.launcher.spawner.ProcessTreeGuard"),
         ):
             MockSRM.return_value = MagicMock()
             mock_proc = MagicMock()
