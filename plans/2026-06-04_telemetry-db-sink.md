@@ -90,9 +90,9 @@ TelemetrySnapshot (SchemaBase + SQLMeta):
 
 ### Phase 2: Миграция DatabasePlugin (sqlite3 → SQLManager)
 
-- **Task 2.1:** `DetectionSchema` (SchemaBase + SQLMeta) + замена raw sqlite3 на SQLManager (auto-DDL, insert_many), сохранить контракт плагина [DONE 2026-06-04] ✅ fork-safe SQLManager в start(), auto-DDL, on-disk smoke зелёный
+- **Task 2.1:** `DetectionSchema` (SchemaBase + SQLMeta) + замена raw sqlite3 на SQLManager (auto-DDL, insert_many), сохранить контракт плагина [DONE 2026-06-04 · 476e760e] ✅ fork-safe SQLManager в start(), auto-DDL, on-disk smoke зелёный
   - **Module contract:** impl-only
-- **Task 2.2:** Обновить команды и тесты плагина под SQLManager [DONE 2026-06-04] ✅ 17 passed, in-memory SQLManager (StaticPool), raw sqlite3-mock убран
+- **Task 2.2:** Обновить команды и тесты плагина под SQLManager [DONE 2026-06-04 · 476e760e] ✅ 17 passed, in-memory SQLManager (StaticPool), raw sqlite3-mock убран
   - **Module contract:** impl-only
 
 ### Phase 3: Тесты + приёмка
@@ -258,11 +258,11 @@ TelemetrySnapshot (SchemaBase + SQLMeta):
 4. `shutdown()`: `self._sql.shutdown()` вместо `_conn.close()`.
 
 **Acceptance criteria:**
-- [ ] `detections` создаётся через `create_tables` (auto-DDL), не ручным SQL
-- [ ] Запись идёт через `SQLManager`/`repo.insert_many` — нет `import sqlite3` в plugin.py
-- [ ] Контракт плагина не изменился: `process(items)` pass-through, register-поля те же
-- [ ] `make check` чисто; sentrux: Plugins→Services OK
-- [ ] fork-safe: SQLManager создаётся в `start()`, `fork_safe=True`
+- [x] `detections` создаётся через `create_tables` (auto-DDL), не ручным SQL
+- [x] Запись идёт через `SQLManager`/`repo.insert_many` — нет `import sqlite3` в plugin.py
+- [x] Контракт плагина не изменился: `process(items)` pass-through, register-поля те же
+- [x] `make check` чисто; sentrux: Plugins→Services OK (min_depth — пред­существующая глобальная метрика)
+- [x] fork-safe: SQLManager создаётся в `start()`, `fork_safe=True`
 
 **Out of scope:** изменение схемы команд (Task 2.2); изменение register-полей; новые поля detections.
 **Edge cases:** `created_at` SQL-default-выражение не поддержано DDLBuilder → проставлять в коде; batch insert падает → fallback one-by-one (сохранить поведение); БД заблокирована → ловить и логировать через ObservableMixin SQLManager.
@@ -284,9 +284,9 @@ TelemetrySnapshot (SchemaBase + SQLMeta):
 3. Убедиться, что `:memory:` в одном процессе виден sample/flush-воркеру (StaticPool — один connection).
 
 **Acceptance criteria:**
-- [ ] `pytest Plugins/io/database/tests` зелёный
-- [ ] Тесты используют SQLManager, не raw sqlite3 mock
-- [ ] Покрыты: batch-flush, force-flush, get_stats, fallback при ошибке вставки
+- [x] `pytest Plugins/io/database/tests` зелёный (17 passed)
+- [x] Тесты используют SQLManager, не raw sqlite3 mock
+- [x] Покрыты: batch-flush, force-flush, get_stats, fallback при ошибке вставки
 
 **Out of scope:** новые команды; интеграционный headless (Phase 3).
 **Dependencies:** Task 2.1
