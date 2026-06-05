@@ -10,7 +10,16 @@
 |---|---|---|---|---|
 | **P4.1** CommandSender ручной dict | «убрать третий способ» | **УЖЕ ЗАКРЫТ** — `CommandSender` делегирует в `message_module/builders/command_envelopes.py` (`build_command_message`/`build_system_command_message`). `RoutedCommandSender` — 0 callers → P5 | 0 | — |
 | **P4.2** heartbeat/broadcasts | «→ router.send» | heartbeat УЖЕ через `send_message`→`router.send` (P1.3). Осталось 2 broadcast в `ProcessMonitor` (`broadcast_full_status:538`, `_broadcast_status_change:610`) → идут мимо хаба через `queue_registry.broadcast_message`. **Потребителей 0** → кандидат на УДАЛЕНИЕ (P5.0 gate), не миграцию | 2 | LOW |
-| **P4.3** queue_registry/SHM приватные | «вне channels запретить» | Живой «вне channels» путь — только broadcast (см. P4.2). SHM вне middleware: RingBufferWriter/Reader, MemoryHandle (0 callers), ProcessIO (1 legacy caller). Нужно sentrux-правило с whitelist `router_module/middleware/` | 2-3 | LOW |
+| **P4.3** queue_registry/SHM приватные | «вне channels запретить» | Живой «вне channels» путь — только broadcast (см. P4.2). SHM вне middleware: RingBufferWriter/Reader, MemoryHandle (0 callers), ProcessIO (1 legacy caller). ~~Нужно sentrux-правило с whitelist `router_module/middleware/`~~ → **DONE: `scripts/transport_boundary/`** (см. ниже) | 2-3 | LOW |
+
+> **КОРРЕКТИРОВКА P4.3 (реализация 2026-06-05):** sentrux НЕ годится — его правила это
+> import-boundaries между путями, а транспорт зовут через атрибут
+> `router_manager.queue_registry.send_to_queue(...)` без импорта (call-site, не импорт).
+> Реализовано как AST call-site-чекер `scripts/transport_boundary/` + `ci.py`. Whitelist
+> шире, чем тут предполагалось: легитим — `router_module/**` (хаб `_deliver_by_targets:322`
+> + frame-middleware) И `shared_resources_module/**` (библиотека очередей/SHM), а не
+> «channels/+middleware/». ProcessIO к этому правилу не относится — зовёт `send_message`
+> (после P1.3 идёт через хаб), прямого SHM/queue не делает. Ратчет: broadcast B7 → `[[debt]]`.
 | **P4.4** двойная диспетчеризация | «handler напрямую в message_dispatcher» | **ЖИВАЯ, главная работа P4.** `process_lifecycle.py:104-154 register_commands_with_router` → `_make_command_handler` closure → `cm.handle_command` → `cm.dispatcher.dispatch` (второй dispatch по тому же `msg["command"]`). ~20 команд/процесс | ~20 cmd | **MEDIUM** |
 | **P4.5a** один ring-buffer | «слить 2» | FrameShmMiddleware слит в P3.1.1 (`4f4dbb28`). `RingBufferWriter`/`Reader` — отдельный мёртвый класс (0 callers) → P5 изоляция | 0 | — |
 | **P4.5b** удалить top-level `frontend/bridge.py` | «затенённый дубль» | **Файла НЕ существует** (ни framework, ни prototype). `bridge/__init__.py` ре-экспортит живой `bridge_impl.DataReceiverBridge`. Закрыто | 0 | — |
