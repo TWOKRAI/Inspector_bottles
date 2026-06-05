@@ -1,6 +1,6 @@
 ---
 name: project_comm_system_p0
-description: "comm-system-target-architecture — P0 quick-wins §11 безопасная зона ЗАКРЫТА (2026-06-05). Остаток §11 — осторожная зона (P1, нужен rollback+qt-smoke). Handoff для нового чата."
+description: "comm-system-target-architecture — P0 §11 безопасная зона + active-bugs батч ЗАКРЫТЫ (2026-06-05). Остаток §11 — осторожная зона hot-path/конверт (P1, нужен rollback+qt-smoke). Handoff для нового чата."
 metadata:
   node_type: memory
   type: project
@@ -14,13 +14,13 @@ metadata:
 - `082ac031`: §11.9 (дубль ChainMatchStrategy.scenarios+CRUD+dispatch_scenario удалён; берегли ScenarioManager-канон core/scenarios.py + ScenarioBuilder; редундантный TestChainMatchStrategy убран) + `.gitignore data/`.
 - `48743bd7`: §11.13 (GuiStateBindings silent pass→_logger.debug), §11.16 (LoggerManager no-op _dispatcher.init/shutdown убраны; инстанс в базе ChannelRoutingManager сохранён для ErrorManager), §11.5 (RolesPanel: editable требует И прав И рабочего bus).
 - Ранее уже было DONE: §11.1 (shadow bridge.py), §11.10 (console help), §11.17 (CRM-конфиги ADR-CRM-005), §11.18 (AsyncSenderBuffer.flush — документирован inline).
+- `80c1566e` (active-bugs батч, 2026-06-05): §11.6 (get_field → get_register+getattr+лог; sync_domain_to_state больше не падает молча в except), §11.20 (_route_to_worker: при ошибке worker-handler НЕ помечать consumed → fallback на process-dispatch, не теряются process.stop/worker.pause), §11.22 (_init_state_proxy вынесен из finally в success-путь initialize). §11.21 — уже был закрыт ранее (GuiStateProxy на delta_sink, dead _dispatch_via_qt/invokeMethod удалён). +3 теста (2× sync_domain_to_state, обновлён test_handler_exception→fallback), framework 3175 зелёные.
 
 **Осталось PENDING — ОСТОРОЖНАЯ ЗОНА (кандидаты P1, нужен rollback-план + инвариант Pipeline зелёный, `/run-proto`+qt-smoke, baseline перед стартом):**
-- §11.2 `routers` (поле Message/Log/Command schemas — cross-process pickle, осторожно), §11.3 `subtype` (heartbeat/broadcast — hot-path, есть тест test_process_monitor.py:120), §11.6 `get_field` (registers_adapter.py:109 зовёт несуществующий метод → sync_domain_to_state падает в except; чинить через getattr(rm.get_register(reg), field)), §11.11 update_handler API (хардкод default_strategy), §11.12 broadcast queue_type (process_communication.py:238 system vs _select_queue_type — hot-path), §11.15 `_state_multiplexer` (app.py closure → нужен add_state_listener).
-- §11.20-22 (active-bugs, P0 но с риском): §20 `_route_to_worker` помечает consumed при ошибке handler → ТЕРЯЮТСЯ process.stop/worker.pause (критично); §21 GuiStateProxy._dispatch_via_qt нарушает main-thread контракт (риск Qt-краша); §22 _init_state_proxy в finally — silent skip.
+- §11.2 `routers` (поле Message/Log/Command schemas — cross-process pickle, осторожно), §11.3 `subtype` (heartbeat/broadcast — hot-path, есть тест test_process_monitor.py:120), §11.11 update_handler API (dispatcher.py:506-530 хардкод default_strategy — добавить param `strategy`), §11.12 broadcast queue_type (process_communication.py:238 system vs _select_queue_type — hot-path), §11.15 `_state_multiplexer` (app.py:249-257 closure → нужен новый API add_state_listener / multi-subscriber).
 - Телеметрия P0 (Option D) — отдельный план `telemetry-delivery-simplification.md`.
 
-**Рекомендованный следующий шаг (моё предложение, не утверждено владельцем):** вариант 2 — §11.20–22 (макс эффект на надёжность, точечные правки), ЛИБО заход в осторожную зону §11.2/3/6/12. Перед стартом — baseline (sentrux session_start или прогон framework-тестов) + помнить про `/run-proto`+qt-smoke перед merge.
+**Рекомендованный следующий шаг (моё предложение, не утверждено владельцем):** осторожная зона — §11.15 (_state_multiplexer, требует нового add_state_listener API, но не hot-path) или §11.11 (dispatcher strategy param, локально) как наименее рискованные; §11.2/3/12 (конверт cross-process + hot-path) — только с rollback-планом и qt-smoke. Перед стартом — baseline (прогон framework-тестов) + `/run-proto`+qt-smoke перед merge всей P0-ветки.
 
 **Дисциплина (на каждый батч в этой ветке):** ruff-format hook переформатирует → re-stage+re-commit (см. [[feedback_commit_msg_format]]); правка module-level DECISIONS.md → `python -m scripts.sync` (правило проекта 8); trailers Why:/Layer:/Refs: обязательны; `data/` теперь в .gitignore (runtime БД). Investigator-аудит остатка §11 делал agent (read-only) — образец для повторного аудита.
 
