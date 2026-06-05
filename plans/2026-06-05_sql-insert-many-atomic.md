@@ -4,7 +4,7 @@
 - **Дата:** 2026-06-05
 - **Статус:** DRAFT
 - **Ветка:** `fix/sql-insert-many-atomic` (создать при старте работы)
-- **Родитель:** [`2026-06-04_telemetry-db-sink.md`](2026-06-04_telemetry-db-sink.md) — дефект вскрыт при миграции DatabasePlugin (Phase 2, ревью Opus)
+- **Родитель:** [`_archive/2026-06-04_telemetry-db-sink.md`](_archive/2026-06-04_telemetry-db-sink.md) — дефект вскрыт при миграции DatabasePlugin (Phase 2, ревью Opus); план закрыт и заархивирован 2026-06-05
 - **Связанные memory:** `project_telemetry_db_sink`, `feedback_fix_framework_forward`
 
 ## Проблема (что не так сейчас)

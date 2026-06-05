@@ -503,12 +503,13 @@ CRM — общая база под `RouterManager`, `LoggerManager`, `ErrorManag
 
 ---
 
-## 14. Cleanup-чеклист (S7)
-После принятия target-плана — судьба временных/устаревших файлов:
-- [ ] `_salvage_digest.md` (корень, untracked) — удалить (сырьё перенесено).
-- [ ] `plans/comm-system-consolidation.md` (v1) — оставить как историю ИЛИ удалить после принятия target.
-- [ ] `plans/comm-system-consolidation-v2.md` (помечен SUPERSEDED) — удалить.
-- [ ] `plans/_wf_comm_arch_v2.js`, `plans/_wf_comm_review.js` — служебные скрипты прогонов; оставить для воспроизводимости ИЛИ убрать.
+## 14. Cleanup-чеклист (S7) — ВЫПОЛНЕН (2026-06-05)
+Судьба временных/устаревших файлов (закрыто после закрытия P0 §11):
+- [x] `_salvage_digest.md` — удалён (сырьё дистиллировано в этот план).
+- [x] `plans/comm-system-consolidation.md` (v1) — перенесён в `plans/_archive/` (история).
+- [x] `plans/comm-system-consolidation-v2.md` (SUPERSEDED) — перенесён в `plans/_archive/`.
+- [x] `plans/_wf_comm_arch_v2.js`, `plans/_wf_comm_review.js` — перенесены в `plans/_archive/` (воспроизводимость прогонов).
+- Примечание: `comm-system-target-architecture.REVIEW.md` остаётся рядом с планом (линия comm-system ещё активна: P1–P3 PENDING); уедет в архив вместе со всей линией.
 
 ## 15. Carve-out prototype→framework — единый список (G7)
 Восстановленная фокусная таблица (в v1 была §6, в target была размазана по §7/§9/§12 P3):
