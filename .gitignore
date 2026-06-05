@@ -115,3 +115,6 @@ multiprocess_framework/docs/COMMUNICATION_MAP_raw.json
 
 # Чужой файл (кинематика робота на Lua) — попал в корень случайно, не часть проекта
 robor.lua
+
+# Runtime-артефакты БД (telemetry.db / inspector.db) — создаются при запуске/live-proof
+data/

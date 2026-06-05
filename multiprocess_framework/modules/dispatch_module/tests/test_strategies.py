@@ -9,7 +9,6 @@ import unittest
 from ..strategies.exact_match import ExactMatchStrategy
 from ..strategies.pattern_match import PatternMatchStrategy
 from ..strategies.fallback_match import FallbackMatchStrategy
-from ..strategies.chain_match import ChainMatchStrategy
 
 
 class TestExactMatchStrategy(unittest.TestCase):
@@ -150,52 +149,9 @@ class TestFallbackMatchStrategy(unittest.TestCase):
         self.assertEqual(found.efficiency, 10)
 
 
-class TestChainMatchStrategy(unittest.TestCase):
-    """Тесты для ChainMatchStrategy."""
-
-    def setUp(self):
-        """Подготовка тестового окружения."""
-        self.strategy = ChainMatchStrategy("test_dispatcher")
-
-    def test_create_scenario(self):
-        """Тест создания сценария."""
-        result = self.strategy.create_scenario("test_scenario", "Тестовый сценарий")
-
-        self.assertTrue(result)
-        self.assertIn("test_scenario", self.strategy.scenarios)
-
-    def test_add_handler_to_scenario(self):
-        """Тест добавления обработчика в сценарий."""
-        self.strategy.create_scenario("test_scenario")
-
-        def handler(data):
-            return data
-
-        result = self.strategy.add_handler_to_scenario("test_scenario", "handler1", handler, stage=1)
-
-        self.assertTrue(result)
-        scenario = self.strategy.scenarios["test_scenario"]
-        self.assertEqual(len(scenario.handlers), 1)
-
-    def test_dispatch_scenario(self):
-        """Тест выполнения сценария."""
-        self.strategy.create_scenario("test_scenario")
-
-        def step1(data):
-            return {"step": 1, "data": data}
-
-        def step2(data):
-            return {"step": 2, "value": data.get("value", 0) + 1}
-
-        self.strategy.add_handler_to_scenario("test_scenario", "step1", step1, stage=1)
-        self.strategy.add_handler_to_scenario("test_scenario", "step2", step2, stage=2)
-
-        message = {"data": {"value": 5}}
-        result = self.strategy.dispatch_scenario("test_scenario", message)
-
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(len(result["stages"]), 2)
-        self.assertIsNotNone(result["final_result"])
+# Тесты сценариев CHAIN_MATCH живут в test_scenarios.py (ScenarioManager — канон).
+# Дубль self.scenarios в ChainMatchStrategy удалён (план comm-system §11.9), вместе
+# с ним — редундантный класс TestChainMatchStrategy.
 
 
 if __name__ == "__main__":

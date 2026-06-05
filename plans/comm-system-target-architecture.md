@@ -459,7 +459,8 @@ CRM — общая база под `RouterManager`, `LoggerManager`, `ErrorManag
 - [ ] **P0** — quick-wins §11 пп.1-19 (вкл. 8/11/14) + телеметрия + потеря/контракты пп.20-22
   - Аудит остатка §11 (2026-06-05): DONE — §11.1 (shadow bridge.py), §11.10 (console help), §11.17 (CRM-конфиги ADR-CRM-005).
   - Безопасный батч 1 (2026-06-05): DONE — §11.4 (IMessageFactory удалён), §11.7+8 (мёртвый relay register_schemas/register_changed + битый MessageAdapter.create_message удалены), §11.14 (DispatcherConfig удалён), §11.19 (асимметрия expects_full_message → ADR-DSP-004).
-  - Осталось PENDING: §11.2 (routers), 3 (subtype), 6 (get_field), 9 (ChainMatch scenarios dup), 11 (update_handler strategy), 12 (broadcast queue_type), 15 (_state_multiplexer), 16 (LoggerManager Dispatcher), + PARTIAL §11.5/13/18; телеметрия (Option D, отдельный план); пп.20-22 (потеря/контракты).
+  - Безопасный батч 2 (2026-06-05): DONE — §11.9 (удалён дубль ChainMatchStrategy.scenarios + CRUD + dispatch_scenario; берегли ScenarioManager-канон + ScenarioBuilder; редундантный TestChainMatchStrategy убран, покрытие в test_scenarios.py). Live find_handler/get_all_handlers/get_handlers_by_tag сохранены.
+  - Осталось PENDING (осторожная зона — hot-path/конверт/API): §11.2 (routers), 3 (subtype), 6 (get_field), 11 (update_handler strategy), 12 (broadcast queue_type), 15 (_state_multiplexer), 16 (LoggerManager Dispatcher), + PARTIAL §11.5/13/18; телеметрия (Option D, отдельный план); пп.20-22 (потеря/контракты).
 - [ ] **P1** — единый `_dispatch` + чистка конверта + `routing_table` в `_resolve_channels`
 - [ ] **P1.5** — heartbeat-порядок + EventBus-инвариант (внутри bucket) + `bundle_builder`→фасад
 - [ ] **P2** — авто-reply + `StateProxy.subscribe`→`request()` + FrameShm 2→1 + Modbus push + SHM `release_process_memory` + SQLChannel + единый `extract_process_targets`
