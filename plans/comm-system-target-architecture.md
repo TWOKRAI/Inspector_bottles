@@ -115,6 +115,8 @@ CRM — общая база под `RouterManager`, `LoggerManager`, `ErrorManag
 | `resolve_dispatch_targets` | **НЕ трогать** | verified: это адресация процессов (register/field → `list[str]`), НЕ key→handler — другой concern |
 | `update_handler_*` хардкод `default_strategy` | **fix** | verified: добавить параметр `strategy` или задокументировать ограничение |
 
+> **⚠ УТОЧНЕНИЕ ПОСЛЕ TRH P4.4 (2026-06-05):** §4 закрывает вопрос «есть ли конкурирующие ДВИЖКИ диспетчеризации» (→ нет, один `Dispatcher`-класс — верно). Он НЕ разбирал **дупликацию РЕЕСТРА команд**: командные ключи лежат и в `CommandManager`, и копируются в `message_dispatcher` через `register_commands_with_router`. Эта дупликация — корень баг-класса, который сам план лечит симптоматически в §12-P2 (double-call «задокументировать», `auto_register_ipc=False` интерим, first-wins-конфликт state.* стр.410-417). **План `plans/2026-05-31_transport-router-hub/p4.4_command-bus.md` (вариант B2, решение владельца 2026-06-05)** убирает корень: kind-router по `type` в `receive()` (`command`→`CommandManager` как единственный владелец ключей), `message_dispatcher` перестаёт держать командные ключи → workaround'ы §12-P2 ретайрятся. B2 **совместим** с «один движок» (§4) и каноном `COMMUNICATION_ARCHITECTURE.md` (стр.40/60). Авто-reply по `request_id` в транспорте (§12-P2) — **вобран в B2** как единый reply-seam. После P4.4.6 — синхронизировать §4/§9.4 с фактическим состоянием.
+
 ---
 
 ## 5. Унификация команд / undo
