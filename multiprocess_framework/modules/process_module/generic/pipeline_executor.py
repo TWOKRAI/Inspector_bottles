@@ -17,7 +17,7 @@ from typing import Callable
 from ..plugins.base import ProcessModulePlugin
 from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
-from .frame_shm_middleware import FrameShmMiddleware
+from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 
 
 class PipelineExecutor:

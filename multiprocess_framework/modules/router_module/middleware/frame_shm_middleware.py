@@ -1,39 +1,215 @@
 # -*- coding: utf-8 -*-
-"""FrameShmMiddleware — middleware для прозрачной передачи кадров через SHM.
+"""FrameShmMiddleware — единый middleware «frame ↔ SHM ref» (P3.1.1, ADR-COMM-003).
 
-Автоматизирует запись/чтение numpy-кадров в shared memory через MemoryManager.
-Подключается к RouterManager через add_send_middleware / add_receive_middleware.
+Слияние двух ранее дублировавшихся реализаций (§5.2 аудита):
+- generic data-pipeline (`process_module/generic`): `strip_and_write`/`restore_frame`
+  — lazy-allocation, round-robin ring (`% coll`), pickle-fallback при сбое SHM-write;
+- router middleware (`router_module/middleware`): `on_send`/`on_receive`
+  — middleware-протокол RouterManager (`add_send_middleware`/`add_receive_middleware`),
+  запись по `find_free_index`, координаты в `msg["data"]` + width/height.
 
-Протокол:
-  - on_send: если msg содержит ключ "frame" (numpy ndarray), записывает в SHM,
-    удаляет "frame" из msg и добавляет SHM-координаты в msg["data"].
-  - on_receive: если msg["data"] содержит "shm_name" и "shm_index",
-    читает кадр из SHM и кладёт в msg["frame"].
+Канон поведения — generic (живой data-path камеры). Обе пары методов сосуществуют
+(каждый вызывающий пользуется своей), общий ~30-строчный SHM-read-fallback (прямое
+открытие `SharedMemory` по `shm_actual_name`) вынесен в `_read_shm_from_actual_name` —
+именно он был дублём. `process_module/generic/frame_shm_middleware.py` ре-экспортирует
+этот класс (direction process_module → router_module уже существует, цикла нет).
+
+Claim Check: пиксели (numpy) едут в OS SHM, по очереди — только координаты (shm_ref).
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import logging
+from typing import Any, Callable, Dict, Optional
 
 
 class FrameShmMiddleware:
-    """Middleware для прозрачной сериализации/десериализации кадров через SHM.
+    """Middleware для frame ↔ SHM на границах процессов.
 
     Args:
-        memory_manager: экземпляр MemoryManager с API write_images/read_images.
-        owner: имя процесса-владельца SHM-региона (например "camera").
-        slot: имя SHM-слота (например "camera_frame").
+        memory_manager: MemoryManager из shared_resources_module (API write_images/
+            read_images/find_free_index/create_memory_dict).
+        owner: имя процесса-владельца SHM-региона (для write).
+        slot: имя SHM-слота (для write).
+        coll: количество SHM-слотов (размер ring buffer) — generic-путь.
+        log_error: callback логирования ошибок — generic-путь.
     """
 
-    def __init__(self, memory_manager: Any, owner: str, slot: str) -> None:
+    def __init__(
+        self,
+        memory_manager: Any,
+        owner: str,
+        slot: str = "output_frames",
+        coll: int = 3,
+        log_error: Callable[[str], None] | None = None,
+    ) -> None:
         self._mm = memory_manager
         self._owner = owner
         self._slot = slot
+        self._coll = coll
+        self._log_error = log_error or (lambda msg: None)
+        self._allocated = False
+        self._write_index = 0
+
+    # ------------------------------------------------------------------
+    # Общий SHM-read-fallback (§5.2 дедуп: был скопирован в restore_frame и on_receive)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _read_shm_from_actual_name(shm_actual_name: str) -> Optional[Any]:
+        """Прочитать кадр напрямую из SharedMemory по фактическому имени (cross-process).
+
+        shm_actual_name приходит от owner через IPC (на Windows включает PID).
+        Возвращает ndarray (копию) или None, если изображений нет. Бросает при
+        ошибке открытия/распаковки — вызывающий ловит и логирует в своём стиле.
+        """
+        from multiprocessing import shared_memory as _shm_mod
+        import struct as _struct
+        import numpy as _np
+
+        shm = _shm_mod.SharedMemory(name=shm_actual_name, create=False)
+        try:
+            buf = shm.buf
+            # Заголовок: num_images (uint32)
+            num_images = _struct.unpack("I", buf[0:4])[0]
+            if num_images > 0:
+                # Заголовок изображения: h, w, c (3x uint32) + dtype char (1 byte)
+                h, w, c = _struct.unpack("III", buf[4:16])
+                dtype_char = chr(buf[16])
+                dtype = _np.dtype(dtype_char)
+                offset = 17
+                pixel_count = h * w * c
+                arr = _np.frombuffer(buf, dtype=dtype, count=pixel_count, offset=offset)
+                frame = arr.reshape((h, w, c)).copy()
+                del arr, buf  # Освободить ссылки на SHM до close()
+                return frame
+            return None
+        finally:
+            shm.close()
+
+    # ------------------------------------------------------------------
+    # Generic data-pipeline API (канон): strip_and_write / restore_frame
+    # ------------------------------------------------------------------
+
+    def restore_frame(self, msg: dict) -> dict:
+        """Восстановить frame из SHM ref в item.
+
+        Входящий msg содержит shm_name, shm_index (или owner + slot + index).
+        Читает ndarray из SHM → кладёт в msg["frame"].
+
+        Стратегия:
+          1. MemoryManager.read_images() — если SHM handle есть в этом процессе
+          2. Fallback: прямое открытие SharedMemory по shm_actual_name (cross-process)
+        """
+        data = msg.get("data", msg)
+
+        # Pickle fallback: frame уже в сообщении (не через SHM)
+        if "frame" in msg and msg["frame"] is not None:
+            return msg
+        if "frame" in data and data.get("frame") is not None:
+            msg["frame"] = data["frame"]
+            return msg
+
+        shm_owner = data.get("owner", data.get("shm_owner", ""))
+        shm_name = data.get("shm_name", "")
+        shm_index = data.get("shm_index", 0)
+
+        if not shm_owner or not shm_name:
+            return msg
+
+        # Попытка 1: через MemoryManager (работает в пределах одного процесса)
+        try:
+            images = self._mm.read_images(shm_owner, shm_name, shm_index, n=1)
+            if images:
+                msg["frame"] = images[0]
+                return msg
+        except Exception:
+            pass
+
+        # Попытка 2: прямое открытие SharedMemory по shm_actual_name (cross-process)
+        shm_actual_name = data.get("shm_actual_name")
+        if shm_actual_name:
+            try:
+                frame = self._read_shm_from_actual_name(shm_actual_name)
+                if frame is not None:
+                    msg["frame"] = frame
+                    return msg
+            except Exception as e:
+                self._log_error(f"FrameShmMiddleware(generic): SHM fallback failed: {e} (shm={shm_actual_name})")
+
+        # Обе попытки не сработали
+        msg["frame"] = None
+        self._log_error(
+            f"FrameShmMiddleware(generic): frame не восстановлен "
+            f"({shm_owner}/{shm_name}[{shm_index}], "
+            f"actual={data.get('shm_actual_name', 'N/A')})"
+        )
+        return msg
+
+    def strip_and_write(self, item: dict) -> dict:
+        """Записать frame в SHM, убрать из item, добавить shm_ref.
+
+        Lazy allocation: SHM создаётся при первом кадре (не нужна предварительная
+        конфигурация формы кадра).
+
+        Fallback: если SHM write не удался (другая форма кадра, нет памяти), frame
+        остаётся в item и пойдёт через pickle в IPC.
+
+        Returns:
+            item без "frame" (+ shm_ref) или item с "frame" (fallback).
+        """
+        frame = item.get("frame")
+        if frame is None:
+            return item
+
+        # Lazy allocation при первом кадре
+        if not self._allocated:
+            self._allocate_shm(frame)
+
+        try:
+            # Round-robin запись по слотам
+            idx = self._write_index % self._coll
+            self._write_index += 1
+
+            shm_name = self._mm.write_images(self._owner, self._slot, [frame], idx)
+            if shm_name:
+                # SHM write OK — убрать frame, добавить координаты
+                item.pop("frame", None)
+                item["owner"] = self._owner
+                item["shm_owner"] = self._owner
+                item["shm_name"] = self._slot
+                item["shm_index"] = idx
+                item["shm_actual_name"] = shm_name
+            else:
+                # SHM write не удался — frame остаётся в item (pickle fallback)
+                pass
+        except Exception:
+            # frame остаётся в item (pickle fallback)
+            pass
+
+        return item
+
+    def _allocate_shm(self, frame: Any) -> None:
+        """Выделить SHM-блоки по форме первого кадра."""
+        try:
+            shape = frame.shape
+            dtype = str(frame.dtype)
+            memory_names = {
+                self._slot: (1, shape, dtype),
+            }
+            self._mm.create_memory_dict(self._owner, memory_names, self._coll)
+            self._allocated = True
+        except Exception as e:
+            self._log_error(f"FrameShmMiddleware: allocate SHM error: {e}")
+
+    # ------------------------------------------------------------------
+    # RouterManager middleware-протокол: on_send / on_receive
+    # ------------------------------------------------------------------
 
     def on_send(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Перехватить исходящее сообщение: записать frame в SHM, заменить на координаты.
 
-        Если в msg нет ключа "frame" или frame не является numpy ndarray —
-        пропускает сообщение без изменений.
+        Если в msg нет ключа "frame" или frame не numpy ndarray — пропускает без изменений.
         """
         frame = msg.get("frame")
         if frame is None:
@@ -51,9 +227,7 @@ class FrameShmMiddleware:
         if free_idx is None:
             free_idx = 0
 
-        shm_actual_name = self._mm.write_images(
-            self._owner, self._slot, [frame], free_idx
-        )
+        shm_actual_name = self._mm.write_images(self._owner, self._slot, [frame], free_idx)
 
         if shm_actual_name is None:
             # Запись не удалась — пропускаем без изменений
@@ -80,9 +254,7 @@ class FrameShmMiddleware:
 
         Стратегия чтения (приоритет):
           1. MemoryManager.read_images() с координатами из сообщения
-             (shm_owner/shm_name из data, fallback на self._owner/self._slot)
-          2. Прямое открытие SharedMemory по shm_actual_name (consumer-процесс, другой OS-процесс)
-             shm_actual_name передаётся от owner через IPC (включает PID на Windows)
+          2. Прямое открытие SharedMemory по shm_actual_name (другой OS-процесс)
         """
         data = msg.get("data")
         if not isinstance(data, dict):
@@ -98,14 +270,13 @@ class FrameShmMiddleware:
         if not hasattr(self, "_trace_on_recv_cnt"):
             self._trace_on_recv_cnt = 0
         self._trace_on_recv_cnt += 1
-        do_trace = (self._trace_on_recv_cnt % 30 == 1)
+        do_trace = self._trace_on_recv_cnt % 30 == 1
 
         # Координаты из сообщения (приоритет) или конфигурация middleware (fallback)
         owner = data.get("shm_owner", self._owner)
         slot = shm_name or self._slot
 
         if do_trace:
-            import logging
             logging.getLogger("FrameShmMiddleware").info(
                 f"[TRACE] on_receive #{self._trace_on_recv_cnt}: "
                 f"owner={owner}, slot={slot}, index={shm_index}, "
@@ -119,14 +290,11 @@ class FrameShmMiddleware:
             if images:
                 msg["frame"] = images[0]
                 if do_trace:
-                    import logging
                     logging.getLogger("FrameShmMiddleware").info(
-                        f"[TRACE] on_receive: MemoryManager SUCCESS, "
-                        f"frame shape={images[0].shape}"
+                        f"[TRACE] on_receive: MemoryManager SUCCESS, frame shape={images[0].shape}"
                     )
                 return msg
             elif do_trace:
-                import logging
                 logging.getLogger("FrameShmMiddleware").info(
                     "[TRACE] on_receive: MemoryManager returned empty, trying fallback"
                 )
@@ -135,47 +303,23 @@ class FrameShmMiddleware:
         shm_actual_name = data.get("shm_actual_name")
         if shm_actual_name:
             try:
-                from multiprocessing import shared_memory as _shm_mod
-                import struct as _struct
-                import numpy as _np
-
-                shm = _shm_mod.SharedMemory(name=shm_actual_name, create=False)
-                try:
-                    buf = shm.buf
-                    # Читаем заголовок: num_images (uint32)
-                    num_images = _struct.unpack("I", buf[0:4])[0]
-                    if num_images > 0:
-                        # Заголовок изображения: h, w, c (3x uint32) + dtype char (1 byte)
-                        h, w, c = _struct.unpack("III", buf[4:16])
-                        dtype_char = chr(buf[16])
-                        dtype = _np.dtype(dtype_char)
-                        offset = 17
-                        pixel_count = h * w * c
-                        arr = _np.frombuffer(buf, dtype=dtype, count=pixel_count, offset=offset)
-                        frame = arr.reshape((h, w, c)).copy()
-                        del arr, buf  # Освободить ссылки на SHM до close()
-                        msg["frame"] = frame
-                        if do_trace:
-                            import logging
-                            logging.getLogger("FrameShmMiddleware").info(
-                                f"[TRACE] on_receive: SHM fallback SUCCESS, "
-                                f"frame shape=({h},{w},{c})"
-                            )
-                finally:
-                    shm.close()
+                frame = self._read_shm_from_actual_name(shm_actual_name)
+                if frame is not None:
+                    msg["frame"] = frame
+                    if do_trace:
+                        logging.getLogger("FrameShmMiddleware").info(
+                            f"[TRACE] on_receive: SHM fallback SUCCESS, frame shape={frame.shape}"
+                        )
             except Exception as exc:
-                import logging
                 logging.getLogger("FrameShmMiddleware").warning(
                     "SHM fallback read failed: %s (shm=%s)", exc, shm_actual_name
                 )
         elif do_trace:
-            import logging
             logging.getLogger("FrameShmMiddleware").warning(
                 "[TRACE] on_receive: no shm_actual_name in data, cannot fallback!"
             )
 
         if do_trace and "frame" not in msg:
-            import logging
             logging.getLogger("FrameShmMiddleware").warning(
                 f"[TRACE] on_receive: FRAME NOT RESTORED! keys={list(data.keys())}"
             )

@@ -16,7 +16,7 @@ from typing import Callable
 
 from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
-from .frame_shm_middleware import FrameShmMiddleware
+from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .inspector_manager import InspectorManager
 
 

@@ -14,7 +14,7 @@ import queue
 
 from ..core.process_module import ProcessModule
 from .data_receiver import DataReceiver
-from .frame_shm_middleware import FrameShmMiddleware
+from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .inspector_manager import InspectorManager
 from .pipeline_executor import PipelineExecutor
 from .source_producer import SourceProducer

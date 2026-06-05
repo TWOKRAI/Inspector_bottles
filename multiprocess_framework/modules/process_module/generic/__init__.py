@@ -11,7 +11,10 @@
 
 from .blueprint import ProcessConfig, SystemBlueprint, Wire
 from .data_receiver import DataReceiver
-from .frame_shm_middleware import FrameShmMiddleware
+
+# FrameShmMiddleware — транспорт SHM-кадров живёт в router_module (P3.1.1, ADR-COMM-003);
+# здесь только back-compat ре-экспорт (в process_module транспорт не определяется).
+from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .generic_process import GenericProcess
 from .generic_process_config import GenericProcessConfig, PluginConfig
 from .plugin_orchestrator import PluginOrchestrator
