@@ -1,9 +1,9 @@
 # Plan: Observability Control Plane — единая конфигурируемая наблюдаемость с hot-reload
 
 - **Slug:** observability-control-plane
-- **Дата:** 2026-06-03
-- **Статус:** DRAFT
-- **Ветка:** feat/observability-control-plane
+- **Дата:** 2026-06-03 (влито в main 2026-06-05)
+- **Статус:** Phase 1 DONE (`d63bae62`) — влито в main; Phase 2-4 PENDING
+- **Ветка:** feat/observability-control-plane — отребейзена на актуальный main и влита (ff). Phase 1 (`reconfigure(config)` на CRM + `invalidate_decision_cache` LoggerManager) теперь в main; §11 CRM #16/#17/#18 (из P0 comm-system) авто-смержились без конфликта (разные регионы). Остаток: Phase 2 (секция `observability` в конфиге), Phase 3 (`ConfigFileWatcher` → live hot-reload), Phase 4 (IPC `config.reload`/`logger.sink.enable` через командный путь хаба). По execution-order — до движковых S4/S5 (decision #4), Phase 2+ «по аппетиту».
 
 ## Контекст
 

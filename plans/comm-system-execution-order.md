@@ -8,7 +8,7 @@
 
 > **СВЕРКА С РЕАЛЬНОСТЬЮ (2026-06-05).** С момента написания (04.06) сделано больше, чем в порядке ниже:
 > - **S0 (telemetry-A) — DONE.** Решено НЕ через Option A bridge-reuse, а через `telemetry-self-publish-redesign.md` (процесс сам публикует fps/latency в дерево; FPS числами, статусы зелёные). qt-smoke 2026-06-05 подтвердил. План self-publish заархивирован.
-> - **S1 (observability + §11 CRM) — частично/моот.** План `2026-06-03_observability-control-plane/` так и НЕ был написан (есть только ветка `feat/observability-control-plane`). §11 CRM-пункты #16/#17/#18 закрыты в составе P0 §11. `reconfigure()`/hot-reload — отдельная работа, появится при реальной потребности (не блокирует).
+> - **S1 (observability + §11 CRM) — Phase 1 DONE (влито в main `d63bae62`, 2026-06-05).** План `2026-06-03_observability-control-plane/` НАШЁЛСЯ — он жил на ветке `feat/observability-control-plane`, которая отребейзена на актуальный main и влита (ff). Phase 1 = `reconfigure(config)` на CRM-менеджерах + `invalidate_decision_cache` LoggerManager (фикс залипания should_log). §11 CRM #16/#17/#18 (из P0) авто-смержились без конфликта. Остаток Phase 2-4 (секция конфига, ConfigFileWatcher hot-reload, IPC config.reload) — PENDING, «по аппетиту».
 > - **S3 (§11 quick-wins) — DONE.** Весь P0 §11 (пп.1-22, вкл. hot-path осторожную зону) закрыт 2026-06-05 (5 коммитов + qt-smoke). См. `comm-system-target-architecture.md` трекинг S8.
 > - **Осталось:** **S2** (merge ветки в main — 303 коммита, FF-возможен) → **S4** (kind-каналы TRH P3/P4 = comm-system P1/P2) → **S5** (авто-reply/undo/carve-out). Порядок ниже актуален для S2-S5.
 
