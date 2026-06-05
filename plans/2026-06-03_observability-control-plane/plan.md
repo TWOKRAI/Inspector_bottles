@@ -2,7 +2,7 @@
 
 - **Slug:** observability-control-plane
 - **Дата:** 2026-06-03 (влито в main 2026-06-05)
-- **Статус:** Phase 1 DONE (`d63bae62`) + Phase 2 DONE (`6e6cf15f`) + Phase 3 DONE (`6a85dc33`+`a1dbe976`+`675d91e7`: схема+прокидка+hot-reload watcher) — в main; **Phase 4 (design-for-extension doc) — осталась**
+- **Статус:** ✅ **ЗАВЕРШЁН** (2026-06-05). Phase 1 (`d63bae62`) + Phase 2 (`6e6cf15f`) + Phase 3 (`6a85dc33`+`a1dbe976`+`675d91e7`) + Phase 4 (`8348d303` ADR-CRM-006) — всё в main. Прод-верификация: qt-smoke FPS 21.0 baseline + стабилен после live hot-reload.
 - **Ветка:** feat/observability-control-plane — отребейзена на актуальный main и влита (ff). Phase 1 (`reconfigure(config)` на CRM + `invalidate_decision_cache` LoggerManager) теперь в main; §11 CRM #16/#17/#18 (из P0 comm-system) авто-смержились без конфликта (разные регионы). Остаток: Phase 2 (секция `observability` в конфиге), Phase 3 (`ConfigFileWatcher` → live hot-reload), Phase 4 (IPC `config.reload`/`logger.sink.enable` через командный путь хаба). По execution-order — до движковых S4/S5 (decision #4), Phase 2+ «по аппетиту».
 
 ## Контекст
@@ -88,8 +88,8 @@ CRM-менеджерах, в который позже подключатся IP
   > полный набор менеджеров — overlay лишь применяет пользовательские значения. Добавлена
   > зависимость `watchdog>=4.0` (ConfigFileWatcher был под неё написан, но не подключён).
 
-### Phase 4: Design-for-extension (только заделы, без реализации)
-- Task 4.1: Документ-контракт точек расширения (SQLChannel / SocketChannel / IPC-команды) [PENDING] (зависит от 1.x, 2.1)
+### Phase 4: Design-for-extension (только заделы, без реализации) — ✅ DONE
+- Task 4.1: Документ-контракт точек расширения (SQLChannel / SocketChannel / IPC-команды) [DONE `8348d303` — ADR-CRM-006]
   - **Module contract:** n/a
 
 Детали задач — в файлах `phase-1.md` … `phase-4.md`.
