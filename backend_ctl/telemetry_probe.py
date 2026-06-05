@@ -4,8 +4,8 @@
 Поднимает прототип headless (BACKEND_CTL=1), подключает driver и через
 request/reply localизует обрыв live-телеметрии процессов:
 
-  1. introspect.handlers(ProcessManager) — есть ли `state.subscribe`/`state.changed`
-     в router.message_dispatcher (иначе IPC-подписка молча дропается);
+  1. introspect.handlers(ProcessManager) — P4.4(B2): `state.subscribe` в CommandManager
+     (`commands`), `state.changed` в event_dispatcher (`router_handlers`);
   2. state.subscribe(processes.**) — отвечает ли handle_state_subscribe (sub_id);
   3. state.get(processes) — публикует ли ProcessMonitor телеметрию в дерево;
   4. introspect.status(<proc>) — живые ли процессы.
@@ -52,13 +52,19 @@ def main() -> int:
         with BackendDriver(port=port) as drv:
             time.sleep(0.5)
 
-            # 1. Хендлеры ProcessManager — есть ли state.* в message_dispatcher?
+            # 1. Хендлеры ProcessManager. P4.4 (B2): команды (state.subscribe/set,
+            #    process.command) — в CommandManager (поле `commands`); события
+            #    (state.changed) — в event_dispatcher (поле `router_handlers`).
             res = drv.introspect_handlers("ProcessManager", timeout=8.0)
-            rh = _unwrap(res).get("router_handlers") or []
+            inner = _unwrap(res)
+            rh = inner.get("router_handlers") or []
+            cmds = inner.get("commands") or []
             print(f"[1] introspect.handlers(ProcessManager): success={res.get('success')}")
             print(f"    router_handlers ({len(rh)}): {sorted(rh)}")
-            for key in ("state.subscribe", "state.set", "state.changed", "process.command"):
-                print(f"    >>> '{key}' в message_dispatcher: {key in rh}")
+            print(f"    commands ({len(cmds)}): {sorted(cmds)}")
+            for key in ("state.subscribe", "state.set", "process.command"):
+                print(f"    >>> '{key}' в CommandManager: {key in cmds}")
+            print(f"    >>> 'state.changed' в event_dispatcher: {'state.changed' in rh}")
             print()
 
             # 2. state.subscribe — отвечает ли handle_state_subscribe?
