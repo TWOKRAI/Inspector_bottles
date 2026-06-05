@@ -1,6 +1,6 @@
 ---
 name: project_telemetry_db_sink
-description: Telemetry DB-sink plan — Phase 1 (sink) + Phase 2 (DatabasePlugin→SQLManager) DONE; remains Phase 3 (pytest sink + headless приёмка). Framework fix activated plugin state-publishing.
+description: Telemetry DB-sink plan — ВЕСЬ ЗАКРЫТ (Phase 0–3, 1ab30a1c): sink + DatabasePlugin→SQLManager + 23 pytest + headless live-proof. Долг insert_many атомарности → дочерний план sql-insert-many-atomic.
 metadata:
   node_type: memory
   type: project
@@ -23,4 +23,6 @@ metadata:
 
 **Phase 2 database — ПОЛНОСТЬЮ ЗАКРЫТА (ревью Opus APPROVE + добивка):** коммиты 476e760e (миграция), 578c5243 (port-fix+live-proof), 0da4d582 (атомарность по ревью: `repo.insert_many` = per-row commit, НЕ транзакция → старый batch+fallback давал дубли; теперь `_do_flush` пишет построчно), 1096ea1f (created_at `Optional[float]`→`float` NOT NULL; **inspection_full.yaml ПОЧИНЕН** — добавлены `wires:`+`displays:`, был незапускаем, live-proof 258 строк; `telemetry_sink._sample_loop` обёрнут в try/except — транзиентная ошибка БД не убивает worker). 18 тестов database, ruff/pyright чисто.
 
-**Осталось (только sink-ветка):** Task 3.1 — pytest для `telemetry_sink` (у него СЕЙЧАС 0 тестов: агрегация кэша→строки, период семпла, schema/DDL, fork_safe→NullPool, гонка flush/worker). Task 3.2 — headless-приёмка `telemetry_snapshots` (по образцу database live-proof: temp wired-топология + query). Связано: [[project_telemetry_self_publish]], [[project_telemetry_subscription_bug]], [[feedback_fix_framework_forward]].
+**Phase 3 — ЗАКРЫТА (1ab30a1c, 2026-06-05):** Task 3.1 — `Plugins/io/telemetry_sink/tests/`, 23 теста (register/период, schema/DDL, кэш `_on_deltas`, агрегация `_sample_once` state-колонки/extra JSON/system-сводка, команды flush/get_stats/purge_old, fork-safe конфиг `start()`, гонка flush/worker под `_write_lock` — на ФАЙЛОВОЙ БД, т.к. in-memory StaticPool теряет схему под потоками). Task 3.2 — live headless-proof `backend_ctl/telemetry_sink_proof.py` (`python -m backend_ctl.telemetry_sink_proof`): 20 строк в `data/telemetry.db` (camera_0/system/ProcessManager/telemetry_sink × 5 окон ts, span 15.2с), `total_written=20` в логе = число строк, 0 SQL/pool/fork-ошибок. **ВЕСЬ план telemetry-db-sink закрыт (Phase 0–3).**
+
+**Дочерний план `plans/2026-06-05_sql-insert-many-atomic.md` (DRAFT, ветка `fix/sql-insert-many-atomic`):** чинит долг — `GenericRepository.insert_many` сейчас per-row commit (не атомарен). После фикса: `DatabasePlugin._do_flush` откатывается на атомарный batch+fallback, `telemetry_sink._sample_once` получает атомарность снимка бесплатно, docstring `_sample_loop`+race-теста про «per-row, дублей нет» — обновить (Task 2.x того плана). Связано: [[project_telemetry_self_publish]], [[project_telemetry_subscription_bug]], [[feedback_fix_framework_forward]].
