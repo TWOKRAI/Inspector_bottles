@@ -6,7 +6,16 @@ metadata:
 ---
 
 TRH P4.4 (главная работа P4) — план `plans/2026-05-31_transport-router-hub/p4.4_command-bus.md`.
-Статус 2026-06-05: PLANNED, ревью Opus прошло (NEEDS REWORK → правки применены), не начато.
+Статус 2026-06-05: **P4.4.0 recon DONE** (ветка `feat/command-bus`, коммит d1f6d4d3). Вариант B
+подтверждён выполнимым; блокеры сняты. Далее P4.4.1.
+
+**Recon-выводы (на коде):** двойной резолв = `message_dispatcher.dispatch(command)` → generic-closure
+`_make_command_handler` → `cm.handle_command` → `cm.dispatcher.dispatch(command)`. Все prod-команды
+EXACT_MATCH (pattern/fallback только в тестах). 3 обходных хендлера — РАЗНЫЕ ключи в одном
+message_dispatcher → **коллизии для B НЕТ by-design**. **Блокер P4.4.1:** `get_commands()` не отдаёт
+callable+expects_full_message → нужен `CommandManager.iter_handler_infos()`. EXACT_MATCH register
+«первая-побеждает» → рекомендация: `register_command` router-aware (убрать closure+re-sync). state.*
+двойная регистрация гасится `auto_register_ipc=False`. **Рекомендация: P4.4.4 lifecycle — отдельным подпланом.**
 
 **Цель:** убрать двойную диспетчеризацию приёма команд (две инстанции `dispatch_module.Dispatcher`:
 `RouterManager.message_dispatcher` + `CommandManager.dispatcher`, обе резолвят по `command`).
