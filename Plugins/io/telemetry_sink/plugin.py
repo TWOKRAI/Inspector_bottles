@@ -168,13 +168,23 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
     # --- Семпл ---
 
     def _sample_loop(self, stop_event, pause_event) -> None:
-        """Периодический семпл кэша (как DatabasePlugin._flush_loop)."""
+        """Периодический семпл кэша (как DatabasePlugin._flush_loop).
+
+        `_sample_once` обёрнут в try/except: транзиентная ошибка БД (locked, и т.п.)
+        НЕ должна убивать worker — иначе сток телеметрии молча умрёт навсегда.
+        Логируем и продолжаем до следующего тика. (repo.insert_many — per-row commit,
+        не атомарна: частичная запись возможна, но следующий семпл — новый ts-снимок,
+        не повтор, поэтому дублей нет.)
+        """
         while not stop_event.is_set():
             if pause_event.is_set():
                 time.sleep(0.1)
                 continue
             time.sleep(self._reg.sample_interval_sec)
-            self._sample_once()
+            try:
+                self._sample_once()
+            except Exception as exc:
+                self._ctx.log_error(f"TelemetrySinkPlugin: семпл упал, продолжаю: {exc}")
 
     # Стандартные метрики `processes.<P>.state.<metric>` → колонки.
     # uptime маппится в колонку uptime_s; остальные state.* и все workers.* — в extra.

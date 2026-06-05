@@ -63,8 +63,17 @@ Reviewer нашёл реальную поведенческую регресси
 без дублей. Batch-выигрыш не теряется (insert_many и так per-row). Тесты переписаны:
 `test_row_failure_does_not_drop_others_or_duplicate`, `test_first_error_only_logged_once`.
 
+## Доп. фиксы по запросу «все баги и косяки» (2026-06-04)
+
+- `created_at: Optional[float]` → `float` (NOT NULL): код всегда проставляет значение, исходная
+  таблица имела DEFAULT — Optional был слабее контракта.
+- `inspection_full.yaml` — **починен**: добавлена секция `wires:` (+`displays:`). Была устаревшей
+  (только `chain_targets`) → не проходила port-валидацию, незапускаема. Live-proof: headless-запуск
+  пишет **258 строк** в `detections`.
+- (смежно) `telemetry_sink._sample_loop` — `_sample_once()` обёрнут в try/except: транзиентная
+  ошибка БД больше не убивает worker стока.
+
 ## Отложено (Phase 3)
 
 - Task 3.1 — формальные pytest sink (плагин database уже покрыт здесь; 18 passed).
 - Task 3.2 (sink-ветка) — headless-приёмка `telemetry_snapshots` (ветка database закрыта live-proof выше).
-- Привести `inspection_full.yaml` к `wires:`-формату (отдельная задача — устаревшая топология).

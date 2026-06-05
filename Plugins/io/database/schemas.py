@@ -41,4 +41,6 @@ class DetectionSchema(SchemaBase):
     camera_id: Optional[int] = None
     event_type: Optional[str] = None
     data: Optional[str] = None
-    created_at: Optional[float] = None
+    # NOT NULL: значение всегда проставляется в коде (_do_flush: created_at=time.time()),
+    # как и в исходной таблице с DEFAULT unixepoch. Optional был бы неоправданно слабее контракта.
+    created_at: float

@@ -102,3 +102,35 @@ processes:
 
   # gui — в фундаменте (backend/topology/base.yaml), суммируется при запуске.
   # Pipeline адресует его по имени (chain_targets: [gui]).
+
+# Port-level разводка (обязательна для валидации SystemBlueprint.check()).
+# Раньше топология полагалась только на chain_targets (процесс-уровень) и НЕ проходила
+# валидацию портов — была незапускаемой. Восстановлено по фактическим портам плагинов.
+wires:
+  # Камера → детекция (color_mask 1-й; blob_detector берёт кадр напрямую — выход
+  # color_mask это mask(gray), несовместим с frame(bgr), auto-wiring не покрывает).
+  - source: camera_0.camera_service.frame
+    target: processor.color_mask.frame
+  - source: camera_0.camera_service.frame
+    target: processor.blob_detector.frame
+  # Детекция → overlay (кадр + маска + детекции)
+  - source: processor.blob_detector.frame
+    target: renderer.render_overlay.frame
+  - source: processor.blob_detector.mask
+    target: renderer.render_overlay.mask
+  - source: processor.blob_detector.detections
+    target: renderer.render_overlay.detections
+  # Overlay → инспектор (готовый кадр) + детекции (fan-out от детектора)
+  - source: renderer.render_overlay.rendered_frame
+    target: inspector.robot_control.frame
+  - source: processor.blob_detector.detections
+    target: inspector.robot_control.detections
+  # Инспектор → БД (результат инспекции, dict)
+  - source: inspector.robot_control.inspection_result
+    target: storage.database.result
+
+# Отображение результата на gui-дисплее (как в рецепте color_inspect).
+displays:
+  - node_id: renderer.render_overlay.rendered_frame
+    display_id: main
+    display_name: Результат инспекции
