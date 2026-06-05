@@ -224,16 +224,47 @@ class FrameTraceChannel(LogChannel):
                 self._fh = None
 
 
+# Реестр фабрик sink-каналов: type → класс канала.
+# Мутируемый: новые типы добавляются через register_sink_factory() без правки create_channel.
+_SINK_FACTORIES: Dict[str, type] = {
+    "file": FileChannel,
+    "console": ConsoleChannel,
+    "http": HttpChannel,
+    "frame_trace": FrameTraceChannel,
+}
+
+
+def register_sink_factory(sink_type: str, factory: type) -> None:
+    """Зарегистрировать тип sink-канала в реестре фабрик.
+
+    Позволяет добавить кастомный канал (SQL, Socket, …) без правки create_channel.
+    Повторная регистрация того же типа переопределяет предыдущую (последняя побеждает).
+
+    Args:
+        sink_type: Строковый идентификатор типа (значение config.type).
+        factory:   Класс-наследник LogChannel (или класс с методом write()).
+
+    Raises:
+        TypeError: sink_type пустой/не str, либо factory не класс / не реализует write().
+    """
+    if not isinstance(sink_type, str) or not sink_type:
+        raise TypeError(f"sink_type must be a non-empty str, got {sink_type!r}")
+    if not isinstance(factory, type):
+        raise TypeError(f"factory must be a class, got {factory!r}")
+    if not (issubclass(factory, LogChannel) or callable(getattr(factory, "write", None))):
+        raise TypeError(f"factory {factory!r} must subclass LogChannel or define write()")
+    _SINK_FACTORIES[sink_type] = factory
+
+
+def get_registered_sink_types() -> list[str]:
+    """Вернуть список зарегистрированных типов sink-каналов."""
+    return list(_SINK_FACTORIES)
+
+
 def create_channel(channel_name: str, config: LoggerChannelSchema) -> LogChannel:
     """Фабрика для создания каналов (name задаётся ключом словаря channels)."""
     cfg = config.model_copy(update={"name": channel_name})
-    channel_types = {
-        "file": FileChannel,
-        "console": ConsoleChannel,
-        "http": HttpChannel,
-        "frame_trace": FrameTraceChannel,
-    }
-    channel_class = channel_types.get(cfg.type)
+    channel_class = _SINK_FACTORIES.get(cfg.type)
     if not channel_class:
         raise ValueError(f"Unknown channel type: {cfg.type}")
     return channel_class(cfg)

@@ -18,7 +18,15 @@ from .configs import (
 )
 from .core.log_config import LogLevel, LogScope
 from .core.logger_manager import LoggerManager, get_logger, init_logging, shutdown_logging
-from .channels.log_channel import LogChannel, FileChannel, ConsoleChannel, HttpChannel, create_channel
+from .channels.log_channel import (
+    LogChannel,
+    FileChannel,
+    ConsoleChannel,
+    HttpChannel,
+    create_channel,
+    register_sink_factory,
+    get_registered_sink_types,
+)
 from .adapters.logger_adapter import LoggerAdapter
 from .interfaces import ILoggerManager, ILogChannel
 
@@ -35,6 +43,8 @@ __all__ = [
     "ConsoleChannel",
     "HttpChannel",
     "create_channel",
+    "register_sink_factory",
+    "get_registered_sink_types",
     "LoggerAdapter",
     "ILoggerManager",
     "ILogChannel",
