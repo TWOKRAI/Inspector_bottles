@@ -99,9 +99,13 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
 
     logger: Dict[str, Any] = {
         "default_level": cfg.log_level,
-        "log_directory": cfg.log_directory,
         "enable_batching": cfg.enable_batching,
     }
+    # log_directory эмитим ТОЛЬКО если задан явно: при overlay-merge поверх дефолтов
+    # None затёр бы уже резолвнутый абсолютный путь (managers_from_log_dir). None =
+    # «не задано → использовать downstream-дефолт».
+    if cfg.log_directory is not None:
+        logger["log_directory"] = cfg.log_directory
     # Тогглы применяем только если что-то выключено — иначе LoggerManagerConfig
     # сам подставит дефолтные каналы (идентичный результат, меньше связности).
     if not (cfg.console and cfg.file):

@@ -33,8 +33,15 @@ def test_logger_dict_validates() -> None:
     out = expand_observability({"log_level": "DEBUG", "log_directory": "/tmp/logs"})
     cfg = LoggerManagerConfig.model_validate(out["logger"])
     assert cfg.default_level == "DEBUG"
+    assert out["logger"]["log_directory"] == "/tmp/logs"  # явный — эмитится
     # Богатый дефолтный граф каналов сохранён (не затёрт при флагах по умолчанию).
     assert "console" in cfg.channels and "system_file" in cfg.channels
+
+
+def test_log_directory_none_omitted() -> None:
+    """log_directory=None НЕ эмитится — иначе overlay затрёт резолвнутый log_dir."""
+    out = expand_observability({"log_level": "INFO"})
+    assert "log_directory" not in out["logger"]
 
 
 def test_error_dict_validates_and_nonempty() -> None:

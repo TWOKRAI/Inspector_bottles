@@ -9,6 +9,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
+from multiprocess_framework.modules.process_module.configs import ObservabilityConfig
 
 
 class SystemSection(SchemaBase):
@@ -152,6 +153,7 @@ class SystemConfig(SchemaBase):
     storage: StorageDefaults = StorageDefaults()
     discovery: DiscoverySection = DiscoverySection()
     backend_ctl: BackendCtlSection = BackendCtlSection()
+    observability: ObservabilityConfig = ObservabilityConfig()
 
     def defaults_for_category(self, category: str) -> dict[str, Any]:
         """Получить defaults dict для категории плагина.

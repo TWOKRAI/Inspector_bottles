@@ -39,6 +39,24 @@ backend_ctl:
   port: 8765
   host: "127.0.0.1"
 
+# --- Наблюдаемость (единая секция: Logger + Error + Stats) ---
+# Управляет всеми тремя менеджерами наблюдаемости каждого процесса (overlay поверх
+# дефолтов фреймворка). Правка этой секции — точка для hot-reload (Phase 3.3).
+# log_directory не задан → используется system.log_dir выше.
+observability:
+  log_level: INFO          # DEBUG | INFO | WARNING | ERROR | CRITICAL
+  enable_batching: true    # батчинг записи (Logger + Error)
+  console: true            # консольный sink
+  file: true               # файловые sink-каналы
+  errors:
+    enabled: true
+    level: WARNING
+    include_stacktrace: true
+  stats:
+    enabled: true
+    aggregation_interval: 5.0
+    log_level: INFO
+
 # --- Автообнаружение плагинов и сервисов ---
 discovery:
   plugin_paths:

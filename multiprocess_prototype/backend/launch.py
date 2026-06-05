@@ -210,6 +210,10 @@ class SystemBuilder:
     def build(self) -> "SystemLauncher":
         """Собрать готовый к запуску ``SystemLauncher``."""
         from multiprocess_framework.modules.data_schema_module import process
+        from multiprocess_framework.modules.process_module.configs import expand_observability
+        from multiprocess_framework.modules.process_module.configs.managers_config import (
+            merge_managers,
+        )
         from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
             SystemLauncher,
         )
@@ -261,8 +265,15 @@ class SystemBuilder:
                 "backend_ctl": sys_config.backend_ctl.model_dump(),
             },
         )
+        # Единая секция observability → overlay поверх дефолтных managers каждого
+        # процесса (Logger/Error/Stats). Фреймворк уже даёт полный набор менеджеров;
+        # overlay лишь применяет пользовательские значения из system.yaml. Это же —
+        # источник для hot-reload (Phase 3.3).
+        obs_overlay = expand_observability(sys_config.observability.model_dump())
         for cfg in configs:
-            launcher.add_process(*process(cfg))
+            name, proc_dict = process(cfg)
+            proc_dict["managers"] = merge_managers(proc_dict.get("managers", {}), obs_overlay)
+            launcher.add_process(name, proc_dict)
 
         return launcher
 
