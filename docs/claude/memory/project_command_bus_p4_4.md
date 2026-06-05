@@ -6,8 +6,15 @@ metadata:
 ---
 
 TRH P4.4 (главная работа P4) — план `plans/2026-05-31_transport-router-hub/p4.4_command-bus.md`.
-Статус 2026-06-05: **P4.4.0 recon DONE** + **развилка пересмотрена → B2** (ветка `feat/command-bus`,
-коммиты d1f6d4d3, 05bf3a86). Далее P4.4.1.
+Статус 2026-06-05: **P4.4.0 recon DONE** + **B2 (сверено с comm-system §4)** + **P4.4.1 core DONE**
+(ветка `feat/command-bus`). kind-router по `type` в receive() (`_dispatch_command`: type=command→CM,
+авто-reply по request_id, manages_own_reply, strangler-fallback); process.command+register_update свёрнуты
+в команды CM. framework 3219 passed, qt-smoke OK. Остаток P4.4.1b: снять мёртвый auto_register_ipc +
+register_commands_with_router-копии + fallback.
+
+**Сверка с comm-system-target-architecture §4 (ревью B+):** «два диспетчера не дубль» = про ДВИЖКИ (один
+Dispatcher, B2 не нарушает), НЕ про дупликацию РЕЕСТРА команд (корень баг-класса telemetry/auto_register_ipc).
+B2 убирает корень; канон COMMUNICATION_ARCHITECTURE.md совместим. Кросс-линк в §4. TODO P4.4.6: синхрон §4/§9.4.
 
 **РЕШЕНИЕ B2 (kind-router), НЕ B1:** recon-факт «все команды несут `type=command`» сделал kind-router
 реализуемым. B1 (один диспетчер) делал CommandManager полым, message_dispatcher свалкой. **B2:**
