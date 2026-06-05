@@ -65,6 +65,12 @@ class RolesPanel(QWidget):
             self._can_edit = False
             self._can_delete = False
 
+        # Редактирование прав требует И права roles.edit, И рабочего приёмника
+        # изменений (ActionBus). Без bus сигнал permissions_changed не подключается
+        # (см. ниже) → правки молча терялись бы при нажатии Save. Поэтому при bus=None
+        # матрица read-only, кнопка Save скрыта — без ложной affordance (план §11.5).
+        self._edit_enabled = self._can_edit and self._bus is not None
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -84,9 +90,14 @@ class RolesPanel(QWidget):
             main_layout.addWidget(placeholder)
             return
 
-        # Подсказка «только чтение» (если нет прав на редактирование)
-        if not self._can_edit:
-            readonly_label = QLabel("(только чтение)")
+        # Подсказка «только чтение» (нет прав ИЛИ недоступен редактор)
+        if not self._edit_enabled:
+            # Различаем «нет прав» и «есть права, но нет приёмника изменений».
+            if self._can_edit and self._bus is None:
+                hint = "(только чтение — редактор ролей недоступен)"
+            else:
+                hint = "(только чтение)"
+            readonly_label = QLabel(hint)
             readonly_label.setProperty("role", "readonly-hint")
             main_layout.addWidget(readonly_label)
 
@@ -97,18 +108,14 @@ class RolesPanel(QWidget):
         # Список ролей (фиксированная ширина ~160px)
         self._roles_list = QListWidget()
         self._roles_list.setFixedWidth(160)
-        self._roles_list.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
-        )
+        self._roles_list.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
-        # Матрица прав (редактируемая при наличии roles.edit)
-        self._matrix = PermissionMatrix(editable=self._can_edit)
-        self._matrix.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        # Матрица прав: редактируема только при наличии прав И рабочего приёмника
+        self._matrix = PermissionMatrix(editable=self._edit_enabled)
+        self._matrix.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # Подключаем сигнал матрицы к ActionBus (только если editable и bus доступен)
-        if self._can_edit and self._bus is not None:
+        # Подключаем сигнал матрицы к ActionBus (только если редактирование реально включено)
+        if self._edit_enabled:
             self._matrix.permissions_changed.connect(self._on_permissions_changed)
 
         content_layout.addWidget(self._roles_list)
@@ -119,15 +126,11 @@ class RolesPanel(QWidget):
         # Кнопки создаются здесь, но размещаются в action panel секции
         self._btn_create = QPushButton("Создать роль")
         self._btn_create.setEnabled(self._can_create)
-        self._btn_create.setToolTip(
-            "" if self._can_create else "Недостаточно прав (roles.create)"
-        )
+        self._btn_create.setToolTip("" if self._can_create else "Недостаточно прав (roles.create)")
 
         self._btn_delete = QPushButton("Удалить роль")
         self._btn_delete.setEnabled(self._can_delete)
-        self._btn_delete.setToolTip(
-            "" if self._can_delete else "Недостаточно прав (roles.delete)"
-        )
+        self._btn_delete.setToolTip("" if self._can_delete else "Недостаточно прав (roles.delete)")
         self._btn_delete.clicked.connect(self._on_delete_clicked)
 
         # --- Инициализация данных ---
@@ -193,9 +196,7 @@ class RolesPanel(QWidget):
     # Обработчики кнопок
     # ------------------------------------------------------------------
 
-    def _on_permissions_changed(
-        self, role_name: str, old_perms: list[str], new_perms: list[str]
-    ) -> None:
+    def _on_permissions_changed(self, role_name: str, old_perms: list[str], new_perms: list[str]) -> None:
         """Отправить role_update через ActionBus при изменении матрицы."""
         if self._bus is None:
             return

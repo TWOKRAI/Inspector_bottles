@@ -10,6 +10,7 @@ GuiStateBindings регистрирует обратные вызовы чере
 
 from __future__ import annotations
 
+import logging
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING
@@ -20,6 +21,10 @@ from .glob_match import match_glob
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.bridge_impl import DataReceiverBridge
+
+# Несовместимость виджета со значением — ожидаемая ситуация (не валим GUI), но по
+# правилу 5 не глушим молча: логируем на debug, чтобы видеть при отладке биндингов.
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +279,8 @@ class GuiStateBindings:
             if match_glob(fpattern, path):
                 try:
                     fcallback(path, value)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _logger.debug("bindings: fan-out callback failed on %s (pattern %s): %s", path, fpattern, exc)
 
     def _apply_to_widget(self, handle: BindingHandle, value: Any) -> bool:
         """Применить значение к виджету подписки через setter.
@@ -299,14 +304,14 @@ class GuiStateBindings:
         if setter is not None:
             try:
                 setter(widget, display_value)
-            except Exception:
-                pass  # Виджет несовместим — тихо пропускаем
+            except Exception as exc:
+                _logger.debug("bindings: setter '%s' failed on %s: %s", handle.prop, handle.pattern, exc)
         else:
             # Fallback: getattr(widget, prop)(value)
             try:
                 method = getattr(widget, handle.prop, None)
                 if callable(method):
                     method(display_value)
-            except Exception:
-                pass
+            except Exception as exc:
+                _logger.debug("bindings: fallback method '%s' failed on %s: %s", handle.prop, handle.pattern, exc)
         return True

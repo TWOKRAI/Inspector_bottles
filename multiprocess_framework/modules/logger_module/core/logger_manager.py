@@ -112,7 +112,10 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
 
     def initialize(self) -> bool:
         try:
-            self._dispatcher.initialize()
+            # _dispatcher (унаследован от ChannelRoutingManager) в LoggerManager мёртв:
+            # ни одного register_handler/dispatch — логирование идёт через CRM-каналы +
+            # BatchBuffer. Его no-op lifecycle не вызываем (план comm-system §11.16).
+            # Инстанс остаётся в базе (его использует ErrorManager) — базу не трогаем.
             if self._buffer:
                 self._buffer.start()
             self.is_initialized = True
@@ -128,7 +131,7 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             self.flush()
             if self._buffer:
                 self._buffer.stop()
-            self._dispatcher.shutdown()
+            # _dispatcher.shutdown() не вызываем — он мёртв в LoggerManager (§11.16, см. initialize).
 
             for channel in self._channel_registry.clear():
                 try:
