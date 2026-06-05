@@ -510,6 +510,33 @@ class RouterManager(ChannelRoutingManager):
             except Exception as exc:
                 self._log_warning(f"reply_to_request '{cmd_name}': {exc}")
 
+    def _route_by_kind(self, processed: Dict[str, Any]) -> None:
+        """Kind-router (регулировщик по виду `type`): направить входящее
+        сообщение нужному получателю.
+
+        - ``type=="command"`` → CommandManager (через :meth:`_dispatch_command`):
+          единственный владелец команд, резолв по `command`, авто-reply по request_id.
+        - прочие виды (``event``/``system``/``data``…) → ``message_dispatcher`` по
+          ключу `command|type` (обработчики событий `state.changed` и heartbeat
+          зарегистрированы там по ключу).
+
+        Вызывается из :meth:`receive` ПОСЛЕ `_route_to_worker` (P2.2) и резолва
+        pending-ответа — порядок инвариантен.
+        """
+        if processed.get("type") == "command":
+            self._dispatch_command(processed)
+            return
+
+        dispatch_key = processed.get("command") or processed.get("type", "")
+        if dispatch_key:
+            try:
+                self.message_dispatcher.dispatch(
+                    processed,
+                    key_field="command" if processed.get("command") else "type",
+                )
+            except Exception as exc:
+                self._log_warning(f"message_dispatcher error for '{dispatch_key}': {exc}")
+
     # ================================================================
     # RECEIVE
     # ================================================================
@@ -579,24 +606,8 @@ class RouterManager(ChannelRoutingManager):
                     self._inc_stat("received")
                     continue
 
-                # P4.4.1 (B2 kind-router): маршрутизация по ВИДУ `type`.
-                # type=="command" → CommandManager (единственный владелец командных
-                # ключей; резолв по `command` + транспортный авто-reply по request_id).
-                # Прочие виды (event/system/data/…) → message_dispatcher по ключу
-                # command|type, как раньше: state.changed (type=event) и heartbeat
-                # (type=system) остаются на message_dispatcher-пути.
-                if processed.get("type") == "command":
-                    self._dispatch_command(processed)
-                else:
-                    dispatch_key = processed.get("command") or processed.get("type", "")
-                    if dispatch_key:
-                        try:
-                            self.message_dispatcher.dispatch(
-                                processed,
-                                key_field="command" if processed.get("command") else "type",
-                            )
-                        except Exception as exc:
-                            self._log_warning(f"message_dispatcher error for '{dispatch_key}': {exc}")
+                # P4.4 (B2): kind-router — регулировщик по виду `type`.
+                self._route_by_kind(processed)
 
                 result.append(Message.from_dict(processed) if return_messages else processed)
                 self._inc_stat("received")
