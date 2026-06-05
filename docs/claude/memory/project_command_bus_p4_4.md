@@ -6,11 +6,12 @@ metadata:
 ---
 
 TRH P4.4 (главная работа P4) — план `plans/2026-05-31_transport-router-hub/p4.4_command-bus.md`.
-Статус 2026-06-05: **P4.4.0 recon DONE** + **B2 (сверено с comm-system §4)** + **P4.4.1 core DONE**
-(ветка `feat/command-bus`). kind-router по `type` в receive() (`_dispatch_command`: type=command→CM,
-авто-reply по request_id, manages_own_reply, strangler-fallback); process.command+register_update свёрнуты
-в команды CM. framework 3219 passed, qt-smoke OK. Остаток P4.4.1b: снять мёртвый auto_register_ipc +
-register_commands_with_router-копии + fallback.
+Статус 2026-06-05: **P4.4.0 recon DONE** + **B2 (сверено с comm-system §4)** + **P4.4.1 + P4.4.1b DONE**
+(ветка `feat/command-bus`, коммиты aadb38c7 core, 1e7d7b49 cleanup). kind-router по `type` в receive()
+(`_dispatch_command`: type=command→CM, авто-reply по request_id, manages_own_reply, strangler-fallback с
+warning); process.command+register_update свёрнуты в команды CM. P4.4.1b: удалены
+register_commands_with_router + _make_command_handler (копии команд в message_dispatcher) → дупликация
+реестра устранена. framework 3221 passed, qt-smoke OK (0 strangler-warnings). Далее P4.4.2 observability-seam.
 
 **Сверка с comm-system-target-architecture §4 (ревью B+):** «два диспетчера не дубль» = про ДВИЖКИ (один
 Dispatcher, B2 не нарушает), НЕ про дупликацию РЕЕСТРА команд (корень баг-класса telemetry/auto_register_ipc).
