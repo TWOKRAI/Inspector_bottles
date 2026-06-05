@@ -482,7 +482,16 @@ class RouterManager(ChannelRoutingManager):
 
         if info is None:
             # Команда не в CommandManager — fallback в message_dispatcher (strangler).
+            # Если CommandManager ЕСТЬ, но ключа в нём нет — это пропущенная миграция
+            # (после P4.4.1b все type==command живут в CM): логируем warning-диагноз.
+            # Если CommandManager нет (bare-процесс/тест) — тихий fallback, прежнее
+            # поведение. TODO P4.4.6: убрать fallback, когда integration подтвердит «тишину».
             if cmd_name:
+                if cm is not None:
+                    self._log_warning(
+                        f"command '{cmd_name}' нет в CommandManager — strangler-fallback в "
+                        f"message_dispatcher (миграция команды в CM не завершена?)"
+                    )
                 try:
                     self.message_dispatcher.dispatch(processed, key_field="command")
                 except Exception as exc:

@@ -20,6 +20,7 @@ import unittest
 from queue import Queue
 from types import SimpleNamespace
 from typing import Callable
+from unittest.mock import Mock
 
 from ..core.router_manager import RouterManager, _PendingRequest
 from ..channels.queue_channel import QueueChannel
@@ -1322,6 +1323,70 @@ class TestRequestResponse(unittest.TestCase):
         self.assertTrue(pending.event.is_set(), "ответ должен резолвить pending")
         self.assertEqual(pending.response["result"], {"ok": 1})
         router._pending_requests.clear()
+
+
+class TestDispatchCommand(unittest.TestCase):
+    """P4.4.1 (B2): kind-router исполняет type==command через CommandManager.
+
+    Заменяет прежние тесты closure _make_command_handler (удалён): reply теперь
+    делает транспорт (_dispatch_command), CommandManager — единственный владелец.
+    """
+
+    def _router_with_cm(self, cm):
+        router = _make_router("rr_cmd")
+        router.initialize()
+        router.process = SimpleNamespace(command_manager=cm)
+        router.reply_to_request = Mock()
+        router.message_dispatcher.dispatch = Mock()
+        return router
+
+    def test_command_in_cm_dispatched_and_replied(self):
+        cm = Mock()
+        cm.get_command_info = Mock(return_value={"key": "worker.create", "metadata": {}})
+        cm.handle_command = Mock(return_value={"ok": 1})
+        router = self._router_with_cm(cm)
+        msg = {"type": "command", "command": "worker.create", "request_id": "c1"}
+        router._dispatch_command(msg)
+        cm.handle_command.assert_called_once_with(msg)
+        router.reply_to_request.assert_called_once_with(msg, {"ok": 1})
+        router.message_dispatcher.dispatch.assert_not_called()
+
+    def test_manages_own_reply_skips_auto_reply(self):
+        cm = Mock()
+        cm.get_command_info = Mock(return_value={"key": "process.command", "metadata": {"manages_own_reply": True}})
+        cm.handle_command = Mock(return_value=None)
+        router = self._router_with_cm(cm)
+        # data.correlation_id присутствует — без manages_own_reply авто-reply бы сработал.
+        msg = {"type": "command", "command": "process.command", "data": {"correlation_id": "x"}}
+        router._dispatch_command(msg)
+        cm.handle_command.assert_called_once_with(msg)
+        router.reply_to_request.assert_not_called()
+
+    def test_command_not_in_cm_falls_back(self):
+        cm = Mock()
+        cm.get_command_info = Mock(return_value=None)
+        cm.handle_command = Mock()
+        router = self._router_with_cm(cm)
+        router._dispatch_command({"type": "command", "command": "legacy.cmd"})
+        cm.handle_command.assert_not_called()
+        router.message_dispatcher.dispatch.assert_called_once()
+
+    def test_no_command_manager_falls_back(self):
+        router = _make_router("rr_nocm")
+        router.initialize()
+        router.process = None
+        router.message_dispatcher.dispatch = Mock()
+        router._dispatch_command({"type": "command", "command": "x"})
+        router.message_dispatcher.dispatch.assert_called_once()
+
+    def test_handler_exception_replies_error(self):
+        cm = Mock()
+        cm.get_command_info = Mock(return_value={"key": "boom", "metadata": {}})
+        cm.handle_command = Mock(side_effect=RuntimeError("boom"))
+        router = self._router_with_cm(cm)
+        router._dispatch_command({"type": "command", "command": "boom", "request_id": "c1"})
+        router.reply_to_request.assert_called_once()
+        self.assertEqual(router.reply_to_request.call_args[0][1].get("status"), "error")
 
 
 if __name__ == "__main__":

@@ -352,9 +352,11 @@ class BuiltinCommands:
     def _cmd_introspect_handlers(self, data=None, **kwargs) -> dict:
         """Приёмники процесса: ключи router message_dispatcher + команды CommandManager.
 
-        ``router_handlers`` — это реальные ключи, по которым процесс принимает
-        IPC-сообщения (включая register_update, если плагин его зарегистрировал).
-        Отсутствие ожидаемого ключа = диагноз (находка Этапа 2).
+        P4.4.1 (B2): команды (type=="command", вкл. register_update/process.command/
+        state.*) приходят через kind-router → CommandManager → поле ``commands``.
+        ``router_handlers`` (message_dispatcher) держит НЕ-командные ключи: события
+        (state.changed), heartbeat и т.п. Отсутствие ожидаемого ключа в нужном поле
+        = диагноз (находка Этапа 2).
         """
         svc = self._services
         router_handlers: list = []
