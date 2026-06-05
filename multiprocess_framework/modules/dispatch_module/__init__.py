@@ -9,7 +9,6 @@ from .core.base_dispatcher import BaseDispatcher
 from .core.dispatcher import Dispatcher
 from .builders.scenario_builder import ScenarioBuilder
 from .interfaces import IDispatcher
-from .configs.dispatcher_config import DispatcherConfig
 
 __all__ = [
     # Типы данных
@@ -24,6 +23,4 @@ __all__ = [
     "IDispatcher",
     # Лёгкий диспетчер (без ObservableMixin, EXACT_MATCH only)
     "BaseDispatcher",
-    "DispatcherConfig",
 ]
-

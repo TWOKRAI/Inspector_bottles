@@ -2,19 +2,18 @@
 """
 Публичные контракты message_module.
 
-IMessage        — контракт любого сообщения (Protocol, structural typing).
-IMessageFactory — фабрика для создания сообщений (ABC).
+IMessage — контракт любого сообщения (Protocol, structural typing).
 
 Правило: внешние модули импортируют только из interfaces.py, не из core/.
-Создавать сообщения через MessageFactory.create() или Message.create().
+Создавать сообщения через Message.create() или MessageAdapter.
 
 Правило Dict at Boundary (ADR-008):
     При передаче через границу процессов:  msg.to_dict()
     При получении из очереди:              Message.from_dict(raw_dict)
 """
+
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set, Union
 
 try:
@@ -69,27 +68,3 @@ class IMessage(Protocol):
     def clone(self) -> "IMessage": ...
 
     def get_schema_info(self) -> Optional[Dict[str, str]]: ...
-
-
-class IMessageFactory(ABC):
-    """Контракт фабрики сообщений."""
-
-    @abstractmethod
-    def create(
-        self,
-        msg_type: Union[str, Any],
-        sender: str,
-        **kwargs: Any,
-    ) -> IMessage:
-        """Создать сообщение по типу и отправителю."""
-        ...
-
-    @abstractmethod
-    def from_dict(self, data: Dict[str, Any]) -> IMessage:
-        """Восстановить сообщение из словаря (после границы процесса)."""
-        ...
-
-    @abstractmethod
-    def from_json(self, json_str: str) -> IMessage:
-        """Восстановить сообщение из JSON-строки."""
-        ...

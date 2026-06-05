@@ -135,7 +135,7 @@ GUI / домен (in-proc)   EventBus · QtEventBus · CommandDispatcherOrchestr
 - `request_id` — **единое** имя корреляции. `data.correlation_id` — только backward-shim чтения.
 - `queue_type` — выводится из `type` (`_select_queue_type`); в продюсерах не хардкодить.
 - `data_type` — самостоятелен как discriminator для типа `DATA` (frame_ready/state_delta/register_update); не удалять.
-- Мёртвые поля (`routers`, `subtype`, `IMessageFactory`) — на удаление (см. план §11).
+- Мёртвые поля (`routers`, `subtype`) — на удаление (см. план §11). `IMessageFactory` — удалён (§11.4).
 
 ---
 

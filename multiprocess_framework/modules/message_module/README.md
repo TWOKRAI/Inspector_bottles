@@ -448,16 +448,6 @@ def process_incoming(msg: IMessage) -> None:
     ...
 ```
 
-`IMessageFactory` — для dependency injection и тестирования:
-
-```python
-from message_module.interfaces import IMessageFactory
-
-class MyManager:
-    def __init__(self, factory: IMessageFactory):
-        self._factory = factory
-
-    def create_ping(self) -> IMessage:
-        return self._factory.create("command", self.name,
-                                    targets=["other"], command="ping")
-```
+Для создания сообщений используйте `Message.create()` или `MessageAdapter(sender)`
+(см. примеры выше). Отдельной фабрики-абстракции нет (`IMessageFactory` удалён —
+0 реализаций; план comm-system §11.4).

@@ -248,46 +248,15 @@ class PluginOrchestrator:
             return None
 
     def _boot_registers(self, registers_manager: Any) -> None:
-        """Boot-time: handler register_update + отправка schemas в PM."""
-        # Handler для runtime register_update от GUI/других процессов
+        """Boot-time: регистрация handler'а register_update от GUI/других процессов.
+
+        (Раньше здесь же слались register_schemas в PM «для broadcast» — мёртвый
+        relay: приёмника msg_type register_schemas нет нигде, dead letter. Удалён
+        по плану comm-system §11.7.)
+        """
         router = getattr(self._services, "router_manager", None)
         if router:
             router.register_message_handler("register_update", self._on_register_update)
-
-        # Отправить schemas в ProcessManager для broadcast
-        try:
-            schemas_payload = registers_manager.model_dump_all()
-
-            if self._io is not None:
-                # Через ProcessIO (если есть)
-                self._io.send_data(
-                    "process_manager",
-                    "register_schemas",
-                    {
-                        "process_name": self._services.name,
-                        "schemas": schemas_payload,
-                    },
-                )
-            else:
-                # Напрямую через services
-                from multiprocess_framework.modules.message_module import MessageAdapter
-
-                msg = MessageAdapter.create_message(
-                    source=self._services.name,
-                    target="process_manager",
-                    msg_type="register_schemas",
-                    data={
-                        "process_name": self._services.name,
-                        "schemas": schemas_payload,
-                    },
-                )
-                self._services.send_message("process_manager", msg)
-
-            self._services.log_info(
-                f"PluginOrchestrator[{self._services.name}]: register_schemas -> PM ({len(schemas_payload)} registers)"
-            )
-        except Exception as e:
-            self._services.log_error(f"PluginOrchestrator[{self._services.name}]: register_schemas send: {e}")
 
     def _on_register_update(self, msg: dict) -> None:
         """Handler: GUI/другой процесс обновляет значение регистра."""
@@ -308,36 +277,8 @@ class PluginOrchestrator:
             self._services.log_info(
                 f"PluginOrchestrator[{self._services.name}]: register_update {register_name}.{field_name} = {value}"
             )
-            # Relay register_changed -> PM для broadcast
-            try:
-                if self._io is not None:
-                    self._io.send_data(
-                        "process_manager",
-                        "register_changed",
-                        {
-                            "process_name": self._services.name,
-                            "register": register_name,
-                            "field": field_name,
-                            "value": value,
-                        },
-                    )
-                else:
-                    from multiprocess_framework.modules.message_module import MessageAdapter
-
-                    relay_msg = MessageAdapter.create_message(
-                        source=self._services.name,
-                        target="process_manager",
-                        msg_type="register_changed",
-                        data={
-                            "process_name": self._services.name,
-                            "register": register_name,
-                            "field": field_name,
-                            "value": value,
-                        },
-                    )
-                    self._services.send_message("process_manager", relay_msg)
-            except Exception:
-                pass
+            # (Раньше тут был relay register_changed -> PM «для broadcast» — мёртвое
+            # письмо: приёмника msg_type register_changed нет. Удалён по плану §11.7/8.)
         else:
             self._services.log_error(
                 f"PluginOrchestrator[{self._services.name}]: register_update failed "

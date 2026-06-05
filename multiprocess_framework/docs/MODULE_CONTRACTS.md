@@ -116,7 +116,6 @@
 - `Message(SchemaBase)` — реализация с `model_dump()`/`from_dict()`, fluent API: `set_priority`, `set_targets`, `set_channel`.
 - `MessageType(str, Enum)` — `COMMAND/LOG/SYSTEM/BROADCAST/DATA/REQUEST/RESPONSE/EVENT/GENERAL`.
 - `MessageAdapter(sender)` — `command(targets, command, args, …)`, `log(level, msg, …)`, `system(targets, action, …)`, `broadcast(content, …)`, `data(targets, data_type, data, …)`, `request(targets, request_type, …)`, `response(targets, request_id, result, …)`, `event(event_type, …)`.
-- `IMessageFactory(Protocol)` — для тестовых дублёров.
 - Опциональные строгие схемы: `CommandMessageSchema`, `LogMessageSchema` (`extra='forbid'`).
 
 **Инварианты:**
