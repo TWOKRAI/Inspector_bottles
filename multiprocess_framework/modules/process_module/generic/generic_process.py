@@ -71,6 +71,13 @@ class GenericProcess(ProcessModule):
                 slot="output_frames",
                 log_error=self._log_error,
             )
+            # P3.1.2: Claim Check кадров — забота хаба, а не producer'ов. Регистрируем
+            # send-middleware: SourceProducer/PipelineExecutor шлют msg с frame в data,
+            # router сам выносит его в SHM (strip_and_write по generic-семантике). Guard
+            # внутри метода (type=="data") — no-op для команд/heartbeat/state.
+            router = getattr(self, "router_manager", None)
+            if router is not None:
+                router.add_send_middleware(shm_middleware.strip_data_frame_on_send)
 
         # chain_queue: DataReceiver -> PipelineExecutor
         self._chain_queue: queue.Queue = queue.Queue(maxsize=queue_size)

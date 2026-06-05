@@ -212,10 +212,9 @@ class PipelineExecutor:
     def _send_results(self, items: list[dict]) -> None:
         """Отправить items по IPC. Routing: item['target'] → per-item, else chain_targets."""
         for item in items:
-            # SHM write: убрать frame, записать в SHM
-            if self._shm and "frame" in item:
-                item = self._shm.strip_and_write(item)
-
+            # P3.1.2: SHM-write (Claim Check) больше НЕ зовётся здесь явно — frame
+            # едет в msg["data"] и выносится в SHM router-send-middleware
+            # (FrameShmMiddleware.strip_data_frame_on_send, регистрируется в GenericProcess).
             # Определить targets
             per_item_target = item.pop("target", None)
             targets = [per_item_target] if per_item_target else self._chain_targets

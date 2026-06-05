@@ -134,20 +134,13 @@ class SourceProducer:
             self._cycle_metrics.record(time.monotonic() - t_start)
 
     def _send_item(self, item: dict) -> None:
-        """SHM write + IPC send одного item."""
-        # SHM write: убрать frame, записать в SHM
-        if self._shm and "frame" in item:
-            item = self._shm.strip_and_write(item)
-            # [TRACE] Проверить что SHM write сработал
-            if getattr(self, "_trace_cnt", 0) % 30 == 1:
-                has_shm = "shm_name" in item and "shm_actual_name" in item
-                self._log_debug(
-                    f"[TRACE] SourceProducer({self._plugin.name}): "
-                    f"strip_and_write → shm_ok={has_shm}, "
-                    f"owner={item.get('owner')}, shm_name={item.get('shm_name')}, "
-                    f"shm_actual={item.get('shm_actual_name')}"
-                )
+        """IPC send одного item.
 
+        P3.1.2: SHM-write (Claim Check) больше НЕ зовётся здесь явно — frame едет
+        в ``msg["data"]`` и выносится в SHM router-send-middleware
+        (``FrameShmMiddleware.strip_data_frame_on_send``, регистрируется в
+        GenericProcess). Producer не знает про SHM.
+        """
         # Routing: item["target"] → per-item, else chain_targets
         per_item_target = item.pop("target", None)
         targets = [per_item_target] if per_item_target else self._chain_targets

@@ -202,6 +202,31 @@ class FrameShmMiddleware:
         except Exception as e:
             self._log_error(f"FrameShmMiddleware: allocate SHM error: {e}")
 
+    def strip_data_frame_on_send(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """Send-middleware для data-pipeline (P3.1.2): вынести frame из msg["data"] в SHM.
+
+        Регистрируется через ``RouterManager.add_send_middleware`` в GenericProcess —
+        Claim Check кадров становится делом хаба, а не явного вызова в
+        SourceProducer/PipelineExecutor. Использует generic-семантику
+        :meth:`strip_and_write` (lazy-alloc, round-robin ring, pickle-fallback) поверх
+        ``msg["data"]`` (item остаётся тем же dict — мутируется на месте).
+
+        Срабатывает ТОЛЬКО на data-кадрах (``type=="data"`` и frame в ``data``) —
+        команды/heartbeat/state проходят без изменений (быстрый guard, ноль накладных
+        на не-кадровых сообщениях). Путь top-level-frame (`wire.configure` → on_send)
+        не затрагивается: там frame в ``msg["frame"]``, а не в ``msg["data"]``.
+
+        Мультикаст: producer переиспользует один item для нескольких targets; первый
+        ``router.send`` стрипает его (frame → SHM, координаты в data), последующие
+        видят item уже без frame → no-op. Паритет с прежним «strip один раз до цикла».
+        """
+        if msg.get("type") != "data":
+            return msg
+        data = msg.get("data")
+        if isinstance(data, dict) and data.get("frame") is not None:
+            self.strip_and_write(data)
+        return msg
+
     # ------------------------------------------------------------------
     # RouterManager middleware-протокол: on_send / on_receive
     # ------------------------------------------------------------------
