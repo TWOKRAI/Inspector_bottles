@@ -3,7 +3,7 @@
 RouterManager — наследник ChannelRoutingManager.
 
 Координирует AsyncSender (outgoing pipeline), AsyncReceiver (incoming poll),
-channel_dispatcher (outgoing routing) и message_dispatcher (incoming handling).
+channel_dispatcher (outgoing routing) и event_dispatcher (incoming handling).
 """
 
 import threading
@@ -41,7 +41,7 @@ class _PendingRequest:
 
 
 class RouterManager(ChannelRoutingManager):
-    """Фасад маршрутизации: AsyncSender/Receiver, CRM-каналы, channel_dispatcher + message_dispatcher."""
+    """Фасад маршрутизации: AsyncSender/Receiver, CRM-каналы, channel_dispatcher + event_dispatcher."""
 
     def __init__(
         self,
@@ -91,8 +91,8 @@ class RouterManager(ChannelRoutingManager):
         self._send_mw = MiddlewarePipeline("send", log_warning=self._log_warning)
         self._recv_mw = MiddlewarePipeline("receive", log_warning=self._log_warning)
         self.channel_dispatcher = self._dispatcher
-        self.message_dispatcher = Dispatcher(
-            f"{manager_name}_message_dispatcher",
+        self.event_dispatcher = Dispatcher(
+            f"{manager_name}_event_dispatcher",
             process=process,
             default_strategy=dispatch_strategy,
         )
@@ -131,7 +131,7 @@ class RouterManager(ChannelRoutingManager):
     def initialize(self) -> bool:
         try:
             self._dispatcher.initialize()
-            self.message_dispatcher.initialize()
+            self.event_dispatcher.initialize()
             self._sender.start()
             self.is_initialized = True
             self._log_info(
@@ -154,7 +154,7 @@ class RouterManager(ChannelRoutingManager):
                     pass
 
             self._dispatcher.shutdown()
-            self.message_dispatcher.shutdown()
+            self.event_dispatcher.shutdown()
             self.is_initialized = False
             self._log_info("RouterManager shutdown completed")
             return True
@@ -472,7 +472,7 @@ class RouterManager(ChannelRoutingManager):
         пропускается (иначе двойной ответ).
 
         Strangler-safety: если команды нет в CommandManager (не мигрирована),
-        fallback в ``message_dispatcher`` по ключу — сохраняет прежнее поведение
+        fallback в ``event_dispatcher`` по ключу — сохраняет прежнее поведение
         прямых регистраций. TODO P4.4.6: убрать fallback после подтверждения, что
         все ``type==command`` хендлеры живут в CommandManager.
         """
@@ -481,7 +481,7 @@ class RouterManager(ChannelRoutingManager):
         info = cm.get_command_info(cmd_name) if (cm and cmd_name) else None
 
         if info is None:
-            # Команда не в CommandManager — fallback в message_dispatcher (strangler).
+            # Команда не в CommandManager — fallback в event_dispatcher (strangler).
             # Если CommandManager ЕСТЬ, но ключа в нём нет — это пропущенная миграция
             # (после P4.4.1b все type==command живут в CM): логируем warning-диагноз.
             # Если CommandManager нет (bare-процесс/тест) — тихий fallback, прежнее
@@ -490,10 +490,10 @@ class RouterManager(ChannelRoutingManager):
                 if cm is not None:
                     self._log_warning(
                         f"command '{cmd_name}' нет в CommandManager — strangler-fallback в "
-                        f"message_dispatcher (миграция команды в CM не завершена?)"
+                        f"event_dispatcher (миграция команды в CM не завершена?)"
                     )
                 try:
-                    self.message_dispatcher.dispatch(processed, key_field="command")
+                    self.event_dispatcher.dispatch(processed, key_field="command")
                 except Exception as exc:
                     self._log_warning(f"command fallback dispatch '{cmd_name}': {exc}")
             return
@@ -516,7 +516,7 @@ class RouterManager(ChannelRoutingManager):
 
         - ``type=="command"`` → CommandManager (через :meth:`_dispatch_command`):
           единственный владелец команд, резолв по `command`, авто-reply по request_id.
-        - прочие виды (``event``/``system``/``data``…) → ``message_dispatcher`` по
+        - прочие виды (``event``/``system``/``data``…) → ``event_dispatcher`` по
           ключу `command|type` (обработчики событий `state.changed` и heartbeat
           зарегистрированы там по ключу).
 
@@ -530,12 +530,12 @@ class RouterManager(ChannelRoutingManager):
         dispatch_key = processed.get("command") or processed.get("type", "")
         if dispatch_key:
             try:
-                self.message_dispatcher.dispatch(
+                self.event_dispatcher.dispatch(
                     processed,
                     key_field="command" if processed.get("command") else "type",
                 )
             except Exception as exc:
-                self._log_warning(f"message_dispatcher error for '{dispatch_key}': {exc}")
+                self._log_warning(f"event_dispatcher error for '{dispatch_key}': {exc}")
 
     # ================================================================
     # RECEIVE
@@ -548,7 +548,7 @@ class RouterManager(ChannelRoutingManager):
         input_channels_only: bool = True,
         channel_types: Optional[List[str]] = None,
     ) -> List[Union["Message", Dict[str, Any]]]:
-        """Sync опрос каналов + receive middleware + message_dispatcher.
+        """Sync опрос каналов + receive middleware + event_dispatcher.
         input_channels_only=True: опрашивать только каналы процесса (process.name_*).
         channel_types: если задан (например ['system'] или ['data']), опрашивать только
         каналы с соответствующим суффиксом (process_system, process_data).
@@ -799,7 +799,7 @@ class RouterManager(ChannelRoutingManager):
         return True
 
     # ================================================================
-    # MESSAGE HANDLERS (message_dispatcher API)
+    # MESSAGE HANDLERS (event_dispatcher API)
     # ================================================================
 
     def register_message_handler(
@@ -812,7 +812,7 @@ class RouterManager(ChannelRoutingManager):
         tags: Optional[List[str]] = None,
         strategy: DispatchStrategy = DispatchStrategy.EXACT_MATCH,
     ) -> bool:
-        return self.message_dispatcher.register_handler(
+        return self.event_dispatcher.register_handler(
             key=key,
             handler=handler,
             expects_full_message=expects_full_message,
@@ -844,7 +844,7 @@ class RouterManager(ChannelRoutingManager):
         return self._worker_handlers.pop(worker_name, None) is not None
 
     def register_message_scenario(self, scenario_name: str, description: str = "") -> bool:
-        return self.message_dispatcher.create_scenario(scenario_name, description)
+        return self.event_dispatcher.create_scenario(scenario_name, description)
 
     def add_handler_to_message_scenario(
         self,
@@ -853,7 +853,7 @@ class RouterManager(ChannelRoutingManager):
         handler: Callable,
         stage: int = 0,
     ) -> bool:
-        return self.message_dispatcher.add_handler_to_scenario(
+        return self.event_dispatcher.add_handler_to_scenario(
             scenario_name=scenario_name,
             handler_key=handler_key,
             handler=handler,
@@ -890,7 +890,7 @@ class RouterManager(ChannelRoutingManager):
         """Полная статистика: счётчики, каналы, dispatcher'ы, потоки."""
         base = super().get_stats() if hasattr(super(), "get_stats") else {}
         ch_h = self.channel_dispatcher.get_all_handlers()
-        msg_h = self.message_dispatcher.get_all_handlers()
+        msg_h = self.event_dispatcher.get_all_handlers()
         with self._stats_lock:
             stats_snap = dict(self._stats)
 
@@ -925,8 +925,8 @@ class RouterManager(ChannelRoutingManager):
         """Состояние обоих dispatcher'ов: handlers, scenarios, counts."""
         ch_h = self.channel_dispatcher.get_all_handlers()
         ch_s = self.channel_dispatcher.get_all_scenarios()
-        msg_h = self.message_dispatcher.get_all_handlers()
-        msg_s = self.message_dispatcher.get_all_scenarios()
+        msg_h = self.event_dispatcher.get_all_handlers()
+        msg_s = self.event_dispatcher.get_all_scenarios()
 
         return {
             "channel_dispatcher": {
@@ -935,8 +935,8 @@ class RouterManager(ChannelRoutingManager):
                 "handlers": ch_h,
                 "scenarios": ch_s,
             },
-            "message_dispatcher": {
-                "name": self.message_dispatcher.manager_name,
+            "event_dispatcher": {
+                "name": self.event_dispatcher.manager_name,
                 "handler_count": len(msg_h),
                 "handlers": msg_h,
                 "scenarios": msg_s,

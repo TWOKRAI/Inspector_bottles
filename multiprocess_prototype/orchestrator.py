@@ -74,9 +74,9 @@ class ProcessManagerProcessApp(ProcessManagerProcess):
         )
 
         # auto_register_ipc=False: НЕ регистрировать state.* напрямую (RAW) в
-        # message_dispatcher. P4.4.1 (B2): state.* — команды CommandManager
+        # event_dispatcher. P4.4.1 (B2): state.* — команды CommandManager
         # (register_commands ниже), kind-router в receive() диспатчит их туда по
-        # type=="command", reply делает транспорт. RAW-копии в message_dispatcher
+        # type=="command", reply делает транспорт. RAW-копии в event_dispatcher
         # были бы dead-path. router всё равно нужен DeltaDispatcher'у (push дельт).
         self._state_store_manager = StateStoreManager(
             router=self.router_manager,
@@ -99,7 +99,7 @@ class ProcessManagerProcessApp(ProcessManagerProcess):
         # P4.4.1 (B2): этого ДОСТАТОЧНО — kind-router в receive() диспатчит входящие
         # state.* (type=="command") напрямую в CommandManager, а reply делает транспорт
         # по request_id. Прежний wrapped-путь (register_commands_with_router +
-        # _make_command_handler, копировавший state.* в message_dispatcher) удалён:
+        # _make_command_handler, копировавший state.* в event_dispatcher) удалён:
         # дупликация реестра устранена, конфликт «первая-регистрация-побеждает» (RAW vs
         # wrapped, ломавший state.get/subscribe timeout'ом) исчез структурно.
         if self.command_manager:

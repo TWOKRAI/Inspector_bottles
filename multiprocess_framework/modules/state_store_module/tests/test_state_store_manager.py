@@ -94,7 +94,7 @@ class TestStateStoreManagerInit:
         router = MockRouter()
         mgr = StateStoreManager(router=router, auto_register_ipc=False)
         assert mgr.initialize() is True
-        # RAW-регистрации НЕТ — message_dispatcher не занят сырыми хендлерами.
+        # RAW-регистрации НЕТ — event_dispatcher не занят сырыми хендлерами.
         assert router.registered_handlers == {}
 
     def test_initialize_auto_register_ipc_true_is_default(self):

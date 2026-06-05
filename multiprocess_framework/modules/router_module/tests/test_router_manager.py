@@ -9,7 +9,7 @@
 - Асинхронная отправка (send_async) с PriorityQueue
 - Получение (receive) — sync poll
 - Маршрутизация через channel_dispatcher (exact, broadcast)
-- Обработчики входящих сообщений (message_dispatcher)
+- Обработчики входящих сообщений (event_dispatcher)
 - Middleware pipeline (send / receive)
 - Инспекция (get_dispatcher_info, get_stats)
 """
@@ -343,7 +343,7 @@ class TestAttachLogger(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Тесты message_dispatcher — обработчики входящих
+# Тесты event_dispatcher — обработчики входящих
 # ---------------------------------------------------------------------------
 
 
@@ -386,7 +386,7 @@ class TestMessageHandlers(unittest.TestCase):
         self.assertIn("b", log)
 
     def test_unregistered_command_does_not_crash(self):
-        """Нет handler'а — message_dispatcher просто не вызывает ничего, без исключения."""
+        """Нет handler'а — event_dispatcher просто не вызывает ничего, без исключения."""
         self.q.put({"command": "unknown_xyz", "data": {}})
         messages = self.router.receive(timeout=0.1)
         self.assertEqual(len(messages), 1)
@@ -592,13 +592,13 @@ class TestDispatcherInfo(unittest.TestCase):
     def test_get_dispatcher_info_returns_both_dispatchers(self):
         info = self.router.get_dispatcher_info()
         self.assertIn("channel_dispatcher", info)
-        self.assertIn("message_dispatcher", info)
+        self.assertIn("event_dispatcher", info)
 
     def test_dispatcher_info_has_required_keys(self):
         info = self.router.get_dispatcher_info()
         for key in ("name", "handler_count", "handlers", "scenarios"):
             self.assertIn(key, info["channel_dispatcher"], f"missing key: {key}")
-            self.assertIn(key, info["message_dispatcher"], f"missing key: {key}")
+            self.assertIn(key, info["event_dispatcher"], f"missing key: {key}")
 
     def test_dispatcher_info_counts_match_registered(self):
         ch, _ = _make_channel()
@@ -608,7 +608,7 @@ class TestDispatcherInfo(unittest.TestCase):
 
         info = self.router.get_dispatcher_info()
         self.assertEqual(info["channel_dispatcher"]["handler_count"], 1)
-        self.assertEqual(info["message_dispatcher"]["handler_count"], 1)
+        self.assertEqual(info["event_dispatcher"]["handler_count"], 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1072,7 +1072,7 @@ class TestWorkerHandlerRouting(unittest.TestCase):
         self.assertEqual(got, ["cfg"])
 
     def test_worker_handler_skips_process_dispatch(self):
-        # Доставлено воркеру → process-level message_dispatcher НЕ зовётся.
+        # Доставлено воркеру → process-level event_dispatcher НЕ зовётся.
         worker_got: list = []
         proc_got: list = []
         self.router.register_worker_handler("w", lambda m: worker_got.append(1))
@@ -1337,7 +1337,7 @@ class TestDispatchCommand(unittest.TestCase):
         router.initialize()
         router.process = SimpleNamespace(command_manager=cm)
         router.reply_to_request = Mock()
-        router.message_dispatcher.dispatch = Mock()
+        router.event_dispatcher.dispatch = Mock()
         return router
 
     def test_command_in_cm_dispatched_and_replied(self):
@@ -1349,7 +1349,7 @@ class TestDispatchCommand(unittest.TestCase):
         router._dispatch_command(msg)
         cm.handle_command.assert_called_once_with(msg)
         router.reply_to_request.assert_called_once_with(msg, {"ok": 1})
-        router.message_dispatcher.dispatch.assert_not_called()
+        router.event_dispatcher.dispatch.assert_not_called()
 
     def test_manages_own_reply_skips_auto_reply(self):
         cm = Mock()
@@ -1369,15 +1369,15 @@ class TestDispatchCommand(unittest.TestCase):
         router = self._router_with_cm(cm)
         router._dispatch_command({"type": "command", "command": "legacy.cmd"})
         cm.handle_command.assert_not_called()
-        router.message_dispatcher.dispatch.assert_called_once()
+        router.event_dispatcher.dispatch.assert_called_once()
 
     def test_no_command_manager_falls_back(self):
         router = _make_router("rr_nocm")
         router.initialize()
         router.process = None
-        router.message_dispatcher.dispatch = Mock()
+        router.event_dispatcher.dispatch = Mock()
         router._dispatch_command({"type": "command", "command": "x"})
-        router.message_dispatcher.dispatch.assert_called_once()
+        router.event_dispatcher.dispatch.assert_called_once()
 
     def test_handler_exception_replies_error(self):
         cm = Mock()

@@ -161,7 +161,7 @@ class TestBuiltinCommandsReachableViaCommandManager:
     живут в CommandManager и достижимы через kind-router (type==command →
     CommandManager) в RouterManager.receive().
 
-    Раньше требовался ре-синк копий команд в message_dispatcher
+    Раньше требовался ре-синк копий команд в event_dispatcher
     (register_commands_with_router) — удалён: дупликация реестра устранена,
     CommandManager — единственный владелец командных ключей.
     """

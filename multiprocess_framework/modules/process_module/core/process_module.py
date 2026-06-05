@@ -151,7 +151,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self._init_custom_managers()
             self._init_application_threads()
 
-            # 6b. P4.4.1 (B2): команды НЕ копируются в message_dispatcher — kind-router
+            # 6b. P4.4.1 (B2): команды НЕ копируются в event_dispatcher — kind-router
             # в receive() диспатчит type=="command" напрямую в CommandManager.
 
             # 7. Системные потоки (message_processor) — после воркеров
@@ -603,7 +603,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._builtin_cmds = BuiltinCommands(self)
         self._builtin_cmds.register()
         # P4.4.1 (B2): builtins (worker.*/wire.*/introspect.*) живут в CommandManager;
-        # ре-синк в message_dispatcher больше не нужен — kind-router в receive()
+        # ре-синк в event_dispatcher больше не нужен — kind-router в receive()
         # диспатчит type=="command" напрямую в CommandManager.
 
         # Heartbeat (composition)

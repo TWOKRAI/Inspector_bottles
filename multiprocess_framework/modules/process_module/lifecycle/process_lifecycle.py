@@ -102,11 +102,11 @@ class ProcessLifecycle:
         return queues, queue_registry, memory_manager
 
     # P4.4.1 (B2): register_commands_with_router + _make_command_handler УДАЛЕНЫ.
-    # Раньше они КОПИРОВАЛИ все команды CommandManager в router.message_dispatcher
+    # Раньше они КОПИРОВАЛИ все команды CommandManager в router.event_dispatcher
     # (через generic-closure с reply_to_request). После kind-router'а команды
     # (type=="command") диспатчатся напрямую в CommandManager из RouterManager.receive()
     # (`_dispatch_command`), а reply делает транспорт по request_id — копии в
-    # message_dispatcher больше не нужны (дупликация реестра устранена). CommandManager —
+    # event_dispatcher больше не нужны (дупликация реестра устранена). CommandManager —
     # единственный владелец командных ключей.
 
     def shutdown(self) -> bool:

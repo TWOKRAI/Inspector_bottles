@@ -41,7 +41,7 @@ class _FakeMessageDispatcher:
 
 class _FakeRouter:
     def __init__(self, handler_keys) -> None:
-        self.message_dispatcher = _FakeMessageDispatcher(handler_keys)
+        self.event_dispatcher = _FakeMessageDispatcher(handler_keys)
 
 
 class _FakeWorkerManager:

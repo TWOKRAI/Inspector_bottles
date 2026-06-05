@@ -7,6 +7,7 @@ IMessageChannel  — контракт любого типа канала (Queue,
 
 Правило: внешние модули импортируют только из interfaces.py, не из core/.
 """
+
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Union
 from typing import TYPE_CHECKING
@@ -130,7 +131,7 @@ class IRouterManager(ABC):
     ) -> bool:
         """Привязать ключ к группе каналов (fan-out / broadcast)."""
 
-    # ---- Обработчики входящих (message_dispatcher) ----
+    # ---- Обработчики входящих (event_dispatcher) ----
 
     @abstractmethod
     def register_message_handler(

@@ -350,23 +350,23 @@ class BuiltinCommands:
         )
 
     def _cmd_introspect_handlers(self, data=None, **kwargs) -> dict:
-        """Приёмники процесса: ключи router message_dispatcher + команды CommandManager.
+        """Приёмники процесса: ключи router event_dispatcher + команды CommandManager.
 
         P4.4.1 (B2): команды (type=="command", вкл. register_update/process.command/
         state.*) приходят через kind-router → CommandManager → поле ``commands``.
-        ``router_handlers`` (message_dispatcher) держит НЕ-командные ключи: события
+        ``router_handlers`` (event_dispatcher) держит НЕ-командные ключи: события
         (state.changed), heartbeat и т.п. Отсутствие ожидаемого ключа в нужном поле
         = диагноз (находка Этапа 2).
         """
         svc = self._services
         router_handlers: list = []
         router = svc.router_manager
-        md = getattr(router, "message_dispatcher", None) if router else None
+        md = getattr(router, "event_dispatcher", None) if router else None
         if md is not None:
             try:
                 router_handlers = [h.get("key") for h in md.get_all_handlers()]
             except Exception as exc:  # noqa: BLE001
-                return {"success": False, "reason": f"message_dispatcher: {exc}"}
+                return {"success": False, "reason": f"event_dispatcher: {exc}"}
 
         commands: list = []
         cm = svc.command_manager
