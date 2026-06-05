@@ -4,6 +4,13 @@
 Собирает логи от всех менеджеров через `ObservableMixin`, принимает `LOG`-сообщения от дочерних
 процессов через `RouterManager` и записывает в множество каналов используя батчинг.
 
+> **Observability control plane:** новый тип sink добавляется одной строкой
+> `register_sink_factory(type, cls)` (`channels/log_channel.py`) — без правки `create_channel`.
+> Runtime-перенастройка каналов/уровней — `reconfigure(config: dict)` (база CRM, хук
+> `_rebuild_from_config` + `invalidate_decision_cache`). Hot-reload из файла —
+> `process_module/managers/observability_reload.py`. Точки расширения и якоря —
+> ADR-CRM-006 в [`../channel_routing_module/DECISIONS.md`](../channel_routing_module/DECISIONS.md).
+
 ---
 
 ## Архитектура и наследование
