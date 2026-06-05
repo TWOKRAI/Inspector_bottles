@@ -42,17 +42,23 @@
 
 ---
 
-## ADR-MSG-004 (was ADR-150): Поле `routers` — маршрутизация внутри процесса
+## ADR-MSG-004 (was ADR-150): Поле `routers` — УДАЛЕНО (§11.2)
 
-**Статус:** принято  
+**Статус:** отменено (2026-06-05, comm-system P0 §11.2)  
 **Дата:** 2026-04-09  
 **Контекст:** `routers` field роль неясна.  
-**Решение:**
+**Исходное решение:**
 - `targets` — имена процессов (межпроцессная адресация)
 - `channel` — имя канала в RouterManager получателя
 - `routers` — список RouterManager'ов внутри одного процесса
 
-**Последствия:** Default `["internal"]` — один RouterManager на процесс. LOG исключает из `to_dict()`.
+**Отмена:** Поле `routers` оказалось мёртвым — 0 prod-читателей (только писалось
+validator'ом и исключалось из LOG `to_dict()`). Удалено из `Message`,
+`LogMessageSchema`, `CommandMessageSchema`, `MESSAGE_TYPE_DEFAULTS` и
+`MESSAGE_TYPE_EXCLUDE_FIELDS` (последний оставлен пустым как generic
+extension-point). Адресация полностью покрывается `targets` (процесс/воркер) +
+`channel` (канал RouterManager). Один RouterManager на процесс — инвариант
+архитектуры, отдельное поле не нужно.
 
 ---
 
@@ -94,7 +100,7 @@
 
 **Последствия:** Один источник истины — `Message.model_fields`; строгие схемы `CommandMessageSchema` / `LogMessageSchema` остаются отдельными (`extra='forbid'`). Публичный API (`create`, `to_dict`, `from_dict`, `MessageAdapter`) сохранён.
 
-**Примечание:** `Message` — единственный `SchemaBase`-наследник без `FieldRouting`. Это осознанное решение: `Message` — value object для IPC-транспорта, а не регистр с маршрутизацией полей. Маршрутизация сообщений определяется полями `targets` / `channel` / `routers` напрямую, без `FieldRouting`.
+**Примечание:** `Message` — единственный `SchemaBase`-наследник без `FieldRouting`. Это осознанное решение: `Message` — value object для IPC-транспорта, а не регистр с маршрутизацией полей. Маршрутизация сообщений определяется полями `targets` / `channel` напрямую, без `FieldRouting`.
 
 ---
 

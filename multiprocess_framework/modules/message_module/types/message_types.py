@@ -54,7 +54,6 @@ MESSAGE_TYPE_DEFAULTS = {
     MessageType.LOG: {
         "channel": "log",
         "targets": ["logger"],
-        "routers": ["log"],
         "required_fields": ["level", "message"],
     },
     MessageType.SYSTEM: {
@@ -86,7 +85,7 @@ MESSAGE_TYPE_DEFAULTS = {
 }
 
 
-# Поля, которые нужно исключать при сериализации для определенных типов
-MESSAGE_TYPE_EXCLUDE_FIELDS = {
-    MessageType.LOG: {"routers"},  # Логи не должны показывать routers в dict
-}
+# Поля, которые нужно исключать при сериализации для определённых типов.
+# Generic extension-point (используется в Message.to_dict). Сейчас пуст:
+# единственная запись LOG:{"routers"} удалена вместе с мёртвым полем routers (§11.2).
+MESSAGE_TYPE_EXCLUDE_FIELDS: dict = {}

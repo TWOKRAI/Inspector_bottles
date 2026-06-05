@@ -226,6 +226,32 @@ class TestDispatcher(unittest.TestCase):
         self.assertEqual(handler_info["metadata"]["version"], 2)
         self.assertTrue(handler_info["metadata"]["updated"])
 
+    def test_update_handler_metadata_with_strategy_param(self):
+        """§11.11: update_handler_* с явным strategy адресует не-default хранилище.
+
+        Раньше методы хардкодили default_strategy (EXACT_MATCH) → хендлеры в
+        PATTERN/FALLBACK обновить было нельзя. Параметр strategy снимает ограничение.
+        """
+
+        def pattern_handler(data):
+            return {}
+
+        self.dispatcher.register_handler(
+            r"pat_\d+",
+            pattern_handler,
+            strategy=DispatchStrategy.PATTERN_MATCH,
+            metadata={"version": 1},
+        )
+
+        # Без strategy метод смотрит в EXACT_MATCH — ключа там нет → False.
+        self.assertFalse(self.dispatcher.update_handler_metadata(r"pat_\d+", {"version": 2}))
+
+        # С явной strategy=PATTERN_MATCH — обновление проходит.
+        result = self.dispatcher.update_handler_metadata(
+            r"pat_\d+", {"version": 2}, strategy=DispatchStrategy.PATTERN_MATCH
+        )
+        self.assertTrue(result)
+
     def test_scenario_creation(self):
         """Тест создания сценария."""
         result = self.dispatcher.create_scenario("test_scenario", "Тестовый сценарий", {"type": "test"})

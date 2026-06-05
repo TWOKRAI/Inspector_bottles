@@ -499,36 +499,61 @@ class Dispatcher(BaseManager, ObservableMixin):
         """
         return self._scenario_mgr.dispatch_scenario(scenario_name, message, data_field, stop_on_error)
 
-    # Методы для обновления обработчиков (работают с default_strategy)
+    # Методы для обновления обработчиков.
+    # По умолчанию работают с default_strategy; параметр `strategy` (§11.11)
+    # позволяет адресно обновлять хендлеры в PATTERN/FALLBACK-хранилищах —
+    # раньше это было невозможно (хардкод default_strategy блокировал доступ).
 
-    def update_handler_efficiency(self, key: str, new_efficiency: int) -> bool:
+    def _resolve_strategy(self, strategy: Optional[DispatchStrategy]) -> tuple["BaseStrategy", Any]:
+        """Вернуть (реализацию стратегии, её хранилище) по ключу или default'у.
+
+        Бросает KeyError только при неизвестном ключе — вызывающие методы
+        ловят это нормализацией к False (несуществующая стратегия = нет хендлера).
+        """
+        target = strategy or self._default_strategy
+        return self._strategies[target], self._handlers_storage[target]
+
+    def update_handler_efficiency(
+        self, key: str, new_efficiency: int, strategy: Optional[DispatchStrategy] = None
+    ) -> bool:
         """Обновление уровня эффективности обработчика."""
-        strategy_impl = self._strategies[self._default_strategy]
-        storage = self._handlers_storage[self._default_strategy]
+        if (strategy or self._default_strategy) not in self._strategies:
+            return False
+        strategy_impl, storage = self._resolve_strategy(strategy)
         return strategy_impl.update_handler_efficiency(key, new_efficiency, storage)
 
-    def update_handler_metadata(self, key: str, new_metadata: Dict[str, Any]) -> bool:
+    def update_handler_metadata(
+        self, key: str, new_metadata: Dict[str, Any], strategy: Optional[DispatchStrategy] = None
+    ) -> bool:
         """Обновление метаданных обработчика."""
-        strategy_impl = self._strategies[self._default_strategy]
-        storage = self._handlers_storage[self._default_strategy]
+        if (strategy or self._default_strategy) not in self._strategies:
+            return False
+        strategy_impl, storage = self._resolve_strategy(strategy)
         return strategy_impl.update_handler_metadata(key, new_metadata, storage)
 
-    def update_handler_tags(self, key: str, new_tags: List[str]) -> bool:
+    def update_handler_tags(self, key: str, new_tags: List[str], strategy: Optional[DispatchStrategy] = None) -> bool:
         """Обновление тегов обработчика."""
-        strategy_impl = self._strategies[self._default_strategy]
-        storage = self._handlers_storage[self._default_strategy]
+        if (strategy or self._default_strategy) not in self._strategies:
+            return False
+        strategy_impl, storage = self._resolve_strategy(strategy)
         return strategy_impl.update_handler_tags(key, new_tags, storage)
 
-    def update_handler_function(self, key: str, new_handler: Callable) -> bool:
+    def update_handler_function(
+        self, key: str, new_handler: Callable, strategy: Optional[DispatchStrategy] = None
+    ) -> bool:
         """Обновление функции-обработчика."""
-        strategy_impl = self._strategies[self._default_strategy]
-        storage = self._handlers_storage[self._default_strategy]
+        if (strategy or self._default_strategy) not in self._strategies:
+            return False
+        strategy_impl, storage = self._resolve_strategy(strategy)
         return strategy_impl.update_handler_function(key, new_handler, storage)
 
-    def update_expects_full_message(self, key: str, expects_full: bool) -> bool:
+    def update_expects_full_message(
+        self, key: str, expects_full: bool, strategy: Optional[DispatchStrategy] = None
+    ) -> bool:
         """Обновление флага expects_full_message."""
-        strategy_impl = self._strategies[self._default_strategy]
-        storage = self._handlers_storage[self._default_strategy]
+        if (strategy or self._default_strategy) not in self._strategies:
+            return False
+        strategy_impl, storage = self._resolve_strategy(strategy)
         return strategy_impl.update_expects_full_message(key, expects_full, storage)
 
     def overwrite_handler(

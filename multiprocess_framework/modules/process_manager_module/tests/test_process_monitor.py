@@ -117,7 +117,9 @@ class TestProcessMonitorStateDetection:
         call_args = mock_pm.communication.broadcast.call_args
         message = call_args[0][0]
         assert message["type"] == "system"
-        assert message["subtype"] == "process_status_changed"
+        # subtype удалён (§11.3): диспетчеризация идёт по type/process_name,
+        # не по внесхемному subtype. Контракт статус-сообщения — поля ниже.
+        assert "subtype" not in message
         assert message["process_name"] == "P1"
         assert message["old_status"] == "running"
         assert message["new_status"] == "stopped"

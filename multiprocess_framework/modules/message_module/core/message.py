@@ -58,29 +58,20 @@ class Message(SchemaBase):
     id: Annotated[str, FieldMeta("Уникальный ID сообщения")] = ""
     type: Annotated[str, FieldMeta("Тип сообщения (MessageType enum value)")] = "general"
     sender: Annotated[str, FieldMeta("Имя процесса-отправителя")] = ""
-    targets: Annotated[List[str], FieldMeta("Список процессов-получателей")] = Field(
-        default_factory=list
-    )
+    targets: Annotated[List[str], FieldMeta("Список процессов-получателей")] = Field(default_factory=list)
     timestamp: Annotated[float, FieldMeta("Unix-timestamp создания")] = 0.0
 
     # === Routing ===
     priority: Annotated[str, FieldMeta("Приоритет: urgent|high|normal|low")] = "normal"
-    routers: Annotated[List[str], FieldMeta("RouterManager'ы внутри процесса")] = Field(
-        default_factory=lambda: ["internal"]
-    )
     channel: Annotated[Optional[str], FieldMeta("Канал доставки в RouterManager")] = None
-    metadata: Annotated[Dict[str, Any], FieldMeta("Произвольные метаданные")] = Field(
-        default_factory=dict
-    )
+    metadata: Annotated[Dict[str, Any], FieldMeta("Произвольные метаданные")] = Field(default_factory=dict)
 
     # === GENERAL ===
     content: Annotated[Optional[Any], FieldMeta("Произвольное содержимое")] = None
 
     # === COMMAND ===
     command: Annotated[Optional[str], FieldMeta("Имя команды")] = None
-    args: Annotated[Dict[str, Any], FieldMeta("Аргументы команды")] = Field(
-        default_factory=dict
-    )
+    args: Annotated[Dict[str, Any], FieldMeta("Аргументы команды")] = Field(default_factory=dict)
     need_ack: Annotated[bool, FieldMeta("Требуется подтверждение")] = False
 
     # === LOG ===
@@ -93,9 +84,7 @@ class Message(SchemaBase):
     data: Annotated[Optional[Any], FieldMeta("Данные системного действия")] = None
 
     # === BROADCAST ===
-    exclude: Annotated[List[str], FieldMeta("Процессы для исключения")] = Field(
-        default_factory=list
-    )
+    exclude: Annotated[List[str], FieldMeta("Процессы для исключения")] = Field(default_factory=list)
 
     # === DATA ===
     data_type: Annotated[Optional[str], FieldMeta("Тип передаваемых данных")] = None
@@ -105,9 +94,7 @@ class Message(SchemaBase):
     # === REQUEST ===
     request_type: Annotated[Optional[str], FieldMeta("Тип запроса")] = None
     query: Annotated[Optional[Any], FieldMeta("Тело запроса")] = None
-    timeout: Annotated[
-        float, FieldMeta("Таймаут ответа, сек", min=0.1, max=300.0)
-    ] = 5.0
+    timeout: Annotated[float, FieldMeta("Таймаут ответа, сек", min=0.1, max=300.0)] = 5.0
 
     # === RESPONSE ===
     request_id: Annotated[Optional[str], FieldMeta("ID запроса (correlation)")] = None
@@ -138,8 +125,6 @@ class Message(SchemaBase):
                 object.__setattr__(self, "channel", defaults["channel"])
             if "targets" in defaults and not self.targets:
                 object.__setattr__(self, "targets", defaults["targets"])
-            if "routers" in defaults:
-                object.__setattr__(self, "routers", defaults["routers"])
         except ValueError:
             pass
 
@@ -213,9 +198,7 @@ class Message(SchemaBase):
         self.content = content
         return self
 
-    def set_command(
-        self, command: str, args: Optional[Dict[str, Any]] = None
-    ) -> "Message":
+    def set_command(self, command: str, args: Optional[Dict[str, Any]] = None) -> "Message":
         """Устанавливает команду и аргументы (COMMAND)."""
         self.command = command
         if args:
@@ -264,9 +247,7 @@ class Message(SchemaBase):
             for field_name in defaults.get("required_fields", []):
                 value = getattr(self, field_name, None)
                 if value is None or (isinstance(value, str) and not value):
-                    raise MessageValidationError(
-                        f"Required field '{field_name}' is empty for type '{self.type}'"
-                    )
+                    raise MessageValidationError(f"Required field '{field_name}' is empty for type '{self.type}'")
         except ValueError:
             raise MessageValidationError(f"Unknown message type: {self.type}")
 
@@ -302,11 +283,7 @@ class Message(SchemaBase):
         if exclude_none:
             data = {k: v for k, v in data.items() if v is not None}
 
-        data = {
-            k: v
-            for k, v in data.items()
-            if not (isinstance(v, (list, dict)) and not v)
-        }
+        data = {k: v for k, v in data.items() if not (isinstance(v, (list, dict)) and not v)}
 
         if exclude_fields:
             data = {k: v for k, v in data.items() if k not in exclude_fields}
@@ -434,10 +411,7 @@ class Message(SchemaBase):
         """msg['command'] = 'start'"""
         names = type(self).model_fields
         if key not in names:
-            raise KeyError(
-                f"Field '{key}' is not a valid message field. "
-                f"Valid fields: {sorted(names.keys())}"
-            )
+            raise KeyError(f"Field '{key}' is not a valid message field. Valid fields: {sorted(names.keys())}")
         setattr(self, key, value)
 
     def __contains__(self, key: str) -> bool:

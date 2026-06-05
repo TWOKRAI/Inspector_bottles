@@ -64,7 +64,6 @@ class ProcessHeartbeat:
             try:
                 heartbeat_msg = {
                     "type": "system",
-                    "subtype": "heartbeat",
                     "command": "heartbeat",
                     "sender": self._services.name,
                     "timestamp": time.time(),

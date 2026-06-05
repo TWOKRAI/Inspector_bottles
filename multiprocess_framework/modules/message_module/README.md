@@ -96,7 +96,6 @@ message_module/
 | `timestamp` | `float` | Unix-timestamp создания | ✓ |
 | `priority` | `str` | `normal` | `low\|normal\|high\|urgent` |
 | `channel` | `str\|None` | Канал доставки | ✓ по типу |
-| `routers` | `List[str]` | Список роутеров | ✓ по типу |
 | `metadata` | `dict` | Произвольные метаданные | — |
 
 ### Специфичные по типу

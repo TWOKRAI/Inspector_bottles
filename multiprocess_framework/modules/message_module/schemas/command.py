@@ -22,7 +22,6 @@ class CommandMessageSchema(SchemaBase):
     targets: Annotated[List[str], FieldMeta("Получатели")]
     timestamp: float = Field(default_factory=time.time)
     priority: str = "normal"
-    routers: List[str] = Field(default_factory=lambda: ["internal"])
     channel: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     command: Annotated[str, FieldMeta("Имя команды")]

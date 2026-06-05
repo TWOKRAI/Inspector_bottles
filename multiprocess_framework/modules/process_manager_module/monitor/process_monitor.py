@@ -565,7 +565,6 @@ class ProcessMonitor:
 
             msg = {
                 "type": "system",
-                "subtype": "process_full_status",
                 "sender": self.process.name,
                 "processes": all_status,
                 "timestamp": time.time(),
@@ -611,7 +610,6 @@ class ProcessMonitor:
 
             msg = {
                 "type": "system",
-                "subtype": "process_status_changed",
                 "sender": self.process.name,
                 "process_name": process_name,
                 "old_status": old_status,
