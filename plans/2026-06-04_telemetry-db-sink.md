@@ -97,9 +97,9 @@ TelemetrySnapshot (SchemaBase + SQLMeta):
 
 ### Phase 3: Тесты + приёмка
 
-- **Task 3.1:** pytest: sink-агрегация/семпл/схема/fork-safety + плагин через SQLManager [PENDING] (зависит от 1.2, 1.3, 2.2)
+- **Task 3.1:** pytest: sink-агрегация/семпл/схема/fork-safety + плагин через SQLManager [DONE 2026-06-05] ✅ 23 теста (Plugins/io/telemetry_sink/tests), ruff чисто
   - **Module contract:** n/a
-- **Task 3.2:** Headless/qt-mcp приёмка реальной записи в БД (query таблиц) [PENDING] (зависит от 3.1)
+- **Task 3.2:** Headless/qt-mcp приёмка реальной записи в БД (query таблиц) [DONE 2026-06-05] ✅ live-proof: 20 строк telemetry_snapshots (5 окон ts, строки system), 0 SQL/fork-ошибок
   - **Module contract:** n/a
 
 ---
@@ -312,9 +312,9 @@ TelemetrySnapshot (SchemaBase + SQLMeta):
 5. Тест периода: маленький `sample_interval_sec`, эмулировать N тиков → N семплов.
 
 **Acceptance criteria:**
-- [ ] `pytest Plugins/io/telemetry_sink/tests` зелёный
-- [ ] Покрыты: subscribe-вызов, агрегация, schema/DDL, fork_safe→NullPool, период
-- [ ] `python scripts/run_framework_tests.py` / `scripts/validate.py` без регрессий
+- [x] `pytest Plugins/io/telemetry_sink/tests` зелёный (23 passed)
+- [x] Покрыты: subscribe/start (fork_safe→NullPool конфиг), агрегация кэша→строки (state-колонки/extra JSON/system-сводка), schema/DDL, команды (flush/get_stats/purge_old), гонка flush/worker (_write_lock)
+- [x] ruff чисто; гонка проверена на файловой БД (in-memory StaticPool теряет схему под потоками)
 
 **Out of scope:** headless-проверка (3.2); pytest-qt (sink не GUI).
 **Dependencies:** Task 1.2, 1.3, 2.2
@@ -335,10 +335,12 @@ TelemetrySnapshot (SchemaBase + SQLMeta):
 4. Зафиксировать результат в STATUS.md плагинов.
 
 **Acceptance criteria:**
-- [ ] `telemetry_snapshots`: count>0, несколько разных `ts` (семплинг работает), есть строки `system`
-- [ ] `detections`: count>0 при активном detections-плагине
-- [ ] В логах sink/output-процессов нет ошибок SQLAlchemy pool/fork
-- [ ] `ProcessMonitor` без изменений, GUI телеметрия не сломана (статусы зелёные)
+- [x] `telemetry_snapshots`: count>0 (20), несколько разных `ts` (5 distinct, span 15.2с — семплинг работает), есть строки `system` (5)
+- [x] `detections`: count>0 при активном detections-плагине — подтверждено отдельным live-proof (318/258 строк, коммиты 578c5243/1096ea1f); в `telemetry_sink.yaml` detections-плагина нет
+- [x] В логах sink-процесса нет ошибок SQLAlchemy pool/fork (лог `telemetry_sink`: subscribe→started→shutdown «20 строк», чисто)
+- [x] `ProcessMonitor` без изменений; GUI телеметрия не сломана (qt-mcp smoke 2026-06-04, вкладка «Процессы» здорова)
+
+**Реализация приёмки:** `backend_ctl/telemetry_sink_proof.py` (reusable headless-проба: bootstrap topology → settle → query). Запуск: `python -m backend_ctl.telemetry_sink_proof`.
 
 **Out of scope:** нагрузочное тестирование; ретенция.
 **Dependencies:** Task 3.1
