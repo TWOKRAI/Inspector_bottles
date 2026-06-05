@@ -461,7 +461,7 @@ class RouterManager(ChannelRoutingManager):
         return self.send(response)
 
     def _dispatch_command(self, processed: Dict[str, Any]) -> None:
-        """P4.4.1 (B2): исполнить входящую команду (`type=="command"`).
+        """P4.4 (B2): исполнить входящую команду (`type=="command"`).
 
         CommandManager — единственный владелец командных ключей. Резолв по
         `command` ровно один (в CM). Транспортный авто-reply по `request_id`:
@@ -471,40 +471,35 @@ class RouterManager(ChannelRoutingManager):
         помечаются metadata ``manages_own_reply=True`` — для них авто-reply
         пропускается (иначе двойной ответ).
 
-        Strangler-safety: если команды нет в CommandManager (не мигрирована),
-        fallback в ``event_dispatcher`` по ключу — сохраняет прежнее поведение
-        прямых регистраций. TODO P4.4.6: убрать fallback после подтверждения, что
-        все ``type==command`` хендлеры живут в CommandManager.
+        Неизвестную команду CommandManager.handle_command возвращает как
+        ``{"status": "error", ...}`` → инициатор получает error-reply (fail-loud,
+        не silent drop). Fallback в ``event_dispatcher`` остаётся ТОЛЬКО для
+        роутера без CommandManager (bare-процесс/тест) — там команды доставляются
+        прямыми register_message_handler.
         """
         cm = getattr(self.process, "command_manager", None) if self.process else None
         cmd_name = processed.get("command")
-        info = cm.get_command_info(cmd_name) if (cm and cmd_name) else None
 
-        if info is None:
-            # Команда не в CommandManager — fallback в event_dispatcher (strangler).
-            # Если CommandManager ЕСТЬ, но ключа в нём нет — это пропущенная миграция
-            # (после P4.4.1b все type==command живут в CM): логируем warning-диагноз.
-            # Если CommandManager нет (bare-процесс/тест) — тихий fallback, прежнее
-            # поведение. TODO P4.4.6: убрать fallback, когда integration подтвердит «тишину».
+        if cm is None:
+            # Роутер без CommandManager (bare/тест): команды доставляются прямыми
+            # register_message_handler в event_dispatcher по ключу.
             if cmd_name:
-                if cm is not None:
-                    self._log_warning(
-                        f"command '{cmd_name}' нет в CommandManager — strangler-fallback в "
-                        f"event_dispatcher (миграция команды в CM не завершена?)"
-                    )
                 try:
                     self.event_dispatcher.dispatch(processed, key_field="command")
                 except Exception as exc:
-                    self._log_warning(f"command fallback dispatch '{cmd_name}': {exc}")
+                    self._log_warning(f"command dispatch '{cmd_name}': {exc}")
             return
 
+        # CommandManager — владелец команд: исполняет (или возвращает error для
+        # неизвестной команды). info нужен только для решения про авто-reply.
+        info = cm.get_command_info(cmd_name) if cmd_name else None
         try:
             result = cm.handle_command(processed)
         except Exception as exc:
             self._log_warning(f"command '{cmd_name}' handler error: {exc}")
             result = {"status": "error", "reason": str(exc)}
 
-        if not (info.get("metadata") or {}).get("manages_own_reply"):
+        if not (info and (info.get("metadata") or {}).get("manages_own_reply")):
             try:
                 self.reply_to_request(processed, result)
             except Exception as exc:

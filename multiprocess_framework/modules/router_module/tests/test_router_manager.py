@@ -1362,16 +1362,21 @@ class TestDispatchCommand(unittest.TestCase):
         cm.handle_command.assert_called_once_with(msg)
         router.reply_to_request.assert_not_called()
 
-    def test_command_not_in_cm_falls_back(self):
+    def test_unknown_command_goes_through_cm_no_fallback(self):
+        # CommandManager есть, но команды в нём нет: CM-владелец её обрабатывает
+        # (вернёт error), инициатор получает error-reply (fail-loud). НЕТ fallback
+        # в event_dispatcher при наличии CM (strangler снят в P4.4.6).
         cm = Mock()
         cm.get_command_info = Mock(return_value=None)
-        cm.handle_command = Mock()
+        cm.handle_command = Mock(return_value={"status": "error", "reason": "No handler"})
         router = self._router_with_cm(cm)
-        router._dispatch_command({"type": "command", "command": "legacy.cmd"})
-        cm.handle_command.assert_not_called()
-        router.event_dispatcher.dispatch.assert_called_once()
+        router._dispatch_command({"type": "command", "command": "legacy.cmd", "request_id": "c1"})
+        cm.handle_command.assert_called_once()
+        router.event_dispatcher.dispatch.assert_not_called()
+        router.reply_to_request.assert_called_once()
 
     def test_no_command_manager_falls_back(self):
+        # Роутер без CommandManager (bare/тест) → event_dispatcher по ключу.
         router = _make_router("rr_nocm")
         router.initialize()
         router.process = None
