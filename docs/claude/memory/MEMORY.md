@@ -57,3 +57,4 @@
 - [Telemetry DB-sink](project_telemetry_db_sink.md) — Phase 1 (sink) + Phase 2 (database→SQLManager, 476e760e) DONE; остался Phase 3 (pytest sink + headless приёмка); framework-фикс активировал _publish_state плагинов; GUI qt-mcp здорова
 - [Fix framework forward](feedback_fix_framework_forward.md) — framework-баги чинить разрешено когда мешают; правки на УЛУЧШЕНИЕ, не удаление (fix-forward, не вырезать функционал)
 - [comm-system P0 closed](project_comm_system_p0.md) — §11 ВЕСЬ закрыт (пп.1-22, вкл. hot-path осторожную зону); qt-smoke verified; следующее P1. Телеметрия = отдельный план
+- [Observability control plane](project_observability_control_plane.md) — план ЗАВЕРШЁН (Phase 1-4): единая секция observability + hot-reload watcher в оркестраторе (Option B, forward-compat Phase 4 IPC) + sink-фабрики + ADR-CRM-006; watchdog dep; FPS 21.0 verified
