@@ -35,6 +35,8 @@ dependencies = [
     # Network / utils
     "requests>=2.32",
     "environs>=11.0",
+    # Config hot-reload (ConfigFileWatcher → observability hot-reload)
+    "watchdog>=4.0",
     # Simulation
     "pygame>=2.6",
     # Async testing — было в стейл inner pyproject

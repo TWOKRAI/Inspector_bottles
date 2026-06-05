@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 
+from typing import Any, Optional
+
 from multiprocess_framework.modules.process_manager_module.process.process_manager_process import (
     ProcessManagerProcess,
 )
@@ -20,6 +22,47 @@ class ProcessManagerProcessApp(ProcessManagerProcess):
     который SystemLauncher мёржит в process_config оркестратора.
     Доступ внутри: self.get_config("initial_state").
     """
+
+    _observability_watcher: Optional[Any] = None
+
+    def initialize(self) -> bool:
+        """Инициализация PM + запуск observability hot-reload watcher (P3.3).
+
+        Watcher следит за system.yaml: правка секции observability на лету
+        перестраивает Logger/Error/Stats этого процесса без рестарта.
+        Cross-process распространение — Phase 4 (IPC config.reload).
+        """
+        if not super().initialize():
+            return False
+        self._start_observability_watcher()
+        return True
+
+    def _start_observability_watcher(self) -> None:
+        from multiprocess_framework.modules.process_module.managers.observability_reload import (
+            start_observability_watcher,
+        )
+
+        config_path = self.get_config("observability_config_path") or ""
+        if not config_path:
+            return
+        self._observability_watcher = start_observability_watcher(
+            config_path=config_path,
+            logger=self.logger_manager,
+            error=self.error_manager,
+            stats=self.stats_manager,
+            log_info=self._log_info,
+            log_error=self._log_error,
+        )
+
+    def shutdown(self) -> bool:
+        """Остановить watcher (нет висящих потоков), затем штатный shutdown PM."""
+        if self._observability_watcher is not None:
+            try:
+                self._observability_watcher.stop()
+            except Exception as exc:  # noqa: BLE001 — shutdown best-effort
+                self._log_error(f"[observability] watcher stop: {exc}")
+            self._observability_watcher = None
+        return super().shutdown()
 
     def _setup_state_store(self) -> None:
         """Переопределение хука: создать StateStoreManager с initial_state."""

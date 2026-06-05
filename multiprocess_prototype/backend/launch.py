@@ -263,6 +263,8 @@ class SystemBuilder:
                 "initial_state": initial_state,
                 "state_throttle_rules": throttle_rules,
                 "backend_ctl": sys_config.backend_ctl.model_dump(),
+                # Путь к system.yaml для observability hot-reload watcher (P3.3).
+                "observability_config_path": str(self._system_path) if self._system_path else "",
             },
         )
         # Единая секция observability → overlay поверх дефолтных managers каждого
