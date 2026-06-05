@@ -13,7 +13,7 @@
     - state-телеметрия (``DeltaDispatcher``): ``type="event"``, но семантика STATE
       (``command="state.changed"``);
     - ``state.set``/``state.merge``: ``type="command"``, семантика STATE;
-    - heartbeat: ``type="system"`` + ``subtype`` + ``command="heartbeat"``.
+    - heartbeat: ``type="system"`` + ``command="heartbeat"``.
   Поэтому канал резолвится **с нормализацией**: сперва override по префиксу
   ``command``, затем таблица по ``MessageType``. STATE — это channel-kind,
   выводимый из ``command="state.*"``, а НЕ член enum ``MessageType``
