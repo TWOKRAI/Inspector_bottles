@@ -165,6 +165,13 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             if logger and hasattr(logger, "push_context"):
                 logger.push_context(proc_name=self.name)
 
+            # 10. Регистрация state.changed handler (ADR-SS-006) — только в
+            #     success-пути. Раньше вызов стоял в finally и при исключении
+            #     ДО присвоения router_manager молча пропускался по guard'у
+            #     (§11.22 comm-system): нельзя регистрировать handler на
+            #     полуинициализированном процессе.
+            self._init_state_proxy()
+
             self.is_initialized = True
             self._log_info(f"Process '{self.name}' initialized successfully")
             return True
@@ -175,8 +182,6 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self._log_error(f"Failed to initialize process '{self.name}': {e}")
             self._log_error(f"Traceback: {_tb.format_exc()}")
             return False
-        finally:
-            self._init_state_proxy()
 
     def shutdown(self) -> bool:
         """

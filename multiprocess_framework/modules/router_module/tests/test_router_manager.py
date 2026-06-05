@@ -1106,15 +1106,21 @@ class TestWorkerHandlerRouting(unittest.TestCase):
         self.router.receive(timeout=0.1)
         self.assertEqual(got, [])
 
-    def test_handler_exception_does_not_crash_receive(self):
+    def test_handler_exception_falls_back_to_process_dispatch(self):
+        # §11.20: при провале worker-handler билет НЕ помечается consumed —
+        # уходит на process-dispatch, чтобы control-plane команда (process.stop,
+        # worker.pause) не потерялась. Цикл не падает.
         def boom(_m):
             raise RuntimeError("boom")
 
+        proc_got: list = []
         self.router.register_worker_handler("w", boom)
+        self.router.register_message_handler("cfg", lambda m: proc_got.append(1))
         self.q.put({"type": "command", "command": "cfg", "_address": ["proc", "w"]})
         messages = self.router.receive(timeout=0.1)
-        # Билет считается доставленным воркеру (return True), цикл не упал.
+        # Билет дошёл до result И до process-level handler (fallback, не потерян).
         self.assertEqual(len(messages), 1)
+        self.assertEqual(proc_got, [1])
 
     def test_unregister_worker_handler(self):
         self.router.register_worker_handler("w", lambda m: None)

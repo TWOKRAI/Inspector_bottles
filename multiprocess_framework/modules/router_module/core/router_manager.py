@@ -546,8 +546,11 @@ class RouterManager(ChannelRoutingManager):
           - билет — data-кадр (Гибрид: кадры едут трубами, не уводим в «почту»);
           - для воркера нет обработчика (лог + fallback на process-dispatch, не падение).
 
-        Исключение в самом обработчике логируется и НЕ роняет приёмный цикл —
-        билет всё равно считается доставленным воркеру (return True).
+        Исключение в самом обработчике логируется и билет НЕ помечается
+        consumed (return False) — иначе control-plane команды (process.stop,
+        worker.pause) терялись бы при сбое handler'а. Fallback на
+        process-dispatch даёт обработку по умолчанию или явный «нет хендлера»
+        вместо тихой потери (§11.20 comm-system).
         """
         if not self._worker_handlers:
             return False
@@ -567,7 +570,10 @@ class RouterManager(ChannelRoutingManager):
         try:
             handler(processed)
         except Exception as exc:
-            self._log_warning(f"worker-handler '{worker}' error: {exc}")
+            # НЕ помечаем consumed при провале — fallback на process-dispatch,
+            # чтобы не потерять control-plane команду (§11.20 comm-system).
+            self._log_error(f"worker-handler '{worker}' error: {exc} — fallback на process-dispatch")
+            return False
         return True
 
     def _poll_all_channels(

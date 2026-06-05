@@ -105,13 +105,24 @@ class RegistersStateAdapter(StateAdapterBase):
             return
 
         for (register_name, field_name), state_path in self._path_mapping.items():
+            register = self._rm.get_register(register_name)
+            if register is None:
+                # RegistersManager не имеет get_field — читаем значение поля
+                # с экземпляра регистра (SchemaBase). Нет регистра — нет смысла
+                # держать pending: логируем и пропускаем (правило 5).
+                self._log_warning(f"sync_domain_to_state: регистр '{register_name}' не найден — пропуск {state_path}")
+                continue
             try:
-                value = self._rm.get_field(register_name, field_name)
+                value = getattr(register, field_name)
                 self._mark_pending(state_path)
                 self._proxy.set(state_path, value)
-            except Exception:
+            except Exception as exc:
                 # Убираем pending при ошибке, чтобы не блокировать обратный путь
                 self._pending_paths.discard(state_path)
+                self._log_warning(
+                    f"sync_domain_to_state: не удалось синхронизировать "
+                    f"{register_name}.{field_name} -> {state_path}: {exc}"
+                )
 
     def sync_state_to_domain(self) -> None:
         """Синхронизировать все пути из StateProxy -> RegistersManager.

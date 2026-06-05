@@ -14,6 +14,7 @@ RecipeStateAdapter теперь полноценный StateAdapterBase-насл
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -126,6 +127,44 @@ def test_registers_adapter_path_mapping():
     assert ("camera", "fps") in adapter._path_mapping
     assert "cameras.0.config.fps" in adapter._reverse_mapping
     assert adapter._reverse_mapping["cameras.0.config.fps"] == ("camera", "fps")
+
+
+# ---------------------------------------------------------------------------
+# §11.6 comm-system: sync_domain_to_state читает через get_register + getattr
+# ---------------------------------------------------------------------------
+
+
+def test_sync_domain_to_state_reads_via_get_register():
+    """sync_domain_to_state читает значения полей через get_register + getattr
+    и пишет их в proxy. Раньше звался несуществующий RegistersManager.get_field
+    → AttributeError молча гасился в except, синхронизация не происходила."""
+    mock_rm = MagicMock()
+    mock_rm.get_register.return_value = SimpleNamespace(fps=30)
+
+    mapping = {("camera", "fps"): "cameras.0.config.fps"}
+    adapter = RegistersStateAdapter(registers_manager=mock_rm, path_mapping=mapping)
+    mock_proxy = MagicMock()
+    adapter.bind(mock_proxy)
+
+    adapter.sync_domain_to_state()
+
+    mock_rm.get_register.assert_called_once_with("camera")
+    mock_proxy.set.assert_called_once_with("cameras.0.config.fps", 30)
+
+
+def test_sync_domain_to_state_missing_register_skips():
+    """Нет регистра → пропуск без падения и без записи в proxy (§11.6)."""
+    mock_rm = MagicMock()
+    mock_rm.get_register.return_value = None
+
+    mapping = {("camera", "fps"): "cameras.0.config.fps"}
+    adapter = RegistersStateAdapter(registers_manager=mock_rm, path_mapping=mapping)
+    mock_proxy = MagicMock()
+    adapter.bind(mock_proxy)
+
+    adapter.sync_domain_to_state()
+
+    mock_proxy.set.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
