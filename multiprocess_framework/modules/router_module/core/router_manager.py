@@ -241,16 +241,31 @@ class RouterManager(ChannelRoutingManager):
 
     @staticmethod
     def _select_queue_type(msg_dict: Dict[str, Any]) -> str:
-        """Единое правило выбора очереди (qtype) для адресной доставки.
+        """Единое правило выбора очереди (qtype) для адресной доставки И broadcast.
 
-        Канонизирует логику, ранее раздублированную в трёх местах (recon #5:
-        `send_to_process`, `_deliver_by_targets`, `broadcast`): явный
-        `msg["queue_type"]`, иначе "system" для команд, иначе "data". Это
-        правило-ПАРИТЕТ с нынешним `ProcessCommunication.send_to_process` —
-        менять его (на богатую таблицу `MESSAGE_TYPE_TO_CHANNEL`) будем при
-        вводе Event/State-каналов (P3), не ломая поведение сейчас.
+        Канонизирует логику, ранее раздублированную в нескольких местах (recon #5:
+        `send_to_process`, `_deliver_by_targets`, `broadcast`):
+          1. явный `msg["queue_type"]` — высший приоритет;
+          2. control-plane (`command`/`system`) → "system"-очередь — её опрашивает
+             `SystemThreads._message_processing_loop` (channel_types=['system']);
+          3. иначе (`data`/кадры/event) → "data"-очередь — её опрашивает
+             `data_receiver` (channel_types=['data']).
+
+        §11.12 (comm-system P0): добавлен `system` → "system". Раньше type="system"
+        падал в else → "data", из-за чего heartbeat (type="system", command="heartbeat")
+        уходил в data-очередь, мимо SystemThreads, который его и должен принимать
+        (`ProcessMonitor._register_heartbeat_handler`). Одновременно `broadcast`
+        перестал хардкодить дефолт "system" и теперь зовёт этот хелпер — устранён
+        расходящийся дефолт (status-broadcast type="system" → "system", паритет).
+        `event`/`response`/`request` сознательно остаются на "data"-правиле else:
+        EVENT едет в data-очередь воркеров (см. SystemThreads/_message_processing_loop
+        и data_receiver), request/response резолвятся в receive() до диспетчеризации.
+        Богатую таблицу `MESSAGE_TYPE_TO_CHANNEL` вводим при kind-каналах (P1/P3).
         """
-        return msg_dict.get("queue_type") or ("system" if msg_dict.get("type") == "command" else "data")
+        explicit = msg_dict.get("queue_type")
+        if explicit:
+            return explicit
+        return "system" if msg_dict.get("type") in ("command", "system") else "data"
 
     def _deliver_by_targets(self, msg_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Адресная доставка по msg["targets"] через общий queue_registry.

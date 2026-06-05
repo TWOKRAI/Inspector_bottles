@@ -235,7 +235,11 @@ class ProcessCommunication(IProcessCommunication):
             # Используем queue_registry если доступен
             if hasattr(self.router_manager, "queue_registry") and self.router_manager.queue_registry:
                 exclude_process = self.process_name if exclude_self else None
-                queue_type = message.get("queue_type", "system")
+                # §11.12: единое правило qtype (хелпер RouterManager) вместо
+                # хардкод-дефолта "system". Для status-broadcast (type="system")
+                # хелпер тоже даёт "system" — паритет; явный queue_type уважается.
+                select = getattr(self.router_manager, "_select_queue_type", None)
+                queue_type = select(message) if select else message.get("queue_type", "system")
                 return self.router_manager.queue_registry.broadcast_message(message, queue_type, exclude_process)
 
             # Fallback: отправка через роутер с broadcast флагом
