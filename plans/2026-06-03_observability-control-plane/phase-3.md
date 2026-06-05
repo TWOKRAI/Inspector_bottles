@@ -1,5 +1,11 @@
 # Phase 3: Единая секция конфига + hot-reload в проде
 
+> **✅ DONE (2026-06-05):** 3.1 `6a85dc33` (ObservabilityConfig+expand) · 3.2 `a1dbe976`
+> (прокидка секции в managers, overlay) · 3.3 `675d91e7` (ConfigFileWatcher в оркестраторе,
+> Option B). Verify: process_module/317 passed (вкл. 5 hot-reload + 10 config), прод
+> qt-smoke FPS 21.0 baseline + стабилен после live-правки. Решения и резолв открытых
+> вопросов — в `plan.md` (Phase 3 врезка). watchdog>=4.0 добавлен в pyproject.
+
 **Цель фазы:** ввести единую секцию `observability` (одна точка для Logger/Error/Stats),
 реально прокинуть её из прототипа в `managers`-конфиг процессов (сейчас всё на defaults,
 ErrorManager при пустом конфиге не создаётся) и подключить `ConfigFileWatcher` +
