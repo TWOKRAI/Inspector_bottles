@@ -3,8 +3,40 @@
 from unittest.mock import MagicMock
 
 from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
+from multiprocess_prototype.frontend.bridge_impl import DataReceiverBridge
 from multiprocess_prototype.frontend.widgets.controls.process_status import ProcessStatusWidget
 from multiprocess_prototype.frontend.widgets.controls.command_panel import CommandPanel
+
+
+class TestStateListeners:
+    """§11.15: multi-subscriber add_state_listener вместо closure-мультиплексора."""
+
+    def test_primary_and_listeners_called_in_order(self, qtbot):
+        """state-сообщение → _state_cb, затем все add_state_listener, по порядку."""
+        bridge = DataReceiverBridge()
+        calls: list[str] = []
+        bridge.set_state_callback(lambda m: calls.append("primary"))
+        bridge.add_state_listener(lambda m: calls.append("listener_1"))
+        bridge.add_state_listener(lambda m: calls.append("listener_2"))
+
+        # dispatch из main thread → AutoConnection вызывает _on_deliver синхронно
+        bridge.dispatch({"data_type": "state_delta", "path": "p", "value": 1})
+
+        assert calls == ["primary", "listener_1", "listener_2"]
+
+    def test_listener_added_once(self, qtbot):
+        """Повторное добавление того же cb игнорируется (идемпотентность)."""
+        bridge = DataReceiverBridge()
+        calls: list[int] = []
+
+        def listener(_m):
+            calls.append(1)
+
+        bridge.add_state_listener(listener)
+        bridge.add_state_listener(listener)
+        bridge.dispatch({"data_type": "state_delta", "path": "p", "value": 1})
+
+        assert calls == [1]
 
 
 class TestCommandSender:

@@ -250,20 +250,19 @@ def run_gui(process: "GuiProcess") -> None:
     # IPC cache-invalidation bridge подписывается на typed EventBus в блоке 3h.1
     # (ниже, после сборки app_services). Legacy holder.on_changed убран в G.1.2.
 
-    # Phase 12: мультиплексор state_callback → bindings + topology_bridge
-    # GuiStateBindings уже занял set_state_callback. Теперь ставим обёртку,
-    # которая вызывает и bindings, и bridge.on_state_delta.
-    _original_state_cb = bindings._on_state_msg
-
-    def _state_multiplexer(msg_dict: dict) -> None:
-        _original_state_cb(msg_dict)
+    # §11.15: topology_bridge подписывается на state ОТДЕЛЬНЫМ слушателем,
+    # а не обёрткой-closure поверх set_state_callback. GuiStateBindings
+    # держит первичный set_state_callback (занял его в 3b); здесь добавляем
+    # второго подписчика через add_state_listener (multi-subscriber). Порядок
+    # сохранён: сначала bindings (_state_cb), затем этот listener.
+    def _forward_state_delta_to_topology(msg_dict: dict) -> None:
         if msg_dict.get("data_type") == "state_delta":
             path = msg_dict.get("path", "")
             value = msg_dict.get("value")
             if path:
                 topology_bridge.on_state_delta(path, value)
 
-    process._bridge.set_state_callback(_state_multiplexer)
+    process._bridge.add_state_listener(_forward_state_delta_to_topology)
 
     # 3f. ServiceStateAdapter — подключить ПОСЛЕ bindings (proxy-aware step)
     # В GUI-процессе нет StateProxy (он живёт только в ProcessModule-процессах),

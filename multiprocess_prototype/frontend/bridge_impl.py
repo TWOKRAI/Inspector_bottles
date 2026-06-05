@@ -31,6 +31,12 @@ class DataReceiverBridge(QObject):
         self._frame_cb: Callable | None = None
         self._state_cb: Callable | None = None
         self._command_cb: Callable | None = None
+        # §11.15: multi-subscriber для state. Раньше второй потребитель
+        # (topology_bridge) подключался обёрткой-closure поверх single-slot
+        # set_state_callback (скрытый fan-out _state_multiplexer в app.py) —
+        # теперь явный список слушателей: каждый подписчик регистрируется
+        # отдельно через add_state_listener, без перехвата чужого callback.
+        self._state_listeners: list[Callable] = []
         # AutoConnection: DirectConnection в main thread, QueuedConnection из worker thread
         self._deliver.connect(self._on_deliver, Qt.ConnectionType.AutoConnection)
 
@@ -38,7 +44,19 @@ class DataReceiverBridge(QObject):
         self._frame_cb = cb
 
     def set_state_callback(self, cb: Callable) -> None:
+        """Основной (первичный) state-callback. Сохранён для обратной совместимости;
+        дополнительные потребители — через add_state_listener (§11.15)."""
         self._state_cb = cb
+
+    def add_state_listener(self, cb: Callable) -> None:
+        """Добавить ещё одного слушателя state-сообщений (multi-subscriber, §11.15).
+
+        Вызывается в Qt main thread (после _state_cb) на каждое state-сообщение.
+        Идемпотентность не гарантируется — один и тот же cb добавляется один раз
+        на стороне вызывающего.
+        """
+        if cb not in self._state_listeners:
+            self._state_listeners.append(cb)
 
     def set_command_callback(self, cb: Callable) -> None:
         self._command_cb = cb
@@ -65,6 +83,8 @@ class DataReceiverBridge(QObject):
         elif kind == "state":
             if self._state_cb:
                 self._state_cb(msg_dict)
+            for listener in self._state_listeners:
+                listener(msg_dict)
             self.state_updated.emit(msg_dict)
         elif kind == "command":
             if self._command_cb:
