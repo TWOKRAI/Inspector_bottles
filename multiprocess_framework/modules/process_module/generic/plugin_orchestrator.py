@@ -254,9 +254,22 @@ class PluginOrchestrator:
         relay: приёмника msg_type register_schemas нет нигде, dead letter. Удалён
         по плану comm-system §11.7.)
         """
-        router = getattr(self._services, "router_manager", None)
-        if router:
-            router.register_message_handler("register_update", self._on_register_update)
+        # P4.4.1 (B2): register_update — обычная команда CommandManager (kind-router
+        # по type=command зовёт CM). manages_own_reply=True: fire-and-forget (handler
+        # ничего не возвращает инициатору), авто-reply пропускается для паритета.
+        cm = getattr(self._services, "command_manager", None)
+        if cm is not None:
+            cm.register_command(
+                "register_update",
+                self._on_register_update,
+                expects_full_message=True,
+                metadata={"description": "GUI/процесс обновляет значение регистра", "manages_own_reply": True},
+                tags=["registers"],
+            )
+        else:  # fallback (нет CommandManager) — прежний прямой путь
+            router = getattr(self._services, "router_manager", None)
+            if router:
+                router.register_message_handler("register_update", self._on_register_update)
 
     def _on_register_update(self, msg: dict) -> None:
         """Handler: GUI/другой процесс обновляет значение регистра."""

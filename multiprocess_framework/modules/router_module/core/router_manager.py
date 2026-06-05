@@ -460,6 +460,47 @@ class RouterManager(ChannelRoutingManager):
         }
         return self.send(response)
 
+    def _dispatch_command(self, processed: Dict[str, Any]) -> None:
+        """P4.4.1 (B2): исполнить входящую команду (`type=="command"`).
+
+        CommandManager — единственный владелец командных ключей. Резолв по
+        `command` ровно один (в CM). Транспортный авто-reply по `request_id`:
+        после исполнения вызывается ``reply_to_request`` (no-op, если билет не
+        несёт correlation-id — fire-and-forget паритет). Команды, отвечающие
+        САМИ (например ``process.command`` строит свой ``process.command.response``),
+        помечаются metadata ``manages_own_reply=True`` — для них авто-reply
+        пропускается (иначе двойной ответ).
+
+        Strangler-safety: если команды нет в CommandManager (не мигрирована),
+        fallback в ``message_dispatcher`` по ключу — сохраняет прежнее поведение
+        прямых регистраций. TODO P4.4.6: убрать fallback после подтверждения, что
+        все ``type==command`` хендлеры живут в CommandManager.
+        """
+        cm = getattr(self.process, "command_manager", None) if self.process else None
+        cmd_name = processed.get("command")
+        info = cm.get_command_info(cmd_name) if (cm and cmd_name) else None
+
+        if info is None:
+            # Команда не в CommandManager — fallback в message_dispatcher (strangler).
+            if cmd_name:
+                try:
+                    self.message_dispatcher.dispatch(processed, key_field="command")
+                except Exception as exc:
+                    self._log_warning(f"command fallback dispatch '{cmd_name}': {exc}")
+            return
+
+        try:
+            result = cm.handle_command(processed)
+        except Exception as exc:
+            self._log_warning(f"command '{cmd_name}' handler error: {exc}")
+            result = {"status": "error", "reason": str(exc)}
+
+        if not (info.get("metadata") or {}).get("manages_own_reply"):
+            try:
+                self.reply_to_request(processed, result)
+            except Exception as exc:
+                self._log_warning(f"reply_to_request '{cmd_name}': {exc}")
+
     # ================================================================
     # RECEIVE
     # ================================================================
@@ -529,15 +570,24 @@ class RouterManager(ChannelRoutingManager):
                     self._inc_stat("received")
                     continue
 
-                dispatch_key = processed.get("command") or processed.get("type", "")
-                if dispatch_key:
-                    try:
-                        self.message_dispatcher.dispatch(
-                            processed,
-                            key_field="command" if processed.get("command") else "type",
-                        )
-                    except Exception as exc:
-                        self._log_warning(f"message_dispatcher error for '{dispatch_key}': {exc}")
+                # P4.4.1 (B2 kind-router): маршрутизация по ВИДУ `type`.
+                # type=="command" → CommandManager (единственный владелец командных
+                # ключей; резолв по `command` + транспортный авто-reply по request_id).
+                # Прочие виды (event/system/data/…) → message_dispatcher по ключу
+                # command|type, как раньше: state.changed (type=event) и heartbeat
+                # (type=system) остаются на message_dispatcher-пути.
+                if processed.get("type") == "command":
+                    self._dispatch_command(processed)
+                else:
+                    dispatch_key = processed.get("command") or processed.get("type", "")
+                    if dispatch_key:
+                        try:
+                            self.message_dispatcher.dispatch(
+                                processed,
+                                key_field="command" if processed.get("command") else "type",
+                            )
+                        except Exception as exc:
+                            self._log_warning(f"message_dispatcher error for '{dispatch_key}': {exc}")
 
                 result.append(Message.from_dict(processed) if return_messages else processed)
                 self._inc_stat("received")

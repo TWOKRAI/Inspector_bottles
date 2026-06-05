@@ -168,8 +168,19 @@ class ProcessManagerProcess(ProcessModule):
 
             self._process_monitor.start()
 
-            # Router endpoint: другие процессы могут слать команды через Router (AD-8)
-            if self.router_manager:
+            # Router endpoint: другие процессы могут слать команды через Router (AD-8).
+            # P4.4.1 (B2): process.command — обычная команда CommandManager (kind-router
+            # по type=command зовёт CM). manages_own_reply=True: handler строит свой
+            # process.command.response сам → транспортный авто-reply пропускается.
+            if self.command_manager:
+                self.command_manager.register_command(
+                    "process.command",
+                    self._handle_process_command,
+                    expects_full_message=True,
+                    metadata={"description": "Router endpoint: вложенная команда PM", "manages_own_reply": True},
+                    tags=["system"],
+                )
+            elif self.router_manager:  # fallback (нет CommandManager) — прежний прямой путь
                 self.router_manager.register_message_handler("process.command", self._handle_process_command)
 
             # backend-control endpoint (dev-инструмент): гейт = system.yaml
