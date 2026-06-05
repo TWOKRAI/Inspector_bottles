@@ -58,3 +58,5 @@
 - [Fix framework forward](feedback_fix_framework_forward.md) — framework-баги чинить разрешено когда мешают; правки на УЛУЧШЕНИЕ, не удаление (fix-forward, не вырезать функционал)
 - [comm-system P0 closed](project_comm_system_p0.md) — §11 ВЕСЬ закрыт (пп.1-22, вкл. hot-path осторожную зону); qt-smoke verified; следующее P1. Телеметрия = отдельный план
 - [Observability control plane](project_observability_control_plane.md) — план ЗАВЕРШЁН (Phase 1-4): единая секция observability + hot-reload watcher в оркестраторе (Option B, forward-compat Phase 4 IPC) + sink-фабрики + ADR-CRM-006; watchdog dep; FPS 21.0 verified
+- [Fewer layers](feedback_fewer_layers.md) — владелец: меньше слоёв при той же функциональности строго лучше; выбор P4.4 варианта B (один диспетчер) над A
+- [Command-bus P4.4 plan](project_command_bus_p4_4.md) — TRH P4.4: убрать двойную диспетчеризацию, CommandManager=библиотека, +lifecycle-feedback; ревью Opus NEEDS REWORK→fixed (3 блокера), вариант B
