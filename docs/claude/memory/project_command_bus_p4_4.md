@@ -11,7 +11,13 @@ TRH P4.4 (главная работа P4) — план `plans/2026-05-31_transpo
 (`_dispatch_command`: type=command→CM, авто-reply по request_id, manages_own_reply, strangler-fallback с
 warning); process.command+register_update свёрнуты в команды CM. P4.4.1b: удалены
 register_commands_with_router + _make_command_handler (копии команд в message_dispatcher) → дупликация
-реестра устранена. framework 3221 passed, qt-smoke OK (0 strangler-warnings). Далее P4.4.2 observability-seam.
+реестра устранена. framework 3221 passed, qt-smoke OK (0 strangler-warnings).
+
+**Доп. рефакторинги:** ✅ регулировщик вынесен в метод `_route_by_kind` (603a4918, = «kind-router»);
+✅ `message_dispatcher`→`event_dispatcher` (8b62c753, рейн 14 файлов — объект держит только события+heartbeat).
+**P4.4.2 (observability-seam) ОТМЕНЕНА:** comm-system §4/§9.1 сохраняет CommandManager как «фасад+timing»;
+перенос = override + ломает паритет (handle_command зовут и не из транспорта); пробел уже закрыт B2.
+P4.4.3 core (один резолвер) достигнут B2. **Далее P4.4.6** (integration + ADR + синхрон comm-system).
 
 **Сверка с comm-system-target-architecture §4 (ревью B+):** «два диспетчера не дубль» = про ДВИЖКИ (один
 Dispatcher, B2 не нарушает), НЕ про дупликацию РЕЕСТРА команд (корень баг-класса telemetry/auto_register_ipc).
