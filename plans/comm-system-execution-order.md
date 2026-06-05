@@ -1,10 +1,16 @@
 # Plan: Порядок исполнения comm-system + observability (sequencing / оркестрация)
 
 - **Slug:** comm-system-execution-order
-- **Дата:** 2026-06-04
-- **Статус:** READY — стартовать в новой сессии с S0
+- **Дата:** 2026-06-04 (обновлено 2026-06-05)
+- **Статус:** S0/S1/S3 DONE — осталось S2 (merge) → S4 → S5
 - **Тип:** meta / cross-cutting — НЕ новый код, а порядок над 5 существующими планами
 - **Ветка:** работает поверх `feat/comm-system-target-architecture` и `feat/observability-control-plane` (см. §«Ветки»)
+
+> **СВЕРКА С РЕАЛЬНОСТЬЮ (2026-06-05).** С момента написания (04.06) сделано больше, чем в порядке ниже:
+> - **S0 (telemetry-A) — DONE.** Решено НЕ через Option A bridge-reuse, а через `telemetry-self-publish-redesign.md` (процесс сам публикует fps/latency в дерево; FPS числами, статусы зелёные). qt-smoke 2026-06-05 подтвердил. План self-publish заархивирован.
+> - **S1 (observability + §11 CRM) — частично/моот.** План `2026-06-03_observability-control-plane/` так и НЕ был написан (есть только ветка `feat/observability-control-plane`). §11 CRM-пункты #16/#17/#18 закрыты в составе P0 §11. `reconfigure()`/hot-reload — отдельная работа, появится при реальной потребности (не блокирует).
+> - **S3 (§11 quick-wins) — DONE.** Весь P0 §11 (пп.1-22, вкл. hot-path осторожную зону) закрыт 2026-06-05 (5 коммитов + qt-smoke). См. `comm-system-target-architecture.md` трекинг S8.
+> - **Осталось:** **S2** (merge ветки в main — 303 коммита, FF-возможен) → **S4** (kind-каналы TRH P3/P4 = comm-system P1/P2) → **S5** (авто-reply/undo/carve-out). Порядок ниже актуален для S2-S5.
 
 > **Зачем этот файл.** Пять планов (ниже) — это пять срезов ОДНОЙ цели, но с пересекающейся
 > нумерацией фаз и расходящимися ветками. Болит не архитектура (она цельная), а **координация**.
@@ -62,12 +68,11 @@
 ## Порядок исполнения
 
 ```
-S0 (СЕЙЧАС, продукт)   telemetry-A          ─┐ параллельно (0 пересечения файлов)
-S1 (СЕЙЧАС, движок-гиг) observability + CRM  ─┘ оба до S4/S5
+S0 ✅DONE (telemetry)   self-publish-redesign (не Option A)  [FPS зелёный, qt-smoke ok]
+S1 ✅частично (CRM)     §11 #16/17/18 закрыты; observability-план не написан
+S3 ✅DONE (гигиена)     comm-system §11 quick-wins пп.1-22    [закрыто 2026-06-05]
         │
-S2 (gate)              merge TRH P0–P2 → main           [фундамент под движок]
-        │
-S3 (parallel, гигиена) comm-system §11 quick-wins        [мёртвый код, fan-out/ultracode]
+S2 (gate) ⬅СЕЙЧАС      merge ветки → main (303 коммита, FF)  [фундамент под движок]
         │
 S4 (движок, после S2)  kind-каналы: TRH P3/P4            [= CSA P1; ОДИН владелец]
         │                    └─ P3.2 StateChannel = deferred (решение #2)
