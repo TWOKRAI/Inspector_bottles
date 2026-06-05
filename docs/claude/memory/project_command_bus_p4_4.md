@@ -6,8 +6,14 @@ metadata:
 ---
 
 TRH P4.4 (главная работа P4) — план `plans/2026-05-31_transport-router-hub/p4.4_command-bus.md`.
-Статус 2026-06-05: **P4.4.0 recon DONE** (ветка `feat/command-bus`, коммит d1f6d4d3). Вариант B
-подтверждён выполнимым; блокеры сняты. Далее P4.4.1.
+Статус 2026-06-05: **P4.4.0 recon DONE** + **развилка пересмотрена → B2** (ветка `feat/command-bus`,
+коммиты d1f6d4d3, 05bf3a86). Далее P4.4.1.
+
+**РЕШЕНИЕ B2 (kind-router), НЕ B1:** recon-факт «все команды несут `type=command`» сделал kind-router
+реализуемым. B1 (один диспетчер) делал CommandManager полым, message_dispatcher свалкой. **B2:**
+`message_dispatcher`→`kind_router` (резолв по `type`); `CommandManager` ВЛАДЕЕТ таблицей команд (резолв
+по `command` 1 раз). process.command/register_update → команды CM; state.changed → event-ветка; хак
+auto_register_ipc уходит. «Меньше слоёв» = меньше полых компонентов, а не -1 lookup.
 
 **Recon-выводы (на коде):** двойной резолв = `message_dispatcher.dispatch(command)` → generic-closure
 `_make_command_handler` → `cm.handle_command` → `cm.dispatcher.dispatch(command)`. Все prod-команды
