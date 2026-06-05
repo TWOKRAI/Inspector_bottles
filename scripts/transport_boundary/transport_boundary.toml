@@ -1,0 +1,69 @@
+# Конфигурация для scripts/transport_boundary/transport_boundary.py
+#
+# Инвариант transport-router-hub P4.3: прямой queue/SHM-транспорт — только в хабе.
+# Единственный способ отправки между компонентами — router.send(message).
+
+[scan]
+# Слои проекта (framework → Services → Plugins → prototype). scripts/ не сканируем.
+roots = [
+    "multiprocess_framework",
+    "Services",
+    "Plugins",
+    "multiprocess_prototype",
+]
+
+[exclude]
+dirs = [
+    "__pycache__", ".git", ".venv", "venv", "env",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "build", "dist",
+    "tests",            # тесты вправе дёргать транспорт напрямую (фикстуры/моки)
+    "docs",
+]
+# Глобы по относительному posix-пути от корня репо.
+path_patterns = [
+    "**/test_*.py",
+    "**/conftest.py",
+    "**/_archive/**",
+    "multiprocess_prototype_backup/**",
+]
+
+[detect]
+# Низкоуровневые транспортные символы. Вызов любого вне allow/debt = нарушение.
+#   send_to_queue / broadcast_message — прямая адресная/широковещательная доставка
+#     в обход router.send (queue_registry).
+#   RingBufferWriter/Reader/MemoryHandle — прямой SHM вне Claim Check хаба.
+forbidden_calls = [
+    "send_to_queue",
+    "broadcast_message",
+    "RingBufferWriter",
+    "RingBufferReader",
+    "MemoryHandle",
+]
+
+[allow]
+# «Внутри хаба»: здесь прямой транспорт легитимен.
+#   router_module/**           — сам хаб (_deliver_by_targets) + frame-middleware (Claim Check)
+#   shared_resources_module/** — реализация транспортной библиотеки очередей/SHM
+paths = [
+    "multiprocess_framework/modules/router_module/**",
+    "multiprocess_framework/modules/shared_resources_module/**",
+]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Известные долги (ratchet). Печатаются как KNOWN DEBT, НЕ роняют чекер.
+# Удаление — в P5 (см. plan.md, recon_p4.md). Любой НОВЫЙ вызов вне allow/debt → fail.
+# ──────────────────────────────────────────────────────────────────────────────
+
+[[debt]]
+path = "multiprocess_framework/modules/process_module/communication/process_communication.py"
+reason = "broadcast B7 (queue_registry.broadcast_message) мимо хаба, 0 потребителей → P4.2/P5.0 gate"
+
+[[debt]]
+path = "multiprocess_framework/modules/process_module/core/process_module.py"
+reason = "broadcast_message-алиас публичного API → P5 (вслед за B7)"
+
+[output]
+format = "table"   # table | json
+# strict = true → exit 1 при нарушениях вне allow/debt (для CI/pre-push)
+strict = true

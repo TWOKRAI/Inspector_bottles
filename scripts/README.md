@@ -31,6 +31,7 @@
 | [`test_ratio/`](test_ratio/) | `/test-ratio` | LOC-отношение `tests/` к `code/` на каждый модуль. Дополнение к `/sentrux-gaps` (объёмная метрика). | [README](test_ratio/README.md) |
 | [`todo_inventory/`](todo_inventory/) | `/todo-inventory` | Сбор `TODO/FIXME/HACK/XXX/BUG/NOTE` с автором и возрастом через `git blame`. | [README](todo_inventory/README.md) |
 | [`clean_cache/`](clean_cache/) | `/clean-cache` | Чистка `__pycache__/`, `.pytest_cache/`, `*.pyc`, `.coverage` и т.п. **Dry-run по умолчанию**, реальное удаление — `--apply`. | [README](clean_cache/README.md) |
+| [`transport_boundary/`](transport_boundary/) | — (в `ci.py`) | AST-инвариант transport-router-hub P4.3: прямой queue/SHM-транспорт (`send_to_queue`/`broadcast_message`/SHM) только внутри хаба (`router_module`/`shared_resources_module`). Ratchet с `[[debt]]`. Exit 0/1. | [README](transport_boundary/README.md) |
 
 Конфиг подпакета лежит рядом с `*.py` (например, [`code_stats/code_stats.toml`](code_stats/code_stats.toml)) — CLI-флаги перекрывают значения из конфига.
 

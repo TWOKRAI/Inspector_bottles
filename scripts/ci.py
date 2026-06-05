@@ -8,6 +8,7 @@ CI-standalone проверка качества проекта.
 1. Структурная валидация (validate.py)
 2. Тесты фреймворка (run_framework_tests.py)
 3. ADR sync дрифт (scripts/sync --check)
+3b. Транспортный инвариант (transport_boundary.py — router.send только в хабе)
 4. Архитектурные границы (sentrux check, если установлен)
 5. Ruff lint (если установлен)
 
@@ -115,6 +116,12 @@ class CIRunner:
             [sys.executable, "-m", "scripts.sync", "--check"],
         )
 
+        # 3b. Транспортный инвариант (router.send — единственный способ отправки)
+        self.run_step(
+            "Транспортный инвариант (router.send)",
+            [sys.executable, "scripts/transport_boundary/transport_boundary.py"],
+        )
+
         # 4. Sentrux check (архитектурные границы)
         if not self.no_sentrux:
             self.run_step(
@@ -159,6 +166,12 @@ class CIRunner:
 
 
 def main() -> int:
+    # Windows-консоль по умолчанию cp1251 — не кодирует box-drawing/кириллицу в выводе.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
     args = set(sys.argv[1:])
 
     if "--help" in args or "-h" in args:
