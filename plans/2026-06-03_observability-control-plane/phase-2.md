@@ -34,13 +34,21 @@ SQLChannel / SocketChannel (Phase 4).
 5. Тест на регистрацию фиктивного `MemorySink(LogChannel)` и создание через `create_channel`.
 
 **Acceptance criteria:**
-- [ ] `python -m pytest multiprocess_framework/modules/logger_module/tests/ -q` — green.
-- [ ] `from multiprocess_framework.modules.logger_module import register_sink_factory` работает.
-- [ ] Регистрация нового типа + `create_channel(name, cfg(type=new))` создаёт инстанс без правки `create_channel`.
-- [ ] Существующие типы (`file/console/http/frame_trace`) по-прежнему создаются.
-- [ ] `python scripts/validate.py` — без новых ошибок.
+- [x] `python -m pytest multiprocess_framework/modules/logger_module/tests/ -q` — green (25 passed).
+- [x] `from multiprocess_framework.modules.logger_module import register_sink_factory` работает.
+- [x] Регистрация нового типа + `create_channel(name, cfg(type=new))` создаёт инстанс без правки `create_channel`.
+- [x] Существующие типы (`file/console/http/frame_trace`) по-прежнему создаются.
+- [x] `python scripts/validate.py` — без новых ошибок.
 
 **Out of scope:** общий cross-module реестр для Stats/Router; реализация SQL/Socket sink; авто-discovery sink-классов.
 **Edge cases:** регистрация типа-дубля (последняя побеждает — задокументировать); None/невалидный factory → `TypeError`.
 **Dependencies:** Task 1.1 (reconfigure уже использует `create_channel` через `_setup_channels`).
 **Module contract:** public-api-change (новый публичный экспорт `register_sink_factory`).
+
+> **Task 2.1 DONE (`6e6cf15f`, 2026-06-05):** `channel_types` вынесен в module-level
+> `_SINK_FACTORIES`; публичные `register_sink_factory(type, cls)` (валидация: не-класс /
+> без `write()` / пустой type → `TypeError`; last-wins) + `get_registered_sink_types()`;
+> `create_channel` читает из реестра, `ValueError` при неизвестном типе (паритет). Экспорт
+> в `logger_module/__init__.py`. 5 тестов (`test_sink_factory.py`, фикстура восстанавливает
+> module-level реестр). ruff+pyright чисты (1 пре-существующий warning в HttpChannel),
+> validate без дрифта. StatsManager-каналы НЕ тронуты (задел следующей итерации).

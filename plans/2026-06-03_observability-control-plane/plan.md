@@ -2,7 +2,7 @@
 
 - **Slug:** observability-control-plane
 - **Дата:** 2026-06-03 (влито в main 2026-06-05)
-- **Статус:** Phase 1 DONE (`d63bae62`) — влито в main; Phase 2-4 PENDING
+- **Статус:** Phase 1 DONE (`d63bae62`) + Phase 2 DONE (`6e6cf15f`, реестр sink-фабрик) — в main; Phase 3-4 PENDING
 - **Ветка:** feat/observability-control-plane — отребейзена на актуальный main и влита (ff). Phase 1 (`reconfigure(config)` на CRM + `invalidate_decision_cache` LoggerManager) теперь в main; §11 CRM #16/#17/#18 (из P0 comm-system) авто-смержились без конфликта (разные регионы). Остаток: Phase 2 (секция `observability` в конфиге), Phase 3 (`ConfigFileWatcher` → live hot-reload), Phase 4 (IPC `config.reload`/`logger.sink.enable` через командный путь хаба). По execution-order — до движковых S4/S5 (decision #4), Phase 2+ «по аппетиту».
 
 ## Контекст
@@ -69,7 +69,7 @@ CRM-менеджерах, в который позже подключатся IP
   - **Module contract:** public-api-change
 
 ### Phase 2: Реестр sink-фабрик
-- Task 2.1: `register_sink_factory` / `create_sink` — реестр поверх `create_channel` [PENDING] (зависит от 1.1)
+- Task 2.1: `register_sink_factory` / `create_sink` — реестр поверх `create_channel` [DONE `6e6cf15f`]
   - **Module contract:** public-api-change
 
 ### Phase 3: Единая секция конфига + hot-reload в проде
