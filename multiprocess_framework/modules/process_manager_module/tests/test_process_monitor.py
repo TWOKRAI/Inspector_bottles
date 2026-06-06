@@ -229,6 +229,26 @@ class TestProcessMonitorHeartbeats:
         assert monitor.previous_states.get("DeadP", {}).get("status") == "crashed"
         mock_pm.shared_resources.process_state_registry.update_state.assert_called()
 
+    def test_unresponsive_disabled_policy_does_not_shutdown(self) -> None:
+        """Unresponsive при выключенной policy НЕ роняет систему (consistency с crashed).
+
+        Регресс-гард (command-result-bridge): транзиентный unresponsive (например
+        новый процесс после горячей замены ещё не прислал heartbeat) НЕ должен
+        каскадом инициировать shutdown и ронять GUI.
+        """
+        mock_pm = _make_mock_process_manager()
+        mock_pm._stop_requested = False
+        # policy.enabled=False по умолчанию
+        monitor = ProcessMonitor(mock_pm, heartbeat_timeout=1.0)
+        monitor._last_heartbeat["cam"] = time.time() - 999.0
+        monitor.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+
+        monitor._check_heartbeat_timeout("cam", time.time())
+
+        assert mock_pm._stop_requested is False  # система НЕ остановлена
+        # процесс помечен unresponsive
+        assert monitor.previous_states["cam"]["status"] == "unresponsive"
+
 
 class TestProcessMonitorGetStats:
     def test_get_stats_returns_dict(self) -> None:
