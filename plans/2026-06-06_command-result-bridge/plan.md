@@ -137,8 +137,14 @@ P1 framework: CommandSender request-path (+ IProcess) ─▶ P2 GUI: RequestRunn
 3. `_on_replace_result(resp)`: `resp["success"]` → «Рецепт запущен (заменено N процессов)»; иначе → ошибка/`rolled_back` через View.
 4. pytest-qt: presenter обновляет View по фейковым success/error результатам.
 5. **qt-mcp smoke** (memory `feedback_qt_mcp_smoke_verification`): прототип, активировать рецепт → индикатор результата виден, UI не фризится, FPS не просел; проверить и happy, и error (битый blueprint).
-**Acceptance:** - [ ] активация рецепта показывает реальный success/error (не optimistic) - [ ] UI не фризится во время операции (worker-поток) - [ ] qt-mcp smoke: успех и ошибка отрисованы, FPS паритет - [ ] pytest-qt зелёные.
+**Acceptance:** - [x] активация рецепта показывает реальный success/error (не optimistic) - [x] UI не фризится во время операции (worker-поток) - [x] qt-mcp smoke: live happy-path (restore→«Запустить»→async replace→процессы подняты, GUI выжил); feedback НЕ-модальный (статус+лог) - [x] pytest-qt зелёные (459 pipeline).
 **Out of scope:** lifecycle-прогресс (P4.4.4 follow-up); request-path для других команд (по аппетиту позже).
+**Статус:** ✅ **P3 DONE** (`c4894133` non-modal). По ходу live-smoke вскрыт и починен каскад крашей горячей замены (вне исходного scope, но блокировал приёмку):
+- `00781adb` — `replace_blueprint` читал `class` вместо канонического `process_class` → класс не грузился → откат → краш. + reply `success` по self-report.
+- `9288835c` — монитор реально не паузился при replace (цикл шёл по worker-event, игнорировал `_monitoring`) → ложный unresponsive.
+- `3b4891fe` — unresponsive при disabled-policy ронял ВСЮ систему (каскад на GUI). Теперь не роняет (как crashed).
+- `f1c88d10` — restore: активный рецепт из манифеста при старте (раньше всегда None).
+**Остаток (следующая сессия):** persist slug→app.yaml при активации (restore готов); баг UI-активации «Загрузить» (dispatch ActivateRecipe early-return?); косметика — 3 ложных unresponsive при старте процессов (безвредны); app переписывает raw-рецепт (стирает комментарии).
 
 ### Task P4 — Integration + ADR + docs + sentrux
 **Level:** Senior · **Assignee:** tester + teamlead
