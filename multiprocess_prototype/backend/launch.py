@@ -274,6 +274,10 @@ class SystemBuilder:
                 "backend_ctl": sys_config.backend_ctl.model_dump(),
                 # Путь к system.yaml для observability hot-reload watcher (P3.3).
                 "observability_config_path": str(self._system_path) if self._system_path else "",
+                # Дебаунс hot-swap: коалесинг повторных/наложенных кликов 3 точек входа
+                # (Recipes «Загрузить», Pipeline «Запустить»/«Перезапустить») → не «тасуем»
+                # процессы. Меряется от завершения предыдущей замены. 0 = выключено (тесты).
+                "replace_debounce_s": 1.0,
             },
         )
         # Единая секция observability → overlay поверх дефолтных managers каждого

@@ -602,3 +602,52 @@ class TestEdgeCases:
         pm.replace_blueprint({"processes": [{"process_name": "n2", "process_class": "m.N2"}]})
         assert "n2" in pm._process_configs
         assert "n1" not in pm._process_configs
+
+
+class TestReplaceBlueprintDebounce:
+    """Дебаунс hot-swap: in-flight guard + cooldown (единая точка коалесинга)."""
+
+    def test_in_flight_guard_rejects_reentrant(self) -> None:
+        """Пока замена идёт (_replace_in_progress=True) — новый запрос отклоняется."""
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        pm._replace_in_progress = True
+
+        result = pm.replace_blueprint({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is False
+        assert result["debounced"] is True
+        # Реальная замена не выполнялась — w1 на месте.
+        assert "w1" in pm._process_configs
+        assert "n1" not in pm._process_configs
+
+    def test_cooldown_rejects_rapid_second(self) -> None:
+        """С replace_debounce_s>0 повторный запрос в окне после завершения — отклоняется."""
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        pm.get_config = lambda key: {"stop_process_timeout": 1.0, "replace_debounce_s": 10.0}.get(key)
+
+        # Первая замена проходит (last_replace_ts по умолчанию 0 → окно давно вышло).
+        r1 = pm.replace_blueprint({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+        assert r1["success"] is True
+
+        # Вторая сразу же — внутри cooldown (10с) → debounced, n1 остаётся.
+        r2 = pm.replace_blueprint({"processes": [{"process_name": "n2", "process_class": "m.N2"}]})
+        assert r2["success"] is False
+        assert r2["debounced"] is True
+        assert "n1" in pm._process_configs
+        assert "n2" not in pm._process_configs
+
+    def test_cooldown_zero_disables_debounce(self) -> None:
+        """replace_debounce_s=0 (дефолт тестов) → дебаунс выключен, двойная замена работает."""
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        # get_config по умолчанию возвращает None для replace_debounce_s → 0.0.
+        pm.replace_blueprint({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+        pm.replace_blueprint({"processes": [{"process_name": "n2", "process_class": "m.N2"}]})
+        assert "n2" in pm._process_configs
+        assert "n1" not in pm._process_configs
+
+    def test_in_flight_flag_cleared_after_replace(self) -> None:
+        """После замены флаг _replace_in_progress снят (finally), следующая проходит."""
+        pm = make_pm({"w1": {"class": "m.W1"}})
+        pm.replace_blueprint({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+        assert pm._replace_in_progress is False
+        assert pm._last_replace_ts > 0.0

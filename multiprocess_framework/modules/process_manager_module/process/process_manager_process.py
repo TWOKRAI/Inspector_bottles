@@ -9,6 +9,7 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
+import time
 from typing import Any
 
 from ...console_module import ConsoleManager
@@ -56,6 +57,9 @@ class ProcessManagerProcess(ProcessModule):
         self._process_configs: dict[str, dict[str, Any]] = {}
         # Трекинг активных wire-каналов (wire_key → метаданные)
         self._active_wires: dict[str, dict[str, Any]] = {}
+        # Дебаунс hot-swap: in-flight guard + cooldown (см. replace_blueprint).
+        self._replace_in_progress: bool = False
+        self._last_replace_ts: float = 0.0
         self._create_components()
 
     def _create_components(self) -> None:
@@ -688,6 +692,49 @@ class ProcessManagerProcess(ProcessModule):
         return result
 
     def replace_blueprint(self, new_blueprint: dict[str, Any] | None) -> dict[str, Any]:
+        """Дебаунс-обёртка над заменой blueprint — единая точка коалесинга hot-swap.
+
+        3 GUI-точки входа (Recipes «Загрузить», Pipeline «Запустить»/«Перезапустить»)
+        сходятся сюда через IPC ``blueprint.replace``. Чтобы повторные/наложенные клики
+        не «тасовали» процессы:
+          - in-flight guard: пока замена идёт — новые запросы отклоняются;
+          - cooldown ``replace_debounce_s`` (config, дефолт 0): запрос в пределах окна
+            ПОСЛЕ ЗАВЕРШЕНИЯ предыдущей замены отклоняется. Меряется от завершения:
+            IPC-сообщения читаются последовательно уже после долгой (секунды) замены,
+            поэтому двойной клик приходит на обработку именно по её завершении.
+
+        Тесты не задают ``replace_debounce_s`` → 0 → дебаунс выключен (паритет поведения).
+        """
+        # getattr-дефолты: make_pm в тестах обходит __init__ (атрибутов может не быть).
+        if getattr(self, "_replace_in_progress", False):
+            self._log_warning("replace_blueprint: замена уже выполняется — запрос пропущен (debounce)")
+            return {
+                "success": False,
+                "replaced": [],
+                "skipped_protected": [],
+                "error": "замена уже выполняется",
+                "rolled_back": False,
+                "debounced": True,
+            }
+        cooldown = float(self.get_config("replace_debounce_s") or 0.0)
+        if cooldown > 0.0 and (time.monotonic() - getattr(self, "_last_replace_ts", 0.0)) < cooldown:
+            self._log_info("replace_blueprint: запрос в пределах cooldown — пропущен (debounce)")
+            return {
+                "success": False,
+                "replaced": [],
+                "skipped_protected": [],
+                "error": "debounce cooldown",
+                "rolled_back": False,
+                "debounced": True,
+            }
+        self._replace_in_progress = True
+        try:
+            return self._replace_blueprint_impl(new_blueprint)
+        finally:
+            self._replace_in_progress = False
+            self._last_replace_ts = time.monotonic()
+
+    def _replace_blueprint_impl(self, new_blueprint: dict[str, Any] | None) -> dict[str, Any]:
         """Заменить blueprint: остановить незащищённые процессы, поднять новые.
 
         Dict at Boundary: принимает dict, не Pydantic-модель.
