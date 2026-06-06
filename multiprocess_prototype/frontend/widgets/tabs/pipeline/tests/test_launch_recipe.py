@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
 """Тесты кнопки «Запустить активный рецепт» — PipelinePresenter.launch_active_recipe.
-Task E.1 -> F.4: мигрировано на RecipeStore Protocol (FakeRecipeStore).
 
-8 unit-тестов (см. docstrings в каждом классе).
+Task E.1 -> F.4: мигрировано на RecipeStore Protocol (FakeRecipeStore).
+command-result-bridge P3: async request/response + НЕ-модальный feedback через
+notify-callback (статус-строка + лог), без блокирующих QMessageBox.
 
 Запуск:
     python -m pytest multiprocess_prototype/frontend/widgets/tabs/pipeline/tests/test_launch_recipe.py -v
 """
 
 from __future__ import annotations
-
-from unittest.mock import MagicMock
 
 from multiprocess_prototype.domain.tests._fakes import FakeRecipeStore
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import (
@@ -58,244 +57,142 @@ def _make_services(store: FakeRecipeStore, config_extra: dict | None = None):
     return services
 
 
-# ---------------------------------------------------------------------------
-# Тест 1: нет активного рецепта -> warning, return False
-# ---------------------------------------------------------------------------
+def _make_presenter(store, proxy=None):
+    """PipelinePresenter с notify-spy. Возвращает (presenter, messages)."""
+    messages: list[str] = []
+    services = _make_services(store)
+    presenter = PipelinePresenter(services, notify=messages.append, process_manager_proxy=proxy)
+    return presenter, messages
 
 
-class TestLaunchNoActiveRecipe:
-    """get_active() == None -> warning, return False."""
+class _FakeAsyncProxy:
+    """Fake ProcessManagerProxy с async request/response.
 
-    def test_launch_no_active_recipe_warns(self, monkeypatch) -> None:
-        store = _make_recipe_store(active_slug=None)
-        services = _make_services(store)
-        presenter = PipelinePresenter(services)
+    Синхронно зовёт ``on_result`` заготовленным ответом — детерминизм в
+    unit-тесте. Реальная доставка результата с worker-потока в main-thread
+    покрыта тестами RequestRunner (P2), здесь проверяется только рендеринг
+    результата презентером.
+    """
 
-        warnings_shown = []
-        from PySide6.QtWidgets import QMessageBox
-
-        monkeypatch.setattr(
-            QMessageBox,
-            "warning",
-            staticmethod(lambda *a, **kw: warnings_shown.append(a[2] if len(a) > 2 else "w")),
+    def __init__(self, response: dict | None = None, raise_exc: Exception | None = None) -> None:
+        self._response = (
+            response if response is not None else {"success": True, "result": {"success": True, "replaced": []}}
         )
-        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **kw: None))
+        self._raise = raise_exc
+        self.blueprints: list[dict] = []
+
+    def replace_blueprint_async(self, blueprint: dict, on_result) -> None:
+        self.blueprints.append(blueprint)
+        if self._raise is not None:
+            raise self._raise
+        on_result(self._response)
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight (НЕ-модальный feedback через notify)
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchPreflight:
+    """Pre-flight проверки → notify-сообщение + return False (без модалок)."""
+
+    def test_launch_no_active_recipe(self) -> None:
+        presenter, messages = _make_presenter(_make_recipe_store(active_slug=None))
 
         result = presenter.launch_active_recipe(parent=None)
 
         assert result is False
-        assert len(warnings_shown) == 1
-        assert "рецепт" in warnings_shown[0].lower()
+        assert any("активный рецепт" in m.lower() for m in messages)
 
+    def test_launch_recipe_read_fails(self) -> None:
+        presenter, messages = _make_presenter(_make_recipe_store(active_slug="broken", recipe_data=None))
 
-# ---------------------------------------------------------------------------
-# Тест 2: read_raw возвращает None -> critical, return False
-# ---------------------------------------------------------------------------
+        result = presenter.launch_active_recipe(parent=None)
 
+        assert result is False
+        assert any("прочитать" in m.lower() for m in messages)
 
-class TestLaunchRecipeReadFails:
-    """read_raw() == None -> QMessageBox.critical, return False."""
-
-    def test_launch_recipe_read_fails(self, monkeypatch) -> None:
-        store = _make_recipe_store(active_slug="broken", recipe_data=None)
-        services = _make_services(store)
-        presenter = PipelinePresenter(services)
-
-        criticals_shown = []
-        from PySide6.QtWidgets import QMessageBox
-
-        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(
-            QMessageBox,
-            "critical",
-            staticmethod(lambda *a, **kw: criticals_shown.append(a[2] if len(a) > 2 else "c")),
+    def test_launch_no_blueprint(self) -> None:
+        presenter, messages = _make_presenter(
+            _make_recipe_store(
+                active_slug="empty_bp",
+                recipe_data={"meta": {}, "data": {"active_services": []}},
+            )
         )
 
         result = presenter.launch_active_recipe(parent=None)
 
         assert result is False
-        assert len(criticals_shown) == 1
+        assert any("blueprint" in m.lower() for m in messages)
 
-
-# ---------------------------------------------------------------------------
-# Тест 3: рецепт без blueprint -> warning, return False
-# ---------------------------------------------------------------------------
-
-
-class TestLaunchNoBlueprint:
-    """Рецепт без секции blueprint -> warning, return False."""
-
-    def test_launch_no_blueprint_warns(self, monkeypatch) -> None:
-        store = _make_recipe_store(
-            active_slug="empty_bp",
-            recipe_data={"meta": {}, "data": {"active_services": []}},
-        )
-        services = _make_services(store)
-        presenter = PipelinePresenter(services)
-
-        warnings_shown = []
-        from PySide6.QtWidgets import QMessageBox
-
-        monkeypatch.setattr(
-            QMessageBox,
-            "warning",
-            staticmethod(lambda *a, **kw: warnings_shown.append(a[2] if len(a) > 2 else "w")),
-        )
-        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **kw: None))
+    def test_launch_no_proxy(self) -> None:
+        presenter, messages = _make_presenter(_make_recipe_store())  # proxy=None
 
         result = presenter.launch_active_recipe(parent=None)
 
         assert result is False
-        assert len(warnings_shown) == 1
-        assert "blueprint" in warnings_shown[0].lower()
+        assert any("proxy" in m.lower() for m in messages)
 
 
 # ---------------------------------------------------------------------------
-# Тест 4: нет proxy -> warning, return False
+# Async request/response — GUI узнаёт реальный результат
 # ---------------------------------------------------------------------------
 
 
-class TestLaunchNoProxy:
-    """Нет proxy в config -> warning, return False."""
+class TestLaunchAsyncResult:
+    """replace_blueprint_async → реальный результат PM в notify."""
 
-    def test_launch_no_proxy_warns(self, monkeypatch) -> None:
-        store = _make_recipe_store()
-        services = _make_services(store)
-        presenter = PipelinePresenter(services)
-
-        warnings_shown = []
-        from PySide6.QtWidgets import QMessageBox
-
-        monkeypatch.setattr(
-            QMessageBox,
-            "warning",
-            staticmethod(lambda *a, **kw: warnings_shown.append(a[2] if len(a) > 2 else "w")),
-        )
-        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **kw: None))
-
-        result = presenter.launch_active_recipe(parent=None)
-
-        assert result is False
-        assert len(warnings_shown) == 1
-        assert "proxy" in warnings_shown[0].lower() or "ProcessManager" in warnings_shown[0]
-
-
-# ---------------------------------------------------------------------------
-# Тест 5: успешный вызов replace_blueprint -> information, return True
-# ---------------------------------------------------------------------------
-
-
-class TestLaunchCallsReplaceBlueprint:
-    """Proxy замокан, replace_blueprint возвращает success=True -> True."""
-
-    def test_launch_calls_replace_blueprint(self, monkeypatch) -> None:
-        expected_blueprint = {
-            "processes": [{"process_name": "proc1"}],
-            "wires": [],
-        }
+    def test_success_shows_replaced_count(self) -> None:
+        """Успех PM → notify «запущен (заменено процессов: N)», return True."""
+        expected_blueprint = {"processes": [{"process_name": "proc1"}], "wires": []}
         store = _make_recipe_store(
             active_slug="demo_recipe",
-            recipe_data={
-                "meta": {"name": "demo_recipe"},
-                "data": {"blueprint": expected_blueprint},
-            },
+            recipe_data={"meta": {"name": "demo_recipe"}, "data": {"blueprint": expected_blueprint}},
         )
+        proxy = _FakeAsyncProxy(response={"success": True, "result": {"success": True, "replaced": ["a", "b"]}})
+        presenter, messages = _make_presenter(store, proxy)
 
-        # Этап 1: fire-and-forget IPC — proxy возвращает optimistic-ack.
-        proxy = MagicMock()
-        proxy.replace_blueprint.return_value = {"success": True, "dispatched": True}
+        result = presenter.launch_active_recipe(parent=None)
 
-        services = _make_services(store)
-        presenter = PipelinePresenter(services, process_manager_proxy=proxy)
+        assert result is True  # запрос отправлен в работу
+        assert proxy.blueprints == [expected_blueprint]
+        assert any("запущен" in m and "2" in m for m in messages)
 
-        info_shown = []
-        from PySide6.QtWidgets import QMessageBox
-
-        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(
-            QMessageBox,
-            "information",
-            staticmethod(lambda *a, **kw: info_shown.append(a[2] if len(a) > 2 else "i")),
-        )
-        monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **kw: None))
+    def test_failure_shows_error(self) -> None:
+        """PM success=False → notify ошибки с текстом, return True (запрос ушёл)."""
+        proxy = _FakeAsyncProxy(response={"success": False, "result": {"success": False, "error": "boom"}})
+        presenter, messages = _make_presenter(_make_recipe_store(), proxy)
 
         result = presenter.launch_active_recipe(parent=None)
 
         assert result is True
-        proxy.replace_blueprint.assert_called_once_with(expected_blueprint)
-        assert len(info_shown) == 1
-        assert "demo_recipe" in info_shown[0]
-        assert "отправлена" in info_shown[0]
+        assert any("ошибка" in m.lower() and "boom" in m for m in messages)
 
-
-# ---------------------------------------------------------------------------
-# Тест 6: replace_blueprint возвращает success=False -> critical, return False
-# ---------------------------------------------------------------------------
-
-
-class TestLaunchHandlesReplaceBlueprintFailure:
-    """Proxy возвращает success=False -> critical, return False."""
-
-    def test_launch_handles_replace_blueprint_failure(self, monkeypatch) -> None:
-        store = _make_recipe_store()
-        # Этап 1: optimistic-ack без success → critical с текстом ошибки.
-        proxy = MagicMock()
-        proxy.replace_blueprint.return_value = {"success": False, "error": "boom"}
-
-        services = _make_services(store)
-        presenter = PipelinePresenter(services, process_manager_proxy=proxy)
-
-        criticals_shown = []
-        from PySide6.QtWidgets import QMessageBox
-
-        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(
-            QMessageBox,
-            "critical",
-            staticmethod(lambda *a, **kw: criticals_shown.append(a[2] if len(a) > 2 else "c")),
+    def test_rollback_shows_rollback(self) -> None:
+        """PM rolled_back=True → notify помечает откат."""
+        proxy = _FakeAsyncProxy(
+            response={
+                "success": False,
+                "result": {
+                    "success": False,
+                    "error": "Ошибка старта процесса 'cam'",
+                    "rolled_back": True,
+                },
+            }
         )
+        presenter, messages = _make_presenter(_make_recipe_store(), proxy)
+
+        result = presenter.launch_active_recipe(parent=None)
+
+        assert result is True
+        assert any("rollback" in m.lower() or "откач" in m.lower() for m in messages)
+
+    def test_dispatch_exception(self) -> None:
+        """Исключение при отправке → notify ошибки, return False (pre-flight провал)."""
+        proxy = _FakeAsyncProxy(raise_exc=Exception("crash"))
+        presenter, messages = _make_presenter(_make_recipe_store(), proxy)
 
         result = presenter.launch_active_recipe(parent=None)
 
         assert result is False
-        assert len(criticals_shown) == 1
-        assert "boom" in criticals_shown[0]
-
-
-# ---------------------------------------------------------------------------
-# Тест 7: replace_blueprint поднимает исключение -> critical, не падает
-# ---------------------------------------------------------------------------
-
-
-class TestLaunchHandlesException:
-    """proxy.replace_blueprint raises Exception -> critical, return False."""
-
-    def test_launch_handles_exception(self, monkeypatch) -> None:
-        store = _make_recipe_store()
-        proxy = MagicMock()
-        proxy.replace_blueprint.side_effect = Exception("crash")
-
-        services = _make_services(store)
-        presenter = PipelinePresenter(services, process_manager_proxy=proxy)
-
-        criticals_shown = []
-        from PySide6.QtWidgets import QMessageBox
-
-        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
-        monkeypatch.setattr(
-            QMessageBox,
-            "critical",
-            staticmethod(lambda *a, **kw: criticals_shown.append(a[2] if len(a) > 2 else "c")),
-        )
-
-        result = presenter.launch_active_recipe(parent=None)
-
-        assert result is False
-        assert len(criticals_shown) == 1
-        assert "crash" in criticals_shown[0]
+        assert any("crash" in m for m in messages)

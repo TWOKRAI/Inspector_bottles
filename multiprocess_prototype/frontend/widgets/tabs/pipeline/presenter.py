@@ -1531,11 +1531,17 @@ class PipelinePresenter:
     # ------------------------------------------------------------------ #
 
     def launch_active_recipe(self, parent: "QWidget | None" = None) -> bool:
-        """Запустить активный рецепт через ProcessManager-proxy.
+        """Запустить активный рецепт через ProcessManager-proxy (request/response).
 
         Получает blueprint из активного рецепта и вызывает
-        ``proxy.replace_blueprint(blueprint)`` — горячую замену процессов
-        без остановки GUI.
+        ``proxy.replace_blueprint_async(blueprint, on_result)`` — горячую замену
+        процессов с РЕАЛЬНЫМ результатом (command-result-bridge P3).
+
+        В отличие от прежнего fire-and-forget (показывал «отправлено» без знания
+        факта): request исполняется на worker-потоке (UI не фризится), а реальный
+        ответ PM (``success``/``replaced``/``rolled_back``) приходит в
+        :meth:`_on_recipe_launch_result` в Qt main-thread и показывается
+        пользователю как успех (с числом заменённых процессов) или ошибка/rollback.
 
         Task F.4: использует RecipeStore Protocol (services.recipes).
 
@@ -1543,68 +1549,87 @@ class PipelinePresenter:
             parent: родительский виджет для QMessageBox (может быть None).
 
         Returns:
-            True при успешном запуске, False при любой ошибке или при
-            отсутствии proxy.
-        """
-        from PySide6.QtWidgets import QMessageBox
+            True если запрос отправлен в работу (результат придёт асинхронно в
+            ``_on_recipe_launch_result``); False при pre-flight ошибке (нет
+            активного рецепта / blueprint / proxy / ошибка отправки).
 
+        Note:
+            Feedback не-модальный: статус и результат идут в статусную строку
+            (``_notify``) и лог (терминал), без блокирующих QMessageBox.
+        """
         store = self._services.recipes
 
         # Шаг 1: проверить активный рецепт
         active_slug = store.get_active()
         if active_slug is None:
-            QMessageBox.warning(parent, "Запуск рецепта", "Не выбран активный рецепт")
+            self._notify_status("Запуск рецепта: не выбран активный рецепт", level="warning")
             return False
 
         # Шаг 2: прочитать рецепт через RecipeStore Protocol
         current = store.read_raw(active_slug)
         if current is None:
-            QMessageBox.critical(parent, "Запуск рецепта", "Не удалось прочитать рецепт")
+            self._notify_status(f"Запуск рецепта: не удалось прочитать рецепт '{active_slug}'", level="error")
             return False
 
-        # Шаг 4: извлечь blueprint
+        # Шаг 3: извлечь blueprint
         blueprint = current.get("blueprint") or current.get("data", {}).get("blueprint") or {}
         if not blueprint:
-            QMessageBox.warning(
-                parent,
-                "Запуск рецепта",
-                f"Рецепт '{active_slug}' не содержит blueprint",
-            )
+            self._notify_status(f"Запуск рецепта: рецепт '{active_slug}' не содержит blueprint", level="warning")
             return False
 
-        # Шаг 5: ProcessManager-proxy (Этап 1: RuntimeDeps, Q-F1=B runtime-layer).
+        # Шаг 4: ProcessManager-proxy с async request/response (Этап 1: RuntimeDeps).
         proxy = self._pm_proxy
-        if proxy is None or not hasattr(proxy, "replace_blueprint"):
-            QMessageBox.warning(
-                parent,
-                "Запуск рецепта",
-                "ProcessManager-proxy недоступен в GUI-процессе.\nЗапуск возможен только при работающей системе.",
+        if proxy is None or not hasattr(proxy, "replace_blueprint_async"):
+            self._notify_status(
+                "Запуск рецепта: ProcessManager-proxy недоступен (система не запущена)",
+                level="warning",
             )
             return False
 
-        # Шаг 6: отправить replace_blueprint в backend (fire-and-forget IPC).
-        # Реальный результат (replaced/rollback) приходит async через Router-ответ;
-        # здесь подтверждаем только факт отправки команды (optimistic-ack).
+        # Шаг 5: request/response — реальный результат придёт в on_result (main-thread),
+        # request исполняется на worker-потоке (UI не фризится). До ответа показываем
+        # «выполняется…» в статусной строке (не модально, чтобы не блокировать UI).
+        self._notify_status(f"Запуск рецепта '{active_slug}': выполняется…")
         try:
-            result = proxy.replace_blueprint(blueprint)
-            if result.get("success", False):
-                QMessageBox.information(
-                    parent,
-                    "Запуск рецепта",
-                    f"Команда запуска рецепта '{active_slug}' отправлена в backend.\n"
-                    "Горячая замена процессов применяется на стороне ProcessManager.",
-                )
-                return True
-            QMessageBox.critical(
-                parent,
-                "Запуск рецепта",
-                f"Не удалось отправить команду: {result.get('error') or 'неизвестная ошибка'}",
+            proxy.replace_blueprint_async(
+                blueprint,
+                lambda resp: self._on_recipe_launch_result(resp, active_slug),
             )
-            return False
         except Exception as exc:
-            logger.exception("launch_active_recipe failed")
-            QMessageBox.critical(parent, "Запуск рецепта", f"Ошибка: {exc}")
+            logger.exception("launch_active_recipe dispatch failed")
+            self._notify_status(f"Запуск рецепта '{active_slug}': ошибка отправки — {exc}", level="error")
             return False
+        return True
+
+    def _on_recipe_launch_result(self, resp: dict, slug: str) -> None:
+        """Главный поток: показать реальный результат активации рецепта (P3).
+
+        Не-модально (статус-строка + лог). Форма ответа:
+        - полный PM-ответ ``{"success": bool, "result": {success, replaced,
+          rolled_back, error, ...}}`` (через ``router.request`` → reply PM);
+        - error/timeout-обёртка ``{"success": False, "error": "..."}`` (без
+          ``result``) — от RequestRunner/``request()``.
+
+        Приоритет вердикту самого PM (``result["success"]``); при его отсутствии —
+        транспортный ``success``.
+        """
+        resp = resp if isinstance(resp, dict) else {}
+        inner = resp.get("result")
+        inner = inner if isinstance(inner, dict) else {}
+        ok = bool(inner["success"]) if "success" in inner else bool(resp.get("success"))
+
+        if ok:
+            replaced = inner.get("replaced")
+            count = len(replaced) if isinstance(replaced, list) else replaced
+            detail = f"заменено процессов: {count}" if count is not None else "горячая замена применена"
+            self._notify_status(f"Рецепт '{slug}' запущен ({detail})")
+            return
+
+        # Ошибка / rollback
+        error = inner.get("error") or resp.get("error") or "неизвестная ошибка"
+        if inner.get("rolled_back"):
+            error = f"{error}; изменения откачены (rollback) — прежняя топология сохранена"
+        self._notify_status(f"Рецепт '{slug}': ошибка запуска — {error}", level="error")
 
     # ------------------------------------------------------------------ #
     #  Этап 1 pipeline-live-control — кнопки управления процессами         #
@@ -1696,9 +1721,14 @@ class PipelinePresenter:
             QMessageBox.critical(parent, "Управление процессом", f"Ошибка: {exc}")
             return False
 
-    def _notify_status(self, message: str) -> None:
-        """Показать статус через notify-callback (statusBar) + лог."""
-        logger.info(message)
+    def _notify_status(self, message: str, *, level: str = "info") -> None:
+        """Показать статус через notify-callback (statusBar) + лог в терминал.
+
+        Не-модально: вместо блокирующих QMessageBox результат команды виден в
+        статусной строке и в логе (терминал). ``level`` — уровень логгера
+        ("info"/"warning"/"error").
+        """
+        getattr(logger, level, logger.info)(message)
         if self._notify is not None:
             self._notify(message)
 
