@@ -109,7 +109,7 @@ class DeltaDispatcher:
             "sender": self._sender,
             "targets": [subscriber],
             # queue_type="system": доставка в {subscriber}_system, который опрашивает
-            # штатный message_processor подписчика — message_dispatcher синхронно
+            # штатный message_processor подписчика — event_dispatcher синхронно
             # вызовет handler state.changed при опросе. См. U1-fallback в
             # RouterManager._deliver_by_targets (доставка по targets через queue_registry).
             "queue_type": "system",

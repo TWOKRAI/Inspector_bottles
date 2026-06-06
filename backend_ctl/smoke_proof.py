@@ -18,15 +18,18 @@ import time
 
 
 def _has_register_update(result: dict) -> bool:
-    """True, если у процесса есть router-приёмник register_update.
+    """True, если у процесса есть приёмник register_update.
 
-    Честная проверка по списку router_handlers (а не по подстроке в repr — иначе
-    timeout-ответ ложно трактуется). Возвращает False при ошибке/таймауте.
+    P4.4 (B2): register_update теперь **команда CommandManager** (поле `commands`),
+    раньше был router-handler (`router_handlers`). Проверяем оба поля — robust к
+    обеим эпохам. Возвращает False при ошибке/таймауте.
     """
     if not isinstance(result, dict) or not result.get("success"):
         return False
-    handlers = (result.get("result") or {}).get("router_handlers") or []
-    return "register_update" in handlers
+    inner = result.get("result") or {}
+    commands = inner.get("commands") or []
+    handlers = inner.get("router_handlers") or []
+    return "register_update" in commands or "register_update" in handlers
 
 
 def main() -> int:

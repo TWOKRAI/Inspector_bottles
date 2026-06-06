@@ -151,8 +151,8 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self._init_custom_managers()
             self._init_application_threads()
 
-            # 6b. Связать command_manager с router.message_dispatcher
-            self._lifecycle.register_commands_with_router()
+            # 6b. P4.4.1 (B2): команды НЕ копируются в event_dispatcher — kind-router
+            # в receive() диспатчит type=="command" напрямую в CommandManager.
 
             # 7. Системные потоки (message_processor) — после воркеров
             self._init_system_threads()
@@ -602,14 +602,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
 
         self._builtin_cmds = BuiltinCommands(self)
         self._builtin_cmds.register()
-
-        # Ре-синк команд в router.message_dispatcher: register_commands_with_router()
-        # в initialize() отрабатывает ДО регистрации builtins здесь (worker.*/wire.*/
-        # introspect.*), поэтому без повторной синхронизации эти команды есть в
-        # CommandManager, но НЕ диспатчатся из входящих IPC-сообщений (молча дропаются).
-        # register_message_handler идемпотентен (replace по ключу) — повторная
-        # синхронизация ранее зарегистрированных безопасна.
-        self._lifecycle.register_commands_with_router()
+        # P4.4.1 (B2): builtins (worker.*/wire.*/introspect.*) живут в CommandManager;
+        # ре-синк в event_dispatcher больше не нужен — kind-router в receive()
+        # диспатчит type=="command" напрямую в CommandManager.
 
         # Heartbeat (composition)
         from ..heartbeat.process_heartbeat import ProcessHeartbeat

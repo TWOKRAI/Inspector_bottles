@@ -120,7 +120,7 @@ class ProcessMonitor:
         """Зарегистрировать обработчик heartbeat в роутере ProcessManager-а.
 
         Сообщения с command='heartbeat' будут обработаны _on_heartbeat_received
-        через стандартный message_dispatcher (вызывается из SystemThreads._message_processing_loop).
+        через стандартный event_dispatcher (вызывается из SystemThreads._message_processing_loop).
         """
         if not self.process.router_manager:
             self.process._log_warning("RouterManager недоступен — heartbeat handler не зарегистрирован")

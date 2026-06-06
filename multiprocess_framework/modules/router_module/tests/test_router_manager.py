@@ -9,7 +9,7 @@
 - Асинхронная отправка (send_async) с PriorityQueue
 - Получение (receive) — sync poll
 - Маршрутизация через channel_dispatcher (exact, broadcast)
-- Обработчики входящих сообщений (message_dispatcher)
+- Обработчики входящих сообщений (event_dispatcher)
 - Middleware pipeline (send / receive)
 - Инспекция (get_dispatcher_info, get_stats)
 """
@@ -20,6 +20,7 @@ import unittest
 from queue import Queue
 from types import SimpleNamespace
 from typing import Callable
+from unittest.mock import Mock
 
 from ..core.router_manager import RouterManager, _PendingRequest
 from ..channels.queue_channel import QueueChannel
@@ -342,7 +343,7 @@ class TestAttachLogger(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Тесты message_dispatcher — обработчики входящих
+# Тесты event_dispatcher — обработчики входящих
 # ---------------------------------------------------------------------------
 
 
@@ -385,7 +386,7 @@ class TestMessageHandlers(unittest.TestCase):
         self.assertIn("b", log)
 
     def test_unregistered_command_does_not_crash(self):
-        """Нет handler'а — message_dispatcher просто не вызывает ничего, без исключения."""
+        """Нет handler'а — event_dispatcher просто не вызывает ничего, без исключения."""
         self.q.put({"command": "unknown_xyz", "data": {}})
         messages = self.router.receive(timeout=0.1)
         self.assertEqual(len(messages), 1)
@@ -591,13 +592,13 @@ class TestDispatcherInfo(unittest.TestCase):
     def test_get_dispatcher_info_returns_both_dispatchers(self):
         info = self.router.get_dispatcher_info()
         self.assertIn("channel_dispatcher", info)
-        self.assertIn("message_dispatcher", info)
+        self.assertIn("event_dispatcher", info)
 
     def test_dispatcher_info_has_required_keys(self):
         info = self.router.get_dispatcher_info()
         for key in ("name", "handler_count", "handlers", "scenarios"):
             self.assertIn(key, info["channel_dispatcher"], f"missing key: {key}")
-            self.assertIn(key, info["message_dispatcher"], f"missing key: {key}")
+            self.assertIn(key, info["event_dispatcher"], f"missing key: {key}")
 
     def test_dispatcher_info_counts_match_registered(self):
         ch, _ = _make_channel()
@@ -607,7 +608,7 @@ class TestDispatcherInfo(unittest.TestCase):
 
         info = self.router.get_dispatcher_info()
         self.assertEqual(info["channel_dispatcher"]["handler_count"], 1)
-        self.assertEqual(info["message_dispatcher"]["handler_count"], 1)
+        self.assertEqual(info["event_dispatcher"]["handler_count"], 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1071,7 +1072,7 @@ class TestWorkerHandlerRouting(unittest.TestCase):
         self.assertEqual(got, ["cfg"])
 
     def test_worker_handler_skips_process_dispatch(self):
-        # Доставлено воркеру → process-level message_dispatcher НЕ зовётся.
+        # Доставлено воркеру → process-level event_dispatcher НЕ зовётся.
         worker_got: list = []
         proc_got: list = []
         self.router.register_worker_handler("w", lambda m: worker_got.append(1))
@@ -1322,6 +1323,75 @@ class TestRequestResponse(unittest.TestCase):
         self.assertTrue(pending.event.is_set(), "ответ должен резолвить pending")
         self.assertEqual(pending.response["result"], {"ok": 1})
         router._pending_requests.clear()
+
+
+class TestDispatchCommand(unittest.TestCase):
+    """P4.4.1 (B2): kind-router исполняет type==command через CommandManager.
+
+    Заменяет прежние тесты closure _make_command_handler (удалён): reply теперь
+    делает транспорт (_dispatch_command), CommandManager — единственный владелец.
+    """
+
+    def _router_with_cm(self, cm):
+        router = _make_router("rr_cmd")
+        router.initialize()
+        router.process = SimpleNamespace(command_manager=cm)
+        router.reply_to_request = Mock()
+        router.event_dispatcher.dispatch = Mock()
+        return router
+
+    def test_command_in_cm_dispatched_and_replied(self):
+        cm = Mock()
+        cm.get_command_info = Mock(return_value={"key": "worker.create", "metadata": {}})
+        cm.handle_command = Mock(return_value={"ok": 1})
+        router = self._router_with_cm(cm)
+        msg = {"type": "command", "command": "worker.create", "request_id": "c1"}
+        router._dispatch_command(msg)
+        cm.handle_command.assert_called_once_with(msg)
+        router.reply_to_request.assert_called_once_with(msg, {"ok": 1})
+        router.event_dispatcher.dispatch.assert_not_called()
+
+    def test_manages_own_reply_skips_auto_reply(self):
+        cm = Mock()
+        cm.get_command_info = Mock(return_value={"key": "process.command", "metadata": {"manages_own_reply": True}})
+        cm.handle_command = Mock(return_value=None)
+        router = self._router_with_cm(cm)
+        # data.correlation_id присутствует — без manages_own_reply авто-reply бы сработал.
+        msg = {"type": "command", "command": "process.command", "data": {"correlation_id": "x"}}
+        router._dispatch_command(msg)
+        cm.handle_command.assert_called_once_with(msg)
+        router.reply_to_request.assert_not_called()
+
+    def test_unknown_command_goes_through_cm_no_fallback(self):
+        # CommandManager есть, но команды в нём нет: CM-владелец её обрабатывает
+        # (вернёт error), инициатор получает error-reply (fail-loud). НЕТ fallback
+        # в event_dispatcher при наличии CM (strangler снят в P4.4.6).
+        cm = Mock()
+        cm.get_command_info = Mock(return_value=None)
+        cm.handle_command = Mock(return_value={"status": "error", "reason": "No handler"})
+        router = self._router_with_cm(cm)
+        router._dispatch_command({"type": "command", "command": "legacy.cmd", "request_id": "c1"})
+        cm.handle_command.assert_called_once()
+        router.event_dispatcher.dispatch.assert_not_called()
+        router.reply_to_request.assert_called_once()
+
+    def test_no_command_manager_falls_back(self):
+        # Роутер без CommandManager (bare/тест) → event_dispatcher по ключу.
+        router = _make_router("rr_nocm")
+        router.initialize()
+        router.process = None
+        router.event_dispatcher.dispatch = Mock()
+        router._dispatch_command({"type": "command", "command": "x"})
+        router.event_dispatcher.dispatch.assert_called_once()
+
+    def test_handler_exception_replies_error(self):
+        cm = Mock()
+        cm.get_command_info = Mock(return_value={"key": "boom", "metadata": {}})
+        cm.handle_command = Mock(side_effect=RuntimeError("boom"))
+        router = self._router_with_cm(cm)
+        router._dispatch_command({"type": "command", "command": "boom", "request_id": "c1"})
+        router.reply_to_request.assert_called_once()
+        self.assertEqual(router.reply_to_request.call_args[0][1].get("status"), "error")
 
 
 if __name__ == "__main__":

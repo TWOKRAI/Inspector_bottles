@@ -2289,6 +2289,25 @@
 - Связанные ADR: ADR-COMM-001, ADR-RTR-007, ADR-MSG-007 (addressing-хелперы), ADR-024 (channel_types), ADR-008 (Dict at Boundary).
 - Refs: [plans/2026-05-31_transport-router-hub/plan.md](../../plans/2026-05-31_transport-router-hub/plan.md) (P0.2, P2), [multiprocess_prototype/plans/processes-workers-runtime-debts.md](../multiprocess_prototype/plans/processes-workers-runtime-debts.md)
 
+## ADR-COMM-005: Command Bus — kind-router по `type`, CommandManager владеет командами, авто-reply транспортом
+- Дата: 2026-06-05
+- Статус: принято
+- Контекст: приём команды проходил **два** инстанса `dispatch_module.Dispatcher`, оба резолвили по одному ключу `command`: входящий `message_dispatcher` (router) → generic-closure `_make_command_handler` → `CommandManager.dispatcher`. Командные ключи **дублировались** — лежали и в `CommandManager`, и копировались в `message_dispatcher` (через `register_commands_with_router`). Эта дупликация — корень баг-класса: state.* регистрировались двумя путями (RAW + wrapped) в один диспетчер, «первая-регистрация-побеждает» → `state.get/subscribe` timeout (лечилось хаком `auto_register_ipc=False`). Плюс reply жил в closure, а 3 command-хендлера шли мимо CommandManager (`process.command`, `register_update`, `state.changed`).
+- Решение (вариант **B2**):
+  - **kind-router** — регулировщик по виду `type` в `RouterManager.receive()` (метод `_route_by_kind`): `type=="command"` → `CommandManager` (`_dispatch_command`); прочие виды (`event`/`system`/`data`) → `event_dispatcher` по ключу; `response` — корреляция (P0.5); порядок: после `_route_to_worker` (P2.2).
+  - **CommandManager — единственный владелец командных ключей**, резолв по `command` ровно один (в нём). Команды НЕ копируются в роутер: `register_commands_with_router` + `_make_command_handler` удалены, `register_command` достаточно.
+  - **Авто-reply транспортом** по `request_id` (no-op без correlation — fire-and-forget паритет). Команды, отвечающие сами (`process.command`), помечаются `metadata.manages_own_reply=True`.
+  - Обходные хендлеры свёрнуты: `process.command`/`register_update` → обычные команды CommandManager; `state.changed` (type=event) → event-ветка. Хак `auto_register_ipc=False` больше не workaround (state.* — команды CM).
+  - **Наблюдаемость команд (timing/metrics/log) ОСТАЁТСЯ в `CommandManager.handle_command`** — это его фасадная роль (comm-system §4/§9.1), НЕ выносится в транспорт.
+  - `message_dispatcher` → переименован в **`event_dispatcher`** (после дедупликации держит только события + heartbeat).
+- Причина: убрать дупликацию реестра команд (корень баг-класса) и двойной резолв; один владелец команд, один регулировщик по виду; reply — ответственность транспорта (канон). «Меньше слоёв» = меньше дублирующих компонентов, у каждого одна ответственность.
+- Отклонённые альтернативы:
+  - **B1 (один диспетчер, CommandManager-фасад регистрирует прямо в `message_dispatcher`)** — отвергнуто: команды физически не в CommandManager, полый слой, имя врёт.
+  - **Вариант A (kind-router + fallback в `message_dispatcher` для обходных)** — отвергнуто: fallback не нужен, обходные стали командами.
+  - **Вынос наблюдаемости в транспортный шов (исходный P4.4.2)** — отвергнуто: конфликт с comm-system §4/§9.1 (CommandManager = фасад с timing, preserved) + ломает паритет (handle_command зовут не только из транспорта).
+- Связанные ADR: ADR-COMM-001 (router.send — канон транспорта), ADR-DSP-001…004 (стратегии/expects_full_message), ADR-005 (correlation_id / request-reply), ADR-008 (Dict at Boundary). Соотнесено с `plans/comm-system-target-architecture.md` §4/§9.4 (B2 убирает «documented workarounds»: double-call, auto_register_ipc, first-wins).
+- Refs: [plans/2026-05-31_transport-router-hub/p4.4_command-bus.md](../../plans/2026-05-31_transport-router-hub/p4.4_command-bus.md), [plans/comm-system-target-architecture.md](../../plans/comm-system-target-architecture.md)
+
 ---
 
 ## Модульные решения

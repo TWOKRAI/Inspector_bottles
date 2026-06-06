@@ -150,70 +150,31 @@ class TestProcessModuleRunStop:
         assert process.should_stop() is True
 
 
-class TestCommandHandlerReply:
-    """P0.5: обёртка handler'а команды отвечает инициатору через reply_to_request."""
-
-    def test_handler_invokes_reply_to_request_with_result(self):
-        from ..lifecycle.process_lifecycle import ProcessLifecycle
-
-        cm = Mock()
-        cm.handle_command = Mock(return_value={"success": True, "value": 42})
-        proc = Mock()
-        proc.router_manager = Mock()
-
-        handler = ProcessLifecycle._make_command_handler(cm, proc)
-        msg = {"command": "introspect.status", "sender": "driver", "request_id": "c1"}
-        result = handler(msg)
-
-        assert result == {"success": True, "value": 42}
-        cm.handle_command.assert_called_once_with(msg)
-        proc.router_manager.reply_to_request.assert_called_once_with(msg, {"success": True, "value": 42})
-
-    def test_handler_survives_reply_failure(self):
-        from ..lifecycle.process_lifecycle import ProcessLifecycle
-
-        cm = Mock()
-        cm.handle_command = Mock(return_value={"ok": 1})
-        proc = Mock()
-        proc.router_manager.reply_to_request = Mock(side_effect=RuntimeError("boom"))
-
-        handler = ProcessLifecycle._make_command_handler(cm, proc)
-        # Исключение в reply не должно ронять обработку команды.
-        result = handler({"command": "x"})
-        assert result == {"ok": 1}
-        proc._log_warning.assert_called_once()
-
-    def test_handler_without_router_just_returns(self):
-        from ..lifecycle.process_lifecycle import ProcessLifecycle
-
-        cm = Mock()
-        cm.handle_command = Mock(return_value={"ok": 1})
-        proc = Mock()
-        proc.router_manager = None
-
-        handler = ProcessLifecycle._make_command_handler(cm, proc)
-        assert handler({"command": "x"}) == {"ok": 1}
+# P4.4.1 (B2): TestCommandHandlerReply удалён — closure _make_command_handler снят,
+# reply делает транспорт (RouterManager._dispatch_command). Покрытие reply/
+# manages_own_reply/fallback — в router_module/tests/test_router_manager.py
+# (TestDispatchCommand).
 
 
-class TestBuiltinCommandsReachableViaRouter:
-    """Регрессия: builtin-команды (worker.*/introspect.*), регистрируемые в run()
-    ПОСЛЕ register_commands_with_router() в initialize(), должны быть ре-синканы в
-    router.message_dispatcher — иначе входящие IPC-сообщения молча дропаются.
+class TestBuiltinCommandsReachableViaCommandManager:
+    """P4.4.1 (B2): builtin-команды (worker.*/introspect.*), регистрируемые в run(),
+    живут в CommandManager и достижимы через kind-router (type==command →
+    CommandManager) в RouterManager.receive().
 
-    Раньше этот разрыв маскировался: команды звались напрямую через CommandManager,
-    а не через router.receive() → message_dispatcher.dispatch().
+    Раньше требовался ре-синк копий команд в event_dispatcher
+    (register_commands_with_router) — удалён: дупликация реестра устранена,
+    CommandManager — единственный владелец командных ключей.
     """
 
-    def test_introspect_and_worker_commands_in_message_dispatcher_after_run(self):
+    def test_builtin_commands_in_command_manager_after_run(self):
         sr = make_mock_shared_resources()
         process = ProcessModule("reach_proc", shared_resources=sr, config={})
         assert process.initialize() is True
-        process.run()  # регистрирует BuiltinCommands + ре-синк в router
+        process.run()  # регистрирует BuiltinCommands
         try:
-            md_keys = {h.get("key") for h in process.router_manager.message_dispatcher.get_all_handlers()}
-            cm_keys = {c.get("key") for c in process.command_manager.get_commands()}
+            cm = process.command_manager
+            cm_keys = {c.get("key") for c in cm.get_commands()}
 
-            # builtin-команды должны быть достижимы через router (не только в CommandManager)
             for key in (
                 "introspect.handlers",
                 "introspect.registers",
@@ -223,6 +184,7 @@ class TestBuiltinCommandsReachableViaRouter:
                 "wire.configure",
             ):
                 assert key in cm_keys, f"{key} нет в CommandManager"
-                assert key in md_keys, f"{key} НЕ достижим через router message_dispatcher"
+                # kind-router нашёл бы реальный handler (не молчаливый дроп)
+                assert cm.get_command_info(key) is not None, f"{key} не резолвится в CM"
         finally:
             process.shutdown()

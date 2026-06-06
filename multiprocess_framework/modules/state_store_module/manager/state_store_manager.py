@@ -48,12 +48,11 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
             logger: LoggerManager или ObservableMixin-совместимый объект.
             stats: StatsManager или ObservableMixin-совместимый объект.
             auto_register_ipc: регистрировать ли inbound IPC-обработчики state.*
-                напрямую (RAW) в message_dispatcher при initialize(). True —
-                legacy-путь (тесты, in_memory_router). False — обработчики
-                подключаются wrapped-путём через CommandManager +
-                register_commands_with_router (с reply_to_request). RAW не
-                умеет отвечать на request/reply и, побеждая по «первая
-                регистрация» в dispatcher, ломает state.get/subscribe timeout'ом.
+                напрямую (RAW) в event_dispatcher при initialize(). True —
+                legacy-путь (тесты, in_memory_router). False (prod) — state.*
+                регистрируются как команды CommandManager (register_commands), а
+                kind-router в RouterManager.receive() диспатчит их туда по
+                type=="command"; reply делает транспорт по request_id (P4.4.1/B2).
         """
         BaseManager.__init__(self, manager_name=manager_name)
         ObservableMixin.__init__(self, managers={"logger": logger, "stats": stats})
