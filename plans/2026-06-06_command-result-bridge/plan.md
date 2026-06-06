@@ -123,8 +123,9 @@ P1 framework: CommandSender request-path (+ IProcess) ─▶ P2 GUI: RequestRunn
 2. `ProcessManagerProxy.replace_blueprint_async(blueprint, on_result: Callable[[dict], None])` (+ `start/stop/restart_process_async` по необходимости) — submit в runner, `on_result` вызывается в main-thread.
 3. Старые fire-and-forget методы сохранить (G5, back-compat для путей, где результат не нужен).
 4. Тесты pytest-qt: submit → `on_result` получает фейковый response в main-thread; ошибка задачи → error-result; нет cross-thread Qt-доступа.
-**Acceptance:** - [ ] `replace_blueprint_async` не блокирует main-thread, `on_result` приходит в main-thread - [ ] исключение в request → error-result, поток жив - [ ] старые методы fire-and-forget работают - [ ] pytest-qt зелёные.
+**Acceptance:** - [x] `replace_blueprint_async` не блокирует main-thread, `on_result` приходит в main-thread - [x] исключение в request → error-result, поток жив - [x] старые методы fire-and-forget работают - [x] pytest-qt зелёные.
 **Out of scope:** presenter/виджет (P3).
+**Статус:** ✅ **P2 DONE** (`e9e29f71`). `RequestRunner` (QThreadPool + Signal/AutoConnection, паттерн DataReceiverBridge) + `ProcessManagerProxy.*_async(on_result)` (replace_blueprint/start/stop/restart). 9 тестов (доставка, on_result в main-thread + request на worker, error-result, wrap, None, real-result, lifecycle, паритет); 13 passed. **Находка тестом:** async-сабмиты идут конкурентно на пуле → порядок завершения не гарантирован (тест сравнивает множеством, не списком) — это корректное свойство, не баг.
 
 ### Task P3 — Presenter: активация рецепта показывает success/error (+ qt-smoke)
 **Level:** Senior+ · **Assignee:** teamlead/developer · **MVP обязателен**
