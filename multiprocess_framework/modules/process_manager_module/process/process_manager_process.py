@@ -759,11 +759,19 @@ class ProcessManagerProcess(ProcessModule):
             if pname in protected:
                 continue
             try:
+                # Канонический класс из ВНЕШНЕГО blueprint — ключ process_class
+                # (как ProcessLaunchConfig.build, process_launch_config.py:88). Внутренний
+                # ключ class реестр (ProcessRegistry._create_process) выставит сам из
+                # class_path. Fail-fast при отсутствии — внятная ошибка + rollback вместо
+                # "not enough values to unpack" в class_loader на пустой строке.
+                class_path = str(pcfg.get("process_class", ""))
+                if not class_path:
+                    raise RuntimeError(f"process_class отсутствует в blueprint для '{pname}'")
+
                 # Зарегистрировать в shared_resources
                 if self.shared_resources:
                     self.shared_resources.register_process(pname, pcfg)
 
-                class_path = pcfg.get("class", "")
                 priority = pcfg.get("priority", "normal")
                 process = self._process_registry.create_and_register(pname, class_path, pcfg, priority)
                 if not process:
@@ -772,8 +780,12 @@ class ProcessManagerProcess(ProcessModule):
                 self._priority.apply_priority(process)
                 self._priority.register_priority(pname, priority)
 
-                # Обновить _process_configs
-                self._process_configs[pname] = copy.deepcopy(pcfg)
+                # Обновить _process_configs — нормализуем к ВНУТРЕННЕМУ контракту (ключ
+                # class), чтобы downstream (restart_process, snapshot-rollback,
+                # broadcast_full_status) читали class консистентно для hot-replaced.
+                normalized_cfg = copy.deepcopy(pcfg)
+                normalized_cfg["class"] = class_path
+                self._process_configs[pname] = normalized_cfg
                 started_names.append(pname)
                 self._log_info(f"replace_blueprint: процесс '{pname}' запущен")
 
@@ -883,9 +895,18 @@ class ProcessManagerProcess(ProcessModule):
 
                 result = self.command_manager.handle_command(inner_msg)
 
-                # Определяем success: если result — dict с "error" или status="error"
+                # Определяем success. Приоритет — явному self-report команды
+                # (``result["success"]``): PM-методы (``replace_blueprint``,
+                # lifecycle) кладут ``"error": None`` даже на успехе, из-за чего
+                # эвристика ``"error" not in result`` ложно дала бы success=False
+                # (успешная горячая замена транслировалась бы как ошибка —
+                # ломает command-result-bridge «GUI узнаёт результат»). Эвристика
+                # остаётся фолбэком для результатов без явного ``"success"``.
                 if isinstance(result, dict):
-                    success = "error" not in result and result.get("status") != "error"
+                    if "success" in result:
+                        success = bool(result["success"])
+                    else:
+                        success = "error" not in result and result.get("status") != "error"
                 else:
                     success = True
 

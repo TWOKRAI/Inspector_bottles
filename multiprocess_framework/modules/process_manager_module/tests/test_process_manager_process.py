@@ -355,3 +355,47 @@ class TestProcessCommandResponse:
         call = pmp.router_manager.reply_to_request.call_args
         assert call.kwargs.get("success") is False
         assert call.args[1] == {"status": "error", "reason": "boom"}
+
+    def test_explicit_success_honored_over_error_none(self) -> None:
+        """command-result-bridge fix-forward: result со ``success=True`` + ``error=None``
+        (форма PM ``replace_blueprint`` на успехе) → транспортный success=True.
+
+        До фикса эвристика ``"error" not in result`` ложно давала False, потому что
+        ключ ``error`` присутствует (со значением None).
+        """
+        pmp = self._make_pmp()
+        pmp.command_manager.handle_command.return_value = {
+            "success": True,
+            "replaced": ["a", "b"],
+            "skipped_protected": [],
+            "error": None,
+            "rolled_back": False,
+        }
+        pmp._handle_process_command(
+            {
+                "command": "process.command",
+                "sender": "gui",
+                "data": {"cmd": "blueprint.replace", "correlation_id": "c4", "blueprint": {}},
+            }
+        )
+        call = pmp.router_manager.reply_to_request.call_args
+        assert call.kwargs.get("success") is True
+
+    def test_explicit_success_false_honored(self) -> None:
+        """result со ``success=False`` (rollback) → транспортный success=False."""
+        pmp = self._make_pmp()
+        pmp.command_manager.handle_command.return_value = {
+            "success": False,
+            "replaced": ["a"],
+            "error": "Ошибка старта процесса 'x'",
+            "rolled_back": True,
+        }
+        pmp._handle_process_command(
+            {
+                "command": "process.command",
+                "sender": "gui",
+                "data": {"cmd": "blueprint.replace", "correlation_id": "c5", "blueprint": {}},
+            }
+        )
+        call = pmp.router_manager.reply_to_request.call_args
+        assert call.kwargs.get("success") is False

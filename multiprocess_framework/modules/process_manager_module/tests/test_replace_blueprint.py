@@ -238,7 +238,9 @@ class TestReplaceBlueprint:
         """1 незащищённый процесс, замена на новый → старый остановлен, новый запущен."""
         pm = make_pm({"worker_1": {"class": "mod.Worker", "priority": "normal"}})
 
-        new_blueprint = {"processes": [{"process_name": "worker_2", "class": "mod.Worker2", "priority": "normal"}]}
+        new_blueprint = {
+            "processes": [{"process_name": "worker_2", "process_class": "mod.Worker2", "priority": "normal"}]
+        }
         result = pm.replace_blueprint(new_blueprint)
 
         assert result["success"] is True
@@ -261,8 +263,8 @@ class TestReplaceBlueprint:
 
         new_blueprint = {
             "processes": [
-                {"process_name": "n1", "class": "m.N1"},
-                {"process_name": "n2", "class": "m.N2"},
+                {"process_name": "n1", "process_class": "m.N1"},
+                {"process_name": "n2", "process_class": "m.N2"},
             ]
         }
         result = pm.replace_blueprint(new_blueprint)
@@ -277,7 +279,7 @@ class TestReplaceBlueprint:
         """Успешный replace → rolled_back=False."""
         pm = make_pm({"w1": {"class": "m.W1"}})
 
-        result = pm.replace_blueprint({"processes": [{"process_name": "w2", "class": "m.W2"}]})
+        result = pm.replace_blueprint({"processes": [{"process_name": "w2", "process_class": "m.W2"}]})
         assert result["rolled_back"] is False
 
     def test_replace_empty_processes_in_new_blueprint(self) -> None:
@@ -317,7 +319,7 @@ class TestProtected:
         # Сбрасываем _started чтобы убедиться, что start() не вызывался
         gui_proc._started = False
 
-        new_blueprint = {"processes": [{"process_name": "new_worker", "class": "m.NW"}]}
+        new_blueprint = {"processes": [{"process_name": "new_worker", "process_class": "m.NW"}]}
         result = pm.replace_blueprint(new_blueprint)
 
         assert result["success"] is True
@@ -390,7 +392,7 @@ class TestRollback:
             fail_on_stop={"w2"},
         )
 
-        result = pm.replace_blueprint({"processes": [{"process_name": "n1", "class": "m.N1"}]})
+        result = pm.replace_blueprint({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
 
         assert result["success"] is False
         assert result["rolled_back"] is True
@@ -411,7 +413,7 @@ class TestRollback:
         # Сохраним snapshot конфигов до замены
         snapshot = copy.deepcopy(pm._process_configs)
 
-        result = pm.replace_blueprint({"processes": [{"process_name": "n1", "class": "m.N1"}]})
+        result = pm.replace_blueprint({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
 
         assert result["success"] is False
         assert result["rolled_back"] is True
@@ -435,6 +437,24 @@ class TestRollback:
         for name in snapshot_before:
             assert name in pm._process_configs
             assert pm._process_configs[name]["class"] == snapshot_before[name]["class"]
+
+    def test_rollback_on_missing_process_class(self) -> None:
+        """Новый процесс без process_class → fail-fast + rollback с понятной ошибкой.
+
+        Регресс-гард: раньше пустой class_path уходил в class_loader и падал
+        невнятным "not enough values to unpack" (см. command-result-bridge P3,
+        баг class vs process_class). Теперь — явная ошибка + откат.
+        """
+        pm = make_pm({"w1": {"class": "m.W1"}})
+
+        # process_class отсутствует во внешнем blueprint
+        result = pm.replace_blueprint({"processes": [{"process_name": "n1"}]})
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+        assert "process_class" in (result["error"] or "")
+        # w1 восстановлен из snapshot
+        assert "w1" in pm._process_configs
 
 
 class TestShmCleanup:
@@ -495,10 +515,11 @@ class TestEdgeCases:
         """После успешного replace _process_configs содержит новые конфиги."""
         pm = make_pm({"w1": {"class": "m.W1"}})
 
-        new_cfg = {"process_name": "new_w", "class": "m.New", "priority": "high"}
+        new_cfg = {"process_name": "new_w", "process_class": "m.New", "priority": "high"}
         pm.replace_blueprint({"processes": [new_cfg]})
 
         assert "new_w" in pm._process_configs
+        # _process_configs нормализован к внутреннему ключу class (= process_class)
         assert pm._process_configs["new_w"]["class"] == "m.New"
         assert "w1" not in pm._process_configs
 
@@ -517,11 +538,11 @@ class TestEdgeCases:
         pm = make_pm({"w1": {"class": "m.W1"}})
 
         # Первый replace: w1 → n1
-        pm.replace_blueprint({"processes": [{"process_name": "n1", "class": "m.N1"}]})
+        pm.replace_blueprint({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
         assert "n1" in pm._process_configs
         assert "w1" not in pm._process_configs
 
         # Второй replace: n1 → n2
-        pm.replace_blueprint({"processes": [{"process_name": "n2", "class": "m.N2"}]})
+        pm.replace_blueprint({"processes": [{"process_name": "n2", "process_class": "m.N2"}]})
         assert "n2" in pm._process_configs
         assert "n1" not in pm._process_configs
