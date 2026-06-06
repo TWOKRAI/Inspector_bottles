@@ -60,14 +60,16 @@ class IMemoryManager(ABC):
         """
 
     @abstractmethod
-    def release_memory(
-        self, process_name: str, memory_name: str, index: int
-    ) -> None:
+    def release_memory(self, process_name: str, memory_name: str, index: int) -> None:
         """Освободить слот памяти."""
 
     @abstractmethod
     def close_memory(self, process_name: str, memory_name: str) -> None:
         """Закрыть и очистить блок памяти."""
+
+    @abstractmethod
+    def release_process_memory(self, process_name: str) -> None:
+        """Полный teardown SHM процесса (hot-swap): закрыть все блоки + снять с PSR."""
 
     @abstractmethod
     def reinitialize_handles(self) -> bool:

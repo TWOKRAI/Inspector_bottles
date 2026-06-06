@@ -242,6 +242,14 @@ class RecipesTab(BaseListNavTab):
         self._activate_btn.setEnabled(has_selection)
         self._save_btn.setEnabled(has_selection)
 
+    def show_active_recipe(self, slug: str | None) -> None:
+        """Показать в шапке action-колонки активный (загруженный) рецепт.
+
+        Args:
+            slug: slug активного рецепта или None.
+        """
+        self._active_label.setText(f"Активен: {slug}" if slug else "Активен: —")
+
     def confirm_delete(self, slug: str) -> bool:
         """Показать диалог подтверждения удаления.
 
@@ -278,6 +286,14 @@ class RecipesTab(BaseListNavTab):
         action_layout = QVBoxLayout(action_widget)
         action_layout.setContentsMargins(4, 4, 4, 4)
         action_layout.setSpacing(6)
+
+        # Индикатор активного рецепта (какой сейчас загружен в систему).
+        # Обновляется presenter'ом через show_active_recipe при load/активации.
+        self._active_label = QLabel("Активен: —")
+        self._active_label.setWordWrap(True)
+        self._active_label.setStyleSheet("font-weight: bold; padding: 2px 0;")
+        self._active_label.setToolTip("Рецепт, загруженный в работающую систему")
+        action_layout.addWidget(self._active_label)
 
         # Создать — всегда активна
         self._create_btn = QPushButton("Создать")

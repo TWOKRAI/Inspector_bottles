@@ -122,9 +122,7 @@ class TestMemoryManagerUnifiedPath:
 
     def test_no_legacy_local_memories(self, mm):
         """_local_memories больше не существует — единый путь через _local_handles."""
-        assert not hasattr(mm, "_local_memories"), (
-            "_local_memories должен быть удалён, используй _local_handles"
-        )
+        assert not hasattr(mm, "_local_memories"), "_local_memories должен быть удалён, используй _local_handles"
 
     def test_standalone_meta_is_consistent(self, mm):
         """Метаданные в standalone-режиме согласованы с handles."""
@@ -144,6 +142,58 @@ class TestMemoryManagerUnifiedPath:
         result = mm.read_images("p1", "test_mem", index=0)
         assert result is not None
         assert np.array_equal(result[0], img)
+
+
+class TestMemoryManagerReleaseProcess:
+    """release_process_memory — полный teardown SHM процесса при hot-swap."""
+
+    MULTI_CONFIG = {
+        "mem_a": (2, SHAPE, DTYPE),
+        "mem_b": (1, SHAPE, DTYPE),
+    }
+
+    def test_release_closes_all_blocks(self, mm):
+        """Все блоки процесса закрыты, процесс исчез из _local_handles/_local_meta."""
+        mm.create_memory_dict("p1", self.MULTI_CONFIG, coll=2)
+        assert mm._local_handles.get("p1") is not None
+        assert len(mm._local_handles["p1"]) == 2
+
+        mm.release_process_memory("p1")
+
+        assert "p1" not in mm._local_handles
+        assert "p1" not in mm._local_meta
+
+    def test_release_unknown_process_is_noop(self, mm):
+        """release несуществующего процесса не падает."""
+        mm.release_process_memory("ghost")  # не должно бросить
+
+    def test_switch_a_b_a_no_leak(self, mm):
+        """switch A→B→A: число процессов с handles не растёт (нет утечки сегментов).
+
+        Регресс-гард к hot-swap: после release старого процесса его имя/handles
+        свободны, новый процесс создаёт свежие ячейки без накопления.
+        """
+        for _ in range(3):
+            mm.create_memory_dict("proc_a", MEMORY_CONFIG, coll=2)
+            assert len(mm._local_handles) == 1  # только proc_a
+            mm.release_process_memory("proc_a")
+            assert len(mm._local_handles) == 0  # очищено
+
+            mm.create_memory_dict("proc_b", MEMORY_CONFIG, coll=2)
+            assert len(mm._local_handles) == 1  # только proc_b
+            mm.release_process_memory("proc_b")
+            assert len(mm._local_handles) == 0
+
+    def test_release_then_recreate_same_name(self, mm):
+        """После release имя свободно — пересоздание того же процесса работает."""
+        mm.create_memory_dict("p1", MEMORY_CONFIG, coll=2)
+        mm.release_process_memory("p1")
+
+        ok = mm.create_memory_dict("p1", MEMORY_CONFIG, coll=2)
+        assert ok is True
+        # Новые ячейки созданы и доступны для записи
+        shm_name = mm.write_images("p1", "test_mem", [make_image(55)], index=0)
+        assert shm_name is not None
 
 
 class TestMemoryManagerSafeClose:

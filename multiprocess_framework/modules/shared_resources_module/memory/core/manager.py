@@ -273,13 +273,9 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         memory_data = self.get_memory_data(process_name, shm_name)
         access = val.validate_memory_access(memory_data, shm_name, index)
         if access != MemoryAccessStatus.OK:
-            self._log_warning(
-                f"Memory access failed for '{process_name}'/'{shm_name}'[{index}]: {access.value}"
-            )
+            self._log_warning(f"Memory access failed for '{process_name}'/'{shm_name}'[{index}]: {access.value}")
             return None
-        write_status = val.validate_write_operation(
-            memory_data, shm_name, index, len(images)
-        )
+        write_status = val.validate_write_operation(memory_data, shm_name, index, len(images))
         if write_status != MemoryAccessStatus.OK:
             self._log_warning(
                 f"Write validation failed for '{process_name}'/'{shm_name}'[{index}]: {write_status.value}"
@@ -289,9 +285,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             handles = memory_data["handles"]
             shm = handles[index]
             max_images, max_shape, expected_dtype = memory_data["params"][shm_name]
-            fmt.pack_images(
-                shm.buf, images, max_shape, np.dtype(expected_dtype), fast=pack_fast
-            )
+            fmt.pack_images(shm.buf, images, max_shape, np.dtype(expected_dtype), fast=pack_fast)
             self._stats["written"] += 1
             return shm.name
         except Exception as e:
@@ -312,17 +306,13 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         memory_data = self.get_memory_data(process_name, shm_name)
         access = val.validate_memory_access(memory_data, shm_name, index)
         if access != MemoryAccessStatus.OK:
-            self._log_warning(
-                f"Memory read failed for '{process_name}'/'{shm_name}'[{index}]: {access.value}"
-            )
+            self._log_warning(f"Memory read failed for '{process_name}'/'{shm_name}'[{index}]: {access.value}")
             return None
         try:
             handles = memory_data["handles"]
             shm = handles[index]
             _, max_shape, expected_dtype = memory_data["params"][shm_name]
-            images = fmt.unpack_images(
-                shm.buf, max_shape, np.dtype(expected_dtype), n=n, copy=copy
-            )
+            images = fmt.unpack_images(shm.buf, max_shape, np.dtype(expected_dtype), n=n, copy=copy)
             self._stats["read"] += 1
             return images
         except Exception as e:
@@ -381,6 +371,33 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             if used == 0:
                 return i
         return None
+
+    def release_process_memory(self, process_name: str) -> None:
+        """Полностью освободить SHM процесса при hot-swap (replace_blueprint).
+
+        В отличие от ``close_all(process_name)`` (только handles) — это полный
+        teardown процесса: (1) закрыть+unlink (owner) ВСЕ блоки; (2) снять процесс
+        с ProcessStateRegistry (метаданные памяти уже вычищены ``close_memory``);
+        (3) подчистить локальные структуры. После этого имена SHM свободны —
+        новый процесс с тем же именем создаёт свежие ячейки без коллизий.
+        """
+        # 1. Закрыть и (owner) unlink все блоки процесса.
+        #    close_memory попутно вычищает memory_* ключи из ProcessData.custom.
+        for shm_name in list(self._local_handles.get(process_name, {}).keys()):
+            self.close_memory(process_name, shm_name)
+
+        # 2. Снять процесс с PSR (с PSR-режимом; без PSR — no-op)
+        if self._process_state_registry is not None:
+            try:
+                self._process_state_registry.unregister_process(process_name)
+            except Exception as e:
+                self._log_error(f"release_process_memory: unregister_process('{process_name}') failed: {e}")
+
+        # 3. Подчистить локальные структуры (handles обнулены close_memory, но
+        #    остаётся пустой dict процесса; meta — для standalone-режима)
+        self._local_handles.pop(process_name, None)
+        self._local_meta.pop(process_name, None)
+        self._log_info(f"release_process_memory: SHM процесса '{process_name}' освобождён")
 
     def close_all(self, process_name: Optional[str] = None) -> None:
         if process_name:

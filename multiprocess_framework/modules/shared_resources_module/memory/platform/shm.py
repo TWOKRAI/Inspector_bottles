@@ -9,6 +9,7 @@ POSIX (Linux/macOS): unlink() освобождает сегмент; cleanup_sta
 
 from __future__ import annotations
 
+import itertools
 import os
 import platform
 from multiprocessing import shared_memory
@@ -17,6 +18,14 @@ from typing import Any, List, Optional
 from ....logger_module.utils import FallbackLogger
 
 _logger = FallbackLogger(__name__)
+
+# Счётчик инкарнаций имени SHM в рамках процесса. Нужен для hot-swap: при пересоздании
+# сегмента (новый рецепт) старый на Windows освобождается АСИНХРОННО (unlink — no-op,
+# segment жив пока открыт хоть один handle; terminate закрывает handles не мгновенно).
+# Свежая инкарнация в имени избегает FileExistsError на переходном окне. Consumer'ы
+# читают ФАКТИЧЕСКИЕ имена (memory_names в PSR / shm_actual_name в frame_data), поэтому
+# суффикс прозрачен.
+_incarnation = itertools.count(1)
 
 # Тип для SharedMemory (Any для избежания прямого импорта в интерфейсах)
 ShmType = shared_memory.SharedMemory
@@ -85,11 +94,18 @@ def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
                     cleanup_stale_shm(key)
 
 
-def _unique_base_name(base_name: str) -> str:
-    """На Windows — уникальное имя с PID для избежания FileExistsError от предыдущих запусков."""
+def _unique_base_name(base_name: str, *, fresh: bool = False) -> str:
+    """Уникальное имя SHM.
+
+    На Windows дополняется PID (избежать FileExistsError от предыдущих ЗАПУСКОВ).
+    ``fresh=True`` дополнительно добавляет инкарнацию — для пересоздания внутри одного
+    процесса (hot-swap), когда старый сегмент с тем же PID-именем ещё не освобождён.
+    """
     if is_windows():
-        return f"{base_name}_{os.getpid()}"
-    return base_name
+        suffix = f"_{next(_incarnation)}" if fresh else ""
+        return f"{base_name}_{os.getpid()}{suffix}"
+    # POSIX: unlink освобождает сразу; fresh нужен лишь если живой holder держит сегмент.
+    return f"{base_name}_{next(_incarnation)}" if fresh else base_name
 
 
 def create_shm_block(name: str, size: int) -> ShmType:
@@ -164,16 +180,38 @@ def create_shm_blocks(base_name: str, size: int, coll: int) -> Optional[List[Shm
     При ошибке создания любого блока — закрывает и удаляет уже созданные,
     возвращает None.
     """
-    base = _unique_base_name(base_name)
-    shm_list: List[ShmType] = []
-    try:
-        for i in range(coll):
-            name = f"{base}_{i}"
-            shm = create_shm_block(name, size)
-            shm_list.append(shm)
-        return shm_list
-    except Exception as e:
-        for created in shm_list:
-            close_shm(created, unlink=True)
-        _logger.error("[MemoryManager] SharedMemory create failed for '%s': %s", base_name, e)
-        return None
+    # До 3 попыток: при FileExistsError (сегмент предыдущей инкарнации ещё не
+    # освобождён — hot-swap на Windows) пересоздаём набор со СВЕЖИМ именем. Старый
+    # сегмент освободится, когда ОС закроет handles умершего процесса; новая инкарнация
+    # не ждёт этого окна. Consumer'ы читают фактические имена → суффикс прозрачен.
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        base = _unique_base_name(base_name, fresh=(attempt > 0))
+        shm_list: List[ShmType] = []
+        try:
+            for i in range(coll):
+                shm_list.append(create_shm_block(f"{base}_{i}", size))
+            if attempt > 0:
+                _logger.warning(
+                    "[MemoryManager] SHM '%s' пересоздан со свежей инкарнацией '%s' "
+                    "(старый сегмент ещё держался — hot-swap)",
+                    base_name,
+                    base,
+                )
+            return shm_list
+        except FileExistsError as e:
+            last_exc = e
+            for created in shm_list:
+                close_shm(created, unlink=True)
+            continue
+        except Exception as e:
+            for created in shm_list:
+                close_shm(created, unlink=True)
+            _logger.error("[MemoryManager] SharedMemory create failed for '%s': %s", base_name, e)
+            return None
+    _logger.error(
+        "[MemoryManager] SharedMemory create failed for '%s' после 3 попыток: %s",
+        base_name,
+        last_exc,
+    )
+    return None

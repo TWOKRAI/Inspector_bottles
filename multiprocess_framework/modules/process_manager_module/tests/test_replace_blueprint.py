@@ -105,6 +105,20 @@ class MockProcessRegistry:
         proc._alive = False
         return True
 
+    def stop_many(self, names: list[str], timeout: float = 5.0) -> dict[str, bool]:
+        result: dict[str, bool] = {}
+        for name in names:
+            if name in self._fail_on_stop:
+                result[name] = False
+                continue
+            proc = self._processes.get(name)
+            if proc is None:
+                result[name] = False
+                continue
+            proc._alive = False
+            result[name] = True
+        return result
+
     def stop_all(self, timeout: float = 5.0) -> None:
         for proc in self._processes.values():
             proc._alive = False
@@ -438,23 +452,65 @@ class TestRollback:
             assert name in pm._process_configs
             assert pm._process_configs[name]["class"] == snapshot_before[name]["class"]
 
-    def test_rollback_on_missing_process_class(self) -> None:
-        """Новый процесс без process_class → fail-fast + rollback с понятной ошибкой.
+    def test_missing_process_class_defaults_to_generic(self) -> None:
+        """Процесс без process_class → дефолтный GenericProcess (как boot), без краха.
 
-        Регресс-гард: раньше пустой class_path уходил в class_loader и падал
-        невнятным "not enough values to unpack" (см. command-result-bridge P3,
-        баг class vs process_class). Теперь — явная ошибка + откат.
+        Раньше replace передавал raw-dict напрямую и пустой class_path падал
+        невнятным "not enough values to unpack" в class_loader. Теперь replace
+        трансформирует blueprint ТЕМ ЖЕ путём, что boot (_build_proc_dicts →
+        SystemBlueprint.build_configs → process), а GenericProcessConfig.process_class
+        дефолтит на GenericProcess. Поэтому пропущенный process_class — не ошибка,
+        а штатный дефолт (boot-консистентно). Регресс-гард class vs process_class
+        теперь структурный: build() всегда даёт валидный class.
         """
         pm = make_pm({"w1": {"class": "m.W1"}})
 
-        # process_class отсутствует во внешнем blueprint
+        # process_class отсутствует → должен подставиться дефолтный GenericProcess
         result = pm.replace_blueprint({"processes": [{"process_name": "n1"}]})
 
-        assert result["success"] is False
-        assert result["rolled_back"] is True
-        assert "process_class" in (result["error"] or "")
-        # w1 восстановлен из snapshot
-        assert "w1" in pm._process_configs
+        assert result["success"] is True
+        assert result["rolled_back"] is False
+        assert "n1" in pm._process_configs
+        # class заполнен дефолтным GenericProcess (не пустой → нет краша class_loader)
+        assert "GenericProcess" in pm._process_configs["n1"]["class"]
+        assert "w1" not in pm._process_configs  # заменён
+
+
+class TestBlueprintTransform:
+    """Raw-blueprint → канонический proc_dict (фикс «картинка не меняется»)."""
+
+    def test_chain_targets_and_plugins_nested_into_config(self) -> None:
+        """chain_targets/plugins из raw-blueprint попадают во вложенный config.
+
+        Регресс-гард корня бага: replace передавал raw recipe-dict напрямую, и
+        процесс стартовал без плагинов (PluginOrchestrator не создавался) и без
+        маршрутов (chain_targets=[]) → данные не текли в GUI. Теперь _build_proc_dicts
+        трансформирует blueprint как boot → config.plugins / config.chain_targets.
+        """
+        pm = make_pm({"w1": {"class": "m.W1"}})
+
+        result = pm.replace_blueprint(
+            {
+                "processes": [
+                    {
+                        "process_name": "camera_0",
+                        "process_class": "m.Cam",
+                        "chain_targets": ["detector"],
+                        "plugins": [{"plugin_name": "capture", "plugin_class": "m.CapturePlugin"}],
+                    }
+                ]
+            }
+        )
+
+        assert result["success"] is True
+        cfg = pm._process_configs["camera_0"]
+        # Канонический формат: class на верхнем уровне, остальное — во вложенном config
+        assert cfg["class"] == "m.Cam"
+        assert "config" in cfg
+        assert cfg["config"]["chain_targets"] == ["detector"]
+        assert cfg["config"]["plugins"] == [{"plugin_name": "capture", "plugin_class": "m.CapturePlugin"}]
+        # Очередь data создаётся (нужна для приёма IPC) — DEFAULT_QUEUES
+        assert "queues" in cfg
 
 
 class TestShmCleanup:

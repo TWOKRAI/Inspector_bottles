@@ -47,6 +47,14 @@ class IRecipesView(Protocol):
         """
         ...
 
+    def show_active_recipe(self, slug: str | None) -> None:
+        """Показать, какой рецепт сейчас загружен (активен) в системе.
+
+        Args:
+            slug: slug активного рецепта или None если активного нет.
+        """
+        ...
+
     def show_error(self, message: str) -> None:
         """Показать пользователю сообщение об ошибке.
 

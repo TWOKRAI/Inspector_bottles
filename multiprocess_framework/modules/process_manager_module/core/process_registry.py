@@ -198,6 +198,79 @@ class ProcessRegistry:
                     self.logger._log_error(f"Error killing '{name}': {e}")
         return True
 
+    def stop_many(self, names: List[str], timeout: float = 5.0) -> Dict[str, bool]:
+        """Остановить НЕСКОЛЬКО процессов ПАРАЛЛЕЛЬНО (один общий дедлайн).
+
+        В отличие от ``stop_one`` в цикле (N×timeout ≈ 35с для 7 процессов),
+        взводит все ``stop_event`` разом, затем ждёт graceful-выхода с ОБЩИМ
+        дедлайном ``time.monotonic()+timeout`` → суммарно ~timeout. Стрэгглеры —
+        ``terminate`` → ``kill`` (тоже параллельно). Паттерн ``stop_all``/``_join_all``,
+        доведённый до hot-swap (``replace_blueprint``).
+
+        Args:
+            names: имена процессов для остановки.
+            timeout: общий дедлайн graceful-остановки (секунды).
+
+        Returns:
+            Карта ``{name: stopped}``: ``True`` — процесс найден и остановлен
+            (graceful/terminate/kill); ``False`` — не найден в реестре
+            (нет ``stop_event`` или ``Process``).
+        """
+        result: Dict[str, bool] = {}
+        procs: Dict[str, Process] = {}
+
+        # (a) Взвести все stop_event разом — дети гаснут параллельно
+        for name in names:
+            ev = self._stop_events.get(name)
+            process = self.get_process_by_name(name)
+            if not ev or not process:
+                result[name] = False
+                continue
+            ev.set()
+            procs[name] = process
+            result[name] = True
+
+        if not procs:
+            return result
+
+        if self.logger:
+            self.logger._log_info(f"Stopping {len(procs)} processes in parallel (timeout={timeout}s): {list(procs)}")
+
+        # (b) Один общий дедлайн на graceful-выход всех
+        deadline = time.monotonic() + timeout
+        for process in procs.values():
+            if process.is_alive():
+                process.join(timeout=max(0.0, deadline - time.monotonic()))
+
+        # (c) Terminate стрэгглеров (тоже разом), затем общий короткий join
+        stragglers = [p for p in procs.values() if p.is_alive()]
+        for process in stragglers:
+            if self.logger:
+                self.logger._log_warning(f"Process '{process.name}' did not stop in {timeout}s, terminating...")
+            try:
+                process.terminate()
+            except Exception as e:
+                if self.logger:
+                    self.logger._log_warning(f"Error terminating '{process.name}': {e}")
+        if stragglers:
+            term_deadline = time.monotonic() + 1.0
+            for process in stragglers:
+                if process.is_alive():
+                    process.join(timeout=max(0.0, term_deadline - time.monotonic()))
+
+        # (d) Kill оставшихся
+        for process in procs.values():
+            if process.is_alive():
+                if self.logger:
+                    self.logger._log_error(f"Force killing process '{process.name}'")
+                try:
+                    process.kill()
+                except Exception as e:
+                    if self.logger:
+                        self.logger._log_error(f"Error killing '{process.name}': {e}")
+
+        return result
+
     def stop_all(self, timeout: float = 5.0) -> None:
         if self.logger:
             self.logger._log_info(f"Stopping all processes (timeout={timeout}s)...")

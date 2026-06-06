@@ -144,6 +144,8 @@ class RecipesPresenter:
         slugs = list(self._store.list())
         self._view.refresh_list(slugs)
         self._view.set_buttons_state(False, False)
+        # Показать какой рецепт сейчас активен (загружен в систему).
+        self._view.show_active_recipe(self._store.get_active())
         self._log_info(f"RecipesPresenter.load: {len(slugs)} рецептов")
 
     # ------------------------------------------------------------------

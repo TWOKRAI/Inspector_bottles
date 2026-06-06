@@ -53,6 +53,23 @@ class TestCreateShmBlocks:
         for shm in blocks:
             close_shm(shm, unlink=is_posix())
 
+    def test_recreate_with_live_segment_succeeds_fresh(self):
+        """Повторный create при ЖИВОМ старом сегменте не падает (свежая инкарнация).
+
+        Регресс-гард hot-swap (Windows «File exists camera_0_frame_PID_0»): старый
+        сегмент держится (handle ещё открыт), второй create того же base должен
+        пересоздать со свежим именем, а не упасть FileExistsError.
+        """
+        first = create_shm_blocks("test_platform_ops_recreate", 256, 1)
+        assert first is not None
+        # Старый ещё ЖИВ (handle открыт) — имитируем переходное окно hot-swap.
+        second = create_shm_blocks("test_platform_ops_recreate", 256, 1)
+        assert second is not None, "повторный create должен дать свежую инкарнацию"
+        # Имена различаются → нет коллизии
+        assert second[0].name != first[0].name
+        for shm in (*first, *second):
+            close_shm(shm, unlink=is_posix())
+
 
 @pytest.mark.skipif(SKIP_MACOS, reason="SharedMemory unreliable on macOS")
 class TestOpenShmBlock:

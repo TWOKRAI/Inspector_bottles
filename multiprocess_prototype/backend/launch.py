@@ -254,6 +254,15 @@ class SystemBuilder:
             if not cfg.log_dir:
                 cfg.log_dir = log_dir
 
+        # Зафиксировать log_dir в env: дочерние процессы наследуют его (spawn), и при
+        # ГОРЯЧЕЙ замене рецепта (replace_blueprint._build_proc_dicts) процессы, у которых
+        # cfg.log_dir пуст, резолвят его через INSPECTOR_LOG_DIR (process_launch_config.
+        # _resolve_log_dir) → пишут в ту же папку, а не в ./logs (fallback). Иначе
+        # hot-swap'нутые процессы логировали мимо logs/prototype_2.
+        import os as _os
+
+        _os.environ.setdefault("INSPECTOR_LOG_DIR", str(Path(log_dir).resolve()))
+
         self._print_banner(n_processes=len(configs), n_plugins=discovered, log_dir=log_dir)
 
         launcher = SystemLauncher(

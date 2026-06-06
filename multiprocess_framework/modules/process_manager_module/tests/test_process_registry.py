@@ -94,6 +94,34 @@ class TestProcessRegistry:
         pb.terminate()
         pb.join(timeout=1.0)
 
+    def test_stop_many_stops_all_named_parallel(self) -> None:
+        """stop_many(names) останавливает все указанные процессы, возвращает карту."""
+        registry = ProcessRegistry(logger=None)
+        registry._stop_events["A"] = Event()
+        registry._stop_events["B"] = Event()
+        pa = Process(target=time.sleep, args=(10,), name="A")
+        pb = Process(target=time.sleep, args=(10,), name="B")
+        registry.add_process(pa)
+        registry.add_process(pb)
+        pa.start()
+        pb.start()
+        time.sleep(0.05)
+
+        # Общий дедлайн ~0.5с (sleep не слушает stop_event → terminate), параллельно
+        result = registry.stop_many(["A", "B"], timeout=0.5)
+
+        assert result == {"A": True, "B": True}
+        assert registry._stop_events["A"].is_set()
+        assert registry._stop_events["B"].is_set()
+        assert not pa.is_alive()
+        assert not pb.is_alive()
+
+    def test_stop_many_unknown_process_returns_false(self) -> None:
+        """stop_many для несуществующего имени → False, без падения."""
+        registry = ProcessRegistry(logger=None)
+        result = registry.stop_many(["ghost"], timeout=0.5)
+        assert result == {"ghost": False}
+
     def test_remove_process_clears_stop_event(self) -> None:
         registry = ProcessRegistry(logger=None)
         registry._stop_events["X"] = Event()
