@@ -331,6 +331,26 @@ def run_gui(process: "GuiProcess") -> None:
         # sync_domain_to_state — no-op если proxy=None (adapter логирует warning)
         _recipe_adapter.sync_domain_to_state()
 
+        # Restore активного рецепта: манифест (app.yaml → pipeline) указывает на
+        # бутовый рецепт — он же «последний активный» (persist пишет pipeline при
+        # активации). set_active помечает его в движке, чтобы GUI (Pipeline/Recipes)
+        # знал текущий рецепт сразу после старта, без ручной активации. Зовём
+        # менеджер напрямую (не через presenter) — не зависит от UI-пути активации.
+        try:
+            _boot_slug = _manifest.pipeline.stem
+            if _recipe_manager.set_active(_boot_slug):
+                process._log_info(
+                    f"recipe_manager: активный рецепт восстановлен из манифеста: '{_boot_slug}'",
+                    module="startup",
+                )
+            else:
+                process._log_warning(
+                    f"recipe_manager: рецепт из манифеста не найден: '{_boot_slug}'",
+                    module="startup",
+                )
+        except Exception as e:
+            process._log_warning(f"recipe_manager: restore активного рецепта не удался: {e}", module="startup")
+
         process._log_info(
             f"recipe_manager: создан, recipes_dir={_recipes_dir}, доступно рецептов={len(_recipe_manager.list())}",
             module="startup",
