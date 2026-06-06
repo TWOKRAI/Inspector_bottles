@@ -118,3 +118,6 @@ robor.lua
 
 # Runtime-артефакты БД (telemetry.db / inspector.db) — создаются при запуске/live-proof
 data/
+
+# Lock-файлы планировщика (ephemeral)
+.claude/scheduled_tasks.lock
