@@ -12,6 +12,7 @@ import time
 from unittest.mock import MagicMock
 from multiprocessing import Event
 
+from ..core.restart_policy import RestartPolicy
 from ..monitor.process_monitor import ProcessMonitor
 
 
@@ -72,6 +73,83 @@ class TestProcessMonitorStartStop:
         mock_pm = _make_mock_process_manager()
         monitor = ProcessMonitor(mock_pm)
         monitor.stop()
+
+    def test_start_resets_stale_heartbeat_on_resume(self) -> None:
+        """Resume после паузы (replace_blueprint) перезапускает heartbeat-таймер.
+
+        Регресс-гард (command-result-bridge): простой паузы монитора не должен
+        засчитываться как пропущенный heartbeat → ложный UNRESPONSIVE → shutdown
+        системы (краш GUI по SIGTERM). После start() устаревшие метки сброшены к ~now.
+        """
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        stale = time.time() - 999.0
+        monitor._last_heartbeat = {"camera_0": stale, "gui": stale}
+
+        monitor.start()  # resume
+
+        for name, ts in monitor._last_heartbeat.items():
+            assert time.time() - ts < 5.0, f"heartbeat '{name}' не сброшен при resume"
+
+    def test_loop_idles_when_paused(self) -> None:
+        """stop()-пауза (_monitoring=False): цикл НЕ опрашивает реестр / heartbeat.
+
+        Суть фикса краша: во время replace_blueprint монитор на паузе не выполняет
+        _check_heartbeats → нет ложного UNRESPONSIVE → нет shutdown системы.
+        """
+        import threading
+
+        mock_pm = _make_mock_process_manager()
+        reg = mock_pm.shared_resources.process_state_registry
+        monitor = ProcessMonitor(mock_pm, poll_interval=0.01)
+        monitor._monitoring = False  # пауза (как после stop())
+
+        stop_event = Event()
+        pause_event = Event()
+        t = threading.Thread(target=lambda: monitor._monitoring_loop(stop_event, pause_event))
+        t.start()
+        time.sleep(0.05)
+        stop_event.set()
+        t.join(timeout=1.0)
+
+        reg.get_all_process_data.assert_not_called()  # тело цикла пропущено на паузе
+
+    def test_resume_does_not_create_second_worker(self) -> None:
+        """start→stop→start: воркер цикла создаётся один раз (resume = снятие паузы)."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm.worker_manager.create_worker = MagicMock()
+        monitor = ProcessMonitor(mock_pm)
+
+        monitor.start()
+        monitor.stop()
+        monitor.start()  # resume
+
+        assert mock_pm.worker_manager.create_worker.call_count == 1
+        assert monitor._monitoring is True
+
+
+class TestProcessMonitorProtectedAutoRestart:
+    """command-result-bridge: авто-рестарт НЕ трогает protected (GUI/PM)."""
+
+    def test_auto_restart_skips_protected(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        mock_pm._get_protected_names.return_value = {"gui", "ProcessManager"}
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True))
+
+        monitor._try_auto_restart("gui", reason="unresponsive")
+
+        mock_pm.restart_process.assert_not_called()
+        mock_pm._log_warning.assert_called()
+
+    def test_auto_restart_allows_non_protected(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        mock_pm._get_protected_names.return_value = {"gui"}
+        mock_pm.restart_process.return_value = True
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, backoff_sec=0.0))
+
+        monitor._try_auto_restart("camera_0", reason="crashed")
+
+        mock_pm.restart_process.assert_called_once_with("camera_0")
 
 
 class TestProcessMonitorStateDetection:
@@ -178,6 +256,7 @@ class TestProcessMonitorLoop:
         mock_pm = _make_mock_process_manager()
         mock_pm.shared_resources.process_state_registry.get_all_process_data.side_effect = RuntimeError("test error")
         monitor = ProcessMonitor(mock_pm, poll_interval=0.01)
+        monitor._monitoring = True  # gate цикла: иначе тело (и путь исключения) пропускается
 
         stop_event = Event()
         pause_event = Event()

@@ -69,7 +69,13 @@ class ProcessMonitor:
         self.heartbeat_timeout = heartbeat_timeout
         self.restart_policy = restart_policy or RestartPolicy()
         self.previous_states: dict[str, dict[str, Any]] = {}
+        # _monitoring — реальный run/pause gate цикла (loop его проверяет). stop()
+        # ставит False → цикл паузится (НЕ убивает воркер), start() → True + resume.
         self._monitoring = False
+        # Воркер state_monitor создаётся РОВНО один раз (первый start); повторные
+        # start() (resume после паузы на replace_blueprint) лишь снимают паузу —
+        # иначе плодились бы дубли воркера.
+        self._worker_created = False
 
         # Heartbeat: время последнего heartbeat от каждого процесса
         self._last_heartbeat: dict[str, float] = {}
@@ -93,23 +99,41 @@ class ProcessMonitor:
         if self._monitoring:
             self.process._log_warning("Monitor already running")
             return
-        self.process._log_info("Starting process state monitor")
 
-        # Регистрируем обработчик heartbeat-сообщений на роутере ProcessManager-а
-        self._register_heartbeat_handler()
+        # Resume после паузы (replace_blueprint глушит монитор на время горячей
+        # замены процессов): перезапускаем heartbeat-таймер для уже известных
+        # процессов. Иначе простой паузы (секунды на spawn/stop) засчитается как
+        # пропущенные heartbeat → ложный UNRESPONSIVE → при disabled-policy
+        # shutdown всей системы (крах GUI по SIGTERM), при enabled — авто-рестарт.
+        if self._last_heartbeat:
+            resume_ts = time.time()
+            for name in self._last_heartbeat:
+                self._last_heartbeat[name] = resume_ts
 
-        self.process.worker_manager.create_worker(
-            "state_monitor",
-            self._monitoring_loop,
-            ThreadConfig(priority=ThreadPriority.NORMAL),
-            auto_start=True,
-        )
         self._monitoring = True
+
+        # Воркер цикла создаём один раз; повторный start() — это resume (снятие
+        # паузы через _monitoring), а не новый воркер.
+        if not self._worker_created:
+            self.process._log_info("Starting process state monitor")
+            self._register_heartbeat_handler()
+            self.process.worker_manager.create_worker(
+                "state_monitor",
+                self._monitoring_loop,
+                ThreadConfig(priority=ThreadPriority.NORMAL),
+                auto_start=True,
+            )
+            self._worker_created = True
+        else:
+            self.process._log_info("Resuming process state monitor")
 
     def stop(self):
         if not self._monitoring:
             return
-        self.process._log_info("Stopping process state monitor")
+        # Пауза цикла (НЕ убийство воркера): _monitoring=False, цикл встаёт на
+        # idle и НЕ выполняет _check_heartbeats — на время replace_blueprint это
+        # исключает ложный UNRESPONSIVE по застывшим heartbeat.
+        self.process._log_info("Pausing process state monitor")
         self._monitoring = False
 
     # ----------------------------------------------------------------
@@ -244,7 +268,10 @@ class ProcessMonitor:
     def _monitoring_loop(self, stop_event: Event, pause_event: Event):
         self.process._log_info("Process monitor loop started")
         while not stop_event.is_set():
-            if pause_event.is_set():
+            # _monitoring — пауза от stop() (replace_blueprint): цикл встаёт на idle,
+            # НЕ выполняет _check_heartbeats → нет ложного UNRESPONSIVE во время
+            # горячей замены. pause_event — пауза от worker_manager.
+            if not self._monitoring or pause_event.is_set():
                 time.sleep(0.1)
                 continue
             try:
@@ -466,6 +493,19 @@ class ProcessMonitor:
             reason: Причина рестарта (crashed / unresponsive)
         """
         if not self.restart_policy.enabled:
+            return
+
+        # Protected-процессы (GUI, ProcessManager) НИКОГДА не авто-рестартим:
+        # их жизненным циклом владеет launcher/shutdown, а terminate живого
+        # protected (например ложный unresponsive после паузы монитора на
+        # replace_blueprint) = крах ядра приложения (GUI получает SIGTERM).
+        protected: set[str] = set()
+        try:
+            protected = self.process._get_protected_names()
+        except Exception:  # nosec B110 — best-effort; при сбое не блокируем рестарт обычных процессов
+            protected = set()
+        if process_name in protected:
+            self.process._log_warning(f"Process '{process_name}' protected — авто-рестарт ({reason}) пропущен")
             return
 
         count = self._restart_counts.get(process_name, 0)
