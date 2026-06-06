@@ -71,3 +71,8 @@ class RuntimeDeps:
     auth_ctx: "AuthContext | None" = None
     process_manager_proxy: "ProcessManagerProxy | None" = None
     request_ui_restart: "Callable[[], None] | None" = None
+    # persist активного рецепта в манифест (app.yaml → pipeline) при активации.
+    # Закрывает loop: активация в GUI → app.yaml обновлён → следующий старт
+    # восстанавливает рецепт (см. app.py restore). None → no-op (persist отключён).
+    # Запись через ruamel round-trip — комментарии app.yaml сохраняются.
+    persist_active_recipe: "Callable[[str], None] | None" = None

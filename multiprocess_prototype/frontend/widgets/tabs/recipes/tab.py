@@ -62,6 +62,7 @@ class RecipesTab(BaseListNavTab):
         services: AppServices,
         *,
         process_manager_proxy: object | None = None,
+        persist_active_fn: object | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Инициализировать таб рецептов.
@@ -70,10 +71,13 @@ class RecipesTab(BaseListNavTab):
             services: типизированный DI-контейнер AppServices.
             process_manager_proxy: IPC-фасад управления живым backend (Этап 1).
                 None → активация рецепта только меняет state, без применения к backend.
+            persist_active_fn: колбэк persist активного рецепта в манифест (app.yaml).
+                None → persist отключён (активация не пишет app.yaml).
             parent: родительский виджет.
         """
         self._services = services
         self._pm_proxy = process_manager_proxy
+        self._persist_active_fn = persist_active_fn
         self._selected_slug: str | None = None
         self._form_stack_index: int = 0
 
@@ -117,6 +121,7 @@ class RecipesTab(BaseListNavTab):
                 replace_blueprint_fn=_replace_fn,
                 commands=services.commands,  # G.6.5: активация → dispatch(ActivateRecipe)
                 topology_store=services.topology,  # Этап 1: «Сохранить» (живой граф → рецепт)
+                persist_active_fn=self._persist_active_fn,  # persist #1: активный slug → app.yaml
             )
             self._presenter.load()
 
@@ -135,7 +140,11 @@ class RecipesTab(BaseListNavTab):
         Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
         Этап 1: process_manager_proxy — применение рецепта к живому backend.
         """
-        return cls(services, process_manager_proxy=runtime.process_manager_proxy)
+        return cls(
+            services,
+            process_manager_proxy=runtime.process_manager_proxy,
+            persist_active_fn=runtime.persist_active_recipe,
+        )
 
     # ------------------------------------------------------------------ #
     #  BaseListNavTab hooks                                                #

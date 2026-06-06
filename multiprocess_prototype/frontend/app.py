@@ -301,7 +301,12 @@ def run_gui(process: "GuiProcess") -> None:
     _recipe_manager = None  # G.5.1: инициализируем до try — build_app_services fail-loud при None
     try:
         from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
-        from multiprocess_framework.modules.state_store_module.recipes.recipe_engine import RecipeEngine
+
+        # fix recipe-v3-engine-decouple: prototype-wrapper (НЕ generic framework-движок).
+        # Wrapper короткозамыкает load() для v3-рецептов (top-level blueprint) — без
+        # migrate/replay/перезаписи. Generic-движок считал v3 legacy (нет meta.version)
+        # и портил файл миграцией пустого data при каждом set_active (старт/«Загрузить»).
+        from multiprocess_prototype.backend.state.recipes import RecipeEngine
         from multiprocess_prototype.recipes.manager import RecipeManager
         from multiprocess_prototype.recipes.migrations.format_v1_to_v2 import (
             migrate_v1_to_v2,
@@ -608,6 +613,18 @@ def run_gui(process: "GuiProcess") -> None:
         process._restart_ui = True
         app.quit()
 
+    def _persist_active_recipe(slug: str) -> None:
+        """persist #1: записать активный рецепт в манифест (app.yaml → pipeline).
+
+        Закрывает loop: активация в GUI → app.yaml обновлён → следующий старт
+        восстанавливает рецепт (restore выше читает _manifest.pipeline.stem). Запись
+        через ruamel round-trip — комментарии app.yaml сохраняются. Формат pipeline
+        совпадает с текущим в app.yaml: ``recipes/<slug>.yaml``.
+        """
+        from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
+
+        update_yaml_preserving(resolve_manifest_path(), {"pipeline": f"recipes/{slug}.yaml"})
+
     _runtime = RuntimeDeps(
         command_sender=command_sender,
         topology_bridge=topology_bridge,
@@ -617,6 +634,7 @@ def run_gui(process: "GuiProcess") -> None:
         auth_ctx=auth_ctx,
         process_manager_proxy=process_manager_proxy,
         request_ui_restart=_request_ui_restart,
+        persist_active_recipe=_persist_active_recipe,
     )
 
     tab_factory = TabFactory(

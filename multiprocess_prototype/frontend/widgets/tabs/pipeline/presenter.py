@@ -1502,20 +1502,14 @@ class PipelinePresenter:
             QMessageBox.critical(parent, "Сохранение рецепта", "Не удалось прочитать рецепт")
             return False
 
-        # Шаг 4: обновить секции в data-части рецепта
+        # Шаг 4: обновить top-level секции v3-рецепта (displays ВНУТРЬ blueprint) через
+        # единый нормализатор (one source of truth): без legacy data:-вложения, прочие
+        # ключи (name/version/active_services) сохраняются. save_raw — ruamel round-trip.
         try:
-            recipe_data = raw_recipe.get("data", {})
-            if not isinstance(recipe_data, dict):
-                recipe_data = {}
+            from multiprocess_prototype.recipes.format import normalize_recipe_v3_raw
 
-            recipe_data["blueprint"] = bp_dict
-            recipe_data["display_bindings"] = bindings
-            recipe_data["gui_positions"] = gui_positions
-
-            raw_recipe["data"] = recipe_data
-
-            # Записать через RecipeStore Protocol
-            store.save_raw(active_slug, raw_recipe)
+            bp_dict["displays"] = bindings
+            store.save_raw(active_slug, normalize_recipe_v3_raw(raw_recipe, bp_dict, gui_positions))
 
             logger.info("Pipeline сохранён в рецепт '%s'", active_slug)
         except Exception as exc:

@@ -27,8 +27,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import yaml
-
 from multiprocess_prototype.domain.entities.recipe import Recipe
 
 if TYPE_CHECKING:
@@ -74,16 +72,14 @@ class RecipeStoreFromManager:
         """Записать рецепт в YAML, денормализуя meta -> top-level (Q2 Variant A).
 
         Обходит RecipeManager.save() — тот делает snapshot config-store,
-        а нам нужно записать domain entity как есть.
+        а нам нужно записать domain entity как есть. Запись через
+        update_yaml_preserving (ruamel) — сохраняет комментарии существующего файла.
         """
+        from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
+
         data = self._denormalize(recipe.to_dict())
-        target = self._dir / f"{slug}.yaml"
-        # Убеждаемся что директория существует
         self._dir.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
+        update_yaml_preserving(self._dir / f"{slug}.yaml", data)
 
     def delete(self, slug: str) -> None:
         """Удалить файл рецепта. Если файла нет — молча игнорировать."""
@@ -99,17 +95,17 @@ class RecipeStoreFromManager:
         return self._rm.read_recipe(slug)
 
     def save_raw(self, slug: str, data: dict) -> None:
-        """Записать raw dict в YAML-файл (без денормализации — данные как есть).
+        """Записать top-level ключи рецепта, СОХРАНИВ комментарии (ruamel round-trip).
 
-        Используется presenter'ами для сохранения полной YAML-структуры
-        (blueprint/display_bindings/gui_positions и т.д.).
+        merge-семантика: обновляются только переданные top-level ключи (blueprint,
+        gui_positions, ...); остальные (name/version/description) и комментарии файла
+        не тронуты. Новый файл создаётся из ``data``. Используется presenter'ами для
+        сохранения живого графа в рецепт без порчи документа.
         """
+        from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
+
         self._dir.mkdir(parents=True, exist_ok=True)
-        target = self._dir / f"{slug}.yaml"
-        target.write_text(
-            yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
+        update_yaml_preserving(self._dir / f"{slug}.yaml", data)
 
     # ------------------------------------------------------------------
     # Active recipe

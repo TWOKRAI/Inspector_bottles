@@ -317,3 +317,33 @@ class TestRecipeEngineWithMigration:
 
         bak_path = recipe_path.with_suffix(".yaml.bak")
         assert bak_path.exists(), "Backup .bak должен быть создан при миграции"
+
+
+# ------------------------------------------------------------------
+# duplicate() сохраняет комментарии (fix recipe-v3-engine-decouple, finding #4)
+# ------------------------------------------------------------------
+
+
+def test_duplicate_preserves_comments(manager: RecipeManager, recipes_dir: Path) -> None:
+    """duplicate() v3-рецепта сохраняет комментарии и обновляет top-level name."""
+    (recipes_dir / "src.yaml").write_text(
+        "# Комментарий-заголовок исходного рецепта.\n"
+        "name: src\n"
+        "version: 3\n"
+        "description: orig\n"
+        "blueprint:\n"
+        "  processes: []  # инлайн-комментарий\n"
+        "  wires: []\n",
+        encoding="utf-8",
+    )
+
+    assert manager.duplicate("src", "dst") is True
+
+    text = (recipes_dir / "dst.yaml").read_text(encoding="utf-8")
+    assert "# Комментарий-заголовок исходного рецепта." in text  # комментарий сохранён
+    assert "# инлайн-комментарий" in text
+    import yaml as _yaml
+
+    data = _yaml.safe_load(text)
+    assert data["name"] == "dst"  # имя обновлено
+    assert data["version"] == 3

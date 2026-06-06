@@ -632,3 +632,57 @@ def test_set_active_none_returns_true(
 
     assert result is True
     assert store.get_active() is None
+
+
+# ---------------------------------------------------------------------------
+# Comment-preserving save_raw (fix recipe-v3-engine-decouple)
+# ---------------------------------------------------------------------------
+
+
+def test_save_raw_preserves_comments_and_top_level(store: Any, recipe_dir: Path) -> None:
+    """save_raw сохраняет комментарии файла и пишет top-level blueprint (не data:)."""
+    slug = "commented"
+    (recipe_dir / f"{slug}.yaml").write_text(
+        "# Заголовок-комментарий рецепта.\n"
+        "name: commented\n"
+        "version: 3\n"
+        "description: orig\n"
+        "blueprint:\n"
+        "  processes: []\n"
+        "  wires: []\n"
+        "active_services:\n"
+        "  - svc_a\n",
+        encoding="utf-8",
+    )
+
+    raw = store.read_raw(slug)
+    raw["blueprint"] = {"processes": [{"process_name": "p1"}], "wires": [], "displays": []}
+    store.save_raw(slug, raw)
+
+    text = (recipe_dir / f"{slug}.yaml").read_text(encoding="utf-8")
+    assert "# Заголовок-комментарий рецепта." in text  # комментарий сохранён
+    assert "data:" not in text  # legacy-вложение не появляется
+
+    reloaded = store.read_raw(slug)
+    assert reloaded["blueprint"]["processes"][0]["process_name"] == "p1"
+    assert reloaded["name"] == "commented"  # top-level не потерян
+    assert reloaded["active_services"] == ["svc_a"]
+
+
+def test_save_raw_roundtrip_parses_as_recipe(store: Any, recipe_dir: Path) -> None:
+    """Файл после save_raw валиден для Recipe.from_dict (активация не сломается)."""
+    slug = "rt"
+    _write_yaml(recipe_dir / f"{slug}.yaml", _minimal_recipe_dict())
+
+    raw = store.read_raw(slug)
+    raw["blueprint"] = {
+        "processes": [{"process_name": "cam", "plugins": [{"plugin_name": "capture"}]}],
+        "wires": [],
+        "displays": [{"node_id": "cam.capture.frame", "display_id": "main"}],
+    }
+    store.save_raw(slug, raw)
+
+    reloaded = store.read_raw(slug)
+    recipe = Recipe.from_dict(reloaded)  # не должно бросать ValidationError
+    assert recipe.blueprint.processes[0].process_name == "cam"
+    assert recipe.blueprint.displays[0].display_id == "main"

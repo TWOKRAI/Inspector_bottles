@@ -10,6 +10,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.49",  # asyncio extras = greenlet для async-адаптера
     "numpy>=2.4,<3",
     "PyYAML>=6.0",
+    "ruamel.yaml>=0.18",  # round-trip YAML с сохранением комментариев (рецепты, app.yaml)
     "psutil>=7.0",
     # GUI (Phase 2 завершена: миграция PyQt5 → PySide6)
     "pyside6>=6.8,<6.11",

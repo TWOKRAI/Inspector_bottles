@@ -12,7 +12,7 @@ Dict at Boundary: RecipeManager работает с dict (YAML-данные),
 
 from __future__ import annotations
 
-import copy
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -198,22 +198,24 @@ class RecipeManager:
             self._log_error(f"RecipeManager.duplicate: некорректный формат рецепта '{source_slug}'")
             return False
 
-        # Создаём копию с обновлённым meta.name
-        new_recipe = copy.deepcopy(recipe_data)
+        # Копируем файл байт-в-байт (сохраняем комментарии), затем обновляем имя через
+        # ruamel round-trip — комментарии не теряются (тот же класс бага, что чинил
+        # save_raw; раньше yaml.dump стирал комментарии при дублировании).
+        from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
 
-        # Обновляем meta.name если поле существует
-        if "meta" in new_recipe and isinstance(new_recipe["meta"], dict):
-            new_recipe["meta"]["name"] = new_slug
-        else:
-            # Для v2-формата рецептов: top-level поле name
-            new_recipe["name"] = new_slug
-
-        # Записываем под новым именем
         try:
-            with open(target_path, "w", encoding="utf-8") as f:
-                yaml.dump(new_recipe, f, default_flow_style=False, allow_unicode=True)
+            shutil.copy2(source_path, target_path)
+            if isinstance(recipe_data.get("meta"), dict):
+                # legacy-формат: имя в meta.name
+                meta = dict(recipe_data["meta"])
+                meta["name"] = new_slug
+                update_yaml_preserving(target_path, {"meta": meta})
+            else:
+                # v3-формат: top-level name
+                update_yaml_preserving(target_path, {"name": new_slug})
         except OSError as exc:
             self._log_error(f"RecipeManager.duplicate: ошибка записи '{new_slug}': {exc}")
+            target_path.unlink(missing_ok=True)
             return False
 
         self._log_info(f"RecipeManager: дублирован рецепт '{source_slug}' → '{new_slug}'")

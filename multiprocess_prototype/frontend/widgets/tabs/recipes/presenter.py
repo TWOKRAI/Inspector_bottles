@@ -84,6 +84,7 @@ class RecipesPresenter:
         logger: Any | None = None,
         commands: "CommandDispatcher | None" = None,
         topology_store: Any | None = None,
+        persist_active_fn: Callable[[str], None] | None = None,
     ) -> None:
         """Инициализировать presenter.
 
@@ -108,6 +109,8 @@ class RecipesPresenter:
         # Этап 1 pipeline-live-control: источник текущей топологии (TopologyRepository
         # с .load()) для кнопки «Сохранить» (живой граф → выбранный рецепт). None → no-op.
         self._topology_store = topology_store
+        # persist активного рецепта в манифест (app.yaml). None → no-op.
+        self._persist_active_fn = persist_active_fn
         self._selected_slug: str | None = None
 
     # ------------------------------------------------------------------
@@ -318,6 +321,13 @@ class RecipesPresenter:
                 self._view.show_error(f"Не удалось активировать рецепт: {exc}")
                 self._log_error(f"RecipesPresenter.on_set_active: ActivateRecipe отклонён: {exc}")
                 return
+            except Exception as exc:  # noqa: BLE001
+                # Surface-not-mask: непредвиденные ошибки dispatch (напр. ValidationError
+                # от битого/несовместимого YAML рецепта) раньше пролетали мимо узкого
+                # except DomainError → «Загрузить» молча ломался. Теперь показываем.
+                self._view.show_error(f"Ошибка активации рецепта '{target_slug}': {exc}")
+                self._log_error(f"RecipesPresenter.on_set_active: ActivateRecipe исключение: {exc!r}")
+                return
 
         # Активируем через RecipeStore Protocol
         success = self._store.set_active(target_slug)
@@ -359,6 +369,15 @@ class RecipesPresenter:
 
             self._log_info(f"RecipesPresenter.on_set_active: replace_blueprint успешен для '{target_slug}'")
 
+        # persist #1: записать активный slug в манифест (app.yaml → pipeline), чтобы
+        # следующий старт восстановил этот рецепт. Ошибка persist не валит активацию.
+        if self._persist_active_fn is not None:
+            try:
+                self._persist_active_fn(target_slug)
+                self._log_info(f"RecipesPresenter.on_set_active: persist в манифест '{target_slug}'")
+            except Exception as exc:  # noqa: BLE001
+                self._log_warning(f"RecipesPresenter.on_set_active: persist не удался: {exc}")
+
         self.load()
         self._view.set_buttons_state(True, True)
 
@@ -386,11 +405,12 @@ class RecipesPresenter:
             return False
 
         topo = self._topology_store.load() or {}
+        # v3-схема: blueprint top-level, displays ВНУТРИ blueprint.displays.
         blueprint = {
             "processes": topo.get("processes", []),
             "wires": topo.get("wires", []),
+            "displays": topo.get("displays", []),
         }
-        display_bindings = topo.get("displays", [])
         gui_positions = topo.get("gui_positions", {})
 
         raw = self._store.read_raw(target_slug)
@@ -399,14 +419,12 @@ class RecipesPresenter:
             return False
 
         try:
-            data = raw.get("data", {})
-            if not isinstance(data, dict):
-                data = {}
-            data["blueprint"] = blueprint
-            data["display_bindings"] = display_bindings
-            data["gui_positions"] = gui_positions
-            raw["data"] = data
-            self._store.save_raw(target_slug, raw)
+            # Единый нормализатор v3-raw (one source of truth): top-level blueprint,
+            # без legacy data:/meta:, прочие ключи (name/version/active_services)
+            # сохраняются. save_raw пишет с комментариями (ruamel round-trip).
+            from multiprocess_prototype.recipes.format import normalize_recipe_v3_raw
+
+            self._store.save_raw(target_slug, normalize_recipe_v3_raw(raw, blueprint, gui_positions))
             self._log_info(f"RecipesPresenter.on_save: топология сохранена в '{target_slug}'")
             return True
         except Exception as exc:  # noqa: BLE001

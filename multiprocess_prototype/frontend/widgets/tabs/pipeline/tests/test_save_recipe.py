@@ -22,17 +22,13 @@ from ._helpers import make_pipeline_services
 
 
 def _make_recipe_raw(slug: str = "test_recipe") -> dict:
-    """Создать минимальный v2-рецепт в формате RecipeEngine (raw dict)."""
+    """Создать минимальный v3-рецепт (top-level формат, как на диске)."""
     return {
-        "meta": {
-            "name": slug,
-            "description": "",
-            "version": 2,
-            "created_at": "2026-05-25T00:00:00+00:00",
-        },
-        "data": {
-            "active_services": ["camera_service"],
-        },
+        "name": slug,
+        "version": 3,
+        "description": "",
+        "blueprint": {"processes": [], "wires": [], "displays": []},
+        "active_services": ["camera_service"],
     }
 
 
@@ -77,27 +73,28 @@ class TestSaveToActiveRecipeWritesBlueprint:
 
         assert result is True
 
-        # Проверяем raw-данные в store (не на диске)
+        # Проверяем raw-данные в store (не на диске).
+        # Fix recipe-v3-engine-decouple: top-level blueprint, displays ВНУТРИ
+        # blueprint.displays (не legacy data:-вложение). active_services сохраняется
+        # top-level (пишем в прочитанный raw, не затирая остальные ключи).
         saved = store._raw[slug]
-        assert "data" in saved
-        data = saved["data"]
+        assert "data" not in saved  # legacy-вложение убрано
 
-        assert "blueprint" in data
-        bp = data["blueprint"]
+        assert "blueprint" in saved
+        bp = saved["blueprint"]
         assert "processes" in bp
         process_names = [p["process_name"] for p in bp["processes"]]
         assert "cam" in process_names
         assert "proc" in process_names
 
-        assert "display_bindings" in data
-        assert len(data["display_bindings"]) == 1
-        binding = data["display_bindings"][0]
-        assert binding["display_id"] == "main_output"
+        assert "displays" in bp
+        assert len(bp["displays"]) == 1
+        assert bp["displays"][0]["display_id"] == "main_output"
 
-        assert data.get("active_services") == ["camera_service"]
+        assert saved.get("active_services") == ["camera_service"]
 
     def test_save_updates_gui_positions(self, monkeypatch) -> None:
-        """gui_positions записываются в секцию data['gui_positions']."""
+        """gui_positions записываются в top-level gui_positions рецепта."""
         slug = "pos_recipe"
         services, store = _make_services_with_recipe(slug)
         presenter = PipelinePresenter(services)
@@ -115,7 +112,7 @@ class TestSaveToActiveRecipeWritesBlueprint:
         assert result is True
 
         saved = store._raw[slug]
-        gui_pos = saved["data"].get("gui_positions", {})
+        gui_pos = saved.get("gui_positions", {})
         assert "node_a" in gui_pos
 
 

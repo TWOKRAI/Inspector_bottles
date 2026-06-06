@@ -388,7 +388,12 @@ def test_on_set_active_replace_error(
 
 
 def test_on_save_persists_topology(mock_view: MagicMock) -> None:
-    """on_save пишет живую топологию в data.blueprint выбранного рецепта (Этап 1)."""
+    """on_save пишет живую топологию в top-level blueprint рецепта (displays внутри).
+
+    Fix recipe-v3-engine-decouple: раньше писалось в legacy-вложение data.blueprint
+    (его reader не понимал → порча). Теперь — top-level blueprint, displays внутри
+    blueprint.displays (round-trip с editor/backend-launch).
+    """
     store = _make_store(slugs=["cup"])
 
     class _FakeTopologyStore:
@@ -411,9 +416,10 @@ def test_on_save_persists_topology(mock_view: MagicMock) -> None:
     assert ok is True
     mock_view.show_error.assert_not_called()
     saved = store.read_raw("cup")
-    assert saved["data"]["blueprint"]["processes"][0]["process_name"] == "p1"
-    assert saved["data"]["blueprint"]["wires"][0]["source"] == "p1.a.out"
-    assert saved["data"]["display_bindings"][0]["display_id"] == "main"
+    assert "data" not in saved  # legacy-вложение убрано
+    assert saved["blueprint"]["processes"][0]["process_name"] == "p1"
+    assert saved["blueprint"]["wires"][0]["source"] == "p1.a.out"
+    assert saved["blueprint"]["displays"][0]["display_id"] == "main"
 
 
 def test_on_save_no_topology_store(mock_view: MagicMock) -> None:
