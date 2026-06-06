@@ -31,6 +31,26 @@ class MockProcess:
         self.sent.append((target, msg))
 
 
+class MockRouter:
+    """Мок RouterManager.request — записывает request-билеты, отдаёт заготовленный ответ."""
+
+    def __init__(self, response: dict[str, Any] | None = None) -> None:
+        self.requested: list[tuple[dict[str, Any], float]] = []
+        self._response = response if response is not None else {"success": True, "result": {}}
+
+    def request(self, msg: dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
+        self.requested.append((msg, timeout))
+        return self._response
+
+
+class MockRequestingProcess(MockProcess):
+    """Мок GuiProcess с router_manager (поддержка request/response)."""
+
+    def __init__(self, name: str = "gui", response: dict[str, Any] | None = None) -> None:
+        super().__init__(name)
+        self.router_manager = MockRouter(response)
+
+
 # --- Fixtures ---
 
 
@@ -48,7 +68,6 @@ def sender(process: MockProcess) -> CommandSender:
 
 
 class TestSendCommand:
-
     def test_basic_send(self, sender: CommandSender, process: MockProcess) -> None:
         """send_command формирует и отправляет dict-сообщение."""
         sender.send_command("camera_0", "set_fps", {"fps": 30})
@@ -80,7 +99,6 @@ class TestSendCommand:
 
 
 class TestSendFieldCommand:
-
     def test_immediate_send(self, sender: CommandSender, process: MockProcess) -> None:
         """debounce_ms=0 → немедленная отправка."""
         sender.send_field_command("processor_0", "set_config", {"h_min": 50})
@@ -92,9 +110,7 @@ class TestSendFieldCommand:
 
     def test_debounce_stores_pending_then_flush(self, sender: CommandSender, process: MockProcess) -> None:
         """debounce_ms > 0 → данные в pending, flush отправляет."""
-        sender.send_field_command(
-            "processor_0", "set_config", {"h_min": 50}, debounce_ms=50
-        )
+        sender.send_field_command("processor_0", "set_config", {"h_min": 50}, debounce_ms=50)
         # QTimer запущен, но event loop не крутится — данные в pending или уже flush'нуты
         # Принудительный flush гарантирует отправку
         sender.flush()
@@ -142,7 +158,6 @@ class TestSendFieldCommand:
 
 
 class TestSendActionCommand:
-
     def test_action_immediate(self, sender: CommandSender, process: MockProcess) -> None:
         """Action-команда всегда отправляется немедленно."""
         sender.send_action_command("camera_0", "start_capture")
@@ -160,11 +175,86 @@ class TestSendActionCommand:
         assert msg["data"] == {"w": 1920, "h": 1080}
 
 
+# --- request/response (command-result-bridge) ---
+
+
+class TestRequestCommand:
+    """request_command/request_system_command — round-trip через router.request."""
+
+    def test_request_system_command_returns_real_response(self) -> None:
+        """request_system_command идёт в router.request и возвращает реальный ответ."""
+        process = MockRequestingProcess("gui", response={"success": True, "result": {"replaced": ["w1"]}})
+        sender = CommandSender(process)
+
+        resp = sender.request_system_command({"cmd": "blueprint.replace", "blueprint": {"processes": []}})
+
+        # Билет ушёл в router.request, НЕ в fire-and-forget send_message
+        assert len(process.router_manager.requested) == 1
+        assert len(process.sent) == 0
+        msg, _timeout = process.router_manager.requested[0]
+        assert msg["command"] == "process.command"
+        assert msg["data"] == {"cmd": "blueprint.replace", "blueprint": {"processes": []}}
+        assert msg["sender"] == "gui"
+        # Реальный ответ проброшен наверх
+        assert resp == {"success": True, "result": {"replaced": ["w1"]}}
+
+    def test_request_command_returns_real_response(self) -> None:
+        """request_command (прямая команда процессу) тоже round-trip."""
+        process = MockRequestingProcess("gui", response={"success": True, "result": "ok"})
+        sender = CommandSender(process)
+
+        resp = sender.request_command("camera_0", "process.stop", {"process_name": "camera_0"})
+
+        msg, _ = process.router_manager.requested[0]
+        assert msg["command"] == "process.stop"
+        assert msg["targets"] == ["camera_0"]
+        assert resp["result"] == "ok"
+
+    def test_request_passes_timeout(self) -> None:
+        """timeout прокидывается в router.request."""
+        process = MockRequestingProcess("gui")
+        sender = CommandSender(process)
+
+        sender.request_system_command({"cmd": "process.start"}, timeout=12.5)
+
+        _, timeout = process.router_manager.requested[0]
+        assert timeout == 12.5
+
+    def test_request_default_timeout(self) -> None:
+        """Без явного timeout — DEFAULT_REQUEST_TIMEOUT."""
+        from multiprocess_prototype.frontend.bridge.command_sender import DEFAULT_REQUEST_TIMEOUT
+
+        process = MockRequestingProcess("gui")
+        sender = CommandSender(process)
+
+        sender.request_system_command({"cmd": "process.start"})
+
+        _, timeout = process.router_manager.requested[0]
+        assert timeout == DEFAULT_REQUEST_TIMEOUT
+
+    def test_request_without_router_raises(self) -> None:
+        """Процесс без router_manager → понятная ошибка конфигурации (не тихий сбой)."""
+        process = MockProcess("gui")  # без router_manager
+        sender = CommandSender(process)
+
+        with pytest.raises(RuntimeError, match="router_manager"):
+            sender.request_system_command({"cmd": "process.start"})
+
+    def test_fire_and_forget_unchanged_by_request_path(self) -> None:
+        """send_command остаётся fire-and-forget (паритет, не задет request-путём)."""
+        process = MockRequestingProcess("gui")
+        sender = CommandSender(process)
+
+        sender.send_command("camera_0", "set_fps", {"fps": 30})
+
+        assert len(process.sent) == 1
+        assert len(process.router_manager.requested) == 0
+
+
 # --- pending_count ---
 
 
 class TestPendingCount:
-
     def test_pending_count_empty(self, sender: CommandSender) -> None:
         assert sender.pending_count == 0
 

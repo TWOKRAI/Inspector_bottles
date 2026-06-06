@@ -18,17 +18,40 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "IProcess",
+    "IRequestingProcess",
     "CommandSender",
+    "DEFAULT_REQUEST_TIMEOUT",
 ]
+
+# Дефолтный таймаут request-команд. Щедрый, т.к. дискретные операции (blueprint.replace
+# = спавн N процессов) идут секунды. Прогресс-индикация (lifecycle, follow-up) уберёт
+# слепое ожидание; пока — индикатор «выполняется…» на стороне presenter.
+DEFAULT_REQUEST_TIMEOUT = 30.0
 
 
 @runtime_checkable
 class IProcess(Protocol):
-    """Минимальный интерфейс процесса для CommandSender."""
+    """Минимальный интерфейс процесса для CommandSender (fire-and-forget)."""
 
     name: str
 
     def send_message(self, target: str, msg: dict[str, Any]) -> None: ...
+
+
+@runtime_checkable
+class IRequestingProcess(IProcess, Protocol):
+    """Процесс, поддерживающий request/response (для command-result-bridge).
+
+    Расширяет :class:`IProcess` доступом к ``router_manager`` с методом
+    ``request(msg, timeout) -> dict`` (P0.5). GuiProcess(ProcessModule) ему
+    удовлетворяет: ``self.router_manager`` — рабочий RouterManager.
+
+    Контракт потока: ``request()`` БЛОКИРУЕТ вызывающий поток до ответа/таймаута
+    и НЕ должен вызываться из приёмного потока процесса (дедлок). В GUI request-
+    методы исполняются на worker-потоке (RequestRunner), не в Qt main-thread.
+    """
+
+    router_manager: Any
 
 
 class CommandSender:
@@ -170,3 +193,64 @@ class CommandSender:
         # Форма сообщения — общий билдер протокола (один источник правды с driver'ом).
         msg = build_system_command_message(command, sender=self._process.name)
         self._process.send_message(target, msg)
+
+    # --- request/response (command-result-bridge): GUI узнаёт результат ---
+
+    def request_command(
+        self,
+        target_process: str,
+        command: str,
+        args: dict[str, Any] | None = None,
+        *,
+        timeout: float = DEFAULT_REQUEST_TIMEOUT,
+    ) -> dict[str, Any]:
+        """Отправить команду и ДОЖДАТЬСЯ реального ответа процесса (round-trip).
+
+        В отличие от :meth:`send_command` (fire-and-forget) — блокирует поток до
+        ``response`` или таймаута. correlation_id проставляет ``router.request()``.
+
+        Контракт потока: вызывать с worker-потока (НЕ Qt main, НЕ приёмный поток).
+
+        Args:
+            target_process: имя процесса-получателя.
+            command: имя команды.
+            args: аргументы команды.
+            timeout: ожидание ответа, сек.
+
+        Returns:
+            dict ответа (``success``/``result``; при таймауте — ``{"success":
+            False, "error": "timeout", ...}``).
+        """
+        msg = build_command_message(target_process, command, args, sender=self._process.name)
+        return self._request(msg, timeout)
+
+    def request_system_command(
+        self,
+        command: dict[str, Any],
+        *,
+        timeout: float = DEFAULT_REQUEST_TIMEOUT,
+    ) -> dict[str, Any]:
+        """System-команда в ProcessManager с ожиданием реального результата.
+
+        Round-trip-вариант :meth:`send_system_command`. Backend (``_handle_process_command``)
+        отвечает ``process.command.response`` с результатом вложенной команды
+        (например ``replace_blueprint`` → ``{success, replaced, rolled_back, ...}``).
+
+        Контракт потока: вызывать с worker-потока (см. :meth:`request_command`).
+        """
+        msg = build_system_command_message(command, sender=self._process.name)
+        return self._request(msg, timeout)
+
+    def _request(self, msg: dict[str, Any], timeout: float) -> dict[str, Any]:
+        """Отправить билет через ``router.request`` и вернуть ответ.
+
+        Требует, чтобы процесс предоставлял ``router_manager`` (см.
+        :class:`IRequestingProcess`). Иначе — ошибка конфигурации.
+        """
+        router = getattr(self._process, "router_manager", None)
+        if router is None or not hasattr(router, "request"):
+            raise RuntimeError(
+                "request_command/request_system_command требуют process.router_manager "
+                "с методом request() (см. IRequestingProcess)"
+            )
+        return router.request(msg, timeout=timeout)

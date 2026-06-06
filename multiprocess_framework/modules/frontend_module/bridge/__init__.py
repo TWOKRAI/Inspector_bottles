@@ -7,8 +7,10 @@ Stability: partial (→ contract после Task C1)
 """
 
 from multiprocess_framework.modules.frontend_module.bridge.command_sender import (
+    DEFAULT_REQUEST_TIMEOUT,
     CommandSender,
     IProcess,
+    IRequestingProcess,
 )
 from multiprocess_framework.modules.frontend_module.bridge.command_validator import (
     CommandValidator,
@@ -47,6 +49,8 @@ __all__ = [
     # command_sender
     "CommandSender",
     "IProcess",
+    "IRequestingProcess",
+    "DEFAULT_REQUEST_TIMEOUT",
     # command_validator
     "CommandValidator",
     "ICommandCatalog",
