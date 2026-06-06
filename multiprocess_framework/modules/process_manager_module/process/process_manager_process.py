@@ -792,25 +792,44 @@ class ProcessManagerProcess(ProcessModule):
             # Удалить конфиг (будет обновлён из нового blueprint)
             self._process_configs.pop(proc_name, None)
 
-        # 7. Зарегистрировать и запустить новые процессы (не-protected).
-        #    Используем proc_dict'ы из _build_proc_dicts (канонический формат с вложенным
-        #    config), а НЕ raw new_by_name — иначе процессы стартуют без плагинов/маршрутов.
-        started_names: list[str] = []
+        # 7. Зарегистрировать и запустить новые процессы (не-protected) ДВУХФАЗНО — как boot
+        #    (_create_processes_from_config): СНАЧАЛА очереди ВСЕХ процессов, ПОТОМ create+start.
+        #    Иначе процесс, стартующий раньше (напр. camera_0 в color_inspect — первый в рецепте),
+        #    получает spawn-bundle (snapshot shared_resources) ДО регистрации очередей более
+        #    позднего consumer'а (detector) → шлёт кадры в «пустоту», данные не доходят (P0
+        #    hot-swap blocker: на boot двухфазно — работает, в ad-hoc replace было однофазно).
+        #    Используем proc_dict'ы из _build_proc_dicts (канонический формат с вложенным config).
+
+        # Фаза 1: register_process (очереди) ВСЕХ новых non-protected процессов ДО любого старта.
+        to_start: list[tuple[str, dict[str, Any], str]] = []  # (name, proc_dict, priority)
         for pname, proc_dict in built_proc_dicts.items():
             if pname in protected:
                 continue
+            # build() уже выставил внутренний ключ class из process_class.
+            class_path = str(proc_dict.get("class", ""))
+            if not class_path:
+                self._log_error(f"replace_blueprint: process_class отсутствует для '{pname}', rollback")
+                self._restore_from_snapshot(old_configs)
+                self._resume_monitor(monitor_was_running)
+                return {
+                    "success": False,
+                    "replaced": replaced_names,
+                    "skipped_protected": skipped_protected,
+                    "error": f"process_class отсутствует в blueprint для '{pname}'",
+                    "rolled_back": True,
+                }
+            priority = str(proc_dict.get("priority", "normal"))
+            # Зарегистрировать в shared_resources КАНОНИЧЕСКИЙ proc_dict (создаёт очереди).
+            if self.shared_resources:
+                self.shared_resources.register_process(pname, proc_dict)
+            to_start.append((pname, proc_dict, priority))
+
+        # Фаза 2: create_and_register + start (очереди всех новых процессов уже зарегистрированы,
+        #    поэтому каждый spawn-bundle видит очереди всех остальных → доставка кадров не рвётся).
+        started_names: list[str] = []
+        for pname, proc_dict, priority in to_start:
             try:
-                # build() уже выставил внутренний ключ class из process_class.
                 class_path = str(proc_dict.get("class", ""))
-                if not class_path:
-                    raise RuntimeError(f"process_class отсутствует в blueprint для '{pname}'")
-
-                priority = str(proc_dict.get("priority", "normal"))
-
-                # Зарегистрировать в shared_resources КАНОНИЧЕСКИЙ proc_dict
-                if self.shared_resources:
-                    self.shared_resources.register_process(pname, proc_dict)
-
                 process = self._process_registry.create_and_register(pname, class_path, proc_dict, priority)
                 if not process:
                     raise RuntimeError(f"create_and_register вернул None для '{pname}'")
