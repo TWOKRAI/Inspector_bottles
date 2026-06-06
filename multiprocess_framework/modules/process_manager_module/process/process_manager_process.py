@@ -9,7 +9,6 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
-import uuid
 from typing import Any
 
 from ...console_module import ConsoleManager
@@ -854,19 +853,17 @@ class ProcessManagerProcess(ProcessModule):
                 }
             }
 
-        Формат ответа::
+        Формат ответа (дженерик ``reply_to_request``, ADR-COMM-005)::
 
             {
+                "type": "response",
                 "command": "process.command.response",
-                "data": {
-                    "correlation_id": "uuid",
-                    "success": True/False,
-                    "result": {...}
-                }
+                "request_id": "<correlation>",   # top-level (driver/инициатор)
+                "success": True/False,
+                "result": {...}                  # результат вложенной команды
             }
         """
         data = msg.get("data") or {}
-        correlation_id = data.get("correlation_id") or str(uuid.uuid4())
         cmd = data.get("cmd", "")
 
         try:
@@ -897,36 +894,19 @@ class ProcessManagerProcess(ProcessModule):
             result = {"status": "error", "reason": str(exc)}
             success = False
 
-        # Отправить ответ через Router (P0.5: адресуем отправителю — раньше
-        # ответ шёл без targets и терялся). Адресат: data.reply_to или sender
-        # входящего билета. request_id (top-level) + data.correlation_id —
-        # чтобы резолвер инициатора (RouterManager._resolve_pending) совпал.
-        reply_target = data.get("reply_to") or msg.get("sender")
-        response = {
-            "type": "response",
-            "command": "process.command.response",
-            "sender": self.name,
-            "targets": [reply_target] if reply_target else [],
-            "queue_type": "system",
-            "request_id": correlation_id,
-            "success": success,
-            "result": result,
-            "data": {
-                "correlation_id": correlation_id,
-                "success": success,
-                "result": result,
-            },
-        }
-        if self.router_manager and reply_target:
+        # Ответ инициатору через дженерик reply_to_request (absorb bespoke-reply,
+        # comm-system §9.4 / ADR-COMM-005). Корреляция — _extract_correlation_id:
+        # top-level request_id (driver) → data.correlation_id (legacy-обёртка). No-op
+        # без correlation (GUI fire-and-forget, паритет). Адресат — data.reply_to /
+        # reply_to / sender. manages_own_reply=True у регистрации команды → kind-router
+        # НЕ авто-reply'ит (иначе двойной ответ).
+        if self.router_manager:
             try:
-                self.router_manager.send(response)
+                self.router_manager.reply_to_request(
+                    msg, result, success=success, response_command="process.command.response"
+                )
             except Exception as send_exc:
                 self._log_error(f"Не удалось отправить process.command.response: {send_exc}")
-        elif not reply_target:
-            self._log_debug(
-                f"process.command.response не отправлен: во входящем билете нет sender "
-                f"(cmd={cmd!r}, correlation_id={correlation_id})"
-            )
 
     def _handle_critical_error(self, exc: Exception, context: str) -> None:
         """Логировать критическую ошибку через error_module и запустить shutdown."""

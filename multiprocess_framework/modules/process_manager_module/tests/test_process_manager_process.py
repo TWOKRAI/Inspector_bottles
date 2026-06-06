@@ -296,7 +296,9 @@ class TestProcessManagerProcessBuiltinCommands:
 
 
 class TestProcessCommandResponse:
-    """P0.5: ответ _handle_process_command адресуется отправителю (раньше терялся)."""
+    """_handle_process_command делегирует ответ дженерик reply_to_request
+    (absorb bespoke-reply, ADR-COMM-005). Адресация/correlation — внутри
+    reply_to_request (покрыто router_module/tests reply_to_request)."""
 
     def _make_pmp(self):
         pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
@@ -307,58 +309,42 @@ class TestProcessCommandResponse:
         pmp._log_debug = MagicMock()
         return pmp
 
-    def test_response_addressed_to_sender_with_correlation(self) -> None:
+    def test_delegates_result_to_reply_to_request(self) -> None:
         pmp = self._make_pmp()
         pmp.command_manager.handle_command.return_value = {"success": True, "replaced": ["a"]}
+        msg = {
+            "command": "process.command",
+            "sender": "gui",
+            "data": {"cmd": "blueprint.replace", "correlation_id": "c1", "blueprint": {}},
+        }
+        pmp._handle_process_command(msg)
 
+        pmp.router_manager.reply_to_request.assert_called_once()
+        call = pmp.router_manager.reply_to_request.call_args
+        # исходный билет передан → reply_to_request извлечёт correlation/target сам
+        assert call.args[0] is msg
+        assert call.args[1] == {"success": True, "replaced": ["a"]}  # результат вложенной команды
+        assert call.kwargs.get("success") is True
+        assert call.kwargs.get("response_command") == "process.command.response"
+        pmp.router_manager.send.assert_not_called()  # больше НЕ кустарный send
+
+    def test_inner_command_unwrapped_without_service_fields(self) -> None:
+        pmp = self._make_pmp()
+        pmp.command_manager.handle_command.return_value = {"status": "ok"}
         pmp._handle_process_command(
             {
                 "command": "process.command",
                 "sender": "gui",
-                "data": {"cmd": "blueprint.replace", "correlation_id": "c1", "blueprint": {}},
+                "data": {"cmd": "process.start", "correlation_id": "c2", "process_name": "cam"},
             }
         )
-
-        pmp.router_manager.send.assert_called_once()
-        response = pmp.router_manager.send.call_args[0][0]
-        assert response["targets"] == ["gui"]
-        assert response["sender"] == "ProcessManager"
-        assert response["request_id"] == "c1"
-        assert response["queue_type"] == "system"
-        assert response["success"] is True
-        assert response["data"]["correlation_id"] == "c1"
-
-    def test_reply_to_override_wins_over_sender(self) -> None:
-        pmp = self._make_pmp()
-        pmp.command_manager.handle_command.return_value = {"status": "ok"}
-
-        pmp._handle_process_command(
-            {
-                "command": "process.command",
-                "sender": "gui",
-                "data": {"cmd": "process.status", "correlation_id": "c2", "reply_to": "driver"},
-            }
-        )
-        response = pmp.router_manager.send.call_args[0][0]
-        assert response["targets"] == ["driver"]
-
-    def test_no_sender_no_response_sent(self) -> None:
-        pmp = self._make_pmp()
-        pmp.command_manager.handle_command.return_value = {"status": "ok"}
-
-        pmp._handle_process_command(
-            {
-                "command": "process.command",
-                "data": {"cmd": "process.status"},  # нет sender / reply_to
-            }
-        )
-        pmp.router_manager.send.assert_not_called()
-        pmp._log_debug.assert_called_once()
+        inner = pmp.command_manager.handle_command.call_args[0][0]
+        assert inner["command"] == "process.start"
+        assert inner["data"] == {"process_name": "cam"}  # cmd/correlation_id отфильтрованы
 
     def test_command_error_marks_success_false(self) -> None:
         pmp = self._make_pmp()
         pmp.command_manager.handle_command.return_value = {"status": "error", "reason": "boom"}
-
         pmp._handle_process_command(
             {
                 "command": "process.command",
@@ -366,6 +352,6 @@ class TestProcessCommandResponse:
                 "data": {"cmd": "process.start", "correlation_id": "c3"},
             }
         )
-        response = pmp.router_manager.send.call_args[0][0]
-        assert response["success"] is False
-        assert response["request_id"] == "c3"
+        call = pmp.router_manager.reply_to_request.call_args
+        assert call.kwargs.get("success") is False
+        assert call.args[1] == {"status": "error", "reason": "boom"}
