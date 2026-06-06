@@ -110,8 +110,9 @@ P1 framework: CommandSender request-path (+ IProcess) ─▶ P2 GUI: RequestRunn
 3. `request_command(target, command, args, timeout)` — аналогично через `build_command_message`.
 4. Не трогать `send_command`/`send_field_command` (fire-and-forget остаётся, G5).
 5. Тесты: fake process с router-stub; проверить, что билет идёт в `request()` (не `send_message`), response возвращается; таймаут → `{"success": False, "error": "timeout"}` (как `request()`).
-**Acceptance:** - [ ] `request_system_command` возвращает реальный response PM (через router.request) - [ ] fire-and-forward методы без изменений (паритет) - [ ] таймаут проброшен корректно - [ ] framework-тесты зелёные, ruff/pyright чисты.
+**Acceptance:** - [x] `request_system_command` возвращает реальный response PM (через router.request) - [x] fire-and-forward методы без изменений (паритет) - [x] таймаут проброшен корректно - [x] framework-тесты зелёные, ruff/pyright чисты.
 **Out of scope:** потоки (P2); GUI (P3).
+**Статус:** ✅ **P1 DONE** (`deae8b91`). `request_command`/`request_system_command` + `IRequestingProcess` + `DEFAULT_REQUEST_TIMEOUT=30s`. 6 тестов (round-trip, timeout, no-router→raise, паритет fire-and-forget); command_sender/19 passed, ruff+pyright clean. **Решение:** тесты — в существующем `multiprocess_prototype/.../test_command_sender.py` (конвенция: CommandSender-тесты живут там через re-export), не в новом framework-tests-каталоге.
 
 ### Task P2 — GUI: RequestRunner (worker-поток) + ProcessManagerProxy async-вариант
 **Level:** Senior+ · **Assignee:** teamlead
