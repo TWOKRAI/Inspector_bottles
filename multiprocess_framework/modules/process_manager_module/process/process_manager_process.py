@@ -1229,3 +1229,80 @@ class ProcessManagerProcess(ProcessModule):
     def get_all_processes_status(self) -> dict[str, dict[str, Any]]:
         """Статусы всех процессов."""
         return self._status.get_all_status()
+
+    # -------------------------------------------------------------------------
+    # Сиды TopologyManager — single-purpose методы (Task 2.0)
+    #
+    # Каждый метод мутирует РОВНО ОДНУ вещь. Wiring в _setup_topology_manager
+    # делается в Task 2.2 — здесь только определения.
+    # -------------------------------------------------------------------------
+
+    def _topology_stop(self, name: str) -> bool:
+        """Сид stop: остановить один процесс (halt).
+
+        Делегирует в ``stop_process`` (per-process stop через stop_event).
+        """
+        return self.stop_process(name)
+
+    def _topology_cleanup(self, name: str) -> bool:
+        """Сид cleanup: снять с реестра + освободить SHM + удалить конфиг.
+
+        Единственная мутация: удаление процесса из реестра, освобождение
+        его SHM-ресурсов и удаление записи из ``_process_configs``.
+        """
+        self._cleanup_process_resources(name)
+        self._process_configs.pop(name, None)
+        return True
+
+    def _topology_provision(self, name: str, proc_dict: dict) -> bool:
+        """Сид provision: зарегистрировать очереди + аллоцировать SHM.
+
+        Двухфазная регистрация (урок Task 7 / 5cd23192): очереди ВСЕХ
+        процессов регистрируются ДО старта любого из них. SHM аллоцируется
+        здесь же, в фазе provision, а НЕ при create.
+
+        НЕ стартует процесс, НЕ создаёт экземпляр.
+        """
+        # Очереди
+        if self.shared_resources:
+            self.shared_resources.register_process(name, proc_dict)
+
+        # SHM (если секция memory задана)
+        memory = proc_dict.get("memory")
+        if memory and self.shared_resources:
+            mm = getattr(self.shared_resources, "memory_manager", None)
+            if mm and hasattr(mm, "create_memory_dict"):
+                try:
+                    mem_names = {k: v for k, v in memory.items() if k != "coll"}
+                    coll = memory.get("coll", 2)
+                    if mem_names:
+                        mm.create_memory_dict(name, mem_names, coll)
+                except Exception as exc:
+                    self._log_warning(f"topology_provision: SHM-аллокация для '{name}' не удалась: {exc}")
+        return True
+
+    def _topology_create(self, name: str, proc_dict: dict) -> bool:
+        """Сид create: создать экземпляр процесса БЕЗ старта.
+
+        Регистрирует процесс в ``ProcessRegistry``, применяет приоритет,
+        сохраняет конфиг в ``_process_configs``.
+
+        НЕ стартует процесс (это ``_topology_start``).
+        НЕ аллоцирует SHM (это ``_topology_provision``).
+        """
+        class_path = proc_dict.get("class", "")
+        priority = proc_dict.get("priority", "normal")
+        process = self._process_registry.create_and_register(name, class_path, proc_dict, priority)
+        if not process:
+            return False
+        self._priority.apply_priority(process)
+        self._priority.register_priority(name, priority)
+        self._process_configs[name] = copy.deepcopy(proc_dict)
+        return True
+
+    def _topology_start(self, name: str) -> bool:
+        """Сид start: запустить ранее созданный процесс.
+
+        Делегирует в ``start_process`` (находит в реестре, зовёт process.start).
+        """
+        return self.start_process(name)
