@@ -276,6 +276,68 @@ class TestListDelete:
 
 
 # =====================================================================
+# set_active — чистый указатель (без TreeStore-replay)
+# =====================================================================
+
+
+class TestSetActive:
+    """Тесты set_active() — только указатель, без config-side-effect."""
+
+    def test_set_active_sets_pointer(self, engine: RecipeEngine) -> None:
+        """set_active() устанавливает get_active() без вызова load()."""
+        engine.save("prod")
+        assert engine.get_active() is None
+
+        result = engine.set_active("prod")
+        assert result is True
+        assert engine.get_active() == "prod"
+
+    def test_set_active_nonexistent_returns_false(self, engine: RecipeEngine) -> None:
+        """set_active() для несуществующего рецепта → False, указатель не меняется."""
+        result = engine.set_active("nonexistent")
+        assert result is False
+        assert engine.get_active() is None
+
+    def test_set_active_does_not_touch_tree_store(self, store: TreeStore, engine: RecipeEngine) -> None:
+        """set_active() НЕ применяет data к TreeStore (ключевой acceptance).
+
+        Сценарий: save → изменить store → set_active → store не восстановлен.
+        В отличие от load(), который бы восстановил значения.
+        """
+        engine.save("prod")
+
+        # Меняем store после save
+        store.set("cameras.0.config.fps", 999, source="test")
+        assert store.get("cameras.0.config.fps") == 999
+
+        # set_active — только указатель
+        result = engine.set_active("prod")
+        assert result is True
+        assert engine.get_active() == "prod"
+
+        # TreeStore НЕ восстановлен (значение осталось 999, а не 30)
+        assert store.get("cameras.0.config.fps") == 999
+
+    def test_set_active_resets_snapshot(self, engine: RecipeEngine) -> None:
+        """set_active() сбрасывает loaded_snapshot → is_dirty() = False."""
+        engine.save("prod")
+        engine.set_active("prod")
+        # Без snapshot is_dirty всегда False
+        assert engine.is_dirty() is False
+
+    def test_set_active_overwrites_previous(self, engine: RecipeEngine) -> None:
+        """Повторный set_active меняет указатель."""
+        engine.save("alpha")
+        engine.save("beta")
+
+        engine.set_active("alpha")
+        assert engine.get_active() == "alpha"
+
+        engine.set_active("beta")
+        assert engine.get_active() == "beta"
+
+
+# =====================================================================
 # deactivate
 # =====================================================================
 

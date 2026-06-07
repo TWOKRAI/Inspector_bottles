@@ -166,6 +166,70 @@ class TestRecipeManagerDuplicate:
         assert result is False
 
 
+class TestRecipeManagerSetActive:
+    """Тесты set_active() — чистый указатель, развязка «активация ≠ применение»."""
+
+    def test_set_active_sets_pointer(self, manager: RecipeManager, recipes_dir: Path) -> None:
+        """set_active ставит указатель без вызова load/TreeStore-replay."""
+        _save_recipe_file(recipes_dir, "cup_inspection")
+
+        result = manager.set_active("cup_inspection")
+        assert result is True
+        assert manager.get_active() == "cup_inspection"
+
+    def test_set_active_nonexistent_returns_false(self, manager: RecipeManager) -> None:
+        """set_active для несуществующего рецепта → False."""
+        result = manager.set_active("nonexistent")
+        assert result is False
+        assert manager.get_active() is None
+
+    def test_set_active_does_not_apply_config_to_tree_store(
+        self, store: TreeStore, engine: RecipeEngine, recipes_dir: Path
+    ) -> None:
+        """set_active НЕ применяет config-snapshot к TreeStore (acceptance Task 3.1).
+
+        Сценарий: сохранить рецепт → изменить TreeStore → set_active → TreeStore не восстановлен.
+        """
+        # Подготовка: начальное состояние fps=30, сохраняем рецепт
+        store.set("cameras.0.config.fps", 30, source="setup")
+        engine.save("test_recipe")
+
+        # Изменяем TreeStore после save
+        store.set("cameras.0.config.fps", 999, source="test")
+        assert store.get("cameras.0.config.fps") == 999
+
+        manager = RecipeManager(engine=engine)
+        result = manager.set_active("test_recipe")
+        assert result is True
+
+        # TreeStore НЕ восстановлен — set_active не тронул config
+        assert store.get("cameras.0.config.fps") == 999
+
+    def test_set_active_updates_state_proxy(self, engine: RecipeEngine, recipes_dir: Path) -> None:
+        """set_active обновляет state.recipes.active через proxy."""
+        mock_proxy = MagicMock()
+        manager = RecipeManager(engine=engine, state_proxy=mock_proxy)
+
+        _save_recipe_file(recipes_dir, "cup_inspection")
+        manager.set_active("cup_inspection")
+
+        mock_proxy.set.assert_called_with("recipes.active", "cup_inspection")
+
+    def test_set_active_does_not_call_engine_load(self, engine: RecipeEngine, recipes_dir: Path) -> None:
+        """set_active НЕ делегирует в engine.load() (нет side-effect)."""
+        _save_recipe_file(recipes_dir, "cup_inspection")
+
+        # Мониторим engine.load через MagicMock-обёртку
+        original_load = engine.load
+        load_spy = MagicMock(side_effect=original_load)
+        engine.load = load_spy  # type: ignore[method-assign]
+
+        manager = RecipeManager(engine=engine)
+        manager.set_active("cup_inspection")
+
+        load_spy.assert_not_called()
+
+
 class TestRecipeManagerStateProxy:
     """Тесты интеграции с StateProxy."""
 

@@ -302,6 +302,31 @@ class RecipeEngine:
         """Имя последнего загруженного рецепта (или None)."""
         return self._active_name
 
+    def set_active(self, name: str) -> bool:
+        """Установить рецепт активным — чистый указатель, БЕЗ применения data к TreeStore.
+
+        Проверяет существование YAML-файла рецепта. Если найден — ставит
+        ``_active_name`` и сбрасывает loaded-snapshot (is_dirty будет False,
+        т.к. snapshot отсутствует). НЕ вызывает load() — никакого TreeStore-replay,
+        миграций или перезаписи файлов.
+
+        Симметричен deactivate(): один ставит указатель, другой сбрасывает.
+
+        Args:
+            name: имя рецепта (без .yaml).
+
+        Returns:
+            True если рецепт найден и указатель установлен, False если файл не существует.
+        """
+        file_path = self._recipes_dir / f"{name}.yaml"
+        if not file_path.exists():
+            return False
+        self._active_name = name
+        # Сбрасываем snapshot: set_active — это не load, snapshot не актуален
+        self._loaded_snapshot = None
+        self._loaded_paths = None
+        return True
+
     def deactivate(self) -> None:
         """Сбросить активный рецепт (симметрично set_active).
 

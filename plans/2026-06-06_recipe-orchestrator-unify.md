@@ -234,10 +234,10 @@ diff и commands делят protected-логику и assembler → гарант
 - **активировать** = пометить указатель `active` (только bookkeeping + state.recipes.active);
 - **применить** = `apply_topology(RecipeManager.read(slug))` (построить топологию, поднять процессы).
 **Steps:** 1. `set_active` свести к указателю (без `load`-применения к config). 2. Применение топологии — явный вызов `apply_topology`. 3. RecipeManager остаётся «про файлы»: НЕ знает про процессы/proc_dicts/топологию.
-**Acceptance:**
-- [ ] активный рецепт читается из RecipeManager, не из 3 мест
-- [ ] `set_active` не имеет config/топология-side-effect (юнит: указатель сменился, процессы не тронуты)
-- [ ] применение идёт только через `apply_topology`
+**Acceptance:** (DONE)
+- [x] активный рецепт читается из RecipeManager, не из 3 мест (engine._active_name = source of truth; state.recipes.active + domain Project.active_recipe = sync-проекции через RecipeStateAdapter)
+- [x] `set_active` не имеет config/топология-side-effect (юнит: указатель сменился, TreeStore не тронут — 5 тестов engine + 5 тестов manager)
+- [x] применение идёт только через `apply_topology` (qt-smoke: Загрузить → apply_topology → FPS 14-16, swap в обе стороны, 0 traceback)
 
 ---
 

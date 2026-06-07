@@ -91,6 +91,14 @@ class FakeEngine:
     def get_active(self) -> str | None:
         return self._active_name
 
+    def set_active(self, name: str) -> bool:
+        """Чистый указатель — как RecipeEngine.set_active (Task 3.1)."""
+        path = self.recipes_dir / f"{name}.yaml"
+        if not path.exists():
+            return False
+        self._active_name = name
+        return True
+
     def deactivate(self) -> None:
         """Сброс активного рецепта (симметрично RecipeEngine.deactivate)."""
         self._active_name = None

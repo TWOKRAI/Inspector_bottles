@@ -232,10 +232,14 @@ class RecipeManager:
         self._log_info("RecipeManager: активный рецепт сброшен")
 
     def set_active(self, slug: str) -> bool:
-        """Установить рецепт активным.
+        """Установить рецепт активным — чистый указатель, БЕЗ config/topology side-effect.
 
-        Вызывает load(slug) и уведомляет state_proxy.
-        Возвращает False если рецепт не найден.
+        Делегирует в engine.set_active(slug) (проверка существования + указатель)
+        и обновляет state.recipes.active через StateProxy.
+
+        НЕ вызывает load() — никакого TreeStore-replay, миграций или перезаписи
+        файлов. Применение топологии (рестарт процессов) — отдельная операция
+        через apply_topology.
 
         Args:
             slug: имя рецепта для активации.
@@ -243,14 +247,12 @@ class RecipeManager:
         Returns:
             True если успешно, False если рецепт не найден.
         """
-        recipes_dir: Path = self._engine.recipes_dir
-        recipe_path = recipes_dir / f"{slug}.yaml"
-
-        if not recipe_path.exists():
+        result = self._engine.set_active(slug)
+        if not result:
             self._log_warning(f"RecipeManager.set_active: рецепт '{slug}' не найден")
             return False
 
-        self.load(slug)
+        self._update_active_in_state(slug)
         self._log_info(f"RecipeManager: активирован рецепт '{slug}'")
         return True
 
