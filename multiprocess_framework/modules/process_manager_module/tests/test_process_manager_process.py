@@ -315,7 +315,7 @@ class TestProcessCommandResponse:
         msg = {
             "command": "process.command",
             "sender": "gui",
-            "data": {"cmd": "blueprint.replace", "correlation_id": "c1", "blueprint": {}},
+            "data": {"cmd": "topology.apply", "correlation_id": "c1", "topology_dict": {}},
         }
         pmp._handle_process_command(msg)
 
@@ -358,7 +358,7 @@ class TestProcessCommandResponse:
 
     def test_explicit_success_honored_over_error_none(self) -> None:
         """command-result-bridge fix-forward: result со ``success=True`` + ``error=None``
-        (форма PM ``replace_blueprint`` на успехе) → транспортный success=True.
+        (форма PM ``apply_topology`` на успехе) → транспортный success=True.
 
         До фикса эвристика ``"error" not in result`` ложно давала False, потому что
         ключ ``error`` присутствует (со значением None).
@@ -375,7 +375,7 @@ class TestProcessCommandResponse:
             {
                 "command": "process.command",
                 "sender": "gui",
-                "data": {"cmd": "blueprint.replace", "correlation_id": "c4", "blueprint": {}},
+                "data": {"cmd": "topology.apply", "correlation_id": "c4", "topology_dict": {}},
             }
         )
         call = pmp.router_manager.reply_to_request.call_args
@@ -394,7 +394,7 @@ class TestProcessCommandResponse:
             {
                 "command": "process.command",
                 "sender": "gui",
-                "data": {"cmd": "blueprint.replace", "correlation_id": "c5", "blueprint": {}},
+                "data": {"cmd": "topology.apply", "correlation_id": "c5", "topology_dict": {}},
             }
         )
         call = pmp.router_manager.reply_to_request.call_args

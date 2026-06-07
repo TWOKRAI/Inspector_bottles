@@ -107,12 +107,12 @@ class RecipesTab(BaseListNavTab):
             self._content_stack.setCurrentWidget(_unavailable_label)
             self._create_btn.setEnabled(False)
         else:
-            # Этап 1 pipeline-live-control: «Сделать активным» применяет рецепт к
-            # живому backend через proxy.replace_blueprint (fire-and-forget IPC).
+            # Task 4.1: «Сделать активным» применяет рецепт к живому backend через
+            # proxy.apply_topology (fire-and-forget, on_result=None).
             # None → graceful: только set_active без перезапуска процессов.
             _replace_fn = (
-                self._pm_proxy.replace_blueprint
-                if self._pm_proxy is not None and hasattr(self._pm_proxy, "replace_blueprint")
+                self._pm_proxy.apply_topology
+                if self._pm_proxy is not None and hasattr(self._pm_proxy, "apply_topology")
                 else None
             )
             self._presenter = RecipesPresenter(
@@ -317,7 +317,7 @@ class RecipesTab(BaseListNavTab):
 
         # Загрузить — активировать рецепт И применить к живому backend (Этап 1).
         # Раньше «Сделать активным»; переименовано — кнопка реально грузит рецепт
-        # в систему (replace_blueprint через proxy), а не только метит активным.
+        # в систему (apply_topology через proxy), а не только метит активным.
         self._activate_btn = QPushButton("Загрузить")
         self._activate_btn.setToolTip("Загрузить рецепт: активировать и применить к работающей системе")
         self._activate_btn.setEnabled(False)

@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Тесты ProcessManagerProxy — тонкого GUI-фасада управления backend (Этап 1).
+"""Тесты ProcessManagerProxy — тонкого GUI-фасада управления backend.
 
 Проверяют: правильный cmd + Dict at Boundary в send_system_command,
-optimistic-ack возврат, fire-and-forget семантику.
+optimistic-ack возврат, fire-and-forget и async (command-result-bridge) семантику.
+
+Task 4.1: apply_topology заменяет replace_blueprint / replace_blueprint_async.
 
 Запуск:
     python -m pytest multiprocess_prototype/frontend/bridge/tests/test_process_manager_proxy.py -v
@@ -23,15 +25,28 @@ class _FakeSender:
         self.sent.append(command)
 
 
-def test_replace_blueprint_sends_correct_cmd() -> None:
+def test_apply_topology_sync_sends_correct_cmd() -> None:
+    """apply_topology(source) → cmd=topology.apply, payload topology_dict, optimistic-ack."""
     sender = _FakeSender()
     proxy = ProcessManagerProxy(sender)
     bp = {"processes": [{"process_name": "p1"}], "wires": []}
 
-    result = proxy.replace_blueprint(bp)
+    result = proxy.apply_topology(bp)
 
-    assert sender.sent == [{"cmd": "blueprint.replace", "blueprint": bp}]
-    assert result == {"success": True, "dispatched": True, "cmd": "blueprint.replace"}
+    assert sender.sent == [{"cmd": "topology.apply", "topology_dict": bp}]
+    assert result == {"success": True, "dispatched": True, "cmd": "topology.apply"}
+
+
+def test_apply_topology_sync_returns_ack() -> None:
+    """apply_topology без on_result → возвращает optimistic-ack dict."""
+    sender = _FakeSender()
+    proxy = ProcessManagerProxy(sender)
+
+    result = proxy.apply_topology({"processes": []})
+
+    assert isinstance(result, dict)
+    assert result["success"] is True
+    assert result["dispatched"] is True
 
 
 def test_process_lifecycle_commands() -> None:
@@ -64,12 +79,12 @@ def test_dict_at_boundary() -> None:
     sender = _FakeSender()
     proxy = ProcessManagerProxy(sender)
 
-    proxy.replace_blueprint({"processes": []})
+    proxy.apply_topology({"processes": []})
 
     assert isinstance(sender.sent[0], dict)
 
 
-# --- request/response async (command-result-bridge P2) ---
+# --- request/response async (command-result-bridge) ---
 
 
 class _FakeRequestingSender(_FakeSender):
@@ -85,20 +100,35 @@ class _FakeRequestingSender(_FakeSender):
         return self._response
 
 
-def test_replace_blueprint_async_delivers_real_result(qtbot) -> None:
-    """replace_blueprint_async идёт через request_system_command, реальный результат в on_result."""
+def test_apply_topology_async_delivers_real_result(qtbot) -> None:
+    """apply_topology(source, on_result=...) → round-trip, реальный результат в on_result."""
     sender = _FakeRequestingSender(response={"success": True, "result": {"replaced": ["p1"]}})
     proxy = ProcessManagerProxy(sender)
     bp = {"processes": [{"process_name": "p1"}], "wires": []}
     results: list[dict] = []
 
-    proxy.replace_blueprint_async(bp, results.append)
+    ret = proxy.apply_topology(bp, on_result=results.append)
 
+    # Метод возвращает None при async-пути (результат придёт асинхронно)
+    assert ret is None
     qtbot.waitUntil(lambda: len(results) == 1, timeout=2000)
     # Ушло через request (round-trip), НЕ через fire-and-forget send_system_command
-    assert sender.requested == [{"cmd": "blueprint.replace", "blueprint": bp}]
+    assert sender.requested == [{"cmd": "topology.apply", "topology_dict": bp}]
     assert sender.sent == []
     assert results[0] == {"success": True, "result": {"replaced": ["p1"]}}
+
+
+def test_apply_topology_async_uses_topology_dict_key(qtbot) -> None:
+    """Async-путь: payload содержит topology_dict (не blueprint)."""
+    sender = _FakeRequestingSender(response={"success": True})
+    proxy = ProcessManagerProxy(sender)
+    bp = {"processes": [], "wires": []}
+    results: list[dict] = []
+
+    proxy.apply_topology(bp, on_result=results.append)
+
+    qtbot.waitUntil(lambda: len(results) == 1, timeout=2000)
+    assert sender.requested[0] == {"cmd": "topology.apply", "topology_dict": bp}
 
 
 def test_lifecycle_async_commands(qtbot) -> None:
@@ -132,19 +162,15 @@ def test_async_error_delivers_error_result(qtbot) -> None:
     proxy = ProcessManagerProxy(_BoomSender())
     results: list[dict] = []
 
-    proxy.replace_blueprint_async({"processes": []}, results.append)
+    proxy.apply_topology({"processes": []}, on_result=results.append)
 
     qtbot.waitUntil(lambda: len(results) == 1, timeout=2000)
     assert results[0]["success"] is False
     assert "no backend" in results[0]["error"]
 
 
-def test_fire_and_forget_methods_unchanged(qtbot) -> None:
-    """Старые fire-and-forget методы не задеты async-путём (паритет, G5)."""
-    sender = _FakeRequestingSender()
-    proxy = ProcessManagerProxy(sender)
-
-    proxy.replace_blueprint({"processes": []})
-
-    assert sender.sent == [{"cmd": "blueprint.replace", "blueprint": {"processes": []}}]
-    assert sender.requested == []
+def test_no_replace_blueprint_attribute() -> None:
+    """replace_blueprint / replace_blueprint_async сняты (Task 4.1)."""
+    proxy = ProcessManagerProxy(_FakeSender())
+    assert not hasattr(proxy, "replace_blueprint"), "replace_blueprint не должен существовать"
+    assert not hasattr(proxy, "replace_blueprint_async"), "replace_blueprint_async не должен существовать"

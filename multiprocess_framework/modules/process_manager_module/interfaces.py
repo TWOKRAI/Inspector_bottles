@@ -199,18 +199,19 @@ class IProcessManagerProcess(ABC):
         ...
 
     @abstractmethod
-    def replace_blueprint(self, new_blueprint: Dict[str, Any]) -> Dict[str, Any]:
-        """Заменить blueprint: остановить незащищённые процессы, поднять новые.
+    def apply_topology(self, blueprint: Dict[str, Any] | None) -> Dict[str, Any]:
+        """Транзакционно применить топологию (Task 4.1: единственный путь замены).
 
         Горячая замена рабочих процессов при переключении рецепта.
         Protected-процессы (GUI, orchestrator) не затрагиваются.
         При partial failure — полный rollback до snapshot.
+        Debounce (in-flight guard + cooldown) не позволяет обойти замену по IPC.
 
         Dict at Boundary: принимает dict-представление SystemBlueprint,
         не Pydantic-модель.
 
         Args:
-            new_blueprint: dict с ключами ``processes`` (list[dict]) и
+            blueprint: dict с ключами ``processes`` (list[dict]) и
                 ``wires`` (list[dict]).  Если ``None`` или ``{}`` —
                 трактуется как пустой blueprint (все незащищённые
                 процессы будут остановлены, новые не поднимутся).
@@ -223,6 +224,7 @@ class IProcessManagerProcess(ABC):
                   protected-процессов.
                 - ``error`` (str | None) — описание ошибки или None.
                 - ``rolled_back`` (bool) — True если произведён rollback.
+                - ``debounced`` (bool) — True если запрос отклонён debounce.
         """
         ...
 

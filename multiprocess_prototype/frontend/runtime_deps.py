@@ -54,7 +54,7 @@ class RuntimeDeps:
             который domain не может экспонировать (запрет импорта framework). G.2 / Q-F1=B.
         auth_ctx: AuthContext (manager+state+audit) для admin-панелей (SettingsTab).
         process_manager_proxy: IPC-фасад управления живым ProcessManagerProcess
-            (replace_blueprint / start / stop / restart). Тонкая обёртка над
+            (apply_topology / start / stop / restart). Тонкая обёртка над
             command_sender; None → кнопки управления Pipeline/Recipes дают понятный
             статус «backend недоступен», не падают. Этап 1 pipeline-live-control.
         request_ui_restart: узкий callback «перезапустить UI» для InterfaceSection

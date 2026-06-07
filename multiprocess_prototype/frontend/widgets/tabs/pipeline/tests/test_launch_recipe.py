@@ -72,6 +72,9 @@ class _FakeAsyncProxy:
     unit-тесте. Реальная доставка результата с worker-потока в main-thread
     покрыта тестами RequestRunner (P2), здесь проверяется только рендеринг
     результата презентером.
+
+    Task 4.1: использует apply_topology(source, on_result=...) вместо
+    replace_blueprint_async.
     """
 
     def __init__(self, response: dict | None = None, raise_exc: Exception | None = None) -> None:
@@ -81,11 +84,12 @@ class _FakeAsyncProxy:
         self._raise = raise_exc
         self.blueprints: list[dict] = []
 
-    def replace_blueprint_async(self, blueprint: dict, on_result) -> None:
-        self.blueprints.append(blueprint)
+    def apply_topology(self, source: dict, on_result=None) -> None:
+        self.blueprints.append(source)
         if self._raise is not None:
             raise self._raise
-        on_result(self._response)
+        if on_result is not None:
+            on_result(self._response)
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +144,7 @@ class TestLaunchPreflight:
 
 
 class TestLaunchAsyncResult:
-    """replace_blueprint_async → реальный результат PM в notify."""
+    """apply_topology(source, on_result=...) → реальный результат PM в notify."""
 
     def test_success_shows_replaced_count(self) -> None:
         """Успех PM → notify «запущен (заменено процессов: N)», return True."""

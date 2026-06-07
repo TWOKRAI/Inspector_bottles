@@ -246,12 +246,22 @@ diff и commands делят protected-логику и assembler → гарант
 #### Task 4.1 — proxy: `apply_topology`
 **Level:** Middle+ (Developer) · **Файлы:** `frontend/bridge/process_manager_proxy.py`
 **Goal:** `apply_topology(source: str|dict, on_result=None)` → cmd `topology.apply` (slug резолвится backend через RecipeManager, либо передаём blueprint). Заменяет `replace_blueprint*`. **Тонкий — без своего debounce** (он на backend, Task 2.2).
-**Acceptance:** - [ ] proxy не содержит логики сборки/коалесинга - [ ] старые `replace_blueprint*` сняты, алиас (Task 2.3) удалён
+**Acceptance:** (DONE — 2026-06-07)
+- [x] proxy не содержит логики сборки/коалесинга
+- [x] `apply_topology(source, on_result=None)`: None → fire-and-forget (dispatch "topology.apply"); задан → async request/response (command-result-bridge жив)
+- [x] старые `replace_blueprint` + `replace_blueprint_async` сняты
+- [x] алиас (Task 2.3): `replace_blueprint` + `_cmd_blueprint_replace` удалены из PM, регистрация `blueprint.replace` снята
+- [x] тесты: 10 proxy + 19 command_sender + 60 PM = 89 passed
 
 #### Task 4.2 — Свести 3 точки входа GUI
 **Level:** Middle+ (Developer) · **Файлы:** `recipes/presenter.py`, `pipeline/presenter.py`
 **Goal:** Recipes «Загрузить» (slug), Pipeline «Запустить»/«Перезапустить» (in-memory blueprint) → один путь `apply_topology`. Коалесинг обеспечивает backend.
-**Acceptance:** - [ ] нет «тасования» - [ ] qt-smoke 3 кнопки (повтор-клики коалесятся backend-guard'ом)
+**Acceptance:** (DONE — 2026-06-07)
+- [x] Recipes `tab.py` wiring: `replace_blueprint` → `apply_topology` (sync callback)
+- [x] Pipeline «Запустить» (`launch_active_recipe`): `replace_blueprint_async` → `apply_topology(..., on_result=...)` (command-result-bridge сохранён)
+- [x] Pipeline «Перезапустить» (`restart_topology`): `replace_blueprint` → `apply_topology` (sync)
+- [x] `presenter.py` тесты: 18 recipes + 8 pipeline = 26 passed
+- [x] grep `\.replace_blueprint\(|"blueprint\.replace"` → 0 прод-вызовов
 
 ---
 

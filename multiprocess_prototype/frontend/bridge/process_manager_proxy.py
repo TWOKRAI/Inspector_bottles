@@ -11,24 +11,23 @@ GUI-редактор Pipeline менял топологию только in-memo
     Транспорт переиспользуется (RouterManager + command IPC), новый канал не создаётся.
 
 Соответствие backend-командам (``ProcessManagerProcess._register_builtin_commands``):
-    replace_blueprint(dict) → cmd="blueprint.replace", data={"blueprint": ...}
-    restart_process(name)   → cmd="process.restart",   data={"process_name": ...}
-    start_process(name)     → cmd="process.start",      data={"process_name": ...}
-    stop_process(name)      → cmd="process.stop",       data={"process_name": ...}
-    shutdown_system()       → cmd="system.shutdown",    data={}
+    apply_topology(dict)    → cmd="topology.apply", data={"topology_dict": ...}
+    restart_process(name)   → cmd="process.restart", data={"process_name": ...}
+    start_process(name)     → cmd="process.start",   data={"process_name": ...}
+    stop_process(name)      → cmd="process.stop",    data={"process_name": ...}
+    shutdown_system()       → cmd="system.shutdown",  data={}
 
 Backend-приёмник: ``CommandSender.send_system_command`` шлёт сообщение
 ``command="process.command"`` в процесс ``ProcessManager``, где
 ``_handle_process_command`` распаковывает вложенный ``cmd`` и делегирует в
-``CommandManager`` → готовые методы PM (``replace_blueprint`` PM:635,
-``start/stop/restart_process`` PM:964-1004).
+``CommandManager`` → ``PM.apply_topology`` (транзакция + rollback + debounce).
 
 Async-семантика (важно):
-    IPC fire-and-forget — реальный результат ``replace_blueprint`` (success,
-    replaced, rolled_back) приходит обратно асинхронно через Router-ответ
-    ``process.command.response`` и здесь НЕ дожидается. Методы возвращают
-    optimistic-ack ``{"success": True, "dispatched": True}`` сразу после отправки.
-    Презентер показывает «команда отправлена», не утверждая факт замены N процессов.
+    Sync-путь (``on_result=None``) — fire-and-forget: возвращает optimistic-ack
+    ``{"success": True, "dispatched": True}`` сразу после отправки.
+    Async-путь (``on_result`` задан) — request/response на worker-потоке: реальный
+    ответ PM (``success``/``replaced``/``rolled_back``) приходит в ``on_result``
+    в Qt main-thread (command-result-bridge). UI не фризится.
 """
 
 from __future__ import annotations
@@ -49,12 +48,14 @@ class ProcessManagerProxy:
 
     Оборачивает ``CommandSender`` (создаётся в ``app.py``).
 
-    Два режима (command-result-bridge):
-      - **fire-and-forget** (``replace_blueprint`` и пр.): optimistic-ack, не ждёт
+    Два режима apply_topology (command-result-bridge):
+      - **fire-and-forget** (``on_result=None``): optimistic-ack, не ждёт
         backend-ответа. Для путей, где результат не нужен.
-      - **request/response** (``*_async``): реальный результат PM приходит в
+      - **request/response** (``on_result`` задан): реальный результат PM приходит в
         ``on_result`` в Qt main-thread; request исполняется на worker-потоке
         (``RequestRunner``), UI не фризится.
+
+    Proxy НЕ содержит debounce-логики — он живёт на backend (``PM.apply_topology``).
     """
 
     def __init__(
@@ -69,16 +70,32 @@ class ProcessManagerProxy:
     #  Команды управления                                                 #
     # ------------------------------------------------------------------ #
 
-    def replace_blueprint(self, blueprint: dict[str, Any]) -> dict[str, Any]:
-        """Горячая замена blueprint процессов (atomic replace + rollback на backend).
+    def apply_topology(
+        self,
+        source: dict[str, Any],
+        on_result: ResultCallback | None = None,
+    ) -> dict[str, Any] | None:
+        """Применить топологию blueprint к живому backend через ``topology.apply``.
+
+        Единственная точка входа для замены топологии. Debounce живёт на backend
+        (``PM.apply_topology``), прокси никакой коалесинг не делает.
 
         Args:
-            blueprint: blueprint-dict топологии (Dict at Boundary).
+            source: blueprint-dict топологии (Dict at Boundary).
+            on_result: если задан — async request/response (command-result-bridge):
+                реальный ответ PM (``success``/``replaced``/``rolled_back``) придёт
+                в ``on_result`` в Qt main-thread; UI не фризится.
+                Если ``None`` — fire-and-forget: возвращает optimistic-ack.
 
         Returns:
-            optimistic-ack ``{"success": True, "dispatched": True}``.
+            При ``on_result=None``: optimistic-ack ``{"success": True, "dispatched": True}``.
+            При ``on_result`` задан: ``None`` (результат придёт асинхронно).
         """
-        return self._dispatch("blueprint.replace", {"blueprint": blueprint})
+        payload = {"topology_dict": source}
+        if on_result is None:
+            return self._dispatch("topology.apply", payload)
+        self._dispatch_async("topology.apply", payload, on_result)
+        return None
 
     def restart_process(self, process_name: str) -> dict[str, Any]:
         """Перезапустить именованный процесс."""
@@ -103,15 +120,6 @@ class ProcessManagerProxy:
     # ------------------------------------------------------------------ #
     #  Команды с результатом (request/response, command-result-bridge)    #
     # ------------------------------------------------------------------ #
-
-    def replace_blueprint_async(self, blueprint: dict[str, Any], on_result: ResultCallback) -> None:
-        """Горячая замена blueprint с РЕАЛЬНЫМ результатом в ``on_result``.
-
-        В отличие от :meth:`replace_blueprint` (fire-and-forget) — backend-ответ
-        (``success``/``replaced``/``rolled_back``) приходит в ``on_result`` в Qt
-        main-thread. request исполняется на worker-потоке (UI не фризится).
-        """
-        self._dispatch_async("blueprint.replace", {"blueprint": blueprint}, on_result)
 
     def restart_process_async(self, process_name: str, on_result: ResultCallback) -> None:
         """Перезапустить процесс с результатом в ``on_result``."""

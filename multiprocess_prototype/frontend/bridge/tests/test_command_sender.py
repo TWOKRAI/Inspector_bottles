@@ -186,14 +186,14 @@ class TestRequestCommand:
         process = MockRequestingProcess("gui", response={"success": True, "result": {"replaced": ["w1"]}})
         sender = CommandSender(process)
 
-        resp = sender.request_system_command({"cmd": "blueprint.replace", "blueprint": {"processes": []}})
+        resp = sender.request_system_command({"cmd": "topology.apply", "topology_dict": {"processes": []}})
 
         # Билет ушёл в router.request, НЕ в fire-and-forget send_message
         assert len(process.router_manager.requested) == 1
         assert len(process.sent) == 0
         msg, _timeout = process.router_manager.requested[0]
         assert msg["command"] == "process.command"
-        assert msg["data"] == {"cmd": "blueprint.replace", "blueprint": {"processes": []}}
+        assert msg["data"] == {"cmd": "topology.apply", "topology_dict": {"processes": []}}
         assert msg["sender"] == "gui"
         # Реальный ответ проброшен наверх
         assert resp == {"success": True, "result": {"replaced": ["w1"]}}

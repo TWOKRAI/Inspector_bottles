@@ -79,7 +79,7 @@ class PipelinePresenter:
         # GuiStateBindings — для actual-телеметрии камеры в инспекторе (Phase 3).
         self._bindings = bindings
         # Этап 1 pipeline-live-control: IPC-фасад управления живым backend
-        # (replace_blueprint / start / stop / restart). Runtime-объект (RuntimeDeps,
+        # (apply_topology / start / stop / restart). Runtime-объект (RuntimeDeps,
         # Q-F1=B), не AppServices. None → кнопки управления дают понятный статус.
         self._pm_proxy = process_manager_proxy
         # G.2: live RegistersManager — runtime-объект (FieldInfo-схемы + значения)
@@ -1535,8 +1535,8 @@ class PipelinePresenter:
         """Запустить активный рецепт через ProcessManager-proxy (request/response).
 
         Получает blueprint из активного рецепта и вызывает
-        ``proxy.replace_blueprint_async(blueprint, on_result)`` — горячую замену
-        процессов с РЕАЛЬНЫМ результатом (command-result-bridge P3).
+        ``proxy.apply_topology(blueprint, on_result=...)`` — горячую замену
+        процессов с РЕАЛЬНЫМ результатом (command-result-bridge, Task 4.1).
 
         В отличие от прежнего fire-and-forget (показывал «отправлено» без знания
         факта): request исполняется на worker-потоке (UI не фризится), а реальный
@@ -1578,9 +1578,9 @@ class PipelinePresenter:
             self._notify_status(f"Запуск рецепта: рецепт '{active_slug}' не содержит blueprint", level="warning")
             return False
 
-        # Шаг 4: ProcessManager-proxy с async request/response (Этап 1: RuntimeDeps).
+        # Шаг 4: ProcessManager-proxy с async request/response (Task 4.1: topology.apply).
         proxy = self._pm_proxy
-        if proxy is None or not hasattr(proxy, "replace_blueprint_async"):
+        if proxy is None or not hasattr(proxy, "apply_topology"):
             self._notify_status(
                 "Запуск рецепта: ProcessManager-proxy недоступен (система не запущена)",
                 level="warning",
@@ -1592,9 +1592,9 @@ class PipelinePresenter:
         # «выполняется…» в статусной строке (не модально, чтобы не блокировать UI).
         self._notify_status(f"Запуск рецепта '{active_slug}': выполняется…")
         try:
-            proxy.replace_blueprint_async(
+            proxy.apply_topology(
                 blueprint,
-                lambda resp: self._on_recipe_launch_result(resp, active_slug),
+                on_result=lambda resp: self._on_recipe_launch_result(resp, active_slug),
             )
         except Exception as exc:
             logger.exception("launch_active_recipe dispatch failed")
@@ -1641,7 +1641,7 @@ class PipelinePresenter:
 
         В отличие от ``launch_active_recipe`` (берёт сохранённый рецепт) — берёт
         in-memory модель редактора (``graph_to_blueprint``), тот же формат blueprint,
-        что принимает ``replace_blueprint`` (processes=list, PM:664). Fire-and-forget IPC.
+        что принимает ``apply_topology`` (Task 4.1). Fire-and-forget IPC.
 
         Сценарий: удалить ноду → «Перезапустить» → эффект ноды пропадает на дисплее.
 
@@ -1656,7 +1656,7 @@ class PipelinePresenter:
         from .io import graph_to_blueprint
 
         proxy = self._pm_proxy
-        if proxy is None or not hasattr(proxy, "replace_blueprint"):
+        if proxy is None or not hasattr(proxy, "apply_topology"):
             QMessageBox.warning(
                 parent,
                 "Перезапустить",
@@ -1666,14 +1666,14 @@ class PipelinePresenter:
 
         bp_dict, _bindings, _gui_positions = graph_to_blueprint(self._model)
         try:
-            result = proxy.replace_blueprint(bp_dict)
-            if result.get("success", False):
+            result = proxy.apply_topology(bp_dict)
+            if result is not None and result.get("success", False):
                 self._notify_status("Команда перезапуска топологии отправлена в backend")
                 return True
             QMessageBox.critical(
                 parent,
                 "Перезапустить",
-                f"Не удалось отправить команду: {result.get('error') or 'неизвестная ошибка'}",
+                f"Не удалось отправить команду: {(result or {}).get('error') or 'неизвестная ошибка'}",
             )
             return False
         except Exception as exc:

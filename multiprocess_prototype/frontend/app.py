@@ -110,8 +110,8 @@ def run_gui(process: "GuiProcess") -> None:
     command_sender = CommandSender(process)
 
     # 3-bis. ProcessManagerProxy — IPC-фасад управления живым ProcessManagerProcess
-    # (Этап 1 pipeline-live-control). Тонкая обёртка над command_sender: шлёт
-    # blueprint.replace / process.start|stop|restart через RouterManager в backend.
+    # (Task 4.1 recipe-orchestrator-unify). Тонкая обёртка над command_sender: шлёт
+    # topology.apply / process.start|stop|restart через RouterManager в backend.
     # Прокидывается в табы Pipeline/Recipes через RuntimeDeps (runtime-layer, не
     # AppServices). Закрывает корневой блокер «proxy=None» (launch_active_recipe).
     from .bridge.process_manager_proxy import ProcessManagerProxy

@@ -57,7 +57,7 @@ class ProcessManagerProcess(ProcessModule):
         self._process_configs: dict[str, dict[str, Any]] = {}
         # Трекинг активных wire-каналов (wire_key → метаданные)
         self._active_wires: dict[str, dict[str, Any]] = {}
-        # Дебаунс hot-swap: in-flight guard + cooldown (см. replace_blueprint).
+        # Дебаунс hot-swap: in-flight guard + cooldown (см. apply_topology).
         self._replace_in_progress: bool = False
         self._last_replace_ts: float = 0.0
         self._create_components()
@@ -262,10 +262,6 @@ class ProcessManagerProcess(ProcessModule):
             "wire.setup": (self._cmd_wire_setup, "Настроить wire-канал (SHM + routes)"),
             "wire.teardown": (self._cmd_wire_teardown, "Разобрать wire-канал"),
             "wire.status": (self._cmd_wire_status, "Статусы wire-каналов"),
-            "blueprint.replace": (
-                self._cmd_blueprint_replace,
-                "Заменить blueprint (горячая замена процессов)",
-            ),
         }
 
         for cmd_name, (handler, description) in commands.items():
@@ -764,14 +760,6 @@ class ProcessManagerProcess(ProcessModule):
             except Exception as exc:
                 self._log_error(f"_teardown_partial: shared_resources cleanup '{name}' не удался: {exc}")
 
-    def replace_blueprint(self, new_blueprint: dict[str, Any] | None) -> dict[str, Any]:
-        """Переходный алиас -> apply_topology (road C).
-
-        GUI шлёт ``blueprint.replace`` через IPC до перехода на ``topology.apply``
-        (Task 4.1). Алиас сохраняет совместимость; удаление — после Task 4.1.
-        """
-        return self.apply_topology(new_blueprint)
-
     def _resume_monitor(self, was_running: bool) -> None:
         """Безопасно возобновить ProcessMonitor если он был запущен."""
         if was_running:
@@ -779,14 +767,6 @@ class ProcessManagerProcess(ProcessModule):
                 self._process_monitor.start()
             except Exception as exc:
                 self._log_warning(f"apply_topology: ошибка возобновления ProcessMonitor: {exc}")
-
-    def _cmd_blueprint_replace(self, data=None, **kwargs) -> dict:
-        """Команда CommandManager: заменить blueprint (горячая замена процессов)."""
-        args = _merge_cmd_args(data, kwargs)
-        new_blueprint = args.get("blueprint")
-        if new_blueprint is None and "blueprint" not in args:
-            return {"error": "blueprint required"}
-        return self.replace_blueprint(new_blueprint)
 
     # -------------------------------------------------------------------------
     # Router endpoint — приём команд от других процессов (AD-8)
@@ -1110,7 +1090,7 @@ class ProcessManagerProcess(ProcessModule):
         не обходились.
 
         Debounce (in-flight guard + cooldown) — единственная точка коалесинга.
-        ``replace_blueprint`` — переходный алиас сюда (до Task 4.1).
+        GUI вызывает через ``topology.apply`` (IPC) → ``_cmd_topology_apply`` → сюда.
 
         Args:
             blueprint: dict-представление топологии (или None → пустая).
