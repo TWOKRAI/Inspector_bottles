@@ -118,6 +118,20 @@ diff и commands делят protected-логику и assembler → гарант
 
 ---
 
+## Решение владельца 2026-06-07 — observability через BaseManager (ОТМЕНЯЕТ «stateless / 0 менеджеров»)
+
+После честного разбора (ObservableMixin даёт доступ к logger/error/stats и БЕЗ
+наследования; BaseManager добавляет lifecycle) владелец выбрал **единообразие**:
+`TopologyManager` **и** `FullReplacePlanner` наследуют `BaseManager + ObservableMixin`
+(паттерн `ProcessModule`: `BaseManager.__init__(name)` + `ObservableMixin.__init__(managers={'logger','error','stats'})` + `initialize`/`shutdown`). Мотив — предсказуемость
+«все компоненты одинаковые, исключений нет», цена (lifecycle-церемония планировщика)
+принята осознанно.
+- PM инъецирует `self.logger_manager` / `self.error_manager` / `self.stats_manager` в оба компонента при конфигурации.
+- `BlueprintAssembler` (Phase 1, в проде) остаётся чистым трансформером — ошибки через `BlueprintInvalid`, ловит и логирует вызывающий PM (ретрофит не нужен).
+- Сиды — методы PM (уже наблюдаемого) — observability уже есть.
+
+> Это меняет формулировки ниже («Stateless, не manager», «Новых менеджеров с lifecycle: 0») — читать как исторические; актуально это решение.
+
 ## Фазы
 
 ### Phase 1 — Канонический трансформер (вынос, без изменения поведения)

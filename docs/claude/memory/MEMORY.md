@@ -61,3 +61,4 @@
 - [Fewer layers](feedback_fewer_layers.md) — владелец: меньше слоёв при той же функциональности строго лучше; выбор P4.4 варианта B (один диспетчер) над A
 - [Command-bus P4.4 plan](project_command_bus_p4_4.md) — TRH P4.4: убрать двойную диспетчеризацию, CommandManager=библиотека, +lifecycle-feedback; ревью Opus NEEDS REWORK→fixed (3 блокера), вариант B
 - [Recipe hot-swap](project_recipe_hotswap.md) — Task 1-7 DONE; Task 7 кадры-после-switch РЕШЁН (5cd23192) двухфазной регистрацией очередей в replace_blueprint (НЕ SHM/камера); направление — recipe-orchestrator-unify
+- [All components via BaseManager](feedback_all_components_base_manager.md) — владелец 2026-06-07: все компоненты наследуют BaseManager+ObservableMixin (единообразие > минимализм), даже чистые стратегии
