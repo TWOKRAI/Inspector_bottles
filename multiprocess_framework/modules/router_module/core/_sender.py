@@ -12,6 +12,7 @@ RouterManager передаёт туда свой _do_send().
     sender.enqueue(msg, priority="high")
     sender.stop()
 """
+
 import itertools
 import queue
 import threading
@@ -21,9 +22,9 @@ from typing import Any, Callable, Dict, Optional
 # Числовые приоритеты (меньше = важнее)
 PRIORITY_MAP: Dict[str, int] = {
     "urgent": 0,
-    "high":   1,
+    "high": 1,
     "normal": 2,
-    "low":    3,
+    "low": 3,
 }
 DEFAULT_PRIORITY = 2  # normal
 
@@ -58,9 +59,9 @@ class AsyncSender:
         self._thread: Optional[threading.Thread] = None
 
         self._log_warning = log_warning or (lambda msg: None)
-        self._log_error   = log_error   or (lambda msg: None)
+        self._log_error = log_error or (lambda msg: None)
 
-        self.queued:  int = 0
+        self.queued: int = 0
         self.dropped: int = 0
 
     # ------------------------------------------------------------------
@@ -79,8 +80,14 @@ class AsyncSender:
         )
         self._thread.start()
 
-    def stop(self, timeout: float = 3.0) -> None:
-        """Остановить поток. Ждёт завершения текущей отправки."""
+    def stop(self, timeout: float = 1.0) -> None:
+        """Остановить поток. Ждёт завершения текущей отправки.
+
+        Timeout снижен с 3.0 → 1.0: worker-цикл проверяет stop_event каждые 10ms
+        (queue.get timeout=0.01), поэтому join завершается практически мгновенно.
+        3с были избыточны и складывались с cap.release() (~1-2с на DirectShow),
+        создавая суммарную задержку > 5с → принудительный terminate процессов.
+        """
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
@@ -127,10 +134,12 @@ class AsyncSender:
         """Фоновый цикл: достаёт сообщения и передаёт в send_fn.
 
         Блокировка внутри send_fn (полная IPC-очередь) не влияет на UI-поток.
+        timeout=0.01: частая проверка stop_event обеспечивает быстрый выход (~10ms)
+        при shutdown — критично для укладки в 5с OS-deadline при recipe hot-swap.
         """
         while not self._stop_event.is_set():
             try:
-                _, _, msg_dict = self._queue.get(timeout=0.1)
+                _, _, msg_dict = self._queue.get(timeout=0.01)
                 self._send_fn(msg_dict)
             except queue.Empty:
                 continue
