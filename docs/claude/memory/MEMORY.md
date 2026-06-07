@@ -62,3 +62,5 @@
 - [Command-bus P4.4 plan](project_command_bus_p4_4.md) — TRH P4.4: убрать двойную диспетчеризацию, CommandManager=библиотека, +lifecycle-feedback; ревью Opus NEEDS REWORK→fixed (3 блокера), вариант B
 - [Recipe hot-swap](project_recipe_hotswap.md) — Task 1-7 DONE; Task 7 кадры-после-switch РЕШЁН (5cd23192) двухфазной регистрацией очередей в replace_blueprint (НЕ SHM/камера); направление — recipe-orchestrator-unify
 - [All components via BaseManager](feedback_all_components_base_manager.md) — владелец 2026-06-07: все компоненты наследуют BaseManager+ObservableMixin (единообразие > минимализм), даже чистые стратегии
+- [Graceful-stop debt](project_graceful_stop_debt.md) — 5с-хан­г при switch/shutdown; cancel_join_thread ИСКЛЮЧЁН (e2e не помог, ребёнок не доходит до finally); копать в stop_all_workers/put()/cv2.read()
+- [Camera settings feature](project_camera_settings_feature.md) — отложено в новый чат: настройки камеры в Services (пресеты + actual params, Live + persist); CapturePlugin/DirectShow, MJPG-долг
