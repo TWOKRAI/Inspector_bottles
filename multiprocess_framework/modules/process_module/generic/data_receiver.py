@@ -67,6 +67,10 @@ class DataReceiver:
         # частоту опроса, а не реальный поток данных).
         self._cycle_metrics = CycleMetricsRecorder(target_interval_s=0.0)
 
+        # stop_event текущего run_loop — сохраняется при запуске воркера,
+        # используется в on_items_ready для stop-aware backpressure.
+        self._stop_event: threading.Event | None = None
+
     def get_cycle_metrics(self) -> dict:
         """Снимок тайминга цикла приёма (потокобезопасно).
 
@@ -78,7 +82,11 @@ class DataReceiver:
     def on_items_ready(self, items: list[dict]) -> None:
         """Callback от InspectorManager — коллекция готова, кладём в chain_queue.
 
-        Backpressure (Q6): block + alert. Никогда не дропаем.
+        Backpressure (Q6): block + alert. Никогда не дропаем в нормальной работе.
+
+        При взведённом stop_event (shutdown) — прекращаем ожидание освобождения
+        очереди: downstream consumer уже остановлен, ждать бессмысленно. Item
+        дропается (единственный случай) чтобы воркер мог выйти gracefully.
         """
         try:
             self._chain_queue.put(items, timeout=self._lag_threshold)
@@ -89,8 +97,20 @@ class DataReceiver:
                 f"DataReceiver: pipeline overload (queue full > {self._lag_threshold}s), "
                 f"events={self._overload_events}. Ждём освобождения..."
             )
-            # Блокируем до освобождения — НИКОГДА не дропаем (Q6)
-            self._chain_queue.put(items)
+            # Stop-aware backpressure: chunked put с проверкой stop_event.
+            # В нормальной работе блокируем до освобождения (Q6 — не дропаем).
+            # При shutdown (stop_event взведён) — выходим, чтобы не зависнуть:
+            # downstream consumer уже гасится и очередь никто не дочитает.
+            while True:
+                if self._stop_event is not None and self._stop_event.is_set():
+                    # Downstream остановлен — дропаем и выходим (shutdown path)
+                    self._log_error("DataReceiver: stop_event set during backpressure wait — dropping item (shutdown)")
+                    return
+                try:
+                    self._chain_queue.put(items, timeout=0.1)
+                    return  # успешно положили
+                except queue.Full:
+                    continue  # ещё не освободилась — проверим stop_event снова
 
     def run_loop(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """LOOP worker: receive IPC → restore frame → InspectorManager.
@@ -99,6 +119,8 @@ class DataReceiver:
             stop_event: сигнал остановки
             pause_event: сигнал паузы
         """
+        # Сохраняем stop_event для on_items_ready (stop-aware backpressure).
+        self._stop_event = stop_event
         self._last_timeout_check = time.monotonic()
 
         while not stop_event.is_set():

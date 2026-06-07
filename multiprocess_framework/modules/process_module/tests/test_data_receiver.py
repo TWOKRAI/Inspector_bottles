@@ -105,6 +105,35 @@ class TestOnItemsReady:
         delivered = chain_q.get_nowait()
         assert delivered == [{"new": True}]
 
+    def test_backpressure_exits_on_stop_event(self):
+        """Queue full + stop_event взведён → on_items_ready не блокируется (shutdown path)."""
+        chain_q = queue.Queue(maxsize=1)
+        chain_q.put([{"blocking": True}])  # Заполняем
+
+        stop_event = threading.Event()
+        inspector = InspectorManager()
+        receiver = DataReceiver(
+            receive_fn=lambda **kw: None,
+            shm_middleware=None,
+            inspector_manager=inspector,
+            chain_queue=chain_q,
+            lag_alert_threshold_sec=0.05,
+        )
+        # Симулируем run_loop — он сохраняет stop_event перед стартом
+        receiver._stop_event = stop_event
+
+        # Взводим stop_event заранее (как при shutdown)
+        stop_event.set()
+
+        t0 = time.time()
+        receiver.on_items_ready([{"new": True}])
+        elapsed = time.time() - t0
+
+        # Должен выйти быстро (< 0.5с), не зависнуть на 5с
+        assert elapsed < 0.5, f"on_items_ready заблокировалась на {elapsed:.2f}с при stop_event"
+        # Очередь не изменилась (item дропнут)
+        assert chain_q.qsize() == 1
+
 
 class TestRunLoop:
     """run_loop интеграция."""
