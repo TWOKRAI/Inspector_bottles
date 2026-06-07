@@ -211,17 +211,17 @@ diff и commands делят protected-логику и assembler → гарант
 2. `_setup_topology_manager` пробрасывает все 5 сидов (Task 2.0).
 3. `ProcessManagerProcessApp`: `orchestrator_config["sys_config"]=sys_config.model_dump()`; после `initialize` собрать цепочку: `assembler=BlueprintAssembler(obs_dict)` → `build_proc_dicts = lambda bp: assembler.assemble(normalize_blueprint(bp, sys_config))` → `planner=FullReplacePlanner(proc_dicts_fn=build_proc_dicts, protected_provider=self._get_protected_names)` → `self._topology_manager.configure(diff_fn=planner.diff, commands_fn=planner.commands)`. (Та же `build_proc_dicts`, что в boot Task 1.2 — одна сборка.)
 4. Команда `topology.apply` маршрутизируется в `PM.apply_topology` (а не напрямую в менеджер — чтобы транзакция/debounce не обходились).
-**Acceptance:**
-- [ ] integration: инъекция падения на фазе `create` 3-го процесса → первые 2 откатаны, старый рецепт восстановлен (процессы + `_process_configs` + monitor resumed)
-- [ ] integration: повтор-клик во время apply коалесится (in-flight guard)
-- [ ] `topology.apply(blueprint)` поднимает процессы с defaults+obs (паритет boot) — live qt-smoke переключение, FPS > 0 в обе стороны
-- [ ] SHM не течёт: после N свопов число SHM-сегментов стабильно (cleanup-фаза работает)
+**Acceptance:** (DONE — unit/integration 71/71 + live qt-smoke 2026-06-07)
+- [x] integration: инъекция падения на фазе `create` 3-го процесса → первые 2 откатаны, старый рецепт восстановлен (процессы + `_process_configs` + monitor resumed) — покрыто test_apply_topology
+- [x] integration: повтор-клик во время apply коалесится (in-flight guard) — покрыто test_apply_topology
+- [x] `topology.apply(blueprint)` поднимает процессы с defaults+obs (паритет boot) — **live qt-smoke 2026-06-07: color_inspect↔region_pipeline в обе стороны, FPS 15.0/14.0, 0 traceback** (Recipes «Загрузить» → blueprint.replace alias → apply_topology)
+- [~] SHM не течёт: после 2 свопов краша нет; замечен warning «старая очередь camera_0_frame осталась зарегистрированной при пересоздании» → watch-item, проверить число сегментов после N свопов отдельно
 
 #### Task 2.3 — Свернуть ad-hoc дорогу B (через переходный алиас)
 **Level:** Middle+ (Developer) · **Файлы:** PM-процесс
 **Goal:** Удалить `_build_proc_dicts` и инлайн-обвязку `replace_blueprint`; команду `blueprint.replace` **на одну фазу** сделать тонким алиасом → `PM.apply_topology`. Удаление алиаса — после перехода GUI (Task 4.1).
 **Steps:** 1. `_build_proc_dicts` + инлайн stop/spawn/rollback удалить. 2. `blueprint.replace` → `self.apply_topology(blueprint)`. 3. После Task 4.1 — алиас и команду удалить.
-**Acceptance:** (DONE) - [x] `grep _build_proc_dicts` пуст - [x] обвязка (rollback/cleanup/monitor/debounce) живёт ТОЛЬКО в `apply_topology` (нет дублей) - [x] sentrux check_rules / validate.py зелёный - [ ] GUI «Перезапустить» работает через алиас (qt-smoke — Director)
+**Acceptance:** (DONE) - [x] `grep _build_proc_dicts` пуст - [x] обвязка (rollback/cleanup/monitor/debounce) живёт ТОЛЬКО в `apply_topology` (нет дублей) - [x] sentrux check_rules / validate.py зелёный - [x] GUI переключение через алиас работает — live qt-smoke 2026-06-07 (Recipes «Загрузить» = тот же путь blueprint.replace→apply_topology; своп в обе стороны, FPS>0, без краша)
 
 ---
 
