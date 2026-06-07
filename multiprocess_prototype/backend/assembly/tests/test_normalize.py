@@ -4,7 +4,6 @@
 1. normalize_blueprint применяет per-category defaults как старый _merge_defaults.
 2. Inline-значения плагина имеют приоритет (override) над defaults.
 3. Неизвестные категории не ломают обработку.
-4. build_proc_dicts связывает нормализацию + assembler.
 """
 
 from __future__ import annotations
@@ -12,7 +11,6 @@ from __future__ import annotations
 import copy
 
 from multiprocess_prototype.backend.assembly.normalize import (
-    build_proc_dicts,
     normalize_blueprint,
 )
 from multiprocess_prototype.backend.config.schemas import SystemConfig
@@ -162,26 +160,3 @@ class TestNormalizeBlueprint:
         sys_config = _make_sys_config()
         result = normalize_blueprint(bp, sys_config)
         assert result["processes"] == []
-
-
-# ---------------------------------------------------------------------------
-# Тесты build_proc_dicts (связка)
-# ---------------------------------------------------------------------------
-
-
-class TestBuildProcDicts:
-    """build_proc_dicts — связка normalize + assembler."""
-
-    def test_returns_proc_dicts(self) -> None:
-        """build_proc_dicts возвращает dict[str, dict]."""
-        bp = copy.deepcopy(_BLUEPRINT_WITH_PLUGINS)
-        sys_config = _make_sys_config()
-        result = build_proc_dicts(bp, sys_config)
-
-        assert isinstance(result, dict)
-        assert set(result.keys()) == {"cam", "proc"}
-        for name, proc_dict in result.items():
-            assert isinstance(proc_dict, dict)
-            # merge_with_defaults применён — обязательные ключи есть
-            assert "class" in proc_dict
-            assert "workers" in proc_dict

@@ -57,7 +57,6 @@ class TopologyManager(BaseManager, ObservableMixin):
         cleanup_process_fn: (name) -> bool — снять с реестра + освободить SHM + конфиг.
         provision_process_fn: (name, proc_dict) -> bool — очереди + SHM.
         start_process_fn: (name) -> bool — запустить процесс.
-        allocate_shm_fn: DEPRECATED — SHM теперь в provision. Сохранён для back-compat.
         diff_fn: вычислить diff между двумя topology dict'ами.
         commands_fn: сгенерировать команды из diff.
         manager_name: имя менеджера (дефолт "topology").
@@ -75,7 +74,6 @@ class TopologyManager(BaseManager, ObservableMixin):
         cleanup_process_fn: Callable[[str], bool] | None = None,
         provision_process_fn: Callable[..., bool] | None = None,
         start_process_fn: Callable[[str], bool] | None = None,
-        allocate_shm_fn: Callable[[str, dict, int], None] | None = None,
         diff_fn: DiffFn | None = None,
         commands_fn: CommandsFn | None = None,
         manager_name: str = "topology",
@@ -94,7 +92,6 @@ class TopologyManager(BaseManager, ObservableMixin):
         self._cleanup_process = cleanup_process_fn
         self._provision_process = provision_process_fn
         self._start_process = start_process_fn
-        self._allocate_shm = allocate_shm_fn  # deprecated, back-compat
         self._diff_fn = diff_fn
         self._commands_fn = commands_fn
         self._current_topology: dict | None = None

@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-
+import copy
 from typing import Any, Optional
 
 from multiprocess_framework.modules.process_manager_module.process.process_manager_process import (
@@ -94,8 +94,13 @@ class ProcessManagerProcessApp(ProcessManagerProcess):
         assembler = BlueprintAssembler(observability_dict=obs_overlay, log_dir=log_dir)
 
         def _build_proc_dicts(bp: dict) -> dict[str, dict]:
-            """unwrap рецепта v3 → normalize → assemble (единая сборка boot+switch)."""
-            return assembler.assemble(normalize_blueprint(unwrap_recipe(bp), sys_config))
+            """unwrap рецепта v3 → normalize → assemble (единая сборка boot+switch).
+
+            deepcopy входа: unwrap_recipe отдаёт shallow-copy (ссылки внутрь
+            исходного blueprint), normalize_blueprint мутирует in-place →
+            без deepcopy повторный switch накапливал бы side-effect на IPC-рецепте.
+            """
+            return assembler.assemble(normalize_blueprint(copy.deepcopy(unwrap_recipe(bp)), sys_config))
 
         # Планировщик (BaseManager + ObservableMixin)
         planner = FullReplacePlanner(

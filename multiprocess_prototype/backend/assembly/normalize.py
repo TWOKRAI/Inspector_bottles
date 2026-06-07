@@ -5,17 +5,11 @@
 
 - ``normalize_blueprint`` — перенос ``_merge_defaults`` из ``launch.py``:
   in-place мутация + возврат (паритет дороги A; задокументировано).
-- ``build_proc_dicts`` — связка для Phase 2 switch: нормализация + assembler
-  в одном вызове.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-
-from multiprocess_framework.modules.process_module.configs import expand_observability
-
-from .assembler import BlueprintAssembler
 
 if TYPE_CHECKING:
     from multiprocess_prototype.backend.config.schemas import SystemConfig
@@ -51,29 +45,3 @@ def normalize_blueprint(
                 plugin.clear()
                 plugin.update(merged)
     return bp_dict
-
-
-def build_proc_dicts(
-    bp_dict: dict[str, Any],
-    sys_config: "SystemConfig",
-) -> dict[str, dict[str, Any]]:
-    """Нормализация + сборка в одном вызове (связка для Phase 2 switch).
-
-    Строит ``BlueprintAssembler`` с observability overlay и log_dir из
-    ``sys_config``, нормализует blueprint и зовёт ``assemble``.
-
-    Args:
-        bp_dict: Blueprint dict (будет мутирован — нормализация in-place).
-        sys_config: Системный конфиг.
-
-    Returns:
-        ``{process_name: normalized_proc_dict}``.
-    """
-    obs_overlay = expand_observability(sys_config.observability.model_dump())
-    log_dir = sys_config.system.log_dir or "logs"
-
-    assembler = BlueprintAssembler(
-        observability_dict=obs_overlay,
-        log_dir=log_dir,
-    )
-    return assembler.assemble(normalize_blueprint(bp_dict, sys_config))

@@ -226,14 +226,7 @@ class ProcessManagerProcess(ProcessModule):
             _topology_create    — instantiate (без start)
             _topology_start     — run
 
-        allocate_shm_fn — deprecated (SHM в provision), сохранён для back-compat.
         """
-        allocate_shm = None
-        if self.shared_resources:
-            mm = getattr(self.shared_resources, "memory_manager", None)
-            if mm and hasattr(mm, "create_memory_dict"):
-                allocate_shm = mm.create_memory_dict
-
         self._topology_manager = TopologyManager(
             create_process_fn=self._topology_create,
             stop_process_fn=self._topology_stop,
@@ -241,7 +234,6 @@ class ProcessManagerProcess(ProcessModule):
             cleanup_process_fn=self._topology_cleanup,
             provision_process_fn=self._topology_provision,
             start_process_fn=self._topology_start,
-            allocate_shm_fn=allocate_shm,
             logger=getattr(self, "logger_manager", None),
             error=getattr(self, "error_manager", None),
             stats=getattr(self, "stats_manager", None),
