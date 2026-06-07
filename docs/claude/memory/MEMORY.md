@@ -60,3 +60,4 @@
 - [Observability control plane](project_observability_control_plane.md) — план ЗАВЕРШЁН (Phase 1-4): единая секция observability + hot-reload watcher в оркестраторе (Option B, forward-compat Phase 4 IPC) + sink-фабрики + ADR-CRM-006; watchdog dep; FPS 21.0 verified
 - [Fewer layers](feedback_fewer_layers.md) — владелец: меньше слоёв при той же функциональности строго лучше; выбор P4.4 варианта B (один диспетчер) над A
 - [Command-bus P4.4 plan](project_command_bus_p4_4.md) — TRH P4.4: убрать двойную диспетчеризацию, CommandManager=библиотека, +lifecycle-feedback; ревью Opus NEEDS REWORK→fixed (3 блокера), вариант B
+- [Recipe hot-swap](project_recipe_hotswap.md) — Task 1-7 DONE; Task 7 кадры-после-switch РЕШЁН (5cd23192) двухфазной регистрацией очередей в replace_blueprint (НЕ SHM/камера); направление — recipe-orchestrator-unify
