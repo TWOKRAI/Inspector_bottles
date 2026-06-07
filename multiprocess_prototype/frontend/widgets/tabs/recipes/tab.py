@@ -110,7 +110,7 @@ class RecipesTab(BaseListNavTab):
             # Task 4.1: «Сделать активным» применяет рецепт к живому backend через
             # proxy.apply_topology (fire-and-forget, on_result=None).
             # None → graceful: только set_active без перезапуска процессов.
-            _replace_fn = (
+            _apply_fn = (
                 self._pm_proxy.apply_topology
                 if self._pm_proxy is not None and hasattr(self._pm_proxy, "apply_topology")
                 else None
@@ -118,7 +118,7 @@ class RecipesTab(BaseListNavTab):
             self._presenter = RecipesPresenter(
                 store=services.recipes,
                 view=self,
-                replace_blueprint_fn=_replace_fn,
+                apply_topology_fn=_apply_fn,
                 commands=services.commands,  # G.6.5: активация → dispatch(ActivateRecipe)
                 topology_store=services.topology,  # Этап 1: «Сохранить» (живой граф → рецепт)
                 persist_active_fn=self._persist_active_fn,  # persist #1: активный slug → app.yaml

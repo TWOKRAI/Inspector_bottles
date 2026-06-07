@@ -1,7 +1,7 @@
 """test_recipes_integration.py — Интеграционные smoke-тесты для Phase 5 RecipeManager.
 
 Проверяют сквозные сценарии без GUI и без реальных OS-процессов:
-- создание рецепта → set_active → replace_blueprint_fn получает правильный blueprint dict
+- создание рецепта → set_active → apply_topology_fn получает правильный blueprint dict
 - загрузка legacy v1-рецепта → автомиграция → .bak файл + version: 2
 - duplicate + set_active → get_active возвращает новое имя
 
@@ -72,15 +72,15 @@ def _save_v2_recipe(tmp_path: Path, slug: str, blueprint: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 1: create → activate → replace_blueprint_fn вызвана с blueprint dict
+# Test 1: create → activate → apply_topology_fn вызвана с blueprint dict
 # ---------------------------------------------------------------------------
 
 
 def test_create_activate_recipe_smoke(tmp_path: Path) -> None:
-    """Создать v2-рецепт, set_active → RecipesPresenter вызывает replace_blueprint_fn
+    """Создать v2-рецепт, set_active → RecipesPresenter вызывает apply_topology_fn
     с blueprint dict из YAML.
 
-    Проверяет: сквозной путь RecipeManager → RecipesPresenter → replace_blueprint_fn.
+    Проверяет: сквозной путь RecipeManager → RecipesPresenter → apply_topology_fn.
     """
     from multiprocess_prototype.frontend.widgets.tabs.recipes.presenter import RecipesPresenter
 
@@ -94,7 +94,7 @@ def test_create_activate_recipe_smoke(tmp_path: Path) -> None:
 
     manager = _make_manager(tmp_path)
 
-    # Mock replace_blueprint_fn — записывает переданный аргумент
+    # Mock apply_topology_fn — записывает переданный аргумент
     _captured_blueprint: list[dict] = []
 
     def _mock_replace(bp: dict) -> dict:
@@ -113,16 +113,16 @@ def test_create_activate_recipe_smoke(tmp_path: Path) -> None:
     presenter = RecipesPresenter(
         store=store,
         view=mock_view,
-        replace_blueprint_fn=_mock_replace,
+        apply_topology_fn=_mock_replace,
     )
 
     # Act: активировать рецепт через presenter
     presenter.on_set_active(slug)
 
-    # Assert: replace_blueprint_fn вызвана с blueprint dict
-    assert len(_captured_blueprint) == 1, "replace_blueprint_fn должна быть вызвана ровно один раз"
+    # Assert: apply_topology_fn вызвана с blueprint dict
+    assert len(_captured_blueprint) == 1, "apply_topology_fn должна быть вызвана ровно один раз"
     called_bp = _captured_blueprint[0]
-    assert isinstance(called_bp, dict), "replace_blueprint_fn должна получить dict"
+    assert isinstance(called_bp, dict), "apply_topology_fn должна получить dict"
     # Blueprint содержит processes (список процессов)
     assert "processes" in called_bp, "blueprint dict должен содержать ключ 'processes'"
     assert len(called_bp["processes"]) == 1, "должен быть один процесс в blueprint"

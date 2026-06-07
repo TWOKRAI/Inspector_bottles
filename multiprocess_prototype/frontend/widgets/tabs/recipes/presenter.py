@@ -8,7 +8,7 @@ Pure Python, без Qt-импортов. Управляет CRUD через Reci
 Task F.4: перешёл с RecipeManager на RecipeStore Protocol.
 Presenter больше не трогает файловую систему — вся I/O через store.
 
-«Dict at Boundary»: replace_blueprint_fn принимает и возвращает dict.
+«Dict at Boundary»: apply_topology_fn принимает и возвращает dict.
 Логирование: if self._logger: self._logger.log_info(...) — silent при logger=None.
 
 Refs: plans/prototype-skeleton-2026-05/phase-5-recipes-manager-v2.md Task 5.6
@@ -70,8 +70,8 @@ class RecipesPresenter:
     Attributes:
         _store: RecipeStore Protocol (CRUD + raw dict + duplicate).
         _view: реализация IRecipesView (Qt-виджет или mock в тестах).
-        _replace_blueprint_fn: callback replace_blueprint -> dict result.
-                               None -> set_active работает без перезапуска процессов.
+        _apply_topology_fn: callback apply_topology(blueprint) -> dict result.
+                            None -> set_active работает без перезапуска процессов.
         _logger: опциональный логгер (LoggerManager или совместимый).
         _selected_slug: текущий выбранный slug в nav-списке.
     """
@@ -80,7 +80,7 @@ class RecipesPresenter:
         self,
         store: "RecipeStore",
         view: "IRecipesView",
-        replace_blueprint_fn: Callable[[dict], dict] | None = None,
+        apply_topology_fn: Callable[[dict], dict] | None = None,
         logger: Any | None = None,
         commands: "CommandDispatcher | None" = None,
         topology_store: Any | None = None,
@@ -91,8 +91,8 @@ class RecipesPresenter:
         Args:
             store: RecipeStore Protocol с доступом к CRUD и raw-dict I/O.
             view: реализация IRecipesView.
-            replace_blueprint_fn: опциональный callback для замены blueprint
-                при set_active (ProcessManager.replace_blueprint). None ->
+            apply_topology_fn: опциональный callback применения топологии
+                при set_active (proxy.apply_topology → topology.apply). None ->
                 только state обновляется без перезапуска процессов.
             logger: опциональный менеджер логирования (silent при None).
             commands: domain CommandDispatcher (G.6.5). При наличии активация
@@ -103,7 +103,7 @@ class RecipesPresenter:
         """
         self._store = store
         self._view = view
-        self._replace_blueprint_fn = replace_blueprint_fn
+        self._apply_topology_fn = apply_topology_fn
         self._logger = logger
         self._commands = commands
         # Этап 1 pipeline-live-control: источник текущей топологии (TopologyRepository
@@ -293,11 +293,11 @@ class RecipesPresenter:
         self.load()
 
     def on_set_active(self, slug: str | None = None) -> None:
-        """Сделать рецепт активным и вызвать replace_blueprint если задан.
+        """Сделать рецепт активным и применить топологию (apply_topology) если задана.
 
         Порядок:
         1. store.set_active(slug) -> bool.
-        2. Если _replace_blueprint_fn задан — читает blueprint из raw dict и вызывает его.
+        2. Если _apply_topology_fn задан — читает blueprint из raw dict и вызывает его.
         3. Если result["success"] -> load() + set_buttons_state(True, True).
         4. Если ошибка -> view.show_error.
 
@@ -340,8 +340,8 @@ class RecipesPresenter:
 
         self._log_info(f"RecipesPresenter.on_set_active: активирован '{target_slug}'")
 
-        # Если задан replace_blueprint_fn — выполняем горячую замену
-        if self._replace_blueprint_fn is not None:
+        # Если задан apply_topology_fn — выполняем горячую замену топологии
+        if self._apply_topology_fn is not None:
             # Читаем raw YAML через RecipeStore Protocol
             recipe_data = self._store.read_raw(target_slug)
             if recipe_data is None:
@@ -353,23 +353,23 @@ class RecipesPresenter:
             blueprint_dict: dict = recipe_data.get("blueprint", {})
 
             try:
-                result = self._replace_blueprint_fn(blueprint_dict)
+                result = self._apply_topology_fn(blueprint_dict)
             except Exception as exc:  # noqa: BLE001
-                self._view.show_error(f"Ошибка replace_blueprint: {exc}")
-                self._log_error(f"RecipesPresenter.on_set_active: исключение replace_blueprint: {exc}")
+                self._view.show_error(f"Ошибка применения топологии: {exc}")
+                self._log_error(f"RecipesPresenter.on_set_active: исключение apply_topology: {exc}")
                 return
 
             if not isinstance(result, dict) or not result.get("success"):
                 error_msg = (
-                    result.get("error", "Ошибка replace_blueprint")
+                    result.get("error", "Ошибка применения топологии")
                     if isinstance(result, dict)
-                    else "Ошибка replace_blueprint"
+                    else "Ошибка применения топологии"
                 )
                 self._view.show_error(error_msg)
-                self._log_error(f"RecipesPresenter.on_set_active: replace_blueprint failed: {error_msg}")
+                self._log_error(f"RecipesPresenter.on_set_active: apply_topology failed: {error_msg}")
                 return
 
-            self._log_info(f"RecipesPresenter.on_set_active: replace_blueprint успешен для '{target_slug}'")
+            self._log_info(f"RecipesPresenter.on_set_active: apply_topology успешен для '{target_slug}'")
 
         # persist #1: записать активный slug в манифест (app.yaml → pipeline), чтобы
         # следующий старт восстановил этот рецепт. Ошибка persist не валит активацию.

@@ -291,14 +291,14 @@ def test_on_delete_no_confirm(
 
 
 # ---------------------------------------------------------------------------
-# Тест 10: on_set_active -> replace_blueprint_fn вызывается с blueprint dict
+# Тест 10: on_set_active -> apply_topology_fn вызывается с blueprint dict
 # ---------------------------------------------------------------------------
 
 
 def test_on_set_active_calls_replace(
     mock_view: MagicMock,
 ) -> None:
-    """on_set_active вызывает replace_blueprint_fn с blueprint dict."""
+    """on_set_active вызывает apply_topology_fn с blueprint dict."""
     blueprint_data = {
         "processes": [{"process_name": "worker_1", "class": "Worker", "plugins": []}],
         "wires": [],
@@ -317,7 +317,7 @@ def test_on_set_active_calls_replace(
     presenter = RecipesPresenter(
         store=store,
         view=mock_view,
-        replace_blueprint_fn=replace_fn,
+        apply_topology_fn=replace_fn,
     )
 
     presenter._selected_slug = "cup"
@@ -339,12 +339,12 @@ def test_on_set_active_calls_replace(
 def test_on_set_active_no_replace_fn(
     mock_view: MagicMock,
 ) -> None:
-    """_replace_blueprint_fn = None -> on_set_active работает без ошибки."""
+    """_apply_topology_fn = None -> on_set_active работает без ошибки."""
     store = _make_store(slugs=["cup"])
     presenter = RecipesPresenter(
         store=store,
         view=mock_view,
-        replace_blueprint_fn=None,
+        apply_topology_fn=None,
     )
 
     presenter._selected_slug = "cup"
@@ -365,13 +365,13 @@ def test_on_set_active_no_replace_fn(
 def test_on_set_active_replace_error(
     mock_view: MagicMock,
 ) -> None:
-    """replace_blueprint_fn возвращает success=False -> view.show_error вызван."""
+    """apply_topology_fn возвращает success=False -> view.show_error вызван."""
     store = _make_store(slugs=["cup"])
     replace_fn = MagicMock(return_value={"success": False, "error": "Процесс не стартовал"})
     presenter = RecipesPresenter(
         store=store,
         view=mock_view,
-        replace_blueprint_fn=replace_fn,
+        apply_topology_fn=replace_fn,
     )
 
     presenter._selected_slug = "cup"
