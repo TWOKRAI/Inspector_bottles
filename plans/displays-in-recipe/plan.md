@@ -2,7 +2,7 @@
 
 - **Slug:** displays-in-recipe
 - **Дата:** 2026-06-07
-- **Статус:** REVIEWED (APPROVED WITH NITS, 2026-06-07; findings ревьюера применены)
+- **Статус:** DONE (2026-06-07) — Phase 0-5 реализованы; reviewer Opus APPROVED; коммиты `e7829660` (план), `9a59ed92` (Phase 0), `f4d9d82a` (Phase 1-5)
 - **Ветка:** feat/displays-in-recipe (создаётся Director)
 - **Refs-trailer (обязателен во всех коммитах):** `Refs: plans/displays-in-recipe/plan.md`
 
@@ -217,46 +217,46 @@ Phase 2        Phase 3                       Phase 4
 > read-side editor → резолв имени по реестру, потом миграция YAML, потом удаление поля.
 > **Phase 0 коммитится и проходит все тесты ДО старта Phase 1.**
 
-- Task 0.1: Резолв имени дисплея в Pipeline editor без `display_name`-поля [PENDING]
+- Task 0.1: Резолв имени дисплея в Pipeline editor без `display_name`-поля [DONE]
   - **Module contract:** impl-only
-- Task 0.2: Миграция YAML — убрать `display_name` из `blueprint.displays` всех рецептов [PENDING]
+- Task 0.2: Миграция YAML — убрать `display_name` из `blueprint.displays` всех рецептов [DONE]
   - **Module contract:** n/a
-- Task 0.3: Удалить `display_name` из `DisplayInstance` + обновить тесты [PENDING]
+- Task 0.3: Удалить `display_name` из `DisplayInstance` + обновить тесты [DONE]
   - **Module contract:** public-api-change
 
 ### Phase 1: domain — DisplayDefinition + Recipe.displays
 
-- Task 1.1: **[VERTICAL SLICE]** определение → boundary → backend (минимальный E2E) [PENDING]
+- Task 1.1: **[VERTICAL SLICE]** определение → boundary → backend (минимальный E2E) [DONE]
   - **Module contract:** new-lite
-- Task 1.2: Инвариант уникальности `id` + валидация ссылок `display_id` [PENDING]
+- Task 1.2: Инвариант уникальности `id` + валидация ссылок `display_id` [DONE]
   - **Module contract:** impl-only
-- Task 1.3: `_denormalize` + RecipeStore round-trip [PENDING]
+- Task 1.3: `_denormalize` + RecipeStore round-trip [DONE]
   - **Module contract:** impl-only
 
 ### Phase 2: DisplayRegistry.reload + lifecycle (apply_topology, boot)
 
-- Task 2.1: Метод `DisplayRegistry.reload(entries)` (порядок 5 шагов) [PENDING] (зависит 1.1)
+- Task 2.1: Метод `DisplayRegistry.reload(entries)` (порядок 5 шагов) [DONE] (зависит 1.1)
   - **Module contract:** public-api-change
-- Task 2.2: Встройка `reload` в `apply_topology` + boot recipe-driven [PENDING] (зависит 2.1, 1.1)
+- Task 2.2: Встройка `reload` в `apply_topology` + boot recipe-driven [DONE] (зависит 2.1, 1.1)
   - **Module contract:** impl-only
-- Task 2.3: GUI-подписка на `RecipeActivated` → перечитать реестр [PENDING] (зависит 2.2)
+- Task 2.3: GUI-подписка на `RecipeActivated` → перечитать реестр [DONE] (зависит 2.2)
   - **Module contract:** impl-only
 
 ### Phase 3: мигратор displays.yaml → рецепты
 
-- Task 3.1: Разовый мигратор определений в секцию `displays` рецептов [PENDING] (зависит 1.1)
+- Task 3.1: Разовый мигратор определений в секцию `displays` рецептов [DONE] (зависит 1.1)
   - **Module contract:** n/a
 
 ### Phase 4: render-pipeline в окне превью
 
-- Task 4.1: Конвейер crop → scale → rotate → flip → fit в `PreviewWindow` [PENDING] (зависит 1.1)
+- Task 4.1: Конвейер crop → scale → rotate → flip → fit в `PreviewWindow` [DONE] (зависит 1.1)
   - **Module contract:** impl-only
 
 ### Phase 5: вкладка «Дисплеи» recipe-scoped (Phase 1 UI спеки, MVP)
 
-- Task 5.1: `DisplaySpec`/`DisplayCatalog` + render-поля, recipe-scoped persist [PENDING] (зависит 1.1, 1.3)
+- Task 5.1: `DisplaySpec`/`DisplayCatalog` + render-поля, recipe-scoped persist [DONE] (зависит 1.1, 1.3)
   - **Module contract:** public-api-change
-- Task 5.2: Форма + карточки + CRUD + превью с render-параметрами [PENDING] (зависит 5.1, 4.1, 2.3)
+- Task 5.2: Форма + карточки + CRUD + превью с render-параметрами [DONE] (зависит 5.1, 4.1, 2.3)
   - **Module contract:** impl-only
 
 ---
