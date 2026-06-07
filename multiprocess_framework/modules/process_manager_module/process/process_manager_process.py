@@ -595,7 +595,7 @@ class ProcessManagerProcess(ProcessModule):
         return {"success": True, "wires": result}
 
     # -------------------------------------------------------------------------
-    # Blueprint replace — горячая замена незащищённых процессов (Phase 5)
+    # Protected / cleanup / rollback / snapshot — общие хелперы topology
     # -------------------------------------------------------------------------
 
     def _get_protected_names(self) -> set[str]:
@@ -613,8 +613,8 @@ class ProcessManagerProcess(ProcessModule):
     def _cleanup_process_resources(self, name: str) -> None:
         """Снять остановленный процесс с реестра и освободить его SHM.
 
-        Cleanup-фаза hot-swap (стоп-фаза вынесена в ``ProcessRegistry.stop_many`` —
-        параллельная остановка всех процессов разом). Не бросает исключений.
+        Используется сидом ``_topology_cleanup`` и ``_restore_from_snapshot``.
+        Не бросает исключений.
 
         Args:
             name: имя уже остановленного процесса.
@@ -622,7 +622,7 @@ class ProcessManagerProcess(ProcessModule):
         try:
             self._process_registry.remove_process(name)
         except Exception as exc:
-            self._log_warning(f"replace_blueprint: ошибка удаления '{name}' из реестра: {exc}")
+            self._log_warning(f"cleanup_process_resources: ошибка удаления '{name}' из реестра: {exc}")
 
         # Cleanup SHM-сегментов процесса
         if self.shared_resources is not None:
@@ -633,11 +633,9 @@ class ProcessManagerProcess(ProcessModule):
                     try:
                         release_fn(name)
                     except Exception as exc:
-                        self._log_warning(f"replace_blueprint: SHM cleanup для '{name}' не удался: {exc}")
+                        self._log_warning(f"cleanup_process_resources: SHM cleanup для '{name}' не удался: {exc}")
                 else:
-                    self._log_warning(
-                        f"replace_blueprint: memory_manager не имеет release_process_memory, SHM для '{name}' не очищен"
-                    )
+                    self._log_warning(f"cleanup_process_resources: нет release_process_memory, SHM '{name}' не очищен")
 
     def _restore_from_snapshot(self, snapshot_configs: dict[str, dict]) -> None:
         """Восстановить процессы из snapshot-конфигов (rollback).
@@ -665,293 +663,23 @@ class ProcessManagerProcess(ProcessModule):
                 if process:
                     process.start()
                     self._priority.apply_priority(process)
-                    self._log_info(f"replace_blueprint rollback: процесс '{proc_name}' восстановлен")
+                    self._log_info(f"topology rollback: процесс '{proc_name}' восстановлен")
                 else:
-                    self._log_error(f"replace_blueprint rollback: не удалось пересоздать '{proc_name}'")
+                    self._log_error(f"topology rollback: не удалось пересоздать '{proc_name}'")
             except Exception as exc:
-                self._log_error(f"replace_blueprint rollback: ошибка восстановления '{proc_name}': {exc}")
+                self._log_error(f"topology rollback: ошибка восстановления '{proc_name}': {exc}")
 
         # Восстановить _process_configs из snapshot
         for proc_name, cfg in snapshot_configs.items():
             self._process_configs[proc_name] = copy.deepcopy(cfg)
 
-    def _build_proc_dicts(self, new_blueprint: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """Трансформировать raw-blueprint в proc_dict'ы ТЕМ ЖЕ путём, что boot.
-
-        Корень бага «переключает, но картинка не меняется»: raw recipe-process
-        (``process_name``/``process_class``/``chain_targets``/``plugins`` на ВЕРХНЕМ
-        уровне) передавался в ``create_and_register`` как есть, а процесс ждёт
-        ВЛОЖЕННЫЙ ключ ``config`` (``plugins``/``chain_targets``/``queues``). Без
-        трансформации горячо поднятые процессы стартуют ПУСТЫМИ (PluginOrchestrator
-        не создаётся, chain_targets=[], нет очереди data) → данные не текут в GUI.
-
-        Повторяет boot (``SystemLauncher.build``, launch.py:243-276):
-        ``SystemBlueprint.model_validate → build_configs() → process(cfg)`` → proc_dict
-        с вложенным ``config``. Лишние поля blueprint (``displays``/``wires``)
-        игнорируются (SchemaBase ``extra='ignore'``). Registry-независимо: рецепты
-        используют полные ``plugin_class`` пути (резолв через import, не PluginRegistry,
-        который в orchestrator-процессе не наполнен).
-
-        Lazy-импорт фреймворк-сиблингов — избегаем цикла на загрузке модуля.
-
-        Args:
-            new_blueprint: raw dict рецепта (секция ``blueprint``).
-
-        Returns:
-            ``{process_name: proc_dict}`` в каноническом формате (как boot).
-
-        Raises:
-            Exception: при невалидном blueprint (ловится в replace_blueprint → ошибка).
-        """
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
-            SystemBlueprint,
-        )
-        from multiprocess_framework.modules.data_schema_module import process
-
-        topology = SystemBlueprint.model_validate(new_blueprint or {})
-        result: dict[str, dict[str, Any]] = {}
-        for cfg in topology.build_configs():
-            name, proc_dict = process(cfg)
-            result[name] = proc_dict
-        return result
-
     def replace_blueprint(self, new_blueprint: dict[str, Any] | None) -> dict[str, Any]:
-        """Дебаунс-обёртка над заменой blueprint — единая точка коалесинга hot-swap.
+        """Переходный алиас -> apply_topology (road C).
 
-        3 GUI-точки входа (Recipes «Загрузить», Pipeline «Запустить»/«Перезапустить»)
-        сходятся сюда через IPC ``blueprint.replace``. Чтобы повторные/наложенные клики
-        не «тасовали» процессы:
-          - in-flight guard: пока замена идёт — новые запросы отклоняются;
-          - cooldown ``replace_debounce_s`` (config, дефолт 0): запрос в пределах окна
-            ПОСЛЕ ЗАВЕРШЕНИЯ предыдущей замены отклоняется. Меряется от завершения:
-            IPC-сообщения читаются последовательно уже после долгой (секунды) замены,
-            поэтому двойной клик приходит на обработку именно по её завершении.
-
-        Тесты не задают ``replace_debounce_s`` → 0 → дебаунс выключен (паритет поведения).
+        GUI шлёт ``blueprint.replace`` через IPC до перехода на ``topology.apply``
+        (Task 4.1). Алиас сохраняет совместимость; удаление — после Task 4.1.
         """
-        # getattr-дефолты: make_pm в тестах обходит __init__ (атрибутов может не быть).
-        if getattr(self, "_replace_in_progress", False):
-            self._log_warning("replace_blueprint: замена уже выполняется — запрос пропущен (debounce)")
-            return {
-                "success": False,
-                "replaced": [],
-                "skipped_protected": [],
-                "error": "замена уже выполняется",
-                "rolled_back": False,
-                "debounced": True,
-            }
-        cooldown = float(self.get_config("replace_debounce_s") or 0.0)
-        if cooldown > 0.0 and (time.monotonic() - getattr(self, "_last_replace_ts", 0.0)) < cooldown:
-            self._log_info("replace_blueprint: запрос в пределах cooldown — пропущен (debounce)")
-            return {
-                "success": False,
-                "replaced": [],
-                "skipped_protected": [],
-                "error": "debounce cooldown",
-                "rolled_back": False,
-                "debounced": True,
-            }
-        self._replace_in_progress = True
-        try:
-            return self._replace_blueprint_impl(new_blueprint)
-        finally:
-            self._replace_in_progress = False
-            self._last_replace_ts = time.monotonic()
-
-    def _replace_blueprint_impl(self, new_blueprint: dict[str, Any] | None) -> dict[str, Any]:
-        """Заменить blueprint: остановить незащищённые процессы, поднять новые.
-
-        Dict at Boundary: принимает dict, не Pydantic-модель.
-
-        Алгоритм:
-            1. Извлечь список процессов из ``new_blueprint["processes"]``.
-            2. Вычислить protected (``_get_protected_names``).
-            3. Вычислить ``to_replace`` — текущие незащищённые процессы.
-            4. Snapshot ``copy.deepcopy(to_replace)``.
-            5. Pause ProcessMonitor.
-            6. Stop+cleanup каждого ``to_replace``; при ошибке → rollback.
-            7. Register+start новых процессов; при ошибке → rollback.
-            8. Обновить ``_process_configs``, resume monitor.
-            9. Вернуть результат.
-
-        Args:
-            new_blueprint: dict-представление SystemBlueprint.  Если ``None``
-                или ``{}`` — трактуется как пустой blueprint.
-
-        Returns:
-            dict с ключами ``success``, ``replaced``, ``skipped_protected``,
-            ``error``, ``rolled_back``.
-        """
-        # --- Edge case: None → пустой dict ---
-        if new_blueprint is None:
-            new_blueprint = {}
-
-        # 1. Извлечь список новых процессов (graceful при отсутствии ключа)
-        new_processes_list: list[dict[str, Any]] = new_blueprint.get("processes") or []
-
-        # Индексируем новые процессы по имени
-        new_by_name: dict[str, dict[str, Any]] = {}
-        for proc_cfg in new_processes_list:
-            pname = proc_cfg.get("process_name") or proc_cfg.get("name", "")
-            if pname:
-                new_by_name[pname] = proc_cfg
-
-        # 2. Protected-процессы
-        protected = self._get_protected_names()
-
-        # 3. Текущие незащищённые процессы (кандидаты на замену)
-        to_replace: dict[str, dict[str, Any]] = {
-            name: cfg for name, cfg in self._process_configs.items() if name not in protected
-        }
-
-        # 4. Snapshot
-        old_configs = copy.deepcopy(to_replace)
-
-        skipped_protected = sorted(name for name in self._process_configs if name in protected)
-        replaced_names: list[str] = []
-
-        self._log_info(
-            f"replace_blueprint: начало замены. "
-            f"to_replace={list(to_replace.keys())}, "
-            f"protected={skipped_protected}, "
-            f"new_processes={list(new_by_name.keys())}"
-        )
-
-        # 4.5 Трансформировать raw-blueprint → proc_dict'ы (как boot) ДО остановки:
-        #     невалидный blueprint должен упасть БЕЗ teardown работающей системы.
-        try:
-            built_proc_dicts = self._build_proc_dicts(new_blueprint)
-        except Exception as exc:  # noqa: BLE001
-            self._log_error(f"replace_blueprint: невалидный blueprint, замена отменена: {exc}")
-            self._resume_monitor(monitor_was_running=False)  # монитор ещё не паузили
-            return {
-                "success": False,
-                "replaced": [],
-                "skipped_protected": skipped_protected,
-                "error": f"Невалидный blueprint: {exc}",
-                "rolled_back": False,
-            }
-
-        # 5. Pause ProcessMonitor (безопасно при повторном вызове)
-        monitor_was_running = getattr(self._process_monitor, "_monitoring", False)
-        if monitor_was_running:
-            try:
-                self._process_monitor.stop()
-            except Exception as exc:
-                self._log_warning(f"replace_blueprint: ошибка остановки ProcessMonitor: {exc}")
-
-        stop_timeout = float(self.get_config("stop_process_timeout") or 5.0)
-
-        # 6. Остановить ВСЕ незащищённые процессы ПАРАЛЛЕЛЬНО (один общий дедлайн,
-        #    ~stop_timeout суммарно вместо N×stop_timeout), затем cleanup каждого.
-        stop_results = self._process_registry.stop_many(list(to_replace.keys()), stop_timeout)
-        for proc_name in list(to_replace.keys()):
-            if not stop_results.get(proc_name, False):
-                # Процесс не остановлен (не найден в реестре) — rollback
-                self._log_error(f"replace_blueprint: не удалось остановить '{proc_name}', rollback")
-                self._restore_from_snapshot(old_configs)
-                self._resume_monitor(monitor_was_running)
-                return {
-                    "success": False,
-                    "replaced": replaced_names,
-                    "skipped_protected": skipped_protected,
-                    "error": f"Не удалось остановить процесс '{proc_name}'",
-                    "rolled_back": True,
-                }
-            self._cleanup_process_resources(proc_name)
-            replaced_names.append(proc_name)
-            # Удалить конфиг (будет обновлён из нового blueprint)
-            self._process_configs.pop(proc_name, None)
-
-        # 7. Зарегистрировать и запустить новые процессы (не-protected) ДВУХФАЗНО — как boot
-        #    (_create_processes_from_config): СНАЧАЛА очереди ВСЕХ процессов, ПОТОМ create+start.
-        #    Иначе процесс, стартующий раньше (напр. camera_0 в color_inspect — первый в рецепте),
-        #    получает spawn-bundle (snapshot shared_resources) ДО регистрации очередей более
-        #    позднего consumer'а (detector) → шлёт кадры в «пустоту», данные не доходят (P0
-        #    hot-swap blocker: на boot двухфазно — работает, в ad-hoc replace было однофазно).
-        #    Используем proc_dict'ы из _build_proc_dicts (канонический формат с вложенным config).
-
-        # Фаза 1: register_process (очереди) ВСЕХ новых non-protected процессов ДО любого старта.
-        to_start: list[tuple[str, dict[str, Any], str]] = []  # (name, proc_dict, priority)
-        for pname, proc_dict in built_proc_dicts.items():
-            if pname in protected:
-                continue
-            # build() уже выставил внутренний ключ class из process_class.
-            class_path = str(proc_dict.get("class", ""))
-            if not class_path:
-                self._log_error(f"replace_blueprint: process_class отсутствует для '{pname}', rollback")
-                self._restore_from_snapshot(old_configs)
-                self._resume_monitor(monitor_was_running)
-                return {
-                    "success": False,
-                    "replaced": replaced_names,
-                    "skipped_protected": skipped_protected,
-                    "error": f"process_class отсутствует в blueprint для '{pname}'",
-                    "rolled_back": True,
-                }
-            priority = str(proc_dict.get("priority", "normal"))
-            # Зарегистрировать в shared_resources КАНОНИЧЕСКИЙ proc_dict (создаёт очереди).
-            if self.shared_resources:
-                self.shared_resources.register_process(pname, proc_dict)
-            to_start.append((pname, proc_dict, priority))
-
-        # Фаза 2: create_and_register + start (очереди всех новых процессов уже зарегистрированы,
-        #    поэтому каждый spawn-bundle видит очереди всех остальных → доставка кадров не рвётся).
-        started_names: list[str] = []
-        for pname, proc_dict, priority in to_start:
-            try:
-                class_path = str(proc_dict.get("class", ""))
-                process = self._process_registry.create_and_register(pname, class_path, proc_dict, priority)
-                if not process:
-                    raise RuntimeError(f"create_and_register вернул None для '{pname}'")
-                process.start()
-                self._priority.apply_priority(process)
-                self._priority.register_priority(pname, priority)
-
-                # _process_configs хранит канонический proc_dict (с class + config) —
-                # downstream (restart_process, snapshot-rollback, broadcast_full_status,
-                # _get_protected_names) читает class/protected консистентно.
-                self._process_configs[pname] = copy.deepcopy(proc_dict)
-                started_names.append(pname)
-                self._log_info(f"replace_blueprint: процесс '{pname}' запущен")
-
-            except Exception as exc:
-                self._log_error(f"replace_blueprint: ошибка старта '{pname}': {exc}, rollback")
-                # Откатить уже запущенные новые процессы
-                for started in started_names:
-                    try:
-                        self._process_registry.stop_one(started, stop_timeout)
-                        self._process_registry.remove_process(started)
-                    except Exception as cleanup_exc:  # noqa: PERF203
-                        self._log_warning(f"replace_blueprint: cleanup '{started}' при rollback: {cleanup_exc}")
-                    self._process_configs.pop(started, None)
-
-                self._restore_from_snapshot(old_configs)
-                self._resume_monitor(monitor_was_running)
-                return {
-                    "success": False,
-                    "replaced": replaced_names,
-                    "skipped_protected": skipped_protected,
-                    "error": f"Ошибка старта процесса '{pname}': {exc}",
-                    "rolled_back": True,
-                }
-
-        # 8. Resume ProcessMonitor
-        self._resume_monitor(monitor_was_running)
-
-        self._log_info(
-            f"replace_blueprint: завершено. "
-            f"stopped={replaced_names}, started={started_names}, "
-            f"protected={skipped_protected}"
-        )
-
-        return {
-            "success": True,
-            "replaced": replaced_names,
-            "skipped_protected": skipped_protected,
-            "error": None,
-            "rolled_back": False,
-        }
+        return self.apply_topology(new_blueprint)
 
     def _resume_monitor(self, was_running: bool) -> None:
         """Безопасно возобновить ProcessMonitor если он был запущен."""
@@ -959,7 +687,7 @@ class ProcessManagerProcess(ProcessModule):
             try:
                 self._process_monitor.start()
             except Exception as exc:
-                self._log_warning(f"replace_blueprint: ошибка возобновления ProcessMonitor: {exc}")
+                self._log_warning(f"apply_topology: ошибка возобновления ProcessMonitor: {exc}")
 
     def _cmd_blueprint_replace(self, data=None, **kwargs) -> dict:
         """Команда CommandManager: заменить blueprint (горячая замена процессов)."""
@@ -1272,7 +1000,7 @@ class ProcessManagerProcess(ProcessModule):
         """Живые non-protected имена процессов (current_provider для планировщика).
 
         Источник истины «что снести» при switch: PM._process_configs
-        минус protected (как в дороге B ``to_replace``). Нельзя брать из
+        минус protected. Нельзя брать из
         TopologyManager._current_topology — на первом switch она None
         (boot шёл дорогой A).
         """
@@ -1290,8 +1018,8 @@ class ProcessManagerProcess(ProcessModule):
         в ``TopologyManager.apply`` — чтобы debounce, snapshot и rollback
         не обходились.
 
-        Debounce (in-flight guard + cooldown) — близнец логики ``replace_blueprint``
-        (дорога B). Дублирование осознанное: дорога B остаётся живой до Task 2.3.
+        Debounce (in-flight guard + cooldown) — единственная точка коалесинга.
+        ``replace_blueprint`` — переходный алиас сюда (до Task 4.1).
 
         Args:
             blueprint: dict-представление топологии (или None → пустая).

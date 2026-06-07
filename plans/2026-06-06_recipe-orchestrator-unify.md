@@ -221,7 +221,7 @@ diff и commands делят protected-логику и assembler → гарант
 **Level:** Middle+ (Developer) · **Файлы:** PM-процесс
 **Goal:** Удалить `_build_proc_dicts` и инлайн-обвязку `replace_blueprint`; команду `blueprint.replace` **на одну фазу** сделать тонким алиасом → `PM.apply_topology`. Удаление алиаса — после перехода GUI (Task 4.1).
 **Steps:** 1. `_build_proc_dicts` + инлайн stop/spawn/rollback удалить. 2. `blueprint.replace` → `self.apply_topology(blueprint)`. 3. После Task 4.1 — алиас и команду удалить.
-**Acceptance:** - [ ] `grep _build_proc_dicts` пуст - [ ] обвязка (rollback/cleanup/monitor/debounce) живёт ТОЛЬКО в `apply_topology` (нет дублей) - [ ] sentrux check_rules зелёный - [ ] GUI «Перезапустить» работает через алиас
+**Acceptance:** (DONE) - [x] `grep _build_proc_dicts` пуст - [x] обвязка (rollback/cleanup/monitor/debounce) живёт ТОЛЬКО в `apply_topology` (нет дублей) - [x] sentrux check_rules / validate.py зелёный - [ ] GUI «Перезапустить» работает через алиас (qt-smoke — Director)
 
 ---
 
