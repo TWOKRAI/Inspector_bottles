@@ -2,6 +2,7 @@
 
 Каждый сид мутирует РОВНО одну вещь. Проверяем:
 - _topology_stop: только stop, без cleanup/SHM/config.
+- _topology_stop_all: bulk через stop_many (паритет дороги B), не N×stop_one.
 - _topology_cleanup: registry + SHM + _process_configs, НЕ стартует/останавливает.
 - _topology_provision: очереди + SHM, НЕ создаёт экземпляр, НЕ стартует.
 - _topology_create: create_and_register + priority + config, НЕ стартует, НЕ SHM.
@@ -100,6 +101,57 @@ class TestTopologyStop:
         pm = _make_pm()
         pm.stop_process = MagicMock(return_value=False)
         assert pm._topology_stop("nope") is False
+
+
+# ===========================================================================
+# _topology_stop_all
+# ===========================================================================
+
+
+class TestTopologyStopAll:
+    """_topology_stop_all: bulk через stop_many (паритет дороги B)."""
+
+    def test_calls_stop_many(self) -> None:
+        """_topology_stop_all зовёт stop_many, а не N×stop_one."""
+        pm = _make_pm({"cam": {"class": "Cam"}, "det": {"class": "Det"}})
+        pm._process_registry.stop_many = MagicMock(return_value={"cam": True, "det": True})
+        result = pm._topology_stop_all(["cam", "det"])
+        assert result is True
+        pm._process_registry.stop_many.assert_called_once_with(
+            ["cam", "det"],
+            1.0,  # stop_process_timeout из _get_config
+        )
+
+    def test_empty_list_returns_true(self) -> None:
+        """Пустой список → True без вызова stop_many."""
+        pm = _make_pm()
+        pm._process_registry.stop_many = MagicMock()
+        result = pm._topology_stop_all([])
+        assert result is True
+        pm._process_registry.stop_many.assert_not_called()
+
+    def test_partial_fail_returns_false(self) -> None:
+        """Один процесс не остановлен → False."""
+        pm = _make_pm({"a": {"class": "A"}, "b": {"class": "B"}})
+        pm._process_registry.stop_many = MagicMock(return_value={"a": True, "b": False})
+        result = pm._topology_stop_all(["a", "b"])
+        assert result is False
+
+    def test_all_fail_returns_false(self) -> None:
+        """Все не остановлены → False."""
+        pm = _make_pm({"x": {"class": "X"}})
+        pm._process_registry.stop_many = MagicMock(return_value={"x": False})
+        result = pm._topology_stop_all(["x"])
+        assert result is False
+
+    def test_missing_name_in_results_returns_false(self) -> None:
+        """stop_many не вернул результат для имени → трактуется как False."""
+        pm = _make_pm({"a": {"class": "A"}})
+        pm._process_registry.stop_many = MagicMock(
+            return_value={}  # пустой dict — имя отсутствует
+        )
+        result = pm._topology_stop_all(["a"])
+        assert result is False
 
 
 # ===========================================================================

@@ -1,12 +1,13 @@
 """Тесты FullReplacePlanner — стратегия полной замены (Task 2.1).
 
 Покрытие:
-- commands даёт порядок ровно stop→cleanup→provision→create→start.
+- commands даёт порядок: stop_all → cleanup → provision → create → start.
+- Фаза stop — одна bulk-команда process.stop_all (паритет stop_many дороги B).
 - protected исключены из ВСЕХ фаз.
 - Невалидный blueprint (proc_dicts_fn бросает BlueprintInvalid) →
   commands пробрасывает ДО любой stop-команды.
 - old берётся из current_provider (не из аргумента current):
-  current=None, current_provider→{a,b} → stop/cleanup для a,b.
+  current=None, current_provider→{a,b} → stop_all/cleanup для a,b.
 - diff и commands согласованы: команды покрывают ровно old ∪ new.
 - Observability: fake stats получает planner.commands metric.
 - Lifecycle: initialize/shutdown.
@@ -134,8 +135,8 @@ class TestPlannerDiff:
 
 
 class TestPlannerCommandsOrder:
-    def test_stop_cleanup_provision_create_start(self) -> None:
-        """commands даёт порядок ровно stop→cleanup→provision→create→start."""
+    def test_stop_all_cleanup_provision_create_start(self) -> None:
+        """commands даёт порядок: stop_all → cleanup → provision → create → start."""
         proc_dicts = {
             "new_a": {"class": "A"},
             "new_b": {"class": "B"},
@@ -149,15 +150,16 @@ class TestPlannerCommandsOrder:
         # Извлечь типы команд по порядку
         cmd_types = [c["cmd"] for c in cmds]
 
-        # Должны быть 5 фаз: 2 stop, 2 cleanup, 2 provision, 2 create, 2 start
-        assert cmd_types.count("process.stop") == 2
+        # Фаза A: 1 bulk stop_all (вместо N×process.stop)
+        assert cmd_types.count("process.stop_all") == 1
+        assert cmd_types.count("process.stop") == 0  # больше нет per-process stop
         assert cmd_types.count("process.cleanup") == 2
         assert cmd_types.count("process.provision") == 2
         assert cmd_types.count("process.create") == 2
         assert cmd_types.count("process.start") == 2
 
-        # Проверить порядок фаз (все stop ПЕРЕД всеми cleanup ПЕРЕД ...)
-        stop_end = max(i for i, c in enumerate(cmds) if c["cmd"] == "process.stop")
+        # Проверить порядок фаз (stop_all ПЕРЕД cleanup ПЕРЕД ...)
+        stop_all_idx = cmd_types.index("process.stop_all")
         cleanup_start = min(i for i, c in enumerate(cmds) if c["cmd"] == "process.cleanup")
         cleanup_end = max(i for i, c in enumerate(cmds) if c["cmd"] == "process.cleanup")
         provision_start = min(i for i, c in enumerate(cmds) if c["cmd"] == "process.provision")
@@ -166,24 +168,28 @@ class TestPlannerCommandsOrder:
         create_end = max(i for i, c in enumerate(cmds) if c["cmd"] == "process.create")
         start_start = min(i for i, c in enumerate(cmds) if c["cmd"] == "process.start")
 
-        assert stop_end < cleanup_start
+        assert stop_all_idx < cleanup_start
         assert cleanup_end < provision_start
         assert provision_end < create_start
         assert create_end < start_start
 
-    def test_names_match_phases(self) -> None:
-        """stop/cleanup содержат old-имена, provision/create/start — new-имена."""
+    def test_stop_all_contains_old_names(self) -> None:
+        """stop_all содержит sorted(old) имена; cleanup/provision/create/start — per-process."""
         proc_dicts = {"alpha": {"class": "A"}, "beta": {"class": "B"}}
         p = _make_planner(proc_dicts=proc_dicts, current={"gamma", "delta"})
         cmds = p.commands({"has_changes": True}, {})
 
-        stop_names = {c["process_name"] for c in cmds if c["cmd"] == "process.stop"}
+        # stop_all — одна команда с process_names
+        stop_all_cmds = [c for c in cmds if c["cmd"] == "process.stop_all"]
+        assert len(stop_all_cmds) == 1
+        assert set(stop_all_cmds[0]["process_names"]) == {"gamma", "delta"}
+        assert stop_all_cmds[0]["process_names"] == sorted({"gamma", "delta"})
+
         cleanup_names = {c["process_name"] for c in cmds if c["cmd"] == "process.cleanup"}
         provision_names = {c["process_name"] for c in cmds if c["cmd"] == "process.provision"}
         create_names = {c["process_name"] for c in cmds if c["cmd"] == "process.create"}
         start_names = {c["process_name"] for c in cmds if c["cmd"] == "process.start"}
 
-        assert stop_names == {"gamma", "delta"}
         assert cleanup_names == {"gamma", "delta"}
         assert provision_names == {"alpha", "beta"}
         assert create_names == {"alpha", "beta"}
@@ -197,7 +203,7 @@ class TestPlannerCommandsOrder:
 
 class TestPlannerProtected:
     def test_protected_excluded_from_all_phases(self) -> None:
-        """protected исключены из всех 5 фаз.
+        """protected исключены из всех фаз.
 
         current_provider уже возвращает non-protected имена (фильтрация
         на стороне PM). Но proc_dicts может содержать protected-имя —
@@ -216,12 +222,19 @@ class TestPlannerProtected:
         )
         cmds = p.commands({"has_changes": True}, {})
 
-        all_names = {c["process_name"] for c in cmds}
-        assert "gui" not in all_names
+        # gui не должен появляться ни в каких командах
+        all_per_process = {c["process_name"] for c in cmds if "process_name" in c}
+        all_bulk_names: set[str] = set()
+        for c in cmds:
+            if "process_names" in c:
+                all_bulk_names.update(c["process_names"])
+        assert "gui" not in all_per_process
+        assert "gui" not in all_bulk_names
 
-        # old_worker — не protected, должен быть в stop/cleanup
-        stop_names = {c["process_name"] for c in cmds if c["cmd"] == "process.stop"}
-        assert "old_worker" in stop_names
+        # old_worker — не protected, должен быть в stop_all
+        stop_all_cmds = [c for c in cmds if c["cmd"] == "process.stop_all"]
+        assert len(stop_all_cmds) == 1
+        assert "old_worker" in stop_all_cmds[0]["process_names"]
 
         # worker — не protected, должен быть в provision/create/start
         start_names = {c["process_name"] for c in cmds if c["cmd"] == "process.start"}
@@ -271,7 +284,7 @@ class TestPlannerCurrentProvider:
         """old берётся из current_provider, не из аргумента.
 
         current=None (первый switch), current_provider→{a,b} →
-        stop/cleanup для a,b.
+        stop_all/cleanup для a,b.
         """
         proc_dicts = {"new_x": {"class": "X"}}
         p = _make_planner(
@@ -281,10 +294,11 @@ class TestPlannerCurrentProvider:
         # diff с current=None (первый switch — topology менеджер не видел boot)
         cmds = p.commands({"has_changes": True}, {"desired": True})
 
-        stop_names = {c["process_name"] for c in cmds if c["cmd"] == "process.stop"}
+        stop_all_cmds = [c for c in cmds if c["cmd"] == "process.stop_all"]
         cleanup_names = {c["process_name"] for c in cmds if c["cmd"] == "process.cleanup"}
 
-        assert stop_names == {"boot_a", "boot_b"}
+        assert len(stop_all_cmds) == 1
+        assert set(stop_all_cmds[0]["process_names"]) == {"boot_a", "boot_b"}
         assert cleanup_names == {"boot_a", "boot_b"}
 
 
@@ -304,29 +318,39 @@ class TestPlannerConsistency:
         )
         cmds = p.commands({"has_changes": True}, {})
 
-        all_names = {c["process_name"] for c in cmds}
+        # stop_all содержит old-имена, per-process — new-имена
+        stop_all_names = set()
+        per_process_names = set()
+        for c in cmds:
+            if c["cmd"] == "process.stop_all":
+                stop_all_names.update(c["process_names"])
+            elif "process_name" in c:
+                per_process_names.add(c["process_name"])
+        all_names = stop_all_names | per_process_names
         assert all_names == {"o1", "o2", "n1", "n2"}
 
     def test_empty_current_only_new(self) -> None:
-        """Пустой current → только provision/create/start для новых."""
+        """Пустой current → нет stop_all, только provision/create/start для новых."""
         proc_dicts = {"x": {"class": "X"}}
         p = _make_planner(proc_dicts=proc_dicts, current=set())
         cmds = p.commands({"has_changes": True}, {})
 
         cmd_types = {c["cmd"] for c in cmds}
+        assert "process.stop_all" not in cmd_types
         assert "process.stop" not in cmd_types
         assert "process.cleanup" not in cmd_types
         assert "process.provision" in cmd_types
         assert "process.create" in cmd_types
         assert "process.start" in cmd_types
 
-    def test_empty_new_only_stop_cleanup(self) -> None:
-        """Пустой proc_dicts → только stop/cleanup для старых."""
+    def test_empty_new_only_stop_all_cleanup(self) -> None:
+        """Пустой proc_dicts → только stop_all + cleanup для старых."""
         p = _make_planner(proc_dicts={}, current={"old_1"})
         cmds = p.commands({"has_changes": True}, {})
 
         cmd_types = {c["cmd"] for c in cmds}
-        assert "process.stop" in cmd_types
+        assert "process.stop_all" in cmd_types
+        assert "process.stop" not in cmd_types
         assert "process.cleanup" in cmd_types
         assert "process.provision" not in cmd_types
         assert "process.create" not in cmd_types
@@ -366,7 +390,7 @@ class TestPlannerObservability:
 
         metric_names = [m[0] for m in fake_stats.metrics]
         assert "planner.commands" in metric_names
-        # Значение = количество команд (1 stop + 1 cleanup + 2 provision + 2 create + 2 start = 8)
+        # Значение = количество команд (1 stop_all + 1 cleanup + 2 provision + 2 create + 2 start = 8)
         planner_metric = [m for m in fake_stats.metrics if m[0] == "planner.commands"]
         assert planner_metric[0][1] == 8
 

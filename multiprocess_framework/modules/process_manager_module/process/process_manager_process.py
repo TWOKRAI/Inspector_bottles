@@ -237,6 +237,7 @@ class ProcessManagerProcess(ProcessModule):
         self._topology_manager = TopologyManager(
             create_process_fn=self._topology_create,
             stop_process_fn=self._topology_stop,
+            stop_all_process_fn=self._topology_stop_all,
             cleanup_process_fn=self._topology_cleanup,
             provision_process_fn=self._topology_provision,
             start_process_fn=self._topology_start,
@@ -1121,6 +1122,19 @@ class ProcessManagerProcess(ProcessModule):
         Делегирует в ``stop_process`` (per-process stop через stop_event).
         """
         return self.stop_process(name)
+
+    def _topology_stop_all(self, names: list[str]) -> bool:
+        """Сид stop_all: остановить несколько процессов ПАРАЛЛЕЛЬНО (bulk).
+
+        Паритет дороги B: ``stop_many`` с одним общим таймаутом на все
+        процессы, а не N×timeout последовательно. Без этого switch
+        рецепта занимает N×5с (4 процесса → 20с вместо ~5с).
+        """
+        if not names:
+            return True
+        timeout = float(self.get_config("stop_process_timeout") or 5.0)
+        results = self._process_registry.stop_many(list(names), timeout)
+        return all(results.get(n, False) for n in names)
 
     def _topology_cleanup(self, name: str) -> bool:
         """Сид cleanup: снять с реестра + освободить SHM + удалить конфиг.

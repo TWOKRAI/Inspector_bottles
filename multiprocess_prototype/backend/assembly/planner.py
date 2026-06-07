@@ -109,7 +109,10 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
         """Сгенерировать 5-фазный список команд для полной замены.
 
         **Порядок = исполнение** (плоский цикл TopologyManager воспроизводит
-        двухфазность boot): stop → cleanup → provision → create → start.
+        двухфазность boot): stop_all → cleanup → provision → create → start.
+
+        **Фаза stop — bulk:** одна команда ``process.stop_all`` вместо N×``process.stop``
+        (паритет stop_many дороги B). Без этого N×timeout (4 проц × 5с = 20с).
 
         **Валидация ДО эмиссии:** ``proc_dicts_fn`` вызывается первым; если
         blueprint невалиден (``BlueprintInvalid``) — ни одной stop-команды
@@ -139,9 +142,9 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
         # 3. Собрать команды по 5 фазам
         cmds: list[dict] = []
 
-        # Фаза A: stop старых
-        for name in sorted(old):
-            cmds.append({"cmd": "process.stop", "process_name": name})
+        # Фаза A: bulk-остановка старых (одна команда, параллельный stop_many)
+        if old:
+            cmds.append({"cmd": "process.stop_all", "process_names": sorted(old)})
 
         # Фаза B: cleanup старых
         for name in sorted(old):
@@ -172,7 +175,8 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
             cmds.append({"cmd": "process.start", "process_name": name})
 
         self._log_info(
-            f"full-replace commands: {len(cmds)} (stop={len(old)}, new={len(new)}, protected={len(protected)})"
+            f"full-replace commands: {len(cmds)} (stop_all={'1' if old else '0'}, "
+            f"old={len(old)}, new={len(new)}, protected={len(protected)})"
         )
         self._record_metric("planner.commands", len(cmds))
 

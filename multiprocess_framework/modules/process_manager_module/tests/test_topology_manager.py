@@ -1,7 +1,8 @@
-"""Тесты TopologyManager — 5 типов команд, apply, observability (Task 2.0).
+"""Тесты TopologyManager — 6 типов команд, apply, observability (Task 2.0).
 
 Покрытие:
-- 5 типов команд: stop, cleanup, provision, create, start — каждый зовёт свой сид.
+- 6 типов команд: stop_all, stop, cleanup, provision, create, start — каждый зовёт свой сид.
+- process.stop_all: bulk-параллельная остановка (паритет stop_many дороги B).
 - apply: порядок исполнения, коммит _current_topology при успехе.
 - apply: НЕ коммитит при exception (hard-fail).
 - apply: НЕ коммитит при soft-fail (сид вернул success=False).
@@ -72,6 +73,7 @@ def _make_seeds():
     """Создать fake-сиды — MagicMock'и, чтобы следить за вызовами."""
     return {
         "stop": MagicMock(return_value=True),
+        "stop_all": MagicMock(return_value=True),
         "cleanup": MagicMock(return_value=True),
         "provision": MagicMock(return_value=True),
         "create": MagicMock(return_value=True),
@@ -93,6 +95,7 @@ def _make_tm(
     return TopologyManager(
         create_process_fn=s.get("create"),
         stop_process_fn=s.get("stop"),
+        stop_all_process_fn=s.get("stop_all"),
         cleanup_process_fn=s.get("cleanup"),
         provision_process_fn=s.get("provision"),
         start_process_fn=s.get("start"),
@@ -129,6 +132,32 @@ class TestTopologyManagerLifecycle:
 
 class TestExecuteCommand:
     """Каждый тип команды вызывает ровно свой сид."""
+
+    def test_process_stop_all_success(self) -> None:
+        """process.stop_all вызывает stop_all_process_fn с list имён."""
+        seeds = _make_seeds()
+        tm = _make_tm(seeds)
+        result = tm._execute_command({"cmd": "process.stop_all", "process_names": ["A", "B"]})
+        assert result["success"] is True
+        assert result["process_names"] == ["A", "B"]
+        seeds["stop_all"].assert_called_once_with(["A", "B"])
+        # Одиночный stop НЕ вызван
+        seeds["stop"].assert_not_called()
+
+    def test_process_stop_all_failure(self) -> None:
+        """stop_all_process_fn вернул False → success=False."""
+        seeds = _make_seeds()
+        seeds["stop_all"].return_value = False
+        tm = _make_tm(seeds)
+        result = tm._execute_command({"cmd": "process.stop_all", "process_names": ["X"]})
+        assert result["success"] is False
+
+    def test_process_stop_all_not_configured(self) -> None:
+        """process.stop_all без сида → success=False, error."""
+        tm = TopologyManager()
+        result = tm._execute_command({"cmd": "process.stop_all", "process_names": ["A"]})
+        assert result["success"] is False
+        assert "not configured" in result.get("error", "")
 
     def test_process_stop(self) -> None:
         seeds = _make_seeds()
@@ -258,8 +287,60 @@ class TestApplyOrdering:
             "start:B",
         ]
 
-    def test_full_five_phase_order(self) -> None:
-        """Полный 5-фазный цикл: stop→cleanup→provision→create→start."""
+    def test_full_five_phase_order_with_stop_all(self) -> None:
+        """Полный 5-фазный цикл: stop_all → cleanup → provision → create → start."""
+        call_log: list[str] = []
+
+        def stop_all_fn(names):
+            call_log.append(f"stop_all:{','.join(sorted(names))}")
+            return True
+
+        def make_fn(label):
+            def fn(name, *args):
+                call_log.append(f"{label}:{name}")
+                return True
+
+            return fn
+
+        commands = [
+            {"cmd": "process.stop_all", "process_names": ["old_1", "old_2"]},
+            {"cmd": "process.cleanup", "process_name": "old_1"},
+            {"cmd": "process.cleanup", "process_name": "old_2"},
+            {"cmd": "process.provision", "process_name": "new_1", "proc_dict": {}},
+            {"cmd": "process.provision", "process_name": "new_2", "proc_dict": {}},
+            {"cmd": "process.create", "process_name": "new_1", "proc_dict": {}},
+            {"cmd": "process.create", "process_name": "new_2", "proc_dict": {}},
+            {"cmd": "process.start", "process_name": "new_1"},
+            {"cmd": "process.start", "process_name": "new_2"},
+        ]
+
+        tm = TopologyManager(
+            stop_all_process_fn=stop_all_fn,
+            stop_process_fn=make_fn("stop"),
+            cleanup_process_fn=make_fn("cleanup"),
+            provision_process_fn=make_fn("provision"),
+            create_process_fn=make_fn("create"),
+            start_process_fn=make_fn("start"),
+            diff_fn=MagicMock(return_value={"has_changes": True}),
+            commands_fn=MagicMock(return_value=commands),
+        )
+
+        result = tm.apply({"desired": True})
+        assert result["success"] is True
+        assert call_log == [
+            "stop_all:old_1,old_2",
+            "cleanup:old_1",
+            "cleanup:old_2",
+            "provision:new_1",
+            "provision:new_2",
+            "create:new_1",
+            "create:new_2",
+            "start:new_1",
+            "start:new_2",
+        ]
+
+    def test_full_five_phase_order_legacy_per_process_stop(self) -> None:
+        """Back-compat: per-process stop (legacy) тоже работает."""
         call_log: list[str] = []
 
         def make_fn(label):
@@ -542,6 +623,12 @@ class TestObservability:
 
 class TestSeedNotConfigured:
     """Команда при отсутствии соответствующего сида → success False (не exception)."""
+
+    def test_stop_all_without_seed(self) -> None:
+        tm = TopologyManager()
+        result = tm._execute_command({"cmd": "process.stop_all", "process_names": ["A"]})
+        assert result["success"] is False
+        assert "not configured" in result.get("error", "")
 
     def test_stop_without_seed(self) -> None:
         tm = TopologyManager()

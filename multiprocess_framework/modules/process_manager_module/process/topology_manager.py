@@ -14,8 +14,9 @@
   get()                 — получить текущую topology как dict
   diff(topology_dict)   — dry-run: вычислить diff без применения
 
-5 типов команд:
-  process.stop       — остановить процесс (halt)
+6 типов команд:
+  process.stop_all   — остановить несколько процессов ПАРАЛЛЕЛЬНО (bulk)
+  process.stop       — остановить один процесс (halt, back-compat)
   process.cleanup    — снять с реестра + освободить SHM + удалить конфиг (free)
   process.provision  — зарегистрировать очереди + аллоцировать SHM (provision)
   process.create     — создать экземпляр БЕЗ старта (instantiate)
@@ -50,6 +51,9 @@ class TopologyManager(BaseManager, ObservableMixin):
     Args:
         create_process_fn: (name, proc_dict) -> bool — создать экземпляр БЕЗ старта.
         stop_process_fn: (name) -> bool — остановить процесс.
+        stop_all_process_fn: (names: list[str]) -> bool — остановить несколько
+            процессов ПАРАЛЛЕЛЬНО (bulk). Паритет stop_many дороги B: один
+            общий таймаут на все, а не N×timeout последовательно.
         cleanup_process_fn: (name) -> bool — снять с реестра + освободить SHM + конфиг.
         provision_process_fn: (name, proc_dict) -> bool — очереди + SHM.
         start_process_fn: (name) -> bool — запустить процесс.
@@ -67,6 +71,7 @@ class TopologyManager(BaseManager, ObservableMixin):
         *,
         create_process_fn: Callable[..., Any] | None = None,
         stop_process_fn: Callable[[str], bool] | None = None,
+        stop_all_process_fn: Callable[[list[str]], bool] | None = None,
         cleanup_process_fn: Callable[[str], bool] | None = None,
         provision_process_fn: Callable[..., bool] | None = None,
         start_process_fn: Callable[[str], bool] | None = None,
@@ -85,6 +90,7 @@ class TopologyManager(BaseManager, ObservableMixin):
         )
         self._create_process = create_process_fn
         self._stop_process = stop_process_fn
+        self._stop_all_process = stop_all_process_fn
         self._cleanup_process = cleanup_process_fn
         self._provision_process = provision_process_fn
         self._start_process = start_process_fn
@@ -123,6 +129,7 @@ class TopologyManager(BaseManager, ObservableMixin):
         commands_fn: CommandsFn | None = None,
         create_process_fn: Callable[..., Any] | None = None,
         stop_process_fn: Callable[[str], bool] | None = None,
+        stop_all_process_fn: Callable[[list[str]], bool] | None = None,
         cleanup_process_fn: Callable[[str], bool] | None = None,
         provision_process_fn: Callable[..., bool] | None = None,
         start_process_fn: Callable[[str], bool] | None = None,
@@ -136,6 +143,8 @@ class TopologyManager(BaseManager, ObservableMixin):
             self._create_process = create_process_fn
         if stop_process_fn is not None:
             self._stop_process = stop_process_fn
+        if stop_all_process_fn is not None:
+            self._stop_all_process = stop_all_process_fn
         if cleanup_process_fn is not None:
             self._cleanup_process = cleanup_process_fn
         if provision_process_fn is not None:
@@ -247,10 +256,12 @@ class TopologyManager(BaseManager, ObservableMixin):
     # -------------------------------------------------------------------------
 
     def _execute_command(self, cmd: dict) -> dict:
-        """Выполнить одну команду. Возвращает ``{cmd, process_name, success}``.
+        """Выполнить одну команду. Возвращает ``{cmd, ..., success}``.
 
-        Поддерживает 5 типов:
-        - ``process.stop`` → ``stop_process_fn(name)``
+        Поддерживает 6 типов:
+        - ``process.stop_all`` → ``stop_all_process_fn(names)`` — bulk-параллельная
+          остановка (паритет stop_many дороги B: один общий таймаут, а не N×timeout).
+        - ``process.stop`` → ``stop_process_fn(name)`` — single (back-compat).
         - ``process.cleanup`` → ``cleanup_process_fn(name)``
         - ``process.provision`` → ``provision_process_fn(name, proc_dict)``
         - ``process.create`` → ``create_process_fn(name, proc_dict)``
@@ -263,7 +274,22 @@ class TopologyManager(BaseManager, ObservableMixin):
         process_name = cmd.get("process_name", "")
 
         try:
-            if cmd_type == "process.stop":
+            if cmd_type == "process.stop_all":
+                if self._stop_all_process is None:
+                    return {
+                        "cmd": cmd_type,
+                        "success": False,
+                        "error": "stop_all_process_fn not configured",
+                    }
+                names = cmd.get("process_names", [])
+                success = self._stop_all_process(names)
+                return {
+                    "cmd": cmd_type,
+                    "process_names": names,
+                    "success": bool(success),
+                }
+
+            elif cmd_type == "process.stop":
                 if self._stop_process is None:
                     return {
                         "cmd": cmd_type,

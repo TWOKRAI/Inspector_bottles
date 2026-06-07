@@ -105,6 +105,13 @@ class MockProcessRegistry:
         proc._alive = False
         return True
 
+    def stop_many(self, names: list[str], timeout: float = 5.0) -> dict[str, bool]:
+        """Параллельная остановка (мок: синхронно помечает остановленными)."""
+        results: dict[str, bool] = {}
+        for name in names:
+            results[name] = self.stop_one(name, timeout)
+        return results
+
     @property
     def os_processes(self) -> list[MockProcess]:
         return list(self._processes.values())
@@ -176,15 +183,16 @@ class FakePlanner:
         return {"has_changes": True}
 
     def commands(self, diff_result: dict, desired: dict) -> list[dict]:
-        """5-фазные команды: stop old -> cleanup old -> provision new -> create new -> start new."""
+        """5-фазные команды: stop_all old -> cleanup old -> provision new -> create new -> start new."""
         proc_dicts = self._build_proc_dicts(desired)
         protected = self._pm._get_protected_names()
         old = set(self._pm._process_configs) - protected
         new = [n for n in proc_dicts if n not in protected]
 
         cmds: list[dict] = []
-        for name in sorted(old):
-            cmds.append({"cmd": "process.stop", "process_name": name})
+        # Фаза A: bulk-остановка (одна команда, параллельный stop_many)
+        if old:
+            cmds.append({"cmd": "process.stop_all", "process_names": sorted(old)})
         for name in sorted(old):
             cmds.append({"cmd": "process.cleanup", "process_name": name})
         for name in new:
@@ -276,6 +284,7 @@ def make_pm(
     pm._topology_manager = TopologyManager(
         create_process_fn=pm._topology_create,
         stop_process_fn=pm._topology_stop,
+        stop_all_process_fn=pm._topology_stop_all,
         cleanup_process_fn=pm._topology_cleanup,
         provision_process_fn=pm._topology_provision,
         start_process_fn=pm._topology_start,
