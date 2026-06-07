@@ -46,6 +46,12 @@ def unwrap_recipe(raw: dict) -> dict:
     ``processes:`` на верхнем уровне. Эта функция разворачивает рецепт в плоскую
     топологию (тот же dict-контракт, что грузит ``SystemBuilder``), оставляя сырые
     топологии без изменений (backward-compat).
+
+    Ключи на границе (Dict-at-Boundary):
+      - ``displays`` (в bp) — **привязки** (list[dict], node_id/display_id),
+        секция ``blueprint.displays`` рецепта.
+      - ``display_definitions`` — **определения** дисплеев (list[dict], id/name/width/...),
+        top-level секция ``displays`` рецепта. Не путать с привязками.
     """
     if not (isinstance(raw, dict) and "blueprint" in raw and "processes" not in raw):
         return raw
@@ -53,6 +59,10 @@ def unwrap_recipe(raw: dict) -> dict:
     # display_bindings рецепта (node_id/display_id) == секция displays топологии.
     if raw.get("display_bindings") and not bp.get("displays"):
         bp["displays"] = raw["display_bindings"]
+    # Определения дисплеев (top-level displays рецепта) → display_definitions на границе.
+    # display_definitions — list[dict] (Dict-at-Boundary, НЕ Pydantic).
+    if raw.get("displays"):
+        bp["display_definitions"] = list(raw["displays"])
     return bp
 
 
@@ -100,16 +110,23 @@ def merge_topologies(base_dict: dict, pipeline_dict: dict) -> dict:
     # Без этого display-боксы из pipeline-топологии терялись бы при merge, и в
     # GUI-редакторе пайплайн не имел бы Display-ноды-стока на выходе.
     merged_displays = list(base_dict.get("displays") or []) + list(pipeline_dict.get("displays") or [])
+    # display_definitions (определения дисплеев) — суммируются из фундамента и pipeline.
+    # Простая конкатенация; дедупликация по id — задача Task 1.2.
+    merged_defs = list(base_dict.get("display_definitions") or []) + list(
+        pipeline_dict.get("display_definitions") or []
+    )
     # metadata (gui_positions и пр.) — pipeline переопределяет фундамент.
     merged_metadata = {**(base_dict.get("metadata") or {}), **(pipeline_dict.get("metadata") or {})}
 
-    merged = {
+    merged: dict[str, Any] = {
         "name": pipeline_dict.get("name", "pipeline"),
         "description": pipeline_dict.get("description", ""),
         "processes": merged_procs,
         "wires": merged_wires,
         "displays": merged_displays,
     }
+    if merged_defs:
+        merged["display_definitions"] = merged_defs
     if merged_metadata:
         merged["metadata"] = merged_metadata
     return merged

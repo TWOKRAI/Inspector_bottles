@@ -143,32 +143,12 @@ def run_gui(process: "GuiProcess") -> None:
     except Exception as e:
         process._log_warning(f"Не удалось выполнить service discovery: {e}", module="startup")
 
-    # 3b-pre2. Preload DisplayRegistry из YAML до создания AppServices (Task C.1.5).
-    #
-    # Phase D adapter ожидает заполненный singleton. Без этого блока
-    # services.displays.list_displays() вернёт пустой tuple до открытия DisplaysTab.
-    # Idempotent: DisplayRegistry — singleton; повторный register() от DisplaysTab
-    # будет отловлен через ValueError (дубликат) и проигнорирован.
+    # 3b-pre2. DisplayRegistry singleton — создаётся пустым; наполняется ниже
+    # (после загрузки topology, шаг 3a) из display_definitions активного рецепта.
+    # Task 2.2 displays-in-recipe: displays.yaml больше не читается при boot.
     from multiprocess_framework.modules.display_module import DisplayRegistry as _DisplayRegistry
-    from multiprocess_prototype.backend.config.displays_loader import (
-        load_displays_config,
-        displays_config_to_registry,
-    )
 
-    _displays_yaml_path = PROJECT_ROOT / "multiprocess_prototype" / "backend" / "config" / "displays.yaml"
     _display_registry = _DisplayRegistry()
-    if _displays_yaml_path.exists():
-        _displays_config = load_displays_config(_displays_yaml_path)
-        displays_config_to_registry(_displays_config, _display_registry)
-        process._log_info(
-            f"display_registry: preloaded {len(_displays_config.displays)} дисплей(ов) из {_displays_yaml_path.name}",
-            module="startup",
-        )
-    else:
-        process._log_info(
-            f"display_registry: {_displays_yaml_path.name} не найден — singleton инициализирован пустым",
-            module="startup",
-        )
 
     # 3a. Загрузить topology для GUI + создать EventBus и TopologyRepositoryStore (G.3).
     # Store владеет topology dict и публикует TopologyReplaced на каждую мутацию.
@@ -195,6 +175,23 @@ def run_gui(process: "GuiProcess") -> None:
     except Exception as e:
         process._log_warning(f"Не удалось загрузить topology: {e}", module="startup")
         _topology_dict = {}
+
+    # 3a.0. Наполнить DisplayRegistry из display_definitions активного рецепта
+    # (Task 2.2 displays-in-recipe). Topology уже содержит display_definitions
+    # после unwrap_recipe + merge_topologies (Task 1.1). Если рецепт не имеет
+    # определений дисплеев — реестр остаётся пустым (корректно).
+    _boot_display_defs = _topology_dict.get("display_definitions") or []
+    if _boot_display_defs:
+        _display_registry.reload(_boot_display_defs)
+        process._log_info(
+            f"display_registry: recipe-driven boot — {len(_boot_display_defs)} определений из активного рецепта",
+            module="startup",
+        )
+    else:
+        process._log_info(
+            "display_registry: активный рецепт не содержит display_definitions — реестр пуст",
+            module="startup",
+        )
 
     event_bus = QtEventBus()
     topology_store = TopologyRepositoryStore(_topology_dict, events=event_bus)

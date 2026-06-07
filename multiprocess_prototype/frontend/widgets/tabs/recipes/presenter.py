@@ -349,11 +349,19 @@ class RecipesPresenter:
                 self._log_error(f"RecipesPresenter.on_set_active: не удалось прочитать '{target_slug}'")
                 return
 
-            # Dict at Boundary: передаём dict, не Pydantic-модель
-            blueprint_dict: dict = recipe_data.get("blueprint", {})
+            # Task 2.2 displays-in-recipe: если рецепт v3 (top-level blueprint) —
+            # передаём ПОЛНЫЙ raw-dict, backend-овский unwrap_recipe извлечёт
+            # display_definitions из top-level «displays». Иначе (v2/plain) —
+            # только blueprint dict (backward compat).
+            if "blueprint" in recipe_data and "processes" not in recipe_data:
+                # v3 рецепт (есть blueprint, нет top-level processes)
+                topology_source: dict = recipe_data
+            else:
+                # v2/plain: извлечь blueprint
+                topology_source = recipe_data.get("blueprint") or recipe_data.get("data", {}).get("blueprint") or {}
 
             try:
-                result = self._apply_topology_fn(blueprint_dict)
+                result = self._apply_topology_fn(topology_source)
             except Exception as exc:  # noqa: BLE001
                 self._view.show_error(f"Ошибка применения топологии: {exc}")
                 self._log_error(f"RecipesPresenter.on_set_active: исключение apply_topology: {exc}")

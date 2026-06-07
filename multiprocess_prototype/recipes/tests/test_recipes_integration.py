@@ -119,14 +119,16 @@ def test_create_activate_recipe_smoke(tmp_path: Path) -> None:
     # Act: активировать рецепт через presenter
     presenter.on_set_active(slug)
 
-    # Assert: apply_topology_fn вызвана с blueprint dict
+    # Assert: apply_topology_fn вызвана с полным raw-dict рецепта (Task 2.2).
+    # Рецепт v2/v3 имеет top-level blueprint → RecipesPresenter передаёт полный dict,
+    # backend-овский unwrap_recipe извлечёт blueprint + display_definitions.
     assert len(_captured_blueprint) == 1, "apply_topology_fn должна быть вызвана ровно один раз"
     called_bp = _captured_blueprint[0]
     assert isinstance(called_bp, dict), "apply_topology_fn должна получить dict"
-    # Blueprint содержит processes (список процессов)
-    assert "processes" in called_bp, "blueprint dict должен содержать ключ 'processes'"
-    assert len(called_bp["processes"]) == 1, "должен быть один процесс в blueprint"
-    assert called_bp["processes"][0]["process_name"] == "worker_1"
+    # Полный рецепт: blueprint внутри
+    assert "blueprint" in called_bp, "raw-dict рецепта должен содержать ключ 'blueprint'"
+    assert len(called_bp["blueprint"]["processes"]) == 1, "должен быть один процесс в blueprint"
+    assert called_bp["blueprint"]["processes"][0]["process_name"] == "worker_1"
 
 
 # ---------------------------------------------------------------------------

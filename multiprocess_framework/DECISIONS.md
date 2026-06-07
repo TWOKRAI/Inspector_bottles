@@ -2338,7 +2338,7 @@
 | `chain_module` | [`modules/chain_module/DECISIONS.md`](modules/chain_module/DECISIONS.md) | Command & Work | ADR-CHN-001…008 (Protocol-based decoupling от доменных типов, ..., Публичный IChainLogger Protocol для исполнителей) |
 | `actions_module` | [`modules/actions_module/DECISIONS.md`](modules/actions_module/DECISIONS.md) | Command & Work |  |
 | `service_module` | [`modules/service_module/DECISIONS.md`](modules/service_module/DECISIONS.md) | Services & Lifecycle | ADR-SVC-001…003 (Singleton ServiceRegistry через `__new__` + Lock, ..., `ServiceRegistry` хранит классы, не экземпляры) |
-| `display_module` | [`modules/display_module/DECISIONS.md`](modules/display_module/DECISIONS.md) | Services & Lifecycle | ADR-DM-001…003 (DisplayEntry generic: без vision-полей, ..., SHM cleanup при unregister — только warning) |
+| `display_module` | [`modules/display_module/DECISIONS.md`](modules/display_module/DECISIONS.md) | Services & Lifecycle | ADR-DM-001…004 (DisplayEntry generic: без vision-полей, ..., `reload` = только метаданные, render-поля игнорируются) |
 <!-- ADR-INDEX:END -->
 
 ---

@@ -112,4 +112,18 @@ blueprint:
   displays:
     - node_id: painter.contour_draw.frame
       display_id: main
-      display_name: Основной дисплей
+displays:
+  - id: main
+    name: Основной дисплей
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none

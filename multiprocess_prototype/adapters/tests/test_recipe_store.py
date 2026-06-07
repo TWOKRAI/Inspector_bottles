@@ -678,11 +678,17 @@ def test_save_raw_preserves_comments_and_top_level(store: Any, recipe_dir: Path)
 
 
 def test_save_raw_roundtrip_parses_as_recipe(store: Any, recipe_dir: Path) -> None:
-    """Файл после save_raw валиден для Recipe.from_dict (активация не сломается)."""
+    """Файл после save_raw валиден для Recipe.from_dict (активация не сломается).
+
+    Task 1.2: если blueprint.displays ссылается на display_id "main",
+    секция displays рецепта обязана содержать определение с id="main".
+    """
     slug = "rt"
     _write_yaml(recipe_dir / f"{slug}.yaml", _minimal_recipe_dict())
 
     raw = store.read_raw(slug)
+    # Добавляем определение дисплея "main" (Task 1.2: валидация ссылок)
+    raw["displays"] = [{"id": "main", "name": "Main"}]
     raw["blueprint"] = {
         "processes": [{"process_name": "cam", "plugins": [{"plugin_name": "capture"}]}],
         "wires": [],
@@ -694,3 +700,162 @@ def test_save_raw_roundtrip_parses_as_recipe(store: Any, recipe_dir: Path) -> No
     recipe = Recipe.from_dict(reloaded)  # не должно бросать ValidationError
     assert recipe.blueprint.processes[0].process_name == "cam"
     assert recipe.blueprint.displays[0].display_id == "main"
+
+
+# ===========================================================================
+# Task 1.3: _denormalize + RecipeStore round-trip (секция displays)
+# ===========================================================================
+
+
+def _recipe_with_displays() -> Recipe:
+    """Создать Recipe с одним DisplayDefinition (синтетический, без привязок)."""
+    from multiprocess_prototype.domain.entities.display import DisplayDefinition
+
+    display_def = DisplayDefinition(
+        id="main",
+        name="Основной дисплей",
+        width=1280,
+        height=720,
+        format="BGR",
+        fps_limit=30.0,
+        ring_buffer_blocks=3,
+        fit="contain",
+        scale=100,
+        rotate=0,
+        flip="none",
+        crop=None,
+    )
+    base = _minimal_recipe_dict()
+    # displays — top-level секция определений (НЕ blueprint.displays = привязки)
+    base["displays"] = [display_def.to_dict()]
+    return Recipe.from_dict(base)
+
+
+# ---------------------------------------------------------------------------
+# Тест 25 (Task 1.3): write → read round-trip сохраняет секцию displays
+# ---------------------------------------------------------------------------
+
+
+def test_write_read_roundtrip_preserves_displays(
+    store: RecipeStoreFromManager,
+    recipe_dir: Path,
+) -> None:
+    """write(slug, recipe_with_displays) → read(slug).displays совпадает с исходным.
+
+    Проверяет, что _denormalize не теряет секцию displays (DisplayDefinition).
+    displays — top-level, НЕ внутри blueprint.
+    """
+    from multiprocess_prototype.domain.entities.display import DisplayDefinition
+
+    original = _recipe_with_displays()
+    slug = "displays-roundtrip"
+
+    store.write(slug, original)
+    loaded = store.read(slug)
+
+    assert loaded is not None, "Рецепт должен читаться после write"
+    assert len(loaded.displays) == 1, "Должно быть ровно одно определение дисплея"
+
+    d = loaded.displays[0]
+    assert isinstance(d, DisplayDefinition)
+    assert d.id == "main"
+    assert d.name == "Основной дисплей"
+    assert d.width == 1280
+    assert d.height == 720
+    assert d.format == "BGR"
+    assert d.fit == "contain"
+    assert d.scale == 100
+    assert d.rotate == 0
+    assert d.flip == "none"
+    assert d.crop is None
+
+
+# ---------------------------------------------------------------------------
+# Тест 26 (Task 1.3): displays — top-level в YAML (не внутри blueprint)
+# ---------------------------------------------------------------------------
+
+
+def test_displays_is_top_level_in_yaml(
+    store: RecipeStoreFromManager,
+    recipe_dir: Path,
+) -> None:
+    """После write() YAML содержит top-level ключ displays (не внутри blueprint).
+
+    Проверяет корректное позиционирование секции displays в денормализованном YAML.
+    """
+    original = _recipe_with_displays()
+    slug = "displays-toplevel"
+
+    store.write(slug, original)
+
+    # Читаем raw YAML (не через adapter) для проверки структуры файла
+    raw = yaml.safe_load((recipe_dir / f"{slug}.yaml").read_text(encoding="utf-8"))
+
+    # displays обязан быть на верхнем уровне
+    assert "displays" in raw, "displays должен быть top-level ключом в YAML"
+    assert isinstance(raw["displays"], list), "displays должен быть списком"
+    assert len(raw["displays"]) == 1
+
+    first = raw["displays"][0]
+    assert first["id"] == "main"
+    assert first["width"] == 1280
+
+    # Top-level displays — это ОПРЕДЕЛЕНИЯ (имеют ключ "id").
+    # blueprint.displays — это ПРИВЯЗКИ (имеют ключ "node_id") — это отдельная секция.
+    # Проверяем, что top-level displays не является секцией привязок.
+    assert "id" in first, "top-level displays должен содержать поля определения (id, width, ...)"
+    assert "node_id" not in first, "top-level displays НЕ должен содержать привязки (node_id) — это blueprint.displays"
+
+
+# ---------------------------------------------------------------------------
+# Тест 27 (Task 1.3): порядок ключей — displays идёт перед blueprint
+# ---------------------------------------------------------------------------
+
+
+def test_displays_appears_before_blueprint_in_yaml(
+    store: RecipeStoreFromManager,
+    recipe_dir: Path,
+) -> None:
+    """После write() в YAML ключ displays стоит перед blueprint (читаемость).
+
+    Это требование к _denormalize: meta → displays → blueprint → остальные.
+    """
+    original = _recipe_with_displays()
+    slug = "displays-order"
+
+    store.write(slug, original)
+
+    text = (recipe_dir / f"{slug}.yaml").read_text(encoding="utf-8")
+    pos_displays = text.find("\ndisplays:")
+    pos_blueprint = text.find("\nblueprint:")
+
+    # Оба ключа должны присутствовать
+    assert pos_displays != -1, "displays должен присутствовать в YAML"
+    assert pos_blueprint != -1, "blueprint должен присутствовать в YAML"
+
+    # displays должен стоять раньше blueprint
+    assert pos_displays < pos_blueprint, "displays должен идти перед blueprint в YAML для читаемости"
+
+
+# ---------------------------------------------------------------------------
+# Тест 28 (Task 1.3): рецепт без displays — существующий YAML не ломается
+# ---------------------------------------------------------------------------
+
+
+def test_write_without_displays_does_not_break(
+    store: RecipeStoreFromManager,
+    recipe_dir: Path,
+) -> None:
+    """write() рецепта без секции displays работает без ошибок.
+
+    Edge case: рецепт без displays → пустой список или отсутствие ключа,
+    не ломает read() существующих рецептов.
+    """
+    original = _make_recipe()  # без displays (по умолчанию пустой tuple)
+    slug = "no-displays"
+
+    store.write(slug, original)
+    loaded = store.read(slug)
+
+    assert loaded is not None
+    assert loaded.displays == (), "Пустой рецепт должен иметь пустой кортеж displays"

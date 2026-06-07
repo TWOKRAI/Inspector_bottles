@@ -21,12 +21,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 from typing_extensions import Annotated, Self
 
 from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
 
-from .display import DisplayInstance
+from .display import DisplayDefinition, DisplayInstance
 from .topology import Topology
 
 
@@ -55,7 +55,7 @@ class RecipeMeta(SchemaBase):
 
 
 class Recipe(SchemaBase):
-    """Рецепт системы: blueprint топологии + активные сервисы + привязки дисплеев."""
+    """Рецепт системы: blueprint топологии + активные сервисы + определения/привязки дисплеев."""
 
     model_config = ConfigDict(
         frozen=True,
@@ -70,6 +70,10 @@ class Recipe(SchemaBase):
     active_services: Annotated[
         tuple[str, ...],
         FieldMeta("Список активных сервисов (service_id)"),
+    ] = ()
+    displays: Annotated[
+        tuple[DisplayDefinition, ...],
+        FieldMeta("Определения дисплеев рецепта (SHM + render)"),
     ] = ()
     display_bindings: Annotated[
         tuple[DisplayInstance, ...],
@@ -98,6 +102,25 @@ class Recipe(SchemaBase):
         """Конвертирует list → tuple."""
         if isinstance(v, list):
             return tuple(v)
+        return v  # type: ignore[return-value]
+
+    @field_validator("displays", mode="before")
+    @classmethod
+    def _coerce_displays(cls, v: Any) -> tuple[DisplayDefinition, ...]:
+        """Конвертирует list[dict] → tuple[DisplayDefinition, ...].
+
+        Принимает list/tuple элементов: dict, DisplayDefinition или Pydantic-raw.
+        """
+        if isinstance(v, (list, tuple)):
+            items: list[DisplayDefinition] = []
+            for item in v:
+                if isinstance(item, dict):
+                    items.append(DisplayDefinition.from_dict(item))
+                elif isinstance(item, DisplayDefinition):
+                    items.append(item)
+                else:
+                    items.append(DisplayDefinition.model_validate(item))
+            return tuple(items)
         return v  # type: ignore[return-value]
 
     @field_validator("display_bindings", mode="before")
@@ -134,6 +157,39 @@ class Recipe(SchemaBase):
                     result[key] = val  # type: ignore[assignment]
             return result
         return v  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # Инварианты уровня рецепта (Task 1.2)
+    # ------------------------------------------------------------------
+
+    @model_validator(mode="after")
+    def _validate_recipe_invariants(self) -> "Recipe":
+        """Проверяет инварианты целостности рецепта.
+
+        1. Уникальность displays[].id в пределах рецепта.
+        2. Каждый display_id в blueprint.displays присутствует в recipe.displays.
+           Висячие ссылки (display_id без определения) → ValueError.
+
+        Edge cases:
+          - displays пуст + есть привязки → ошибка (висячие ссылки).
+          - привязок нет → ok (дисплей без привязки допустим, раздел 6.6).
+        """
+        # 1. Уникальность id
+        seen_ids: set[str] = set()
+        for definition in self.displays:
+            if definition.id in seen_ids:
+                raise ValueError(f"Дубль display id: {definition.id}")
+            seen_ids.add(definition.id)
+
+        # 2. Валидация ссылок: blueprint.displays[].display_id ∈ seen_ids
+        for binding in self.blueprint.displays:
+            if binding.display_id not in seen_ids:
+                raise ValueError(
+                    f"Ссылка на несуществующий display_id: '{binding.display_id}' "
+                    f"— определение отсутствует в секции displays рецепта"
+                )
+
+        return self
 
     # ------------------------------------------------------------------
     # Сериализация

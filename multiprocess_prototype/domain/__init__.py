@@ -25,7 +25,10 @@ Phase D подключит domain к runtime через AppServices DI-конт�
 from __future__ import annotations
 
 from .entities import (
+    DisplayCrop,
+    DisplayDefinition,
     DisplayInstance,
+    DisplayPosition,
     PluginInstance,
     Process,
     Project,
@@ -128,6 +131,7 @@ def register_domain_schemas(registry: object = None) -> None:  # type: ignore[as
             ("WorkerSpec", WorkerSpec),
             ("Wire", Wire),
             ("DisplayInstance", DisplayInstance),
+            ("DisplayDefinition", DisplayDefinition),
             ("Process", Process),
             ("RecipeMeta", RecipeMeta),
             ("Recipe", Recipe),
@@ -161,6 +165,9 @@ __all__ = [
     "WorkerSpec",
     "Wire",
     "DisplayInstance",
+    "DisplayDefinition",
+    "DisplayPosition",
+    "DisplayCrop",
     "Process",
     "RecipeMeta",
     "Recipe",

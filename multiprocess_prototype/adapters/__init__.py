@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from .auth import AuthFacadeFromAuthState
 from .catalogs import (
+    DisplayCatalogFromRecipe,
     DisplayCatalogFromRegistry,
     PluginCatalogFromRegistry,
     ServiceManagerFromRegistry,
@@ -38,6 +39,7 @@ __all__ = [
     "PluginCatalogFromRegistry",
     "ServiceManagerFromRegistry",
     "DisplayCatalogFromRegistry",
+    "DisplayCatalogFromRecipe",
     "TopologyRepositoryStore",
     "RegistersBackendFromManager",
     "RecipeStoreFromManager",

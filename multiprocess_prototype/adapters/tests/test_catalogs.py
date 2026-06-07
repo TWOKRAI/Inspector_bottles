@@ -947,3 +947,456 @@ class TestRealPluginRegistrySmoke:
         resolved = catalog.resolve(first.name)
         assert resolved is not None
         assert resolved.name == first.name
+
+
+# ==============================================================================
+# Тесты DisplayCatalogFromRecipe (Task 5.1 — recipe-scoped)
+# ==============================================================================
+
+
+class _FakeRecipeStoreForCatalog:
+    """Минимальный fake RecipeStore для тестов DisplayCatalogFromRecipe.
+
+    Хранит рецепты in-memory по slug. Поддерживает read/write/get_active.
+    """
+
+    def __init__(
+        self,
+        recipes: dict[str, object] | None = None,
+        active_slug: str | None = None,
+    ) -> None:
+        from multiprocess_prototype.domain.entities.recipe import Recipe
+
+        self._recipes: dict[str, Recipe] = {}
+        if recipes:
+            for slug, data in recipes.items():
+                if isinstance(data, dict):
+                    self._recipes[slug] = Recipe.from_dict(data)
+                else:
+                    self._recipes[slug] = data
+        self._active = active_slug
+
+    def read(self, slug: str):
+        return self._recipes.get(slug)
+
+    def write(self, slug: str, recipe) -> None:
+        self._recipes[slug] = recipe
+
+    def get_active(self) -> str | None:
+        return self._active
+
+    def set_active(self, slug: str | None) -> bool:
+        self._active = slug
+        return True
+
+
+class TestDisplayCatalogFromRecipe:
+    """Тесты для DisplayCatalogFromRecipe (Task 5.1 — recipe-scoped persist)."""
+
+    def _make_recipe_data(
+        self,
+        name: str = "test_recipe",
+        displays: list[dict] | None = None,
+    ) -> dict:
+        """Сформировать минимальный dict рецепта с секцией displays."""
+        return {
+            "name": name,
+            "version": 3,
+            "displays": displays or [],
+            "blueprint": {"processes": [], "wires": [], "displays": []},
+        }
+
+    def _make_catalog(
+        self,
+        recipe_data: dict | None = None,
+        slug: str = "test",
+        active: bool = True,
+    ):
+        """Создать DisplayCatalogFromRecipe с fake store."""
+        from multiprocess_prototype.adapters.catalogs.display_catalog_recipe import (
+            DisplayCatalogFromRecipe,
+        )
+
+        recipes = {}
+        if recipe_data is not None:
+            recipes[slug] = recipe_data
+        active_slug = slug if active else None
+        store = _FakeRecipeStoreForCatalog(recipes=recipes, active_slug=active_slug)
+        return DisplayCatalogFromRecipe(
+            recipe_store=store,  # type: ignore[arg-type]
+            get_active_slug=store.get_active,
+        ), store
+
+    # ------------------------------------------------------------------ #
+    #  list_displays: из активного рецепта                                 #
+    # ------------------------------------------------------------------ #
+
+    def test_list_displays_from_active_recipe(self):
+        """list_displays() возвращает дисплеи из активного рецепта."""
+        data = self._make_recipe_data(
+            displays=[
+                {"id": "main", "name": "Основной", "width": 1920, "height": 1080},
+                {"id": "debug", "name": "Отладочный"},
+            ]
+        )
+        catalog, _ = self._make_catalog(data)
+        result = catalog.list_displays()
+
+        assert len(result) == 2
+        ids = {spec.display_id for spec in result}
+        assert ids == {"main", "debug"}
+
+    def test_list_displays_no_active_recipe_returns_empty(self):
+        """Нет активного рецепта → list_displays() пуст."""
+        data = self._make_recipe_data(displays=[{"id": "x", "name": "X"}])
+        catalog, _ = self._make_catalog(data, active=False)
+        assert catalog.list_displays() == ()
+
+    def test_list_displays_recipe_without_displays_section(self):
+        """Рецепт без displays → пустой tuple."""
+        data = self._make_recipe_data(displays=[])
+        catalog, _ = self._make_catalog(data)
+        assert catalog.list_displays() == ()
+
+    # ------------------------------------------------------------------ #
+    #  list_displays: render-поля сохраняются                             #
+    # ------------------------------------------------------------------ #
+
+    def test_list_displays_contains_render_fields(self):
+        """list_displays() возвращает DisplaySpec с render-полями из определений."""
+        data = self._make_recipe_data(
+            displays=[
+                {
+                    "id": "cam1",
+                    "name": "Камера 1",
+                    "width": 1280,
+                    "height": 720,
+                    "fit": "cover",
+                    "scale": 150,
+                    "rotate": 90,
+                    "flip": "horizontal",
+                    "position": {"x": 100, "y": 200},
+                    "crop": {"x": 10, "y": 20, "w": 640, "h": 480},
+                }
+            ]
+        )
+        catalog, _ = self._make_catalog(data)
+        result = catalog.list_displays()
+
+        assert len(result) == 1
+        spec = result[0]
+        assert spec.display_id == "cam1"
+        assert spec.fit == "cover"
+        assert spec.scale == 150
+        assert spec.rotate == 90
+        assert spec.flip == "horizontal"
+        assert spec.position == {"x": 100, "y": 200}
+        assert spec.crop == {"x": 10, "y": 20, "w": 640, "h": 480}
+
+    # ------------------------------------------------------------------ #
+    #  resolve: из активного рецепта                                      #
+    # ------------------------------------------------------------------ #
+
+    def test_resolve_known_display(self):
+        """resolve() возвращает DisplaySpec для известного id."""
+        data = self._make_recipe_data(
+            displays=[
+                {"id": "main", "name": "Main", "width": 800},
+            ]
+        )
+        catalog, _ = self._make_catalog(data)
+        spec = catalog.resolve("main")
+
+        assert spec is not None
+        assert spec.display_id == "main"
+        assert spec.display_name == "Main"
+        assert spec.width == 800
+
+    def test_resolve_unknown_returns_none(self):
+        """resolve() с неизвестным id → None."""
+        data = self._make_recipe_data(displays=[{"id": "x", "name": "X"}])
+        catalog, _ = self._make_catalog(data)
+        assert catalog.resolve("unknown") is None
+
+    def test_resolve_no_active_recipe_returns_none(self):
+        """resolve() без активного рецепта → None."""
+        data = self._make_recipe_data(displays=[{"id": "x", "name": "X"}])
+        catalog, _ = self._make_catalog(data, active=False)
+        assert catalog.resolve("x") is None
+
+    # ------------------------------------------------------------------ #
+    #  register: мутирует активный рецепт                                 #
+    # ------------------------------------------------------------------ #
+
+    def test_register_adds_to_recipe_displays(self):
+        """register(spec) добавляет DisplayDefinition в recipe.displays и сохраняет."""
+        from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
+
+        data = self._make_recipe_data(displays=[])
+        catalog, store = self._make_catalog(data)
+
+        spec = DisplaySpec(
+            display_id="new_disp",
+            display_name="Новый дисплей",
+            width=800,
+            height=600,
+            fit="stretch",
+            scale=200,
+            rotate=180,
+            flip="both",
+            position={"x": 50, "y": 75},
+            crop={"x": 0, "y": 0, "w": 400, "h": 300},
+        )
+        catalog.register(spec)
+
+        # Проверяем, что рецепт обновлён
+        recipe = store.read("test")
+        assert recipe is not None
+        assert len(recipe.displays) == 1
+        defn = recipe.displays[0]
+        assert defn.id == "new_disp"
+        assert defn.name == "Новый дисплей"
+        assert defn.width == 800
+        assert defn.fit == "stretch"
+        assert defn.scale == 200
+        assert defn.rotate == 180
+        assert defn.flip == "both"
+        assert defn.position.x == 50
+        assert defn.position.y == 75
+        assert defn.crop is not None
+        assert defn.crop.w == 400
+
+    def test_register_preserves_existing_displays(self):
+        """register() не теряет существующие дисплеи."""
+        from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
+
+        data = self._make_recipe_data(
+            displays=[
+                {"id": "existing", "name": "Existing"},
+            ]
+        )
+        catalog, store = self._make_catalog(data)
+
+        catalog.register(DisplaySpec(display_id="new", display_name="New"))
+
+        recipe = store.read("test")
+        assert recipe is not None
+        assert len(recipe.displays) == 2
+        ids = {d.id for d in recipe.displays}
+        assert ids == {"existing", "new"}
+
+    def test_register_duplicate_raises(self):
+        """register() с дубликатом id → ValueError."""
+        from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
+
+        data = self._make_recipe_data(displays=[{"id": "dup", "name": "Dup"}])
+        catalog, _ = self._make_catalog(data)
+
+        with pytest.raises(ValueError, match="already registered"):
+            catalog.register(DisplaySpec(display_id="dup", display_name="Another"))
+
+    def test_register_no_active_recipe_raises(self):
+        """register() без активного рецепта → ValueError."""
+        from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
+
+        data = self._make_recipe_data(displays=[])
+        catalog, _ = self._make_catalog(data, active=False)
+
+        with pytest.raises(ValueError, match="Нет активного рецепта"):
+            catalog.register(DisplaySpec(display_id="x", display_name="X"))
+
+    # ------------------------------------------------------------------ #
+    #  unregister: удаляет из рецепта                                     #
+    # ------------------------------------------------------------------ #
+
+    def test_unregister_removes_from_recipe(self):
+        """unregister() удаляет дисплей из recipe.displays."""
+        data = self._make_recipe_data(
+            displays=[
+                {"id": "a", "name": "A"},
+                {"id": "b", "name": "B"},
+            ]
+        )
+        catalog, store = self._make_catalog(data)
+
+        result = catalog.unregister("a")
+        assert result is True
+
+        recipe = store.read("test")
+        assert recipe is not None
+        assert len(recipe.displays) == 1
+        assert recipe.displays[0].id == "b"
+
+    def test_unregister_unknown_returns_false(self):
+        """unregister() с неизвестным id → False."""
+        data = self._make_recipe_data(displays=[{"id": "x", "name": "X"}])
+        catalog, _ = self._make_catalog(data)
+        assert catalog.unregister("nonexistent") is False
+
+    def test_unregister_no_active_recipe_returns_false(self):
+        """unregister() без активного рецепта → False."""
+        data = self._make_recipe_data(displays=[{"id": "x", "name": "X"}])
+        catalog, _ = self._make_catalog(data, active=False)
+        assert catalog.unregister("x") is False
+
+    # ------------------------------------------------------------------ #
+    #  has: проверка наличия                                              #
+    # ------------------------------------------------------------------ #
+
+    def test_has_returns_true_for_existing(self):
+        """has() → True для существующего дисплея в рецепте."""
+        data = self._make_recipe_data(displays=[{"id": "main", "name": "Main"}])
+        catalog, _ = self._make_catalog(data)
+        assert catalog.has("main") is True
+
+    def test_has_returns_false_for_unknown(self):
+        """has() → False для несуществующего."""
+        data = self._make_recipe_data(displays=[{"id": "main", "name": "Main"}])
+        catalog, _ = self._make_catalog(data)
+        assert catalog.has("unknown") is False
+
+    def test_has_no_active_recipe_returns_false(self):
+        """has() без активного рецепта → False."""
+        data = self._make_recipe_data(displays=[{"id": "x", "name": "X"}])
+        catalog, _ = self._make_catalog(data, active=False)
+        assert catalog.has("x") is False
+
+    # ------------------------------------------------------------------ #
+    #  persist: пишет в файл рецепта, НЕ в displays.yaml                 #
+    # ------------------------------------------------------------------ #
+
+    def test_persist_writes_to_recipe_not_yaml(self):
+        """persist() вызывает store.write() с текущим рецептом (recipe-scoped)."""
+        data = self._make_recipe_data(
+            displays=[
+                {"id": "d1", "name": "D1", "scale": 120, "fit": "stretch"},
+            ]
+        )
+        catalog, store = self._make_catalog(data)
+        catalog.persist()
+
+        # Рецепт на месте и не потерял данные
+        recipe = store.read("test")
+        assert recipe is not None
+        assert len(recipe.displays) == 1
+        assert recipe.displays[0].id == "d1"
+        assert recipe.displays[0].scale == 120
+
+    def test_persist_no_active_recipe_is_noop(self):
+        """persist() без активного рецепта — no-op (не бросает)."""
+        data = self._make_recipe_data(displays=[])
+        catalog, _ = self._make_catalog(data, active=False)
+        # Не бросает исключение
+        catalog.persist()
+
+    # ------------------------------------------------------------------ #
+    #  DisplaySpec ↔ DisplayDefinition round-trip                         #
+    # ------------------------------------------------------------------ #
+
+    def test_spec_to_definition_roundtrip(self):
+        """DisplaySpec → dict → DisplayDefinition → DisplaySpec (round-trip render-полей)."""
+        from multiprocess_prototype.domain.entities.display import DisplayDefinition
+        from multiprocess_prototype.domain.protocols.display_catalog import (
+            DisplaySpec,
+            definition_to_spec,
+            spec_to_definition_dict,
+        )
+
+        original = DisplaySpec(
+            display_id="rt",
+            display_name="Round-trip",
+            width=1920,
+            height=1080,
+            format="RGB",
+            fps_limit=60.0,
+            ring_buffer_blocks=5,
+            position={"x": 42, "y": 99},
+            fit="cover",
+            scale=200,
+            rotate=270,
+            flip="vertical",
+            crop={"x": 10, "y": 20, "w": 100, "h": 50},
+        )
+
+        # Spec → dict → Definition
+        d = spec_to_definition_dict(original)
+        defn = DisplayDefinition.from_dict(d)
+
+        assert defn.id == "rt"
+        assert defn.name == "Round-trip"
+        assert defn.width == 1920
+        assert defn.fit == "cover"
+        assert defn.scale == 200
+        assert defn.rotate == 270
+        assert defn.flip == "vertical"
+        assert defn.position.x == 42
+        assert defn.position.y == 99
+        assert defn.crop is not None
+        assert defn.crop.w == 100
+
+        # Definition → Spec
+        back = definition_to_spec(defn)
+        assert back.display_id == original.display_id
+        assert back.display_name == original.display_name
+        assert back.width == original.width
+        assert back.format == original.format
+        assert back.fit == original.fit
+        assert back.scale == original.scale
+        assert back.rotate == original.rotate
+        assert back.flip == original.flip
+        assert back.position == original.position
+        assert back.crop == original.crop
+        assert back.fps_limit == original.fps_limit
+        assert back.ring_buffer_blocks == original.ring_buffer_blocks
+
+    def test_spec_with_crop_none_roundtrip(self):
+        """Round-trip с crop=None."""
+        from multiprocess_prototype.domain.entities.display import DisplayDefinition
+        from multiprocess_prototype.domain.protocols.display_catalog import (
+            DisplaySpec,
+            definition_to_spec,
+            spec_to_definition_dict,
+        )
+
+        spec = DisplaySpec(display_id="nocrop", display_name="No Crop", crop=None)
+        d = spec_to_definition_dict(spec)
+        defn = DisplayDefinition.from_dict(d)
+        assert defn.crop is None
+
+        back = definition_to_spec(defn)
+        assert back.crop is None
+
+    def test_spec_with_default_position_roundtrip(self):
+        """Round-trip с position по умолчанию."""
+        from multiprocess_prototype.domain.entities.display import DisplayDefinition
+        from multiprocess_prototype.domain.protocols.display_catalog import (
+            DisplaySpec,
+            definition_to_spec,
+            spec_to_definition_dict,
+        )
+
+        spec = DisplaySpec(display_id="def", display_name="Defaults")
+        d = spec_to_definition_dict(spec)
+        defn = DisplayDefinition.from_dict(d)
+        assert defn.position.x == 0
+        assert defn.position.y == 0
+        assert defn.fit == "contain"
+        assert defn.scale == 100
+        assert defn.rotate == 0
+        assert defn.flip == "none"
+
+        back = definition_to_spec(defn)
+        assert back.position == {"x": 0, "y": 0}
+        assert back.fit == "contain"
+
+    # ------------------------------------------------------------------ #
+    #  Protocol compliance                                                #
+    # ------------------------------------------------------------------ #
+
+    def test_satisfies_display_catalog_protocol(self):
+        """DisplayCatalogFromRecipe удовлетворяет DisplayCatalog Protocol."""
+
+        data = self._make_recipe_data()
+        catalog, _ = self._make_catalog(data)
+        _check: DisplayCatalog = catalog  # type: ignore[assignment]
+        assert _check is catalog

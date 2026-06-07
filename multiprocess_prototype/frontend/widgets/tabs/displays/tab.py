@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""DisplaysTab v2 — CRUD-таб управления дисплеями (MVP pattern).
+"""DisplaysTab v3 — CRUD-таб управления дисплеями (MVP pattern, recipe-scoped).
+
+Task 5.2 (displays-in-recipe): форма с секциями «Базовые» + «Параметры отображения»,
+CRUD с render-полями, persist в активный рецепт, превью с render-параметрами.
 
 Task E.6 + F.3: мигрирован на AppServices DI. Принимает ``services: AppServices``.
 DisplayCatalog Protocol (domain) покрывает полный read+write API (Phase F).
@@ -11,19 +14,27 @@ explicit-параметром (паттерн E.2/E.5).
 Реализует IDisplaysView через structural subtyping (без явного наследования).
 Использует BaseListNavTab: QListWidget слева + content-форма справа.
 
-Форма (правая панель):
+Форма (правая панель) — две секции (QGroupBox):
+  Секция «Базовые»:
     - id (QLineEdit, read-only при выборе существующего)
     - name (QLineEdit)
     - width / height (QSpinBox, 1..7680)
     - format (QComboBox: BGR/RGB/GRAY/RGBA)
     - fps_limit (QDoubleSpinBox, 0.0..240.0)
     - ring_buffer_blocks (QSpinBox, 1..32)
+  Секция «Параметры отображения»:
+    - position X/Y (QSpinBox, 0..7680)
+    - fit (QComboBox: contain/cover/stretch/none)
+    - scale (QSpinBox: 10..1000, шаг 10, default 100)
+    - rotate (QComboBox: 0/90/180/270)
+    - flip (QComboBox: none/horizontal/vertical/both)
+    - crop X/Y/W/H (QSpinBox) + галочка «Обрезка включена» (off → crop=None)
 
 Кнопки (action-колонка):
     - «Создать» — всегда активна (при наличии permission)
     - «Удалить» — disabled без выбора
     - «Дублировать» — disabled без выбора
-    - «Открыть превью» — disabled без выбора
+    - «Открыть превью» — disabled без выбора (применяет render-параметры)
 
 Архитектурная заметка:
     BaseListNavTab управляет content_stack через add_item/remove_item.
@@ -32,6 +43,8 @@ explicit-параметром (паттерн E.2/E.5).
     refresh_list вставляет форму в content_scroll напрямую через
     _tab_layout.set_content_widget — но только один раз (форма singleton).
     Повторная перезапись не нужна, форма остаётся в content_scroll.
+
+Refs: plans/displays-in-recipe/plan.md Task 5.2
 """
 
 from __future__ import annotations
@@ -39,10 +52,11 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
-    QLabel,
+    QGroupBox,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -123,8 +137,12 @@ class DisplaysTab(BaseListNavTab):
 
         self._setup_actions()
 
-        # Список открытых окон превью (PreviewWindow) — предотвращаем GC
-        self._preview_windows: list = []
+        from multiprocess_prototype.frontend.widgets.displays import PreviewWindowManager
+
+        # Реестр открытых окон превью (PreviewWindowManager):
+        # - предотвращает GC (сильные ссылки),
+        # - управляет orphan/reconnect при смене рецепта (Task 2.3).
+        self._window_manager = PreviewWindowManager()
 
         # Presenter получает store=services.displays (DisplayCatalog Protocol)
         self._presenter = DisplaysPresenter(
@@ -132,6 +150,16 @@ class DisplaysTab(BaseListNavTab):
             view=self,
             preview_callback=self._open_preview_window,
         )
+
+        # Подписка presenter'а на RecipeActivated (Task 2.3):
+        # event_bus = services.events, window_manager = наш реестр,
+        # router_manager = runtime-параметр (None если не передан).
+        self._presenter.bind_event_bus(
+            services.events,
+            window_manager=self._window_manager,
+            router_manager=self._router_manager,
+        )
+
         self._presenter.load()
 
     # ------------------------------------------------------------------ #
@@ -228,7 +256,7 @@ class DisplaysTab(BaseListNavTab):
         """Заполнить форму данными записи или очистить при None.
 
         При spec=None — поля очищаются, id становится редактируемым
-        (режим создания нового дисплея).
+        (режим создания нового дисплея). Render-поля сбрасываются к дефолтам.
         При spec!=None — поля заполняются, id становится read-only
         (режим просмотра/редактирования существующего).
 
@@ -236,6 +264,7 @@ class DisplaysTab(BaseListNavTab):
             spec: спецификация дисплея или None.
         """
         if spec is None:
+            # Базовые
             self._id_edit.setReadOnly(False)
             self._id_edit.clear()
             self._name_edit.clear()
@@ -244,7 +273,20 @@ class DisplaysTab(BaseListNavTab):
             self._format_combo.setCurrentText("BGR")
             self._fps_spin.setValue(30.0)
             self._ring_spin.setValue(3)
+            # Render-дефолты
+            self._pos_x_spin.setValue(0)
+            self._pos_y_spin.setValue(0)
+            self._fit_combo.setCurrentText("contain")
+            self._scale_spin.setValue(100)
+            self._rotate_combo.setCurrentText("0")
+            self._flip_combo.setCurrentText("none")
+            self._crop_enabled_cb.setChecked(False)
+            self._crop_x_spin.setValue(0)
+            self._crop_y_spin.setValue(0)
+            self._crop_w_spin.setValue(1280)
+            self._crop_h_spin.setValue(720)
         else:
+            # Базовые
             self._id_edit.setReadOnly(True)
             self._id_edit.setText(spec.display_id)
             self._name_edit.setText(spec.display_name)
@@ -254,6 +296,27 @@ class DisplaysTab(BaseListNavTab):
             self._format_combo.setCurrentText(fmt)
             self._fps_spin.setValue(spec.fps_limit)
             self._ring_spin.setValue(spec.ring_buffer_blocks)
+            # Render-поля
+            pos = spec.position or {"x": 0, "y": 0}
+            self._pos_x_spin.setValue(pos.get("x", 0))
+            self._pos_y_spin.setValue(pos.get("y", 0))
+            self._fit_combo.setCurrentText(spec.fit or "contain")
+            self._scale_spin.setValue(spec.scale if spec.scale else 100)
+            self._rotate_combo.setCurrentText(str(spec.rotate or 0))
+            self._flip_combo.setCurrentText(spec.flip or "none")
+            # Crop
+            if spec.crop is not None:
+                self._crop_enabled_cb.setChecked(True)
+                self._crop_x_spin.setValue(spec.crop.get("x", 0))
+                self._crop_y_spin.setValue(spec.crop.get("y", 0))
+                self._crop_w_spin.setValue(spec.crop.get("w", 1280))
+                self._crop_h_spin.setValue(spec.crop.get("h", 720))
+            else:
+                self._crop_enabled_cb.setChecked(False)
+                self._crop_x_spin.setValue(0)
+                self._crop_y_spin.setValue(0)
+                self._crop_w_spin.setValue(1280)
+                self._crop_h_spin.setValue(720)
 
     def set_buttons_state(self, has_selection: bool) -> None:
         """Включить/выключить кнопки мутации.
@@ -269,8 +332,20 @@ class DisplaysTab(BaseListNavTab):
         """Собрать текущие данные формы в словарь.
 
         Returns:
-            dict: {id, name, width, height, format, fps_limit, ring_buffer_blocks}
+            dict: базовые + render-поля:
+                {id, name, width, height, format, fps_limit, ring_buffer_blocks,
+                 position, fit, scale, rotate, flip, crop}
         """
+        # Crop: None если галочка выключена
+        crop: dict[str, int] | None = None
+        if self._crop_enabled_cb.isChecked():
+            crop = {
+                "x": self._crop_x_spin.value(),
+                "y": self._crop_y_spin.value(),
+                "w": self._crop_w_spin.value(),
+                "h": self._crop_h_spin.value(),
+            }
+
         return {
             "id": self._id_edit.text().strip(),
             "name": self._name_edit.text().strip(),
@@ -279,6 +354,16 @@ class DisplaysTab(BaseListNavTab):
             "format": self._format_combo.currentText(),
             "fps_limit": self._fps_spin.value(),
             "ring_buffer_blocks": self._ring_spin.value(),
+            # Render-поля
+            "position": {
+                "x": self._pos_x_spin.value(),
+                "y": self._pos_y_spin.value(),
+            },
+            "fit": self._fit_combo.currentText(),
+            "scale": self._scale_spin.value(),
+            "rotate": int(self._rotate_combo.currentText()),
+            "flip": self._flip_combo.currentText(),
+            "crop": crop,
         }
 
     def show_error(self, message: str) -> None:
@@ -296,48 +381,54 @@ class DisplaysTab(BaseListNavTab):
     def _build_form(self) -> None:
         """Создать singleton-форму редактирования полей DisplaySpec.
 
-        Форма размещается в content_scroll через set_content_widget.
-        Не привязана к content_stack — один виджет для всех записей.
+        Форма содержит две секции (QGroupBox):
+          - «Базовые» — SHM-конфигурация (id, name, width, height, format, fps, ring_buffer).
+          - «Параметры отображения» — render-слой (position, fit, scale, rotate, flip, crop).
+
+        Паттерн: SectionedForm (QGroupBox секции), аналог ProcessCard (StyledPanel + header).
         """
         self._form_widget = QWidget()
         form_vbox = QVBoxLayout(self._form_widget)
         form_vbox.setContentsMargins(12, 12, 12, 12)
-        form_vbox.setSpacing(6)
+        form_vbox.setSpacing(10)
 
-        form_vbox.addWidget(QLabel("<b>Параметры дисплея</b>"))
-
-        form_layout = QFormLayout()
-        form_layout.setContentsMargins(0, 4, 0, 0)
-        form_layout.setSpacing(8)
+        # ============================================================
+        # Секция «Базовые»
+        # ============================================================
+        base_group = QGroupBox("Базовые")
+        base_group.setObjectName("DisplaysFormBaseSection")
+        base_layout = QFormLayout(base_group)
+        base_layout.setContentsMargins(8, 12, 8, 8)
+        base_layout.setSpacing(8)
 
         # ID — read-only при выборе существующего
         self._id_edit = QLineEdit()
         self._id_edit.setPlaceholderText("Уникальный идентификатор")
-        form_layout.addRow("ID:", self._id_edit)
+        base_layout.addRow("ID:", self._id_edit)
 
         # Название
         self._name_edit = QLineEdit()
         self._name_edit.setPlaceholderText("Имя дисплея")
-        form_layout.addRow("Название:", self._name_edit)
+        base_layout.addRow("Название:", self._name_edit)
 
         # Ширина
         self._width_spin = QSpinBox()
         self._width_spin.setRange(1, 7680)
         self._width_spin.setValue(1280)
         self._width_spin.setSuffix(" px")
-        form_layout.addRow("Ширина:", self._width_spin)
+        base_layout.addRow("Ширина:", self._width_spin)
 
         # Высота
         self._height_spin = QSpinBox()
         self._height_spin.setRange(1, 7680)
         self._height_spin.setValue(720)
         self._height_spin.setSuffix(" px")
-        form_layout.addRow("Высота:", self._height_spin)
+        base_layout.addRow("Высота:", self._height_spin)
 
         # Формат пикселей
         self._format_combo = QComboBox()
         self._format_combo.addItems(_PIXEL_FORMATS)
-        form_layout.addRow("Формат:", self._format_combo)
+        base_layout.addRow("Формат:", self._format_combo)
 
         # FPS limit
         self._fps_spin = QDoubleSpinBox()
@@ -346,17 +437,111 @@ class DisplaysTab(BaseListNavTab):
         self._fps_spin.setDecimals(1)
         self._fps_spin.setValue(30.0)
         self._fps_spin.setSpecialValueText("Без ограничений")
-        form_layout.addRow("FPS limit:", self._fps_spin)
+        base_layout.addRow("FPS limit:", self._fps_spin)
 
         # Ring buffer blocks
         self._ring_spin = QSpinBox()
         self._ring_spin.setRange(1, 32)
         self._ring_spin.setValue(3)
         self._ring_spin.setToolTip("Количество блоков ring-buffer SHM-канала")
-        form_layout.addRow("Ring buffer:", self._ring_spin)
+        base_layout.addRow("Ring buffer:", self._ring_spin)
 
-        form_vbox.addLayout(form_layout)
+        form_vbox.addWidget(base_group)
+
+        # ============================================================
+        # Секция «Параметры отображения» (render-слой)
+        # ============================================================
+        render_group = QGroupBox("Параметры отображения")
+        render_group.setObjectName("DisplaysFormRenderSection")
+        render_layout = QFormLayout(render_group)
+        render_layout.setContentsMargins(8, 12, 8, 8)
+        render_layout.setSpacing(8)
+
+        # Позиция X
+        self._pos_x_spin = QSpinBox()
+        self._pos_x_spin.setRange(0, 7680)
+        self._pos_x_spin.setValue(0)
+        self._pos_x_spin.setSuffix(" px")
+        render_layout.addRow("Позиция X:", self._pos_x_spin)
+
+        # Позиция Y
+        self._pos_y_spin = QSpinBox()
+        self._pos_y_spin.setRange(0, 7680)
+        self._pos_y_spin.setValue(0)
+        self._pos_y_spin.setSuffix(" px")
+        render_layout.addRow("Позиция Y:", self._pos_y_spin)
+
+        # Fit
+        self._fit_combo = QComboBox()
+        self._fit_combo.addItems(["contain", "cover", "stretch", "none"])
+        render_layout.addRow("Fit:", self._fit_combo)
+
+        # Scale — QSpinBox 10..1000 шаг 10 default 100 (раздел 8 + 9.11 спеки)
+        self._scale_spin = QSpinBox()
+        self._scale_spin.setObjectName("DisplaysFormScaleSpin")
+        self._scale_spin.setRange(10, 1000)
+        self._scale_spin.setSingleStep(10)
+        self._scale_spin.setValue(100)
+        self._scale_spin.setSuffix(" %")
+        render_layout.addRow("Scale:", self._scale_spin)
+
+        # Rotate
+        self._rotate_combo = QComboBox()
+        self._rotate_combo.addItems(["0", "90", "180", "270"])
+        render_layout.addRow("Rotate:", self._rotate_combo)
+
+        # Flip
+        self._flip_combo = QComboBox()
+        self._flip_combo.addItems(["none", "horizontal", "vertical", "both"])
+        render_layout.addRow("Flip:", self._flip_combo)
+
+        # Crop — галочка «Обрезка включена» + поля X/Y/W/H
+        self._crop_enabled_cb = QCheckBox("Обрезка включена")
+        self._crop_enabled_cb.setChecked(False)
+        self._crop_enabled_cb.toggled.connect(self._on_crop_toggled)
+        render_layout.addRow(self._crop_enabled_cb)
+
+        self._crop_x_spin = QSpinBox()
+        self._crop_x_spin.setRange(0, 7680)
+        self._crop_x_spin.setValue(0)
+        self._crop_x_spin.setSuffix(" px")
+        self._crop_x_spin.setEnabled(False)
+        render_layout.addRow("Crop X:", self._crop_x_spin)
+
+        self._crop_y_spin = QSpinBox()
+        self._crop_y_spin.setRange(0, 7680)
+        self._crop_y_spin.setValue(0)
+        self._crop_y_spin.setSuffix(" px")
+        self._crop_y_spin.setEnabled(False)
+        render_layout.addRow("Crop Y:", self._crop_y_spin)
+
+        self._crop_w_spin = QSpinBox()
+        self._crop_w_spin.setRange(1, 7680)
+        self._crop_w_spin.setValue(1280)
+        self._crop_w_spin.setSuffix(" px")
+        self._crop_w_spin.setEnabled(False)
+        render_layout.addRow("Crop W:", self._crop_w_spin)
+
+        self._crop_h_spin = QSpinBox()
+        self._crop_h_spin.setRange(1, 7680)
+        self._crop_h_spin.setValue(720)
+        self._crop_h_spin.setSuffix(" px")
+        self._crop_h_spin.setEnabled(False)
+        render_layout.addRow("Crop H:", self._crop_h_spin)
+
+        form_vbox.addWidget(render_group)
         form_vbox.addStretch(1)
+
+    def _on_crop_toggled(self, enabled: bool) -> None:
+        """Включить/выключить поля crop при изменении галочки.
+
+        Args:
+            enabled: True — crop поля активны, False — disabled (crop=None).
+        """
+        self._crop_x_spin.setEnabled(enabled)
+        self._crop_y_spin.setEnabled(enabled)
+        self._crop_w_spin.setEnabled(enabled)
+        self._crop_h_spin.setEnabled(enabled)
 
     def _setup_actions(self) -> None:
         """Создать action-кнопки в левой колонке layout'а.
@@ -435,17 +620,20 @@ class DisplaysTab(BaseListNavTab):
     # ------------------------------------------------------------------ #
 
     def _open_preview_window(self, spec: DisplaySpec) -> None:
-        """Открыть окно превью SHM-канала для дисплея.
+        """Открыть окно превью SHM-канала для дисплея с render-параметрами.
 
         Вызывается из presenter через preview_callback.
         router_manager берётся из explicit-параметра конструктора (None -> без подписки).
-        Ссылка на окно сохраняется в ``_preview_windows`` для предотвращения GC.
+        Окно регистрируется в ``_window_manager`` (PreviewWindowManager):
+          - предотвращает GC (сильная ссылка);
+          - включает управление при смене рецепта (orphan close / reconnect).
 
         open_for_display ожидает DisplayEntry (framework) — конвертируем spec -> entry
         локально (tab — frontend-слой, может импортировать framework для превью).
+        Render-параметры (crop/scale/rotate/flip/fit) передаются через render_params (Task 4.1).
 
         Args:
-            spec: спецификация дисплея для превью.
+            spec: спецификация дисплея для превью (включает render-поля).
         """
         from multiprocess_framework.modules.display_module import DisplayEntry
         from multiprocess_prototype.frontend.widgets.displays import open_for_display
@@ -460,9 +648,35 @@ class DisplaysTab(BaseListNavTab):
             ring_buffer_blocks=spec.ring_buffer_blocks,
         )
 
-        window = open_for_display(entry, router_manager=self._router_manager, parent=None)
-        # Сохраняем ссылку — без неё Qt удалит окно при GC
-        self._preview_windows.append(window)
-        # Подчищаем закрытые окна из списка
-        self._preview_windows = [w for w in self._preview_windows if w.isVisible()]
-        logger.info("DisplaysTab: открыто превью '%s'", spec.display_id)
+        # Собираем render-параметры из DisplaySpec (Task 4.1 API)
+        render_params = {
+            "crop": spec.crop,
+            "scale": spec.scale,
+            "rotate": spec.rotate,
+            "flip": spec.flip,
+            "fit": spec.fit,
+        }
+
+        window = open_for_display(
+            entry,
+            router_manager=self._router_manager,
+            parent=None,
+            render_params=render_params,
+        )
+        # Регистрируем окно в менеджере — это даёт сильную ссылку (GC protection)
+        # и включает управление orphan/reconnect при RecipeActivated.
+        self._window_manager.register(spec.display_id, window)
+        logger.info("DisplaysTab: открыто превью '%s' (render: %s)", spec.display_id, render_params)
+
+    # ------------------------------------------------------------------ #
+    #  Qt lifecycle (teardown)                                             #
+    # ------------------------------------------------------------------ #
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """Отписаться от EventBus и закрыть окна превью при закрытии вкладки.
+
+        Args:
+            event: QCloseEvent.
+        """
+        self._presenter.teardown()
+        super().closeEvent(event)

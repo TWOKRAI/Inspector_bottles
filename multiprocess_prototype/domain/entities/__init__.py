@@ -2,12 +2,12 @@
 """
 Публичный API entities domain-слоя.
 
-Экспортирует все 7 entity-классов + вспомогательный RecipeMeta.
+Экспортирует все 7 entity-классов + вспомогательный RecipeMeta + DisplayDefinition (Phase 1).
 """
 
 from __future__ import annotations
 
-from .display import DisplayInstance
+from .display import DisplayCrop, DisplayDefinition, DisplayInstance, DisplayPosition
 from .plugin import PluginInstance
 from .process import Process
 from .project import Project
@@ -21,6 +21,9 @@ __all__ = [
     "WorkerSpec",
     "Wire",
     "DisplayInstance",
+    "DisplayDefinition",
+    "DisplayPosition",
+    "DisplayCrop",
     "Process",
     "RecipeMeta",
     "Recipe",

@@ -19,6 +19,7 @@ ADR-решение по семантике полей:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -210,5 +211,29 @@ class IDisplayRegistry(Protocol):
 
         Args:
             path: Абсолютный или относительный путь к файлу для записи.
+        """
+        ...
+
+    def reload(
+        self,
+        entries: list[dict],
+        *,
+        on_orphan: Callable[[str], None] | None = None,
+    ) -> None:
+        """Атомарно заменить содержимое реестра новыми определениями.
+
+        Из каждого dict извлекаются ТОЛЬКО 7 SHM-полей ``DisplayEntry``
+        (id, name, width, height, format, fps_limit, ring_buffer_blocks).
+        Render-параметры (fit, scale, rotate, flip, crop, position и др.)
+        **игнорируются** — реестр остаётся generic (ADR-DM-001).
+        SHM реестром НЕ выделяется и НЕ освобождается (ADR-DM-003).
+
+        Порядок: orphan-detection → on_orphan callback → _cleanup_shm_channel
+        → clear → register новых. Дубль id → warning + пропуск.
+
+        Args:
+            entries: Список dict-определений дисплеев с границы процесса.
+            on_orphan: Колбэк для каждого orphan-id (prototype подставит
+                       закрытие окон). Если None — уведомление пропускается.
         """
         ...

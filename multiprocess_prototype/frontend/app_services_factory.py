@@ -40,7 +40,7 @@ from multiprocess_prototype.adapters import (
     AuthFacadeFromAuthState,
     CommandDispatcherOrchestrator,
     ConfigStoreFromManager,
-    DisplayCatalogFromRegistry,
+    DisplayCatalogFromRecipe,
     PluginCatalogFromRegistry,
     ProjectHolder,
     RecipeStoreFromManager,
@@ -123,9 +123,13 @@ def build_app_services(deps: AppServicesDeps) -> AppServices:
     # PluginCatalog: read-only реестр плагинов
     plugins = PluginCatalogFromRegistry(deps.plugin_registry)
 
-    # DisplayCatalog: read+write реестр дисплеев (Phase F — writable store)
-    _displays_yaml = Path("multiprocess_prototype/backend/config/displays.yaml")
-    displays = DisplayCatalogFromRegistry(deps.display_registry, yaml_path=_displays_yaml)
+    # DisplayCatalog: recipe-scoped (Task 5.1 — источник истины = активный рецепт).
+    # DisplayCatalogFromRecipe читает/пишет определения в секцию displays рецепта,
+    # НЕ в глобальный displays.yaml. DisplayRegistry (framework singleton) остаётся
+    # для runtime/preview SHM-метаданных (наполняется backend'ом в apply_topology).
+    # Обратная совместимость: DisplayCatalogFromRegistry сохранён для runtime-нужд,
+    # но в AppServices.displays подставляется recipe-scoped вариант.
+    # DI: get_active_slug = lambda, чтобы не хардкодить доступ к RecipeManager singleton.
 
     # RecipeStore: CRUD-доступ к рецептам через RecipeManager
     recipe_manager = deps.recipe_manager
@@ -136,6 +140,12 @@ def build_app_services(deps: AppServicesDeps) -> AppServices:
             "AppServices factory: recipe_manager отсутствует в AppServicesDeps. "
             "Проверьте инициализацию RecipeManager в run_gui() (шаг 3g)."
         )
+
+    # DisplayCatalog (recipe-scoped): создаётся ПОСЛЕ recipes (зависит от RecipeStore).
+    displays = DisplayCatalogFromRecipe(
+        recipe_store=recipes,
+        get_active_slug=recipes.get_active,
+    )
 
     # ServiceManager: read + lifecycle управление сервисами
     services = ServiceManagerFromRegistry(deps.service_registry)

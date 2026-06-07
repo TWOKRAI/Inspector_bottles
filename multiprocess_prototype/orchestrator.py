@@ -141,6 +141,62 @@ class ProcessManagerProcessApp(ProcessManagerProcess):
             log_error=self._log_error,
         )
 
+    # -------------------------------------------------------------------------
+    # apply_topology — prototype-шов для reload DisplayRegistry (Task 2.2)
+    # -------------------------------------------------------------------------
+
+    def apply_topology(self, blueprint: dict | None) -> dict:
+        """Применить топологию + переналить DisplayRegistry определениями рецепта.
+
+        Prototype-override: извлекает ``display_definitions`` из входного dict
+        (сырой рецепт или unwrapped topology), reload'ит DisplayRegistry ПЕРЕД
+        вызовом generic apply (super), откатывает метаданные при rollback.
+
+        SHM НЕ трогает (Решение №1, ADR-DM-003): аллокация кадров продюсеров —
+        штатная фаза ``process.provision`` внутри TopologyManager.
+
+        Generic PM (framework) НЕ знает про display_definitions — это Wire
+        prototype-слоя (ADR-130 / Plan displays-in-recipe Task 2.2).
+        """
+        from dataclasses import asdict
+
+        from multiprocess_framework.modules.display_module import DisplayRegistry
+        from multiprocess_prototype.backend.launch import unwrap_recipe
+
+        # --- Извлечь display_definitions из входного blueprint ---
+        # Если прилетает сырой рецепт (top-level blueprint + displays) —
+        # unwrap_recipe поднимет displays → display_definitions.
+        # Если plain topology (уже содержит processes) — вернёт as-is.
+        bp = blueprint or {}
+        unwrapped = unwrap_recipe(bp) if isinstance(bp, dict) else {}
+        defs = unwrapped.get("display_definitions")
+
+        # Edge case плана: display_definitions ОТСУТСТВУЕТ вовсе → no-op для реестра
+        # (не чистить зря). reload([]) только когда явно пустой список.
+        if defs is None:
+            # Ключ отсутствует — не трогаем реестр, вызываем generic apply
+            return super().apply_topology(blueprint)
+
+        # --- Снять old_defs ДО reload (Решение №2: rollback) ---
+        registry = DisplayRegistry()
+        old_defs = [asdict(e) for e in registry.list()]
+
+        # --- reload метаданных (только SHM-поля, без on_orphan — Task 2.3) ---
+        registry.reload(defs)
+
+        # --- Вызвать generic apply_topology (snapshot/pause/apply/rollback) ---
+        result = super().apply_topology(blueprint)
+
+        # --- Rollback метаданных при неуспехе ---
+        if not result.get("success") and result.get("rolled_back"):
+            registry.reload(old_defs)
+            self._log_info(
+                "[apply_topology] display_definitions откачены (rolled_back): "
+                f"восстановлено {len(old_defs)} определений"
+            )
+
+        return result
+
     def shutdown(self) -> bool:
         """Остановить watcher (нет висящих потоков), затем штатный shutdown PM."""
         if self._observability_watcher is not None:

@@ -25,6 +25,7 @@ CRUD-операции под ``threading.Lock``. Персистентность 
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
@@ -164,6 +165,111 @@ class DisplayRegistry:
         """
         with self._lock:
             self._registry.clear()
+
+    def reload(
+        self,
+        entries: list[dict],
+        *,
+        on_orphan: Callable[[str], None] | None = None,
+    ) -> None:
+        """Атомарно заменить содержимое реестра новыми определениями.
+
+        Реализует транзакционную замену метаданных дисплеев. Из каждого dict
+        извлекаются ТОЛЬКО 7 SHM-полей ``DisplayEntry`` (id, name, width,
+        height, format, fps_limit, ring_buffer_blocks). Render-параметры
+        (fit, scale, rotate, flip, crop, position и любые другие) **игнорируются** —
+        реестр generic (ADR-DM-001). SHM реестром НЕ выделяется и НЕ освобождается:
+        кадр дисплея = SHM-frame ноды-продюсера в бэкенде, аллоцируется штатной
+        фазой ``process.provision`` (ADR-DM-003). ``bind_displays_to_blueprint``
+        — obsolete (мёртвый код, не воскрешать).
+
+        Порядок операций (раздел 4 спеки «Дисплеи в рецепте»):
+            1. Вычислить orphan-id (в реестре, но НЕ в entries).
+            2. Для каждого orphan вызвать ``on_orphan(id)`` (если передан) —
+               prototype подставит колбэк закрытия окон; framework НЕ знает про Qt.
+            3. Для каждого orphan — ``_cleanup_shm_channel(id)`` (лог, ADR-DM-003).
+            4. Очистить внутренний реестр.
+            5. Зарегистрировать новые: для каждого dict взять только 7 SHM-ключей,
+               построить ``DisplayEntry``, положить в реестр. Дубль id → warning,
+               пропуск (без исключения).
+
+        Идемпотентность: ``reload(same)`` = тот же реестр. ``reload(old)`` после
+        ``reload(new)`` полностью восстанавливает старый набор (rollback Task 2.2).
+
+        Args:
+            entries: Список dict-определений дисплеев с границы (list[dict]).
+                     Допускаются любые ключи — извлекаются только SHM-поля.
+            on_orphan: Опциональный колбэк, вызываемый для каждого orphan-id
+                       (дисплей был в реестре, но отсутствует в entries).
+                       Prototype подставит сюда закрытие окон превью.
+                       Если None — шаг уведомления пропускается, но
+                       ``_cleanup_shm_channel`` всё равно вызывается.
+        """
+        # SHM-ключи, допустимые в DisplayEntry
+        _SHM_KEYS = ("id", "name", "width", "height", "format", "fps_limit", "ring_buffer_blocks")
+
+        # --- Шаг 1: снять snapshot + вычислить orphan под lock ---
+        new_ids: set[str] = set()
+        for entry_dict in entries:
+            eid = entry_dict.get("id")
+            if eid is not None:
+                new_ids.add(eid)
+
+        with self._lock:
+            current_ids = set(self._registry.keys())
+
+        orphan_ids = current_ids - new_ids
+
+        # --- Шаг 2: уведомить об orphan (вне lock — колбэк может быть тяжёлым) ---
+        for orphan_id in orphan_ids:
+            if on_orphan is not None:
+                on_orphan(orphan_id)
+
+        # --- Шаг 3: _cleanup_shm_channel для orphan (лог, ADR-DM-003) ---
+        for orphan_id in orphan_ids:
+            self._cleanup_shm_channel(orphan_id)
+
+        # --- Шаг 4-5: очистить + зарегистрировать новые (под lock, атомарно) ---
+        new_registry: dict[str, DisplayEntry] = {}
+        seen_ids: set[str] = set()
+
+        for entry_dict in entries:
+            if not isinstance(entry_dict, dict):
+                self._log_warning(f"DisplayRegistry.reload: элемент entries не является dict: {entry_dict!r}, пропущен")
+                continue
+
+            eid = entry_dict.get("id")
+            if eid is None:
+                self._log_warning("DisplayRegistry.reload: запись без обязательного ключа 'id', пропущена")
+                continue
+
+            # Дубль id → warning + пропуск (паттерн displays_config_to_registry)
+            if eid in seen_ids:
+                self._log_warning(f"DisplayRegistry.reload: дубль id={eid!r} в entries, пропущен")
+                continue
+            seen_ids.add(eid)
+
+            # Извлечь только SHM-поля, render-поля игнорируются
+            filtered = {k: entry_dict[k] for k in _SHM_KEYS if k in entry_dict}
+
+            # Добавить дефолты для опциональных полей
+            filtered.setdefault("name", "")
+            filtered.setdefault("width", 1280)
+            filtered.setdefault("height", 720)
+            filtered.setdefault("format", "BGR")
+            filtered.setdefault("fps_limit", 30.0)
+            filtered.setdefault("ring_buffer_blocks", 3)
+
+            try:
+                entry = DisplayEntry(**filtered)
+            except TypeError as exc:
+                self._log_warning(f"DisplayRegistry.reload: не удалось создать DisplayEntry из {filtered!r}: {exc}")
+                continue
+
+            new_registry[entry.id] = entry
+
+        with self._lock:
+            self._registry = new_registry
 
     # ------------------------------------------------------------------
     # Читающие операции (под lock для snapshot-консистентности)
