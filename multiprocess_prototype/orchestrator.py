@@ -26,16 +26,81 @@ class ProcessManagerProcessApp(ProcessManagerProcess):
     _observability_watcher: Optional[Any] = None
 
     def initialize(self) -> bool:
-        """Инициализация PM + запуск observability hot-reload watcher (P3.3).
+        """Инициализация PM + топология engine + observability watcher.
 
-        Watcher следит за system.yaml: правка секции observability на лету
-        перестраивает Logger/Error/Stats этого процесса без рестарта.
-        Cross-process распространение — Phase 4 (IPC config.reload).
+        Порядок:
+        1. ``super().initialize()`` — ProcessManagerProcess (managers, topology_manager,
+           commands, процессы из config, monitor).
+        2. ``_configure_topology_engine()`` — FullReplacePlanner + configure
+           TopologyManager (diff_fn/commands_fn). Требует: topology_manager (шаг 1),
+           logger/error/stats (шаг 1 → ProcessModule._init_managers).
+        3. ``_start_observability_watcher()`` — hot-reload system.yaml.
         """
         if not super().initialize():
             return False
+        self._configure_topology_engine()
         self._start_observability_watcher()
         return True
+
+    def _configure_topology_engine(self) -> None:
+        """Сконфигурировать TopologyManager: планировщик + сборка proc_dicts.
+
+        Цепочка: unwrap_recipe → normalize_blueprint → BlueprintAssembler.assemble
+        — та же сборка, что boot (Phase 1). Prototype-специфика (unwrap рецепта v3,
+        SystemConfig-defaults) инъецируется через замыкание ``_build_proc_dicts``;
+        framework-менеджер TopologyManager про неё не знает.
+
+        Если ``sys_config`` отсутствует в orchestrator_config (тесты, legacy) —
+        логирует и выходит без конфигурации (менеджер остаётся «спящим»:
+        diff_fn/commands_fn = None → apply вернёт ``not configured``).
+        """
+        sys_config_dict = self.get_config("sys_config")
+        if not sys_config_dict:
+            self._log_info(
+                "[topology-engine] sys_config отсутствует в orchestrator_config — "
+                "планировщик не сконфигурирован (тесты/legacy)"
+            )
+            return
+
+        # Lazy-импорты: prototype-символы, не нужные framework
+        from multiprocess_framework.modules.process_module.configs import expand_observability
+
+        from multiprocess_prototype.backend.assembly import BlueprintAssembler, FullReplacePlanner
+        from multiprocess_prototype.backend.assembly.normalize import normalize_blueprint
+        from multiprocess_prototype.backend.config.schemas import SystemConfig
+        from multiprocess_prototype.backend.launch import unwrap_recipe
+
+        sys_config = SystemConfig.model_validate(sys_config_dict)
+
+        obs_overlay = expand_observability(sys_config.observability.model_dump())
+        log_dir = sys_config.system.log_dir or "logs"
+        assembler = BlueprintAssembler(observability_dict=obs_overlay, log_dir=log_dir)
+
+        def _build_proc_dicts(bp: dict) -> dict[str, dict]:
+            """unwrap рецепта v3 → normalize → assemble (единая сборка boot+switch)."""
+            return assembler.assemble(normalize_blueprint(unwrap_recipe(bp), sys_config))
+
+        # Планировщик (BaseManager + ObservableMixin)
+        planner = FullReplacePlanner(
+            proc_dicts_fn=_build_proc_dicts,
+            protected_provider=self._get_protected_names,
+            current_provider=self._topology_current_names,
+            logger=self.logger_manager,
+            error=self.error_manager,
+            stats=self.stats_manager,
+        )
+        planner.initialize()
+        self._full_replace_planner = planner
+
+        # Сконфигурировать менеджер: diff + commands из планировщика
+        self._topology_manager.configure(
+            diff_fn=planner.diff,
+            commands_fn=planner.commands,
+        )
+
+        self._log_info(
+            f"[topology-engine] сконфигурирован: FullReplacePlanner + BlueprintAssembler (log_dir={log_dir!r})"
+        )
 
     def _start_observability_watcher(self) -> None:
         from multiprocess_framework.modules.process_module.managers.observability_reload import (

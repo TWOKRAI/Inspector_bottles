@@ -274,6 +274,10 @@ class SystemBuilder:
                 # (Recipes «Загрузить», Pipeline «Запустить»/«Перезапустить») → не «тасуем»
                 # процессы. Меряется от завершения предыдущей замены. 0 = выключено (тесты).
                 "replace_debounce_s": 1.0,
+                # SystemConfig dict для configure_topology_engine (Dict at Boundary —
+                # пиклится через spawn). Планировщик использует его для нормализации
+                # blueprint (per-category defaults) + observability overlay + log_dir.
+                "sys_config": sys_config.model_dump(),
             },
         )
         for name, proc_dict in proc_dicts.items():

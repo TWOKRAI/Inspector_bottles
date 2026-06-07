@@ -213,7 +213,21 @@ class ProcessManagerProcess(ProcessModule):
         pass
 
     def _setup_topology_manager(self) -> None:
-        """Создать TopologyManager с callback'ами в PM."""
+        """Создать TopologyManager с 5 сидами + observability-менеджерами.
+
+        Вызывается в initialize() ПОСЛЕ super().initialize() — менеджеры
+        logger_manager / error_manager / stats_manager уже готовы (шаг 3
+        ProcessModule._init_managers).
+
+        Сиды (single-purpose, Task 2.0):
+            _topology_stop      — halt
+            _topology_cleanup   — free (registry + SHM + config)
+            _topology_provision — очереди + SHM
+            _topology_create    — instantiate (без start)
+            _topology_start     — run
+
+        allocate_shm_fn — deprecated (SHM в provision), сохранён для back-compat.
+        """
         allocate_shm = None
         if self.shared_resources:
             mm = getattr(self.shared_resources, "memory_manager", None)
@@ -221,10 +235,17 @@ class ProcessManagerProcess(ProcessModule):
                 allocate_shm = mm.create_memory_dict
 
         self._topology_manager = TopologyManager(
-            create_process_fn=self._cmd_process_create,
-            stop_process_fn=self.stop_process,
+            create_process_fn=self._topology_create,
+            stop_process_fn=self._topology_stop,
+            cleanup_process_fn=self._topology_cleanup,
+            provision_process_fn=self._topology_provision,
+            start_process_fn=self._topology_start,
             allocate_shm_fn=allocate_shm,
+            logger=getattr(self, "logger_manager", None),
+            error=getattr(self, "error_manager", None),
+            stats=getattr(self, "stats_manager", None),
         )
+        self._topology_manager.initialize()
 
     def _register_builtin_commands(self) -> None:
         """Зарегистрировать встроенные команды системы."""
@@ -386,13 +407,16 @@ class ProcessManagerProcess(ProcessModule):
     # -------------------------------------------------------------------------
 
     def _cmd_topology_apply(self, data=None, **kwargs) -> dict:
-        """Применить новую топологию процессов."""
+        """Применить новую топологию процессов.
+
+        Маршрутизирует в ``apply_topology`` (не напрямую в менеджер) —
+        чтобы транзакция, snapshot, rollback и debounce не обходились.
+        """
         args = _merge_cmd_args(data, kwargs)
-        if not (td := args.get("topology_dict")):
+        td = args.get("topology_dict")
+        if td is None:
             return {"error": "topology_dict required"}
-        if self._topology_manager is None:
-            return {"error": "TopologyManager not initialized"}
-        return self._topology_manager.apply(td)
+        return self.apply_topology(td)
 
     def _cmd_topology_get(self, data=None, **kwargs) -> dict:
         """Получить текущую топологию.
@@ -1229,6 +1253,132 @@ class ProcessManagerProcess(ProcessModule):
     def get_all_processes_status(self) -> dict[str, dict[str, Any]]:
         """Статусы всех процессов."""
         return self._status.get_all_status()
+
+    # -------------------------------------------------------------------------
+    # Snapshot / current — хелперы для apply_topology и планировщика
+    # -------------------------------------------------------------------------
+
+    def _snapshot_processes(self) -> dict[str, dict]:
+        """Вернуть deep-copy конфигов non-protected процессов (для rollback).
+
+        Вынос инлайн-паттерна из ``replace_blueprint`` (``old_configs =
+        copy.deepcopy(to_replace)``). Protected исключаются — их не нужно
+        откатывать (они не трогаются при замене).
+        """
+        protected = self._get_protected_names()
+        return copy.deepcopy({name: cfg for name, cfg in self._process_configs.items() if name not in protected})
+
+    def _topology_current_names(self) -> set[str]:
+        """Живые non-protected имена процессов (current_provider для планировщика).
+
+        Источник истины «что снести» при switch: PM._process_configs
+        минус protected (как в дороге B ``to_replace``). Нельзя брать из
+        TopologyManager._current_topology — на первом switch она None
+        (boot шёл дорогой A).
+        """
+        return set(self._process_configs) - self._get_protected_names()
+
+    # -------------------------------------------------------------------------
+    # apply_topology — транзакционная обёртка (Task 2.2)
+    # -------------------------------------------------------------------------
+
+    def apply_topology(self, blueprint: dict | None) -> dict:
+        """Транзакционно применить топологию: snapshot → pause → apply → rollback-on-fail → resume.
+
+        **Единственный владелец побочных эффектов** замены процессов.
+        ``_cmd_topology_apply`` маршрутизирует сюда, а не напрямую
+        в ``TopologyManager.apply`` — чтобы debounce, snapshot и rollback
+        не обходились.
+
+        Debounce (in-flight guard + cooldown) — близнец логики ``replace_blueprint``
+        (дорога B). Дублирование осознанное: дорога B остаётся живой до Task 2.3.
+
+        Args:
+            blueprint: dict-представление топологии (или None → пустая).
+
+        Returns:
+            dict с ключами ``success``, ``rolled_back``, ``debounced``, ``error``
+            и полями результата ``TopologyManager.apply``.
+        """
+        # --- Debounce: in-flight guard ---
+        if getattr(self, "_replace_in_progress", False):
+            self._log_warning("apply_topology: замена уже выполняется — запрос пропущен (debounce)")
+            return {
+                "success": False,
+                "debounced": True,
+                "error": "замена уже выполняется",
+                "rolled_back": False,
+            }
+
+        # --- Debounce: cooldown ---
+        cooldown = float(self.get_config("replace_debounce_s") or 0.0)
+        if cooldown > 0.0 and (time.monotonic() - getattr(self, "_last_replace_ts", 0.0)) < cooldown:
+            self._log_info("apply_topology: запрос в пределах cooldown — пропущен (debounce)")
+            return {
+                "success": False,
+                "debounced": True,
+                "error": "debounce cooldown",
+                "rolled_back": False,
+            }
+
+        # --- Проверка конфигурации ---
+        if self._topology_manager is None:
+            return {"success": False, "error": "TopologyManager not initialized"}
+        if self._topology_manager._commands_fn is None:
+            return {"success": False, "error": "topology not configured (no commands_fn)"}
+
+        self._replace_in_progress = True
+        try:
+            # Snapshot (non-protected) для rollback
+            snapshot = self._snapshot_processes()
+
+            # Pause monitor
+            monitor_was_running = getattr(self._process_monitor, "_monitoring", False)
+            if monitor_was_running:
+                try:
+                    self._process_monitor.stop()
+                except Exception as exc:
+                    self._log_warning(f"apply_topology: ошибка остановки ProcessMonitor: {exc}")
+
+            try:
+                result = self._topology_manager.apply(blueprint or {})
+
+                if not result.get("success"):
+                    # Откат: пересоздать процессы из snapshot
+                    self._restore_from_snapshot(snapshot)
+                    return {
+                        "success": False,
+                        "rolled_back": True,
+                        **{k: v for k, v in result.items() if k != "success"},
+                    }
+
+                # Успех: формируем ответ, совместимый с форматом GUI
+                return {
+                    "success": True,
+                    "rolled_back": False,
+                    **{k: v for k, v in result.items() if k != "success"},
+                }
+
+            except Exception as exc:
+                self._log_error(f"apply_topology: exception в manager.apply: {exc}")
+                self._restore_from_snapshot(snapshot)
+                if hasattr(self, "error_manager") and self.error_manager:
+                    try:
+                        self.error_manager.track_error(exc, {"phase": "apply_topology"})
+                    except Exception:
+                        pass
+                return {
+                    "success": False,
+                    "rolled_back": True,
+                    "error": str(exc),
+                }
+
+            finally:
+                self._resume_monitor(monitor_was_running)
+
+        finally:
+            self._replace_in_progress = False
+            self._last_replace_ts = time.monotonic()
 
     # -------------------------------------------------------------------------
     # Сиды TopologyManager — single-purpose методы (Task 2.0)
