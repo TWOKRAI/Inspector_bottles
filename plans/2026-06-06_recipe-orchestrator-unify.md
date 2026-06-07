@@ -130,16 +130,16 @@ diff и commands делят protected-логику и assembler → гарант
 2. Тело `assemble` (только framework): `SystemBlueprint.model_validate` → `check()` → `build_configs()` → `process(cfg)` → `merge_managers(observability_dict)` → `merge_with_defaults(DEFAULT_PROCESS_SCHEMA)`.
 3. **`_merge_defaults` (per-category, читает `SystemConfig` — `launch.py:118`, app-specific) вызывается СНАРУЖИ** — прототип нормализует blueprint ДО `assemble`. Assembler получает уже смёрженный blueprint dict и НЕ знает про категории/`SystemConfig`. (Ревью B.1: иначе app-логика протечёт во framework при Phase 5.)
 4. Невалидно → `raise BlueprintInvalid` (не `sys.exit`).
-**Acceptance:**
-- [ ] `assemble` чистая (без I/O, без мутаций аргументов; один и тот же вход → один и тот же выход)
-- [ ] **`assemble` НЕ импортирует `SystemConfig`/`multiprocess_prototype.*`** — только framework-символы (grep import'ов в assembly.py чист от prototype)
-- [ ] **эталон теста = дорога A (boot через `SystemLauncher.add_process`, ВКЛЮЧАЯ `merge_with_defaults`)**, НЕ текущий `_build_proc_dicts` (он уже расходится с A — пропускает defaults)
-- [ ] невалид → `BlueprintInvalid`
+**Acceptance:** (DONE 5314d99b)
+- [x] `assemble` чистая (без I/O, без мутаций аргументов; один и тот же вход → один и тот же выход)
+- [x] **`assemble` НЕ импортирует `SystemConfig`/`multiprocess_prototype.*`** — только framework-символы (grep import'ов в assembly.py чист от prototype)
+- [x] **эталон теста = дорога A (boot через `SystemLauncher.add_process`, ВКЛЮЧАЯ `merge_with_defaults`)**, НЕ текущий `_build_proc_dicts` (он уже расходится с A — пропускает defaults)
+- [x] невалид → `BlueprintInvalid`
 
 #### Task 1.2 — boot через `BlueprintAssembler`
 **Level:** Middle+ (Developer) · **Файлы:** `launch.py`
 **Goal:** `SystemBuilder.build()` нормализует blueprint (`_merge_defaults` снаружи) → `BlueprintAssembler.assemble` (дорога A на единой сборке). boot и switch используют **один и тот же** assembler + одну и ту же нормализацию.
-**Acceptance:** - [ ] boot proc_dict идентичен прежнему (diff-тест против дороги A) - [ ] qt-smoke старт
+**Acceptance:** (DONE 5314d99b) - [x] boot proc_dict идентичен прежнему (diff-тест против дороги A) - [x] qt-smoke старт (FPS 15.0, 7 вкладок, кадры текут)
 
 ---
 
