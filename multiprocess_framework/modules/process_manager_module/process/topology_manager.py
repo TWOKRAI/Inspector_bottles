@@ -171,6 +171,9 @@ class TopologyManager(BaseManager, ObservableMixin):
             return {"success": False, "error": "diff_fn/commands_fn not configured"}
 
         t_start = time.perf_counter()
+        # results объявлен ДО try чтобы exception-ветка могла вернуть
+        # частично-собранный список (для _teardown_partial в PM)
+        results: list[dict] = []
 
         try:
             diff = self._diff_fn(self._current_topology, topology_dict)
@@ -184,7 +187,6 @@ class TopologyManager(BaseManager, ObservableMixin):
                 f"Топология: применение {len(commands)} команд (текущая={'есть' if self._current_topology else 'нет'})"
             )
 
-            results: list[dict] = []
             for idx, cmd in enumerate(commands):
                 result = self._execute_command(cmd)
                 results.append(result)
@@ -221,7 +223,9 @@ class TopologyManager(BaseManager, ObservableMixin):
             self._log_error(f"Топология: ошибка apply: {e}")
             self._track_error(e, {"phase": "topology.apply"})
             self._record_timing("topology.apply_ms", elapsed_ms)
-            return {"success": False, "error": str(e)}
+            # results может быть частично заполнен — возвращаем для
+            # _teardown_partial в PM (точный откат по факту исполнения)
+            return {"success": False, "error": str(e), "results": results}
 
     def get(self) -> dict:
         """Получить текущую topology."""

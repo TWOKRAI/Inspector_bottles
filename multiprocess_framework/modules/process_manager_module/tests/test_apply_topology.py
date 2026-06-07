@@ -146,7 +146,13 @@ class TestApplyTopologyRollback:
     """Rollback при failure."""
 
     def test_create_failure_rolls_back(self) -> None:
-        """Падение на create 3-го процесса -> первые 2 откатаны, snapshot восстановлен."""
+        """Падение на create 3-го процесса -> старые восстановлены,
+        НОВЫЕ частично-созданные процессы полностью снесены.
+
+        Проверяет BLOCKER: _teardown_partial сносит provisioned/created
+        процессы ДО _restore_from_snapshot. Без этого — утечка очередей,
+        SHM-сегментов и призрачные конфиги.
+        """
         pm = make_pm(
             {
                 "old_1": {"class": "m.O1"},
@@ -186,6 +192,64 @@ class TestApplyTopologyRollback:
             assert pm._process_configs[name]["class"] == snapshot_before[name]["class"]
         # _current_topology НЕ закоммичен
         assert pm._topology_manager._current_topology is None
+
+        # --- BLOCKER fix assertions ---
+        # НОВЫЕ процессы (proc_a, proc_b, proc_c) ОТСУТСТВУЮТ в _process_configs
+        for new_name in ("proc_a", "proc_b", "proc_c"):
+            assert new_name not in pm._process_configs, f"призрачный конфиг '{new_name}' остался после rollback"
+        # НОВЫЕ процессы отсутствуют в registry
+        for new_name in ("proc_a", "proc_b", "proc_c"):
+            assert pm._process_registry.get_process_by_name(new_name) is None, (
+                f"призрачный процесс '{new_name}' остался в registry после rollback"
+            )
+        # Provisioned-очереди новых процессов очищены из shared_resources
+        sr = pm.shared_resources
+        for new_name in ("proc_a", "proc_b", "proc_c"):
+            assert new_name not in sr._registered, (
+                f"provisioned-очередь '{new_name}' осталась в shared_resources (утечка)"
+            )
+
+    def test_first_create_failure_cleans_all_provisioned(self) -> None:
+        """Падение на ПЕРВОМ create — ВСЕ provisioned-очереди новых процессов снесены.
+
+        Сценарий: planner генерирует provision для ВСЕХ новых процессов ДО create.
+        create[0] падает → ни одной provisioned-очереди не должно остаться.
+        Это ловит баг, подтверждённый ревьюером: provision бежит для ВСЕХ
+        до create, и при падении на первом create оставались provisioned-очереди.
+        """
+        pm = make_pm(
+            {
+                "old_w": {"class": "m.OW"},
+            }
+        )
+
+        # Инъекция: КАЖДЫЙ create падает (fail_on_create в registry)
+        pm._process_registry._fail_on_create = {"new_a", "new_b", "new_c"}
+        wire_planner(pm)
+
+        bp = {
+            "processes": [
+                {"process_name": "new_a", "process_class": "m.A"},
+                {"process_name": "new_b", "process_class": "m.B"},
+                {"process_name": "new_c", "process_class": "m.C"},
+            ]
+        }
+        result = pm.apply_topology(bp)
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+
+        # Старый процесс восстановлен
+        assert "old_w" in pm._process_configs
+
+        # НИ ОДНОГО нового процесса нет в конфигах, registry, shared_resources
+        sr = pm.shared_resources
+        for new_name in ("new_a", "new_b", "new_c"):
+            assert new_name not in pm._process_configs, f"призрачный конфиг '{new_name}' после rollback"
+            assert pm._process_registry.get_process_by_name(new_name) is None, (
+                f"призрачный процесс '{new_name}' в registry"
+            )
+            assert new_name not in sr._registered, f"provisioned-очередь '{new_name}' осталась (утечка SHM/queue)"
 
     def test_soft_fail_rolls_back(self) -> None:
         """Сид вернул success=False (без exception) -> rollback, topology НЕ закоммичен."""
