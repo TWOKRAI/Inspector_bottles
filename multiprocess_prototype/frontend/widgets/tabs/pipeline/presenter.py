@@ -1572,7 +1572,7 @@ class PipelinePresenter:
             self._notify_status(f"Запуск рецепта: не удалось прочитать рецепт '{active_slug}'", level="error")
             return False
 
-        # Шаг 3: извлечь blueprint
+        # Шаг 3: проверить наличие blueprint в рецепте
         blueprint = current.get("blueprint") or current.get("data", {}).get("blueprint") or {}
         if not blueprint:
             self._notify_status(f"Запуск рецепта: рецепт '{active_slug}' не содержит blueprint", level="warning")
@@ -1590,10 +1590,14 @@ class PipelinePresenter:
         # Шаг 5: request/response — реальный результат придёт в on_result (main-thread),
         # request исполняется на worker-потоке (UI не фризится). До ответа показываем
         # «выполняется…» в статусной строке (не модально, чтобы не блокировать UI).
+        # Task 2.2 displays-in-recipe: если рецепт v3 (top-level blueprint) — передаём
+        # ПОЛНЫЙ raw-dict, backend-овский unwrap_recipe извлечёт display_definitions.
+        # Иначе (v2 / plain topology) — только blueprint (backward compat).
+        topology_source = current if "blueprint" in current else blueprint
         self._notify_status(f"Запуск рецепта '{active_slug}': выполняется…")
         try:
             proxy.apply_topology(
-                blueprint,
+                topology_source,
                 on_result=lambda resp: self._on_recipe_launch_result(resp, active_slug),
             )
         except Exception as exc:

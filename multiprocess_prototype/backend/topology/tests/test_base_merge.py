@@ -150,3 +150,85 @@ class TestUnwrapRecipe:
         topo = _load_region_pipeline()
         rs = next(p for proc in topo["processes"] for p in proc["plugins"] if p["plugin_name"] == "region_split")
         assert len(rs["regions"]) == 2 and rs["default_region"]["target"] == "process_flip"
+
+    def test_unwrap_lifts_displays_to_display_definitions(self):
+        """top-level displays рецепта → display_definitions в результате (Dict-at-Boundary)."""
+        recipe = {
+            "name": "r",
+            "version": 3,
+            "displays": [{"id": "main", "width": 1920}],
+            "blueprint": {"name": "r", "processes": [], "wires": []},
+        }
+        topo = unwrap_recipe(recipe)
+        assert "display_definitions" in topo
+        assert topo["display_definitions"] == [{"id": "main", "width": 1920}]
+
+    def test_unwrap_no_displays_no_key(self):
+        """Рецепт без displays → ключ display_definitions отсутствует."""
+        recipe = {
+            "name": "r",
+            "version": 3,
+            "blueprint": {"name": "r", "processes": [], "wires": []},
+        }
+        topo = unwrap_recipe(recipe)
+        assert "display_definitions" not in topo
+
+    def test_unwrap_empty_displays_no_key(self):
+        """Рецепт с пустым displays=[] → ключ display_definitions отсутствует (falsy)."""
+        recipe = {
+            "name": "r",
+            "version": 3,
+            "displays": [],
+            "blueprint": {"name": "r", "processes": [], "wires": []},
+        }
+        topo = unwrap_recipe(recipe)
+        assert "display_definitions" not in topo
+
+
+class TestMergeDisplayDefinitions:
+    """Тесты merge_topologies для display_definitions (Task 1.1)."""
+
+    def test_merge_concatenates_display_definitions(self):
+        """display_definitions суммируются из base и pipeline."""
+        base = {
+            "processes": [],
+            "display_definitions": [{"id": "base_disp", "width": 640}],
+        }
+        pipeline = {
+            "name": "pipe",
+            "processes": [],
+            "display_definitions": [{"id": "pipe_disp", "width": 1280}],
+        }
+        merged = merge_topologies(base, pipeline)
+        assert len(merged["display_definitions"]) == 2
+        ids = [d["id"] for d in merged["display_definitions"]]
+        assert "base_disp" in ids
+        assert "pipe_disp" in ids
+
+    def test_merge_no_definitions_no_key(self):
+        """Ни base ни pipeline не имеют display_definitions → ключ отсутствует."""
+        base = {"processes": []}
+        pipeline = {"name": "p", "processes": []}
+        merged = merge_topologies(base, pipeline)
+        assert "display_definitions" not in merged
+
+    def test_merge_only_pipeline_has_definitions(self):
+        """Только pipeline имеет display_definitions — они проходят."""
+        base = {"processes": []}
+        pipeline = {
+            "name": "p",
+            "processes": [],
+            "display_definitions": [{"id": "d"}],
+        }
+        merged = merge_topologies(base, pipeline)
+        assert merged["display_definitions"] == [{"id": "d"}]
+
+    def test_merge_only_base_has_definitions(self):
+        """Только base имеет display_definitions — они проходят."""
+        base = {
+            "processes": [],
+            "display_definitions": [{"id": "d"}],
+        }
+        pipeline = {"name": "p", "processes": []}
+        merged = merge_topologies(base, pipeline)
+        assert merged["display_definitions"] == [{"id": "d"}]

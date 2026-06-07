@@ -154,12 +154,22 @@ class RecipeStoreFromManager:
         - RecipeManager.read_recipe() (raw YAML reader)
         - Recipe.from_dict() (понимает оба формата)
         - Legacy GUI reader'ы (ожидают top-level name/version)
+
+        Порядок ключей в результирующем YAML для читаемости (Task 1.3):
+            1. meta-поля (name, version, description, created_at)
+            2. displays — определения дисплеев (DisplayDefinition, top-level секция)
+            3. blueprint — топология рецепта
+            4. остальные поля (active_services, display_bindings, gui_positions, ...)
+
+        Поле ``displays`` (tuple[DisplayDefinition,...]) сохраняется автоматически
+        через denormalized.update(result) — оно НЕ входит в meta и не требует
+        специальной обработки. Явное позиционирование перед blueprint — только
+        для читаемости итогового YAML файла.
         """
         result = dict(data)
         meta = result.pop("meta", {})
         if isinstance(meta, dict):
-            # Распаковываем все meta-поля на верхний уровень.
-            # Порядок: meta-поля идут первыми для читаемости YAML
+            # 1. Сначала meta-поля (верхний уровень, читаемость YAML)
             denormalized: dict[str, Any] = {}
             for key in ("name", "version", "description", "created_at"):
                 if key in meta:
@@ -168,7 +178,18 @@ class RecipeStoreFromManager:
             for key, value in meta.items():
                 if key not in denormalized:
                     denormalized[key] = value
-            # Добавляем остальные поля Recipe (blueprint, active_services, ...)
+
+            # 2. displays — определения дисплеев рецепта (перед blueprint для читаемости).
+            #    Сохраняется как top-level секция, НЕ внутри blueprint.
+            #    (blueprint.displays = привязки node_id→display_id — другая секция)
+            if "displays" in result:
+                denormalized["displays"] = result.pop("displays")
+
+            # 3. blueprint — топология (процессы, провода, привязки дисплеев)
+            if "blueprint" in result:
+                denormalized["blueprint"] = result.pop("blueprint")
+
+            # 4. Остальные поля Recipe (active_services, display_bindings, gui_positions, ...)
             denormalized.update(result)
             return denormalized
         return result

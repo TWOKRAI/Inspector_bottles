@@ -116,6 +116,46 @@ Singleton-реестр в framework не должен знать application-spe
 
 ---
 
+## ADR-DM-004: `reload` = только метаданные, render-поля игнорируются
+
+**Дата:** 2026-06-07
+**Статус:** Принято
+**Task context:** Task 2.1 — DisplayRegistry.reload (план displays-in-recipe)
+
+### Контекст
+
+При переключении рецепта `DisplayRegistry` нужно атомарно перезаполнить определениями нового рецепта. Определения на границе процесса приходят как `list[dict]` и содержат как SHM-поля (`id/name/width/height/format/fps_limit/ring_buffer_blocks`), так и render-поля (`fit/scale/rotate/flip/crop/position`). Вопрос: что должен хранить реестр?
+
+### Альтернативы
+
+**A. Расширить `DisplayEntry` render-полями и хранить всё в реестре**
+- Плюсы: один источник истины для всех данных дисплея
+- Минусы: нарушает ADR-DM-001 (generic); framework получает знание о render-pipeline; не-vision приложения обязаны заполнять render-заглушки; blueprint_binding усложняется
+
+**B. `reload` фильтрует: берёт только SHM-поля, render-поля игнорирует**
+- Плюсы: сохраняет ADR-DM-001; реестр остаётся generic; render живёт в prototype-слое (`DisplayDefinition`, `DisplaySpec`, `PreviewWindow`); минимальные изменения framework; SHM-аллокация не затронута (реестр SHM не владеет — ADR-DM-003)
+- Минусы: render-параметры нужно доставлять в prototype отдельным каналом (но это и так через domain entity `DisplayDefinition`)
+
+**C. Два реестра: SHM-реестр (framework) + render-реестр (prototype)**
+- Плюсы: явное разделение
+- Минусы: избыточная сложность; sync двух реестров; один dict на границе всё равно содержит оба набора полей
+
+### Решение
+
+Выбран вариант B. `DisplayRegistry.reload(entries)` принимает `list[dict]` и извлекает ТОЛЬКО 7 SHM-ключей (`id`, `name`, `width`, `height`, `format`, `fps_limit`, `ring_buffer_blocks`). Все остальные ключи (render, prototype-specific) тихо игнорируются. SHM реестром не выделяется и не освобождается — `_cleanup_shm_channel` остаётся лог-предупреждением (ADR-DM-003). Render-параметры доступны prototype-слою через `DisplayDefinition` (domain entity) и `DisplaySpec` (adapter).
+
+Идемпотентность гарантирована: `reload(same)` = тот же реестр; `reload(old)` после `reload(new)` полностью восстанавливает предыдущий набор — достаточно для rollback в `apply_topology` (Архитектурное решение №2 плана).
+
+### Последствия
+
+- `DisplayEntry` и `DisplayRegistry` остаются generic (ADR-DM-001 сохранён)
+- Framework не знает о render-pipeline — SoC между слоями соблюдён
+- `bind_displays_to_blueprint` — obsolete (мёртвый код), не воскрешается
+- Rollback = повторный `reload(old_defs)` — дешёвая операция без SHM side-effects
+- Prototype получает render-параметры через domain entity, не через реестр
+
+---
+
 ## Индекс ADR
 
 | ID | Название | Статус | Task |
@@ -123,3 +163,4 @@ Singleton-реестр в framework не должен знать application-spe
 | ADR-DM-001 | DisplayEntry generic: без vision-полей | Принято | 4.1 |
 | ADR-DM-002 | `persist(path)` принимает path аргументом | Принято | 4.2 |
 | ADR-DM-003 | SHM cleanup при unregister — только warning | Принято | 4.2 |
+| ADR-DM-004 | `reload` = только метаданные, render-поля игнорируются | Принято | 2.1 (displays-in-recipe) |

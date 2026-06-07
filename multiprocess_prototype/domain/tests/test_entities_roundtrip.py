@@ -21,7 +21,10 @@ import yaml
 from pydantic import ValidationError
 
 from multiprocess_prototype.domain import (
+    DisplayCrop,
+    DisplayDefinition,
     DisplayInstance,
+    DisplayPosition,
     EntityValidationError,
     PluginInstance,
     Process,
@@ -720,3 +723,454 @@ class TestProjectFromTopologyFactory:
 
         with pytest.raises((ValidationError, TypeError)):
             project.active_recipe = "mutated"  # type: ignore[misc]
+
+
+# ==============================================================================
+# DisplayDefinition: структура, frozen, extra="forbid", round-trip
+# ==============================================================================
+
+
+class TestDisplayDefinition:
+    """Тесты entity DisplayDefinition (Task 1.1)."""
+
+    def test_minimal_definition(self) -> None:
+        """Минимальное определение: только id (обязательное поле)."""
+        dd = DisplayDefinition(id="main")
+        assert dd.id == "main"
+        assert dd.name == ""
+        assert dd.width == 1280
+        assert dd.height == 720
+        assert dd.format == "BGR"
+        assert dd.fps_limit == 30.0
+        assert dd.ring_buffer_blocks == 3
+        assert dd.position == DisplayPosition(x=0, y=0)
+        assert dd.fit == "contain"
+        assert dd.scale == 100
+        assert dd.rotate == 0
+        assert dd.flip == "none"
+        assert dd.crop is None
+
+    def test_full_definition_roundtrip(self) -> None:
+        """Полное определение: from_dict → to_dict round-trip идемпотентен."""
+        data = {
+            "id": "debug",
+            "name": "Отладочный дисплей",
+            "width": 640,
+            "height": 480,
+            "format": "RGB",
+            "fps_limit": 15.0,
+            "ring_buffer_blocks": 2,
+            "position": {"x": 100, "y": 50},
+            "fit": "cover",
+            "scale": 200,
+            "rotate": 90,
+            "flip": "horizontal",
+            "crop": {"x": 10, "y": 20, "w": 600, "h": 400},
+        }
+        dd = DisplayDefinition.from_dict(data)
+        assert dd.id == "debug"
+        assert dd.name == "Отладочный дисплей"
+        assert dd.width == 640
+        assert dd.position.x == 100
+        assert dd.position.y == 50
+        assert dd.fit == "cover"
+        assert dd.scale == 200
+        assert dd.rotate == 90
+        assert dd.flip == "horizontal"
+        assert dd.crop is not None
+        assert dd.crop.x == 10
+        assert dd.crop.w == 600
+
+        # Round-trip: to_dict → from_dict
+        d2 = dd.to_dict()
+        dd2 = DisplayDefinition.from_dict(d2)
+        assert dd2.to_dict() == d2
+
+    def test_extra_field_raises(self) -> None:
+        """DisplayDefinition с лишним полем → ValidationError (extra='forbid')."""
+        with pytest.raises(ValidationError):
+            DisplayDefinition(id="x", unknown_field="bad")  # type: ignore[call-arg]
+
+    def test_missing_id_raises(self) -> None:
+        """DisplayDefinition без id → ValidationError."""
+        with pytest.raises(ValidationError):
+            DisplayDefinition()  # type: ignore[call-arg]
+
+    def test_frozen(self) -> None:
+        """DisplayDefinition frozen — мутация бросает ошибку."""
+        dd = DisplayDefinition(id="main")
+        with pytest.raises((ValidationError, TypeError)):
+            dd.name = "mutated"  # type: ignore[misc]
+
+    def test_crop_none(self) -> None:
+        """crop: null → None."""
+        dd = DisplayDefinition.from_dict({"id": "x", "crop": None})
+        assert dd.crop is None
+
+    def test_crop_as_dict(self) -> None:
+        """crop: dict → DisplayCrop."""
+        dd = DisplayDefinition.from_dict({"id": "x", "crop": {"x": 0, "y": 0, "w": 100, "h": 100}})
+        assert isinstance(dd.crop, DisplayCrop)
+        assert dd.crop.w == 100
+
+    def test_position_absent_default(self) -> None:
+        """position отсутствует → default {0, 0}."""
+        dd = DisplayDefinition.from_dict({"id": "x"})
+        assert dd.position.x == 0
+        assert dd.position.y == 0
+
+    def test_position_as_dict(self) -> None:
+        """position: dict → DisplayPosition."""
+        dd = DisplayDefinition.from_dict({"id": "x", "position": {"x": 42, "y": 7}})
+        assert isinstance(dd.position, DisplayPosition)
+        assert dd.position.x == 42
+        assert dd.position.y == 7
+
+    def test_to_dict_produces_plain_dict(self) -> None:
+        """to_dict возвращает чистый dict (Dict-at-Boundary)."""
+        dd = DisplayDefinition(id="main", crop=DisplayCrop(x=1, y=2, w=3, h=4))
+        d = dd.to_dict()
+        assert isinstance(d, dict)
+        assert isinstance(d["position"], dict)
+        assert isinstance(d["crop"], dict)
+        # Нет Pydantic-объектов
+        assert d["crop"] == {"x": 1, "y": 2, "w": 3, "h": 4}
+
+
+# ==============================================================================
+# Recipe.displays: секция определений дисплеев (Task 1.1)
+# ==============================================================================
+
+
+class TestRecipeDisplays:
+    """Тесты поля Recipe.displays (tuple[DisplayDefinition, ...])."""
+
+    def _make_recipe_data(self, displays: list[dict] | None = None) -> dict:
+        """Вспомогательный: минимальный dict рецепта с optional displays."""
+        data: dict[str, Any] = {
+            "name": "test_recipe",
+            "version": 3,
+            "blueprint": {"processes": [], "wires": []},
+        }
+        if displays is not None:
+            data["displays"] = displays
+        return data
+
+    def test_recipe_with_displays_from_dict(self) -> None:
+        """Recipe.from_dict с секцией displays создаёт DisplayDefinition."""
+        data = self._make_recipe_data(displays=[{"id": "main", "width": 1920}])
+        recipe = Recipe.from_dict(data)
+        assert len(recipe.displays) == 1
+        assert recipe.displays[0].id == "main"
+        assert recipe.displays[0].width == 1920
+
+    def test_recipe_displays_empty_section(self) -> None:
+        """Пустая секция displays → пустой tuple."""
+        recipe = Recipe.from_dict(self._make_recipe_data(displays=[]))
+        assert recipe.displays == ()
+
+    def test_recipe_displays_absent(self) -> None:
+        """Отсутствующая секция displays → пустой tuple (default)."""
+        recipe = Recipe.from_dict(self._make_recipe_data(displays=None))
+        assert recipe.displays == ()
+
+    def test_recipe_displays_roundtrip_idempotent(self) -> None:
+        """Recipe с displays: from_dict → to_dict → from_dict идемпотентен."""
+        displays_data = [
+            {"id": "main", "name": "Основной", "width": 1280, "height": 720},
+            {
+                "id": "debug",
+                "name": "Отладочный",
+                "width": 640,
+                "height": 480,
+                "crop": {"x": 0, "y": 0, "w": 640, "h": 480},
+            },
+        ]
+        data = self._make_recipe_data(displays=displays_data)
+        recipe1 = Recipe.from_dict(data)
+        recipe_dict = recipe1.to_dict()
+        recipe2 = Recipe.from_dict(recipe_dict)
+
+        assert len(recipe2.displays) == 2
+        assert recipe2.displays[0].id == "main"
+        assert recipe2.displays[1].id == "debug"
+        assert recipe2.displays[1].crop is not None
+        assert recipe2.displays[1].crop.w == 640
+        # Полная идемпотентность dict
+        assert recipe2.to_dict() == recipe_dict
+
+    def test_recipe_to_dict_displays_is_list_of_dicts(self) -> None:
+        """to_dict()["displays"] — list[dict] (Dict-at-Boundary)."""
+        data = self._make_recipe_data(displays=[{"id": "main"}])
+        recipe = Recipe.from_dict(data)
+        out = recipe.to_dict()
+        assert isinstance(out["displays"], list)
+        assert isinstance(out["displays"][0], dict)
+        assert out["displays"][0]["id"] == "main"
+
+    def test_recipe_displays_not_in_meta_delete_list(self) -> None:
+        """top-level 'displays' НЕ удаляется как meta-поле в from_dict."""
+        data = {
+            "name": "test",
+            "version": 3,
+            "displays": [{"id": "main"}],
+            "blueprint": {"processes": [], "wires": []},
+        }
+        recipe = Recipe.from_dict(data)
+        assert len(recipe.displays) == 1
+
+    def test_recipe_displays_coexist_with_display_bindings(self) -> None:
+        """displays (определения) и display_bindings (привязки) сосуществуют."""
+        data = {
+            "name": "coexist",
+            "version": 3,
+            "displays": [{"id": "main", "name": "Основной"}],
+            "display_bindings": [{"node_id": "proc.plug.frame", "display_id": "main"}],
+            "blueprint": {"processes": [], "wires": []},
+        }
+        recipe = Recipe.from_dict(data)
+        assert len(recipe.displays) == 1
+        assert recipe.displays[0].id == "main"
+        assert len(recipe.display_bindings) == 1
+        assert recipe.display_bindings[0].display_id == "main"
+
+    def test_recipe_displays_crop_null_roundtrip(self) -> None:
+        """crop: null в определении → None, round-trip сохраняется."""
+        data = self._make_recipe_data(displays=[{"id": "x", "crop": None}])
+        recipe = Recipe.from_dict(data)
+        assert recipe.displays[0].crop is None
+        out = recipe.to_dict()
+        assert out["displays"][0]["crop"] is None
+
+
+# ==============================================================================
+# DisplayDefinition field_validators (Task 1.2)
+# ==============================================================================
+
+
+class TestDisplayDefinitionValidators:
+    """Тесты field_validator'ов DisplayDefinition (Task 1.2).
+
+    Проверяет инварианты: scale [10..1000], rotate {0/90/180/270},
+    flip/fit/format — enum.
+    """
+
+    # scale
+    def test_scale_minimum_valid(self) -> None:
+        """scale=10 — минимально допустимое значение."""
+        dd = DisplayDefinition(id="x", scale=10)
+        assert dd.scale == 10
+
+    def test_scale_maximum_valid(self) -> None:
+        """scale=1000 — максимально допустимое значение."""
+        dd = DisplayDefinition(id="x", scale=1000)
+        assert dd.scale == 1000
+
+    def test_scale_default_valid(self) -> None:
+        """scale=100 (по умолчанию) — корректен."""
+        dd = DisplayDefinition(id="x")
+        assert dd.scale == 100
+
+    def test_scale_below_minimum_raises(self) -> None:
+        """scale=5 → ValueError с упоминанием значения."""
+        with pytest.raises(ValidationError) as exc_info:
+            DisplayDefinition(id="x", scale=5)
+        assert "5" in str(exc_info.value)
+
+    def test_scale_zero_raises(self) -> None:
+        """scale=0 → ValueError (кадр не виден)."""
+        with pytest.raises(ValidationError):
+            DisplayDefinition(id="x", scale=0)
+
+    def test_scale_above_maximum_raises(self) -> None:
+        """scale=1001 → ValueError."""
+        with pytest.raises(ValidationError):
+            DisplayDefinition(id="x", scale=1001)
+
+    # rotate
+    def test_rotate_valid_values(self) -> None:
+        """rotate ∈ {0, 90, 180, 270} — все допустимы."""
+        for angle in (0, 90, 180, 270):
+            dd = DisplayDefinition(id="x", rotate=angle)
+            assert dd.rotate == angle
+
+    def test_rotate_invalid_raises(self) -> None:
+        """rotate=45 → ValueError."""
+        with pytest.raises(ValidationError) as exc_info:
+            DisplayDefinition(id="x", rotate=45)
+        assert "45" in str(exc_info.value)
+
+    def test_rotate_negative_raises(self) -> None:
+        """rotate=-90 → ValueError."""
+        with pytest.raises(ValidationError):
+            DisplayDefinition(id="x", rotate=-90)
+
+    # flip
+    def test_flip_valid_values(self) -> None:
+        """flip ∈ {none, horizontal, vertical, both} — все допустимы."""
+        for val in ("none", "horizontal", "vertical", "both"):
+            dd = DisplayDefinition(id="x", flip=val)
+            assert dd.flip == val
+
+    def test_flip_invalid_raises(self) -> None:
+        """flip='mirror' → ValueError."""
+        with pytest.raises(ValidationError) as exc_info:
+            DisplayDefinition(id="x", flip="mirror")
+        assert "mirror" in str(exc_info.value)
+
+    def test_flip_empty_string_raises(self) -> None:
+        """flip='' → ValueError."""
+        with pytest.raises(ValidationError):
+            DisplayDefinition(id="x", flip="")
+
+    # fit
+    def test_fit_valid_values(self) -> None:
+        """fit ∈ {contain, cover, stretch, none} — все допустимы."""
+        for val in ("contain", "cover", "stretch", "none"):
+            dd = DisplayDefinition(id="x", fit=val)
+            assert dd.fit == val
+
+    def test_fit_invalid_raises(self) -> None:
+        """fit='fill' → ValueError."""
+        with pytest.raises(ValidationError) as exc_info:
+            DisplayDefinition(id="x", fit="fill")
+        assert "fill" in str(exc_info.value)
+
+    # format
+    def test_format_valid_values(self) -> None:
+        """format ∈ {BGR, RGB, GRAY, RGBA} — все допустимы."""
+        for val in ("BGR", "RGB", "GRAY", "RGBA"):
+            dd = DisplayDefinition(id="x", format=val)
+            assert dd.format == val
+
+    def test_format_invalid_raises(self) -> None:
+        """format='YUV' → ValueError."""
+        with pytest.raises(ValidationError) as exc_info:
+            DisplayDefinition(id="x", format="YUV")
+        assert "YUV" in str(exc_info.value)
+
+    def test_format_lowercase_raises(self) -> None:
+        """format='bgr' (строчные) → ValueError (case-sensitive)."""
+        with pytest.raises(ValidationError):
+            DisplayDefinition(id="x", format="bgr")
+
+
+# ==============================================================================
+# Recipe инварианты уникальности и валидации ссылок (Task 1.2)
+# ==============================================================================
+
+
+class TestRecipeInvariants:
+    """Тесты @model_validator Recipe: уникальность displays[].id
+    и валидация ссылок blueprint.displays[].display_id.
+    """
+
+    def _make_recipe(
+        self,
+        displays: list[dict] | None = None,
+        blueprint_displays: list[dict] | None = None,
+    ) -> dict:
+        """Вспомогательный: минимальный dict рецепта."""
+        bp: dict[str, Any] = {"processes": [], "wires": []}
+        if blueprint_displays is not None:
+            bp["displays"] = blueprint_displays
+        data: dict[str, Any] = {
+            "name": "test",
+            "version": 3,
+            "blueprint": bp,
+        }
+        if displays is not None:
+            data["displays"] = displays
+        return data
+
+    # --- уникальность id ---
+
+    def test_duplicate_display_id_raises(self) -> None:
+        """Два дисплея с одинаковым id → ValueError с упоминанием id."""
+        data = self._make_recipe(displays=[{"id": "main"}, {"id": "main"}])
+        with pytest.raises(ValidationError) as exc_info:
+            Recipe.from_dict(data)
+        assert "main" in str(exc_info.value)
+
+    def test_unique_display_ids_ok(self) -> None:
+        """Два дисплея с разными id → ok."""
+        data = self._make_recipe(displays=[{"id": "main"}, {"id": "debug"}])
+        recipe = Recipe.from_dict(data)
+        assert len(recipe.displays) == 2
+
+    def test_single_display_id_ok(self) -> None:
+        """Один дисплей → ok."""
+        data = self._make_recipe(displays=[{"id": "main"}])
+        recipe = Recipe.from_dict(data)
+        assert recipe.displays[0].id == "main"
+
+    def test_empty_displays_ok(self) -> None:
+        """Пустая секция displays (без привязок) → ok."""
+        data = self._make_recipe(displays=[])
+        recipe = Recipe.from_dict(data)
+        assert recipe.displays == ()
+
+    # --- валидация ссылок ---
+
+    def test_dangling_display_id_in_blueprint_raises(self) -> None:
+        """blueprint.displays ссылается на несуществующий display_id → ValueError."""
+        data = self._make_recipe(
+            displays=[],
+            blueprint_displays=[{"node_id": "proc.plug.frame", "display_id": "ghost"}],
+        )
+        with pytest.raises(ValidationError) as exc_info:
+            Recipe.from_dict(data)
+        assert "ghost" in str(exc_info.value)
+
+    def test_valid_display_reference_ok(self) -> None:
+        """blueprint.displays ссылается на существующий display_id → ok."""
+        data = self._make_recipe(
+            displays=[{"id": "main"}],
+            blueprint_displays=[{"node_id": "proc.plug.frame", "display_id": "main"}],
+        )
+        recipe = Recipe.from_dict(data)
+        assert recipe.blueprint.displays[0].display_id == "main"
+
+    def test_no_blueprint_bindings_ok(self) -> None:
+        """Нет привязок в blueprint → ok (дисплей без привязки допустим)."""
+        data = self._make_recipe(
+            displays=[{"id": "main"}],
+            blueprint_displays=[],
+        )
+        recipe = Recipe.from_dict(data)
+        assert recipe.blueprint.displays == ()
+        assert recipe.displays[0].id == "main"
+
+    def test_empty_displays_with_bindings_raises(self) -> None:
+        """displays пуст + есть привязки → ошибка (висячие ссылки)."""
+        data = self._make_recipe(
+            displays=[],
+            blueprint_displays=[{"node_id": "proc.plug.frame", "display_id": "main"}],
+        )
+        with pytest.raises(ValidationError):
+            Recipe.from_dict(data)
+
+    def test_multiple_bindings_one_dangling_raises(self) -> None:
+        """Одна корректная + одна висячая ссылка → ValueError с указанием проблемного id."""
+        data = self._make_recipe(
+            displays=[{"id": "main"}],
+            blueprint_displays=[
+                {"node_id": "proc.plug.frame1", "display_id": "main"},
+                {"node_id": "proc.plug.frame2", "display_id": "missing"},
+            ],
+        )
+        with pytest.raises(ValidationError) as exc_info:
+            Recipe.from_dict(data)
+        assert "missing" in str(exc_info.value)
+
+    def test_multiple_valid_bindings_ok(self) -> None:
+        """Несколько корректных привязок к разным дисплеям → ok."""
+        data = self._make_recipe(
+            displays=[{"id": "main"}, {"id": "debug"}],
+            blueprint_displays=[
+                {"node_id": "proc.plug.frame1", "display_id": "main"},
+                {"node_id": "proc.plug.frame2", "display_id": "debug"},
+            ],
+        )
+        recipe = Recipe.from_dict(data)
+        assert len(recipe.blueprint.displays) == 2

@@ -32,7 +32,12 @@ from __future__ import annotations
 from .auth_facade import AuthFacade
 from .command_dispatcher import CommandDispatcher, HistoryEntry
 from .config_store import ConfigStore
-from .display_catalog import DisplayCatalog, DisplaySpec
+from .display_catalog import (
+    DisplayCatalog,
+    DisplaySpec,
+    definition_to_spec,
+    spec_to_definition_dict,
+)
 from .event_bus import EventBusProtocol, Subscription
 from .plugin_catalog import PluginCatalog, PluginSpec, PortSpec
 from .recipe_store import RecipeStore
@@ -60,6 +65,8 @@ __all__ = [
     "PortSpec",
     "ServiceSpec",
     "DisplaySpec",
+    "definition_to_spec",
+    "spec_to_definition_dict",
     "FieldSpec",
     "Subscription",
 ]

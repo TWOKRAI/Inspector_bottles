@@ -298,7 +298,12 @@ def test_on_delete_no_confirm(
 def test_on_set_active_calls_replace(
     mock_view: MagicMock,
 ) -> None:
-    """on_set_active вызывает apply_topology_fn с blueprint dict."""
+    """on_set_active вызывает apply_topology_fn с полным raw-dict рецепта (v3 формат).
+
+    Task 2.2 displays-in-recipe: если рецепт содержит top-level blueprint
+    (и НЕ содержит top-level processes) — передаём полный raw dict.
+    Backend-овский unwrap_recipe извлечёт blueprint + display_definitions.
+    """
     blueprint_data = {
         "processes": [{"process_name": "worker_1", "class": "Worker", "plugins": []}],
         "wires": [],
@@ -323,12 +328,13 @@ def test_on_set_active_calls_replace(
     presenter._selected_slug = "cup"
     presenter.on_set_active()
 
-    # replace_fn должен быть вызван с dict blueprint (Dict at Boundary)
+    # replace_fn вызван с полным raw-dict рецепта (top-level blueprint → v3 формат)
     replace_fn.assert_called_once()
-    passed_blueprint = replace_fn.call_args[0][0]
-    assert isinstance(passed_blueprint, dict)
-    assert "processes" in passed_blueprint
-    assert passed_blueprint["processes"][0]["process_name"] == "worker_1"
+    passed = replace_fn.call_args[0][0]
+    assert isinstance(passed, dict)
+    # Полный рецепт: blueprint внутри
+    assert "blueprint" in passed
+    assert passed["blueprint"]["processes"][0]["process_name"] == "worker_1"
 
 
 # ---------------------------------------------------------------------------

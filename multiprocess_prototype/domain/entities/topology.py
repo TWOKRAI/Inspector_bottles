@@ -152,8 +152,10 @@ class Topology(SchemaBase):
         молчаливого поглощения опечаток (extra='forbid' сработает корректно).
         """
         known_keys = {"processes", "wires", "displays", "metadata"}
-        # Whitelist: только известные мета-поля SystemBlueprint
-        _BLUEPRINT_META_KEYS: frozenset[str] = frozenset({"name", "description"})
+        # Whitelist: известные мета-поля SystemBlueprint + display_definitions
+        # (display_definitions проброшен через merge_topologies, Task 1.1/2.2 —
+        #  не относится к Topology domain-модели, но приходит в том же dict).
+        _BLUEPRINT_META_KEYS: frozenset[str] = frozenset({"name", "description", "display_definitions"})
 
         extra_keys = set(data.keys()) - known_keys
         if not extra_keys:
