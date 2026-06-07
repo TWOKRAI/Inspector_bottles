@@ -34,10 +34,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hikvision_camera.core.camera import HikvisionCamera, CameraState
-from hikvision_camera.core.discovery import DeviceInfo, enum_devices
-from hikvision_camera.core.converter import FrameConverter
-from hikvision_camera.core.parameters import CameraParameters, get_parameters, set_parameters
+from Services.hikvision_camera.core.camera import HikvisionCamera, CameraState
+from Services.hikvision_camera.core.discovery import DeviceInfo, enum_devices
+from Services.hikvision_camera.core.converter import FrameConverter
+from Services.hikvision_camera.core.parameters import CameraParameters, get_parameters, set_parameters
 
 
 class HikvisionCameraWindow(QMainWindow):

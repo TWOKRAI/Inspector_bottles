@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from hikvision_camera.core.converter import FrameConverter
-from hikvision_camera.sdk.constants import PixelType
+from Services.hikvision_camera.core.converter import FrameConverter
+from Services.hikvision_camera.sdk.constants import PixelType
 
 
 class TestToBgr:

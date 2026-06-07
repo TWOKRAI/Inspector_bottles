@@ -12,9 +12,9 @@ import time
 from ctypes import byref, memset, sizeof
 from dataclasses import dataclass
 
-from hikvision_camera.sdk.bindings import MvCamera, SDK_AVAILABLE
-from hikvision_camera.sdk.structures import MVCC_FLOATVALUE
-from hikvision_camera.sdk.errors import check_sdk_error, SdkError
+from Services.hikvision_camera.sdk.bindings import MvCamera, SDK_AVAILABLE
+from Services.hikvision_camera.sdk.structures import MVCC_FLOATVALUE
+from Services.hikvision_camera.sdk.errors import check_sdk_error, SdkError
 
 
 @dataclass

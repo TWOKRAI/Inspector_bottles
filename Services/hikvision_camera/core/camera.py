@@ -17,18 +17,18 @@ from typing import Callable
 
 import numpy as np
 
-from hikvision_camera.sdk.bindings import MvCamera, SDK_AVAILABLE
-from hikvision_camera.sdk.structures import (
+from Services.hikvision_camera.sdk.bindings import MvCamera, SDK_AVAILABLE
+from Services.hikvision_camera.sdk.structures import (
     MV_CC_DEVICE_INFO,
     MV_CC_DEVICE_INFO_LIST,
     MV_FRAME_OUT,
 )
-from hikvision_camera.sdk.constants import (
+from Services.hikvision_camera.sdk.constants import (
     MV_GIGE_DEVICE,
     MV_USB_DEVICE,
     MV_TRIGGER_MODE_OFF,
 )
-from hikvision_camera.sdk.errors import check_sdk_error, SdkError
+from Services.hikvision_camera.sdk.errors import check_sdk_error, SdkError
 
 
 class CameraState(Enum):

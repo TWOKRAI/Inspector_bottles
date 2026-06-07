@@ -12,7 +12,7 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-from hikvision_camera.core.camera import CameraState
+from Services.hikvision_camera.core.camera import CameraState
 
 
 @runtime_checkable

@@ -17,7 +17,7 @@ class HikvisionCameraConfig(PluginConfig):
     SHM ring-buffer для zero-copy передачи кадров.
     """
 
-    plugin_class: str = "hikvision_camera.plugin.plugin.HikvisionCameraPlugin"
+    plugin_class: str = "Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin"
 
     # Параметры камеры
     camera_id: Annotated[

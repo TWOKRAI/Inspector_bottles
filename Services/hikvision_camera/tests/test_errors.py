@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from hikvision_camera.sdk.errors import (
+from Services.hikvision_camera.sdk.errors import (
     SdkError,
     check_sdk_error,
     error_description,

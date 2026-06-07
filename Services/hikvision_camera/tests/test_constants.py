@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from hikvision_camera.sdk.constants import (
+from Services.hikvision_camera.sdk.constants import (
     PixelType,
     MV_GIGE_DEVICE,
     MV_USB_DEVICE,

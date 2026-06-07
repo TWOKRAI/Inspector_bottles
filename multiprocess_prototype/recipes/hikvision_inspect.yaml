@@ -1,0 +1,64 @@
+# Рецепт hikvision_inspect — промышленная камера Hikvision → дисплей.
+#
+# Цепочка (одна камера):
+#   camera_0 [HikvisionCameraPlugin] → gui (display "main")
+#
+# МНОГО КАМЕР (независимы, каждая в СВОЁМ процессе):
+#   Скопируй блок процесса camera_0 и поменяй:
+#     - process_name: camera_1            (уникальное имя процесса)
+#     - plugin camera_id: 1               (уникальный SHM-слот hikvision_{id}_frame)
+#     - plugin camera_index: 1            (индекс устройства в enum_devices)
+#   Затем добавь в blueprint.displays привязку camera_1.hikvision.frame → display_id,
+#   а в top-level displays — определение нового дисплея (id, width, position и т.д.).
+#   Камеры полностью независимы: отдельные процессы, отдельные SHM, отдельный захват.
+#
+# Предусловие: установлен MVS SDK (MvCameraControl.dll), камера(ы) подключены.
+# Запуск: python run.py → вкладка «Рецепты» → выбрать hikvision_inspect → активировать.
+name: hikvision_inspect
+version: 3
+description: "Hikvision камера → дисплей (отдельный рецепт, multi-camera-ready)"
+
+blueprint:
+  name: hikvision_inspect
+  description: "Промышленная камера Hikvision напрямую на дисплей"
+
+  processes:
+    # --- Камера 0 (один процесс на одну камеру) ---
+    - process_name: camera_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - gui
+      source_target_fps: 25
+      plugins:
+        - plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
+          plugin_name: hikvision
+          category: source
+          camera_id: 0
+          camera_index: 0
+          resolution_width: 1920
+          resolution_height: 1080
+          fps: 25
+          auto_start: true
+
+  # Привязка узла-источника кадров к дисплею (node_id = process.plugin.port)
+  displays:
+    - node_id: camera_0.hikvision.frame
+      display_id: main
+
+# Определения дисплеев (top-level)
+displays:
+  - id: main
+    name: Камера 0
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none

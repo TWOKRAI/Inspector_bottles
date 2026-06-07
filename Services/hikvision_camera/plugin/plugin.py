@@ -26,8 +26,8 @@ from multiprocess_framework.modules.process_module.plugins.base import (
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
 
-from hikvision_camera.core.camera import HikvisionCamera
-from hikvision_camera.core.converter import FrameConverter
+from Services.hikvision_camera.core.camera import HikvisionCamera
+from Services.hikvision_camera.core.converter import FrameConverter
 
 from .registers import HikvisionCameraRegisters
 
@@ -36,7 +36,7 @@ _FRAME_ID_MODULO = 121
 
 
 @register_plugin(
-    "hikvision_camera",
+    "Services.hikvision_camera",
     category="source",
     description="Промышленная камера Hikvision (MVS SDK)",
 )
@@ -56,7 +56,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
         set_resolution       -- изменение целевого разрешения
     """
 
-    name = "hikvision_camera"
+    name = "Services.hikvision_camera"
     category = "source"
 
     inputs: list[Port] = []
@@ -229,7 +229,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
         if not self._camera or not self._reg:
             return
 
-        from hikvision_camera.core.parameters import (
+        from Services.hikvision_camera.core.parameters import (
             CameraParameters,
             set_parameters,
         )
@@ -281,14 +281,14 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
 
     def cmd_enum_devices(self, data: dict) -> dict:
         """Перечислить доступные Hikvision камеры (GigE/USB)."""
-        from hikvision_camera.core.discovery import enum_devices
+        from Services.hikvision_camera.core.discovery import enum_devices
 
         devices = enum_devices()
         return {"status": "ok", "devices": [d.to_dict() for d in devices]}
 
     def cmd_get_parameters(self, data: dict) -> dict:
         """Получить текущие параметры камеры из SDK."""
-        from hikvision_camera.core.parameters import get_parameters
+        from Services.hikvision_camera.core.parameters import get_parameters
 
         with self._camera_lock:
             if not self._camera or not hasattr(self._camera, "_camera") or self._camera._camera is None:
@@ -309,7 +309,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
 
     def cmd_set_parameters(self, data: dict) -> dict:
         """Установить все параметры камеры (frame_rate, exposure_time, gain)."""
-        from hikvision_camera.core.parameters import (
+        from Services.hikvision_camera.core.parameters import (
             CameraParameters,
             set_parameters,
         )
@@ -392,7 +392,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
         try:
             # Корень проекта (для python -m hikvision_camera)
             project_root = Path(__file__).resolve().parent.parent.parent
-            cmd = [sys.executable, "-m", "hikvision_camera"]
+            cmd = [sys.executable, "-m", "Services.hikvision_camera"]
             self._sdk_process = subprocess.Popen(  # nosec B603 — фиксированный cmd-список, shell=False, без пользовательского ввода
                 cmd,
                 cwd=str(project_root),

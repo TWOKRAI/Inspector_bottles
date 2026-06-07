@@ -1,6 +1,7 @@
 """HikvisionBackend — захват с промышленных камер Hikvision (MVS SDK).
 
-Lazy import: hikvision_camera_module загружается только при создании экземпляра.
+Использует пакет Services.hikvision_camera: core state-machine ``HikvisionCamera``
++ ``FrameConverter`` (raw→BGR). Lazy import — SDK/пакет могут отсутствовать.
 Работает только на Windows (sys.platform == "win32").
 """
 
@@ -8,19 +9,23 @@ from __future__ import annotations
 
 import sys
 
-import cv2
 import numpy as np
 
-# Проверяем доступность SDK при импорте модуля
-_HAS_SDK = False
+# Доступность пакета hikvision_camera (DLL MVS проверяется отдельно — см. HikvisionCamera.sdk_available)
+_HAS_PKG = False
 try:
-    from hikvision_camera_module import HikvisionCameraFacade  # noqa: F401
-    _HAS_SDK = True
+    from Services.hikvision_camera.core.camera import HikvisionCamera
+    from Services.hikvision_camera.core.converter import FrameConverter
+    from Services.hikvision_camera.core.discovery import enum_devices
+    from Services.hikvision_camera.core.parameters import (
+        CameraParameters,
+        get_parameters,
+        set_parameters,
+    )
+
+    _HAS_PKG = True
 except ImportError:
     pass
-
-# Константа pixel type для Bayer RG8 (из MVS SDK)
-_PIXEL_TYPE_BAYER_RG8 = 17301513
 
 
 class HikvisionBackend:
@@ -28,11 +33,12 @@ class HikvisionBackend:
 
     Требования:
         - Windows (sys.platform == "win32")
-        - hikvision_camera_module установлен
+        - пакет Services.hikvision_camera импортируется (а для реального
+          захвата — установлен MVS SDK / MvCameraControl.dll)
 
     Raises:
-        ImportError: если SDK не установлен
         RuntimeError: если платформа не Windows
+        ImportError: если пакет hikvision_camera недоступен
     """
 
     def __init__(
@@ -41,98 +47,51 @@ class HikvisionBackend:
         target_width: int = 1920,
         target_height: int = 1080,
     ) -> None:
-        # Проверка платформы
         if sys.platform != "win32":
-            raise RuntimeError(
-                "HikvisionBackend поддерживается только на Windows"
-            )
-
-        # Проверка SDK
-        if not _HAS_SDK:
+            raise RuntimeError("HikvisionBackend поддерживается только на Windows")
+        if not _HAS_PKG:
             raise ImportError(
-                "hikvision_camera_module не установлен. "
-                "Установите SDK для работы с камерами Hikvision."
+                "Пакет Services.hikvision_camera недоступен. Проверьте установку MVS SDK и доступность пакета."
             )
-
-        from hikvision_camera_module import HikvisionCameraFacade
 
         self._camera_index = camera_index
         self._target_width = target_width
         self._target_height = target_height
         self._running = False
+        self._camera = HikvisionCamera()
 
-        self._facade = HikvisionCameraFacade(
-            on_status=lambda t: None,
-            on_error=lambda t: None,
-        )
-
-    def _convert_to_rgb(
-        self, frame: np.ndarray, pixel_type: int
-    ) -> np.ndarray | None:
-        """Конвертировать кадр в RGB.
-
-        Обрабатывает Bayer RG8, grayscale, RGBA форматы.
-        """
-        if len(frame.shape) == 2:
-            # Одноканальный — Bayer или grayscale
-            code = (
-                cv2.COLOR_BayerRG2RGB
-                if pixel_type == _PIXEL_TYPE_BAYER_RG8
-                else cv2.COLOR_GRAY2RGB
-            )
-            frame = cv2.cvtColor(frame, code)
-        elif len(frame.shape) == 3 and frame.shape[2] == 4:
-            # RGBA → RGB
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
-
-        # Проверка: должен быть 3-канальный
-        if len(frame.shape) != 3 or frame.shape[2] != 3:
-            return None
-        return frame
-
-    def _resize_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Привести кадр к целевому разрешению."""
-        if (
-            frame.shape[0] == self._target_height
-            and frame.shape[1] == self._target_width
-        ):
-            return frame
-        return cv2.resize(
-            frame,
-            (self._target_width, self._target_height),
-            interpolation=cv2.INTER_LINEAR,
-        )
-
-    def capture_frame(self) -> np.ndarray | None:
-        """Захватить один кадр с камеры Hikvision."""
-        if not self._running:
-            return None
-        frame = self._facade.capture_frame(timeout_ms=1000)
-        if frame is None:
-            return None
-        frame = self._convert_to_rgb(frame, self._facade.last_pixel_type)
-        if frame is None:
-            return None
-        return self._resize_frame(frame)
+    # --- Capture lifecycle ---
 
     def start(self) -> None:
         """Открыть камеру и начать захват."""
-        result = self._facade.open(self._camera_index)
-        if result.get("status") != "ok":
+        if not self._camera.open(self._camera_index):
             self._running = False
             return
-        result = self._facade.start_grabbing()
-        self._running = result.get("status") == "ok"
+        self._running = self._camera.start_grabbing()
 
     def stop(self) -> None:
-        """Остановить захват."""
+        """Остановить захват (камера остаётся открытой)."""
         self._running = False
-        self._facade.stop_grabbing()
+        self._camera.stop_grabbing()
 
     def close(self) -> None:
         """Полностью закрыть камеру и освободить ресурсы."""
         self._running = False
-        self._facade.close()
+        self._camera.close()
+
+    def capture_frame(self) -> np.ndarray | None:
+        """Захватить один кадр с камеры Hikvision (BGR, 3 канала)."""
+        if not self._running:
+            return None
+        raw_frame, pixel_type = self._camera.capture_frame(timeout_ms=1000)
+        if raw_frame is None:
+            return None
+        bgr = FrameConverter.to_bgr(raw_frame, pixel_type)
+        if bgr is None:
+            return None
+        return FrameConverter.resize(bgr, self._target_width, self._target_height)
+
+    # --- Команды (enum/параметры) ---
 
     def handle_command(self, cmd: str, data: dict) -> dict | None:
         """Обработать команду Hikvision.
@@ -142,43 +101,51 @@ class HikvisionBackend:
             get_parameters, set_parameters
         """
         if cmd == "enum_devices":
-            result = self._facade.enum_devices() or {}
-            if isinstance(result, dict) and result.get("status") == "ok":
-                for dev in result.get("devices") or []:
-                    if isinstance(dev, dict):
-                        dev.setdefault("source", "hikvision")
-            return result
+            devices = []
+            for dev in enum_devices():
+                d = dev.to_dict() if hasattr(dev, "to_dict") else {}
+                d.setdefault("source", "hikvision")
+                devices.append(d)
+            return {"status": "ok", "devices": devices}
 
         if cmd == "open":
             idx = data.get("camera_index", self._camera_index)
             self._camera_index = idx
-            return self._facade.open(idx)
+            ok = self._camera.open(idx)
+            return {"status": "ok" if ok else "error"}
 
         if cmd == "close":
-            self._running = False
-            self._facade.close()
+            self.close()
             return {"status": "ok"}
 
         if cmd == "start_grabbing":
-            self._facade.open(self._camera_index)
-            result = self._facade.start_grabbing()
-            self._running = result.get("status") == "ok"
-            return result
+            self.start()
+            return {"status": "ok" if self._running else "error"}
 
         if cmd == "stop_grabbing":
-            self._running = False
-            self._facade.stop_grabbing()
+            self.stop()
             return {"status": "ok"}
 
         if cmd == "get_parameters":
-            return self._facade.get_parameters()
+            handle = self._camera._camera
+            params = get_parameters(handle) if handle is not None else None
+            if params is None:
+                return {"status": "error", "error": "Параметры недоступны (камера закрыта?)"}
+            return {
+                "status": "ok",
+                "frame_rate": params.frame_rate,
+                "exposure_time": params.exposure_time,
+                "gain": params.gain,
+            }
 
         if cmd == "set_parameters":
             fr = data.get("frame_rate")
             exp = data.get("exposure_time")
             gain = data.get("gain")
-            if None in (fr, exp, gain):
-                return {"status": "error", "error": "Не хватает параметров"}
-            return self._facade.set_parameters(float(fr), float(exp), float(gain))
+            handle = self._camera._camera
+            if None in (fr, exp, gain) or handle is None:
+                return {"status": "error", "error": "Не хватает параметров или камера закрыта"}
+            ok = set_parameters(handle, CameraParameters(float(fr), float(exp), float(gain)))
+            return {"status": "ok" if ok else "error"}
 
         return None

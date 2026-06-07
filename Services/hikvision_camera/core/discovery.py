@@ -11,13 +11,13 @@ import ctypes
 from ctypes import POINTER
 from dataclasses import dataclass, asdict
 
-from hikvision_camera.sdk.bindings import MvCamera, SDK_AVAILABLE
-from hikvision_camera.sdk.structures import (
+from Services.hikvision_camera.sdk.bindings import MvCamera, SDK_AVAILABLE
+from Services.hikvision_camera.sdk.structures import (
     MV_CC_DEVICE_INFO,
     MV_CC_DEVICE_INFO_LIST,
 )
-from hikvision_camera.sdk.constants import MV_GIGE_DEVICE, MV_USB_DEVICE
-from hikvision_camera.sdk.errors import check_sdk_error, SdkError
+from Services.hikvision_camera.sdk.constants import MV_GIGE_DEVICE, MV_USB_DEVICE
+from Services.hikvision_camera.sdk.errors import check_sdk_error, SdkError
 
 
 @dataclass(frozen=True)

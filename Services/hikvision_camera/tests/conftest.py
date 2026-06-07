@@ -11,14 +11,14 @@ from unittest.mock import patch
 @pytest.fixture
 def mock_sdk_available():
     """Мокаем SDK как доступный."""
-    with patch("hikvision_camera.sdk.bindings.SDK_AVAILABLE", True):
+    with patch("Services.hikvision_camera.sdk.bindings.SDK_AVAILABLE", True):
         yield
 
 
 @pytest.fixture
 def mock_sdk_unavailable():
     """Мокаем SDK как недоступный."""
-    with patch("hikvision_camera.sdk.bindings.SDK_AVAILABLE", False):
+    with patch("Services.hikvision_camera.sdk.bindings.SDK_AVAILABLE", False):
         yield
 
 
