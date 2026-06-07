@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Фикстуры для тестов hikvision_camera_module_2."""
+"""Фикстуры для тестов hikvision_camera."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,14 +11,14 @@ from unittest.mock import patch
 @pytest.fixture
 def mock_sdk_available():
     """Мокаем SDK как доступный."""
-    with patch("hikvision_camera_module_2.sdk.bindings.SDK_AVAILABLE", True):
+    with patch("hikvision_camera.sdk.bindings.SDK_AVAILABLE", True):
         yield
 
 
 @pytest.fixture
 def mock_sdk_unavailable():
     """Мокаем SDK как недоступный."""
-    with patch("hikvision_camera_module_2.sdk.bindings.SDK_AVAILABLE", False):
+    with patch("hikvision_camera.sdk.bindings.SDK_AVAILABLE", False):
         yield
 
 

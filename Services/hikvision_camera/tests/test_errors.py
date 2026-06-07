@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """Тесты SDK errors: SdkError, check_sdk_error, error_description."""
+
 from __future__ import annotations
 
 import pytest
 
-from hikvision_camera_module_2.sdk.errors import (
+from hikvision_camera.sdk.errors import (
     SdkError,
     check_sdk_error,
     error_description,

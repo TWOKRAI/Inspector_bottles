@@ -1,4 +1,5 @@
 """Конфиг HikvisionCameraPlugin -- параметры Hikvision source-плагина."""
+
 from __future__ import annotations
 
 from typing import Annotated, Any
@@ -16,9 +17,7 @@ class HikvisionCameraConfig(PluginConfig):
     SHM ring-buffer для zero-copy передачи кадров.
     """
 
-    plugin_class: str = (
-        "hikvision_camera_module_2.plugin.plugin.HikvisionCameraPlugin"
-    )
+    plugin_class: str = "hikvision_camera.plugin.plugin.HikvisionCameraPlugin"
 
     # Параметры камеры
     camera_id: Annotated[

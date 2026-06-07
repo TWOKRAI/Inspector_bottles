@@ -4,19 +4,20 @@
 
 Возвращает типизированные DeviceInfo dataclass вместо сырых dict.
 """
+
 from __future__ import annotations
 
 import ctypes
 from ctypes import POINTER
 from dataclasses import dataclass, asdict
 
-from hikvision_camera_module_2.sdk.bindings import MvCamera, SDK_AVAILABLE
-from hikvision_camera_module_2.sdk.structures import (
+from hikvision_camera.sdk.bindings import MvCamera, SDK_AVAILABLE
+from hikvision_camera.sdk.structures import (
     MV_CC_DEVICE_INFO,
     MV_CC_DEVICE_INFO_LIST,
 )
-from hikvision_camera_module_2.sdk.constants import MV_GIGE_DEVICE, MV_USB_DEVICE
-from hikvision_camera_module_2.sdk.errors import check_sdk_error, SdkError
+from hikvision_camera.sdk.constants import MV_GIGE_DEVICE, MV_USB_DEVICE
+from hikvision_camera.sdk.errors import check_sdk_error, SdkError
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,7 @@ class DeviceInfo:
     """Информация об обнаруженной камере."""
 
     index: int
-    device_type: str       # "GigE" | "USB" | "Unknown"
+    device_type: str  # "GigE" | "USB" | "Unknown"
     user_name: str
     model_name: str
     serial: str
@@ -35,9 +36,7 @@ class DeviceInfo:
         return asdict(self)
 
 
-def _parse_gige_device(
-    index: int, mvcc: MV_CC_DEVICE_INFO
-) -> DeviceInfo:
+def _parse_gige_device(index: int, mvcc: MV_CC_DEVICE_INFO) -> DeviceInfo:
     """Парсинг информации GigE-устройства."""
     user_name = ""
     model_name = ""
@@ -59,10 +58,7 @@ def _parse_gige_device(
         pass
 
     nip = mvcc.SpecialInfo.stGigEInfo.nCurrentIp
-    serial = (
-        f"{(nip >> 24) & 0xff}.{(nip >> 16) & 0xff}."
-        f"{(nip >> 8) & 0xff}.{nip & 0xff}"
-    )
+    serial = f"{(nip >> 24) & 0xFF}.{(nip >> 16) & 0xFF}.{(nip >> 8) & 0xFF}.{nip & 0xFF}"
     display_name = f"[{index}] GigE: {user_name} {model_name} ({serial})"
 
     return DeviceInfo(
@@ -75,9 +71,7 @@ def _parse_gige_device(
     )
 
 
-def _parse_usb_device(
-    index: int, mvcc: MV_CC_DEVICE_INFO
-) -> DeviceInfo:
+def _parse_usb_device(index: int, mvcc: MV_CC_DEVICE_INFO) -> DeviceInfo:
     """Парсинг информации USB-устройства."""
     user_name = ""
     model_name = ""
@@ -98,11 +92,7 @@ def _parse_usb_device(
     except Exception:
         pass
 
-    serial = "".join(
-        chr(b)
-        for b in mvcc.SpecialInfo.stUsb3VInfo.chSerialNumber
-        if b
-    )
+    serial = "".join(chr(b) for b in mvcc.SpecialInfo.stUsb3VInfo.chSerialNumber if b)
     display_name = f"[{index}] USB: {user_name} {model_name} ({serial})"
 
     return DeviceInfo(
@@ -130,9 +120,7 @@ def enum_devices() -> list[DeviceInfo]:
     try:
         device_list = MV_CC_DEVICE_INFO_LIST()
         check_sdk_error(
-            MvCamera.MV_CC_EnumDevices(
-                MV_GIGE_DEVICE | MV_USB_DEVICE, device_list
-            ),
+            MvCamera.MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, device_list),
             "enum_devices",
         )
 

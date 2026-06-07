@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """Тесты CameraParameters, get_parameters, set_parameters."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
 
-from hikvision_camera_module_2.core.parameters import (
+from hikvision_camera.core.parameters import (
     CameraParameters,
     get_parameters,
     set_parameters,
@@ -55,9 +56,7 @@ class TestGetParameters:
         from unittest.mock import MagicMock
 
         mock_camera = MagicMock()
-        with patch(
-            "hikvision_camera_module_2.core.parameters.SDK_AVAILABLE", False
-        ):
+        with patch("hikvision_camera.core.parameters.SDK_AVAILABLE", False):
             result = get_parameters(mock_camera)
 
         assert result is None
@@ -79,9 +78,7 @@ class TestSetParameters:
         mock_camera = MagicMock()
         params = CameraParameters(frame_rate=30.0, exposure_time=10000.0, gain=5.0)
 
-        with patch(
-            "hikvision_camera_module_2.core.parameters.SDK_AVAILABLE", False
-        ):
+        with patch("hikvision_camera.core.parameters.SDK_AVAILABLE", False):
             result = set_parameters(mock_camera, params)
 
         assert result is False

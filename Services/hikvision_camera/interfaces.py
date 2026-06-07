@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-Публичные контракты hikvision_camera_module_2.
+Публичные контракты hikvision_camera.
 
 Protocol вместо ABC — более pythonic, поддерживает structural subtyping.
 Единственный файл, от которого должны зависеть внешние модули.
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-from hikvision_camera_module_2.core.camera import CameraState
+from hikvision_camera.core.camera import CameraState
 
 
 @runtime_checkable
@@ -44,8 +45,6 @@ class HikvisionCameraProtocol(Protocol):
         """Остановить захват кадров."""
         ...
 
-    def capture_frame(
-        self, timeout_ms: int = 1000
-    ) -> tuple[np.ndarray | None, int]:
+    def capture_frame(self, timeout_ms: int = 1000) -> tuple[np.ndarray | None, int]:
         """Захватить один кадр. Возвращает (raw_frame, pixel_type)."""
         ...

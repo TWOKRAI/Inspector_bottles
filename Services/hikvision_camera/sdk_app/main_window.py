@@ -5,9 +5,10 @@
 без ProcessManager или multiprocess_framework.
 
 Запуск:
-    python -m hikvision_camera_module_2
+    python -m hikvision_camera
     Или из плагина: cmd_open_sdk_app
 """
+
 from __future__ import annotations
 
 import sys
@@ -33,10 +34,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hikvision_camera_module_2.core.camera import HikvisionCamera, CameraState
-from hikvision_camera_module_2.core.discovery import DeviceInfo, enum_devices
-from hikvision_camera_module_2.core.converter import FrameConverter
-from hikvision_camera_module_2.core.parameters import CameraParameters, get_parameters, set_parameters
+from hikvision_camera.core.camera import HikvisionCamera, CameraState
+from hikvision_camera.core.discovery import DeviceInfo, enum_devices
+from hikvision_camera.core.converter import FrameConverter
+from hikvision_camera.core.parameters import CameraParameters, get_parameters, set_parameters
 
 
 class HikvisionCameraWindow(QMainWindow):
@@ -90,9 +91,7 @@ class HikvisionCameraWindow(QMainWindow):
         self._image_label = QLabel("Нет изображения")
         self._image_label.setMinimumSize(640, 480)
         self._image_label.setAlignment(Qt.AlignCenter)
-        self._image_label.setStyleSheet(
-            "background-color: black; color: white; border: 2px solid #444;"
-        )
+        self._image_label.setStyleSheet("background-color: black; color: white; border: 2px solid #444;")
         main_layout.addWidget(self._image_label, stretch=1)
 
     def _create_control_panel(self) -> QWidget:
@@ -186,20 +185,15 @@ class HikvisionCameraWindow(QMainWindow):
         layout.addWidget(self._group_params)
 
         # ── Статус и FPS ──────────────────────────────────────────────
-        self._status_label = QLabel(
-            "Статус: Готов\nНажмите «Найти устройства» для поиска камер"
-        )
+        self._status_label = QLabel("Статус: Готов\nНажмите «Найти устройства» для поиска камер")
         self._status_label.setWordWrap(True)
-        self._status_label.setStyleSheet(
-            "padding: 10px; background-color: #f0f0f0; border: 1px solid #ccc;"
-        )
+        self._status_label.setStyleSheet("padding: 10px; background-color: #f0f0f0; border: 1px solid #ccc;")
         layout.addWidget(self._status_label)
 
         # Счётчик FPS
         self._fps_label = QLabel("FPS: 0.0")
         self._fps_label.setStyleSheet(
-            "padding: 5px; background-color: #e0e0e0; "
-            "border: 1px solid #ccc; font-weight: bold;"
+            "padding: 5px; background-color: #e0e0e0; border: 1px solid #ccc; font-weight: bold;"
         )
         layout.addWidget(self._fps_label)
 
@@ -258,10 +252,7 @@ class HikvisionCameraWindow(QMainWindow):
             for device in devices:
                 self._combo_devices.addItem(device.display_name)
 
-            self._set_status(
-                f"Найдено: {len(devices)} устройств(о). "
-                "Выберите и нажмите «Открыть»"
-            )
+            self._set_status(f"Найдено: {len(devices)} устройств(о). Выберите и нажмите «Открыть»")
 
             print(f"[Enum] Найдено {len(devices)} устройств:")
             for dev in devices:
@@ -282,9 +273,7 @@ class HikvisionCameraWindow(QMainWindow):
                 return
 
             if not self._devices:
-                QMessageBox.warning(
-                    self, "Предупреждение", "Сначала выполните поиск устройств!"
-                )
+                QMessageBox.warning(self, "Предупреждение", "Сначала выполните поиск устройств!")
                 return
 
             camera_index = self._combo_devices.currentIndex()
@@ -311,9 +300,7 @@ class HikvisionCameraWindow(QMainWindow):
                 self._get_parameters()
             else:
                 self._set_status("Не удалось открыть камеру")
-                QMessageBox.critical(
-                    self, "Ошибка", "Не удалось открыть камеру.\nПроверьте подключение."
-                )
+                QMessageBox.critical(self, "Ошибка", "Не удалось открыть камеру.\nПроверьте подключение.")
                 self._camera = None
 
             self._update_controls()
@@ -385,9 +372,7 @@ class HikvisionCameraWindow(QMainWindow):
                 print("[Grab] Захват запущен")
             else:
                 self._set_status("Не удалось запустить захват")
-                QMessageBox.critical(
-                    self, "Ошибка", "Не удалось запустить захват кадров."
-                )
+                QMessageBox.critical(self, "Ошибка", "Не удалось запустить захват кадров.")
 
             self._update_controls()
 
@@ -539,9 +524,7 @@ class HikvisionCameraWindow(QMainWindow):
 
             if params is None:
                 self._set_status("Не удалось получить параметры")
-                QMessageBox.critical(
-                    self, "Ошибка", "Не удалось получить параметры камеры."
-                )
+                QMessageBox.critical(self, "Ошибка", "Не удалось получить параметры камеры.")
                 return
 
             # Заполняем поля ввода
@@ -555,8 +538,10 @@ class HikvisionCameraWindow(QMainWindow):
                 f"Exp={params.exposure_time:.1f}мкс, "
                 f"Gain={params.gain:.2f}дБ"
             )
-            print(f"[Params] frame_rate={params.frame_rate:.2f}, "
-                  f"exposure={params.exposure_time:.2f}, gain={params.gain:.2f}")
+            print(
+                f"[Params] frame_rate={params.frame_rate:.2f}, "
+                f"exposure={params.exposure_time:.2f}, gain={params.gain:.2f}"
+            )
 
         except Exception as exc:
             self._set_status(f"Ошибка чтения параметров: {exc}")
@@ -575,9 +560,7 @@ class HikvisionCameraWindow(QMainWindow):
             exposure_time = float(self._edit_exposure.text())
             gain = float(self._edit_gain.text())
         except ValueError:
-            QMessageBox.warning(
-                self, "Предупреждение", "Введите корректные числовые значения!"
-            )
+            QMessageBox.warning(self, "Предупреждение", "Введите корректные числовые значения!")
             return
 
         self._set_status("Применение параметров камеры...")
@@ -594,18 +577,15 @@ class HikvisionCameraWindow(QMainWindow):
 
             if success:
                 self._set_status(
-                    f"Параметры применены: "
-                    f"FPS={frame_rate:.1f}, "
-                    f"Exp={exposure_time:.1f}мкс, "
-                    f"Gain={gain:.2f}дБ"
+                    f"Параметры применены: FPS={frame_rate:.1f}, Exp={exposure_time:.1f}мкс, Gain={gain:.2f}дБ"
                 )
-                print(f"[Params] Параметры применены: frame_rate={frame_rate:.2f}, "
-                      f"exposure={exposure_time:.2f}, gain={gain:.2f}")
+                print(
+                    f"[Params] Параметры применены: frame_rate={frame_rate:.2f}, "
+                    f"exposure={exposure_time:.2f}, gain={gain:.2f}"
+                )
             else:
                 self._set_status("Не удалось применить параметры")
-                QMessageBox.critical(
-                    self, "Ошибка", "Не удалось применить параметры камеры."
-                )
+                QMessageBox.critical(self, "Ошибка", "Не удалось применить параметры камеры.")
 
         except Exception as exc:
             self._set_status(f"Ошибка применения параметров: {exc}")

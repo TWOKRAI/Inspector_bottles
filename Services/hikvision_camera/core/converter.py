@@ -4,12 +4,13 @@
 
 Поддерживает Bayer RG8, Grayscale, RGBA, RGB → BGR.
 """
+
 from __future__ import annotations
 
 import cv2
 import numpy as np
 
-from hikvision_camera_module_2.sdk.constants import PixelType
+from hikvision_camera.sdk.constants import PixelType
 
 
 class FrameConverter:
@@ -73,9 +74,7 @@ class FrameConverter:
         return None
 
     @staticmethod
-    def resize(
-        frame: np.ndarray, width: int, height: int
-    ) -> np.ndarray:
+    def resize(frame: np.ndarray, width: int, height: int) -> np.ndarray:
         """Ресайз кадра. Если размер совпадает — no-op.
 
         Parameters

@@ -31,14 +31,14 @@ def _make_plugin_configured(config: dict | None = None):
     Returns:
         tuple(plugin, mock_camera) — плагин после configure() и mock HikvisionCamera.
     """
-    from hikvision_camera_module_2.plugin.plugin import HikvisionCameraPlugin
+    from hikvision_camera.plugin.plugin import HikvisionCameraPlugin
 
     plugin = HikvisionCameraPlugin()
     ctx = _make_ctx(config)
     mock_cam = MagicMock()
 
     with patch(
-        "hikvision_camera_module_2.plugin.plugin.HikvisionCamera",
+        "hikvision_camera.plugin.plugin.HikvisionCamera",
         return_value=mock_cam,
     ):
         plugin.configure(ctx)
@@ -56,7 +56,7 @@ class TestHikvisionCameraConfig:
 
     def test_default_values(self):
         """Дефолтные значения конфига: camera_id=0, resolution=1920x1080, fps=25, auto_start=False."""
-        from hikvision_camera_module_2.plugin.config import HikvisionCameraConfig
+        from hikvision_camera.plugin.config import HikvisionCameraConfig
 
         cfg = HikvisionCameraConfig()
         assert cfg.camera_id == 0
@@ -68,7 +68,7 @@ class TestHikvisionCameraConfig:
 
     def test_memory_property(self):
         """memory возвращает dict с правильным slot_name и shape для camera_id=0."""
-        from hikvision_camera_module_2.plugin.config import HikvisionCameraConfig
+        from hikvision_camera.plugin.config import HikvisionCameraConfig
 
         cfg = HikvisionCameraConfig()
         mem = cfg.memory
@@ -80,7 +80,7 @@ class TestHikvisionCameraConfig:
 
     def test_memory_custom_camera_id(self):
         """SHM slot_name учитывает camera_id: camera_id=3 → hikvision_3_frame."""
-        from hikvision_camera_module_2.plugin.config import HikvisionCameraConfig
+        from hikvision_camera.plugin.config import HikvisionCameraConfig
 
         cfg = HikvisionCameraConfig(camera_id=3)
         mem = cfg.memory
@@ -90,17 +90,17 @@ class TestHikvisionCameraConfig:
 
     def test_memory_ring_buffer_size(self):
         """memory['coll'] равен ring_buffer_size."""
-        from hikvision_camera_module_2.plugin.config import HikvisionCameraConfig
+        from hikvision_camera.plugin.config import HikvisionCameraConfig
 
         cfg = HikvisionCameraConfig(ring_buffer_size=5)
         assert cfg.memory["coll"] == 5
 
     def test_plugin_class_path(self):
         """plugin_class указывает на правильный класс."""
-        from hikvision_camera_module_2.plugin.config import HikvisionCameraConfig
+        from hikvision_camera.plugin.config import HikvisionCameraConfig
 
         cfg = HikvisionCameraConfig()
-        assert cfg.plugin_class == ("hikvision_camera_module_2.plugin.plugin.HikvisionCameraPlugin")
+        assert cfg.plugin_class == ("hikvision_camera.plugin.plugin.HikvisionCameraPlugin")
 
 
 # ===========================================================================
@@ -113,7 +113,7 @@ class TestHikvisionCameraRegisters:
 
     def test_default_values(self):
         """Дефолтные значения: exposure_time=10000, gain=0, frame_rate=25."""
-        from hikvision_camera_module_2.plugin.registers import HikvisionCameraRegisters
+        from hikvision_camera.plugin.registers import HikvisionCameraRegisters
 
         reg = HikvisionCameraRegisters()
         assert reg.exposure_time == 10_000.0
@@ -122,7 +122,7 @@ class TestHikvisionCameraRegisters:
 
     def test_field_names(self):
         """Ожидаемые поля присутствуют в model_fields."""
-        from hikvision_camera_module_2.plugin.registers import HikvisionCameraRegisters
+        from hikvision_camera.plugin.registers import HikvisionCameraRegisters
 
         fields = set(HikvisionCameraRegisters.model_fields.keys())
         assert "exposure_time" in fields
@@ -131,7 +131,7 @@ class TestHikvisionCameraRegisters:
 
     def test_mutability(self):
         """Регистры можно менять (нужно для GUI-биндинга)."""
-        from hikvision_camera_module_2.plugin.registers import HikvisionCameraRegisters
+        from hikvision_camera.plugin.registers import HikvisionCameraRegisters
 
         reg = HikvisionCameraRegisters()
         reg.exposure_time = 50_000.0
@@ -153,7 +153,7 @@ class TestHikvisionCameraPlugin:
 
     def test_plugin_meta(self):
         """name='hikvision_camera', category='source'."""
-        from hikvision_camera_module_2.plugin.plugin import HikvisionCameraPlugin
+        from hikvision_camera.plugin.plugin import HikvisionCameraPlugin
 
         plugin = HikvisionCameraPlugin()
         assert plugin.name == "hikvision_camera"
@@ -161,7 +161,7 @@ class TestHikvisionCameraPlugin:
 
     def test_outputs(self):
         """Один output: frame, dtype=image/bgr."""
-        from hikvision_camera_module_2.plugin.plugin import HikvisionCameraPlugin
+        from hikvision_camera.plugin.plugin import HikvisionCameraPlugin
 
         plugin = HikvisionCameraPlugin()
         assert len(plugin.outputs) == 1
@@ -170,14 +170,14 @@ class TestHikvisionCameraPlugin:
 
     def test_no_inputs(self):
         """Source plugin — нет inputs."""
-        from hikvision_camera_module_2.plugin.plugin import HikvisionCameraPlugin
+        from hikvision_camera.plugin.plugin import HikvisionCameraPlugin
 
         plugin = HikvisionCameraPlugin()
         assert plugin.inputs == []
 
     def test_commands_registered(self):
         """Все 11 команд зарегистрированы в commands dict."""
-        from hikvision_camera_module_2.plugin.plugin import HikvisionCameraPlugin
+        from hikvision_camera.plugin.plugin import HikvisionCameraPlugin
 
         plugin = HikvisionCameraPlugin()
         expected = {
@@ -200,14 +200,14 @@ class TestHikvisionCameraPlugin:
 
     def test_configure_creates_camera(self):
         """configure() создаёт HikvisionCamera и сохраняет параметры из конфига."""
-        from hikvision_camera_module_2.plugin.plugin import HikvisionCameraPlugin
+        from hikvision_camera.plugin.plugin import HikvisionCameraPlugin
 
         plugin = HikvisionCameraPlugin()
         ctx = _make_ctx({"camera_id": 2, "camera_index": 1, "fps": 30})
         mock_cam = MagicMock()
 
         with patch(
-            "hikvision_camera_module_2.plugin.plugin.HikvisionCamera",
+            "hikvision_camera.plugin.plugin.HikvisionCamera",
             return_value=mock_cam,
         ) as cam_cls:
             plugin.configure(ctx)
@@ -256,7 +256,7 @@ class TestHikvisionCameraPlugin:
 
         # Mock FrameConverter
         bgr_frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
-        with patch("hikvision_camera_module_2.plugin.plugin.FrameConverter") as mock_fc:
+        with patch("hikvision_camera.plugin.plugin.FrameConverter") as mock_fc:
             mock_fc.to_bgr.return_value = bgr_frame
             mock_fc.resize.return_value = bgr_frame
 
@@ -291,7 +291,7 @@ class TestHikvisionCameraPlugin:
         raw_frame = np.zeros((1080, 1920), dtype=np.uint8)
         mock_cam.capture_frame.return_value = (raw_frame, "BayerRG8")
 
-        with patch("hikvision_camera_module_2.plugin.plugin.FrameConverter") as mock_fc:
+        with patch("hikvision_camera.plugin.plugin.FrameConverter") as mock_fc:
             mock_fc.to_bgr.return_value = None  # конвертер не справился
 
             result = plugin.produce()
@@ -309,7 +309,7 @@ class TestHikvisionCameraPlugin:
         bgr_frame = np.zeros((100, 100, 3), dtype=np.uint8)
         mock_cam.capture_frame.return_value = (raw_frame, "BayerRG8")
 
-        with patch("hikvision_camera_module_2.plugin.plugin.FrameConverter") as mock_fc:
+        with patch("hikvision_camera.plugin.plugin.FrameConverter") as mock_fc:
             mock_fc.to_bgr.return_value = bgr_frame
             mock_fc.resize.return_value = bgr_frame
 
@@ -347,7 +347,7 @@ class TestHikvisionCameraPlugin:
         # enum_devices импортируется внутри cmd_enum_devices (late import),
         # поэтому патчим по месту определения в core.discovery
         with patch(
-            "hikvision_camera_module_2.core.discovery.enum_devices",
+            "hikvision_camera.core.discovery.enum_devices",
             return_value=[fake_device],
         ):
             result = plugin.cmd_enum_devices({})
@@ -360,7 +360,7 @@ class TestHikvisionCameraPlugin:
         plugin, _ = _make_plugin_configured()
 
         with patch(
-            "hikvision_camera_module_2.core.discovery.enum_devices",
+            "hikvision_camera.core.discovery.enum_devices",
             return_value=[],
         ):
             result = plugin.cmd_enum_devices({})
@@ -546,14 +546,14 @@ class TestHikvisionCameraPlugin:
 
     def test_register_class_is_hikvision_registers(self):
         """register_class указывает на HikvisionCameraRegisters."""
-        from hikvision_camera_module_2.plugin.plugin import HikvisionCameraPlugin
-        from hikvision_camera_module_2.plugin.registers import HikvisionCameraRegisters
+        from hikvision_camera.plugin.plugin import HikvisionCameraPlugin
+        from hikvision_camera.plugin.registers import HikvisionCameraRegisters
 
         assert HikvisionCameraPlugin.register_class is HikvisionCameraRegisters
 
     def test_configure_sets_reg(self):
         """configure() инициализирует self._reg как HikvisionCameraRegisters."""
-        from hikvision_camera_module_2.plugin.registers import HikvisionCameraRegisters
+        from hikvision_camera.plugin.registers import HikvisionCameraRegisters
 
         plugin, _ = _make_plugin_configured()
         assert isinstance(plugin._reg, HikvisionCameraRegisters)

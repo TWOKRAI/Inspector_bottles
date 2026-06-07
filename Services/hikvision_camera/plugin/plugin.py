@@ -9,9 +9,10 @@ Lifecycle:
     produce()   -- захват и конвертация кадра
     shutdown()  -- освобождение камеры
 """
+
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 — запуск собственного SDK App фиксированной командой, без untrusted input
 import sys
 import threading
 import time
@@ -25,8 +26,8 @@ from multiprocess_framework.modules.process_module.plugins.base import (
 from multiprocess_framework.modules.process_module.plugins.port import Port
 from multiprocess_framework.modules.process_module.plugins.registry import register_plugin
 
-from hikvision_camera_module_2.core.camera import HikvisionCamera
-from hikvision_camera_module_2.core.converter import FrameConverter
+from hikvision_camera.core.camera import HikvisionCamera
+from hikvision_camera.core.converter import FrameConverter
 
 from .registers import HikvisionCameraRegisters
 
@@ -119,12 +120,8 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
 
         # Создаём камеру с логированием через контекст
         self._camera = HikvisionCamera(
-            on_status=lambda t: ctx.log_info(
-                f"[hikvision_{self._camera_id}] {t}"
-            ),
-            on_error=lambda t: ctx.log_error(
-                f"[hikvision_{self._camera_id}] {t}"
-            ),
+            on_status=lambda t: ctx.log_info(f"[hikvision_{self._camera_id}] {t}"),
+            on_error=lambda t: ctx.log_error(f"[hikvision_{self._camera_id}] {t}"),
         )
 
         ctx.log_info(
@@ -138,8 +135,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
             result = self._do_start_capture()
             if result["status"] != "ok":
                 ctx.log_error(
-                    f"HikvisionCameraPlugin[{self._camera_id}]: "
-                    f"auto_start failed: {result.get('error', 'unknown')}"
+                    f"HikvisionCameraPlugin[{self._camera_id}]: auto_start failed: {result.get('error', 'unknown')}"
                 )
 
     def produce(self) -> list[dict]:
@@ -161,8 +157,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
         frame = FrameConverter.to_bgr(raw_frame, pixel_type)
         if frame is None:
             self._ctx.log_error(
-                f"HikvisionCameraPlugin[{self._camera_id}]: "
-                f"не удалось сконвертировать кадр (pixel_type={pixel_type})"
+                f"HikvisionCameraPlugin[{self._camera_id}]: не удалось сконвертировать кадр (pixel_type={pixel_type})"
             )
             return []
 
@@ -213,9 +208,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
             if not self._camera.start_grabbing():
                 return {"status": "error", "error": "Не удалось запустить захват"}
         self._is_capturing = True
-        self._ctx.log_info(
-            f"HikvisionCameraPlugin[{self._camera_id}]: захват запущен"
-        )
+        self._ctx.log_info(f"HikvisionCameraPlugin[{self._camera_id}]: захват запущен")
         return {"status": "ok"}
 
     def _do_stop_capture(self) -> dict[str, Any]:
@@ -228,9 +221,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
         with self._camera_lock:
             if self._camera:
                 self._camera.stop_grabbing()
-        self._ctx.log_info(
-            f"HikvisionCameraPlugin[{self._camera_id}]: захват остановлен"
-        )
+        self._ctx.log_info(f"HikvisionCameraPlugin[{self._camera_id}]: захват остановлен")
         return {"status": "ok"}
 
     def _apply_parameters_from_register(self) -> None:
@@ -238,7 +229,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
         if not self._camera or not self._reg:
             return
 
-        from hikvision_camera_module_2.core.parameters import (
+        from hikvision_camera.core.parameters import (
             CameraParameters,
             set_parameters,
         )
@@ -251,15 +242,11 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
 
         # Доступ к внутреннему MvCamera для set_parameters
         with self._camera_lock:
-            if (
-                hasattr(self._camera, "_camera")
-                and self._camera._camera is not None
-            ):
+            if hasattr(self._camera, "_camera") and self._camera._camera is not None:
                 ok = set_parameters(self._camera._camera, params)
                 if not ok:
                     self._ctx.log_error(
-                        f"HikvisionCameraPlugin[{self._camera_id}]: "
-                        f"не удалось применить параметры из register"
+                        f"HikvisionCameraPlugin[{self._camera_id}]: не удалось применить параметры из register"
                     )
 
     # --- Команды (авторегистрация через commands dict) ---
@@ -294,21 +281,17 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
 
     def cmd_enum_devices(self, data: dict) -> dict:
         """Перечислить доступные Hikvision камеры (GigE/USB)."""
-        from hikvision_camera_module_2.core.discovery import enum_devices
+        from hikvision_camera.core.discovery import enum_devices
 
         devices = enum_devices()
         return {"status": "ok", "devices": [d.to_dict() for d in devices]}
 
     def cmd_get_parameters(self, data: dict) -> dict:
         """Получить текущие параметры камеры из SDK."""
-        from hikvision_camera_module_2.core.parameters import get_parameters
+        from hikvision_camera.core.parameters import get_parameters
 
         with self._camera_lock:
-            if (
-                not self._camera
-                or not hasattr(self._camera, "_camera")
-                or self._camera._camera is None
-            ):
+            if not self._camera or not hasattr(self._camera, "_camera") or self._camera._camera is None:
                 return {"status": "error", "error": "Камера не открыта"}
             params = get_parameters(self._camera._camera)
 
@@ -326,7 +309,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
 
     def cmd_set_parameters(self, data: dict) -> dict:
         """Установить все параметры камеры (frame_rate, exposure_time, gain)."""
-        from hikvision_camera_module_2.core.parameters import (
+        from hikvision_camera.core.parameters import (
             CameraParameters,
             set_parameters,
         )
@@ -348,11 +331,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
         )
 
         with self._camera_lock:
-            if (
-                not self._camera
-                or not hasattr(self._camera, "_camera")
-                or self._camera._camera is None
-            ):
+            if not self._camera or not hasattr(self._camera, "_camera") or self._camera._camera is None:
                 return {"status": "error", "error": "Камера не открыта"}
             ok = set_parameters(self._camera._camera, params)
 
@@ -411,24 +390,19 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
         if self._sdk_process is not None and self._sdk_process.poll() is None:
             return {"status": "ok", "message": "SDK App уже запущен"}
         try:
-            # Корень проекта (для python -m hikvision_camera_module_2)
+            # Корень проекта (для python -m hikvision_camera)
             project_root = Path(__file__).resolve().parent.parent.parent
-            cmd = [sys.executable, "-m", "hikvision_camera_module_2"]
-            self._sdk_process = subprocess.Popen(
+            cmd = [sys.executable, "-m", "hikvision_camera"]
+            self._sdk_process = subprocess.Popen(  # nosec B603 — фиксированный cmd-список, shell=False, без пользовательского ввода
                 cmd,
                 cwd=str(project_root),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            self._ctx.log_info(
-                f"HikvisionCameraPlugin[{self._camera_id}]: SDK App запущен"
-            )
+            self._ctx.log_info(f"HikvisionCameraPlugin[{self._camera_id}]: SDK App запущен")
             return {"status": "ok", "message": "SDK App запущен"}
         except Exception as exc:
-            self._ctx.log_error(
-                f"HikvisionCameraPlugin[{self._camera_id}]: "
-                f"не удалось запустить SDK App: {exc}"
-            )
+            self._ctx.log_error(f"HikvisionCameraPlugin[{self._camera_id}]: не удалось запустить SDK App: {exc}")
             return {"status": "error", "error": str(exc)}
 
     def cmd_close_sdk_app(self, data: dict) -> dict:

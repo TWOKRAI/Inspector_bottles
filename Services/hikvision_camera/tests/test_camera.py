@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from hikvision_camera_module_2.core.camera import HikvisionCamera, CameraState
+from hikvision_camera.core.camera import HikvisionCamera, CameraState
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ class TestOpenNoSdk:
 
     def test_open_no_sdk(self):
         """SDK недоступен → open() возвращает False, остаётся CLOSED."""
-        with patch("hikvision_camera_module_2.core.camera.SDK_AVAILABLE", False):
+        with patch("hikvision_camera.core.camera.SDK_AVAILABLE", False):
             error_cb = MagicMock()
             cam = HikvisionCamera(on_error=error_cb)
             result = cam.open(0)
@@ -79,7 +79,7 @@ class TestStateTransitions:
 
         # OPEN → GRABBING
         mock_mv.MV_CC_StartGrabbing.return_value = 0  # MV_OK
-        with patch("hikvision_camera_module_2.core.camera.SDK_AVAILABLE", True):
+        with patch("hikvision_camera.core.camera.SDK_AVAILABLE", True):
             result = cam.start_grabbing()
 
         assert result is True
@@ -148,7 +148,7 @@ class TestOpenIdempotent:
         cam, _ = _make_camera_with_mock_sdk()
         assert cam.state == CameraState.OPEN
 
-        with patch("hikvision_camera_module_2.core.camera.SDK_AVAILABLE", True):
+        with patch("hikvision_camera.core.camera.SDK_AVAILABLE", True):
             result = cam.open(0)
 
         assert result is True
@@ -159,7 +159,7 @@ class TestOpenIdempotent:
         cam, _ = _make_camera_with_mock_sdk()
         cam._state = CameraState.GRABBING
 
-        with patch("hikvision_camera_module_2.core.camera.SDK_AVAILABLE", True):
+        with patch("hikvision_camera.core.camera.SDK_AVAILABLE", True):
             result = cam.open(0)
 
         assert result is True
@@ -176,7 +176,7 @@ class TestCallbacks:
 
         mock_mv.MV_CC_StartGrabbing.return_value = 0
 
-        with patch("hikvision_camera_module_2.core.camera.SDK_AVAILABLE", True):
+        with patch("hikvision_camera.core.camera.SDK_AVAILABLE", True):
             cam.start_grabbing()
 
         # on_status должен быть вызван с сообщением о захвате
@@ -190,7 +190,7 @@ class TestCallbacks:
         error_cb = MagicMock()
         cam = HikvisionCamera(on_error=error_cb)
 
-        with patch("hikvision_camera_module_2.core.camera.SDK_AVAILABLE", False):
+        with patch("hikvision_camera.core.camera.SDK_AVAILABLE", False):
             cam.open(0)
 
         error_cb.assert_called_once()
@@ -212,13 +212,13 @@ class TestSdkAvailableProperty:
     def test_sdk_available_true(self):
         """sdk_available возвращает True когда SDK доступен."""
         cam = HikvisionCamera()
-        with patch("hikvision_camera_module_2.core.camera.SDK_AVAILABLE", True):
+        with patch("hikvision_camera.core.camera.SDK_AVAILABLE", True):
             assert cam.sdk_available is True
 
     def test_sdk_available_false(self):
         """sdk_available возвращает False когда SDK недоступен."""
         cam = HikvisionCamera()
-        with patch("hikvision_camera_module_2.core.camera.SDK_AVAILABLE", False):
+        with patch("hikvision_camera.core.camera.SDK_AVAILABLE", False):
             assert cam.sdk_available is False
 
 
@@ -240,7 +240,7 @@ class TestStartGrabbingNoSdk:
 
     def test_start_grabbing_no_sdk(self):
         """SDK недоступен → start_grabbing() возвращает False."""
-        with patch("hikvision_camera_module_2.core.camera.SDK_AVAILABLE", False):
+        with patch("hikvision_camera.core.camera.SDK_AVAILABLE", False):
             cam = HikvisionCamera()
             result = cam.start_grabbing()
 

@@ -5,15 +5,16 @@
 Возвращает типизированный CameraParameters dataclass вместо dict.
 Использует check_sdk_error для явного контроля ошибок.
 """
+
 from __future__ import annotations
 
 import time
 from ctypes import byref, memset, sizeof
 from dataclasses import dataclass
 
-from hikvision_camera_module_2.sdk.bindings import MvCamera, SDK_AVAILABLE
-from hikvision_camera_module_2.sdk.structures import MVCC_FLOATVALUE
-from hikvision_camera_module_2.sdk.errors import check_sdk_error, SdkError
+from hikvision_camera.sdk.bindings import MvCamera, SDK_AVAILABLE
+from hikvision_camera.sdk.structures import MVCC_FLOATVALUE
+from hikvision_camera.sdk.errors import check_sdk_error, SdkError
 
 
 @dataclass
@@ -107,9 +108,7 @@ def set_parameters(camera: MvCamera, params: CameraParameters) -> bool:
         time.sleep(0.2)
 
         check_sdk_error(
-            camera.MV_CC_SetFloatValue(
-                "ExposureTime", float(params.exposure_time)
-            ),
+            camera.MV_CC_SetFloatValue("ExposureTime", float(params.exposure_time)),
             "set_exposure_time",
         )
         check_sdk_error(
@@ -117,9 +116,7 @@ def set_parameters(camera: MvCamera, params: CameraParameters) -> bool:
             "set_gain",
         )
         check_sdk_error(
-            camera.MV_CC_SetFloatValue(
-                "AcquisitionFrameRate", float(params.frame_rate)
-            ),
+            camera.MV_CC_SetFloatValue("AcquisitionFrameRate", float(params.frame_rate)),
             "set_frame_rate",
         )
 

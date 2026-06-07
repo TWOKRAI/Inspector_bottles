@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Тесты констант и enum PixelType."""
+
 from __future__ import annotations
 
-from hikvision_camera_module_2.sdk.constants import (
+from hikvision_camera.sdk.constants import (
     PixelType,
     MV_GIGE_DEVICE,
     MV_USB_DEVICE,

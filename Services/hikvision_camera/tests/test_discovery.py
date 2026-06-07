@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Тесты discovery: DeviceInfo dataclass и enum_devices."""
+
 from __future__ import annotations
 
 import pytest
@@ -7,7 +8,7 @@ from dataclasses import FrozenInstanceError
 
 from unittest.mock import patch
 
-from hikvision_camera_module_2.core.discovery import DeviceInfo, enum_devices
+from hikvision_camera.core.discovery import DeviceInfo, enum_devices
 
 
 class TestDeviceInfo:
@@ -74,9 +75,7 @@ class TestEnumDevices:
 
     def test_enum_devices_no_sdk(self):
         """SDK недоступен → пустой список."""
-        with patch(
-            "hikvision_camera_module_2.core.discovery.SDK_AVAILABLE", False
-        ):
+        with patch("hikvision_camera.core.discovery.SDK_AVAILABLE", False):
             result = enum_devices()
 
         assert result == []

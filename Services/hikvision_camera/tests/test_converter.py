@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """Тесты FrameConverter: конвертация пикселей и resize."""
+
 from __future__ import annotations
 
 import numpy as np
 
-from hikvision_camera_module_2.core.converter import FrameConverter
-from hikvision_camera_module_2.sdk.constants import PixelType
+from hikvision_camera.core.converter import FrameConverter
+from hikvision_camera.sdk.constants import PixelType
 
 
 class TestToBgr:
