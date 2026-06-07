@@ -6,7 +6,6 @@ SHM write и IPC send выполняет GenericProcess (SourceProducer).
 
 from __future__ import annotations
 
-import sys
 import time
 import threading
 
@@ -26,9 +25,13 @@ from .backends import (
     CAMERA_TYPES,
     DEFAULT_CAMERA_TYPE,
 )
+from .registers import CameraServiceRegisters
 
 # Модуль frame_id для wrap-around
 _FRAME_ID_MODULO = 121
+
+# Публикация actual-телеметрии — раз в N кадров (чтобы не спамить state store)
+_ACTUAL_PUBLISH_EVERY = 30
 
 
 @register_plugin(
@@ -49,6 +52,8 @@ class CameraServicePlugin(ProcessModulePlugin):
     name = "camera_service"
     category = "source"
 
+    register_class = CameraServiceRegisters
+
     inputs = []
     outputs = [
         Port(
@@ -68,6 +73,12 @@ class CameraServicePlugin(ProcessModulePlugin):
         "set_device_id": "cmd_set_device_id",
         "set_camera_index": "cmd_set_camera_index",
         "enum_devices": "cmd_enum_devices",
+        # Live-управление параметрами (Phase 2): register subset → set_config,
+        # полный каталог (Services-фасад) → set_param. actual → get_actual.
+        "set_config": "cmd_set_config",
+        "set_param": "cmd_set_param",
+        "set_mjpg": "cmd_set_mjpg",
+        "get_actual": "cmd_get_actual",
         "hik_open": "cmd_hik_open",
         "hik_close": "cmd_hik_close",
         "hik_start_grabbing": "cmd_hik_start_grabbing",
@@ -82,10 +93,12 @@ class CameraServicePlugin(ProcessModulePlugin):
         """Настроить параметры камеры."""
         cfg = ctx.config
 
+        # Tunable subset — через managed register (GUI видит, live-правка).
+        self._reg = self._init_register(ctx)
+
         self._camera_type: str = cfg.get("camera_type", DEFAULT_CAMERA_TYPE)
         self._camera_id: int = cfg.get("camera_id", 0)
         self._device_id: int = cfg.get("device_id", 0)
-        self._fps: int = cfg.get("fps", 25)
         self._width: int = cfg.get("resolution_width", 640)
         self._height: int = cfg.get("resolution_height", 480)
         self._auto_start: bool = cfg.get("auto_start", False)
@@ -94,6 +107,11 @@ class CameraServicePlugin(ProcessModulePlugin):
         self._hik_height: int = cfg.get("hikvision_resolution_height", 1080)
         self._sim_image: str | None = cfg.get("simulator_image_path")
         self._file_path: str = cfg.get("file_source_path", "")
+        # Полный набор CAP_PROP-параметров из рецепта (desired, применяются при open).
+        self._params: dict = dict(cfg.get("params", {}) or {})
+
+        # StateProxy для публикации actual-телеметрии (может быть None)
+        self._state_proxy = ctx.state_proxy
 
         # Состояние
         self._backend: CameraBackend | None = None
@@ -104,7 +122,7 @@ class CameraServicePlugin(ProcessModulePlugin):
 
         ctx.log_info(
             f"CameraServicePlugin[{self._camera_id}]: type={self._camera_type}, "
-            f"{self._width}x{self._height}"
+            f"{self._width}x{self._height}, fps={self._reg.fps}, mjpg={self._reg.mjpg}"
         )
 
     def start(self, ctx: PluginContext) -> None:
@@ -147,6 +165,10 @@ class CameraServicePlugin(ProcessModulePlugin):
 
         self._frame_count = (self._frame_count + 1) % _FRAME_ID_MODULO
 
+        # Публикация actual-параметров (что камера реально применила) в state store.
+        if self._frame_count % _ACTUAL_PUBLISH_EVERY == 0:
+            self._publish_actual()
+
         return [
             {
                 "frame": frame,
@@ -184,6 +206,10 @@ class CameraServicePlugin(ProcessModulePlugin):
             "camera_index": self._camera_index,
             "image_path": self._sim_image,
             "file_path": self._file_path,
+            # Webcam-специфичные tunable (игнорируются другими backend'ами)
+            "fps": self._reg.fps,
+            "mjpg": self._reg.mjpg,
+            "params": dict(self._params),
         }
 
     def _do_start_capture(self, ctx: PluginContext) -> None:
@@ -193,16 +219,11 @@ class CameraServicePlugin(ProcessModulePlugin):
 
         with self._backend_lock:
             if self._backend is None:
-                self._backend = create_backend(
-                    self._camera_type, **self._backend_kwargs()
-                )
+                self._backend = create_backend(self._camera_type, **self._backend_kwargs())
             self._backend.start()
 
         self._is_capturing = True
-        ctx.log_info(
-            f"CameraServicePlugin[{self._camera_id}]: "
-            f"захват запущен (backend={self._camera_type})"
-        )
+        ctx.log_info(f"CameraServicePlugin[{self._camera_id}]: захват запущен (backend={self._camera_type})")
 
     def _do_stop_capture(self, ctx: PluginContext) -> None:
         """Остановить захват (backend остаётся, но stop)."""
@@ -210,9 +231,7 @@ class CameraServicePlugin(ProcessModulePlugin):
         with self._backend_lock:
             if self._backend:
                 self._backend.stop()
-        ctx.log_info(
-            f"CameraServicePlugin[{self._camera_id}]: захват остановлен"
-        )
+        ctx.log_info(f"CameraServicePlugin[{self._camera_id}]: захват остановлен")
 
     def _do_switch_camera_type(self, new_type: str) -> dict:
         """Горячее переключение backend'а.
@@ -222,8 +241,7 @@ class CameraServicePlugin(ProcessModulePlugin):
         if new_type not in CAMERA_TYPES:
             return {
                 "status": "error",
-                "error": f"Неизвестный тип камеры: {new_type!r}. "
-                f"Допустимые: {CAMERA_TYPES}",
+                "error": f"Неизвестный тип камеры: {new_type!r}. Допустимые: {CAMERA_TYPES}",
             }
 
         was_capturing = self._is_capturing
@@ -247,9 +265,7 @@ class CameraServicePlugin(ProcessModulePlugin):
 
         # Создать новый backend
         with self._backend_lock:
-            self._backend = create_backend(
-                self._camera_type, **self._backend_kwargs()
-            )
+            self._backend = create_backend(self._camera_type, **self._backend_kwargs())
 
         # Если захват был активен — перезапустить
         if was_capturing:
@@ -258,11 +274,54 @@ class CameraServicePlugin(ProcessModulePlugin):
                     self._backend.start()
             self._is_capturing = True
 
-        self._ctx.log_info(
-            f"CameraServicePlugin[{self._camera_id}]: "
-            f"переключение {old_type} → {new_type}"
-        )
+        self._ctx.log_info(f"CameraServicePlugin[{self._camera_id}]: переключение {old_type} → {new_type}")
         return {"status": "ok", "camera_type": new_type}
+
+    # --- Live-управление параметрами (Phase 2) ---
+
+    def _webcam_be(self):
+        """Вернуть backend, если он поддерживает live-параметры (webcam), иначе None."""
+        be = self._backend
+        if be is not None and hasattr(be, "set_param"):
+            return be
+        return None
+
+    def _apply_field(self, name: str, value) -> bool:
+        """Применить один tunable-параметр: desired (register/params) + live в backend.
+
+        Источник правды desired: register-поля (для subset) + self._params (полный
+        набор CAP_PROP). Применяется на камеру только если backend = webcam и открыт;
+        иначе остаётся desired и применится при следующем open (_backend_kwargs).
+        """
+        if name in type(self._reg).model_fields:
+            try:
+                setattr(self._reg, name, value)
+            except Exception:
+                pass
+        if name not in ("fps", "mjpg"):
+            self._params[name] = value
+
+        with self._backend_lock:
+            be = self._webcam_be()
+            if be is None:
+                return False
+            if name == "fps":
+                return bool(be.set_fps(int(value)))
+            if name == "mjpg":
+                return bool(be.set_mjpg(bool(value)))
+            return bool(be.set_param(name, value))
+
+    def _publish_actual(self) -> None:
+        """Опубликовать actual-параметры (cap.get) в state store."""
+        if self._state_proxy is None:
+            return
+        with self._backend_lock:
+            be = self._webcam_be()
+            actual = be.get_actual() if be is not None else {}
+        if not actual:
+            return
+        path = f"processes.{self._ctx.process_name}.state.cam.actual"
+        self._state_proxy.merge(path, actual)
 
     # --- Команды (авторегистрация через commands dict) ---
 
@@ -279,9 +338,9 @@ class CameraServicePlugin(ProcessModulePlugin):
         return self._do_switch_camera_type(new_type)
 
     def cmd_set_fps(self, data: dict) -> dict:
-        fps = data.get("fps", self._fps)
-        self._fps = max(1, min(120, int(fps)))
-        return {"status": "ok", "fps": self._fps}
+        fps = max(1, min(120, int(data.get("fps", self._reg.fps))))
+        self._apply_field("fps", fps)
+        return {"status": "ok", "fps": fps}
 
     def cmd_set_resolution(self, data: dict) -> dict:
         self._width = int(data.get("width", self._width))
@@ -300,9 +359,7 @@ class CameraServicePlugin(ProcessModulePlugin):
         return {"status": "ok", "device_id": self._device_id}
 
     def cmd_set_camera_index(self, data: dict) -> dict:
-        self._camera_index = int(
-            data.get("camera_index", self._camera_index)
-        )
+        self._camera_index = int(data.get("camera_index", self._camera_index))
         return {"status": "ok", "camera_index": self._camera_index}
 
     def cmd_enum_devices(self, data: dict) -> dict:
@@ -311,6 +368,42 @@ class CameraServicePlugin(ProcessModulePlugin):
                 result = self._backend.handle_command("enum_devices", data)
                 return result or {"status": "ok", "devices": []}
         return {"status": "ok", "devices": []}
+
+    def cmd_set_config(self, data: dict) -> dict:
+        """Generic field-set (inspector subset): {field: value} → _apply_field.
+
+        Переопределяет авто-generic из ProcessModulePlugin: помимо записи в register
+        выполняет side-effect на камеру (cap.set).
+        """
+        applied: dict = {}
+        for field_name, value in data.items():
+            self._apply_field(field_name, value)
+            applied[field_name] = value
+        return {"status": "ok", "applied": applied}
+
+    def cmd_set_param(self, data: dict) -> dict:
+        """Применить один параметр из полного каталога (Services-фасад).
+
+        data: {"name": <ключ WEBCAM_PARAMS>, "value": <значение>}.
+        """
+        name = data.get("name", "")
+        if not name:
+            return {"status": "error", "error": "name required"}
+        ok = self._apply_field(name, data.get("value"))
+        return {"status": "ok", "applied": ok, "name": name}
+
+    def cmd_set_mjpg(self, data: dict) -> dict:
+        """Переключить MJPG-кодек."""
+        on = bool(data.get("on", True))
+        self._apply_field("mjpg", on)
+        return {"status": "ok", "mjpg": on}
+
+    def cmd_get_actual(self, data: dict) -> dict:
+        """Прочитать actual-параметры камеры (cap.get) on-demand."""
+        with self._backend_lock:
+            be = self._webcam_be()
+            actual = be.get_actual(data.get("names")) if be is not None else {}
+        return {"status": "ok", "actual": actual}
 
     # hik_* passthrough команды — делегирование в backend (strip hik_ prefix)
 

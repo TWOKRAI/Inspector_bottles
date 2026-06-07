@@ -17,8 +17,6 @@ Task 6.3 (новые):
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import numpy as np
 import pytest
 
@@ -368,73 +366,24 @@ class TestApplyFlow:
 
 
 class TestWebcamButton:
-    """Тесты кнопки «Снимок с камеры» (Task 6.3)."""
+    """Тесты кнопки «Снимок с камеры» (единый control-core, без отдельного сервиса)."""
 
-    def test_webcam_button_disabled_when_service_stopped(
+    _CAP = "Plugins.sources.camera_service.backends.webcam_controls.capture_single_frame"
+
+    def test_webcam_button_always_enabled(
         self,
         qtbot,
         grayscale_presenter,
         real_registry,
     ) -> None:
-        """Кнопка webcam disabled если webcam_camera service не RUNNING.
-
-        Создаём mock service_registry с сервисом в статусе 'stopped'.
-        """
+        """Кнопка webcam всегда доступна (снимок — разовый грабер, fail-graceful)."""
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        # Mock сервис в состоянии stopped
-        mock_webcam_svc = MagicMock()
-        mock_webcam_svc.status = "stopped"
-
-        mock_svc_registry = MagicMock()
-        mock_svc_registry.get.return_value = mock_webcam_svc
-
-        ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
-
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
-        qtbot.addWidget(widget)
-
-        # Кнопка должна быть disabled при stopped сервисе
-        assert not widget._btn_webcam.isEnabled()
-
-    def test_webcam_button_enabled_when_service_running(
-        self,
-        qtbot,
-        grayscale_presenter,
-        real_registry,
-    ) -> None:
-        """Кнопка webcam enabled если webcam_camera service RUNNING."""
-        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
-
-        # Mock сервис в состоянии running
-        mock_webcam_svc = MagicMock()
-        mock_webcam_svc.status = "running"
-
-        mock_svc_registry = MagicMock()
-        mock_svc_registry.get.return_value = mock_webcam_svc
-
-        ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
-
+        ctx = _make_ctx(registry=real_registry, service_registry=None)
         widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
         qtbot.addWidget(widget)
 
         assert widget._btn_webcam.isEnabled()
-
-    def test_webcam_button_disabled_when_no_service_registry(
-        self,
-        qtbot,
-        grayscale_presenter,
-        real_registry,
-    ) -> None:
-        """Кнопка webcam disabled если service_registry() → None."""
-        from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
-
-        ctx = _make_ctx(registry=real_registry, service_registry=None)
-
-        widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
-        qtbot.addWidget(widget)
-
-        assert not widget._btn_webcam.isEnabled()
 
     def test_webcam_snapshot_shows_error_when_frame_none(
         self,
@@ -442,25 +391,18 @@ class TestWebcamButton:
         grayscale_presenter,
         real_registry,
     ) -> None:
-        """Снимок с камеры: если get_current_frame() → None → показать ошибку."""
+        """Снимок: capture_single_frame → None → показать ошибку (камера занята/нет)."""
+        from unittest.mock import patch
+
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
-        # Сервис работает, но кадр недоступен
-        mock_webcam_svc = MagicMock()
-        mock_webcam_svc.status = "running"
-        mock_webcam_svc.get_current_frame.return_value = None
-
-        mock_svc_registry = MagicMock()
-        mock_svc_registry.get.return_value = mock_webcam_svc
-
-        ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
-
+        ctx = _make_ctx(registry=real_registry, service_registry=None)
         widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
         qtbot.addWidget(widget)
 
-        widget._on_webcam_snapshot()
+        with patch(self._CAP, return_value=None):
+            widget._on_webcam_snapshot()
 
-        # Должна появиться ошибка
         assert not widget._lbl_error.isHidden()
         assert "Камера" in widget._lbl_error.text() or "недоступна" in widget._lbl_error.text()
 
@@ -470,29 +412,21 @@ class TestWebcamButton:
         grayscale_presenter,
         real_registry,
     ) -> None:
-        """Снимок с камеры: если get_current_frame() возвращает frame → _current_frame установлен."""
+        """Снимок: capture_single_frame вернул кадр → _current_frame установлен."""
         import numpy as np
+        from unittest.mock import patch
+
         from multiprocess_prototype.frontend.widgets.tabs.plugins.sandbox import PluginSandboxWidget
 
         fake_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-
-        mock_webcam_svc = MagicMock()
-        mock_webcam_svc.status = "running"
-        mock_webcam_svc.get_current_frame.return_value = fake_frame
-
-        mock_svc_registry = MagicMock()
-        mock_svc_registry.get.return_value = mock_webcam_svc
-
-        ctx = _make_ctx(registry=real_registry, service_registry=mock_svc_registry)
-
+        ctx = _make_ctx(registry=real_registry, service_registry=None)
         widget = PluginSandboxWidget(grayscale_presenter, "grayscale", services=ctx)
         qtbot.addWidget(widget)
 
-        widget._on_webcam_snapshot()
+        with patch(self._CAP, return_value=fake_frame):
+            widget._on_webcam_snapshot()
 
-        # _current_frame должен быть установлен
         assert widget._current_frame is not None
-        # Кнопка «Применить» должна быть активна
         assert widget._btn_apply.isEnabled()
 
 

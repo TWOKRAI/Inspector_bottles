@@ -11,10 +11,10 @@ Vertical slice (Task 6.2 + Task 6.3):
 MVP-паттерн: ISandboxView (Protocol) + PluginSandboxWidget (реализует Protocol).
 SandboxPresenter инжектируется снаружи.
 
-By design: sandbox требует живой Python plugin_class (entry.register_classes[0]),
-а webcam требует живой service entry (svc_registry.get("webcam_camera")) --
-не покрывается PluginCatalog/ServiceManager Protocol (метаданные).
-Bridge _registry остаётся навсегда. Q-F2=C (owner-decision 2026-05-28).
+By design: sandbox требует живой Python plugin_class (entry.register_classes[0]) --
+не покрывается PluginCatalog Protocol (метаданные). Bridge _registry остаётся.
+Q-F2=C (owner-decision 2026-05-28). Webcam-снимок — разовый грабер control-core
+(webcam_controls.capture_single_frame), единый cv2-путь (отдельный сервис удалён).
 """
 
 from __future__ import annotations
@@ -222,11 +222,10 @@ class PluginSandboxWidget(QWidget):
         super().__init__(parent)
         self._presenter = presenter
         self._plugin_name = plugin_name
-        # By design: sandbox требует живой Python register_classes[0] (Pydantic model)
-        # и живой service entry (status, get_current_frame) -- не покрывается
-        # PluginCatalog/ServiceManager Protocol (метаданные). Q-F2=C (owner-decision 2026-05-28).
+        # By design: sandbox требует живой Python register_classes[0] (Pydantic model) --
+        # не покрывается PluginCatalog Protocol (метаданные). Q-F2=C (owner-decision 2026-05-28).
+        # Webcam-снимок больше не нуждается в service registry (единый control-core).
         self._registry = getattr(services.plugins, "_registry", None) if services is not None else None
-        self._svc_registry = getattr(services.services, "_registry", None) if services is not None else None
         self._current_frame: np.ndarray | None = None  # текущий загруженный кадр
 
         # Словарь QSpinBox/QDoubleSpinBox: field_name → widget
@@ -467,30 +466,14 @@ class PluginSandboxWidget(QWidget):
         return int
 
     def _refresh_webcam_button_state(self) -> None:
-        """Обновить состояние кнопки «Снимок с камеры».
+        """Кнопка «Снимок с камеры» всегда доступна.
 
-        Кнопка enabled только если webcam_camera service в состоянии "running".
-        Вызывается при создании виджета.
+        Снимок делается разовым грабером control-core (единый cv2-путь, см.
+        webcam_controls.capture_single_frame): открывает устройство на миг и
+        освобождает. Если устройство занято работающим плагином — снимок вернёт
+        None и покажется ошибка (graceful). Отдельный webcam_camera-сервис удалён.
         """
-        enabled = self._is_webcam_running()
-        self._btn_webcam.setEnabled(enabled)
-
-    def _is_webcam_running(self) -> bool:
-        """Проверить что webcam_camera service в состоянии running.
-
-        Returns:
-            True если сервис доступен и статус "running".
-        """
-        if self._svc_registry is None:
-            return False
-        try:
-            svc = self._svc_registry.get("webcam_camera")
-            if svc is None:
-                return False
-            status = getattr(svc, "status", "stopped")
-            return status == "running"
-        except Exception:  # noqa: BLE001
-            return False
+        self._btn_webcam.setEnabled(True)
 
     # ------------------------------------------------------------------ #
     #  Слоты                                                               #
@@ -533,21 +516,23 @@ class PluginSandboxWidget(QWidget):
         self._btn_apply.setEnabled(True)
 
     def _on_webcam_snapshot(self) -> None:
-        """Захватить кадр с веб-камеры через WebcamCameraService."""
-        if self._svc_registry is None:
-            self.show_error("Сервисы недоступны")
-            return
+        """Разовый снимок с камеры через единый control-core (без отдельного сервиса).
+
+        capture_single_frame открывает устройство на миг и освобождает. Если оно
+        занято работающим плагином камеры или недоступно — вернёт None (graceful).
+        """
+        from Plugins.sources.camera_service.backends.webcam_controls import (
+            capture_single_frame,
+        )
 
         frame = None
         try:
-            svc = self._svc_registry.get("webcam_camera")
-            if svc is not None and hasattr(svc, "get_current_frame"):
-                frame = svc.get_current_frame()
+            frame = capture_single_frame(0)
         except Exception:  # noqa: BLE001  # nosec B110 — frame=None уже обработан ниже
             pass
 
         if frame is None:
-            self.show_error("Камера недоступна")
+            self.show_error("Камера недоступна (занята pipeline или нет устройства)")
             return
 
         # Скрыть предыдущую ошибку

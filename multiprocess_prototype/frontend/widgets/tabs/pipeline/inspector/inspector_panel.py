@@ -91,6 +91,8 @@ class NodeInspectorPanel(QWidget):
         # G.2: live RegistersManager (FieldInfo-схемы) — runtime-dep через set_services,
         # т.к. forms-фабрике нужен framework FieldInfo (domain FieldSpec lossy).
         self._registers_manager: Any = None
+        # GuiStateBindings — для actual-телеметрии камеры (Phase 3). None → readout скрыт.
+        self._bindings: Any = None
         # Текущий режим отображения: "plugin" или "display"
         self._mode: str = "plugin"
         # Combo «Процесс назначения» (для plugin-узлов)
@@ -104,14 +106,18 @@ class NodeInspectorPanel(QWidget):
         services: "AppServices",
         *,
         registers_manager: Any = None,
+        bindings: Any = None,
     ) -> None:
         """Передать AppServices + live RegistersManager (G.2, runtime-dep).
 
         registers_manager используется в _try_build_cards_editors для получения
         framework FieldInfo (forms-фабрика строит виджеты из FieldInfo, не domain FieldSpec).
+        bindings (GuiStateBindings) — для actual-телеметрии камеры (Phase 3).
         """
         self._services = services
         self._registers_manager = registers_manager
+        if bindings is not None:
+            self._bindings = bindings
 
     def set_context(self, ctx: object) -> None:
         """Legacy bridge для backward compatibility. Deprecated.
@@ -263,6 +269,32 @@ class NodeInspectorPanel(QWidget):
         self._scroll.setWidget(self._params_widget)
         content_layout.addWidget(self._scroll, stretch=1)
 
+        # Блок «Камера (actual)» — read-only телеметрия что камера реально применила
+        # (cap.get), привязка к state store processes.{proc}.state.cam.actual.*.
+        # Показывается только для camera_service-ноды (см. _show_camera_actual).
+        self._cam_actual_form = QWidget()
+        self._cam_actual_layout = QFormLayout(self._cam_actual_form)
+        self._cam_actual_layout.setContentsMargins(0, 4, 0, 4)
+        self._cam_actual_layout.setSpacing(2)
+        self._cam_actual_labels: dict[str, QLabel] = {}
+        cam_title = QLabel("Камера (actual)")
+        cam_title.setProperty("role", "plugin-name")
+        self._cam_actual_layout.addRow(cam_title)
+        for key, caption in (
+            ("fps", "FPS:"),
+            ("resolution", "Разрешение:"),
+            ("exposure", "Экспозиция:"),
+            ("gain", "Усиление:"),
+            ("fourcc", "Кодек:"),
+        ):
+            lbl = QLabel("—")
+            self._cam_actual_labels[key] = lbl
+            self._cam_actual_layout.addRow(caption, lbl)
+        content_layout.addWidget(self._cam_actual_form)
+        self._cam_actual_form.setVisible(False)
+        # Дескрипторы активных подписок actual (для отписки при смене ноды)
+        self._cam_actual_handles: list[Any] = []
+
         self._content.setVisible(False)
         layout.addWidget(self._content, stretch=1)
 
@@ -380,8 +412,95 @@ class NodeInspectorPanel(QWidget):
             if not self._use_cards and params:
                 self._build_lineedit_editors(params)
 
+            # Actual-телеметрия камеры (Phase 3): только для camera_service.
+            if (plugin_name or node_id) == "camera_service":
+                self._show_camera_actual(self._current_process)
+            else:
+                self._hide_camera_actual()
+
         finally:
             self._suppress_changes = False
+
+    # ------------------------------------------------------------------ #
+    #  Камера: actual-телеметрия (Phase 3)                                 #
+    # ------------------------------------------------------------------ #
+
+    def _hide_camera_actual(self) -> None:
+        """Скрыть блок actual и снять подписки."""
+        if self._bindings is not None:
+            for h in self._cam_actual_handles:
+                try:
+                    self._bindings.unbind(h)
+                except Exception:
+                    pass
+        self._cam_actual_handles = []
+        self._cam_actual_form.setVisible(False)
+        for lbl in self._cam_actual_labels.values():
+            lbl.setText("—")
+
+    def _show_camera_actual(self, process_name: str) -> None:
+        """Показать блок actual и привязать метки к state store.
+
+        Пути: processes.{proc}.state.cam.actual.{fps,width,height,exposure,gain,fourcc}.
+        Разрешение собирается из width+height отдельным форматтером на оба пути.
+        """
+        self._hide_camera_actual()
+        if self._bindings is None or not process_name:
+            # Без bindings actual недоступен (нет live-подписки) — блок не показываем.
+            return
+        self._cam_actual_form.setVisible(True)
+        base = f"processes.{process_name}.state.cam.actual"
+
+        def _num(lbl: QLabel, unit: str = ""):
+            return lambda v: f"{float(v):.0f}{unit}" if isinstance(v, (int, float)) else str(v)
+
+        self._cam_actual_handles.append(
+            self._bindings.bind(
+                f"{base}.fps",
+                self._cam_actual_labels["fps"],
+                "text",
+                formatter=_num(self._cam_actual_labels["fps"], " fps"),
+            )
+        )
+        self._cam_actual_handles.append(
+            self._bindings.bind(
+                f"{base}.exposure",
+                self._cam_actual_labels["exposure"],
+                "text",
+                formatter=_num(self._cam_actual_labels["exposure"]),
+            )
+        )
+        self._cam_actual_handles.append(
+            self._bindings.bind(
+                f"{base}.gain", self._cam_actual_labels["gain"], "text", formatter=_num(self._cam_actual_labels["gain"])
+            )
+        )
+        self._cam_actual_handles.append(
+            self._bindings.bind(f"{base}.fourcc", self._cam_actual_labels["fourcc"], "text")
+        )
+        # Разрешение: width и height приходят раздельно → обновляем общую метку.
+        self._cam_res = {"width": 0, "height": 0}
+
+        def _res_update(key):
+            def _fmt(v):
+                try:
+                    self._cam_res[key] = int(float(v))
+                except (TypeError, ValueError):
+                    pass
+                return f"{self._cam_res['width']}×{self._cam_res['height']}"
+
+            return _fmt
+
+        self._cam_actual_handles.append(
+            self._bindings.bind(
+                f"{base}.width", self._cam_actual_labels["resolution"], "text", formatter=_res_update("width")
+            )
+        )
+        self._cam_actual_handles.append(
+            self._bindings.bind(
+                f"{base}.height", self._cam_actual_labels["resolution"], "text", formatter=_res_update("height")
+            )
+        )
 
     def show_display_node(
         self,
@@ -425,6 +544,7 @@ class NodeInspectorPanel(QWidget):
             # Блок «Исполнение» не относится к display-узлам — очистить и спрятать.
             self._clear_exec_info()
             self._exec_info_form.setVisible(False)
+            self._hide_camera_actual()
 
             # Заполнить combo из DisplayRegistry
             self._populate_display_id_combo(display_id)
@@ -868,6 +988,7 @@ class NodeInspectorPanel(QWidget):
         self._move_process_form.setVisible(False)
         self._display_id_form.setVisible(False)
         self._clear_exec_info()
+        self._hide_camera_actual()
         self._clear_params()
 
     @property

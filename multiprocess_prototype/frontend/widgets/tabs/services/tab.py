@@ -47,15 +47,23 @@ class ServicesTab(BaseTreeNavTab):
     Task E.4: мигрирован на AppServices DI. Принимает ``services: AppServices``.
     """
 
-    def __init__(self, services: AppServices, *, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        services: AppServices,
+        *,
+        runtime: RuntimeDeps | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         self._services = services
+        # Camera-фича: RuntimeDeps нужен секции «Камера» (topology_bridge + bindings).
+        self._runtime = runtime
         # G.4.4: undo/redo на domain CommandDispatcher (services.commands
         # удовлетворяет UndoRedoController). Единая глобальная история; кнопки
         # рефрешат enabled-состояние по change-callback после dispatch/undo/redo.
         commands = services.commands
         super().__init__(
             title="Сервисы",
-            sections=build_services_sections(services),
+            sections=build_services_sections(services, runtime),
             ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
             bus_change_subscriber=lambda cb: commands.add_change_callback(cb),
@@ -79,9 +87,9 @@ class ServicesTab(BaseTreeNavTab):
         """Фабричный метод для register_all_tabs() / TabFactory.
 
         Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
-        ServicesTab не использует runtime-зависимостей.
+        Camera-фича: runtime прокидывается в секцию «Камера» (topology_bridge + bindings).
         """
-        return cls(services)
+        return cls(services, runtime=runtime)
 
     def _tree_object_name(self) -> str:
         return "ServicesTreeNav"
@@ -108,7 +116,7 @@ class ServicesTab(BaseTreeNavTab):
         Вызывается по сигналу catalog_updated из ServicePathsSubtabWidget.
         Пересобирает _sections_specs и перезаполняет дерево навигации.
         """
-        new_sections = build_services_sections(self._services)
+        new_sections = build_services_sections(self._services, self._runtime)
         self._sections_specs = new_sections
         self.populate()
 

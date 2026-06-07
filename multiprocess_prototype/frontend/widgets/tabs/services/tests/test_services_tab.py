@@ -134,12 +134,13 @@ class TestServicesTab:
         assert nn_idx < paths_idx
 
     def test_empty_registry_structure(self, qtbot):
-        """Без сервисов: services_root отсутствует, только placeholders."""
+        """Без сервисов: services_root отсутствует, только placeholders + камера."""
         tab = ServicesTab(make_services_services(entries=[]))
         qtbot.addWidget(tab)
 
-        assert len(tab._sections_specs) == 2
         keys = [s.key for s in tab._sections_specs]
+        assert "services_root" not in keys
+        assert "__camera__" in keys
         assert "neural_networks" in keys
         assert "__service_paths__" in keys
 

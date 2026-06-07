@@ -4,13 +4,15 @@
 
 **Слои:** `multiprocess_framework → Services → Plugins → multiprocess_prototype`.
 
-**Обновлено:** 2026-05-27 — добавлен `webcam_camera` (Phase 0/3, ADR-128).
+**Обновлено:** 2026-06-07 — удалён `webcam_camera` (унификация камеры: единственный владелец cv2 —
+плагин `Plugins/sources/camera_service`; настройки — через Pipeline-инспектор и Services «Камера» фасад;
+sandbox-снимок переведён на `webcam_controls.capture_single_frame`).
+Ранее 2026-05-27 — добавлен `webcam_camera` (Phase 0/3, ADR-128).
 Ранее 2026-05-10 — приведение к стандарту валидации (`__init__.py`, `interfaces.py`, `STATUS.md`, `README.md`, `tests/`).
 
 | Сервис | Готовность | Комментарий | ADR |
 |--------|-----------|-------------|-----|
 | `sql` | production | SQLManager + Repository + UoW + QuerySet; выехал из `multiprocess_framework/modules/sql_module/` | ADR-121 |
-| `webcam_camera` | stable | WebcamCameraService — IService реализация для USB-камеры через OpenCV; зарегистрирован через @register_service; перенесён из backup в Phase 0; ADR-128 | ADR-128 |
 | `hikvision_camera` | production | Плагин-обёртка над HikSDK + core/sdk_app; выехал из плагинов | ADR-122 |
 | `modbus` | ready | Драйвер Modbus-TCP / RS485 (pymodbus 3.x); 3 слоя sdk/core/plugin + service; io-плагин `modbus`, телеметрия через API; первый Service-плагин (plugin_paths += Services) | — |
 | `auth` | foundation | User/Role storage + RBAC API (PR1) | ADR-Auth-001..004 |

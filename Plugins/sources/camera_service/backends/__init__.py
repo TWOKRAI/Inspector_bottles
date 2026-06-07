@@ -42,11 +42,15 @@ def create_backend(camera_type: str, **kwargs) -> CameraBackend:
             width=kwargs.get("width", 640),
             height=kwargs.get("height", 480),
             device_id=kwargs.get("device_id", 0),
+            fps=kwargs.get("fps"),
+            mjpg=kwargs.get("mjpg", False),
+            params=kwargs.get("params"),
         )
 
     if camera_type == "hikvision":
         # Lazy import — SDK может отсутствовать
         from .hikvision import HikvisionBackend
+
         return HikvisionBackend(
             camera_index=kwargs.get("camera_index", 0),
             target_width=kwargs.get("width", 1920),

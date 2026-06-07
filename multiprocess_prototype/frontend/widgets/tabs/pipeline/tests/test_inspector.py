@@ -49,6 +49,72 @@ def _make_field_info(field_name: str, field_type: type = str, default: Any = "")
     )
 
 
+class _FakeBindings:
+    """Фейк GuiStateBindings — записывает вызовы bind/unbind."""
+
+    def __init__(self) -> None:
+        self.bound: list[str] = []
+        self.unbound: int = 0
+
+    def bind(self, path, widget, prop="value", *, formatter=None):
+        self.bound.append(path)
+        return ("h", path)
+
+    def unbind(self, handle) -> None:
+        self.unbound += 1
+
+
+class TestCameraActualReadout:
+    """Phase 3: actual-телеметрия камеры в инспекторе."""
+
+    def test_camera_node_shows_actual_and_binds(self, qtbot):
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        binds = _FakeBindings()
+        panel.set_services(_make_services_no_rm(), bindings=binds)
+
+        panel.show_plugin_node(
+            "camera_0.camera_service",
+            category="source",
+            plugin_name="camera_service",
+            process_name="camera_0",
+        )
+        assert not panel._cam_actual_form.isHidden()
+        base = "processes.camera_0.state.cam.actual"
+        assert f"{base}.fps" in binds.bound
+        assert f"{base}.width" in binds.bound
+        assert f"{base}.fourcc" in binds.bound
+
+    def test_non_camera_node_hides_actual(self, qtbot):
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        binds = _FakeBindings()
+        panel.set_services(_make_services_no_rm(), bindings=binds)
+
+        panel.show_plugin_node(
+            "proc.color_mask",
+            category="processing",
+            plugin_name="color_mask",
+            process_name="proc",
+        )
+        assert panel._cam_actual_form.isHidden()
+
+    def test_clear_unbinds_actual(self, qtbot):
+        panel = NodeInspectorPanel()
+        qtbot.addWidget(panel)
+        binds = _FakeBindings()
+        panel.set_services(_make_services_no_rm(), bindings=binds)
+        panel.show_plugin_node(
+            "camera_0.camera_service",
+            category="source",
+            plugin_name="camera_service",
+            process_name="camera_0",
+        )
+        panel.clear()
+        assert binds.unbound > 0
+        assert panel._cam_actual_form.isHidden()
+
+
 def _make_presenter_services(bus=None):
     """AppServices для PipelinePresenter с опциональным action_bus.
 

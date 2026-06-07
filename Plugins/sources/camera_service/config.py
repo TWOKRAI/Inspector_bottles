@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 from multiprocess_framework.modules.process_module.plugins import register_schema
 from multiprocess_framework.modules.process_module.plugins import FieldMeta
 from multiprocess_framework.modules.process_module.plugins import PluginConfig
+from multiprocess_framework.modules.process_module.plugins import SchemaBase
+
+from .registers import CameraServiceRegisters
 
 CameraTypeStr = Literal["simulator", "webcam", "hikvision", "file"]
 
@@ -17,11 +20,16 @@ class CameraServiceConfig(PluginConfig):
 
     Поддерживает 4 backend'а: simulator, webcam, hikvision, file.
     SHM ring-buffer для zero-copy передачи кадров.
+
+    Структурные/identity-поля — здесь. Tunable-параметры (fps, exposure, gain,
+    ...) — в CameraServiceRegisters (см. register_bindings). Полный набор
+    физических параметров вебкамеры персистится в `params` (пишет Services-фасад).
     """
 
-    plugin_class: str = (
-        "Plugins.sources.camera_service.plugin.CameraServicePlugin"
-    )
+    plugin_class: str = "Plugins.sources.camera_service.plugin.CameraServicePlugin"
+
+    # Привязка к register-классам (tunable subset для инспектора)
+    register_bindings: ClassVar[list[type[SchemaBase]]] = [CameraServiceRegisters]
 
     # Тип backend'а
     camera_type: Annotated[
@@ -39,11 +47,6 @@ class CameraServiceConfig(PluginConfig):
         int,
         FieldMeta(description="Номер устройства cv2.VideoCapture (webcam)"),
     ] = 0
-
-    fps: Annotated[
-        int,
-        FieldMeta(description="Целевой FPS захвата"),
-    ] = 25
 
     resolution_width: Annotated[
         int,
@@ -93,6 +96,14 @@ class CameraServiceConfig(PluginConfig):
         int,
         FieldMeta(description="Количество слотов ring-buffer (K)"),
     ] = 3
+
+    # Полный набор физических CAP_PROP-параметров (пишет Services-фасад).
+    # Применяются на камеру при открытии (seed backend). Ключи — из
+    # backends/webcam_controls.WEBCAM_PARAMS.
+    params: Annotated[
+        dict[str, Any],
+        FieldMeta(description="CAP_PROP-параметры вебкамеры", hidden=True),
+    ] = {}
 
     @property
     def memory(self) -> dict[str, Any] | None:

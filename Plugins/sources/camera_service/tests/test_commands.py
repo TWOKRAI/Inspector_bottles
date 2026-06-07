@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
-import pytest
 
 from Plugins.sources.camera_service.plugin import CameraServicePlugin
 
@@ -133,18 +132,16 @@ class TestHikPassthrough:
         for cmd_name in hik_commands:
             assert cmd_name in commands, f"Команда {cmd_name} не зарегистрирована"
             result = commands[cmd_name]({})
-            assert result["status"] == "error", (
-                f"Команда {cmd_name} должна вернуть error для simulator backend"
-            )
+            assert result["status"] == "error", f"Команда {cmd_name} должна вернуть error для simulator backend"
 
         plugin.shutdown(ctx)
 
 
 class TestAllCommandsRegistered:
-    """Проверка что все 14 команд зарегистрированы."""
+    """Проверка что все команды зарегистрированы (14 базовых + 4 live-параметра)."""
 
-    def test_all_14_commands_registered(self):
-        """Все 14 команд зарегистрированы в command_manager."""
+    def test_all_commands_registered(self):
+        """Все 18 команд зарегистрированы в command_manager."""
         plugin = CameraServicePlugin()
         ctx = _make_mock_ctx({"camera_type": "simulator"})
         commands = _configure_with_commands(plugin, ctx)
@@ -164,12 +161,98 @@ class TestAllCommandsRegistered:
             "hik_stop_grabbing",
             "hik_get_parameters",
             "hik_set_parameters",
+            # Phase 2 — live-управление параметрами
+            "set_config",
+            "set_param",
+            "set_mjpg",
+            "get_actual",
         }
 
         assert set(commands.keys()) == expected, (
-            f"Ожидалось 14 команд, получено {len(commands)}: "
+            f"Ожидалось {len(expected)} команд, получено {len(commands)}: "
             f"лишние={set(commands.keys()) - expected}, "
             f"отсутствуют={expected - set(commands.keys())}"
         )
 
         plugin.shutdown(ctx)
+
+
+class _FakeWebcamBackend:
+    """Фейк webcam-backend для тестов live-параметров (без cv2)."""
+
+    def __init__(self) -> None:
+        self.params: dict = {}
+        self.fps: int | None = None
+        self.mjpg: bool | None = None
+
+    def set_param(self, name: str, value) -> bool:
+        self.params[name] = value
+        return True
+
+    def set_fps(self, fps: int) -> bool:
+        self.fps = int(fps)
+        return True
+
+    def set_mjpg(self, on: bool) -> bool:
+        self.mjpg = bool(on)
+        return True
+
+    def get_actual(self, names=None) -> dict:
+        return {"width": 1280, "height": 720, "fps": 30, "gain": 50}
+
+
+class TestLiveParams:
+    """Phase 2: live-управление параметрами через команды."""
+
+    def _plugin_with_fake_webcam(self):
+        plugin = CameraServicePlugin()
+        ctx = _make_mock_ctx({"camera_type": "webcam"})
+        commands = _configure_with_commands(plugin, ctx)
+        plugin._camera_type = "webcam"
+        plugin._backend = _FakeWebcamBackend()
+        return plugin, ctx, commands
+
+    def test_set_param_applies_to_backend(self):
+        plugin, ctx, commands = self._plugin_with_fake_webcam()
+        result = commands["set_param"]({"name": "gain", "value": 100})
+        assert result["status"] == "ok"
+        assert plugin._backend.params["gain"] == 100
+        assert plugin._params["gain"] == 100  # desired сохранён
+
+    def test_set_config_updates_register_and_backend(self):
+        plugin, ctx, commands = self._plugin_with_fake_webcam()
+        commands["set_config"]({"exposure": -4, "fps": 30})
+        assert plugin._reg.exposure == -4
+        assert plugin._reg.fps == 30
+        assert plugin._backend.params["exposure"] == -4
+        assert plugin._backend.fps == 30
+
+    def test_set_mjpg(self):
+        plugin, ctx, commands = self._plugin_with_fake_webcam()
+        commands["set_mjpg"]({"on": True})
+        assert plugin._backend.mjpg is True
+        assert plugin._reg.mjpg is True
+
+    def test_get_actual(self):
+        plugin, ctx, commands = self._plugin_with_fake_webcam()
+        result = commands["get_actual"]({})
+        assert result["status"] == "ok"
+        assert result["actual"]["width"] == 1280
+
+    def test_param_remembered_when_no_backend(self):
+        """Без открытого webcam — desired запоминается, применится при open."""
+        plugin = CameraServicePlugin()
+        ctx = _make_mock_ctx({"camera_type": "simulator"})
+        commands = _configure_with_commands(plugin, ctx)
+        commands["set_param"]({"name": "gain", "value": 77})
+        assert plugin._params["gain"] == 77
+
+    def test_publish_actual_merges_state(self):
+        plugin, ctx, commands = self._plugin_with_fake_webcam()
+        plugin._state_proxy = MagicMock()
+        plugin._ctx.process_name = "camera_0"
+        plugin._publish_actual()
+        plugin._state_proxy.merge.assert_called_once()
+        path, data = plugin._state_proxy.merge.call_args[0]
+        assert path == "processes.camera_0.state.cam.actual"
+        assert data["width"] == 1280

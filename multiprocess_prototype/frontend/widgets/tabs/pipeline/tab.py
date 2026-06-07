@@ -76,6 +76,7 @@ class PipelineTab(QWidget):
         *,
         registers_manager: "RegistersManager | None" = None,
         process_manager_proxy: object | None = None,
+        bindings: object | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -85,6 +86,7 @@ class PipelineTab(QWidget):
             registers_manager=registers_manager,
             notify=self._show_status,
             process_manager_proxy=process_manager_proxy,
+            bindings=bindings,
         )
 
         self._tab_layout = DiffScrollTabLayout(
@@ -176,6 +178,7 @@ class PipelineTab(QWidget):
             services,
             registers_manager=runtime.registers_manager,
             process_manager_proxy=runtime.process_manager_proxy,
+            bindings=runtime.bindings,
         )
 
     # ------------------------------------------------------------------ #

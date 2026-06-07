@@ -73,8 +73,11 @@ class PipelinePresenter:
         registers_manager: "RegistersManager | None" = None,
         notify: "Callable[[str], None] | None" = None,
         process_manager_proxy: Any = None,
+        bindings: Any = None,
     ) -> None:
         self._services = services
+        # GuiStateBindings — для actual-телеметрии камеры в инспекторе (Phase 3).
+        self._bindings = bindings
         # Этап 1 pipeline-live-control: IPC-фасад управления живым backend
         # (replace_blueprint / start / stop / restart). Runtime-объект (RuntimeDeps,
         # Q-F1=B), не AppServices. None → кнопки управления дают понятный статус.
@@ -143,7 +146,11 @@ class PipelinePresenter:
         # D.2: держим ссылку на панель — _on_inspector_field_changed читает
         # current_plugin_index (какой плагин процесса редактируется).
         self._inspector = panel
-        panel.set_services(self._services, registers_manager=self._registers_manager)
+        panel.set_services(
+            self._services,
+            registers_manager=self._registers_manager,
+            bindings=self._bindings,
+        )
         panel.field_changed.connect(self._on_inspector_field_changed)
         panel.target_process_changed.connect(self._on_target_process_changed)
         panel.display_id_changed.connect(self._on_display_id_changed)

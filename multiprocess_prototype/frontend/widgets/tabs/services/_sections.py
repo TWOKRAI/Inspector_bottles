@@ -338,15 +338,22 @@ def _make_service_factory(
 # ---------------------------------------------------------------------------
 
 
-def build_services_sections(services: AppServices) -> "list[SectionSpec]":
+def build_services_sections(
+    services: AppServices,
+    runtime: object | None = None,
+) -> "list[SectionSpec]":
     """Сформировать декларацию секций ServicesTab.
 
     Task E.4: принимает AppServices вместо AppContext.
+    Camera-фича: runtime (RuntimeDeps) нужен секции «Камера» (topology_bridge +
+    bindings для live-управления плагином camera_service). None → секция камеры
+    работает в degraded-режиме (без live/actual).
 
     Структура:
         - «Сервисы» (services_root, родитель) — только если есть хотя бы один
           сервис в ServiceManager. Иначе родительский узел не создаётся.
         - Под ним — N сервисных секций (lazy) из services.services.list_services().
+        - Top-level «Камера» — подробный фасад настроек вебкамеры.
         - Top-level «Нейронные сети» — всегда присутствует как placeholder.
         - Top-level «Пути» (__service_paths__) — управление директориями.
     """
@@ -373,6 +380,11 @@ def build_services_sections(services: AppServices) -> "list[SectionSpec]":
                     lazy=True,
                 )
             )
+
+    # Секция «Камера» — подробный фасад настроек вебкамеры (camera_service).
+    from .camera import build_camera_section
+
+    sections.append(build_camera_section(services, runtime))
 
     sections.append(
         SectionSpec(

@@ -13,6 +13,8 @@ import time
 import cv2
 import numpy as np
 
+from . import webcam_controls as controls
+
 
 def _enum_webcam_devices(max_index: int = 32) -> dict:
     """Перечислить доступные webcam-устройства.
@@ -29,17 +31,15 @@ def _enum_webcam_devices(max_index: int = 32) -> dict:
     devices: list[dict] = []
 
     for i in range(max_index):
-        cap = (
-            cv2.VideoCapture(i, cv2.CAP_DSHOW)
-            if os.name == "nt"
-            else cv2.VideoCapture(i)
-        )
+        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(i)
         if cap.isOpened():
-            devices.append({
-                "index": i,
-                "display_name": f"[OpenCV {i}] Webcam",
-                "source": "webcam",
-            })
+            devices.append(
+                {
+                    "index": i,
+                    "display_name": f"[OpenCV {i}] Webcam",
+                    "source": "webcam",
+                }
+            )
             cap.release()
 
     return {"status": "ok", "devices": devices}
@@ -61,10 +61,18 @@ class WebcamBackend:
         width: int = 640,
         height: int = 480,
         device_id: int = 0,
+        fps: int | None = None,
+        mjpg: bool = False,
+        params: dict | None = None,
     ) -> None:
         self._width = width
         self._height = height
         self._device_id = device_id
+        self._fps = fps
+        self._mjpg = mjpg
+        # Желаемые значения управляемых параметров (desired) — переживают
+        # переоткрытие устройства и применяются заново в _open().
+        self._params: dict = dict(params or {})
         self._running = False
         self._cap: cv2.VideoCapture | None = None
 
@@ -97,8 +105,16 @@ class WebcamBackend:
                     else cv2.VideoCapture(self._device_id)
                 )
                 if self._cap.isOpened():
-                    self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
-                    self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
+                    # Порядок критичен: MJPG(FOURCC) → width/height → fps →
+                    # остальные параметры. См. webcam_controls.apply_open_sequence.
+                    controls.apply_open_sequence(
+                        self._cap,
+                        mjpg=self._mjpg,
+                        width=self._width,
+                        height=self._height,
+                        fps=self._fps,
+                        params=self._params,
+                    )
                     return True
                 # Не открылся — освободить и попробовать снова
                 self._release_cap()
@@ -131,13 +147,53 @@ class WebcamBackend:
         self._running = False
         self._release_cap()
 
+    # --- Live-управление параметрами (через control-core) ---
+
+    def set_param(self, name: str, value) -> bool:
+        """Применить управляемый параметр live и запомнить как desired.
+
+        Запоминается даже если cap не открыт — применится при следующем _open().
+        """
+        self._params[name] = value
+        return controls.apply_param(self._cap, name, value)
+
+    def set_mjpg(self, on: bool) -> bool:
+        """Переключить MJPG-кодек. Запоминается как desired для переоткрытия."""
+        self._mjpg = bool(on)
+        return controls.set_mjpg(self._cap, on)
+
+    def set_fps(self, fps: int) -> bool:
+        """Применить целевой FPS live (cap.set FPS). Запоминается как desired."""
+        self._fps = int(fps)
+        if self._cap is None:
+            return False
+        try:
+            return bool(self._cap.set(cv2.CAP_PROP_FPS, int(fps)))
+        except Exception:
+            return False
+
+    def get_actual(self, names: list[str] | None = None) -> dict:
+        """Прочитать actual-значения (что камера реально применила)."""
+        return controls.read_actual(self._cap, names)
+
     def handle_command(self, cmd: str, data: dict) -> dict | None:
         """Обработать команду.
 
         Поддерживает:
             enum_devices — перечислить доступные webcam-устройства
+            set_param    — применить параметр (data: name, value)
+            set_mjpg     — переключить MJPG (data: on)
+            get_actual   — прочитать actual-значения (data: names опц.)
         """
         if cmd == "enum_devices":
             max_idx = data.get("max_index", 32)
             return _enum_webcam_devices(max_idx)
+        if cmd == "set_param":
+            ok = self.set_param(data.get("name", ""), data.get("value"))
+            return {"status": "ok" if ok else "error", "applied": ok}
+        if cmd == "set_mjpg":
+            ok = self.set_mjpg(bool(data.get("on", True)))
+            return {"status": "ok" if ok else "error", "applied": ok}
+        if cmd == "get_actual":
+            return {"status": "ok", "actual": self.get_actual(data.get("names"))}
         return None
