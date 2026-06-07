@@ -168,4 +168,3 @@ blueprint:
   displays:
     - node_id: stitcher.stitcher.frame
       display_id: main
-      display_name: Основной дисплей

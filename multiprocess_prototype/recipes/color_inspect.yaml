@@ -112,4 +112,3 @@ blueprint:
   displays:
     - node_id: painter.contour_draw.frame
       display_id: main
-      display_name: Основной дисплей

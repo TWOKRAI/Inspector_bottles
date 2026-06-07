@@ -29,7 +29,7 @@ def _make_services_for_presenter(topology=None):
         ],
         "wires": [],
         "displays": [
-            {"node_id": "p2.color_mask.frame", "display_id": "main_output", "display_name": "Основной"},
+            {"node_id": "p2.color_mask.frame", "display_id": "main_output"},
         ],
     }
     return make_pipeline_services(topology=topo)

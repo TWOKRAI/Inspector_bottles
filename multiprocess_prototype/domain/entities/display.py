@@ -3,7 +3,8 @@
 DisplayInstance — entity для привязки отображения к узлу топологии.
 
 Связывает узел-источник (node_id) с конкретным дисплеем (display_id).
-display_name — опциональная метка для UI.
+Адресация исключительно по display_id; имя дисплея резолвится из
+DisplayRegistry / recipe.displays[].name по display_id.
 
 Формат display_bindings (v3):
     YAML-рецепты используют ключи «node_id»/«display_id».
@@ -32,7 +33,6 @@ class DisplayInstance(SchemaBase):
 
     node_id: Annotated[str, FieldMeta("Идентификатор узла-источника (process.plugin.port или process.plugin)")]
     display_id: Annotated[str, FieldMeta("Идентификатор дисплея из DisplayRegistry")]
-    display_name: Annotated[str | None, FieldMeta("Отображаемое имя дисплея (для UI)")] = None
 
     # ------------------------------------------------------------------
     # Сериализация
