@@ -115,23 +115,6 @@ def merge_topologies(base_dict: dict, pipeline_dict: dict) -> dict:
     return merged
 
 
-def _merge_defaults(bp_dict: dict, defaults: "SystemConfig") -> dict:
-    """Merge defaults из system.yaml в plugin-конфиги topology.
-
-    Для каждого плагина: defaults[category] | plugin_inline_config.
-    Inline-значения имеют приоритет (override).
-    """
-    for proc in bp_dict.get("processes", []):
-        for plugin in proc.get("plugins", []):
-            category = plugin.get("category", "")
-            category_defaults = defaults.defaults_for_category(category)
-            if category_defaults:
-                merged = {**category_defaults, **plugin}
-                plugin.clear()
-                plugin.update(merged)
-    return bp_dict
-
-
 def _resolve_pipeline(app: "AppManifest", override: str | None) -> Path:
     """Активный pipeline: CLI-override (имя или путь) > ``app.pipeline``."""
     if not override:
@@ -208,23 +191,25 @@ class SystemBuilder:
     # --- Сборка ---
 
     def build(self) -> "SystemLauncher":
-        """Собрать готовый к запуску ``SystemLauncher``."""
-        from multiprocess_framework.modules.data_schema_module import process
+        """Собрать готовый к запуску ``SystemLauncher``.
+
+        Сборка proc_dict делегирована ``BlueprintAssembler`` (единая дорога для
+        boot и switch).  Boot-only side effects (PluginRegistry.discover,
+        build_initial_state, throttle_rules, INSPECTOR_LOG_DIR env, баннер,
+        SystemLauncher-конструктор, orchestrator_config) остаются здесь.
+        """
         from multiprocess_framework.modules.process_module.configs import expand_observability
-        from multiprocess_framework.modules.process_module.configs.managers_config import (
-            merge_managers,
-        )
         from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
             SystemLauncher,
-        )
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
-            SystemBlueprint,
         )
         from multiprocess_framework.modules.process_module.plugins.registry import (
             PluginRegistry,
         )
         from multiprocess_prototype.backend.state.bootstrap import build_initial_state
         from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
+
+        from .assembly import BlueprintAssembler, BlueprintInvalid
+        from .assembly.normalize import normalize_blueprint
 
         sys_config = self._sys_config
 
@@ -235,35 +220,46 @@ class SystemBuilder:
         ]
         discovered = PluginRegistry.discover(*plugin_paths)
 
-        bp_dict = _merge_defaults(self._blueprint, sys_config)
+        # Нормализация: per-category defaults из SystemConfig → plugin-конфиги.
+        # normalize_blueprint используется НАПРЯМУЮ (не build_proc_dicts), чтобы
+        # не нормализовать дважды — initial_state нужен нормализованный bp_dict.
+        bp_dict = normalize_blueprint(self._blueprint, sys_config)
 
         initial_state = build_initial_state(bp_dict, sys_config.model_dump())
         throttle_rules = build_throttle_rules()
 
-        topology = SystemBlueprint.model_validate(bp_dict)
-        errors = topology.check()
-        if errors:
-            print("[launch] ОШИБКИ валидации topology:", file=sys.stderr)
-            for err in errors:
-                print(f"  ✗ {err}", file=sys.stderr)
-            sys.exit(1)
-
-        configs = topology.build_configs()
         log_dir = sys_config.system.log_dir or "logs"
-        for cfg in configs:
-            if not cfg.log_dir:
-                cfg.log_dir = log_dir
 
         # Зафиксировать log_dir в env: дочерние процессы наследуют его (spawn), и при
-        # ГОРЯЧЕЙ замене рецепта (replace_blueprint._build_proc_dicts) процессы, у которых
-        # cfg.log_dir пуст, резолвят его через INSPECTOR_LOG_DIR (process_launch_config.
-        # _resolve_log_dir) → пишут в ту же папку, а не в ./logs (fallback). Иначе
-        # hot-swap'нутые процессы логировали мимо logs/prototype_2.
+        # ГОРЯЧЕЙ замене рецепта процессы, у которых cfg.log_dir пуст, резолвят его
+        # через INSPECTOR_LOG_DIR (process_launch_config._resolve_log_dir) → пишут
+        # в ту же папку, а не в ./logs (fallback).
         import os as _os
 
         _os.environ.setdefault("INSPECTOR_LOG_DIR", str(Path(log_dir).resolve()))
 
-        self._print_banner(n_processes=len(configs), n_plugins=discovered, log_dir=log_dir)
+        # Единая секция observability → overlay поверх дефолтных managers каждого
+        # процесса (Logger/Error/Stats). Фреймворк уже даёт полный набор менеджеров;
+        # overlay лишь применяет пользовательские значения из system.yaml.
+        obs_overlay = expand_observability(sys_config.observability.model_dump())
+
+        # BlueprintAssembler: stateless сборщик — та же цепочка, что была инлайн
+        # (validate → check → build_configs → log_dir → process → merge_managers →
+        # merge_with_defaults).  Невалидный blueprint → BlueprintInvalid (не sys.exit).
+        assembler = BlueprintAssembler(
+            observability_dict=obs_overlay,
+            log_dir=log_dir,
+        )
+        try:
+            proc_dicts = assembler.assemble(bp_dict)
+        except BlueprintInvalid as exc:
+            # Сохранить ТОЧНО прежний UX: печать ошибок → sys.exit(1).
+            print("[launch] ОШИБКИ валидации topology:", file=sys.stderr)
+            for err in exc.errors:
+                print(f"  ✗ {err}", file=sys.stderr)
+            sys.exit(1)
+
+        self._print_banner(n_processes=len(proc_dicts), n_plugins=discovered, log_dir=log_dir)
 
         launcher = SystemLauncher(
             stop_timeout=sys_config.system.stop_timeout,
@@ -280,14 +276,7 @@ class SystemBuilder:
                 "replace_debounce_s": 1.0,
             },
         )
-        # Единая секция observability → overlay поверх дефолтных managers каждого
-        # процесса (Logger/Error/Stats). Фреймворк уже даёт полный набор менеджеров;
-        # overlay лишь применяет пользовательские значения из system.yaml. Это же —
-        # источник для hot-reload (Phase 3.3).
-        obs_overlay = expand_observability(sys_config.observability.model_dump())
-        for cfg in configs:
-            name, proc_dict = process(cfg)
-            proc_dict["managers"] = merge_managers(proc_dict.get("managers", {}), obs_overlay)
+        for name, proc_dict in proc_dicts.items():
             launcher.add_process(name, proc_dict)
 
         return launcher
