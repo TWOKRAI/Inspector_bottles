@@ -18,7 +18,8 @@
 ### Рецепты / follow-up
 | План | Статус | Суть |
 |------|--------|------|
-| [recipe-format-single-source](2026-06-06_recipe-format-single-source.md) | PLANNED | Единая каноническая схема рецепта (single source = `blueprint.displays`), снять дубль `display_bindings` и мёртвый legacy-слой. Долг из code-review ветки decouple |
+| [displays-in-recipe](../docs/direction/displays-in-recipe.md) (ТЗ) | SPEC plan-ready, ⛔ ждёт unify Phase 2 | Определения дисплеев → в рецепт (секция `recipe.displays`), render-параметры (fit/scale/rotate/flip/crop/position), вкладка recipe-scoped, мигратор. Ревью Opus 6/10 → 3 блокера закрыты в ТЗ. Поглощает recipe-format T1 |
+| [recipe-format-single-source](2026-06-06_recipe-format-single-source.md) | PLANNED (T1 поглощён displays-in-recipe) | T2 defer (prod-safety), T3 drop (косметика). T1 (single source дисплеев) уходит в displays-in-recipe |
 
 ### Pipeline / live-control
 | План | Статус | Осталось |
