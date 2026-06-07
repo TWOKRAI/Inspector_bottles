@@ -19,6 +19,11 @@ import threading
 from typing import Any, Callable, Dict, Optional
 
 
+# Sentinel для структурного завершения worker-потока.
+# Кладётся в очередь с приоритетом -1 (ниже urgent=0) — worker
+# заберёт его следующим и выйдет из цикла.
+_SHUTDOWN = object()
+
 # Числовые приоритеты (меньше = важнее)
 PRIORITY_MAP: Dict[str, int] = {
     "urgent": 0,
@@ -37,6 +42,11 @@ class AsyncSender:
 
     Это позволяет UI-потоку вызывать enqueue() мгновенно, даже если
     канал доставки (IPC-очередь, сокет) временно занят или недоступен.
+
+    Выход worker-потока — СТРУКТУРНЫЙ: при stop() в очередь кладётся
+    sentinel ``_SHUTDOWN`` с приоритетом -1 (ниже всех), worker забирает
+    его блокирующим get() и завершается. join(timeout) — backstop на
+    случай, если sentinel не дошёл (thread daemon, процесс завершится).
 
     Attrs:
         queued  — сколько сообщений помещено в буфер
@@ -81,15 +91,32 @@ class AsyncSender:
         self._thread.start()
 
     def stop(self, timeout: float = 1.0) -> None:
-        """Остановить поток. Ждёт завершения текущей отправки.
+        """Структурно остановить worker-поток через poison-pill sentinel.
 
-        Timeout снижен с 3.0 → 1.0: worker-цикл проверяет stop_event каждые 10ms
-        (queue.get timeout=0.01), поэтому join завершается практически мгновенно.
-        3с были избыточны и складывались с cap.release() (~1-2с на DirectShow),
-        создавая суммарную задержку > 5с → принудительный terminate процессов.
+        1. Взводит stop_event (enqueue перестаёт принимать сообщения).
+        2. Кладёт sentinel ``_SHUTDOWN`` с приоритетом -1 (ниже urgent=0) —
+           worker заберёт его следующим при блокирующем get() и выйдет.
+        3. join(timeout) — backstop: если sentinel не дошёл (например,
+           очередь переполнена и put с timeout не успел), daemon-thread
+           умрёт при завершении процесса.
+
+        Гарантия вставки при полной очереди: используется блокирующий put
+        с timeout. Worker дренирует очередь через send_fn → место
+        освобождается. Если queue.Full всё же (крайний случай: send_fn
+        блокирован дольше timeout) — логируем и полагаемся на join-timeout
+        backstop.
         """
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
+            # Sentinel: приоритет -1 < urgent (0) → заберётся первым.
+            # cnt из общего counter гарантирует уникальность кортежа →
+            # heap НИКОГДА не сравнивает payload (третий элемент).
+            try:
+                self._queue.put((-1, next(self._counter), _SHUTDOWN), timeout=timeout)
+            except queue.Full:
+                self._log_warning(
+                    "[AsyncSender] не удалось вставить sentinel (очередь полна) — полагаемся на join-timeout backstop"
+                )
             self._thread.join(timeout=timeout)
         self._thread = None
 
@@ -100,8 +127,13 @@ class AsyncSender:
     def enqueue(self, msg_dict: Dict[str, Any], priority: str = "normal") -> None:
         """Положить сообщение в очередь. Никогда не блокируется.
 
+        После вызова stop() новые сообщения не принимаются (no-op) —
+        не копим работу в умирающую очередь.
+
         При переполнении буфера сообщение дропается с предупреждением.
         """
+        if self._stop_event.is_set():
+            return
         prio_int = PRIORITY_MAP.get(priority.lower(), DEFAULT_PRIORITY)
         try:
             self._queue.put_nowait((prio_int, next(self._counter), msg_dict))
@@ -131,17 +163,20 @@ class AsyncSender:
     # ------------------------------------------------------------------
 
     def _worker(self) -> None:
-        """Фоновый цикл: достаёт сообщения и передаёт в send_fn.
+        """Фоновый цикл: блокирующий get() + выход по sentinel.
 
         Блокировка внутри send_fn (полная IPC-очередь) не влияет на UI-поток.
-        timeout=0.01: частая проверка stop_event обеспечивает быстрый выход (~10ms)
-        при shutdown — критично для укладки в 5с OS-deadline при recipe hot-swap.
+        Выход — структурный: stop() кладёт sentinel _SHUTDOWN, worker
+        забирает его и делает break. Ноль idle-CPU (блокирующий get,
+        без polling/timeout). stop_event — доп. защита в условии цикла
+        (backstop при аномальном пробуждении), но основной выход — sentinel.
         """
         while not self._stop_event.is_set():
             try:
-                _, _, msg_dict = self._queue.get(timeout=0.01)
-                self._send_fn(msg_dict)
-            except queue.Empty:
-                continue
+                item = self._queue.get()
+                _, _, msg = item
+                if msg is _SHUTDOWN:
+                    break
+                self._send_fn(msg)
             except Exception as e:
                 self._log_error(f"[AsyncSender] worker error: {e}")
