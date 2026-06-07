@@ -63,14 +63,31 @@ class ProcessManagerProcessApp(ProcessManagerProcess):
             return
 
         # Lazy-импорты: prototype-символы, не нужные framework
+        from pathlib import Path
+
         from multiprocess_framework.modules.process_module.configs import expand_observability
+        from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
 
         from multiprocess_prototype.backend.assembly import BlueprintAssembler, FullReplacePlanner
         from multiprocess_prototype.backend.assembly.normalize import normalize_blueprint
         from multiprocess_prototype.backend.config.schemas import SystemConfig
-        from multiprocess_prototype.backend.launch import unwrap_recipe
+        from multiprocess_prototype.backend.launch import PROJECT_ROOT, unwrap_recipe
 
         sys_config = SystemConfig.model_validate(sys_config_dict)
+
+        # КРИТИЧНО: наполнить PluginRegistry в ЭТОМ процессе (PM/orchestrator).
+        # BlueprintAssembler.assemble зовёт SystemBlueprint.check(), а тот резолвит
+        # порты плагинов ТОЛЬКО через PluginRegistry (_find_plugin_entry). На boot
+        # discover выполняется в launcher-процессе, но PM спавнится отдельно и реестр
+        # НЕ наследует — без discover здесь check() считал бы ВСЕ wire невалидными
+        # («источник не найден среди выходов») → BlueprintInvalid → switch рецепта
+        # падал бы, не остановив старые процессы. Та же логика, что launch.py boot.
+        if sys_config.discovery.auto_discover:
+            plugin_paths = [
+                str(PROJECT_ROOT / p) if not Path(p).is_absolute() else p for p in sys_config.discovery.plugin_paths
+            ]
+            discovered = PluginRegistry.discover(*plugin_paths)
+            self._log_info(f"[topology-engine] PluginRegistry.discover: {discovered} плагинов в PM-процессе")
 
         obs_overlay = expand_observability(sys_config.observability.model_dump())
         log_dir = sys_config.system.log_dir or "logs"
