@@ -7,6 +7,17 @@
       "mcp__qex__clear_index",
       "mcp__qex__download_model",
 
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)",
+      "Bash(git branch:*)",
+
       "Bash(*)"
     ],
     "deny": [
