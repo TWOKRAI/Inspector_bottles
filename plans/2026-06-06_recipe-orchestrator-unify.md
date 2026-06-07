@@ -3,7 +3,7 @@
 **Дата:** 2026-06-06
 **Ветка:** `fix/recipe-v3-engine-decouple` (текущая)
 **Slug:** `recipe-orchestrator-unify`
-**Базис:** компаньон к [`2026-06-06_recipe-topology-architecture-analysis.md`](2026-06-06_recipe-topology-architecture-analysis.md) и [`2026-06-06_replace-blueprint-hotswap.md`](2026-06-06_replace-blueprint-hotswap.md).
+**Базис:** компаньон к [`_archive/2026-06-06_recipe-topology-architecture-analysis.md`](_archive/2026-06-06_recipe-topology-architecture-analysis.md) и [`_archive/2026-06-06_replace-blueprint-hotswap.md`](_archive/2026-06-06_replace-blueprint-hotswap.md) (оба закрыты и заархивированы).
 **Цель:** тот же функционал, **меньше слоёв**. Убрать ad-hoc дорогу горячей замены, зажечь
 **уже существующий** framework-менеджер `TopologyManager`. Фреймворк как конструктор: кормим
 generic-менеджеры через их сиды, новых движков не пишем.

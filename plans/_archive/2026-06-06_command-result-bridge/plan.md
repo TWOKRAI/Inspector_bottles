@@ -2,7 +2,7 @@
 
 - **Slug:** `command-result-bridge`
 - **Дата:** 2026-06-06
-- **Статус:** DRAFT — recon выполнен (см. §«Recon»), дизайн зафиксирован. Пивот из `lifecycle-feedback` после adversarial-ревью (BLOCKER-2: GUI-мост fire-and-forget). Это **фундамент**, на котором lifecycle-прогресс ([p4.4.4](../2026-05-31_transport-router-hub/p4.4.4_lifecycle-feedback.md)) и pipeline-live-control Этап 3 становятся дешёвыми.
+- **Статус:** ✅ **DONE (2026-06-07).** P1 `deae8b91` · P2 `e9e29f71` · P3 `c4894133` — все verified. **P4 закрыт по существу** (оценка merit 2026-06-07): тяжёлый ADR признан дублем транспортного ADR-005 + auto-reply note → GUI-специфика зафиксирована в **frontend_module DECISIONS FE-004**; интеграция покрыта существующими тестами + `backend_ctl` (PM-сторона round-trip); memory dual-write `project_command_result_bridge`. Разблокировал lifecycle (p4.4.4) и pipeline-live Этап 3.
 - **Ветка:** `feat/command-result-bridge` (переименована из `feat/lifecycle-feedback` 2026-06-06).
 - **Refs:** `plans/2026-05-31_transport-router-hub/plan.md` (P0.5 request/response `1a1b6b9b`), `p4.4.4_lifecycle-feedback.md` (зависит от этого моста), `plans/2026-05-31_pipeline-live-control/plan.md` (Этап 3 — тоже потребитель), memory `project_pipeline_live_control_stage1`, `project_backend_control_mcp`, `feedback_mvp_pattern`, `feedback_qt_mcp_smoke_verification`, `feedback_dict_at_boundary_gui`.
 - **Слой:** mixed (framework: `frontend_module/CommandSender`; prototype: proxy + presenter + GUI).

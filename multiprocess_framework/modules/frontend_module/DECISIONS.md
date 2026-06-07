@@ -89,3 +89,15 @@ PySide6-фреймворк виджетов с привязкой к `data_schem
 `_update_access_level()` сохранён как deprecated alias с `DeprecationWarning`, внутри обновляет trait через legacy путь и вызывает `_apply_access()`.
 
 **Почему repolish.** QSS-селектор `[readOnly="true"]` читается только при repolish — без него смена свойства не отражается в стилях.
+
+---
+
+### FE-004: GUI-контракт request/response для дискретных команд (2026-06-07)
+
+**Контекст.** GUI слал команды бэкенду fire-and-forget и не знал результат (активация рецепта «молча» падала или успевала — UI не отличал). Транспорт request/response уже существовал (ADR-005, correlation_id), но GUI-сторона его не использовала.
+
+**Решение.** Дискретные команды GUI→PM (активация рецепта, start/stop/restart, replace_blueprint) идут **request/response** — GUI узнаёт реальный результат. Высокочастотный **field-write остаётся fire-and-forget** (request на каждую правку слайдера = блокировка). Контракт потоков: `request()` выполняется на **worker-потоке** (`RequestRunner` поверх `QThreadPool`, паттерн `DataReceiverBridge`), результат маршалится в **main-thread сигналом** (AutoConnection) — никакого прямого доступа к виджетам с воркера. Timeout щедрый (30s); слепое ожидание уберёт lifecycle-прогресс поверх того же канала (`request(on_progress=...)`).
+
+**Реализация.** `CommandSender.request_command/request_system_command` + `IRequestingProcess` (framework, `deae8b91`); `RequestRunner` + `ProcessManagerProxy.*_async(on_result)` (prototype, `e9e29f71`); presenter активации рецепта (`c4894133`). Авто-reply транспортом по `request_id` даёт паритет с fire-and-forget (no-op без correlation).
+
+**Альтернативы.** `request()` из main-thread — отвергнуто (фриз UI). Request для field-write — отвергнуто (блокировка hot-path). Модальный диалог результата — отвергнуто (`c4894133` non-modal, не рвёт поток работы).

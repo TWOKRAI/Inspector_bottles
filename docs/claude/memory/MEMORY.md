@@ -64,3 +64,4 @@
 - [All components via BaseManager](feedback_all_components_base_manager.md) — владелец 2026-06-07: все компоненты наследуют BaseManager+ObservableMixin (единообразие > минимализм), даже чистые стратегии
 - [Graceful-stop debt](project_graceful_stop_debt.md) — 5с-хан­г при switch/shutdown; cancel_join_thread ИСКЛЮЧЁН (e2e не помог, ребёнок не доходит до finally); копать в stop_all_workers/put()/cv2.read()
 - [Camera settings feature](project_camera_settings_feature.md) — отложено в новый чат: настройки камеры в Services (пресеты + actual params, Live + persist); CapturePlugin/DirectShow, MJPG-долг
+- [Command-result bridge](project_command_result_bridge.md) — DONE 2026-06-07: request/response GUI→PM (дискретные команды узнают результат, field-write fire-and-forget); FE-004; разблокирует lifecycle + pipeline-Этап3
