@@ -1,7 +1,7 @@
 # overlay_draw — рисовальщик overlay
 
 Категория: **rendering**. Универсальный плагин: рисует структурные draw-params
-(`overlay`) на кадре через cv2 и выдаёт готовый `rendered_frame` для дисплея.
+(`overlay`) на кадре через cv2 и выдаёт готовый `frame` для дисплея.
 
 ## Контракт
 
@@ -9,7 +9,7 @@
 |------|-----|----------|
 | **вход** `frame` | image/bgr | исходный кадр |
 | **вход** `overlay` | dict | draw-params (`vlines`/`lines`/`dashed_lines`/`points`) |
-| **выход** `rendered_frame` | image/bgr | кадр с нарисованным overlay |
+| **выход** `frame` | image/bgr | кадр с нарисованным overlay (перезапись, конвенция framework) |
 
 Многовходовый узел: `frame` и `overlay` приходят слитыми в один item — их коррелирует
 `JoinInspectorManager` по `(seq_id, data_type)`. Stateless, `thread_safe=True`. Кадр не

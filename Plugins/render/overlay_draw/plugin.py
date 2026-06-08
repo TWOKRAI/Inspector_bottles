@@ -37,7 +37,9 @@ class OverlayDrawPlugin(ProcessModulePlugin):
         Port(name="overlay", dtype="dict", shape="-", description="Draw-params (vlines/lines/points)"),
     ]
     outputs = [
-        Port(name="rendered_frame", dtype="image/bgr", shape="(H, W, 3)", description="Кадр с нарисованным overlay"),
+        # Перезаписываем "frame" (конвенция framework: SHM→дисплей кеется на "frame",
+        # как contour_draw). Отдельный "rendered_frame" дисплей-путём НЕ читается.
+        Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Кадр с нарисованным overlay"),
     ]
 
     register_class = OverlayDrawRegisters
@@ -151,7 +153,7 @@ class OverlayDrawPlugin(ProcessModulePlugin):
                     cv2.LINE_AA,
                 )
 
-        return {**item, "rendered_frame": canvas}
+        return {**item, "frame": canvas}
 
 
 def _pt(p) -> tuple[int, int]:

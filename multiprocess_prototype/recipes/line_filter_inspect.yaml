@@ -31,7 +31,6 @@ blueprint:
       priority: high
       chain_targets:
         - detector
-        - draw
       source_target_fps: 25
       plugins:
         - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
@@ -50,6 +49,7 @@ blueprint:
       priority: normal
       chain_targets:
         - line
+        - draw
       plugins:
         - plugin_class: Plugins.processing.blob_detector.plugin.BlobDetectorPlugin
           plugin_name: blob_detector
@@ -73,7 +73,7 @@ blueprint:
           center_x: 320
           center_y: 240
           angle: 0
-          zone_width: 80
+          zone_width: 140
           mode: enter_zone
 
     # --- Рисовальщик: JOIN(frame+overlay) → rendered_frame → дисплей ---
@@ -86,7 +86,7 @@ blueprint:
         mode: join
         inputs: [frame, overlay]
         primary: frame
-        timeout_sec: 0.08
+        timeout_sec: 0.25
       plugins:
         - plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin
           plugin_name: overlay_draw
@@ -95,7 +95,7 @@ blueprint:
   wires:
     - source: camera_0.capture.frame
       target: detector.blob_detector.frame
-    - source: camera_0.capture.frame
+    - source: detector.blob_detector.frame
       target: draw.overlay_draw.frame
     - source: detector.blob_detector.detections
       target: line.line_filter.detections
@@ -103,7 +103,7 @@ blueprint:
       target: draw.overlay_draw.overlay
 
   displays:
-    - node_id: draw.overlay_draw.rendered_frame
+    - node_id: draw.overlay_draw.frame
       display_id: main
 
 displays:

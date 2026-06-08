@@ -70,6 +70,7 @@ class JoinInspectorManager:
         self._last_seen: dict[str, float] = {}
 
         self._drop_count = 0
+        self._merge_count = 0
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -133,6 +134,7 @@ class JoinInspectorManager:
             eff = self._effective_required(now)
             if eff.issubset(set(self._buffer[seq_id].keys())):
                 ready = self._merge(self._buffer[seq_id])
+                self._merge_count += 1
                 self._buffer.pop(seq_id, None)
                 self._timestamps.pop(seq_id, None)
 
@@ -177,3 +179,8 @@ class JoinInspectorManager:
     def drop_count(self) -> int:
         """Сколько наборов выселено без primary (телеметрия)."""
         return self._drop_count
+
+    @property
+    def merge_count(self) -> int:
+        """Сколько наборов успешно слито (телеметрия)."""
+        return self._merge_count

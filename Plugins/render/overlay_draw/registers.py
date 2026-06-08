@@ -25,9 +25,9 @@ class OverlayDrawRegisters(SchemaBase):
             info='Цвет/толщина по type или group, напр. [{"type":"line","color":[0,255,255],"thickness":2}]',
         ),
     ] = [
-        {"type": "line", "color": [0, 255, 255], "thickness": 2},
-        {"type": "dashed", "color": [0, 200, 255], "thickness": 1},
-        {"type": "point", "color": [0, 0, 255], "radius": 5},
+        {"type": "line", "color": [0, 255, 0], "thickness": 4},
+        {"type": "dashed", "color": [0, 255, 0], "thickness": 3},
+        {"type": "point", "color": [255, 0, 255], "radius": 8},
     ]
 
     # Дефолты (фолбэк, если фигура/таблица не задали стиль).
