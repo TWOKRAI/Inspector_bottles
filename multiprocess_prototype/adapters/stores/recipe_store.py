@@ -107,6 +107,20 @@ class RecipeStoreFromManager:
         self._dir.mkdir(parents=True, exist_ok=True)
         update_yaml_preserving(self._dir / f"{slug}.yaml", data)
 
+    def save_layout(self, slug: str, gui_positions: dict, locked_nodes: list) -> None:
+        """Сохранить GUI-layout в blueprint.metadata, СОХРАНИВ комментарии рецепта.
+
+        Точечно пишет ``blueprint.metadata.{gui_positions,locked_nodes}`` через
+        ruamel (не перезаписывая весь blueprint) — авто-персист при перетаскивании
+        не стирает per-node комментарии. См. free-layout (Task 2/3).
+        """
+        from multiprocess_prototype.recipes.yaml_io import update_blueprint_metadata_preserving
+
+        update_blueprint_metadata_preserving(
+            self._dir / f"{slug}.yaml",
+            {"gui_positions": gui_positions, "locked_nodes": locked_nodes},
+        )
+
     # ------------------------------------------------------------------
     # Active recipe
     # ------------------------------------------------------------------

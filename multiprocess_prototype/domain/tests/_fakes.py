@@ -301,6 +301,27 @@ class FakeRecipeStore:
 
         self._raw[slug] = copy.deepcopy(data)
 
+    def save_layout(self, slug: str, gui_positions: dict, locked_nodes: list) -> None:
+        """Точечно записать blueprint.metadata.{gui_positions,locked_nodes} в raw.
+
+        In-memory эквивалент update_blueprint_metadata_preserving: трогает только
+        metadata, не перезаписывая processes/wires. No-op если рецепт/blueprint нет.
+        """
+        import copy
+
+        raw = self._raw.get(slug)
+        if not isinstance(raw, dict):
+            return
+        bp = raw.get("blueprint")
+        if not isinstance(bp, dict):
+            return
+        meta = bp.get("metadata")
+        if not isinstance(meta, dict):
+            meta = {}
+            bp["metadata"] = meta
+        meta["gui_positions"] = copy.deepcopy(gui_positions)
+        meta["locked_nodes"] = list(locked_nodes)
+
 
 _r: RecipeStore = FakeRecipeStore()
 del _r

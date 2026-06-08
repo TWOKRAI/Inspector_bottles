@@ -970,36 +970,25 @@ class PipelinePresenter:
     def _persist_layout_to_recipe(self) -> None:
         """Тихо сохранить позиции/фиксацию в активный рецепт (по дебаунс-таймеру).
 
-        Layout — GUI-метаданные: пишем ТОЛЬКО ``blueprint.metadata`` (gui_positions +
-        locked_nodes), не трогая processes/wires — editor↔runtime decoupling сохранён
-        ([[project_pipeline_editor_runtime_decoupled]]). blueprint.metadata переживает
+        Layout — GUI-метаданные: пишем ТОЧЕЧНО ``blueprint.metadata.{gui_positions,
+        locked_nodes}`` через store.save_layout (ruamel, не перезаписывая весь blueprint)
+        — комментарии рецепта целы, processes/wires не тронуты (editor↔runtime decoupling,
+        [[project_pipeline_editor_runtime_decoupled]]). blueprint.metadata переживает
         cold-start (unwrap_recipe сохраняет blueprint; load_topology_from_config читает
-        оттуда). Без активного рецепта / нечитаемого raw / ошибки записи — только лог,
-        без QMessageBox (авто-сохранение не должно дёргать пользователя).
+        оттуда). Без активного рецепта / ошибки записи — только лог, без QMessageBox
+        (авто-сохранение не должно дёргать пользователя).
         """
         store = self._services.recipes
         active_slug = store.get_active()
         if active_slug is None:
             return
-        raw = store.read_raw(active_slug)
-        if raw is None:
-            return
-        bp = raw.get("blueprint")
-        if not isinstance(bp, dict):
-            # Рецепт без вложенного blueprint (legacy/raw topology) — нечего патчить.
-            return
 
         if self._scene:
             self._gui_positions.update(self._scene.get_all_node_positions())
 
-        metadata = dict(bp.get("metadata") or {})
-        metadata["gui_positions"] = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
-        metadata["locked_nodes"] = sorted(self._locked_nodes)
-        bp["metadata"] = metadata
-        raw["blueprint"] = bp
-
+        gui_positions = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
         try:
-            store.save_raw(active_slug, raw)
+            store.save_layout(active_slug, gui_positions, sorted(self._locked_nodes))
             logger.debug("Layout pipeline авто-сохранён в рецепт '%s'", active_slug)
         except Exception:
             logger.exception("Авто-сохранение layout в рецепт '%s' не удалось", active_slug)

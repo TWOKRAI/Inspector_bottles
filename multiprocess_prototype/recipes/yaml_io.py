@@ -21,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-__all__ = ["update_yaml_preserving"]
+__all__ = ["update_yaml_preserving", "update_blueprint_metadata_preserving"]
 
 
 def _make_yaml():
@@ -72,3 +72,46 @@ def update_yaml_preserving(path: str | Path, updates: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         yaml.dump(data, f)
+
+
+def update_blueprint_metadata_preserving(path: str | Path, metadata_updates: dict[str, Any]) -> None:
+    """Точечно обновить ``blueprint.metadata.<key>``, сохранив ВСЕ комментарии.
+
+    В отличие от :func:`update_yaml_preserving`, НЕ перезаписывает весь ``blueprint``
+    (что стёрло бы комментарии внутри него — per-node ``# --- ... ---`` и т.п.), а
+    меняет только указанные ключи внутри ``blueprint.metadata`` на ruamel-документе.
+    Применяется для авто-персиста layout (gui_positions / locked_nodes), который не
+    должен портить рецепт при каждом перетаскивании ноды.
+
+    No-op, если файла нет, он пуст или в нём нет вложенного ``blueprint`` (raw-topology
+    без editor-обёртки — layout писать некуда).
+
+    Args:
+        path: путь к YAML-файлу рецепта.
+        metadata_updates: ключи для записи в ``blueprint.metadata`` (значения заменяются
+            целиком — напр. ``{"gui_positions": {...}, "locked_nodes": [...]}``).
+    """
+    from ruamel.yaml.comments import CommentedMap
+
+    path = Path(path)
+    if not path.exists():
+        return
+    yaml = _make_yaml()
+    with path.open("r", encoding="utf-8") as f:
+        doc = yaml.load(f)
+    if not isinstance(doc, dict):
+        return
+    bp = doc.get("blueprint")
+    if not isinstance(bp, dict):
+        # raw-topology без вложенного blueprint — layout некуда писать.
+        return
+
+    meta = bp.get("metadata")
+    if not isinstance(meta, dict):
+        meta = CommentedMap()
+        bp["metadata"] = meta
+    for key, value in metadata_updates.items():
+        meta[key] = value
+
+    with path.open("w", encoding="utf-8") as f:
+        yaml.dump(doc, f)

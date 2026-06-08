@@ -65,6 +65,16 @@ class RecipeStore(Protocol):
         """Записать raw dict в YAML-файл рецепта."""
         ...
 
+    def save_layout(self, slug: str, gui_positions: dict, locked_nodes: list) -> None:
+        """Точечно сохранить GUI-layout (gui_positions + locked_nodes) в blueprint.metadata.
+
+        В отличие от save_raw, НЕ перезаписывает весь blueprint — сохраняет комментарии
+        рецепта (per-node ``# --- ... ---`` и т.п.). Для авто-персиста layout при
+        перетаскивании/фиксации нод (free-layout): частый тихий вызов не должен портить
+        документ. No-op если рецепт не найден / без вложенного blueprint.
+        """
+        ...
+
 
 __all__ = [
     "RecipeStore",
