@@ -93,6 +93,12 @@ class NodeInspectorPanel(QWidget):
         self._registers_manager: Any = None
         # GuiStateBindings — для actual-телеметрии камеры (Phase 3). None → readout скрыт.
         self._bindings: Any = None
+        # command_sender + topology_bridge — для встраиваемых контролов Hikvision.
+        self._command_sender: Any = None
+        self._topology_bridge: Any = None
+        # Контроллер встроенного виджета Hikvision (держим ссылку, иначе GC).
+        self._hik_controller: Any = None
+        self._hik_runner: Any = None
         # Текущий режим отображения: "plugin" или "display"
         self._mode: str = "plugin"
         # Combo «Процесс назначения» (для plugin-узлов)
@@ -107,17 +113,25 @@ class NodeInspectorPanel(QWidget):
         *,
         registers_manager: Any = None,
         bindings: Any = None,
+        command_sender: Any = None,
+        topology_bridge: Any = None,
     ) -> None:
         """Передать AppServices + live RegistersManager (G.2, runtime-dep).
 
         registers_manager используется в _try_build_cards_editors для получения
         framework FieldInfo (forms-фабрика строит виджеты из FieldInfo, не domain FieldSpec).
         bindings (GuiStateBindings) — для actual-телеметрии камеры (Phase 3).
+        command_sender + topology_bridge — для встраиваемых контролов камеры Hikvision
+        (request/response enum/params + live-команды).
         """
         self._services = services
         self._registers_manager = registers_manager
         if bindings is not None:
             self._bindings = bindings
+        if command_sender is not None:
+            self._command_sender = command_sender
+        if topology_bridge is not None:
+            self._topology_bridge = topology_bridge
 
     def set_context(self, ctx: object) -> None:
         """Legacy bridge для backward compatibility. Deprecated.
@@ -417,6 +431,11 @@ class NodeInspectorPanel(QWidget):
                 self._show_camera_actual(self._current_process)
             else:
                 self._hide_camera_actual()
+
+            # Контролы камеры Hikvision (поиск/захват/параметры/SDK App) — дублируют
+            # секцию Services прямо в карточке ноды. Только для плагина hikvision.
+            if (plugin_name or node_id) == "hikvision":
+                self._embed_hikvision_controls()
 
         finally:
             self._suppress_changes = False
@@ -969,6 +988,35 @@ class NodeInspectorPanel(QWidget):
 
         return True
 
+    def _embed_hikvision_controls(self) -> None:
+        """Встроить контролы камеры Hikvision (поиск/захват/параметры/SDK App).
+
+        Дублирует Services-секцию «Hikvision Camera» прямо в карточке ноды.
+        Требует command_sender/topology_bridge (через set_services из RuntimeDeps);
+        без них кнопки дадут понятный статус «нет процесса камеры».
+        """
+        from types import SimpleNamespace
+
+        from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
+        from multiprocess_prototype.frontend.widgets.tabs.services.hikvision.controller import (
+            build_hikvision_controls,
+        )
+
+        runtime = SimpleNamespace(
+            command_sender=self._command_sender,
+            topology_bridge=self._topology_bridge,
+        )
+        self._hik_runner = RequestRunner()
+        widget, controller = build_hikvision_controls(
+            services=self._services,
+            runtime=runtime,
+            request_runner=self._hik_runner,
+        )
+        self._hik_runner.setParent(widget)
+        self._hik_controller = controller
+        # Вставляем контролы первой строкой params (над register-полями плагина).
+        self._params_layout.insertRow(0, widget)
+
     def _build_lineedit_editors(self, params: dict[str, Any]) -> None:
         """Создать QLineEdit-редакторы (fallback если CardsFieldFactory недоступен)."""
         for field_name, value in params.items():
@@ -1041,6 +1089,9 @@ class NodeInspectorPanel(QWidget):
 
         self._field_editors.clear()
         self._use_cards = False
+        # Сбросить ссылки на встроенные контролы Hikvision (виджеты удалит цикл ниже).
+        self._hik_controller = None
+        self._hik_runner = None
 
         while self._params_layout.count():
             item = self._params_layout.takeAt(0)

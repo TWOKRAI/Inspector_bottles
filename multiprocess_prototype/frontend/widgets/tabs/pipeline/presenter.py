@@ -74,10 +74,16 @@ class PipelinePresenter:
         notify: "Callable[[str], None] | None" = None,
         process_manager_proxy: Any = None,
         bindings: Any = None,
+        command_sender: Any = None,
+        topology_bridge: Any = None,
     ) -> None:
         self._services = services
         # GuiStateBindings — для actual-телеметрии камеры в инспекторе (Phase 3).
         self._bindings = bindings
+        # command_sender + topology_bridge — для встраиваемых контролов камеры
+        # Hikvision в инспекторе ноды (request/response enum/params + live-команды).
+        self._command_sender = command_sender
+        self._topology_bridge = topology_bridge
         # Этап 1 pipeline-live-control: IPC-фасад управления живым backend
         # (apply_topology / start / stop / restart). Runtime-объект (RuntimeDeps,
         # Q-F1=B), не AppServices. None → кнопки управления дают понятный статус.
@@ -150,6 +156,8 @@ class PipelinePresenter:
             self._services,
             registers_manager=self._registers_manager,
             bindings=self._bindings,
+            command_sender=self._command_sender,
+            topology_bridge=self._topology_bridge,
         )
         panel.field_changed.connect(self._on_inspector_field_changed)
         panel.target_process_changed.connect(self._on_target_process_changed)
@@ -1268,12 +1276,19 @@ class PipelinePresenter:
                 if port_schemas:
                     self._port_schemas_cache[node_id] = port_schemas
 
+                # Подпись ноды: категория + (для color_convert) выбранный режим.
+                subtitle = category
+                if pname == "color_convert":
+                    mode = pl.get("mode") if isinstance(pl, dict) else getattr(pl, "mode", None)
+                    if mode:
+                        subtitle = f"{category} · {mode}"
+
                 x, y = self._node_position(node_id, name, pi, j)
                 nodes.append(
                     NodeData(
                         node_id=node_id,
                         title=pname or name,
-                        subtitle=category,
+                        subtitle=subtitle,
                         category=category,
                         x=x,
                         y=y,
