@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -271,17 +270,15 @@ class NodeInspectorPanel(QWidget):
         content_layout.addWidget(line2)
         self._divider2 = line2
 
-        # Scroll area для параметров
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
-
+        # Параметры плагина — БЕЗ вложенного скролла: поля идут одно за другим,
+        # карточка раскрыта целиком. Вертикальный overflow обрабатывает мастер-
+        # скролл DiffScrollTabLayout (правый). Раньше здесь был QScrollArea —
+        # он давал второй (внутренний) скроллбар, который путал (убран).
         self._params_widget = QWidget()
         self._params_layout = QFormLayout(self._params_widget)
         self._params_layout.setContentsMargins(0, 4, 0, 4)
         self._params_layout.setSpacing(6)
-        self._scroll.setWidget(self._params_widget)
-        content_layout.addWidget(self._scroll, stretch=1)
+        content_layout.addWidget(self._params_widget, stretch=1)
 
         # Блок «Камера (actual)» — read-only телеметрия что камера реально применила
         # (cap.get), привязка к state store processes.{proc}.state.cam.actual.*.
