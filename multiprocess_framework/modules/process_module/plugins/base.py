@@ -234,15 +234,27 @@ class ProcessModulePlugin(ABC):
     def register_schema(cls) -> list:
         """Register-классы плагина (list[type[SchemaBase]]).
 
-        V3_MY_PURE: по умолчанию берёт из config_class.register_bindings.
-        Плагины без register_bindings → пустой список (graceful degradation).
+        Источники (по приоритету):
+          1. ``config_class().register_bindings`` (если config_class переопределён);
+          2. **fallback** ``register_class`` на самом плагине — канонический и самый
+             частый способ объявить регистр. Благодаря этому fallback любой плагин с
+             ``register_class = X`` автоматически получает RegistersManager и приёмник
+             ``register_update`` (live field-write из GUI) БЕЗ boilerplate-override
+             ``config_class``. Без него (была дыра) плагины вида blob_detector/line_filter
+             молча теряли live-редактирование («No handler for key 'register_update'»).
+          3. Иначе — пустой список (graceful degradation).
 
         Returns:
             Список SchemaBase-классов (не инстансов).
         """
         config_cls = cls.config_class()
         if config_cls is not None and hasattr(config_cls, "register_bindings"):
-            return list(config_cls.register_bindings)
+            bindings = list(config_cls.register_bindings)
+            if bindings:
+                return bindings
+        rc = getattr(cls, "register_class", None)
+        if rc is not None:
+            return [rc]
         return []
 
     @classmethod
