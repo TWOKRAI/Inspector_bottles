@@ -143,11 +143,13 @@ Generic-слияние входов по корреляционному ключ
 
 ---
 
-## Этап 4 — Рефакторинг `PluginRunner` (предусловие io-debug)
+## Этап 4 — Рефакторинг `PluginRunner` (предусловие io-debug) — ✅ DONE (37c7b8d0)
 
 Два места вызова: processing — `PipelineExecutor._execute_chain` (`pipeline_executor.py:188`); source — `plugin.produce()` (`source_producer.py:83`).
-- `PluginRunner` с pre/post-хуками; **два метода** `call_process(plugin, items)` и `call_produce(plugin)` (у produce items нет). `for_each` (`base.py:29-52`) совместим — `call_process` зовёт `process(items)` как сейчас.
-- **Риск:** hot path — overhead < 0.1 мс; ловить `test_pipeline_executor.py`. ~1–2 ч.
+- [x] `PluginRunner` с pre/post-хуками; **два метода** `call_process(plugin, items)` и `call_produce(plugin)` (у produce items нет). `for_each` (`base.py:29-52`) совместим — `call_process` зовёт `process(items)` как сейчас.
+- [x] `GenericProcess` создаёт ОДИН раннер на процесс → проброшен в PipelineExecutor + SourceProducer (хук покрывает все плагины процесса).
+- [x] Раннер прозрачен: исключение плагина пробрасывается (circuit breaker / NotImplementedError-обработка не тронуты); кривой хук изолируется (try/except+log); frame_trace не дублируется.
+- [x] **Риск hot path** снят: 8 тестов `test_plugin_runner.py` (хуки, error-propagation, изоляция, overhead < 0.1мс/вызов); `process_module` 332 passed; qt-mcp smoke OK (линия рисуется, кадры текут через раннер).
 
 ---
 
