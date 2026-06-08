@@ -30,8 +30,8 @@ blueprint:
   metadata:
     gui_positions:
       camera_0.capture: [60, 120]
-      detector.blob_detector: [340, 120]
-      line.line_filter: [620, 120]
+      detector.blob_detector: [334, 125]
+      line.line_filter: [620, 123]
       draw.overlay_draw: [900, 120]
       main: [1180, 120]
     locked_nodes: []
