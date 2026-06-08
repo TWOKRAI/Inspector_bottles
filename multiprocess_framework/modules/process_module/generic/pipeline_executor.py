@@ -17,6 +17,7 @@ from typing import Callable
 from ..plugins.base import ProcessModulePlugin
 from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
+from .plugin_runner import PluginRunner
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 
 
@@ -48,9 +49,13 @@ class PipelineExecutor:
         log_error: Callable[[str], None] | None = None,
         log_debug: Callable[[str], None] | None = None,
         node_name: str = "",
+        plugin_runner: PluginRunner | None = None,
     ) -> None:
         self._plugins = plugins
         self._chain_targets = chain_targets
+        # Единый шов вызова process() (pre/post-хуки → io-debug, Этап 5). Default —
+        # пустой раннер без хуков (поведение идентично прямому plugin.process()).
+        self._runner = plugin_runner or PluginRunner(log_error=log_error)
         # Имя процесса-узла — для frame-trace (process-спан node, transport from).
         self._node = node_name
         self._shm = shm_middleware
@@ -185,7 +190,8 @@ class PipelineExecutor:
             try:
                 # Замер времени плагина — в декораторе frame_trace.traced
                 # (авто на process() всех плагинов), здесь не дублируем.
-                items = plugin.process(items)
+                # Вызов через PluginRunner — единый шов с pre/post-хуками (io-debug).
+                items = self._runner.call_process(plugin, items)
                 # Успех — сбросить счётчик fails
                 self._consecutive_fails[plugin.name] = 0
             except Exception as e:

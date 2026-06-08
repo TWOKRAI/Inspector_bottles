@@ -18,6 +18,7 @@ from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .inspector_manager import InspectorManager
 from .join_inspector_manager import JoinInspectorManager
 from .pipeline_executor import PipelineExecutor
+from .plugin_runner import PluginRunner
 from .source_producer import SourceProducer
 
 
@@ -80,6 +81,11 @@ class GenericProcess(ProcessModule):
             if router is not None:
                 router.add_send_middleware(shm_middleware.strip_data_frame_on_send)
 
+        # Единый PluginRunner на процесс — общий шов вызова process()/produce() для
+        # PipelineExecutor И SourceProducer. Этап 5 регистрирует io-debug post-хук
+        # ОДИН раз здесь → наблюдение покрывает все плагины процесса.
+        self._plugin_runner = PluginRunner(log_error=self._log_error)
+
         # chain_queue: DataReceiver -> PipelineExecutor
         self._chain_queue: queue.Queue = queue.Queue(maxsize=queue_size)
 
@@ -113,6 +119,7 @@ class GenericProcess(ProcessModule):
                 log_error=self._log_error,
                 log_debug=self._log_debug,
                 node_name=self.name,
+                plugin_runner=self._plugin_runner,
             )
 
             # Запуск workers через WorkerManager
@@ -149,6 +156,7 @@ class GenericProcess(ProcessModule):
                 log_error=self._log_error,
                 log_debug=self._log_debug,
                 node_name=self.name,
+                plugin_runner=self._plugin_runner,
             )
             self._source_producers.append(producer)
 

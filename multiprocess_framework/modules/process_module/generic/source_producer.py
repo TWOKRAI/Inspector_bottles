@@ -15,6 +15,7 @@ from typing import Callable
 from ..plugins.base import ProcessModulePlugin
 from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
+from .plugin_runner import PluginRunner
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 
 
@@ -42,9 +43,13 @@ class SourceProducer:
         log_error: Callable[[str], None] | None = None,
         log_debug: Callable[[str], None] | None = None,
         node_name: str = "",
+        plugin_runner: PluginRunner | None = None,
     ) -> None:
         self._plugin = plugin
         self._shm = shm_middleware
+        # Единый шов вызова produce() (pre/post-хуки → io-debug, Этап 5). Default —
+        # пустой раннер без хуков (поведение идентично прямому plugin.produce()).
+        self._runner = plugin_runner or PluginRunner(log_error=log_error)
         self._send = send_fn
         self._chain_targets = chain_targets
         # Имя процесса-узла — для frame-trace (transport from/to, process node).
@@ -80,7 +85,8 @@ class SourceProducer:
             t_start = time.monotonic()
 
             try:
-                items = self._plugin.produce()
+                # Вызов через PluginRunner — единый шов с pre/post-хуками (io-debug).
+                items = self._runner.call_produce(self._plugin)
             except NotImplementedError:
                 self._log_error(f"SourceProducer: {self._plugin.name} не реализует produce()")
                 stop_event.set()
