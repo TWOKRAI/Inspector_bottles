@@ -51,6 +51,38 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Ключевой config-параметр в подписи ноды: {plugin_name: (config_key, префикс)}.
+_NODE_SUBTITLE_PARAM: dict[str, tuple[str, str]] = {
+    "color_convert": ("mode", ""),
+    "hikvision": ("camera_id", "id "),
+}
+
+
+def _plugin_config_value(pl: Any, key: str) -> Any:
+    """Значение config-параметра плагина (поддержка плоского и вложенного config)."""
+    if isinstance(pl, dict):
+        if key in pl:
+            return pl[key]
+        cfg = pl.get("config")
+        return cfg.get(key) if isinstance(cfg, dict) else None
+    if hasattr(pl, key):
+        return getattr(pl, key)
+    cfg = getattr(pl, "config", None)
+    return cfg.get(key) if isinstance(cfg, dict) else None
+
+
+def _node_subtitle(category: str, plugin_name: str, pl: Any) -> str:
+    """Подпись ноды: 'category · <param>' если у плагина есть ключевой параметр."""
+    spec = _NODE_SUBTITLE_PARAM.get(plugin_name)
+    if spec is None:
+        return category
+    key, prefix = spec
+    val = _plugin_config_value(pl, key)
+    if val is None or val == "":
+        return category
+    return f"{category} · {prefix}{val}"
+
+
 class PipelinePresenter:
     """Enhanced presenter для Pipeline Editor.
 
@@ -1276,12 +1308,8 @@ class PipelinePresenter:
                 if port_schemas:
                     self._port_schemas_cache[node_id] = port_schemas
 
-                # Подпись ноды: категория + (для color_convert) выбранный режим.
-                subtitle = category
-                if pname == "color_convert":
-                    mode = pl.get("mode") if isinstance(pl, dict) else getattr(pl, "mode", None)
-                    if mode:
-                        subtitle = f"{category} · {mode}"
+                # Подпись ноды: категория + ключевой параметр плагина (если задан).
+                subtitle = _node_subtitle(category, pname, pl)
 
                 x, y = self._node_position(node_id, name, pi, j)
                 nodes.append(
