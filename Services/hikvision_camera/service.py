@@ -9,7 +9,7 @@ from __future__ import annotations
 from multiprocess_framework.modules.service_module import IService, register_service
 
 
-@register_service(name="Services.hikvision_camera")
+@register_service(name="hikvision_camera")
 class HikvisionCameraService:
     """Shell-сервис камеры Hikvision.
 
@@ -20,7 +20,7 @@ class HikvisionCameraService:
         status — текущее состояние ("stopped" | "running").
     """
 
-    name: str = "Services.hikvision_camera"
+    name: str = "hikvision_camera"
 
     def __init__(self) -> None:
         """Инициализация."""

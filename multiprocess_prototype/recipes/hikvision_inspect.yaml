@@ -1,26 +1,27 @@
 # Рецепт hikvision_inspect — промышленная камера Hikvision → дисплей.
 #
-# Цепочка (одна камера):
-#   camera_0 [HikvisionCameraPlugin] → gui (display "main")
+# Цепочка:
+#   camera_0 [HikvisionCameraPlugin] → color_convert [BGR↔RGB] → gui (display "main")
+#
+# Нода color_convert переставляет каналы R/B: Bayer-демозаик камеры даёт
+# RGB-порядок, дисплей настроен на BGR — нода приводит к корректным цветам.
 #
 # МНОГО КАМЕР (независимы, каждая в СВОЁМ процессе):
-#   Скопируй блок процесса camera_0 и поменяй:
-#     - process_name: camera_1            (уникальное имя процесса)
-#     - plugin camera_id: 1               (уникальный SHM-слот hikvision_{id}_frame)
-#     - plugin camera_index: 1            (индекс устройства в enum_devices)
-#   Затем добавь в blueprint.displays привязку camera_1.hikvision.frame → display_id,
-#   а в top-level displays — определение нового дисплея (id, width, position и т.д.).
-#   Камеры полностью независимы: отдельные процессы, отдельные SHM, отдельный захват.
+#   Скопируй блоки camera_0 + (опц.) свой color_convert, поменяй:
+#     - process_name: camera_1
+#     - camera_id: 1            (уникальный SHM-слот hikvision_{id}_frame)
+#     - camera_index: 1         (индекс устройства в enum_devices)
+#   Добавь wire camera_1 → своя нода → gui и привязку display.
 #
 # Предусловие: установлен MVS SDK (MvCameraControl.dll), камера(ы) подключены.
 # Запуск: python run.py → вкладка «Рецепты» → выбрать hikvision_inspect → активировать.
 name: hikvision_inspect
 version: 3
-description: "Hikvision камера → дисплей (отдельный рецепт, multi-camera-ready)"
+description: "Hikvision камера → BGR↔RGB нода → дисплей (multi-camera-ready)"
 
 blueprint:
   name: hikvision_inspect
-  description: "Промышленная камера Hikvision напрямую на дисплей"
+  description: "Промышленная камера Hikvision → нода конвертации цвета → дисплей"
 
   processes:
     # --- Камера 0 (один процесс на одну камеру) ---
@@ -28,7 +29,7 @@ blueprint:
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high
       chain_targets:
-        - gui
+        - color_convert
       source_target_fps: 25
       plugins:
         - plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
@@ -41,9 +42,25 @@ blueprint:
           fps: 25
           auto_start: true
 
-  # Привязка узла-источника кадров к дисплею (node_id = process.plugin.port)
+    # --- Нода конвертации цвета BGR↔RGB ---
+    - process_name: color_convert
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
+          plugin_name: color_convert
+          category: processing
+          mode: bgr2rgb
+
+  wires:
+    - source: camera_0.hikvision.frame
+      target: color_convert.color_convert.frame
+
+  # Привязка узла к дисплею (node_id = process.plugin.port)
   displays:
-    - node_id: camera_0.hikvision.frame
+    - node_id: color_convert.color_convert.frame
       display_id: main
 
 # Определения дисплеев (top-level)

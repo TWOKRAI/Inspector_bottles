@@ -36,7 +36,7 @@ _FRAME_ID_MODULO = 121
 
 
 @register_plugin(
-    "Services.hikvision_camera",
+    "hikvision",
     category="source",
     description="Промышленная камера Hikvision (MVS SDK)",
 )
@@ -56,7 +56,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
         set_resolution       -- изменение целевого разрешения
     """
 
-    name = "Services.hikvision_camera"
+    name = "hikvision"
     category = "source"
 
     inputs: list[Port] = []

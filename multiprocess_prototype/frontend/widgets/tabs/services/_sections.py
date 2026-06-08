@@ -314,6 +314,14 @@ def _nn_placeholder_factory(_ctx_arg: object) -> _PlaceholderSection:
     )
 
 
+def _cameras_root_factory(_ctx_arg: object) -> _PlaceholderSection:
+    return _PlaceholderSection(
+        key="cameras_root",
+        title="Камеры",
+        text="Выберите камеру из списка слева.",
+    )
+
+
 def _make_paths_factory(services: AppServices) -> "Callable[[object], _ServicePathsSection]":
     return lambda _ctx_arg: _ServicePathsSection(services)
 
@@ -360,6 +368,10 @@ def build_services_sections(
     presenter = ServicesPresenter(services)
     service_data = presenter.list_services()  # [(name, title, lifecycle), ...]
 
+    # Скрываем авто-узел сервиса hikvision_camera из ветки «Сервисы» — для камеры
+    # есть полноценная секция «Hikvision Camera» в группе «Камеры» (см. ниже).
+    service_data = [row for row in service_data if row[0] != "hikvision_camera"]
+
     sections: list[SectionSpec] = []
 
     if service_data:
@@ -381,10 +393,25 @@ def build_services_sections(
                 )
             )
 
-    # Секция «Камера» — подробный фасад настроек вебкамеры (camera_service).
+    # Группа «Камеры» — родительский узел, под ним вебкамера и Hikvision Camera.
+    sections.append(
+        SectionSpec(
+            key="cameras_root",
+            title="Камеры",
+            factory=_cameras_root_factory,
+        )
+    )
+
+    # Вебкамера (camera_service) — подробный фасад настроек.
     from .camera import build_camera_section
 
-    sections.append(build_camera_section(services, runtime))
+    sections.append(build_camera_section(services, runtime, parent_key="cameras_root", title="Вебкамера"))
+
+    # Hikvision Camera — поля как в SDK App (поиск/захват/параметры) + кнопка
+    # запуска автономного окна. Изображение — в дисплее активного рецепта.
+    from .hikvision import build_hikvision_section
+
+    sections.append(build_hikvision_section(services, runtime, parent_key="cameras_root", title="Hikvision Camera"))
 
     sections.append(
         SectionSpec(

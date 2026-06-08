@@ -152,11 +152,11 @@ class TestHikvisionCameraPlugin:
     """Тесты source-плагина."""
 
     def test_plugin_meta(self):
-        """name='Services.hikvision_camera', category='source'."""
+        """name='hikvision', category='source'."""
         from Services.hikvision_camera.plugin.plugin import HikvisionCameraPlugin
 
         plugin = HikvisionCameraPlugin()
-        assert plugin.name == "Services.hikvision_camera"
+        assert plugin.name == "hikvision"
         assert plugin.category == "source"
 
     def test_outputs(self):

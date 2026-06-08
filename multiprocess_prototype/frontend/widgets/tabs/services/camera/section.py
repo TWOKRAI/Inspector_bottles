@@ -136,11 +136,18 @@ class _CameraSection:
         )
 
 
-def build_camera_section(services: Any, runtime: Any) -> SectionSpec:
-    """SectionSpec для секции «Камера» (lazy)."""
+def build_camera_section(
+    services: Any,
+    runtime: Any,
+    *,
+    parent_key: str | None = None,
+    title: str = "Камера",
+) -> SectionSpec:
+    """SectionSpec для секции «Камера» (lazy). parent_key — для группировки."""
     section = _CameraSection(services, runtime)
     return SectionSpec(
         key="__camera__",
-        title="Камера",
+        title=title,
         factory=lambda _ctx_arg: section,
+        parent_key=parent_key,
     )
