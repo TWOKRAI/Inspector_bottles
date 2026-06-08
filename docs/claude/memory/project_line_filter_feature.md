@@ -11,12 +11,17 @@ metadata:
 
 **Архитектура (6 этапов):** теги sender/data_type → `JoinInspectorManager` (обобщение `InspectorManager`, корреляция N входов по `(seq_id, data_type)`, left-join+TTL+auto-passthrough) → `line_filter` (категория «Фильтр») → `overlay_draw` → PluginRunner → io-debug.
 
-**DONE и проверено вживую (qt-mcp smoke OK, live-edit работает):** Этапы 0–3 + интеграция. 4 коммита:
-- `dd70e2d9` фильтр+Join+рендер; `75d6b3bc` рецепт+inspector-поле; `454c4ffb` фикс frame-ключа; `6201c788` фикс live-edit.
+**ПЛАН ЗАВЕРШЁН ✅ (Этапы 0–5), всё проверено вживую (qt-mcp smoke OK).** Коммиты:
+- `dd70e2d9` фильтр+Join+рендер; `75d6b3bc` рецепт+inspector-поле; `454c4ffb` фикс frame-ключа; `6201c788` фикс live-edit (Этапы 0–3).
+- `7a38b83e` убран вложенный скролл параметров карточки (раскрыто, мастер-скролл).
+- `37c7b8d0` Этап 4 `PluginRunner` (единый шов process/produce + pre/post-хуки, прозрачен к исключениям).
+- `6d307cd2` Этап 5 io-debug: `io_peek.py` (summarize_payload O(1) + IoPeekPublisher) + секция «I/O (debug)» внизу карточки (ДВА окна Вход/Выход равной высоты, «Заморозить»).
 
-**ОСТАЛОСЬ:** Этап 4 (`PluginRunner` — единый seam вызова process/produce, предусловие io-debug) + Этап 5 (generic io-debug панель внизу карточки ноды + «Заморозить», throttle 1Гц, summary O(1)). Отложено: транспортный co-location адаптер (Level 1, dormant), модуляризация inspector_panel, схема DrawCommand, реестр категорий.
+**Отложено** (не блокеры): Level 2 транспорт (логические порты), модуляризация inspector_panel, схема DrawCommand, реестр категорий.
 
 **Ключевые решения/грабли (НЕ повторять):**
+- **io-debug:** `IoPeekPublisher` публикует через `StateProxy.set` (НЕ merge — merge флэттенит вложенные dict на листья, подписка не видит снимок целиком). Прототип хранит StateProxy в `self._state_proxy` (приватное), базовый `self.state_proxy`=None → `_attach_io_peek` фолбэчит на `_state_proxy`. GUI: узкий fan-out `processes.*.plugins.*.io_peek` + фильтр по активному пути.
+- **Карточка ноды:** окна вход/выход и параметры — БЕЗ вложенного QScrollArea/QPlainTextEdit-скролла; QLabel авто-рост, overflow ловит мастер-скролл `DiffScrollTabLayout`. Владелец требует «раскрыто, без вложенных скроллов».
 - `overlay_draw` пишет результат в ключ **`frame`** (перезапись), НЕ `rendered_frame` — framework-путь SHM→дисплей кеется на `frame` (как `contour_draw`). Дисплей-биндинг `.frame`.
 - `register_schema()` теперь фолбэчит на `register_class` (`base.py`) — любой плагин с `register_class` получает RegistersManager → приёмник `register_update` → live-edit БЕЗ override `config_class`. Раньше blob_detector/line_filter молча теряли live-edit.
 - Распределённый Join обязателен (в одной цепочке line_filter уронил бы кадр). Топология рецепта `line_filter_inspect.yaml`: `camera→detector→{line, draw}`, `line→draw`; кадр в draw из **detector** (рассинхрон 1 хоп), overlay из line; `inspector.mode=join` на процессе draw.

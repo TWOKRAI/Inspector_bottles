@@ -153,15 +153,22 @@ Generic-слияние входов по корреляционному ключ
 
 ---
 
-## Этап 5 — Generic io-debug панель + «Заморозить»
+## Этап 5 — Generic io-debug панель + «Заморозить» — ✅ DONE (6d307cd2)
 
 Наблюдение in/out любого узла (фильтр, рендер, modbus, sync_join…).
-- **Бэкенд:** post-hook в `PluginRunner` → `summarize_payload(in/out)` → `StateProxy` в `processes.{proc}.plugins.{plugin}.io_peek`.
-  - Summary **O(1) без пикселей:** `ndarray→{shape,dtype}` (без `.tolist()/.mean()`); `list→{len,head}`; `dict→ключи+усечённо`; кадр→`{frame_id,shape}`. JSON-safe.
-  - **Throttle 1 Гц** (паттерн `color_mask:114`), **opt-in per-plugin**.
-- **Фронтенд:** сворачиваемая секция «I/O (debug)» внизу карточки ноды (`inspector_panel.py`, после параметров), **узкая подписка** на конкретный `io_peek` путь (не glob `processes.*`). Кнопка **«Заморозить»** — UI-снапшот/возобновление (бэкенд не трогается).
+- [x] **Бэкенд:** pre/post-хуки `PluginRunner` → `summarize_payload(in/out)` → `StateProxy.set` в `processes.{proc}.plugins.{plugin}.io_peek`.
+  - [x] Summary **O(1) без пикселей:** `ndarray→{shape,dtype}`; `list→{len,head}`; `dict→ключи+усечённо`; строки усекаются. JSON-safe.
+  - [x] **Throttle 1 Гц**, opt-in через поле `io_peek` процесса (default вкл). Грабли: прототип хранит StateProxy в `self._state_proxy` (фолбэк добавлен). **set, не merge** — снимок одной дельтой (merge флэттенит вложенные dict → подписка не видит снимок целиком).
+- [x] **Фронтенд:** сворачиваемая секция «I/O (debug)» внизу карточки ноды; **ДВА окна Вход/Выход** равной высоты (QLabel авто-рост, без вложенного скролла, моноширинный шрифт покрупнее/белее по запросу владельца); читаемый статус «обработка/генерация · вход:N · выход:M»; **узкий fan-out** `processes.*.plugins.*.io_peek` + фильтр по активному пути (не glob `processes.*`). Кнопка **«Заморозить»** — UI-снапшот.
+- [x] Тесты: 9 io_peek + 6 секции; `process_module`+pipeline 809 passed; qt-mcp smoke OK (line_filter: вход=frame-метаданные, выход=overlay/vlines).
 
-**Файлы:** `process_module/.../plugins/io_peek.py` (`summarize_payload`,`IoPeekPublisher`), `prototype/.../pipeline/inspector/io_debug_section.py`, правки `inspector_panel.py`, `PluginRunner`, схема `observability` (`io_peek:{enabled,rate_hz,head_len}`).
+**Файлы:** `process_module/.../plugins/io_peek.py`, `prototype/.../pipeline/inspector/io_debug_section.py`, правки `inspector_panel.py` + `generic_process.py` + конфиги.
+
+---
+
+## Итог: план ЗАВЕРШЁН ✅ (Этапы 0–5)
+
+Все этапы DONE. Отложено (не блокеры, в новый чат при необходимости): Level 2 транспорт (логические порты узла, `address_aware_channel` в рантайм), модуляризация `inspector_panel`, схема DrawCommand, реестр категорий.
 
 ---
 
