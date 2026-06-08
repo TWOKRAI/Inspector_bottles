@@ -82,9 +82,10 @@ class GenericProcess(ProcessModule):
                 router.add_send_middleware(shm_middleware.strip_data_frame_on_send)
 
         # Единый PluginRunner на процесс — общий шов вызова process()/produce() для
-        # PipelineExecutor И SourceProducer. Этап 5 регистрирует io-debug post-хук
-        # ОДИН раз здесь → наблюдение покрывает все плагины процесса.
+        # PipelineExecutor И SourceProducer. io-debug post-хук регистрируется ОДИН
+        # раз здесь → наблюдение покрывает все плагины процесса.
         self._plugin_runner = PluginRunner(log_error=self._log_error)
+        self._attach_io_peek(app_cfg)
 
         # chain_queue: DataReceiver -> PipelineExecutor
         self._chain_queue: queue.Queue = queue.Queue(maxsize=queue_size)
@@ -169,6 +170,39 @@ class GenericProcess(ProcessModule):
                     auto_start=True,
                 )
                 self._log_info(f"GenericProcess[{self.name}]: source '{source_plugin.name}' producer started")
+
+    def _attach_io_peek(self, app_cfg: dict) -> None:
+        """Подключить io-debug publisher к PluginRunner (opt-in, по умолчанию вкл).
+
+        Читает секцию процесса ``io_peek: {enabled, rate_hz, head_len}``. Когда
+        включено — вешает pre/post-хуки IoPeekPublisher, публикующие O(1) сводку
+        in/out каждого плагина в ``processes.{proc}.plugins.{plugin}.io_peek``
+        (throttle rate_hz). Выключено или нет state_proxy → хуки не вешаются,
+        раннер остаётся пустым (нулевой overhead, гарантия Этапа 4).
+        """
+        cfg = app_cfg.get("io_peek", {}) or {}
+        if not cfg.get("enabled", True):
+            return
+        # Прототип (GenericProcessApp) хранит живой StateProxy в self._state_proxy
+        # (создан в _init_custom_managers ДО _init_application_threads); базовый
+        # self.state_proxy — конструкторный арг (часто None). Берём приватный, затем публичный.
+        state_proxy = getattr(self, "_state_proxy", None) or getattr(self, "state_proxy", None)
+        if state_proxy is None:
+            self._log_info(f"GenericProcess[{self.name}]: io-debug отключён (нет state_proxy)")
+            return
+        from ..plugins.io_peek import IoPeekPublisher
+
+        publisher = IoPeekPublisher(
+            state_proxy=state_proxy,
+            process_name=self.name,
+            rate_hz=cfg.get("rate_hz", 1.0),
+            head_len=cfg.get("head_len", 3),
+            log_error=self._log_error,
+        )
+        publisher.attach(self._plugin_runner)
+        # Держим ссылку (хуки — bound-методы publisher, иначе GC).
+        self._io_peek_publisher = publisher
+        self._log_info(f"GenericProcess[{self.name}]: io-debug publisher активен (rate={cfg.get('rate_hz', 1.0)} Гц)")
 
     def _build_inspector(self, app_cfg: dict):
         """Выбрать корреляционный буфер DataReceiver по конфигу.

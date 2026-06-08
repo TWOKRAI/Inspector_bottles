@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
 
 from ..graph.constants import CATEGORY_COLORS
+from .io_debug_section import IoDebugSection
 
 # Thin wrapper для backward compatibility: combo _populate_display_id_combo
 # ожидает .id и .name, а DisplaySpec имеет display_id/display_name.
@@ -127,6 +128,8 @@ class NodeInspectorPanel(QWidget):
         self._registers_manager = registers_manager
         if bindings is not None:
             self._bindings = bindings
+            # io-debug секция подписывается на io_peek через те же bindings.
+            self._io_debug.set_bindings(bindings)
         if command_sender is not None:
             self._command_sender = command_sender
         if topology_bridge is not None:
@@ -306,6 +309,11 @@ class NodeInspectorPanel(QWidget):
         # Дескрипторы активных подписок actual (для отписки при смене ноды)
         self._cam_actual_handles: list[Any] = []
 
+        # Секция «I/O (debug)» — generic наблюдение in/out плагина (в самом низу карточки).
+        # bindings придут позже через set_services → set_bindings.
+        self._io_debug = IoDebugSection()
+        content_layout.addWidget(self._io_debug)
+
         self._content.setVisible(False)
         layout.addWidget(self._content, stretch=1)
 
@@ -434,6 +442,9 @@ class NodeInspectorPanel(QWidget):
             if (plugin_name or node_id) == "hikvision":
                 self._embed_hikvision_controls()
 
+            # io-debug: привязать секцию к io_peek текущего плагина (process+plugin).
+            self._io_debug.set_target(self._current_process, plugin_name or node_id)
+
         finally:
             self._suppress_changes = False
 
@@ -561,6 +572,7 @@ class NodeInspectorPanel(QWidget):
             self._clear_exec_info()
             self._exec_info_form.setVisible(False)
             self._hide_camera_actual()
+            self._io_debug.clear_target()  # у display-узла нет плагина → io-debug спит
 
             # Заполнить combo из DisplayRegistry
             self._populate_display_id_combo(display_id)
@@ -1034,6 +1046,7 @@ class NodeInspectorPanel(QWidget):
         self._display_id_form.setVisible(False)
         self._clear_exec_info()
         self._hide_camera_actual()
+        self._io_debug.clear_target()
         self._clear_params()
 
     @property

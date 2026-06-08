@@ -95,6 +95,14 @@ class GenericProcessConfig(ProcessLaunchConfig):
         ),
     ] = {}
 
+    io_peek: Annotated[
+        dict[str, Any],
+        FieldMeta(
+            "io-debug",
+            info="Сводка in/out плагинов в дерево (io-debug панель): {enabled, rate_hz, head_len}",
+        ),
+    ] = {}
+
     lag_alert_threshold_sec: Annotated[
         float,
         FieldMeta("Lag alert threshold", info="Backpressure alert порог (Q6).", min=0.1),

@@ -104,6 +104,11 @@ class ProcessConfig(SchemaBase):
         FieldMeta("Inspector", info="Режим корреляции DataReceiver: {mode: fanin|join, inputs, primary, ...}"),
     ] = {}
 
+    io_peek: Annotated[
+        dict[str, Any],
+        FieldMeta("io-debug", info="Сводка in/out плагинов в дерево: {enabled, rate_hz, head_len}"),
+    ] = {}
+
     def as_generic_config(self) -> GenericProcessConfig:
         """Конвертировать в GenericProcessConfig для launcher."""
         # Восстановить PluginConfig-инстансы для агрегации memory
@@ -124,6 +129,8 @@ class ProcessConfig(SchemaBase):
             base_kwargs["source_target_fps"] = self.source_target_fps
         if self.inspector:
             base_kwargs["inspector"] = self.inspector
+        if self.io_peek:
+            base_kwargs["io_peek"] = self.io_peek
 
         if plugin_configs:
             return GenericProcessConfig.from_plugins(
