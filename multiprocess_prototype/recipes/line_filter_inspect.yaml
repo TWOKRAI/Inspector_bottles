@@ -1,0 +1,123 @@
+# Рецепт line_filter_inspect — фильтр виртуальной линии (virtual tripwire).
+#
+# Топология (распределённый Join — кадр и overlay из РАЗНЫХ процессов):
+#   camera ──┬→ detector[blob_detector] → line[line_filter] ──→ draw[overlay_draw] → display
+#            └────────────────(frame, data_type=frame)────────→ draw
+#
+# camera: broadcast кадра в detector И draw (chain_targets).
+# detector: blob_detector → detections (center). → line.
+# line: line_filter (категория «Фильтр») — вход в зону/пересечение; выдаёт overlay
+#   (data_type=overlay, наследует seq_id), кадр НЕ трогает. → draw.
+# draw: overlay_draw в JOIN-режиме (inspector.mode=join) — JoinInspectorManager
+#   коррелирует frame (от camera) + overlay (от line) по (seq_id, data_type),
+#   разворачивает vline в линию+пунктирные границы и рисует точки → дисплей.
+#
+# Слайдеры в инспекторе нод: HSV+area (blob_detector), центр/угол/ширина/режим/дедуп
+#   (line_filter), таблица цветов (overlay_draw).
+#
+# Запуск: python run.py → выбрать рецепт line_filter_inspect.
+name: line_filter_inspect
+version: 3
+description: "Camera → детекция → фильтр виртуальной линии → рендер overlay (Join)"
+
+blueprint:
+  name: line_filter_inspect
+  description: "Фильтр виртуальной линии: вход в зону/пересечение + рисование линии и точек"
+
+  processes:
+    # --- Камера: кадр в детектор И в рисовальщик (frame для Join) ---
+    - process_name: camera_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - detector
+        - draw
+      source_target_fps: 25
+      plugins:
+        - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
+          plugin_name: capture
+          category: source
+          camera_id: 0
+          device_id: 0
+          resolution_width: 640
+          resolution_height: 480
+          fps: 25
+          auto_start: true
+
+    # --- Детектор: blob_detector → detections (center) ---
+    - process_name: detector
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - line
+      plugins:
+        - plugin_class: Plugins.processing.blob_detector.plugin.BlobDetectorPlugin
+          plugin_name: blob_detector
+          category: processing
+          h_min: 0
+          h_max: 179
+          s_min: 80
+          v_min: 80
+          min_area: 300
+
+    # --- Фильтр виртуальной линии: detections → overlay (data_type=overlay) ---
+    - process_name: line
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - draw
+      plugins:
+        - plugin_class: Plugins.filter.line_filter.plugin.LineFilterPlugin
+          plugin_name: line_filter
+          category: filter
+          center_x: 320
+          center_y: 240
+          angle: 0
+          zone_width: 80
+          mode: enter_zone
+
+    # --- Рисовальщик: JOIN(frame+overlay) → rendered_frame → дисплей ---
+    - process_name: draw
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      inspector:
+        mode: join
+        inputs: [frame, overlay]
+        primary: frame
+        timeout_sec: 0.08
+      plugins:
+        - plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin
+          plugin_name: overlay_draw
+          category: rendering
+
+  wires:
+    - source: camera_0.capture.frame
+      target: detector.blob_detector.frame
+    - source: camera_0.capture.frame
+      target: draw.overlay_draw.frame
+    - source: detector.blob_detector.detections
+      target: line.line_filter.detections
+    - source: line.line_filter.overlay
+      target: draw.overlay_draw.overlay
+
+  displays:
+    - node_id: draw.overlay_draw.rendered_frame
+      display_id: main
+
+displays:
+  - id: main
+    name: Основной дисплей
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none

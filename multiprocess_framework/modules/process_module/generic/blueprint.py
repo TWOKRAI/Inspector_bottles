@@ -99,6 +99,11 @@ class ProcessConfig(SchemaBase):
         FieldMeta("Source target FPS", info="Целевой FPS для source-плагинов.", min=1.0),
     ] = 25.0
 
+    inspector: Annotated[
+        dict[str, Any],
+        FieldMeta("Inspector", info="Режим корреляции DataReceiver: {mode: fanin|join, inputs, primary, ...}"),
+    ] = {}
+
     def as_generic_config(self) -> GenericProcessConfig:
         """Конвертировать в GenericProcessConfig для launcher."""
         # Восстановить PluginConfig-инстансы для агрегации memory
@@ -117,6 +122,8 @@ class ProcessConfig(SchemaBase):
             base_kwargs["chain_targets"] = self.chain_targets
         if self.source_target_fps != 25.0:
             base_kwargs["source_target_fps"] = self.source_target_fps
+        if self.inspector:
+            base_kwargs["inspector"] = self.inspector
 
         if plugin_configs:
             return GenericProcessConfig.from_plugins(

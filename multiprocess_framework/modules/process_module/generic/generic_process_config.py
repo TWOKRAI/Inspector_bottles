@@ -68,10 +68,7 @@ class GenericProcessConfig(ProcessLaunchConfig):
     GenericProcess читает их в _init_application_threads().
     """
 
-    process_class: str = (
-        "multiprocess_framework.modules.process_module"
-        ".generic.generic_process.GenericProcess"
-    )
+    process_class: str = "multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess"
 
     plugins: Annotated[
         list[dict[str, Any]],
@@ -89,6 +86,14 @@ class GenericProcessConfig(ProcessLaunchConfig):
         int,
         FieldMeta("Queue size", info="Размер internal chain_queue.", min=1, max=1024),
     ] = 64
+
+    inspector: Annotated[
+        dict[str, Any],
+        FieldMeta(
+            "Inspector",
+            info="Режим корреляции DataReceiver: {mode: fanin|join, inputs, primary, timeout_sec, ...}",
+        ),
+    ] = {}
 
     lag_alert_threshold_sec: Annotated[
         float,
@@ -155,10 +160,7 @@ class GenericProcessConfig(ProcessLaunchConfig):
                 extras = getattr(pc, "__pydantic_extra__", None) or {}
                 for reg_cls in pc.register_bindings:
                     # Собираем только поля, известные register-классу
-                    reg_fields = {
-                        k: v for k, v in extras.items()
-                        if k in reg_cls.model_fields
-                    }
+                    reg_fields = {k: v for k, v in extras.items() if k in reg_cls.model_fields}
                     reg = reg_cls(**reg_fields)
                     reg_mem = getattr(reg, "memory", None)
                     if callable(reg_mem):
