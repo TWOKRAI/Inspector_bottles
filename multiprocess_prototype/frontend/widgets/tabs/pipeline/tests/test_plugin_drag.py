@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Тесты D.3: drag плагина между контейнерами + reorder + удаление плагин-ноды.
+"""Тесты free-layout: drag меняет ТОЛЬКО позицию ноды (не процесс) + удаление плагин-ноды.
 
 Покрытие (presenter + реальный orchestrator):
-  - on_plugin_dropped cross-process → MovePlugin (плагин уходит в другой процесс);
-  - on_plugin_dropped reorder внутри процесса → меняется порядок цепочки;
-  - on_plugin_dropped no-op (та же позиция / вне контейнеров) → топология не меняется;
+  - drag ноды (on_node_moved / scene.on_node_drag_finished) → позиция меняется,
+    топология (членство плагина в процессе) НЕ меняется (free-layout Task 1);
+  - смена процесса остаётся доступной через combo инспектора
+    (_on_move_to_process_requested → MovePlugin);
   - remove_selected(плагин-нода) в процессе с >1 плагином → RemovePlugin (только плагин);
   - remove_selected(плагин-нода) в процессе с 1 плагином → RemoveProcess (процесс).
 
-Refs: plans/pipeline-process-container-nodes.md (Phase D.3)
+Refs: plans/2026-06-08_pipeline-free-layout.md (Task 1)
 """
 
 from __future__ import annotations
 
+from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.graph_scene import GraphScene
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.presenter import PipelinePresenter
 
 from ._helpers import make_pipeline_services_with_orchestrator
@@ -43,56 +45,56 @@ def _chain_two_processes():
     return make_pipeline_services_with_orchestrator(topology=topo)
 
 
-class TestDragCrossProcess:
-    def test_move_plugin_to_other_process(self):
-        """drag grayscale из preproc в detector → MovePlugin (cross-process)."""
+class TestDragOnlyMoves:
+    """Drag меняет позицию, но НЕ членство ноды в процессе (free-layout)."""
+
+    def test_drag_records_position_without_topology_change(self):
+        """on_node_moved пишет позицию в _gui_positions, топология не меняется."""
         services = _chain_two_processes()
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
-        p.on_plugin_dropped("preproc.grayscale", "preproc", 1, "detector", 1)
+        before = services.topology.load().to_dict()
+        p.on_node_moved("preproc.grayscale", 999.0, 333.0)
+        after = services.topology.load().to_dict()
 
-        topo = services.topology.load().to_dict()
-        assert _plugins(topo, "preproc") == ["resize"]
-        assert _plugins(topo, "detector") == ["yolo", "grayscale"]
+        # Позиция записана
+        assert p._gui_positions["preproc.grayscale"] == (999.0, 333.0)
+        # Членство плагинов не изменилось — drag не «объединяет под процесс»
+        assert _plugins(after, "preproc") == _plugins(before, "preproc") == ["resize", "grayscale"]
+        assert _plugins(after, "detector") == ["yolo"]
+
+    def test_scene_drag_finished_emits_position_only(self, qtbot):
+        """scene.on_node_drag_finished эмитит node_position_changed (без MovePlugin)."""
+        scene = GraphScene()
+        from multiprocess_prototype.frontend.widgets.tabs.pipeline.graph.node_item import NodeData
+
+        scene.add_node(NodeData("preproc.grayscale", "grayscale", x=10, y=20, process_name="preproc", plugin_index=1))
+        received: list[tuple] = []
+        scene.node_position_changed.connect(lambda nid, x, y: received.append((nid, x, y)))
+
+        node = scene.get_node("preproc.grayscale")
+        node.setPos(400.0, 500.0)
+        scene.on_node_drag_finished("preproc.grayscale")
+
+        assert received == [("preproc.grayscale", 400.0, 500.0)]
 
 
-class TestReorderWithinProcess:
-    def test_reorder_moves_plugin(self):
-        """drag grayscale (index 1) на позицию 0 внутри preproc → [grayscale, resize]."""
+class TestComboStillMovesProcess:
+    """Смена процесса остаётся доступной через combo инспектора (MovePlugin)."""
+
+    def test_move_to_process_via_combo(self):
+        """_on_move_to_process_requested → MovePlugin (плагин уходит в другой процесс)."""
         services = _chain_two_processes()
         p = PipelinePresenter(services)
         p.load_topology_from_config()
 
-        p.on_plugin_dropped("preproc.grayscale", "preproc", 1, "preproc", 0)
+        p._on_move_to_process_requested("detector", "preproc")
 
         topo = services.topology.load().to_dict()
-        assert _plugins(topo, "preproc") == ["grayscale", "resize"]
-
-
-class TestNoOpDrops:
-    def test_same_position_no_change(self):
-        """Дроп без смены позиции → топология не меняется."""
-        services = _chain_two_processes()
-        p = PipelinePresenter(services)
-        p.load_topology_from_config()
-
-        p.on_plugin_dropped("preproc.resize", "preproc", 0, "preproc", 0)
-
-        topo = services.topology.load().to_dict()
-        assert _plugins(topo, "preproc") == ["resize", "grayscale"]
-
-    def test_drop_outside_containers_no_change(self):
-        """Дроп вне контейнеров (to_process="") → топология не меняется."""
-        services = _chain_two_processes()
-        p = PipelinePresenter(services)
-        p.load_topology_from_config()
-
-        p.on_plugin_dropped("preproc.grayscale", "preproc", 1, "", -1)
-
-        topo = services.topology.load().to_dict()
-        assert _plugins(topo, "preproc") == ["resize", "grayscale"]
-        assert _plugins(topo, "detector") == ["yolo"]
+        # yolo переехал из detector в preproc; detector опустел и удалён каскадом
+        assert "yolo" in _plugins(topo, "preproc")
+        assert "detector" not in _process_names(topo)
 
 
 class TestDeletePluginNode:

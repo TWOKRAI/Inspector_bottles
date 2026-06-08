@@ -59,6 +59,9 @@ class DisplayNodeItem(QGraphicsRectItem):
         self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsSelectable)
         self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemSendsGeometryChanges)
 
+        # Флаг реального перетаскивания (отличить drag от клика-выбора), free-layout.
+        self._drag_moved = False
+
         # Стиль: зелёный фон, тёмная рамка
         self.setBrush(QBrush(QColor(DISPLAY_CATEGORY_COLOR)))
         self.setPen(QPen(QColor("#333333"), 1))
@@ -177,7 +180,26 @@ class DisplayNodeItem(QGraphicsRectItem):
     def itemChange(self, change, value):
         """Обновить edge'ы при перемещении узла (аналогично NodeItem)."""
         if change == QGraphicsRectItem.GraphicsItemChange.ItemPositionHasChanged:
+            self._drag_moved = True
             scene = self.scene()
             if scene is not None and hasattr(scene, "on_node_moved"):
                 scene.on_node_moved(self._data.node_id)
         return super().itemChange(change, value)
+
+    def mousePressEvent(self, event):
+        """Начало взаимодействия — сбросить флаг перетаскивания."""
+        self._drag_moved = False
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """Завершение перетаскивания → зафиксировать новую позицию (free-layout).
+
+        Только при реальном перемещении: scene эмитит node_position_changed,
+        presenter дебаунс-сохраняет позицию бокса в рецепт.
+        """
+        super().mouseReleaseEvent(event)
+        if getattr(self, "_drag_moved", False):
+            self._drag_moved = False
+            scene = self.scene()
+            if scene is not None and hasattr(scene, "on_node_drag_finished"):
+                scene.on_node_drag_finished(self._data.node_id)

@@ -24,6 +24,18 @@ blueprint:
   name: line_filter_inspect
   description: "Фильтр виртуальной линии: вход в зону/пересечение + рисование линии и точек"
 
+  # free-layout: позиции нод графа (node_id → [x, y]) для чистой загрузки без
+  # «Раскладки». node_id плагин-ноды = "{процесс}.{плагин}"; display-бокс = display_id.
+  # Авто-сохраняется при перетаскивании (PipelinePresenter._persist_layout_to_recipe).
+  metadata:
+    gui_positions:
+      camera_0.capture: [60, 120]
+      detector.blob_detector: [340, 120]
+      line.line_filter: [620, 120]
+      draw.overlay_draw: [900, 120]
+      main: [1180, 120]
+    locked_nodes: []
+
   processes:
     # --- Камера: кадр в детектор И в рисовальщик (frame для Join) ---
     - process_name: camera_0

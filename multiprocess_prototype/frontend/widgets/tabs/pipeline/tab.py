@@ -251,8 +251,8 @@ class PipelineTab(QWidget):
         self._scene.node_inspect_requested.connect(self._on_node_inspect_requested)
         # Фиксация ноды (контекстное меню «Зафиксировать/Открепить»).
         self._scene.node_lock_toggle_requested.connect(self._on_node_lock_toggle)
-        # D.3: перетаскивание плагин-ноды между контейнерами / reorder внутри.
-        self._scene.plugin_drop_requested.connect(self._on_plugin_drop_requested)
+        # free-layout: drag меняет ТОЛЬКО позицию ноды (не процесс) → персист в рецепт.
+        self._scene.node_position_changed.connect(self._on_node_position_changed)
         # G.4.4: field_changed → presenter._on_inspector_field_changed (dispatch
         # SetPluginConfig, G.4.3) подключается в presenter.set_inspector. Дублирующий
         # tab-коннект (только лог + stale TODO) убран.
@@ -444,23 +444,14 @@ class PipelineTab(QWidget):
         self._presenter.remove_selected([node_id])
         self._inspector.clear()
 
-    def _on_plugin_drop_requested(
-        self,
-        node_id: str,
-        from_process: str,
-        from_index: int,
-        to_process: str,
-        to_index: int,
-    ) -> None:
-        """D.3: плагин-нода перетащена → presenter решает (MovePlugin / snap-back).
+    def _on_node_position_changed(self, node_id: str, x: float, y: float) -> None:
+        """free-layout: нода свободно перемещена → запомнить позицию + персист в рецепт.
 
-        Мутация topology → guard по праву edit. Без права — snap-back (reload из
-        модели вернёт ноду на место, не дав визуально «перетащить» без прав).
+        Позиция — GUI-метаданные (не топология), поэтому permission-gating не нужен:
+        перекомпоновка холста косметична и не меняет членство ноды в процессе.
+        Смена процесса/воркера — только через combo инспектора.
         """
-        if not self._can_edit():
-            self._presenter._reload_scene_from_model()
-            return
-        self._presenter.on_plugin_dropped(node_id, from_process, from_index, to_process, to_index)
+        self._presenter.on_node_moved(node_id, x, y)
 
     def _on_node_inspect_requested(self, node_id: str) -> None:
         """Контекстное меню «Inspect» для узла (NodeItem или DisplayNodeItem).

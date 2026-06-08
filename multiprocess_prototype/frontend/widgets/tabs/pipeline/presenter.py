@@ -131,9 +131,14 @@ class PipelinePresenter:
         self._scene: GraphScene | None = None
         self._suppress = False
         self._gui_positions: dict[str, tuple[float, float]] = {}
-        # Зафиксированные ноды (session-only): не двигаются drag'ом и пропускаются
-        # авто-раскладкой. Применяется в _topology_to_graph (NodeData.locked).
+        # Зафиксированные ноды: не двигаются drag'ом и пропускаются авто-раскладкой.
+        # Применяется в _topology_to_graph (NodeData.locked); персист в рецепт
+        # (metadata.locked_nodes) переживает перезапуск (free-layout Task 3).
         self._locked_nodes: set[str] = set()
+        # free-layout Task 2: debounce-таймер авто-сохранения layout (позиции+фиксация)
+        # в активный рецепт. Ленивая инициализация (нужен QApplication) — в headless
+        # тестах без event loop авто-сохранение пропускается. См. _schedule_layout_persist.
+        self._persist_timer: Any = None
         # G.4.2: кэш port_schemas (node_id → схемы), заполняется _topology_to_graph,
         # читается load_scene_with_ports. Инициализируем здесь, чтобы метод рендера
         # не падал AttributeError при вызове до первого _topology_to_graph.
@@ -375,53 +380,6 @@ class PipelinePresenter:
                 break
         # Scene обновится из _on_topology_replaced (синхронный dispatch)
 
-    def on_plugin_dropped(
-        self,
-        node_id: str,
-        from_process: str,
-        from_index: int,
-        to_process: str,
-        to_index: int,
-    ) -> None:
-        """D.3: плагин-нода перетащена (drag между контейнерами / reorder внутри).
-
-        Решение по сигналу scene.plugin_drop_requested:
-          - дроп вне контейнеров (to_process=="") или без изменения позиции →
-            snap-back: reload scene из модели (топология не менялась);
-          - иначе dispatch(MovePlugin(from, from_index, to, to_index)) — cross-process
-            или reorder; reload придёт из TopologyReplaced. Domain переписывает
-            концы проводов и убирает ставшие внутрипроцессными.
-        """
-        if self._suppress:
-            return
-
-        no_change = (not to_process) or (to_process == from_process and to_index == from_index)
-        if no_change:
-            self._reload_scene_from_model()  # snap-back на исходную позицию
-            return
-
-        try:
-            self._services.commands.dispatch(
-                MovePlugin(
-                    from_process=from_process,
-                    from_index=from_index,
-                    to_process=to_process,
-                    to_index=to_index,
-                )
-            )
-        except DomainError as exc:
-            logger.warning(
-                "MovePlugin (drag) %s[%d]→%s[%d] отклонён: %s",
-                from_process,
-                from_index,
-                to_process,
-                to_index,
-                exc,
-            )
-            self._report(f"Перенос плагина отклонён: {exc}")
-            self._reload_scene_from_model()  # откатить визуальный сдвиг
-        # Успех → scene обновится из _on_topology_replaced (синхронный dispatch)
-
     def _delete_command_for(self, node_id: str):
         """Команда удаления для плагин-ноды/процесса (D.3).
 
@@ -456,21 +414,6 @@ class PipelinePresenter:
         if index < 0:
             return RemoveProcess(process_name=proc)
         return RemovePlugin(process_name=proc, index=index)
-
-    def _reload_scene_from_model(self) -> None:
-        """Перерисовать scene из текущей модели (без dispatch).
-
-        Используется для snap-back после drag без изменения топологии: позиции
-        восстанавливаются из gui_positions/дефолтов. Тот же конвейер, что
-        _on_topology_replaced, с сохранением выделения.
-        """
-        if not self._scene:
-            return
-        selected_ids = self._capture_selection()
-        with self._block_signals():
-            nodes, edges = self._topology_to_graph(self._model.to_topology_dict())
-            self.load_scene_with_ports(nodes, edges)
-            self._restore_selection(selected_ids)
 
     # ------------------------------------------------------------------ #
     #  Signal suppression (из v1)                                         #
@@ -521,12 +464,17 @@ class PipelinePresenter:
         topology = self._services.topology.load().to_dict()
         self._model.from_topology_dict(topology)
 
-        # Восстановить позиции из metadata
+        # Восстановить позиции и фиксацию из metadata (free-layout Task 2/3):
+        # gui_positions → стартовое размещение без «Раскладки»; locked_nodes →
+        # закреплённые ноды переживают перезапуск.
         metadata = topology.get("metadata", {})
         if isinstance(metadata, dict):
             gui_pos = metadata.get("gui_positions", {})
             if isinstance(gui_pos, dict):
                 self._gui_positions = {k: tuple(v) for k, v in gui_pos.items()}
+            locked = metadata.get("locked_nodes", [])
+            if isinstance(locked, (list, tuple)):
+                self._locked_nodes = {str(nid) for nid in locked}
 
         return self._topology_to_graph(topology)
 
@@ -964,21 +912,24 @@ class PipelinePresenter:
         return True
 
     def on_node_moved(self, node_id: str, new_x: float, new_y: float) -> None:
-        """Обработчик перемещения ноды.
+        """Обработчик свободного перемещения ноды (free-layout).
 
-        G.4.4: NODE_MOVE — GUI-only (позиции в _gui_positions/metadata),
-        не topology-domain. Остаётся на отдельном пути.
+        G.4.4: NODE_MOVE — GUI-only (позиции в _gui_positions/metadata), не
+        topology-domain. Drag меняет ТОЛЬКО позицию (членство в процессе не
+        трогается). Позиция дебаунс-сохраняется в активный рецепт (Task 2).
         """
         if self._suppress:
             return
         self._gui_positions[node_id] = (new_x, new_y)
+        self._schedule_layout_persist()
 
     def set_node_lock(self, node_id: str, locked: bool) -> None:
-        """Зафиксировать/освободить ноду явно (session-only).
+        """Зафиксировать/освободить ноду явно.
 
         Locked-нода не перетаскивается (ItemIsMovable=False) и пропускается
-        auto_layout_scene. Состояние живёт в _locked_nodes и переприменяется в
-        _topology_to_graph при reload (переживает мутации в рамках сессии).
+        auto_layout_scene. Состояние живёт в _locked_nodes, переприменяется в
+        _topology_to_graph при reload и дебаунс-сохраняется в рецепт
+        (metadata.locked_nodes) → переживает перезапуск (Task 3).
         """
         if not node_id:
             return
@@ -988,6 +939,70 @@ class PipelinePresenter:
             self._locked_nodes.discard(node_id)
         if self._scene:
             self._scene.set_node_locked(node_id, locked)
+        self._schedule_layout_persist()
+
+    # ------------------------------------------------------------------ #
+    #  Авто-персист layout в рецепт (free-layout Task 2/3)                 #
+    # ------------------------------------------------------------------ #
+
+    # Дебаунс авто-сохранения layout: 400мс после последнего сдвига/фиксации,
+    # чтобы не писать файл рецепта на каждый пиксель перетаскивания.
+    _PERSIST_DEBOUNCE_MS = 400
+
+    def _schedule_layout_persist(self) -> None:
+        """Запланировать (дебаунс) авто-сохранение layout в активный рецепт.
+
+        Ленивая инициализация QTimer: без QApplication (headless-тесты) — no-op,
+        авто-сохранение пропускается (явный save_to_active_recipe не зависит от таймера).
+        """
+        from PySide6.QtWidgets import QApplication
+
+        if QApplication.instance() is None:
+            return
+        if self._persist_timer is None:
+            from PySide6.QtCore import QTimer
+
+            self._persist_timer = QTimer()
+            self._persist_timer.setSingleShot(True)
+            self._persist_timer.timeout.connect(self._persist_layout_to_recipe)
+        self._persist_timer.start(self._PERSIST_DEBOUNCE_MS)
+
+    def _persist_layout_to_recipe(self) -> None:
+        """Тихо сохранить позиции/фиксацию в активный рецепт (по дебаунс-таймеру).
+
+        Layout — GUI-метаданные: пишем ТОЛЬКО ``blueprint.metadata`` (gui_positions +
+        locked_nodes), не трогая processes/wires — editor↔runtime decoupling сохранён
+        ([[project_pipeline_editor_runtime_decoupled]]). blueprint.metadata переживает
+        cold-start (unwrap_recipe сохраняет blueprint; load_topology_from_config читает
+        оттуда). Без активного рецепта / нечитаемого raw / ошибки записи — только лог,
+        без QMessageBox (авто-сохранение не должно дёргать пользователя).
+        """
+        store = self._services.recipes
+        active_slug = store.get_active()
+        if active_slug is None:
+            return
+        raw = store.read_raw(active_slug)
+        if raw is None:
+            return
+        bp = raw.get("blueprint")
+        if not isinstance(bp, dict):
+            # Рецепт без вложенного blueprint (legacy/raw topology) — нечего патчить.
+            return
+
+        if self._scene:
+            self._gui_positions.update(self._scene.get_all_node_positions())
+
+        metadata = dict(bp.get("metadata") or {})
+        metadata["gui_positions"] = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
+        metadata["locked_nodes"] = sorted(self._locked_nodes)
+        bp["metadata"] = metadata
+        raw["blueprint"] = bp
+
+        try:
+            store.save_raw(active_slug, raw)
+            logger.debug("Layout pipeline авто-сохранён в рецепт '%s'", active_slug)
+        except Exception:
+            logger.exception("Авто-сохранение layout в рецепт '%s' не удалось", active_slug)
 
     def toggle_node_lock(self, node_id: str) -> None:
         """Переключить фиксацию ноды (правый клик по ноде)."""
@@ -1559,6 +1574,14 @@ class PipelinePresenter:
             from multiprocess_prototype.recipes.format import normalize_recipe_v3_raw
 
             bp_dict["displays"] = bindings
+            # free-layout Task 2/3: дублируем layout в blueprint.metadata — именно
+            # оттуда его читает load_topology_from_config и cold-start (unwrap_recipe
+            # сохраняет blueprint.metadata). Top-level gui_positions оставляем для
+            # обратной совместимости (Recipes-tab + старые рецепты).
+            metadata = dict(bp_dict.get("metadata") or {})
+            metadata["gui_positions"] = gui_positions
+            metadata["locked_nodes"] = sorted(self._locked_nodes)
+            bp_dict["metadata"] = metadata
             store.save_raw(active_slug, normalize_recipe_v3_raw(raw_recipe, bp_dict, gui_positions))
 
             logger.info("Pipeline сохранён в рецепт '%s'", active_slug)

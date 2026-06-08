@@ -115,6 +115,81 @@ class TestSaveToActiveRecipeWritesBlueprint:
         gui_pos = saved.get("gui_positions", {})
         assert "node_a" in gui_pos
 
+    def test_save_writes_layout_into_blueprint_metadata(self, monkeypatch) -> None:
+        """free-layout Task 2/3: gui_positions + locked_nodes пишутся в blueprint.metadata.
+
+        Именно оттуда их читает load_topology_from_config и cold-start
+        (unwrap_recipe сохраняет blueprint.metadata).
+        """
+        slug = "meta_recipe"
+        services, store = _make_services_with_recipe(slug)
+        presenter = PipelinePresenter(services)
+
+        presenter._model.add_process("node_a", plugin_name="PA", category="source")
+        presenter._gui_positions["node_a"] = (100.0, 200.0)
+        presenter._locked_nodes.add("node_a")
+
+        from PySide6.QtWidgets import QMessageBox
+
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
+        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **kw: None))
+        monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **kw: None))
+
+        assert presenter.save_to_active_recipe(parent=None) is True
+
+        meta = store._raw[slug]["blueprint"]["metadata"]
+        assert meta["gui_positions"]["node_a"] == [100.0, 200.0]
+        assert meta["locked_nodes"] == ["node_a"]
+
+
+class TestPersistLayoutDebounce:
+    """free-layout Task 2/3: _persist_layout_to_recipe патчит ТОЛЬКО blueprint.metadata."""
+
+    def test_persist_patches_metadata_only(self) -> None:
+        """Авто-сохранение layout не трогает processes/wires рецепта."""
+        slug = "persist_recipe"
+        raw = {
+            slug: {
+                "name": slug,
+                "version": 3,
+                "blueprint": {
+                    "processes": [{"process_name": "cam", "plugins": [{"plugin_name": "capture"}]}],
+                    "wires": [{"source": "a", "target": "b"}],
+                },
+            }
+        }
+        from multiprocess_prototype.domain.tests._fakes import FakeRecipeStore
+
+        store = FakeRecipeStore(raw=raw, active=slug)
+        services = make_pipeline_services()
+        object.__setattr__(services, "recipes", store)
+        presenter = PipelinePresenter(services)
+
+        presenter._gui_positions["cam.capture"] = (321.0, 654.0)
+        presenter._locked_nodes.add("cam.capture")
+
+        presenter._persist_layout_to_recipe()
+
+        bp = store._raw[slug]["blueprint"]
+        # processes/wires нетронуты
+        assert bp["processes"] == [{"process_name": "cam", "plugins": [{"plugin_name": "capture"}]}]
+        assert bp["wires"] == [{"source": "a", "target": "b"}]
+        # layout записан в metadata
+        assert bp["metadata"]["gui_positions"]["cam.capture"] == [321.0, 654.0]
+        assert bp["metadata"]["locked_nodes"] == ["cam.capture"]
+
+    def test_persist_no_active_recipe_is_noop(self) -> None:
+        """Без активного рецепта авто-сохранение — тихий no-op (без исключений)."""
+        from multiprocess_prototype.domain.tests._fakes import FakeRecipeStore
+
+        store = FakeRecipeStore()
+        services = make_pipeline_services()
+        object.__setattr__(services, "recipes", store)
+        presenter = PipelinePresenter(services)
+
+        presenter._gui_positions["x"] = (1.0, 2.0)
+        presenter._persist_layout_to_recipe()  # не должно бросить
+
 
 # ---------------------------------------------------------------------------
 # Тест 2: без активного рецепта -> warning, return False

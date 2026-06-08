@@ -23,6 +23,15 @@ blueprint:
   name: hikvision_inspect
   description: "Промышленная камера Hikvision → нода конвертации цвета → дисплей"
 
+  # free-layout: позиции нод графа (node_id → [x, y]) для чистой загрузки без
+  # «Раскладки». Авто-сохраняется при перетаскивании (PipelinePresenter).
+  metadata:
+    gui_positions:
+      camera_0.hikvision: [60, 120]
+      color_convert.color_convert: [340, 120]
+      main: [620, 120]
+    locked_nodes: []
+
   processes:
     # --- Камера 0 (один процесс на одну камеру) ---
     - process_name: camera_0

@@ -1,7 +1,7 @@
 # План: свободное размещение нод графа Pipeline + персист позиций/фиксации
 
 **Ветка:** `feat/pipeline-free-layout` · **Slug:** `pipeline-free-layout`
-**Статус:** черновик (реализация — после закрытия хвостов на `feat/line-filter-virtual`)
+**Статус:** РЕАЛИЗОВАНО (Tasks 1-4 DONE; 49 pipeline-тестов зелёные, ruff clean, qt-mcp smoke OK)
 
 ## Контекст (зачем)
 
@@ -31,10 +31,14 @@
 2. Reorder внутри процесса по drag — тоже убрать (порядок плагинов меняется не drag'ом; если нужно — отдельной кнопкой/combo, вне scope).
 3. Смена процесса/воркера остаётся ТОЛЬКО через combo инспектора (`move_to_process_requested` / `assigned_worker` — уже есть, не трогаем).
 **Acceptance:**
-- [ ] Перетащил ноду куда угодно — осталась там, процесс не сменился.
-- [ ] Перетащил ноду на чужой контейнер — НЕ объединилась.
-- [ ] Combo «Процесс/Воркер» по-прежнему меняет процесс/воркер.
+- [x] Перетащил ноду куда угодно — осталась там, процесс не сменился.
+- [x] Перетащил ноду на чужой контейнер — НЕ объединилась.
+- [x] Combo «Процесс/Воркер» по-прежнему меняет процесс/воркер.
 **Out of scope:** drag-reorder плагинов внутри процесса.
+
+> DONE: `on_node_drag_finished` теперь эмитит только `node_position_changed(node_id, x, y)`;
+> сигнал `plugin_drop_requested` + `presenter.on_plugin_dropped` + `_reload_scene_from_model` удалены.
+> Combo `move_to_process_requested → MovePlugin` не тронут. Тесты: `test_plugin_drag.py`.
 
 ### Task 2 — Авто-персист позиций в рецепт
 **Цель:** позиция сохраняется в рецепт автоматически при перемещении → перезапуск/cold-start её восстанавливает.
@@ -44,10 +48,16 @@
 2. Дебаунс (напр. QTimer 300–500 мс), чтобы не писать файл на каждый пиксель.
 3. Убедиться: позиции — это GUI-metadata, на runtime-топологию не влияют (editor↔runtime decoupling сохраняется).
 **Acceptance:**
-- [ ] Подвинул ноды → перезапустил приложение → позиции те же (без «Раскладки»).
-- [ ] `metadata.gui_positions` в рецепте обновляется после перемещения.
-- [ ] Runtime не перезапускается от изменения позиций.
+- [x] Подвинул ноды → перезапустил приложение → позиции те же (без «Раскладки»).
+- [x] `metadata.gui_positions` в рецепте обновляется после перемещения.
+- [x] Runtime не перезапускается от изменения позиций.
 **Out of scope:** undo/redo позиций.
+
+> DONE: debounce QTimer 400мс (`_schedule_layout_persist` → `_persist_layout_to_recipe`).
+> Авто-сохранение патчит ТОЛЬКО `blueprint.metadata` (gui_positions+locked_nodes), не трогая
+> processes/wires → editor↔runtime decoupling сохранён. `blueprint.metadata` переживает
+> cold-start (unwrap_recipe сохраняет blueprint, load_topology_from_config читает metadata).
+> Без QApplication (headless) — no-op. Тесты: `test_save_recipe.py::TestPersistLayoutDebounce`.
 
 ### Task 3 — Персист фиксации (lock) в рецепт
 **Цель:** закреплённые ноды остаются закреплёнными после перезапуска.
@@ -56,9 +66,14 @@
 1. Сохранять `_locked_nodes` в `metadata.locked_nodes` (список node_id) тем же save-путём.
 2. На загрузке (`load_topology_from_config`) восстанавливать `_locked_nodes` → применять `ItemIsMovable=False` + рамку при построении сцены.
 **Acceptance:**
-- [ ] Закрепил ноду → перезапуск → осталась закреплённой (не двигается, рамка есть).
-- [ ] Открепил → перезапуск → свободна.
+- [x] Закрепил ноду → перезапуск → осталась закреплённой (не двигается, рамка есть).
+- [x] Открепил → перезапуск → свободна.
 **Out of scope:** массовая фиксация/групповые операции.
+
+> DONE: `_locked_nodes` сохраняется в `metadata.locked_nodes` (тем же save-путём,
+> что и позиции). `load_topology_from_config` восстанавливает `_locked_nodes` → `_topology_to_graph`
+> ставит `NodeData.locked` → scene применяет `ItemIsMovable=False` + золотую рамку.
+> Тест: `test_node_lock_and_layout.py::test_locked_and_positions_restored_from_metadata`.
 
 ### Task 4 — Чистая загрузка из позиций, «Раскладка» опциональна
 **Цель:** на старте граф выглядит «как надо» из рецепта; «Раскладка» — ручной опциональный инструмент.
@@ -67,8 +82,13 @@
 2. Дефолтный кластер (`_node_position` fallback) — только для НОВЫХ нод без сохранённой позиции.
 3. «Раскладка» (Sugiyama) остаётся по кнопке/клавише L — не трогаем, не вызываем авто.
 **Acceptance:**
-- [ ] Cold-start рецепта с позициями — граф сразу корректный, «Раскладку» жать не нужно.
-- [ ] Новая нода (drop из палитры) — встаёт в разумное место, не накладывается.
+- [x] Cold-start рецепта с позициями — граф сразу корректный, «Раскладку» жать не нужно.
+- [x] Новая нода (drop из палитры) — встаёт в разумное место, не накладывается.
+
+> DONE: `blueprint.metadata.gui_positions` прописан в `hikvision_inspect.yaml` (активный
+> рецепт по умолчанию, app.yaml) и `line_filter_inspect.yaml`. qt-mcp smoke подтвердил:
+> cold-start даёт чистую left-to-right раскладку без «Раскладки». Fallback-кластер
+> `_node_position` остаётся для новых нод. «Раскладка» (Sugiyama) — только по кнопке/L.
 
 ## Верификация
 - Юнит: `io.py` round-trip (gui_positions + locked_nodes), `presenter` (drag → позиция без MovePlugin; load восстанавливает lock).

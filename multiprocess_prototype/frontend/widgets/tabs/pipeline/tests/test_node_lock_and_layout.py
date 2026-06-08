@@ -105,6 +105,35 @@ def test_inspector_lock_buttons_emit_signal(qtbot):
     assert received == []
 
 
+def test_locked_and_positions_restored_from_metadata(qtbot):
+    """free-layout Task 2/3: load_topology_from_config восстанавливает позиции и lock из metadata.
+
+    Это путь cold-start: рецепт хранит layout в blueprint.metadata → топология (через
+    unwrap_recipe) приносит metadata.gui_positions/locked_nodes → редактор грузит без «Раскладки».
+    """
+    topo = {
+        "processes": [
+            {"process_name": "camera", "plugins": [{"plugin_name": "capture"}]},
+            {"process_name": "processor", "plugins": [{"plugin_name": "color_mask"}]},
+        ],
+        "wires": [],
+        "metadata": {
+            "gui_positions": {"camera.capture": [111.0, 222.0]},
+            "locked_nodes": ["camera.capture"],
+        },
+    }
+    services = make_pipeline_services(topology=topo)
+    p = PipelinePresenter(services)
+    nodes, _edges = p.load_topology_from_config()
+
+    assert p._gui_positions["camera.capture"] == (111.0, 222.0)
+    assert "camera.capture" in p._locked_nodes
+    by_id = {n.node_id: n for n in nodes}
+    assert by_id["camera.capture"].locked is True
+    assert (by_id["camera.capture"].x, by_id["camera.capture"].y) == (111.0, 222.0)
+    assert by_id["processor.color_mask"].locked is False
+
+
 def test_presenter_set_node_lock(qtbot):
     p, scene = _presenter_with_scene()
     node = scene.get_node("camera.capture")

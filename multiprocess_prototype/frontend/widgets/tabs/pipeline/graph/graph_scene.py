@@ -35,9 +35,10 @@ class GraphScene(QGraphicsScene):
     edge_added = Signal(object)  # EdgeItem — новый edge добавлен
     edge_removed = Signal(object)  # EdgeItem — edge удалён (до removeItem)
 
-    # D.3: плагин-нода перетащена. (node_id, from_process, from_index, to_process, to_index).
-    # to_process == "" → дроп вне контейнеров (handler делает snap-back reload).
-    plugin_drop_requested = Signal(str, str, int, str, int)
+    # free-layout: нода свободно перемещена (node_id, scene x, y). Drag меняет ТОЛЬКО
+    # позицию — членство в процессе НЕ трогается (смена процесса/воркера — через combo
+    # инспектора). См. plans/2026-06-08_pipeline-free-layout.md (Task 1).
+    node_position_changed = Signal(str, float, float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -241,37 +242,19 @@ class GraphScene(QGraphicsScene):
             self._refit_container(process_name)
 
     def on_node_drag_finished(self, node_id: str) -> None:
-        """D.3: плагин-нода отпущена после перетаскивания.
+        """free-layout: нода отпущена после перетаскивания — фиксируем новую позицию.
 
-        Определяет целевой контейнер по центру ноды и индекс вставки по X среди
-        членов целевого процесса (исключая саму ноду). Эмитит plugin_drop_requested;
-        решение про MovePlugin/snap-back принимает presenter. Дроп вне контейнеров →
-        to_process="".
+        Drag = ТОЛЬКО перемещение: членство ноды в процессе НЕ меняется (никаких
+        MovePlugin/snap-back и «объединения под процесс»). Эмитит node_position_changed
+        с новой scene-позицией; presenter записывает её в gui_positions и дебаунс-
+        сохраняет в рецепт. Смена процесса/воркера — только через combo инспектора.
+        См. plans/2026-06-08_pipeline-free-layout.md (Task 1).
         """
         node = self._nodes.get(node_id)
-        if node is None or not getattr(node, "process_name", ""):
+        if node is None:
             return
-        from_process = node.process_name
-        from_index = node.plugin_index
-        center = node.sceneBoundingRect().center()
-
-        to_process = ""
-        for pname, cont in self._containers.items():
-            if cont.sceneBoundingRect().contains(center):
-                to_process = pname
-                break
-
-        if not to_process:
-            self.plugin_drop_requested.emit(node_id, from_process, from_index, "", -1)
-            return
-
-        # Индекс вставки: число членов целевого процесса (без перетаскиваемой ноды),
-        # чей центр левее центра ноды. Совпадает с семантикой MovePlugin.to_index
-        # (вставка в список ПОСЛЕ удаления плагина из источника).
-        others = [m for m in self._members_by_process.get(to_process, []) if m is not node]
-        cx = center.x()
-        to_index = sum(1 for m in others if m.sceneBoundingRect().center().x() < cx)
-        self.plugin_drop_requested.emit(node_id, from_process, from_index, to_process, to_index)
+        pos = node.pos()
+        self.node_position_changed.emit(node_id, pos.x(), pos.y())
 
     def remove_edge(self, edge: EdgeItem) -> None:
         """Удалить связь."""
