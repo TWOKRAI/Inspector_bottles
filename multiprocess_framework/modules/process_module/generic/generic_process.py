@@ -16,6 +16,7 @@ from ..core.process_module import ProcessModule
 from .data_receiver import DataReceiver
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .inspector_manager import InspectorManager
+from .join_inspector_manager import JoinInspectorManager
 from .pipeline_executor import PipelineExecutor
 from .source_producer import SourceProducer
 
@@ -84,12 +85,7 @@ class GenericProcess(ProcessModule):
 
         # --- DataReceiver (если есть processing плагины) ---
         if processing_plugins:
-            inspector = InspectorManager(
-                timeout_sec=0.5,
-                log_info=self._log_info,
-                log_error=self._log_error,
-                log_debug=self._log_debug,
-            )
+            inspector = self._build_inspector(app_cfg)
             self._data_receiver = DataReceiver(
                 receive_fn=self.receive_message,
                 shm_middleware=shm_middleware,
@@ -165,3 +161,36 @@ class GenericProcess(ProcessModule):
                     auto_start=True,
                 )
                 self._log_info(f"GenericProcess[{self.name}]: source '{source_plugin.name}' producer started")
+
+    def _build_inspector(self, app_cfg: dict):
+        """Выбрать корреляционный буфер DataReceiver по конфигу.
+
+        Дефолт `fanin` (InspectorManager, region fan-in по count) — backward-compat.
+        `join` (JoinInspectorManager) — generic-слияние именованных входов по
+        (seq_id, data_type) для многовходовых узлов (напр. overlay_draw: frame+overlay).
+
+        Конфиг процесса:
+            config.inspector.mode: "fanin" | "join"
+            config.inspector.inputs: ["frame", "overlay"]      # для join
+            config.inspector.primary: "frame"
+            config.inspector.timeout_sec / inactive_sec / list_merge_keys
+        """
+        insp = app_cfg.get("inspector", {}) or {}
+        mode = insp.get("mode", "fanin")
+        if mode == "join":
+            return JoinInspectorManager(
+                required_inputs=insp.get("inputs", ["frame", "overlay"]),
+                primary=insp.get("primary", "frame"),
+                timeout_sec=insp.get("timeout_sec", 0.08),
+                list_merge_keys=insp.get("list_merge_keys", ("overlay",)),
+                inactive_sec=insp.get("inactive_sec", 1.0),
+                log_info=self._log_info,
+                log_error=self._log_error,
+                log_debug=self._log_debug,
+            )
+        return InspectorManager(
+            timeout_sec=insp.get("timeout_sec", 0.5),
+            log_info=self._log_info,
+            log_error=self._log_error,
+            log_debug=self._log_debug,
+        )

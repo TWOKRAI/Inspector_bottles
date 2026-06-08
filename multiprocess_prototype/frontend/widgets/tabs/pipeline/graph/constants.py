@@ -11,6 +11,7 @@ PORT_SPACING = 20
 CATEGORY_COLORS: dict[str, str] = {
     "source": "#4caf50",
     "processing": "#2196f3",
+    "filter": "#ff6b9d",  # фильтрация координат (virtual line и т.п.)
     "output": "#ff9800",
     "rendering": "#e91e63",
     "control": "#9c27b0",

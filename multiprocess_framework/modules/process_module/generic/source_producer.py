@@ -145,6 +145,12 @@ class SourceProducer:
         per_item_target = item.pop("target", None)
         targets = [per_item_target] if per_item_target else self._chain_targets
 
+        # data_type для корреляции в JoinInspectorManager: кадровые items от источника
+        # помечаем "frame" (точно — только при наличии frame, чтобы не тегать heartbeat
+        # и пр.). Плагин мог задать свой data_type — уважаем (setdefault).
+        if "frame" in item:
+            item.setdefault("data_type", "frame")
+
         # frame-trace: отметить отправителя/время → receiver посчитает transport.
         frame_trace.stamp_send(item, self._node)
 

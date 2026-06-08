@@ -212,7 +212,10 @@ class DataReceiver:
         if "frame" in msg:
             item["frame"] = msg["frame"]
 
-        # Стандартные поля из msg-уровня
+        # Стандартные поля из msg-уровня.
+        # sender/data_type — для корреляции в JoinInspectorManager (Этап 1) и io-debug:
+        # sender ставится на msg-уровне (process_communication.send_to_process) и иначе
+        # потерялся бы при build; data_type помечает поток (frame/overlay/detections/...).
         for key in (
             "camera_id",
             "seq_id",
@@ -223,6 +226,8 @@ class DataReceiver:
             "owner",
             "shm_name",
             "shm_index",
+            "sender",
+            "data_type",
         ):
             if key in msg and key not in item:
                 item[key] = msg[key]
