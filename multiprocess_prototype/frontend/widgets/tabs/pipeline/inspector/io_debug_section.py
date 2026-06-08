@@ -228,11 +228,16 @@ class IoDebugSection(QWidget):
         method_ru = {"process": "обработка", "produce": "генерация"}.get(method, method or "—")
         in_data = value.get("input", {}) or {}
         out_data = value.get("output", {}) or {}
-        in_count = in_data.get("count", 0)
         out_count = out_data.get("count", 0)
-        self._status.setText(f"{method_ru} · вход: {in_count} · выход: {out_count}")
+        # У источника (produce) входа нет: items=None. Показываем понятный плейсхолдер
+        # вместо сырого {"count":0,"items":null} и убираем «вход: 0» из статуса.
+        is_source = in_data.get("items") is None
+        if is_source:
+            self._status.setText(f"{method_ru} · выход: {out_count}")
+        else:
+            self._status.setText(f"{method_ru} · вход: {in_data.get('count', 0)} · выход: {out_count}")
         try:
-            in_text = json.dumps(in_data, indent=2, ensure_ascii=False)
+            in_text = "— (источник: нет входа)" if is_source else json.dumps(in_data, indent=2, ensure_ascii=False)
             out_text = json.dumps(out_data, indent=2, ensure_ascii=False)
         except (TypeError, ValueError):
             in_text, out_text = str(in_data), str(out_data)

@@ -97,6 +97,24 @@ def test_freeze_stops_updates(qtbot):
     assert "вход: 9" in section._status.text()
 
 
+def test_source_input_placeholder(qtbot):
+    """У источника (produce, input.items=None) — плейсхолдер вместо сырого null."""
+    b = _FakeBindings()
+    section = IoDebugSection(b)
+    qtbot.addWidget(section)
+    section.set_target("camera_0", "capture")
+    peek = {
+        "method": "produce",
+        "ts": 1.0,
+        "input": {"count": 0, "items": None},
+        "output": {"count": 1, "items": [{"frame": {"_type": "ndarray"}}]},
+    }
+    b.emit("processes.camera_0.plugins.capture.io_peek", peek)
+    assert "источник" in section._input_text.text()
+    assert "вход" not in section._status.text()  # счётчик входа скрыт у источника
+    assert "генерация" in section._status.text()
+
+
 def test_toggle_shows_body(qtbot):
     section = IoDebugSection()
     qtbot.addWidget(section)
