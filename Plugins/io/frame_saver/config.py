@@ -22,9 +22,7 @@ class FrameSaverPluginConfig(PluginConfig):
     Все параметры (output_dir, save_every_n, image_format, jpeg_quality) — в FrameSaverRegisters.
     """
 
-    plugin_class: str = (
-        "Plugins.io.frame_saver.plugin.FrameSaverPlugin"
-    )
+    plugin_class: str = "Plugins.io.frame_saver.plugin.FrameSaverPlugin"
 
     # Привязка к register-классам
     register_bindings: ClassVar[list[type[SchemaBase]]] = [FrameSaverRegisters]

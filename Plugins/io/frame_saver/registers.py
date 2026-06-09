@@ -131,3 +131,20 @@ class FrameSaverRegisters(SchemaBase):
             min=1,
         ),
     ] = 100
+
+    # --- Триггер сохранения (вход True/False) ---
+    manual_trigger: Annotated[
+        bool,
+        FieldMeta(
+            "Manual Trigger",
+            info="Ручной триггер: переключи в True → сохранить (срабатывает по фронту False→True)",
+        ),
+    ] = False
+
+    trigger_key: Annotated[
+        str,
+        FieldMeta(
+            "Trigger Key",
+            info="Ключ во входном item с булевым сигналом (приходит по проводу со входа trigger)",
+        ),
+    ] = "trigger"

@@ -179,6 +179,50 @@ class TestFormats:
 
 
 # ---------------------------------------------------------------------------
+# Триггер-вход (True/False по проводу + ручной)
+# ---------------------------------------------------------------------------
+
+
+class TestTriggerInput:
+    def test_wired_trigger_flushes(self, tmp_path):
+        """Сигнал True по проводу (отдельный item) → фронт сбрасывает буфер (trigger+accumulate)."""
+        p = make_plugin(tmp_path, subfolder_by_date=False, save_mode="trigger", buffer_mode="accumulate")
+        p.process([frame(0)])
+        p.process([frame(1)])
+        assert list_images(tmp_path) == []
+        p.process([{"trigger": True}])  # фронт False→True → flush
+        assert len(list_images(tmp_path)) == 2
+
+    def test_wired_trigger_level_no_double_fire(self, tmp_path):
+        """Удержание True не даёт повторных срабатываний; повтор только после False→True."""
+        p = make_plugin(tmp_path, subfolder_by_date=False, save_mode="trigger", buffer_mode="last")
+        p.process([frame(0)])
+        p.process([{"trigger": True}])  # фронт → сохранён 1
+        assert len(list_images(tmp_path)) == 1
+        p.process([frame(1)])
+        p.process([{"trigger": True}])  # всё ещё True (уровень) → НЕ срабатывает
+        assert len(list_images(tmp_path)) == 1
+        p.process([{"trigger": False}])  # сброс
+        p.process([{"trigger": True}])  # новый фронт → +1
+        assert len(list_images(tmp_path)) == 2
+
+    def test_manual_trigger_stream(self, tmp_path):
+        """manual_trigger (ручной) в stream-режиме → сохраняет последний кадр по фронту."""
+        p = make_plugin(tmp_path, subfolder_by_date=False, save_mode="stream", save_every_n=1000, manual_trigger=True)
+        p.process([frame(0)])  # stream не сохранит (1%1000), но manual-фронт → сохранит последний
+        assert len(list_images(tmp_path)) == 1
+        p.process([frame(1)])  # manual всё ещё True (уровень) → без повтора
+        assert len(list_images(tmp_path)) == 1
+
+    def test_no_trigger_by_default(self, tmp_path):
+        """Без trigger-сигнала и manual_trigger=False — поведение не меняется (обратная совместимость)."""
+        p = make_plugin(tmp_path, subfolder_by_date=False, save_mode="trigger", buffer_mode="accumulate")
+        for i in range(3):
+            p.process([frame(i)])
+        assert list_images(tmp_path) == []  # ничего не сработало
+
+
+# ---------------------------------------------------------------------------
 # Дата / resume
 # ---------------------------------------------------------------------------
 

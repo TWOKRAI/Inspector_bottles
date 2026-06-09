@@ -9,6 +9,8 @@ Output-плагин: process(items) -> items (pass-through с side-effect сох
   * Retention: хранить N последних дней (старые папки-даты удаляются).
   * Форматы: jpeg / png / bmp / tiff / webp.
   * Режимы: stream (каждый N-й кадр) и trigger (по команде save_now) с буфером last/accumulate.
+  * Вход trigger (True/False, optional): сохранение по фронту False→True — с провода (сигнал
+    другой ноды) или вручную через register manual_trigger в инспекторе.
   * Атомарная запись: *.tmp + rename — крах не оставляет битый кадр.
 
 Thread-safety: process() идёт из data-worker потока, _cmd_save_now() — из system-потока.
@@ -69,6 +71,13 @@ class FrameSaverPlugin(ProcessModulePlugin):
 
     inputs = [
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="BGR-кадр"),
+        Port(
+            name="trigger",
+            dtype="bool",
+            shape="-",
+            optional=True,  # не подключён → используется register manual_trigger (false/true, в рецепте)
+            description="Сигнал True/False: по фронту False→True сохранить (вместо/вместе с save_now)",
+        ),
     ]
     # outputs пуст: frame_saver — терминальная нода (sink). process() возвращает items для
     # совместимости с chain-протоколом, но wire-through наружу не предполагается.
@@ -101,6 +110,10 @@ class FrameSaverPlugin(ProcessModulePlugin):
         self._pending_cleanup: bool = False  # взводится в _resolve_dir, retention выполняется вне lock
         self._force_next: bool = False  # save_now в stream-режиме: форсировать сохранение след. кадра
         self._last_meta: dict | None = None
+        # Триггер True/False (вход trigger + ручной manual_trigger): срабатывает по фронту.
+        self._wired_trigger: bool = False  # последнее значение с провода (вход trigger)
+        self._prev_trigger: bool = False  # предыдущее объединённое состояние (для детекта фронта)
+        self._last_frame_item: dict | None = None  # последний кадр (для триггера в stream-режиме)
 
         # Папку НЕ создаём заранее — папка дня создаётся лениво в _resolve_dir.
         ctx.log_info(
@@ -118,29 +131,54 @@ class FrameSaverPlugin(ProcessModulePlugin):
         ctx.log_info(f"FrameSaverPlugin[{self._camera_id}]: shutdown, сохранено кадров: {self._saved_count}")
 
     def process(self, items: list[dict]) -> list[dict]:
-        """stream — сохранять каждый N-й; trigger — буферизовать. Pass-through.
+        """Кадры — stream-сохранение / буферизация; trigger-вход — сохранение по фронту.
 
-        Вход может быть и одним кадром, и списком — каждый item обрабатывается по очереди.
+        Кадры приходят на порт frame (item["frame"]), сигнал True/False — на порт trigger
+        (item[trigger_key]) ОТДЕЛЬНЫМИ item-ами. Сохранение триггерится по фронту False→True
+        объединённого сигнала (провод trigger ИЛИ ручной manual_trigger). Pass-through.
         """
         for item in items:
             save_it = False
-            # Счётчик/буфер — общее состояние с system-потоком (save_now) → под lock.
-            # _save_frame берёт lock сам → вызываем его ВНЕ этого блока (Lock не reentrant).
+            do_fire = False
+            # Общее состояние (буфер/счётчик/триггер) — под lock (system-поток тоже пишет).
+            # _save_frame/_fire_trigger берут lock сами → вызываем ВНЕ блока (Lock не reentrant).
             with self._lock:
-                self._frame_count += 1
-                if self._reg.save_mode == "stream":
-                    if self._force_next or self._frame_count % self._reg.save_every_n == 0:
-                        self._force_next = False
-                        save_it = True
-                else:  # trigger — не сохраняем в потоке, буферизуем
-                    if self._reg.buffer_mode == "last":
-                        self._buffer.clear()
-                        self._buffer.append(item)  # держим только последний
-                    else:  # accumulate — deque(maxlen) сам вытесняет старые
-                        self._buffer.append(item)
+                if "frame" in item:
+                    self._frame_count += 1
+                    self._last_frame_item = item
+                    if self._reg.save_mode == "stream":
+                        if self._force_next or self._frame_count % self._reg.save_every_n == 0:
+                            self._force_next = False
+                            save_it = True
+                    else:  # trigger — не сохраняем в потоке, буферизуем
+                        if self._reg.buffer_mode == "last":
+                            self._buffer.clear()
+                            self._buffer.append(item)  # держим только последний
+                        else:  # accumulate — deque(maxlen) сам вытесняет старые
+                            self._buffer.append(item)
+
+                # Сигнал с провода (отдельный item с trigger_key).
+                if self._reg.trigger_key in item:
+                    self._wired_trigger = bool(item.get(self._reg.trigger_key))
+
+                # Детект фронта False→True объединённого сигнала (провод ИЛИ ручной).
+                combined = bool(self._reg.manual_trigger) or self._wired_trigger
+                if combined and not self._prev_trigger:
+                    do_fire = True
+                self._prev_trigger = combined
+
             if save_it:
                 self._save_frame(item)
+            if do_fire:
+                self._fire_trigger()
         return items
+
+    def _fire_trigger(self) -> None:
+        """Сработал триггер (фронт): trigger-режим → сброс буфера; stream → сохранить последний кадр."""
+        if self._reg.save_mode == "trigger":
+            self._flush_buffer()
+        elif self._last_frame_item is not None:
+            self._save_frame(self._last_frame_item)
 
     # --- Запись на диск ---
 
