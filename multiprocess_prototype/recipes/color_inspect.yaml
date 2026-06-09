@@ -32,6 +32,7 @@ blueprint:
       priority: high
       chain_targets:
         - detector
+        - saver
       source_target_fps: 25
       plugins:
         - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
@@ -98,9 +99,31 @@ blueprint:
           write_every_n: 1
           auto_connect: true
 
+    # --- Saver: сохранение кадров камеры на диск (frame_saver) ---
+    - process_name: saver
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: low
+      chain_targets: []
+      plugins:
+        - plugin_class: Plugins.io.frame_saver.plugin.FrameSaverPlugin
+          plugin_name: frame_saver
+          category: output
+          output_dir: data/captures
+          filename_prefix: shot
+          index_source: counter
+          image_format: jpeg
+          jpeg_quality: 85
+          subfolder_by_date: true
+          max_days: 7
+          save_mode: stream
+          save_every_n: 25
+
   wires:
     - source: camera_0.capture.frame
       target: detector.hsv_mask.frame
+    # сохранение кадра камеры на диск
+    - source: camera_0.capture.frame
+      target: saver.frame_saver.frame
     # fan-out от детектора: кадр+контуры → художник, детекции → modbus
     - source: detector.contour_finder.frame
       target: painter.contour_draw.frame
