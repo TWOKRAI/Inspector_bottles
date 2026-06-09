@@ -135,6 +135,30 @@ blueprint:
   displays:
     - node_id: painter.contour_draw.frame
       display_id: main
+  metadata:
+    gui_positions:
+      camera_0.capture:
+        - 16.0
+        - 100.0
+      main:
+        - 1600.0
+        - 60.0
+      detector.hsv_mask:
+        - 556.0
+        - 40.0
+      detector.contour_finder:
+        - 756.0
+        - 40.0
+      painter.contour_draw:
+        - 1076.0
+        - 160.0
+      modbus_sink.modbus_sink:
+        - 1076.0
+        - 40.0
+      saver.frame_saver:
+        - 556.0
+        - 246.0
+    locked_nodes: []
 displays:
   - id: main
     name: Основной дисплей

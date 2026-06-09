@@ -490,9 +490,8 @@ class PipelinePresenter:
         """Экспортировать topology dict с gui_positions в metadata."""
         topo = self._model.to_topology_dict()
 
-        # Обновить позиции из scene (если привязана)
-        if self._scene:
-            self._gui_positions.update(self._scene.get_all_node_positions())
+        # Обновить позиции из scene + очистить мусор (ключи не из текущей сцены)
+        self._sync_positions_from_scene()
 
         # Записать позиции в metadata
         topo.setdefault("metadata", {})
@@ -949,6 +948,19 @@ class PipelinePresenter:
     # чтобы не писать файл рецепта на каждый пиксель перетаскивания.
     _PERSIST_DEBOUNCE_MS = 400
 
+    def _sync_positions_from_scene(self) -> None:
+        """Синхронизировать _gui_positions с текущей сценой (только её ноды).
+
+        Берём позиции ТОЛЬКО нод, реально присутствующих в сцене. Это убирает
+        накопленный мусор: ключи нод прошлых рецептов (копились через .update при
+        переключении рецепта) и legacy node_id чужого процесса (напр.
+        ``camera_0.frame_saver`` от старого drag→MovePlugin кода). Иначе мусор
+        записывался в активный рецепт и нода рендерилась «в чужом процессе».
+        """
+        if self._scene is None:
+            return
+        self._gui_positions = dict(self._scene.get_all_node_positions())
+
     def _schedule_layout_persist(self) -> None:
         """Запланировать (дебаунс) авто-сохранение layout в активный рецепт.
 
@@ -983,8 +995,8 @@ class PipelinePresenter:
         if active_slug is None:
             return
 
-        if self._scene:
-            self._gui_positions.update(self._scene.get_all_node_positions())
+        # Только ноды текущей сцены → не писать в рецепт мусор от прошлых рецептов / legacy.
+        self._sync_positions_from_scene()
 
         gui_positions = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
         try:
