@@ -48,6 +48,8 @@ def test_configure_with_model_runs_inference(dummy_models_dir: Path):
     preds = out[0]["predictions"]
     assert len(preds) == 3
     assert plugin._reg.last_label in {"alpha", "beta", "gamma"}
+    # softmax-инвариант: сумма вероятностей ≈ 1.0 (3 класса, порог 0)
+    assert abs(sum(p["confidence"] for p in preds) - 1.0) < 0.01
 
 
 def test_overlay_drawn_when_enabled(dummy_models_dir: Path):
@@ -106,3 +108,23 @@ def test_inference_every_n_reuses_result(dummy_models_dir: Path):
     for _ in range(5):
         out = plugin.process([{"frame": _frame()}])
         assert len(out[0]["predictions"]) == 3
+
+
+def test_model_switch_clears_stale_predictions(dummy_models_dir: Path):
+    """Смена модели сбрасывает кэш предсказаний и счётчик кадров (не reuse старого)."""
+    plugin = MLInferencePlugin()
+    plugin.configure(
+        _make_ctx(
+            {"models_dir": str(dummy_models_dir), "model": "dummy", "inference_every_n": 3, "confidence_threshold": 0.0}
+        )
+    )
+    plugin.process([{"frame": _frame()}])  # кадр 1 — инференс
+    plugin.process([{"frame": _frame()}])  # кадр 2 — reuse
+    assert plugin._last_predictions  # кэш заполнен
+
+    plugin.cmd_set_model({"model": "dummy"})  # перезагрузка модели
+    assert plugin._last_predictions == []  # кэш сброшен
+    assert plugin._frame_idx == 0
+
+    out = plugin.process([{"frame": _frame()}])  # первый кадр после смены — свежий инференс
+    assert len(out[0]["predictions"]) == 3

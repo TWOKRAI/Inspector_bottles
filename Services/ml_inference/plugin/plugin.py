@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 
@@ -27,6 +28,8 @@ from .registers import MLInferenceRegisters
 # Services/ml_inference/plugin/plugin.py → parents[3] = корень проекта.
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_MODELS_DIR = _PROJECT_ROOT / "data" / "models"
+
+logger = logging.getLogger(__name__)
 
 
 @register_plugin(
@@ -133,6 +136,7 @@ class MLInferencePlugin(ProcessModulePlugin):
             except Exception as exc:  # noqa: BLE001 — кадр не должен ронять процесс
                 self._reg.last_error = str(exc)
                 self._ctx.log_error(f"MLInferencePlugin: ошибка инференса: {exc}")
+                logger.exception("MLInferencePlugin: inference error")  # traceback в лог
                 return {**item, "predictions": []}
             self._latency_sum_ms += (time.monotonic() - t0) * 1000
             self._latency_count += 1
@@ -187,6 +191,10 @@ class MLInferencePlugin(ProcessModulePlugin):
     def _load_selected_model(self) -> None:
         """Загрузить self._reg.model в движок; ошибки → last_error (не падаем)."""
         self._reg.last_error = ""
+        # Сбросить кэш предсказаний/счётчик кадров — иначе при inference_every_n > 1
+        # первые кадры после смены модели вернут результаты предыдущей модели.
+        self._last_predictions = []
+        self._frame_idx = 0
         if not self._reg.model:
             self._engine.unload()
             self._reg.loaded_model = ""

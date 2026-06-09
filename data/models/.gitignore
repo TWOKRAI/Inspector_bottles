@@ -3,7 +3,8 @@
 *.pt
 *.pth
 *.engine
-# Документация и sidecar-метаданные — версионируются.
+# Документация, sidecar-метаданные и labels — версионируются (маленькие).
 !README.md
 !*.yaml
+!*.txt
 !.gitignore
