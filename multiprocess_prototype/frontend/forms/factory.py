@@ -113,6 +113,9 @@ _WIDGET_TO_KIND: dict[str, str] = {
     "path": _KIND_PATH,
     "json": _KIND_JSON,
     "label": _KIND_UNSUPPORTED,
+    # Кастомный kind: builder регистрируется извне через register_type("model_picker", ...).
+    # Без зарегистрированного builder'а _BUILDERS.get вернёт _build_unsupported (graceful).
+    "model_picker": "model_picker",
 }
 
 

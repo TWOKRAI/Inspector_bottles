@@ -69,13 +69,19 @@ diagrams = [
 ]
 
 [project.optional-dependencies]
-# ML stack — добавится в Phase 1.5 после успешного перехода на 3.12
-# ml = [
-#     "torch>=2.11",
-#     "torchvision>=0.26",
-#     "ultralytics>=8.3",
-#     "onnxruntime>=1.20",
-# ]
+# ML inference stack (Services/ml_inference). Backend ONNX Runtime — основной:
+# кросс-форматный, лёгкий, CPU/CUDA через providers. onnx нужен для валидации
+# .onnx и генерации dummy-моделей в тестах (CI/headless без реальных весов).
+ml = [
+    "onnxruntime>=1.20",
+    "onnx>=1.17",
+]
+# torch-backend (torchvision MobileNetV3 / .pt веса) — опциональный, тяжёлый.
+# Ставится отдельно: pip install '.[ml-torch]'
+ml-torch = [
+    "torch>=2.11",
+    "torchvision>=0.26",
+]
 
 # Modbus-драйвер (Services/modbus) — опциональный.
 # pymodbus тянет pyserial для RS485 (RTU). Без extra драйвер импортируется,

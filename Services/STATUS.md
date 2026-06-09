@@ -18,6 +18,7 @@ sandbox-снимок переведён на `webcam_controls.capture_single_fra
 | `auth` | foundation | User/Role storage + RBAC API (PR1) | ADR-Auth-001..004 |
 | `Operation_crop` | utility | Утилита для нарезки кадров | — |
 | `Region_processors` | utility | Регион-процессоры (заготовки для пайплайнов) | — |
+| `ml_inference` | foundation | Инференс НС (кадр→классы): data-driven sidecar + pluggable backend (ONNX осн., torch опц.); processing-плагин `ml_inference` + widget `model_picker` | — |
 
 ## Правила слоя
 

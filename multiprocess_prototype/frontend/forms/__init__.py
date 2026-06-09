@@ -14,8 +14,13 @@ from multiprocess_framework.modules.frontend_module.forms.form_context import Fo
 from .factory import CardsFieldFactory
 from .field_editor import FieldEditor
 from .form_builder import build_form_for_register, build_table_for_register
+from .model_picker import register_model_picker
 from .register_view import RegisterView
 from .view_mode_toggle import ViewMode, ViewModeToggle
+
+# Зарегистрировать кастомный builder 'model_picker' (динамический список моделей).
+# Выполняется при первом импорте пакета forms — до построения инспектора Pipeline.
+register_model_picker()
 
 __all__ = [
     "CardsFieldFactory",

@@ -66,6 +66,10 @@ WidgetType = Literal[
     "text",
     "path",
     "label",
+    # Кастомный динамический dropdown (значения вычисляются builder'ом в runtime —
+    # напр. список моделей из data/models). Builder регистрируется через
+    # CardsFieldFactory.register_type(...) на стороне фронтенда.
+    "model_picker",
 ]
 
 
