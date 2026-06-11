@@ -368,9 +368,10 @@ def build_services_sections(
     presenter = ServicesPresenter(services)
     service_data = presenter.list_services()  # [(name, title, lifecycle), ...]
 
-    # Скрываем авто-узел сервиса hikvision_camera из ветки «Сервисы» — для камеры
-    # есть полноценная секция «Hikvision Camera» в группе «Камеры» (см. ниже).
-    service_data = [row for row in service_data if row[0] != "hikvision_camera"]
+    # Скрываем авто-узлы сервисов, у которых есть полноценные секции:
+    # hikvision_camera — секция «Hikvision Camera» в группе «Камеры»;
+    # robot_comm / vfd_comm — секция «Робот Delta» (робот + ПЧ, см. ниже).
+    service_data = [row for row in service_data if row[0] not in ("hikvision_camera", "robot_comm", "vfd_comm")]
 
     sections: list[SectionSpec] = []
 
@@ -412,6 +413,12 @@ def build_services_sections(
     from .hikvision import build_hikvision_section
 
     sections.append(build_hikvision_section(services, runtime, parent_key="cameras_root", title="Hikvision Camera"))
+
+    # Робот Delta — ручное управление роботом (CVT/рисование) и ПЧ (лентой) через
+    # round-trip команды плагинам robot_io / vfd_control / robot_draw активного рецепта.
+    from .robot import build_robot_section
+
+    sections.append(build_robot_section(services, runtime, title="Робот Delta"))
 
     sections.append(
         SectionSpec(

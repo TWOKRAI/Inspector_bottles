@@ -92,7 +92,10 @@ class TestServicesTab:
         assert "services_root" in keys
         assert "sql" in keys
         assert "webcam_camera" in keys
-        assert "hikvision_camera" in keys
+        # hikvision_camera намеренно скрыт из авто-списка: у него полноценная
+        # секция «Hikvision Camera» в группе «Камеры» (см. _sections.py).
+        assert "hikvision_camera" not in keys
+        assert "__hikvision__" in keys
 
     def test_tab_handles_empty_registry(self, qtbot):
         """Tab пустой без ошибок если сервисов нет."""
