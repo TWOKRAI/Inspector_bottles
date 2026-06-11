@@ -153,19 +153,21 @@ def topology() -> dict:
 @pytest.fixture
 def registry() -> MockRegistry:
     reg_cls = MockRegisterClass(model_fields={"h_min": ..., "h_max": ...})
-    return MockRegistry([
-        MockPluginEntry(
-            name="color_mask",
-            plugin_class=MockPluginClass(commands={"set_hsv_range": "set_hsv_range"}),
-            category="processing",
-            register_classes=[reg_cls],
-        ),
-        MockPluginEntry(
-            name="capture",
-            plugin_class=MockPluginClass(commands={"start_capture": "cmd_start"}),
-            category="source",
-        ),
-    ])
+    return MockRegistry(
+        [
+            MockPluginEntry(
+                name="color_mask",
+                plugin_class=MockPluginClass(commands={"set_hsv_range": "set_hsv_range"}),
+                category="processing",
+                register_classes=[reg_cls],
+            ),
+            MockPluginEntry(
+                name="capture",
+                plugin_class=MockPluginClass(commands={"start_capture": "cmd_start"}),
+                category="source",
+            ),
+        ]
+    )
 
 
 @pytest.fixture
@@ -178,12 +180,14 @@ def full_pipeline(registry, topology):
     cmap = MockConnectionMap({"color_mask": "processor_0", "capture": "camera_0"})
     catalog = CommandCatalog.from_registry_and_map(registry, cmap)
 
-    rm = SimpleRM(fields={
-        "color_mask": [
-            SimpleFieldInfo(name="h_min", field_type=int, min_value=0, max_value=180),
-            SimpleFieldInfo(name="h_max", field_type=int, min_value=0, max_value=180),
-        ],
-    })
+    rm = SimpleRM(
+        fields={
+            "color_mask": [
+                SimpleFieldInfo(name="h_min", field_type=int, min_value=0, max_value=180),
+                SimpleFieldInfo(name="h_max", field_type=int, min_value=0, max_value=180),
+            ],
+        }
+    )
     validator = CommandValidator(catalog, rm)
     holder = MockTopologyHolder(topology)
 
@@ -206,8 +210,13 @@ class TestFullPipeline:
         bus, bridge, rm, process, sender = full_pipeline
 
         from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
         action = V2ActionBuilder.field_set_timed(
-            "color_mask", "h_min", 50, 0, description="test",
+            "color_mask",
+            "h_min",
+            50,
+            0,
+            description="test",
         )
 
         bus.execute(action)
@@ -229,8 +238,13 @@ class TestFullPipeline:
         bus, bridge, rm, process, sender = full_pipeline
 
         from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
+
         action = V2ActionBuilder.field_set_timed(
-            "color_mask", "h_min", 100, 0, description="test",
+            "color_mask",
+            "h_min",
+            100,
+            0,
+            description="test",
         )
 
         bus.execute(action)
@@ -254,7 +268,7 @@ class TestFullPipeline:
         assert rm._values.get("color_mask", {}).get("h_min") == 77
 
     def test_lifecycle_start(self, full_pipeline) -> None:
-        """bridge.start_process → IPC process.start."""
+        """bridge.start_process → IPC process.start через ProcessManager."""
         bus, bridge, rm, process, sender = full_pipeline
         MockProcess.sent.clear()
 
@@ -262,8 +276,12 @@ class TestFullPipeline:
         assert ok is True
         assert len(MockProcess.sent) == 1
         target, msg = MockProcess.sent[0]
-        assert target == "camera_0"
-        assert msg["command"] == "process.start"
+        # Lifecycle-команды идут через ProcessManager (system_command),
+        # а не напрямую в процесс (с 1cb03905)
+        assert target == "ProcessManager"
+        assert msg["command"] == "process.command"
+        assert msg["data"]["cmd"] == "process.start"
+        assert msg["data"]["process_name"] == "camera_0"
 
     def test_lifecycle_nonexistent(self, full_pipeline) -> None:
         """Запуск несуществующего процесса → False."""

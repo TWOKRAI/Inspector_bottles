@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 # ------------------------------------------------------------------ #
@@ -35,6 +36,13 @@ _PROJECT_ROOT = _RECIPES_DIR.parent.parent
 _PLUGINS_PROCESSING = str(_PROJECT_ROOT / "Plugins" / "processing")
 _PLUGINS_SOURCES = str(_PROJECT_ROOT / "Plugins" / "sources")
 _PLUGINS_RENDER = str(_PROJECT_ROOT / "Plugins" / "render")
+
+# Рецепт demo_webcam_split_merge удалён (webcam_camera сервис деприкейчен);
+# пропускаем весь модуль, если файл отсутствует.
+pytestmark = pytest.mark.skipif(
+    not _RECIPE_FILE.exists(),
+    reason="рецепт demo_webcam_split_merge.yaml удалён (webcam_camera деприкейчен)",
+)
 
 
 # ------------------------------------------------------------------ #

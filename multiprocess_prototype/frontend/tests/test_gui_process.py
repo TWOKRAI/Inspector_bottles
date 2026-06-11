@@ -232,11 +232,13 @@ class TestTopologyParses:
         blueprint = SystemBlueprint.model_validate(data)
 
         assert blueprint.name == "hello_world"
-        assert len(blueprint.processes) == 2
+        # base.yaml: gui + devices (always-on); pipeline: camera_0
+        assert len(blueprint.processes) == 3
 
         proc_names = {p.process_name for p in blueprint.processes}
         assert "camera_0" in proc_names
         assert "gui" in proc_names
+        assert "devices" in proc_names
 
     def test_topology_check_returns_no_errors(self):
         """blueprint.check() не возвращает ошибок для hello_world."""

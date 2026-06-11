@@ -107,7 +107,15 @@ class TestDefaultBlueprintRoundtrip:
 # Round-trip: demo_webcam_split_merge.yaml → Recipe
 # ==============================================================================
 
+# Рецепт удалён (webcam_camera деприкейчен); вычисляем путь аналогично fixtures_dir
+_DEMO_RECIPE_PATH = Path(__file__).resolve().parent.parent.parent / "recipes" / "demo_webcam_split_merge.yaml"
+_SKIP_DEMO = pytest.mark.skipif(
+    not _DEMO_RECIPE_PATH.exists(),
+    reason="рецепт demo_webcam_split_merge.yaml удалён (webcam_camera деприкейчен)",
+)
 
+
+@_SKIP_DEMO
 class TestDemoRecipeRoundtrip:
     """Тесты round-trip для demo_webcam_split_merge.yaml."""
 
@@ -528,6 +536,7 @@ class TestFrozenBehaviourExtended:
 # ==============================================================================
 
 
+@_SKIP_DEMO
 class TestDemoRecipeYamlRoundtrip:
     """Полный YAML round-trip: entity → yaml.dump → yaml.safe_load → entity."""
 
