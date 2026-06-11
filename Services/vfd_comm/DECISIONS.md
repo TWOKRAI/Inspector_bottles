@@ -10,7 +10,7 @@ mailbox-регистры робота (Lua ретранслирует). Прям
 
 **Решение.** `VfdClient(transport: RegisterTransport, register_map=...)`:
 - сервисы НЕ связаны: vfd_comm не импортирует robot_comm; связку
-  `transport=runtime.get_client()` делает плагин vfd_control (слой Plugins);
+  (bridge-транспорт) выполняет `DeviceManager` в процессе `devices`;
 - мост = RobotClient (реализует RegisterTransport), прямое подключение =
   ModbusDevice(rtu) + DIRECT_MAP — без правки клиента;
 - слой Lua скрывает slave id ПЧ (P14.00) — клиент про RS-485 не знает (SRP).

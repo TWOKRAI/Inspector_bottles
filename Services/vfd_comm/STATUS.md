@@ -15,7 +15,7 @@
 
 ## Не сделано / дальше
 
-- [ ] Плагин vfd_control (Фаза 3 плана robot-vfd-services)
+- [x] ~~Плагин vfd_control~~ → удалён; логика в `Services/device_hub/drivers/vfd_driver.py`
 - [ ] Проверка на железе (run/stop крутит ленту)
 - [ ] Lua-улучшения: idle-публикация зеркала (№1), VFD_FLAG в DRAW (№2)
 - [ ] Прямой RTU-путь: код команд GD20 поверх DIRECT_MAP — при появлении линии

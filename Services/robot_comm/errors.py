@@ -14,12 +14,10 @@ class RobotCommError(Exception):
 
 
 class RobotNotConnectedError(RobotCommError):
-    """Клиент робота не опубликован владельцем.
+    """Клиент робота не подключён.
 
-    Возникает в ``runtime.get_client()``, когда плагин-владелец (robot_io) ещё
-    не создал/не подключил RobotClient. Потребители (vfd_control, robot_draw,
-    calibration) обязаны жить в ОДНОМ процессе с владельцем — runtime-holder
-    process-local и через границу процессов не виден.
+    Возникает, когда операция требует подключённого RobotClient, но процесс
+    devices ещё не установил соединение (device_connect не вызван или failed).
     """
 
 

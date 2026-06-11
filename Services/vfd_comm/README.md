@@ -11,13 +11,12 @@ VfdClient ──(RegisterTransport)──> RobotClient ──TCP──> Робо
               mailbox 0x1200/0x1210            ретрансляция + зеркало статуса
 ```
 
-vfd_comm **не импортирует** robot_comm — связку делает плагин `vfd_control`:
+vfd_comm **не импортирует** robot_comm — связку выполняет `DeviceManager`
+в процессе `devices` (bridge-транспорт через RobotClient).
 
 ```python
-from Services.robot_comm import runtime
-from Services.vfd_comm import VfdClient
-
-vfd = VfdClient(transport=runtime.get_client())   # мост = клиент робота
+# Пример: VfdClient получает транспорт от DeviceManager (внутри VfdDriver)
+vfd = VfdClient(transport=robot_client)   # мост = клиент робота
 vfd.run(50.0)            # частота+направление+RUN+FLAG одной транзакцией
 st = vfd.poll()          # пульс VFD_FLAG + чтение зеркала
 vfd.ensure_alive()       # heartbeat моста не растёт -> VfdBridgeStaleError

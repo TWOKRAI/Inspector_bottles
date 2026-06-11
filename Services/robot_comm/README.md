@@ -60,13 +60,12 @@ echo, энкодер, зеркало ПЧ с heartbeat, draw busy/prog).
 
 ## Модель владельца соединения
 
-Один TCP-master на процесс. Владелец — **плагин `robot_io`**: создаёт клиент в
-`start()`, публикует `runtime.set_client()`, закрывает в `shutdown()`.
-Потребители (`vfd_control`, `robot_draw`, `calibration`) — `runtime.get_client()`.
-Все плагины обязаны жить в **одном `process_name`** рецепта (holder process-local).
+Один TCP-master на устройство. Владелец — **процесс `devices`** (always-on,
+`DeviceHubPlugin` → `RobotDriver`): создаёт `RobotClient`, коннектит,
+выполняет команды по IPC из GUI и плагинов. Старый `runtime.py`
+(process-local holder, co-location) удалён — соединение полностью в `devices`.
 
-`service.py` — только карточка каталога, соединение НЕ открывает (второй
-master к одному mailbox = гонка по проводу).
+`service.py` — только карточка каталога, соединение НЕ открывает.
 
 ## Протокол (карта universal3)
 

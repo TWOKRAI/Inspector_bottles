@@ -1,5 +1,13 @@
 # План: калибровка изображение→координаты робота (robot_comm + плагины)
 
+> **ОБНОВЛЕНИЕ (2026-06-11, device-hub):** `robot_io` теперь тонкий
+> job-форвардер; владелец соединения — процесс `devices` (always-on).
+> Калибровочные команды (job, read_echo, позиция) шлются через IPC
+> (`DeviceHubClient.request("robot_*", ...)`) в `devices`, а не через
+> `runtime.get_client()` в том же процессе. Фаза 4 этого плана
+> (расширение robot_io) подстраивается: форвард calibration-job через
+> DeviceHubClient вместо прямого вызова RobotClient.
+
 > **СИНХРОНИЗИРОВАНО с plans/robot-vfd-services.md (2026-06-11).** Базовая
 > инфраструктура УЖЕ СОЗДАНА тем планом и здесь НЕ делается заново:
 > - `Services/robot_comm` существует (порт **universal3** `pc_full.py`, НЕ u2;

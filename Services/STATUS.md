@@ -15,7 +15,8 @@ sandbox-снимок переведён на `webcam_controls.capture_single_fra
 | `sql` | production | SQLManager + Repository + UoW + QuerySet; выехал из `multiprocess_framework/modules/sql_module/` | ADR-121 |
 | `hikvision_camera` | production | Плагин-обёртка над HikSDK + core/sdk_app; выехал из плагинов | ADR-122 |
 | `modbus` | ready | Универсальный драйвер Modbus-TCP / RS485 (pymodbus 3.x); 3 слоя sdk/core/plugin + service; атомарные `transaction`, `RegisterTransport`, декларативная `RegisterMap` — фундамент сервисов устройств | — |
-| `robot_comm` | ready | Робот Delta (CVT pick-place + рисование) поверх modbus; карта universal3, мост `RegisterTransport` для ПЧ, sim_robot + FakeRobotTransport; владелец соединения — плагин robot_io | ADR-RC-001..005 |
+| `device_hub` | ready | Реестр устройств + DeviceManager + 4 драйвера (robot/vfd/hikvision/generic_modbus); always-on процесс `devices`, GUI-вкладки, YAML-протоколы | ADR-DH-001..005 |
+| `robot_comm` | ready | Робот Delta (CVT pick-place + рисование) поверх modbus; карта universal3, мост `RegisterTransport` для ПЧ, sim_robot + FakeRobotTransport; владелец соединения — процесс devices | ADR-RC-001..005 |
 | `vfd_comm` | ready | ПЧ INVT GD20, транспорт-агностик (`RegisterTransport`): сегодня мост через робота (mailbox+пульс poll), закладка DIRECT_MAP под прямой RTU; robot_comm НЕ импортирует | ADR-VC-001..003 |
 | `auth` | foundation | User/Role storage + RBAC API (PR1) | ADR-Auth-001..004 |
 | `Operation_crop` | utility | Утилита для нарезки кадров | — |

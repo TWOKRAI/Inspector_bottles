@@ -13,14 +13,14 @@
   зеркало ПЧ с heartbeat-семантикой реального Lua)
 - [x] `FakeRobotTransport` (in-process) + TCP `sim_robot` (SimDevice action-хук,
   pymodbus 3.13) — одно ядро
-- [x] `runtime.py` — модель владельца (один master на процесс)
+- [x] ~~`runtime.py`~~ — удалён; владелец соединения — процесс `devices` (ADR-DH-001)
 - [x] `service.py` — карточка каталога БЕЗ соединения
 - [x] CLI: pos/enc/cal/state/params/echo/job/mode
 - [x] Тесты: 40 (fake + TCP e2e)
 
 ## Не сделано / дальше
 
-- [ ] Плагины robot_io / robot_draw (Фаза 3 плана robot-vfd-services)
+- [x] ~~Плагины robot_io / robot_draw~~ → robot_io тонкий (job-форвард), robot_draw удалён (логика в RobotDriver)
 - [ ] Проверка на железе (`python -m Services.robot_comm pos` → X,Y,Z)
 - [ ] Lua-улучшения (idle-публикация ПЧ, PROTO_VERSION, ack/seq) — по плану
 

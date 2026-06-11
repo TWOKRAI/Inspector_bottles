@@ -1,10 +1,8 @@
 """RobotCommService — карточка сервиса в каталоге, БЕЗ собственного соединения.
 
-ВАЖНО: в отличие от эталонного ModbusService, этот сервис НЕ создаёт device и
-НЕ коннектится. Владелец соединения — исключительно плагин robot_io (модель
-владельца, см. runtime.py): второй TCP-master к одному mailbox робота дал бы
-гонку по проводу, которую локальные Lock'и не снимают. Все операции с роботом
-из GUI — round-trip командами к плагину.
+ВАЖНО: владелец соединения — процесс ``devices`` (always-on, DeviceHubPlugin).
+Раньше владельцем был плагин robot_io через runtime.py (co-location),
+теперь runtime.py удалён — все операции идут по IPC через DeviceHubClient.
 """
 
 from __future__ import annotations
@@ -13,7 +11,6 @@ from typing import Any
 
 from multiprocess_framework.modules.service_module import register_service
 
-from Services.robot_comm import runtime
 from Services.robot_comm.core.config import RobotConfig
 
 
@@ -34,17 +31,14 @@ class RobotCommService:
         return True
 
     def stop(self) -> bool:
-        """Сбросить карточку. Живое соединение (если есть) закрывает владелец-плагин."""
+        """Сбросить карточку. Живое соединение (если есть) закрывает процесс devices."""
         self._config = None
         self.status = "stopped"
         return True
 
     def get_status(self) -> dict:
-        """Статус карточки + (если владелец опубликовал клиент) живой статус транспорта."""
-        data: dict[str, Any] = {"state": self.status, "service": self.name, "owner": "plugin robot_io"}
+        """Статус карточки (метаданные)."""
+        data: dict[str, Any] = {"state": self.status, "service": self.name, "owner": "process devices"}
         if self._config is not None:
             data["robot"] = self._config.describe()
-        client = runtime.peek_client()
-        if client is not None:
-            data["client"] = client.get_status()
         return data

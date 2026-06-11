@@ -6,8 +6,8 @@
 - прямое RTU-подключение (закладка): transport = ModbusDevice(transport=rtu),
   карта DIRECT_MAP.
 
-vfd_comm НЕ импортирует robot_comm — связку (transport=runtime.get_client())
-делает плагин vfd_control на уровне Plugins.
+vfd_comm НЕ импортирует robot_comm — связку (bridge-транспорт через
+RobotClient) выполняет DeviceManager в процессе devices.
 
 Graceful degradation: импортируется без pymodbus (VFD_AVAILABLE=False).
 """
