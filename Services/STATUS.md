@@ -14,7 +14,8 @@ sandbox-снимок переведён на `webcam_controls.capture_single_fra
 |--------|-----------|-------------|-----|
 | `sql` | production | SQLManager + Repository + UoW + QuerySet; выехал из `multiprocess_framework/modules/sql_module/` | ADR-121 |
 | `hikvision_camera` | production | Плагин-обёртка над HikSDK + core/sdk_app; выехал из плагинов | ADR-122 |
-| `modbus` | ready | Драйвер Modbus-TCP / RS485 (pymodbus 3.x); 3 слоя sdk/core/plugin + service; io-плагин `modbus`, телеметрия через API; первый Service-плагин (plugin_paths += Services) | — |
+| `modbus` | ready | Универсальный драйвер Modbus-TCP / RS485 (pymodbus 3.x); 3 слоя sdk/core/plugin + service; атомарные `transaction`, `RegisterTransport`, декларативная `RegisterMap` — фундамент сервисов устройств | — |
+| `robot_comm` | ready | Робот Delta (CVT pick-place + рисование) поверх modbus; карта universal3, мост `RegisterTransport` для ПЧ, sim_robot + FakeRobotTransport; владелец соединения — плагин robot_io | ADR-RC-001..005 |
 | `auth` | foundation | User/Role storage + RBAC API (PR1) | ADR-Auth-001..004 |
 | `Operation_crop` | utility | Утилита для нарезки кадров | — |
 | `Region_processors` | utility | Регион-процессоры (заготовки для пайплайнов) | — |
