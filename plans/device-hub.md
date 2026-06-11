@@ -8,7 +8,7 @@
 
 - [x] **Фаза 0** — YAML-протоколы + загрузчик (protocol_file.py, 3 протокола, 80 parity/loader-тестов) — `32cdf2f8`
 - [x] **Фаза 1** — Services/device_hub: реестр, DeviceManager, драйверы, 90 тестов (см. git log: `feat(device_hub)`)
-- [ ] **Фаза 2** — процесс devices: плагин, base.yaml, клиент, баг protected, restart_policy
+- [x] **Фаза 2** — процесс devices: плагин, base.yaml, клиент, protected-регрессия OK, restart_policy=ADR-PH-001 (см. git log)
 - [ ] **Фаза 3** — тонкий robot_io, рецепт v4, devices_sync
 - [ ] **Фаза 4** — GUI: вкладки Робот/ПЧ/Камеры + devices_common
 - [ ] **Фаза 5** — миграция/чистка, ADR, sync доков
@@ -375,7 +375,7 @@ class DeviceHubClient:
 | Роутинг плагин→devices не обкатан (request шёл только GUI→backend) | Ранний spike в Фазе 2 (unit + integration smoke) до основной массы кода |
 | Блокирующий connect/операция душит командный поток (Б2: ВСЕ команды в одном message_processor-потоке) | async connect/disconnect; блокирующее >100 мс — только в device-воркере; тест конкурентности №6 |
 | Латентность IPC для e_capture энкодера | Измерить на sim; командный поток не занят блокирующим (Б2); компенсация по timestamp — follow-up |
-| Крэш процесса devices (Б1: RestartPolicy выключен по умолчанию — авто-рестарта СЕЙЧАС НЕТ) | Фаза 2 п.5: включить restart_policy для devices / зафиксировать ручной рестарт + GUI-индикация |
+| Крэш процесса devices (Б1: RestartPolicy выключен + protected ЯВНО исключены из авто-рестарта) | ADR-PH-001: крэш = ручной рестарт; protected нельзя делать non-protected (потеря always-on); quality деградация как индикация |
 | Ложный stale ПЧ при DRAW робота (Lua не обслуживает mailbox) | У4: VfdDriver гейтит poll по режиму носителя, quality=stale |
 | Hikvision SDK handle в always-on процессе | control-only, lazy import, hik_release (+retry), закрытие по таймауту бездействия |
 | Опечатки в YAML-протоколах | Строгая валидация загрузчика + parity-тесты с python-картами |
