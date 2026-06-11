@@ -23,4 +23,13 @@ processes:
     process_class: multiprocess_prototype.frontend.process.GuiProcess
     plugins: []
 
+  - process_name: devices
+    protected: true
+    process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+    plugins:
+      - plugin_class: Plugins.hub.device_hub.plugin.DeviceHubPlugin
+        plugin_name: device_hub
+        category: hub
+        registry_path: data/devices.yaml
+
 wires: []

@@ -118,6 +118,68 @@ class TestBaseMerge:
         assert "gui" not in names
         assert "camera_0" in names and "stitcher" in names
 
+    def test_protected_survives_merge_and_build(self):
+        """Регрессия У1 (device-hub): protected: true из base.yaml переживает
+        merge → SystemBlueprint → build → proc_dict["protected"] == True.
+
+        Сценарий: base={gui(protected), devices(protected)} + pipeline={worker}.
+        """
+        base = {
+            "name": "base",
+            "processes": [
+                {"process_name": "gui", "protected": True, "process_class": GUI_CLASS, "plugins": []},
+                {
+                    "process_name": "devices",
+                    "protected": True,
+                    "process_class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+                    "plugins": [],
+                },
+            ],
+            "wires": [],
+        }
+        pipeline = {
+            "name": "test_pipeline",
+            "processes": [
+                {
+                    "process_name": "worker",
+                    "process_class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+                    "plugins": [],
+                },
+            ],
+            "wires": [],
+        }
+        merged = merge_topologies(base, pipeline)
+        by_name = {p["process_name"]: p for p in merged["processes"]}
+        assert by_name["gui"]["protected"] is True
+        assert by_name["devices"]["protected"] is True
+        assert by_name["worker"].get("protected") in (None, False)
+
+        # Через SystemBlueprint → build → proc_dict
+        sb = SystemBlueprint.model_validate(merged)
+        protected_flags = {}
+        for cfg in sb.build_configs():
+            name, proc_dict = cfg.build()
+            protected_flags[name] = proc_dict.get("protected", False)
+        assert protected_flags["gui"] is True
+        assert protected_flags["devices"] is True
+        assert protected_flags["worker"] is False
+
+    def test_real_base_yaml_protected_gui(self):
+        """Реальный base.yaml: gui помечен protected, флаг доезжает до proc_dict."""
+        base = _base()
+        gui_proc = next(p for p in base["processes"] if p["process_name"] == "gui")
+        assert gui_proc.get("protected") is True
+        # Через build
+        merged = merge_topologies(base, _load_region_pipeline())
+        sb = SystemBlueprint.model_validate(merged)
+        for cfg in sb.build_configs():
+            if cfg.process_name == "gui":
+                _name, proc_dict = cfg.build()
+                assert proc_dict["protected"] is True
+                break
+        else:
+            pytest.fail("gui не найден в build_configs")
+
 
 class TestUnwrapRecipe:
     """Контракт unwrap_recipe: рецепт (editor-слой) → запускаемая топология."""
