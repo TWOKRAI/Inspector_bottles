@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-"""RobotWidgetController — проводка RobotControlWidget ↔ RobotPresenter.
+"""RobotWidgetController — проводка RobotControlWidget <-> RobotPresenter.
 
-Связывает сигналы виджета с командами presenter; по refresh опрашивает
-телеметрию/ПЧ/рисование (request/response) и применяет UX-ограничения:
+Фаза 4 device-hub: ПЧ-обработчики убраны (отдельная вкладка «ПЧ»). Все
+команды передают device_id выбранного робота. Телеметрия — bindings на
+``devices.state.<id>.status`` (push); кнопка «Обновить» — форс-запрос
+``robot_get_telemetry``.
+
+UX-ограничения:
 - CVT/DRAW активен только при free=1;
-- VFD-кнопки дизейблятся в DRAW-режиме (до Lua-улучшения №2);
-- comm_errors показывается с дельтой за период (RS-485 медленный, абсолют
-  сам по себе не информативен);
-- «связь жива» — по успешности чтений, не по TLM-heartbeat.
+- Gating CVT/DRAW по free сохранён.
 """
 
 from __future__ import annotations
@@ -21,16 +22,23 @@ from .widget import RobotControlWidget
 class RobotWidgetController:
     """Связывает виджет робота с presenter (команды + статусы)."""
 
-    def __init__(self, widget: RobotControlWidget, presenter: RobotPresenter) -> None:
+    def __init__(
+        self,
+        widget: RobotControlWidget,
+        presenter: RobotPresenter,
+        *,
+        bindings: Any = None,
+    ) -> None:
         self._widget = widget
         self._presenter = presenter
-        self._last_comm_errors: int | None = None
+        self._bindings = bindings
+        self._device_id: str | None = None
+        self._status_handles: list[Any] = []
         self._connect()
-        self.refresh_status()
 
     def _connect(self) -> None:
         w = self._widget
-        w.refresh_requested.connect(self.refresh_status)
+        w.refresh_requested.connect(self._on_refresh)
         w.send_job_requested.connect(self._on_send_job)
         w.stop_requested.connect(self._on_stop)
         w.mode_change_requested.connect(self._on_mode)
@@ -41,152 +49,172 @@ class RobotWidgetController:
         w.draw_square_requested.connect(self._on_draw_square)
         w.draw_abort_requested.connect(self._on_draw_abort)
         w.pen_apply_requested.connect(self._on_pen)
-        w.draw_speed_requested.connect(self._presenter.set_draw_speed)
-        w.overlap_requested.connect(self._presenter.set_overlap)
+        w.draw_speed_requested.connect(self._on_draw_speed)
+        w.overlap_requested.connect(self._on_overlap)
 
-        w.vfd_run_requested.connect(self._on_vfd_run)
-        w.vfd_set_freq_requested.connect(self._on_vfd_freq)
-        w.vfd_stop_requested.connect(self._on_vfd_stop)
-        w.vfd_reset_requested.connect(self._on_vfd_reset)
+    # ------------------------------------------------------------------ #
+    # Смена устройства
+    # ------------------------------------------------------------------ #
+
+    def set_device(self, device_id: str | None) -> None:
+        """Переключить на другое устройство: перепривязать bindings."""
+        self._unbind_state()
+        self._device_id = device_id
+        if not device_id:
+            self._widget.set_status("Робот: устройство не выбрано.")
+            self._widget.set_mode_switch_enabled(False)
+            return
+        self._bind_state(device_id)
+        self._widget.set_status(f"Робот: выбрано устройство {device_id}.")
+
+    # ------------------------------------------------------------------ #
+    # Bindings
+    # ------------------------------------------------------------------ #
+
+    def _unbind_state(self) -> None:
+        if self._bindings is not None:
+            for h in self._status_handles:
+                try:
+                    self._bindings.unbind(h)
+                except Exception:
+                    pass
+        self._status_handles.clear()
+
+    def _bind_state(self, device_id: str) -> None:
+        """Привязать виджет к devices.state.<id>.status (push-телеметрия)."""
+        self._unbind_state()
+        if self._bindings is None:
+            return
+        base = f"devices.state.{device_id}"
+        if hasattr(self._bindings, "bind_fanout"):
+            self._bindings.bind_fanout(
+                f"{base}.status",
+                self._on_telemetry_push,
+                owner=self._widget,
+            )
+
+    def _on_telemetry_push(self, _path: str, value: Any) -> None:
+        """Push-телеметрия из state-дерева."""
+        if isinstance(value, dict):
+            self._apply_telemetry(value)
+
+    def _apply_telemetry(self, data: dict) -> None:
+        """Обновить виджет по snapshot телеметрии робота."""
+        telemetry = data.get("telemetry")
+        if isinstance(telemetry, dict):
+            self._widget.set_status("Связь с роботом активна.")
+            self._widget.set_telemetry(
+                float(telemetry.get("x_mm", 0)),
+                float(telemetry.get("y_mm", 0)),
+                float(telemetry.get("z_mm", 0)),
+                float(telemetry.get("rz_deg", 0)),
+            )
+        free = bool(data.get("free", False))
+        self._widget.set_flags(
+            free,
+            bool((telemetry or {}).get("servo", False)),
+            int(data.get("encoder", 0)),
+            int(data.get("queue_len", 0)),
+        )
+        # Lua применяет режим раз за итерацию Motion — переключать только в idle
+        self._widget.set_mode_switch_enabled(free)
 
     # ------------------------------------------------------------------ #
     # Робот
     # ------------------------------------------------------------------ #
 
     def _on_send_job(self, x: float, y: float) -> None:
-        ok = self._presenter.send_test_job(x, y)
-        self._widget.set_status(f"Тест-job X={x:.1f} Y={y:.1f} отправлен." if ok else self._no_live_hint())
+        if not self._device_id:
+            return
+        self._widget.set_status(f"Тест-job X={x:.1f} Y={y:.1f} отправлен.")
+        self._presenter.send_test_job(self._device_id, x, y)
 
     def _on_stop(self, mode: int) -> None:
-        ok = self._presenter.abort(mode)
+        if not self._device_id:
+            return
         labels = {1: "СТОП: домой, в цикле", 2: "СТОП: домой, выход", 3: "СТОП: на месте"}
-        self._widget.set_status(labels.get(mode, "СТОП") if ok else self._no_live_hint())
+        self._widget.set_status(labels.get(mode, "СТОП"))
+        self._presenter.abort(self._device_id, mode)
 
     def _on_mode(self, mode: str) -> None:
-        ok = self._presenter.set_mode(mode)
-        if ok:
-            self._widget.set_status(f"Режим {mode.upper()}.")
-        else:
-            self._widget.set_status(self._no_live_hint())
-        self._apply_vfd_gating(mode)
+        if not self._device_id:
+            return
+        self._widget.set_status(f"Режим {mode.upper()}.")
+        self._presenter.set_mode(self._device_id, mode)
 
     def _on_servo(self, on: bool) -> None:
-        ok = self._presenter.set_servo(on)
-        self._widget.set_status(f"Серво {'ON' if on else 'OFF'}." if ok else self._no_live_hint())
+        if not self._device_id:
+            return
+        self._widget.set_status(f"Серво {'ON' if on else 'OFF'}.")
+        self._presenter.set_servo(self._device_id, on)
 
     def _on_manual(self, on: bool) -> None:
-        ok = self._presenter.set_manual_mode(on)
-        self._widget.set_status(
-            ("Ручной режим: авто-подача на паузе." if on else "Авто-подача возобновлена.")
-            if ok
-            else self._no_live_hint()
-        )
+        if not self._device_id:
+            return
+        self._widget.set_status("Ручной режим: авто-подача на паузе." if on else "Авто-подача возобновлена.")
+        self._presenter.set_manual_mode(self._device_id, on)
 
     # ------------------------------------------------------------------ #
     # Рисование
     # ------------------------------------------------------------------ #
 
     def _on_draw_circle(self, cx: float, cy: float, r: float, z: float) -> None:
-        ok = self._presenter.draw_circle(cx, cy, r, z)
-        text = f"Круг ({cx:.1f},{cy:.1f}) R={r:.1f} поставлен в очередь."
-        self._widget.set_status(text if ok else self._no_live_hint())
+        if not self._device_id:
+            return
+        self._widget.set_status(f"Круг ({cx:.1f},{cy:.1f}) R={r:.1f} поставлен в очередь.")
+        self._presenter.draw_circle(self._device_id, cx, cy, r, z)
 
     def _on_draw_square(self, x1: float, y1: float, x2: float, y2: float, z: float) -> None:
-        ok = self._presenter.draw_square(x1, y1, x2, y2, z)
-        self._widget.set_status("Квадрат поставлен в очередь." if ok else self._no_live_hint())
+        if not self._device_id:
+            return
+        self._widget.set_status("Квадрат поставлен в очередь.")
+        self._presenter.draw_square(self._device_id, x1, y1, x2, y2, z)
 
     def _on_draw_abort(self) -> None:
-        ok = self._presenter.abort_draw()
-        self._widget.set_status("Рисование прервано." if ok else self._no_live_hint())
+        if not self._device_id:
+            return
+        self._widget.set_status("Рисование прервано.")
+        self._presenter.abort_draw(self._device_id)
 
     def _on_pen(self, down: float, up: float) -> None:
-        ok = self._presenter.set_pen(down, up)
-        self._widget.set_status(f"Перо: down={down:.1f} up={up:.1f}." if ok else self._no_live_hint())
-
-    # ------------------------------------------------------------------ #
-    # ПЧ
-    # ------------------------------------------------------------------ #
-
-    def _on_vfd_run(self, freq: float, reverse: bool) -> None:
-        ok = self._presenter.vfd_run(freq, reverse)
-        direction = "реверс" if reverse else "вперёд"
-        self._widget.set_status(f"ПЧ: пуск {direction} {freq:.2f} Гц." if ok else self._no_live_hint())
-
-    def _on_vfd_freq(self, freq: float) -> None:
-        ok = self._presenter.vfd_set_freq(freq)
-        self._widget.set_status(f"ПЧ: частота {freq:.2f} Гц." if ok else self._no_live_hint())
-
-    def _on_vfd_stop(self) -> None:
-        ok = self._presenter.vfd_stop()
-        self._widget.set_status("ПЧ: стоп." if ok else self._no_live_hint())
-
-    def _on_vfd_reset(self) -> None:
-        ok = self._presenter.vfd_reset_fault()
-        self._widget.set_status("ПЧ: сброс аварии." if ok else self._no_live_hint())
-
-    # ------------------------------------------------------------------ #
-    # Статусы (request/response)
-    # ------------------------------------------------------------------ #
-
-    def refresh_status(self) -> None:
-        """Опросить телеметрию робота, статус ПЧ и прогресс рисования."""
-        if not self._presenter.is_live:
-            self._widget.set_status(
-                "Нода робота не запущена. Активируйте рецепт с плагином robot_io "
-                "(robot_io + vfd_control + robot_draw в одном процессе)."
-            )
-            self._widget.set_mode_switch_enabled(False)
-            self._widget.set_vfd_enabled(False, "ПЧ недоступен: нет ноды робота.")
+        if not self._device_id:
             return
-        self._widget.set_status("Опрос ноды робота…")
-        self._presenter.get_telemetry(self._on_telemetry)
-        self._presenter.get_vfd_status(self._on_vfd_status)
-        self._presenter.get_draw_progress(self._on_draw_progress)
+        self._widget.set_status(f"Перо: down={down:.1f} up={up:.1f}.")
+        self._presenter.set_pen(self._device_id, down, up)
 
-    def _on_telemetry(self, data: dict) -> None:
-        telemetry = data.get("telemetry")
-        if not isinstance(telemetry, dict):
-            # связь жива = успешность чтений: пустой ответ -> робот не отвечает
+    def _on_draw_speed(self, pct: int) -> None:
+        if not self._device_id:
+            return
+        self._presenter.set_draw_speed(self._device_id, pct)
+
+    def _on_overlap(self, mm: float) -> None:
+        if not self._device_id:
+            return
+        self._presenter.set_overlap(self._device_id, mm)
+
+    # ------------------------------------------------------------------ #
+    # Форс-запрос
+    # ------------------------------------------------------------------ #
+
+    def _on_refresh(self) -> None:
+        """Кнопка «Обновить»: форс-запрос телеметрии + рисования."""
+        if not self._device_id:
+            self._widget.set_status("Робот: устройство не выбрано.")
+            return
+        self._widget.set_status("Опрос робота…")
+        self._presenter.get_telemetry(self._device_id, self._on_telemetry_response)
+        self._presenter.get_draw_progress(self._device_id, self._on_draw_progress)
+
+    def _on_telemetry_response(self, data: dict) -> None:
+        """Обработчик ответа get_telemetry (pull)."""
+        if not data or not data.get("telemetry"):
             self._widget.set_status("Робот не отвечает (телеметрия пуста).")
             self._widget.set_mode_switch_enabled(False)
             return
-        self._widget.set_status("Связь с роботом активна.")
-        self._widget.set_telemetry(
-            float(telemetry.get("x_mm", 0)),
-            float(telemetry.get("y_mm", 0)),
-            float(telemetry.get("z_mm", 0)),
-            float(telemetry.get("rz_deg", 0)),
-        )
-        free = bool(data.get("free", False))
-        self._widget.set_flags(
-            free,
-            bool(telemetry.get("servo", False)),
-            int(data.get("encoder", 0)),
-            int(data.get("queue_len", 0)),
-        )
-        # Lua применяет режим раз за итерацию Motion — переключать только в idle
-        self._widget.set_mode_switch_enabled(free)
-        self._apply_vfd_gating(self._widget.current_mode())
-
-    def _on_vfd_status(self, data: dict) -> None:
-        vfd = data.get("vfd")
-        if not isinstance(vfd, dict):
-            self._widget.set_vfd_status("ПЧ: нет данных (мост недоступен?).")
-            return
-        comm = int(vfd.get("comm_errors") or 0)
-        delta = "" if self._last_comm_errors is None else f" (+{max(0, comm - self._last_comm_errors)})"
-        self._last_comm_errors = comm
-        running = "RUN" if vfd.get("running") else "STOP"
-        fault = vfd.get("fault") or 0
-        fault_text = f"  АВАРИЯ=0x{int(fault):04X}" if fault else ""
-        alive = "жив" if data.get("bridge_alive") else "ЗАМОРОЖЕН"
-        self._widget.set_vfd_status(
-            f"[{running}] f={float(vfd.get('out_freq_hz', 0)):.2f} Гц  I={float(vfd.get('current_a', 0)):.1f} А  "
-            f"Udc={float(vfd.get('dcbus_v', 0)):.1f} В  hb={vfd.get('heartbeat')} ({alive})  "
-            f"rsErr={comm}{delta}{fault_text}"
-        )
+        self._apply_telemetry(data)
 
     def _on_draw_progress(self, data: dict) -> None:
+        """Обработчик ответа draw_progress."""
         state = data.get("state", "—")
         busy = data.get("busy")
         point = data.get("progress_point", 0)
@@ -194,37 +222,22 @@ class RobotWidgetController:
         queued = data.get("queued", 0)
         self._widget.set_draw_status(f"Рисование: {state}  busy={busy}  точка {point}/{total}  в очереди {queued}")
 
-    def _no_live_hint(self) -> str:
-        return (
-            "Команда не отправлена: нет запущенной ноды робота. Активируйте рецепт "
-            "с robot_io (+ vfd_control / robot_draw в том же процессе)."
-        )
-
-    def _apply_vfd_gating(self, mode: str) -> None:
-        """VFD-кнопки в DRAW дизейблятся: Lua не обслуживает VFD_FLAG вне CVT-idle."""
-        if mode == "draw":
-            self._widget.set_vfd_enabled(
-                False,
-                "ПЧ недоступен в режиме DRAW: робот не обслуживает команды ПЧ во время "
-                "рисования (ограничение протокола; переключитесь в CVT).",
-            )
-        else:
-            self._widget.set_vfd_enabled(True, "")
-
 
 def build_robot_controls(
     *,
-    services: Any,
     runtime: Any,
     request_runner: Any,
-) -> tuple[RobotControlWidget, RobotWidgetController]:
-    """Собрать виджет + presenter + controller с зависимостями из services/runtime."""
+    bindings: Any = None,
+) -> tuple[RobotControlWidget, RobotWidgetController, RobotPresenter]:
+    """Собрать виджет + presenter + controller с зависимостями."""
     widget = RobotControlWidget()
     presenter = RobotPresenter(
-        bridge=getattr(runtime, "topology_bridge", None),
-        topology=getattr(services, "topology", None),
         command_sender=getattr(runtime, "command_sender", None),
         request_runner=request_runner,
     )
-    controller = RobotWidgetController(widget, presenter)
-    return widget, controller
+    controller = RobotWidgetController(
+        widget,
+        presenter,
+        bindings=bindings,
+    )
+    return widget, controller, presenter

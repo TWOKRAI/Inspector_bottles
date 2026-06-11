@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
-"""RobotControlWidget — поля ручного управления роботом Delta и ПЧ.
+"""RobotControlWidget — поля ручного управления роботом Delta.
 
 Виджет — «тупой» (View): только сигналы наружу + сеттеры состояния. Вся
-логика (IPC к плагинам) — в RobotPresenter, проводка — в RobotWidgetController.
+логика (IPC к процессу devices) — в RobotPresenter, проводка — в
+RobotWidgetController.
+
+Фаза 4 device-hub: группа ПЧ убрана (отдельная вкладка «ПЧ»); добавлен
+placeholder для DeviceComboController (kind=robot).
 
 UX-ограничения протокола (выставляются контроллером через сеттеры):
-- переключатель CVT/DRAW активен только при free=1;
-- VFD-кнопки дизейблятся в DRAW-режиме (Lua не обслуживает VFD_FLAG в DRAW).
+- переключатель CVT/DRAW активен только при free=1.
 """
 
 from __future__ import annotations
@@ -36,7 +39,7 @@ def _dspin(minimum: float, maximum: float, value: float, decimals: int = 1) -> Q
 
 
 class RobotControlWidget(QWidget):
-    """Панели: телеметрия, робот (CVT), рисование, ПЧ (лента)."""
+    """Панели: телеметрия, робот (CVT), рисование."""
 
     # --- сигналы наружу (controller подключается) ---
     refresh_requested = Signal()
@@ -53,22 +56,24 @@ class RobotControlWidget(QWidget):
     draw_speed_requested = Signal(int)
     overlap_requested = Signal(float)
 
-    vfd_run_requested = Signal(float, bool)  # freq, reverse
-    vfd_set_freq_requested = Signal(float)
-    vfd_stop_requested = Signal()
-    vfd_reset_requested = Signal()
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
+        # Placeholder для DeviceComboController — вставляется секцией
+        self._combo_placeholder = QVBoxLayout()
+        root.addLayout(self._combo_placeholder)
+
         root.addWidget(self._build_status_group())
         root.addWidget(self._build_robot_group())
         root.addWidget(self._build_draw_group())
-        root.addWidget(self._build_vfd_group())
         root.addStretch(1)
+
+    def add_combo_widget(self, widget: QWidget) -> None:
+        """Вставить виджет DeviceComboController в placeholder."""
+        self._combo_placeholder.addWidget(widget)
 
     # ------------------------------------------------------------------ #
     # Сборка групп
@@ -163,7 +168,6 @@ class RobotControlWidget(QWidget):
                 self._sq[0].value(), self._sq[1].value(), self._sq[2].value(), self._sq[3].value(), self._sq_z.value()
             )
         )
-        # колонка 5 занята кнопкой круга в строке 0; квадрат — в строке 1
         grid.addWidget(self._btn_square, 1, 5)
 
         grid.addWidget(QLabel("Перо down/up:"), 2, 0)
@@ -195,37 +199,6 @@ class RobotControlWidget(QWidget):
         grid.addWidget(self._btn_draw_abort, 4, 5)
         return group
 
-    def _build_vfd_group(self) -> QGroupBox:
-        group = QGroupBox("ПЧ (лента конвейера)")
-        grid = QGridLayout(group)
-
-        grid.addWidget(QLabel("Частота, Гц:"), 0, 0)
-        self._spin_freq = _dspin(0.0, 400.0, 10.0, decimals=2)
-        grid.addWidget(self._spin_freq, 0, 1)
-        self._btn_vfd_run = QPushButton("Пуск")
-        self._btn_vfd_run.clicked.connect(lambda: self.vfd_run_requested.emit(self._spin_freq.value(), False))
-        self._btn_vfd_rev = QPushButton("Пуск (реверс)")
-        self._btn_vfd_rev.clicked.connect(lambda: self.vfd_run_requested.emit(self._spin_freq.value(), True))
-        self._btn_vfd_freq = QPushButton("Сменить частоту")
-        self._btn_vfd_freq.clicked.connect(lambda: self.vfd_set_freq_requested.emit(self._spin_freq.value()))
-        self._btn_vfd_stop = QPushButton("Стоп")
-        self._btn_vfd_stop.clicked.connect(self.vfd_stop_requested.emit)
-        self._btn_vfd_reset = QPushButton("Сброс аварии")
-        self._btn_vfd_reset.clicked.connect(self.vfd_reset_requested.emit)
-        for col, btn in enumerate(
-            (self._btn_vfd_run, self._btn_vfd_rev, self._btn_vfd_freq, self._btn_vfd_stop, self._btn_vfd_reset),
-            start=2,
-        ):
-            grid.addWidget(btn, 0, col)
-
-        self._lbl_vfd = QLabel("ПЧ: —")
-        self._lbl_vfd.setWordWrap(True)
-        grid.addWidget(self._lbl_vfd, 1, 0, 1, 7)
-        self._lbl_vfd_hint = QLabel("")
-        self._lbl_vfd_hint.setWordWrap(True)
-        grid.addWidget(self._lbl_vfd_hint, 2, 0, 1, 7)
-        return group
-
     # ------------------------------------------------------------------ #
     # Сеттеры состояния (controller)
     # ------------------------------------------------------------------ #
@@ -251,16 +224,6 @@ class RobotControlWidget(QWidget):
     def current_mode(self) -> str:
         """Текущий выбранный режим."""
         return self._combo_mode.currentText()
-
-    def set_vfd_enabled(self, enabled: bool, hint: str = "") -> None:
-        """VFD-кнопки: дизейбл в DRAW-режиме (Lua не обслуживает VFD_FLAG в DRAW)."""
-        for btn in (self._btn_vfd_run, self._btn_vfd_rev, self._btn_vfd_freq, self._btn_vfd_stop, self._btn_vfd_reset):
-            btn.setEnabled(enabled)
-        self._lbl_vfd_hint.setText(hint)
-
-    def set_vfd_status(self, text: str) -> None:
-        """Строка статуса ПЧ."""
-        self._lbl_vfd.setText(text)
 
     def set_draw_status(self, text: str) -> None:
         """Строка прогресса рисования."""

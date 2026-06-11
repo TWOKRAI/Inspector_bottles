@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Тесты RobotPresenter — мост/sender/runner как моки, без Qt."""
+"""Тесты RobotPresenter — команды → процесс devices, без Qt.
+
+Фаза 4 device-hub: все команды идут в target ``devices`` с device_id.
+Резолв топологии убран.
+"""
 
 from __future__ import annotations
 
@@ -11,118 +15,103 @@ from multiprocess_prototype.frontend.widgets.tabs.services.robot.presenter impor
 )
 
 
-class FakeTopology:
-    """Топология с нодой робота (robot_io + vfd_control + robot_draw co-located)."""
-
-    def __init__(self, with_robot: bool = True) -> None:
-        plugins = (
-            [{"plugin_name": "robot_io"}, {"plugin_name": "vfd_control"}, {"plugin_name": "robot_draw"}]
-            if with_robot
-            else []
-        )
-        self._topo = {"processes": [{"process_name": "robot", "plugins": plugins}]}
-
-    def load(self):
-        topo = self._topo
-
-        class _Doc:
-            def to_dict(self) -> dict:
-                return topo
-
-        return _Doc()
-
-
 class ImmediateRunner:
     """RequestRunner-стаб: исполняет синхронно (тестам не нужен поток)."""
 
-    def submit(self, fn, on_result) -> None:
-        on_result(fn())
+    def submit(self, fn, on_result=None) -> None:
+        result = fn()
+        if on_result:
+            on_result(result)
 
 
-def make_presenter(*, with_robot: bool = True, bridge_ok: bool = True):
-    bridge = MagicMock()
-    bridge.on_action_command.return_value = bridge_ok
+def make_presenter():
     sender = MagicMock()
-    presenter = RobotPresenter(
-        bridge=bridge,
-        topology=FakeTopology(with_robot),
-        command_sender=sender,
-        request_runner=ImmediateRunner(),
+    runner = ImmediateRunner()
+    presenter = RobotPresenter(command_sender=sender, request_runner=runner)
+    return presenter, sender
+
+
+# --- адресация команд: все → devices с device_id ---
+
+
+def test_send_test_job_routed_to_devices() -> None:
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"status": "ok"}
+    presenter.send_test_job("robot_main", 10.5, -2.0)
+    sender.request_command.assert_called_with(
+        "devices", "robot_send_test_job", {"device_id": "robot_main", "x": 10.5, "y": -2.0}
     )
-    return presenter, bridge, sender
 
 
-# --- топология / is_live ---
+def test_abort_routed_to_devices() -> None:
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"status": "ok"}
+    presenter.abort("robot_main", 3)
+    sender.request_command.assert_called_with("devices", "robot_abort", {"device_id": "robot_main", "mode": 3})
 
 
-def test_finds_robot_process() -> None:
-    presenter, _b, _s = make_presenter()
-    assert presenter.robot_process_name() == "robot"
-    assert presenter.is_live
+def test_set_mode_routed_to_devices() -> None:
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"status": "ok"}
+    presenter.set_mode("robot_main", "draw")
+    sender.request_command.assert_called_with("devices", "robot_set_mode", {"device_id": "robot_main", "mode": "draw"})
 
 
-def test_no_robot_node() -> None:
-    presenter, _b, _s = make_presenter(with_robot=False)
-    assert presenter.robot_process_name() is None
-    assert not presenter.is_live
-
-
-def test_degraded_without_bridge() -> None:
-    presenter = RobotPresenter(bridge=None, topology=FakeTopology())
-    assert not presenter.is_live
-    assert presenter.send_test_job(1, 2) is False  # graceful, не падает
-
-
-# --- адресация команд: плагин + имя + аргументы ---
-
-
-def test_robot_commands_routed_to_robot_io() -> None:
-    presenter, bridge, _s = make_presenter()
-    presenter.send_test_job(10.5, -2.0)
-    bridge.on_action_command.assert_called_with("robot_io", "send_test_job", {"x": 10.5, "y": -2.0})
-    presenter.abort(3)
-    bridge.on_action_command.assert_called_with("robot_io", "abort", {"mode": 3})
-    presenter.set_mode("draw")
-    bridge.on_action_command.assert_called_with("robot_io", "set_mode", {"mode": "draw"})
-    presenter.set_manual_mode(True)
-    bridge.on_action_command.assert_called_with("robot_io", "set_manual_mode", {"on": True})
-
-
-def test_vfd_commands_routed_to_vfd_control() -> None:
-    presenter, bridge, _s = make_presenter()
-    presenter.vfd_run(50.0, reverse=True)
-    bridge.on_action_command.assert_called_with("vfd_control", "vfd_run", {"freq": 50.0, "reverse": True})
-    presenter.vfd_stop()
-    bridge.on_action_command.assert_called_with("vfd_control", "vfd_stop", {})
-
-
-def test_draw_commands_routed_to_robot_draw() -> None:
-    presenter, bridge, _s = make_presenter()
-    presenter.draw_circle(1, 2, 3, -0.5)
-    bridge.on_action_command.assert_called_with(
-        "robot_draw", "draw_circle", {"cx": 1.0, "cy": 2.0, "r": 3.0, "z": -0.5}
+def test_set_manual_mode() -> None:
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"status": "ok"}
+    presenter.set_manual_mode("robot_main", True)
+    sender.request_command.assert_called_with(
+        "devices", "robot_set_manual_mode", {"device_id": "robot_main", "on": True}
     )
-    presenter.abort_draw()
-    bridge.on_action_command.assert_called_with("robot_draw", "abort_draw", {})
+
+
+def test_draw_circle_routed_to_devices() -> None:
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"status": "ok"}
+    presenter.draw_circle("robot_main", 1, 2, 3, -0.5)
+    sender.request_command.assert_called_with(
+        "devices",
+        "robot_draw_circle",
+        {"device_id": "robot_main", "cx": 1.0, "cy": 2.0, "r": 3.0, "z": -0.5},
+    )
+
+
+def test_abort_draw() -> None:
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"status": "ok"}
+    presenter.abort_draw("robot_main")
+    sender.request_command.assert_called_with(
+        "devices",
+        "robot_draw_abort",
+        {"device_id": "robot_main"},
+    )
 
 
 # --- request/response ---
 
 
 def test_get_telemetry_round_trip() -> None:
-    presenter, _b, sender = make_presenter()
-    sender.request_command.return_value = {"status": "ok", "telemetry": {"x_mm": 1.0}, "free": True}
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {
+        "status": "ok",
+        "telemetry": {"x_mm": 1.0},
+        "free": True,
+    }
     results: list[dict] = []
-    presenter.get_telemetry(results.append)
-    sender.request_command.assert_called_once_with("robot", "get_telemetry", {})
+    presenter.get_telemetry("robot_main", results.append)
+    sender.request_command.assert_called_once_with(
+        "devices",
+        "robot_get_telemetry",
+        {"device_id": "robot_main"},
+    )
     assert results == [{"status": "ok", "telemetry": {"x_mm": 1.0}, "free": True}]
 
 
-def test_request_without_process_returns_empty() -> None:
-    presenter, _b, sender = make_presenter(with_robot=False)
+def test_request_without_sender_returns_empty() -> None:
+    presenter = RobotPresenter(command_sender=None, request_runner=None)
     results: list[dict] = []
-    presenter.get_vfd_status(results.append)
-    sender.request_command.assert_not_called()
+    presenter.get_telemetry("robot_main", results.append)
     assert results == [{}]
 
 

@@ -414,11 +414,15 @@ def build_services_sections(
 
     sections.append(build_hikvision_section(services, runtime, parent_key="cameras_root", title="Hikvision Camera"))
 
-    # Робот Delta — ручное управление роботом (CVT/рисование) и ПЧ (лентой) через
-    # round-trip команды плагинам robot_io / vfd_control / robot_draw активного рецепта.
+    # Робот Delta — ручное управление роботом (CVT/рисование) через процесс devices.
     from .robot import build_robot_section
 
     sections.append(build_robot_section(services, runtime, title="Робот Delta"))
+
+    # ПЧ (частотный преобразователь) — отдельная вкладка, управление через devices.
+    from .vfd import build_vfd_section
+
+    sections.append(build_vfd_section(services, runtime, title="ПЧ (частотный преобразователь)"))
 
     sections.append(
         SectionSpec(

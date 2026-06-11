@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Секция «Робот Delta» вкладки Services — ручное управление роботом и ПЧ.
+"""Секция «Робот Delta» вкладки Services — ручное управление роботом.
 
-Паттерн hikvision/: widget (тупой View) + presenter (IPC, без Qt) +
-controller (проводка) + section (SectionSpec).
+Фаза 4 device-hub: команды → процесс ``devices`` (DeviceHubPlugin);
+группа ПЧ вынесена в отдельную вкладку; DeviceComboController (kind=robot).
 """
 
 from .section import build_robot_section

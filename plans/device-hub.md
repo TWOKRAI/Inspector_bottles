@@ -10,7 +10,7 @@
 - [x] **Фаза 1** — Services/device_hub: реестр, DeviceManager, драйверы, 90 тестов (см. git log: `feat(device_hub)`)
 - [x] **Фаза 2** — процесс devices: плагин, base.yaml, клиент, protected-регрессия OK, restart_policy=ADR-PH-001 (см. git log)
 - [x] **Фаза 3** — тонкий robot_io, рецепт v4, devices_sync
-- [ ] **Фаза 4** — GUI: вкладки Робот/ПЧ/Камеры + devices_common
+- [x] **Фаза 4** — GUI: вкладки Робот/ПЧ/Камеры + devices_common
 - [ ] **Фаза 5** — миграция/чистка, ADR, sync доков
 - [ ] **Сквозная верификация** — pytest, sim E2E, qt-mcp smoke, protected-инвариант
 

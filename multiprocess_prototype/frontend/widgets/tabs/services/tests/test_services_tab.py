@@ -96,6 +96,8 @@ class TestServicesTab:
         # секция «Hikvision Camera» в группе «Камеры» (см. _sections.py).
         assert "hikvision_camera" not in keys
         assert "__hikvision__" in keys
+        # Фаза 4 device-hub: секция ПЧ всегда присутствует
+        assert "__vfd__" in keys
 
     def test_tab_handles_empty_registry(self, qtbot):
         """Tab пустой без ошибок если сервисов нет."""
@@ -137,13 +139,14 @@ class TestServicesTab:
         assert nn_idx < paths_idx
 
     def test_empty_registry_structure(self, qtbot):
-        """Без сервисов: services_root отсутствует, только placeholders + камера."""
+        """Без сервисов: services_root отсутствует, только placeholders + камера + ПЧ."""
         tab = ServicesTab(make_services_services(entries=[]))
         qtbot.addWidget(tab)
 
         keys = [s.key for s in tab._sections_specs]
         assert "services_root" not in keys
         assert "__camera__" in keys
+        assert "__vfd__" in keys
         assert "neural_networks" in keys
         assert "__service_paths__" in keys
 
