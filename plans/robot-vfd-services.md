@@ -1,5 +1,26 @@
 # План: универсальный Services/modbus + сервисы устройств Робот и ПЧ (CVT + рисование)
 
+## Статус выполнения (2026-06-11)
+
+- [x] **Фаза 0** — универсализация Services/modbus: transaction (abort-семантика),
+  RegisterTransport, RegisterMap, TCP_NODELAY; 106 тестов — `92bec98c`
+- [x] **Фаза 1** — Services/robot_comm: карта u3, RobotClient, sim_core +
+  FakeRobotTransport + TCP sim_robot, runtime (владелец), CLI (вкл. `cal`);
+  40 тестов, ADR-RC-001..005 — `85c5186c`
+- [x] **Фаза 2** — Services/vfd_comm: VfdClient поверх RegisterTransport,
+  poll()-пульс + ensure_alive, BRIDGE_MAP + закладка DIRECT_MAP; 15 тестов,
+  ADR-VC-001..003 — `669abbf5`
+- [x] **Фаза 3** — плагины robot_io (владелец + feeder + manual_mode) /
+  vfd_control (poll-worker + bridge_alive) / robot_draw (async worker);
+  31 тест — `345b42bd`
+- [x] **Фаза 4** — GUI-секция «Робот Delta» (widget/presenter/controller/section,
+  UX-gating CVT-DRAW/VFD); 16 тестов + qt-probe smoke — `d04ac614`
+- [x] **Фаза 5** — рецепт robot_demo.yaml (co-location ноды робота), ADR-MB-001/002,
+  синхронизация plans/robot-calibration.md — (этот коммит)
+- [ ] **Железо** — `python -m Services.robot_comm pos` → X,Y,Z; тест-job; ПЧ Run/Stop
+- [ ] **Lua-улучшения** (по приоритету ревью): idle-публикация зеркала ПЧ →
+  VFD_FLAG в DRAW → PROTO_VERSION → ack/seq → регистр ручного режима
+
 ## Context
 
 В `robot/universal3/` лежат отлаженные на железе программы: `pc_full.py` (ПК-клиент, Modbus
