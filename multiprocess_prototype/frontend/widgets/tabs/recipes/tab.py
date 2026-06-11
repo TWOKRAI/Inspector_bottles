@@ -63,6 +63,7 @@ class RecipesTab(BaseListNavTab):
         *,
         process_manager_proxy: object | None = None,
         persist_active_fn: object | None = None,
+        command_sender: object | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Инициализировать таб рецептов.
@@ -73,11 +74,14 @@ class RecipesTab(BaseListNavTab):
                 None → активация рецепта только меняет state, без применения к backend.
             persist_active_fn: колбэк persist активного рецепта в манифест (app.yaml).
                 None → persist отключён (активация не пишет app.yaml).
+            command_sender: CommandSender для IPC-вызовов к процессам (device_upsert_many).
+                None → upsert устройств при активации рецепта пропускается.
             parent: родительский виджет.
         """
         self._services = services
         self._pm_proxy = process_manager_proxy
         self._persist_active_fn = persist_active_fn
+        self._command_sender = command_sender
         self._selected_slug: str | None = None
         self._form_stack_index: int = 0
 
@@ -115,6 +119,10 @@ class RecipesTab(BaseListNavTab):
                 if self._pm_proxy is not None and hasattr(self._pm_proxy, "apply_topology")
                 else None
             )
+            # Фаза 3 device-hub: upsert устройств рецепта ДО apply_topology.
+            # Через RequestRunner на worker-потоке (НЕ из Qt main thread).
+            _upsert_fn = self._build_upsert_devices_fn() if self._command_sender is not None else None
+
             self._presenter = RecipesPresenter(
                 store=services.recipes,
                 view=self,
@@ -122,6 +130,7 @@ class RecipesTab(BaseListNavTab):
                 commands=services.commands,  # G.6.5: активация → dispatch(ActivateRecipe)
                 topology_store=services.topology,  # Этап 1: «Сохранить» (живой граф → рецепт)
                 persist_active_fn=self._persist_active_fn,  # persist #1: активный slug → app.yaml
+                upsert_devices_fn=_upsert_fn,  # Фаза 3 device-hub: upsert устройств рецепта
             )
             self._presenter.load()
 
@@ -139,11 +148,13 @@ class RecipesTab(BaseListNavTab):
 
         Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
         Этап 1: process_manager_proxy — применение рецепта к живому backend.
+        Фаза 3 device-hub: command_sender — upsert устройств рецепта в devices.
         """
         return cls(
             services,
             process_manager_proxy=runtime.process_manager_proxy,
             persist_active_fn=runtime.persist_active_recipe,
+            command_sender=runtime.command_sender,
         )
 
     # ------------------------------------------------------------------ #
@@ -339,6 +350,35 @@ class RecipesTab(BaseListNavTab):
 
         action_layout.addStretch(1)
         self._tab_layout.set_action_widget(action_widget)
+
+    # ------------------------------------------------------------------ #
+    #  Device upsert helper (Фаза 3 device-hub)                           #
+    # ------------------------------------------------------------------ #
+
+    def _build_upsert_devices_fn(self):
+        """Построить callback для upsert устройств рецепта в процесс devices.
+
+        Вызывается СИНХРОННО в on_set_active (presenter). Использует
+        command_sender.request_command (блокирующий round-trip) — поэтому
+        on_set_active должен вызываться с учётом того, что apply_topology_fn
+        уже fire-and-forget (не блокирует UI). Upsert быстрый (<100ms),
+        допустим в Qt main-thread (как остальные action-команды в presenter).
+
+        Returns:
+            Callable[[list[dict], str], None] — upsert_devices_fn.
+        """
+        sender = self._command_sender
+
+        def _upsert(devices: list[dict], slug: str) -> None:
+            if sender is None:
+                return
+            sender.send_action_command(
+                "devices",
+                "device_upsert_many",
+                {"devices": devices, "origin": f"recipe:{slug}", "connect": True},
+            )
+
+        return _upsert
 
     # ------------------------------------------------------------------ #
     #  Button handlers                                                     #

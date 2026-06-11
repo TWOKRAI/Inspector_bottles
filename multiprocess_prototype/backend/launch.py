@@ -66,21 +66,27 @@ def unwrap_recipe(raw: dict) -> dict:
     return bp
 
 
-def load_topology_dict(bp_path: Path) -> dict:
-    """Прочитать YAML/JSON-топологию ИЛИ рецепт в dict (с проверкой существования).
+def _load_raw_dict(bp_path: Path) -> dict:
+    """Прочитать YAML/JSON-файл в raw dict (без unwrap).
 
-    Рецепт (вложенный ``blueprint:``) разворачивается в топологию через
-    :func:`unwrap_recipe` — так бэкенд запускает и сырую topology, и GUI-рецепт.
+    Полезно для извлечения top-level секций (``devices:``) до unwrap_recipe.
     """
     if not bp_path.exists():
         print(f"[launch] ОШИБКА: топология не найдена: {bp_path}", file=sys.stderr)
         sys.exit(1)
     with open(bp_path, encoding="utf-8") as f:
         if bp_path.suffix in (".yaml", ".yml"):
-            raw = yaml.safe_load(f)
-        else:
-            raw = json.load(f)
-    return unwrap_recipe(raw)
+            return yaml.safe_load(f) or {}
+        return json.load(f)
+
+
+def load_topology_dict(bp_path: Path) -> dict:
+    """Прочитать YAML/JSON-топологию ИЛИ рецепт в dict (с проверкой существования).
+
+    Рецепт (вложенный ``blueprint:``) разворачивается в топологию через
+    :func:`unwrap_recipe` — так бэкенд запускает и сырую topology, и GUI-рецепт.
+    """
+    return unwrap_recipe(_load_raw_dict(bp_path))
 
 
 def merge_topologies(base_dict: dict, pipeline_dict: dict) -> dict:
@@ -181,9 +187,25 @@ class SystemBuilder:
 
         sys_config = load_system_config(app.system)
         bp_path = _resolve_pipeline(app, pipeline_override)
-        blueprint = load_topology_dict(bp_path)
+
+        # Извлекаем raw для device-секции ДО unwrap (Р11 device-hub)
+        raw = _load_raw_dict(bp_path)
+        blueprint = unwrap_recipe(raw)
+
         if app.base:
             blueprint = merge_topologies(load_topology_dict(app.base), blueprint)
+
+        # Boot-инжект recipe_devices в конфиг device_hub (Р11 device-hub)
+        from multiprocess_prototype.recipes.devices_sync import (
+            extract_recipe_devices,
+            inject_recipe_devices,
+        )
+
+        recipe_devices = extract_recipe_devices(raw)
+        if recipe_devices:
+            recipe_name = raw.get("name", bp_path.stem)
+            blueprint = inject_recipe_devices(blueprint, recipe_devices, recipe_name)
+
         return cls(
             sys_config=sys_config,
             blueprint=blueprint,

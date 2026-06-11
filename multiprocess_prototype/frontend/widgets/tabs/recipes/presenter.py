@@ -85,6 +85,7 @@ class RecipesPresenter:
         commands: "CommandDispatcher | None" = None,
         topology_store: Any | None = None,
         persist_active_fn: Callable[[str], None] | None = None,
+        upsert_devices_fn: Callable[[list[dict], str], None] | None = None,
     ) -> None:
         """Инициализировать presenter.
 
@@ -100,6 +101,11 @@ class RecipesPresenter:
                 загружает топологию рецепта в editor (Pipeline reload) и эмитит
                 RecipeActivated (cross-tab linking, G.6.6). None → legacy-путь
                 (только set_active, без загрузки в editor).
+            upsert_devices_fn: опциональный callback для upsert устройств рецепта
+                в процесс devices ДО apply_topology (Р11 device-hub).
+                Сигнатура: (devices: list[dict], slug: str) -> None.
+                Вызывается на worker-потоке (через RequestRunner).
+                None → пропуск (устройства не upsert'ятся при активации).
         """
         self._store = store
         self._view = view
@@ -111,6 +117,8 @@ class RecipesPresenter:
         self._topology_store = topology_store
         # persist активного рецепта в манифест (app.yaml). None → no-op.
         self._persist_active_fn = persist_active_fn
+        # Фаза 3 device-hub: upsert устройств рецепта ДО apply_topology.
+        self._upsert_devices_fn = upsert_devices_fn
         self._selected_slug: str | None = None
 
     # ------------------------------------------------------------------
@@ -339,6 +347,26 @@ class RecipesPresenter:
             return
 
         self._log_info(f"RecipesPresenter.on_set_active: активирован '{target_slug}'")
+
+        # Фаза 3 device-hub (Р11/У2): upsert устройств рецепта ДО apply_topology.
+        # devices — always-on, upsert+connect подготовят устройства заранее;
+        # иначе свежий robot_io стартует и форвардит в неподключённое устройство.
+        if self._upsert_devices_fn is not None:
+            recipe_raw_for_devices = self._store.read_raw(target_slug)
+            if recipe_raw_for_devices is not None:
+                from multiprocess_prototype.recipes.devices_sync import extract_recipe_devices
+
+                recipe_devs = extract_recipe_devices(recipe_raw_for_devices)
+                if recipe_devs:
+                    try:
+                        self._upsert_devices_fn(recipe_devs, target_slug)
+                        self._log_info(
+                            f"RecipesPresenter.on_set_active: upsert {len(recipe_devs)} устройств "
+                            f"ДО apply_topology для '{target_slug}'"
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        # Деградация: upsert не удался — логируем, но не блокируем активацию
+                        self._log_warning(f"RecipesPresenter.on_set_active: upsert устройств не удался: {exc}")
 
         # Если задан apply_topology_fn — выполняем горячую замену топологии
         if self._apply_topology_fn is not None:

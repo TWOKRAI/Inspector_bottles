@@ -1,27 +1,42 @@
-# Рецепт robot_demo — нода робота Delta (CVT + рисование + ПЧ) + камера.
+# Рецепт robot_demo v4 — камера + тонкий robot_io (job-форвардер в devices).
 #
-# ТОПОЛОГИЧЕСКОЕ ТРЕБОВАНИЕ: robot_io (владелец соединения), vfd_control и
-# robot_draw обязаны жить в ОДНОМ процессе — клиент робота публикуется в
-# process-local runtime (Services.robot_comm.runtime) и через границу
-# процессов не виден.
+# Архитектура: процесс devices (always-on, base.yaml) владеет соединениями
+# с роботом и ПЧ. Плагин robot_io только форвардит job-координаты из pipeline
+# в devices через IPC (DeviceHubClient).
 #
-# Управление — со вкладки Services -> «Робот Delta» (тест-job, стопы,
-# CVT/DRAW, рисование, ПЧ) или CLI: python -m Services.robot_comm pos.
+# Управление — со вкладки Services -> «Робот Delta» / «ПЧ» (IPC в devices).
 #
 # Запуск без железа (симулятор робота — в ОТДЕЛЬНОМ терминале, ПЕРВЫМ):
-#   1) python -m Services.robot_comm.server          # sim: 127.0.0.1:5021
-#   2) поменять host/port ниже на 127.0.0.1/5021
+#   1) python -m Services.robot_comm.server          # sim: 127.0.0.1:5021, unit 2
+#   2) В секции devices ниже: поменять host/port устройства robot_main
+#      на 127.0.0.1 / 5021
 #   3) python multiprocess_prototype/run.py recipes/robot_demo.yaml
 #
 # С железом: host 192.168.1.7, port 502 (дефолты ниже).
 # Предусловие: pip install '.[modbus]' (pymodbus).
 name: robot_demo
-version: 3
-description: "Camera → GUI + нода робота Delta (robot_io + vfd_control + robot_draw)"
+version: 4
+description: "Camera + тонкий robot_io (job-форвард в devices hub)"
+
+# Устройства рецепта — upsert в реестр devices при активации (Р11).
+# Формат DeviceEntry: id, kind, protocol, transport, params.
+devices:
+  - id: robot_main
+    name: "Робот Delta"
+    kind: robot
+    protocol: delta_universal3
+    transport: {type: tcp, host: 192.168.1.7, port: 502, unit_id: 2}
+    params: {word_order: little, feed_poll_s: 0.05, telemetry_interval_s: 0.5}
+  - id: vfd_belt
+    name: "ПЧ лента"
+    kind: vfd
+    protocol: gd20_bridge
+    transport: {type: bridge, bridge: robot_main}
+    params: {freq_max_hz: 50.0, default_freq_hz: 10.0, poll_interval_s: 0.5, stale_polls_limit: 6}
 
 blueprint:
   name: robot_demo
-  description: "Робот Delta: CVT pick-place, рисование, ПЧ (лента) через RS-485-мост"
+  description: "Робот Delta: тонкий job-форвардер в devices hub"
 
   processes:
     # --- Камера: захват кадров (превью в дисплей) ---
@@ -43,40 +58,20 @@ blueprint:
           fps: 25
           auto_start: true
 
-    # --- Нода робота: владелец соединения + потребители (co-location!) ---
+    # --- Тонкий robot_io: job-форвардер в devices ---
     - process_name: robot
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
       chain_targets: []
       plugins:
-        # Владелец RobotClient: создаёт/коннектит/публикует в runtime, feeder CVT
         - plugin_class: Plugins.io.robot_io.plugin.RobotIoPlugin
           plugin_name: robot_io
           category: io
-          host: 192.168.1.7
-          port: 502
-          unit_id: 2
-          word_order: little
-          auto_connect: true
-        # ПЧ (лента) через RS-485-мост робота — клиента берёт из runtime
-        - plugin_class: Plugins.control.vfd_control.plugin.VfdControlPlugin
-          plugin_name: vfd_control
-          category: control
-          freq_max_hz: 50.0
-          default_freq_hz: 10.0
-          poll_interval_s: 0.5
-        # Рисование фигур — клиента берёт из runtime, исполняет асинхронно
-        - plugin_class: Plugins.control.robot_draw.plugin.RobotDrawPlugin
-          plugin_name: robot_draw
-          category: control
-          pen_down_mm: 0.0
-          pen_up_mm: 10.0
-          draw_speed_pct: 30
-          auto_draw: false
+          device_id: robot_main
 
   wires:
     # Кадры в ноду робота: item с ключом robot_job ({x_mm, y_mm}) попадёт в
-    # очередь feeder (upstream-детектор/калибровка добавится позже).
+    # forward-deque (upstream-детектор/калибровка добавится позже).
     - source: camera_0.capture.frame
       target: robot.robot_io.robot_job
 
