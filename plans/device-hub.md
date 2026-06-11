@@ -4,6 +4,16 @@
 **Refs в коммитах:** `Refs: plans/device-hub.md`
 **Ревью:** Fable, APPROVE WITH NOTES — Б1/Б2 и улучшения 1–8 внесены в текст ниже (помечены `[ревью]`)
 
+## Статус выполнения
+
+- [x] **Фаза 0** — YAML-протоколы + загрузчик (protocol_file.py, 3 протокола, 80 parity/loader-тестов) — `32cdf2f8`
+- [x] **Фаза 1** — Services/device_hub: реестр, DeviceManager, драйверы, 90 тестов (см. git log: `feat(device_hub)`)
+- [ ] **Фаза 2** — процесс devices: плагин, base.yaml, клиент, баг protected, restart_policy
+- [ ] **Фаза 3** — тонкий robot_io, рецепт v4, devices_sync
+- [ ] **Фаза 4** — GUI: вкладки Робот/ПЧ/Камеры + devices_common
+- [ ] **Фаза 5** — миграция/чистка, ADR, sync доков
+- [ ] **Сквозная верификация** — pytest, sim E2E, qt-mcp smoke, protected-инвариант
+
 ## Контекст
 
 Фазы 0–5 плана `robot-vfd-services` дали рабочие сервисы (`Services/modbus` универсальный + `robot_comm`/`vfd_comm` + симулятор + parity-тесты с отлаженным `pc_full.py`). Но архитектура владения не устроила владельца:

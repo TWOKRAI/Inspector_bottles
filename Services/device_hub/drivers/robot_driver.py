@@ -1,0 +1,581 @@
+"""RobotDriver — драйвер робота Delta для device_hub.
+
+Порт семантики из Plugins/io/robot_io (feeder-очередь CVT, throttled reconnect,
+телеметрия) + draw-очереди из Plugins/control/robot_draw (рисование фигур).
+
+ПОТОКОБЕЗОПАСНОСТЬ: быстрые операции (send_job, set_*, чтения) могут вызываться
+из чужого потока (командный поток процесса) параллельно tick(). Безопасность
+обеспечивается:
+    - RLock внутри ModbusDevice (атомарность транзакций)
+    - deque (thread-safe append/popleft для job-очереди)
+    - queue.Queue (thread-safe для draw-очереди)
+Draw-операции блокирующие — допустимо, т.к. tick() крутится в выделенном
+per-device воркере. Команды draw_abort минуют очередь через client.draw_abort().
+
+Mode: ``cvt`` (конвейер, дефолт) | ``draw`` (рисование) — expose в snapshot,
+нужен VfdDriver для gating и GUI.
+"""
+
+from __future__ import annotations
+
+import queue
+from collections import deque
+from typing import Any
+
+from Services.device_hub.drivers.base import BaseDeviceDriver
+
+# Минимальный интервал между попытками переподключения, сек
+_RECONNECT_THROTTLE_SEC = 2.0
+# Ожидание освобождения робота перед переключением в DRAW, сек
+_MODE_SWITCH_WAIT_S = 5.0
+
+
+class RobotDriver(BaseDeviceDriver):
+    """Драйвер робота Delta: feeder CVT + draw-очередь + телеметрия.
+
+    Args:
+        entry:     DeviceEntry с kind=robot.
+        protocol:  DeviceProtocol (delta_universal3).
+        transport: Инъекция RegisterTransport для тестов (FakeRobotTransport).
+                   Если None — строится в connect() через build_transport.
+        clock:     Источник монотонного времени.
+        sleep:     Функция паузы.
+    """
+
+    kind = "robot"
+
+    def __init__(
+        self,
+        entry: Any,
+        protocol: Any = None,
+        *,
+        transport: Any = None,
+        clock: Any = None,
+        sleep: Any = None,
+    ) -> None:
+        super().__init__(entry, protocol, clock=clock, sleep=sleep)
+
+        # Транспорт (инъекция для тестов, иначе None до connect)
+        self._transport = transport
+
+        # RobotClient (лениво в connect)
+        self._client: Any = None
+
+        # Feeder-очередь CVT: (x_mm, y_mm, e_capture)
+        # deque — thread-safe append/popleft
+        self._job_queue: deque[tuple[float, float, int]] = deque()
+
+        # Draw-очередь: dict с заданиями рисования
+        # queue.Queue — thread-safe
+        self._draw_queue: queue.Queue[dict] = queue.Queue()
+
+        # Режим: cvt | draw
+        self._mode: str = "cvt"
+
+        # Ручной режим: пауза авто-подачи из очереди
+        self.manual_mode: bool = False
+
+        # Throttled reconnect
+        self._last_reconnect: float = 0.0
+
+        # Интервал телеметрии (из params или дефолт)
+        self._telemetry_interval_s: float = float(entry.params.get("telemetry_interval_s", 0.5))
+        self._feed_poll_s: float = float(entry.params.get("feed_poll_s", 0.05))
+        self._last_telemetry: float = 0.0
+
+        # Счётчики заданий
+        self.jobs_sent: int = 0
+        self.jobs_done: int = 0
+        self.jobs_failed: int = 0
+        self.draws_done: int = 0
+
+        # Draw-параметры (дефолты из robot_draw)
+        self._pen_down_mm: float = float(entry.params.get("pen_down_mm", -50.0))
+        self._pen_up_mm: float = float(entry.params.get("pen_up_mm", -40.0))
+        self._draw_speed_pct: int = int(entry.params.get("draw_speed_pct", 30))
+        self._overlap_mm: float = float(entry.params.get("overlap_mm", 1.0))
+        self._draw_timeout_s: float = float(entry.params.get("draw_timeout_s", 120.0))
+        self._lift_mm: float = float(entry.params.get("lift_mm", 10.0))
+
+        # Состояние рисования
+        self._draw_busy: bool = False
+        self._draw_state: str = "idle"
+
+    # ------------------------------------------------------------------ #
+    # Соединение
+    # ------------------------------------------------------------------ #
+
+    @property
+    def is_connected(self) -> bool:
+        """Установлено ли соединение с роботом."""
+        return self._client is not None and self._client.is_connected
+
+    @property
+    def transport(self) -> Any:
+        """RegisterTransport клиента (для bridge-устройств типа VFD)."""
+        return self._client
+
+    @property
+    def mode(self) -> str:
+        """Текущий режим: ``cvt`` | ``draw``."""
+        return self._mode
+
+    def connect(self) -> bool:
+        """Подключиться к роботу. Создаёт RobotClient если ещё нет."""
+        if self._client is None:
+            self._client = self._build_client()
+        try:
+            ok = self._client.connect()
+        except Exception:
+            self._record_err()
+            self._last_quality = "bad"
+            return False
+        if ok:
+            self._last_quality = "good"
+        else:
+            self._last_quality = "bad"
+        return ok
+
+    def disconnect(self) -> None:
+        """Закрыть соединение."""
+        if self._client is not None:
+            try:
+                self._client.disconnect()
+            except Exception:
+                pass
+        self._last_quality = "bad"
+
+    # ------------------------------------------------------------------ #
+    # Tick — главный цикл (крутится в per-device воркере)
+    # ------------------------------------------------------------------ #
+
+    def tick(self, stop_event: Any = None) -> dict | None:
+        """Один шаг: reconnect -> телеметрия -> feeder -> draw -> snapshot."""
+        if not self._ensure_connected():
+            return self.snapshot(quality="bad")
+
+        self._publish_telemetry_maybe()
+
+        # Draw-очередь приоритет (если есть задания рисования)
+        if not self._draw_queue.empty():
+            self._execute_draw(stop_event)
+
+        # CVT feeder (если не manual_mode и не draw)
+        if not self.manual_mode and self._mode == "cvt" and self._job_queue:
+            try:
+                if self._client.is_free():
+                    job = self._job_queue.popleft() if self._job_queue else None
+                    if job is not None:
+                        self._deliver(job, stop_event)
+            except Exception:
+                self._record_err()
+
+        return self.snapshot(quality="good")
+
+    # ------------------------------------------------------------------ #
+    # Feeder CVT (порт robot_io/plugin.py:151-263)
+    # ------------------------------------------------------------------ #
+
+    def enqueue_job(self, x_mm: float, y_mm: float) -> bool:
+        """Поставить CVT-задание в очередь со снимком энкодера.
+
+        Вызывается из командного потока (thread-safe: deque.append).
+        """
+        if not self.is_connected:
+            return False
+        try:
+            e_capture = self._client.read_encoder()
+        except Exception:
+            self._record_err()
+            return False
+        self._job_queue.append((x_mm, y_mm, e_capture))
+        return True
+
+    def _deliver(self, job: tuple[float, float, int], stop_event: Any) -> None:
+        """Отдать задание: send_job -> ждать приёма -> ждать завершения.
+
+        Порт _deliver из robot_io.
+        """
+
+        x_mm, y_mm, e_capture = job
+        try:
+            self._client.send_job(x_mm, y_mm, e_capture)
+        except Exception:
+            self.jobs_failed += 1
+            self._record_err()
+            return
+        self.jobs_sent += 1
+        self._record_ok()
+
+        # Ждать приёма (job_flag -> 0)
+        accept_wait_s = float(self.entry.params.get("accept_wait_s", 5.0))
+        if not self._wait_condition(self._client.job_accepted, accept_wait_s, stop_event):
+            # Не принял — вернуть в начало очереди
+            self._job_queue.appendleft(job)
+            return
+
+        # Ждать завершения (is_free)
+        job_wait_s = float(self.entry.params.get("job_wait_s", 10.0))
+        if not self._wait_condition(self._client.is_free, job_wait_s, stop_event):
+            self.jobs_failed += 1
+            return
+
+        self.jobs_done += 1
+
+    # ------------------------------------------------------------------ #
+    # Draw (порт robot_draw/plugin.py)
+    # ------------------------------------------------------------------ #
+
+    def _execute_draw(self, stop_event: Any) -> None:
+        """Исполнить одно задание рисования из очереди."""
+        try:
+            task = self._draw_queue.get_nowait()
+        except queue.Empty:
+            return
+
+        self._draw_state = "drawing"
+        self._draw_busy = True
+
+        try:
+            self._prepare_draw(task, stop_event)
+            ok = self._run_figure(task)
+        except Exception:
+            self._draw_state = "failed"
+            self._draw_busy = False
+            self._record_err()
+            return
+        finally:
+            self._draw_busy = False
+
+        if ok:
+            self._draw_state = "done"
+            self.draws_done += 1
+            self._record_ok()
+        else:
+            self._draw_state = "failed"
+
+    def _prepare_draw(self, task: dict, stop_event: Any) -> None:
+        """Переключить в DRAW (дождавшись free) и применить параметры пера."""
+        t_end = self._clock() + _MODE_SWITCH_WAIT_S
+        while self._clock() < t_end:
+            if stop_event is not None and stop_event.is_set():
+                break
+            try:
+                if self._client.is_free():
+                    break
+            except Exception:
+                break
+            self._sleep(0.05)
+
+        self._client.set_mode("draw")
+        self._mode = "draw"
+
+        z = task.get("z")
+        if z is not None:
+            self._client.set_pen(float(z), float(z) + self._lift_mm)
+        else:
+            self._client.set_pen(self._pen_down_mm, self._pen_up_mm)
+        self._client.set_draw_speed(self._draw_speed_pct)
+        self._client.set_overlap(self._overlap_mm)
+
+    def _run_figure(self, task: dict) -> bool:
+        """Исполнить фигуру задания."""
+        from Services.robot_comm.core.datatypes import DrawPoint
+
+        kind = task.get("kind", "points")
+        timeout = self._draw_timeout_s
+
+        if kind == "circle":
+            return self._client.draw_circle(task["cx"], task["cy"], task["r"], timeout=timeout)
+
+        # Полилиния
+        points_raw = task.get("points", [])
+        points = [
+            p if isinstance(p, DrawPoint) else DrawPoint(float(p["x_mm"]), float(p["y_mm"]), int(p.get("pen", 1)))
+            for p in points_raw
+        ]
+        if not points:
+            return False
+        return self._client.draw(points, timeout=timeout)
+
+    # ------------------------------------------------------------------ #
+    # Reconnect (throttled, порт robot_io)
+    # ------------------------------------------------------------------ #
+
+    def _ensure_connected(self) -> bool:
+        """Гарантировать соединение: throttled-reconnect."""
+        if self.is_connected:
+            return True
+        now = self._clock()
+        if now - self._last_reconnect < _RECONNECT_THROTTLE_SEC:
+            return False
+        self._last_reconnect = now
+        self._record_reconnect()
+        return self.connect()
+
+    # ------------------------------------------------------------------ #
+    # Телеметрия
+    # ------------------------------------------------------------------ #
+
+    def _publish_telemetry_maybe(self) -> None:
+        """Раз в telemetry_interval_s: прочитать телеметрию."""
+        now = self._clock()
+        if now - self._last_telemetry < self._telemetry_interval_s:
+            return
+        self._last_telemetry = now
+        try:
+            t0 = self._clock()
+            self._client.read_telemetry()
+            latency = (self._clock() - t0) * 1000
+            self._record_ok(latency)
+        except Exception:
+            self._record_err()
+
+    # ------------------------------------------------------------------ #
+    # Call — диспетчер операций (таблица из плана Р7)
+    # ------------------------------------------------------------------ #
+
+    def call(self, op: str, args: dict) -> dict:
+        """Диспетчер операций робота.
+
+        Быстрые операции (send_job, set_*, чтения) потокобезопасны благодаря
+        RLock внутри ModbusDevice + thread-safe коллекции.
+        """
+        handler = self._OPS.get(op)
+        if handler is None:
+            return {"status": "error", "message": f"Неизвестная операция робота: {op!r}"}
+        try:
+            return handler(self, args)
+        except Exception as exc:
+            self._record_err()
+            return {"status": "error", "message": str(exc)}
+
+    # --- обработчики операций ---
+
+    def _op_send_test_job(self, args: dict) -> dict:
+        x_mm, y_mm = float(args["x"]), float(args["y"])
+        ok = self.enqueue_job(x_mm, y_mm)
+        return {"status": "ok" if ok else "error", "queue_len": len(self._job_queue)}
+
+    def _op_abort(self, args: dict) -> dict:
+        mode = int(args.get("mode", 1))
+        self._client.stop(mode)
+        return {"status": "ok", "mode": mode}
+
+    def _op_set_mode(self, args: dict) -> dict:
+        mode = str(args.get("mode", "cvt"))
+        self._client.set_mode(mode)
+        self._mode = mode
+        return {"status": "ok", "mode": mode}
+
+    def _op_set_servo(self, args: dict) -> dict:
+        on = bool(args.get("on", True))
+        self._client.set_servo(on)
+        return {"status": "ok", "on": on}
+
+    def _op_set_robot_config(self, args: dict) -> dict:
+        fields = {k: v for k, v in args.items() if isinstance(v, (int, float))}
+        if not fields:
+            return {"status": "error", "message": "нет числовых полей конфига"}
+        self._client.set_config(**fields)
+        return {"status": "ok", "fields": fields}
+
+    def _op_get_robot_config(self, _args: dict) -> dict:
+        return {"status": "ok", "config": self._client.get_config()}
+
+    def _op_get_telemetry(self, _args: dict) -> dict:
+        t = self._client.read_telemetry()
+        free = self._client.is_free()
+        enc = self._client.read_encoder()
+        return {
+            "status": "ok",
+            "telemetry": t.to_dict(),
+            "free": free,
+            "encoder": enc,
+            "queue_len": len(self._job_queue),
+        }
+
+    def _op_read_echo(self, _args: dict) -> dict:
+        return {"status": "ok", "echo": self._client.read_echo().to_dict()}
+
+    def _op_set_manual_mode(self, args: dict) -> dict:
+        self.manual_mode = bool(args.get("on", True))
+        return {"status": "ok", "manual_mode": self.manual_mode}
+
+    def _op_clear_queue(self, _args: dict) -> dict:
+        dropped = len(self._job_queue)
+        self._job_queue.clear()
+        return {"status": "ok", "dropped": dropped}
+
+    def _op_enqueue_job(self, args: dict) -> dict:
+        x_mm, y_mm = float(args["x_mm"]), float(args["y_mm"])
+        ok = self.enqueue_job(x_mm, y_mm)
+        return {"status": "ok" if ok else "error", "queue_len": len(self._job_queue)}
+
+    # --- draw-операции ---
+
+    def _op_draw_polyline(self, args: dict) -> dict:
+        points = args.get("points", [])
+        if not points:
+            return {"status": "error", "message": "пустой список точек"}
+        self._draw_queue.put({"kind": "points", "points": points, "z": args.get("z")})
+        return {"status": "ok", "queued": self._draw_queue.qsize()}
+
+    def _op_draw_circle(self, args: dict) -> dict:
+        task = {
+            "kind": "circle",
+            "cx": float(args["cx"]),
+            "cy": float(args["cy"]),
+            "r": float(args["r"]),
+            "z": args.get("z"),
+        }
+        self._draw_queue.put(task)
+        return {"status": "ok", "queued": self._draw_queue.qsize()}
+
+    def _op_draw_square(self, args: dict) -> dict:
+        from Services.robot_comm.core.datatypes import DrawPoint
+
+        x1, y1 = float(args["x1"]), float(args["y1"])
+        x2, y2 = float(args["x2"]), float(args["y2"])
+        corners = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+        points = [DrawPoint(corners[0][0], corners[0][1], 0), DrawPoint(corners[0][0], corners[0][1], 1)]
+        points += [DrawPoint(cx, cy, 1) for cx, cy in corners[1:] + [corners[0]]]
+        self._draw_queue.put({"kind": "points", "points": points, "z": args.get("z")})
+        return {"status": "ok", "queued": self._draw_queue.qsize()}
+
+    def _op_draw_set_pen(self, args: dict) -> dict:
+        self._pen_down_mm = float(args["down"])
+        self._pen_up_mm = float(args["up"])
+        return {"status": "ok", "down": self._pen_down_mm, "up": self._pen_up_mm}
+
+    def _op_draw_set_speed(self, args: dict) -> dict:
+        self._draw_speed_pct = max(1, min(100, int(args["pct"])))
+        return {"status": "ok", "pct": self._draw_speed_pct}
+
+    def _op_draw_set_overlap(self, args: dict) -> dict:
+        self._overlap_mm = max(0.1, float(args["mm"]))
+        return {"status": "ok", "mm": self._overlap_mm}
+
+    def _op_draw_abort(self, _args: dict) -> dict:
+        """Прервать рисование НЕМЕДЛЕННО (минуя очередь — thread-safe)."""
+        self._client.draw_abort()
+        # Очистить невыполненные задания
+        dropped = 0
+        while not self._draw_queue.empty():
+            try:
+                self._draw_queue.get_nowait()
+                dropped += 1
+            except queue.Empty:
+                break
+        self._draw_busy = False
+        self._draw_state = "idle"
+        return {"status": "ok", "dropped_tasks": dropped}
+
+    def _op_draw_progress(self, _args: dict) -> dict:
+        result: dict[str, Any] = {
+            "status": "ok",
+            "state": self._draw_state,
+            "draws_done": self.draws_done,
+            "queued": self._draw_queue.qsize(),
+        }
+        if self.is_connected:
+            try:
+                result["busy"] = self._client.draw_busy()
+                result["progress_point"] = self._client.draw_progress()
+            except Exception as exc:
+                result["read_error"] = str(exc)
+        return result
+
+    # Таблица операций
+    _OPS: dict[str, Any] = {
+        "send_test_job": _op_send_test_job,
+        "abort": _op_abort,
+        "set_mode": _op_set_mode,
+        "set_servo": _op_set_servo,
+        "set_robot_config": _op_set_robot_config,
+        "get_robot_config": _op_get_robot_config,
+        "get_telemetry": _op_get_telemetry,
+        "read_echo": _op_read_echo,
+        "set_manual_mode": _op_set_manual_mode,
+        "clear_queue": _op_clear_queue,
+        "enqueue_job": _op_enqueue_job,
+        "draw_polyline": _op_draw_polyline,
+        "draw_circle": _op_draw_circle,
+        "draw_square": _op_draw_square,
+        "draw_set_pen": _op_draw_set_pen,
+        "draw_set_speed": _op_draw_set_speed,
+        "draw_set_overlap": _op_draw_set_overlap,
+        "draw_abort": _op_draw_abort,
+        "draw_progress": _op_draw_progress,
+    }
+
+    # ------------------------------------------------------------------ #
+    # Snapshot (с mode для VfdDriver gating и GUI)
+    # ------------------------------------------------------------------ #
+
+    def snapshot(self, data: dict | None = None, quality: str | None = None) -> dict:
+        """Snapshot с mode и job-счётчиками."""
+        base = {
+            "mode": self._mode,
+            "manual_mode": self.manual_mode,
+            "queue_len": len(self._job_queue),
+            "jobs_sent": self.jobs_sent,
+            "jobs_done": self.jobs_done,
+            "jobs_failed": self.jobs_failed,
+            "draws_done": self.draws_done,
+            "draw_state": self._draw_state,
+            "draw_queued": self._draw_queue.qsize(),
+        }
+        if data:
+            base.update(data)
+        return super().snapshot(base, quality)
+
+    # ------------------------------------------------------------------ #
+    # Служебное
+    # ------------------------------------------------------------------ #
+
+    def _build_client(self) -> Any:
+        """Создать RobotClient с правильным конфигом."""
+        from Services.robot_comm import RobotClient, RobotConfig
+
+        if self._transport is not None:
+            # Инъекция транспорта (тесты)
+            config = RobotConfig.from_dict(
+                {
+                    **self.entry.transport,
+                    **self.entry.params,
+                }
+            )
+            return RobotClient(
+                config,
+                transport=self._transport,
+                clock=self._clock,
+                sleep=self._sleep,
+            )
+
+        # Боевой режим — конфиг из entry.transport + entry.params
+        t = self.entry.transport
+        p = self.entry.params
+        config = RobotConfig(
+            host=t.get("host", "192.168.1.7"),
+            port=int(t.get("port", 502)),
+            unit_id=int(t.get("unit_id", 2)),
+            timeout_sec=float(t.get("timeout_sec", 1.0)),
+            word_order=str(p.get("word_order", "little")),
+        )
+        return RobotClient(config, clock=self._clock, sleep=self._sleep)
+
+    def _wait_condition(self, condition: Any, timeout: float, stop_event: Any) -> bool:
+        """Поллить условие до timeout (прерываемо stop_event)."""
+        t_end = self._clock() + timeout
+        while self._clock() < t_end:
+            if stop_event is not None and stop_event.is_set():
+                return False
+            try:
+                if condition():
+                    return True
+            except Exception:
+                self._record_err()
+                return False
+            self._sleep(self._feed_poll_s)
+        return False
