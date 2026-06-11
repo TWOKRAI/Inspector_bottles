@@ -41,6 +41,8 @@ class ModbusConfig:
         timeout_sec: Таймаут операции, сек.
         retries:     Число повторов на операцию.
         word_order:  Порядок слов для 32-битных типов: ``big`` | ``little``.
+        tcp_nodelay: Отключить алгоритм Нейгла (TCP) — убирает ~40 мс лагов
+                     при частых мелких записях (боевой опыт с роботом Delta).
     """
 
     transport: TransportType = TransportType.TCP
@@ -48,6 +50,7 @@ class ModbusConfig:
     # TCP
     host: str = "127.0.0.1"
     port: int = 502
+    tcp_nodelay: bool = True
 
     # RTU / RS485
     serial_port: str = "COM1"

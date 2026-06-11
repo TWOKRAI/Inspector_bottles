@@ -14,6 +14,12 @@ GUI/pipeline** как плагин и сервис.
   reads/writes/errors, uptime — через API (`get_status`), callbacks и register-поля.
 - **Graceful degradation**: пакет импортируется без pymodbus (`MODBUS_AVAILABLE`),
   тесты идут без библиотеки и без железа.
+- **Атомарные транзакции** (`ModbusDevice.transaction`) — серия записей под одним
+  Lock для mailbox-протоколов (данные → маркер-флаг последним).
+- **`RegisterTransport`** (Protocol) — минимальный контракт «устройство как
+  пространство регистров» для сервисов устройств.
+- **`RegisterMap`** — декларативная карта регистров устройства (scale/signed/DW),
+  фундамент для тонких сервисов устройств (`robot_comm`, `vfd_comm`, ...).
 
 ## Архитектура (3 слоя)
 
@@ -43,6 +49,52 @@ dev.disconnect()
 # RS485 (RTU)
 dev = ModbusDevice(ModbusConfig(transport=TransportType.RTU, serial_port="COM3", baudrate=9600))
 ```
+
+## Как добавить сервис нового устройства (паттерн)
+
+`Services/modbus` — универсальный транспорт; конкретное устройство (робот, ПЧ,
+сканер, датчик) оформляется **тонким сервисом устройства**, который выбирает тип
+соединения и задаёт свою карту регистров. Эталоны: `Services/robot_comm`
+(прямое TCP-соединение), `Services/vfd_comm` (мост через другое устройство).
+
+Шаблон (`Services/<device>_comm/`):
+
+1. **`core/config.py`** — dataclass конфига устройства. Транспортные параметры —
+   это `ModbusConfig` (или внешний транспорт для моста), доменные — лимиты/шкалы.
+2. **`core/registers.py`** — карта регистров через `RegisterMap` (один источник
+   истины протокола устройства):
+
+   ```python
+   from Services.modbus import Field, Reg, RegBlock, RegDW, RegisterMap
+
+   MAP = RegisterMap(
+       {
+           "job_flag": Reg(0x1100),                       # маркер mailbox
+           "x_mm":     Reg(0x1101, scale=10, signed=True),
+           "encoder":  RegDW(0x1112, signed=True),        # 32 бита
+           "telemetry": RegBlock(0x1130, fields=(
+               Field("x_mm", scale=10, signed=True),
+               Field("moving"),
+           )),
+       },
+       word_order="little",
+   )
+   ```
+
+3. **`core/client.py`** — клиент устройства поверх `RegisterTransport`
+   (`ModbusDevice` для прямого соединения или клиент-мост). Команды mailbox —
+   через `device.transaction(MAP.write_ops({...данные..., "флаг": 1}))`:
+   маркер-флаг всегда последним ключом, abort на первой ошибке гарантирует,
+   что флаг не ляжет поверх частичных данных.
+4. **`service.py`** — `@register_service("<device>_comm")` для каталога сервисов.
+   Если соединением владеет плагин — сервис только карточка/статус, БЕЗ
+   собственного подключения (иначе два master'а к одному устройству).
+5. **`testing/fake_transport.py`** — in-process стаб `RegisterTransport` с
+   mailbox-семантикой устройства (FLAG-цикл, echo) — тесты без сети.
+6. **`tests/`** — карта/кодеки (без сети) + клиент против фейк-транспорта.
+
+Реконнект — ответственность владельца соединения (плагина), НЕ sdk: тихий
+reconnect+retry внутри `transaction` разорвал бы атомарность серии.
 
 ## CLI-smoke
 

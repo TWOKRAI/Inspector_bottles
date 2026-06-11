@@ -130,6 +130,10 @@ class ModbusDevice:
         """Читать discrete inputs (FC=02)."""
         return self._read("read_discrete_inputs", address, count, kind="discrete")
 
+    def read_registers(self, address: int, count: int = 1) -> list[int]:
+        """Читать holding-регистры — alias read_holding (контракт RegisterTransport)."""
+        return self.read_holding(address, count)
+
     # ------------------------------------------------------------------ #
     # Операции записи (с телеметрией)
     # ------------------------------------------------------------------ #
@@ -145,6 +149,48 @@ class ModbusDevice:
     def write_coil(self, address: int, value: bool) -> bool:
         """Записать один coil (FC=05)."""
         return self._write("write_coil", address, value)
+
+    def transaction(self, ops: list[tuple]) -> bool:
+        """Серия записей под ОДНИМ Lock — данные первыми, маркер-флаг последним.
+
+        Атомарный примитив mailbox-протоколов (CVT-робот, ПЧ и т.п.): данные и
+        маркер «данные готовы» пишутся одной серией, чтобы конкурирующий поток
+        (поллер, feeder, GUI-команда) не вклинился между ними.
+
+        Args:
+            ops: операции по порядку:
+                ``("w", addr, value)``   — один регистр (FC=06);
+                ``("wm", addr, [vals])`` — блок регистров (FC=16).
+
+        Returns:
+            True — все операции выполнены.
+
+        Raises:
+            ModbusDriverError: на ПЕРВОЙ неудавшейся операции — оставшиеся
+                (включая маркер) НЕ выполняются. Инвариант: маркер идёт
+                последней операцией, поэтому частично записанные данные без
+                маркера инертны для устройства. Тихий reconnect/retry внутри
+                серии запрещён — он разрывает атомарность.
+            ValueError: неизвестный вид операции.
+        """
+        with self._lock:
+            for kind, address, value in ops:
+                if kind == "w":
+                    method = "write_register"
+                elif kind == "wm":
+                    method = "write_registers"
+                else:
+                    raise ValueError(f"transaction: неизвестная операция {kind!r} (ожидается 'w' | 'wm')")
+                try:
+                    getattr(self._client, method)(address, value)
+                except ModbusDriverError as exc:
+                    self._status.writes_err += 1
+                    self._fail(str(exc))
+                    raise
+                self._status.writes_ok += 1
+            self._status.last_op_ts = self._clock()
+            self._emit_data({"op": "transaction", "count": len(ops)})
+        return True
 
     # ------------------------------------------------------------------ #
     # Внутреннее

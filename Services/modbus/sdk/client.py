@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import socket
 from typing import Any
 
 from Services.modbus.core.config import ModbusConfig, TransportType
@@ -85,7 +86,24 @@ class ModbusSdkClient:
             raise ModbusConnectionError(str(exc)) from exc
         if not ok:
             raise ModbusConnectionError(f"Не удалось подключиться к {self._cfg.describe()}")
+        if self._cfg.transport is TransportType.TCP and self._cfg.tcp_nodelay:
+            self._enable_nodelay()
         return True
+
+    def _enable_nodelay(self) -> None:
+        """Выставить TCP_NODELAY на сокете клиента (best-effort).
+
+        Алгоритм Нейгла буферизует мелкие пакеты — для register-протоколов это
+        периодические всплески латентности ~40 мс. Сокет pymodbus — приватная
+        деталь, поэтому доступ через getattr и молчаливый пропуск при отказе.
+        """
+        sock = getattr(self._client, "socket", None)
+        if sock is None:
+            return
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:  # pragma: no cover - зависит от платформы/сокета
+            pass
 
     def close(self) -> None:
         """Закрыть соединение (идемпотентно)."""

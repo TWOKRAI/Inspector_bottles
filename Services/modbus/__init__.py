@@ -15,15 +15,20 @@ Plugin/Service-слой подтягивается лениво (только п
 
 from Services.modbus.core import (
     ConnectionState,
+    Field,
     ModbusConfig,
     ModbusDevice,
     ModbusPoller,
     ModbusStatus,
+    Reg,
+    RegBlock,
+    RegDW,
     RegisterBlock,
     RegisterKind,
+    RegisterMap,
     TransportType,
 )
-from Services.modbus.interfaces import ModbusClientProtocol
+from Services.modbus.interfaces import ModbusClientProtocol, RegisterTransport
 from Services.modbus.sdk import MODBUS_AVAILABLE, ModbusDriverError
 
 __all__ = [
@@ -35,7 +40,13 @@ __all__ = [
     "ModbusPoller",
     "RegisterBlock",
     "RegisterKind",
+    "RegisterMap",
+    "Reg",
+    "RegDW",
+    "RegBlock",
+    "Field",
     "ModbusClientProtocol",
+    "RegisterTransport",
     "ModbusDriverError",
     "MODBUS_AVAILABLE",
 ]
