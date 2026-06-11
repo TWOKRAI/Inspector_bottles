@@ -395,15 +395,30 @@ class DeviceHubPlugin(ProcessModulePlugin):
         return result
 
     def cmd_device_upsert_many(self, data: dict) -> dict:
-        """Массовый upsert устройств."""
+        """Массовый upsert устройств.
+
+        Args (в data):
+            devices: list[dict] — записи DeviceEntry для upsert.
+            origin:  str | None — источник (``recipe:<slug>``).
+            connect: bool — если True, auto-connect все upserted-устройства (Р11).
+        """
         devices = data.get("devices", [])
         origin = data.get("origin")
+        do_connect = bool(data.get("connect", False))
         results = []
+        upserted_ids: list[str] = []
         for dev_dict in devices:
             if isinstance(dev_dict, dict):
                 r = self._safe_call(self._manager.upsert, dev_dict, origin)
                 results.append(r)
+                if r.get("status") == "ok" and "id" in dev_dict:
+                    upserted_ids.append(dev_dict["id"])
+        self._publish_full_registry()
         self._update_counters()
+        # Р11: auto-connect все upserted-устройства (async через supervisor)
+        if do_connect:
+            for dev_id in upserted_ids:
+                self._conn_queue.put(("connect", dev_id))
         return {"status": "ok", "results": results, "count": len(results)}
 
     def cmd_device_remove(self, data: dict) -> dict:

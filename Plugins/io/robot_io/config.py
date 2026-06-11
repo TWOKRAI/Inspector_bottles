@@ -1,4 +1,4 @@
-"""Конфиг RobotIoPlugin — identity + register binding."""
+"""Конфиг RobotIoPlugin v2 — identity + register binding."""
 
 from __future__ import annotations
 
@@ -13,16 +13,12 @@ from multiprocess_framework.modules.process_module.plugins import (
 from .registers import RobotIoRegisters
 
 
-@register_schema("RobotIoPluginConfigV1")
+@register_schema("RobotIoPluginConfigV2")
 class RobotIoPluginConfig(PluginConfig):
-    """Конфиг плагина robot_io — владелец соединения с роботом."""
+    """Конфиг плагина robot_io v2 — тонкий job-форвардер в devices."""
 
     plugin_class: str = "Plugins.io.robot_io.plugin.RobotIoPlugin"
     register_bindings: ClassVar[list[type[SchemaBase]]] = [RobotIoRegisters]
 
-    # Дефолты подключения (overrides из YAML)
-    host: str = "192.168.1.7"
-    port: int = 502
-    unit_id: int = 2
-    word_order: str = "little"
-    auto_connect: bool = True
+    # Привязка к устройству в реестре devices (override из YAML рецепта)
+    device_id: str = "robot_main"
