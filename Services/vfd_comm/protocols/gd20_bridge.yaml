@@ -1,0 +1,86 @@
+# Протокол INVT GD20 через RS-485-мост робота (mailbox, Lua)
+# Источник: Services/vfd_comm/core/registers.py — BRIDGE_MAP
+# Адреса mailbox 0x1200–0x1204 (команды) и 0x1210–0x1217 (зеркало статуса)
+# обязаны совпадать с cvt_universal_full.lua и python-картой.
+name: gd20_bridge
+kind: vfd
+description: "INVT GD20 через RS-485-мост робота (mailbox, Lua)"
+word_order: big
+registers:
+  cmd_run:
+    type: reg
+    address: 0x1200
+    access: w
+    label: "Пуск"
+    hint: "1 = пуск, 0 = стоп"
+
+  cmd_dir:
+    type: reg
+    address: 0x1201
+    access: w
+    label: "Направление"
+    hint: "0 = вперёд, 1 = назад"
+
+  cmd_freq:
+    type: reg
+    address: 0x1202
+    scale: 100
+    access: w
+    label: "Частота"
+    unit: "Гц"
+    min: 0
+    max: 50
+    default: 10
+    hint: "Уставка частоты ×100 (0.01 Гц на LSB)"
+
+  cmd_reset:
+    type: reg
+    address: 0x1203
+    access: w
+    label: "Сброс аварии"
+    hint: "1 = сброс ошибки ПЧ"
+
+  flag:
+    type: reg
+    address: 0x1204
+    access: rw
+    label: "VFD_FLAG (маркер)"
+    hint: "Маркер команды; ставится последним (атомарность mailbox)"
+
+  status:
+    type: block
+    address: 0x1210
+    access: r
+    label: "Статус ПЧ (зеркало)"
+    hint: "Блок из 8 слов: состояние ПЧ, зеркалируемое Lua-мостом"
+    fields:
+      - name: running
+        label: "Вращение"
+        hint: "1 = ПЧ вращается"
+      - name: out_freq_hz
+        scale: 100
+        unit: "Гц"
+        label: "Выходная частота"
+        hint: "Фактическая частота ×100"
+      - name: current_a
+        scale: 10
+        unit: "А"
+        label: "Ток статора"
+        hint: "Выходной ток ×10"
+      - name: dcbus_v
+        scale: 10
+        unit: "В"
+        label: "Напряжение DC-шины"
+        hint: "Напряжение звена постоянного тока ×10"
+      - name: fault
+        label: "Код аварии"
+        hint: "Код ошибки ПЧ (0 = норма)"
+      - name: status_word
+        label: "Слово состояния"
+        hint: "Биты состояния ПЧ"
+      - name: heartbeat
+        label: "Heartbeat моста"
+        hint: "Счётчик живости Lua-моста; не растёт = мост завис"
+      - name: comm_errors
+        label: "Ошибки RS-485"
+        hint: "Счётчик ошибок коммуникации ПЧ через RS-485"

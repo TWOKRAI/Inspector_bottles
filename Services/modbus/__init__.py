@@ -15,18 +15,23 @@ Plugin/Service-слой подтягивается лениво (только п
 
 from Services.modbus.core import (
     ConnectionState,
+    DeviceProtocol,
     Field,
     ModbusConfig,
     ModbusDevice,
     ModbusPoller,
     ModbusStatus,
+    ProtocolFileError,
     Reg,
     RegBlock,
     RegDW,
     RegisterBlock,
     RegisterKind,
     RegisterMap,
+    RegisterMeta,
     TransportType,
+    find_protocols,
+    load_protocol,
 )
 from Services.modbus.interfaces import ModbusClientProtocol, RegisterTransport
 from Services.modbus.sdk import MODBUS_AVAILABLE, ModbusDriverError
@@ -49,6 +54,12 @@ __all__ = [
     "RegisterTransport",
     "ModbusDriverError",
     "MODBUS_AVAILABLE",
+    # YAML-протоколы устройств
+    "load_protocol",
+    "find_protocols",
+    "DeviceProtocol",
+    "RegisterMeta",
+    "ProtocolFileError",
 ]
 
 

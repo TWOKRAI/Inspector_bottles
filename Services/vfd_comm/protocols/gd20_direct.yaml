@@ -1,0 +1,65 @@
+# Протокол INVT GD20 — прямое RTU-подключение (закладка под будущее)
+# Источник: Services/vfd_comm/core/registers.py — DIRECT_MAP
+# Источник адресов: мануал goodrive20-series-inverter (communication registers).
+# Slave ID ПЧ задаётся P14.00 (по умолчанию 1) — это забота Lua/конфига RTU,
+# данный файл описывает только регистровую карту.
+name: gd20_direct
+kind: vfd
+description: "INVT GD20 прямое RTU-подключение (закладка под прямой Modbus RTU)"
+word_order: big
+registers:
+  cmd:
+    type: reg
+    address: 0x2000
+    access: w
+    label: "Команда управления"
+    hint: "1=RUN FWD, 2=RUN REV, 5=STOP, 7=FAULT RESET"
+
+  cmd_freq:
+    type: reg
+    address: 0x2001
+    scale: 100
+    access: w
+    label: "Уставка частоты"
+    unit: "Гц"
+    min: 0
+    max: 50
+    hint: "Уставка частоты ×100 (0.01 Гц на LSB)"
+
+  status_word:
+    type: reg
+    address: 0x2100
+    access: r
+    label: "Слово состояния"
+    hint: "1=FWD, 2=REV, 3=STOP, 4=FAULT"
+
+  monitor:
+    type: block
+    address: 0x3000
+    access: r
+    label: "Блок мониторинга"
+    hint: "5 слов: уставка, вых. частота, DC-шина, напряжение, ток"
+    fields:
+      - name: set_freq_hz
+        scale: 100
+        unit: "Гц"
+        label: "Уставка частоты"
+        hint: "Активная уставка ×100"
+      - name: out_freq_hz
+        scale: 100
+        unit: "Гц"
+        label: "Выходная частота"
+        hint: "Фактическая выходная частота ×100"
+      - name: dcbus_v
+        scale: 10
+        unit: "В"
+        label: "Напряжение DC-шины"
+        hint: "×10"
+      - name: out_voltage_v
+        unit: "В"
+        label: "Выходное напряжение"
+      - name: current_a
+        scale: 10
+        unit: "А"
+        label: "Ток статора"
+        hint: "Выходной ток ×10"

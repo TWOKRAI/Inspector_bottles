@@ -1,0 +1,343 @@
+# Протокол робота Delta universal3 (CVT pick-place + рисование)
+# Источник: Services/robot_comm/core/registers.py — build_register_map(word_order="little")
+# Адреса/шкалы/знаковость 1:1 с python-картой и cvt_universal_full.lua.
+# word_order: little — порядок слов для DW-регистров (энкодер, E_capture).
+# Mailbox ПЧ (0x1200/0x1210) НЕ включён: он принадлежит Services/vfd_comm.
+name: delta_universal3
+kind: robot
+description: "Робот Delta universal3 — CVT pick-place + рисование (Lua-протокол)"
+word_order: little
+registers:
+  mode:
+    type: reg
+    address: 0x1109
+    access: rw
+    label: "Режим работы"
+    hint: "0 = CVT (pick-place), 1 = DRAW (рисование)"
+
+  # --- CVT job (ПК -> робот) ---
+  job_flag:
+    type: reg
+    address: 0x1100
+    access: rw
+    label: "Флаг задания"
+    hint: "Маркер нового задания CVT (ПК пишет 1, робот сбрасывает в 0)"
+
+  job_x:
+    type: reg
+    address: 0x1101
+    scale: 10
+    signed: true
+    access: rw
+    label: "Целевая X"
+    unit: "мм"
+    hint: "Координата X цели ×10 (0.1 мм на LSB)"
+
+  job_y:
+    type: reg
+    address: 0x1102
+    scale: 10
+    signed: true
+    access: rw
+    label: "Целевая Y"
+    unit: "мм"
+    hint: "Координата Y цели ×10"
+
+  job_ecap:
+    type: dw
+    address: 0x1104
+    signed: true
+    access: rw
+    label: "Позиция ленты (E_capture)"
+    hint: "32-бит значение энкодера в момент захвата (word_order=little)"
+
+  stop:
+    type: reg
+    address: 0x1106
+    access: w
+    label: "Команда стоп"
+    hint: "1 = домой+остаться, 2 = домой+выход+серво OFF, 3 = стоп на месте+серво ON"
+
+  servo:
+    type: reg
+    address: 0x1108
+    access: w
+    label: "Серводвигатель"
+    hint: "1 = ON, 2 = OFF"
+
+  # --- CVT статус (робот -> ПК) ---
+  free:
+    type: reg
+    address: 0x1110
+    access: r
+    label: "Робот свободен"
+    hint: "1 = готов к следующему заданию"
+
+  encoder:
+    type: dw
+    address: 0x1112
+    signed: true
+    access: r
+    label: "Энкодер ленты"
+    hint: "Текущее значение энкодера (word_order=little)"
+
+  echo:
+    type: block
+    address: 0x1120
+    access: r
+    label: "Echo последнего задания"
+    hint: "5 слов: job_x, job_y, px, py, trav"
+    fields:
+      - name: job_x
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Echo X задания"
+      - name: job_y
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Echo Y задания"
+      - name: px
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Позиция захвата X"
+      - name: py
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Позиция захвата Y"
+      - name: trav
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Пройденное расстояние"
+
+  telemetry:
+    type: block
+    address: 0x1130
+    access: r
+    label: "Телеметрия"
+    hint: "11 слов: позиция XYZRZ, движение, скорость, лента, рука, heartbeat, серво, промахи"
+    fields:
+      - name: x_mm
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Позиция X"
+      - name: y_mm
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Позиция Y"
+      - name: z_mm
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Позиция Z"
+      - name: rz_deg
+        scale: 10
+        signed: true
+        unit: "°"
+        label: "Угол Rz"
+      - name: moving
+        label: "В движении"
+        hint: "1 = робот перемещается"
+      - name: spd_pct
+        unit: "%"
+        label: "Скорость"
+        hint: "Скорость в процентах от максимальной"
+      - name: belt_mm_s
+        signed: true
+        unit: "мм/с"
+        label: "Скорость ленты"
+      - name: hand
+        label: "Захват"
+        hint: "Состояние схвата"
+      - name: heartbeat
+        label: "Heartbeat"
+        hint: "Счётчик живости робота"
+      - name: servo
+        label: "Серво"
+        hint: "Состояние сервопривода"
+      - name: miss_count
+        label: "Промахи"
+        hint: "Счётчик промахов захвата"
+
+  # --- конфиг робота ---
+  cfg_flag:
+    type: reg
+    address: 0x1300
+    access: rw
+    label: "Флаг конфигурации"
+    hint: "Маркер записи конфигурации (ПК пишет 1, робот сбрасывает)"
+
+  config:
+    type: block
+    address: 0x1301
+    access: rw
+    label: "Конфигурация робота"
+    hint: "11 слов: скорость, home XYZ, pick_z, place XYZ, grip_ms, zone_max/min"
+    fields:
+      - name: speed
+        label: "Скорость"
+        unit: "%"
+        hint: "Скорость движения (0..100)"
+      - name: home_x
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Home X"
+      - name: home_y
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Home Y"
+      - name: home_z
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Home Z"
+      - name: pick_z
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Pick Z"
+      - name: place_x
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Place X"
+      - name: place_y
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Place Y"
+      - name: place_z
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Place Z"
+      - name: grip_ms
+        unit: "мс"
+        label: "Время захвата"
+        hint: "Время удержания схвата в миллисекундах"
+      - name: zone_max
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Зона MAX"
+        hint: "Максимальная граница рабочей зоны конвейера"
+      - name: zone_min
+        scale: 10
+        signed: true
+        unit: "мм"
+        label: "Зона MIN"
+        hint: "Минимальная граница рабочей зоны конвейера"
+
+  # --- рисование ---
+  draw_flag:
+    type: reg
+    address: 0x1400
+    access: rw
+    label: "Флаг рисования"
+    hint: "Маркер запуска задания рисования"
+
+  draw_type:
+    type: reg
+    address: 0x1401
+    access: rw
+    label: "Тип рисования"
+    hint: "0 = полилиния, 1 = окружность"
+
+  draw_count:
+    type: reg
+    address: 0x1402
+    access: rw
+    label: "Кол-во точек"
+    hint: "Число точек полилинии"
+
+  draw_busy:
+    type: reg
+    address: 0x1403
+    access: r
+    label: "Рисование активно"
+    hint: "1 = задание рисования в процессе"
+
+  draw_prog:
+    type: reg
+    address: 0x1404
+    access: r
+    label: "Прогресс рисования"
+    unit: "%"
+
+  draw_abort:
+    type: reg
+    address: 0x1405
+    access: w
+    label: "Отмена рисования"
+    hint: "1 = прервать текущее задание рисования"
+
+  circ_cx:
+    type: reg
+    address: 0x1406
+    scale: 10
+    signed: true
+    access: rw
+    label: "Центр окружности X"
+    unit: "мм"
+
+  circ_cy:
+    type: reg
+    address: 0x1407
+    scale: 10
+    signed: true
+    access: rw
+    label: "Центр окружности Y"
+    unit: "мм"
+
+  circ_r:
+    type: reg
+    address: 0x1408
+    scale: 10
+    access: rw
+    label: "Радиус окружности"
+    unit: "мм"
+
+  pen_down:
+    type: reg
+    address: 0x1410
+    scale: 10
+    signed: true
+    access: rw
+    label: "Перо опущено (Z)"
+    unit: "мм"
+    hint: "Z-координата при рисовании (перо на поверхности)"
+
+  pen_up:
+    type: reg
+    address: 0x1411
+    scale: 10
+    signed: true
+    access: rw
+    label: "Перо поднято (Z)"
+    unit: "мм"
+    hint: "Z-координата при переезде (перо над поверхностью)"
+
+  draw_spd:
+    type: reg
+    address: 0x1412
+    access: rw
+    label: "Скорость рисования"
+    unit: "%"
+    hint: "Скорость движения при рисовании"
+
+  overlap:
+    type: reg
+    address: 0x1413
+    scale: 10
+    access: rw
+    label: "Перекрытие"
+    unit: "мм"
+    hint: "Перекрытие в начале/конце отрезка для качества линии"
