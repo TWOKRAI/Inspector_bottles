@@ -217,6 +217,10 @@ class CameraServicePlugin(ProcessModulePlugin):
         if self._is_capturing:
             return
 
+        # Арбитраж: если hikvision — попросить hub освободить handle (best-effort)
+        if self._camera_type == "hikvision":
+            self._hik_release_best_effort(ctx)
+
         with self._backend_lock:
             if self._backend is None:
                 self._backend = create_backend(self._camera_type, **self._backend_kwargs())
@@ -224,6 +228,38 @@ class CameraServicePlugin(ProcessModulePlugin):
 
         self._is_capturing = True
         ctx.log_info(f"CameraServicePlugin[{self._camera_id}]: захват запущен (backend={self._camera_type})")
+
+    def _hik_release_best_effort(self, ctx: PluginContext) -> None:
+        """Попросить devices-hub освободить hikvision handle (best-effort, retry 1).
+
+        Деградация: hub недоступен/нет handle → warning, НЕ блокировать старт.
+        Контракт: вызывается из командного потока (configure/start), НЕ из produce().
+        """
+        try:
+            from Plugins.hub.device_hub.client import DeviceHubClient
+
+            client = DeviceHubClient(ctx, default_timeout=1.0)
+        except Exception:
+            ctx.log_info("CameraServicePlugin: DeviceHubClient недоступен, пропускаем hik_release")
+            return
+
+        device_id = getattr(self, "_device_id", None) or ""
+        args = {"device_id": device_id} if device_id else {}
+
+        for attempt in range(2):  # попытка 0 + retry 1
+            try:
+                result = client.request("hik_release", args, timeout=1.0)
+                if result.get("status") == "ok":
+                    ctx.log_info("CameraServicePlugin: hik_release ok")
+                    return
+                # Ответ error — hub не имеет handle, это нормально
+                ctx.log_info(f"CameraServicePlugin: hik_release ответ: {result.get('message', 'ok')}")
+                return
+            except Exception as exc:
+                if attempt == 0:
+                    ctx.log_info(f"CameraServicePlugin: hik_release попытка 1 неудачна: {exc}, retry")
+                else:
+                    ctx.log_warning(f"CameraServicePlugin: hik_release недоступен после retry: {exc}")
 
     def _do_stop_capture(self, ctx: PluginContext) -> None:
         """Остановить захват (backend остаётся, но stop)."""

@@ -590,8 +590,32 @@ class DeviceHubPlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def cmd_hik_enum(self, data: dict) -> dict:
-        """Перечислить камеры Hikvision."""
-        return self._kind_call(data, "hikvision", "enum")
+        """Перечислить камеры Hikvision (device-less: не требует device_id).
+
+        Discovery — операция вида (kind), а не экземпляра: перечисляет ВСЕ
+        камеры Hikvision на шине, без привязки к конкретной записи реестра.
+        Lazy import SDK: если SDK недоступен — ошибка, не crash.
+        """
+        try:
+            from Services.hikvision_camera.core.discovery import enum_devices
+        except ImportError:
+            return {"status": "error", "message": "SDK Hikvision недоступен"}
+        try:
+            devices = enum_devices()
+            return {
+                "status": "ok",
+                "devices": [
+                    {
+                        "serial": getattr(d, "serial", getattr(d, "serial_number", "")),
+                        "model": getattr(d, "model_name", ""),
+                        "ip": getattr(d, "ip_address", getattr(d, "display_name", "")),
+                        "index": getattr(d, "index", i),
+                    }
+                    for i, d in enumerate(devices)
+                ],
+            }
+        except Exception as exc:
+            return {"status": "error", "message": f"Ошибка перечисления камер: {exc}"}
 
     def cmd_hik_open(self, data: dict) -> dict:
         """Открыть камеру: {device_id}."""
@@ -610,5 +634,25 @@ class DeviceHubPlugin(ProcessModulePlugin):
         return self._kind_call(data, "hikvision", "set_params")
 
     def cmd_hik_release(self, data: dict) -> dict:
-        """Освободить камеру: {device_id}."""
-        return self._kind_call(data, "hikvision", "release")
+        """Освободить камеру: {device_id?}.
+
+        Если device_id не указан — release всех подключённых hikvision-устройств
+        (арбитраж: capture-плагин просит освободить handle перед стартом).
+        Если у hub нет открытого handle — просто ok.
+        """
+        dev_id = data.get("device_id", "")
+        if dev_id:
+            return self._kind_call(data, "hikvision", "release")
+        # Без device_id — release всех hikvision-устройств
+        released = []
+        for entry in list(self._manager._entries.values()):
+            if entry.kind != "hikvision":
+                continue
+            driver = self._manager._drivers.get(entry.id)
+            if driver is not None and driver.is_connected:
+                try:
+                    driver.call("release", {})
+                    released.append(entry.id)
+                except Exception:
+                    pass
+        return {"status": "ok", "released": released}

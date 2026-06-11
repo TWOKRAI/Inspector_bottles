@@ -324,6 +324,78 @@ class TestKindValidation:
 
 
 # ------------------------------------------------------------------ #
+# hik_enum device-less + hik_release broadcast
+# ------------------------------------------------------------------ #
+
+
+class TestHikvisionCommands:
+    """Тесты hikvision-команд: device-less enum, broadcast release."""
+
+    def test_hik_enum_without_device_id(self, tmp_path: Path) -> None:
+        """hik_enum не требует device_id — вызывает discovery напрямую."""
+        from types import SimpleNamespace
+
+        plugin, ctx = _make_plugin(tmp_path)
+        # SimpleNamespace — чтобы getattr возвращал реальные значения
+        fake_dev = SimpleNamespace(
+            serial="SN123",
+            serial_number="SN123",
+            model_name="DS-2CD",
+            ip_address="192.168.1.10",
+            index=0,
+        )
+        with patch(
+            "Services.hikvision_camera.core.discovery.enum_devices",
+            return_value=[fake_dev],
+        ):
+            result = plugin.cmd_hik_enum({})  # БЕЗ device_id
+        assert result["status"] == "ok"
+        assert len(result["devices"]) == 1
+        assert result["devices"][0]["serial"] == "SN123"
+
+    def test_hik_enum_sdk_unavailable(self, tmp_path: Path) -> None:
+        """hik_enum без SDK → ошибка, не crash."""
+        plugin, ctx = _make_plugin(tmp_path)
+        with patch.dict("sys.modules", {"Services.hikvision_camera.core.discovery": None}):
+            # Имитация ImportError
+            import builtins
+
+            original_import = builtins.__import__
+
+            def fail_import(name, *args, **kwargs):
+                if "hikvision_camera.core.discovery" in name:
+                    raise ImportError("SDK недоступен")
+                return original_import(name, *args, **kwargs)
+
+            with patch("builtins.__import__", side_effect=fail_import):
+                result = plugin.cmd_hik_enum({})
+        assert result["status"] == "error"
+        assert "SDK" in result["message"] or "недоступен" in result["message"]
+
+    def test_hik_release_without_device_id(self, tmp_path: Path) -> None:
+        """hik_release без device_id — release всех hikvision-устройств."""
+        plugin, ctx = _make_plugin(tmp_path)
+        # Создадим hikvision-устройство и фейковый драйвер
+        plugin.cmd_device_upsert({"id": "cam_1", "name": "Cam1", "kind": "hikvision", "params": {"serial": "SN1"}})
+        mock_driver = MagicMock()
+        mock_driver.is_connected = True
+        mock_driver.call.return_value = {"status": "ok"}
+        plugin._manager._drivers["cam_1"] = mock_driver
+
+        result = plugin.cmd_hik_release({})  # БЕЗ device_id
+        assert result["status"] == "ok"
+        assert "cam_1" in result["released"]
+        mock_driver.call.assert_called_once_with("release", {})
+
+    def test_hik_release_no_connected_cameras(self, tmp_path: Path) -> None:
+        """hik_release без device_id и без подключённых камер → ok, released=[]."""
+        plugin, ctx = _make_plugin(tmp_path)
+        result = plugin.cmd_hik_release({})
+        assert result["status"] == "ok"
+        assert result["released"] == []
+
+
+# ------------------------------------------------------------------ #
 # Resolve registry path (У6)
 # ------------------------------------------------------------------ #
 
