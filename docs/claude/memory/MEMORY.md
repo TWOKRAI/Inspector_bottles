@@ -67,3 +67,4 @@
 - [Command-result bridge](project_command_result_bridge.md) — DONE 2026-06-07: request/response GUI→PM (дискретные команды узнают результат, field-write fire-and-forget); FE-004; разблокирует lifecycle + pipeline-Этап3
 - [qt-mcp launch](reference_qt_mcp_launch.md) — probe только с QT_MCP_PROBE=1 (порт 9142); backend_ctl флуд на 8765 безобиден; чистка по PID не глобально
 - [Line filter feature](project_line_filter_feature.md) — virtual-line фильтр+Join+рендер; Этапы 0-3+smoke DONE (4 коммита feat/line-filter-virtual), осталось Этап 4-5; грабли: overlay_draw пишет frame не rendered_frame, register_schema фолбэк на register_class
+- [Robot+VFD services](project_robot_vfd_services.md) — robot/universal3 → сервисы: универсальный Services/modbus (transaction/RegisterTransport/RegisterMap) + robot_comm/vfd_comm (мост ПЧ через Protocol) + плагины robot_io(владелец)/vfd_control/robot_draw + GUI-вкладка; co-location обязательна; Фазы 0-5 DONE
