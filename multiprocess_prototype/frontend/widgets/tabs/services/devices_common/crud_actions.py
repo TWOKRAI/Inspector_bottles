@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from .recipe_devices import RecipeDevicesError
 
@@ -118,7 +118,7 @@ class DeviceCrudActions:
             robot_devices=robot_devices,
             parent=parent,
         )
-        if dlg.exec() != dlg.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         entry = dlg.get_entry()
         if not entry.get("id"):
@@ -162,7 +162,7 @@ class DeviceCrudActions:
             existing=existing_entry,
             parent=parent,
         )
-        if dlg.exec() != dlg.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         entry = dlg.get_entry()
         self._persist_and_sync(entry, "edit")

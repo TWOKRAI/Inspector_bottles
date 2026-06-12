@@ -114,6 +114,32 @@ class TestAdd:
         # список обновлён
         refresh.assert_called()
 
+    def test_add_real_dialog_accept(self, qtbot, monkeypatch) -> None:
+        """Регрессия: exec() сравнивается с QDialog.DialogCode.Accepted на РЕАЛЬНОМ
+        DeviceEditorDialog (инстанс QDialog не имеет атрибута .Accepted — баг живого
+        запуска, который скрыли моки)."""
+        from PySide6.QtWidgets import QDialog
+
+        from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.editor_dialog import (
+            DeviceEditorDialog,
+        )
+
+        crud, store, sender, refresh = _make_crud()
+        entry = {
+            "id": "robot_real",
+            "name": "Реальный",
+            "kind": "robot",
+            "transport": {"type": "tcp", "host": "127.0.0.1", "port": 502, "unit_id": 1},
+        }
+        # Реальный класс диалога; патчим только exec (модальность) и get_entry.
+        monkeypatch.setattr(DeviceEditorDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+        monkeypatch.setattr(DeviceEditorDialog, "get_entry", lambda self: entry)
+
+        crud.on_add_clicked()  # не должен бросить AttributeError на dlg.Accepted
+
+        assert [d["id"] for d in store.list()] == ["robot_real"]
+        assert any(c[0][1] == "device_upsert" for c in sender.request_command.call_args_list)
+
     def test_add_reject_no_persist(self) -> None:
         crud, store, sender, refresh = _make_crud()
         with patch(_EDITOR) as MockDlg:
