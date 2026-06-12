@@ -10,7 +10,7 @@
 - [x] **Фаза B** — рецепт как источник истины устройств: RecipeDevicesStore (pure) + device_sync_set (hub) + activation switch + DeviceManager(store=None) + 35 тестов. GUI CRUD-ordering (рецепт→hub) свёрнут в Фазу C (Qt-coupled, живёт в crud_actions)
 - [x] **Фаза C** — master-detail: DeviceListPanel + DeviceMasterDetail + DeviceDetailPage + crud_actions(recipe-first) + robot/vfd секции + «+ Добавить»→диалог (interim) + 19 тестов + build-smoke + boot-smoke OK. Hikvision-секция отложена (нужен set_device по25 serial/index — follow-up)
 - [x] **Чекпойнт boot-smoke** — приложение поднимается чисто с robot_demo→fallback line_filter (6 процессов вкл. always-on devices, probe LISTENING:9142, 0 traceback). qt-mcp ВИЗУАЛЬНЫЙ snapshot заблокирован: MCP-сервер qt-mcp не подключён в этой сессии (не код) — перенесён в финальную Верификацию
-- [ ] **Фаза D** — страница добавления устройства (автопоиск камер + ручной ввод). NB: add уже работает через модальный диалог (interim), D заменяет на встроенную страницу + автопоиск камер
+- [x] **Фаза D** — встроенная AddDevicePage с ПРОБНЫМ ПОДКЛЮЧЕНИЕМ перед сохранением (решение владельца): «Проверить связь» (upsert origin=probe + connect, не в рецепт) → live-статус → «Добавить» (рецепт + re-tag recipe:slug) → «Отмена»/уход убирает пробное. DeviceFormWidget вынесен (shared, dialog переиспользует). robot/vfd на add_page_factory. Автопоиск камер — отложен с hikvision (Фаза E). 102 passed + boot-smoke OK
 - [ ] **Фаза E** — чистка (devices.yaml/store, комбо) + документация
 - [ ] **Верификация** — ОБЯЗАТЕЛЬНЫЙ qt-mcp ВИЗУАЛЬНЫЙ probe-прогон (см. ниже) + чек-лист железа
 

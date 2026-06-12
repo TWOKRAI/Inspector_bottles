@@ -128,7 +128,7 @@ class DeviceMasterDetail(QWidget):
         recipe_store: Any,
         bindings: Any = None,
         device_page_factory: Callable[[str], QWidget],
-        add_page_factory: Callable[[], QWidget] | None = None,
+        add_page_factory: Callable[[Callable[[str], None], Callable[[], None]], QWidget] | None = None,
         on_add: Callable[[], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -136,11 +136,12 @@ class DeviceMasterDetail(QWidget):
         self._kind = kind
         self._recipe_store = recipe_store
         self._device_page_factory = device_page_factory
+        # add_page_factory(on_committed, on_cancel) -> встроенная страница добавления
+        # (Фаза D). on_add — fallback через модальный диалог, если страницы нет.
         self._add_page_factory = add_page_factory
-        # on_add — обработчик «+ Добавить» через модальный диалог (interim до Фазы D,
-        # пока нет встроенной страницы добавления add_page_factory).
         self._on_add = on_add
         self._pages: dict[str, int] = {}
+        self._add_page: QWidget | None = None
         self._add_index: int | None = None
 
         root = QHBoxLayout(self)
@@ -195,6 +196,8 @@ class DeviceMasterDetail(QWidget):
         return "Выберите устройство в списке слева"
 
     def _show_device(self, device_id: str) -> None:
+        # Уход со страницы добавления — убрать пробное (несохранённое) подключение
+        self._cleanup_add_page()
         if device_id not in self._pages:
             page = self._device_page_factory(device_id)
             self._pages[device_id] = self._stack.addWidget(page)
@@ -202,10 +205,12 @@ class DeviceMasterDetail(QWidget):
 
     def _show_add(self) -> None:
         # Приоритет: встроенная страница добавления (Фаза D) → модальный диалог
-        # (interim) → заглушка-подсказка.
+        # (fallback) → заглушка-подсказка.
         if self._add_page_factory is not None:
-            if self._add_index is None:
-                self._add_index = self._stack.addWidget(self._add_page_factory())
+            # Пересоздаём страницу для чистой формы при каждом «+ Добавить»
+            self._destroy_add_page()
+            self._add_page = self._add_page_factory(self._after_add_commit, self._after_add_cancel)
+            self._add_index = self._stack.addWidget(self._add_page)
             self._stack.setCurrentIndex(self._add_index)
             return
         if self._on_add is not None:
@@ -213,6 +218,30 @@ class DeviceMasterDetail(QWidget):
             return
         self._placeholder.setText("Добавление устройств появится на странице добавления (Фаза D)")
         self._stack.setCurrentIndex(0)
+
+    def _after_add_commit(self, device_id: str) -> None:
+        """Устройство сохранено — обновить список и открыть его страницу."""
+        self.refresh()
+        self.select_device(device_id)
+
+    def _after_add_cancel(self) -> None:
+        """Отмена добавления — вернуться к заглушке."""
+        self._stack.setCurrentIndex(0)
+
+    def _cleanup_add_page(self) -> None:
+        """Best-effort: убрать пробное подключение страницы добавления."""
+        if self._add_page is not None:
+            cleanup = getattr(self._add_page, "cleanup", None)
+            if callable(cleanup):
+                cleanup()
+
+    def _destroy_add_page(self) -> None:
+        if self._add_page is not None:
+            self._cleanup_add_page()
+            self._stack.removeWidget(self._add_page)
+            self._add_page.deleteLater()
+            self._add_page = None
+            self._add_index = None
 
 
 __all__ = ["DeviceMasterDetail", "DeviceDetailPage"]

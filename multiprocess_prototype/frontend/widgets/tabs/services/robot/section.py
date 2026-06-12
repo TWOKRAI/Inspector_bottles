@@ -98,8 +98,7 @@ class _RobotSection:
             recipe_store=self._recipe_store,
             bindings=self._bindings,
             device_page_factory=self._make_device_page,
-            add_page_factory=None,  # Фаза D — встроенная страница добавления
-            on_add=lambda: self._crud.on_add_clicked(),  # interim: модальный диалог
+            add_page_factory=self._make_add_page,  # Фаза D: встроенная страница
         )
         self._crud = DeviceCrudActions(
             kind="robot",
@@ -109,6 +108,20 @@ class _RobotSection:
             parent_widget=self._master,
         )
         self._widget = self._master
+
+    def _make_add_page(self, on_committed, on_cancel) -> QWidget:
+        from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.add_page import (
+            AddDevicePage,
+        )
+
+        return AddDevicePage(
+            kind="robot",
+            presenter=self._devices_presenter,
+            recipe_store=self._recipe_store,
+            on_committed=on_committed,
+            on_cancel=on_cancel,
+            bindings=self._bindings,
+        )
 
     def _make_device_page(self, device_id: str) -> QWidget:
         from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
