@@ -12,6 +12,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from PySide6.QtCore import QTimer
+
 from .presenter import VfdPresenter
 from .widget import VfdControlWidget
 
@@ -37,6 +39,15 @@ class VfdWidgetController:
         self._device_id: str | None = None
         self._last_comm_errors: int | None = None
         self._status_handles: list[Any] = []
+
+        # н5 ревью Fable: QTimer для периодической проверки устаревания
+        # данных. Если hub упал — пуши прекращаются, но индикатор
+        # должен перейти в stale через _STALE_THRESHOLD_S.
+        self._last_status_ts: float | None = None
+        self._stale_timer = QTimer()
+        self._stale_timer.setInterval(2000)  # 2 с
+        self._stale_timer.timeout.connect(self._check_stale)
+
         self._connect()
 
     def _connect(self) -> None:
@@ -56,17 +67,39 @@ class VfdWidgetController:
         self._unbind_state()
         self._device_id = device_id
         self._last_comm_errors = None
+        self._last_status_ts = None
         if not device_id:
+            self._stale_timer.stop()
             self._widget.set_status("ПЧ: устройство не выбрано.")
             self._widget.set_controls_enabled(False, "Выберите устройство.")
             return
         self._bind_state(device_id)
+        self._stale_timer.start()
         # Запросить describe для лимитов частоты и gating
         self._presenter.device_describe(device_id, self._on_describe)
 
     # ------------------------------------------------------------------ #
     # Bindings на state-пути
     # ------------------------------------------------------------------ #
+
+    def unbind(self) -> None:
+        """Остановить таймер и отвязать bindings (при скрытии вкладки)."""
+        self._stale_timer.stop()
+        self._unbind_state()
+
+    def _check_stale(self) -> None:
+        """н5: периодическая проверка устаревания данных (QTimer callback).
+
+        Если hub упал и пуши прекратились, через _STALE_THRESHOLD_S
+        индикатор переходит в stale.
+        """
+        if self._last_status_ts is None:
+            return
+        age = time.time() - self._last_status_ts
+        if age > _STALE_THRESHOLD_S:
+            self._widget.set_quality(
+                f"Нет связи с hub (данные устарели на {age:.1f} с). Процесс devices может быть недоступен."
+            )
 
     def _unbind_state(self) -> None:
         if self._bindings is not None:
@@ -114,6 +147,8 @@ class VfdWidgetController:
         """Callback для push-статуса ПЧ из state-дерева."""
         if not isinstance(value, dict):
             return
+        # н5: запомнить время последнего пуша для stale-timer
+        self._last_status_ts = time.time()
         self._apply_vfd_status(value)
 
     def _apply_vfd_status(self, vfd: dict) -> None:
