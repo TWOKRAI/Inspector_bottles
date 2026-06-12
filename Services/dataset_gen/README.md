@@ -156,8 +156,9 @@ python -m Services.dataset_gen.tools.make_ru_letter_sprites --out data/dataset_g
 
 ## Границы
 
-- НЕ обучает модель — только генерирует данные (обучающий сервис — отдельный,
-  контракт стыковки = `SampleLabel` / target-словарь `SyntheticDataset`)
+- НЕ обучает модель — только генерирует данные (обучающий сервис —
+  [`Services/ml_train`](../ml_train/README.md), контракт стыковки =
+  `SampleLabel` / target-словарь `SyntheticDataset`)
 - НЕ pipeline-плагин (нет GUI/IPC); чистая библиотека уровня Services
 - Зависимости: numpy, OpenCV, Pillow, PyYAML, Pydantic; torch и pyarrow — опционально
 - Не импортирует `multiprocess_prototype.*` (правило слоя Services)

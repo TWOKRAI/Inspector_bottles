@@ -1,0 +1,45 @@
+# Пресет: классификация 33 русских букв + угол поворота,
+# данные — синтетика dataset_gen на лету (пресет ru_letters_disk).
+#
+# Запуск:
+#   python -m Services.ml_train train Services/ml_train/presets/ru_letters_synthetic.yaml
+
+model:
+  arch: mobilenet_v3_large        # альтернативы: mobilenetv4_medium (timm), timm/<имя>
+  pretrained: true
+  dropout: 0.2
+  angle_head: true                # учим и угол (sin, cos; маска angle_valid)
+
+data:
+  source: synthetic
+  generator_preset: Services/dataset_gen/presets/ru_letters_disk.yaml
+  samples_per_epoch: 6600         # 200 на класс за эпоху
+  val_samples: 990                # 30 на класс
+  batch_size: 64
+  num_workers: 4
+  seed: 42
+  augment:
+    enabled: false                # синтетика уже аугментирована движком dataset_gen
+
+optim:
+  epochs: 60
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  warmup_epochs: 3
+  scheduler: cosine
+  label_smoothing: 0.1
+  class_weights: auto
+  angle_loss_weight: 1.0
+
+train:
+  device: auto
+  amp: auto                       # bf16 на современных GPU
+  ema_decay: 0.999
+  early_stopping_patience: 15
+  monitor: balanced_accuracy
+  runs_dir: data/ml_train/runs
+
+export:
+  auto: true                      # после обучения — сразу ONNX в data/models
+  models_dir: data/models
+  opset: 17

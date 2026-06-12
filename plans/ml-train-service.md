@@ -1,7 +1,7 @@
 # ml-train-service — универсальный сервис обучения нейросетей
 
 **Ветка:** `feat/ml-train-service`
-**Статус:** in progress
+**Статус:** done (v1)
 **Дата:** 2026-06-13
 
 ## Цель
@@ -33,17 +33,20 @@
 ## Задачи
 
 - [x] План + ветка
-- [ ] T1. Каркас сервиса: `config.py` (Pydantic, from_yaml/from_dict/to_dict), `interfaces.py`
-- [ ] T2. `models.py` — реестр архитектур (torchvision MobileNetV3, timm MobileNetV4, `timm/*` passthrough), мультиголова класс+угол
-- [ ] T3. `data.py` — три источника + аугментации + class weights + DataLoader'ы
-- [ ] T4. `metrics.py` — numpy-метрики (accuracy, balanced accuracy, confusion matrix, per-class report, angle MAE°)
-- [ ] T5. `trainer.py` — цикл обучения (AMP, EMA, mixup, warmup+cosine, early stopping, чекпоинты, history)
-- [ ] T6. `selection.py` — RunRegistry: сравнение прогонов, выбор лучшего
-- [ ] T7. `export.py` — ONNX + sidecar + labels для `ml_inference` (+ parity-проверка через onnxruntime)
-- [ ] T8. `__main__.py` CLI: `train` / `runs` / `export`
-- [ ] T9. Пресет `presets/ru_letters_synthetic.yaml` (синтетика dataset_gen)
-- [ ] T10. Тесты: config/selection/metrics (без torch) + data/trainer/export (torch, smoke CPU)
-- [ ] T11. Документация: README.md, STATUS.md, строка в `Services/STATUS.md`, extra `ml-train` в pyproject
+- [x] T1. Каркас сервиса: `config.py` (Pydantic, from_yaml/from_dict/to_dict), `interfaces.py`
+- [x] T2. `models.py` — реестр архитектур (torchvision MobileNetV3, timm MobileNetV4, `timm/*` passthrough), мультиголова класс+угол
+- [x] T3. `data.py` — три источника + аугментации + class weights + DataLoader'ы
+- [x] T4. `metrics.py` — numpy-метрики (accuracy, balanced accuracy, confusion matrix, per-class report, angle MAE°)
+- [x] T5. `trainer.py` — цикл обучения (AMP, EMA, mixup, warmup+cosine, early stopping, чекпоинты, history)
+- [x] T6. `selection.py` — RunRegistry: сравнение прогонов, выбор лучшего
+- [x] T7. `export.py` — ONNX + sidecar + labels для `ml_inference` (+ parity-проверка через onnxruntime)
+- [x] T8. `__main__.py` CLI: `train` / `runs` / `export` / `archs`
+- [x] T9. Пресет `presets/ru_letters_synthetic.yaml` (синтетика dataset_gen)
+- [x] T10. Тесты: 34 (21 без torch + 13 torch smoke CPU, вкл. интеграцию с ModelRegistry ml_inference)
+- [x] T11. Документация: README.md, STATUS.md, строка в `Services/STATUS.md`, extra `ml-train` в pyproject
+
+**Верификация:** 34/34 теста; живой probe синтетики (33 класса, батч 8×3×128×128);
+parity torch↔onnxruntime в экспорте; ruff clean.
 
 ## Out of scope
 

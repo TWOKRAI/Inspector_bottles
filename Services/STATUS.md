@@ -4,7 +4,9 @@
 
 **Слои:** `multiprocess_framework → Services → Plugins → multiprocess_prototype`.
 
-**Обновлено:** 2026-06-12 — добавлен `dataset_gen` (генерация синтетических датасетов cut-and-paste,
+**Обновлено:** 2026-06-13 — добавлен `ml_train` (обучение и выбор моделей: MobileNetV3/V4 + timm,
+3 источника данных, ONNX-экспорт в формат ml_inference).
+Ранее 2026-06-12 — добавлен `dataset_gen` (генерация синтетических датасетов cut-and-paste,
 пресет «русские буквы на дисках»).
 Ранее 2026-06-07 — удалён `webcam_camera` (унификация камеры: единственный владелец cv2 —
 плагин `Plugins/sources/camera_service`; настройки — через Pipeline-инспектор и Services «Камера» фасад;
@@ -25,6 +27,7 @@ sandbox-снимок переведён на `webcam_controls.capture_single_fra
 | `Region_processors` | utility | Регион-процессоры (заготовки для пайплайнов) | — |
 | `ml_inference` | foundation | Инференс НС (кадр→классы): data-driven sidecar + pluggable backend (ONNX осн., torch опц.); processing-плагин `ml_inference` + widget `model_picker` | — |
 | `dataset_gen` | ready | Универсальный генератор синтетического датасета (cut-and-paste): классификация + угол поворота, авто-детектор симметрии (none/180/full), экспорт на диск / torch Dataset на лету; пресет «русские буквы на дисках» | — |
+| `ml_train` | ready | Универсальное обучение и выбор моделей: MobileNetV3 (torchvision) / MobileNetV4 + `timm/<имя>` (timm), классы + угол; AMP/EMA/mixup/warmup+cosine; RunRegistry; ONNX-экспорт + sidecar → ml_inference | — |
 
 ## Правила слоя
 
