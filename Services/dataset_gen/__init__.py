@@ -24,6 +24,7 @@ YAML-пресете. В комплекте пресет под русские б
 from pathlib import Path
 
 from Services.dataset_gen.core import (
+    ClassMeta,
     DatasetEngine,
     GeneratorConfig,
     SampleLabel,
@@ -38,6 +39,7 @@ from Services.dataset_gen.preview import save_preview_grid
 PRESETS_DIR = Path(__file__).parent / "presets"
 
 __all__ = [
+    "ClassMeta",
     "DatasetEngine",
     "GeneratorConfig",
     "SampleLabel",

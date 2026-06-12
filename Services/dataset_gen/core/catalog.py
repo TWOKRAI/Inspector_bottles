@@ -1,8 +1,12 @@
 """Каталог классов и фонов: загрузка RGBA-эталонов и выдача фоновых кропов.
 
-Класс = подкаталог в classes_dir (имя подкаталога — имя класса), внутри
-один или несколько эталонов на прозрачном фоне. Порядок классов — сортировка
-имён подкаталогов, индекс класса стабилен между запусками.
+Класс = ЛИСТОВАЯ папка со спрайтами. Каталог обходится рекурсивно, поэтому
+классы можно группировать в подклассы (`letters/vowels/А`); путь от корня до
+листа = иерархия класса. Внутри листовой папки — один или несколько эталонов
+на прозрачном фоне. Индекс класса стабилен между запусками (сортировка по пути).
+
+В каждой папке (любого уровня) может лежать `meta.yaml` — разметка, которая
+наследуется вниз (см. core/metadata.py).
 
 Внутреннее цветовое соглашение сервиса — RGB/RGBA; конвертация из BGR(A)
 происходит здесь, на загрузке.
@@ -14,7 +18,7 @@ np.fromfile + cv2.imdecode (и imencode + tofile на записи).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -22,6 +26,7 @@ import numpy as np
 
 from Services.dataset_gen.core.backgrounds import procedural_background
 from Services.dataset_gen.core.config import CatalogConfig
+from Services.dataset_gen.core.metadata import ClassMeta, load_meta
 
 SPRITE_SUFFIXES = {".png", ".webp", ".tif", ".tiff"}
 BACKGROUND_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}
@@ -53,11 +58,28 @@ def imwrite_unicode(path: str | Path, image_bgr: np.ndarray) -> None:
 
 @dataclass(frozen=True)
 class ClassEntry:
-    """Описание класса: имя (= имя подкаталога), индекс, пути эталонов."""
+    """Описание класса.
+
+    name — имя листовой папки (для совместимости и overrides по имени);
+    path — иерархия от корня каталога классов (`["letters", "А"]`);
+    meta — слитая разметка (родительские meta.* + собственный), см. metadata.py.
+    """
 
     name: str
     index: int
     sprite_paths: tuple[Path, ...]
+    path: tuple[str, ...] = ()
+    meta: ClassMeta = field(default_factory=ClassMeta)
+
+    @property
+    def qualified_name(self) -> str:
+        """Полное имя через иерархию: `letters/vowels/А` (POSIX-разделитель)."""
+        return "/".join(self.path) if self.path else self.name
+
+    @property
+    def display_name(self) -> str:
+        """Человекочитаемое имя из meta или имя папки."""
+        return self.meta.display_name or self.name
 
 
 class SpriteCatalog:
@@ -91,25 +113,34 @@ class SpriteCatalog:
         if not root.is_dir():
             raise FileNotFoundError(f"Каталог классов не найден: {root}")
 
-        # Класс = подкаталог со спрайтами. Служебные папки (имя с «.» или «_» —
-        # напр. _meta/, .git/) пропускаются: рядом с классами могут лежать
-        # метаданные, они не должны попасть в список классов.
-        subdirs = sorted(
-            (d for d in root.iterdir() if d.is_dir() and d.name[0] not in "._"),
-            key=lambda d: d.name,
-        )
-        if not subdirs:
-            raise ValueError(f"В каталоге классов нет подкаталогов-классов: {root}")
+        # Рекурсивный обход: класс = листовая папка со спрайтами; промежуточные
+        # папки — группы (подклассы). meta.* наследуется от корня к листу.
+        leaves: list[tuple[tuple[str, ...], Path, tuple[Path, ...], ClassMeta]] = []
+        self._collect_classes(root, (), load_meta(root), leaves)
+        if not leaves:
+            raise ValueError(f"В каталоге классов нет листовых папок со спрайтами: {root}")
 
+        leaves.sort(key=lambda item: item[0])  # стабильный порядок по иерархии
+
+        names_seen: dict[str, tuple[str, ...]] = {}
         self._classes = []
         self._sprites = {}
-        for index, sub in enumerate(subdirs):
-            paths = tuple(sorted(p for p in sub.iterdir() if p.suffix.lower() in SPRITE_SUFFIXES))
-            if not paths:
-                raise ValueError(f"Класс «{sub.name}»: нет эталонов ({sub})")
-            sprites = [self._load_sprite(p) for p in paths]
-            self._classes.append(ClassEntry(name=sub.name, index=index, sprite_paths=paths))
-            self._sprites[index] = sprites
+        for index, (path, _dir, paths, meta) in enumerate(leaves):
+            if not path:
+                raise ValueError(
+                    f"Спрайты лежат прямо в корне {root} — нужны подпапки-классы "
+                    f"(например {root.name}/<класс>/sprite.png)"
+                )
+            name = path[-1]
+            if name in names_seen:
+                raise ValueError(
+                    f"Конфликт имён классов «{name}»: {'/'.join(names_seen[name])} и "
+                    f"{'/'.join(path)}. Имена листовых папок должны быть уникальны "
+                    f"(переименуйте или задайте display_name в meta.yaml)."
+                )
+            names_seen[name] = path
+            self._classes.append(ClassEntry(name=name, index=index, sprite_paths=paths, path=path, meta=meta))
+            self._sprites[index] = [self._load_sprite(p) for p in paths]
 
         bg_dir = self._config.backgrounds_dir
         if bg_dir is not None:
@@ -123,6 +154,32 @@ class SpriteCatalog:
             if not self._background_paths:
                 raise ValueError(f"В каталоге фонов нет изображений: {bg_dir}")
         self._loaded = True
+
+    def _collect_classes(
+        self,
+        directory: Path,
+        rel_path: tuple[str, ...],
+        inherited_meta: ClassMeta,
+        out: list[tuple[tuple[str, ...], Path, tuple[Path, ...], ClassMeta]],
+    ) -> None:
+        """Рекурсивно собрать листовые классы со спрайтами и накопить метаданные.
+
+        Листовая папка (есть спрайты) → класс; иначе спускаемся в подпапки.
+        Если в папке есть и спрайты, и подпапки — спрайты выигрывают (это класс),
+        подпапки не считаются подклассами (избегаем неоднозначности).
+        Служебные папки (имя с «.» или «_») пропускаются.
+        """
+        meta = inherited_meta if rel_path == () else inherited_meta.merged_with_child(load_meta(directory))
+        sprite_paths = tuple(sorted(p for p in directory.iterdir() if p.suffix.lower() in SPRITE_SUFFIXES))
+        if sprite_paths:
+            out.append((rel_path, directory, sprite_paths, meta))
+            return
+        subdirs = sorted(
+            (d for d in directory.iterdir() if d.is_dir() and d.name[0] not in "._"),
+            key=lambda d: d.name,
+        )
+        for sub in subdirs:
+            self._collect_classes(sub, rel_path + (sub.name,), meta, out)
 
     @staticmethod
     def _load_sprite(path: Path) -> np.ndarray:
@@ -150,6 +207,11 @@ class SpriteCatalog:
     def num_classes(self) -> int:
         self._ensure_loaded()
         return len(self._classes)
+
+    def entry(self, class_index: int) -> ClassEntry:
+        """Запись класса по индексу (без копирования списка — для hot path)."""
+        self._ensure_loaded()
+        return self._classes[class_index]
 
     def sprites(self, class_index: int) -> list[np.ndarray]:
         """Все эталоны класса (RGBA uint8)."""

@@ -4,6 +4,7 @@ from Services.dataset_gen.core.catalog import SpriteCatalog, imread_unicode, imw
 from Services.dataset_gen.core.config import GeneratorConfig, SymmetryType
 from Services.dataset_gen.core.engine import DatasetEngine
 from Services.dataset_gen.core.labels import SampleLabel
+from Services.dataset_gen.core.metadata import ClassMeta, load_meta, write_meta
 from Services.dataset_gen.core.symmetry import detect_symmetry, encode_angle, rotation_difference
 
 __all__ = [
@@ -12,6 +13,9 @@ __all__ = [
     "SampleLabel",
     "SpriteCatalog",
     "SymmetryType",
+    "ClassMeta",
+    "load_meta",
+    "write_meta",
     "detect_symmetry",
     "encode_angle",
     "rotation_difference",

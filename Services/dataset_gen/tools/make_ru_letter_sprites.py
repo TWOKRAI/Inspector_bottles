@@ -18,6 +18,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from Services.dataset_gen.core.metadata import ClassMeta, write_meta
+
 RU_UPPERCASE = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"  # 33 буквы
 
 _FONT_CANDIDATES = (
@@ -87,11 +89,15 @@ def generate_sprites(
     letters: str = RU_UPPERCASE,
     size: int = 256,
     font_path: str | None = None,
+    write_meta_files: bool = True,
 ) -> list[Path]:
-    """Сгенерировать каталог классов: подкаталог на букву с base.png.
+    """Сгенерировать каталог классов: подкаталог на букву с base.png + meta.yaml.
+
+    В каждой папке класса пишется meta.yaml с разметкой (display_name, tags) —
+    шаблон, который можно дополнить руками (например symmetry для пограничных).
 
     Post:
-      - создано len(letters) подкаталогов, в каждом base.png (RGBA)
+      - создано len(letters) подкаталогов, в каждом base.png (RGBA) и meta.yaml
     """
     out = Path(out_dir)
     created: list[Path] = []
@@ -102,6 +108,11 @@ def generate_sprites(
         path = class_dir / "base.png"
         Image.fromarray(sprite).save(path)  # PIL: unicode-пути ок на Windows
         created.append(path)
+        if write_meta_files:
+            write_meta(
+                class_dir,
+                ClassMeta(display_name=f"Буква {letter}", tags=["letter", "ru"]),
+            )
     return created
 
 

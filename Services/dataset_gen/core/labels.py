@@ -19,6 +19,7 @@ class SampleLabel(BaseModel):
 
     class_index: int
     class_name: str
+    class_path: str = ""  # иерархия класса: `letters/vowels/А` (POSIX), для подклассов
     angle_deg: float  # ground truth, CCW, [0, 360)
     angle_sin: float  # кодирование с учётом симметрии (см. symmetry.encode_angle)
     angle_cos: float

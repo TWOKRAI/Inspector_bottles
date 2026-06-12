@@ -35,6 +35,7 @@ _LABEL_FIELDS = (
     "filename",
     "class_index",
     "class_name",
+    "class_path",
     "angle_deg",
     "angle_sin",
     "angle_cos",
@@ -82,7 +83,16 @@ def export_dataset(
             if progress_cb is not None:
                 progress_cb(done, total)
 
+    _write_class_registry(out, generator)
     return _write_labels(out, rows, labels_format)
+
+
+def _write_class_registry(out: Path, generator: SampleGenerator) -> None:
+    """Сохранить реестр классов с разметкой в classes.json (если доступен)."""
+    registry = getattr(generator, "class_registry", None)
+    if registry is None:
+        return
+    (out / "classes.json").write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def export_splits(

@@ -61,6 +61,29 @@ class DatasetEngine:
         names = self._catalog.class_names
         return {names[i]: s for i, s in self._symmetry.items()}
 
+    @property
+    def class_registry(self) -> list[dict]:
+        """Реестр классов с разметкой — «файл разметки» датасета (classes.json).
+
+        По записи на класс: index, name, path (иерархия), symmetry (итоговая,
+        после overrides/meta/детектора), sprite_count и вся пользовательская
+        разметка из meta.yaml.
+        """
+        registry = []
+        for entry in self._catalog.classes:
+            registry.append(
+                {
+                    "index": entry.index,
+                    "name": entry.name,
+                    "path": entry.qualified_name,
+                    "display_name": entry.display_name,
+                    "symmetry": self._symmetry[entry.index],
+                    "sprite_count": len(entry.sprite_paths),
+                    "meta": entry.meta.to_dict(),
+                }
+            )
+        return registry
+
     # -- генерация ------------------------------------------------------------
 
     def generate_sample(
@@ -135,9 +158,11 @@ class DatasetEngine:
 
         symmetry = self._symmetry[class_index]
         sin_v, cos_v, valid = encode_angle(angle, symmetry)
+        entry = self._catalog.entry(class_index)
         label = SampleLabel(
             class_index=class_index,
-            class_name=self._catalog.class_names[class_index],
+            class_name=entry.name,
+            class_path=entry.qualified_name,
             angle_deg=angle,
             angle_sin=sin_v,
             angle_cos=cos_v,
@@ -149,12 +174,17 @@ class DatasetEngine:
     # -- внутреннее -----------------------------------------------------------
 
     def _resolve_symmetries(self) -> dict[int, SymmetryType]:
+        """Симметрия класса. Приоритет: глобальный override из конфига →
+        meta.yaml класса (symmetry) → авто-детектор → "none" при выкл. детекторе."""
         sym_cfg = self.config.symmetry
         result: dict[int, SymmetryType] = {}
         for entry in self._catalog.classes:
             override = sym_cfg.overrides.get(entry.name)
             if override is not None:
                 result[entry.index] = override
+                continue
+            if entry.meta.symmetry is not None:
+                result[entry.index] = entry.meta.symmetry
                 continue
             if not sym_cfg.auto_detect:
                 result[entry.index] = "none"
