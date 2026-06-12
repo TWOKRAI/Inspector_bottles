@@ -61,11 +61,24 @@ class VfdDriver(BaseDeviceDriver):
         return False
 
     def connect(self) -> bool:
-        """Создать VfdClient поверх транспорта (bridge -> носитель, tcp -> own)."""
+        """Создать VfdClient поверх транспорта (bridge -> носитель, tcp -> own).
+
+        н7: транспорт получается исключительно через build_transport, который
+        валидирует kind носителя и цикл. TransportBuildError -> quality=bad +
+        сообщение в last_error (через _record_err и пробрасывание исключения).
+        """
         if self._vfd_client is not None:
             return self._vfd_client.is_connected
 
-        transport = self._get_transport()
+        from Services.device_hub.errors import TransportBuildError
+
+        try:
+            transport = self._get_transport()
+        except TransportBuildError:
+            # Понятная ошибка: носитель не существует / не robot / цикл
+            self._last_quality = "bad"
+            self._record_err()
+            raise  # Пусть caller (DeviceManager.connect) логирует
         if transport is None:
             self._last_quality = "bad"
             return False
@@ -206,24 +219,24 @@ class VfdDriver(BaseDeviceDriver):
     # ------------------------------------------------------------------ #
 
     def _get_transport(self) -> Any:
-        """Получить RegisterTransport: инъекция или bridge-резолв."""
+        """Получить RegisterTransport: инъекция или build_transport (единый путь, н7).
+
+        Ранее bridge резолвился напрямую через resolve_device, минуя валидацию
+        в build_transport (_build_bridge: проверка kind носителя, цикл, None-transport).
+        Теперь все типы (bridge/tcp/rtu) проходят через build_transport, который
+        кидает TransportBuildError с понятным сообщением — silent-None исключён.
+        """
         if self._injected_transport is not None:
             return self._injected_transport
 
-        # Bridge — получить транспорт через resolve_device
-        t_type = self.entry.transport.get("type", "")
-        if t_type == "bridge":
-            bridge_id = self.entry.transport.get("bridge", "")
-            if self._resolve_device is not None and bridge_id:
-                carrier = self._resolve_device(bridge_id)
-                if carrier is not None:
-                    return getattr(carrier, "transport", None)
-            return None
-
-        # TCP/RTU — build_transport (в будущем)
+        from Services.device_hub.errors import TransportBuildError
         from Services.device_hub.transports import build_transport
 
-        return build_transport(self.entry, self._resolve_device or (lambda _: None))
+        try:
+            return build_transport(self.entry, self._resolve_device or (lambda _: None))
+        except TransportBuildError:
+            # Пробрасываем как есть — caller (connect) обработает и вернёт quality=bad
+            raise
 
     def _is_carrier_in_draw(self) -> bool:
         """Проверить, в режиме ли DRAW носитель-робот (bridge gating)."""

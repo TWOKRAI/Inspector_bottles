@@ -150,9 +150,18 @@ class RobotDriver(BaseDeviceDriver):
     # ------------------------------------------------------------------ #
 
     def tick(self, stop_event: Any = None) -> dict | None:
-        """Один шаг: reconnect -> телеметрия -> feeder -> draw -> snapshot."""
+        """Один шаг: reconnect -> телеметрия -> feeder -> draw -> snapshot.
+
+        н8 ревью Fable: quality snapshot'а отражает результат текущего тика.
+        Если в этом тике произошла IO-ошибка (tx_err вырос) — quality="bad",
+        а не "good". is_connected (ModbusDevice._fail) падает лишь после этого
+        тика — snapshot не должен маскировать ошибку.
+        """
         if not self._ensure_connected():
             return self.snapshot(quality="bad")
+
+        # Запоминаем счётчик ошибок до операций тика (н8)
+        _err_before = self._stats["tx_err"]
 
         self._publish_telemetry_maybe()
 
@@ -177,7 +186,10 @@ class RobotDriver(BaseDeviceDriver):
             except Exception:
                 self._record_err()
 
-        return self.snapshot(quality="good")
+        # н8: если в этом тике возникла IO-ошибка — quality="bad"
+        _tick_had_err = self._stats["tx_err"] > _err_before
+        quality = "bad" if _tick_had_err else "good"
+        return self.snapshot(quality=quality)
 
     # ------------------------------------------------------------------ #
     # Feeder CVT (порт robot_io/plugin.py:151-263)

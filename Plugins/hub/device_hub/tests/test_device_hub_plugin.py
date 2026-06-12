@@ -104,6 +104,80 @@ class TestLifecycle:
         assert "test_dev" in plugin._manager._entries
         assert plugin._reg.devices_total == 1
 
+    def test_start_recipe_origin_slug_preserved(self, tmp_path: Path) -> None:
+        """н6: recipe_origin из конфига передаётся как origin при upsert — slug не теряется."""
+        registry_file = tmp_path / "devices.yaml"
+        recipe = [
+            {
+                "id": "robot_demo",
+                "name": "Demo Robot",
+                "kind": "robot",
+                "transport": {"type": "tcp", "host": "1.2.3.4", "port": 502, "unit_id": 1},
+            }
+        ]
+        config: dict = {
+            "registry_path": str(registry_file),
+            "recipe_devices": recipe,
+            "recipe_origin": "recipe:robot_demo",
+        }
+        from Plugins.hub.device_hub.tests.conftest import make_ctx
+
+        ctx = make_ctx(config, tmp_registry=registry_file)
+        plugin = DeviceHubPlugin()
+        plugin.configure(ctx)
+
+        # Перехватываем вызовы upsert, чтобы проверить origin
+        upserted_origins: list[str] = []
+        original_upsert = plugin._manager.upsert
+
+        def capturing_upsert(data: dict, origin: str | None = None) -> None:
+            upserted_origins.append(origin or "")
+            return original_upsert(data, origin)
+
+        plugin._manager.upsert = capturing_upsert  # type: ignore[method-assign]
+        plugin.start(ctx)
+
+        # Все upsert'ы должны использовать "recipe:robot_demo", а не просто "recipe"
+        assert any(o == "recipe:robot_demo" for o in upserted_origins), (
+            f"Ожидали origin='recipe:robot_demo', получили: {upserted_origins}"
+        )
+
+    def test_start_recipe_origin_fallback(self, tmp_path: Path) -> None:
+        """н6: без recipe_origin в конфиге используется fallback 'recipe'."""
+        registry_file = tmp_path / "devices.yaml"
+        recipe = [
+            {
+                "id": "robot_default",
+                "name": "Default Robot",
+                "kind": "robot",
+                "transport": {"type": "tcp", "host": "1.2.3.4", "port": 502, "unit_id": 1},
+            }
+        ]
+        config: dict = {
+            "registry_path": str(registry_file),
+            "recipe_devices": recipe,
+            # recipe_origin не задан — должен быть fallback "recipe"
+        }
+        from Plugins.hub.device_hub.tests.conftest import make_ctx
+
+        ctx = make_ctx(config, tmp_registry=registry_file)
+        plugin = DeviceHubPlugin()
+        plugin.configure(ctx)
+
+        upserted_origins: list[str] = []
+        original_upsert = plugin._manager.upsert
+
+        def capturing_upsert(data: dict, origin: str | None = None) -> None:
+            upserted_origins.append(origin or "")
+            return original_upsert(data, origin)
+
+        plugin._manager.upsert = capturing_upsert  # type: ignore[method-assign]
+        plugin.start(ctx)
+
+        assert any(o == "recipe" for o in upserted_origins), (
+            f"Ожидали fallback origin='recipe', получили: {upserted_origins}"
+        )
+
     def test_shutdown_disconnects_all(self, tmp_path: Path) -> None:
         """shutdown отключает все устройства."""
         plugin, ctx = _make_plugin(tmp_path)

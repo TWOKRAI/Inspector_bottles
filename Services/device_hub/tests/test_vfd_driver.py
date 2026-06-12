@@ -173,3 +173,54 @@ class TestVfdDriverTick:
         snap = vfd_driver.tick(stop)
         if snap is not None:
             assert snap["quality"] in ("good", "stale")
+
+
+class TestVfdDriverBridgeValidation:
+    """н7: bridge резолвится через build_transport с валидацией."""
+
+    def test_connect_bridge_to_vfd_raises_transport_error(self, vfd_entry, clock) -> None:
+        """н7: bridge на vfd-устройство (не robot) -> TransportBuildError, не silent None."""
+        from Services.device_hub.errors import TransportBuildError
+
+        # Носитель с kind=vfd — не допустим как мост
+        class FakeVfdCarrier:
+            kind = "vfd"
+            transport = object()
+
+        d = VfdDriver(
+            vfd_entry,
+            clock=clock.clock,
+            sleep=clock.sleep,
+            resolve_device=lambda _: FakeVfdCarrier(),
+        )
+        with pytest.raises(TransportBuildError, match="robot"):
+            d.connect()
+
+    def test_connect_bridge_carrier_not_found_raises(self, vfd_entry, clock) -> None:
+        """н7: bridge на несуществующее устройство -> TransportBuildError с понятным сообщением."""
+        from Services.device_hub.errors import TransportBuildError
+
+        d = VfdDriver(
+            vfd_entry,
+            clock=clock.clock,
+            sleep=clock.sleep,
+            resolve_device=lambda _: None,  # носитель не найден
+        )
+        with pytest.raises(TransportBuildError, match="не найден"):
+            d.connect()
+
+    def test_connect_bridge_cycle_raises(self, clock) -> None:
+        """н7: bridge-цикл (устройство ссылается на себя) -> TransportBuildError."""
+        from Services.device_hub.errors import TransportBuildError
+        from Services.device_hub.registry.entry import DeviceEntry
+
+        cycle_entry = DeviceEntry(
+            id="vfd_self",
+            name="ПЧ циклический",
+            kind="vfd",
+            transport={"type": "bridge", "bridge": "vfd_self"},
+            params={},
+        )
+        d = VfdDriver(cycle_entry, clock=clock.clock, sleep=clock.sleep, resolve_device=lambda _: None)
+        with pytest.raises(TransportBuildError, match="цикл"):
+            d.connect()

@@ -171,12 +171,15 @@ class DeviceHubPlugin(ProcessModulePlugin):
 
     def start(self, ctx: PluginContext) -> None:
         """READY -> RUNNING: upsert recipe_devices, auto_connect, supervisor-worker."""
-        # Upsert устройств из конфига рецепта (опционально)
+        # Upsert устройств из конфига рецепта (опционально).
+        # н6: читаем recipe_origin из конфига плагина, чтобы slug не терялся
+        # (origin="recipe" не позволяет отличить один рецепт от другого).
         recipe_devices = ctx.config.get("recipe_devices", [])
+        recipe_origin: str = ctx.config.get("recipe_origin", "recipe")
         recipe_ids: set[str] = set()
         for dev_dict in recipe_devices:
             if isinstance(dev_dict, dict) and "id" in dev_dict:
-                self._manager.upsert(dev_dict, origin="recipe")
+                self._manager.upsert(dev_dict, origin=recipe_origin)
                 recipe_ids.add(dev_dict["id"])
 
         # Обновить счётчики после recipe upsert

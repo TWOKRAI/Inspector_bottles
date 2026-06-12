@@ -185,6 +185,34 @@ class TestRobotDriverTelemetry:
         assert "encoder" in result
 
 
+class TestRobotDriverTickQuality:
+    """н8: quality в snapshot tick'а отражает результат текущего тика."""
+
+    def test_tick_good_on_success(self, driver) -> None:
+        """Успешный tick (без IO-ошибок) -> quality=good."""
+        stop = threading.Event()
+        snap = driver.tick(stop)
+        assert snap is not None
+        assert snap["quality"] == "good"
+
+    def test_tick_bad_on_telemetry_error(self, driver) -> None:
+        """н8: если телеметрия падает в этом тике -> quality=bad, не good."""
+        # Форсируем сброс интервала телеметрии, чтобы следующий tick точно её вызвал
+        driver._last_telemetry = 0.0
+        driver._telemetry_interval_s = 0.0
+
+        import unittest.mock as mock
+
+        # Заставляем read_telemetry бросить исключение
+        with mock.patch.object(driver._client, "read_telemetry", side_effect=OSError("симулированная ошибка")):
+            stop = threading.Event()
+            snap = driver.tick(stop)
+
+        assert snap is not None
+        # tx_err вырос — качество должно быть bad (не good)
+        assert snap["quality"] != "good", "tick с IO-ошибкой в этом тике должен возвращать quality != good"
+
+
 class TestRobotDriverCallOps:
     """Проверка таблицы операций."""
 
