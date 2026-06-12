@@ -1,0 +1,43 @@
+# Пресет: распознавание русских заглавных букв на дисках (33 класса).
+# Чёрные буквы одного шрифта на белых глянцевых дисках, конвейер движется.
+#
+# Спрайты генерируются утилитой (один раз):
+#   python -m Services.dataset_gen.tools.make_ru_letter_sprites --out data/dataset_gen/ru_letters/sprites
+#
+# Относительные пути резолвятся от каталога этого файла.
+# backgrounds_dir: null → процедурные фоны; для боевого датасета укажите
+# каталог фотографий реальной сцены (конвейер, лоток и т.п.).
+
+catalog:
+  classes_dir: ../../../data/dataset_gen/ru_letters/sprites
+  backgrounds_dir: null
+
+output:
+  size: [128, 128]        # (H, W)
+  frames_per_class: 300
+  supersample: 1.0
+
+placement:
+  object_size_frac: [0.55, 0.85]
+  keep_inside: true
+
+symmetry:
+  auto_detect: true        # детектору доверяем больше, чем списку ожиданий
+  threshold: 0.05
+  rel_threshold: 0.3       # отсекает «почти симметричные» (П, В) на фоне диска
+  full_angles: [30, 45, 60, 90, 120, 135]
+  overrides: {}            # ожидания для контроля: О→full; Н,Ж,Ф,Х,И→180; С — решит детектор
+
+augment:
+  rotation: {enabled: true, range: [0, 360]}
+  shift:    {enabled: true, frac: 0.10}
+  scale:    {enabled: true, range: [0.9, 1.1]}
+  brightness_contrast: {enabled: true, prob: 0.9, brightness: [-35, 35], contrast: [0.8, 1.2]}
+  gaussian_blur: {enabled: true, prob: 0.5, sigma: [0.4, 1.6]}
+  motion_blur:   {enabled: true, prob: 0.4, length: [3, 9]}        # конвейер движется
+  noise:         {enabled: true, prob: 0.7, std: [2, 9]}
+  color_temperature: {enabled: true, prob: 0.5, shift: [-0.07, 0.07]}
+  jpeg:  {enabled: true, prob: 0.3, quality: [55, 90]}
+  glare: {enabled: true, prob: 0.5, intensity: [40, 110], radius_frac: [0.15, 0.4]}  # глянец дисков
+
+seed: 42
