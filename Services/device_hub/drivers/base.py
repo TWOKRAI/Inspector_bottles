@@ -65,6 +65,11 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
         # Последнее качество (для snapshot)
         self._last_quality: str = "bad"
 
+        # НР-1/НР-2: desired-state — проставляется плагином-supervisor'ом.
+        # Драйвер НЕ должен реконнектиться при desired_connected=False.
+        # Runtime-атрибут, НЕ persist.
+        self.desired_connected: bool = False
+
     # ------------------------------------------------------------------ #
     # Контракт BaseManager
     # ------------------------------------------------------------------ #

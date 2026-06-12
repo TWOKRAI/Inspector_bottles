@@ -15,6 +15,9 @@ from typing import Any
 
 from Services.device_hub.drivers.base import BaseDeviceDriver
 
+# Минимальный интервал между попытками (ре)подключения VFD, сек
+_VFD_RECONNECT_THROTTLE_SEC = 3.0
+
 
 class VfdDriver(BaseDeviceDriver):
     """Драйвер ПЧ: run/stop/set_freq/reset_fault + poll-зеркало.
@@ -48,6 +51,10 @@ class VfdDriver(BaseDeviceDriver):
         # Параметры из entry.params
         self._poll_interval_s: float = float(entry.params.get("poll_interval_s", 0.5))
         self._last_poll: float = 0.0
+
+        # НР-2: throttle для reconnect при desired=True + not connected.
+        # -inf чтобы первая попытка прошла сразу (аналог robot_driver).
+        self._last_reconnect: float = float("-inf")
 
     # ------------------------------------------------------------------ #
     # Соединение
@@ -118,9 +125,18 @@ class VfdDriver(BaseDeviceDriver):
     # ------------------------------------------------------------------ #
 
     def tick(self, stop_event: Any = None) -> dict | None:
-        """Один шаг: если carrier в DRAW -> stale; иначе poll + ensure_alive."""
+        """Один шаг: reconnect при desired + not connected, DRAW-gating, poll.
+
+        НР-2 ревью Fable: если desired_connected=True но VFD не подключён
+        (напр. носитель-робот был offline при первом connect), пытаемся
+        (ре)подключиться через build_transport с throttle. Это позволяет
+        bridged-VFD автоматически подняться когда робот-носитель появится.
+        """
         if self._vfd_client is None or not self.is_connected:
-            return self.snapshot(quality="bad")
+            if not self.desired_connected:
+                return self.snapshot(quality="bad")
+            # НР-2: throttled reconnect — пробуем (ре)подключиться
+            return self._attempt_reconnect()
 
         # DRAW-gating (У4): проверяем режим носителя
         if self._is_carrier_in_draw():
@@ -213,6 +229,35 @@ class VfdDriver(BaseDeviceDriver):
         "reset_fault": _op_reset_fault,
         "get_status": _op_get_status,
     }
+
+    # ------------------------------------------------------------------ #
+    # Reconnect (НР-2)
+    # ------------------------------------------------------------------ #
+
+    def _attempt_reconnect(self) -> dict:
+        """Throttled reconnect при desired=True + not connected.
+
+        Возвращает snapshot: quality=bad + reason при неудаче.
+        Не спамит connect каждый тик — throttle через _last_reconnect.
+        """
+        now = self._clock()
+        if now - self._last_reconnect < _VFD_RECONNECT_THROTTLE_SEC:
+            return self.snapshot(
+                data={"reason": "ожидание повторного подключения"},
+                quality="bad",
+            )
+        self._last_reconnect = now
+        self._record_reconnect()
+        try:
+            ok = self.connect()
+        except Exception:
+            ok = False
+        if ok:
+            return self.snapshot(quality="good")
+        return self.snapshot(
+            data={"reason": "носитель не готов или транспорт недоступен"},
+            quality="bad",
+        )
 
     # ------------------------------------------------------------------ #
     # Служебное

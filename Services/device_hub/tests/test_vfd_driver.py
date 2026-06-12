@@ -175,6 +175,106 @@ class TestVfdDriverTick:
             assert snap["quality"] in ("good", "stale")
 
 
+class TestVfdDriverDesiredReconnect:
+    """НР-2: VFD с desired=True + not connected -> tick пытается reconnect."""
+
+    def test_tick_reconnects_when_desired_true(self, vfd_entry, clock) -> None:
+        """desired=True + disconnected -> tick вызывает _attempt_reconnect."""
+        # VFD без транспорта (connect упадёт), но desired=True
+        attempts: list[bool] = []
+
+        class FakeVfdDriver(VfdDriver):
+            """Перехватываем connect для подсчёта попыток."""
+
+            def connect(self) -> bool:
+                attempts.append(True)
+                return False
+
+        d = FakeVfdDriver(vfd_entry, clock=clock.clock, sleep=clock.sleep)
+        d.desired_connected = True
+        stop = threading.Event()
+
+        # Первый tick — reconnect (throttle=0 при первом вызове)
+        snap = d.tick(stop)
+        assert snap is not None
+        assert snap["quality"] == "bad"
+        assert len(attempts) == 1
+
+        # Второй tick сразу — throttle (3 секунды не прошло)
+        snap = d.tick(stop)
+        assert len(attempts) == 1  # не вызвал connect повторно
+
+        # Прокрутить время на 4 секунды — retry
+        clock.t += 4.0
+        snap = d.tick(stop)
+        assert len(attempts) == 2
+
+    def test_tick_no_reconnect_when_desired_false(self, vfd_entry, clock) -> None:
+        """desired=False + disconnected -> tick возвращает bad, НЕ реконнектит."""
+        d = VfdDriver(vfd_entry, clock=clock.clock, sleep=clock.sleep)
+        d.desired_connected = False
+        stop = threading.Event()
+
+        # Мокаем connect чтобы убедиться что не вызывается
+        original_connect = d.connect
+        connect_calls = []
+
+        def tracking_connect():
+            connect_calls.append(True)
+            return original_connect()
+
+        d.connect = tracking_connect
+
+        for _ in range(5):
+            snap = d.tick(stop)
+            assert snap["quality"] == "bad"
+            clock.t += 5.0
+
+        assert len(connect_calls) == 0, "connect НЕ должен вызываться при desired=False"
+
+    def test_bridged_vfd_reconnects_when_carrier_appears(self, vfd_entry, robot_entry, robot_transport, clock) -> None:
+        """НР-2: робот offline -> VFD desired=True ждёт -> робот connect -> VFD поднимается."""
+        # Робот ещё не подключён — resolve_device возвращает None
+        carrier_ref: list = [None]
+
+        def resolve(dev_id: str):
+            return carrier_ref[0]
+
+        d = VfdDriver(
+            vfd_entry,
+            protocol=None,
+            resolve_device=resolve,
+            clock=clock.clock,
+            sleep=clock.sleep,
+        )
+        d.desired_connected = True
+        stop = threading.Event()
+
+        # Первый tick — connect упадёт (carrier=None -> TransportBuildError)
+        snap = d.tick(stop)
+        assert snap["quality"] == "bad"
+        assert not d.is_connected
+
+        # Робот поднялся
+        robot = RobotDriver(
+            robot_entry,
+            protocol=None,
+            transport=robot_transport,
+            clock=clock.clock,
+            sleep=clock.sleep,
+        )
+        robot.connect()
+        carrier_ref[0] = robot
+
+        # Прокрутить throttle
+        clock.t += 5.0
+
+        # Следующий tick — VFD подключится через bridge
+        snap = d.tick(stop)
+        assert d.is_connected, "VFD должен подключиться когда носитель появился"
+        assert snap["quality"] == "good"
+
+
 class TestVfdDriverBridgeValidation:
     """н7: bridge резолвится через build_transport с валидацией."""
 

@@ -112,13 +112,14 @@ class TestRobotDriverReconnect:
     """Throttled reconnect при недоступном транспорте."""
 
     def test_disconnected_reconnect_throttle(self, robot_entry, transport, clock) -> None:
-        """При обрыве: reconnect не чаще _RECONNECT_THROTTLE_SEC."""
+        """При обрыве + desired=True: reconnect не чаще _RECONNECT_THROTTLE_SEC."""
         d = RobotDriver(
             robot_entry,
             transport=transport,
             clock=clock.clock,
             sleep=clock.sleep,
         )
+        d.desired_connected = True
         # Не подключаемся — tick пытается reconnect
         transport._connected = False
         stop = threading.Event()
@@ -136,6 +137,28 @@ class TestRobotDriverReconnect:
         snap3 = d.tick(stop)
         assert snap3["quality"] == "good"
         assert d.is_connected
+
+    def test_no_reconnect_when_desired_false(self, robot_entry, transport, clock) -> None:
+        """НР-1: desired=False -> tick НЕ пытается реконнектиться."""
+        d = RobotDriver(
+            robot_entry,
+            transport=transport,
+            clock=clock.clock,
+            sleep=clock.sleep,
+        )
+        d.desired_connected = False
+        transport._connected = False
+        stop = threading.Event()
+
+        # 5 тиков с прокруткой времени — connect НЕ вызывается
+        for _ in range(5):
+            snap = d.tick(stop)
+            assert snap["quality"] == "bad"
+            clock.t += 5.0
+
+        assert not d.is_connected
+        # reconnects = 0 (не было попыток)
+        assert d.stats["reconnects"] == 0
 
 
 class TestRobotDriverDraw:

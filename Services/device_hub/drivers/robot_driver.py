@@ -322,9 +322,14 @@ class RobotDriver(BaseDeviceDriver):
     # ------------------------------------------------------------------ #
 
     def _ensure_connected(self) -> bool:
-        """Гарантировать соединение: throttled-reconnect."""
+        """Гарантировать соединение: throttled-reconnect.
+
+        НР-1: при desired_connected=False — НЕ реконнектиться.
+        """
         if self.is_connected:
             return True
+        if not self.desired_connected:
+            return False
         now = self._clock()
         if now - self._last_reconnect < _RECONNECT_THROTTLE_SEC:
             return False

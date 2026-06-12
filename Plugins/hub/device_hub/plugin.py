@@ -160,8 +160,16 @@ class DeviceHubPlugin(ProcessModulePlugin):
         self._conn_queue: queue.Queue[tuple[str, str]] = queue.Queue()
         # Воркеры per-device: {device_id: worker_name}
         self._device_workers: dict[str, str] = {}
-        # Lock для device_workers (модифицируется из supervisor и командного потока)
+        # Lock для device_workers И desired_connected
+        # (модифицируется из supervisor и командного потока)
         self._workers_lock = threading.Lock()
+
+        # НР-1/НР-2 ревью Fable: desired-state соединения.
+        # Runtime-состояние сессии (НЕ persist в devices.yaml).
+        # True = пользователь/рецепт хотят устройство подключённым;
+        # False = пользователь явно отключил.
+        # Без desired=True supervisor НЕ создаёт воркер и драйвер НЕ реконнектит.
+        self._desired_connected: dict[str, bool] = {}
 
         # Публикация начального реестра
         self._publish_full_registry()
@@ -189,8 +197,10 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # Auto-connect: устройства с auto_connect=True ИЛИ из рецепта (Р11/н1:
         # запись в devices: подразумевает auto_connect — иначе pipeline молча
         # дропает job'ы до ручного «Подключить»).
+        # НР-1: выставляем desired_connected=True, чтобы supervisor знал намерение.
         for entry in self._manager._entries.values():
             if entry.enabled and (entry.auto_connect or entry.id in recipe_ids):
+                self._desired_connected[entry.id] = True
                 self._conn_queue.put(("connect", entry.id))
 
         # Supervisor-worker (LOOP)
@@ -252,8 +262,16 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     ok = self._manager.connect(dev_id)
                     conn = "connected" if ok else "error"
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": conn})
+                    # НР-1/НР-2: проставляем desired на драйвере (для reconnect в tick)
+                    driver = self._manager._drivers.get(dev_id)
+                    if driver is not None:
+                        driver.desired_connected = True
                 elif op == "disconnect":
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnecting"})
+                    # НР-1: desired=False на драйвере ДО disconnect (tick не реконнектит)
+                    driver = self._manager._drivers.get(dev_id)
+                    if driver is not None:
+                        driver.desired_connected = False
                     self._manager.disconnect(dev_id)
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnected"})
                     # Остановить per-device воркер
@@ -267,54 +285,85 @@ class DeviceHubPlugin(ProcessModulePlugin):
             self._update_counters()
 
     def _ensure_device_workers(self) -> None:
-        """Для ВСЕХ драйверов без воркера — создать per-device воркер.
+        """Привести факт к desired: воркер есть <=> desired_connected=True.
 
-        Б-2 ревью Fable: воркер создаётся для ЛЮБОГО драйвера (не только
-        connected). tick() внутри драйвера сам выполняет throttled reconnect
-        при is_connected=False. Без воркера reconnect не запустится —
-        устройство, чей первый connect упал, навсегда останется мёртвым.
+        НР-1/НР-2 ревью Fable: воркер создаётся ТОЛЬКО для desired=True.
+        При desired=False воркер останавливается (если был).
+        Драйвер в _drivers может оставаться для быстрого повторного connect.
+
+        НР-3: проверка desired + _drivers + запись _device_workers — под
+        общим _workers_lock, чтобы remove не мог создать окно.
+
+        НР-4: create_worker может вернуть False — записываем в _device_workers
+        ТОЛЬКО при True; при False — лог, retry на следующей итерации.
         """
-        for dev_id, driver in list(self._manager._drivers.items()):
-            with self._workers_lock:
+        with self._workers_lock:
+            # Остановить воркеры для desired=False (факт > desired)
+            for dev_id in list(self._device_workers):
+                if not self._desired_connected.get(dev_id, False):
+                    wname = self._device_workers.pop(dev_id, None)
+                    if wname and self._ctx and self._ctx.worker_manager:
+                        remove_fn = getattr(self._ctx.worker_manager, "remove_worker", None)
+                        if remove_fn:
+                            try:
+                                remove_fn(wname)
+                            except Exception:
+                                pass
+
+            # Создать воркеры для desired=True без существующего воркера
+            for dev_id in list(self._desired_connected):
+                if not self._desired_connected.get(dev_id, False):
+                    continue
                 if dev_id in self._device_workers:
                     continue
-            wname = f"dev_{dev_id}"
+                # НР-3: драйвер должен существовать (не удалён remove)
+                driver = self._manager._drivers.get(dev_id)
+                if driver is None:
+                    continue
 
-            def make_tick_fn(did: str, drv: Any) -> Any:
-                """Замыкание для per-device tick (избежать capture loop-переменной)."""
+                wname = f"dev_{dev_id}"
 
-                def tick_loop(stop_evt: threading.Event, pause_evt: threading.Event) -> None:
-                    interval = getattr(drv.entry, "params", {}).get("poll_interval_s", 0.5)
-                    if isinstance(interval, str):
-                        interval = float(interval)
-                    while not stop_evt.is_set():
-                        if pause_evt.is_set():
-                            time.sleep(0.1)
-                            continue
-                        try:
-                            snapshot = drv.tick(stop_evt)
-                            if snapshot is not None:
-                                self._publish_state(f"devices.state.{did}.status", snapshot)
-                                self._publish_state(f"devices.state.{did}.stats", drv.stats)
-                        except Exception as exc:
-                            self._publish_state(f"devices.state.{did}.last_error", str(exc))
-                        time.sleep(interval)
+                def make_tick_fn(did: str, drv: Any) -> Any:
+                    """Замыкание для per-device tick."""
 
-                return tick_loop
+                    def tick_loop(stop_evt: threading.Event, pause_evt: threading.Event) -> None:
+                        interval = getattr(drv.entry, "params", {}).get("poll_interval_s", 0.5)
+                        if isinstance(interval, str):
+                            interval = float(interval)
+                        while not stop_evt.is_set():
+                            if pause_evt.is_set():
+                                time.sleep(0.1)
+                                continue
+                            try:
+                                snapshot = drv.tick(stop_evt)
+                                if snapshot is not None:
+                                    self._publish_state(f"devices.state.{did}.status", snapshot)
+                                    self._publish_state(f"devices.state.{did}.stats", drv.stats)
+                            except Exception as exc:
+                                self._publish_state(f"devices.state.{did}.last_error", str(exc))
+                            time.sleep(interval)
 
-            try:
-                cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
-                self._ctx.worker_manager.create_worker(
-                    wname,
-                    make_tick_fn(dev_id, driver),
-                    cfg,
-                    auto_start=True,
-                )
-                with self._workers_lock:
-                    self._device_workers[dev_id] = wname
-            except Exception as exc:
-                if self._ctx:
-                    self._ctx.log_error(f"DeviceHubPlugin: не удалось создать воркер {wname}: {exc}")
+                    return tick_loop
+
+                try:
+                    cfg = ThreadConfig(execution_mode=ExecutionMode.LOOP)
+                    ok = self._ctx.worker_manager.create_worker(
+                        wname,
+                        make_tick_fn(dev_id, driver),
+                        cfg,
+                        auto_start=True,
+                    )
+                    # НР-4: записываем ТОЛЬКО при ok=True
+                    if ok:
+                        self._device_workers[dev_id] = wname
+                    elif self._ctx:
+                        self._ctx.log_error(
+                            f"DeviceHubPlugin: create_worker {wname} вернул False "
+                            f"(имя занято?), retry на следующей итерации"
+                        )
+                except Exception as exc:
+                    if self._ctx:
+                        self._ctx.log_error(f"DeviceHubPlugin: не удалось создать воркер {wname}: {exc}")
 
     def _stop_device_worker(self, dev_id: str) -> None:
         """Остановить и ПОЛНОСТЬЮ удалить per-device воркер из WorkerManager.
@@ -434,6 +483,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
         self._update_counters()
         # Р11: auto-connect все upserted-устройства (async через supervisor)
         if do_connect:
+            with self._workers_lock:
+                for dev_id in upserted_ids:
+                    self._desired_connected[dev_id] = True
             for dev_id in upserted_ids:
                 self._conn_queue.put(("connect", dev_id))
         return {"status": "ok", "results": results, "count": len(results)}
@@ -444,10 +496,15 @@ class DeviceHubPlugin(ProcessModulePlugin):
         н2 ревью Fable: останавливаем per-device воркер ПЕРЕД удалением
         записи, иначе tick_loop замыкание вечно тикает удалённый драйвер,
         а повторное добавление того же id не создаст воркер (имя занято).
+
+        НР-3: desired=False ДО остановки воркера — _ensure_device_workers
+        не пересоздаст воркер в окне между remove и stop.
         """
         dev_id = data.get("device_id", "")
-        # Сначала остановить воркер (если есть) — до remove, чтобы tick
-        # не мешал disconnect'у внутри manager.remove
+        # НР-3: сначала desired=False, потом воркер, потом remove —
+        # атомарно по отношению к _ensure_device_workers
+        with self._workers_lock:
+            self._desired_connected.pop(dev_id, None)
         self._stop_device_worker(dev_id)
         result = self._safe_call(self._manager.remove, dev_id)
         # Очистить state удалённого устройства
@@ -474,6 +531,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
             self._manager.get(dev_id)  # проверка существования
         except DeviceHubError as exc:
             return {"status": "error", "message": str(exc)}
+        # НР-1: выставляем desired перед постановкой в очередь
+        with self._workers_lock:
+            self._desired_connected[dev_id] = True
         self._conn_queue.put(("connect", dev_id))
         return {"status": "ok", "conn": "connecting"}
 
@@ -486,6 +546,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
             self._manager.get(dev_id)
         except DeviceHubError as exc:
             return {"status": "error", "message": str(exc)}
+        # НР-1: desired=False — supervisor НЕ пересоздаст воркер
+        with self._workers_lock:
+            self._desired_connected[dev_id] = False
         self._conn_queue.put(("disconnect", dev_id))
         return {"status": "ok", "conn": "disconnecting"}
 
