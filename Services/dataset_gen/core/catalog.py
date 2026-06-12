@@ -18,6 +18,7 @@ np.fromfile + cv2.imdecode (и imencode + tofile на записи).
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -83,20 +84,26 @@ class ClassEntry:
 
 
 class SpriteCatalog:
-    """Каталог: эталоны классов (в памяти) + фоны (ленивый кэш по пути).
+    """Каталог: эталоны классов (в памяти) + фоны (LRU-кэш по пути).
 
     Эталоны грузятся жадно в load() — их немного и они маленькие.
     Фоновые фото могут быть большими и многочисленными — грузятся по запросу
-    и кэшируются по пути (кэш не ограничен: при огромных наборах фонов
-    следите за памятью).
+    и кэшируются с ограничением (LRU, background_cache_size): при огромных
+    наборах фонов кэш не растёт без предела (защита от OOM), редко используемые
+    фоны вытесняются и перечитываются с диска при следующем обращении.
+
+    НЕ потокобезопасен (общий rng не используется здесь, но LRU-кэш мутируется);
+    для torch DataLoader с num_workers>0 каждый воркер получает свою копию
+    каталога (spawn/pickle), что корректно, но дублирует кэш по воркерам.
     """
 
-    def __init__(self, config: CatalogConfig) -> None:
+    def __init__(self, config: CatalogConfig, background_cache_size: int = 64) -> None:
         self._config = config
         self._classes: list[ClassEntry] = []
         self._sprites: dict[int, list[np.ndarray]] = {}
         self._background_paths: list[Path] = []
-        self._background_cache: dict[Path, np.ndarray] = {}
+        self._background_cache: OrderedDict[Path, np.ndarray] = OrderedDict()
+        self._background_cache_size = max(1, background_cache_size)
         self._loaded = False
 
     # -- загрузка -----------------------------------------------------------
@@ -238,6 +245,10 @@ class SpriteCatalog:
             raw = imread_unicode(path, cv2.IMREAD_COLOR)
             bg = cv2.cvtColor(raw, cv2.COLOR_BGR2RGB)
             self._background_cache[path] = bg
+            if len(self._background_cache) > self._background_cache_size:
+                self._background_cache.popitem(last=False)  # вытеснить LRU
+        else:
+            self._background_cache.move_to_end(path)  # отметить как недавно использованный
         return _cover_crop(bg, size_hw, rng)
 
     def _ensure_loaded(self) -> None:

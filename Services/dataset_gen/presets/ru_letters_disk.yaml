@@ -15,10 +15,10 @@ catalog:
 output:
   size: [128, 128]        # (H, W)
   frames_per_class: 300
-  supersample: 1.0
+  supersample: 1.5        # композиция крупнее + downscale → сглаживает шов вклейки
 
 placement:
-  object_size_frac: [0.55, 0.85]
+  object_size_frac: [0.5, 0.85]
   keep_inside: true
 
 symmetry:
@@ -30,17 +30,20 @@ symmetry:
 
 augment:
   rotation: {enabled: true, range: [0, 360]}
-  shift:    {enabled: true, frac: 0.10}
-  scale:    {enabled: true, range: [0.9, 1.1]}
+  shift:    {enabled: true, frac: 0.14}                            # объект не строго по центру
+  scale:    {enabled: true, range: [0.8, 1.2]}                     # разброс расстояния до камеры
   brightness_contrast: {enabled: true, prob: 0.9, brightness: [-35, 35], contrast: [0.8, 1.2]}
-  gaussian_blur: {enabled: true, prob: 0.5, sigma: [0.4, 1.6]}
-  motion_blur:   {enabled: true, prob: 0.4, length: [3, 9]}        # конвейер движется
+  gamma:    {enabled: true, prob: 0.4, gamma: [0.75, 1.35]}        # нелинейность тонмаппинга камеры
+  vignette: {enabled: true, prob: 0.4, strength: [0.12, 0.4], radius_frac: [0.4, 0.7]}  # затемнение к краям
+  gaussian_blur: {enabled: true, prob: 0.5, sigma: [0.5, 2.5]}     # расфокус (расширено для 128px)
+  motion_blur:   {enabled: true, prob: 0.4, length: [3, 11]}       # конвейер движется
   noise:         {enabled: true, prob: 0.7, std: [2, 9]}
   color_temperature: {enabled: true, prob: 0.5, shift: [-0.07, 0.07]}
-  channel_shift: {enabled: true, prob: 0.4, max_shift: 12}      # нестабильность баланса камеры
+  channel_shift: {enabled: true, prob: 0.4, max_shift: 12}         # нестабильность баланса камеры
   jpeg:  {enabled: true, prob: 0.3, quality: [55, 90]}
   glare: {enabled: true, prob: 0.5, intensity: [40, 110], radius_frac: [0.15, 0.4]}  # глянец дисков
   shadow: {enabled: true, prob: 0.4, strength: [0.15, 0.4], softness_frac: [0.25, 0.6]}  # неравномерный свет
-  occlusion: {enabled: true, prob: 0.15, count: [1, 1], size_frac: [0.04, 0.12]}  # грязь/частичное перекрытие
+  contact_shadow: {enabled: true, prob: 0.6, opacity: [0.3, 0.6], blur_frac: [0.06, 0.16], offset_frac: [0.02, 0.1]}  # тень под объектом (анти-«парение»)
+  occlusion: {enabled: true, prob: 0.2, count: [1, 2], size_frac: [0.04, 0.14]}  # грязь/частичное перекрытие
 
 seed: 42

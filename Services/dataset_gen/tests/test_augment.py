@@ -9,12 +9,14 @@ from Services.dataset_gen.core.augment import (
     apply_brightness_contrast,
     apply_channel_shift,
     apply_color_temperature,
+    apply_gamma,
     apply_glare,
     apply_jpeg,
     apply_motion_blur,
     apply_occlusion,
     apply_photometric,
     apply_shadow,
+    apply_vignette,
     make_motion_kernel,
 )
 from Services.dataset_gen.core.config import AugmentConfig
@@ -65,42 +67,52 @@ class TestJpeg:
 class TestApplyPhotometric:
     def test_all_disabled_is_identity(self):
         frame = np.random.default_rng(2).integers(0, 255, (48, 48, 3), dtype=np.uint8)
-        cfg = AugmentConfig.model_validate(
-            {
-                name: {"enabled": False}
-                for name in (
-                    "brightness_contrast",
-                    "gaussian_blur",
-                    "motion_blur",
-                    "noise",
-                    "color_temperature",
-                    "jpeg",
-                    "glare",
-                )
-            }
-        )
+        # отключаем ВСЕ фотометрические блоки программно (не хардкодим список —
+        # тест устойчив к добавлению новых аугментаций)
+        cfg = AugmentConfig.model_validate({name: {"enabled": False} for name in AugmentConfig.model_fields})
         out = apply_photometric(frame, cfg, np.random.default_rng(0))
         assert (out == frame).all()
 
     def test_output_shape_dtype_with_everything_on(self):
         frame = np.random.default_rng(3).integers(0, 255, (48, 48, 3), dtype=np.uint8)
-        cfg = AugmentConfig.model_validate(
-            {
-                "motion_blur": {"enabled": True, "prob": 1.0},
-                "jpeg": {"enabled": True, "prob": 1.0},
-                "glare": {"enabled": True, "prob": 1.0},
-                "shadow": {"enabled": True, "prob": 1.0},
-                "occlusion": {"enabled": True, "prob": 1.0},
-                "channel_shift": {"enabled": True, "prob": 1.0},
-                "gaussian_blur": {"prob": 1.0},
-                "noise": {"prob": 1.0},
-                "color_temperature": {"prob": 1.0},
-                "brightness_contrast": {"prob": 1.0},
-            }
-        )
+        # все фотометрические аугментации включены с prob=1 (геометрия не в проходе)
+        photometric = {
+            "brightness_contrast",
+            "gamma",
+            "vignette",
+            "gaussian_blur",
+            "motion_blur",
+            "noise",
+            "color_temperature",
+            "channel_shift",
+            "jpeg",
+            "glare",
+            "shadow",
+            "occlusion",
+        }
+        cfg = AugmentConfig.model_validate({name: {"enabled": True, "prob": 1.0} for name in photometric})
         out = apply_photometric(frame, cfg, np.random.default_rng(0))
         assert out.shape == frame.shape
         assert out.dtype == np.uint8
+
+
+class TestGamma:
+    def test_gamma_gt1_darkens_midtones(self, frame_f32):
+        out = apply_gamma(frame_f32, 2.0)
+        assert out.mean() < frame_f32.mean()
+
+    def test_gamma_1_is_identity(self, frame_f32):
+        out = apply_gamma(frame_f32, 1.0)
+        assert np.allclose(out, frame_f32, atol=0.5)
+
+
+class TestVignette:
+    def test_darkens_corners_keeps_center(self, frame_f32):
+        out = apply_vignette(frame_f32, strength=0.5, radius_frac=0.3)
+        center = out[28:36, 28:36].mean() / frame_f32[28:36, 28:36].mean()
+        corner = out[:4, :4].mean() / frame_f32[:4, :4].mean()
+        assert center > 0.97
+        assert corner < 0.85
 
 
 class TestChannelShift:

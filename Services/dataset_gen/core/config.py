@@ -90,6 +90,23 @@ class ColorTemperatureAug(BaseModel):
     shift: RangeF = (-0.08, 0.08)
 
 
+class GammaAug(BaseModel):
+    """Степенная тональная кривая (нелинейность сенсора/тонмаппинг камеры)."""
+
+    enabled: bool = False
+    prob: float = Field(default=0.5, ge=0.0, le=1.0)
+    gamma: RangeF = (0.7, 1.4)
+
+
+class VignetteAug(BaseModel):
+    """Виньетка: радиальное затемнение к краям кадра (реальная оптика)."""
+
+    enabled: bool = False
+    prob: float = Field(default=0.5, ge=0.0, le=1.0)
+    strength: RangeF = (0.15, 0.45)
+    radius_frac: RangeF = (0.4, 0.7)
+
+
 class ChannelShiftAug(BaseModel):
     """Независимый аддитивный сдвиг каждого канала RGB (нестабильность баланса
     камеры). max_shift — максимум |сдвига| на канал в шкале 0–255."""
@@ -119,6 +136,25 @@ class OcclusionAug(BaseModel):
     prob: float = Field(default=0.3, ge=0.0, le=1.0)
     count: RangeI = (1, 2)
     size_frac: RangeF = (0.05, 0.18)
+
+
+class ContactShadowAug(BaseModel):
+    """Контактная тень под объектом: размытая смещённая копия альфа-маски,
+    затемняющая фон вокруг/под объектом ДО композиции.
+
+    Убирает эффект «парящего» объекта — главный структурный признак вклейки,
+    который фотометрия полным кадром не устраняет. Тень рисуется по фону,
+    объект кладётся поверх.
+
+    opacity — сила затемнения; blur_frac — размытие тени (доля размера объекта);
+    offset_frac — смещение тени (доля размера объекта, имитация высоты/угла света).
+    """
+
+    enabled: bool = False
+    prob: float = Field(default=0.6, ge=0.0, le=1.0)
+    opacity: RangeF = (0.3, 0.6)
+    blur_frac: RangeF = (0.06, 0.16)
+    offset_frac: RangeF = (0.02, 0.10)
 
 
 class JpegAug(BaseModel):
@@ -151,6 +187,8 @@ class AugmentConfig(BaseModel):
     shift: ShiftAug = Field(default_factory=ShiftAug)
     scale: ScaleAug = Field(default_factory=ScaleAug)
     brightness_contrast: BrightnessContrastAug = Field(default_factory=BrightnessContrastAug)
+    gamma: GammaAug = Field(default_factory=GammaAug)
+    vignette: VignetteAug = Field(default_factory=VignetteAug)
     gaussian_blur: GaussianBlurAug = Field(default_factory=GaussianBlurAug)
     motion_blur: MotionBlurAug = Field(default_factory=MotionBlurAug)
     noise: NoiseAug = Field(default_factory=NoiseAug)
@@ -159,6 +197,7 @@ class AugmentConfig(BaseModel):
     jpeg: JpegAug = Field(default_factory=JpegAug)
     glare: GlareAug = Field(default_factory=GlareAug)
     shadow: ShadowAug = Field(default_factory=ShadowAug)
+    contact_shadow: ContactShadowAug = Field(default_factory=ContactShadowAug)
     occlusion: OcclusionAug = Field(default_factory=OcclusionAug)
 
 

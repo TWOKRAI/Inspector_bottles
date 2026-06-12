@@ -75,6 +75,48 @@ def fit_longest_side(sprite: np.ndarray, target_px: int) -> np.ndarray:
     return cv2.resize(sprite, (new_w, new_h), interpolation=interp)
 
 
+def cast_contact_shadow(
+    background_rgb: np.ndarray,
+    sprite_rgba: np.ndarray,
+    center_xy: tuple[float, float],
+    opacity: float,
+    blur_px: int,
+    offset_xy: tuple[int, int],
+) -> np.ndarray:
+    """Нарисовать на фоне контактную тень от объекта (до его композиции).
+
+    Тень = размытая альфа-маска спрайта, смещённая на offset_xy, затемняющая
+    фон. Убирает эффект «парящего» объекта — главный признак вклейки.
+
+    Pre:
+      - background_rgb: HxWx3 uint8; sprite_rgba: hxwx4 uint8; 0<=opacity<=1
+    Post:
+      - возвращён фон с затемнением в зоне тени (копия; объект НЕ нарисован)
+    """
+    bh, bw = background_rgb.shape[:2]
+    sh, sw = sprite_rgba.shape[:2]
+    cx, cy = center_xy
+    ox, oy = offset_xy
+    x0 = int(round(cx - sw / 2.0)) + ox
+    y0 = int(round(cy - sh / 2.0)) + oy
+
+    # маска тени на полном холсте фона
+    shadow_mask = np.zeros((bh, bw), dtype=np.float32)
+    bx0, by0 = max(0, x0), max(0, y0)
+    bx1, by1 = min(bw, x0 + sw), min(bh, y0 + sh)
+    if bx0 >= bx1 or by0 >= by1:
+        return background_rgb.copy()
+    alpha = sprite_rgba[by0 - y0 : by1 - y0, bx0 - x0 : bx1 - x0, 3].astype(np.float32) / 255.0
+    shadow_mask[by0:by1, bx0:bx1] = alpha
+    if blur_px > 0:
+        k = blur_px | 1  # нечётный размер ядра
+        shadow_mask = cv2.GaussianBlur(shadow_mask, (k, k), 0)
+
+    out = background_rgb.astype(np.float32)
+    out *= 1.0 - (opacity * shadow_mask)[:, :, None]
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 def composite(
     background_rgb: np.ndarray,
     sprite_rgba: np.ndarray,

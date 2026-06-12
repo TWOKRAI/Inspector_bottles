@@ -13,6 +13,7 @@ import numpy as np
 
 from Services.dataset_gen.core.catalog import SpriteCatalog
 from Services.dataset_gen.core.compose import (
+    cast_contact_shadow,
     composite,
     crop_to_alpha,
     fit_longest_side,
@@ -22,6 +23,11 @@ from Services.dataset_gen.core.config import GeneratorConfig, SymmetryType
 from Services.dataset_gen.core.labels import SampleLabel
 from Services.dataset_gen.core.augment import apply_photometric
 from Services.dataset_gen.core.symmetry import combine_symmetries, detect_symmetry, encode_angle
+
+
+def _uniform_val(rng: np.random.Generator, pair: tuple[float, float]) -> float:
+    """Равномерная выборка из диапазона (lo, hi)."""
+    return float(rng.uniform(pair[0], pair[1]))
 
 
 class DatasetEngine:
@@ -147,6 +153,17 @@ class DatasetEngine:
             sh, sw = sized.shape[:2]
             cx = float(np.clip(cx, sw / 2.0, work_w - sw / 2.0))
             cy = float(np.clip(cy, sh / 2.0, work_h - sh / 2.0))
+
+        # контактная тень на фон ДО объекта (убирает «парение»)
+        cs = cfg.augment.contact_shadow
+        if cs.enabled and rng.random() < cs.prob:
+            obj_px = max(sized.shape[:2])
+            blur_px = int(_uniform_val(rng, cs.blur_frac) * obj_px)
+            off = _uniform_val(rng, cs.offset_frac) * obj_px
+            ang = float(rng.uniform(0.0, 2.0 * np.pi))
+            offset_xy = (int(round(np.cos(ang) * off)), int(round(np.sin(ang) * off)))
+            frame = cast_contact_shadow(frame, sized, (cx, cy), _uniform_val(rng, cs.opacity), blur_px, offset_xy)
+
         frame = composite(frame, sized, (cx, cy))
 
         # 6. фотометрия полным кадром

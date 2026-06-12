@@ -63,6 +63,18 @@ class TestExportSplits:
         img_val = (result["val"].parent / "images/000/00000.png").read_bytes()
         assert img_train != img_val  # разные rng → нет дубликатов между сплитами
 
+    def test_split_data_stable_under_key_reorder(self, base_config, tmp_path):
+        # детерминизм привязан к ИМЕНИ сплита, не к позиции в dict:
+        # перестановка ключей не меняет данные train
+        from Services.dataset_gen.export import export_splits
+
+        engine = DatasetEngine(base_config)
+        r1 = export_splits(engine, tmp_path / "a", splits={"train": 1, "val": 1}, seed=5)
+        r2 = export_splits(engine, tmp_path / "b", splits={"val": 1, "train": 1}, seed=5)
+        train1 = (r1["train"].parent / "images/000/00000.png").read_bytes()
+        train2 = (r2["train"].parent / "images/000/00000.png").read_bytes()
+        assert train1 == train2
+
 
 class TestExportParquet:
     def test_parquet_labels_roundtrip(self, base_config, tmp_path):

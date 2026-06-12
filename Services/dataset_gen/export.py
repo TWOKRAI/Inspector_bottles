@@ -19,6 +19,7 @@ csv/json — stdlib.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -87,6 +88,14 @@ def export_dataset(
     return _write_labels(out, rows, labels_format)
 
 
+def _name_seed(name: str) -> int:
+    """Стабильный (между запусками/платформами) integer-seed из имени сплита.
+
+    Встроенный hash() солится per-process — не годится для воспроизводимости.
+    """
+    return int.from_bytes(hashlib.sha256(name.encode("utf-8")).digest()[:8], "little")
+
+
 def _write_class_registry(out: Path, generator: SampleGenerator) -> None:
     """Сохранить реестр классов с разметкой в classes.json (если доступен)."""
     registry = getattr(generator, "class_registry", None)
@@ -107,8 +116,9 @@ def export_splits(
     """Сформировать несколько наборов (train/val/test) в подкаталогах.
 
     splits — имя набора → кадров на класс, например {"train": 300, "val": 50}.
-    Каждый набор генерируется собственным rng (производным от seed и имени),
-    поэтому наборы не пересекаются и воспроизводимы независимо от порядка.
+    Каждый набор генерируется собственным rng, производным от seed и ИМЕНИ
+    сплита (а не от позиции в dict) — наборы не пересекаются и воспроизводимы
+    независимо от порядка ключей: переставить train/val не меняет данные.
 
     Pre:
       - splits не пуст, значения ≥ 1
@@ -119,8 +129,8 @@ def export_splits(
     if not splits:
         raise ValueError("splits пуст — нечего экспортировать")
     result: dict[str, Path] = {}
-    for split_index, (name, frames) in enumerate(splits.items()):
-        rng = np.random.default_rng((seed, split_index))
+    for name, frames in splits.items():
+        rng = np.random.default_rng((seed, _name_seed(name)))
         result[name] = export_dataset(
             generator,
             Path(out_dir) / name,

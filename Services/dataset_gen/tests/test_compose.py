@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from Services.dataset_gen.core.compose import (
+    cast_contact_shadow,
     composite,
     crop_to_alpha,
     fit_longest_side,
@@ -84,3 +85,22 @@ class TestComposite:
         bg = np.full((100, 100, 3), 10, dtype=np.uint8)
         out = composite(bg, disk_sprite, (0.0, 0.0))
         assert out.shape == bg.shape
+
+
+class TestContactShadow:
+    def test_darkens_region_under_object(self, disk_sprite):
+        bg = np.full((120, 120, 3), 200, dtype=np.uint8)
+        out = cast_contact_shadow(bg, disk_sprite, (60.0, 60.0), opacity=0.5, blur_px=5, offset_xy=(4, 4))
+        # под объектом фон затемнён, дальний угол — нет
+        assert out[60, 60].mean() < 180
+        assert out[0, 0].mean() == pytest.approx(200, abs=1)
+
+    def test_background_copy_not_mutated(self, disk_sprite):
+        bg = np.full((120, 120, 3), 200, dtype=np.uint8)
+        cast_contact_shadow(bg, disk_sprite, (60.0, 60.0), 0.5, 5, (0, 0))
+        assert (bg == 200).all()
+
+    def test_offscreen_object_is_safe(self, disk_sprite):
+        bg = np.full((120, 120, 3), 200, dtype=np.uint8)
+        out = cast_contact_shadow(bg, disk_sprite, (-500.0, -500.0), 0.5, 5, (0, 0))
+        assert (out == bg).all()
