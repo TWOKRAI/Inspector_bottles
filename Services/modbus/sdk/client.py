@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 from typing import Any
 
@@ -24,6 +25,11 @@ from Services.modbus.sdk.errors import (
     ModbusIOError,
     ModbusNotAvailableError,
 )
+
+# Подробное wire-логирование УСПЕШНЫХ чтений (телеметрия каждые 0.5 с заливает
+# консоль). По умолчанию — DEBUG (тихо); MODBUS_WIRE_LOG=1 → INFO (видно RX).
+# Записи-команды, ошибки и connect логируются всегда (INFO/WARNING).
+_WIRE_READ_VERBOSE = bool(os.environ.get("MODBUS_WIRE_LOG"))
 
 # --------------------------------------------------------------------------- #
 # Graceful import pymodbus
@@ -149,10 +155,13 @@ class ModbusSdkClient:
         tag = f"{self._cfg.host}#u{unit}"
         addr = _fmt_addr(args)
         is_read = method_name.startswith("read")
+        # Записи (команды) — всегда INFO; чтения (телеметрия) — DEBUG, либо INFO
+        # при MODBUS_WIRE_LOG=1 (чтобы не заливать консоль поллингом).
+        read_log = logger.info if _WIRE_READ_VERBOSE else logger.debug
         # TX: что отправилось
         if is_read:
             count = kwargs.get("count", args[1] if len(args) > 1 else 1)
-            logger.info(f"[MODBUS {tag}] TX {method_name} @{addr} count={count}")
+            read_log(f"[MODBUS {tag}] TX {method_name} @{addr} count={count}")
         else:
             payload = args[1] if len(args) > 1 else kwargs.get("values", kwargs.get("value"))
             logger.info(f"[MODBUS {tag}] TX {method_name} @{addr} = {payload}")
@@ -168,7 +177,10 @@ class ModbusSdkClient:
         rx = getattr(result, "registers", None)
         if rx is None:
             rx = getattr(result, "bits", None)
-        logger.info(f"[MODBUS {tag}] RX {method_name} @{addr} → {rx}")
+        if is_read:
+            read_log(f"[MODBUS {tag}] RX {method_name} @{addr} → {rx}")
+        else:
+            logger.info(f"[MODBUS {tag}] RX {method_name} @{addr} → ok")
         return result
 
     # ------------------------------------------------------------------ #
