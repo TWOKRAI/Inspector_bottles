@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 
+import pytest
 from PIL import Image
 
 from Services.dataset_gen.core.engine import DatasetEngine
@@ -61,6 +62,18 @@ class TestExportSplits:
         img_train = (result["train"].parent / "images/000/00000.png").read_bytes()
         img_val = (result["val"].parent / "images/000/00000.png").read_bytes()
         assert img_train != img_val  # разные rng → нет дубликатов между сплитами
+
+
+class TestExportParquet:
+    def test_parquet_labels_roundtrip(self, base_config, tmp_path):
+        pytest.importorskip("pyarrow")
+        import pyarrow.parquet as pq
+
+        engine = DatasetEngine(base_config)
+        labels_path = export_dataset(engine, tmp_path / "ds", frames_per_class=2, labels_format="parquet")
+        table = pq.read_table(labels_path)
+        assert table.num_rows == 6  # 3 класса × 2
+        assert {"filename", "class_index", "angle_sin", "angle_valid"} <= set(table.column_names)
 
 
 class TestExportJson:

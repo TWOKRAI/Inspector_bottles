@@ -20,6 +20,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from Services.dataset_gen.core.backgrounds import procedural_background
 from Services.dataset_gen.core.config import CatalogConfig
 
 SPRITE_SUFFIXES = {".png", ".webp", ".tif", ".tiff"}
@@ -90,9 +91,15 @@ class SpriteCatalog:
         if not root.is_dir():
             raise FileNotFoundError(f"Каталог классов не найден: {root}")
 
-        subdirs = sorted((d for d in root.iterdir() if d.is_dir()), key=lambda d: d.name)
+        # Класс = подкаталог со спрайтами. Служебные папки (имя с «.» или «_» —
+        # напр. _meta/, .git/) пропускаются: рядом с классами могут лежать
+        # метаданные, они не должны попасть в список классов.
+        subdirs = sorted(
+            (d for d in root.iterdir() if d.is_dir() and d.name[0] not in "._"),
+            key=lambda d: d.name,
+        )
         if not subdirs:
-            raise ValueError(f"В каталоге классов нет подкаталогов: {root}")
+            raise ValueError(f"В каталоге классов нет подкаталогов-классов: {root}")
 
         self._classes = []
         self._sprites = {}
@@ -108,7 +115,11 @@ class SpriteCatalog:
         if bg_dir is not None:
             if not bg_dir.is_dir():
                 raise FileNotFoundError(f"Каталог фонов не найден: {bg_dir}")
-            self._background_paths = sorted(p for p in bg_dir.iterdir() if p.suffix.lower() in BACKGROUND_SUFFIXES)
+            # Рекурсивно: фоны допустимо раскладывать по подпапкам-категориям
+            # (например belt/, tray/, table/) — берём все изображения из дерева.
+            self._background_paths = sorted(
+                p for p in bg_dir.rglob("*") if p.is_file() and p.suffix.lower() in BACKGROUND_SUFFIXES
+            )
             if not self._background_paths:
                 raise ValueError(f"В каталоге фонов нет изображений: {bg_dir}")
         self._loaded = True
@@ -158,7 +169,7 @@ class SpriteCatalog:
         """
         self._ensure_loaded()
         if not self._background_paths:
-            return _procedural_background(rng, size_hw)
+            return procedural_background(rng, size_hw)
         path = self._background_paths[int(rng.integers(len(self._background_paths)))]
         bg = self._background_cache.get(path)
         if bg is None:
@@ -185,18 +196,3 @@ def _cover_crop(image: np.ndarray, size_hw: tuple[int, int], rng: np.random.Gene
     y0 = int(rng.integers(h - th + 1))
     x0 = int(rng.integers(w - tw + 1))
     return image[y0 : y0 + th, x0 : x0 + tw].copy()
-
-
-def _procedural_background(rng: np.random.Generator, size_hw: tuple[int, int]) -> np.ndarray:
-    """Процедурный фон: базовый цвет + низкочастотный градиент + лёгкий шум.
-
-    Используется когда backgrounds_dir не задан (быстрый старт, тесты).
-    Для реалистичного датасета подложите фото реальной сцены.
-    """
-    h, w = size_hw
-    base = rng.uniform(50.0, 200.0, size=3).astype(np.float32)
-    low = rng.normal(0.0, 1.0, size=(4, 4, 3)).astype(np.float32)
-    gradient = cv2.resize(low, (w, h), interpolation=cv2.INTER_CUBIC) * rng.uniform(8.0, 35.0)
-    noise = rng.normal(0.0, 3.0, size=(h, w, 3)).astype(np.float32)
-    frame = base[None, None, :] + gradient + noise
-    return np.clip(frame, 0, 255).astype(np.uint8)

@@ -71,6 +71,30 @@ engine = DatasetEngine(cfg)
 save_preview_grid(engine, "preview.png", n=16)                # визуальный контроль
 ```
 
+## Структура входных данных (две независимые папки)
+
+```
+classes_dir/                 backgrounds_dir/        ← фото реальной сцены
+├── А/                       ├── belt/               (сканируется РЕКУРСИВНО:
+│   └── base.png   (RGBA)    │   ├── shot1.jpg        фоны можно раскладывать
+├── Б/                       │   └── shot2.jpg        по подпапкам-категориям)
+│   ├── sprite_0.png         ├── tray/
+│   └── sprite_1.png  (неск. │   └── shot3.jpg
+│      эталонов на класс)    └── table/
+├── _meta/        ← служебн. │       └── shot4.jpg
+└── labels.yaml   ← игнор.
+```
+
+- **classes_dir** — класс = подкаталог со спрайтами; имя подкаталога = имя класса.
+  Несколько эталонов в классе → движок берёт случайный на каждый кадр.
+  Папки с именем на `.`/`_` (например `_meta/`) и любые файлы верхнего уровня
+  **игнорируются** — рядом с классами можно держать метаданные.
+- **backgrounds_dir** — фото фона; сканируется рекурсивно (подпапки-категории).
+  Если не задан (`null`) — генерируются процедурные фоны нескольких типов
+  (градиент, шлифованный металл, лента с планками, пятнистая поверхность).
+  Фон под каждый кадр выбирается случайно и кропается под выходной размер —
+  это и есть «подстановка фона через аугментацию».
+
 ## Аугментации
 
 Каждая — отдельный включаемый блок с диапазонами в конфиге; можно собирать
@@ -120,7 +144,7 @@ python -m Services.dataset_gen.tools.make_ru_letter_sprites --out data/dataset_g
 - НЕ обучает модель — только генерирует данные (обучающий сервис — отдельный,
   контракт стыковки = `SampleLabel` / target-словарь `SyntheticDataset`)
 - НЕ pipeline-плагин (нет GUI/IPC); чистая библиотека уровня Services
-- Зависимости: numpy, OpenCV, Pillow, PyYAML, Pydantic; torch/pandas+pyarrow — опционально
+- Зависимости: numpy, OpenCV, Pillow, PyYAML, Pydantic; torch и pyarrow — опционально
 - Не импортирует `multiprocess_prototype.*` (правило слоя Services)
 
 ## Грабли (Windows)
@@ -133,4 +157,4 @@ non-ASCII пути на Windows. Весь I/O — через `imread_unicode`/`i
 
 ## Стабильность
 
-contract — README + interfaces.py (Protocol) + Pre/Post в docstrings + contract-тесты (56).
+contract — README + interfaces.py (Protocol) + Pre/Post в docstrings + contract-тесты (80).

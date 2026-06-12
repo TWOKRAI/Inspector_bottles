@@ -12,7 +12,8 @@
 сидом, а не разбиением файлов.
 
 В файле меток поле filename — путь относительно каталога набора (POSIX-слэши).
-parquet требует pandas+pyarrow (опционально); csv/json — stdlib.
+parquet требует pyarrow (опционально, через pyarrow напрямую — pandas не нужен);
+csv/json — stdlib.
 """
 
 from __future__ import annotations
@@ -135,14 +136,23 @@ def _write_labels(out: Path, rows: list[dict[str, Any]], fmt: LabelsFormat) -> P
         path.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
         return path
     if fmt == "parquet":
-        try:
-            import pandas as pd
-        except ImportError as exc:  # pragma: no cover - зависит от окружения
-            raise ImportError(
-                "labels_format='parquet' требует pandas + pyarrow: "
-                "pip install pandas pyarrow (или используйте csv/json)"
-            ) from exc
-        path = out / "labels.parquet"
-        pd.DataFrame(rows).to_parquet(path, index=False)
-        return path
+        return _write_parquet(out / "labels.parquet", rows)
     raise ValueError(f"Неизвестный формат меток: {fmt}")
+
+
+def _write_parquet(path: Path, rows: list[dict[str, Any]]) -> Path:
+    """Записать метки в parquet через pyarrow напрямую (pandas не требуется).
+
+    Колонки строятся по фиксированной схеме _LABEL_FIELDS — порядок и типы
+    стабильны независимо от содержимого первой строки.
+    """
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as exc:  # pragma: no cover - зависит от окружения
+        raise ImportError(
+            "labels_format='parquet' требует pyarrow: pip install pyarrow (или используйте csv/json)"
+        ) from exc
+    columns = {field: [row[field] for row in rows] for field in _LABEL_FIELDS}
+    pq.write_table(pa.table(columns), path)
+    return path
