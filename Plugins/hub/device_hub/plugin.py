@@ -451,7 +451,9 @@ class DeviceHubPlugin(ProcessModulePlugin):
         except Exception as exc:
             self._reg.commands_err += 1
             self._reg.last_error = str(exc)
-            return {"status": "error", "message": str(exc)}
+            # error= дублирует message: CommandManager логирует reason/error, не message
+            # (иначе все ошибки device-команд в консоли = «failed: None»).
+            return {"status": "error", "message": str(exc), "error": str(exc)}
 
     def _kind_call(self, data: dict, expected_kind: str, op: str) -> dict:
         """Команда для конкретного kind: валидация kind + dispatch."""

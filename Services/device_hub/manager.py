@@ -296,10 +296,10 @@ class DeviceManager(BaseManager, ObservableMixin):
             return {"status": "error", "message": str(exc)}
 
         driver = self._drivers.get(dev_id)
-        if driver is None:
-            return {"status": "error", "message": f"Устройство {dev_id!r} не подключено"}
-        if not driver.is_connected:
-            return {"status": "error", "message": f"Устройство {dev_id!r} не подключено"}
+        if driver is None or not driver.is_connected:
+            # error= дублирует message для CommandManager-лога (он читает reason/error)
+            msg = f"Устройство {dev_id!r} не подключено"
+            return {"status": "error", "message": msg, "error": msg}
 
         return driver.call(op, args)
 
