@@ -11,7 +11,11 @@
 - [x] **Фаза C** — master-detail: DeviceListPanel + DeviceMasterDetail + DeviceDetailPage + crud_actions(recipe-first) + robot/vfd секции + «+ Добавить»→диалог (interim) + 19 тестов + build-smoke + boot-smoke OK. Hikvision-секция отложена (нужен set_device по25 serial/index — follow-up)
 - [x] **Чекпойнт boot-smoke** — приложение поднимается чисто с robot_demo→fallback line_filter (6 процессов вкл. always-on devices, probe LISTENING:9142, 0 traceback). qt-mcp ВИЗУАЛЬНЫЙ snapshot заблокирован: MCP-сервер qt-mcp не подключён в этой сессии (не код) — перенесён в финальную Верификацию
 - [x] **Фаза D** — встроенная AddDevicePage с ПРОБНЫМ ПОДКЛЮЧЕНИЕМ перед сохранением (решение владельца): «Проверить связь» (upsert origin=probe + connect, не в рецепт) → live-статус → «Добавить» (рецепт + re-tag recipe:slug) → «Отмена»/уход убирает пробное. DeviceFormWidget вынесен (shared, dialog переиспользует). robot/vfd на add_page_factory. Автопоиск камер — отложен с hikvision (Фаза E). 102 passed + boot-smoke OK
-- [ ] **Фаза E** — чистка (devices.yaml/store, комбо) + документация
+- [~] **Фаза E** — частично: README devices_common (архитектура) DONE; conn-индикатор +disconnecting DONE. ОСТАЛОСЬ (требует go-ahead, риск/решение):
+  - **hikvision-секция → master-detail** (KEYSTONE: разблокирует удаление комбо; нужен set_device по serial/index; камеры работают сейчас — рефакторить лучше с визуальной qt-mcp проверкой)
+  - удаление `DeviceComboController` (заблокировано hikvision — комбо ещё в hikvision/controller.py)
+  - удаление файлового стора `devices.yaml` + `registry_path` → DeviceManager(store=None) в плагине + **ADR-DH-007** (рецепт — единственный источник). store=None groundwork готов (Фаза B); меняет поведение test_configure_loads_existing_registry
+  - автопоиск камер (hik_enum) в AddDevicePage — вместе с hikvision-секцией
 - [ ] **Верификация** — ОБЯЗАТЕЛЬНЫЙ qt-mcp ВИЗУАЛЬНЫЙ probe-прогон (см. ниже) + чек-лист железа
 
 ## Контекст
