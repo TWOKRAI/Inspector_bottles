@@ -40,6 +40,29 @@ class TestExportCsv:
         assert calls[-1] == (3, 3)
 
 
+class TestExportSplits:
+    def test_three_splits_with_own_labels(self, base_config, tmp_path):
+        from Services.dataset_gen.export import export_splits
+
+        engine = DatasetEngine(base_config)
+        result = export_splits(engine, tmp_path / "ds", splits={"train": 2, "val": 1, "test": 1}, seed=5)
+
+        assert set(result) == {"train", "val", "test"}
+        with result["train"].open(encoding="utf-8") as f:
+            assert len(list(csv.DictReader(f))) == 6  # 3 класса × 2
+        with result["val"].open(encoding="utf-8") as f:
+            assert len(list(csv.DictReader(f))) == 3
+
+    def test_splits_differ_between_each_other(self, base_config, tmp_path):
+        from Services.dataset_gen.export import export_splits
+
+        engine = DatasetEngine(base_config)
+        result = export_splits(engine, tmp_path / "ds", splits={"train": 1, "val": 1}, seed=5)
+        img_train = (result["train"].parent / "images/000/00000.png").read_bytes()
+        img_val = (result["val"].parent / "images/000/00000.png").read_bytes()
+        assert img_train != img_val  # разные rng → нет дубликатов между сплитами
+
+
 class TestExportJson:
     def test_json_labels_parse(self, base_config, tmp_path):
         engine = DatasetEngine(base_config)

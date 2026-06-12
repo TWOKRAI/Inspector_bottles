@@ -7,7 +7,11 @@
     │   └── 001/...
     └── labels.csv | labels.json | labels.parquet
 
-В файле меток поле filename — путь относительно out_dir (POSIX-слэши).
+`export_splits` формирует несколько наборов (train/val/test) в подкаталогах,
+каждый — той же структуры; для синтетики «утечка» между сплитами исключается
+сидом, а не разбиением файлов.
+
+В файле меток поле filename — путь относительно каталога набора (POSIX-слэши).
 parquet требует pandas+pyarrow (опционально); csv/json — stdlib.
 """
 
@@ -78,6 +82,44 @@ def export_dataset(
                 progress_cb(done, total)
 
     return _write_labels(out, rows, labels_format)
+
+
+def export_splits(
+    generator: SampleGenerator,
+    out_dir: str | Path,
+    splits: dict[str, int],
+    image_format: str = "png",
+    labels_format: LabelsFormat = "csv",
+    seed: int = 0,
+    progress_cb: Callable[[int, int], None] | None = None,
+) -> dict[str, Path]:
+    """Сформировать несколько наборов (train/val/test) в подкаталогах.
+
+    splits — имя набора → кадров на класс, например {"train": 300, "val": 50}.
+    Каждый набор генерируется собственным rng (производным от seed и имени),
+    поэтому наборы не пересекаются и воспроизводимы независимо от порядка.
+
+    Pre:
+      - splits не пуст, значения ≥ 1
+    Post:
+      - out_dir/<имя>/images/... + labels.<fmt> для каждого набора;
+        возвращён словарь имя → путь к файлу меток
+    """
+    if not splits:
+        raise ValueError("splits пуст — нечего экспортировать")
+    result: dict[str, Path] = {}
+    for split_index, (name, frames) in enumerate(splits.items()):
+        rng = np.random.default_rng((seed, split_index))
+        result[name] = export_dataset(
+            generator,
+            Path(out_dir) / name,
+            frames_per_class=frames,
+            image_format=image_format,
+            labels_format=labels_format,
+            rng=rng,
+            progress_cb=progress_cb,
+        )
+    return result
 
 
 def _write_labels(out: Path, rows: list[dict[str, Any]], fmt: LabelsFormat) -> Path:

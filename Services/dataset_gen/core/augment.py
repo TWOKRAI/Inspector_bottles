@@ -4,9 +4,10 @@
 JPEG-артефакты применяются единым проходом на весь скомпозиченный кадр.
 Если применять их к объекту до вклейки — модель выучит шов вклейки, а не объект.
 
-Порядок прохода (от «сцены» к «сенсору»):
-блик (свет сцены) → расфокус → смаз движения → яркость/контраст →
-цветовая температура → шум сенсора → JPEG (кодек — последним).
+Порядок прохода (от «сцены» к «сенсору» и кодеку):
+сцена: блик → тень → окклюзия; оптика: расфокус → смаз движения;
+сенсор: яркость/контраст → температура → сдвиг каналов → шум;
+кодек: JPEG — последним.
 
 Каждая операция — отдельная детерминированная функция с явными параметрами
 (тестируемость); apply_photometric сэмплирует параметры из конфига.
@@ -76,6 +77,57 @@ def apply_color_temperature(frame: np.ndarray, shift: float) -> np.ndarray:
     return out
 
 
+def apply_channel_shift(frame: np.ndarray, shifts: tuple[float, float, float]) -> np.ndarray:
+    """Независимый аддитивный сдвиг каналов RGB (нестабильность баланса камеры)."""
+    return frame + np.asarray(shifts, dtype=np.float32)[None, None, :]
+
+
+def apply_shadow(
+    frame: np.ndarray,
+    angle_deg: float,
+    offset: float,
+    strength: float,
+    softness: float,
+) -> np.ndarray:
+    """Мягкая тень: линейный градиент затемнения поперёк направления angle_deg.
+
+    offset ∈ [0..1] — положение фронта тени вдоль направления;
+    strength — затемнение в полностью затенённой зоне;
+    softness ∈ (0..1] — ширина переходной зоны (доля кадра).
+
+    Pre:
+      - frame: HxWx3 float32; 0 <= strength < 1; softness > 0
+    Post:
+      - пиксели затемнены не более чем на strength, форма сохранена
+    """
+    h, w = frame.shape[:2]
+    rad = np.deg2rad(angle_deg)
+    yy, xx = np.ogrid[:h, :w]
+    proj = (xx / max(w - 1, 1)) * np.cos(rad) + (yy / max(h - 1, 1)) * np.sin(rad)
+    proj = (proj - proj.min()) / max(proj.max() - proj.min(), 1e-6)  # → [0..1]
+    mask = np.clip((proj - offset) / softness, 0.0, 1.0).astype(np.float32)
+    return frame * (1.0 - strength * mask)[:, :, None]
+
+
+def apply_occlusion(
+    frame: np.ndarray,
+    rect_xywh: tuple[int, int, int, int],
+    color: tuple[float, float, float],
+) -> np.ndarray:
+    """Окклюзия: закрасить прямоугольник (x, y, w, h) сплошным цветом.
+
+    Выход за границы кадра обрезается; кадр не модифицируется (копия).
+    """
+    fh, fw = frame.shape[:2]
+    x, y, w, h = rect_xywh
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(fw, x + w), min(fh, y + h)
+    out = frame.copy()
+    if x0 < x1 and y0 < y1:
+        out[y0:y1, x0:x1] = np.asarray(color, dtype=np.float32)
+    return out
+
+
 def apply_jpeg(frame_u8_rgb: np.ndarray, quality: int) -> np.ndarray:
     """JPEG-артефакты: пережатие с заданным качеством (вход/выход RGB uint8)."""
     bgr = cv2.cvtColor(frame_u8_rgb, cv2.COLOR_RGB2BGR)
@@ -107,6 +159,25 @@ def apply_photometric(frame_rgb_u8: np.ndarray, cfg: AugmentConfig, rng: np.rand
         center = (float(rng.uniform(0, w)), float(rng.uniform(0, h)))
         x = apply_glare(x, center, radius, _uniform(rng, g.intensity))
 
+    sh = cfg.shadow
+    if sh.enabled and rng.random() < sh.prob:
+        x = apply_shadow(
+            x,
+            angle_deg=float(rng.uniform(0.0, 360.0)),
+            offset=float(rng.uniform(0.2, 0.8)),
+            strength=_uniform(rng, sh.strength),
+            softness=_uniform(rng, sh.softness_frac),
+        )
+
+    oc = cfg.occlusion
+    if oc.enabled and rng.random() < oc.prob:
+        for _ in range(int(rng.integers(oc.count[0], oc.count[1] + 1))):
+            side = _uniform(rng, oc.size_frac) * min(h, w)
+            rw, rh = int(side * rng.uniform(0.6, 1.6)), int(side * rng.uniform(0.6, 1.6))
+            rect = (int(rng.uniform(0, w - 1)), int(rng.uniform(0, h - 1)), max(1, rw), max(1, rh))
+            color = tuple(float(c) for c in rng.uniform(0, 255, size=3))
+            x = apply_occlusion(x, rect, color)
+
     b = cfg.gaussian_blur
     if b.enabled and rng.random() < b.prob:
         sigma = _uniform(rng, b.sigma)
@@ -124,6 +195,11 @@ def apply_photometric(frame_rgb_u8: np.ndarray, cfg: AugmentConfig, rng: np.rand
     t = cfg.color_temperature
     if t.enabled and rng.random() < t.prob:
         x = apply_color_temperature(x, _uniform(rng, t.shift))
+
+    cs = cfg.channel_shift
+    if cs.enabled and rng.random() < cs.prob:
+        shifts = tuple(float(s) for s in rng.uniform(-cs.max_shift, cs.max_shift, size=3))
+        x = apply_channel_shift(x, shifts)
 
     n = cfg.noise
     if n.enabled and rng.random() < n.prob:

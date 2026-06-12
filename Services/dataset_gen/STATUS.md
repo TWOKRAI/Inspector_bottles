@@ -1,22 +1,29 @@
 # dataset_gen — STATUS
 
 **Готовность:** ready
-**Обновлено:** 2026-06-12 (создание сервиса)
+**Обновлено:** 2026-06-12 (создание + расширение аугментаций/сплитов)
+
+## Производительность
+
+~3.8 ms/кадр в 1 поток (128×128, все аугментации пресета вкл.) ≈ 260 кадров/с;
+датасет 33×300=9900 кадров ~40s. С `num_workers>0` в torch — линейно быстрее.
+Init движка (33 класса + детекция симметрий) ~1s.
 
 ## Что сделано
 
 - Ядро: `GeneratorConfig` (Pydantic v2, YAML-пресеты), `SpriteCatalog`
   (RGBA-эталоны + фоны/процедурные), `compose` (rotate-expand → crop-alpha →
-  alpha-blend), `augment` (фотометрия полным кадром ПОСЛЕ композиции: блик,
-  blur, motion blur, яркость/контраст, температура, шум, JPEG), `symmetry`
+  alpha-blend), `augment` (фотометрия полным кадром ПОСЛЕ композиции, порядок
+  сцена→оптика→сенсор→кодек: блик, тень, окклюзия/cutout, blur, motion blur,
+  яркость/контраст, температура, сдвиг каналов, шум, JPEG), `symmetry`
   (авто-детектор none/180/full + кодирование угла), `DatasetEngine`
-- Режимы вывода на одном движке: `export_dataset` (PNG + labels
-  csv/json/parquet) и `SyntheticDataset` (torch, лениво, детерминизм
-  при num_workers через rng=(seed, idx))
+- Режимы вывода на одном движке: `export_dataset` / `export_splits`
+  (train/val/test папками, свой rng на сплит) и `SyntheticDataset`
+  (torch, лениво, детерминизм при num_workers через rng=(seed, idx))
 - QC: `save_preview_grid` — сетка с подписями (PIL, кириллица)
-- Пресет `ru_letters_disk.yaml` (33 буквы, 128×128, 0–360°, glare+motion)
-  + генератор эталонов `tools/make_ru_letter_sprites.py`
-- Тесты: 56 passed (+1 skip torch) — contract-style, синтетические фикстуры
+- Пресет `ru_letters_disk.yaml` (33 буквы, 128×128, 0–360°, glare+motion+
+  shadow+occlusion+channel_shift) + генератор эталонов `tools/make_ru_letter_sprites.py`
+- Тесты: 63 passed (+1 skip torch) — contract-style, синтетические фикстуры
 
 ## Верифицировано e2e (2026-06-12)
 

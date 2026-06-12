@@ -90,6 +90,37 @@ class ColorTemperatureAug(BaseModel):
     shift: RangeF = (-0.08, 0.08)
 
 
+class ChannelShiftAug(BaseModel):
+    """Независимый аддитивный сдвиг каждого канала RGB (нестабильность баланса
+    камеры). max_shift — максимум |сдвига| на канал в шкале 0–255."""
+
+    enabled: bool = False
+    prob: float = Field(default=0.5, ge=0.0, le=1.0)
+    max_shift: float = Field(default=15.0, ge=0.0, le=128.0)
+
+
+class ShadowAug(BaseModel):
+    """Мягкая тень: линейный градиент затемнения с случайного направления
+    (неравномерность освещения сцены). strength — доля затемнения в максимуме
+    тени; softness_frac — ширина переходной зоны как доля размера кадра."""
+
+    enabled: bool = False
+    prob: float = Field(default=0.5, ge=0.0, le=1.0)
+    strength: RangeF = (0.15, 0.45)
+    softness_frac: RangeF = (0.2, 0.6)
+
+
+class OcclusionAug(BaseModel):
+    """Окклюзия (cutout): случайные прямоугольники, закрашенные случайным
+    цветом — устойчивость к частичному перекрытию/грязи. size_frac — сторона
+    прямоугольника как доля минимальной стороны кадра."""
+
+    enabled: bool = False
+    prob: float = Field(default=0.3, ge=0.0, le=1.0)
+    count: RangeI = (1, 2)
+    size_frac: RangeF = (0.05, 0.18)
+
+
 class JpegAug(BaseModel):
     """JPEG-артефакты: пережатие кадра со случайным качеством."""
 
@@ -124,8 +155,11 @@ class AugmentConfig(BaseModel):
     motion_blur: MotionBlurAug = Field(default_factory=MotionBlurAug)
     noise: NoiseAug = Field(default_factory=NoiseAug)
     color_temperature: ColorTemperatureAug = Field(default_factory=ColorTemperatureAug)
+    channel_shift: ChannelShiftAug = Field(default_factory=ChannelShiftAug)
     jpeg: JpegAug = Field(default_factory=JpegAug)
     glare: GlareAug = Field(default_factory=GlareAug)
+    shadow: ShadowAug = Field(default_factory=ShadowAug)
+    occlusion: OcclusionAug = Field(default_factory=OcclusionAug)
 
 
 # ---------------------------------------------------------------------------

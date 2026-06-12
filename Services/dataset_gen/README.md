@@ -19,6 +19,7 @@
 | `SampleLabel` | метка: class_index, angle_deg, (sin, cos), symmetry, angle_valid |
 | `SampleGenerator` | Protocol источника сэмплов ([interfaces.py](interfaces.py)) |
 | `export_dataset` | режим 1: датасет на диск (PNG + labels csv/json/parquet) |
+| `export_splits` | то же, но train/val/test подкаталогами (без утечки между сплитами) |
 | `SyntheticDataset` | режим 2: torch Dataset на лету (ленивый импорт, torch опционален) |
 | `save_preview_grid` | QC-сетка N кадров с подписями «класс + угол» |
 | `detect_symmetry`, `encode_angle` | авто-детектор симметрии и кодирование угла |
@@ -34,6 +35,11 @@ from Services.dataset_gen import DatasetEngine, PRESETS_DIR, export_dataset
 engine = DatasetEngine.from_yaml(str(PRESETS_DIR / "ru_letters_disk.yaml"))
 export_dataset(engine, "data/dataset_gen/ru_letters/train", frames_per_class=300)
 # → images/{класс:03d}/{i:05d}.png + labels.csv
+
+# или сразу train/val/test (свой rng на сплит — без дубликатов между ними):
+from Services.dataset_gen import export_splits
+export_splits(engine, "data/dataset_gen/ru_letters",
+              splits={"train": 300, "val": 50, "test": 50})
 ```
 
 **2. Генерация на лету для PyTorch (без хранения файлов):**
@@ -64,6 +70,20 @@ cfg = GeneratorConfig.from_dict({
 engine = DatasetEngine(cfg)
 save_preview_grid(engine, "preview.png", n=16)                # визуальный контроль
 ```
+
+## Аугментации
+
+Каждая — отдельный включаемый блок с диапазонами в конфиге; можно собирать
+любые комбинации. Фотометрия применяется ОДНИМ проходом на весь кадр после
+композиции (в порядке сцена → оптика → сенсор → кодек):
+
+| Группа | Аугментации |
+|--------|-------------|
+| Геометрия (до/при композиции) | поворот, сдвиг X/Y, масштаб |
+| Сцена | блик-пятно (glare), мягкая тень (shadow), окклюзия/cutout (occlusion) |
+| Оптика | гауссово размытие, motion blur |
+| Сенсор | яркость/контраст, цветовая температура, сдвиг каналов, гауссов шум |
+| Кодек | JPEG-артефакты |
 
 ## Симметрия и метка угла
 

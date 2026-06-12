@@ -31,7 +31,7 @@ from Services.dataset_gen.core import (
     detect_symmetry,
     encode_angle,
 )
-from Services.dataset_gen.export import export_dataset
+from Services.dataset_gen.export import export_dataset, export_splits
 from Services.dataset_gen.interfaces import SampleGenerator
 from Services.dataset_gen.preview import save_preview_grid
 
@@ -47,6 +47,7 @@ __all__ = [
     "detect_symmetry",
     "encode_angle",
     "export_dataset",
+    "export_splits",
     "save_preview_grid",
     "PRESETS_DIR",
 ]

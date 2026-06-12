@@ -7,11 +7,14 @@ import pytest
 
 from Services.dataset_gen.core.augment import (
     apply_brightness_contrast,
+    apply_channel_shift,
     apply_color_temperature,
     apply_glare,
     apply_jpeg,
     apply_motion_blur,
+    apply_occlusion,
     apply_photometric,
+    apply_shadow,
     make_motion_kernel,
 )
 from Services.dataset_gen.core.config import AugmentConfig
@@ -86,6 +89,9 @@ class TestApplyPhotometric:
                 "motion_blur": {"enabled": True, "prob": 1.0},
                 "jpeg": {"enabled": True, "prob": 1.0},
                 "glare": {"enabled": True, "prob": 1.0},
+                "shadow": {"enabled": True, "prob": 1.0},
+                "occlusion": {"enabled": True, "prob": 1.0},
+                "channel_shift": {"enabled": True, "prob": 1.0},
                 "gaussian_blur": {"prob": 1.0},
                 "noise": {"prob": 1.0},
                 "color_temperature": {"prob": 1.0},
@@ -95,3 +101,37 @@ class TestApplyPhotometric:
         out = apply_photometric(frame, cfg, np.random.default_rng(0))
         assert out.shape == frame.shape
         assert out.dtype == np.uint8
+
+
+class TestChannelShift:
+    def test_shifts_each_channel_independently(self, frame_f32):
+        out = apply_channel_shift(frame_f32, (10.0, -5.0, 0.0))
+        assert out[:, :, 0].mean() == pytest.approx(frame_f32[:, :, 0].mean() + 10.0, abs=0.1)
+        assert out[:, :, 1].mean() == pytest.approx(frame_f32[:, :, 1].mean() - 5.0, abs=0.1)
+        assert out[:, :, 2].mean() == pytest.approx(frame_f32[:, :, 2].mean(), abs=0.1)
+
+
+class TestShadow:
+    def test_darkens_far_side_keeps_near_side(self, frame_f32):
+        # тень слева направо (angle=0): правый край темнее, левый почти не тронут
+        out = apply_shadow(frame_f32, angle_deg=0.0, offset=0.5, strength=0.4, softness=0.2)
+        left = out[:, :4].mean() / frame_f32[:, :4].mean()
+        right = out[:, -4:].mean() / frame_f32[:, -4:].mean()
+        assert left > 0.97
+        assert right == pytest.approx(0.6, abs=0.05)
+
+    def test_never_darkens_below_strength(self, frame_f32):
+        out = apply_shadow(frame_f32, angle_deg=137.0, offset=0.3, strength=0.5, softness=0.3)
+        assert (out >= frame_f32 * 0.5 - 1e-3).all()
+
+
+class TestOcclusion:
+    def test_rect_filled_rest_untouched(self, frame_f32):
+        out = apply_occlusion(frame_f32, (10, 12, 8, 6), (5.0, 5.0, 5.0))
+        assert (out[12:18, 10:18] == 5.0).all()
+        assert (out[:12] == frame_f32[:12]).all()
+        assert (out[:, :10] == frame_f32[:, :10]).all()
+
+    def test_offscreen_rect_is_safe(self, frame_f32):
+        out = apply_occlusion(frame_f32, (200, 200, 10, 10), (0.0, 0.0, 0.0))
+        assert (out == frame_f32).all()
