@@ -98,7 +98,8 @@ class _RobotSection:
             recipe_store=self._recipe_store,
             bindings=self._bindings,
             device_page_factory=self._make_device_page,
-            add_page_factory=None,  # Фаза D
+            add_page_factory=None,  # Фаза D — встроенная страница добавления
+            on_add=lambda: self._crud.on_add_clicked(),  # interim: модальный диалог
         )
         self._crud = DeviceCrudActions(
             kind="robot",

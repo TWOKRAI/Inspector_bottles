@@ -129,6 +129,18 @@ class TestDeviceMasterDetail:
         md.refresh()
         assert md._stack.currentIndex() == 0  # заглушка
 
+    def test_add_requested_invokes_on_add(self, qtbot):
+        called = []
+        md = DeviceMasterDetail(
+            kind="robot",
+            recipe_store=_store([_robot("r1")]),
+            device_page_factory=lambda d: QWidget(),
+            on_add=lambda: called.append(True),
+        )
+        qtbot.addWidget(md)
+        md._show_add()
+        assert called == [True]  # «+ Добавить» вызвал диалог-обработчик
+
     def test_placeholder_text_without_active(self, qtbot):
         md = DeviceMasterDetail(kind="robot", recipe_store=_store(active=None), device_page_factory=lambda d: QWidget())
         qtbot.addWidget(md)

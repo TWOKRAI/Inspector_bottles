@@ -129,6 +129,7 @@ class DeviceMasterDetail(QWidget):
         bindings: Any = None,
         device_page_factory: Callable[[str], QWidget],
         add_page_factory: Callable[[], QWidget] | None = None,
+        on_add: Callable[[], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -136,6 +137,9 @@ class DeviceMasterDetail(QWidget):
         self._recipe_store = recipe_store
         self._device_page_factory = device_page_factory
         self._add_page_factory = add_page_factory
+        # on_add — обработчик «+ Добавить» через модальный диалог (interim до Фазы D,
+        # пока нет встроенной страницы добавления add_page_factory).
+        self._on_add = on_add
         self._pages: dict[str, int] = {}
         self._add_index: int | None = None
 
@@ -197,14 +201,18 @@ class DeviceMasterDetail(QWidget):
         self._stack.setCurrentIndex(self._pages[device_id])
 
     def _show_add(self) -> None:
-        if self._add_page_factory is None:
-            # Фаза D ещё не подключена — остаёмся на заглушке с подсказкой
-            self._placeholder.setText("Добавление устройств появится на странице добавления (Фаза D)")
-            self._stack.setCurrentIndex(0)
+        # Приоритет: встроенная страница добавления (Фаза D) → модальный диалог
+        # (interim) → заглушка-подсказка.
+        if self._add_page_factory is not None:
+            if self._add_index is None:
+                self._add_index = self._stack.addWidget(self._add_page_factory())
+            self._stack.setCurrentIndex(self._add_index)
             return
-        if self._add_index is None:
-            self._add_index = self._stack.addWidget(self._add_page_factory())
-        self._stack.setCurrentIndex(self._add_index)
+        if self._on_add is not None:
+            self._on_add()
+            return
+        self._placeholder.setText("Добавление устройств появится на странице добавления (Фаза D)")
+        self._stack.setCurrentIndex(0)
 
 
 __all__ = ["DeviceMasterDetail", "DeviceDetailPage"]

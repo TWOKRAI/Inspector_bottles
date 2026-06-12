@@ -8,10 +8,11 @@
 
 - [x] **Фаза А** — хотфикс интеграционных багов (доставка devices-дельт, публикация upsert) — БАГ-1+БАГ-2 + тесты; probe перенесён на чекпойнт после Фазы C (см. ниже)
 - [x] **Фаза B** — рецепт как источник истины устройств: RecipeDevicesStore (pure) + device_sync_set (hub) + activation switch + DeviceManager(store=None) + 35 тестов. GUI CRUD-ordering (рецепт→hub) свёрнут в Фазу C (Qt-coupled, живёт в crud_actions)
-- [~] **Фаза C** — master-detail: DeviceListPanel + DeviceMasterDetail + DeviceDetailPage + crud_actions(recipe-first) + robot/vfd секции переделаны + 18 тестов + build-smoke OK. Hikvision-секция отложена (нужен set_device по serial/index — follow-up). Probe-чекпойнт — ниже
-- [ ] **Фаза D** — страница добавления устройства (автопоиск камер + ручной ввод)
+- [x] **Фаза C** — master-detail: DeviceListPanel + DeviceMasterDetail + DeviceDetailPage + crud_actions(recipe-first) + robot/vfd секции + «+ Добавить»→диалог (interim) + 19 тестов + build-smoke + boot-smoke OK. Hikvision-секция отложена (нужен set_device по25 serial/index — follow-up)
+- [x] **Чекпойнт boot-smoke** — приложение поднимается чисто с robot_demo→fallback line_filter (6 процессов вкл. always-on devices, probe LISTENING:9142, 0 traceback). qt-mcp ВИЗУАЛЬНЫЙ snapshot заблокирован: MCP-сервер qt-mcp не подключён в этой сессии (не код) — перенесён в финальную Верификацию
+- [ ] **Фаза D** — страница добавления устройства (автопоиск камер + ручной ввод). NB: add уже работает через модальный диалог (interim), D заменяет на встроенную страницу + автопоиск камер
 - [ ] **Фаза E** — чистка (devices.yaml/store, комбо) + документация
-- [ ] **Верификация** — ОБЯЗАТЕЛЬНЫЙ qt-mcp probe-прогон (см. ниже) + чек-лист железа
+- [ ] **Верификация** — ОБЯЗАТЕЛЬНЫЙ qt-mcp ВИЗУАЛЬНЫЙ probe-прогон (см. ниже) + чек-лист железа
 
 ## Контекст
 
