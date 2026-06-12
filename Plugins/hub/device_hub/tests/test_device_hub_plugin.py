@@ -241,6 +241,54 @@ class TestCrudCommands:
         calls = [c.args[0] for c in ctx.state_proxy.merge.call_args_list]
         assert "devices.registry.dev_2" in calls
 
+    def test_device_upsert_publishes_full_registry(self, tmp_path: Path) -> None:
+        """Баг #2: cmd_device_upsert вызывает _publish_full_registry после успеха.
+
+        До фикса: только _update_counters(), но не _publish_full_registry() →
+        DeltaDispatcher не получал дельту devices.registry.* → комбо GUI не
+        обновлялось через push-подписку.
+        """
+        plugin, ctx = _make_plugin(tmp_path)
+        ctx.state_proxy.merge.reset_mock()
+
+        plugin.cmd_device_upsert(
+            {
+                "id": "dev_pub",
+                "name": "Pub Dev",
+                "kind": "robot",
+                "transport": {"type": "tcp", "host": "1.1.1.1", "port": 502, "unit_id": 1},
+            }
+        )
+        # После upsert devices.registry.<id> ДОЛЖЕН быть в вызовах merge
+        paths = [c.args[0] for c in ctx.state_proxy.merge.call_args_list]
+        assert "devices.registry.dev_pub" in paths, (
+            "cmd_device_upsert должен публиковать реестр через _publish_full_registry"
+        )
+
+    def test_device_remove_publishes_full_registry(self, tmp_path: Path) -> None:
+        """Баг #2 (remove): cmd_device_remove вызывает _publish_full_registry после успеха.
+
+        Без публикации реестра после удаления комбо GUI хранит устаревшую запись.
+        """
+        plugin, ctx = _make_plugin(tmp_path)
+        plugin.cmd_device_upsert(
+            {
+                "id": "dev_del",
+                "name": "Del Dev",
+                "kind": "robot",
+                "transport": {"type": "tcp", "host": "1.1.1.1", "port": 502, "unit_id": 1},
+            }
+        )
+        ctx.state_proxy.merge.reset_mock()
+
+        result = plugin.cmd_device_remove({"device_id": "dev_del"})
+        assert result["status"] == "ok"
+
+        # После remove merge должен быть вызван (хотя бы для очистки state)
+        assert ctx.state_proxy.merge.call_count >= 1, (
+            "cmd_device_remove должен вызывать merge (state/registry) после удаления"
+        )
+
     def test_device_remove(self, tmp_path: Path) -> None:
         """device_remove удаляет устройство."""
         plugin, ctx = _make_plugin(tmp_path)

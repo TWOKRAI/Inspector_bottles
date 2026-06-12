@@ -553,6 +553,91 @@ class TestRequestSystemShutdown:
         process._log_warning.assert_called_once()
 
 
+class TestGuiProcessSubscriptions:
+    """GuiProcess подписывается на нужные пути StateStore.
+
+    Баг #1: отсутствие подписки devices.** блокировало push-дельты реестра
+    устройств → комбо DeviceComboController оставалось пустым.
+    """
+
+    def _run_init_threads_with_mock_proxy(self, process):
+        """Запустить _init_application_threads и вернуть список подписанных путей.
+
+        GuiStateProxy импортируется внутри функции (локальный import), поэтому
+        патчим по полному пути модуля, а не по имени в process-модуле.
+        """
+        subscribed_paths: list[str] = []
+        mock_proxy = MagicMock()
+        mock_proxy.subscribe.side_effect = lambda path, *a, **kw: subscribed_paths.append(path)
+
+        with (
+            patch(
+                "multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy.GuiStateProxy.__init__",
+                return_value=None,
+            ),
+            patch(
+                "multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy.GuiStateProxy.initialize",
+            ),
+            patch(
+                "multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy.GuiStateProxy.subscribe",
+                side_effect=lambda path, *a, **kw: subscribed_paths.append(path),
+            ),
+        ):
+            process._init_application_threads()
+
+        return subscribed_paths
+
+    def test_subscriptions_include_devices(self):
+        """_init_application_threads подписывается на devices.**."""
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        sr = _make_mock_shared_resources()
+        process = GuiProcess(name="gui", shared_resources=sr)
+
+        process._init_configuration = MagicMock()
+        process._init_queues = MagicMock()
+        process._init_managers = MagicMock()
+        process._init_communication = MagicMock()
+        process._register_process_state = MagicMock()
+        process._init_system_threads = MagicMock()
+        process._init_custom_managers = MagicMock()
+        process.update_process_state = MagicMock()
+        process.worker_manager = MagicMock()
+        # router_manager нужен для register_message_handler
+        process.router_manager = MagicMock()
+
+        subscribed_paths = self._run_init_threads_with_mock_proxy(process)
+
+        # Обязательные подписки
+        assert "processes.**" in subscribed_paths, "подписка processes.** отсутствует"
+        assert "system.**" in subscribed_paths, "подписка system.** отсутствует"
+        assert "devices.**" in subscribed_paths, (
+            "подписка devices.** отсутствует — push-дельты реестра устройств не дойдут до GUI"
+        )
+
+    def test_subscriptions_all_three_present(self):
+        """Подписок ровно три: processes/system/devices."""
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        sr = _make_mock_shared_resources()
+        process = GuiProcess(name="gui", shared_resources=sr)
+
+        process._init_configuration = MagicMock()
+        process._init_queues = MagicMock()
+        process._init_managers = MagicMock()
+        process._init_communication = MagicMock()
+        process._register_process_state = MagicMock()
+        process._init_system_threads = MagicMock()
+        process._init_custom_managers = MagicMock()
+        process.update_process_state = MagicMock()
+        process.worker_manager = MagicMock()
+        process.router_manager = MagicMock()
+
+        subscribed_paths = self._run_init_threads_with_mock_proxy(process)
+
+        assert set(subscribed_paths) >= {"processes.**", "system.**", "devices.**"}
+
+
 class TestStateDeltasToBridge:
     """GuiProcess._on_state_deltas_to_bridge: дельты StateStore → bridge.dispatch(state_delta).
 

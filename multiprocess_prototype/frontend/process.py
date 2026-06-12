@@ -78,9 +78,16 @@ class GuiProcess(ProcessModule):
                 # для health-панели вкладки «Процессы». Без неё дельты system.* не
                 # доходят до GUI и панель показывает дефолты («Активно: 0», «—»).
                 self._gui_state_proxy.subscribe("system.**", lambda _deltas: None, exclude_self=True)
+                # devices.** — реестр устройств, conn-статусы, телеметрия.
+                # Без этой подписки DeviceHubPlugin публикует devices.registry.*
+                # / devices.state.* в DeltaDispatcher, но дельты не доходят до GUI:
+                # DeltaDispatcher шлёт дельты только подписчикам; GUI не в списке →
+                # комбо остаётся пустым и push-обновления conn мертвы.
+                # При подписке сработает _replay_initial_state — комбо заполнится сразу.
+                self._gui_state_proxy.subscribe("devices.**", lambda _deltas: None, exclude_self=True)
             except Exception as exc:
                 self._log_warning(
-                    f"GuiProcess '{self.name}': подписка на processes.**/system.** не удалась: {exc}",
+                    f"GuiProcess '{self.name}': подписка на processes.**/system.**/devices.** не удалась: {exc}",
                     module="gui",
                 )
 

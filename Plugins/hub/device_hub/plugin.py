@@ -457,6 +457,11 @@ class DeviceHubPlugin(ProcessModulePlugin):
         """Создать/обновить устройство."""
         origin = data.pop("origin", None)
         result = self._safe_call(self._manager.upsert, data, origin)
+        # Публикуем реестр после успешного upsert — аналогично cmd_device_upsert_many.
+        # Без этого комбо DeviceComboController не получит push-дельту devices.registry.*
+        # и GUI отобразит устройство только после явного pull/refresh.
+        if result.get("status") == "ok":
+            self._publish_full_registry()
         self._update_counters()
         return result
 
@@ -507,9 +512,13 @@ class DeviceHubPlugin(ProcessModulePlugin):
             self._desired_connected.pop(dev_id, None)
         self._stop_device_worker(dev_id)
         result = self._safe_call(self._manager.remove, dev_id)
-        # Очистить state удалённого устройства
+        # Очистить state удалённого устройства и обновить реестр в StateStore.
+        # _publish_full_registry после remove не публикует удалённую запись →
+        # DeltaDispatcher удаляет/замещает устаревший узел devices.registry.<id>,
+        # что приводит к исчезновению устройства из комбо в GUI.
         if result.get("status") == "ok":
             self._publish_state(f"devices.state.{dev_id}", {})
+            self._publish_full_registry()
         self._update_counters()
         return result
 
