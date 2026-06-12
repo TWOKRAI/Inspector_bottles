@@ -206,7 +206,11 @@ class TestHikReleaseBestEffort:
         plugin.shutdown(ctx)
 
     def test_hik_release_with_fake_client(self):
-        """_hik_release_best_effort с фейковым DeviceHubClient → ok."""
+        """_hik_release_best_effort с фейковым DeviceHubClient → fire-and-forget ok.
+
+        Б-3 ревью Fable: используется send_fire_and_forget (non-blocking),
+        НЕ blocking request.
+        """
         from unittest.mock import patch
 
         plugin = CameraServicePlugin()
@@ -214,7 +218,7 @@ class TestHikReleaseBestEffort:
         plugin.configure(ctx)
 
         fake_client = MagicMock()
-        fake_client.request.return_value = {"status": "ok"}
+        fake_client.send_fire_and_forget.return_value = True
 
         with patch(
             "Plugins.hub.device_hub.client.DeviceHubClient",
@@ -222,11 +226,17 @@ class TestHikReleaseBestEffort:
         ):
             plugin._hik_release_best_effort(ctx)
 
-        fake_client.request.assert_called_once_with("hik_release", {}, timeout=1.0)
-        ctx.log_info.assert_any_call("CameraServicePlugin: hik_release ok")
+        # fire-and-forget вызван (не blocking request)
+        fake_client.send_fire_and_forget.assert_called_once_with("hik_release", {})
+        fake_client.request.assert_not_called()
+        ctx.log_info.assert_any_call("CameraServicePlugin: hik_release отправлен (fire-and-forget)")
 
-    def test_hik_release_retries_on_failure(self):
-        """_hik_release_best_effort retry 1 раз при исключении."""
+    def test_hik_release_send_failure_warning(self):
+        """_hik_release_best_effort: если send_fire_and_forget вернул False → warning.
+
+        Б-3 ревью Fable: fire-and-forget НЕ ретраит — один вызов, при неудаче
+        warning. Ретрай blocking request удалён (был источником дедлока).
+        """
         from unittest.mock import patch
 
         plugin = CameraServicePlugin()
@@ -234,7 +244,7 @@ class TestHikReleaseBestEffort:
         plugin.configure(ctx)
 
         fake_client = MagicMock()
-        fake_client.request.side_effect = RuntimeError("timeout")
+        fake_client.send_fire_and_forget.return_value = False
 
         with patch(
             "Plugins.hub.device_hub.client.DeviceHubClient",
@@ -242,8 +252,7 @@ class TestHikReleaseBestEffort:
         ):
             plugin._hik_release_best_effort(ctx)
 
-        # 2 попытки (0 + retry 1)
-        assert fake_client.request.call_count == 2
+        # warning при неудаче
         ctx.log_warning.assert_called_once()
 
     def test_hik_release_no_client_graceful(self):

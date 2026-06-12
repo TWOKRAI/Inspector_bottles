@@ -230,10 +230,15 @@ class CameraServicePlugin(ProcessModulePlugin):
         ctx.log_info(f"CameraServicePlugin[{self._camera_id}]: захват запущен (backend={self._camera_type})")
 
     def _hik_release_best_effort(self, ctx: PluginContext) -> None:
-        """Попросить devices-hub освободить hikvision handle (best-effort, retry 1).
+        """Попросить devices-hub освободить hikvision handle (fire-and-forget).
 
-        Деградация: hub недоступен/нет handle → warning, НЕ блокировать старт.
-        Контракт: вызывается из командного потока (configure/start), НЕ из produce().
+        Б-3 ревью Fable: НЕ использовать blocking request — cmd_start_capture
+        вызывается из потока message_processor, который крутит router.receive;
+        request() из него = дедлок до таймаута (контракт router_manager).
+
+        Решение: send_fire_and_forget (router.send_async, non-blocking).
+        Арбитраж best-effort — ответ не нужен. Деградация: hub недоступен
+        → warning, НЕ блокировать старт.
         """
         try:
             from Plugins.hub.device_hub.client import DeviceHubClient
@@ -246,20 +251,11 @@ class CameraServicePlugin(ProcessModulePlugin):
         device_id = getattr(self, "_device_id", None) or ""
         args = {"device_id": device_id} if device_id else {}
 
-        for attempt in range(2):  # попытка 0 + retry 1
-            try:
-                result = client.request("hik_release", args, timeout=1.0)
-                if result.get("status") == "ok":
-                    ctx.log_info("CameraServicePlugin: hik_release ok")
-                    return
-                # Ответ error — hub не имеет handle, это нормально
-                ctx.log_info(f"CameraServicePlugin: hik_release ответ: {result.get('message', 'ok')}")
-                return
-            except Exception as exc:
-                if attempt == 0:
-                    ctx.log_info(f"CameraServicePlugin: hik_release попытка 1 неудачна: {exc}, retry")
-                else:
-                    ctx.log_warning(f"CameraServicePlugin: hik_release недоступен после retry: {exc}")
+        ok = client.send_fire_and_forget("hik_release", args)
+        if ok:
+            ctx.log_info("CameraServicePlugin: hik_release отправлен (fire-and-forget)")
+        else:
+            ctx.log_warning("CameraServicePlugin: hik_release не удалось отправить (router недоступен)")
 
     def _do_stop_capture(self, ctx: PluginContext) -> None:
         """Остановить захват (backend остаётся, но stop)."""
