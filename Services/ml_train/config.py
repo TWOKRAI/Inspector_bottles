@@ -20,8 +20,8 @@ SchedulerType = Literal["cosine", "plateau", "none"]
 AmpMode = Literal["auto", "off", "fp16", "bf16"]
 MonitorMetric = Literal["balanced_accuracy", "accuracy", "val_loss", "angle_mae_deg"]
 
-#: метрики, у которых «лучше» = меньше (для режима монитора)
-_MINIMIZE_METRICS = {"val_loss", "angle_mae_deg"}
+#: метрики, у которых «лучше» = меньше (режим монитора, сортировка RunRegistry)
+MINIMIZE_METRICS = {"val_loss", "angle_mae_deg"}
 
 
 class ModelConfig(BaseModel):
@@ -141,12 +141,14 @@ class TrainConfig(BaseModel):
             raise ValueError("mixup несовместим с angle_head: угловые метки не смешиваются")
         if self.train.monitor == "angle_mae_deg" and not self.model.angle_head:
             raise ValueError("monitor=angle_mae_deg требует model.angle_head=true")
+        if self.train.monitor == "angle_mae_deg" and self.data.source == "folder":
+            raise ValueError("monitor=angle_mae_deg недоступен для source=folder (нет меток угла)")
         return self
 
     @property
     def monitor_mode(self) -> Literal["min", "max"]:
         """Направление оптимизации монитор-метрики."""
-        return "min" if self.train.monitor in _MINIMIZE_METRICS else "max"
+        return "min" if self.train.monitor in MINIMIZE_METRICS else "max"
 
     # ------------------------------------------------------------------ #
     # Dict at Boundary

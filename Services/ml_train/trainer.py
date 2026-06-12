@@ -48,24 +48,34 @@ class TrainResult:
 
 
 class _Ema:
-    """Экспоненциальное скользящее среднее весов (валидация и чекпоинт — по EMA)."""
+    """Экспоненциальное скользящее среднее весов (валидация и чекпоинт — по EMA).
+
+    Ключи shadow хранятся без префикса torch.compile (`_orig_mod.`) — чекпоинт
+    и eval-копия работают с «чистыми» именами. Warmup: эффективный decay
+    min(decay, (1+n)/(10+n)) — первые эпохи не «вмораживают» случайную
+    инициализацию в теневые веса.
+    """
 
     def __init__(self, model: nn.Module, decay: float) -> None:
         self.decay = decay
-        self.shadow = {k: v.detach().clone().float() for k, v in model.state_dict().items()}
+        self.updates = 0
+        self.shadow = {k.removeprefix("_orig_mod."): v.detach().clone().float() for k, v in model.state_dict().items()}
 
     @torch.no_grad()
     def update(self, model: nn.Module) -> None:
-        for k, v in model.state_dict().items():
+        self.updates += 1
+        decay = min(self.decay, (1.0 + self.updates) / (10.0 + self.updates))
+        for raw_key, v in model.state_dict().items():
+            k = raw_key.removeprefix("_orig_mod.")
             if v.dtype.is_floating_point:
-                self.shadow[k].mul_(self.decay).add_(v.detach().float(), alpha=1.0 - self.decay)
+                self.shadow[k].mul_(decay).add_(v.detach().float(), alpha=1.0 - decay)
             else:
                 self.shadow[k] = v.detach().clone().float()
 
     def state_dict_like(self, model: nn.Module) -> dict[str, torch.Tensor]:
-        """Теневые веса, приведённые к dtype модели."""
-        sd = model.state_dict()
-        return {k: self.shadow[k].to(sd[k].dtype) for k in sd}
+        """Теневые веса, приведённые к dtype модели (ключи — без префикса compile)."""
+        sd = {k.removeprefix("_orig_mod."): v for k, v in model.state_dict().items()}
+        return {k: self.shadow[k].to(v.dtype) for k, v in sd.items()}
 
 
 class Trainer:
@@ -76,7 +86,8 @@ class Trainer:
         self.device = _resolve_device(config.train.device)
         self.amp_dtype = _resolve_amp(config.train.amp, self.device)
         torch.manual_seed(config.data.seed)
-        np.random.seed(config.data.seed)
+        # собственный rng (mixup и т.п.) — глобальный np.random не трогаем
+        self._rng = np.random.default_rng(config.data.seed)
 
         self.bundle: DataBundle = build_dataloaders(config.data)
         num_classes = config.model.num_classes or len(self.bundle.class_names)
@@ -88,6 +99,9 @@ class Trainer:
         self.model: MultiHeadModel = build_model(config.model, num_classes).to(self.device)
         if config.train.channels_last:
             self.model = self.model.to(memory_format=torch.channels_last)
+        # eval-копия для EMA-валидации: создаётся ОДИН раз и ДО torch.compile
+        # (deepcopy OptimizedModule нестабилен; копия раз в эпоху — лишняя память)
+        self._ema_eval = copy.deepcopy(self.model) if config.train.ema_decay > 0 else None
         if config.train.compile:
             self.model = torch.compile(self.model)  # type: ignore[assignment]
 
@@ -102,7 +116,7 @@ class Trainer:
             weight_decay=config.optim.weight_decay,
         )
         self.scheduler = self._build_scheduler()
-        self.scaler = torch.amp.GradScaler(enabled=self.amp_dtype == torch.float16)
+        self.scaler = torch.amp.GradScaler(self.device.type, enabled=self.amp_dtype == torch.float16)
         self.ema = _Ema(self.model, config.train.ema_decay) if config.train.ema_decay > 0 else None
 
         self.run_dir = self._prepare_run_dir()
@@ -137,8 +151,14 @@ class Trainer:
             t0 = time.perf_counter()
             train_loss = self._train_one_epoch()
             val_summary, val_loss = self._validate(self.bundle.val_loader)
+            if monitor == "angle_mae_deg" and val_summary.get("angle_mae_deg") is None:
+                # в данных нет валидных углов (например, folder-источник) —
+                # иначе best.pt не сохранился бы ни разу, а plateau упал бы на None
+                logger.warning("monitor=angle_mae_deg недоступен (нет валидных углов) — переключаюсь на val_loss")
+                monitor, mode, best_value = "val_loss", "min", math.inf
             if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                self.scheduler.step(val_summary.get(monitor, val_loss))
+                plateau_value = val_summary.get(monitor)
+                self.scheduler.step(val_loss if plateau_value is None else plateau_value)
             elif self.scheduler is not None:
                 self.scheduler.step()
 
@@ -227,7 +247,7 @@ class Trainer:
         return total_loss / max(n_batches, 1)
 
     def _mixup_step(self, images: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        lam = float(np.random.beta(self.config.optim.mixup_alpha, self.config.optim.mixup_alpha))
+        lam = float(self._rng.beta(self.config.optim.mixup_alpha, self.config.optim.mixup_alpha))
         perm = torch.randperm(images.size(0), device=images.device)
         mixed = lam * images + (1.0 - lam) * images[perm]
         logits, _ = self.model(mixed)
@@ -272,11 +292,10 @@ class Trainer:
     # ------------------------------------------------------------------ #
 
     def _eval_model(self) -> nn.Module:
-        if self.ema is None:
+        if self.ema is None or self._ema_eval is None:
             return self.model
-        ema_model = copy.deepcopy(self.model)
-        ema_model.load_state_dict(self.ema.state_dict_like(self.model))
-        return ema_model
+        self._ema_eval.load_state_dict(self.ema.state_dict_like(self.model))
+        return self._ema_eval
 
     def _to_device(self, images: torch.Tensor) -> torch.Tensor:
         images = images.to(self.device, non_blocking=True)
@@ -371,12 +390,18 @@ def _resolve_device(spec: str) -> torch.device:
 
 
 def _resolve_amp(mode: str, device: torch.device) -> torch.dtype | None:
-    """auto: bf16 на CUDA с поддержкой, иначе fp16; CPU — без AMP."""
+    """auto: bf16 на CUDA с поддержкой, иначе fp16; CPU — без AMP.
+
+    Явный fp16 вне CUDA запрещён: GradScaler не работает на CPU —
+    fp16-градиенты остались бы без скейлинга (тихий underflow).
+    """
     if mode == "off":
         return None
     if mode == "bf16":
         return torch.bfloat16
     if mode == "fp16":
+        if device.type != "cuda":
+            raise ValueError("amp=fp16 поддерживается только на CUDA; для CPU используйте off/bf16/auto")
         return torch.float16
     if device.type != "cuda":
         return None

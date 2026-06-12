@@ -195,15 +195,26 @@ def _probe_image_size(dataset: Dataset) -> tuple[int, int]:
 
 
 def _build_synthetic(config: DataConfig) -> DataBundle:
-    from Services.dataset_gen import DatasetEngine, SyntheticDataset
+    from Services.dataset_gen import DatasetEngine
 
     engine = DatasetEngine.from_yaml(str(config.generator_preset))
+    return bundle_from_generator(engine, config)
+
+
+def bundle_from_generator(generator, config: DataConfig) -> DataBundle:
+    """DataBundle поверх любого SampleGenerator (контракт dataset_gen.interfaces).
+
+    Выделено из _build_synthetic: в тестах подставляется stub-генератор
+    без YAML-пресета и реальных спрайтов.
+    """
+    from Services.dataset_gen import SyntheticDataset
+
     train_tf = build_transforms(config, train=True, resize=False)
     eval_tf = build_transforms(config, train=False, resize=False)
     # независимые сиды → независимые потоки случайности train/val (без утечки)
-    train_ds = SyntheticDataset(engine, length=config.samples_per_epoch, seed=config.seed, transform=train_tf)
-    val_ds = SyntheticDataset(engine, length=config.val_samples, seed=config.seed + 1, transform=eval_tf)
-    class_names = list(engine.class_names)
+    train_ds = SyntheticDataset(generator, length=config.samples_per_epoch, seed=config.seed, transform=train_tf)
+    val_ds = SyntheticDataset(generator, length=config.val_samples, seed=config.seed + 1, transform=eval_tf)
+    class_names = list(generator.class_names)
     counts = _synthetic_counts(len(train_ds), len(class_names))
     return DataBundle(
         train_loader=_loader(train_ds, config, shuffle=True),
@@ -253,6 +264,11 @@ def _build_exported(config: DataConfig) -> DataBundle:
 
     class_names = _class_names_from_rows(label_rows)
     counts = _counts_from_rows(label_rows, len(class_names))
+    # рассинхрон сплитов (экспорт с разными каталогами) ловим здесь с внятной
+    # ошибкой — иначе IndexError в confusion_matrix посреди валидации
+    for split_name, ds in (("val", val_ds), ("test", test_ds)):
+        if isinstance(ds, ExportedDataset):
+            _check_class_bounds(ds.rows, len(class_names), split_name)
     return DataBundle(
         train_loader=_loader(train_ds, config, shuffle=True),
         val_loader=_loader(val_ds, config, shuffle=False),
@@ -296,8 +312,9 @@ def _random_split_two_views(
     n = len(train_view)  # type: ignore[arg-type]
     indices = np.random.default_rng(seed).permutation(n)
     n_val = max(1, int(n * val_split))
-    if n - n_val < 1:
-        raise ValueError(f"Слишком мало данных ({n}) для val_split={val_split}")
+    # train-сплит < 2 сэмплов: единственный батч размера 1 уронит BatchNorm
+    if n - n_val < 2:
+        raise ValueError(f"Слишком мало данных ({n}) для val_split={val_split}: train-сплит < 2 сэмплов")
     return Subset(train_view, indices[n_val:].tolist()), Subset(eval_view, indices[:n_val].tolist())
 
 
@@ -323,6 +340,16 @@ def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() == "true"
+
+
+def _check_class_bounds(rows: list[dict[str, Any]], num_classes: int, split_name: str) -> None:
+    """Pre-условие согласованности сплитов: class_index < числа классов train."""
+    max_index = max(int(r["class_index"]) for r in rows)
+    if max_index >= num_classes:
+        raise ValueError(
+            f"Сплит '{split_name}' содержит class_index={max_index}, а в train классов {num_classes} — "
+            f"сплиты экспортированы с разными каталогами классов"
+        )
 
 
 def _class_names_from_rows(rows: list[dict[str, Any]]) -> list[str]:

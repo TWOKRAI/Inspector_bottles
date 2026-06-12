@@ -8,23 +8,12 @@ import pytest
 torch = pytest.importorskip("torch")
 cv2 = pytest.importorskip("cv2")
 
+from Services.dataset_gen.export import _LABEL_FIELDS  # noqa: E402 — контракт формата меток
 from Services.ml_train.config import DataConfig  # noqa: E402
 from Services.ml_train.data import (  # noqa: E402
     ExportedDataset,
     FolderDataset,
     build_dataloaders,
-)
-
-_LABEL_FIELDS = (
-    "filename",
-    "class_index",
-    "class_name",
-    "class_path",
-    "angle_deg",
-    "angle_sin",
-    "angle_cos",
-    "symmetry",
-    "angle_valid",
 )
 
 
@@ -114,6 +103,94 @@ def test_build_dataloaders_folder_split(tmp_path):
     n_val = len(bundle.val_loader.dataset)
     assert n_train + n_val == 20 and n_val == 4
     assert bundle.image_size == (16, 16)
+
+
+def test_random_split_disjoint_and_full(tmp_path):
+    """Критичное свойство: train/val дизъюнктны и вместе покрывают весь датасет."""
+    from torch.utils.data import Subset
+
+    from Services.ml_train.data import _random_split_two_views
+
+    class _Fake:
+        def __len__(self):
+            return 20
+
+    train_ds, val_ds = _random_split_two_views(_Fake(), _Fake(), val_split=0.3, seed=7)
+    assert isinstance(train_ds, Subset) and isinstance(val_ds, Subset)
+    train_idx, val_idx = set(train_ds.indices), set(val_ds.indices)
+    assert train_idx.isdisjoint(val_idx)
+    assert train_idx | val_idx == set(range(20))
+
+
+def test_split_too_small_raises(tmp_path):
+    from Services.ml_train.data import _random_split_two_views
+
+    class _Tiny:
+        def __len__(self):
+            return 2
+
+    with pytest.raises(ValueError, match="Слишком мало"):
+        _random_split_two_views(_Tiny(), _Tiny(), val_split=0.5, seed=0)
+
+
+def test_exported_split_mismatch_raises(tmp_path):
+    """val с class_index вне диапазона train → внятная ошибка, а не IndexError."""
+    root = tmp_path / "ds"
+    _make_exported(root / "train", n_per_class=4, num_classes=2)
+    _make_exported(root / "val", n_per_class=2, num_classes=3)  # лишний класс
+    cfg = DataConfig(source="exported", root=str(root), image_size=(24, 24))
+    with pytest.raises(ValueError, match="разными каталогами"):
+        build_dataloaders(cfg)
+
+
+class _StubGenerator:
+    """Stub SampleGenerator (контракт dataset_gen.interfaces) — без YAML и спрайтов."""
+
+    num_classes = 3
+    class_names = ["a", "b", "c"]
+    symmetry_map = {"a": "none", "b": "none", "c": "full"}
+
+    def generate_sample(self, class_index=None, rng=None):
+        from Services.dataset_gen.core.labels import SampleLabel
+
+        rng = rng or np.random.default_rng(0)
+        frame = rng.integers(0, 255, (48, 48, 3), dtype=np.uint8)
+        full = class_index == 2
+        label = SampleLabel(
+            class_index=int(class_index),
+            class_name=self.class_names[class_index],
+            angle_deg=45.0,
+            angle_sin=0.0 if full else float(np.sin(np.radians(45))),
+            angle_cos=0.0 if full else float(np.cos(np.radians(45))),
+            symmetry="full" if full else "none",
+            angle_valid=not full,
+        )
+        return frame, label
+
+
+def test_bundle_from_stub_generator():
+    """Синтетический путь без dataset_gen-пресета: контракт сэмпла + независимость train/val."""
+    from Services.ml_train.data import bundle_from_generator
+
+    cfg = DataConfig(
+        source="synthetic",
+        generator_preset="unused.yaml",
+        samples_per_epoch=12,
+        val_samples=6,
+        batch_size=4,
+        num_workers=0,
+    )
+    bundle = bundle_from_generator(_StubGenerator(), cfg)
+    assert bundle.class_names == ["a", "b", "c"]
+    assert bundle.image_size == (48, 48)  # resize=False: размер задаёт генератор
+    images, target = next(iter(bundle.val_loader))
+    assert images.shape == (4, 3, 48, 48)
+    # класс 2 (full-симметрия) → angle_valid=False (маска loss)
+    full_mask = target["class_index"] == 2
+    assert (~target["angle_valid"][full_mask]).all()
+    # train и val — разные сиды → батчи не совпадают побайтно
+    train_images, _ = next(iter(bundle.train_loader))
+    assert train_images.shape[0] == 4
 
 
 def test_folder_imbalance_weights(tmp_path):

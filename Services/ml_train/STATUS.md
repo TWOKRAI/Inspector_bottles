@@ -22,7 +22,20 @@
 - CLI: `train` / `runs` / `export` / `archs`; пресет `ru_letters_synthetic.yaml`
 - Тесты: 34 (21 без torch + 13 с torch, smoke-обучение на CPU)
 
+## Ревью
+
+Fable-ревью 2026-06-13: APPROVE с замечаниями; MAJOR-1 (resize-политика)
+задокументирован, MINOR 2-8 и NIT 9-11 исправлены, добавлены тесты
+(stub-синтетика, дизъюнктность сплита, ONNX с угловой головой).
+
 ## Известные ограничения
+
+- **Resize-политика train↔inference:** обучение — stretch, ml_inference —
+  letterbox (дефолт `keep_aspect=True`). Для квадратного входа эквивалентно;
+  для неквадратного ROI — подавать квадратные кропы (см. README). Follow-up:
+  поле resize-политики в sidecar + поддержка в ml_inference.preprocess
+- Интерполяция: `v2.Resize(antialias=True)` при обучении vs `cv2.INTER_LINEAR`
+  при инференсе — мелкий численный дрейф при сильном downscale (допущение)
 
 - ONNX-экспорт через legacy TorchScript-путь (`dynamo=False`) — стабильный
   выбор для tuple-выхода `(logits, angle|None)`; миграция на dynamo-экспорт

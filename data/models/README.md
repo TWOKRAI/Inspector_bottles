@@ -37,6 +37,11 @@ labels: imagenet_classes.txt            # файл меток (опц.); без 
 **Почему так:** препроцессинг (resize, цветопорядок, нормализация, layout) задаётся
 данными, а не кодом. Добавить новую модель = положить веса + sidecar, править код не нужно.
 
+> **Ограничение resize:** sidecar не описывает политику ресайза; инференс
+> делает letterbox (`keep_aspect=True`), а модели из `Services/ml_train`
+> обучаются stretch'ем. Эквивалентно только для квадратного входа — модели
+> ml_train подключайте к квадратным кропам (см. `Services/ml_train/README.md`).
+
 ## Где взять MobileNetV3 в ONNX
 
 Экспорт из torchvision (нужен `pip install '.[ml-torch]'`):

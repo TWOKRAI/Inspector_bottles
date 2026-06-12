@@ -127,6 +127,38 @@ def test_exported_model_visible_to_ml_inference(tiny_run):
     assert spec.load_labels() == ["circle", "square"]
 
 
+def test_export_onnx_angle_head_two_outputs(tmp_path):
+    """Нетривиальный путь экспорта: модель с угловой головой → два выхода ONNX."""
+    pytest.importorskip("onnx")
+    ort = pytest.importorskip("onnxruntime")
+    from Services.ml_train.config import TrainConfig
+    from Services.ml_train.export import export_onnx
+
+    config = TrainConfig.from_dict(
+        {
+            "model": {"arch": "mobilenet_v3_small", "pretrained": False, "angle_head": True},
+            "data": {"source": "folder", "root": "unused"},
+        }
+    )
+    model = build_model(config.model, num_classes=4)
+    ckpt = {
+        "model_state": model.state_dict(),
+        "config": config.to_dict(),
+        "class_names": ["a", "b", "c", "d"],
+        "image_size": [32, 32],
+        "epoch": 0,
+        "metrics": {},
+    }
+    torch.save(ckpt, tmp_path / "best.pt")
+    onnx_path = export_onnx(tmp_path / "best.pt", models_dir=tmp_path / "models", model_id="ang")
+
+    session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+    names = [o.name for o in session.get_outputs()]
+    assert names == ["logits", "angle"]
+    logits, angle = session.run(None, {"input": np.random.rand(2, 3, 32, 32).astype(np.float32)})
+    assert logits.shape == (2, 4) and angle.shape == (2, 2)
+
+
 def test_angle_head_forward_and_loss_mask():
     """Модель с угловой головой: 2 выхода; full-симметрия маскируется в loss."""
     from Services.ml_train.config import ModelConfig

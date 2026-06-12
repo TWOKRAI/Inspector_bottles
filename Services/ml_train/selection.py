@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from Services.ml_train.config import _MINIMIZE_METRICS
+from Services.ml_train.config import MINIMIZE_METRICS
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ class RunRegistry:
 
         Post: None, если ни у одного прогона нет этой метрики или чекпоинта.
         """
-        minimize = metric in _MINIMIZE_METRICS
+        minimize = metric in MINIMIZE_METRICS
         candidates = [
             (run.metric(metric), run)
             for run in self._runs.values()
@@ -94,7 +94,7 @@ class RunRegistry:
 
     def summary(self, sort_by: str = "balanced_accuracy") -> list[dict[str, Any]]:
         """Строки для таблицы сравнения (отсортированы по метрике, лучшие сверху)."""
-        minimize = sort_by in _MINIMIZE_METRICS
+        minimize = sort_by in MINIMIZE_METRICS
         rows = [
             {
                 "run": run.name,
@@ -108,8 +108,9 @@ class RunRegistry:
             }
             for run in self._runs.values()
         ]
+        # .get: произвольное имя метрики из CLI не должно ронять таблицу (KeyError)
         rows.sort(
-            key=lambda r: (r[sort_by] is None, (r[sort_by] or 0) * (1 if minimize else -1)),
+            key=lambda r: (r.get(sort_by) is None, (r.get(sort_by) or 0) * (1 if minimize else -1)),
         )
         return rows
 

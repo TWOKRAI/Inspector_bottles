@@ -45,8 +45,16 @@
 - [x] T10. Тесты: 34 (21 без torch + 13 torch smoke CPU, вкл. интеграцию с ModelRegistry ml_inference)
 - [x] T11. Документация: README.md, STATUS.md, строка в `Services/STATUS.md`, extra `ml-train` в pyproject
 
-**Верификация:** 34/34 теста; живой probe синтетики (33 класса, батч 8×3×128×128);
+**Верификация:** 39/39 тестов; живой probe синтетики (33 класса, батч 8×3×128×128);
 parity torch↔onnxruntime в экспорте; ruff clean.
+
+**Ревью (Fable, 2026-06-13):** APPROVE с замечаниями. MAJOR-1 (resize stretch↔letterbox
+при неквадратном входе) — задокументирован в README ml_train + data/models, follow-up:
+поле resize-политики в sidecar. MINOR 2-8 и NIT 9-11 исправлены (fallback монитора
+angle→val_loss, запрет fp16 на CPU, EMA: warmup-decay + одна eval-копия до compile,
+проверка рассинхрона сплитов, защита крошечного train-сплита, KeyError в summary,
+собственный rng вместо глобального np.random). Тесты +5: stub-синтетика,
+дизъюнктность сплита, рассинхрон сплитов, ONNX с угловой головой.
 
 ## Out of scope
 

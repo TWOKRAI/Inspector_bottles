@@ -25,7 +25,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p_runs = sub.add_parser("runs", help="таблица прогонов")
     p_runs.add_argument("--runs-dir", default="data/ml_train/runs")
-    p_runs.add_argument("--metric", default="balanced_accuracy")
+    p_runs.add_argument(
+        "--metric",
+        default="balanced_accuracy",
+        choices=["balanced_accuracy", "accuracy", "angle_mae_deg"],
+    )
 
     p_export = sub.add_parser("export", help="экспорт чекпоинта в ONNX + sidecar")
     p_export.add_argument("checkpoint", help="best.pt либо папка прогона")
