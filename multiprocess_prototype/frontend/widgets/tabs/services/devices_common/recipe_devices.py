@@ -52,6 +52,10 @@ class RecipeDevicesStore:
         """Есть ли активный рецепт (можно ли добавлять устройства)."""
         return bool(self._active_provider())
 
+    def active_slug(self) -> str | None:
+        """Slug активного рецепта (для origin-тега ``recipe:<slug>``) или None."""
+        return self._active_provider()
+
     def _require_active(self) -> str:
         slug = self._active_provider()
         if not slug:

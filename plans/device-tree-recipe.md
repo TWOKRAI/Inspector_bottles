@@ -8,7 +8,7 @@
 
 - [x] **Фаза А** — хотфикс интеграционных багов (доставка devices-дельт, публикация upsert) — БАГ-1+БАГ-2 + тесты; probe перенесён на чекпойнт после Фазы C (см. ниже)
 - [x] **Фаза B** — рецепт как источник истины устройств: RecipeDevicesStore (pure) + device_sync_set (hub) + activation switch + DeviceManager(store=None) + 35 тестов. GUI CRUD-ordering (рецепт→hub) свёрнут в Фазу C (Qt-coupled, живёт в crud_actions)
-- [ ] **Фаза C** — вторая колонка устройств внутри страниц сервисов (master-detail + «+ Добавить»)
+- [~] **Фаза C** — master-detail: DeviceListPanel + DeviceMasterDetail + DeviceDetailPage + crud_actions(recipe-first) + robot/vfd секции переделаны + 18 тестов + build-smoke OK. Hikvision-секция отложена (нужен set_device по serial/index — follow-up). Probe-чекпойнт — ниже
 - [ ] **Фаза D** — страница добавления устройства (автопоиск камер + ручной ввод)
 - [ ] **Фаза E** — чистка (devices.yaml/store, комбо) + документация
 - [ ] **Верификация** — ОБЯЗАТЕЛЬНЫЙ qt-mcp probe-прогон (см. ниже) + чек-лист железа
