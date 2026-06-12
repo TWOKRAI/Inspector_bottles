@@ -48,9 +48,15 @@ class VfdDriver(BaseDeviceDriver):
         self._vfd_client: Any = None
         self._bridge_alive: bool = False
 
-        # Параметры из entry.params
-        self._poll_interval_s: float = float(entry.params.get("poll_interval_s", 0.5))
-        self._last_poll: float = 0.0
+        # Параметры из entry.params.
+        # Приоритет — всегда робот. ПЧ управляется/читается В ОСНОВНОМ ПО ЗАПРОСУ:
+        # дефолт poll_interval_s=0 = фоновый poll ВЫКЛЮЧЕН (статус из ответов
+        # команд run/set_freq/get_status). Фоновый пульс VFD_FLAG перехватывал бы
+        # единственный Motion-цикл робота — голод servo/движения. Чтобы включить
+        # редкий keep-alive — задать poll_interval_s>0 в params устройства.
+        self._poll_interval_s: float = float(entry.params.get("poll_interval_s", 0.0))
+        # -inf: первый запрошенный poll не троттлится (как _last_reconnect).
+        self._last_poll: float = float("-inf")
 
         # НР-2: throttle для reconnect при desired=True + not connected.
         # -inf чтобы первая попытка прошла сразу (аналог robot_driver).
@@ -138,8 +144,16 @@ class VfdDriver(BaseDeviceDriver):
             # НР-2: throttled reconnect — пробуем (ре)подключиться
             return self._attempt_reconnect()
 
-        # DRAW-gating (У4): проверяем режим носителя
-        if self._is_carrier_in_draw():
+        # ПЧ — в основном ПО ЗАПРОСУ: при poll_interval_s <= 0 фоновый poll
+        # выключен полностью. Статус приходит из ответов команд (run/set_freq/
+        # get_status сами поллят зеркало). Mailbox робота в фоне НЕ дёргаем —
+        # приоритет всегда у робота (энкодер/движение).
+        if self._poll_interval_s <= 0:
+            return None
+
+        # Приоритет робота: пока носитель занят (DRAW либо движение/доставка
+        # задания), НЕ дёргаем mailbox ПЧ — иначе handle_vfd перехватит Motion-цикл.
+        if self._is_carrier_busy():
             return self.snapshot(
                 data={"reason": "carrier busy", "bridge_alive": self._bridge_alive},
                 quality="stale",
@@ -289,8 +303,12 @@ class VfdDriver(BaseDeviceDriver):
             # Пробрасываем как есть — caller (connect) обработает и вернёт quality=bad
             raise
 
-    def _is_carrier_in_draw(self) -> bool:
-        """Проверить, в режиме ли DRAW носитель-робот (bridge gating)."""
+    def _is_carrier_busy(self) -> bool:
+        """Занят ли носитель-робот: режим DRAW либо движение/доставка задания.
+
+        Пока носитель busy, фоновый poll ПЧ пропускается (приоритет робота).
+        Для tcp/rtu (прямое подключение без моста) — носителя нет, poll всегда.
+        """
         t_type = self.entry.transport.get("type", "")
         if t_type != "bridge":
             return False  # tcp/rtu — poll всегда
@@ -303,5 +321,6 @@ class VfdDriver(BaseDeviceDriver):
         if carrier is None:
             return False
 
-        mode = getattr(carrier, "mode", "cvt")
-        return mode == "draw"
+        if getattr(carrier, "mode", "cvt") == "draw":
+            return True
+        return bool(getattr(carrier, "busy", False))

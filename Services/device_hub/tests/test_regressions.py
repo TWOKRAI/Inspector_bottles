@@ -84,7 +84,7 @@ class TestDrawModeReturnToCvt:
         driver.tick(stop)  # исполняет draw
         driver.tick(stop)  # возвращает mode в cvt
 
-        # Проверяем что mode == cvt — VfdDriver._is_carrier_in_draw вернёт False
+        # Проверяем что mode == cvt — VfdDriver._is_carrier_busy вернёт False
         assert driver.mode == "cvt"
 
 

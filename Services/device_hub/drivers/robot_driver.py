@@ -107,6 +107,12 @@ class RobotDriver(BaseDeviceDriver):
         self._draw_busy: bool = False
         self._draw_state: str = "idle"
 
+        # Доставка задания в полёте (feeder в _deliver). Нужно мосту ПЧ: пока
+        # робот занят движением, ПЧ НЕ должна пульсировать VFD_FLAG — иначе
+        # высокоприоритетная ветка handle_vfd в Lua перехватывает единственный
+        # Motion-цикл робота и servo/job голодают (см. busy ниже).
+        self._delivering: bool = False
+
     # ------------------------------------------------------------------ #
     # Соединение
     # ------------------------------------------------------------------ #
@@ -125,6 +131,16 @@ class RobotDriver(BaseDeviceDriver):
     def mode(self) -> str:
         """Текущий режим: ``cvt`` | ``draw``."""
         return self._mode
+
+    @property
+    def busy(self) -> bool:
+        """Робот занят полезной работой: есть задания / идёт доставка / рисование.
+
+        Используется мостом ПЧ (VfdDriver): пока робот busy, ПЧ НЕ пульсирует
+        VFD_FLAG — высокоприоритетная ветка handle_vfd в Lua не должна перехватывать
+        единственный Motion-цикл робота во время движения. Приоритет — всегда робот.
+        """
+        return bool(self._job_queue) or self._draw_busy or self._delivering
 
     def connect(self) -> bool:
         """Подключиться к роботу. Создаёт RobotClient если ещё нет."""
@@ -223,29 +239,35 @@ class RobotDriver(BaseDeviceDriver):
         """
 
         x_mm, y_mm, e_capture = job
+        # Помечаем доставку — мост ПЧ не будет дёргать mailbox робота, пока идёт
+        # движение (приоритет робота, см. busy).
+        self._delivering = True
         try:
-            self._client.send_job(x_mm, y_mm, e_capture)
-        except Exception:
-            self.jobs_failed += 1
-            self._record_err()
-            return
-        self.jobs_sent += 1
-        self._record_ok()
+            try:
+                self._client.send_job(x_mm, y_mm, e_capture)
+            except Exception:
+                self.jobs_failed += 1
+                self._record_err()
+                return
+            self.jobs_sent += 1
+            self._record_ok()
 
-        # Ждать приёма (job_flag -> 0)
-        accept_wait_s = float(self.entry.params.get("accept_wait_s", 5.0))
-        if not self._wait_condition(self._client.job_accepted, accept_wait_s, stop_event):
-            # Не принял — вернуть в начало очереди
-            self._job_queue.appendleft(job)
-            return
+            # Ждать приёма (job_flag -> 0)
+            accept_wait_s = float(self.entry.params.get("accept_wait_s", 5.0))
+            if not self._wait_condition(self._client.job_accepted, accept_wait_s, stop_event):
+                # Не принял — вернуть в начало очереди
+                self._job_queue.appendleft(job)
+                return
 
-        # Ждать завершения (is_free)
-        job_wait_s = float(self.entry.params.get("job_wait_s", 10.0))
-        if not self._wait_condition(self._client.is_free, job_wait_s, stop_event):
-            self.jobs_failed += 1
-            return
+            # Ждать завершения (is_free)
+            job_wait_s = float(self.entry.params.get("job_wait_s", 10.0))
+            if not self._wait_condition(self._client.is_free, job_wait_s, stop_event):
+                self.jobs_failed += 1
+                return
 
-        self.jobs_done += 1
+            self.jobs_done += 1
+        finally:
+            self._delivering = False
 
     # ------------------------------------------------------------------ #
     # Draw (порт robot_draw/plugin.py)

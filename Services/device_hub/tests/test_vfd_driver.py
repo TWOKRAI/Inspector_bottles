@@ -49,7 +49,7 @@ def vfd_entry() -> DeviceEntry:
         kind="vfd",
         protocol="gd20_bridge",
         transport={"type": "bridge", "bridge": "robot_main"},
-        params={"freq_max_hz": 50.0, "default_freq_hz": 10.0, "poll_interval_s": 0.0, "stale_polls_limit": 6},
+        params={"freq_max_hz": 50.0, "default_freq_hz": 10.0, "poll_interval_s": 0.5, "stale_polls_limit": 6},
     )
 
 
@@ -177,6 +177,22 @@ class TestVfdDriverDrawGating:
         if snap is not None:
             assert snap["quality"] in ("good", "stale")
 
+    def test_carrier_busy_skips_poll(self, vfd_driver, robot_driver, clock) -> None:
+        """Носитель занят движением (busy) -> VFD tick НЕ дёргает mailbox.
+
+        Приоритет робота: пока есть задание/доставка, ПЧ не пульсирует VFD_FLAG,
+        иначе handle_vfd перехватывает Motion-цикл робота (голод servo/движения).
+        """
+        robot_driver._mode = "cvt"
+        robot_driver._job_queue.append((10.0, 20.0, 0))  # busy: есть задание
+        assert robot_driver.busy is True
+
+        stop = threading.Event()
+        snap = vfd_driver.tick(stop)
+        assert snap is not None
+        assert snap["quality"] == "stale"
+        assert snap.get("reason") == "carrier busy"
+
 
 class TestVfdDriverTick:
     """tick() — poll + ensure_alive."""
@@ -195,6 +211,20 @@ class TestVfdDriverTick:
         snap = vfd_driver.tick(stop)
         if snap is not None:
             assert snap["quality"] in ("good", "stale")
+
+    def test_ondemand_no_background_poll(self, vfd_entry, robot_driver, clock) -> None:
+        """poll_interval_s=0 (дефолт) -> фоновый poll выключен, tick не дёргает mailbox.
+
+        ПЧ в основном по запросу: статус из ответов команд, фоном VFD_FLAG не
+        пульсируем (приоритет робота). tick подключённого ПЧ возвращает None.
+        """
+        entry = vfd_entry
+        entry.params["poll_interval_s"] = 0.0
+        d = VfdDriver(entry, resolve_device=lambda _: robot_driver, clock=clock.clock, sleep=clock.sleep)
+        d.connect()
+        assert d.is_connected
+        stop = threading.Event()
+        assert d.tick(stop) is None  # фоновый poll выключен
 
 
 class TestVfdDriverDesiredReconnect:
