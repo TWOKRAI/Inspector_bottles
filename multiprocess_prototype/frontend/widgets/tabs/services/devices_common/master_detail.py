@@ -35,6 +35,7 @@ from .device_list_panel import DeviceListPanel
 _CONN_TEXT = {
     "connected": "● подключено",
     "connecting": "◌ подключение…",
+    "disconnecting": "◌ отключение…",
     "disconnected": "○ отключено",
     "error": "✕ ошибка",
 }

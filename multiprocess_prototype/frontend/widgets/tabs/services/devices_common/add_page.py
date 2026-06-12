@@ -35,6 +35,7 @@ from .recipe_devices import RecipeDevicesError
 _CONN_TEXT = {
     "connected": ("● связь есть", "color: green;"),
     "connecting": ("◌ подключение…", "color: orange;"),
+    "disconnecting": ("◌ отключение…", "color: orange;"),
     "disconnected": ("○ нет связи", "color: gray;"),
     "error": ("✕ ошибка связи", "color: red;"),
 }

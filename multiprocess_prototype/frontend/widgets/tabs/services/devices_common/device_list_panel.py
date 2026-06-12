@@ -33,6 +33,7 @@ _ROLE_IS_ADD = int(Qt.ItemDataRole.UserRole) + 2
 _CONN_GLYPH = {
     "connected": "●",
     "connecting": "◌",
+    "disconnecting": "◌",
     "disconnected": "○",
     "error": "✕",
 }
