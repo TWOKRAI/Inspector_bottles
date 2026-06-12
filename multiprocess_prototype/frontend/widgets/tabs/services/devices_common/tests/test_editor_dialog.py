@@ -16,8 +16,8 @@ def test_create_mode_tcp_entry(qtbot) -> None:
     )
     qtbot.addWidget(dlg)
 
-    dlg._form._edit_id.setText("robot_main")
-    dlg._form._edit_name.setText("Робот Delta")
+    dlg._form._edit_name.setText("Робот Delta")  # имя первым (автозаполнит ID slug'ом)
+    dlg._form._edit_id.setText("robot_main")  # затем переопределяем ID явно
     dlg._form._combo_protocol.setCurrentText("delta_universal3")
     dlg._form._combo_transport.setCurrentIndex(0)  # tcp
     dlg._form._tcp_host.setText("192.168.1.7")
@@ -44,8 +44,8 @@ def test_create_mode_bridge_entry(qtbot) -> None:
     )
     qtbot.addWidget(dlg)
 
-    dlg._form._edit_id.setText("vfd_belt")
-    dlg._form._edit_name.setText("ПЧ лента")
+    dlg._form._edit_name.setText("ПЧ лента")  # имя первым
+    dlg._form._edit_id.setText("vfd_belt")  # затем ID явно
     dlg._form._combo_transport.setCurrentIndex(1)  # bridge
 
     entry = dlg.get_entry()
@@ -106,6 +106,33 @@ def test_params_empty_returns_empty_dict(qtbot) -> None:
 
     entry = dlg.get_entry()
     assert entry["params"] == {}
+
+
+def test_id_autofills_slug_from_name(qtbot) -> None:
+    """Имя → ID (slug, транслит кириллицы), пока ID не правили вручную."""
+    dlg = DeviceEditorDialog(kind="robot")
+    qtbot.addWidget(dlg)
+    dlg._form._edit_name.setText("Робот Delta 2")
+    assert dlg._form._edit_id.text() == "robot_delta_2"
+
+
+def test_manual_id_edit_stops_autofill(qtbot) -> None:
+    """После ручной правки ID имя его больше не перезаписывает."""
+    dlg = DeviceEditorDialog(kind="robot")
+    qtbot.addWidget(dlg)
+    dlg._form._edit_id.setText("")  # программно — не считается ручной правкой
+    dlg._form._edit_id.textEdited.emit("my_id")  # имитируем ручной ввод
+    dlg._form._edit_name.setText("Другое имя")
+    assert dlg._form._edit_id.text() != "drugoe_imya"
+
+
+def test_edit_mode_no_autofill(qtbot) -> None:
+    """В режиме редактирования id фиксирован — имя его не трогает."""
+    existing = {"id": "robot_main", "name": "X", "kind": "robot", "transport": {"type": "tcp"}}
+    dlg = DeviceEditorDialog(kind="robot", existing=existing)
+    qtbot.addWidget(dlg)
+    dlg._form._edit_name.setText("Новое имя")
+    assert dlg._form._edit_id.text() == "robot_main"
 
 
 def test_robot_default_unit_id_is_2(qtbot) -> None:

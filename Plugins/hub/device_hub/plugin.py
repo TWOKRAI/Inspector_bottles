@@ -331,15 +331,26 @@ class DeviceHubPlugin(ProcessModulePlugin):
                         interval = getattr(drv.entry, "params", {}).get("poll_interval_s", 0.5)
                         if isinstance(interval, str):
                             interval = float(interval)
+                        tick_n = 0
                         while not stop_evt.is_set():
                             if pause_evt.is_set():
                                 time.sleep(0.1)
                                 continue
                             try:
+                                tick_n += 1
                                 snapshot = drv.tick(stop_evt)
                                 if snapshot is not None:
                                     self._publish_state(f"devices.state.{did}.status", snapshot)
                                     self._publish_state(f"devices.state.{did}.stats", drv.stats)
+                                # conn каждый тик: иначе одноразовая дельта при connect
+                                # дедуплицируется StateStore, и поздние подписчики (список,
+                                # страница добавления) видят stale «disconnected». ts меняется
+                                # → дельта проходит. quality снапшота отражает живость чтений.
+                                if getattr(drv, "is_connected", False):
+                                    conn = "error" if (snapshot or {}).get("quality") == "bad" else "connected"
+                                else:
+                                    conn = "disconnected"
+                                self._publish_state(f"devices.state.{did}.conn", {"conn": conn, "ts": tick_n})
                                 # io_peek для панели «Вход/Выход» (если драйвер
                                 # накапливает wire-обмен — robot/generic_modbus).
                                 io = getattr(drv, "last_io", None)

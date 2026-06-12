@@ -13,6 +13,7 @@ Refs: plans/device-tree-recipe.md Фаза D
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from PySide6.QtWidgets import (
@@ -26,6 +27,48 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+_TRANSLIT = {
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "e",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "h",
+    "ц": "c",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "sch",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+}
+
+
+def _slug(text: str) -> str:
+    """Имя → slug-id: транслит кириллицы, нижний регистр, ``[a-z0-9_]``."""
+    s = "".join(_TRANSLIT.get(ch, ch) for ch in text.strip().lower())
+    return re.sub(r"[^a-z0-9]+", "_", s).strip("_")
 
 
 class DeviceFormWidget(QWidget):
@@ -70,6 +113,12 @@ class DeviceFormWidget(QWidget):
         if existing:
             self._edit_name.setText(existing.get("name", ""))
         form.addRow("Название:", self._edit_name)
+
+        # Автогенерация ID из имени (slug), пока пользователь не правил ID вручную.
+        # В режиме редактирования id заблокирован — автозаполнение выключено.
+        self._id_user_edited = self._is_edit
+        self._edit_id.textEdited.connect(lambda *_: setattr(self, "_id_user_edited", True))
+        self._edit_name.textChanged.connect(self._autofill_id)
 
         form.addRow("Тип (kind):", QLabel(kind))
 
@@ -161,9 +210,16 @@ class DeviceFormWidget(QWidget):
 
     # ------------------------------------------------------------------ #
 
+    def _autofill_id(self, name: str) -> None:
+        """Имя → slug в поле ID, пока пользователь не правил ID вручную."""
+        if self._id_user_edited:
+            return
+        self._edit_id.setText(_slug(name))
+
     def set_id(self, device_id: str) -> None:
         """Установить id (автогенерация slug из имени в AddDevicePage)."""
         self._edit_id.setText(device_id)
+        self._id_user_edited = True
 
     def id_text(self) -> str:
         return self._edit_id.text().strip()
