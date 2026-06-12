@@ -34,6 +34,33 @@ def mgr(store: RegistryStore, published: list) -> DeviceManager:
     return m
 
 
+class TestInMemoryStore:
+    """store=None — реестр чисто in-memory (Фаза B device-tree-recipe).
+
+    Источник истины — рецепт; файловый стор опционален (полное удаление — Фаза E).
+    """
+
+    def test_initialize_without_store(self) -> None:
+        mgr = DeviceManager(store=None)
+        assert mgr.initialize() is True
+        assert mgr.list_devices() == []
+
+    def test_upsert_remove_without_store(self) -> None:
+        published: list = []
+        mgr = DeviceManager(store=None, publish_cb=lambda p, d: published.append((p, d)))
+        mgr.initialize()
+        mgr.upsert({"id": "r1", "name": "R", "kind": "robot"})
+        assert [e["id"] for e in mgr.list_devices()] == ["r1"]
+        assert any("r1" in p for p, _ in published)  # publish работает без стора
+        mgr.remove("r1")
+        assert mgr.list_devices() == []
+
+    def test_shutdown_without_store(self) -> None:
+        mgr = DeviceManager(store=None)
+        mgr.initialize()
+        assert mgr.shutdown() is True  # _save() — no-op, без AttributeError
+
+
 class TestCrud:
     """CRUD операции реестра."""
 

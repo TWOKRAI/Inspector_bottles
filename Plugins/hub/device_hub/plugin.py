@@ -88,6 +88,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
         "device_describe": "cmd_device_describe",
         "device_upsert": "cmd_device_upsert",
         "device_upsert_many": "cmd_device_upsert_many",
+        "device_sync_set": "cmd_device_sync_set",
         "device_remove": "cmd_device_remove",
         "device_protocols": "cmd_device_protocols",
         # Соединение (асинхронные — Б2)
@@ -494,6 +495,75 @@ class DeviceHubPlugin(ProcessModulePlugin):
             for dev_id in upserted_ids:
                 self._conn_queue.put(("connect", dev_id))
         return {"status": "ok", "results": results, "count": len(results)}
+
+    def cmd_device_sync_set(self, data: dict) -> dict:
+        """Полная синхронизация recipe-устройств реестра с переданным набором.
+
+        Идемпотентная замена набора recipe-устройств (план device-tree-recipe,
+        Фаза B): рецепт — источник истины, hub — runtime-отражение. Вызывается
+        при активации рецепта (вместо ``device_upsert_many``).
+
+        Семантика:
+          1. upsert всех из ``devices`` с ``origin`` (обычно ``recipe:<slug>``);
+          2. **remove** recipe-устройств (origin начинается с ``recipe:``), которых
+             НЕТ в новом списке — через полный путь cmd_device_remove (disconnect +
+             стоп воркера + публикация). Manual-устройства (origin != recipe:*) НЕ
+             трогаются;
+          3. auto-connect всех upserted (если ``connect`` True, по умолчанию True).
+
+        Bridge-зависимые recipe-устройства удаляются первыми (иначе manager.remove
+        бросит RegistryIntegrityError на устройстве-носителе).
+
+        Args (в data):
+            devices: list[dict] — целевой набор recipe-устройств.
+            origin:  str — источник (``recipe:<slug>``).
+            connect: bool — auto-connect upserted (по умолчанию True).
+        """
+        devices = data.get("devices", [])
+        origin = data.get("origin")
+        do_connect = bool(data.get("connect", True))
+
+        # 1. upsert целевого набора
+        new_ids: set[str] = set()
+        results = []
+        for dev_dict in devices:
+            if isinstance(dev_dict, dict) and "id" in dev_dict:
+                r = self._safe_call(self._manager.upsert, dev_dict, origin)
+                results.append(r)
+                if r.get("status") == "ok":
+                    new_ids.add(dev_dict["id"])
+
+        # 2. удалить лишние recipe-устройства (bridge-зависимые — первыми)
+        stale = [
+            e
+            for e in self._manager.list_devices()
+            if str(e.get("origin", "")).startswith("recipe:") and e.get("id") not in new_ids
+        ]
+        stale.sort(key=lambda e: 0 if e.get("transport", {}).get("type") == "bridge" else 1)
+        removed_ids: list[str] = []
+        for entry in stale:
+            dev_id = entry.get("id", "")
+            rm = self.cmd_device_remove({"device_id": dev_id})
+            if rm.get("status") == "ok":
+                removed_ids.append(dev_id)
+
+        self._publish_full_registry()
+        self._update_counters()
+
+        # 3. auto-connect upserted (async через supervisor)
+        if do_connect:
+            with self._workers_lock:
+                for dev_id in new_ids:
+                    self._desired_connected[dev_id] = True
+            for dev_id in new_ids:
+                self._conn_queue.put(("connect", dev_id))
+
+        return {
+            "status": "ok",
+            "upserted": sorted(new_ids),
+            "removed": removed_ids,
+            "count": len(results),
+        }
 
     def cmd_device_remove(self, data: dict) -> dict:
         """Удалить устройство из реестра.

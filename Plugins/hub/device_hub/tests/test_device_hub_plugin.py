@@ -331,6 +331,76 @@ class TestCrudCommands:
         assert plugin._reg.devices_total == 2
 
 
+class TestDeviceSyncSet:
+    """device_sync_set — полная синхронизация recipe-устройств (Фаза B).
+
+    Рецепт — источник истины: upsert набора + remove чужих recipe-устройств,
+    manual-устройства не трогаются.
+    """
+
+    @staticmethod
+    def _robot(dev_id: str, host: str = "1.1.1.1") -> dict:
+        return {
+            "id": dev_id,
+            "name": dev_id,
+            "kind": "robot",
+            "transport": {"type": "tcp", "host": host, "port": 502, "unit_id": 1},
+        }
+
+    def test_sync_set_upserts_new_devices(self, tmp_path: Path) -> None:
+        """sync_set создаёт устройства из набора с recipe-origin."""
+        plugin, ctx = _make_plugin(tmp_path)
+        result = plugin.cmd_device_sync_set(
+            {"devices": [self._robot("r1"), self._robot("r2")], "origin": "recipe:demo"}
+        )
+        assert result["status"] == "ok"
+        assert set(result["upserted"]) == {"r1", "r2"}
+        assert plugin._manager.get("r1").origin == "recipe:demo"
+
+    def test_sync_set_removes_stale_recipe_devices(self, tmp_path: Path) -> None:
+        """recipe-устройство из прошлого рецепта, которого нет в новом наборе, удаляется."""
+        plugin, ctx = _make_plugin(tmp_path)
+        # Прошлый рецепт оставил r_old
+        plugin.cmd_device_sync_set({"devices": [self._robot("r_old")], "origin": "recipe:old"})
+        assert "r_old" in [e["id"] for e in plugin._manager.list_devices()]
+
+        # Новый рецепт без r_old → r_old удаляется
+        result = plugin.cmd_device_sync_set({"devices": [self._robot("r_new")], "origin": "recipe:new"})
+        ids = [e["id"] for e in plugin._manager.list_devices()]
+        assert "r_new" in ids
+        assert "r_old" not in ids
+        assert "r_old" in result["removed"]
+
+    def test_sync_set_preserves_manual_devices(self, tmp_path: Path) -> None:
+        """Manual-устройства (origin != recipe:*) sync_set НЕ трогает."""
+        plugin, ctx = _make_plugin(tmp_path)
+        plugin.cmd_device_upsert({**self._robot("manual_1"), "origin": "manual"})
+        plugin.cmd_device_sync_set({"devices": [self._robot("r1")], "origin": "recipe:demo"})
+        ids = [e["id"] for e in plugin._manager.list_devices()]
+        assert "manual_1" in ids  # не удалён
+        assert "r1" in ids
+
+    def test_sync_set_removes_bridge_dependent_first(self, tmp_path: Path) -> None:
+        """Bridge-зависимое recipe-устройство удаляется раньше носителя (без integrity-сбоя)."""
+        XFM = "recipe:old"
+        plugin, ctx = _make_plugin(tmp_path)
+        # Носитель-робот + зависимый bridge-VFD, оба recipe-origin
+        plugin.cmd_device_sync_set(
+            {
+                "devices": [
+                    self._robot("rbridge"),
+                    {"id": "vfd1", "name": "VFD", "kind": "vfd", "transport": {"type": "bridge", "bridge": "rbridge"}},
+                ],
+                "origin": XFM,
+            }
+        )
+        # Новый рецепт пуст → оба recipe-устройства удаляются, без RegistryIntegrityError
+        result = plugin.cmd_device_sync_set({"devices": [], "origin": "recipe:new"})
+        assert result["status"] == "ok"
+        assert set(result["removed"]) == {"rbridge", "vfd1"}
+        assert plugin._manager.list_devices() == []
+
+
 # ------------------------------------------------------------------ #
 # Async connect/disconnect (Б2)
 # ------------------------------------------------------------------ #

@@ -31,13 +31,15 @@ class DeviceManager(BaseManager, ObservableMixin):
     """Менеджер устройств: CRUD + lifecycle + dispatch.
 
     Args:
-        store:      RegistryStore для персистентности.
+        store:      RegistryStore для персистентности, либо ``None`` — реестр чисто
+                    in-memory (источник истины — рецепт, план device-tree-recipe
+                    Фаза B; полное удаление файлового стора — Фаза E + ADR-DH-007).
         publish_cb: Callback публикации ``(path, data_dict) -> None``.
     """
 
     def __init__(
         self,
-        store: RegistryStore,
+        store: RegistryStore | None,
         publish_cb: Callable[[str, dict], None] | None = None,
     ) -> None:
         BaseManager.__init__(self, manager_name="device_manager")
@@ -67,10 +69,10 @@ class DeviceManager(BaseManager, ObservableMixin):
     # ------------------------------------------------------------------ #
 
     def initialize(self) -> bool:
-        """Загрузить реестр из store."""
-        entries = self._store.load()
-        for e in entries:
-            self._entries[e.id] = e
+        """Загрузить реестр из store (store=None — пустой in-memory реестр)."""
+        if self._store is not None:
+            for e in self._store.load():
+                self._entries[e.id] = e
         self.is_initialized = True
         return True
 
@@ -456,6 +458,11 @@ class DeviceManager(BaseManager, ObservableMixin):
         return load_protocol(path)
 
     def _save(self) -> None:
-        """Сохранить реестр в store (под lock — атомарная запись не thread-safe)."""
+        """Сохранить реестр в store (под lock — атомарная запись не thread-safe).
+
+        store=None — no-op (in-memory реестр, источник истины — рецепт).
+        """
+        if self._store is None:
+            return
         with self._registry_lock:
             self._store.save(list(self._entries.values()))

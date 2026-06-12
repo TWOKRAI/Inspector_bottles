@@ -362,8 +362,13 @@ class RecipesTab(BaseListNavTab):
 
         Вызывается из on_set_active (presenter) в Qt main-thread. Использует
         send_action_command — fire-and-forget (не блокирует UI). Команда
-        device_upsert_many обрабатывается в supervisor-воркере devices-процесса
+        device_sync_set обрабатывается в supervisor-воркере devices-процесса
         асинхронно; connect произойдёт после разбора очереди supervisor'ом.
+
+        Фаза B device-tree-recipe: рецепт — источник истины, поэтому активация
+        — полная синхронизация (device_sync_set): upsert набора рецепта +
+        remove чужих recipe-устройств от предыдущего рецепта. Manual-устройства
+        не трогаются.
 
         Returns:
             Callable[[list[dict], str], None] — upsert_devices_fn.
@@ -375,7 +380,7 @@ class RecipesTab(BaseListNavTab):
                 return
             sender.send_action_command(
                 "devices",
-                "device_upsert_many",
+                "device_sync_set",
                 {"devices": devices, "origin": f"recipe:{slug}", "connect": True},
             )
 
