@@ -340,6 +340,14 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 if snapshot is not None:
                                     self._publish_state(f"devices.state.{did}.status", snapshot)
                                     self._publish_state(f"devices.state.{did}.stats", drv.stats)
+                                # io_peek для панели «Вход/Выход» (если драйвер
+                                # накапливает wire-обмен — robot/generic_modbus).
+                                io = getattr(drv, "last_io", None)
+                                if io and (io.get("input") or io.get("output")):
+                                    self._publish_state(
+                                        f"devices.state.{did}.io_peek",
+                                        {"method": "modbus", **io},
+                                    )
                             except Exception as exc:
                                 self._publish_state(f"devices.state.{did}.last_error", str(exc))
                             time.sleep(interval)

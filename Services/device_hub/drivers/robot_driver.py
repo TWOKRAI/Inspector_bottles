@@ -78,6 +78,12 @@ class RobotDriver(BaseDeviceDriver):
         # Throttled reconnect
         self._last_reconnect: float = 0.0
 
+        # Wire-обмен для панели «Вход/Выход»: последние TX (запись) и RX (чтение).
+        # Заполняется из on_data ModbusDevice (каждый read/write); публикуется
+        # супервизором как devices.state.<id>.io_peek. Захватывает и трафик
+        # bridged-ПЧ (она пишет через транспорт робота).
+        self._last_io: dict[str, Any] = {"input": None, "output": None}
+
         # Интервал телеметрии (из params или дефолт)
         self._telemetry_interval_s: float = float(entry.params.get("telemetry_interval_s", 0.5))
         self._feed_poll_s: float = float(entry.params.get("feed_poll_s", 0.05))
@@ -558,6 +564,30 @@ class RobotDriver(BaseDeviceDriver):
     # Служебное
     # ------------------------------------------------------------------ #
 
+    @property
+    def last_io(self) -> dict:
+        """Последний wire-обмен {input, output} для панели «Вход/Выход»."""
+        return self._last_io
+
+    def _on_wire(self, payload: dict) -> None:
+        """on_data ModbusDevice: запомнить последний TX (запись) и RX (чтение).
+
+        Дёшево (без публикации) — публикует супервизор раз в тик. payload:
+        чтение ``{op, address, values}``; запись ``{op, address, value}``;
+        транзакция ``{op, count}``.
+        """
+        op = str(payload.get("op", ""))
+        addr = payload.get("address")
+        reg = f"0x{addr:04X}" if isinstance(addr, int) else None
+        if op.startswith("read"):
+            self._last_io["input"] = {"op": op, "reg": reg, "values": payload.get("values")}
+        else:
+            self._last_io["output"] = {
+                "op": op,
+                "reg": reg,
+                "value": payload.get("value", payload.get("count")),
+            }
+
     def _build_client(self) -> Any:
         """Создать RobotClient с правильным конфигом."""
         from Services.robot_comm import RobotClient, RobotConfig
@@ -587,7 +617,7 @@ class RobotDriver(BaseDeviceDriver):
             timeout_sec=float(t.get("timeout_sec", 1.0)),
             word_order=str(p.get("word_order", "little")),
         )
-        return RobotClient(config, clock=self._clock, sleep=self._sleep)
+        return RobotClient(config, on_data=self._on_wire, clock=self._clock, sleep=self._sleep)
 
     def _wait_condition(self, condition: Any, timeout: float, stop_event: Any) -> bool:
         """Поллить условие до timeout (прерываемо stop_event)."""

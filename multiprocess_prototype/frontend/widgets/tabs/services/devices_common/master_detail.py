@@ -17,6 +17,7 @@ Refs: plans/device-tree-recipe.md Фаза C
 
 from __future__ import annotations
 
+import json
 from typing import Any, Callable
 
 from PySide6.QtCore import Qt
@@ -39,6 +40,21 @@ _CONN_TEXT = {
     "disconnected": "○ отключено",
     "error": "✕ ошибка",
 }
+
+
+def _render_device_io(value: dict) -> tuple[str, str, str]:
+    """Рендер io_peek устройства: {input:{op,reg,values}, output:{op,reg,value}}.
+
+    Вход (RX) — последнее чтение регистров; выход (TX) — последняя запись.
+    """
+    in_data = value.get("input") or {}
+    out_data = value.get("output") or {}
+    in_reg = in_data.get("reg", "—") if in_data else "—"
+    out_reg = out_data.get("reg", "—") if out_data else "—"
+    status = f"вход (RX): {in_reg} · выход (TX): {out_reg}"
+    in_text = json.dumps(in_data, indent=2, ensure_ascii=False) if in_data else "— (нет чтений)"
+    out_text = json.dumps(out_data, indent=2, ensure_ascii=False) if out_data else "— (нет записей)"
+    return status, in_text, out_text
 
 
 class DeviceDetailPage(QWidget):
@@ -92,6 +108,24 @@ class DeviceDetailPage(QWidget):
         root.addLayout(header)
 
         root.addWidget(inner_widget, 1)
+
+        # Панель «Вход/Выход» (Modbus TX/RX) внизу — переиспользует IoDebugSection
+        # плагинов, подписка на devices.state.<id>.io_peek (публикует device_hub).
+        try:
+            from multiprocess_prototype.frontend.widgets.tabs.pipeline.inspector.io_debug_section import (
+                IoDebugSection,
+            )
+
+            self._io_section = IoDebugSection(
+                bindings,
+                peek_pattern="devices.state.*.io_peek",
+                render_fn=_render_device_io,
+                title="Modbus I/O (вход/выход)",
+            )
+            self._io_section.set_active_path(f"devices.state.{device_id}.io_peek")
+            root.addWidget(self._io_section)
+        except Exception:
+            self._io_section = None  # pipeline-пакет недоступен — панель опциональна
 
         # Проводка кнопок
         self._btn_connect.clicked.connect(lambda: self._presenter.device_connect(self._device_id))

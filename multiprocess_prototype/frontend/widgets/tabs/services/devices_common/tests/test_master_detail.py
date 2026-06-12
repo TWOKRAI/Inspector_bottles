@@ -14,6 +14,7 @@ from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.device
 )
 from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.master_detail import (
     DeviceMasterDetail,
+    _render_device_io,
 )
 from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.recipe_devices import (
     RecipeDevicesStore,
@@ -145,3 +146,21 @@ class TestDeviceMasterDetail:
         md = DeviceMasterDetail(kind="robot", recipe_store=_store(active=None), device_page_factory=lambda d: QWidget())
         qtbot.addWidget(md)
         assert "Активируйте рецепт" in md._placeholder.text()
+
+
+class TestDeviceIoRender:
+    def test_render_shows_tx_rx_registers(self):
+        value = {
+            "method": "modbus",
+            "input": {"op": "read_holding", "reg": "0x1130", "values": [3000, 63436]},
+            "output": {"op": "write_register", "reg": "0x1106", "value": 2},
+        }
+        status, in_text, out_text = _render_device_io(value)
+        assert "0x1130" in status and "0x1106" in status
+        assert "3000" in in_text and "63436" in in_text
+        assert "0x1106" in out_text
+
+    def test_render_empty_placeholders(self):
+        status, in_text, out_text = _render_device_io({"input": None, "output": None})
+        assert "нет чтений" in in_text
+        assert "нет записей" in out_text

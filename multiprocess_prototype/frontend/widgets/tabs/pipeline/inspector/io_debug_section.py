@@ -39,6 +39,26 @@ _IO_TEXT_STYLE = (
 _IO_PEEK_PATTERN = "processes.*.plugins.*.io_peek"
 
 
+def _default_render(value: dict) -> tuple[str, str, str]:
+    """Рендер io_peek плагина: {method, input:{count,items}, output:{count}}."""
+    method = value.get("method", "")
+    method_ru = {"process": "обработка", "produce": "генерация"}.get(method, method or "—")
+    in_data = value.get("input", {}) or {}
+    out_data = value.get("output", {}) or {}
+    out_count = out_data.get("count", 0)
+    is_source = in_data.get("items") is None
+    if is_source:
+        status = f"{method_ru} · выход: {out_count}"
+    else:
+        status = f"{method_ru} · вход: {in_data.get('count', 0)} · выход: {out_count}"
+    try:
+        in_text = "— (источник: нет входа)" if is_source else json.dumps(in_data, indent=2, ensure_ascii=False)
+        out_text = json.dumps(out_data, indent=2, ensure_ascii=False)
+    except (TypeError, ValueError):
+        in_text, out_text = str(in_data), str(out_data)
+    return status, in_text, out_text
+
+
 class IoDebugSection(QWidget):
     """Сворачиваемая секция I/O-отладки одного плагина.
 
@@ -48,10 +68,23 @@ class IoDebugSection(QWidget):
         section.clear_target()                       # при снятии выбора
     """
 
-    def __init__(self, bindings: Any = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        bindings: Any = None,
+        parent: QWidget | None = None,
+        *,
+        peek_pattern: str = _IO_PEEK_PATTERN,
+        render_fn: Any = None,
+        title: str = "I/O (debug)",
+    ) -> None:
         super().__init__(parent)
         self._bindings: Any = None
         self._subscribed: bool = False
+        # Паттерн fan-out + рендер настраиваются: плагин (по умолчанию) или
+        # устройство (devices.state.*.io_peek + raw TX/RX рендер).
+        self._peek_pattern: str = peek_pattern
+        self._render_fn = render_fn or _default_render
+        self._title = title
         # Активный путь io_peek (точное совпадение фильтрует чужие дельты). Пусто → секция спит.
         self._active_path: str = ""
         self._frozen: bool = False
@@ -68,9 +101,9 @@ class IoDebugSection(QWidget):
         self._bindings = bindings
         if bindings is None or self._subscribed:
             return
-        # Узкая подписка: один fan-out на io_peek всех плагинов (callback фильтрует).
+        # Узкая подписка: один fan-out на io_peek (callback фильтрует по пути).
         try:
-            bindings.bind_fanout(_IO_PEEK_PATTERN, self._on_io_peek, owner=self)
+            bindings.bind_fanout(self._peek_pattern, self._on_io_peek, owner=self)
             self._subscribed = True
         except Exception:
             pass  # bindings без bind_fanout (legacy) → секция статична, не падаем
@@ -89,7 +122,7 @@ class IoDebugSection(QWidget):
         header_layout = QHBoxLayout(header_row)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(6)
-        self._toggle_btn = QPushButton("▸ I/O (debug)")
+        self._toggle_btn = QPushButton(f"▸ {self._title}")
         self._toggle_btn.setObjectName("IoDebugToggle")
         self._toggle_btn.setCheckable(True)
         self._toggle_btn.setToolTip("Показать сводку входных/выходных данных плагина")
@@ -167,7 +200,11 @@ class IoDebugSection(QWidget):
 
     def set_target(self, process_name: str, plugin_name: str) -> None:
         """Привязать секцию к io_peek конкретного плагина (вызывается при выборе ноды)."""
-        self._active_path = f"processes.{process_name}.plugins.{plugin_name}.io_peek"
+        self.set_active_path(f"processes.{process_name}.plugins.{plugin_name}.io_peek")
+
+    def set_active_path(self, path: str) -> None:
+        """Привязать секцию к произвольному пути io_peek (напр. devices.state.<id>.io_peek)."""
+        self._active_path = path
         # Сброс на старте: разморозить + почистить (новые данные придут со следующей дельтой).
         self._frozen = False
         self._freeze_btn.setChecked(False)
@@ -218,29 +255,18 @@ class IoDebugSection(QWidget):
             self._render(value)
 
     def _render(self, value: Any) -> None:
-        """Отрисовать снимок io_peek (dict) в читаемый текст."""
+        """Отрисовать снимок io_peek (dict) через настроенную render-стратегию.
+
+        Сырой monotonic-ts не показываем — «живость» видна по меняющемуся
+        содержимому окон.
+        """
         if not isinstance(value, dict):
             return
-        # Читаемый статус: тип вызова (обработка/генерация) + счётчики элементов
-        # вход/выход. Сырой monotonic-ts не показываем — он ничего не говорит владельцу;
-        # «живость» видна по меняющемуся содержимому.
-        method = value.get("method", "")
-        method_ru = {"process": "обработка", "produce": "генерация"}.get(method, method or "—")
-        in_data = value.get("input", {}) or {}
-        out_data = value.get("output", {}) or {}
-        out_count = out_data.get("count", 0)
-        # У источника (produce) входа нет: items=None. Показываем понятный плейсхолдер
-        # вместо сырого {"count":0,"items":null} и убираем «вход: 0» из статуса.
-        is_source = in_data.get("items") is None
-        if is_source:
-            self._status.setText(f"{method_ru} · выход: {out_count}")
-        else:
-            self._status.setText(f"{method_ru} · вход: {in_data.get('count', 0)} · выход: {out_count}")
         try:
-            in_text = "— (источник: нет входа)" if is_source else json.dumps(in_data, indent=2, ensure_ascii=False)
-            out_text = json.dumps(out_data, indent=2, ensure_ascii=False)
-        except (TypeError, ValueError):
-            in_text, out_text = str(in_data), str(out_data)
+            status, in_text, out_text = self._render_fn(value)
+        except Exception:
+            return
+        self._status.setText(status)
         self._input_text.setText(in_text)
         self._output_text.setText(out_text)
         self._equalize_heights()
@@ -252,7 +278,7 @@ class IoDebugSection(QWidget):
     def _on_toggle(self, checked: bool) -> None:
         self._body_visible = checked
         self._body.setVisible(checked)
-        self._toggle_btn.setText("▾ I/O (debug)" if checked else "▸ I/O (debug)")
+        self._toggle_btn.setText(f"▾ {self._title}" if checked else f"▸ {self._title}")
 
     def _on_freeze(self, checked: bool) -> None:
         self._frozen = checked

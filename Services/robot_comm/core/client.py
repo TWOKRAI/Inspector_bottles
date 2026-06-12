@@ -75,13 +75,16 @@ class RobotClient:
         *,
         transport: DeviceTransport | None = None,
         on_progress: ProgressCallback | None = None,
+        on_data: Callable[[dict], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._cfg = config or RobotConfig()
         self._map = build_register_map(self._cfg.word_order)
+        # on_data — хук wire-обмена (TX/RX) от ModbusDevice; используется драйвером
+        # для публикации io_peek (панель «Вход/Выход» на странице устройства).
         self._device: DeviceTransport = (
-            transport if transport is not None else ModbusDevice(self._cfg.to_modbus_config())
+            transport if transport is not None else ModbusDevice(self._cfg.to_modbus_config(), on_data=on_data)
         )
         self._on_progress = on_progress
         self._clock = clock
