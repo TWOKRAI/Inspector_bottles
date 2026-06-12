@@ -188,17 +188,23 @@ class VfdDriver(BaseDeviceDriver):
             return {"status": "error", "message": str(exc)}
 
     def _op_run(self, args: dict) -> dict:
-        freq = args.get("freq")
-        reverse = bool(args.get("reverse", False))
+        # Контракт плагина (cmd_vfd_run) и GUI-presenter шлют freq_hz/direction;
+        # старые тесты драйвера — freq/reverse. Принимаем оба (freq_hz приоритет).
+        freq = args.get("freq_hz", args.get("freq"))
+        reverse = bool(args.get("reverse", args.get("direction", 0)))
         self._vfd_client.run(
             float(freq) if freq is not None else None,
             reverse=reverse,
         )
         self._record_ok()
-        return {"status": "ok", "freq": freq, "reverse": reverse}
+        return {"status": "ok", "freq_hz": freq, "reverse": reverse}
 
     def _op_set_freq(self, args: dict) -> dict:
-        hz = float(args["hz"])
+        # GUI-presenter шлёт freq_hz (контракт cmd_vfd_set_freq); старые тесты — hz.
+        raw = args.get("freq_hz", args.get("hz"))
+        if raw is None:
+            return {"status": "error", "message": "freq_hz обязателен"}
+        hz = float(raw)
         self._vfd_client.set_freq(hz)
         self._record_ok()
         return {"status": "ok", "hz": hz}

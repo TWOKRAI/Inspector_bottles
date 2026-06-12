@@ -112,6 +112,28 @@ class TestVfdDriverCommands:
         result = vfd_driver.call("set_freq", {"hz": 30.0})
         assert result["status"] == "ok"
 
+    def test_set_freq_gui_key(self, vfd_driver, robot_driver) -> None:
+        """Регрессия: GUI-presenter шлёт freq_hz (не hz) — частота обязана дойти.
+
+        До фикса _op_set_freq читал args['hz'] -> KeyError -> частота не менялась
+        («старт работает, частоту не меняет»).
+        """
+        result = vfd_driver.call("set_freq", {"freq_hz": 33.0})
+        assert result["status"] == "ok"
+        # Мейлбокс ПЧ робота: 0x1202 = частота ×100
+        assert robot_driver._client.read_registers(0x1202, 1)[0] == 3300
+
+    def test_run_gui_keys(self, vfd_driver, robot_driver) -> None:
+        """Регрессия: GUI шлёт freq_hz/direction (не freq/reverse).
+
+        До фикса run читал args['freq'] -> None -> крутил на дефолтной частоте,
+        direction игнорировался.
+        """
+        result = vfd_driver.call("run", {"freq_hz": 25.0, "direction": 1})
+        assert result["status"] == "ok"
+        assert robot_driver._client.read_registers(0x1202, 1)[0] == 2500  # частота
+        assert robot_driver._client.read_registers(0x1201, 1)[0] == 1  # реверс
+
     def test_reset_fault(self, vfd_driver) -> None:
         result = vfd_driver.call("reset_fault", {})
         assert result["status"] == "ok"
