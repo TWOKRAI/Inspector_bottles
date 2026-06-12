@@ -13,10 +13,16 @@ UX-ограничения:
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .presenter import RobotPresenter
 from .widget import RobotControlWidget
+
+# н5 ревью Fable (ADR-PH-001): порог устаревания данных hub.
+# Если time.time() - ts > _STALE_THRESHOLD_S, данные считаются stale
+# независимо от quality-поля (hub мог упасть и quality «замёрз»).
+_STALE_THRESHOLD_S = 3.0
 
 
 class RobotWidgetController:
@@ -100,6 +106,17 @@ class RobotWidgetController:
 
     def _apply_telemetry(self, data: dict) -> None:
         """Обновить виджет по snapshot телеметрии робота."""
+        # н5/ADR-PH-001: проверка возраста ts — hub мог упасть
+        ts = data.get("ts")
+        if ts is not None:
+            age = time.time() - float(ts)
+            if age > _STALE_THRESHOLD_S:
+                self._widget.set_status(
+                    f"Нет связи с hub (данные устарели на {age:.1f} с). Процесс devices может быть недоступен."
+                )
+                self._widget.set_mode_switch_enabled(False)
+                return
+
         telemetry = data.get("telemetry")
         if isinstance(telemetry, dict):
             self._widget.set_status("Связь с роботом активна.")

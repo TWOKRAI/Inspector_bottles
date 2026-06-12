@@ -9,10 +9,16 @@ comm_errors — с дельтой за период (перенесено из r
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .presenter import VfdPresenter
 from .widget import VfdControlWidget
+
+# н5 ревью Fable (ADR-PH-001): порог устаревания данных hub.
+# Если time.time() - ts > _STALE_THRESHOLD_S, данные считаются stale
+# независимо от quality-поля (hub мог упасть и quality «замёрз»).
+_STALE_THRESHOLD_S = 3.0
 
 
 class VfdWidgetController:
@@ -130,9 +136,20 @@ class VfdWidgetController:
             f"hb={hb}  rsErr={comm}{delta}{fault_text}"
         )
 
-        # Quality
+        # Quality + проверка возраста ts (н5/ADR-PH-001)
         quality = vfd.get("quality", "")
-        if quality == "good":
+        ts = vfd.get("ts")
+        ts_stale = False
+        if ts is not None:
+            age = time.time() - float(ts)
+            if age > _STALE_THRESHOLD_S:
+                ts_stale = True
+
+        if ts_stale:
+            self._widget.set_quality(
+                f"Нет связи с hub (данные устарели на {age:.1f} с). Процесс devices может быть недоступен."
+            )
+        elif quality == "good":
             self._widget.set_quality("Данные актуальны.")
         elif quality == "stale":
             reason = vfd.get("reason", "")
