@@ -105,3 +105,47 @@ class TestDeviceHubClient:
         # Проверить что timeout передан
         call_kwargs = ctx.router_manager.request.call_args
         assert call_kwargs.kwargs.get("timeout") == 3.0 or call_kwargs[1].get("timeout") == 3.0
+
+
+# ------------------------------------------------------------------ #
+# send_fire_and_forget (Б-3 ревью Fable)
+# ------------------------------------------------------------------ #
+
+
+class TestSendFireAndForget:
+    """Тесты fire-and-forget отправки (Б-3: безопасно из приёмного потока)."""
+
+    def test_send_fire_and_forget_success(self) -> None:
+        """send_fire_and_forget использует send_async (non-blocking)."""
+        ctx = MagicMock()
+        ctx.process_name = "camera_source"
+        ctx.router_manager.send_async = MagicMock()
+        client = DeviceHubClient(ctx)
+        ok = client.send_fire_and_forget("hik_release", {"device_id": "cam_1"})
+        assert ok is True
+        ctx.router_manager.send_async.assert_called_once()
+
+    def test_send_fire_and_forget_no_router(self) -> None:
+        """Нет router_manager → False, не crash."""
+        ctx = MagicMock()
+        ctx.router_manager = None
+        client = DeviceHubClient(ctx)
+        ok = client.send_fire_and_forget("hik_release")
+        assert ok is False
+
+    def test_send_fire_and_forget_no_send_async(self) -> None:
+        """Router без send_async → False."""
+        ctx = MagicMock(spec=[])
+        ctx.router_manager = MagicMock(spec=[])  # нет send_async
+        client = DeviceHubClient(ctx)
+        ok = client.send_fire_and_forget("hik_release")
+        assert ok is False
+
+    def test_send_fire_and_forget_does_not_call_request(self) -> None:
+        """fire-and-forget НЕ вызывает blocking request."""
+        ctx = MagicMock()
+        ctx.process_name = "camera_source"
+        ctx.router_manager.send_async = MagicMock()
+        client = DeviceHubClient(ctx)
+        client.send_fire_and_forget("hik_release")
+        ctx.router_manager.request.assert_not_called()

@@ -113,3 +113,43 @@ class DeviceHubClient:
             return {"status": "error", "message": f"IPC ошибка: {exc}"}
 
         return _normalize_response(raw)
+
+    def send_fire_and_forget(
+        self,
+        command: str,
+        args: dict[str, Any] | None = None,
+    ) -> bool:
+        """Отправить команду в devices БЕЗ ожидания ответа (fire-and-forget).
+
+        Б-3 ревью Fable: безопасно вызывать из приёмного потока
+        (message_processor), т.к. НЕ блокирует — использует
+        router_manager.send_async (non-blocking enqueue в AsyncSender).
+
+        Returns:
+            True если сообщение поставлено в очередь, False при ошибке.
+        """
+        router = getattr(self._ctx, "router_manager", None)
+        if router is None:
+            return False
+
+        send_async = getattr(router, "send_async", None)
+        if send_async is None:
+            return False
+
+        from multiprocess_framework.modules.message_module.builders.command_envelopes import (
+            build_command_message,
+        )
+
+        sender = getattr(self._ctx, "process_name", "unknown")
+        msg = build_command_message(
+            target=self._target,
+            command=command,
+            args=args or {},
+            sender=sender,
+        )
+
+        try:
+            send_async(msg)
+            return True
+        except Exception:
+            return False

@@ -173,17 +173,21 @@ class DeviceHubPlugin(ProcessModulePlugin):
         """READY -> RUNNING: upsert recipe_devices, auto_connect, supervisor-worker."""
         # Upsert устройств из конфига рецепта (опционально)
         recipe_devices = ctx.config.get("recipe_devices", [])
+        recipe_ids: set[str] = set()
         for dev_dict in recipe_devices:
             if isinstance(dev_dict, dict) and "id" in dev_dict:
                 self._manager.upsert(dev_dict, origin="recipe")
+                recipe_ids.add(dev_dict["id"])
 
         # Обновить счётчики после recipe upsert
         self._publish_full_registry()
         self._update_counters()
 
-        # Auto-connect устройств с auto_connect=True
+        # Auto-connect: устройства с auto_connect=True ИЛИ из рецепта (Р11/н1:
+        # запись в devices: подразумевает auto_connect — иначе pipeline молча
+        # дропает job'ы до ручного «Подключить»).
         for entry in self._manager._entries.values():
-            if entry.auto_connect and entry.enabled:
+            if entry.enabled and (entry.auto_connect or entry.id in recipe_ids):
                 self._conn_queue.put(("connect", entry.id))
 
         # Supervisor-worker (LOOP)
@@ -198,14 +202,14 @@ class DeviceHubPlugin(ProcessModulePlugin):
 
     def shutdown(self, ctx: PluginContext) -> None:
         """* -> STOPPED: отключить всех, сохранить реестр."""
-        # Остановить per-device воркеры (worker_manager.stop_worker — если есть)
+        # Остановить и удалить per-device воркеры (remove_worker освобождает имена)
         with self._workers_lock:
             for dev_id, wname in list(self._device_workers.items()):
                 try:
                     if ctx.worker_manager is not None:
-                        stop_fn = getattr(ctx.worker_manager, "stop_worker", None)
-                        if stop_fn:
-                            stop_fn(wname)
+                        remove_fn = getattr(ctx.worker_manager, "remove_worker", None)
+                        if remove_fn:
+                            remove_fn(wname)
                 except Exception:
                     pass
             self._device_workers.clear()
@@ -260,10 +264,14 @@ class DeviceHubPlugin(ProcessModulePlugin):
             self._update_counters()
 
     def _ensure_device_workers(self) -> None:
-        """Для connected-драйверов без воркера — создать per-device воркер."""
+        """Для ВСЕХ драйверов без воркера — создать per-device воркер.
+
+        Б-2 ревью Fable: воркер создаётся для ЛЮБОГО драйвера (не только
+        connected). tick() внутри драйвера сам выполняет throttled reconnect
+        при is_connected=False. Без воркера reconnect не запустится —
+        устройство, чей первый connect упал, навсегда останется мёртвым.
+        """
         for dev_id, driver in list(self._manager._drivers.items()):
-            if not driver.is_connected:
-                continue
             with self._workers_lock:
                 if dev_id in self._device_workers:
                     continue
@@ -306,14 +314,20 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     self._ctx.log_error(f"DeviceHubPlugin: не удалось создать воркер {wname}: {exc}")
 
     def _stop_device_worker(self, dev_id: str) -> None:
-        """Остановить per-device воркер."""
+        """Остановить и ПОЛНОСТЬЮ удалить per-device воркер из WorkerManager.
+
+        Б-1 ревью Fable: stop_worker оставляет имя в реестре WorkerManager,
+        поэтому повторный create_worker вернёт False. remove_worker
+        останавливает поток И удаляет запись — имя освобождается для
+        повторного connect.
+        """
         with self._workers_lock:
             wname = self._device_workers.pop(dev_id, None)
         if wname and self._ctx and self._ctx.worker_manager:
-            stop_fn = getattr(self._ctx.worker_manager, "stop_worker", None)
-            if stop_fn:
+            remove_fn = getattr(self._ctx.worker_manager, "remove_worker", None)
+            if remove_fn:
                 try:
-                    stop_fn(wname)
+                    remove_fn(wname)
                 except Exception:
                     pass
 
@@ -422,9 +436,20 @@ class DeviceHubPlugin(ProcessModulePlugin):
         return {"status": "ok", "results": results, "count": len(results)}
 
     def cmd_device_remove(self, data: dict) -> dict:
-        """Удалить устройство из реестра."""
+        """Удалить устройство из реестра.
+
+        н2 ревью Fable: останавливаем per-device воркер ПЕРЕД удалением
+        записи, иначе tick_loop замыкание вечно тикает удалённый драйвер,
+        а повторное добавление того же id не создаст воркер (имя занято).
+        """
         dev_id = data.get("device_id", "")
+        # Сначала остановить воркер (если есть) — до remove, чтобы tick
+        # не мешал disconnect'у внутри manager.remove
+        self._stop_device_worker(dev_id)
         result = self._safe_call(self._manager.remove, dev_id)
+        # Очистить state удалённого устройства
+        if result.get("status") == "ok":
+            self._publish_state(f"devices.state.{dev_id}", {})
         self._update_counters()
         return result
 

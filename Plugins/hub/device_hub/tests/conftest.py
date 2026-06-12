@@ -25,13 +25,23 @@ class FakeWorkerManager:
     def __init__(self) -> None:
         self.workers: dict[str, Any] = {}
 
-    def create_worker(self, name: str, fn: Any, cfg: Any = None, auto_start: bool = False) -> None:
-        """Запомнить воркер; НЕ стартуем (тесты вызывают fn руками)."""
-        self.workers[name] = {"fn": fn, "cfg": cfg, "auto_start": auto_start}
+    def create_worker(self, name: str, fn: Any, cfg: Any = None, auto_start: bool = False) -> bool:
+        """Запомнить воркер; НЕ стартуем (тесты вызывают fn руками).
 
-    def stop_worker(self, name: str) -> None:
-        """Удалить воркер из реестра."""
-        self.workers.pop(name, None)
+        Возвращает False если имя занято (как реальный WorkerManager).
+        """
+        if name in self.workers:
+            return False
+        self.workers[name] = {"fn": fn, "cfg": cfg, "auto_start": auto_start}
+        return True
+
+    def stop_worker(self, name: str) -> bool:
+        """Остановить воркер (оставить в реестре — как реальный stop_worker)."""
+        return name in self.workers
+
+    def remove_worker(self, name: str) -> bool:
+        """Остановить и УДАЛИТЬ воркер из реестра (освобождает имя)."""
+        return self.workers.pop(name, None) is not None
 
 
 def make_ctx(

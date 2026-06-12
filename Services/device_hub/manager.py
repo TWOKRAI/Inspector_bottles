@@ -12,6 +12,7 @@ publish_cb — инъекция конструктора: ``(path, dict) -> None
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -49,6 +50,11 @@ class DeviceManager(BaseManager, ObservableMixin):
 
         # Живые драйверы: id -> BaseDeviceDriver
         self._drivers: dict[str, Any] = {}
+
+        # RLock на _entries/_drivers: мутируются из командного потока
+        # (upsert/remove) и supervisor (connect→_get_or_create_driver).
+        # Короткие критические секции — НЕ держать на время connect-IO!
+        self._registry_lock = threading.RLock()
 
         # Фабрики драйверов: kind -> callable(entry, protocol) -> driver
         self._factories: dict[str, Callable] = {}
@@ -123,11 +129,22 @@ class DeviceManager(BaseManager, ObservableMixin):
             raise DeviceNotFoundError(f"Устройство {dev_id!r} не найдено")
         return entry
 
-    def upsert(self, entry_dict: dict, origin: str | None = None) -> DeviceEntry:
+    def upsert(
+        self,
+        entry_dict: dict,
+        origin: str | None = None,
+    ) -> DeviceEntry:
         """Создать или обновить устройство (merge-семантика).
 
-        При обновлении: ручные name/enabled НЕ затираются, если в entry_dict
-        не заданы (merge). origin проставляется если передан.
+        При обновлении: ручные name/enabled НЕ затираются рецептом, если
+        рецепт их не задаёт ЯВНО (ключ отсутствует в entry_dict).
+        origin проставляется если передан.
+
+        н4 ревью Fable: исправлена мёртвая ветка — старая проверка
+        ``key in ("name","enabled") and key not in entry_dict`` невыполнима
+        (итерация по entry_dict.items() гарантирует key in entry_dict).
+        Теперь: при recipe-origin храним множество _явно_ переданных ключей
+        и пропускаем name/enabled, которых НЕТ в исходном dict.
 
         Args:
             entry_dict: Dict с полями DeviceEntry (обязательно id, kind).
@@ -140,12 +157,20 @@ class DeviceManager(BaseManager, ObservableMixin):
         existing = self._entries.get(dev_id)
 
         if existing is not None:
-            # Merge: новые данные поверх старых, но name/enabled только если заданы
+            # Merge: новые данные поверх старых, но name/enabled только
+            # если ЯВНО заданы в entry_dict (ключ присутствует).
+            # Множество ключей entry_dict — источник истины «явно задано».
+            explicit_keys = set(entry_dict.keys())
             merged = existing.to_dict()
             for key, value in entry_dict.items():
-                if key in ("name", "enabled") and key not in entry_dict:
-                    continue
+                if key in ("name", "enabled") and key not in explicit_keys:
+                    # Невозможная ветка (safety), но семантика ясна
+                    continue  # pragma: no cover
                 merged[key] = value
+            # Защита: name/enabled НЕ затираются, если рецепт их не указал
+            for protected_key in ("name", "enabled"):
+                if protected_key not in explicit_keys:
+                    merged[protected_key] = getattr(existing, protected_key)
             if origin is not None:
                 merged["origin"] = origin
             entry = DeviceEntry.from_dict(merged)
@@ -154,7 +179,8 @@ class DeviceManager(BaseManager, ObservableMixin):
                 entry_dict = {**entry_dict, "origin": origin}
             entry = DeviceEntry.from_dict(entry_dict)
 
-        self._entries[entry.id] = entry
+        with self._registry_lock:
+            self._entries[entry.id] = entry
         self._save()
         self._publish(f"devices.registry.{entry.id}", entry.to_dict())
         return entry
@@ -169,29 +195,32 @@ class DeviceManager(BaseManager, ObservableMixin):
             DeviceNotFoundError: Устройство не найдено.
             RegistryIntegrityError: Есть зависимые bridge-устройства.
         """
-        if dev_id not in self._entries:
-            raise DeviceNotFoundError(f"Устройство {dev_id!r} не найдено")
+        with self._registry_lock:
+            if dev_id not in self._entries:
+                raise DeviceNotFoundError(f"Устройство {dev_id!r} не найдено")
 
-        # Проверка: есть ли bridge-зависимые
-        dependents = [
-            e.id
-            for e in self._entries.values()
-            if e.transport.get("type") == "bridge" and e.transport.get("bridge") == dev_id
-        ]
-        if dependents:
-            raise RegistryIntegrityError(
-                f"Нельзя удалить устройство {dev_id!r}: от него зависят "
-                f"bridge-устройства: {dependents}. Удалите зависимые сначала."
-            )
+            # Проверка: есть ли bridge-зависимые
+            dependents = [
+                e.id
+                for e in self._entries.values()
+                if e.transport.get("type") == "bridge" and e.transport.get("bridge") == dev_id
+            ]
+            if dependents:
+                raise RegistryIntegrityError(
+                    f"Нельзя удалить устройство {dev_id!r}: от него зависят "
+                    f"bridge-устройства: {dependents}. Удалите зависимые сначала."
+                )
 
-        # Отключить драйвер если есть
+        # Отключить драйвер если есть (ВНЕ lock — IO)
         if dev_id in self._drivers:
             try:
                 self.disconnect(dev_id)
             except Exception:
                 pass
 
-        del self._entries[dev_id]
+        with self._registry_lock:
+            self._entries.pop(dev_id, None)
+            self._drivers.pop(dev_id, None)
         self._save()
         self._publish(f"devices.registry.{dev_id}", {})
 
@@ -390,10 +419,11 @@ class DeviceManager(BaseManager, ObservableMixin):
         return driver
 
     def _get_or_create_driver(self, entry: DeviceEntry) -> Any:
-        """Получить или лениво создать драйвер."""
-        driver = self._drivers.get(entry.id)
-        if driver is not None:
-            return driver
+        """Получить или лениво создать драйвер (потокобезопасно)."""
+        with self._registry_lock:
+            driver = self._drivers.get(entry.id)
+            if driver is not None:
+                return driver
 
         factory = self._factories.get(entry.kind)
         if factory is None:
@@ -401,13 +431,18 @@ class DeviceManager(BaseManager, ObservableMixin):
                 f"Нет фабрики драйвера для kind={entry.kind!r}. Зарегистрируйте через register_driver_factory()."
             )
 
-        # Загрузить протокол если указан
+        # Загрузить протокол если указан (ВНЕ lock — может быть IO)
         protocol = None
         if entry.protocol:
             protocol = self._load_protocol(entry.protocol)
 
         driver = factory(entry, protocol)
-        self._drivers[entry.id] = driver
+        with self._registry_lock:
+            # Double-check: другой поток мог создать
+            existing = self._drivers.get(entry.id)
+            if existing is not None:
+                return existing
+            self._drivers[entry.id] = driver
         return driver
 
     def _load_protocol(self, name: str) -> Any:
@@ -421,5 +456,6 @@ class DeviceManager(BaseManager, ObservableMixin):
         return load_protocol(path)
 
     def _save(self) -> None:
-        """Сохранить реестр в store."""
-        self._store.save(list(self._entries.values()))
+        """Сохранить реестр в store (под lock — атомарная запись не thread-safe)."""
+        with self._registry_lock:
+            self._store.save(list(self._entries.values()))

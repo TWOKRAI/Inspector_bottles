@@ -112,13 +112,19 @@ class RegistryStore:
             prefix=".devices_",
             suffix=".yaml.tmp",
         )
+        closed = False
         try:
             os.write(fd, text.encode("utf-8"))
             os.close(fd)
+            closed = True
             os.replace(tmp_path, str(self._path))
         except BaseException:
-            # Очистка tmp при ошибке
-            os.close(fd) if not os.get_inheritable(fd) else None  # noqa: SIM108 — fd мог быть закрыт
+            # Очистка tmp при ошибке; fd мог быть уже закрыт
+            if not closed:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
             try:
                 os.unlink(tmp_path)
             except OSError:
