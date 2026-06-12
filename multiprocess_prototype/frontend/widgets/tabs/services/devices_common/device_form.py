@@ -103,7 +103,10 @@ class DeviceFormWidget(QWidget):
         self._tcp_port.setValue(502)
         self._tcp_unit = QSpinBox()
         self._tcp_unit.setRange(0, 255)
-        self._tcp_unit.setValue(1)
+        # unit_id по умолчанию зависит от вида: робот Delta SCARA отвечает на
+        # slave=2 (подтверждено рабочим pc_full.py); generic — 1. Неверный unit
+        # = TCP открыт, но все чтения уходят на чужой slave → conn=error.
+        self._tcp_unit.setValue(2 if kind == "robot" else 1)
         tcp_form.addRow("Host:", self._tcp_host)
         tcp_form.addRow("Port:", self._tcp_port)
         tcp_form.addRow("Unit ID:", self._tcp_unit)
@@ -138,6 +141,10 @@ class DeviceFormWidget(QWidget):
         self._stack.addWidget(rtu_page)
 
         self._combo_transport.currentIndexChanged.connect(self._stack.setCurrentIndex)
+
+        # ПЧ по умолчанию — bridge (общается через робота-носителя по RS-485)
+        if kind == "vfd" and not self._is_edit:
+            self._combo_transport.setCurrentText("bridge")
 
         if existing:
             self._load_existing(existing)

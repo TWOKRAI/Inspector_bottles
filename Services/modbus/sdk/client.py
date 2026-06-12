@@ -16,6 +16,8 @@ from __future__ import annotations
 import socket
 from typing import Any
 
+from loguru import logger
+
 from Services.modbus.core.config import ModbusConfig, TransportType
 from Services.modbus.sdk.errors import (
     ModbusConnectionError,
@@ -36,6 +38,13 @@ except ImportError:  # pragma: no cover - окружение без pymodbus
     ModbusSerialClient = None  # type: ignore
     ModbusException = Exception  # type: ignore
     MODBUS_AVAILABLE = False
+
+
+def _fmt_addr(args: tuple) -> str:
+    """Адрес (первый позиционный аргумент) в hex для лога."""
+    if args and isinstance(args[0], int):
+        return f"0x{args[0]:04X}"
+    return "?"
 
 
 class ModbusSdkClient:
@@ -80,12 +89,16 @@ class ModbusSdkClient:
         """Установить соединение. Бросает ModbusConnectionError при неудаче."""
         if self._client is None:
             self._client = self._build_client()
+        logger.info(f"[MODBUS] connect → {self._cfg.describe()} (unit={self._cfg.unit_id})")
         try:
             ok = bool(self._client.connect())
         except ModbusException as exc:  # pragma: no cover - сетевые сбои
+            logger.warning(f"[MODBUS] connect FAILED {self._cfg.describe()}: {exc}")
             raise ModbusConnectionError(str(exc)) from exc
         if not ok:
+            logger.warning(f"[MODBUS] connect FAILED {self._cfg.describe()} (unit={self._cfg.unit_id})")
             raise ModbusConnectionError(f"Не удалось подключиться к {self._cfg.describe()}")
+        logger.info(f"[MODBUS] connected {self._cfg.describe()} (unit={self._cfg.unit_id})")
         if self._cfg.transport is TransportType.TCP and self._cfg.tcp_nodelay:
             self._enable_nodelay()
         return True
@@ -123,18 +136,39 @@ class ModbusSdkClient:
     # ------------------------------------------------------------------ #
 
     def _call(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
-        """Вызвать метод клиента, подставив адрес ведомого совместимым способом."""
+        """Вызвать метод клиента, подставив адрес ведомого совместимым способом.
+
+        Wire-логирование (что отправилось / что принялось) — для диагностики
+        связи. Уровень INFO, тег ``[MODBUS host#uN]``; ошибки — WARNING с unit
+        (типичная причина «нет ответа» — неверный unit_id: робот Delta = 2).
+        """
         if self._client is None:
             raise ModbusConnectionError("Клиент не подключён")
         method = getattr(self._client, method_name)
         unit = self._cfg.unit_id
+        tag = f"{self._cfg.host}#u{unit}"
+        addr = _fmt_addr(args)
+        is_read = method_name.startswith("read")
+        # TX: что отправилось
+        if is_read:
+            count = kwargs.get("count", args[1] if len(args) > 1 else 1)
+            logger.info(f"[MODBUS {tag}] TX {method_name} @{addr} count={count}")
+        else:
+            payload = args[1] if len(args) > 1 else kwargs.get("values", kwargs.get("value"))
+            logger.info(f"[MODBUS {tag}] TX {method_name} @{addr} = {payload}")
         try:
             result = method(*args, device_id=unit, **kwargs)
         except TypeError:
             # Старые версии pymodbus: device_id отсутствует -> slave
             result = method(*args, slave=unit, **kwargs)
         if result is None or result.isError():
+            logger.warning(f"[MODBUS {tag}] ERR {method_name} @{addr} unit={unit} → {result!r}")
             raise ModbusIOError(f"{method_name} -> ошибка устройства: {result}")
+        # RX: что принялось
+        rx = getattr(result, "registers", None)
+        if rx is None:
+            rx = getattr(result, "bits", None)
+        logger.info(f"[MODBUS {tag}] RX {method_name} @{addr} → {rx}")
         return result
 
     # ------------------------------------------------------------------ #

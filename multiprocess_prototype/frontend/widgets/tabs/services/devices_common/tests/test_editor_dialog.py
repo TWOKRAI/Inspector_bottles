@@ -108,6 +108,29 @@ def test_params_empty_returns_empty_dict(qtbot) -> None:
     assert entry["params"] == {}
 
 
+def test_robot_default_unit_id_is_2(qtbot) -> None:
+    """Робот Delta отвечает на slave=2 (подтверждено pc_full.py) — дефолт формы = 2."""
+    dlg = DeviceEditorDialog(kind="robot")
+    qtbot.addWidget(dlg)
+    assert dlg._form._tcp_unit.value() == 2
+    assert dlg.get_entry()["transport"]["unit_id"] == 2
+
+
+def test_generic_default_unit_id_is_1(qtbot) -> None:
+    """Не-робот: generic Modbus-дефолт unit=1."""
+    dlg = DeviceEditorDialog(kind="generic_modbus")
+    qtbot.addWidget(dlg)
+    assert dlg._form._tcp_unit.value() == 1
+
+
+def test_vfd_defaults_to_bridge(qtbot) -> None:
+    """ПЧ общается через робота — транспорт по умолчанию bridge."""
+    dlg = DeviceEditorDialog(kind="vfd", robot_devices=[{"id": "robot_main", "name": "Робот"}])
+    qtbot.addWidget(dlg)
+    assert dlg._form._combo_transport.currentText() == "bridge"
+    assert dlg.get_entry()["transport"]["type"] == "bridge"
+
+
 def test_combo_shows_protocols(qtbot) -> None:
     """Комбо протоколов заполняется из переданного списка."""
     dlg = DeviceEditorDialog(
