@@ -160,6 +160,13 @@ class RobotDriver(BaseDeviceDriver):
         if not self._draw_queue.empty():
             self._execute_draw(stop_event)
 
+        # н3 ревью Fable: после опустошения draw-очереди и завершения текущего
+        # рисования — вернуть режим cvt. Без этого _mode навсегда застревает
+        # в "draw", VfdDriver вечно получает stale, CVT-feeder выключен.
+        if self._mode == "draw" and self._draw_queue.empty() and not self._draw_busy:
+            self._client.set_mode("cvt")
+            self._mode = "cvt"
+
         # CVT feeder (если не manual_mode и не draw)
         if not self.manual_mode and self._mode == "cvt" and self._job_queue:
             try:
