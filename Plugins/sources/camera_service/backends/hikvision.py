@@ -41,6 +41,12 @@ class HikvisionBackend:
         ImportError: если пакет hikvision_camera недоступен
     """
 
+    # НР-5 ревью Fable: ретрай открытия камеры после async hik_release.
+    # hik_release — fire-and-forget, handle освобождается асинхронно;
+    # первый open может упасть «занято». Паттерн аналогичен WebcamBackend.
+    _OPEN_RETRIES = 3
+    _RETRY_DELAY = 0.3  # секунды между попытками
+
     def __init__(
         self,
         camera_index: int = 0,
@@ -63,11 +69,24 @@ class HikvisionBackend:
     # --- Capture lifecycle ---
 
     def start(self) -> None:
-        """Открыть камеру и начать захват."""
-        if not self._camera.open(self._camera_index):
-            self._running = False
-            return
-        self._running = self._camera.start_grabbing()
+        """Открыть камеру и начать захват.
+
+        НР-5 ревью Fable: до 3 попыток открытия с задержкой. После
+        async hik_release handle освобождается не мгновенно — первый
+        open может упасть «занято». Паттерн аналогичен WebcamBackend._open().
+        """
+        import time
+
+        for attempt in range(self._OPEN_RETRIES):
+            if self._camera.open(self._camera_index):
+                self._running = self._camera.start_grabbing()
+                return
+            # Не открылся — подождать и повторить
+            if attempt < self._OPEN_RETRIES - 1:
+                time.sleep(self._RETRY_DELAY)
+
+        # Все попытки исчерпаны
+        self._running = False
 
     def stop(self) -> None:
         """Остановить захват (камера остаётся открытой)."""
