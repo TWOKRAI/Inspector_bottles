@@ -120,7 +120,9 @@ class RecipesTab(BaseListNavTab):
                 else None
             )
             # Фаза 3 device-hub: upsert устройств рецепта ДО apply_topology.
-            # Через RequestRunner на worker-потоке (НЕ из Qt main thread).
+            # send_action_command — fire-and-forget из Qt main-thread (не блокирует UI).
+            # Устройства появятся в devices-процессе асинхронно; robot_io переживёт
+            # первые секунды через forward-deque до появления соединения.
             _upsert_fn = self._build_upsert_devices_fn() if self._command_sender is not None else None
 
             self._presenter = RecipesPresenter(
@@ -358,11 +360,10 @@ class RecipesTab(BaseListNavTab):
     def _build_upsert_devices_fn(self):
         """Построить callback для upsert устройств рецепта в процесс devices.
 
-        Вызывается СИНХРОННО в on_set_active (presenter). Использует
-        command_sender.request_command (блокирующий round-trip) — поэтому
-        on_set_active должен вызываться с учётом того, что apply_topology_fn
-        уже fire-and-forget (не блокирует UI). Upsert быстрый (<100ms),
-        допустим в Qt main-thread (как остальные action-команды в presenter).
+        Вызывается из on_set_active (presenter) в Qt main-thread. Использует
+        send_action_command — fire-and-forget (не блокирует UI). Команда
+        device_upsert_many обрабатывается в supervisor-воркере devices-процесса
+        асинхронно; connect произойдёт после разбора очереди supervisor'ом.
 
         Returns:
             Callable[[list[dict], str], None] — upsert_devices_fn.
