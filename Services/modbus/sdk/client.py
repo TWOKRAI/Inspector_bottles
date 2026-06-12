@@ -26,10 +26,10 @@ from Services.modbus.sdk.errors import (
     ModbusNotAvailableError,
 )
 
-# Подробное wire-логирование УСПЕШНЫХ чтений (телеметрия каждые 0.5 с заливает
-# консоль). По умолчанию — DEBUG (тихо); MODBUS_WIRE_LOG=1 → INFO (видно RX).
-# Записи-команды, ошибки и connect логируются всегда (INFO/WARNING).
-_WIRE_READ_VERBOSE = bool(os.environ.get("MODBUS_WIRE_LOG"))
+# Wire-логирование TX/RX в КОНСОЛЬ по умолчанию ВЫКЛЮЧЕНО — обмен виден в панели
+# «Вход/Выход» на странице устройства (devices.state.<id>.io_peek). Включить флуд
+# в консоль для отладки: MODBUS_WIRE_LOG=1. connect и ошибки логируются всегда.
+_WIRE_VERBOSE = bool(os.environ.get("MODBUS_WIRE_LOG"))
 
 # --------------------------------------------------------------------------- #
 # Graceful import pymodbus
@@ -155,16 +155,14 @@ class ModbusSdkClient:
         tag = f"{self._cfg.host}#u{unit}"
         addr = _fmt_addr(args)
         is_read = method_name.startswith("read")
-        # Записи (команды) — всегда INFO; чтения (телеметрия) — DEBUG, либо INFO
-        # при MODBUS_WIRE_LOG=1 (чтобы не заливать консоль поллингом).
-        read_log = logger.info if _WIRE_READ_VERBOSE else logger.debug
-        # TX: что отправилось
-        if is_read:
-            count = kwargs.get("count", args[1] if len(args) > 1 else 1)
-            read_log(f"[MODBUS {tag}] TX {method_name} @{addr} count={count}")
-        else:
-            payload = args[1] if len(args) > 1 else kwargs.get("values", kwargs.get("value"))
-            logger.info(f"[MODBUS {tag}] TX {method_name} @{addr} = {payload}")
+        # TX в консоль — только при MODBUS_WIRE_LOG=1 (иначе обмен виден в панели).
+        if _WIRE_VERBOSE:
+            if is_read:
+                count = kwargs.get("count", args[1] if len(args) > 1 else 1)
+                logger.info(f"[MODBUS {tag}] TX {method_name} @{addr} count={count}")
+            else:
+                payload = args[1] if len(args) > 1 else kwargs.get("values", kwargs.get("value"))
+                logger.info(f"[MODBUS {tag}] TX {method_name} @{addr} = {payload}")
         try:
             result = method(*args, device_id=unit, **kwargs)
         except TypeError:
@@ -173,14 +171,12 @@ class ModbusSdkClient:
         if result is None or result.isError():
             logger.warning(f"[MODBUS {tag}] ERR {method_name} @{addr} unit={unit} → {result!r}")
             raise ModbusIOError(f"{method_name} -> ошибка устройства: {result}")
-        # RX: что принялось
-        rx = getattr(result, "registers", None)
-        if rx is None:
-            rx = getattr(result, "bits", None)
-        if is_read:
-            read_log(f"[MODBUS {tag}] RX {method_name} @{addr} → {rx}")
-        else:
-            logger.info(f"[MODBUS {tag}] RX {method_name} @{addr} → ok")
+        # RX в консоль — только при MODBUS_WIRE_LOG=1.
+        if _WIRE_VERBOSE:
+            rx = getattr(result, "registers", None)
+            if rx is None:
+                rx = getattr(result, "bits", None)
+            logger.info(f"[MODBUS {tag}] RX {method_name} @{addr} → {rx}")
         return result
 
     # ------------------------------------------------------------------ #

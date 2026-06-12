@@ -57,9 +57,9 @@ class TestIntegrationSmoke:
             plugin._conn_queue.put(("connect", "robot_sim"))
             plugin._process_conn_queue()
 
-        # 3. Проверяем что state опубликован
-        merge_calls = {c.args[0] for c in ctx.state_proxy.merge.call_args_list}
-        assert "devices.state.robot_sim.conn" in merge_calls
+        # 3. Проверяем что state опубликован (conn — через set, атомарно)
+        set_calls = {c.args[0] for c in ctx.state_proxy.set.call_args_list}
+        assert "devices.state.robot_sim.conn" in set_calls
 
     def test_kind_validation_vfd_to_robot(self, tmp_path: Path) -> None:
         """vfd_run к robot-устройству → ошибка kind."""

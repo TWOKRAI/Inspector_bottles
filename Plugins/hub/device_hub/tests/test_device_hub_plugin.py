@@ -465,9 +465,11 @@ class TestAsyncConnect:
         with patch("Services.device_hub.manager.DeviceManager.connect") as mock_connect:
             mock_connect.return_value = True
             plugin._process_conn_queue()
-        # Проверяем что state publish вызван с connected
-        merge_calls = {c.args[0]: c.args[1] for c in ctx.state_proxy.merge.call_args_list}
-        assert "devices.state.robot_1.conn" in merge_calls
+        # conn публикуется через set (атомарно, один узел) — не merge (тот
+        # раскладывает на листья, не матчащие паттерн виджетов devices.state.*.conn)
+        set_calls = {c.args[0]: c.args[1] for c in ctx.state_proxy.set.call_args_list}
+        assert "devices.state.robot_1.conn" in set_calls
+        assert set_calls["devices.state.robot_1.conn"].get("conn") == "connected"
 
 
 # ------------------------------------------------------------------ #

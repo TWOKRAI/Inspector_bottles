@@ -408,9 +408,20 @@ class DeviceHubPlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def _publish_state(self, path: str, data: Any) -> None:
-        """Публикация в state-дерево через state_proxy.merge (потокобезопасен)."""
+        """Публикация в state-дерево (потокобезопасно).
+
+        conn/io_peek — атомарный ``set`` (одна дельта на точном пути): виджеты
+        подписаны на ``devices.state.*.conn`` / ``*.io_peek``, а ``*`` матчит
+        РОВНО один сегмент. merge раскладывает dict на листовые дельты
+        (``…conn.conn``, ``…io_peek.input.values``), которые НЕ матчат паттерн →
+        статус/панель оставались пустыми. Остальное (status/stats/registry) —
+        merge (потребители читают листовые поля).
+        """
         if self._ctx and self._ctx.state_proxy is not None:
-            self._ctx.state_proxy.merge(path, data)
+            if path.endswith(".conn") or path.endswith(".io_peek"):
+                self._ctx.state_proxy.set(path, data)
+            else:
+                self._ctx.state_proxy.merge(path, data)
 
     def _publish_full_registry(self) -> None:
         """Опубликовать весь реестр в state-дерево."""
