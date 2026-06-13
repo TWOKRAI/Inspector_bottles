@@ -143,6 +143,14 @@ class TrainConfig(BaseModel):
             raise ValueError("monitor=angle_mae_deg требует model.angle_head=true")
         if self.train.monitor == "angle_mae_deg" and self.data.source == "folder":
             raise ValueError("monitor=angle_mae_deg недоступен для source=folder (нет меток угла)")
+        if self.model.angle_head and self.data.source == "folder":
+            # folder-датасет не несёт углов (angle_valid=False) → голова угла учится
+            # на нулях, а sidecar объявит angle_head=True/symmetry={} → инференс
+            # вернёт valid=True с мусорным углом → робот доворачивает наугад
+            raise ValueError(
+                "angle_head=True несовместим с source=folder: нет меток угла. "
+                "Используйте source=synthetic (dataset_gen) или exported (с углами)."
+            )
         return self
 
     @property

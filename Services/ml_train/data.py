@@ -39,6 +39,9 @@ class DataBundle:
     class_names: list[str]
     class_weights: torch.Tensor | None  # None при class_weights=none
     image_size: tuple[int, int]  # фактический (H, W) сэмпла — для ONNX sidecar
+    #: симметрия класса для декода угла в инференсе {class_name: none|180|full};
+    #: None для folder-источника (нет меток угла). Уходит в checkpoint → sidecar.
+    symmetry_map: dict[str, str] | None = None
 
 
 def _imread_unicode(path: Path) -> np.ndarray:
@@ -216,6 +219,7 @@ def bundle_from_generator(generator, config: DataConfig) -> DataBundle:
     val_ds = SyntheticDataset(generator, length=config.val_samples, seed=config.seed + 1, transform=eval_tf)
     class_names = list(generator.class_names)
     counts = _synthetic_counts(len(train_ds), len(class_names))
+    sym = getattr(generator, "symmetry_map", None)
     return DataBundle(
         train_loader=_loader(train_ds, config, shuffle=True),
         val_loader=_loader(val_ds, config, shuffle=False),
@@ -223,6 +227,7 @@ def bundle_from_generator(generator, config: DataConfig) -> DataBundle:
         class_names=class_names,
         class_weights=_balanced_weights(counts),
         image_size=_probe_image_size(val_ds),
+        symmetry_map={k: str(v) for k, v in sym.items()} if sym else None,
     )
 
 
@@ -276,6 +281,7 @@ def _build_exported(config: DataConfig) -> DataBundle:
         class_names=class_names,
         class_weights=_balanced_weights(counts),
         image_size=tuple(config.image_size),
+        symmetry_map=_symmetry_from_rows(label_rows),
     )
 
 
@@ -350,6 +356,15 @@ def _check_class_bounds(rows: list[dict[str, Any]], num_classes: int, split_name
             f"Сплит '{split_name}' содержит class_index={max_index}, а в train классов {num_classes} — "
             f"сплиты экспортированы с разными каталогами классов"
         )
+
+
+def _symmetry_from_rows(rows: list[dict[str, Any]]) -> dict[str, str] | None:
+    """Симметрия класса из колонки symmetry меток (exported dataset_gen)."""
+    m: dict[str, str] = {}
+    for r in rows:
+        if r.get("symmetry"):
+            m[str(r["class_name"])] = str(r["symmetry"])
+    return m or None
 
 
 def _class_names_from_rows(rows: list[dict[str, Any]]) -> list[str]:

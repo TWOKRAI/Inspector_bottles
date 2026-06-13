@@ -277,6 +277,8 @@ class Trainer:
                 pred_sc.append(angle.float().cpu().numpy())
                 true_sc.append(target["angle"].numpy())
                 valid.append(target["angle_valid"].numpy())
+        sym_map = self.bundle.symmetry_map
+        class_symmetry = [sym_map.get(n, "none") for n in self.bundle.class_names] if sym_map else None
         summary = M.evaluation_summary(
             np.concatenate(y_true),
             np.concatenate(y_pred),
@@ -284,6 +286,7 @@ class Trainer:
             pred_sincos=np.concatenate(pred_sc) if pred_sc else None,
             true_sincos=np.concatenate(true_sc) if true_sc else None,
             angle_valid=np.concatenate(valid) if valid else None,
+            class_symmetry=class_symmetry,
         )
         return summary, total_loss / max(n_batches, 1)
 
@@ -356,6 +359,7 @@ class Trainer:
                 "config": self.config.to_dict(),
                 "class_names": self.bundle.class_names,
                 "image_size": list(self.bundle.image_size),
+                "symmetry_map": self.bundle.symmetry_map,  # для декода угла в инференсе
                 "epoch": epoch,
                 "metrics": {k: v for k, v in val_summary.items() if k != "confusion_matrix"},
             },

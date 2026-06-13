@@ -137,7 +137,8 @@ def test_export_onnx_angle_head_two_outputs(tmp_path):
     config = TrainConfig.from_dict(
         {
             "model": {"arch": "mobilenet_v3_small", "pretrained": False, "angle_head": True},
-            "data": {"source": "folder", "root": "unused"},
+            # exported, не folder: folder не несёт углов → angle_head запрещён валидатором
+            "data": {"source": "exported", "root": "unused"},
         }
     )
     model = build_model(config.model, num_classes=4)
