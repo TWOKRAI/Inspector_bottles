@@ -2,7 +2,7 @@
 # круги по маске → линия (триггер) → квадратный crop вокруг центра → сохранение (+ sidecar).
 #
 # Топология:
-#   camera_0[hikvision] → roi[region_split] → detector[hsv_mask → circle_detector]
+#   camera_0[hikvision] → roi[roi_crop] → detector[hsv_mask → circle_detector]
 #     detector ──┬→ line[line_filter] ──┬→ crop[center_crop] → saver[frame_saver]   (ЧИСТЫЙ кадр + .json)
 #                │                       └→ draw                                      (дисплей main)
 #                ├→ draw[circle_draw → overlay_draw]  (Join: круги + линия)  → display "main"
@@ -15,7 +15,7 @@
 # Два дисплея для тюнинга: "main" (кадр + круги + линия), "mask" (что видит hsv_mask).
 #
 # === ТЮНИНГ (всё в ПИКСЕЛЯХ — калибровки мм↔px пока нет, см. план Часть 2) ===
-#   1) ROI region_split.regions[0]: x/y/width/height.
+#   1) ROI roi_crop: x/y/width/height (скалярные live-поля — применяются на лету).
 #   2) hsv_mask: s_max (верх насыщенности) / v_min (низ яркости) белого — смотреть дисплей "mask".
 #   3) circle_detector: min/max_radius (px в ROI), param2 (меньше → больше ложных) — смотреть "main".
 #   4) line_filter: center_x/center_y/angle/zone_width (ROI-координаты).
@@ -83,18 +83,14 @@ blueprint:
         source_target_fps: 25
     - process_name: roi
       plugins:
-        - plugin_name: region_split
-          plugin_class: Plugins.processing.region_split.plugin.RegionSplitPlugin
+        - plugin_name: roi_crop
+          plugin_class: Plugins.processing.roi_crop.plugin.RoiCropPlugin
           category: processing
           config:
-            camera_id: 0
-            regions:
-              - name: roi_0
-                x: 560
-                y: 240
-                width: 800
-                height: 600
-                target: detector
+            x: 560        # ТЮНИНГ: скалярные live-поля (применяются на лету)
+            y: 240
+            width: 800
+            height: 600
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
@@ -269,9 +265,9 @@ blueprint:
       metadata: {}
   wires:
     - source: camera_0.hikvision.frame
-      target: roi.region_split.frame
+      target: roi.roi_crop.frame
       description: ''
-    - source: roi.region_split.region
+    - source: roi.roi_crop.frame
       target: detector.hsv_mask.frame
       description: ''
     - source: detector.circle_detector.frame
@@ -308,7 +304,7 @@ blueprint:
       camera_0.hikvision:
         - 16.0
         - 160.0
-      roi.region_split:
+      roi.roi_crop:
         - 556.0
         - 160.0
       detector.hsv_mask:
