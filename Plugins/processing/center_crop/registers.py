@@ -10,28 +10,62 @@ line_filter (item["filtered"][*]["xy"]). Размер стороны — в пи
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from multiprocess_framework.modules.process_module.plugins import FieldMeta
 from multiprocess_framework.modules.process_module.plugins import register_schema
 from multiprocess_framework.modules.process_module.plugins import SchemaBase
 
+SizeMode = Literal["fixed", "radius"]
+
 
 @register_schema("CenterCropRegistersV1")
 class CenterCropRegisters(SchemaBase):
-    """Параметры center_crop — сторона квадрата и поведение на границе кадра."""
+    """Параметры center_crop — размер квадрата и поведение на границе кадра."""
 
-    # --- Размер выреза ---
+    # --- Режим размера выреза ---
+    size_mode: Annotated[
+        SizeMode,
+        FieldMeta(
+            "Size Mode",
+            info=(
+                "fixed = фиксированная сторона side_px; radius = под размер круга (сторона = 2·radius·scale + 2·margin)"
+            ),
+        ),
+    ] = "fixed"
+
+    # --- Размер выреза (size_mode=fixed) ---
     side_px: Annotated[
         int,
         FieldMeta(
             "Crop Side",
-            info="Сторона квадратного выреза (px). Размер в мм считается после калибровки.",
+            info="Сторона квадрата (px) при size_mode=fixed. Размер в мм считается после калибровки.",
             min=2,
             max=4000,
             unit="px",
         ),
     ] = 200
+
+    # --- Размер выреза (size_mode=radius) ---
+    radius_scale: Annotated[
+        float,
+        FieldMeta(
+            "Radius Scale",
+            info="Множитель радиуса при size_mode=radius (1.0 = плотно по кругу, его bbox)",
+            min=0.1,
+            max=5.0,
+        ),
+    ] = 1.0
+    margin_px: Annotated[
+        int,
+        FieldMeta(
+            "Margin",
+            info="Поля вокруг круга (px с каждой стороны) при size_mode=radius",
+            min=0,
+            max=2000,
+            unit="px",
+        ),
+    ] = 10
 
     # --- Поведение на границе кадра ---
     drop_partial: Annotated[

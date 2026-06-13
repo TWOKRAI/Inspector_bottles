@@ -62,8 +62,9 @@ class CenterCropPlugin(ProcessModulePlugin):
         self._ctx = ctx
         self._reg: CenterCropRegisters = self._init_register(ctx)
         ctx.log_info(
-            f"CenterCropPlugin: side={self._reg.side_px}px, drop_partial={self._reg.drop_partial}, "
-            f"pad_if_oob={self._reg.pad_if_oob}"
+            f"CenterCropPlugin: size_mode={self._reg.size_mode}, side={self._reg.side_px}px, "
+            f"radius_scale={self._reg.radius_scale}, margin={self._reg.margin_px}px, "
+            f"drop_partial={self._reg.drop_partial}, pad_if_oob={self._reg.pad_if_oob}"
         )
 
     # --- Обработка (fan-out: один вход → N вырезов) ---
@@ -84,11 +85,28 @@ class CenterCropPlugin(ProcessModulePlugin):
                 if xy is None:
                     continue
                 cx, cy = xy
-                crop = self._crop_square(frame, cx, cy)
+                # Радиус круга сопоставляем ОДИН раз (нужен и для размера выреза,
+                # и для sidecar) — не дублируем вычисление.
+                radius = self._match_radius(cx, cy, detections)
+                side = self._resolve_side(radius)
+                crop = self._crop_square(frame, cx, cy, side)
                 if crop is None:
                     continue  # drop_partial: вырез вышел за границу
-                out.append(self._build_item(item, crop, cx, cy, detections, event, k))
+                out.append(self._build_item(item, crop, cx, cy, radius, side, event, k))
         return out
+
+    def _resolve_side(self, radius: int | None) -> int:
+        """Сторона квадрата по режиму размера.
+
+        size_mode=fixed  → side_px (фиксированный квадрат).
+        size_mode=radius → плотно по кругу: 2·radius·scale + 2·margin (bbox круга + поля).
+        Если радиус неизвестен (нет сопоставленного detection) — fallback на side_px,
+        чтобы вырез всё равно состоялся.
+        """
+        if self._reg.size_mode == "radius" and radius and radius > 0:
+            side = int(round(2 * radius * float(self._reg.radius_scale))) + 2 * int(self._reg.margin_px)
+            return max(2, side)
+        return int(self._reg.side_px)
 
     @staticmethod
     def _event_xy(event: object) -> tuple[int, int] | None:
@@ -102,12 +120,11 @@ class CenterCropPlugin(ProcessModulePlugin):
 
     # --- Вырез квадрата с учётом границ кадра ---
 
-    def _crop_square(self, frame: np.ndarray, cx: int, cy: int) -> np.ndarray | None:
-        """Квадрат side_px вокруг (cx, cy). Поведение у границы — по register.
+    def _crop_square(self, frame: np.ndarray, cx: int, cy: int, side: int) -> np.ndarray | None:
+        """Квадрат side×side вокруг (cx, cy). Поведение у границы — по register.
 
         Возвращает ndarray (копию) или None, если drop_partial и вырез частично вне кадра.
         """
-        side = int(self._reg.side_px)
         half = side // 2
         x0, y0 = cx - half, cy - half
         x1, y1 = x0 + side, y0 + side  # ширина/высота ровно = side
@@ -176,15 +193,16 @@ class CenterCropPlugin(ProcessModulePlugin):
         crop: np.ndarray,
         cx: int,
         cy: int,
-        detections: list,
+        radius: int | None,
+        side: int,
         event: dict,
         index: int,
     ) -> dict:
-        radius = self._match_radius(cx, cy, detections)
         sidecar = {
             "center_px": [cx, cy],
             "radius_px": radius,
-            "side_px": int(self._reg.side_px),
+            "size_mode": self._reg.size_mode,
+            "side_px": int(side),  # фактическая сторона выреза (динамическая при size_mode=radius)
             "crop_h": int(crop.shape[0]),
             "crop_w": int(crop.shape[1]),
             "track_id": event.get("id"),

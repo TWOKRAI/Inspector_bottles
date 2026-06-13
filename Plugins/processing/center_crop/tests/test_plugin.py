@@ -157,6 +157,44 @@ class TestSidecar:
         assert out[0]["sidecar"]["radius_px"] is None
 
 
+class TestSizeModeRadius:
+    """size_mode=radius — сторона выреза под размер круга (2·r·scale + 2·margin)."""
+
+    def test_side_from_radius(self):
+        # radius=40, scale=1.0, margin=10 → side = 2·40 + 2·10 = 100
+        p = _plugin({"size_mode": "radius", "radius_scale": 1.0, "margin_px": 10})
+        det = [{"center": [200, 200], "radius": 40}]
+        out = p.process([_item(_frame(400, 400), [{"xy": [200, 200], "id": 1}], detections=det)])
+        assert len(out) == 1
+        crop = out[0]["frame"]
+        assert crop.shape[0] == 100 and crop.shape[1] == 100
+        assert out[0]["sidecar"]["size_mode"] == "radius"
+        assert out[0]["sidecar"]["side_px"] == 100  # фактическая сторона
+        assert out[0]["sidecar"]["radius_px"] == 40
+
+    def test_radius_scale_and_margin(self):
+        # radius=30, scale=1.5, margin=5 → round(2·30·1.5) + 2·5 = 90 + 10 = 100
+        p = _plugin({"size_mode": "radius", "radius_scale": 1.5, "margin_px": 5})
+        det = [{"center": [200, 200], "radius": 30}]
+        out = p.process([_item(_frame(400, 400), [{"xy": [200, 200]}], detections=det)])
+        assert out[0]["frame"].shape[0] == 100
+
+    def test_fallback_to_side_px_when_no_radius(self):
+        # size_mode=radius, но круг не сопоставлен (нет detections) → fallback side_px
+        p = _plugin({"size_mode": "radius", "side_px": 64})
+        out = p.process([_item(_frame(400, 400), [{"xy": [200, 200]}], detections=[])])
+        assert out[0]["frame"].shape[0] == 64
+        assert out[0]["sidecar"]["side_px"] == 64
+
+    def test_fixed_mode_ignores_radius(self):
+        # size_mode=fixed (дефолт) → строго side_px, радиус не влияет на размер
+        p = _plugin({"size_mode": "fixed", "side_px": 80})
+        det = [{"center": [200, 200], "radius": 40}]
+        out = p.process([_item(_frame(400, 400), [{"xy": [200, 200]}], detections=det)])
+        assert out[0]["frame"].shape[0] == 80
+        assert out[0]["sidecar"]["size_mode"] == "fixed"
+
+
 class TestCommands:
     def test_set_side(self):
         p = _plugin()

@@ -168,7 +168,12 @@ blueprint:
           plugin_class: Plugins.processing.center_crop.plugin.CenterCropPlugin
           category: processing
           config:
-            side_px: 300
+            # size_mode=radius: вырез ПОД РАЗМЕР круга (bbox круга + поля), а не фикс.
+            # сторона = 2·radius·radius_scale + 2·margin_px (radius от circle_detector).
+            size_mode: radius
+            radius_scale: 1.0
+            margin_px: 12
+            side_px: 300         # fallback, если радиус круга не сопоставился
             drop_partial: false
             pad_if_oob: true
       workers: []
