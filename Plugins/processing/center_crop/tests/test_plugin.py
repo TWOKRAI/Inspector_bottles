@@ -195,6 +195,36 @@ class TestSizeModeRadius:
         assert out[0]["sidecar"]["size_mode"] == "fixed"
 
 
+class TestOutputSize:
+    """output_size — ресайз выреза к единому размеру (для ML-датасета)."""
+
+    def test_resize_radius_crop_to_uniform(self):
+        # size_mode=radius даёт side=100, но output_size=224 → ресайз к 224×224
+        p = _plugin({"size_mode": "radius", "radius_scale": 1.0, "margin_px": 10, "output_size": 224})
+        det = [{"center": [200, 200], "radius": 40}]
+        out = p.process([_item(_frame(400, 400), [{"xy": [200, 200]}], detections=det)])
+        crop = out[0]["frame"]
+        assert crop.shape[0] == 224 and crop.shape[1] == 224
+        assert out[0]["sidecar"]["side_px"] == 100  # геометрия сохранена
+        assert out[0]["sidecar"]["output_size"] == 224
+        assert out[0]["sidecar"]["crop_h"] == 224  # фактический размер после ресайза
+
+    def test_output_size_zero_keeps_native(self):
+        p = _plugin({"size_mode": "fixed", "side_px": 80, "output_size": 0})
+        out = p.process([_item(_frame(400, 400), [{"xy": [200, 200]}])])
+        assert out[0]["frame"].shape[0] == 80
+        assert out[0]["sidecar"]["output_size"] == 0
+
+    def test_uniform_size_across_different_radii(self):
+        # Два круга разного радиуса → оба выреза приводятся к одному output_size
+        p = _plugin({"size_mode": "radius", "output_size": 128, "radius_match_dist": 30})
+        det = [{"center": [100, 100], "radius": 30}, {"center": [300, 300], "radius": 60}]
+        filtered = [{"xy": [100, 100]}, {"xy": [300, 300]}]
+        out = p.process([_item(_frame(400, 400), filtered, detections=det)])
+        assert len(out) == 2
+        assert all(o["frame"].shape[:2] == (128, 128) for o in out)
+
+
 class TestCommands:
     def test_set_side(self):
         p = _plugin()

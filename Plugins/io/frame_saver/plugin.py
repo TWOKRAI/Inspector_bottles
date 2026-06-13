@@ -269,7 +269,9 @@ class FrameSaverPlugin(ProcessModulePlugin):
         sidecar = path.with_suffix(".json")
         tmp = sidecar.with_suffix(".json.tmp")
         try:
-            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            # default=str: не-JSON-значение (напр. numpy-скаляр от downstream) сериализуется
+            # как строка, а не роняет ВЕСЬ sidecar — лучше записать с фолбэком, чем потерять.
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
             tmp.replace(sidecar)
         except (OSError, TypeError, ValueError) as exc:
             try:

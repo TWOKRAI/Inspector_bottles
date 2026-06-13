@@ -67,6 +67,21 @@ class CenterCropRegisters(SchemaBase):
         ),
     ] = 10
 
+    # --- Унификация размера для ML-датасета ---
+    output_size: Annotated[
+        int,
+        FieldMeta(
+            "Output Size",
+            info=(
+                "0 = сохранять как вырезано (размер под круг, разный). "
+                ">0 = ресайз каждого выреза к output_size×output_size (единый размер для обучения)."
+            ),
+            min=0,
+            max=4096,
+            unit="px",
+        ),
+    ] = 0
+
     # --- Поведение на границе кадра ---
     drop_partial: Annotated[
         bool,

@@ -92,8 +92,12 @@ class CircleDetectorPlugin(ProcessModulePlugin):
         method, args = self._safe_hough_args()
         try:
             circles = cv2.HoughCircles(gray, method, **args)
-        except cv2.error as exc:
-            # Защита от непредусмотренных комбинаций параметров — не роняем pipeline
+        except Exception as exc:
+            # HoughCircles на вырожденном содержимом (полностью белый/чёрный кадр,
+            # degenerate-аккумулятор) кидает НЕ только cv2.error, но и generic C++
+            # exception ("Unknown C++ exception from OpenCV code"). Ловим всё — иначе
+            # необработанное исключение уходит в PipelineExecutor → circuit breaker
+            # (5 подряд → детекция стоит 60с). Плагин самодостаточен: вернуть [] детекций.
             self._ctx.log_error(f"CircleDetectorPlugin: HoughCircles failed ({args}): {exc}")
             return self._finish(item, [])
 
@@ -103,9 +107,13 @@ class CircleDetectorPlugin(ProcessModulePlugin):
             for x, y, r in np.around(circles[0]).astype(int):
                 detections.append({"center": [int(x), int(y)], "radius": int(r)})
 
-        # Рисуем только на 3-канальном изображении (на бинарной маске цветной круг бессмыслен)
+        # Рисуем только на 3-канальном кадре (на бинарной маске цветной круг бессмыслен).
+        # На КОПИИ, не на src: src может быть SHM-буфером / общим кадром для других веток
+        # (detector → line/crop/draw/maskview) — мутация загрязнила бы их (и датасет).
         if self._reg.draw_circles and detections and src.ndim == 3:
-            self._draw(src, detections)
+            drawn = src.copy()
+            self._draw(drawn, detections)
+            item = {**item, "frame": drawn}
 
         return self._finish(item, detections)
 

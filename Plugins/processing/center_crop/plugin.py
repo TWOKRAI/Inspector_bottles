@@ -16,6 +16,7 @@ Stateless относительно кадров (вся темпоральная
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 
 from multiprocess_framework.modules.process_module.plugins import (
@@ -92,8 +93,21 @@ class CenterCropPlugin(ProcessModulePlugin):
                 crop = self._crop_square(frame, cx, cy, side)
                 if crop is None:
                     continue  # drop_partial: вырез вышел за границу
+                crop = self._resize_output(crop)
                 out.append(self._build_item(item, crop, cx, cy, radius, side, event, k))
         return out
+
+    def _resize_output(self, crop: np.ndarray) -> np.ndarray:
+        """Ресайз выреза к output_size×output_size (если задан) — единый размер для ML.
+
+        output_size=0 → как вырезано (размер под круг). INTER_AREA при уменьшении
+        (антиалиасинг), INTER_LINEAR при увеличении.
+        """
+        out = int(self._reg.output_size)
+        if out <= 0 or (crop.shape[0] == out and crop.shape[1] == out):
+            return crop
+        interp = cv2.INTER_AREA if crop.shape[0] > out else cv2.INTER_LINEAR
+        return cv2.resize(crop, (out, out), interpolation=interp)
 
     def _resolve_side(self, radius: int | None) -> int:
         """Сторона квадрата по режиму размера.
@@ -202,8 +216,9 @@ class CenterCropPlugin(ProcessModulePlugin):
             "center_px": [cx, cy],
             "radius_px": radius,
             "size_mode": self._reg.size_mode,
-            "side_px": int(side),  # фактическая сторона выреза (динамическая при size_mode=radius)
-            "crop_h": int(crop.shape[0]),
+            "side_px": int(side),  # геометрическая сторона выреза (до ресайза; динамич. при radius)
+            "output_size": int(self._reg.output_size),  # 0 = без ресайза
+            "crop_h": int(crop.shape[0]),  # фактический размер (после ресайза, если был)
             "crop_w": int(crop.shape[1]),
             "track_id": event.get("id"),
             "direction": event.get("direction"),

@@ -94,8 +94,12 @@ class PluginOrchestrator:
 
         Нормализуем к плоскому ЗДЕСЬ (единая граница) — чтобы ``ctx.config`` всегда был
         плоским для ВСЕХ плагинов, и плагинам не нужно знать про два формата.
+
+        Мета-поля PluginConfig (``plugin_class``/``plugin_name``/``category``) — НЕ параметры
+        плагина, отбрасываем (иначе ``category`` и т.п. утекают в ``ctx.config`` как мусор).
         """
-        cfg = {k: v for k, v in pdef.items() if k not in ("plugin_class", "plugin_name")}
+        meta_keys = ("plugin_class", "plugin_name", "category")
+        cfg = {k: v for k, v in pdef.items() if k not in meta_keys}
         nested = cfg.pop("config", None)
         if isinstance(nested, dict):
             cfg.update(nested)  # вложенный config разворачиваем поверх (он — источник истины)
