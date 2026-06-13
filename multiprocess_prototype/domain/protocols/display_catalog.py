@@ -36,6 +36,9 @@ class DisplaySpec:
 
     display_id: str
     display_name: str
+    # Показывать ли дисплей в главной области GUI (toggle вкл/выкл).
+    # Бэк-совместимо: default True (дисплеи без явного enabled показываются).
+    enabled: bool = True
     width: int = 1280
     height: int = 720
     format: str = "BGR"
@@ -116,6 +119,8 @@ def definition_to_spec(defn: Any) -> DisplaySpec:
     return DisplaySpec(
         display_id=defn.id,
         display_name=defn.name,
+        # enabled может отсутствовать у duck-type объектов → getattr с дефолтом True
+        enabled=getattr(defn, "enabled", True),
         width=defn.width,
         height=defn.height,
         format=defn.format,
@@ -144,6 +149,7 @@ def spec_to_definition_dict(spec: DisplaySpec) -> dict[str, Any]:
     result: dict[str, Any] = {
         "id": spec.display_id,
         "name": spec.display_name,
+        "enabled": spec.enabled,
         "width": spec.width,
         "height": spec.height,
         "format": spec.format,

@@ -61,6 +61,7 @@ class DisplaysPresenter:
         store: DisplayCatalog,
         view: "IDisplaysView",
         preview_callback: Callable[[DisplaySpec], None] | None = None,
+        event_bus: object | None = None,
     ) -> None:
         """Инициализировать presenter.
 
@@ -68,10 +69,13 @@ class DisplaysPresenter:
             store: DisplayCatalog Protocol (read+write).
             view: реализация IDisplaysView.
             preview_callback: опциональный callback для открытия превью.
+            event_bus: EventBus для эмита DisplaysChanged (главная панель
+                пересобирает слоты). None → событие не эмитится (no-op).
         """
         self._store = store
         self._view = view
         self._preview_callback = preview_callback
+        self._event_bus = event_bus
         self._selected_id: str | None = None
 
         # Подписка на RecipeActivated (устанавливается через bind_event_bus)
@@ -222,21 +226,26 @@ class DisplaysPresenter:
     def on_create(self) -> None:
         """Создать новый дисплей из данных формы.
 
-        Читает view.get_form_data(), строит DisplaySpec (включая render-поля),
-        регистрирует через store, сохраняет в рецепт, обновляет список.
+        ID генерируется автоматически (display_<N>) — пользователь его НЕ вводит
+        (поле read-only). name по умолчанию равен сгенерированному id, если
+        пользователь оставил поле пустым.
+
+        Читает view.get_form_data(), строит DisplaySpec (включая render-поля
+        и enabled), регистрирует через store, сохраняет в рецепт, обновляет список.
         При ValueError — показывает ошибку через view.show_error().
         """
         data = self._view.get_form_data()
 
-        display_id = data.get("id", "").strip()
-        if not display_id:
-            self._view.show_error("Поле 'ID' не может быть пустым.")
-            return
+        # ID генерируется автоматически (поле формы read-only/пустое при создании).
+        display_id = self._generate_display_id()
+        # name-дефолт: пусто → display_<N> (= display_id), иначе значение пользователя.
+        name = data.get("name", "").strip() or display_id
 
         try:
             spec = DisplaySpec(
                 display_id=display_id,
-                display_name=data.get("name", display_id),
+                display_name=name,
+                enabled=bool(data.get("enabled", True)),
                 width=int(data.get("width", 1280)),
                 height=int(data.get("height", 720)),
                 format=str(data.get("format", "BGR")),
@@ -261,6 +270,7 @@ class DisplaysPresenter:
             return
 
         self._persist()
+        self._emit_displays_changed()
         self._view.refresh_list(list(self._store.list_displays()))
         logger.info("DisplaysPresenter: создан дисплей '%s'", display_id)
 
@@ -276,6 +286,7 @@ class DisplaysPresenter:
             return
 
         self._persist()
+        self._emit_displays_changed()
         self._selected_id = None
         self._view.refresh_list(list(self._store.list_displays()))
         self._view.show_entry(None)
@@ -302,6 +313,7 @@ class DisplaysPresenter:
         new_spec = DisplaySpec(
             display_id=new_id,
             display_name=f"{source.display_name} (копия)",
+            enabled=getattr(source, "enabled", True),
             width=source.width,
             height=source.height,
             format=source.format,
@@ -324,8 +336,47 @@ class DisplaysPresenter:
             return
 
         self._persist()
+        self._emit_displays_changed()
         self._view.refresh_list(list(self._store.list_displays()))
         logger.info("DisplaysPresenter: дублирован '%s' -> '%s'", display_id, new_id)
+
+    def on_set_enabled(self, display_id: str, enabled: bool) -> None:
+        """Применить toggle «Показывать в главной области» к дисплею.
+
+        Обновляет enabled выбранного дисплея in-place (через store.update,
+        сохраняя привязки node->display), персистит в рецепт и эмитит
+        DisplaysChanged — главная панель сразу пересоберёт слоты.
+
+        Если store не поддерживает update (нет метода) — лог-предупреждение,
+        изменение не применяется (graceful).
+
+        Args:
+            display_id: id дисплея.
+            enabled:    новое состояние (True — показывать).
+        """
+        spec = self._store.resolve(display_id)
+        if spec is None:
+            logger.warning("DisplaysPresenter: дисплей '%s' не найден для toggle enabled", display_id)
+            return
+        if bool(getattr(spec, "enabled", True)) == enabled:
+            return  # без изменений
+
+        update = getattr(self._store, "update", None)
+        if not callable(update):
+            logger.warning("DisplaysPresenter: store не поддерживает update — toggle enabled пропущен")
+            return
+
+        from dataclasses import replace
+
+        new_spec = replace(spec, enabled=enabled)
+        ok = update(new_spec)
+        if not ok:
+            logger.warning("DisplaysPresenter: update enabled для '%s' не прошёл", display_id)
+            return
+
+        self._persist()
+        self._emit_displays_changed()
+        logger.info("DisplaysPresenter: дисплей '%s' enabled=%s", display_id, enabled)
 
     def on_open_preview(self, display_id: str) -> None:
         """Открыть превью канала дисплея.
@@ -346,6 +397,22 @@ class DisplaysPresenter:
     # ------------------------------------------------------------------ #
     #  Вспомогательные методы                                              #
     # ------------------------------------------------------------------ #
+
+    def _generate_display_id(self) -> str:
+        """Сгенерировать уникальный auto-id для нового дисплея.
+
+        Формат ``display_<N>``: перебирает display_1, display_2, ... до первого
+        незанятого id в активном рецепте.
+
+        Returns:
+            Первый свободный id вида ``display_<N>`` (N начинается с 1).
+        """
+        counter = 1
+        while True:
+            candidate = f"display_{counter}"
+            if not self._store.has(candidate):
+                return candidate
+            counter += 1
 
     def _generate_copy_id(self, source_id: str) -> str:
         """Сгенерировать уникальный id-копии для дублирования.
@@ -375,3 +442,27 @@ class DisplaysPresenter:
             self._store.persist()
         except Exception as exc:
             logger.error("DisplaysPresenter: ошибка сохранения YAML: %s", exc)
+
+    def _emit_displays_changed(self) -> None:
+        """Эмитить DisplaysChanged — главная панель пересоберёт слоты.
+
+        Graceful no-op если event_bus не передан или импорт/publish упал.
+        """
+        if self._event_bus is None:
+            return
+        try:
+            from multiprocess_prototype.domain.events import DisplaysChanged
+
+            publish = getattr(self._event_bus, "publish", None) or getattr(self._event_bus, "emit", None)
+            if publish is None:
+                return
+            slug = None
+            get_active = getattr(self._store, "_get_active_slug", None)
+            if callable(get_active):
+                try:
+                    slug = get_active()
+                except Exception:  # noqa: BLE001
+                    slug = None
+            publish(DisplaysChanged(slug=slug))
+        except Exception as exc:  # noqa: BLE001 — уведомление не должно валить CRUD
+            logger.warning("DisplaysPresenter: не удалось эмитить DisplaysChanged: %s", exc)

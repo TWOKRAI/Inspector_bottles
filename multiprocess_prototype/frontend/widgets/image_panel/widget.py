@@ -1,4 +1,5 @@
 """ImagePanelWidget — мульти-дисплейная панель кадров."""
+
 import logging
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout
@@ -84,6 +85,59 @@ class ImagePanelWidget(QWidget):
         slot.deleteLater()
 
         logger.debug("Удалён слот: %s", slot_id)
+
+    def set_displays(self, displays: list[dict]) -> None:
+        """Пересобрать слоты панели по списку дисплеев рецепта.
+
+        Раскладка MVP — в ряд, но порядок определяется ``position.x``
+        (сортировка по возрастанию X), чтобы редактирование позиции во
+        вкладке Displays уже влияло на порядок. Архитектурно заложено под
+        свободные позиции по x/y в будущем — здесь только порядок.
+
+        Бэк-совместимость:
+          - Пустой список → fallback на единственный слот "main" (текущее
+            поведение для рецептов без секции displays).
+          - Только enabled-дисплеи попадают в панель (toggle вкл/выкл).
+
+        Args:
+            displays: список словарей вида
+                {"id": str, "label": str, "enabled": bool, "x": int, "y": int}.
+                Невалидные записи (без "id") пропускаются.
+        """
+        # Отфильтровать enabled + валидные, отсортировать по position.x (затем y)
+        wanted = [d for d in displays if d.get("id") and d.get("enabled", True)]
+        wanted.sort(key=lambda d: (int(d.get("x", 0)), int(d.get("y", 0))))
+
+        # Fallback: рецепт без дисплеев → один слот "main" (старое поведение)
+        if not wanted:
+            wanted = [{"id": "main", "label": "Main", "x": 0, "y": 0}]
+
+        wanted_ids = [d["id"] for d in wanted]
+
+        # Удалить слоты, которых больше нет в желаемом наборе
+        for slot_id in list(self._slots.keys()):
+            if slot_id not in wanted_ids:
+                self.remove_slot(slot_id)
+
+        # Добавить недостающие + переупорядочить по wanted (порядок в layout)
+        for position, d in enumerate(wanted):
+            slot_id = d["id"]
+            label = d.get("label") or slot_id
+            if slot_id not in self._slots:
+                slot = DisplaySlot(slot_id=slot_id, label=label, parent=self)
+                self._slots[slot_id] = slot
+                self._presenter.register_slot(slot_id, slot)
+                self._layout.insertWidget(position, slot)
+                logger.debug("set_displays: добавлен слот '%s' (поз %d)", slot_id, position)
+            else:
+                # Слот существует — гарантировать правильную позицию в layout
+                slot = self._slots[slot_id]
+                current = self._layout.indexOf(slot)
+                if current != position:
+                    self._layout.removeWidget(slot)
+                    self._layout.insertWidget(position, slot)
+
+        logger.debug("set_displays: активные слоты = %s", wanted_ids)
 
     # ------------------------------------------------------------------
     # Отображение кадров

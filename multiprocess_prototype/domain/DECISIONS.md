@@ -1,5 +1,65 @@
 # multiprocess_prototype/domain — Архитектурные решения
 
+## DOM-002: мульти-дисплей в главной области — поле `enabled` + маршрутизация по `sender`
+
+**Дата:** 2026-06-13
+**Статус:** принято
+**Refs:** plans/dataset-circle-capture.md, ветка feat/dataset-circle-capture
+
+### Контекст
+
+Требование: показывать НЕСКОЛЬКО дисплеев одновременно в главной области GUI
+(`ImagePanelWidget`), с toggle вкл/выкл и упорядочиванием по позиции. До этого
+панель жёстко показывала единственный слот «main» (хардкод в `app.py`).
+
+### Решение
+
+1. **Поле `enabled: bool = True`** добавлено в `DisplayDefinition` (entity) и
+   `DisplaySpec` (protocol). Default `True` → бэк-совместимость: рецепты без
+   `enabled` показывают дисплей. Round-trip через `definition_to_spec` /
+   `spec_to_definition_dict` и YAML рецепта.
+
+2. **Транспорт мульти-дисплея — классификация по `sender`, НЕ per-display
+   SHM-каналы.** Кадры всех дисплеев уже приходят в GUI через единый
+   `data_receiver` → `DataReceiverBridge` (оба процесса draw/maskview имеют
+   `chain_targets: [gui]`). Различитель — поле `sender` (имя процесса-отправителя),
+   присутствует в КАЖДОМ IPC-сообщении. Привязка `blueprint.displays`
+   (node_id→display_id; node_id = `process.plugin.port`) даёт карту
+   `process_name → display_id`. `_on_frame_received` кладёт кадр в слот по sender,
+   fallback на «main».
+
+3. **Раскладка — в ряд, порядок по `position.x`.** `ImagePanelWidget.set_displays`
+   фильтрует enabled, сортирует по `(x, y)`, пересобирает слоты. Заложено под
+   свободные позиции x/y в будущем (сейчас position влияет только на порядок).
+
+4. **Реактивность:** новое событие `DisplaysChanged` (domain) эмитится presenter'ом
+   вкладки Displays при create/delete/toggle; главная панель пересобирает слоты.
+   Плюс пересборка на `RecipeActivated`.
+
+### Отвергнутые альтернативы
+
+- **Per-display SHM-каналы `display.<id>` (рекомендация в задаче, путь PreviewWindow):**
+  отвергнут. PreviewWindow подписывается на `display.<id>` через
+  `register_broadcast_route`, но НИКТО не публикует в эти каналы внутри
+  GUI-процесса — это заготовка Phase 4 (окно показывает «Ожидание кадров...»).
+  Поднимать второй транспорт ради главной панели — дублирование; реальные кадры
+  уже доступны через `data_receiver` с надёжным различителем `sender`.
+- **Идентификатор дисплея через `frame_trace._from`:** отвергнут — поле живёт
+  только при `INSPECTOR_FRAME_TRACE=1`, ненадёжно. `sender` есть всегда.
+- **id дисплея вводит пользователь:** отвергнут по требованию владельца — id
+  генерируется автоматически (`display_<N>`), поле read-only; name-default
+  `display_<N>` при пустом вводе.
+
+### Последствия
+
+- Бэк-совместимо: рецепты с одним дисплеем / без `enabled` / без привязок →
+  единственный слот «main» (старое поведение через fallback).
+- **Breaking (внутренний):** `DisplaysPresenter.on_create` больше не берёт id из
+  формы — тесты обновлены. `ProjectEvent` union: 15 → 16 (+`DisplaysChanged`).
+- `DisplayCatalogFromRecipe.update(spec)` добавлен — обновление определения
+  in-place БЕЗ потери привязок `blueprint.displays` (важно для toggle enabled;
+  unregister+register снёс бы привязки).
+
 ## DOM-001: display = binding (привязка), не wire
 
 **Дата:** 2026-05-29

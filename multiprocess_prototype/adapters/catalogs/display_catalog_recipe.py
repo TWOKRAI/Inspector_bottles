@@ -166,6 +166,44 @@ class DisplayCatalogFromRecipe:
         updated = recipe.model_copy(update={"displays": tuple(new_displays)})
         self._store.write(slug, updated)
 
+    def update(self, spec: DisplaySpec) -> bool:
+        """Обновить существующее определение дисплея in-place (по display_id).
+
+        В отличие от unregister+register, СОХРАНЯЕТ привязки
+        ``blueprint.displays`` (node_id->display_id) и порядок определений —
+        важно для toggle enabled и редактирования полей без потери маршрутизации.
+
+        Args:
+            spec: новое определение (display_id должен существовать в рецепте).
+
+        Returns:
+            True если обновлено, False если рецепта/дисплея нет.
+        """
+        slug = self._get_active_slug()
+        if slug is None:
+            return False
+        recipe = self._store.read(slug)
+        if recipe is None:
+            return False
+
+        defn_dict = spec_to_definition_dict(spec)
+        new_defn = DisplayDefinition.from_dict(defn_dict)
+
+        found = False
+        new_displays: list[DisplayDefinition] = []
+        for d in recipe.displays:
+            if d.id == spec.display_id:
+                new_displays.append(new_defn)
+                found = True
+            else:
+                new_displays.append(d)
+        if not found:
+            return False
+
+        updated = recipe.model_copy(update={"displays": tuple(new_displays)})
+        self._store.write(slug, updated)
+        return True
+
     def unregister(self, display_id: str) -> bool:
         """Удалить дисплей по id из активного рецепта.
 

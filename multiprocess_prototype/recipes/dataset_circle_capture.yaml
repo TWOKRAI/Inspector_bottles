@@ -341,13 +341,14 @@ blueprint:
 displays:
   - id: main
     name: Кадр + круги + линия
+    enabled: true          # показывать в главной области (toggle во вкладке Displays)
     width: 1280
     height: 720
     format: BGR
     fps_limit: 30.0
     ring_buffer_blocks: 3
     position:
-      x: 0
+      x: 0                 # порядок в ряд по X (main левее mask)
       y: 0
     fit: contain
     scale: 100
@@ -355,13 +356,14 @@ displays:
     flip: none
   - id: mask
     name: Маска белого (hsv_mask)
+    enabled: true          # выключить → дисплей исчезнет из главной области
     width: 1280
     height: 720
     format: BGR
     fps_limit: 30.0
     ring_buffer_blocks: 3
     position:
-      x: 0
+      x: 1000              # правее main (порядок по position.x)
       y: 0
     fit: contain
     scale: 100

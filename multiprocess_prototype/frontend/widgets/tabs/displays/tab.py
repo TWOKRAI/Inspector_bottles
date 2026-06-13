@@ -144,11 +144,14 @@ class DisplaysTab(BaseListNavTab):
         # - управляет orphan/reconnect при смене рецепта (Task 2.3).
         self._window_manager = PreviewWindowManager()
 
-        # Presenter получает store=services.displays (DisplayCatalog Protocol)
+        # Presenter получает store=services.displays (DisplayCatalog Protocol).
+        # event_bus=services.events — для эмита DisplaysChanged (главная панель
+        # пересобирает слоты при создании/удалении/toggle дисплея).
         self._presenter = DisplaysPresenter(
             store=services.displays,
             view=self,
             preview_callback=self._open_preview_window,
+            event_bus=services.events,
         )
 
         # Подписка presenter'а на RecipeActivated (Task 2.3):
@@ -264,10 +267,13 @@ class DisplaysTab(BaseListNavTab):
             spec: спецификация дисплея или None.
         """
         if spec is None:
-            # Базовые
-            self._id_edit.setReadOnly(False)
+            # Базовые. ID всегда read-only (генерируется автоматически при создании).
             self._id_edit.clear()
             self._name_edit.clear()
+            # blockSignals: программная установка не должна триггерить on_set_enabled
+            self._enabled_cb.blockSignals(True)
+            self._enabled_cb.setChecked(True)
+            self._enabled_cb.blockSignals(False)
             self._width_spin.setValue(1280)
             self._height_spin.setValue(720)
             self._format_combo.setCurrentText("BGR")
@@ -286,10 +292,13 @@ class DisplaysTab(BaseListNavTab):
             self._crop_w_spin.setValue(1280)
             self._crop_h_spin.setValue(720)
         else:
-            # Базовые
-            self._id_edit.setReadOnly(True)
+            # Базовые (id всегда read-only)
             self._id_edit.setText(spec.display_id)
             self._name_edit.setText(spec.display_name)
+            # blockSignals: программная установка не должна триггерить on_set_enabled
+            self._enabled_cb.blockSignals(True)
+            self._enabled_cb.setChecked(bool(getattr(spec, "enabled", True)))
+            self._enabled_cb.blockSignals(False)
             self._width_spin.setValue(spec.width)
             self._height_spin.setValue(spec.height)
             fmt = spec.format if spec.format in _PIXEL_FORMATS else "BGR"
@@ -349,6 +358,7 @@ class DisplaysTab(BaseListNavTab):
         return {
             "id": self._id_edit.text().strip(),
             "name": self._name_edit.text().strip(),
+            "enabled": self._enabled_cb.isChecked(),
             "width": self._width_spin.value(),
             "height": self._height_spin.value(),
             "format": self._format_combo.currentText(),
@@ -401,15 +411,25 @@ class DisplaysTab(BaseListNavTab):
         base_layout.setContentsMargins(8, 12, 8, 8)
         base_layout.setSpacing(8)
 
-        # ID — read-only при выборе существующего
+        # ID — генерируется автоматически, всегда read-only (пользователь НЕ вводит).
+        # При создании presenter подставит display_<N>; при выборе — id записи.
         self._id_edit = QLineEdit()
-        self._id_edit.setPlaceholderText("Уникальный идентификатор")
+        self._id_edit.setReadOnly(True)
+        self._id_edit.setPlaceholderText("(генерируется автоматически)")
         base_layout.addRow("ID:", self._id_edit)
 
         # Название
         self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("Имя дисплея")
+        self._name_edit.setPlaceholderText("Имя дисплея (по умолчанию display_<N>)")
         base_layout.addRow("Название:", self._name_edit)
+
+        # Показывать в главной области (toggle вкл/выкл дисплея).
+        # Изменение применяется сразу к выбранному дисплею (persist в рецепт).
+        self._enabled_cb = QCheckBox("Показывать в главной области")
+        self._enabled_cb.setChecked(True)
+        self._enabled_cb.setToolTip("Если включено — дисплей отображается в главной области GUI рядом с другими")
+        self._enabled_cb.toggled.connect(self._on_enabled_toggled)
+        base_layout.addRow(self._enabled_cb)
 
         # Ширина
         self._width_spin = QSpinBox()
@@ -531,6 +551,20 @@ class DisplaysTab(BaseListNavTab):
 
         form_vbox.addWidget(render_group)
         form_vbox.addStretch(1)
+
+    def _on_enabled_toggled(self, enabled: bool) -> None:
+        """Применить toggle «Показывать в главной области» к выбранному дисплею.
+
+        Игнорируется при программном заполнении формы (show_entry) — там
+        чекбокс обновляется через blockSignals. Срабатывает только на
+        пользовательское переключение для уже выбранного дисплея.
+
+        Args:
+            enabled: новое состояние чекбокса (True — показывать).
+        """
+        if self._selected_id is None:
+            return
+        self._presenter.on_set_enabled(self._selected_id, enabled)
 
     def _on_crop_toggled(self, enabled: bool) -> None:
         """Включить/выключить поля crop при изменении галочки.

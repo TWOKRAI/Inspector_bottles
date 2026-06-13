@@ -658,8 +658,15 @@ def run_gui(process: "GuiProcess") -> None:
 
     propagate_access_context_to_tree(window, auth_ctx.state)
 
-    # 6. Подключить bridge callbacks
-    _setup_bridge_callbacks(process, image_panel, window)
+    # 6. Подключить bridge callbacks (+ мульти-дисплей: слоты и маршрутизация
+    #    кадров по sender строятся из активного рецепта; пересборка на RecipeActivated)
+    _setup_bridge_callbacks(
+        process,
+        image_panel,
+        window,
+        recipe_manager=_recipe_manager,
+        event_bus=event_bus,
+    )
 
     # 7. Запустить таймеры (fps, safety)
     _setup_timers(app, process, window)
@@ -675,8 +682,80 @@ def _setup_bridge_callbacks(
     process: "GuiProcess",
     image_panel: ImagePanelWidget,
     window: MainWindow,
+    *,
+    recipe_manager: object | None = None,
+    event_bus: object | None = None,
 ) -> None:
-    """Подключить bridge signals к виджетам."""
+    """Подключить bridge signals к виджетам.
+
+    Мульти-дисплей (ветка feat/dataset-circle-capture):
+      - слоты главной панели строятся из секции ``displays`` активного рецепта
+        (enabled-фильтр + сортировка по position.x внутри set_displays);
+      - входящие кадры маршрутизируются по ``sender`` (имя процесса) в нужный
+        слот через карту привязок ``blueprint.displays`` (node_id->display_id);
+      - на ``RecipeActivated`` слоты и карта пересобираются.
+
+    Бэк-совместимость: рецепт без секции displays / без привязок → один слот
+    "main" и все кадры в него (текущее поведение).
+    """
+    from .widgets.image_panel.recipe_displays import (
+        build_frame_routing,
+        build_panel_displays,
+        resolve_display_id,
+    )
+
+    # Карта маршрутизации process_name -> display_id (мутабельна: обновляется
+    # из замыкания при пересборке на RecipeActivated).
+    _routing: dict[str, str] = {}
+
+    def _read_active_recipe() -> dict | None:
+        """Прочитать raw-dict активного рецепта (None если недоступен)."""
+        if recipe_manager is None:
+            return None
+        try:
+            get_active = getattr(recipe_manager, "get_active", None)
+            read_recipe = getattr(recipe_manager, "read_recipe", None)
+            if get_active is None or read_recipe is None:
+                return None
+            slug = get_active()
+            if not slug:
+                return None
+            return read_recipe(slug)
+        except Exception as exc:  # noqa: BLE001 — конфиг-чтение не должно валить GUI
+            process._log_warning(f"мульти-дисплей: чтение рецепта не удалось: {exc}", module="gui")
+            return None
+
+    def _rebuild_displays() -> None:
+        """Пересобрать слоты панели и карту маршрутизации из активного рецепта."""
+        recipe = _read_active_recipe()
+        displays = build_panel_displays(recipe)
+        _routing.clear()
+        _routing.update(build_frame_routing(recipe))
+        try:
+            image_panel.set_displays(displays)
+        except Exception as exc:  # noqa: BLE001 — UI-перестройка не должна валить GUI
+            process._log_warning(f"мульти-дисплей: set_displays не удалось: {exc}", module="gui")
+        process._log_info(
+            f"мульти-дисплей: слотов={len(displays) or 1}, routing={_routing}",
+            module="gui",
+        )
+
+    # Первичная сборка слотов под активный рецепт (до прихода кадров).
+    _rebuild_displays()
+
+    # Пересборка при смене рецепта (RecipeActivated) и при правке дисплеев во
+    # вкладке Displays (DisplaysChanged — toggle enabled / create / delete).
+    if event_bus is not None:
+        try:
+            from multiprocess_prototype.domain.events import DisplaysChanged, RecipeActivated
+
+            subscribe = getattr(event_bus, "subscribe", None)
+            if subscribe is not None:
+                subscribe(RecipeActivated, lambda _e: _rebuild_displays())
+                subscribe(DisplaysChanged, lambda _e: _rebuild_displays())
+        except Exception as exc:  # noqa: BLE001
+            process._log_warning(f"мульти-дисплей: подписка на события дисплеев не удалась: {exc}", module="gui")
+
     _frame_trace_cnt = 0
 
     def _on_frame_received(msg_dict: dict) -> None:
@@ -689,6 +768,7 @@ def _setup_bridge_callbacks(
             process._log_info(
                 f"[TRACE] _on_frame_received #{_frame_trace_cnt}: "
                 f"has_frame={frame is not None}, "
+                f"sender={msg_dict.get('sender', '?')}, "
                 f"frame_shape={frame.shape if frame is not None and hasattr(frame, 'shape') else None}, "
                 f"data_type={msg_dict.get('data_type', '?')}, "
                 f"keys={list(msg_dict.keys())[:10]}",
@@ -696,7 +776,9 @@ def _setup_bridge_callbacks(
             )
 
         if frame is not None:
-            image_panel.display_frame("main", frame)
+            # Маршрутизация по sender → слот дисплея (fallback "main").
+            slot_id = resolve_display_id(msg_dict, _routing, default="main")
+            image_panel.display_frame(slot_id, frame)
             window.increment_frame_count()
             # Сквозная задержка: source штампует data.capture_ts = time.time() при
             # захвате; здесь, на выходе всей цепочки, считаем now - capture_ts.

@@ -129,6 +129,9 @@ class DisplayDefinition(SchemaBase):
     # --- SHM-параметры ---
     id: Annotated[str, FieldMeta("Уникальный ID дисплея (ключ ссылки)")]
     name: Annotated[str, FieldMeta("Отображаемое имя дисплея")] = ""
+    # Показывать ли дисплей в главной области GUI (toggle вкл/выкл).
+    # Бэк-совместимо: отсутствует в YAML → True (показывать).
+    enabled: Annotated[bool, FieldMeta("Показывать дисплей в главной области GUI")] = True
     width: Annotated[int, FieldMeta("Ширина SHM-сегмента (пиксели)")] = 1280
     height: Annotated[int, FieldMeta("Высота SHM-сегмента (пиксели)")] = 720
     format: Annotated[str, FieldMeta("Формат пикселей: BGR | RGB | GRAY | RGBA")] = "BGR"

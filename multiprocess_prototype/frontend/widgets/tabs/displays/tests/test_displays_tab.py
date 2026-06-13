@@ -179,10 +179,14 @@ def test_presenter_create_calls_register(
     store: FakeDisplayCatalog,
     mock_view: MagicMock,
 ):
-    """mock view.get_form_data returns dict -> on_create() -> store.register + refresh_list."""
+    """on_create() -> id генерируется автоматически (display_1), store.register + refresh_list.
+
+    Мульти-дисплей: id больше НЕ берётся из формы (поле read-only/auto).
+    """
     mock_view.get_form_data.return_value = {
-        "id": "new_display",
+        "id": "",  # форма не задаёт id (read-only)
         "name": "Новый дисплей",
+        "enabled": True,
         "width": 1280,
         "height": 720,
         "format": "BGR",
@@ -192,8 +196,9 @@ def test_presenter_create_calls_register(
 
     presenter.on_create()
 
-    # Запись появилась в store
-    assert store.resolve("new_display") is not None
+    # Запись появилась в store под auto-id display_1
+    assert store.resolve("display_1") is not None
+    assert store.resolve("display_1").display_name == "Новый дисплей"
     # refresh_list был вызван
     mock_view.refresh_list.assert_called()
 
@@ -243,17 +248,22 @@ def test_presenter_duplicate_creates_copy(
 # ---------------------------------------------------------------------------
 
 
-def test_presenter_create_duplicate_shows_error(
+def test_presenter_create_auto_id_skips_taken(
     presenter: DisplaysPresenter,
     store: FakeDisplayCatalog,
     mock_view: MagicMock,
 ):
-    """on_create с уже существующим id -> view.show_error вызван."""
-    store.register(_make_spec("existing"))
+    """auto-id пропускает занятый display_1 → создаёт display_2 (без ошибки).
+
+    Мульти-дисплей: id генерируется автоматически и всегда уникален —
+    коллизия по id из формы больше невозможна.
+    """
+    store.register(_make_spec("display_1"))
 
     mock_view.get_form_data.return_value = {
-        "id": "existing",
-        "name": "Дубликат",
+        "id": "",
+        "name": "Второй",
+        "enabled": True,
         "width": 1280,
         "height": 720,
         "format": "BGR",
@@ -263,7 +273,8 @@ def test_presenter_create_duplicate_shows_error(
 
     presenter.on_create()
 
-    mock_view.show_error.assert_called_once()
+    assert store.resolve("display_2") is not None
+    mock_view.show_error.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -319,10 +330,11 @@ def test_presenter_create_with_render_fields(
     store: FakeDisplayCatalog,
     mock_view: MagicMock,
 ):
-    """on_create с render-полями -> store содержит scale/fit/crop."""
+    """on_create с render-полями -> store содержит scale/fit/crop (id = auto display_1)."""
     mock_view.get_form_data.return_value = {
-        "id": "render_test",
+        "id": "",  # auto-id
         "name": "Render Test",
+        "enabled": True,
         "width": 1920,
         "height": 1080,
         "format": "BGR",
@@ -338,7 +350,7 @@ def test_presenter_create_with_render_fields(
 
     presenter.on_create()
 
-    spec = store.resolve("render_test")
+    spec = store.resolve("display_1")
     assert spec is not None
     assert spec.scale == 150
     assert spec.fit == "cover"

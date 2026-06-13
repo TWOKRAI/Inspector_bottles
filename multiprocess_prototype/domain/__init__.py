@@ -82,6 +82,7 @@ from .commands import (
 )
 from .events import (
     DisplayBound,
+    DisplaysChanged,
     DisplayUnbound,
     PluginConfigChanged,
     PluginInserted,
@@ -208,6 +209,7 @@ __all__ = [
     "WireConnected",
     "WireDisconnected",
     "DisplayBound",
+    "DisplaysChanged",
     "DisplayUnbound",
     "TargetProcessAssigned",
     "RecipeActivated",

@@ -197,6 +197,17 @@ class FakeDisplayCatalog:
             raise ValueError(f"Display '{spec.display_id}' already registered")
         self._specs[spec.display_id] = spec
 
+    def update(self, spec: DisplaySpec) -> bool:
+        """Обновить существующий дисплей in-place (по display_id).
+
+        Зеркалит DisplayCatalogFromRecipe.update — сохраняет наличие записи,
+        используется для toggle enabled. Возвращает False если дисплей не найден.
+        """
+        if spec.display_id not in self._specs:
+            return False
+        self._specs[spec.display_id] = spec
+        return True
+
     def unregister(self, display_id: str) -> bool:
         return self._specs.pop(display_id, None) is not None
 

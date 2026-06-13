@@ -169,6 +169,20 @@ class DisplayUnbound:
     display_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class DisplaysChanged:
+    """Эмитится когда изменился набор/параметры определений дисплеев рецепта.
+
+    Поводы: создание/удаление/дублирование дисплея, toggle enabled, правка полей.
+    Слушатель (главная панель ImagePanel) пересобирает слоты из активного рецепта.
+    Несёт slug рецепта (для контекста; подписчик перечитывает рецепт сам).
+    """
+
+    event_type: ClassVar[str] = "DisplaysChanged"
+
+    slug: str | None = None
+
+
 # ==============================================================================
 # Target / Recipe / Topology-события
 # ==============================================================================
@@ -213,7 +227,7 @@ class TopologyReplaced:
 
 
 # ==============================================================================
-# Discriminated union всех 14 событий
+# Discriminated union всех событий
 # ==============================================================================
 
 ProjectEvent = Union[
@@ -228,6 +242,7 @@ ProjectEvent = Union[
     WireDisconnected,
     DisplayBound,
     DisplayUnbound,
+    DisplaysChanged,
     TargetProcessAssigned,
     RecipeActivated,
     RecipeDeactivated,
@@ -247,6 +262,7 @@ __all__ = [
     "WireDisconnected",
     "DisplayBound",
     "DisplayUnbound",
+    "DisplaysChanged",
     "TargetProcessAssigned",
     "RecipeActivated",
     "RecipeDeactivated",
