@@ -1,0 +1,374 @@
+# Рецепт dataset_circle_capture — сбор датасета: камера → ROI → маска белого →
+# круги по маске → линия (триггер) → квадратный crop вокруг центра → сохранение (+ sidecar).
+#
+# Топология:
+#   camera_0[hikvision] → roi[region_split] → detector[hsv_mask → circle_detector]
+#     detector ──┬→ line[line_filter] ──┬→ crop[center_crop] → saver[frame_saver]   (ЧИСТЫЙ кадр + .json)
+#                │                       └→ draw                                      (дисплей main)
+#                ├→ draw[circle_draw → overlay_draw]  (Join: круги + линия)  → display "main"
+#                └→ maskview[mask_to_frame]           (маска как кадр)        → display "mask"
+#
+# detector: hsv_mask изолирует белый объект → item["mask"]; circle_detector(input_key=mask,
+#   keep_mask=true) ищет круги по ЧИСТОЙ маске (мало ложных) и НЕ рисует на кадре — кадр идёт
+#   в center_crop чистым (важно для датасета). detections несут center+radius, маска сохраняется
+#   для дисплея.
+# Два дисплея для тюнинга: "main" (кадр + круги + линия), "mask" (что видит hsv_mask).
+#
+# === ТЮНИНГ (всё в ПИКСЕЛЯХ — калибровки мм↔px пока нет, см. план Часть 2) ===
+#   1) ROI region_split.regions[0]: x/y/width/height.
+#   2) hsv_mask: s_max (верх насыщенности) / v_min (низ яркости) белого — смотреть дисплей "mask".
+#   3) circle_detector: min/max_radius (px в ROI), param2 (меньше → больше ложных) — смотреть "main".
+#   4) line_filter: center_x/center_y/angle/zone_width (ROI-координаты).
+#   5) center_crop.side_px — сторона квадрата.
+#
+# === SMOKE без Hikvision: заменить camera_0 на Plugins.sources.capture.plugin.CapturePlugin ===
+# Запуск: python multiprocess_prototype/run.py dataset_circle_capture
+name: dataset_circle_capture
+version: 3
+description: "Камера → маска белого → круги → линия(триггер) → crop → сохранение датасета (+2 дисплея)"
+
+blueprint:
+  name: default
+  description: ''
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.process.GuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+    - process_name: devices
+      plugins:
+        - plugin_name: device_hub
+          plugin_class: Plugins.hub.device_hub.plugin.DeviceHubPlugin
+          category: hub
+          config:
+            registry_path: data/devices.yaml
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+    - process_name: camera_0
+      plugins:
+        - plugin_name: hikvision
+          plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
+          category: source
+          config:
+            camera_id: 0
+            camera_index: 0
+            resolution_width: 1440
+            resolution_height: 1080
+            fps: 25
+            auto_start: true
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      target_process:
+      chain_targets:
+        - roi
+      description:
+      protected: false
+      category:
+      metadata:
+        source_target_fps: 25
+    - process_name: roi
+      plugins:
+        - plugin_name: region_split
+          plugin_class: Plugins.processing.region_split.plugin.RegionSplitPlugin
+          category: processing
+          config:
+            camera_id: 0
+            regions:
+              - name: roi_0
+                x: 560
+                y: 240
+                width: 800
+                height: 600
+                target: detector
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process: crop
+      chain_targets:
+        - detector
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: detector
+      plugins:
+        - plugin_name: hsv_mask
+          plugin_class: Plugins.processing.hsv_mask.plugin.HsvMaskPlugin
+          category: processing
+          config:
+            h_min: 0
+            h_max: 179
+            s_min: 0
+            s_max: 60
+            v_min: 180
+            v_max: 255
+        - plugin_name: circle_detector
+          plugin_class: Plugins.processing.circle_detector.plugin.CircleDetectorPlugin
+          category: processing
+          config:
+            input_key: mask
+            keep_mask: true
+            mode: gradient
+            blur_method: gaussian
+            blur_ksize: 5
+            dp: 1.2
+            min_dist: 100
+            param1: 100
+            param2: 25
+            min_radius: 60
+            max_radius: 250
+            draw_circles: false
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - line
+        - crop
+        - draw
+        - maskview
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: line
+      plugins:
+        - plugin_name: line_filter
+          plugin_class: Plugins.filter.line_filter.plugin.LineFilterPlugin
+          category: filter
+          config:
+            center_x: 400
+            center_y: 300
+            angle: 0
+            zone_width: 80
+            mode: enter_zone
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - crop
+        - draw
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: crop
+      plugins:
+        - plugin_name: center_crop
+          plugin_class: Plugins.processing.center_crop.plugin.CenterCropPlugin
+          category: processing
+          config:
+            side_px: 300
+            drop_partial: false
+            pad_if_oob: true
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - saver
+      description:
+      protected: false
+      category:
+      metadata:
+        inspector:
+          mode: join
+          inputs:
+            - frame
+            - overlay
+          primary: frame
+          timeout_sec: 0.25
+    - process_name: saver
+      plugins:
+        - plugin_name: frame_saver
+          plugin_class: Plugins.io.frame_saver.plugin.FrameSaverPlugin
+          category: output
+          config:
+            output_dir: data/dataset/circles
+            filename_prefix: circle
+            subfolder_by_date: true
+            image_format: png
+            save_mode: stream
+            save_every_n: 1
+            write_sidecar: true
+            max_days: 0
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets: []
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: draw
+      plugins:
+        - plugin_name: circle_draw
+          plugin_class: Plugins.render.circle_draw.plugin.CircleDrawPlugin
+          category: rendering
+          config:
+            color_bgr:
+              - 0
+              - 255
+              - 0
+            thickness: 2
+            show_radius: true
+        - plugin_name: overlay_draw
+          plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin
+          category: rendering
+          config: {}
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - gui
+      description:
+      protected: false
+      category:
+      metadata:
+        inspector:
+          mode: join
+          inputs:
+            - frame
+            - overlay
+          primary: frame
+          timeout_sec: 0.25
+    - process_name: maskview
+      plugins:
+        - plugin_name: mask_to_frame
+          plugin_class: Plugins.processing.mask_to_frame.plugin.MaskToFramePlugin
+          category: processing
+          config:
+            source_key: mask
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: low
+      target_process:
+      chain_targets:
+        - gui
+      description:
+      protected: false
+      category:
+      metadata: {}
+  wires:
+    - source: camera_0.hikvision.frame
+      target: roi.region_split.frame
+      description: ''
+    - source: roi.region_split.region
+      target: detector.hsv_mask.frame
+      description: ''
+    - source: detector.circle_detector.frame
+      target: crop.center_crop.frame
+      description: ''
+    - source: detector.circle_detector.frame
+      target: draw.circle_draw.frame
+      description: ''
+    - source: detector.circle_detector.detections
+      target: draw.circle_draw.detections
+      description: ''
+    - source: detector.circle_detector.detections
+      target: line.line_filter.detections
+      description: ''
+    - source: detector.circle_detector.mask
+      target: maskview.mask_to_frame.mask
+      description: ''
+    - source: line.line_filter.overlay
+      target: crop.center_crop.trigger_in
+      description: ''
+    - source: line.line_filter.overlay
+      target: draw.overlay_draw.overlay
+      description: ''
+    - source: crop.center_crop.frame
+      target: saver.frame_saver.frame
+      description: ''
+  displays:
+    - node_id: draw.overlay_draw.frame
+      display_id: main
+    - node_id: maskview.mask_to_frame.frame
+      display_id: mask
+  metadata:
+    gui_positions: &id001
+      camera_0.hikvision:
+        - 16.0
+        - 160.0
+      roi.region_split:
+        - 556.0
+        - 160.0
+      detector.hsv_mask:
+        - 1076.0
+        - 160.0
+      detector.circle_detector:
+        - 1276.0
+        - 160.0
+      line.line_filter:
+        - 1616.0
+        - 100.0
+      maskview.mask_to_frame:
+        - 1616.0
+        - 220.0
+      crop.center_crop:
+        - 2136.0
+        - 40.0
+      draw.circle_draw:
+        - 2136.0
+        - 160.0
+      draw.overlay_draw:
+        - 2336.0
+        - 160.0
+      mask:
+        - 2120.0
+        - 240.0
+      saver.frame_saver:
+        - 2676.0
+        - 100.0
+      main:
+        - 2660.0
+        - 180.0
+    locked_nodes: []
+displays:
+  - id: main
+    name: Кадр + круги + линия
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+  - id: mask
+    name: Маска белого (hsv_mask)
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+gui_positions: *id001

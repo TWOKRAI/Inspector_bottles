@@ -96,6 +96,23 @@ class FrameSaverRegisters(SchemaBase):
         ),
     ] = 85
 
+    # --- Sidecar-метаданные (для датасета) ---
+    write_sidecar: Annotated[
+        bool,
+        FieldMeta(
+            "Write Sidecar JSON",
+            info="Сохранять .json с метаданными рядом с кадром (из item[sidecar_key]); для разметки датасета",
+        ),
+    ] = False
+
+    sidecar_key: Annotated[
+        str,
+        FieldMeta(
+            "Sidecar Key",
+            info="Ключ во входном item с dict-метаданными для sidecar JSON",
+        ),
+    ] = "sidecar"
+
     # --- Режим сохранения ---
     save_mode: Annotated[
         Literal["stream", "trigger"],

@@ -71,3 +71,5 @@
 - [Device hub](project_device_hub.md) — always-on процесс devices, YAML-протоколы, desired-state, quality codes; Фазы 0-5+фиксы Fable DONE; 3 диагностированных GUI-бага НЕ починены; NEXT: plans/device-tree-recipe.md (дерево устройств + рецепт-истина), исполняет Opus
 - [Dataset-gen service](project_dataset_gen_service.md) — DONE: универсальный cut-and-paste генератор (класс+угол), пресет ru-букв; грабли: центр (size-1)/2, rel_threshold, bbox-центрирование глифа; NEXT обучающий сервис
 - [ml_train service](project_ml_train_service.md) — DONE v1: универсальное обучение+выбор моделей (MobileNetV3/V4, timm/<имя>), 3 источника данных, ONNX→ml_inference; follow-up: resize-политика в sidecar
+- [Always probe qt-mcp on launch](feedback_qt_mcp_always_probe.md) — every smoke run: QT_MCP_PROBE=1 python run.py <recipe> (port 9142)
+- [Hikvision anamorphic resize](project_hikvision_aspect_ratio.md) — plugin resizes native 4:3 → target anamorphically; set resolution to 4:3 or round objects become ellipses

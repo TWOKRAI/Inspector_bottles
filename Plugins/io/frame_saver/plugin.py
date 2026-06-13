@@ -22,6 +22,7 @@ V3_MY_PURE: plugin самодостаточен — все параметры В
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import threading
@@ -234,6 +235,8 @@ class FrameSaverPlugin(ProcessModulePlugin):
                     "format": self._reg.image_format,
                 }
                 self._last_meta = meta
+                if self._reg.write_sidecar:
+                    self._write_sidecar(path, item, meta)
             else:
                 self._on_write_error(tmp)
 
@@ -246,6 +249,34 @@ class FrameSaverPlugin(ProcessModulePlugin):
             self._cleanup_old_days(Path(self._reg.output_dir).resolve())
 
         return meta
+
+    def _write_sidecar(self, path: Path, item: dict, meta: dict) -> None:
+        """Записать .json с метаданными рядом с кадром (для разметки датасета).
+
+        Источник — item[sidecar_key] (dict), дополненный полями кадра (w/h/ts/file).
+        Атомарно (*.tmp + replace). Ошибки не роняют сохранение кадра.
+        """
+        payload = item.get(self._reg.sidecar_key)
+        if not isinstance(payload, dict):
+            return
+        data = {
+            **payload,
+            "file": path.name,
+            "width": meta["w"],
+            "height": meta["h"],
+            "saved_ts": meta["ts"],
+        }
+        sidecar = path.with_suffix(".json")
+        tmp = sidecar.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(sidecar)
+        except (OSError, TypeError, ValueError) as exc:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            self._ctx.log_error(f"FrameSaver: sidecar не записан для {path.name}: {exc}")
 
     def _resolve_dir(self) -> Path:
         """Папка дня (output_dir/<date>): ленивое создание + resume индекса при смене суток.
