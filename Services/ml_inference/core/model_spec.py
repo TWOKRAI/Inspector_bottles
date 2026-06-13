@@ -18,6 +18,8 @@ TaskType = Literal["classification", "detection"]
 BackendType = Literal["onnx", "torch"]
 LayoutType = Literal["NCHW", "NHWC"]
 ColorOrder = Literal["RGB", "BGR"]
+ResizePolicy = Literal["letterbox", "stretch", "center_crop"]
+SymmetryType = Literal["none", "180", "full"]
 
 
 class Normalize(BaseModel):
@@ -41,8 +43,16 @@ class ModelSpec(BaseModel):
     input_size: tuple[int, int] = (224, 224)  # (H, W)
     layout: LayoutType = "NCHW"
     color: ColorOrder = "RGB"
+    resize_policy: ResizePolicy = "letterbox"
     normalize: Normalize = Field(default_factory=Normalize)
     labels_path: Path | None = None
+
+    # --- мультиголовость: классификация + регрессия угла -----------------
+    output_name: str = "logits"  # имя выхода-классификатора
+    angle_head: bool = False  # есть ли голова угла (sin, cos)
+    angle_output_name: str = "angle"  # имя выхода угла
+    #: симметрия класса для декода угла: {class_name: none|180|full}
+    symmetry: dict[str, SymmetryType] = Field(default_factory=dict)
 
     @field_validator("input_size", mode="before")
     @classmethod

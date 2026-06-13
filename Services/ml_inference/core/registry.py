@@ -100,6 +100,13 @@ class ModelRegistry:
         norm_raw = raw.get("normalize") or {}
         normalize = Normalize(**norm_raw) if isinstance(norm_raw, dict) else Normalize()
 
+        if "input_size" not in raw:
+            logger.warning(
+                "ModelRegistry: sidecar %s без input_size — использую дефолт (224,224); "
+                "укажите input_size явно (размер обучения), иначе препроцесс неверен",
+                sidecar.name,
+            )
+
         return ModelSpec(
             name=str(raw.get("name") or weights.stem),
             task=raw.get("task", "classification"),
@@ -108,8 +115,13 @@ class ModelRegistry:
             input_size=raw.get("input_size", (224, 224)),
             layout=raw.get("layout", "NCHW"),
             color=raw.get("color", "RGB"),
+            resize_policy=raw.get("resize_policy", "letterbox"),
             normalize=normalize,
             labels_path=labels_path,
+            output_name=raw.get("output_name", "logits"),
+            angle_head=bool(raw.get("angle_head", False)),
+            angle_output_name=raw.get("angle_output_name", "angle"),
+            symmetry=raw.get("symmetry") or {},
         )
 
     def _safe_path(self, value: str | None, default: Path | None) -> Path:
