@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from pydantic import field_validator
+
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 from ..plugins.port import Port, are_ports_compatible
 from ..plugins.registry import PluginRegistry
@@ -76,6 +78,16 @@ class ProcessConfig(SchemaBase):
         str,
         FieldMeta("Приоритет", info="normal | high | low"),
     ] = "normal"
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _priority_not_none(cls, v: Any) -> Any:
+        """GUI-нормализованные рецепты пишут пустой скаляр как explicit-null (YAML `priority:`).
+
+        priority — обязательный str с дефолтом, поэтому None/"" ломали бы валидацию при
+        hot-apply (boot маскирует это base-merge'ем, hot-apply — нет). Приводим к дефолту.
+        """
+        return "normal" if v is None or v == "" else v
 
     process_class: Annotated[
         str,
