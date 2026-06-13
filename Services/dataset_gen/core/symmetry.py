@@ -144,3 +144,26 @@ def encode_angle(angle_deg: float, symmetry: SymmetryType) -> tuple[float, float
     factor = 2.0 if symmetry == "180" else 1.0
     rad = math.radians(angle_deg * factor)
     return math.sin(rad), math.cos(rad), True
+
+
+def decode_angle(sin_v: float, cos_v: float, symmetry: SymmetryType) -> tuple[float, bool]:
+    """Декодировать (sin, cos) обратно в физический угол с учётом симметрии.
+
+    Обратная к encode_angle операция — ЕДИНЫЙ контракт train↔inference, чтобы
+    обучение и инференс не разъехались по конвенции угла.
+
+    Pre:
+      - symmetry ∈ {"none", "180", "full"}; (sin_v, cos_v) — выход angle-головы
+    Post:
+      - none: angle_deg ∈ [0, 360), angle_valid=True;
+      - 180:  angle_deg ∈ [0, 180), angle_valid=True (θ и θ+180° неразличимы);
+      - full: (0.0, False) — угол не определён, доворот не нужен.
+    """
+    if symmetry == "full":
+        return 0.0, False
+    raw_deg = math.degrees(math.atan2(sin_v, cos_v))  # ∈ (-180, 180]
+    period = 180.0 if symmetry == "180" else 360.0  # 180: 2θ → θ, период 180°
+    deg = (raw_deg / 2.0 if symmetry == "180" else raw_deg) % period
+    if deg > period - 1e-6:  # граничный шум float (≈period → 0)
+        deg = 0.0
+    return deg, True

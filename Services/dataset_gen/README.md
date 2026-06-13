@@ -154,6 +154,24 @@ python -m Services.dataset_gen.tools.make_ru_letter_sprites --out data/dataset_g
 остальные (включая С и П) — **none**. `backgrounds_dir: null` → процедурные фоны;
 для боевого датасета укажите фото реальной сцены.
 
+## Эталоны из РЕАЛЬНЫХ фото (пресет real_letters_disk)
+
+Вместо синтетических спрайтов можно вырезать эталоны из реальных снимков буквы
+на диске. Снимите 4 фото буквы под углами 0/90/180/270° (угол в имени файла),
+по подпапке на класс, и прогоните инструмент — он найдёт диск (HoughCircles),
+вырежет его в RGBA (вне круга прозрачно) и приведёт к вертикали:
+
+```bash
+python -m Services.dataset_gen.tools.cut_real_disks \
+    --input data/real_photos --out data/dataset_gen/ru_letters_real/sprites [--debug]
+# data/real_photos/<буква>/0.jpg 90.jpg 180.jpg 270.jpg → <out>/<буква>/000.png … + meta.yaml
+```
+
+4 снимка становятся 4 равноправными эталонами класса (реальная фактура/блики);
+дальше — штатный движок по пресету [`real_letters_disk.yaml`](presets/real_letters_disk.yaml)
+(вход 124×124, фон — папка реальных фото сцены). Обучение MobileNetV3 Large:
+`python -m Services.ml_train train Services/ml_train/presets/ru_letters_real.yaml`.
+
 ## Границы
 
 - НЕ обучает модель — только генерирует данные (обучающий сервис —
