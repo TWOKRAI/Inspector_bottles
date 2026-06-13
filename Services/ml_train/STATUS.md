@@ -20,7 +20,9 @@
 - `export_onnx`: ONNX (динамический batch) + sidecar + classes.txt в формате
   `ml_inference`; parity-проверка torch↔ORT; интеграционный тест с `ModelRegistry`
 - CLI: `train` / `runs` / `export` / `archs`; пресет `ru_letters_synthetic.yaml`
-- Тесты: 34 (21 без torch + 13 с torch, smoke-обучение на CPU)
+- `service.py` — фасад IService для вкладки «Сервисы» (реестр прогонов + готовность
+  ML-стека; torch НЕ импортируется при discovery)
+- Тесты: 39 + 3 фасадных (config/metrics/selection без torch; data/trainer/export — torch smoke CPU)
 
 ## Ревью
 

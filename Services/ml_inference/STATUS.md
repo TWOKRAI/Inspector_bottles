@@ -1,6 +1,7 @@
 # ml_inference — STATUS
 
 **Готовность:** foundation (классификация, ONNX backend) — 2026-06-08
+**Обновлено:** 2026-06-13 — `service.py` фасад IService (вкладка «Сервисы»: скан data/models + статус backend'ов)
 
 ## Что сделано
 
