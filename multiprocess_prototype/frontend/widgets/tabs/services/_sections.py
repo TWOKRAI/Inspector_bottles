@@ -310,7 +310,7 @@ def _nn_placeholder_factory(_ctx_arg: object) -> _PlaceholderSection:
     return _PlaceholderSection(
         key="neural_networks",
         title="Нейронные сети",
-        text="Нейронные сети будут доступны в Phase 14+",
+        text="Выберите раздел: генерация датасета, обучение или модели инференса.",
     )
 
 
@@ -370,8 +370,10 @@ def build_services_sections(
 
     # Скрываем авто-узлы сервисов, у которых есть полноценные секции:
     # hikvision_camera — секция «Hikvision Camera» в группе «Камеры»;
-    # robot_comm / vfd_comm — секция «Робот Delta» (робот + ПЧ, см. ниже).
-    service_data = [row for row in service_data if row[0] not in ("hikvision_camera", "robot_comm", "vfd_comm")]
+    # robot_comm / vfd_comm — секция «Робот Delta» (робот + ПЧ, см. ниже);
+    # dataset_gen / ml_train / ml_inference — группа «Нейронные сети».
+    _hidden = ("hikvision_camera", "robot_comm", "vfd_comm", "dataset_gen", "ml_train", "ml_inference")
+    service_data = [row for row in service_data if row[0] not in _hidden]
 
     sections: list[SectionSpec] = []
 
@@ -424,6 +426,8 @@ def build_services_sections(
 
     sections.append(build_vfd_section(services, runtime, title="ПЧ (частотный преобразователь)"))
 
+    # Группа «Нейронные сети» — ML-конвейер: генерация датасета (dataset_gen),
+    # обучение (ml_train), каталог моделей инференса (ml_inference).
     sections.append(
         SectionSpec(
             key="neural_networks",
@@ -431,6 +435,9 @@ def build_services_sections(
             factory=_nn_placeholder_factory,
         )
     )
+    from .neural import build_neural_sections
+
+    sections.extend(build_neural_sections(services, runtime, parent_key="neural_networks"))
     sections.append(
         SectionSpec(
             key="__service_paths__",
