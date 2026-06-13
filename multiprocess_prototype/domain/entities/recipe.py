@@ -79,6 +79,10 @@ class Recipe(SchemaBase):
         tuple[DisplayInstance, ...],
         FieldMeta("Привязки узлов к дисплеям"),
     ] = ()
+    devices: Annotated[
+        tuple[dict[str, Any], ...],
+        FieldMeta("Зарегистрированные устройства (top-level секция devices:, источник истины)"),
+    ] = ()
     gui_positions: dict[str, tuple[float, float]] = Field(
         default_factory=dict,
         description="Позиции узлов в GUI-редакторе: node_id → (x, y).",
@@ -142,6 +146,19 @@ class Recipe(SchemaBase):
                 else:
                     items.append(DisplayInstance.model_validate(item))
             return tuple(items)
+        return v  # type: ignore[return-value]
+
+    @field_validator("devices", mode="before")
+    @classmethod
+    def _coerce_devices(cls, v: Any) -> tuple[dict[str, Any], ...]:
+        """Конвертирует list[dict] → tuple[dict, ...] (raw-passthrough).
+
+        Устройства имеют переменную форму (transport/params зависят от kind),
+        поэтому хранятся как сырые dict'ы — их потребляют devices_sync/hub,
+        а не строгая entity. Копируем dict, чтобы не делить ссылку с raw-yaml.
+        """
+        if isinstance(v, (list, tuple)):
+            return tuple(dict(d) if isinstance(d, dict) else d for d in v)
         return v  # type: ignore[return-value]
 
     @field_validator("gui_positions", mode="before")

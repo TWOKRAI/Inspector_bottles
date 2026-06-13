@@ -124,27 +124,50 @@ class _RobotSection:
         )
 
     def _make_device_page(self, device_id: str) -> QWidget:
+        from PySide6.QtWidgets import QTabWidget
+
         from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
         from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.master_detail import (
             DeviceDetailPage,
         )
 
+        from .calibration.controller import build_calibration_controls, resolve_calibration_process
+
+        # Вкладка 1 — ручное управление роботом (как раньше).
         runner = RequestRunner()
-        widget, controller, _presenter = build_robot_controls(
+        robot_widget, robot_controller, _presenter = build_robot_controls(
             runtime=self._runtime,
             request_runner=runner,
             bindings=self._bindings,
         )
-        runner.setParent(widget)
-        if isinstance(controller, RobotWidgetController):
-            controller.set_device(device_id)
+        if isinstance(robot_controller, RobotWidgetController):
+            robot_controller.set_device(device_id)
+
+        # Вкладка 2 — визард калибровки камера↔робот (команды cal_* в процесс рецепта).
+        cal_runner = RequestRunner()
+        target = resolve_calibration_process(getattr(self._services, "recipes", None))
+        cal_widget, cal_controller, _cal_presenter = build_calibration_controls(
+            runtime=self._runtime,
+            request_runner=cal_runner,
+            bindings=self._bindings,
+            target_process=target,
+        )
+        cal_controller.set_device(device_id)
+
+        tabs = QTabWidget()
+        tabs.addTab(robot_widget, "Ручное управление")
+        tabs.addTab(cal_widget, "Калибровка")
+        runner.setParent(tabs)
+        cal_runner.setParent(tabs)
+        # Удержать controller'ы от GC (живут пока жива страница устройства).
+        tabs._keepalive = (robot_controller, cal_controller, _presenter, _cal_presenter)
 
         entry = self._recipe_store.get(device_id) or {}
         name = entry.get("name") or device_id
         return DeviceDetailPage(
             device_id=device_id,
             name=name,
-            inner_widget=widget,
+            inner_widget=tabs,
             devices_presenter=self._devices_presenter,
             on_edit=self._crud.on_edit_clicked,
             on_remove=self._crud.on_remove_clicked,

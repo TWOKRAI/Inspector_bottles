@@ -1,33 +1,48 @@
-# Рецепт dataset_circle_capture — сбор датасета: камера → ROI → маска белого →
-# круги по маске → линия (триггер) → квадратный crop вокруг центра → сохранение (+ sidecar).
+# Рецепт dataset_circle_capture — сбор датасета: камера → ROI → конверт цвета →
+# маска белого → круги → линия (триггер) → квадратный crop вокруг центра → сохранение.
 #
-# Топология:
-#   camera_0[hikvision] → roi[roi_crop] → detector[hsv_mask → circle_detector]
+# Топология (DAG — ветки от circle_detector ОБЯЗАНЫ быть отдельными процессами):
+#   camera_0[hikvision] → roi[roi_crop → color_convert] → detector[hsv_mask → circle_detector]
 #     detector ──┬→ line[line_filter] ──┬→ crop[center_crop] → saver[frame_saver]   (ЧИСТЫЙ кадр + .json)
 #                │                       └→ draw                                      (дисплей main)
 #                ├→ draw[circle_draw → overlay_draw]  (Join: круги + линия)  → display "main"
 #                └→ maskview[mask_to_frame]           (маска как кадр)        → display "mask"
 #
+# === ПРАВИЛА РАСПРЕДЕЛЕНИЯ ПЛАГИНОВ ПО ПРОЦЕССАМ (важно!) ===
+#   * Внутри процесса плагины исполняются СТРОГО ЛИНЕЙНО (выход N → вход N+1),
+#     наружу уходит ТОЛЬКО финальный выход в chain_targets (по имени процесса).
+#     Поэтому в один процесс можно слить лишь ЛИНЕЙНЫЙ участок (A→B→C).
+#   * Узел-ВЕТВЛЕНИЕ (fan-out) или узел, чей выход нужно отвести отдельно
+#     (в join/дисплей/другую ветку) — ОБЯЗАН быть отдельным процессом.
+#     Здесь circle_detector ветвится на line/crop/draw/maskview → их не слить в линию.
+#   * Валидные слияния: roi_crop→color_convert (roi), hsv_mask→circle_detector (detector).
+#   * inspector (join) — ПРЯМОЙ ключ процесса, НЕ под metadata: загрузчик читает
+#     ProcessConfig.inspector; под metadata join МОЛЧА не активируется (линия не сольётся).
+#     ВНИМАНИЕ: GUI при пересохранении переносит inspector под metadata — после правок
+#     в редакторе проверяй, что join на месте (иначе линия/crop перестают работать).
+#
 # detector: hsv_mask изолирует белый объект → item["mask"]; circle_detector(input_key=mask,
 #   keep_mask=true) ищет круги по ЧИСТОЙ маске (мало ложных) и НЕ рисует на кадре — кадр идёт
-#   в center_crop чистым (важно для датасета). detections несут center+radius, маска сохраняется
-#   для дисплея.
+#   в center_crop чистым (важно для датасета). color_convert(bgr2rgb) в roi → весь downstream
+#   (детект/дисплеи/датасет) в RGB-порядке; на белый детект перестановка R↔B не влияет.
 # Два дисплея для тюнинга: "main" (кадр + круги + линия), "mask" (что видит hsv_mask).
 #
-# === ТЮНИНГ (всё в ПИКСЕЛЯХ — калибровки мм↔px пока нет, см. план Часть 2) ===
-#   1) ROI roi_crop: x/y/width/height (скалярные live-поля — применяются на лету).
-#   2) hsv_mask: s_max (верх насыщенности) / v_min (низ яркости) белого — смотреть дисплей "mask".
-#   3) circle_detector: min/max_radius (px в ROI), param2 (меньше → больше ложных) — смотреть "main".
+# === ТЮНИНГ (всё в ПИКСЕЛЯХ — калибровки мм↔px пока нет) ===
+#   1) roi_crop: x/y/width/height (скалярные live-поля — применяются на лету).
+#   2) hsv_mask: s_max / v_min белого — смотреть дисплей "mask".
+#   3) circle_detector: min/max_radius (px в ROI), param2 (меньше → больше ложных) — "main".
 #   4) line_filter: center_x/center_y/angle/zone_width (ROI-координаты).
-#   5) center_crop.side_px — сторона квадрата.
+#   5) center_crop: size_mode=radius → сторона = 2·radius·radius_scale + 2·margin_px.
 #
 # === SMOKE без Hikvision: заменить camera_0 на Plugins.sources.capture.plugin.CapturePlugin ===
 # Запуск: python multiprocess_prototype/run.py dataset_circle_capture
 name: dataset_circle_capture
 version: 3
-description: "Камера → маска белого → круги → линия(триггер) → crop → сохранение датасета (+2 дисплея)"
+description: "Камера → ROI+конверт → маска → круги → линия(триггер) → crop → сохранение (+2 дисплея)"
 
 blueprint:
+  name: default
+  description: ''
   processes:
     - process_name: gui
       plugins: []
@@ -89,10 +104,15 @@ blueprint:
             y: 240
             width: 800
             height: 600
+        - plugin_name: color_convert
+          plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
+          category: processing
+          config:
+            mode: bgr2rgb
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
-      target_process: crop
+      target_process:
       chain_targets:
         - detector
       description:
@@ -168,12 +188,10 @@ blueprint:
           plugin_class: Plugins.processing.center_crop.plugin.CenterCropPlugin
           category: processing
           config:
-            # size_mode=radius: вырез ПОД РАЗМЕР круга (bbox круга + поля), а не фикс.
-            # сторона = 2·radius·radius_scale + 2·margin_px (radius от circle_detector).
             size_mode: radius
             radius_scale: 1.0
-            margin_px: 12
-            side_px: 300         # fallback, если радиус круга не сопоставился
+            margin_px: 18
+            side_px: 300
             drop_partial: false
             pad_if_oob: true
       workers: []
@@ -185,8 +203,8 @@ blueprint:
       description:
       protected: false
       category:
-      # inspector — ПРЯМОЙ ключ процесса (ProcessConfig.inspector), НЕ под metadata:
-      # схема metadata не содержит → join бы не активировался (frame+overlay не слились бы).
+      # inspector — ПРЯМОЙ ключ процесса (НЕ под metadata): join кадра (от detector)
+      # + overlay-триггера (от line) по seq_id → center_crop режет по сработавшим центрам.
       inspector:
         mode: join
         inputs:
@@ -243,7 +261,7 @@ blueprint:
       description:
       protected: false
       category:
-      # inspector — ПРЯМОЙ ключ процесса (см. crop выше): join frame(от circle_detector)
+      # inspector — ПРЯМОЙ ключ процесса (НЕ под metadata): join frame(от circle_detector)
       # + overlay(от line_filter) по seq_id → overlay_draw рисует линию. Под metadata НЕ работает.
       inspector:
         mode: join
@@ -273,53 +291,33 @@ blueprint:
   wires:
     - source: camera_0.hikvision.frame
       target: roi.roi_crop.frame
-      src_dtype:
-      tgt_dtype:
       description: ''
-    - source: roi.roi_crop.frame
+    - source: roi.color_convert.frame
       target: detector.hsv_mask.frame
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: detector.circle_detector.frame
       target: crop.center_crop.frame
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: detector.circle_detector.frame
       target: draw.circle_draw.frame
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: detector.circle_detector.detections
       target: draw.circle_draw.detections
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: detector.circle_detector.detections
       target: line.line_filter.detections
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: detector.circle_detector.mask
       target: maskview.mask_to_frame.mask
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: line.line_filter.overlay
       target: crop.center_crop.trigger_in
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: line.line_filter.overlay
       target: draw.overlay_draw.overlay
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: crop.center_crop.frame
       target: saver.frame_saver.frame
-      src_dtype:
-      tgt_dtype:
       description: ''
   displays:
     - node_id: draw.overlay_draw.frame
@@ -327,46 +325,47 @@ blueprint:
     - node_id: maskview.mask_to_frame.frame
       display_id: mask
   metadata:
-    gui_positions:
+    gui_positions: &id001
       camera_0.hikvision:
         - 16.0
         - 160.0
       roi.roi_crop:
-        - 556.0
+        - 320.0
+        - 160.0
+      roi.color_convert:
+        - 520.0
         - 160.0
       detector.hsv_mask:
-        - 1076.0
+        - 840.0
         - 160.0
       detector.circle_detector:
-        - 1276.0
+        - 1040.0
         - 160.0
       line.line_filter:
-        - 1616.0
-        - 112.37031197924497
+        - 1360.0
+        - 100.0
       crop.center_crop:
-        - 2136.0
+        - 1700.0
         - 40.0
       saver.frame_saver:
-        - 2676.0
-        - 100.0
+        - 2040.0
+        - 40.0
       draw.circle_draw:
-        - 2136.0
-        - 160.0
-      draw.overlay_draw:
-        - 2336.0
-        - 160.0
-      maskview.mask_to_frame:
-        - 1616.0
+        - 1700.0
         - 220.0
+      draw.overlay_draw:
+        - 1900.0
+        - 220.0
+      maskview.mask_to_frame:
+        - 1360.0
+        - 300.0
       main:
-        - 2660.0
-        - 180.0
+        - 2240.0
+        - 220.0
       mask:
-        - 2120.0
-        - 240.0
+        - 1700.0
+        - 360.0
     locked_nodes: []
-    name: default
-    description: ''
 displays:
   - id: main
     name: Кадр + круги + линия
@@ -400,44 +399,26 @@ displays:
     rotate: 0
     flip: none
     crop:
-gui_positions:
-  camera_0.hikvision:
-    - 16.0
-    - 160.0
-  roi.roi_crop:
-    - 556.0
-    - 160.0
-  detector.hsv_mask:
-    - 1076.0
-    - 160.0
-  detector.circle_detector:
-    - 1276.0
-    - 160.0
-  line.line_filter:
-    - 1616.0
-    - 100.0
-  maskview.mask_to_frame:
-    - 1616.0
-    - 220.0
-  crop.center_crop:
-    - 2136.0
-    - 40.0
-  draw.circle_draw:
-    - 2136.0
-    - 160.0
-  draw.overlay_draw:
-    - 2336.0
-    - 160.0
-  mask:
-    - 2120.0
-    - 240.0
-  saver.frame_saver:
-    - 2676.0
-    - 100.0
-  main:
-    - 2660.0
-    - 180.0
+gui_positions: *id001
 created_at: ''
 active_services: []
 display_bindings: []
-devices: []
+devices:
+  - id: '1'
+    name: робот
+    kind: robot
+    protocol: delta_universal3
+    transport:
+      type: tcp
+      host: 192.168.1.7
+      port: 502
+      unit_id: 2
+    params: {}
+  - id: '2'
+    name: ПЧ
+    kind: vfd
+    protocol: gd20_bridge
+    transport:
+      type: bridge
+      bridge: '1'
+    params: {}

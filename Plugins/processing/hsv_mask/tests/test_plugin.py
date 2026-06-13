@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 
 from multiprocess_framework.modules.process_module.plugins.base import PluginContext
@@ -59,3 +60,31 @@ def test_empty_when_color_absent() -> None:
 def test_none_frame_skipped() -> None:
     plugin = _make_plugin()
     assert plugin.process([{"frame": None}]) == []
+
+
+def _hue_square_frame(hue: int) -> np.ndarray:
+    """Кадр 100x100 BGR с квадратом 40x40 заданного Hue (S=V=255), фон чёрный."""
+    hsv = np.zeros((100, 100, 3), dtype=np.uint8)
+    hsv[30:70, 30:70] = (hue, 255, 255)
+    return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+
+def test_wrap_around_catches_high_hue() -> None:
+    """h_min>h_max → wrap-around: верхняя полоса [170..179] ловит красный H≈175."""
+    frame = _hue_square_frame(175)
+    wrap = _make_plugin({"h_min": 170, "h_max": 10, "s_min": 100, "v_min": 100})
+    mask_wrap = wrap.process([{"frame": frame}])[0]["mask"]
+    assert mask_wrap[50, 50] == 255
+    assert mask_wrap[5, 5] == 0
+    # Одиночный диапазон [0..10] такой Hue НЕ ловит — доказывает необходимость wrap.
+    single = _make_plugin({"h_min": 0, "h_max": 10, "s_min": 100, "v_min": 100})
+    mask_single = single.process([{"frame": frame}])[0]["mask"]
+    assert int(np.count_nonzero(mask_single)) == 0
+
+
+def test_wrap_around_catches_both_red_bands() -> None:
+    """Wrap-диапазон ловит и низкий (H≈2), и высокий (H≈177) красный одновременно."""
+    plugin = _make_plugin({"h_min": 170, "h_max": 10, "s_min": 100, "v_min": 100})
+    for hue in (2, 177):
+        mask = plugin.process([{"frame": _hue_square_frame(hue)}])[0]["mask"]
+        assert mask[50, 50] == 255, f"Hue {hue} не пойман wrap-диапазоном"

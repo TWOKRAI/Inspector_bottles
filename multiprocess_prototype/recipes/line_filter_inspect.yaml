@@ -133,3 +133,22 @@ displays:
     scale: 100
     rotate: 0
     flip: none
+devices:
+  - id: '23'
+    name: robot
+    kind: robot
+    protocol: delta_universal3
+    transport:
+      type: tcp
+      host: 192.168.1.7
+      port: 502
+      unit_id: 2
+    params: {}
+  - id: '55'
+    name: PH
+    kind: vfd
+    protocol: gd20_bridge
+    transport:
+      type: bridge
+      bridge: '23'
+    params: {}

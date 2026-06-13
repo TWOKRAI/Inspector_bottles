@@ -73,3 +73,4 @@
 - [ml_train service](project_ml_train_service.md) — DONE v1: универсальное обучение+выбор моделей (MobileNetV3/V4, timm/<имя>), 3 источника данных, ONNX→ml_inference; follow-up: resize-политика в sidecar
 - [Always probe qt-mcp on launch](feedback_qt_mcp_always_probe.md) — every smoke run: QT_MCP_PROBE=1 python run.py <recipe> (port 9142)
 - [Hikvision anamorphic resize](project_hikvision_aspect_ratio.md) — plugin resizes native 4:3 → target anamorphically; set resolution to 4:3 or round objects become ellipses
+- [Prototype audit 2026-06](project_prototype_audit_2026_06.md) — справочник аудита prototype+Services+Plugins (docs/audits/), ID-находки H1/M-leak-1/...; 2 HIGH, узкое место модульность, циклов импорта нет

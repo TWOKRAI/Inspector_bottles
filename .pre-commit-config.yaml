@@ -3,7 +3,8 @@
 # Ручной прогон: pre-commit run --all-files
 # Обновление версий: pre-commit autoupdate
 
-exclude: ^multiprocess_prototype_backup/
+# robot/ — firmware/PLC/Colab (Lua, экспортированные ноутбуки, pc-скрипты), не модульный Python проекта
+exclude: ^(multiprocess_prototype_backup/|robot/)
 
 repos:
   # ── Общие проверки ──

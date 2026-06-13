@@ -1,0 +1,236 @@
+# Рецепт camera_robot_calibration — РАЗОВАЯ калибровка камера↔робот↔энкодер.
+#
+# Топология:
+#   camera_0[hikvision] → roi[roi_crop] → detector[color_convert → hsv_mask(красный) →
+#     circle_detector(по маске)] ──┬→ cal[camera_robot_calibration]      → display "main"
+#                                  └→ maskview[mask_to_frame]            → display "mask"
+#
+# Эталон: плата с 5 КРАСНЫМИ точками (4 угла + центр) на белом фоне.
+# detector: color_convert нормализует порядок каналов (default none; если красное на
+#   дисплее "mask" не ловится из-за BGR/RGB-свопа камеры — переключить mode=rgb2bgr/bgr2rgb).
+#   hsv_mask с h_min>h_max = wrap-around красного (H≈0 и H≈179). circle_detector(input_key=mask,
+#   keep_mask=true) ищет круги по маске; mask сохраняется для дисплея "mask".
+# cal: оркестратор калибровки — кэширует detections, общается с роботом/лентой через
+#   DeviceHubClient (процесс devices), собирает гомографию + вектор ленты. Командный API
+#   визарда (cal_begin/cal_capture_image/cal_set_robot_point/cal_encoder_scale/cal_belt_run/
+#   cal_belt_stop/cal_compute/cal_save/cal_reset) — со вкладки Services → Robot → Калибровка.
+#   Результат → config/calibration/<camera_id>.yaml (НЕ в рецепт).
+#
+# === ТЮНИНГ (всё в ПИКСЕЛЯХ) ===
+#   1) roi_crop x/y/width/height (0 = до края) — обрезать фон, оставить плату.
+#   2) color_convert.mode — если точки на "mask" не красные → bgr2rgb/rgb2bgr.
+#   3) hsv_mask: красный по умолчанию h_min=170,h_max=10 (wrap); тюнить s_min/v_min по "mask".
+#   4) circle_detector: min/max_radius (px), param2 (меньше → больше ложных) — смотреть "main".
+#   5) cal.reproj_threshold_mm — порог приёмки калибровки.
+#
+# === СИМУЛЯТОР робота (ПЕРВЫМ, в отдельном терминале) ===
+#   1) python -m Services.robot_comm.server            # 127.0.0.1:5021, unit 2
+#   2) В секции devices ниже robot_main: host 127.0.0.1, port 5021
+#   3) (опц.) заменить camera_0 hikvision на Plugins.sources.capture.plugin.CapturePlugin
+#   4) python multiprocess_prototype/run.py recipes/camera_robot_calibration.yaml
+#
+# С железом: робот 192.168.1.7:502 unit 2 (дефолты ниже), pip install '.[modbus]'.
+name: camera_robot_calibration
+version: 3
+description: "Калибровка камера↔робот: гомография px→мм + вектор ленты (визард)"
+
+# Устройства — upsert в реестр devices при активации.
+devices:
+  - id: robot_main
+    name: "Робот Delta"
+    kind: robot
+    protocol: delta_universal3
+    transport: {type: tcp, host: 192.168.1.7, port: 502, unit_id: 2}
+    params: {word_order: little, feed_poll_s: 0.05, telemetry_interval_s: 0.5}
+  - id: vfd_belt
+    name: "ПЧ лента"
+    kind: vfd
+    protocol: gd20_bridge
+    transport: {type: bridge, bridge: robot_main}
+    params: {freq_max_hz: 50.0, default_freq_hz: 10.0, poll_interval_s: 0.5, stale_polls_limit: 6}
+
+blueprint:
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.process.GuiProcess
+      protected: true
+      metadata: {}
+    - process_name: devices
+      plugins:
+        - plugin_name: device_hub
+          plugin_class: Plugins.hub.device_hub.plugin.DeviceHubPlugin
+          category: hub
+          config:
+            registry_path: data/devices.yaml
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      protected: true
+      metadata: {}
+    - process_name: camera_0
+      plugins:
+        - plugin_name: hikvision
+          plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
+          category: source
+          config:
+            camera_id: 0
+            camera_index: 0
+            resolution_width: 1440
+            resolution_height: 1080
+            fps: 25
+            auto_start: true
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - roi
+      protected: false
+      metadata:
+        source_target_fps: 25
+    - process_name: roi
+      plugins:
+        - plugin_name: roi_crop
+          plugin_class: Plugins.processing.roi_crop.plugin.RoiCropPlugin
+          category: processing
+          config:
+            x: 0
+            y: 0
+            width: 0
+            height: 0
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - detector
+      protected: false
+      metadata: {}
+    - process_name: detector
+      plugins:
+        - plugin_name: color_convert
+          plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
+          category: processing
+          config:
+            mode: none
+        - plugin_name: hsv_mask
+          plugin_class: Plugins.processing.hsv_mask.plugin.HsvMaskPlugin
+          category: processing
+          config:
+            # Красный = wrap-around по Hue: h_min > h_max → OR полос [0..10] и [170..179].
+            h_min: 170
+            h_max: 10
+            s_min: 100
+            s_max: 255
+            v_min: 80
+            v_max: 255
+        - plugin_name: circle_detector
+          plugin_class: Plugins.processing.circle_detector.plugin.CircleDetectorPlugin
+          category: processing
+          config:
+            input_key: mask
+            keep_mask: true
+            mode: gradient
+            blur_method: gaussian
+            blur_ksize: 5
+            dp: 1.2
+            min_dist: 60
+            param1: 100
+            param2: 20
+            min_radius: 8
+            max_radius: 80
+            draw_circles: false
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - cal
+        - maskview
+      protected: false
+      metadata: {}
+    - process_name: cal
+      plugins:
+        - plugin_name: camera_robot_calibration
+          plugin_class: Plugins.calibration.camera_robot.plugin.CameraRobotCalibrationPlugin
+          category: calibration
+          config:
+            robot_id: robot_main
+            vfd_id: vfd_belt
+            camera_id: cam0
+            expected_points: 5
+            reproj_threshold_mm: 2.0
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      protected: false
+      metadata: {}
+    - process_name: maskview
+      plugins:
+        - plugin_name: mask_to_frame
+          plugin_class: Plugins.processing.mask_to_frame.plugin.MaskToFramePlugin
+          category: processing
+          config:
+            source_key: mask
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: low
+      chain_targets:
+        - gui
+      protected: false
+      metadata: {}
+  wires:
+    - source: camera_0.hikvision.frame
+      target: roi.roi_crop.frame
+    - source: roi.roi_crop.frame
+      target: detector.color_convert.frame
+    - source: detector.circle_detector.frame
+      target: cal.camera_robot_calibration.frame
+    - source: detector.circle_detector.detections
+      target: cal.camera_robot_calibration.detections
+    - source: detector.circle_detector.mask
+      target: maskview.mask_to_frame.mask
+  displays:
+    - node_id: cal.camera_robot_calibration.frame
+      display_id: main
+    - node_id: maskview.mask_to_frame.frame
+      display_id: mask
+  metadata:
+    name: default
+    description: ''
+displays:
+  - id: main
+    name: Кадр + точки калибровки
+    enabled: true
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+    crop:
+  - id: mask
+    name: Маска красного (hsv_mask)
+    enabled: true
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 1000
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+    crop:
+created_at: ''
+active_services: []
+display_bindings: []
