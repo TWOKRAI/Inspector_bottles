@@ -237,6 +237,25 @@ def _check_display_references(
             raise DomainError(f"display '{di.display_id}' not found in catalog")
 
 
+def _check_recipe_self_display_references(recipe: Any) -> None:
+    """Привязки blueprint.displays активируемого рецепта → его СОБСТВЕННЫЕ recipe.displays.
+
+    При активации каталог (DisplayCatalogFromRecipe) recipe-scoped и указывает на ЕЩЁ
+    активный (старый) рецепт — активируемый станет активным лишь ПОСЛЕ этого apply
+    (chicken-and-egg). Поэтому привязки нового рецепта нельзя проверять против старого
+    каталога: рецепт с новым дисплеем (напр. 'mask') ложно роняет активацию.
+
+    Рецепт самодостаточен: blueprint.displays ссылается на recipe.displays того же
+    рецепта (Recipe-сущность это и гарантирует). Проверяем по ним — это и есть
+    «каталог синхронизируется с дисплеями рецепта»: после активации recipe-scoped
+    каталог увидит ровно эти определения.
+    """
+    own_ids = {d.id for d in recipe.displays}
+    for binding in recipe.blueprint.displays:
+        if binding.display_id not in own_ids:
+            raise DomainError(f"display '{binding.display_id}' not found in catalog")
+
+
 def _validate_topology(topology: Topology, catalogs: ApplyContext) -> None:
     """Выполняет все 5 invariants в одном проходе."""
     _check_unique_process_names(topology)
@@ -893,7 +912,9 @@ class Project(SchemaBase):
         if catalogs.plugins is not None:
             _check_plugin_references(recipe.blueprint, catalogs)
         if catalogs.displays is not None:
-            _check_display_references(recipe.blueprint, catalogs)
+            # Self-contained: привязки против СОБСТВЕННЫХ дисплеев рецепта, НЕ против
+            # каталога старого активного рецепта (chicken-and-egg, см. helper).
+            _check_recipe_self_display_references(recipe)
 
         new_project = self.model_copy(
             update={
