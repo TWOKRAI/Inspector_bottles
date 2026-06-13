@@ -214,11 +214,14 @@ def test_remove_process_not_found_raises() -> None:
 
 
 def test_rename_process_ok() -> None:
-    """Переименование процесса обновляет wires и display bindings."""
+    """Переименование процесса обновляет wires, display bindings и
+    перекрёстные ссылки target_process/chain_targets (H1)."""
     topology = Topology(
         processes=(
             Process(process_name="old_name"),
-            Process(process_name="other"),
+            # "other" маршрутизирует на old_name через оба механизма
+            Process(process_name="other", target_process="old_name", chain_targets=("old_name", "third")),
+            Process(process_name="third"),
         ),
         wires=(
             Wire(source="old_name.blur", target="other"),
@@ -240,6 +243,12 @@ def test_rename_process_ok() -> None:
 
     # Display bindings обновлены
     assert new_proj.topology.displays[0].node_id == "new_name.blur.out"
+
+    # H1: перекрёстные IPC-ссылки в других процессах обновлены, stale-имени нет
+    other = new_proj.topology.find_process("other")
+    assert other is not None
+    assert other.target_process == "new_name"
+    assert other.chain_targets == ("new_name", "third")  # third не тронут, порядок сохранён
 
     assert len(events) == 1
     assert isinstance(events[0], ProcessRenamed)

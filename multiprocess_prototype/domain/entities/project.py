@@ -466,11 +466,22 @@ class Project(SchemaBase):
         if self.topology.find_process(cmd.new_name) is not None:
             raise DomainError(f"process_name '{cmd.new_name}' already exists")
 
-        # Переименование процесса
-        new_processes = tuple(
-            p.model_copy(update={"process_name": cmd.new_name}) if p.process_name == cmd.old_name else p
-            for p in self.topology.processes
-        )
+        # Переименование процесса + обновление перекрёстных ссылок на его имя
+        # в ДРУГИХ процессах: target_process (адрес IPC-команд) и chain_targets
+        # (получатели chain-маршрутизации). Без этого после A→B процессы со
+        # stale-ссылкой шлют IPC на несуществующий процесс — битая маршрутизация,
+        # молча проявляется только в runtime (находка аудита H1).
+        def _rename_refs(proc: Process) -> Process:
+            updates: dict[str, Any] = {}
+            if proc.process_name == cmd.old_name:
+                updates["process_name"] = cmd.new_name
+            if proc.target_process == cmd.old_name:
+                updates["target_process"] = cmd.new_name
+            if cmd.old_name in proc.chain_targets:
+                updates["chain_targets"] = tuple(cmd.new_name if t == cmd.old_name else t for t in proc.chain_targets)
+            return proc.model_copy(update=updates) if updates else proc
+
+        new_processes = tuple(_rename_refs(p) for p in self.topology.processes)
 
         # Обновление wire-ов: заменяем source/target, если содержат old_name
         def _rename_node(node_id: str) -> str:

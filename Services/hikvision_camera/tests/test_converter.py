@@ -145,3 +145,55 @@ class TestResize:
         result = FrameConverter.resize(gray, 50, 25)
 
         assert result.shape == (25, 50)
+
+    def test_letterbox_preserves_aspect_with_padding(self):
+        """letterbox: 4:3 (640×480) → 16:9 (640×360) вписывает с сохранением аспекта
+        и добивает чёрными полями слева/справа (pillarbox), НЕ растягивая (H2).
+
+        scale = min(640/640, 360/480) = 0.75 → контент 480×360, центр по ширине,
+        поля по 80px слева и справа.
+        """
+        frame = np.full((480, 640, 3), 255, dtype=np.uint8)  # белый 4:3
+        result = FrameConverter.resize(frame, 640, 360, mode="letterbox")
+
+        assert result.shape == (360, 640, 3)
+        # Поля слева/справа — чёрные (весь столбец)
+        assert result[:, 0, :].sum() == 0, "левый столбец должен быть чёрным полем"
+        assert result[:, -1, :].sum() == 0, "правый столбец должен быть чёрным полем"
+        # Центр — белый контент
+        assert result[180, 320, :].tolist() == [255, 255, 255]
+
+    def test_letterbox_no_padding_when_aspect_matches(self):
+        """letterbox при совпадении аспекта (4:3→4:3) = чистый ресайз без полей."""
+        frame = np.full((480, 640, 3), 200, dtype=np.uint8)
+        result = FrameConverter.resize(frame, 320, 240, mode="letterbox")
+
+        assert result.shape == (240, 320, 3)
+        # Полей нет — весь кадр заполнен контентом
+        assert result.min() == 200 and result.max() == 200
+
+    def test_stretch_mode_anamorphic(self):
+        """stretch: явный анаморфный ресайз (заполняет всю цель, искажает геометрию)."""
+        frame = np.full((480, 640, 3), 128, dtype=np.uint8)
+        result = FrameConverter.resize(frame, 640, 360, mode="stretch")
+
+        assert result.shape == (360, 640, 3)
+        # Никаких чёрных полей — весь кадр заполнен (растянут)
+        assert result.min() == 128
+
+    def test_unknown_mode_falls_back_to_letterbox(self):
+        """Неизвестный режим трактуется как letterbox (fail-safe)."""
+        frame = np.full((480, 640, 3), 255, dtype=np.uint8)
+        result = FrameConverter.resize(frame, 640, 360, mode="bogus")
+
+        assert result.shape == (360, 640, 3)
+        # letterbox → есть чёрные поля по бокам
+        assert result[:, 0, :].sum() == 0
+
+    def test_letterbox_grayscale_2d(self):
+        """letterbox корректно работает с 2D grayscale (без оси каналов)."""
+        gray = np.full((480, 640), 255, dtype=np.uint8)
+        result = FrameConverter.resize(gray, 640, 360, mode="letterbox")
+
+        assert result.shape == (360, 640)
+        assert result[:, 0].sum() == 0  # чёрное поле слева

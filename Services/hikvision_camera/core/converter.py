@@ -74,24 +74,52 @@ class FrameConverter:
         return None
 
     @staticmethod
-    def resize(frame: np.ndarray, width: int, height: int) -> np.ndarray:
-        """Ресайз кадра. Если размер совпадает — no-op.
+    def resize(frame: np.ndarray, width: int, height: int, mode: str = "letterbox") -> np.ndarray:
+        """Ресайз кадра до (width, height). Если размер совпадает — no-op.
+
+        Режимы (`mode`):
+        - ``"letterbox"`` (по умолчанию, безопасный): сохраняет аспект кадра,
+          вписывает в целевой прямоугольник и добивает чёрными полями. Геометрия
+          объектов НЕ искажается — критично для CV/ML (круги остаются кругами).
+        - ``"stretch"``: анаморфный ресайз без сохранения аспекта. При несовпадении
+          аспекта сенсора и цели искажает геометрию (круги → эллипсы) — находка
+          аудита H2. Оставлен как явная опция для случаев, где заливка важнее формы.
+
+        Любое неизвестное значение `mode` трактуется как ``"letterbox"`` (fail-safe).
 
         Parameters
         ----------
         frame : np.ndarray
-            Входной кадр.
+            Входной кадр (2D grayscale или 3D BGR).
         width : int
             Целевая ширина.
         height : int
             Целевая высота.
+        mode : str
+            ``"letterbox"`` | ``"stretch"``.
 
         Returns
         -------
         np.ndarray
-            Кадр с нужным размером.
+            Кадр с размером ровно (height, width[, C]).
         """
         h, w = frame.shape[:2]
         if w == width and h == height:
             return frame
-        return cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
+        if mode == "stretch":
+            return cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
+
+        # letterbox: вписываем с сохранением аспекта + чёрные поля
+        scale = min(width / w, height / h)
+        new_w = max(1, round(w * scale))
+        new_h = max(1, round(h * scale))
+        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+        if frame.ndim == 3:
+            canvas = np.zeros((height, width, frame.shape[2]), dtype=frame.dtype)
+        else:
+            canvas = np.zeros((height, width), dtype=frame.dtype)
+        x0 = (width - new_w) // 2
+        y0 = (height - new_h) // 2
+        canvas[y0 : y0 + new_h, x0 : x0 + new_w] = resized
+        return canvas

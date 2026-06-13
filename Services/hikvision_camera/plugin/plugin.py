@@ -109,6 +109,7 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
         self._camera_index: int = cfg.get("camera_index", 0)
         self._width: int = cfg.get("resolution_width", 1920)
         self._height: int = cfg.get("resolution_height", 1080)
+        self._resize_mode: str = cfg.get("resize_mode", "letterbox")
         self._fps: int = cfg.get("fps", 25)
         self._auto_start: bool = cfg.get("auto_start", False)
 
@@ -165,8 +166,9 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
             )
             return []
 
-        # Resize до целевого разрешения
-        frame = FrameConverter.resize(frame, self._width, self._height)
+        # Resize до целевого разрешения (letterbox по умолчанию — не искажает
+        # геометрию объектов; см. H2)
+        frame = FrameConverter.resize(frame, self._width, self._height, self._resize_mode)
 
         self._frame_count = (self._frame_count + 1) % _FRAME_ID_MODULO
 

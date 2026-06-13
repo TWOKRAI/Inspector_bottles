@@ -46,7 +46,10 @@ blueprint:
           category: source
           camera_id: 0
           camera_index: 0
-          resolution_width: 1920
+          # Аспект ДОЛЖЕН совпадать с сенсором (Hikvision 4:3, напр. 2592×1944),
+          # иначе геометрия искажается. 1440×1080 = чистый 4:3 (H2).
+          # resize_mode: letterbox (дефолт) сохранит аспект даже при ином разрешении.
+          resolution_width: 1440
           resolution_height: 1080
           fps: 25
           auto_start: true

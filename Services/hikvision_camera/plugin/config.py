@@ -40,6 +40,14 @@ class HikvisionCameraConfig(PluginConfig):
         FieldMeta(description="Высота кадра (px)"),
     ] = 1080
 
+    resize_mode: Annotated[
+        str,
+        FieldMeta(
+            description="Режим ресайза: letterbox (сохраняет аспект + поля, безопасно для CV/ML) "
+            "или stretch (анаморфный, искажает геометрию при несовпадении аспекта)"
+        ),
+    ] = "letterbox"
+
     fps: Annotated[
         int,
         FieldMeta(description="Целевой FPS захвата"),
