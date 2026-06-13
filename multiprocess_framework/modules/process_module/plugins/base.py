@@ -311,13 +311,11 @@ class ProcessModulePlugin(ABC):
         if reg is None:
             reg = cls()
 
-        # 3. YAML overrides из config
-        # Поддержка двух форматов: плоский ({"x": 1, ...}) и вложенный
-        # ({"config": {"x": 1, ...}}) — второй используется в blueprint-рецептах.
-        _flat_cfg: dict = ctx.config.get("config", ctx.config)
+        # 3. YAML overrides из config (ctx.config всегда плоский — нормализация
+        #    формата pdef живёт в PluginOrchestrator._extract_plugin_config).
         for field_name in type(reg).model_fields:
-            if field_name in _flat_cfg:
-                setattr(reg, field_name, _flat_cfg[field_name])
+            if field_name in ctx.config:
+                setattr(reg, field_name, ctx.config[field_name])
 
         return reg
 

@@ -73,7 +73,7 @@ class PluginOrchestrator:
                 continue
             try:
                 plugin = self._load_plugin(resolved_class_path, plugin_name)
-                plugin_config = {k: v for k, v in pdef.items() if k not in ("plugin_class", "plugin_name")}
+                plugin_config = self._extract_plugin_config(pdef)
                 ctx = base_ctx.with_config(plugin_config)
                 plugin.configure_managers(ctx)
                 self._early_plugins.append((plugin, ctx))
@@ -81,6 +81,25 @@ class PluginOrchestrator:
                 self._services.log_error(
                     f"PluginOrchestrator[{self._services.name}]: configure_managers '{plugin_name}': {e}"
                 )
+
+    @staticmethod
+    def _extract_plugin_config(pdef: dict) -> dict:
+        """Извлечь плоский конфиг плагина из его определения (pdef).
+
+        pdef встречается в двух форматах:
+          - плоский (старые рецепты): параметры на верхнем уровне pdef
+            (``{"plugin_name": ..., "camera_id": 0, "auto_start": true}``);
+          - вложенный (GUI-нормализованный): параметры под ключом ``config``
+            (``{"plugin_name": ..., "category": ..., "config": {"camera_id": 0, ...}}``).
+
+        Нормализуем к плоскому ЗДЕСЬ (единая граница) — чтобы ``ctx.config`` всегда был
+        плоским для ВСЕХ плагинов, и плагинам не нужно знать про два формата.
+        """
+        cfg = {k: v for k, v in pdef.items() if k not in ("plugin_class", "plugin_name")}
+        nested = cfg.pop("config", None)
+        if isinstance(nested, dict):
+            cfg.update(nested)  # вложенный config разворачиваем поверх (он — источник истины)
+        return cfg
 
     def boot(self) -> None:
         """IDLE -> READY -> RUNNING + registers bootstrap.

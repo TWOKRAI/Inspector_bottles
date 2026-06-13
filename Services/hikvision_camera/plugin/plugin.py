@@ -98,13 +98,10 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
     def configure(self, ctx: PluginContext) -> None:
         """Настроить плагин: создать HikvisionCamera, прочитать конфиг.
 
-        Поддерживает два формата конфига:
-          - плоский (старый): ctx.config = {"camera_id": 0, "auto_start": true, ...}
-          - вложенный (новый): ctx.config = {"category": "source", "config": {...}}
+        ctx.config всегда плоский (нормализация формата pdef — в
+        PluginOrchestrator._extract_plugin_config).
         """
-        # Совместимость: если конфиг вложен под ключ "config" — читаем его,
-        # иначе используем весь ctx.config как есть (плоский формат).
-        cfg = ctx.config.get("config", ctx.config)
+        cfg = ctx.config
         self._ctx = ctx
 
         # Параметры из конфига

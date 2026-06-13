@@ -230,34 +230,42 @@ class TestHikvisionCameraPlugin:
         assert plugin._auto_start is False
 
     def test_configure_nested_config(self):
-        """configure() читает конфиг из вложенного ctx.config["config"] (blueprint-формат рецептов).
+        """Вложенный blueprint-формат pdef нормализуется ОРКЕСТРАТОРОМ → плагин читает плоский ctx.config.
 
-        Раньше при вложенном формате плагин получал дефолты вместо заданных значений,
-        из-за чего auto_start=True не срабатывал и камера не стартовала (FPS=0 баг).
+        Регресс FPS=0: GUI-нормализованный рецепт кладёт параметры под ключ "config";
+        PluginOrchestrator._extract_plugin_config разворачивает их в плоский ctx.config,
+        и плагину НЕ нужно знать про два формата (без костыля .get("config", ...)).
         """
+        from multiprocess_framework.modules.process_module.generic.plugin_orchestrator import (
+            PluginOrchestrator,
+        )
         from Services.hikvision_camera.plugin.plugin import HikvisionCameraPlugin
 
-        plugin = HikvisionCameraPlugin()
         # Вложенный формат: как в dataset_circle_capture.yaml (blueprint-рецепт)
-        nested_ctx = _make_ctx(
-            {
-                "category": "source",
-                "config": {
-                    "camera_id": 1,
-                    "camera_index": 0,
-                    "resolution_width": 1440,
-                    "resolution_height": 1080,
-                    "fps": 25,
-                    "auto_start": True,
-                },
-            }
-        )
-        mock_cam = MagicMock()
+        pdef = {
+            "plugin_name": "hikvision",
+            "plugin_class": "Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin",
+            "category": "source",
+            "config": {
+                "camera_id": 1,
+                "camera_index": 0,
+                "resolution_width": 1440,
+                "resolution_height": 1080,
+                "fps": 25,
+                "auto_start": True,
+            },
+        }
+        # Нормализация формата — на границе оркестратора (единая точка)
+        flat = PluginOrchestrator._extract_plugin_config(pdef)
+        assert "config" not in flat
+        assert flat["camera_id"] == 1 and flat["auto_start"] is True
+
+        plugin = HikvisionCameraPlugin()
         with patch(
             "Services.hikvision_camera.plugin.plugin.HikvisionCamera",
-            return_value=mock_cam,
+            return_value=MagicMock(),
         ):
-            plugin.configure(nested_ctx)
+            plugin.configure(_make_ctx(flat))
 
         assert plugin._camera_id == 1
         assert plugin._width == 1440
