@@ -50,6 +50,11 @@ class FrameShmMiddleware:
         self._log_error = log_error or (lambda msg: None)
         self._allocated = False
         self._write_index = 0
+        # Текущая ВЫДЕЛЕННАЯ ёмкость слота (h, w, c). None — ещё не выделяли.
+        # Нужна для переаллокации при росте кадра (resize): иначе кадр больше блока
+        # не влезает → write_images падает → вечный pickle-fallback (медленно).
+        self._alloc_shape: tuple[int, int, int] | None = None
+        self._alloc_dtype: str | None = None
 
     # ------------------------------------------------------------------
     # Общий SHM-read-fallback (§5.2 дедуп: был скопирован в restore_frame и on_receive)
@@ -162,8 +167,12 @@ class FrameShmMiddleware:
         if frame is None:
             return item
 
-        # Lazy allocation при первом кадре
-        if not self._allocated:
+        # Lazy allocation при первом кадре + ПЕРЕАЛЛОКАЦИЯ при росте кадра (resize).
+        # Блок выделяется под форму первого кадра; если позже кадр становится больше
+        # (увеличили ROI / сменили разрешение) — пересоздаём блок под новый размер и
+        # переключаем ссылку (новый shm_actual_name едет в каждом сообщении, читатели
+        # следуют за ним). Иначе крупный кадр не влезал бы и шёл через медленный pickle.
+        if not self._allocated or not self._frame_fits(frame):
             self._allocate_shm(frame)
 
         try:
@@ -189,16 +198,58 @@ class FrameShmMiddleware:
 
         return item
 
+    @staticmethod
+    def _shape_hwc(frame: Any) -> tuple[int, int, int]:
+        """Нормализовать форму кадра к (h, w, c). Grayscale (H, W) → (H, W, 1)."""
+        sh = frame.shape
+        if len(sh) == 2:
+            return int(sh[0]), int(sh[1]), 1
+        return int(sh[0]), int(sh[1]), int(sh[2])
+
+    def _frame_fits(self, frame: Any) -> bool:
+        """Влезает ли кадр в текущую выделенную ёмкость (по каждому измерению + dtype)."""
+        if self._alloc_shape is None:
+            return False
+        fh, fw, fc = self._shape_hwc(frame)
+        ah, aw, ac = self._alloc_shape
+        return fh <= ah and fw <= aw and fc <= ac and str(frame.dtype) == self._alloc_dtype
+
     def _allocate_shm(self, frame: Any) -> None:
-        """Выделить SHM-блоки по форме первого кадра."""
+        """(Пере)выделить SHM-блоки под кадр. Grow-only: ёмкость только растёт.
+
+        Целевая форма = max(текущая_ёмкость, форма_кадра) по каждому измерению —
+        блок не сжимается (меньшие кадры читаются по header), но растёт под бо́льшие.
+        Растёт ограниченное число раз (до максимума кадра камеры) → сходится, без
+        thrash. При переаллокации старый блок закрывается (owner → unlink), новый
+        создаётся; новый shm_actual_name едет в каждом сообщении → читатели следуют.
+        """
         try:
-            shape = frame.shape
+            fh, fw, fc = self._shape_hwc(frame)
             dtype = str(frame.dtype)
-            memory_names = {
-                self._slot: (1, shape, dtype),
-            }
+            # Grow-only: не уменьшаем ёмкость (избегаем «качелей» при чередовании размеров).
+            if self._alloc_shape is not None and dtype == self._alloc_dtype:
+                ah, aw, ac = self._alloc_shape
+                target = (max(ah, fh), max(aw, fw), max(ac, fc))
+            else:
+                target = (fh, fw, fc)
+
+            # Уже выделено и форма не меняется — ничего не делаем (defensive).
+            if self._allocated and target == self._alloc_shape and dtype == self._alloc_dtype:
+                return
+
+            # Переаллокация: закрыть старый блок (owner → unlink), затем создать новый.
+            if self._allocated:
+                try:
+                    self._mm.close_memory(self._owner, self._slot)
+                except Exception as e:
+                    self._log_error(f"FrameShmMiddleware: close old SHM before realloc: {e}")
+
+            memory_names = {self._slot: (1, target, dtype)}
             self._mm.create_memory_dict(self._owner, memory_names, self._coll)
             self._allocated = True
+            self._alloc_shape = target
+            self._alloc_dtype = dtype
+            self._write_index = 0  # свежие слоты — пишем с начала кольца
         except Exception as e:
             self._log_error(f"FrameShmMiddleware: allocate SHM error: {e}")
 

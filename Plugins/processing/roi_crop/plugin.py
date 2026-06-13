@@ -44,6 +44,7 @@ class RoiCropPlugin(ProcessModulePlugin):
     def configure(self, ctx: PluginContext) -> None:
         self._ctx = ctx
         self._reg: RoiCropRegisters = self._init_register(ctx)
+        self._last_log_key: tuple | None = None  # диагностика: лог только при смене ROI/кадра
         ctx.log_info(f"RoiCropPlugin: ROI x={self._reg.x}, y={self._reg.y}, w={self._reg.width}, h={self._reg.height}")
 
     @for_each
@@ -60,6 +61,17 @@ class RoiCropPlugin(ProcessModulePlugin):
         rh = int(self._reg.height)
         x1 = w if rw <= 0 else min(x0 + rw, w)
         y1 = h if rh <= 0 else min(y0 + rh, h)
+
+        # ДИАГНОСТИКА (throttled — лог только при смене кадра/ROI): видеть реальные числа.
+        # Помогает поймать «801 → полный кадр»: покажет, что реально приходит в reg и кадр.
+        log_key = (w, h, rw, rh, x0, y0)
+        if log_key != self._last_log_key:
+            self._last_log_key = log_key
+            self._ctx.log_info(
+                f"RoiCrop diag: frame={w}x{h} reg(x={self._reg.x},y={self._reg.y},"
+                f"w={rw},h={rh}) -> crop x[{x0}:{x1}] y[{y0}:{y1}] = {x1 - x0}x{y1 - y0}"
+            )
+
         if x1 <= x0 or y1 <= y0:
             return None  # вырожденный ROI — нечего отдавать
 
