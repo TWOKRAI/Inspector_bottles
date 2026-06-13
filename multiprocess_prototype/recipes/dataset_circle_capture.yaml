@@ -28,8 +28,6 @@ version: 3
 description: "Камера → маска белого → круги → линия(триггер) → crop → сохранение датасета (+2 дисплея)"
 
 blueprint:
-  name: default
-  description: ''
   processes:
     - process_name: gui
       plugins: []
@@ -87,7 +85,7 @@ blueprint:
           plugin_class: Plugins.processing.roi_crop.plugin.RoiCropPlugin
           category: processing
           config:
-            x: 560        # ТЮНИНГ: скалярные live-поля (применяются на лету)
+            x: 560
             y: 240
             width: 800
             height: 600
@@ -182,14 +180,16 @@ blueprint:
       description:
       protected: false
       category:
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
+      # inspector — ПРЯМОЙ ключ процесса (ProcessConfig.inspector), НЕ под metadata:
+      # схема metadata не содержит → join бы не активировался (frame+overlay не слились бы).
+      inspector:
+        mode: join
+        inputs:
+          - frame
+          - overlay
+        primary: frame
+        timeout_sec: 0.25
+      metadata: {}
     - process_name: saver
       plugins:
         - plugin_name: frame_saver
@@ -238,14 +238,16 @@ blueprint:
       description:
       protected: false
       category:
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
+      # inspector — ПРЯМОЙ ключ процесса (см. crop выше): join frame(от circle_detector)
+      # + overlay(от line_filter) по seq_id → overlay_draw рисует линию. Под metadata НЕ работает.
+      inspector:
+        mode: join
+        inputs:
+          - frame
+          - overlay
+        primary: frame
+        timeout_sec: 0.25
+      metadata: {}
     - process_name: maskview
       plugins:
         - plugin_name: mask_to_frame
@@ -266,33 +268,53 @@ blueprint:
   wires:
     - source: camera_0.hikvision.frame
       target: roi.roi_crop.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: roi.roi_crop.frame
       target: detector.hsv_mask.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: detector.circle_detector.frame
       target: crop.center_crop.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: detector.circle_detector.frame
       target: draw.circle_draw.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: detector.circle_detector.detections
       target: draw.circle_draw.detections
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: detector.circle_detector.detections
       target: line.line_filter.detections
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: detector.circle_detector.mask
       target: maskview.mask_to_frame.mask
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: line.line_filter.overlay
       target: crop.center_crop.trigger_in
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: line.line_filter.overlay
       target: draw.overlay_draw.overlay
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: crop.center_crop.frame
       target: saver.frame_saver.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
   displays:
     - node_id: draw.overlay_draw.frame
@@ -300,7 +322,7 @@ blueprint:
     - node_id: maskview.mask_to_frame.frame
       display_id: mask
   metadata:
-    gui_positions: &id001
+    gui_positions:
       camera_0.hikvision:
         - 16.0
         - 160.0
@@ -315,58 +337,102 @@ blueprint:
         - 160.0
       line.line_filter:
         - 1616.0
-        - 100.0
-      maskview.mask_to_frame:
-        - 1616.0
-        - 220.0
+        - 112.37031197924497
       crop.center_crop:
         - 2136.0
         - 40.0
+      saver.frame_saver:
+        - 2676.0
+        - 100.0
       draw.circle_draw:
         - 2136.0
         - 160.0
       draw.overlay_draw:
         - 2336.0
         - 160.0
-      mask:
-        - 2120.0
-        - 240.0
-      saver.frame_saver:
-        - 2676.0
-        - 100.0
+      maskview.mask_to_frame:
+        - 1616.0
+        - 220.0
       main:
         - 2660.0
         - 180.0
+      mask:
+        - 2120.0
+        - 240.0
     locked_nodes: []
+    name: default
+    description: ''
 displays:
   - id: main
     name: Кадр + круги + линия
-    enabled: true          # показывать в главной области (toggle во вкладке Displays)
+    enabled: true
     width: 1280
     height: 720
     format: BGR
     fps_limit: 30.0
     ring_buffer_blocks: 3
     position:
-      x: 0                 # порядок в ряд по X (main левее mask)
+      x: 0
       y: 0
     fit: contain
     scale: 100
     rotate: 0
     flip: none
+    crop:
   - id: mask
     name: Маска белого (hsv_mask)
-    enabled: true          # выключить → дисплей исчезнет из главной области
+    enabled: true
     width: 1280
     height: 720
     format: BGR
     fps_limit: 30.0
     ring_buffer_blocks: 3
     position:
-      x: 1000              # правее main (порядок по position.x)
+      x: 1000
       y: 0
     fit: contain
     scale: 100
     rotate: 0
     flip: none
-gui_positions: *id001
+    crop:
+gui_positions:
+  camera_0.hikvision:
+    - 16.0
+    - 160.0
+  roi.roi_crop:
+    - 556.0
+    - 160.0
+  detector.hsv_mask:
+    - 1076.0
+    - 160.0
+  detector.circle_detector:
+    - 1276.0
+    - 160.0
+  line.line_filter:
+    - 1616.0
+    - 100.0
+  maskview.mask_to_frame:
+    - 1616.0
+    - 220.0
+  crop.center_crop:
+    - 2136.0
+    - 40.0
+  draw.circle_draw:
+    - 2136.0
+    - 160.0
+  draw.overlay_draw:
+    - 2336.0
+    - 160.0
+  mask:
+    - 2120.0
+    - 240.0
+  saver.frame_saver:
+    - 2676.0
+    - 100.0
+  main:
+    - 2660.0
+    - 180.0
+created_at: ''
+active_services: []
+display_bindings: []
+devices: []

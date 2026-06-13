@@ -707,6 +707,11 @@ def _setup_bridge_callbacks(
     # Карта маршрутизации process_name -> display_id (мутабельна: обновляется
     # из замыкания при пересборке на RecipeActivated).
     _routing: dict[str, str] = {}
+    # Первичный слот для подсчёта FPS: один кадровый проход pipeline может прийти
+    # в GUI несколькими дисплеями (main + mask) — считать FPS по ВСЕМ = N-кратный
+    # дубль. Считаем только кадры первичного дисплея → «за один проход» (список и
+    # порядок дисплеев — см. _rebuild_displays). Мутабельный контейнер для замыкания.
+    _primary_slot: list[str] = ["main"]
 
     def _read_active_recipe() -> dict | None:
         """Прочитать raw-dict активного рецепта (None если недоступен)."""
@@ -731,6 +736,12 @@ def _setup_bridge_callbacks(
         displays = build_panel_displays(recipe)
         _routing.clear()
         _routing.update(build_frame_routing(recipe))
+        # Первичный слот = первый включённый дисплей в порядке панели (сортировка по
+        # position.x, как в ImagePanelWidget.set_displays). По нему считаем FPS — один
+        # раз на проход, без дубля при нескольких дисплеях.
+        _enabled = [d for d in displays if d.get("id") and d.get("enabled", True)]
+        _enabled.sort(key=lambda d: (int(d.get("x", 0)), int(d.get("y", 0))))
+        _primary_slot[0] = _enabled[0]["id"] if _enabled else "main"
         try:
             image_panel.set_displays(displays)
         except Exception as exc:  # noqa: BLE001 — UI-перестройка не должна валить GUI
@@ -779,13 +790,17 @@ def _setup_bridge_callbacks(
             # Маршрутизация по sender → слот дисплея (fallback "main").
             slot_id = resolve_display_id(msg_dict, _routing, default="main")
             image_panel.display_frame(slot_id, frame)
-            window.increment_frame_count()
+            # FPS/latency считаем ТОЛЬКО по первичному слоту: иначе несколько
+            # дисплеев одного прохода (main + mask) дают N-кратный дубль FPS.
+            is_primary = slot_id == _primary_slot[0]
+            if is_primary:
+                window.increment_frame_count()
             # Сквозная задержка: source штампует data.capture_ts = time.time() при
             # захвате; здесь, на выходе всей цепочки, считаем now - capture_ts.
             # time.time() (wall) — кросс-процессно сравнимо на одной машине.
             data = msg_dict.get("data")
             cts = data.get("capture_ts") if isinstance(data, dict) else None
-            if isinstance(cts, (int, float)):
+            if is_primary and isinstance(cts, (int, float)):
                 window.record_chain_latency((time.time() - cts) * 1000.0)
 
             # frame-trace: финальный transport-спан (painter→gui) + дамп полного
