@@ -229,6 +229,41 @@ class TestHikvisionCameraPlugin:
         assert plugin._height == 1080
         assert plugin._auto_start is False
 
+    def test_configure_nested_config(self):
+        """configure() читает конфиг из вложенного ctx.config["config"] (blueprint-формат рецептов).
+
+        Раньше при вложенном формате плагин получал дефолты вместо заданных значений,
+        из-за чего auto_start=True не срабатывал и камера не стартовала (FPS=0 баг).
+        """
+        from Services.hikvision_camera.plugin.plugin import HikvisionCameraPlugin
+
+        plugin = HikvisionCameraPlugin()
+        # Вложенный формат: как в dataset_circle_capture.yaml (blueprint-рецепт)
+        nested_ctx = _make_ctx(
+            {
+                "category": "source",
+                "config": {
+                    "camera_id": 1,
+                    "camera_index": 0,
+                    "resolution_width": 1440,
+                    "resolution_height": 1080,
+                    "fps": 25,
+                    "auto_start": True,
+                },
+            }
+        )
+        mock_cam = MagicMock()
+        with patch(
+            "Services.hikvision_camera.plugin.plugin.HikvisionCamera",
+            return_value=mock_cam,
+        ):
+            plugin.configure(nested_ctx)
+
+        assert plugin._camera_id == 1
+        assert plugin._width == 1440
+        assert plugin._height == 1080
+        assert plugin._auto_start is True
+
     # --- produce ---
 
     def test_produce_not_capturing(self):
