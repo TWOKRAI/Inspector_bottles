@@ -1,15 +1,17 @@
 # Рецепт camera_robot_calibration — РАЗОВАЯ калибровка камера↔робот↔энкодер.
 #
-# Топология:
-#   camera_0[hikvision] → roi[roi_crop] → detector[color_convert → hsv_mask(красный) →
-#     circle_detector(по маске)] ──┬→ cal[camera_robot_calibration]      → display "main"
-#                                  └→ maskview[mask_to_frame]            → display "mask"
+# Топология (blob-детекция, разбитая на атомарные плагины):
+#   camera_0[hikvision] → roi[roi_crop] → detector[color_convert(bgr2rgb) → hsv_mask →
+#     morphology → contour_finder] ─┬→ cal[...]                            → display "main"
+#                                   └→ maskview                            → display "mask"
 #
 # Эталон: плата с 5 КРАСНЫМИ точками (4 угла + центр) на белом фоне.
-# detector: color_convert нормализует порядок каналов (default none; если красное на
-#   дисплее "mask" не ловится из-за BGR/RGB-свопа камеры — переключить mode=rgb2bgr/bgr2rgb).
-#   hsv_mask с h_min>h_max = wrap-around красного (H≈0 и H≈179). circle_detector(input_key=mask,
-#   keep_mask=true) ищет круги по маске; mask сохраняется для дисплея "mask".
+# detector: color_convert(bgr2rgb) ПЕРВЫЙ — корректный цвет на дисплее (валидатор требует
+#   frame→frame стыковку портов, поэтому конверт на frame-пути до hsv). Следствие: hsv видит
+#   RGB, и COLOR_BGR2HSV читает физически КРАСНЫЙ как «синий» hue (~H95-135) — это норма,
+#   тюнить по дисплею "mask". morphology(open_close) «вырезает» только сплошные круги
+#   (убирает шум, заполняет дырки). contour_finder ищет контуры по чистой маске, фильтрует
+#   по площади, отдаёт center; keep_mask=true → mask идёт на дисплей "mask".
 # cal: оркестратор калибровки — кэширует detections, общается с роботом/лентой через
 #   DeviceHubClient (процесс devices), собирает гомографию + вектор ленты. Командный API
 #   визарда (cal_begin/cal_capture_image/cal_set_robot_point/cal_encoder_scale/cal_belt_run/
@@ -20,8 +22,9 @@
 #   1) roi_crop x/y/width/height (0 = до края) — обрезать фон, оставить плату.
 #   2) color_convert.mode — если точки на "mask" не красные → bgr2rgb/rgb2bgr.
 #   3) hsv_mask: красный по умолчанию h_min=170,h_max=10 (wrap); тюнить s_min/v_min по "mask".
-#   4) circle_detector: min/max_radius (px), param2 (меньше → больше ложных) — смотреть "main".
-#   5) cal.reproj_threshold_mm — порог приёмки калибровки.
+#   4) morphology.kernel_size — больше → агрессивнее чистка шума (но «съедает» мелкие круги).
+#   5) contour_finder: min_area/max_area (px²) — диапазон площади круга; режет шум — смотреть "main".
+#   6) cal.reproj_threshold_mm — порог приёмки калибровки.
 #
 # === СИМУЛЯТОР робота (ПЕРВЫМ, в отдельном терминале) ===
 #   1) python -m Services.robot_comm.server            # 127.0.0.1:5021, unit 2
@@ -37,25 +40,44 @@ description: "Калибровка камера↔робот: гомографи
 # Устройства — upsert в реестр devices при активации.
 devices:
   - id: robot_main
-    name: "Робот Delta"
+    name: Робот Delta
     kind: robot
     protocol: delta_universal3
-    transport: {type: tcp, host: 192.168.1.7, port: 502, unit_id: 2}
-    params: {word_order: little, feed_poll_s: 0.05, telemetry_interval_s: 0.5}
+    transport:
+      type: tcp
+      host: 192.168.1.7
+      port: 502
+      unit_id: 2
+    params:
+      word_order: little
+      feed_poll_s: 0.05
+      telemetry_interval_s: 0.5
   - id: vfd_belt
-    name: "ПЧ лента"
+    name: ПЧ лента
     kind: vfd
     protocol: gd20_bridge
-    transport: {type: bridge, bridge: robot_main}
-    params: {freq_max_hz: 50.0, default_freq_hz: 10.0, poll_interval_s: 0.5, stale_polls_limit: 6}
-
+    transport:
+      type: bridge
+      bridge: robot_main
+    params:
+      freq_max_hz: 50.0
+      default_freq_hz: 10.0
+      poll_interval_s: 0.5
+      stale_polls_limit: 6
 blueprint:
+  name: default
+  description: ''
   processes:
     - process_name: gui
       plugins: []
       workers: []
       process_class: multiprocess_prototype.frontend.process.GuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
       protected: true
+      category:
       metadata: {}
     - process_name: devices
       plugins:
@@ -66,7 +88,12 @@ blueprint:
             registry_path: data/devices.yaml
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority:
+      target_process:
+      chain_targets: []
+      description:
       protected: true
+      category:
       metadata: {}
     - process_name: camera_0
       plugins:
@@ -83,9 +110,12 @@ blueprint:
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high
+      target_process:
       chain_targets:
         - roi
+      description:
       protected: false
+      category:
       metadata:
         source_target_fps: 25
     - process_name: roi
@@ -94,16 +124,19 @@ blueprint:
           plugin_class: Plugins.processing.roi_crop.plugin.RoiCropPlugin
           category: processing
           config:
-            x: 0
-            y: 0
-            width: 0
-            height: 0
+            x: 413
+            y: 120
+            width: 734
+            height: 846
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
+      target_process:
       chain_targets:
         - detector
+      description:
       protected: false
+      category:
       metadata: {}
     - process_name: detector
       plugins:
@@ -111,41 +144,42 @@ blueprint:
           plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
           category: processing
           config:
-            mode: none
+            mode: bgr2rgb
         - plugin_name: hsv_mask
           plugin_class: Plugins.processing.hsv_mask.plugin.HsvMaskPlugin
           category: processing
           config:
-            # Красный = wrap-around по Hue: h_min > h_max → OR полос [0..10] и [170..179].
-            h_min: 170
-            h_max: 10
+            h_min: 0
+            h_max: 135
             s_min: 100
             s_max: 255
-            v_min: 80
+            v_min: 70
             v_max: 255
-        - plugin_name: circle_detector
-          plugin_class: Plugins.processing.circle_detector.plugin.CircleDetectorPlugin
+        - plugin_name: morphology
+          plugin_class: Plugins.processing.morphology.plugin.MorphologyPlugin
           category: processing
           config:
-            input_key: mask
+            operation: open_close
+            kernel_shape: ellipse
+            kernel_size: 5
+            iterations: 1
+        - plugin_name: contour_finder
+          plugin_class: Plugins.processing.contour_finder.plugin.ContourFinderPlugin
+          category: processing
+          config:
+            min_area: 30
+            max_area: 0
             keep_mask: true
-            mode: gradient
-            blur_method: gaussian
-            blur_ksize: 5
-            dp: 1.2
-            min_dist: 60
-            param1: 100
-            param2: 20
-            min_radius: 8
-            max_radius: 80
-            draw_circles: false
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
+      target_process:
       chain_targets:
         - cal
         - maskview
+      description:
       protected: false
+      category:
       metadata: {}
     - process_name: cal
       plugins:
@@ -161,9 +195,12 @@ blueprint:
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
+      target_process:
       chain_targets:
         - gui
+      description:
       protected: false
+      category:
       metadata: {}
     - process_name: maskview
       plugins:
@@ -175,29 +212,67 @@ blueprint:
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: low
+      target_process:
       chain_targets:
         - gui
+      description:
       protected: false
+      category:
       metadata: {}
   wires:
     - source: camera_0.hikvision.frame
       target: roi.roi_crop.frame
+      description: ''
     - source: roi.roi_crop.frame
       target: detector.color_convert.frame
-    - source: detector.circle_detector.frame
+      description: ''
+    - source: detector.contour_finder.frame
       target: cal.camera_robot_calibration.frame
-    - source: detector.circle_detector.detections
+      description: ''
+    - source: detector.contour_finder.detections
       target: cal.camera_robot_calibration.detections
-    - source: detector.circle_detector.mask
+      description: ''
+    - source: detector.contour_finder.mask
       target: maskview.mask_to_frame.mask
+      description: ''
   displays:
     - node_id: cal.camera_robot_calibration.frame
       display_id: main
     - node_id: maskview.mask_to_frame.frame
       display_id: mask
   metadata:
-    name: default
-    description: ''
+    gui_positions: &id001
+      camera_0.hikvision:
+        - 16.0
+        - 100.0
+      roi.roi_crop:
+        - 956.0
+        - 100.0
+      detector.color_convert:
+        - 1876.0
+        - 100.0
+      detector.hsv_mask:
+        - 2076.0
+        - 122.04540959629236
+      detector.morphology:
+        - 2276.0
+        - 100.0
+      detector.contour_finder:
+        - 2476.0
+        - 100.0
+      cal.camera_robot_calibration:
+        - 2816.0
+        - 40.0
+      maskview.mask_to_frame:
+        - 2816.0
+        - 160.0
+      main:
+        - 3720.0
+        - 0.0
+      mask:
+        - 3720.0
+        - 120.0
+    locked_nodes: []
 displays:
   - id: main
     name: Кадр + точки калибровки
@@ -234,3 +309,4 @@ displays:
 created_at: ''
 active_services: []
 display_bindings: []
+gui_positions: *id001
