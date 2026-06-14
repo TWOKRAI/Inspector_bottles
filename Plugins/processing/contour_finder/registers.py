@@ -17,3 +17,7 @@ class ContourFinderRegisters(SchemaBase):
 
     min_area: Annotated[int, FieldMeta("Min Area", info="Мин. площадь контура (px²)", min=0, unit="px²")] = 100
     max_area: Annotated[int, FieldMeta("Max Area", info="Макс. площадь (0 = без ограничения)", min=0, unit="px²")] = 0
+    keep_mask: Annotated[
+        bool,
+        FieldMeta("Keep Mask", info="Не дропать маску после поиска (нужно display-ветке для показа маски)"),
+    ] = False

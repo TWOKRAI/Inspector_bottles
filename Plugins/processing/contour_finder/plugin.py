@@ -38,6 +38,7 @@ class ContourFinderPlugin(ProcessModulePlugin):
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Кадр (pass-through)"),
         Port(name="detections", dtype="list[dict]", shape="N", description="Детекции (bbox, center, area)"),
         Port(name="contours", dtype="list[ndarray]", shape="N", description="Контуры для рисования"),
+        Port(name="mask", dtype="image/gray", shape="(H, W)", optional=True, description="Маска (при keep_mask)"),
     ]
 
     commands = {}
@@ -84,5 +85,6 @@ class ContourFinderPlugin(ProcessModulePlugin):
             filtered.append(c)
 
         out = {**item, "detections": detections, "contours": filtered}
-        out.pop("mask", None)  # маска дальше не нужна — не гоняем по IPC
+        if not self._reg.keep_mask:
+            out.pop("mask", None)  # маска дальше не нужна — не гоняем по IPC (кроме keep_mask)
         return out
