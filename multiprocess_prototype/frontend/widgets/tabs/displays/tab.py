@@ -105,6 +105,7 @@ class DisplaysTab(BaseListNavTab):
         services: AppServices,
         *,
         router_manager: object | None = None,
+        image_panel: object | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Инициализировать таб дисплеев.
@@ -113,10 +114,13 @@ class DisplaysTab(BaseListNavTab):
             services: типизированный DI-контейнер AppServices.
             router_manager: RouterManager для превью SHM-канала (runtime-объект вне
                 AppServices, по умолчанию None — превью без подписки).
+            image_panel: главная панель кадров (ImagePanelWidget) для снимка дисплея
+                (grab_frame). None → кнопка «Снимок» даёт понятный статус.
             parent: родительский виджет.
         """
         self._services = services
         self._router_manager = router_manager
+        self._image_panel = image_panel
         self._selected_id: str | None = None
         # Индекс формы в content_stack (устанавливается после super().__init__)
         self._form_stack_index: int = 0
@@ -178,9 +182,9 @@ class DisplaysTab(BaseListNavTab):
         """Фабричный метод для register_all_tabs() / TabFactory.
 
         Task F.9: принимает AppServices + RuntimeDeps (Q-F1=B).
-        DisplaysTab не использует runtime-зависимостей.
+        image_panel из runtime — для снимка дисплея (кнопка «Снимок»).
         """
-        return cls(services)
+        return cls(services, image_panel=runtime.image_panel)
 
     # ------------------------------------------------------------------ #
     #  BaseListNavTab hooks                                                #
@@ -336,6 +340,7 @@ class DisplaysTab(BaseListNavTab):
         self._delete_btn.setEnabled(has_selection)
         self._duplicate_btn.setEnabled(has_selection)
         self._preview_btn.setEnabled(has_selection)
+        self._snapshot_btn.setEnabled(has_selection)
 
     def get_form_data(self) -> dict:
         """Собрать текущие данные формы в словарь.
@@ -618,6 +623,14 @@ class DisplaysTab(BaseListNavTab):
         self._preview_btn.clicked.connect(self._on_preview_clicked)
         action_layout.addWidget(self._preview_btn)
 
+        # Снимок — сохранить текущий кадр выбранного дисплея в PNG. Read-only вывод,
+        # permission не требуется. Disabled без выбора.
+        self._snapshot_btn = QPushButton("Снимок")
+        self._snapshot_btn.setToolTip("Сохранить текущий кадр выбранного дисплея в PNG (data/snapshots/)")
+        self._snapshot_btn.setEnabled(False)
+        self._snapshot_btn.clicked.connect(self._on_snapshot_clicked)
+        action_layout.addWidget(self._snapshot_btn)
+
         action_layout.addStretch(1)
         self._tab_layout.set_action_widget(action_widget)
 
@@ -648,6 +661,55 @@ class DisplaysTab(BaseListNavTab):
         """Обработать нажатие «Открыть превью»."""
         if self._selected_id is not None:
             self._presenter.on_open_preview(self._selected_id)
+
+    def _on_snapshot_clicked(self) -> None:
+        """Сохранить текущий кадр ВЫБРАННОГО дисплея в PNG (data/snapshots/)."""
+        if self._selected_id is None:
+            return
+        if self._image_panel is None:
+            self.show_error("Снимок недоступен: панель кадров не подключена (backend не запущен).")
+            return
+        frame = self._image_panel.grab_frame(self._selected_id)
+        if frame is None:
+            self.show_error(
+                f"Нет кадра для дисплея '{self._selected_id}'. Запусти процессы и дождись кадра, затем повтори."
+            )
+            return
+        path = self._save_snapshot(self._selected_id, frame)
+        if path is not None:
+            QMessageBox.information(self, "Снимок сохранён", f"Кадр дисплея «{self._selected_id}» сохранён:\n{path}")
+
+    def _save_snapshot(self, display_id: str, frame) -> "object | None":
+        """Сохранить кадр как PNG (как на экране). Возвращает путь или None при ошибке."""
+        from datetime import datetime
+        from pathlib import Path
+
+        import numpy as np
+        from PySide6.QtGui import QImage
+
+        try:
+            arr = np.ascontiguousarray(frame)
+            if arr.ndim != 3 or arr.shape[2] != 3:
+                self.show_error("Кадр не 3-канальный — снимок не поддерживается.")
+                return None
+            # Дисплей показывает frame[..., ::-1] как RGB888 — повторяем, чтобы PNG совпал с экраном.
+            rgb = np.ascontiguousarray(arr[..., ::-1])
+            h, w = rgb.shape[:2]
+            qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+            out_dir = Path("data/snapshots")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            path = out_dir / f"{display_id}_{ts}.png"
+            # qimg ссылается на буфер rgb — он жив до конца save() (локальная переменная).
+            if not qimg.save(str(path), "PNG"):
+                self.show_error("Не удалось записать PNG (QImage.save вернул False).")
+                return None
+            logger.info("DisplaysTab: снимок дисплея '%s' → %s", display_id, path)
+            return path
+        except Exception as exc:  # noqa: BLE001 — снимок не должен ронять GUI
+            logger.error("DisplaysTab: снимок '%s' не удался: %s", display_id, exc, exc_info=True)
+            self.show_error(f"Снимок не удался: {exc}")
+            return None
 
     # ------------------------------------------------------------------ #
     #  Preview callback (Task 4.7)                                         #

@@ -151,6 +151,10 @@ class ImagePanelWidget(QWidget):
         """Отобразить несколько кадров: dict[slot_id, np.ndarray]."""
         self._presenter.on_frames(frames)
 
+    def grab_frame(self, slot_id: str):
+        """Последний кадр слота (BGR numpy) или None — для снимка дисплея."""
+        return self._presenter.get_last_frame(slot_id)
+
     # ------------------------------------------------------------------
     # Свойства
     # ------------------------------------------------------------------

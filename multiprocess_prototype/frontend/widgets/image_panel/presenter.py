@@ -1,4 +1,5 @@
 """ImagePanelPresenter — управляет набором DisplaySlot'ов."""
+
 import logging
 
 import numpy as np
@@ -19,6 +20,9 @@ class ImagePanelPresenter:
     def __init__(self):
         # slot_id → DisplaySlot
         self._slots: dict[str, DisplaySlot] = {}
+        # slot_id → последний валидный кадр (для снимка/grab). Храним ссылку (дёшево);
+        # снимок — редкая ручная операция, риск рассинхрона кадра приемлем.
+        self._last_frames: dict = {}
 
     # ------------------------------------------------------------------
     # Регистрация слотов
@@ -64,15 +68,16 @@ class ImagePanelPresenter:
             slot.set_placeholder("Нет сигнала")
             return
 
+        # Запомнить последний валидный кадр для снимка (grab_frame).
+        self._last_frames[slot_id] = frame
+
         try:
             # BGR → RGB: инвертируем порядок каналов (как в CameraPresenter)
             rgb = frame[..., ::-1].copy()  # copy() гарантирует contiguous memory
             h, w = rgb.shape[:2]
             bytes_per_line = 3 * w
 
-            qimage = QImage(
-                rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888
-            )
+            qimage = QImage(rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(qimage)
             slot.update_pixmap(pixmap)
         except Exception as exc:
@@ -86,3 +91,7 @@ class ImagePanelPresenter:
         """
         for slot_id, frame in frames.items():
             self.on_frame(slot_id, frame)
+
+    def get_last_frame(self, slot_id: str):
+        """Последний валидный кадр слота (BGR numpy) или None — для снимка."""
+        return self._last_frames.get(slot_id)

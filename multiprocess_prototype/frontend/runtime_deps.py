@@ -71,6 +71,9 @@ class RuntimeDeps:
     auth_ctx: "AuthContext | None" = None
     process_manager_proxy: "ProcessManagerProxy | None" = None
     request_ui_restart: "Callable[[], None] | None" = None
+    # Главная панель кадров (ImagePanelWidget) — runtime-объект. Нужен DisplaysTab
+    # для снимка дисплея (grab_frame). None → кнопка «Снимок» даёт статус «нет кадра».
+    image_panel: Any = None
     # persist активного рецепта в манифест (app.yaml → pipeline) при активации.
     # Закрывает loop: активация в GUI → app.yaml обновлён → следующий старт
     # восстанавливает рецепт (см. app.py restore). None → no-op (persist отключён).

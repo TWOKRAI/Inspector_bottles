@@ -56,6 +56,13 @@ def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
 
+    # Глобальный wheel-guard: колесо мыши не меняет значения полей ввода
+    # (spin/combo/slider) — частая причина случайных правок. Прокрутка страниц
+    # сохраняется (событие пробрасывается scroll-области). Parent=app → не уберёт GC.
+    from .wheel_guard import WheelGuard
+
+    app.installEventFilter(WheelGuard(app))
+
     # qt-mcp probe — активируется только при QT_MCP_PROBE=1.
     # Слушает localhost:9142, видимо MCP-сервером qt-mcp для UI-интроспекции.
     # Прод-поведение не меняется без env-флага.
@@ -632,6 +639,7 @@ def run_gui(process: "GuiProcess") -> None:
         process_manager_proxy=process_manager_proxy,
         request_ui_restart=_request_ui_restart,
         persist_active_recipe=_persist_active_recipe,
+        image_panel=image_panel,
     )
 
     tab_factory = TabFactory(
