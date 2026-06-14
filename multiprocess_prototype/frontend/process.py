@@ -85,9 +85,16 @@ class GuiProcess(ProcessModule):
                 # комбо остаётся пустым и push-обновления conn мертвы.
                 # При подписке сработает _replay_initial_state — комбо заполнится сразу.
                 self._gui_state_proxy.subscribe("devices.**", lambda _deltas: None, exclude_self=True)
+                # calibration.** — прогресс визарда калибровки камера↔робот.
+                # CameraRobotCalibrationPlugin публикует calibration.state.<camera_id>.progress;
+                # без этой подписки DeltaDispatcher не шлёт дельты в GUI (GUI не в списке
+                # подписчиков) → подвкладка «Калибровка» (Services → Робот) «висит»: «найдено
+                # N/5», собранные точки, reproj и активация «Сохранить» не обновляются.
+                self._gui_state_proxy.subscribe("calibration.**", lambda _deltas: None, exclude_self=True)
             except Exception as exc:
                 self._log_warning(
-                    f"GuiProcess '{self.name}': подписка на processes.**/system.**/devices.** не удалась: {exc}",
+                    f"GuiProcess '{self.name}': подписка на processes.**/system.**/devices.**/"
+                    f"calibration.** не удалась: {exc}",
                     module="gui",
                 )
 

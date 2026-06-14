@@ -614,9 +614,12 @@ class TestGuiProcessSubscriptions:
         assert "devices.**" in subscribed_paths, (
             "подписка devices.** отсутствует — push-дельты реестра устройств не дойдут до GUI"
         )
+        assert "calibration.**" in subscribed_paths, (
+            "подписка calibration.** отсутствует — прогресс визарда калибровки не дойдёт до GUI"
+        )
 
-    def test_subscriptions_all_three_present(self):
-        """Подписок ровно три: processes/system/devices."""
+    def test_subscriptions_all_four_present(self):
+        """Подписок ровно четыре: processes/system/devices/calibration."""
         from multiprocess_prototype.frontend.process import GuiProcess
 
         sr = _make_mock_shared_resources()
@@ -635,7 +638,7 @@ class TestGuiProcessSubscriptions:
 
         subscribed_paths = self._run_init_threads_with_mock_proxy(process)
 
-        assert set(subscribed_paths) >= {"processes.**", "system.**", "devices.**"}
+        assert set(subscribed_paths) >= {"processes.**", "system.**", "devices.**", "calibration.**"}
 
 
 class TestStateDeltasToBridge:
