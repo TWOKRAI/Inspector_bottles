@@ -151,6 +151,9 @@ class PluginOrchestrator:
 
         self._services.log_info(f"PluginOrchestrator[{self._services.name}]: {len(self._plugins)} плагин(ов)")
 
+        # Фаза 3.5: control-команды (bypass ноды) — независимо от наличия регистров.
+        self._register_control_commands()
+
         # Фаза 4: Registers boot — отправить schemas в PM + handler
         if registers_manager is not None:
             self._boot_registers(registers_manager)
@@ -293,6 +296,45 @@ class PluginOrchestrator:
             router = getattr(self._services, "router_manager", None)
             if router:
                 router.register_message_handler("register_update", self._on_register_update)
+
+    def _register_control_commands(self) -> None:
+        """Регистрация control-команд плагинов (bypass). Не зависит от регистров.
+
+        ``set_enabled`` — GUI/другой процесс включает/выключает ноду по имени плагина.
+        Выключенная нода пропускает кадр без обработки (PluginRunner.call_process).
+        """
+        cm = getattr(self._services, "command_manager", None)
+        if cm is None:
+            return
+        try:
+            cm.register_command(
+                "set_enabled",
+                self._on_set_enabled,
+                expects_full_message=True,
+                metadata={"description": "Включить/выключить ноду (bypass)", "manages_own_reply": True},
+                tags=["control"],
+            )
+        except Exception as e:  # noqa: BLE001 — регистрация команды не должна валить boot
+            self._services.log_error(f"PluginOrchestrator[{self._services.name}]: register set_enabled: {e}")
+
+    def _on_set_enabled(self, msg: dict) -> None:
+        """Handler: переключить bypass плагина по имени (data: {plugin_name, enabled})."""
+        data = msg.get("data", {})
+        plugin_name = data.get("plugin_name")
+        enabled = bool(data.get("enabled", True))
+        if not plugin_name:
+            return
+        for plugin in self._plugins:
+            if plugin.name == plugin_name:
+                plugin.enabled = enabled
+                self._services.log_info(
+                    f"PluginOrchestrator[{self._services.name}]: нода '{plugin_name}' "
+                    f"{'включена' if enabled else 'ВЫКЛЮЧЕНА (bypass)'}"
+                )
+                return
+        self._services.log_error(
+            f"PluginOrchestrator[{self._services.name}]: set_enabled — плагин '{plugin_name}' не найден"
+        )
 
     def _on_register_update(self, msg: dict) -> None:
         """Handler: GUI/другой процесс обновляет значение регистра."""

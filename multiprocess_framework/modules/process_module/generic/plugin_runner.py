@@ -67,9 +67,18 @@ class PluginRunner:
     # ------------------------------------------------------------------ #
 
     def call_process(self, plugin: "ProcessModulePlugin", items: list[dict]) -> list[dict]:
-        """Вызвать plugin.process(items) с хуками. Исключение плагина пробрасывается."""
+        """Вызвать plugin.process(items) с хуками. Исключение плагина пробрасывается.
+
+        Bypass: если plugin.enabled == False — process() НЕ вызывается, кадр идёт
+        насквозь (outputs = входные items). Хуки наблюдения всё равно срабатывают
+        (io-debug видит ноду как pass-through). Нужно, чтобы выключить «тяжёлую»/
+        зависающую ноду (напр. circle_detector) и спокойно тюнить остальную цепочку.
+        """
         self._run_pre(plugin, "process", items)
-        outputs = plugin.process(items)
+        if getattr(plugin, "enabled", True):
+            outputs = plugin.process(items)
+        else:
+            outputs = items  # bypass: кадр без обработки
         self._run_post(plugin, "process", items, outputs)
         return outputs
 

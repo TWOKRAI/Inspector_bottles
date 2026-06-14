@@ -150,3 +150,43 @@ def test_empty_runner_overhead_negligible():
     # Требование Этапа 4: overhead пустого раннера < 0.1 мс. Берём запас (вызов
     # плагина-двойника + два пустых прохода по хукам — субмиллисекунда с большим зазором).
     assert per_call < 0.1e-3, f"overhead {per_call * 1e6:.1f} мкс/вызов превышает 100 мкс"
+
+
+# ---------------------------------------------------------------------------
+#  Bypass: enabled=False → process() не вызывается, кадр идёт насквозь
+# ---------------------------------------------------------------------------
+
+
+def test_disabled_plugin_passes_through_without_process():
+    runner = PluginRunner()
+    called: list[bool] = []
+
+    def _proc(items):
+        called.append(True)
+        return [{"mutated": True}]
+
+    plugin = _FakePlugin(process_fn=_proc)
+    plugin.enabled = False
+    items = [{"frame": 7}]
+    out = runner.call_process(plugin, items)
+    assert out is items  # тот же список — кадр без обработки
+    assert called == []  # process() НЕ вызывался
+
+
+def test_enabled_plugin_processes_normally():
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{**it, "seen": True} for it in items])
+    plugin.enabled = True
+    assert runner.call_process(plugin, [{"v": 1}]) == [{"v": 1, "seen": True}]
+
+
+def test_disabled_plugin_still_runs_hooks():
+    """Bypass не должен ослеплять наблюдателей: pre/post-хуки срабатывают, outputs=inputs."""
+    runner = PluginRunner()
+    seen: list[tuple] = []
+    runner.add_post_hook(lambda p, m, inp, out: seen.append((m, inp, out)))
+    plugin = _FakePlugin(process_fn=lambda items: [{"x": 1}])
+    plugin.enabled = False
+    items = [{"frame": 1}]
+    runner.call_process(plugin, items)
+    assert seen == [("process", items, items)]

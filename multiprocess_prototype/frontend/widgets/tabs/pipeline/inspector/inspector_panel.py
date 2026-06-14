@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QFrame,
@@ -77,6 +78,8 @@ class NodeInspectorPanel(QWidget):
         super().__init__(parent)
         self._current_process: str = ""
         self._current_node_id: str = ""
+        # Имя плагина выбранной ноды (для команды set_enabled / bypass).
+        self._current_plugin_name: str = ""
         # D.2: индекс выбранного плагина в цепочке процесса (для SetPluginConfig
         # presenter читает его как panel.current_plugin_index). По умолчанию 0 —
         # совместимо с прямым field_changed.emit в тестах (1 плагин/процесс).
@@ -236,6 +239,20 @@ class NodeInspectorPanel(QWidget):
         lock_layout.addWidget(self._unlock_btn, 1)
         mp_layout.addRow("Фиксация:", lock_row)
 
+        # Тумблер bypass: снять галку → нода пропускает кадр БЕЗ обработки (live).
+        # Нужно, чтобы выключить тяжёлую/зависающую ноду (circle_detector) и спокойно
+        # тюнить остальную цепочку (напр. hsv_mask по дисплею «mask»). Команда set_enabled
+        # уходит в процесс ноды через command_sender. По умолчанию включена.
+        self._bypass_check = QCheckBox("Нода включена (обрабатывает кадр)")
+        self._bypass_check.setObjectName("NodeEnabledCheck")
+        self._bypass_check.setChecked(True)
+        self._bypass_check.setMinimumHeight(32)
+        self._bypass_check.setToolTip(
+            "Снять галку → нода пропускает кадр без обработки (bypass).\n"
+            "Удобно отключить circle_detector, пока настраиваешь hsv-маску."
+        )
+        mp_layout.addRow("Обработка:", self._bypass_check)
+
         content_layout.addWidget(self._move_process_form)
         self._move_process_form.setVisible(False)
 
@@ -324,6 +341,26 @@ class NodeInspectorPanel(QWidget):
         self._move_worker_combo.currentIndexChanged.connect(self._on_move_worker_combo_changed)
         self._lock_btn.clicked.connect(lambda: self._emit_lock(True))
         self._unlock_btn.clicked.connect(lambda: self._emit_lock(False))
+        self._bypass_check.toggled.connect(self._on_bypass_toggled)
+
+    def _on_bypass_toggled(self, checked: bool) -> None:
+        """Тумблер bypass → команда set_enabled в процесс ноды (fire-and-forget).
+
+        checked=True → нода обрабатывает; False → пропускает кадр без обработки.
+        Без command_sender (редактор без живого backend) — no-op (нечего слать).
+        """
+        if self._suppress_changes:
+            return
+        if self._command_sender is None or not self._current_process or not self._current_plugin_name:
+            return
+        try:
+            self._command_sender.send_command(
+                self._current_process,
+                "set_enabled",
+                {"plugin_name": self._current_plugin_name, "enabled": bool(checked)},
+            )
+        except Exception:
+            logger.debug("set_enabled не отправлен для %s.%s", self._current_process, self._current_plugin_name)
 
     def _emit_lock(self, locked: bool) -> None:
         """Кнопки «Закрепить/Открепить» → сигнал для текущей ноды."""
@@ -375,6 +412,10 @@ class NodeInspectorPanel(QWidget):
             self._current_node_id = node_id
             self._current_process = process_name or node_id
             self._current_plugin_index = plugin_index
+            self._current_plugin_name = plugin_name or node_id
+            # Сброс тумблера bypass в «включено» при выборе ноды (readback живого
+            # состояния пока нет — дефолт enabled; signal подавлен, чтобы не слать команду).
+            self._bypass_check.setChecked(True)
             self._placeholder.setVisible(False)
             self._content.setVisible(True)
 

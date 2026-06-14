@@ -222,6 +222,10 @@ class ProcessModulePlugin(ABC):
         self.metrics: PluginMetrics | None = None
         # Имя процесса-узла для frame-trace (ставит PluginOrchestrator.boot).
         self._trace_node: str = ""
+        # Bypass-флаг: если False — PluginRunner НЕ вызывает process(), кадр идёт
+        # насквозь без обработки (live-тумблер в инспекторе ноды). Источники (produce)
+        # bypass не поддерживают (нечего пропускать). См. PluginRunner.call_process.
+        self.enabled: bool = True
 
     # --- Data pipeline контракт (Phase 5) ---
 
