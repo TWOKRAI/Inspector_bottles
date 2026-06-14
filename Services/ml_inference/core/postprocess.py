@@ -9,7 +9,44 @@
 
 from __future__ import annotations
 
+import math
+from typing import Literal
+
 import numpy as np
+
+SymmetryType = Literal["none", "180", "full"]
+
+
+def decode_angle(sin_v: float, cos_v: float, symmetry: SymmetryType) -> tuple[float, bool]:
+    """(sin, cos) выхода angle-головы → физический угол с учётом симметрии.
+
+    ЗЕРКАЛО dataset_gen.encode_angle (паритет проверяется контракт-тестом
+    test_postprocess). atan2 масштабо-инвариантен → нормировать (sin,cos) не нужно.
+
+    Post:
+      - none: angle_deg ∈ [0,360), valid=True;
+      - 180:  angle_deg ∈ [0,180), valid=True (θ и θ+180° неразличимы);
+      - full: (0.0, False) — угол не определён, доворот не нужен.
+    """
+    if symmetry == "full":
+        return 0.0, False
+    raw_deg = math.degrees(math.atan2(sin_v, cos_v))
+    period = 180.0 if symmetry == "180" else 360.0
+    deg = (raw_deg / 2.0 if symmetry == "180" else raw_deg) % period
+    if deg > period - 1e-6:  # граничный шум float (≈period → 0)
+        deg = 0.0
+    return deg, True
+
+
+def angle_postprocess(angle_raw: np.ndarray, symmetry: SymmetryType = "none") -> dict:
+    """Выход angle-головы (1,2)|(2,) [sin,cos] → {angle_deg, angle_valid}."""
+    arr = np.asarray(angle_raw, dtype=np.float32)
+    if arr.ndim == 2:
+        arr = arr[0]
+    if arr.ndim != 1 or arr.shape[0] < 2:
+        raise ValueError(f"ожидается выход угла (1,2) или (2,), получено {angle_raw.shape}")
+    deg, valid = decode_angle(float(arr[0]), float(arr[1]), symmetry)
+    return {"angle_deg": deg, "angle_valid": valid}
 
 
 def softmax(logits: np.ndarray) -> np.ndarray:

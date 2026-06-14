@@ -49,31 +49,41 @@ class ONNXRuntimeBackend(BaseInferenceBackend):
             raise RuntimeError("onnxruntime не установлен. Установите: pip install '.[ml]'")
         self._session: ort.InferenceSession | None = None
         self._input_name: str = ""
+        self._output_names: list[str] = []
 
     def load(self, spec: ModelSpec, device: str = "cpu") -> None:
         """Создать InferenceSession из весов .onnx."""
         path = str(spec.weights_path)
         self._session = ort.InferenceSession(path, providers=_providers_for(device))
         self._input_name = self._session.get_inputs()[0].name
+        self._output_names = [o.name for o in self._session.get_outputs()]
         self._spec = spec
         self._device = device
         logger.info(
-            "ONNXBackend: загружена %s (%s, providers=%s)",
+            "ONNXBackend: загружена %s (%s, providers=%s, outputs=%s)",
             spec.name,
             device,
             self._session.get_providers(),
+            self._output_names,
         )
 
-    def infer(self, tensor: np.ndarray) -> np.ndarray:
-        """Прогнать тензор → сырой выход первого output."""
+    def infer(self, tensor: np.ndarray) -> dict[str, np.ndarray]:
+        """Прогнать тензор → выходы сети по именам (logits[, angle], ...)."""
         if self._session is None:
             raise RuntimeError("ONNXBackend: модель не загружена")
         outputs = self._session.run(None, {self._input_name: tensor})
-        return np.asarray(outputs[0])
+        # имена выходов уникальны у нашего экспорта; для сторонних конвертеров с
+        # пустыми/дублирующими именами — fallback на out_<i> (без молчаливой коллизии)
+        result: dict[str, np.ndarray] = {}
+        for i, (name, o) in enumerate(zip(self._output_names, outputs)):
+            key = name if name and name not in result else f"out_{i}"
+            result[key] = np.asarray(o)
+        return result
 
     def unload(self) -> None:
         """Освободить сессию."""
         self._session = None
         self._input_name = ""
+        self._output_names = []
         self._spec = None
         gc.collect()

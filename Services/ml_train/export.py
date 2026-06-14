@@ -49,8 +49,12 @@ def export_onnx(
     config = TrainConfig.from_dict(ckpt["config"])
     class_names: list[str] = list(ckpt["class_names"])
     h, w = (int(v) for v in ckpt["image_size"])
+    symmetry_map: dict[str, str] = ckpt.get("symmetry_map") or {}
 
-    model = build_model(config.model, num_classes=len(class_names))
+    # pretrained=False: веса берём из чекпоинта, не из ImageNet (иначе экспорт
+    # на офлайн-стенде повиснет на загрузке, а веса всё равно перезатираются)
+    model_cfg = config.model.model_copy(update={"pretrained": False})
+    model = build_model(model_cfg, num_classes=len(class_names))
     model.load_state_dict(ckpt["model_state"])
     model.eval()
 
@@ -68,7 +72,7 @@ def export_onnx(
 
     labels_name = f"{model_id}_classes.txt"
     (out_dir / labels_name).write_text("\n".join(class_names) + "\n", encoding="utf-8")
-    _write_sidecar(out_dir / f"{model_id}.yaml", model_id, config, (h, w), labels_name)
+    _write_sidecar(out_dir / f"{model_id}.yaml", model_id, config, (h, w), labels_name, symmetry_map)
 
     if verify:
         _verify_parity(model, dummy, onnx_path)
@@ -103,9 +107,15 @@ def _write_sidecar(
     config: TrainConfig,
     input_size: tuple[int, int],
     labels_name: str,
+    symmetry_map: dict[str, str] | None = None,
 ) -> None:
-    """Sidecar по конвенции data/models/README.md (читает ModelRegistry ml_inference)."""
-    sidecar = {
+    """Sidecar по конвенции data/models/README.md (читает ModelRegistry ml_inference).
+
+    Пишет ВСЁ для воспроизводимого инференса: размер/нормализацию/каналы/политику
+    ресайза и — при angle_head — имена выходов и симметрию классов (для декода угла).
+    resize_policy=stretch: обучение не делает letterbox, инференс не должен тоже.
+    """
+    sidecar: dict[str, Any] = {
         "name": f"{model_id} ({config.model.arch})",
         "task": "classification",
         "backend": "onnx",
@@ -113,12 +123,19 @@ def _write_sidecar(
         "input_size": [input_size[0], input_size[1]],
         "layout": "NCHW",
         "color": "RGB",
+        "resize_policy": "stretch",
         "normalize": {
             "mean": list(config.data.normalize.mean),
             "std": list(config.data.normalize.std),
         },
         "labels": labels_name,
+        "output_name": "logits",
     }
+    if config.model.angle_head:
+        sidecar["angle_head"] = True
+        sidecar["angle_output_name"] = "angle"
+        sidecar["angle_convention"] = "ccw_deg"  # угол CCW в градусах (контракт decode_angle)
+        sidecar["symmetry"] = dict(symmetry_map or {})
     path.write_text(yaml.safe_dump(sidecar, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 

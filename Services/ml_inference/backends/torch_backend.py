@@ -67,16 +67,30 @@ class TorchBackend(BaseInferenceBackend):
         self._device = dev
         logger.info("TorchBackend: загружена %s (%s)", spec.name, dev)
 
-    def infer(self, tensor: np.ndarray) -> np.ndarray:
-        """Прогнать тензор → сырой выход (numpy)."""
+    def infer(self, tensor: np.ndarray) -> dict[str, np.ndarray]:
+        """Прогнать тензор → выходы по именам.
+
+        TorchScript не несёт имён выходов → маппим по конвенции spec:
+        первый выход = output_name (logits), второй = angle_output_name (angle),
+        остальные = out_<i>. Одиночный тензор → только output_name.
+        """
         if self._model is None:
             raise RuntimeError("TorchBackend: модель не загружена")
         with torch.no_grad():
             inp = torch.from_numpy(tensor).to(self._device)
             out = self._model(inp)
-        if isinstance(out, (list, tuple)):
-            out = out[0]
-        return out.detach().cpu().numpy()
+        # MultiHeadModel.forward отдаёт (logits, None) при angle_head=False —
+        # None-выходы отбрасываем, чтобы не звать None.detach()
+        outs = list(out) if isinstance(out, (list, tuple)) else [out]
+        outs = [t for t in outs if t is not None]
+        names = [self._spec.output_name if self._spec else "logits"]
+        if self._spec is not None:
+            names.append(self._spec.angle_output_name)
+        result: dict[str, np.ndarray] = {}
+        for i, t in enumerate(outs):
+            name = names[i] if i < len(names) else f"out_{i}"
+            result[name] = t.detach().cpu().numpy()
+        return result
 
     def unload(self) -> None:
         """Освободить модель + GPU-память."""

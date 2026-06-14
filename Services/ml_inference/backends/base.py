@@ -7,11 +7,14 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 
 import numpy as np
 
 from Services.ml_inference.core.model_spec import ModelSpec
+
+logger = logging.getLogger(__name__)
 
 
 class BaseInferenceBackend(ABC):
@@ -36,8 +39,13 @@ class BaseInferenceBackend(ABC):
         """Загрузить модель из spec на устройство (cpu|cuda)."""
 
     @abstractmethod
-    def infer(self, tensor: np.ndarray) -> np.ndarray:
-        """Прогнать предобработанный тензор → сырой выход сети."""
+    def infer(self, tensor: np.ndarray) -> dict[str, np.ndarray]:
+        """Прогнать тензор → сырые выходы сети по ИМЕНАМ.
+
+        Возвращает dict {output_name: ndarray} — мультиголовые модели
+        (классификация + угол) отдают несколько выходов; одноголовые — один.
+        Имена соответствуют выходам ONNX-сессии / конвенции TorchScript.
+        """
 
     @abstractmethod
     def unload(self) -> None:
@@ -47,6 +55,7 @@ class BaseInferenceBackend(ABC):
         """Прогреть модель фиктивным прогоном по форме входа из spec.
 
         Базовая реализация генерирует нулевой тензор нужной формы и прогоняет infer().
+        Исключение прогрева не валит загрузку — только лог (модель уже загружена).
         """
         if self._spec is None:
             return
@@ -54,4 +63,7 @@ class BaseInferenceBackend(ABC):
         c = 3
         shape = (1, c, h, w) if self._spec.layout == "NCHW" else (1, h, w, c)
         dummy = np.zeros(shape, dtype=np.float32)
-        self.infer(dummy)
+        try:
+            self.infer(dummy)
+        except Exception:  # noqa: BLE001 — прогрев не критичен, модель уже готова
+            logger.warning("warmup: фиктивный прогон не удался (модель всё равно загружена)", exc_info=True)

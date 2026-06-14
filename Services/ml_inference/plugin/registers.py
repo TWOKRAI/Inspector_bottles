@@ -67,5 +67,7 @@ class MLInferenceRegisters(SchemaBase):
     loaded_model: Annotated[str, FieldMeta("Загружена модель", readonly=True)] = ""
     last_label: Annotated[str, FieldMeta("Последний класс", readonly=True)] = ""
     last_confidence: Annotated[float, FieldMeta("Последняя уверенность", readonly=True)] = 0.0
+    last_angle_deg: Annotated[float, FieldMeta("Последний угол", readonly=True, unit="°")] = 0.0
+    last_angle_valid: Annotated[bool, FieldMeta("Угол определён", readonly=True)] = False
     avg_latency_ms: Annotated[float, FieldMeta("Латентность инференса", readonly=True, unit="ms")] = 0.0
     last_error: Annotated[str, FieldMeta("Последняя ошибка", readonly=True)] = ""

@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 
 import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
@@ -30,6 +32,36 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_MODELS_DIR = _PROJECT_ROOT / "data" / "models"
 
 logger = logging.getLogger(__name__)
+
+# Кириллица в overlay: cv2.putText (Hershey) не рисует кириллицу → '???'.
+# Рисуем через PIL TTF. Шрифт грузится один раз (ленивая инициализация).
+_FONT_CANDIDATES = (
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+)
+_FONT: ImageFont.FreeTypeFont | ImageFont.ImageFont | None = None
+
+
+def _overlay_font() -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    global _FONT
+    if _FONT is None:
+        for path in _FONT_CANDIDATES:
+            if Path(path).is_file():
+                _FONT = ImageFont.truetype(path, 22)
+                break
+        else:
+            _FONT = ImageFont.load_default()
+    return _FONT
+
+
+def _put_text_unicode(frame_bgr: np.ndarray, text: str, org: tuple[int, int], color=(0, 255, 0)) -> np.ndarray:
+    """Нарисовать текст (в т.ч. кириллицу) на BGR-кадре через PIL. Цвет — BGR."""
+    img = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+    ImageDraw.Draw(img).text(org, text, font=_overlay_font(), fill=(color[2], color[1], color[0]))
+    frame_bgr[:] = cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)
+    return frame_bgr
 
 
 @register_plugin(
@@ -149,14 +181,24 @@ class MLInferencePlugin(ProcessModulePlugin):
         if self._reg.draw_overlay and preds:
             result_frame = self._draw_overlay(frame.copy(), preds[0])
 
+        # overlay пишем в 'frame' (его читает дисплей; SHM-middleware стрипует
+        # именно 'frame'). Отдельный 'rendered_frame' НЕ заводим — он поехал бы
+        # полным кадром через pickle на каждом кадре (грабли line_filter).
         return {**item, "frame": result_frame, "predictions": preds}
 
     @staticmethod
     def _draw_overlay(frame, top1: dict):
-        """Нарисовать топ-1 класс + confidence в левом верхнем углу."""
-        text = f"{top1['label']}: {top1['confidence']:.2f}"
-        cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
-        return frame
+        """Топ-1 класс + confidence + угол (если определён) поверх кадра.
+
+        Угол: angle_valid=True → «θ°»; есть angle_deg, но valid=False (full-симметрия)
+        → «любой» (доворот не нужен). Кириллица рисуется через PIL.
+        """
+        text = f"{top1['label']} {top1['confidence']:.2f}"
+        if top1.get("angle_valid"):
+            text += f"  {top1['angle_deg']:.0f}°"
+        elif "angle_deg" in top1:
+            text += "  ∠любой"
+        return _put_text_unicode(frame, text, (8, 6), (0, 255, 0))
 
     # ------------------------------------------------------------------ #
     # Команды (live)
@@ -195,6 +237,9 @@ class MLInferencePlugin(ProcessModulePlugin):
         # первые кадры после смены модели вернут результаты предыдущей модели.
         self._last_predictions = []
         self._frame_idx = 0
+        # сбросить угловую телеметрию — у новой модели может не быть angle_head
+        self._reg.last_angle_deg = 0.0
+        self._reg.last_angle_valid = False
         if not self._reg.model:
             self._engine.unload()
             self._reg.loaded_model = ""
@@ -208,10 +253,22 @@ class MLInferencePlugin(ProcessModulePlugin):
             self._ctx.log_error(f"MLInferencePlugin: не удалось загрузить '{self._reg.model}': {exc}")
 
     def _update_last_pred_telemetry(self, preds: list[dict]) -> None:
-        """Обновить readonly-поля последнего предсказания."""
-        if preds:
-            self._reg.last_label = preds[0]["label"]
-            self._reg.last_confidence = round(float(preds[0]["confidence"]), 4)
+        """Обновить readonly-поля последнего предсказания (класс + угол).
+
+        При пустом результате / отсутствии угла у top-1 СБРАСЫВАЕМ angle_valid —
+        иначе робот доворачивает по углу прошлого/несуществующего объекта (stale).
+        """
+        if not preds:
+            self._reg.last_angle_valid = False
+            return
+        top = preds[0]
+        self._reg.last_label = top["label"]
+        self._reg.last_confidence = round(float(top["confidence"]), 4)
+        if "angle_deg" in top:
+            self._reg.last_angle_deg = round(float(top["angle_deg"]), 2)
+            self._reg.last_angle_valid = bool(top.get("angle_valid", False))
+        else:
+            self._reg.last_angle_valid = False
 
     def _publish_state(self) -> None:
         """Опубликовать метрики инференса в StateStore."""
@@ -226,6 +283,8 @@ class MLInferencePlugin(ProcessModulePlugin):
                     "loaded_model": self._reg.loaded_model,
                     "last_label": self._reg.last_label,
                     "last_confidence": self._reg.last_confidence,
+                    "last_angle_deg": self._reg.last_angle_deg,
+                    "last_angle_valid": self._reg.last_angle_valid,
                     "avg_latency_ms": self._reg.avg_latency_ms,
                 },
             )

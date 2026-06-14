@@ -17,7 +17,7 @@ from Services.ml_inference.backends.base import BaseInferenceBackend
 from Services.ml_inference.backends.onnx_backend import ONNX_AVAILABLE, ONNXRuntimeBackend
 from Services.ml_inference.backends.torch_backend import TORCH_AVAILABLE, TorchBackend
 from Services.ml_inference.core.model_spec import ModelSpec
-from Services.ml_inference.core.postprocess import classify_postprocess
+from Services.ml_inference.core.postprocess import angle_postprocess, classify_postprocess
 from Services.ml_inference.core.preprocess import preprocess
 from Services.ml_inference.core.registry import ModelRegistry
 
@@ -84,12 +84,31 @@ class InferenceEngine:
         logger.info("InferenceEngine: модель '%s' готова (%s)", model_id, device)
 
     def predict(self, frame: np.ndarray, *, top_k: int = 5, threshold: float = 0.0) -> list[dict]:
-        """BGR-кадр → топ-K предсказаний. Пустой список если движок не готов."""
+        """BGR-кадр → топ-K предсказаний (+ угол у top-1, если angle_head).
+
+        Пустой список если движок не готов. У top-1 добавляются angle_deg/
+        angle_valid с учётом симметрии распознанного класса (full → valid=False).
+        """
         if not self.is_ready or self._spec is None or self._backend is None:
             return []
         tensor = preprocess(frame, self._spec)
-        raw = self._backend.infer(tensor)
-        return classify_postprocess(raw, labels=self._labels, top_k=top_k, threshold=threshold)
+        outputs = self._backend.infer(tensor)
+        logits = outputs.get(self._spec.output_name)
+        if logits is None:  # одноголовая модель / иное имя — берём первый выход
+            logger.warning(
+                "predict: выход '%s' не найден в %s — fallback на первый выход (проверьте sidecar output_name)",
+                self._spec.output_name,
+                list(outputs),
+            )
+            logits = next(iter(outputs.values()))
+        preds = classify_postprocess(logits, labels=self._labels, top_k=top_k, threshold=threshold)
+
+        if self._spec.angle_head and preds:
+            angle_raw = outputs.get(self._spec.angle_output_name)
+            if angle_raw is not None:
+                sym = self._spec.symmetry.get(preds[0]["label"], "none")
+                preds[0].update(angle_postprocess(angle_raw, sym))
+        return preds
 
     def unload(self) -> None:
         """Выгрузить текущую модель и освободить ресурсы."""

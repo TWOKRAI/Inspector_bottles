@@ -37,6 +37,12 @@ def main(argv: list[str] | None = None) -> int:
     p_export.add_argument("--model-id", default=None)
     p_export.add_argument("--opset", type=int, default=17)
 
+    p_eval = sub.add_parser("eval", help="валидация на реальном hold-out (буквы + угол)")
+    p_eval.add_argument("model_id", help="id экспортированной модели (имя .onnx без расширения)")
+    p_eval.add_argument("holdout_dir", help="папка hold-out: <буква>/<угол>.jpg")
+    p_eval.add_argument("--models-dir", default="data/models")
+    p_eval.add_argument("--device", default="cpu")
+
     sub.add_parser("archs", help="доступные архитектуры")
 
     args = parser.parse_args(argv)
@@ -50,6 +56,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _cmd_runs(args)
     if args.command == "export":
         return _cmd_export(args)
+    if args.command == "eval":
+        return _cmd_eval(args)
     if args.command == "archs":
         return _cmd_archs()
     return 2
@@ -100,6 +108,24 @@ def _cmd_export(args: argparse.Namespace) -> int:
     checkpoint = path / "best.pt" if path.is_dir() else path
     onnx_path = export_onnx(checkpoint, models_dir=args.models_dir, model_id=args.model_id, opset=args.opset)
     print(f"Экспортировано: {onnx_path} (+ sidecar .yaml + classes.txt)")
+    return 0
+
+
+def _cmd_eval(args: argparse.Namespace) -> int:
+    import json
+
+    from Services.ml_train.holdout_eval import evaluate_holdout
+
+    summary = evaluate_holdout(args.model_id, args.holdout_dir, models_dir=args.models_dir, device=args.device)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    within_key = next((k for k in summary if k.startswith("angle_within_")), None)
+    within = summary.get(within_key) if within_key else None
+    print(f"\nИтог: точность буквы={summary['accuracy']:.1%}", end="")
+    if summary["angle_mae_deg"] is not None:
+        tail = f" (≤порог: {within:.1%})" if within is not None else ""
+        print(f", angle MAE={summary['angle_mae_deg']}°{tail}")
+    else:
+        print(" (углы не оценивались)")
     return 0
 
 

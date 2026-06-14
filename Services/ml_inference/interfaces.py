@@ -30,8 +30,8 @@ class InferenceBackend(Protocol):
         """Прогреть модель фиктивным прогоном (убрать спайк первого кадра)."""
         ...
 
-    def infer(self, tensor: np.ndarray) -> np.ndarray:
-        """Прогнать предобработанный тензор → сырой выход сети."""
+    def infer(self, tensor: np.ndarray) -> dict[str, np.ndarray]:
+        """Прогнать предобработанный тензор → выходы сети по именам."""
         ...
 
     def unload(self) -> None:

@@ -37,25 +37,58 @@ def letterbox(frame: np.ndarray, size: tuple[int, int], pad_value: int = 114) ->
     return canvas
 
 
-def preprocess(frame: np.ndarray, spec: ModelSpec, *, keep_aspect: bool = True) -> np.ndarray:
+def center_crop_resize(frame: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """Cover-resize до покрытия (H, W) + центральный кроп.
+
+    Для кропа диска: тянет короткую сторону до цели и режет центр — без серого
+    паддинга и без искажения пропорций (диск уже почти квадратный).
+    """
+    target_h, target_w = size
+    h, w = frame.shape[:2]
+    scale = max(target_h / h, target_w / w)
+    new_w, new_h = max(target_w, int(round(w * scale))), max(target_h, int(round(h * scale)))
+    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    top = (new_h - target_h) // 2
+    left = (new_w - target_w) // 2
+    return resized[top : top + target_h, left : left + target_w]
+
+
+def preprocess(
+    frame: np.ndarray,
+    spec: ModelSpec,
+    *,
+    keep_aspect: bool | None = None,
+    resize_policy: str | None = None,
+) -> np.ndarray:
     """BGR-кадр → нормализованный float32-тензор по ModelSpec.
 
-    Args:
-        frame: BGR uint8 (H, W, 3).
-        spec: метаданные модели (input_size, color, normalize, layout).
-        keep_aspect: True — letterbox (сохранить пропорции), False — stretch.
+    Политика ресайза (приоритет: явный resize_policy → keep_aspect → spec):
+      - letterbox    — сохранить пропорции + серый паддинг (детекция/неквадрат);
+      - stretch      — растянуть до квадрата (диск-кроп уже квадратный);
+      - center_crop  — cover-resize + центральный кроп.
+    keep_aspect оставлен для обратной совместимости (True→letterbox, False→stretch).
 
     Returns:
-        np.float32 батч-тензор формы (1, C, H, W) для NCHW или (1, H, W, C) для NHWC.
+        np.float32 батч-тензор (1, C, H, W) для NCHW или (1, H, W, C) для NHWC.
     """
     if frame.ndim != 3 or frame.shape[2] != 3:
         raise ValueError(f"ожидается BGR-кадр (H, W, 3), получено {frame.shape}")
 
+    if resize_policy is None:
+        if keep_aspect is True:
+            resize_policy = "letterbox"
+        elif keep_aspect is False:
+            resize_policy = "stretch"
+        else:
+            resize_policy = spec.resize_policy
+
     target_h, target_w = spec.input_size
 
-    if keep_aspect:
+    if resize_policy == "letterbox":
         img = letterbox(frame, (target_h, target_w))
-    else:
+    elif resize_policy == "center_crop":
+        img = center_crop_resize(frame, (target_h, target_w))
+    else:  # stretch
         img = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
 
     # Порядок каналов: pipeline отдаёт BGR; сеть может ждать RGB.

@@ -1,0 +1,49 @@
+# Пресет: классификация русских букв + угол поворота,
+# данные — генерация dataset_gen на лету из РЕАЛЬНЫХ дисков
+# (пресет real_letters_disk: эталоны вырезаны из реальных фото).
+#
+# Подготовка эталонов (один раз):
+#   python -m Services.dataset_gen.tools.cut_real_disks \
+#       --input data/real_photos --out data/dataset_gen/ru_letters_real/sprites
+# Обучение:
+#   python -m Services.ml_train train Services/ml_train/presets/ru_letters_real.yaml
+
+model:
+  arch: mobilenet_v3_large        # целевая архитектура
+  pretrained: true
+  dropout: 0.2
+  angle_head: true                # учим и угол (sin, cos; маска angle_valid по симметрии)
+
+data:
+  source: synthetic               # генерация на лету из каталога эталонов (без датасета на диске)
+  generator_preset: Services/dataset_gen/presets/real_letters_disk.yaml
+  samples_per_epoch: 6600         # ~200 на класс за эпоху (масштабируется на весь алфавит)
+  val_samples: 990
+  batch_size: 64
+  num_workers: 4
+  seed: 42
+  augment:
+    enabled: false                # аугментирует движок dataset_gen, не torch-трансформы
+
+optim:
+  epochs: 60
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  warmup_epochs: 3
+  scheduler: cosine
+  label_smoothing: 0.1
+  class_weights: auto
+  angle_loss_weight: 1.0
+
+train:
+  device: auto
+  amp: auto
+  ema_decay: 0.999
+  early_stopping_patience: 15
+  monitor: balanced_accuracy      # альтернатива: angle_mae_deg (требует angle_head)
+  runs_dir: data/ml_train/runs
+
+export:
+  auto: true                      # после обучения — ONNX + sidecar в data/models (для ml_inference)
+  models_dir: data/models
+  opset: 17
