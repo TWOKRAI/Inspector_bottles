@@ -46,6 +46,9 @@ from .store import save_calibration
 _HUB_TIMEOUT = 2.0
 # Интервал поллинга очереди действий в воркере, сек.
 _QUEUE_POLL_S = 0.05
+# Каждые N пустых поллингов публикуем live-снапшот (для real-time px/счётчика в GUI).
+# 6 × 0.05с ≈ 0.3с — достаточно «живо», без флуда state-дерева.
+_LIVE_PUBLISH_EVERY = 6
 # Роли 5 точек (порядок order_points: 4 угла + центр).
 _ROLES = ("corner_tl", "corner_tr", "corner_br", "corner_bl", "center")
 
@@ -78,6 +81,7 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
         "cal_begin": "cmd_begin",
         "cal_capture_image": "cmd_capture_image",
         "cal_set_robot_point": "cmd_set_robot_point",
+        "cal_set_point": "cmd_set_point",
         "cal_encoder_scale": "cmd_encoder_scale",
         "cal_belt_run": "cmd_belt_run",
         "cal_belt_stop": "cmd_belt_stop",
@@ -147,15 +151,30 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
         detections: list[dict],
         overlay: list[tuple[float, float, str]] | None,
     ) -> np.ndarray:
-        """Нарисовать live-детекции (зелёные) + захваченные нумерованные точки (красные)."""
+        """Нарисовать live-детекции (зелёные, нумерованные 1-5) + захваченные точки (красные)."""
         out = frame.copy()  # не мутировать SHM-буфер
-        for d in detections:
-            if not isinstance(d, dict):
-                continue
-            ctr = d.get("center")
-            if isinstance(ctr, (list, tuple)) and len(ctr) >= 2:
-                cx, cy = int(round(float(ctr[0]))), int(round(float(ctr[1])))
-                cv2.circle(out, (cx, cy), 4, (0, 255, 0), -1)
+        # Live-точки: если ровно 5 — упорядочиваем (order_points) и нумеруем 1-5,
+        # чтобы оператор видел, какая точка какой номер, ещё до захвата. Иначе — просто точки.
+        live_pts = [
+            (float(d["center"][0]), float(d["center"][1]))
+            for d in detections
+            if isinstance(d, dict) and isinstance(d.get("center"), (list, tuple)) and len(d["center"]) >= 2
+        ]
+        ordered_live = None
+        if len(live_pts) == 5:
+            try:
+                corners, center = geometry.order_points(live_pts)
+                ordered_live = [*corners, center]
+            except ValueError:
+                ordered_live = None
+        if ordered_live is not None:
+            for i, (x, y) in enumerate(ordered_live):
+                cx, cy = int(round(x)), int(round(y))
+                cv2.circle(out, (cx, cy), 5, (0, 255, 0), -1)
+                cv2.putText(out, str(i + 1), (cx + 8, cy - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        else:
+            for x, y in live_pts:
+                cv2.circle(out, (int(round(x)), int(round(y))), 4, (0, 255, 0), -1)
         if overlay:
             for x, y, label in overlay:
                 cx, cy = int(round(x)), int(round(y))
@@ -175,6 +194,9 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
 
     def cmd_set_robot_point(self, data: dict) -> dict:
         return self._enqueue("set_robot_point", data)
+
+    def cmd_set_point(self, data: dict) -> dict:
+        return self._enqueue("set_point", data)
 
     def cmd_encoder_scale(self, data: dict) -> dict:
         return self._enqueue("encoder_scale", data)
@@ -203,6 +225,7 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def _calibration_worker(self, stop_event: Any, pause_event: Any) -> None:
+        idle = 0
         while not stop_event.is_set():
             if pause_event.is_set():
                 time.sleep(0.1)
@@ -210,7 +233,13 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             try:
                 action = self._queue.get(timeout=_QUEUE_POLL_S)
             except Empty:
+                # Нет команд — периодически публикуем live-снапшот (real-time px/счётчик).
+                idle += 1
+                if idle >= _LIVE_PUBLISH_EVERY:
+                    idle = 0
+                    self._publish()
                 continue
+            idle = 0
             self._dispatch(action)
 
     def _dispatch(self, action_item: dict) -> None:
@@ -220,6 +249,7 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             "begin": self._do_begin,
             "capture_image": self._do_capture_image,
             "set_robot_point": self._do_set_robot_point,
+            "set_point": self._do_set_point_manual,
             "encoder_scale": self._do_encoder_scale,
             "belt_run": self._do_belt_run,
             "belt_stop": self._do_belt_stop,
@@ -251,6 +281,13 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
         self._state["message"] = "Сессия калибровки начата. Снимите кадр эталона."
 
     def _do_capture_image(self, args: dict) -> None:
+        self._capture_from_detections()
+
+    def _capture_from_detections(self) -> None:
+        """Зафиксировать px из текущих 5 детекций (упорядочить) + энкодер захвата.
+
+        Общий код «Снять кадр» и авто-захвата при первом «Точка N».
+        """
         with self._lock:
             dets = list(self._last_detections)
         expected = int(self._reg.expected_points)
@@ -285,8 +322,9 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
         self._set_overlay(ordered)
 
     def _do_set_robot_point(self, args: dict) -> None:
+        # Авто-захват при первом нажатии «Точка N» (отдельная кнопка «Снять кадр» не нужна).
         if self._state["px"] is None:
-            raise CalibrationError("Сначала снимите кадр (cal_capture_image).")
+            self._capture_from_detections()
         idx = int(args.get("index", -1))
         if not 0 <= idx < 5:
             raise CalibrationError(f"index {idx} вне диапазона 0..4")
@@ -297,6 +335,38 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
         self._state["message"] = (
             f"Точка {idx + 1} ({_ROLES[idx]}): x={pos[0]:.1f} y={pos[1]:.1f} enc={enc} — собрано {collected}/5"
         )
+
+    def _do_set_point_manual(self, args: dict) -> None:
+        """Ручная правка координат точки (data: index, px=[x,y]?, mm=[x,y]?).
+
+        Позволяет оператору поправить px (пиксели) и/или mm (координаты робота)
+        вручную — для контроля/коррекции. mm без предшествующего касания роботом
+        (enc_i=None) трактуем как замер на момент захвата кадра (enc_i=e_capture).
+        """
+        idx = int(args.get("index", -1))
+        if not 0 <= idx < 5:
+            raise CalibrationError(f"index {idx} вне диапазона 0..4")
+        px = args.get("px")
+        mm = args.get("mm")
+        enc = args.get("enc")
+        if px is not None and len(px) >= 2:
+            if self._state["px"] is None:
+                self._state["px"] = [None] * 5
+                self._state["roles"] = list(_ROLES)
+            self._state["px"][idx] = [float(px[0]), float(px[1])]
+            # Обновить overlay (нумерованные точки на кадре), если все 5 px заданы.
+            if all(p is not None for p in self._state["px"]):
+                self._set_overlay(self._state["px"])
+        if mm is not None and len(mm) >= 2:
+            self._state["mm"][idx] = [float(mm[0]), float(mm[1])]
+            if enc is not None:
+                # Энкодер пришёл с GUI (push-телеметрия). Первый зафиксированный = опорный E0.
+                self._state["enc_i"][idx] = int(enc)
+                if self._state["e_capture"] is None:
+                    self._state["e_capture"] = int(enc)
+            elif self._state["enc_i"][idx] is None:
+                self._state["enc_i"][idx] = self._state["e_capture"]
+        self._state["message"] = f"Точка {idx + 1}: записана"
 
     def _do_encoder_scale(self, args: dict) -> None:
         ref = int(args.get("ref_index", 0))
@@ -332,14 +402,16 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
         e0 = self._state["e_capture"]
         mpc = self._state["mm_per_count"]
         belt = self._state["belt_dir"]
-        if px is None:
-            raise CalibrationError("Нет снятого кадра.")
+        if px is None or any(p is None for p in px):
+            raise CalibrationError("Не заданы пиксельные координаты всех 5 точек.")
         if any(m is None for m in mm):
             raise CalibrationError("Сняты роботом не все 5 точек.")
         if mpc is None or belt is None:
-            raise CalibrationError("Не задан масштаб ленты (cal_encoder_scale).")
-        belt_dir = (belt[0], belt[1])
-        mm_fixed = [geometry.compensate((mm[i][0], mm[i][1]), enc_i[i], e0, mpc, belt_dir) for i in range(5)]
+            # Статическая калибровка (без ленты): px[i]↔mm[i] напрямую, без belt-компенсации.
+            mm_fixed = [(float(mm[i][0]), float(mm[i][1])) for i in range(5)]
+        else:
+            belt_dir = (belt[0], belt[1])
+            mm_fixed = [geometry.compensate((mm[i][0], mm[i][1]), enc_i[i], e0, mpc, belt_dir) for i in range(5)]
         h = geometry.fit_homography(px[:4], mm_fixed[:4])  # ValueError → _dispatch
         err = geometry.reprojection_error(h, px, mm_fixed, center_index=4)
         passed = err["center_mm"] <= float(self._reg.reproj_threshold_mm)
@@ -399,12 +471,31 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
         }
 
     def _read_telemetry(self) -> tuple[tuple[float, float], int]:
-        """Блокирующий запрос телеметрии робота → ((x_mm, y_mm), encoder)."""
+        """Блокирующий запрос телеметрии робота → ((x_mm, y_mm), encoder).
+
+        Устойчиво к структуре ответа: telemetry/encoder ищем на верхнем уровне И
+        во вложенных result/data (разные обёртки IPC). Энкодер необязателен —
+        для статической калибровки (без ленты) важны только x_mm/y_mm; если энкодер
+        недоступен (нет ленты/мгновенный сбой чтения) — берём 0, не валим точку.
+        """
         res = self._hub_call("robot_get_telemetry", {"device_id": self._state["robot_id"]})
-        tel = res.get("telemetry") or {}
-        if "x_mm" not in tel or "y_mm" not in tel or res.get("encoder") is None:
-            raise CalibrationError("Телеметрия робота без x_mm/y_mm/encoder.")
-        return (float(tel["x_mm"]), float(tel["y_mm"])), int(res["encoder"])
+        tel, enc = self._extract_telemetry(res)
+        if "x_mm" not in tel or "y_mm" not in tel:
+            raise CalibrationError(f"Телеметрия робота без x_mm/y_mm. Ответ: {res}")
+        return (float(tel["x_mm"]), float(tel["y_mm"])), int(enc if enc is not None else 0)
+
+    @staticmethod
+    def _extract_telemetry(res: Any) -> tuple[dict, int | None]:
+        """Достать (telemetry, encoder) из ответа hub — верхний уровень или вложенный."""
+        if not isinstance(res, dict):
+            return {}, None
+        if isinstance(res.get("telemetry"), dict):
+            return res["telemetry"], res.get("encoder")
+        for key in ("result", "data"):
+            sub = res.get(key)
+            if isinstance(sub, dict) and isinstance(sub.get("telemetry"), dict):
+                return sub["telemetry"], sub.get("encoder")
+        return {}, None
 
     def _hub_call(self, command: str, args: dict) -> dict:
         if self._client is None:
@@ -449,7 +540,24 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             return
         s = self._state
         with self._lock:
-            live_found = len(self._last_detections)
+            live_dets = list(self._last_detections)
+        live_found = len(live_dets)
+        # live_px: упорядоченные текущие детекции (для real-time показа px ДО захвата).
+        live_px = None
+        live_pts = [
+            (float(d["center"][0]), float(d["center"][1]))
+            for d in live_dets
+            if isinstance(d, dict) and isinstance(d.get("center"), (list, tuple)) and len(d["center"]) >= 2
+        ]
+        if len(live_pts) == 5:
+            try:
+                corners, center = geometry.order_points(live_pts)
+                live_px = [list(p) for p in [*corners, center]]
+            except ValueError:
+                live_px = None
+        px_state = s["px"]
+        px_out = [list(p) for p in px_state] if px_state else [None] * 5
+        mm_out = [list(m) if m is not None else None for m in s["mm"]]
         snap = {
             "phase": s["phase"],
             "message": s["message"],
@@ -465,5 +573,10 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             "passed": s["passed"],
             "saved_path": s["saved_path"],
             "reproj_threshold_mm": float(self._reg.reproj_threshold_mm),
+            # Покоординатно для GUI (визард показывает + правит вручную).
+            "px": px_out,  # [[x,y]|None]·5 — пиксели (после захвата/ручной правки)
+            "live_px": live_px,  # [[x,y]]·5 | None — упорядоченные live-детекции (real-time до захвата)
+            "mm": mm_out,  # [[x,y]|None]·5 — координаты робота (после касания/правки)
+            "roles": s["roles"] or list(_ROLES),
         }
         self._ctx.state_proxy.set(f"calibration.state.{s['camera_id']}.progress", snap)

@@ -76,15 +76,40 @@ def test_set_device_binds_progress(qtbot):
 def test_begin_includes_robot_id(qtbot):
     widget, presenter, bindings, controller = _build(qtbot)
     controller.set_device("robot_main")
+    presenter.begin.reset_mock()  # set_device авто-стартует сессию — сбрасываем счётчик
     widget.begin_requested.emit("cam7", "vfd_belt")
     presenter.begin.assert_called_once_with("cam7", "robot_main", "vfd_belt")
 
 
-def test_set_point_routes_index(qtbot):
+def test_set_device_auto_begins(qtbot):
     widget, presenter, bindings, controller = _build(qtbot)
     controller.set_device("robot_main")
-    widget.set_point_requested.emit(3)
-    presenter.set_robot_point.assert_called_once_with(3)
+    presenter.begin.assert_called_once_with("cam0", "robot_main", "vfd_belt")
+
+
+def test_set_point_writes_px_and_robot(qtbot):
+    widget, presenter, bindings, controller = _build(qtbot)
+    controller.set_device("robot_main")
+    # Push-телеметрия робота (как ручная вкладка)
+    controller._on_robot_status(
+        "devices.state.robot_main.status",
+        {"telemetry": {"x_mm": 12.0, "y_mm": 34.0}, "encoder": 555},
+    )
+    # Прогресс с live_px (5 упорядоченных точек)
+    controller._on_progress_push(
+        "calibration.state.cam0.progress",
+        {"live_px": [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]},
+    )
+    widget.set_point_requested.emit(2)
+    presenter.set_point.assert_called_once_with(2, px=[5, 6], mm=[12.0, 34.0], enc=555)
+    presenter.set_robot_point.assert_not_called()  # сломанный pull НЕ используется
+
+
+def test_set_point_without_telemetry_no_call(qtbot):
+    widget, presenter, bindings, controller = _build(qtbot)
+    controller.set_device("robot_main")
+    widget.set_point_requested.emit(0)  # телеметрии ещё не было
+    presenter.set_point.assert_not_called()
 
 
 def test_progress_push_updates_widget(qtbot):

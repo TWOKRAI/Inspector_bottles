@@ -49,6 +49,12 @@ class CalibrationController:
         self._robot_id: str | None = None
         self._camera_id: str | None = None
         self._progress_owner_path: str | None = None
+        # Push-телеметрия робота (как ручная вкладка): кэш текущих координат/энкодера.
+        self._robot_tlm_id: str | None = None
+        self._robot_xy: tuple[float, float] | None = None
+        self._robot_enc: int | None = None
+        # Последний снапшот прогресса — для live_px при записи точки.
+        self._last_snapshot: dict = {}
         self._connect()
 
     def _connect(self) -> None:
@@ -56,6 +62,8 @@ class CalibrationController:
         w.begin_requested.connect(self._on_begin)
         w.capture_requested.connect(self._on_capture)
         w.set_point_requested.connect(self._on_set_point)
+        w.point_px_edited.connect(self._on_point_px_edited)
+        w.point_robot_edited.connect(self._on_point_robot_edited)
         w.belt_run_requested.connect(self._on_belt_run)
         w.belt_stop_requested.connect(self._on_belt_stop)
         w.encoder_scale_requested.connect(self._on_encoder_scale)
@@ -73,9 +81,38 @@ class CalibrationController:
             self._widget.set_controls_enabled(False, "Калибровка: выберите робота.")
             return
         self._widget.set_controls_enabled(True)
-        self._widget.set_status(f"Робот «{device_id}» выбран. Нажмите «Начать сессию», затем «Снять кадр».")
-        # Предварительно подписаться на прогресс для camera_id по умолчанию из поля.
-        self._bind_progress(self._widget.camera_id)
+        # Подписка на живую телеметрию робота (тот же push, что в «Ручном управлении»).
+        self._bind_robot_telemetry(device_id)
+        cam = self._widget.camera_id
+        vfd = self._widget.vfd_id
+        self._bind_progress(cam)
+        self._widget.set_status(
+            f"Робот «{device_id}». Наведи плату (live 5/5), затем жми «Точка N» по номерам на кадре."
+        )
+        # Авто-старт сессии (кнопки «Начать сессию» больше нет).
+        self._presenter.begin(cam, device_id, vfd)
+
+    def _bind_robot_telemetry(self, device_id: str) -> None:
+        """Подписаться на devices.state.<id>.status → кэш x/y/encoder робота (push)."""
+        if self._bindings is None or not device_id or device_id == self._robot_tlm_id:
+            return
+        self._robot_tlm_id = device_id
+        path = f"devices.state.{device_id}.status"
+        if hasattr(self._bindings, "bind_fanout"):
+            self._bindings.bind_fanout(path, self._on_robot_status, owner=self._widget)
+
+    def _on_robot_status(self, _path: str, value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        tel = value.get("telemetry") or {}
+        x = tel.get("x_mm")
+        y = tel.get("y_mm")
+        enc = value.get("encoder")
+        if x is None or y is None:
+            return
+        self._robot_xy = (float(x), float(y))
+        self._robot_enc = int(enc) if enc is not None else None
+        self._widget.set_robot_live(float(x), float(y), self._robot_enc)
 
     def unbind(self) -> None:
         self._unbind_progress()
@@ -103,6 +140,8 @@ class CalibrationController:
         self._progress_owner_path = None
 
     def _on_progress_push(self, _path: str, value: Any) -> None:
+        if isinstance(value, dict):
+            self._last_snapshot = value
         self._widget.set_progress(value)
 
     # ------------------------------------------------------------------ #
@@ -122,8 +161,33 @@ class CalibrationController:
         self._presenter.capture_image()
 
     def _on_set_point(self, index: int) -> None:
-        self._widget.set_status(f"Наведение робота на точку {index + 1}…")
-        self._presenter.set_robot_point(index)
+        """«Точка N»: записать px (live-детекция) + координаты робота (push) + энкодер.
+
+        Не использует сломанный pull `cal_set_robot_point` — берём всё с GUI-стороны
+        и пишем через `cal_set_point` (плагин просто сохраняет, без IPC к роботу).
+        """
+        if self._robot_xy is None:
+            self._widget.set_status("Нет телеметрии робота — проверь подключение (вкладка «Ручное управление»).")
+            return
+        live_px = (self._last_snapshot or {}).get("live_px") or []
+        px = live_px[index] if index < len(live_px) and live_px[index] else None
+        x, y = self._robot_xy
+        self._presenter.set_point(index, px=px, mm=[x, y], enc=self._robot_enc)
+        if px is None:
+            self._widget.set_status(
+                f"Точка {index + 1}: робот ({x:.1f}, {y:.1f}) записан, но px НЕ записан "
+                f"(нужно live 5/5 — наведи плату)."
+            )
+        else:
+            self._widget.set_status(f"Точка {index + 1}: px={px}, робот ({x:.1f}, {y:.1f}), enc={self._robot_enc}")
+
+    def _on_point_px_edited(self, index: int, x: float, y: float) -> None:
+        self._widget.set_status(f"Точка {index + 1}: ручная правка px ({x:.0f}, {y:.0f})")
+        self._presenter.set_point(int(index), px=[x, y])
+
+    def _on_point_robot_edited(self, index: int, x: float, y: float) -> None:
+        self._widget.set_status(f"Точка {index + 1}: ручная правка робот ({x:.1f}, {y:.1f})")
+        self._presenter.set_point(int(index), mm=[x, y])
 
     def _on_belt_run(self, freq: float) -> None:
         self._widget.set_status(f"Лента: пуск {freq:.2f} Гц…")

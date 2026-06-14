@@ -166,6 +166,68 @@ def test_save_without_compute_rejected():
     assert p._state["error"]
 
 
+# --- Ручная правка координат точки (cal_set_point) -------------------------
+def test_manual_px_edit_updates_state():
+    p = _plugin(FakeHub([(0.0, 0.0, E0)]))
+    p._last_detections = _detections(PX_ALL)
+    p._dispatch({"action": "capture_image", "args": {}})
+    p._dispatch({"action": "set_point", "args": {"index": 2, "px": [111.0, 222.0]}})
+    assert p._state["px"][2] == [111.0, 222.0]
+    assert p._state["error"] is None
+
+
+def test_manual_mm_edit_defaults_encoder_to_capture():
+    p = _plugin(FakeHub([(0.0, 0.0, E0)]))
+    p._last_detections = _detections(PX_ALL)
+    p._dispatch({"action": "capture_image", "args": {}})
+    # mm без касания роботом (enc_i[1] is None) → enc_i := e_capture
+    p._dispatch({"action": "set_point", "args": {"index": 1, "mm": [5.0, 7.0]}})
+    assert p._state["mm"][1] == [5.0, 7.0]
+    assert p._state["enc_i"][1] == E0
+
+
+def test_manual_set_point_bad_index_errors():
+    p = _plugin(FakeHub([(0.0, 0.0, E0)]))
+    p._last_detections = _detections(PX_ALL)
+    p._dispatch({"action": "capture_image", "args": {}})
+    p._dispatch({"action": "set_point", "args": {"index": 9, "px": [1.0, 2.0]}})
+    assert p._state["error"]
+
+
+def test_snapshot_includes_per_point_coords():
+    p = _plugin(FakeHub([(0.0, 0.0, E0), (3.0, 4.0, 1100)]))
+    p._last_detections = _detections(PX_ALL)
+    p._dispatch({"action": "capture_image", "args": {}})
+    p._dispatch({"action": "set_robot_point", "args": {"index": 0}})
+    snap = p._ctx.state_proxy.set.call_args[0][1]
+    assert len(snap["px"]) == 5 and snap["px"][0] is not None  # px заполнены после захвата
+    assert snap["mm"][0] == [3.0, 4.0]  # робот-координаты точки 0
+    assert snap["roles"][4] == "center"
+
+
+# --- Авто-захват: «Точка N» без отдельного «Снять кадр» --------------------
+def test_set_robot_point_auto_captures():
+    # Телеметрия: [0]=авто-захват (E0), [1]=сама точка 0.
+    hub = FakeHub([(0.0, 0.0, E0), (3.0, 4.0, 1100)])
+    p = _plugin(hub)
+    p._last_detections = _detections(PX_ALL)
+    # БЕЗ capture_image — сразу точка 0
+    p._dispatch({"action": "set_robot_point", "args": {"index": 0}})
+    assert p._state["px"] is not None  # px авто-зафиксированы
+    assert p._state["mm"][0] == [3.0, 4.0]
+    assert p._state["error"] is None
+
+
+# --- live_px в снапшоте при 5 живых детекциях ------------------------------
+def test_snapshot_live_px_when_five_detections():
+    p = _plugin(FakeHub([]))
+    p._last_detections = _detections(PX_ALL)  # 5 точек, БЕЗ захвата
+    p._publish()
+    snap = p._ctx.state_proxy.set.call_args[0][1]
+    assert snap["captured"] is False
+    assert snap["live_px"] is not None and len(snap["live_px"]) == 5
+
+
 # --- process() аннотирует кадр, не падает ----------------------------------
 def test_process_annotates_frame_no_crash():
     p = _plugin()

@@ -51,6 +51,17 @@ class CalibrationPresenter:
     def set_robot_point(self, index: int, on_result=None) -> None:
         self._request("cal_set_robot_point", {"index": int(index)}, on_result)
 
+    def set_point(self, index: int, px=None, mm=None, enc=None, on_result=None) -> None:
+        """Запись/правка координат точки: px=[x,y] (пиксели), mm=[x,y] (робот), enc (энкодер)."""
+        args: dict = {"index": int(index)}
+        if px is not None:
+            args["px"] = [float(px[0]), float(px[1])]
+        if mm is not None:
+            args["mm"] = [float(mm[0]), float(mm[1])]
+        if enc is not None:
+            args["enc"] = int(enc)
+        self._request("cal_set_point", args, on_result)
+
     def encoder_scale(self, ref_index: int, on_result=None) -> None:
         self._request("cal_encoder_scale", {"ref_index": int(ref_index)}, on_result)
 
