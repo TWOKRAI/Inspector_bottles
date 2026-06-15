@@ -126,8 +126,35 @@ def test_enc_raw_two_words(bot: RobotClient) -> None:
 
 def test_set_mode_validates(bot: RobotClient) -> None:
     assert bot.set_mode("draw")
+    assert bot.set_mode("manual")
     with pytest.raises(ValueError):
         bot.set_mode("fly")
+
+
+# --- MANUAL: ручной jog ---
+
+
+def test_jog_wire_format_marker_last(bot: RobotClient, transport: FakeRobotTransport) -> None:
+    """Контракт с Lua: mode=MANUAL, abs, dX/dY (s16*10), spd, маркер man_flag — ПОСЛЕДНИМ."""
+    bot.jog(15.0, -20.0, 30, absolute=False)
+    ops = transport.transactions[-1]
+    assert ops[0] == ("w", 0x1109, 2)  # mode = MANUAL
+    assert ops[1] == ("w", 0x1506, 0)  # man_abs = относительно
+    assert ops[2] == ("w", 0x1501, 150)  # dX ×10
+    assert ops[3] == ("w", 0x1502, (-200) & 0xFFFF)  # dY ×10 (s16)
+    assert ops[4] == ("w", 0x1503, 30)  # spd
+    assert ops[-1] == ("w", 0x1500, 1)  # man_flag — маркер последним
+
+
+def test_jog_absolute_flag(bot: RobotClient, transport: FakeRobotTransport) -> None:
+    bot.jog(100.0, 50.0, absolute=True)
+    ops = transport.transactions[-1]
+    assert ("w", 0x1506, 1) in ops  # man_abs = абсолют
+
+
+def test_jog_rejects_out_of_limit(bot: RobotClient) -> None:
+    with pytest.raises(RobotJobError, match="вне"):
+        bot.jog(5000.0, 0.0, 30)
 
 
 # --- конфиг: read-modify-write ---

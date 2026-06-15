@@ -102,6 +102,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
         "robot_send_test_job": "cmd_robot_send_test_job",
         "robot_abort": "cmd_robot_abort",
         "robot_set_mode": "cmd_robot_set_mode",
+        "robot_jog": "cmd_robot_jog",
+        "robot_jog_abort": "cmd_robot_jog_abort",
         "robot_set_servo": "cmd_robot_set_servo",
         "robot_set_robot_config": "cmd_robot_set_robot_config",
         "robot_get_robot_config": "cmd_robot_get_robot_config",
@@ -696,8 +698,16 @@ class DeviceHubPlugin(ProcessModulePlugin):
         return self._kind_call(data, "robot", "abort")
 
     def cmd_robot_set_mode(self, data: dict) -> dict:
-        """Режим робота: {device_id, mode: cvt|draw}."""
+        """Режим робота: {device_id, mode: cvt|draw|manual}."""
         return self._kind_call(data, "robot", "set_mode")
+
+    def cmd_robot_jog(self, data: dict) -> dict:
+        """Ручной ход: {device_id, dx, dy, spd?, absolute?} — смещение мм + Override %."""
+        return self._kind_call(data, "robot", "jog")
+
+    def cmd_robot_jog_abort(self, data: dict) -> dict:
+        """Прервать ручной ход: {device_id}."""
+        return self._kind_call(data, "robot", "jog_abort")
 
     def cmd_robot_set_servo(self, data: dict) -> dict:
         """Серво: {device_id, on: bool}."""

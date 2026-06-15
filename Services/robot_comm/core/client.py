@@ -34,6 +34,7 @@ from Services.robot_comm.core.registers import (
     DRAW_TYPE_POLYLINE,
     MODE_CVT,
     MODE_DRAW,
+    MODE_MANUAL,
     PTS_MAX,
     REG_PTS_BASE,
     SERVO_OFF,
@@ -47,7 +48,7 @@ from Services.robot_comm.interfaces import DeviceTransport
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
-_MODES = {"cvt": MODE_CVT, "draw": MODE_DRAW}
+_MODES = {"cvt": MODE_CVT, "draw": MODE_DRAW, "manual": MODE_MANUAL}
 
 # Тайминги рисования (из боевого pc_full.py)
 DRAW_TIMEOUT_S = 120.0  # максимум на один проход (батч) рисования
@@ -141,8 +142,52 @@ class RobotClient:
         итерацию Motion-цикла, при занятом роботе переключение «зависнет».
         """
         if mode not in _MODES:
-            raise ValueError(f"mode: ожидается 'cvt' | 'draw', получено {mode!r}")
+            raise ValueError(f"mode: ожидается 'cvt' | 'draw' | 'manual', получено {mode!r}")
         return self._write_map({"mode": _MODES[mode]})
+
+    # ------------------------------------------------------------------ #
+    # MANUAL (ручной jog по Modbus)
+    # ------------------------------------------------------------------ #
+
+    def jog(
+        self,
+        dx_mm: float,
+        dy_mm: float,
+        speed_pct: int | None = None,
+        *,
+        absolute: bool = False,
+    ) -> bool:
+        """Ручной ход робота: смещение dX/dY (мм) при скорости speed_pct (Override %).
+
+        Пишет mode=MANUAL + dx/dy/abs/spd и поднимает man_flag (маркер — последним).
+        Lua в MODE=2 выполняет один MovL и сбрасывает man_flag. ``absolute=True`` —
+        ехать в координату (X=dx, Y=dy), иначе смещение от текущей позы. Ход одной
+        команды Lua обрезает до 200 мм (защита). Звать ТОЛЬКО когда робот свободен.
+
+        Raises:
+            RobotJobError: |dx|/|dy| вне предела s16 при scale=10.
+        """
+        limit = self._cfg.xy_limit_mm
+        if abs(dx_mm) > limit or abs(dy_mm) > limit:
+            raise RobotJobError(f"Ход вне ±{limit} мм: dX={dx_mm}, dY={dy_mm}")
+        writes: dict[str, Any] = {
+            "mode": MODE_MANUAL,
+            "man_abs": 1 if absolute else 0,
+            "man_dx": dx_mm,
+            "man_dy": dy_mm,
+        }
+        if speed_pct is not None:
+            writes["man_spd"] = int(speed_pct)
+        writes["man_flag"] = 1  # маркер — последним
+        return self._write_map(writes)
+
+    def manual_busy(self) -> bool:
+        """Идёт ли ручной ход (man_busy=1)."""
+        return self._map.read(self._device, "man_busy") == 1
+
+    def jog_abort(self) -> bool:
+        """Прервать ручной ход (man_abort=1)."""
+        return self._write_map({"man_abort": 1})
 
     # ------------------------------------------------------------------ #
     # CVT

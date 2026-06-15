@@ -128,3 +128,30 @@ def test_refresh_calls_telemetry_and_draw(qtbot) -> None:
     presenter.get_draw_progress.assert_called_once()
     # Проверить device_id в первом аргументе
     assert presenter.get_telemetry.call_args[0][0] == "robot_main"
+
+
+def test_jog_forwards_to_presenter(qtbot) -> None:
+    """«Ехать» (jog) → presenter.jog(device_id, dx, dy, spd, absolute)."""
+    widget, controller, presenter = make_controller(qtbot)
+    controller.set_device("robot_main")
+    widget.jog_requested.emit(15.0, -20.0, 30, False)
+    presenter.jog.assert_called_once_with("robot_main", 15.0, -20.0, 30, False)
+
+
+def test_jog_abort_forwards_to_presenter(qtbot) -> None:
+    """«Стоп» jog → presenter.jog_abort(device_id)."""
+    widget, controller, presenter = make_controller(qtbot)
+    controller.set_device("robot_main")
+    widget.jog_abort_requested.emit()
+    presenter.jog_abort.assert_called_once_with("robot_main")
+
+
+def test_jog_button_click_emits(qtbot) -> None:
+    """Клик по «Ехать» с полей виджета доходит до presenter."""
+    widget, controller, presenter = make_controller(qtbot)
+    controller.set_device("robot_main")
+    widget._jog_dx.setValue(10.0)
+    widget._jog_dy.setValue(5.0)
+    widget._jog_spd.setValue(25)
+    widget._btn_jog.click()
+    presenter.jog.assert_called_once_with("robot_main", 10.0, 5.0, 25, False)

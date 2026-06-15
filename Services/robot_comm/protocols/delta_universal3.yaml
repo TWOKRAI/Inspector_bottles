@@ -13,7 +13,7 @@ registers:
     address: 0x1109
     access: rw
     label: "Режим работы"
-    hint: "0 = CVT (pick-place), 1 = DRAW (рисование)"
+    hint: "0 = CVT (pick-place), 1 = DRAW (рисование), 2 = MANUAL (ручной jog)"
 
   # --- CVT job (ПК -> робот) ---
   job_flag:
@@ -341,3 +341,60 @@ registers:
     label: "Перекрытие"
     unit: "мм"
     hint: "Перекрытие в начале/конце отрезка для качества линии"
+
+  # --- MANUAL: ручной jog (mode=2) ---
+  man_flag:
+    type: reg
+    address: 0x1500
+    access: rw
+    label: "Флаг ручного хода"
+    hint: "ПК пишет 1 = выполнить ход, робот сбрасывает в 0"
+
+  man_dx:
+    type: reg
+    address: 0x1501
+    scale: 10
+    signed: true
+    access: rw
+    label: "Смещение X"
+    unit: "мм"
+    hint: "dX ×10 (относительно позы; при man_abs=1 — целевой X)"
+
+  man_dy:
+    type: reg
+    address: 0x1502
+    scale: 10
+    signed: true
+    access: rw
+    label: "Смещение Y"
+    unit: "мм"
+    hint: "dY ×10 (относительно позы; при man_abs=1 — целевой Y)"
+
+  man_spd:
+    type: reg
+    address: 0x1503
+    access: rw
+    label: "Скорость ручного хода"
+    unit: "%"
+    hint: "Override %, 1..100"
+
+  man_busy:
+    type: reg
+    address: 0x1504
+    access: r
+    label: "Ручной ход активен"
+    hint: "1 = робот выполняет ход"
+
+  man_abort:
+    type: reg
+    address: 0x1505
+    access: w
+    label: "Стоп ручного хода"
+    hint: "1 = прервать текущий ход"
+
+  man_abs:
+    type: reg
+    address: 0x1506
+    access: rw
+    label: "Абсолютный ход"
+    hint: "0 = относительно (jog на dX/dY), 1 = абсолют (ехать в X/Y)"

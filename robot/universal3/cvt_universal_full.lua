@@ -1,11 +1,16 @@
 -- =====================================================================
 --  Delta SCARA · DRAStudio (Lua/RL) — ПОЛНАЯ: CVT pick-place + РИСОВАНИЕ
 --
---  Одна программа, ДВА режима (переключатель REG_MODE 0x1109):
---    MODE=0 (CVT)  — конвейерный pick-place + ПЧ + телеметрия + параметры + стоп + зона
---                    (= cvt_universal_mt.lua дословно).
---    MODE=1 (DRAW) — плоттер: пачка точек → плавный проход MovL(PASS) по ПУЛУ distinct-точек,
---                    перо по Z (= draw.lua).
+--  Одна программа, ТРИ режима (переключатель REG_MODE 0x1109):
+--    MODE=0 (CVT)    — конвейерный pick-place + ПЧ + телеметрия + параметры + стоп + зона
+--                      (= cvt_universal_mt.lua дословно).
+--    MODE=1 (DRAW)   — плоттер: пачка точек → плавный проход MovL(PASS) по ПУЛУ distinct-точек,
+--                      перо по Z (= draw.lua).
+--    MODE=2 (MANUAL) — ручной jog по Modbus: ПК задаёт смещение dX/dY (0.1 мм) и скорость (%),
+--                      флаг REG_MAN_FLAG 0x1500 запускает один линейный ход MovL на месте.
+--                      Относительный (jog) или абсолютный (ехать в координату) — REG_MAN_ABS.
+--                      Стоп — REG_MAN_ABORT/REG_STOP. Z/RZ не меняются (движение в плоскости).
+--                      Удобно для наведения робота по точкам калибровки.
 --
 --  Планировщик MultiTask(Motion, Mirror): Motion (function1) — главный цикл, ветвится по
 --  режиму; Mirror (function2) — параллельно во время хода (свежий энкодер/живая поза + стоп).
@@ -69,6 +74,14 @@ local REG_OVERLAP  = 0x1413    -- W  : SetOverlapDistance, 0.1 мм
 local REG_PTS_BASE = 0x1420
 local PTS_MAX      = 100
 local POOL_BASE    = 100        -- id точек пула = POOL_BASE+1..POOL_BASE+PTS_MAX (101..200)
+-- ── MANUAL: ручной jog по Modbus ──
+local REG_MAN_FLAG  = 0x1500    -- W  : 1 = команда хода готова (ПК), 0 = принято/выполнено (робот)
+local REG_MAN_DX    = 0x1501    -- W  : смещение X, 0.1 мм (знаковое; абс. — целевой X при REG_MAN_ABS=1)
+local REG_MAN_DY    = 0x1502    -- W  : смещение Y, 0.1 мм (знаковое; абс. — целевой Y при REG_MAN_ABS=1)
+local REG_MAN_SPD   = 0x1503    -- W  : скорость %, 1..100
+local REG_MAN_BUSY  = 0x1504    -- W  : 1 = движется, 0 = свободен
+local REG_MAN_ABORT = 0x1505    -- W  : 1 = стоп ручного хода
+local REG_MAN_ABS   = 0x1506    -- W  : 0 = относительно (jog на dX/dY), 1 = абсолют (ехать в X=dX, Y=dY)
 
 -- =====================  ГЕОМЕТРИЯ / ТОЧКИ  ========================
 local CV        = 1
@@ -85,6 +98,7 @@ local POSTURE  = {0,0,0,0,0,0,0,4}
 SetGlobalPoint(90, "GL_HOME",  300, -210, -40,    -100, 1, 0, 0, POSTURE)
 SetGlobalPoint(91, "GL_PLACE", 450, -300, -90,    -100, 1, 0, 0, POSTURE)
 SetGlobalPoint(80, "GL_PICK",  300, -210, Z_PICK, -100, 1, 0, 0, POSTURE)
+SetGlobalPoint(81, "GL_MAN",   300, -210, -40,    -100, 1, 0, 0, POSTURE)  -- скретч-точка ручного хода (MANUAL)
 
 -- дефолты рисования:
 local PEN_DOWN0 = -100
@@ -129,6 +143,7 @@ zone_min        = 120
 miss_count      = 0
 zone_tripped    = false
 draw_abort      = false        -- запрос стопа рисования
+manual_abort    = false        -- запрос стопа ручного хода (MANUAL)
 
 -- =====================  МЕЛКИЕ ХЕЛПЕРЫ  ===========================
 local function iround(v) return math.floor(v + 0.5) end
@@ -526,6 +541,49 @@ local function draw_circle()
   print("DRAW: круг (" .. cx .. "," .. cy .. ") R=" .. r)
 end
 
+-- =====================  ОДИН РУЧНОЙ ХОД (MANUAL jog)  =============
+-- ПК пишет dX/dY (0.1 мм) + скорость (Override %), флаг REG_MAN_FLAG запускает один MovL.
+-- REG_MAN_ABS=0 — относительно текущей позы (jog на dX/dY); =1 — абсолют (ехать в X=dX, Y=dY).
+-- Z/RZ сохраняются (движение в плоскости). Линейный ход одной команды ограничен 0..MAX_MAN_MM мм.
+local MAX_MAN_MM = 200          -- макс. ход за одну команду, мм (защитный диапазон 0..200)
+
+local function run_manual()
+  if not servo_on then
+    print("MANUAL: серво OFF — ход отклонён")
+    WriteModbus(REG_MAN_BUSY, "W", 0); WriteModbus(REG_FREE, "W", 1)
+    return
+  end
+  local dx  = ReadModbus(REG_MAN_DX,  "W") / XY_SCALE
+  local dy  = ReadModbus(REG_MAN_DY,  "W") / XY_SCALE
+  local spd = ReadModbus(REG_MAN_SPD, "W")
+  local absmode = ReadModbus(REG_MAN_ABS, "W")
+  if spd >= 1 and spd <= 100 then Override(spd) end   -- скорость через Override (%)
+
+  local cx, cy, cz = RobotX() or 0, RobotY() or 0, RobotZ() or 0
+  local tx, ty
+  if absmode == 1 then tx, ty = dx, dy else tx, ty = cx + dx, cy + dy end
+
+  -- защита: линейный ход одной команды — в диапазоне 0..MAX_MAN_MM мм
+  local mvx, mvy = tx - cx, ty - cy
+  local dist = math.sqrt(mvx * mvx + mvy * mvy)
+  if dist > MAX_MAN_MM then
+    local k = MAX_MAN_MM / dist
+    tx, ty = cx + mvx * k, cy + mvy * k
+    print("MANUAL: ход " .. iround(dist) .. " мм > " .. MAX_MAN_MM .. " — обрезан до " .. MAX_MAN_MM)
+  end
+
+  WritePoint("GL_MAN", "X", tx)
+  WritePoint("GL_MAN", "Y", ty)
+  WritePoint("GL_MAN", "Z", cz)                        -- Z сохраняем (движение в плоскости)
+  WriteModbus(REG_MAN_BUSY, "W", 1); WriteModbus(REG_FREE, "W", 0)
+  MovL("GL_MAN")                                       -- стоп ловит Mirror → MotionStop
+  WriteModbus(REG_MAN_ABORT, "W", 0)
+  manual_abort   = false
+  motion_stopped = false
+  WriteModbus(REG_MAN_BUSY, "W", 0); WriteModbus(REG_FREE, "W", 1)
+  print("MANUAL: → (" .. iround(tx) .. "," .. iround(ty) .. ") spd=" .. spd .. " abs=" .. absmode)
+end
+
 -- =====================  FUNCTION2: MIRROR (параллельная)  =========
 -- Крутится ВО ВРЕМЯ хода Motion. Ветвится по режиму. ⚠️ НЕТ while/WAIT/DELAY.
 function Mirror()
@@ -534,6 +592,23 @@ function Mirror()
     publish_pose()
     if ReadModbus(REG_DRAW_ABORT, "W") == 1 then
       draw_abort = true
+      if not motion_stopped then MotionStop(); motion_stopped = true end
+    end
+    return
+  end
+
+  if mode == 2 then
+    -- MANUAL: живая поза + свежий энкодер + стоп ручного хода
+    publish_pose()
+    local enc = CVT_GetEncoderPulseCount(CV)
+    if enc then WriteModbus(REG_ENC, "DW", enc) end
+    if ReadModbus(REG_MAN_ABORT, "W") == 1 then
+      manual_abort = true
+      if not motion_stopped then MotionStop(); motion_stopped = true end
+    end
+    local sm = poll_stop()
+    if sm ~= 0 then
+      stop_mode = sm
       if not motion_stopped then MotionStop(); motion_stopped = true end
     end
     return
@@ -565,8 +640,8 @@ end
 -- =====================  FUNCTION1: MOTION (главный цикл)  =========
 function Motion()
   while running do
-    mode = ReadModbus(REG_MODE, "W")                -- 0 CVT / 1 DRAW
-    if mode ~= 1 then mode = 0 end
+    mode = ReadModbus(REG_MODE, "W")                -- 0 CVT / 1 DRAW / 2 MANUAL
+    if mode ~= 1 and mode ~= 2 then mode = 0 end
 
     if mode == 1 then
       -- ================ РЕЖИМ РИСОВАНИЯ ================
@@ -584,6 +659,36 @@ function Motion()
       else
         if ReadModbus(REG_DRAW_ABORT, "W") == 1 then WriteModbus(REG_DRAW_ABORT, "W", 0) end
         DELAY(0.02)
+      end
+
+    elseif mode == 2 then
+      -- ================ РЕЖИМ MANUAL (ручной jog по Modbus) ================
+      publish_pose()
+      mirror_encoder()
+      if stop_mode == 0 then stop_mode = poll_stop() end
+      if stop_mode ~= 0 then
+        -- стоп ручного хода: гасим без homing — робот остаётся на месте
+        WriteModbus(REG_STOP, "W", 0); stop_mode = 0
+        motion_stopped = false
+        WriteModbus(REG_MAN_BUSY, "W", 0); WriteModbus(REG_FREE, "W", 1)
+        print("MANUAL: стоп — робот на месте")
+      elseif ReadModbus(REG_VFD_FLAG, "W") == 1 then
+        -- ПЧ на той же RS-485 — обслуживаем и в MANUAL (иначе heartbeat ПЧ замёрзнет → stale)
+        WriteModbus(REG_VFD_FLAG, "W", 0)
+        handle_vfd()
+      elseif ReadModbus(REG_SERVO, "W") == 1 then
+        WriteModbus(REG_SERVO, "W", 0); RobotServoOn();  servo_on = true;  print("SERVO ON")
+      elseif ReadModbus(REG_SERVO, "W") == 2 then
+        WriteModbus(REG_SERVO, "W", 0); RobotServoOff(); servo_on = false; print("SERVO OFF")
+      elseif ReadModbus(REG_MAN_FLAG, "W") == 1 then
+        WriteModbus(REG_MAN_FLAG, "W", 0)
+        manual_abort = false
+        WriteModbus(REG_MAN_ABORT, "W", 0)
+        run_manual()
+      else
+        publish_telemetry()
+        WriteModbus(REG_FREE, "W", 1)
+        DELAY(0.005)
       end
 
     else
@@ -678,10 +783,18 @@ WriteModbus(REG_PEN_DOWN, "W", iround(PEN_DOWN0 * XY_SCALE))
 WriteModbus(REG_PEN_UP,   "W", iround(PEN_UP0   * XY_SCALE))
 WriteModbus(REG_DRAW_SPD, "W", DRAW_SPD0)
 WriteModbus(REG_OVERLAP,  "W", iround(OVERLAP0 * XY_SCALE))
+-- дефолты ручного режима (MANUAL)
+WriteModbus(REG_MAN_FLAG,  "W", 0)
+WriteModbus(REG_MAN_DX,    "W", 0)
+WriteModbus(REG_MAN_DY,    "W", 0)
+WriteModbus(REG_MAN_SPD,   "W", SPD_MOVE)
+WriteModbus(REG_MAN_BUSY,  "W", 0)
+WriteModbus(REG_MAN_ABORT, "W", 0)
+WriteModbus(REG_MAN_ABS,   "W", 0)
 
 MovP("GL_HOME", SPD(SPD_MOVE))
 
-print("cvt_universal_FULL: старт (CVT + DRAW, MultiTask)")
+print("cvt_universal_FULL: старт (CVT + DRAW + MANUAL, MultiTask)")
 print("enc=" .. tostring(CVT_GetEncoderPulseCount(CV)))
 
 running = true

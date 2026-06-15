@@ -420,6 +420,21 @@ class RobotDriver(BaseDeviceDriver):
         self._mode = mode
         return {"status": "ok", "mode": mode}
 
+    def _op_jog(self, args: dict) -> dict:
+        """Ручной ход: {device_id, dx, dy, spd?, absolute?} — смещение мм + Override %."""
+        dx = float(args.get("dx", 0.0))
+        dy = float(args.get("dy", 0.0))
+        spd = args.get("spd")
+        absolute = bool(args.get("absolute", False))
+        self._client.jog(dx, dy, int(spd) if spd is not None else None, absolute=absolute)
+        self._mode = "manual"
+        return {"status": "ok", "dx": dx, "dy": dy, "absolute": absolute}
+
+    def _op_jog_abort(self, _args: dict) -> dict:
+        """Прервать ручной ход (man_abort=1)."""
+        self._client.jog_abort()
+        return {"status": "ok"}
+
     def _op_set_servo(self, args: dict) -> dict:
         on = bool(args.get("on", True))
         self._client.set_servo(on)
@@ -543,6 +558,8 @@ class RobotDriver(BaseDeviceDriver):
         "send_test_job": _op_send_test_job,
         "abort": _op_abort,
         "set_mode": _op_set_mode,
+        "jog": _op_jog,
+        "jog_abort": _op_jog_abort,
         "set_servo": _op_set_servo,
         "set_robot_config": _op_set_robot_config,
         "get_robot_config": _op_get_robot_config,

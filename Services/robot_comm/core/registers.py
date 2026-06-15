@@ -23,6 +23,7 @@ ROBOT_UNIT_ID = 2  # Modbus device_id робота (ПЧ за мостом им�
 
 MODE_CVT = 0
 MODE_DRAW = 1
+MODE_MANUAL = 2  # ручной jog по Modbus (dX/dY + скорость)
 
 XY_SCALE = 10  # 0.1 мм на LSB
 XY_LIMIT_MM = 3276.7  # предел s16 при scale=10
@@ -66,6 +67,15 @@ REG_DRAW_COUNT = 0x1402
 REG_DRAW_BUSY = 0x1403
 REG_DRAW_PROG = 0x1404
 REG_DRAW_ABORT = 0x1405
+
+# MANUAL: ручной jog по Modbus (0x1500..0x1506)
+REG_MAN_FLAG = 0x1500
+REG_MAN_DX = 0x1501
+REG_MAN_DY = 0x1502
+REG_MAN_SPD = 0x1503
+REG_MAN_BUSY = 0x1504
+REG_MAN_ABORT = 0x1505
+REG_MAN_ABS = 0x1506
 
 # Размер адресного пространства робота (для симулятора): drawing-буфер
 # 0x1420 + 100 точек * 3 рег = 0x14A4, округляем с запасом.
@@ -148,6 +158,14 @@ def build_register_map(word_order: str = "little") -> RegisterMap:
             "pen_up": Reg(0x1411, scale=XY_SCALE, signed=True),
             "draw_spd": Reg(0x1412),
             "overlap": Reg(0x1413, scale=XY_SCALE),
+            # --- MANUAL: ручной jog ---
+            "man_flag": Reg(REG_MAN_FLAG),
+            "man_dx": Reg(REG_MAN_DX, scale=XY_SCALE, signed=True),
+            "man_dy": Reg(REG_MAN_DY, scale=XY_SCALE, signed=True),
+            "man_spd": Reg(REG_MAN_SPD),
+            "man_busy": Reg(REG_MAN_BUSY),
+            "man_abort": Reg(REG_MAN_ABORT),
+            "man_abs": Reg(REG_MAN_ABS),
         },
         word_order=word_order,  # type: ignore[arg-type]
     )

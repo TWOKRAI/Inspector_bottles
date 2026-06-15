@@ -248,6 +248,16 @@ class TestRobotDriverCallOps:
         assert result["status"] == "ok"
         assert driver.manual_mode is True
 
+    def test_jog_via_call(self, driver) -> None:
+        result = driver.call("jog", {"dx": 12.0, "dy": -8.0, "spd": 40, "absolute": False})
+        assert result["status"] == "ok"
+        assert result["dx"] == 12.0 and result["dy"] == -8.0
+        assert driver.mode == "manual"  # jog включает режим manual
+
+    def test_jog_abort_via_call(self, driver) -> None:
+        result = driver.call("jog_abort", {})
+        assert result["status"] == "ok"
+
     def test_clear_queue(self, driver) -> None:
         driver.enqueue_job(1.0, 2.0)
         driver.enqueue_job(3.0, 4.0)
