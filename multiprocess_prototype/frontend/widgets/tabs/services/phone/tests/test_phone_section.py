@@ -30,19 +30,6 @@ def test_presenter_start_stop_route_to_phone_camera():
     ]
 
 
-def test_presenter_emit_signal_routes_payload():
-    from multiprocess_prototype.frontend.widgets.tabs.services.phone.presenter import (
-        PhoneServicePresenter,
-    )
-
-    bridge = _FakeBridge()
-    presenter = PhoneServicePresenter(bridge=bridge)
-    assert presenter.emit_signal("signal_1", {"x_mm": 1.0, "y_mm": 2.0}) is True
-    assert bridge.calls == [
-        ("phone_camera", "emit_signal", {"port": "signal_1", "value": {"x_mm": 1.0, "y_mm": 2.0}}),
-    ]
-
-
 def test_presenter_no_bridge_is_noop():
     from multiprocess_prototype.frontend.widgets.tabs.services.phone.presenter import (
         PhoneServicePresenter,
@@ -53,34 +40,18 @@ def test_presenter_no_bridge_is_noop():
     assert presenter.stop_server() is False
 
 
-def test_widget_pult_emits_coords(qtbot):
-    """Виджет строится (QApplication) и кнопка координат эмитит signal_requested."""
+def test_widget_observation_only(qtbot):
+    """Виджет наблюдения строится (QApplication) и НЕ содержит пульта сигналов."""
     from multiprocess_prototype.frontend.widgets.tabs.services.phone.widget import (
         PhoneServiceWidget,
     )
 
     w = PhoneServiceWidget()
     qtbot.addWidget(w)
-    w._coord_x.setText("12.5")
-    w._coord_y.setText("34")
-    captured: list[tuple[str, object]] = []
-    w.signal_requested.connect(lambda port, val: captured.append((port, val)))
-    w._emit_coords()
-    assert captured == [("signal_1", {"x_mm": 12.5, "y_mm": 34.0})]
-
-
-def test_widget_pult_emits_text(qtbot):
-    from multiprocess_prototype.frontend.widgets.tabs.services.phone.widget import (
-        PhoneServiceWidget,
-    )
-
-    w = PhoneServiceWidget()
-    qtbot.addWidget(w)
-    w._signal_text.setText("ГАЙКА")
-    captured: list[tuple[str, object]] = []
-    w.signal_requested.connect(lambda port, val: captured.append((port, val)))
-    w._emit_text()
-    assert captured == [("signal_2", "ГАЙКА")]
+    # Пульт убран: ни сигнала запроса, ни полей/методов эмита.
+    assert not hasattr(w, "signal_requested")
+    assert not hasattr(w, "_emit_coords")
+    assert not hasattr(w, "_coord_x")
 
 
 def test_build_phone_section_spec():

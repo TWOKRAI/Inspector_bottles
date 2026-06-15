@@ -28,14 +28,6 @@ class PhoneServicePresenter:
         """Выключить приём с телефона (погасить HTTP-сервер)."""
         return self._send("stop_server")
 
-    def emit_signal(self, port: str, value: object) -> bool:
-        """Эмитировать сигнал пульта на выходной порт ноды.
-
-        port — signal_1..signal_3; value — payload (dict координат, строка, и т.п.).
-        Уйдёт в pipeline как item[port] = value (вяжи порт к потребителю в редакторе).
-        """
-        return self._send("emit_signal", {"port": port, "value": value})
-
     def _send(self, command: str, args: dict | None = None) -> bool:
         if self._bridge is None:
             logger.debug("PhoneService: bridge недоступен — %s пропущена", command)

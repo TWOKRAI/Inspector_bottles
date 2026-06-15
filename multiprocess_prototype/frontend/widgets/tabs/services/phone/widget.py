@@ -1,30 +1,26 @@
-"""PhoneServiceWidget — карточка сервиса «Телефон».
+"""PhoneServiceWidget — карточка сервиса «Телефон» (только наблюдение).
 
-Показывает статус сервера, адрес для телефона, QR-код, последнее принятое слово
-и подсказку про брандмауэр. Кнопки Вкл/Выкл — в action-колонке секции.
+Показывает статус сервера, адрес для телефона, QR-код, последнее принятое слово,
+превью последнего фото и подсказку про брандмауэр. Кнопки Вкл/Выкл — в
+action-колонке секции. Пульт сигналов сюда НЕ входит: сигналы эмитит HTML-страница
+телефона (и, в перспективе, отдельный сервис-пульт), а GUI-вкладка — для наблюдения.
 """
 
 from __future__ import annotations
 
 import base64
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 
 class PhoneServiceWidget(QWidget):
-    """Виджет управления приёмом фото/слова с телефона по WiFi + пульт сигналов."""
-
-    # Запрос эмитировать сигнал пульта: (port, value). Секция → presenter.emit_signal.
-    signal_requested = Signal(str, object)
+    """Виджет наблюдения за приёмом фото/слова с телефона по WiFi."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -66,40 +62,6 @@ class PhoneServiceWidget(QWidget):
         self._thumb_label = QLabel("—")
         self._thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._thumb_label)
-
-        # --- Пульт (сигналы) — кнопки шлют сигнал на выходной порт ноды.
-        layout.addWidget(QLabel("<b>🔘 Пульт (сигналы)</b>"))
-
-        # signal_1 — координаты роботу {x_mm, y_mm}
-        coord_row = QHBoxLayout()
-        self._coord_x = QLineEdit()
-        self._coord_x.setPlaceholderText("X, мм")
-        self._coord_y = QLineEdit()
-        self._coord_y.setPlaceholderText("Y, мм")
-        btn_coords = QPushButton("Координаты → signal_1")
-        btn_coords.setToolTip("Эмитировать {x_mm, y_mm} на порт signal_1 (вяжи к robot_io)")
-        btn_coords.clicked.connect(self._emit_coords)
-        coord_row.addWidget(self._coord_x)
-        coord_row.addWidget(self._coord_y)
-        coord_row.addWidget(btn_coords)
-        layout.addLayout(coord_row)
-
-        # signal_2 — текст (напр. слово)
-        text_row = QHBoxLayout()
-        self._signal_text = QLineEdit()
-        self._signal_text.setPlaceholderText("значение / слово")
-        btn_text = QPushButton("Текст → signal_2")
-        btn_text.setToolTip("Эмитировать строку на порт signal_2")
-        btn_text.clicked.connect(self._emit_text)
-        text_row.addWidget(self._signal_text)
-        text_row.addWidget(btn_text)
-        layout.addLayout(text_row)
-
-        # signal_3 — простой триггер (без значения)
-        btn_trigger = QPushButton("Триггер → signal_3")
-        btn_trigger.setToolTip("Эмитировать триггер (true) на порт signal_3")
-        btn_trigger.clicked.connect(lambda: self.signal_requested.emit("signal_3", True))
-        layout.addWidget(btn_trigger)
 
         hint = QLabel(
             "Телефон и ПК — в одной сети WiFi. Откройте адрес или отсканируйте QR "
@@ -150,18 +112,3 @@ class PhoneServiceWidget(QWidget):
                 pixmap = pixmap.scaledToWidth(360, Qt.TransformationMode.SmoothTransformation)
             self._thumb_label.setPixmap(pixmap)
             self._thumb_label.setText("")
-
-    def _emit_coords(self) -> None:
-        """Собрать {x_mm, y_mm} из полей и эмитировать на signal_1."""
-        try:
-            x = float(self._coord_x.text().strip().replace(",", "."))
-            y = float(self._coord_y.text().strip().replace(",", "."))
-        except ValueError:
-            return
-        self.signal_requested.emit("signal_1", {"x_mm": x, "y_mm": y})
-
-    def _emit_text(self) -> None:
-        """Эмитировать строку из поля на signal_2."""
-        text = self._signal_text.text().strip()
-        if text:
-            self.signal_requested.emit("signal_2", text)

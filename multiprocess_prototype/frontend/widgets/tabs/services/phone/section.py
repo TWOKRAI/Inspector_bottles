@@ -74,8 +74,6 @@ class _PhoneSection:
     def _build(self) -> None:
         self._widget = PhoneServiceWidget()
         self._presenter = PhoneServicePresenter(bridge=getattr(self._runtime, "topology_bridge", None))
-        # Пульт: кнопки виджета → emit_signal через bridge.
-        self._widget.signal_requested.connect(self._presenter.emit_signal)
         self._refresh()
 
     def _build_buttons(self) -> None:
