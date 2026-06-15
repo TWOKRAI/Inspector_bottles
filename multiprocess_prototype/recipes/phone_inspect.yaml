@@ -1,0 +1,69 @@
+# Рецепт phone_inspect — фото с телефона как камера → дисплей.
+#
+# Нода phone_cam (PhoneCameraPlugin) — источник кадров (вместо вебкамеры):
+#   1) запусти рецепт, открой Services → Телефон — там адрес и QR;
+#   2) на телефоне (та же сеть WiFi) открой адрес, отправь фото;
+#   3) фото появится в дисплее «Фото с телефона».
+# Слово (режим букв) уходит в state: processes.phone_cam.state.phone.word.
+#
+# Это шаблон: ноду phone_camera можно так же добавить в любой рецепт в редакторе
+# Pipeline и связать выход frame с обработкой/дисплеем (как камеру).
+#
+# Запуск: python multiprocess_prototype/run.py phone_inspect
+
+name: phone_inspect
+version: 1
+description: "Фото с телефона по WiFi → дисплей (телефон как камера)"
+
+blueprint:
+  name: phone_inspect
+  description: "phone_camera → дисплей"
+
+  processes:
+    - process_name: phone_cam
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      source_target_fps: 10
+      plugins:
+        - plugin_class: Services.phone_gateway.plugin.plugin.PhoneCameraPlugin
+          plugin_name: phone_camera
+          category: source
+          camera_id: 0
+          host: "0.0.0.0"
+          http_port: 8080
+          resolution_width: 640
+          resolution_height: 480
+          auto_start: true
+          show_hint: true
+
+  wires: []
+
+  displays:
+    - node_id: phone_cam.phone_camera.frame
+      display_id: phone_view
+
+  metadata:
+    gui_positions:
+      phone_cam.phone_camera:
+        - 16.0
+        - 40.0
+      phone_view:
+        - 0.0
+        - 0.0
+    locked_nodes: []
+
+displays:
+  - id: phone_view
+    name: Фото с телефона
+    width: 640
+    height: 480
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position: {x: 0, y: 0}
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none

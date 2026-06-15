@@ -426,6 +426,11 @@ def build_services_sections(
 
     sections.append(build_vfd_section(services, runtime, title="ПЧ (частотный преобразователь)"))
 
+    # Телефон — приём фото/слова по WiFi (always-on сервис phone_gateway, toggle).
+    from .phone import build_phone_section
+
+    sections.append(build_phone_section(services, runtime, title="Телефон"))
+
     # Группа «Нейронные сети» — ML-конвейер: генерация датасета (dataset_gen),
     # обучение (ml_train), каталог моделей инференса (ml_inference).
     sections.append(
