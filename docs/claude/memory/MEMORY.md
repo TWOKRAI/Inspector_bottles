@@ -81,3 +81,4 @@
 - [CUDA torch setup](project_cuda_torch_setup.md) — RTX 3050 4GB; torch ставить cu124-колесом (uv pip --reinstall --index ...); дефолтный PyPI даёт +cpu, uv sync откатывает
 - [Package install by user](feedback_package_install_by_user.md) — install-команды запускает пользователь сам (deny-правило на pip); агент выдаёт команду, не вызывает
 - [Letter+angle training](project_letter_angle_training.md) — буква+угол на дисках для робота; пресеты manual_letters; 12/33 букв; фокус — точность угла
+- [Pult control panel](project_pult_control_panel.md) — сервис «Пульт» (рецептный, контролы→сигналы pipeline) + дашборд (выбранные поля/сигналы др. нод в одном месте) + узел robot_scale (px→мм по углам листа); «Рисовать»→robot_draw verified live
