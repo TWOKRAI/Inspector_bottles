@@ -14,8 +14,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator
 
-# Типы контролов v1 — все эмитят значение на выходной порт ноды (pipeline-сигнал).
+# Тип контрола — ВИД виджета (как выглядит/оперируется).
 ControlType = Literal["button", "toggle", "slider", "number", "text"]
+
+# Источник/назначение контрола — КУДА идёт действие (Phase 5 дашборд):
+#   local   — эмит на свой выходной порт (pipeline-сигнал; дефолт, текущее поведение);
+#   param   — правка register-поля ДРУГОЙ ноды (live field-write в target_process);
+#   monitor — read-only показ значения поля другой ноды (без правки);
+#   action  — триггер команды target_command на другой ноде (как «Рисовать»).
+ControlSource = Literal["local", "param", "monitor", "action"]
 
 _NUMERIC = {"slider", "number"}
 
@@ -42,6 +49,13 @@ class ControlSpec(BaseModel):
     max: float = 100.0
     step: float = 1.0
     trigger_value: Any = True
+
+    # Дашборд (Phase 5): контрол может управлять/наблюдать ДРУГУЮ ноду.
+    source: ControlSource = "local"
+    target_process: str = ""  # имя процесса-ноды (для param/monitor/action)
+    target_plugin_index: int = 0  # индекс плагина в процессе (мульти-плагин)
+    target_field: str = ""  # имя register-поля (param/monitor)
+    target_command: str = ""  # имя команды (action)
 
     @field_validator("id")
     @classmethod

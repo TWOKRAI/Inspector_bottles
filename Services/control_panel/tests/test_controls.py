@@ -76,3 +76,50 @@ class TestParseControls:
         assert dicts[0]["port"] == "out_3"
         # повторный парсинг даёт эквивалент
         assert parse_controls(dicts)[0].port == "out_3"
+
+
+class TestDashboardSource:
+    """Phase 5: source-режимы (local/param/monitor/action) + target-адресация."""
+
+    def test_default_source_local(self) -> None:
+        assert ControlSpec(id="a", type="button").source == "local"
+
+    def test_param_targets_other_node(self) -> None:
+        spec = ControlSpec(
+            id="thr",
+            type="slider",
+            source="param",
+            target_process="seg",
+            target_field="threshold",
+            min=0.0,
+            max=1.0,
+        )
+        assert spec.source == "param"
+        assert spec.target_process == "seg"
+        assert spec.target_field == "threshold"
+        # coerce по-прежнему по ВИДУ виджета (type), source ортогонален
+        assert spec.coerce(2.0) == 1.0  # slider clamp
+
+    def test_action_targets_command(self) -> None:
+        spec = ControlSpec(
+            id="draw", type="button", source="action", target_process="points", target_command="robot_draw_send"
+        )
+        assert spec.source == "action"
+        assert spec.target_command == "robot_draw_send"
+
+    def test_roundtrip_preserves_dashboard_fields(self) -> None:
+        raw = [
+            {
+                "id": "thr",
+                "type": "number",
+                "source": "param",
+                "target_process": "seg",
+                "target_plugin_index": 0,
+                "target_field": "threshold",
+            }
+        ]
+        specs = parse_controls(raw)
+        out = controls_to_dicts(specs)[0]
+        assert out["source"] == "param"
+        assert out["target_process"] == "seg"
+        assert out["target_field"] == "threshold"
