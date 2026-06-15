@@ -16,6 +16,10 @@
   Нода в pipeline — только источник сигналов.
 - Контролы v1: **кнопка (триггер), тумблер (вкл/выкл), слайдер (число в диапазоне),
   поле числа/текста**.
+- **Рецептность:** контролы хранятся **в рецепте** (поле `controls` ноды `control_panel`
+  в `blueprint`). У каждого рецепта свой набор кнопок/слайдеров. При старте плагин читает
+  `controls` из конфига; GUI-правки (add/remove/update) **сохраняются обратно в рецепт**
+  при save (Phase 2) — а не только live-командой в рантайм.
 
 ## Архитектура
 
@@ -72,12 +76,17 @@ Services/control_panel/
     поле→`QLineEdit`/`QSpinBox`. Каждое действие → сигнал виджета `control_changed(id, value)`.
     Секция «Добавить контрол»: тип + label + порт + диапазон → `control_add`.
   - `presenter.py`: `set_control/emit_control/add_control/remove_control` через
-    `bridge.on_action_command("control_panel", ...)`.
+    `bridge.on_action_command("control_panel", ...)` (live в рантайм) **+ персист в рецепт**:
+    запись `controls` в конфиг ноды через config/topology-write (как list[dict]-инспектор),
+    чтобы набор контролов сохранялся в рецепт при save (рецептный сервис).
   - `section.py`: `_ControlPanelSection` + `build_control_panel_section()`; bind `control_panel.controls`
     по glob `processes.*.state.control_panel.*`.
   - регистрация в `_sections.py` (после «Телефон»).
 - **Тесты:** presenter роутит команды; виджет строит контролы из спеки; add-форма эмитит.
 - **Acceptance:** `pytest .../control_panel/` зелёный; ruff чист.
+- **Открытый вопрос Phase 2:** точка персиста — переиспользовать generic list[dict]-инспектор
+  для поля `controls` в карточке ноды (Pipeline) ИЛИ свой save-путь из вкладки «Пульт».
+  Решить в начале Phase 2 (см. память про list[dict]-виджет inspector, ca631b7f).
 
 ### Phase 3 — Демо-рецепт + проводка
 **Assignee:** Director · **Layer:** prototype
