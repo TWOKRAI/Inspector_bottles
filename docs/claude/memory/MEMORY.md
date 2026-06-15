@@ -1,3 +1,4 @@
+- [VFD bridge over robot — reboot fix](project_vfd_bridge_robot_reboot.md) — ПЧ vfd_belt висит мостом поверх robot_main; зависший ПЧ лечится перезагрузкой РОБОТА, не правкой кода ПЧ
 - [Qt widget editing patterns](feedback_widget_qt_patterns.md) — setFlags recursion, blockSignals, EditTriggers (critical)
 - [Qt-MCP smoke verification mandatory](feedback_qt_mcp_smoke_verification.md) — after any Qt tab/widget rewrite, run proto + qt_snapshot; pytest-qt unit tests don't prove real assembly
 - [No global taskkill](feedback_no_global_taskkill.md) — never `taskkill /IM python.exe` / `pkill python` / `killall` — use TaskStop or PID-specific kill
@@ -75,3 +76,7 @@
 - [Hikvision anamorphic resize](project_hikvision_aspect_ratio.md) — plugin resizes native 4:3 → target anamorphically; set resolution to 4:3 or round objects become ellipses
 - [Prototype audit 2026-06](project_prototype_audit_2026_06.md) — справочник аудита prototype+Services+Plugins (docs/audits/), ID-находки H1/M-leak-1/...; 2 HIGH, узкое место модульность, циклов импорта нет
 - [Calibration GUI progress](project_calibration_gui_progress.md) — визард калибровки «висел»: GUI не подписан на новый state-корень calibration.** (нужна subscribe в process.py); FIXED b9fbbde1 + урок про новые state-корни + техника headless backend_ctl-драйва
+- [Always project .venv](feedback_always_project_venv.md) — uv run без --no-sync падает/берёт не тот интерпретатор; всегда проектный .venv (qt-mcp фикс)
+- [CUDA torch setup](project_cuda_torch_setup.md) — RTX 3050 4GB; torch ставить cu124-колесом (uv pip --reinstall --index ...); дефолтный PyPI даёт +cpu, uv sync откатывает
+- [Package install by user](feedback_package_install_by_user.md) — install-команды запускает пользователь сам (deny-правило на pip); агент выдаёт команду, не вызывает
+- [Letter+angle training](project_letter_angle_training.md) — буква+угол на дисках для робота; пресеты manual_letters; 12/33 букв; фокус — точность угла
