@@ -4,8 +4,12 @@
 Виджет «тупой» (View): сигналы наружу на каждый шаг + сеттеры состояния.
 Логика (команды cal_*, подписка на прогресс) — в CalibrationController/Presenter.
 
-Порядок шагов: Начать сессию → Снять кадр (5 точек) → Навести робота на точки 1..5
-→ Прогон ленты + Снять масштаб (репер) → Вычислить → Сохранить. UX без красоты (MVP).
+Три явных шага (по запросу владельца):
+  • Шаг 1 — Пиксели: одна кнопка «Зафиксировать» снимает кадр → px 5 точек + энкодер E0.
+  • Шаг 2 — Робот: на каждую точку своя кнопка, пишет координаты робота X/Y + энкодер E1.
+  • Шаг 3 — Лента: выбор репера, прогон ленты, «Считать E2» → новые координаты робота
+    репера (пиксели те же, из Шага 1) + энкодер E2 → масштаб ленты.
+UX без красоты (MVP).
 """
 
 from __future__ import annotations
@@ -30,15 +34,15 @@ _NUM_POINTS = 5
 
 
 class CalibrationWizardWidget(QWidget):
-    """Командная панель калибровки: кнопки шагов + статус/прогресс."""
+    """Командная панель калибровки: 3 шага (пиксели · робот · лента) + результат/статус."""
 
     # --- сигналы наружу ---
     begin_requested = Signal(str, str)  # camera_id, vfd_id
-    capture_requested = Signal()
-    set_point_requested = Signal(int)  # index 0..4
+    capture_requested = Signal()  # Шаг 1: «Зафиксировать» (снимок px + E0)
+    set_point_requested = Signal(int)  # Шаг 2: «Точка N» (робот X/Y + E1), index 0..4
     belt_run_requested = Signal(float)  # freq_hz
     belt_stop_requested = Signal()
-    encoder_scale_requested = Signal(int)  # ref_index 0..4
+    encoder_scale_requested = Signal(int)  # Шаг 3: репер 0..4 → новый робот + E2
     compute_requested = Signal()
     save_requested = Signal()
     reset_requested = Signal()
@@ -51,18 +55,19 @@ class CalibrationWizardWidget(QWidget):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
         root.addWidget(self._build_session_group())
-        root.addWidget(self._build_points_group())
-        root.addWidget(self._build_belt_group())
+        root.addWidget(self._build_step1_group())
+        root.addWidget(self._build_step2_group())
+        root.addWidget(self._build_step3_group())
         root.addWidget(self._build_result_group())
         root.addWidget(self._build_status_group())
         root.addStretch(1)
 
     # ------------------------------------------------------------------ #
-    # Группы
+    # Сессия (Камера / ПЧ + live)
     # ------------------------------------------------------------------ #
 
     def _build_session_group(self) -> QGroupBox:
-        group = QGroupBox("1. Камера / ПЧ + статус")
+        group = QGroupBox("Камера / ПЧ + статус")
         grid = QGridLayout(group)
         grid.addWidget(QLabel("Камера:"), 0, 0)
         self._edit_camera = QComboBox()
@@ -78,11 +83,9 @@ class CalibrationWizardWidget(QWidget):
         self._edit_camera.activated.connect(lambda _i: self._emit_begin())
         self._edit_vfd.activated.connect(lambda _i: self._emit_begin())
 
-        self._lbl_found = QLabel("Найдено: — (live: 0/5)")
-        grid.addWidget(self._lbl_found, 1, 0, 1, 4)
         # Живая позиция робота (push devices.state.<id>.status) — для контроля перед записью.
         self._lbl_robot_live = QLabel("Робот сейчас: —")
-        grid.addWidget(self._lbl_robot_live, 2, 0, 1, 4)
+        grid.addWidget(self._lbl_robot_live, 1, 0, 1, 4)
         return group
 
     def _emit_begin(self) -> None:
@@ -113,17 +116,58 @@ class CalibrationWizardWidget(QWidget):
         """Обновить метку «Робот сейчас» (live push-телеметрия)."""
         self._lbl_robot_live.setText(f"Робот сейчас: X={x:.1f}  Y={y:.1f}  энкодер={enc if enc is not None else '—'}")
 
-    def _build_points_group(self) -> QGroupBox:
-        group = QGroupBox("2. Точки: кнопка пишет координаты робота · px и мм видны и правятся вручную")
+    # ------------------------------------------------------------------ #
+    # Шаг 1 — Пиксели (снимок камеры)
+    # ------------------------------------------------------------------ #
+
+    def _build_step1_group(self) -> QGroupBox:
+        group = QGroupBox("Шаг 1 — Пиксели: «Зафиксировать» снимает кадр (px 5 точек + энкодер E0)")
         grid = QGridLayout(group)
         grid.setSpacing(4)
-        # Заголовки колонок
-        for col, title in enumerate(("Точка", "px X", "px Y", "робот X, мм", "робот Y, мм")):
+        for col, title in enumerate(("Точка", "px X", "px Y")):
+            grid.addWidget(QLabel(title), 0, col)
+
+        self._px_x: list[QDoubleSpinBox] = []
+        self._px_y: list[QDoubleSpinBox] = []
+        for i in range(_NUM_POINTS):
+            r = i + 1
+            grid.addWidget(QLabel(f"Точка {i + 1}"), r, 0)
+            pxx = self._make_coord_spin(0, 8000, 0, " px")
+            pxy = self._make_coord_spin(0, 8000, 0, " px")
+            grid.addWidget(pxx, r, 1)
+            grid.addWidget(pxy, r, 2)
+            # editingFinished (не valueChanged): программный fill идёт с blockSignals,
+            # пользовательская правка ловится только при завершении ввода/потере фокуса.
+            pxx.editingFinished.connect(lambda idx=i: self._emit_px(idx))
+            pxy.editingFinished.connect(lambda idx=i: self._emit_px(idx))
+            self._px_x.append(pxx)
+            self._px_y.append(pxy)
+
+        self._btn_capture = QPushButton("Зафиксировать (снимок 5 точек)")
+        self._btn_capture.setToolTip("Снять кадр: записать пиксели 5 найденных точек и энкодер E0")
+        self._btn_capture.clicked.connect(self.capture_requested.emit)
+        grid.addWidget(self._btn_capture, _NUM_POINTS + 1, 0, 1, 3)
+
+        self._lbl_found = QLabel("Найдено: — (live: 0/5)")
+        grid.addWidget(self._lbl_found, _NUM_POINTS + 2, 0, 1, 3)
+        self._lbl_e0 = QLabel("Энкодер E0 (снимок): —")
+        grid.addWidget(self._lbl_e0, _NUM_POINTS + 3, 0, 1, 3)
+        return group
+
+    # ------------------------------------------------------------------ #
+    # Шаг 2 — Координаты робота
+    # ------------------------------------------------------------------ #
+
+    def _build_step2_group(self) -> QGroupBox:
+        group = QGroupBox("Шаг 2 — Робот: «Точка N» пишет робота X/Y (px — зафиксированные из Шага 1; E1 один на всех)")
+        grid = QGridLayout(group)
+        grid.setSpacing(4)
+        for col, title in enumerate(("Точка", "px X (фикс.)", "px Y (фикс.)", "робот X, мм", "робот Y, мм")):
             grid.addWidget(QLabel(title), 0, col)
 
         self._point_buttons: list[QPushButton] = []
-        self._px_x: list[QDoubleSpinBox] = []
-        self._px_y: list[QDoubleSpinBox] = []
+        self._px2_x: list[QDoubleSpinBox] = []  # зафиксированные пиксели (read-only зеркало Шага 1)
+        self._px2_y: list[QDoubleSpinBox] = []
         self._rb_x: list[QDoubleSpinBox] = []
         self._rb_y: list[QDoubleSpinBox] = []
         for i in range(_NUM_POINTS):
@@ -134,38 +178,93 @@ class CalibrationWizardWidget(QWidget):
             grid.addWidget(btn, r, 0)
             self._point_buttons.append(btn)
 
-            pxx = self._make_coord_spin(0, 8000, 0, " px")
-            pxy = self._make_coord_spin(0, 8000, 0, " px")
+            px2x = self._make_coord_spin(0, 8000, 0, " px", readonly=True)
+            px2y = self._make_coord_spin(0, 8000, 0, " px", readonly=True)
+            grid.addWidget(px2x, r, 1)
+            grid.addWidget(px2y, r, 2)
+            self._px2_x.append(px2x)
+            self._px2_y.append(px2y)
+
             rbx = self._make_coord_spin(-100000.0, 100000.0, 2, "")
             rby = self._make_coord_spin(-100000.0, 100000.0, 2, "")
-            grid.addWidget(pxx, r, 1)
-            grid.addWidget(pxy, r, 2)
             grid.addWidget(rbx, r, 3)
             grid.addWidget(rby, r, 4)
-            # editingFinished (не valueChanged): программный fill идёт с blockSignals,
-            # пользовательская правка ловится только при завершении ввода/потере фокуса.
-            pxx.editingFinished.connect(lambda idx=i: self._emit_px(idx))
-            pxy.editingFinished.connect(lambda idx=i: self._emit_px(idx))
             rbx.editingFinished.connect(lambda idx=i: self._emit_robot(idx))
             rby.editingFinished.connect(lambda idx=i: self._emit_robot(idx))
-            self._px_x.append(pxx)
-            self._px_y.append(pxy)
             self._rb_x.append(rbx)
             self._rb_y.append(rby)
 
+        self._lbl_e1 = QLabel("Энкодер E1 (робот): —")
+        grid.addWidget(self._lbl_e1, _NUM_POINTS + 1, 0, 1, 5)
         self._lbl_points = QLabel("Собрано: 0/5")
-        grid.addWidget(self._lbl_points, _NUM_POINTS + 1, 0, 1, 5)
+        grid.addWidget(self._lbl_points, _NUM_POINTS + 2, 0, 1, 5)
         return group
 
+    # ------------------------------------------------------------------ #
+    # Шаг 3 — Масштаб ленты (репер после прогона)
+    # ------------------------------------------------------------------ #
+
+    def _build_step3_group(self) -> QGroupBox:
+        group = QGroupBox("Шаг 3 — Лента: прогон + повторное касание репера (px те же, новый робот + E2)")
+        grid = QGridLayout(group)
+        grid.addWidget(QLabel("Частота, Гц:"), 0, 0)
+        self._spin_freq = QDoubleSpinBox()
+        self._spin_freq.setRange(0.0, 50.0)
+        self._spin_freq.setDecimals(2)
+        self._spin_freq.setValue(10.0)
+        grid.addWidget(self._spin_freq, 0, 1)
+        self._btn_belt_run = QPushButton("Лента: Пуск")
+        self._btn_belt_run.clicked.connect(lambda: self.belt_run_requested.emit(self._spin_freq.value()))
+        grid.addWidget(self._btn_belt_run, 0, 2)
+        self._btn_belt_stop = QPushButton("Лента: Стоп")
+        self._btn_belt_stop.clicked.connect(self.belt_stop_requested.emit)
+        grid.addWidget(self._btn_belt_stop, 0, 3)
+
+        grid.addWidget(QLabel("Репер — точка №:"), 1, 0)
+        self._spin_ref = QSpinBox()
+        self._spin_ref.setRange(1, _NUM_POINTS)
+        self._spin_ref.setValue(_NUM_POINTS)  # по умолчанию центр (точка 5)
+        grid.addWidget(self._spin_ref, 1, 1)
+        self._btn_scale = QPushButton("Считать E2 (после ленты) + расчёт")
+        self._btn_scale.setToolTip(
+            "После прогона ленты заново коснись репера: пишет новые координаты робота + E2, "
+            "считает масштаб ленты и дистанцию камера→робот (пиксели берутся из Шага 1)"
+        )
+        self._btn_scale.clicked.connect(lambda: self.encoder_scale_requested.emit(self._spin_ref.value() - 1))
+        grid.addWidget(self._btn_scale, 1, 2, 1, 2)
+
+        # Показ результата повторного касания репера: те же px (Шаг 1) + новый робот + E2.
+        self._lbl_step3_px = QLabel("Репер px (из Шага 1): —")
+        grid.addWidget(self._lbl_step3_px, 2, 0, 1, 4)
+        self._lbl_step3_robot = QLabel("Новые координаты робота: —")
+        grid.addWidget(self._lbl_step3_robot, 3, 0, 1, 4)
+        self._lbl_e2 = QLabel("Энкодер E2 (после ленты): —")
+        grid.addWidget(self._lbl_e2, 4, 0, 1, 4)
+        self._lbl_scale = QLabel("Масштаб ленты: —")
+        self._lbl_scale.setWordWrap(True)
+        grid.addWidget(self._lbl_scale, 5, 0, 1, 4)
+        return group
+
+    # ------------------------------------------------------------------ #
+    # Общие хелперы полей
+    # ------------------------------------------------------------------ #
+
     @staticmethod
-    def _make_coord_spin(lo: float, hi: float, decimals: int, suffix: str) -> QDoubleSpinBox:
-        """Компактный QDoubleSpinBox для координаты (без стрелок-кнопок)."""
+    def _make_coord_spin(lo: float, hi: float, decimals: int, suffix: str, readonly: bool = False) -> QDoubleSpinBox:
+        """Компактный QDoubleSpinBox для координаты (без стрелок-кнопок).
+
+        readonly=True — поле только для показа (зафиксированные значения, не правятся).
+        """
         sp = QDoubleSpinBox()
         sp.setRange(lo, hi)
         sp.setDecimals(decimals)
         if suffix:
             sp.setSuffix(suffix)
         sp.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
+        if readonly:
+            sp.setReadOnly(True)
+            sp.setFocusPolicy(sp.focusPolicy().NoFocus)
+            sp.setStyleSheet("QDoubleSpinBox { background: #f0f0f0; color: #444; }")
         return sp
 
     def _emit_px(self, i: int) -> None:
@@ -185,37 +284,15 @@ class CalibrationWizardWidget(QWidget):
             sp.setValue(float(v))
             sp.blockSignals(False)
 
-    def _build_belt_group(self) -> QGroupBox:
-        group = QGroupBox("3. Масштаб ленты (прогон + 1 повторное касание)")
-        grid = QGridLayout(group)
-        grid.addWidget(QLabel("Частота, Гц:"), 0, 0)
-        self._spin_freq = QDoubleSpinBox()
-        self._spin_freq.setRange(0.0, 50.0)
-        self._spin_freq.setDecimals(2)
-        self._spin_freq.setValue(10.0)
-        grid.addWidget(self._spin_freq, 0, 1)
-        self._btn_belt_run = QPushButton("Лента: Пуск")
-        self._btn_belt_run.clicked.connect(lambda: self.belt_run_requested.emit(self._spin_freq.value()))
-        grid.addWidget(self._btn_belt_run, 0, 2)
-        self._btn_belt_stop = QPushButton("Лента: Стоп")
-        self._btn_belt_stop.clicked.connect(self.belt_stop_requested.emit)
-        grid.addWidget(self._btn_belt_stop, 0, 3)
-
-        grid.addWidget(QLabel("Репер — точка №:"), 1, 0)
-        self._spin_ref = QSpinBox()
-        self._spin_ref.setRange(1, _NUM_POINTS)
-        self._spin_ref.setValue(1)
-        grid.addWidget(self._spin_ref, 1, 1)
-        self._btn_scale = QPushButton("Снять масштаб (повторное касание)")
-        self._btn_scale.clicked.connect(lambda: self.encoder_scale_requested.emit(self._spin_ref.value() - 1))
-        grid.addWidget(self._btn_scale, 1, 2, 1, 2)
-
-        self._lbl_scale = QLabel("Масштаб ленты: —")
-        grid.addWidget(self._lbl_scale, 2, 0, 1, 4)
-        return group
+    @staticmethod
+    def _fmt_xy(val, dec: int = 0) -> str:
+        """Форматировать пару [x,y] для метки (или «—» если нет)."""
+        if not val or len(val) < 2:
+            return "—"
+        return f"X={float(val[0]):.{dec}f}  Y={float(val[1]):.{dec}f}"
 
     def _build_result_group(self) -> QGroupBox:
-        group = QGroupBox("4. Вычислить и сохранить")
+        group = QGroupBox("Вычислить и сохранить")
         layout = QVBoxLayout(group)
         row = QHBoxLayout()
         self._btn_compute = QPushButton("Вычислить")
@@ -275,7 +352,7 @@ class CalibrationWizardWidget(QWidget):
         self._lbl_found.setText(f"Найдено: {found} (live: {live}/{expected})")
         self._lbl_points.setText(f"Собрано: {snap.get('points_collected', 0)}/{expected}")
 
-        # Покоординатно: заполнить поля px / робот из снапшота (правка вручную не затирается).
+        # Покоординатно: заполнить поля px (Шаг 1) / робот (Шаг 2) из снапшота.
         # px: после захвата — зафиксированные (snap["px"]); ДО захвата — live (real-time).
         captured = bool(snap.get("captured"))
         px = snap.get("px") or []
@@ -288,11 +365,33 @@ class CalibrationWizardWidget(QWidget):
                 px_val = live_px[i] if i < len(live_px) else None
             self._set_spin_pair(self._px_x[i], self._px_y[i], px_val)
             self._set_spin_pair(self._rb_x[i], self._rb_y[i], mm[i] if i < len(mm) else None)
+            # Шаг 2: зафиксированные пиксели (только после захвата) — read-only зеркало Шага 1.
+            fixed_px = px[i] if (captured and i < len(px)) else None
+            self._set_spin_pair(self._px2_x[i], self._px2_y[i], fixed_px)
+
+        # Три замера энкодера по шагам: E0 (снимок) · E1 (робот) · E2 (после ленты).
+        def _e(v) -> str:
+            return "—" if v is None else str(int(v))
+
+        self._lbl_e0.setText(f"Энкодер E0 (снимок): {_e(snap.get('e0'))}")
+        self._lbl_e1.setText(f"Энкодер E1 (робот): {_e(snap.get('e1'))}")
+        self._lbl_e2.setText(f"Энкодер E2 (после ленты): {_e(snap.get('e2'))}")
+
+        # Шаг 3: репер (из snapshot или текущего выбора) — те же px + новые координаты робота.
+        belt_ref = snap.get("belt_ref")
+        ref_idx = belt_ref if belt_ref is not None else (self._spin_ref.value() - 1)
+        ref_px = px[ref_idx] if 0 <= ref_idx < len(px) else None
+        self._lbl_step3_px.setText(f"Репер (точка {ref_idx + 1}) px из Шага 1: {self._fmt_xy(ref_px)}")
+        self._lbl_step3_robot.setText(f"Новые координаты робота: {self._fmt_xy(snap.get('belt_mm2'), dec=1)}")
 
         if snap.get("scale_done"):
             mpc = snap.get("mm_per_count")
             belt = snap.get("belt_dir") or [0.0, 0.0]
-            self._lbl_scale.setText(f"Масштаб ленты: {mpc:.5f} мм/count, направление ({belt[0]:.3f}, {belt[1]:.3f})")
+            dist = snap.get("camera_to_robot_mm")
+            dist_txt = f", камера→робот {dist:.1f} мм" if dist is not None else ""
+            self._lbl_scale.setText(
+                f"Масштаб ленты: {mpc:.5f} мм/count, направление ({belt[0]:.3f}, {belt[1]:.3f}){dist_txt}"
+            )
         else:
             self._lbl_scale.setText("Масштаб ленты: —")
 
@@ -318,6 +417,7 @@ class CalibrationWizardWidget(QWidget):
 
     def set_controls_enabled(self, enabled: bool, hint: str = "") -> None:
         for btn in (
+            self._btn_capture,
             self._btn_belt_run,
             self._btn_belt_stop,
             self._btn_scale,

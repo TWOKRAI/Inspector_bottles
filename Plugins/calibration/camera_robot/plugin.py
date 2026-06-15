@@ -51,6 +51,11 @@ _QUEUE_POLL_S = 0.05
 _LIVE_PUBLISH_EVERY = 6
 # Роли 5 точек (порядок order_points: 4 угла + центр).
 _ROLES = ("corner_tl", "corner_tr", "corner_br", "corner_bl", "center")
+_CENTER_IDX = 4  # роль "center" — репер по умолчанию для масштаба ленты
+# Защита от переполнения энкодера (16-бит wrap-around): разница E2−E1 больше — мусор.
+# ИНВАРИАНТ: энкодер ленты — ОДИН сквозной на всю трассу камера→робот (один датчик),
+# иначе вычитание E1−E0 (дистанция камера→робот) и E2−E1 (масштаб) бессмысленны.
+_MAX_SANE_ENC_DELTA = 100_000
 
 
 class CalibrationError(Exception):
@@ -310,6 +315,9 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             e_capture=enc,
             mm=[None] * 5,
             enc_i=[None] * 5,
+            e_belt2=None,
+            belt_ref=None,
+            camera_to_robot_mm=None,
             mm_per_count=None,
             belt_dir=None,
             homography=None,
@@ -376,14 +384,29 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
         enc_i = self._state["enc_i"]
         if mm[ref] is None or enc_i[ref] is None:
             raise CalibrationError(f"Точка {ref + 1} ещё не снята роботом — нельзя взять её как репер.")
-        pos2, enc_b = self._read_telemetry()
+        pos2, enc_b = self._read_telemetry()  # E2 — повторное касание репера после прогона ленты
+        e1 = int(enc_i[ref])  # E1 — энкодер 1-го касания репера
+        # Guard переполнения: разница E2−E1 за разумным пределом = wrap-around 16-бит энкодера.
+        if abs(enc_b - e1) > _MAX_SANE_ENC_DELTA:
+            raise CalibrationError(
+                f"Энкодер: разница E2−E1={enc_b - e1} нереально велика (вероятно переход через ноль). "
+                f"Повторите замер на меньшем прогоне ленты."
+            )
         mm_per_count, belt_dir = geometry.belt_vector(
-            (mm[ref][0], mm[ref][1]), pos2, enc_i[ref], enc_b
+            (mm[ref][0], mm[ref][1]), pos2, e1, enc_b
         )  # ValueError → _dispatch
         self._state["mm_per_count"] = mm_per_count
         self._state["belt_dir"] = [belt_dir[0], belt_dir[1]]
+        self._state["e_belt2"] = enc_b
+        self._state["belt_mm2"] = [pos2[0], pos2[1]]  # новые координаты робота репера (Шаг 3)
+        self._state["belt_ref"] = ref
+        # Дистанция камера→зона робота: за (E1−E0) импульсов деталь проезжает столько мм.
+        e0 = self._state["e_capture"]
+        cam_to_robot = (e1 - int(e0)) * mm_per_count if e0 is not None else None
+        self._state["camera_to_robot_mm"] = cam_to_robot
+        dist_txt = f", камера→робот {cam_to_robot:.1f} мм" if cam_to_robot is not None else ""
         self._state["message"] = (
-            f"Масштаб ленты: {mm_per_count:.5f} мм/count, направление ({belt_dir[0]:.3f}, {belt_dir[1]:.3f})"
+            f"Масштаб ленты: {mm_per_count:.5f} мм/count, направление ({belt_dir[0]:.3f}, {belt_dir[1]:.3f}){dist_txt}"
         )
 
     def _do_belt_run(self, args: dict) -> None:
@@ -462,9 +485,12 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             "transform": "homography",
             "px_to_mm": s["homography"],
             "encoder": {
-                "e_capture": s["e_capture"],
+                "e_capture": s["e_capture"],  # E0 — камера
+                "e_belt2": s["e_belt2"],  # E2 — повторное касание репера после ленты
+                "belt_ref": s["belt_ref"],  # индекс реперной точки масштаба
                 "mm_per_count": s["mm_per_count"],
                 "belt_dir_mm": s["belt_dir"],
+                "camera_to_robot_mm": s["camera_to_robot_mm"],  # (E1−E0)·mm_per_count
             },
             "reproj_error_mm": s["reproj"],
             "points": points,
@@ -514,9 +540,13 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             "vfd_id": self._reg.vfd_id,
             "px": None,
             "roles": None,
-            "e_capture": None,
+            "e_capture": None,  # E0 — энкодер на момент захвата кадра камерой
             "mm": [None] * 5,
-            "enc_i": [None] * 5,
+            "enc_i": [None] * 5,  # энкодер на момент касания робота по точкам (E1 = enc_i[репер])
+            "e_belt2": None,  # E2 — энкодер при повторном касании репера после прогона ленты
+            "belt_mm2": None,  # новые координаты робота репера после прогона ленты (Шаг 3)
+            "belt_ref": None,  # индекс реперной точки масштаба ленты
+            "camera_to_robot_mm": None,  # (E1−E0)·mm_per_count — дистанция камера→зона робота, мм
             "mm_per_count": None,
             "belt_dir": None,
             "homography": None,
@@ -556,7 +586,9 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             except ValueError:
                 live_px = None
         px_state = s["px"]
-        px_out = [list(p) for p in px_state] if px_state else [None] * 5
+        # px_state — список из 5, отдельные точки могут быть None (записана не вся плата) →
+        # list(None) бросает TypeError и валит воркер. Защищаем поэлементно (как mm_out ниже).
+        px_out = [list(p) if p is not None else None for p in px_state] if px_state else [None] * 5
         mm_out = [list(m) if m is not None else None for m in s["mm"]]
         snap = {
             "phase": s["phase"],
@@ -569,6 +601,12 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             "scale_done": s["mm_per_count"] is not None,
             "mm_per_count": s["mm_per_count"],
             "belt_dir": s["belt_dir"],
+            # Энкодер: E0 (камера), E1 (робот, репер/центр), E2 (после ленты) + дистанция.
+            "e0": s["e_capture"],
+            "e1": s["enc_i"][s["belt_ref"] if s["belt_ref"] is not None else _CENTER_IDX],
+            "e2": s["e_belt2"],
+            "belt_mm2": list(s["belt_mm2"]) if s["belt_mm2"] else None,  # новый робот репера (Шаг 3)
+            "camera_to_robot_mm": s["camera_to_robot_mm"],
             "reproj": s["reproj"],
             "passed": s["passed"],
             "saved_path": s["saved_path"],

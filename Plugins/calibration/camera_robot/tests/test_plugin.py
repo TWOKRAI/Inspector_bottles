@@ -158,6 +158,48 @@ def test_encoder_scale_zero_delta_errors():
     assert p._state["error"]
 
 
+# --- E0/E1/E2 + дистанция камера→робот -------------------------------------
+def test_encoder_scale_stores_e2_distance_and_snapshot():
+    """encoder_scale пишет E2/репер/дистанцию в state, snapshot и payload."""
+    hub = FakeHub(_moving_belt_telemetry())
+    p = _plugin(hub)
+    p._last_detections = _detections(PX_ALL)
+    p._dispatch({"action": "capture_image", "args": {}})
+    for i in range(5):
+        p._dispatch({"action": "set_robot_point", "args": {"index": i}})
+    p._dispatch({"action": "encoder_scale", "args": {"ref_index": 0}})
+
+    expected_dist = (ENC_I[0] - E0) * MPC  # (E1−E0)·mm_per_count
+    assert p._state["e_belt2"] == E_B
+    assert p._state["belt_ref"] == 0
+    assert p._state["camera_to_robot_mm"] == pytest.approx(expected_dist, abs=1e-6)
+
+    snap = p._ctx.state_proxy.set.call_args[0][1]
+    assert snap["e0"] == E0 and snap["e1"] == ENC_I[0] and snap["e2"] == E_B
+    assert snap["camera_to_robot_mm"] == pytest.approx(expected_dist, abs=1e-6)
+    # Шаг 3: новые координаты робота репера после ленты (для показа в GUI).
+    assert snap["belt_mm2"] is not None and len(snap["belt_mm2"]) == 2
+
+    enc = p._build_payload()["encoder"]
+    assert enc["e_capture"] == E0 and enc["e_belt2"] == E_B and enc["belt_ref"] == 0
+    assert enc["camera_to_robot_mm"] == pytest.approx(expected_dist, abs=1e-6)
+
+
+def test_encoder_scale_overflow_guard_errors():
+    """E2 нереально далеко от E1 (wrap-around 16-бит) → расчёт отклонён."""
+    tel = [(0.0, 0.0, E0)]
+    tel += [(float(i), float(2 * i), ENC_I[i]) for i in range(5)]
+    tel += [(5.0, 5.0, ENC_I[0] + 200_000)]  # E2 за пределом _MAX_SANE_ENC_DELTA
+    p = _plugin(FakeHub(tel))
+    p._last_detections = _detections(PX_ALL)
+    p._dispatch({"action": "capture_image", "args": {}})
+    for i in range(5):
+        p._dispatch({"action": "set_robot_point", "args": {"index": i}})
+    p._dispatch({"action": "encoder_scale", "args": {"ref_index": 0}})
+    assert p._state["mm_per_count"] is None
+    assert "нереально велика" in (p._state["error"] or "")
+
+
 # --- Сохранение отклоняется без compute ------------------------------------
 def test_save_without_compute_rejected():
     p = _plugin(FakeHub([]))
@@ -192,6 +234,21 @@ def test_manual_set_point_bad_index_errors():
     p._dispatch({"action": "capture_image", "args": {}})
     p._dispatch({"action": "set_point", "args": {"index": 9, "px": [1.0, 2.0]}})
     assert p._state["error"]
+
+
+def test_snapshot_partial_px_no_crash():
+    """Одиночная «Точка N» (px не у всех точек) → _publish не падает на None-элементах px.
+
+    Регрессия: GUI шлёт cal_set_point по одной точке (без полного «Снять кадр»),
+    s["px"] = [None]*5 с одним заполненным; list(None) валил воркер калибровки.
+    """
+    p = _plugin(FakeHub([]))
+    # _dispatch внутри зовёт _publish — до фикса тут TypeError 'NoneType' is not iterable.
+    p._dispatch({"action": "set_point", "args": {"index": 1, "px": [670.0, 63.0]}})
+    snap = p._ctx.state_proxy.set.call_args[0][1]
+    assert snap["px"][1] == [670.0, 63.0]
+    assert snap["px"][0] is None and snap["px"][4] is None
+    assert p._state["error"] is None
 
 
 def test_snapshot_includes_per_point_coords():

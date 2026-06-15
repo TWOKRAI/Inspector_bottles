@@ -87,7 +87,8 @@ def test_set_device_auto_begins(qtbot):
     presenter.begin.assert_called_once_with("cam0", "robot_main", "vfd_belt")
 
 
-def test_set_point_writes_px_and_robot(qtbot):
+def test_set_point_writes_robot_only(qtbot):
+    """Шаг 2 «Точка N» пишет ТОЛЬКО координаты робота + энкодер (px — это Шаг 1)."""
     widget, presenter, bindings, controller = _build(qtbot)
     controller.set_device("robot_main")
     # Push-телеметрия робота (как ручная вкладка)
@@ -95,20 +96,79 @@ def test_set_point_writes_px_and_robot(qtbot):
         "devices.state.robot_main.status",
         {"telemetry": {"x_mm": 12.0, "y_mm": 34.0}, "encoder": 555},
     )
-    # Прогресс с live_px (5 упорядоченных точек)
+    widget.set_point_requested.emit(2)
+    presenter.set_point.assert_called_once_with(2, mm=[12.0, 34.0], enc=555)
+    presenter.set_robot_point.assert_not_called()  # сломанный pull НЕ используется
+
+
+def test_capture_button_triggers_capture(qtbot):
+    """Шаг 1 «Зафиксировать» → presenter.capture_image (снимок px + E0)."""
+    widget, presenter, bindings, controller = _build(qtbot)
+    controller.set_device("robot_main")
+    widget.capture_requested.emit()
+    presenter.capture_image.assert_called_once_with()
+
+
+def test_progress_step3_shows_new_robot(qtbot):
+    """Шаг 3: новые координаты робота репера (belt_mm2) и E2 попадают в метки."""
+    widget, presenter, bindings, controller = _build(qtbot)
+    controller.set_device("robot_main")
     controller._on_progress_push(
         "calibration.state.cam0.progress",
-        {"live_px": [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]},
+        {
+            "captured": True,
+            "px": [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]],
+            "belt_ref": 0,
+            "belt_mm2": [88.5, 12.3],
+            "e2": 1300,
+        },
     )
-    widget.set_point_requested.emit(2)
-    presenter.set_point.assert_called_once_with(2, px=[5, 6], mm=[12.0, 34.0], enc=555)
-    presenter.set_robot_point.assert_not_called()  # сломанный pull НЕ используется
+    assert "88.5" in widget._lbl_step3_robot.text()
+    assert "1300" in widget._lbl_e2.text()
+    assert "точка 1" in widget._lbl_step3_px.text()
 
 
 def test_set_point_without_telemetry_no_call(qtbot):
     widget, presenter, bindings, controller = _build(qtbot)
     controller.set_device("robot_main")
     widget.set_point_requested.emit(0)  # телеметрии ещё не было
+    presenter.set_point.assert_not_called()
+
+
+class FakeRobotPresenter:
+    """Синхронный pull: get_telemetry сразу зовёт callback с заранее заданным ответом."""
+
+    def __init__(self, telemetry):
+        self._tlm = telemetry
+        self.calls = []
+
+    def get_telemetry(self, device_id, on_result):
+        self.calls.append(device_id)
+        on_result(self._tlm)
+
+
+def test_set_point_pulls_robot_on_button(qtbot):
+    """«Точка N» делает свежий pull робота и пишет mm/enc из ответа (не из push-кэша)."""
+    widget = CalibrationWizardWidget()
+    qtbot.addWidget(widget)
+    presenter = MagicMock()
+    robot = FakeRobotPresenter({"telemetry": {"x_mm": 12.0, "y_mm": 34.0}, "encoder": 555})
+    controller = CalibrationController(widget, presenter, bindings=FakeBindings(), robot_presenter=robot)
+    controller.set_device("robot_main")  # разовый pull → «Робот сейчас» заполнена
+    assert "robot_main" in robot.calls
+    widget.set_point_requested.emit(2)
+    presenter.set_point.assert_called_once_with(2, mm=[12.0, 34.0], enc=555)
+
+
+def test_set_point_pull_empty_telemetry_no_write(qtbot):
+    """Пустой ответ робота → точку не пишем, статус об отсутствии телеметрии."""
+    widget = CalibrationWizardWidget()
+    qtbot.addWidget(widget)
+    presenter = MagicMock()
+    robot = FakeRobotPresenter({"status": "ok"})  # пусто (как сломанный pull)
+    controller = CalibrationController(widget, presenter, bindings=FakeBindings(), robot_presenter=robot)
+    controller.set_device("robot_main")
+    widget.set_point_requested.emit(0)
     presenter.set_point.assert_not_called()
 
 
