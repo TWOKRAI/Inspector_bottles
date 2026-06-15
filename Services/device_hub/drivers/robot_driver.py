@@ -350,9 +350,12 @@ class RobotDriver(BaseDeviceDriver):
     # ------------------------------------------------------------------ #
 
     def _ensure_connected(self) -> bool:
-        """Гарантировать соединение: throttled-reconnect.
+        """Гарантировать соединение: throttled-reconnect с лимитом попыток.
 
         НР-1: при desired_connected=False — НЕ реконнектиться.
+        Лимит: после max_reconnect_attempts неудач драйвер «сдаётся»
+        (_note_reconnect_failed выставляет desired_connected=False) — без железа
+        не спамим connect вечно; возобновление — ручным «Подключить».
         """
         if self.is_connected:
             return True
@@ -363,7 +366,11 @@ class RobotDriver(BaseDeviceDriver):
             return False
         self._last_reconnect = now
         self._record_reconnect()
-        return self.connect()
+        if self.connect():
+            self.reset_reconnect()
+            return True
+        self._note_reconnect_failed()
+        return False
 
     # ------------------------------------------------------------------ #
     # Телеметрия

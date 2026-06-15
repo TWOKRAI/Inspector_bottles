@@ -273,7 +273,15 @@ class VfdDriver(BaseDeviceDriver):
         except Exception:
             ok = False
         if ok:
+            self.reset_reconnect()
             return self.snapshot(quality="good")
+        # Лимит попыток: после исчерпания «сдаёмся» (desired_connected=False) —
+        # tick перестанет звать _attempt_reconnect, возобновление ручным «Подключить».
+        if not self._note_reconnect_failed():
+            return self.snapshot(
+                data={"reason": "попытки подключения исчерпаны — нажмите «Подключить»"},
+                quality="bad",
+            )
         return self.snapshot(
             data={"reason": "носитель не готов или транспорт недоступен"},
             quality="bad",

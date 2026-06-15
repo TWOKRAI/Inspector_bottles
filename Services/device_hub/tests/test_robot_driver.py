@@ -161,6 +161,86 @@ class TestRobotDriverReconnect:
         assert d.stats["reconnects"] == 0
 
 
+class TestRobotDriverReconnectLimit:
+    """Лимит попыток реконнекта: после N неудач драйвер «сдаётся»."""
+
+    @staticmethod
+    def _fail_connect(driver: RobotDriver) -> dict:
+        """Подменить connect() на всегда-провал со счётчиком вызовов."""
+        calls = {"n": 0}
+
+        def fake_connect() -> bool:
+            calls["n"] += 1
+            return False
+
+        driver.connect = fake_connect  # type: ignore[method-assign]
+        return calls
+
+    def test_gives_up_after_limit(self, robot_entry, transport, clock) -> None:
+        """После max_reconnect_attempts неудач: desired=False, reconnect_exhausted=True, спам прекращается."""
+        d = RobotDriver(robot_entry, transport=transport, clock=clock.clock, sleep=clock.sleep)
+        assert d.max_reconnect_attempts == 3  # дефолт
+        d.desired_connected = True
+        transport._connected = False
+        calls = self._fail_connect(d)
+        stop = threading.Event()
+
+        # 3 попытки (перед каждым тиком продвигаем часы > throttle 2.0)
+        for _ in range(3):
+            clock.t += 3.0
+            d.tick(stop)
+        assert calls["n"] == 3
+        assert d.reconnect_exhausted is True
+        assert d.desired_connected is False
+
+        # Дальше connect НЕ зовётся (desired=False) — спама нет
+        clock.t += 10.0
+        d.tick(stop)
+        assert calls["n"] == 3
+
+    def test_manual_reset_reenables(self, robot_entry, transport, clock) -> None:
+        """reset_reconnect (ручной «Подключить») даёт заново полный лимит попыток."""
+        d = RobotDriver(robot_entry, transport=transport, clock=clock.clock, sleep=clock.sleep)
+        d.desired_connected = True
+        transport._connected = False
+        calls = self._fail_connect(d)
+        stop = threading.Event()
+        for _ in range(3):
+            clock.t += 3.0
+            d.tick(stop)
+        assert d.reconnect_exhausted is True
+
+        # Ручной reconnect: сброс + desired=True снова
+        d.reset_reconnect()
+        d.desired_connected = True
+        assert d.reconnect_exhausted is False
+        clock.t += 3.0
+        d.tick(stop)
+        assert calls["n"] == 4  # снова пытается
+
+    def test_zero_means_unlimited(self, transport, clock) -> None:
+        """max_reconnect_attempts=0 — без лимита (прежнее бесконечное поведение)."""
+        entry = DeviceEntry(
+            id="robot_main",
+            name="Робот",
+            kind="robot",
+            protocol="delta_universal3",
+            transport={"type": "tcp", "host": "127.0.0.1", "port": 502, "unit_id": 2},
+            params={"max_reconnect_attempts": 0},
+        )
+        d = RobotDriver(entry, transport=transport, clock=clock.clock, sleep=clock.sleep)
+        d.desired_connected = True
+        transport._connected = False
+        calls = self._fail_connect(d)
+        stop = threading.Event()
+        for _ in range(6):
+            clock.t += 3.0
+            d.tick(stop)
+        assert calls["n"] == 6  # пытается каждый раз
+        assert d.desired_connected is True
+        assert d.reconnect_exhausted is False
+
+
 class TestRobotDriverDraw:
     """Draw-очередь: draw_circle через call, abort."""
 

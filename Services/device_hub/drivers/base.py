@@ -70,6 +70,16 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
         # Runtime-атрибут, НЕ persist.
         self.desired_connected: bool = False
 
+        # Лимит подряд-неудачных попыток (ре)подключения. После исчерпания драйвер
+        # перестаёт реконнектиться (desired_connected=False, reconnect_exhausted=True)
+        # и ждёт ручного «Подключить» — иначе при отсутствии железа идёт бесконечный
+        # спам connect раз в throttle. 0 = без лимита (старое бесконечное поведение).
+        _params = getattr(entry, "params", {}) or {}
+        self.max_reconnect_attempts: int = int(_params.get("max_reconnect_attempts", 3))
+        self._reconnect_attempts: int = 0
+        # Драйвер «сдался»: исчерпал попытки, ждёт ручного подключения (для conn="failed").
+        self.reconnect_exhausted: bool = False
+
     # ------------------------------------------------------------------ #
     # Контракт BaseManager
     # ------------------------------------------------------------------ #
@@ -153,3 +163,35 @@ class BaseDeviceDriver(BaseManager, ObservableMixin):
     def _record_reconnect(self) -> None:
         """Зафиксировать переподключение."""
         self._stats["reconnects"] += 1
+
+    # ------------------------------------------------------------------ #
+    # Лимит попыток реконнекта (общий для всех драйверов)
+    # ------------------------------------------------------------------ #
+
+    def reset_reconnect(self) -> None:
+        """Сбросить счётчик попыток и флаг «сдался».
+
+        Зовётся при успешном connect и при ручном «Подключить» (supervisor),
+        чтобы дать драйверу заново полный лимит попыток.
+        """
+        self._reconnect_attempts = 0
+        self.reconnect_exhausted = False
+
+    def _note_reconnect_failed(self) -> bool:
+        """Учесть неудачную попытку (ре)подключения.
+
+        Returns:
+            True — лимит не исчерпан, можно пытаться дальше.
+            False — лимит исчерпан: выставляет ``desired_connected=False`` и
+            ``reconnect_exhausted=True``, чтобы драйвер замолчал до ручного
+            «Подключить». При ``max_reconnect_attempts <= 0`` — всегда True
+            (без лимита, прежнее бесконечное поведение).
+        """
+        if self.max_reconnect_attempts <= 0:
+            return True
+        self._reconnect_attempts += 1
+        if self._reconnect_attempts >= self.max_reconnect_attempts:
+            self.desired_connected = False
+            self.reconnect_exhausted = True
+            return False
+        return True

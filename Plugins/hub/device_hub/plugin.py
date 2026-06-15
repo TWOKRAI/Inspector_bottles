@@ -269,6 +269,12 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     driver = self._manager._drivers.get(dev_id)
                     if driver is not None:
                         driver.desired_connected = True
+                        # Ручной/повторный connect: сбросить лимит попыток, чтобы
+                        # после «сдался» (reconnect_exhausted) кнопка «Подключить»
+                        # дала драйверу заново полный лимит попыток.
+                        reset = getattr(driver, "reset_reconnect", None)
+                        if callable(reset):
+                            reset()
                 elif op == "disconnect":
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnecting"})
                     # НР-1: desired=False на драйвере ДО disconnect (tick не реконнектит)
@@ -350,6 +356,10 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                 # → дельта проходит. quality снапшота отражает живость чтений.
                                 if getattr(drv, "is_connected", False):
                                     conn = "error" if (snapshot or {}).get("quality") == "bad" else "connected"
+                                elif getattr(drv, "reconnect_exhausted", False):
+                                    # Драйвер исчерпал попытки и «сдался» — ждёт ручного
+                                    # «Подключить». Отдельное состояние для GUI (не спам).
+                                    conn = "failed"
                                 else:
                                     conn = "disconnected"
                                 self._publish_state(f"devices.state.{did}.conn", {"conn": conn, "ts": tick_n})
