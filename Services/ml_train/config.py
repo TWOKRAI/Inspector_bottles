@@ -47,8 +47,13 @@ class NormalizeConfig(BaseModel):
 
 
 class AugmentConfig(BaseModel):
-    """Аугментации на тензорах (для exported/folder; синтетика аугментирована движком).
+    """Аугментации на тензорах (поверх данных любого источника при enabled=True).
 
+    ВАЖНО: build_transforms применяет эти аугментации и к synthetic тоже (движок
+    dataset_gen уже аугментирует — для synthetic torch-аугментации обычно лишние,
+    пресеты ставят enabled=false). Геометрические (hflip/rotation_deg) НЕСОВМЕСТИМЫ
+    с angle_head: они поворачивают/отражают картинку, но метку угла (sin,cos) НЕ
+    пересчитывают → GT угла портится молча (запрещено в TrainConfig._check_cross).
     hflip по умолчанию ВЫКЛ: для текста/букв зеркалирование меняет класс.
     """
 
@@ -150,6 +155,20 @@ class TrainConfig(BaseModel):
             raise ValueError(
                 "angle_head=True несовместим с source=folder: нет меток угла. "
                 "Используйте source=synthetic (dataset_gen) или exported (с углами)."
+            )
+        if (
+            self.model.angle_head
+            and self.data.augment.enabled
+            and (self.data.augment.hflip or self.data.augment.rotation_deg > 0)
+        ):
+            # геометрические torch-аугментации крутят/отражают КАРТИНКУ, но метка угла
+            # (sin,cos) читается из данных и НЕ пересчитывается → модель учится на паре
+            # «повёрнутый кадр ↔ старый угол», val angle_mae тоже считается по битому GT
+            # (тихая порча точности доворота). Фотометрия (color_jitter/random_erasing) — ок.
+            raise ValueError(
+                "геометрические аугментации (augment.hflip / augment.rotation_deg>0) "
+                "несовместимы с angle_head: метка угла не пересчитывается, GT портится молча. "
+                "Отключите hflip/rotation_deg (фотометрия допустима) или уберите angle_head."
             )
         return self
 

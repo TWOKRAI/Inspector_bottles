@@ -44,8 +44,10 @@ Fable-ревью 2026-06-13: APPROVE с замечаниями; MAJOR-1 (resize-
   по мере зрелости
 - Без resume после прерывания (last.pt сохраняется, перезапуск — с нуля)
 - Без DDP, без гиперпараметрического поиска, без INT8/QAT-квантования
-- `angle_mae_deg` — в кодированном пространстве угла (для symmetry=180
-  физическая ошибка вдвое меньше показанной)
+- `angle_mae_deg` в history/metrics.json — ФИЗИЧЕСКИЙ MAE (с учётом factor=2 для
+  symmetry=180; делить на 2 НЕ нужно): для synthetic/exported `class_symmetry`
+  всегда задан → `evaluation_summary` идёт по `angle_report`. Кодированный MAE
+  (вдвое больше) возникает лишь в редком fallback без symmetry-карты
 
 ## Следующие шаги (по потребности)
 

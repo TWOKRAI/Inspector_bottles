@@ -1,0 +1,340 @@
+# Рецепт letter_angle_inspect — БОЕВОЕ распознавание буквы+угла на дисках.
+#   камера → ROI → круги → линия(триггер) → КВАДРАТНЫЙ crop → ml_inference → дисплей
+#
+# Назначение: канонический live-тракт инференса для робота-укладчика. Когда диск
+# пересекает линию (точку съёма), center_crop вырезает КВАДРАТ вокруг центра круга
+# и отдаёт его в ml_inference → буква + угол доворота. Квадратный вход — ОБЯЗАТЕЛЕН:
+# модель обучена на квадратных кропах (resize_policy=stretch), а stretch на
+# неквадратном кадре исказил бы геометрию и угол (preprocess залогирует warning).
+# Именно поэтому в тракте стоит center_crop, а НЕ прямоугольный roi_crop перед моделью.
+#
+# Топология (DAG — ветки от circle_detector ОБЯЗАНЫ быть отдельными процессами):
+#   capture → roi[roi_crop] → detector[circle_detector] ──┬→ line[line_filter] ─┬→ crop  → infer → display "recog"
+#                                                          │                     └→ draw
+#                                                          ├→ crop[center_crop] (Join: frame+overlay)
+#                                                          └→ draw[circle_draw→overlay_draw] → display "main"
+#
+# === ЦВЕТ (важно!) ===
+#   ml_inference сам делает BGR→RGB по sidecar (color: RGB). Поэтому в тракт инференса
+#   кадр идёт в НАТИВНОМ BGR (без color_convert bgr2rgb) — иначе двойная перестановка
+#   каналов даст модели неверные цвета. circle_detector работает по grayscale кадра
+#   (input_key=frame), цветопорядок ему безразличен.
+#
+# === ТЮНИНГ (всё в ПИКСЕЛЯХ ROI) ===
+#   1) roi_crop: x/y/width/height — окно вокруг ленты.
+#   2) circle_detector: min/max_radius (px диска в ROI), param2 (меньше → больше ложных).
+#   3) line_filter: center_x/center_y/angle/zone_width — линия точки съёма.
+#   4) center_crop: size_mode=radius → сторона = 2·radius·radius_scale + 2·margin;
+#      output_size=128 = под вход модели (квадрат→квадрат, без искажения угла).
+#   5) ml_inference: model (выбрать веса из data/models), confidence_threshold.
+#
+# === РОБОТ (долг интеграции) ===
+#   Угол готов в infer.ml_inference.predictions[0] (angle_deg + angle_valid) и в
+#   телеметрии last_angle_deg/last_angle_valid. Потребитель-робот ещё НЕ подключён:
+#   при wiring ОБЯЗАТЕЛЬНО проверять angle_valid (False = full-симметрия/нет детекции
+#   → НЕ доворачивать). См. контракт в Services/ml_inference/plugin/registers.py.
+#
+# === SMOKE: вебкамера (capture). Для прода заменить capture на Hikvision-источник. ===
+# Запуск: python multiprocess_prototype/run.py letter_angle_inspect
+name: letter_angle_inspect
+version: 3
+description: "Камера → ROI → круги → линия(триггер) → квадратный crop → ml_inference (буква+угол)"
+
+blueprint:
+  name: default
+  description: ''
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.process.GuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+    - process_name: capture
+      plugins:
+        - plugin_name: capture
+          plugin_class: Plugins.sources.capture.plugin.CapturePlugin
+          category: source
+          config:
+            camera_index: 0
+            auto_start: true
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      target_process:
+      chain_targets:
+        - roi
+      description:
+      protected: false
+      category:
+      metadata:
+        source_target_fps: 25
+    - process_name: roi
+      plugins:
+        - plugin_name: roi_crop
+          plugin_class: Plugins.processing.roi_crop.plugin.RoiCropPlugin
+          category: processing
+          config:
+            x: 160
+            y: 80
+            width: 480
+            height: 360
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - detector
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: detector
+      plugins:
+        # Детекция по grayscale кадра (input_key=frame): диск — выраженный круг.
+        # draw_circles=false → в crop/infer уходит ЧИСТЫЙ кадр (важно для инференса).
+        - plugin_name: circle_detector
+          plugin_class: Plugins.processing.circle_detector.plugin.CircleDetectorPlugin
+          category: processing
+          config:
+            input_key: frame
+            mode: gradient
+            blur_method: gaussian
+            blur_ksize: 5
+            dp: 1.2
+            min_dist: 80
+            param1: 100
+            param2: 30
+            min_radius: 20
+            max_radius: 120
+            draw_circles: false
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - line
+        - crop
+        - draw
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: line
+      plugins:
+        - plugin_name: line_filter
+          plugin_class: Plugins.filter.line_filter.plugin.LineFilterPlugin
+          category: filter
+          config:
+            center_x: 240
+            center_y: 180
+            angle: 0
+            zone_width: 80
+            mode: enter_zone
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - crop
+        - draw
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: crop
+      plugins:
+        # Квадратный вырез вокруг центра круга по триггеру линии. output_size=128 —
+        # вход модели: квадрат→квадрат, ml_inference не искажает геометрию/угол.
+        - plugin_name: center_crop
+          plugin_class: Plugins.processing.center_crop.plugin.CenterCropPlugin
+          category: processing
+          config:
+            size_mode: radius
+            radius_scale: 1.0
+            margin_px: 14
+            side_px: 256
+            output_size: 128
+            drop_partial: false
+            pad_if_oob: true
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - infer
+      description:
+      protected: false
+      category:
+      metadata:
+        inspector:
+          mode: join
+          inputs:
+            - frame
+            - overlay
+          primary: frame
+          timeout_sec: 0.25
+    - process_name: infer
+      plugins:
+        # ВХОД — квадратный кроп (от center_crop). Модель: буква + угол (angle_head).
+        # Выбери веса из data/models через GUI; здесь — обученная 12-буквенная модель.
+        - plugin_name: ml_inference
+          plugin_class: Services.ml_inference.plugin.plugin.MLInferencePlugin
+          category: processing
+          config:
+            model: mobilenet_v3_large_20260615_112355
+            device: cpu
+            confidence_threshold: 0.5
+            top_k: 3
+            inference_every_n: 1
+            draw_overlay: true
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - gui
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: draw
+      plugins:
+        - plugin_name: circle_draw
+          plugin_class: Plugins.render.circle_draw.plugin.CircleDrawPlugin
+          category: rendering
+          config:
+            color_bgr:
+              - 0
+              - 255
+              - 0
+            thickness: 2
+            show_radius: true
+        - plugin_name: overlay_draw
+          plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin
+          category: rendering
+          config: {}
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - gui
+      description:
+      protected: false
+      category:
+      metadata:
+        inspector:
+          mode: join
+          inputs:
+            - frame
+            - overlay
+          primary: frame
+          timeout_sec: 0.25
+  wires:
+    - source: capture.capture.frame
+      target: roi.roi_crop.frame
+      description: ''
+    - source: roi.roi_crop.frame
+      target: detector.circle_detector.frame
+      description: ''
+    - source: detector.circle_detector.frame
+      target: crop.center_crop.frame
+      description: ''
+    - source: detector.circle_detector.frame
+      target: draw.circle_draw.frame
+      description: ''
+    - source: detector.circle_detector.detections
+      target: draw.circle_draw.detections
+      description: ''
+    - source: detector.circle_detector.detections
+      target: line.line_filter.detections
+      description: ''
+    - source: line.line_filter.overlay
+      target: crop.center_crop.trigger_in
+      description: ''
+    - source: line.line_filter.overlay
+      target: draw.overlay_draw.overlay
+      description: ''
+    - source: crop.center_crop.frame
+      target: infer.ml_inference.frame
+      description: ''
+  displays:
+    - node_id: draw.overlay_draw.frame
+      display_id: main
+    - node_id: infer.ml_inference.frame
+      display_id: recog
+  metadata:
+    gui_positions:
+      capture.capture:
+        - 16.0
+        - 160.0
+      roi.roi_crop:
+        - 320.0
+        - 160.0
+      detector.circle_detector:
+        - 640.0
+        - 160.0
+      line.line_filter:
+        - 980.0
+        - 100.0
+      crop.center_crop:
+        - 1320.0
+        - 40.0
+      infer.ml_inference:
+        - 1700.0
+        - 40.0
+      draw.circle_draw:
+        - 1320.0
+        - 200.0
+      draw.overlay_draw:
+        - 1520.0
+        - 200.0
+      main:
+        - 1840.0
+        - 220.0
+      recog:
+        - 2060.0
+        - 60.0
+    locked_nodes: []
+displays:
+  - id: main
+    name: Кадр + круги + линия
+    enabled: true
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+    crop:
+  - id: recog
+    name: Распознанный диск (буква + угол)
+    enabled: true
+    width: 512
+    height: 512
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 1000
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+    crop:
+created_at: ''
+active_services: []
+display_bindings: []

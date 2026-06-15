@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
 
@@ -75,7 +76,10 @@ class MLInferencePlugin(ProcessModulePlugin):
     name = "ml_inference"
     category = "processing"
 
-    # InferenceSession не thread-safe — параллельный вызов process() запрещён.
+    # InferenceSession не thread-safe. process() фреймворк зовёт последовательно
+    # (один поток pipeline_executor), НО команды (set_model/reload) приходят на
+    # ДРУГОМ потоке (message_processor) и могут пересоздать сессию во время predict.
+    # thread_safe фреймворком не enforce'ится → защищаемся сами через _engine_lock.
     thread_safe = False
 
     inputs = [
@@ -106,12 +110,17 @@ class MLInferencePlugin(ProcessModulePlugin):
 
         models_dir = ctx.config.get("models_dir") or str(_DEFAULT_MODELS_DIR)
         self._engine = InferenceEngine(models_dir)
+        # Сериализует доступ к движку: predict() (поток pipeline_executor) против
+        # load/unload из команд (поток message_processor) — иначе гонка по сессии.
+        self._engine_lock = threading.Lock()
 
         # Кэш для inference_every_n + телеметрия latency.
         self._frame_idx: int = 0
         self._last_predictions: list[dict] = []
         self._latency_sum_ms: float = 0.0
         self._latency_count: int = 0
+        self._last_latency_ms: float = 0.0  # мгновенное значение последнего инференса
+        self._max_latency_ms: float = 0.0  # худший спайк за окно публикации
         self._last_publish: float = time.monotonic()
 
         self._load_selected_model()
@@ -138,8 +147,9 @@ class MLInferencePlugin(ProcessModulePlugin):
                 out.append(result)
 
         now = time.monotonic()
-        if now - self._last_publish >= 1.0:
-            self._publish_state()
+        elapsed = now - self._last_publish
+        if elapsed >= 1.0:
+            self._publish_state(elapsed)
             self._last_publish = now
         return out
 
@@ -160,18 +170,28 @@ class MLInferencePlugin(ProcessModulePlugin):
         if run_now:
             t0 = time.monotonic()
             try:
-                preds = self._engine.predict(
-                    frame,
-                    top_k=self._reg.top_k,
-                    threshold=self._reg.confidence_threshold,
-                )
+                # lock: команда set_model/reload на другом потоке может в этот момент
+                # выгружать/пересоздавать сессию (engine.load_model → unload → _session=None)
+                with self._engine_lock:
+                    preds = self._engine.predict(
+                        frame,
+                        top_k=self._reg.top_k,
+                        threshold=self._reg.confidence_threshold,
+                    )
             except Exception as exc:  # noqa: BLE001 — кадр не должен ронять процесс
                 self._reg.last_error = str(exc)
                 self._ctx.log_error(f"MLInferencePlugin: ошибка инференса: {exc}")
                 logger.exception("MLInferencePlugin: inference error")  # traceback в лог
                 return {**item, "predictions": []}
-            self._latency_sum_ms += (time.monotonic() - t0) * 1000
+            # успешный инференс снимает прошлую транзиентную ошибку (иначе stale-«красный»
+            # висит в телеметрии до перезагрузки модели)
+            if self._reg.last_error:
+                self._reg.last_error = ""
+            dt_ms = (time.monotonic() - t0) * 1000
+            self._latency_sum_ms += dt_ms
             self._latency_count += 1
+            self._last_latency_ms = dt_ms
+            self._max_latency_ms = max(self._max_latency_ms, dt_ms)
             self._last_predictions = preds
             self._update_last_pred_telemetry(preds)
         else:
@@ -240,25 +260,35 @@ class MLInferencePlugin(ProcessModulePlugin):
         # сбросить угловую телеметрию — у новой модели может не быть angle_head
         self._reg.last_angle_deg = 0.0
         self._reg.last_angle_valid = False
-        if not self._reg.model:
-            self._engine.unload()
-            self._reg.loaded_model = ""
-            return
-        try:
-            self._engine.load_model(self._reg.model, device=self._reg.device)
-            self._reg.loaded_model = self._engine.current_model or self._reg.model
-        except Exception as exc:  # noqa: BLE001 — нет модели не должно ронять процесс
-            self._reg.last_error = str(exc)
-            self._reg.loaded_model = ""
-            self._ctx.log_error(f"MLInferencePlugin: не удалось загрузить '{self._reg.model}': {exc}")
+        self._reg.active_providers = ""
+        # lock: не пересоздавать сессию, пока predict() на другом потоке её читает
+        with self._engine_lock:
+            if not self._reg.model:
+                self._engine.unload()
+                self._reg.loaded_model = ""
+                return
+            try:
+                self._engine.load_model(self._reg.model, device=self._reg.device)
+                self._reg.loaded_model = self._engine.current_model or self._reg.model
+                # фактические providers (показывает молчаливый CPU-fallback при device=cuda)
+                self._reg.active_providers = ", ".join(self._engine.active_providers)
+            except Exception as exc:  # noqa: BLE001 — нет модели не должно ронять процесс
+                self._reg.last_error = str(exc)
+                self._reg.loaded_model = ""
+                self._ctx.log_error(f"MLInferencePlugin: не удалось загрузить '{self._reg.model}': {exc}")
 
     def _update_last_pred_telemetry(self, preds: list[dict]) -> None:
         """Обновить readonly-поля последнего предсказания (класс + угол).
 
-        При пустом результате / отсутствии угла у top-1 СБРАСЫВАЕМ angle_valid —
-        иначе робот доворачивает по углу прошлого/несуществующего объекта (stale).
+        При пустом результате / отсутствии угла у top-1 СБРАСЫВАЕМ angle_valid И
+        обнуляем сам угол/класс — иначе в телеметрии висит фантом прошлого объекта
+        (число last_angle_deg выглядит валидным), и неаккуратный потребитель,
+        читающий угол без проверки angle_valid, довернул бы по stale-значению.
         """
         if not preds:
+            self._reg.last_label = ""
+            self._reg.last_confidence = 0.0
+            self._reg.last_angle_deg = 0.0
             self._reg.last_angle_valid = False
             return
         top = preds[0]
@@ -268,12 +298,21 @@ class MLInferencePlugin(ProcessModulePlugin):
             self._reg.last_angle_deg = round(float(top["angle_deg"]), 2)
             self._reg.last_angle_valid = bool(top.get("angle_valid", False))
         else:
+            self._reg.last_angle_deg = 0.0
             self._reg.last_angle_valid = False
 
-    def _publish_state(self) -> None:
-        """Опубликовать метрики инференса в StateStore."""
+    def _publish_state(self, elapsed_s: float) -> None:
+        """Опубликовать метрики инференса в StateStore.
+
+        elapsed_s — длительность окна с прошлой публикации (для inference_fps =
+        число инференсов / окно; учитывает inference_every_n и простой).
+        """
         avg = self._latency_sum_ms / self._latency_count if self._latency_count else 0.0
+        fps = self._latency_count / elapsed_s if elapsed_s > 0 else 0.0
         self._reg.avg_latency_ms = round(avg, 2)
+        self._reg.last_latency_ms = round(self._last_latency_ms, 2)
+        self._reg.max_latency_ms = round(self._max_latency_ms, 2)
+        self._reg.inference_fps = round(fps, 1)
         if self._state_proxy is not None:
             path = f"processes.{self._ctx.process_name}.state"
             self._state_proxy.merge(
@@ -281,12 +320,19 @@ class MLInferencePlugin(ProcessModulePlugin):
                 {
                     "status": "running",
                     "loaded_model": self._reg.loaded_model,
+                    "active_providers": self._reg.active_providers,
                     "last_label": self._reg.last_label,
                     "last_confidence": self._reg.last_confidence,
                     "last_angle_deg": self._reg.last_angle_deg,
                     "last_angle_valid": self._reg.last_angle_valid,
                     "avg_latency_ms": self._reg.avg_latency_ms,
+                    "last_latency_ms": self._reg.last_latency_ms,
+                    "max_latency_ms": self._reg.max_latency_ms,
+                    "inference_fps": self._reg.inference_fps,
                 },
             )
+        # avg/max/fps — оконные: сбрасываем. last_latency_ms — НЕ сбрасываем
+        # (последнее измеренное значение должно держаться между публикациями).
         self._latency_sum_ms = 0.0
         self._latency_count = 0
+        self._max_latency_ms = 0.0

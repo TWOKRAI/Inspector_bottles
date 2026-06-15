@@ -51,6 +51,13 @@ class ONNXRuntimeBackend(BaseInferenceBackend):
         self._input_name: str = ""
         self._output_names: list[str] = []
 
+    @property
+    def active_providers(self) -> list[str]:
+        """Реальные providers сессии — показывает CPU-fallback при запросе cuda."""
+        if self._session is None:
+            return []
+        return list(self._session.get_providers())
+
     def load(self, spec: ModelSpec, device: str = "cpu") -> None:
         """Создать InferenceSession из весов .onnx."""
         path = str(spec.weights_path)

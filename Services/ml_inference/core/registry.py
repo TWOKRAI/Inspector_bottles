@@ -106,6 +106,15 @@ class ModelRegistry:
                 "укажите input_size явно (размер обучения), иначе препроцесс неверен",
                 sidecar.name,
             )
+        if "resize_policy" not in raw:
+            # Дефолт ModelSpec — letterbox (общая конвенция), но обучение классификации
+            # на квадратных кропах обычно идёт через stretch (export пишет его явно).
+            # Молчаливый letterbox даст серый паддинг/иной масштаб → тихая порча точности.
+            logger.warning(
+                "ModelRegistry: sidecar %s без resize_policy — использую дефолт 'letterbox'; "
+                "для моделей, обученных stretch (export ml_train), укажите resize_policy явно",
+                sidecar.name,
+            )
 
         return ModelSpec(
             name=str(raw.get("name") or weights.stem),

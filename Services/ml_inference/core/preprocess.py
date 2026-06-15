@@ -12,10 +12,17 @@
 
 from __future__ import annotations
 
+import logging
+
 import cv2
 import numpy as np
 
 from Services.ml_inference.core.model_spec import ModelSpec
+
+logger = logging.getLogger(__name__)
+
+#: формы кадра, для которых уже залогирован stretch-на-неквадрате (анти-спам на 25 fps)
+_WARNED_STRETCH_SHAPES: set[tuple[int, int]] = set()
 
 
 def letterbox(frame: np.ndarray, size: tuple[int, int], pad_value: int = 114) -> np.ndarray:
@@ -89,6 +96,20 @@ def preprocess(
     elif resize_policy == "center_crop":
         img = center_crop_resize(frame, (target_h, target_w))
     else:  # stretch
+        # stretch анизотропен: на НЕквадратном кадре он искажает геометрию и
+        # ломает регрессию угла (модели обучены на квадратных кропах диска).
+        # Не падаем (могла быть классификация без угла), но предупреждаем один раз
+        # на форму — апстрим обязан подавать квадрат (center_crop/circle-кроп).
+        h, w = frame.shape[:2]
+        if h != w and (h, w) not in _WARNED_STRETCH_SHAPES:
+            _WARNED_STRETCH_SHAPES.add((h, w))
+            logger.warning(
+                "preprocess: resize_policy=stretch на НЕквадратном кадре %dx%d — "
+                "анизотропный ресайз исказит геометрию и угол. Подавайте квадратный "
+                "кроп (center_crop) либо смените resize_policy на center_crop/letterbox.",
+                w,
+                h,
+            )
         img = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
 
     # Порядок каналов: pipeline отдаёт BGR; сеть может ждать RGB.

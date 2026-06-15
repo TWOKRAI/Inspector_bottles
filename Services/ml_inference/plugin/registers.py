@@ -65,9 +65,23 @@ class MLInferenceRegisters(SchemaBase):
 
     # --- Телеметрия (readonly) ---
     loaded_model: Annotated[str, FieldMeta("Загружена модель", readonly=True)] = ""
+    active_providers: Annotated[
+        str,
+        FieldMeta(
+            "Активные providers",
+            info="Фактическое устройство инференса; показывает молчаливый CPU-fallback при device=cuda",
+            readonly=True,
+        ),
+    ] = ""
     last_label: Annotated[str, FieldMeta("Последний класс", readonly=True)] = ""
     last_confidence: Annotated[float, FieldMeta("Последняя уверенность", readonly=True)] = 0.0
+    # КОНТРАКТ: last_angle_deg валиден ТОЛЬКО при last_angle_valid=True. Потребитель
+    # (робот-доворот) ОБЯЗАН сначала проверить last_angle_valid; при False — НЕ доворачивать
+    # (full-симметрия/нет детекции/нет угла). Иначе доворот по неопределённому углу.
     last_angle_deg: Annotated[float, FieldMeta("Последний угол", readonly=True, unit="°")] = 0.0
     last_angle_valid: Annotated[bool, FieldMeta("Угол определён", readonly=True)] = False
-    avg_latency_ms: Annotated[float, FieldMeta("Латентность инференса", readonly=True, unit="ms")] = 0.0
+    avg_latency_ms: Annotated[float, FieldMeta("Латентность (сред.)", readonly=True, unit="ms")] = 0.0
+    last_latency_ms: Annotated[float, FieldMeta("Латентность (послед.)", readonly=True, unit="ms")] = 0.0
+    max_latency_ms: Annotated[float, FieldMeta("Латентность (макс. за окно)", readonly=True, unit="ms")] = 0.0
+    inference_fps: Annotated[float, FieldMeta("Инференсов в секунду", readonly=True, unit="fps")] = 0.0
     last_error: Annotated[str, FieldMeta("Последняя ошибка", readonly=True)] = ""

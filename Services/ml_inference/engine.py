@@ -47,6 +47,8 @@ class InferenceEngine:
         self._spec: ModelSpec | None = None
         self._labels: list[str] | None = None
         self._device: str = "cpu"
+        #: метки, для которых уже залогирован fallback симметрии (анти-спам в predict)
+        self._warned_symmetry: set[str] = set()
 
     @property
     def registry(self) -> ModelRegistry:
@@ -62,6 +64,16 @@ class InferenceEngine:
     def is_ready(self) -> bool:
         """Готов ли движок к predict()."""
         return self._backend is not None and self._backend.is_loaded
+
+    @property
+    def active_providers(self) -> list[str]:
+        """Фактические execution-providers/устройство загруженного backend.
+
+        Для ONNX это реальные providers сессии (напр. ['CPUExecutionProvider']
+        даже если запрашивали cuda — fallback). Пустой список, если не загружено.
+        Нужно телеметрии: оператор должен видеть, что cuda молча уехала на CPU.
+        """
+        return self._backend.active_providers if self._backend is not None else []
 
     def load_model(self, model_id: str, device: str = "cpu") -> None:
         """Загрузить модель по id из каталога (с выгрузкой предыдущей)."""
@@ -81,7 +93,51 @@ class InferenceEngine:
         self._spec = spec
         self._labels = spec.load_labels()
         self._device = device
+        self._warned_symmetry = set()
+        self._check_symmetry_coverage(spec)
         logger.info("InferenceEngine: модель '%s' готова (%s)", model_id, device)
+
+    def _check_symmetry_coverage(self, spec: ModelSpec) -> None:
+        """Предупредить, если у angle-модели метки не покрыты картой симметрии.
+
+        Метка вне symmetry-карты на инференсе трактуется консервативно как 'full'
+        (angle_valid=False, доворот не делается) — см. _symmetry_for. Это fail-safe:
+        для реально full-объекта (круг) лучше не доворачивать, чем по мусорному углу.
+        Но молчать о пробеле нельзя — он обычно означает опечатку/рассинхрон sidecar.
+        """
+        if not spec.angle_head or not self._labels:
+            return
+        missing = [lbl for lbl in self._labels if lbl not in spec.symmetry]
+        if missing:
+            logger.warning(
+                "InferenceEngine: модель '%s' с angle_head, но %d меток вне symmetry-карты "
+                "(%s%s) — для них угол трактуется как 'full' (angle_valid=False). "
+                "Проверьте sidecar: пробел обычно = опечатка/рассинхрон ключей.",
+                spec.name,
+                len(missing),
+                ", ".join(missing[:8]),
+                "…" if len(missing) > 8 else "",
+            )
+
+    def _symmetry_for(self, label: str) -> str:
+        """Симметрия класса из sidecar; fail-safe 'full' для непокрытой метки.
+
+        Дефолт НЕ 'none': 'none' дал бы angle_valid=True и конкретный угол для
+        объекта неизвестной симметрии (круг → доворот наугад). 'full' → valid=False.
+        """
+        if self._spec is None:
+            return "full"
+        sym = self._spec.symmetry.get(label)
+        if sym is None:
+            if label not in self._warned_symmetry:
+                self._warned_symmetry.add(label)
+                logger.warning(
+                    "predict: класс '%s' отсутствует в symmetry-карте — угол как 'full' "
+                    "(angle_valid=False, без доворота)",
+                    label,
+                )
+            return "full"
+        return sym
 
     def predict(self, frame: np.ndarray, *, top_k: int = 5, threshold: float = 0.0) -> list[dict]:
         """BGR-кадр → топ-K предсказаний (+ угол у top-1, если angle_head).
@@ -106,7 +162,7 @@ class InferenceEngine:
         if self._spec.angle_head and preds:
             angle_raw = outputs.get(self._spec.angle_output_name)
             if angle_raw is not None:
-                sym = self._spec.symmetry.get(preds[0]["label"], "none")
+                sym = self._symmetry_for(preds[0]["label"])
                 preds[0].update(angle_postprocess(angle_raw, sym))
         return preds
 

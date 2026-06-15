@@ -34,6 +34,15 @@ class BaseInferenceBackend(ABC):
         """ModelSpec текущей загруженной модели."""
         return self._spec
 
+    @property
+    def active_providers(self) -> list[str]:
+        """Фактические execution-providers/устройство (для телеметрии fallback).
+
+        База возвращает запрошенное устройство; backend'ы с реальным выбором
+        провайдера (ONNX) переопределяют, чтобы показать настоящий CPU/CUDA.
+        """
+        return [self._device] if self._spec is not None else []
+
     @abstractmethod
     def load(self, spec: ModelSpec, device: str = "cpu") -> None:
         """Загрузить модель из spec на устройство (cpu|cuda)."""

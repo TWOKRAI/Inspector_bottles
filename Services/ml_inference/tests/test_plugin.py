@@ -110,6 +110,33 @@ def test_inference_every_n_reuses_result(dummy_models_dir: Path):
         assert len(out[0]["predictions"]) == 3
 
 
+def test_latency_telemetry_populated(dummy_models_dir: Path):
+    """После инференса и публикации заполнены avg/last/max latency и inference_fps."""
+    plugin = MLInferencePlugin()
+    plugin.configure(_make_ctx({"models_dir": str(dummy_models_dir), "model": "dummy", "confidence_threshold": 0.0}))
+    plugin.process([{"frame": _frame()}])  # один инференс → счётчики заполнены
+    plugin._publish_state(elapsed_s=1.0)  # окно 1 c → fps = инференсов/окно
+
+    assert plugin._reg.inference_fps == 1.0  # 1 инференс за 1 c
+    assert plugin._reg.last_latency_ms >= 0.0
+    # один сэмпл → avg == max == last
+    assert plugin._reg.avg_latency_ms == plugin._reg.last_latency_ms
+    assert plugin._reg.max_latency_ms == plugin._reg.last_latency_ms
+
+
+def test_max_latency_resets_last_persists_after_publish(dummy_models_dir: Path):
+    """После публикации max/счётчики обнуляются, а last_latency_ms держится."""
+    plugin = MLInferencePlugin()
+    plugin.configure(_make_ctx({"models_dir": str(dummy_models_dir), "model": "dummy", "confidence_threshold": 0.0}))
+    plugin.process([{"frame": _frame()}])
+    plugin._publish_state(elapsed_s=1.0)
+    last = plugin._reg.last_latency_ms
+
+    assert plugin._max_latency_ms == 0.0  # окно сброшено
+    assert plugin._latency_count == 0
+    assert plugin._reg.last_latency_ms == last  # last не сбрасывается
+
+
 def test_model_switch_clears_stale_predictions(dummy_models_dir: Path):
     """Смена модели сбрасывает кэш предсказаний и счётчик кадров (не reuse старого)."""
     plugin = MLInferencePlugin()
@@ -128,3 +155,46 @@ def test_model_switch_clears_stale_predictions(dummy_models_dir: Path):
 
     out = plugin.process([{"frame": _frame()}])  # первый кадр после смены — свежий инференс
     assert len(out[0]["predictions"]) == 3
+
+
+def test_empty_preds_resets_stale_telemetry(dummy_models_dir: Path):
+    """Пустой результат обнуляет угол/класс — фантом прошлого объекта не остаётся."""
+    plugin = MLInferencePlugin()
+    plugin.configure(_make_ctx({"models_dir": str(dummy_models_dir), "model": "dummy"}))
+    # засеять «прошлый объект»
+    plugin._reg.last_label = "alpha"
+    plugin._reg.last_confidence = 0.9
+    plugin._reg.last_angle_deg = 37.0
+    plugin._reg.last_angle_valid = True
+
+    plugin._update_last_pred_telemetry([])  # объект пропал
+
+    assert plugin._reg.last_angle_valid is False
+    assert plugin._reg.last_angle_deg == 0.0  # число тоже обнулено (не stale)
+    assert plugin._reg.last_label == ""
+    assert plugin._reg.last_confidence == 0.0
+
+
+def test_last_error_cleared_on_successful_inference(dummy_models_dir: Path):
+    """Транзиентная ошибка снимается после успешного кадра (не висит «красным»)."""
+    plugin = MLInferencePlugin()
+    plugin.configure(_make_ctx({"models_dir": str(dummy_models_dir), "model": "dummy", "confidence_threshold": 0.0}))
+    plugin._reg.last_error = "сбой прошлого кадра"
+    plugin.process([{"frame": _frame()}])
+    assert plugin._reg.last_error == ""
+
+
+def test_active_providers_populated_after_load(dummy_models_dir: Path):
+    """После загрузки видно фактическое устройство инференса (диагностика CPU-fallback)."""
+    plugin = MLInferencePlugin()
+    plugin.configure(_make_ctx({"models_dir": str(dummy_models_dir), "model": "dummy"}))
+    assert "CPU" in plugin._reg.active_providers
+
+
+def test_engine_lock_present(dummy_models_dir: Path):
+    """Плагин сериализует доступ к движку (predict vs смена модели на разных потоках)."""
+    import threading
+
+    plugin = MLInferencePlugin()
+    plugin.configure(_make_ctx({"models_dir": str(dummy_models_dir), "model": "dummy"}))
+    assert isinstance(plugin._engine_lock, type(threading.Lock()))

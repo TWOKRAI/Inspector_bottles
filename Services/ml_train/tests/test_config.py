@@ -48,6 +48,37 @@ def test_angle_monitor_requires_angle_head():
         TrainConfig.from_dict({"data": {"source": "folder", "root": "x"}, "train": {"monitor": "angle_mae_deg"}})
 
 
+@pytest.mark.parametrize("aug", [{"rotation_deg": 15.0}, {"hflip": True}])
+def test_angle_head_rejects_geometric_augment(aug):
+    """Геометрические аугментации портят GT угла (метка не пересчитывается) → запрет."""
+    with pytest.raises(ValidationError, match="геометрические аугментации"):
+        TrainConfig.from_dict(
+            {
+                "model": {"angle_head": True},
+                "data": {
+                    "source": "synthetic",
+                    "generator_preset": "x.yaml",
+                    "augment": {"enabled": True, **aug},
+                },
+            }
+        )
+
+
+def test_angle_head_allows_photometric_augment():
+    """Фотометрия (color_jitter/random_erasing) угол не трогает — разрешена при angle_head."""
+    cfg = TrainConfig.from_dict(
+        {
+            "model": {"angle_head": True},
+            "data": {
+                "source": "synthetic",
+                "generator_preset": "x.yaml",
+                "augment": {"enabled": True, "color_jitter": 0.2, "random_erasing": 0.1},
+            },
+        }
+    )
+    assert cfg.model.angle_head is True
+
+
 def test_dict_roundtrip():
     src = {
         "model": {"arch": "mobilenetv4_medium", "angle_head": True},

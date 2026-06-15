@@ -56,3 +56,28 @@ def test_graceful_degradation_onnx_missing(dummy_models_dir: Path, monkeypatch):
 def test_unknown_backend_raises():
     with pytest.raises(ValueError):
         _make_backend("tensorrt")
+
+
+def test_symmetry_for_uncovered_label_is_full(dummy_models_dir: Path):
+    """Метка вне symmetry-карты → fail-safe 'full' (angle_valid=False, без доворота)."""
+    eng = InferenceEngine(str(dummy_models_dir))
+    eng.load_model("dummy")
+    # карта пуста → любая метка непокрыта → консервативный 'full', НЕ 'none'
+    assert eng._symmetry_for("alpha") == "full"
+
+
+def test_symmetry_for_covered_label_returns_mapped(dummy_models_dir: Path):
+    eng = InferenceEngine(str(dummy_models_dir))
+    eng.load_model("dummy")
+    eng._spec.symmetry = {"alpha": "180", "beta": "none"}
+    assert eng._symmetry_for("alpha") == "180"
+    assert eng._symmetry_for("beta") == "none"
+    assert eng._symmetry_for("gamma") == "full"  # gamma не покрыта → fail-safe
+
+
+def test_active_providers_reports_real_device(dummy_models_dir: Path):
+    """active_providers отражает фактический backend (на CPU-стенде — CPUExecutionProvider)."""
+    eng = InferenceEngine(str(dummy_models_dir))
+    assert eng.active_providers == []  # не загружено
+    eng.load_model("dummy", device="cuda")  # без CUDAExecutionProvider → fallback CPU
+    assert any("CPU" in p for p in eng.active_providers)
