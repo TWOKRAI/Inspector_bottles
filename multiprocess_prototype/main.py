@@ -66,11 +66,36 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
 
 
 def main(pipeline_override: str | None = None) -> int:
-    """Запуск приложения: главный конфиг → сборка → run."""
+    """Запуск приложения: главный конфиг → сборка → run.
+
+    CLI-аргумент (`run.py <recipe>`) трактуется как «сделать этот рецепт
+    активным»: он пишется в манифест (``app.yaml: pipeline``) ДО сборки. Тогда и
+    бэкенд, и дочерний GUI-процесс читают ОДИН и тот же активный рецепт из
+    конфига (он же «последний» — для следующего запуска без аргумента). Без записи
+    override доходил только до бэкенда, а GUI читал старый ``app.yaml`` →
+    рассинхрон рецептов (дисплеи не грузились). При ошибке записи — graceful
+    fallback на прежнее поведение (override только в бэкенд).
+    """
     from multiprocess_prototype.backend.config.manifest import load_manifest
 
-    app = load_manifest(resolve_manifest_path())
-    build_launcher(app, pipeline_override).run()
+    manifest_path = resolve_manifest_path()
+    effective_override = pipeline_override
+    if pipeline_override:
+        from multiprocess_prototype.backend.launch import persist_pipeline_choice
+
+        try:
+            written = persist_pipeline_choice(manifest_path, pipeline_override)
+            print(f"[run] активный рецепт записан в манифест: pipeline: {written}")
+            effective_override = None  # манифест уже указывает на нужный рецепт
+        except Exception as exc:  # noqa: BLE001 — persist не должен валить запуск
+            print(
+                f"[run] не удалось записать рецепт в манифест ({exc}); запускаю бэкенд "
+                "с CLI-override (GUI может взять рецепт из старого app.yaml)",
+                file=sys.stderr,
+            )
+
+    app = load_manifest(manifest_path)
+    build_launcher(app, effective_override).run()
     return 0
 
 

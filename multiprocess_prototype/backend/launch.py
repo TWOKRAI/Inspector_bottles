@@ -149,6 +149,54 @@ def _resolve_pipeline(app: "AppManifest", override: str | None) -> Path:
     return app.pipeline.parent / f"{override}.yaml"
 
 
+def _manifest_pipeline_value(override: str) -> str:
+    """Нормализовать CLI-override к строке для записи в ``app.yaml: pipeline``.
+
+    Голое имя рецепта → ``recipes/<name>.yaml`` (та же форма, что пишет GUI при
+    активации рецепта, см. ``app.py::_persist_active_recipe``). Явный путь — как
+    есть, с нормализацией разделителей (манифест резолвит относительный путь от
+    своего каталога, абсолютный — как есть).
+    """
+    if Path(override).is_absolute() or Path(override).suffix or ("/" in override) or ("\\" in override):
+        return override.replace("\\", "/")
+    return f"recipes/{override}.yaml"
+
+
+def persist_pipeline_choice(manifest_path: Path, override: str) -> str:
+    """Записать выбранный CLI-рецепт в манифест (``app.yaml: pipeline``).
+
+    Делает CLI-override (`run.py <recipe>`) «последним активным рецептом»: и
+    бэкенд (``main`` → ``build_launcher``), и дочерний GUI-процесс
+    (``frontend/app.py`` читает ``resolve_manifest_path().pipeline``) после записи
+    видят ОДИН и тот же рецепт из конфига. Без этой записи override доходил только
+    до бэкенда, а GUI читал старый ``app.yaml`` — рецепты расходились (маршрутизация
+    дисплеев не совпадала, дисплеи пустые).
+
+    Запись через ruamel round-trip — комментарии ``app.yaml`` сохраняются. Если
+    значение уже совпадает с текущим — файл не трогаем (не дёргаем mtime/git).
+
+    Args:
+        manifest_path: путь к ``app.yaml``.
+        override: CLI-аргумент (имя рецепта или путь к топологии).
+
+    Returns:
+        Строка, записанная (или уже бывшая) в ``pipeline:`` — для логов.
+    """
+    value = _manifest_pipeline_value(override)
+
+    # Сравнить с текущим pipeline: не переписывать манифест зря.
+    current: str | None = None
+    if manifest_path.exists():
+        with open(manifest_path, encoding="utf-8") as f:
+            current = (yaml.safe_load(f) or {}).get("pipeline")
+
+    if current != value:
+        from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
+
+        update_yaml_preserving(manifest_path, {"pipeline": value})
+    return value
+
+
 # ---------------------------------------------------------------------------
 # SystemBuilder — сборка SystemLauncher
 # ---------------------------------------------------------------------------
