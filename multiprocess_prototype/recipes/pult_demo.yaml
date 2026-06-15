@@ -1,0 +1,49 @@
+# Рецепт pult_demo — демонстрация сервиса «Пульт».
+#
+# Нода pult (ControlPanelPlugin) — источник сигналов. Готовые контролы видны во
+# вкладке Services → «Пульт»; операция (нажать/сдвинуть/ввести) эмитит значение на
+# выходной порт (out_N). Привяжи порт к потребителю в редакторе Pipeline.
+#
+# Набор контролов хранится ЗДЕСЬ (в рецепте), в config-поле `controls` ноды.
+# Правки во вкладке «Пульт» (add/remove) персистятся обратно в рецепт при save.
+#
+# Запуск: python multiprocess_prototype/run.py pult_demo
+#   затем Services → «Пульт»: 4 контрола; нажми/сдвинь — в логах увидишь сигнал.
+
+name: pult_demo
+version: 1
+description: "Демо пульта: control_panel с готовыми контролами → сигналы"
+
+blueprint:
+  name: pult_demo
+  description: "Пульт (control_panel): контролы → сигналы на out_1..out_4"
+
+  processes:
+    - process_name: pult
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      source_target_fps: 10
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Services.control_panel.plugin.plugin.ControlPanelPlugin
+          plugin_name: control_panel
+          category: source
+          panel_id: pult
+          controls:
+            - {id: start, type: button, label: "Старт", port: out_1, trigger_value: true}
+            - {id: light, type: toggle, label: "Свет", port: out_2}
+            - {id: speed, type: slider, label: "Скорость", port: out_3, min: 0, max: 100, value: 30}
+            - {id: word, type: text, label: "Слово", port: out_4}
+
+  wires: []
+  displays: []
+
+  metadata:
+    gui_positions:
+      pult.control_panel:
+        - 40.0
+        - 40.0
+    locked_nodes: []
+
+displays: []

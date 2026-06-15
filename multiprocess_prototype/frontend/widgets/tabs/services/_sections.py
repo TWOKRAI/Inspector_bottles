@@ -431,6 +431,12 @@ def build_services_sections(
 
     sections.append(build_phone_section(services, runtime, title="Телефон"))
 
+    # Пульт — GUI-контролы (кнопка/тумблер/слайдер/поле) → сигналы в pipeline.
+    # Набор контролов рецептный (нода control_panel); персист через SetPluginConfig.
+    from .control_panel import build_control_panel_section
+
+    sections.append(build_control_panel_section(services, runtime, title="Пульт"))
+
     # Группа «Нейронные сети» — ML-конвейер: генерация датасета (dataset_gen),
     # обучение (ml_train), каталог моделей инференса (ml_inference).
     sections.append(
