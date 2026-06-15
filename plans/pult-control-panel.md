@@ -106,6 +106,40 @@ Services/control_panel/
 - qt-mcp smoke: запустить прототип, активировать `pult_demo`, добавить контрол, нажать —
   убедиться, что сигнал уходит (qt_snapshot + лог эмита).
 
+## Phase 5 — Дашборд: параметры/сигналы ДРУГИХ нод в пульте (направление 2026-06-15)
+
+**Цель:** вынести в пульт **только выбранные** параметры/сигналы других нод, чтобы
+настраивать НУЖНОЕ в одном месте, не прыгая по нодам. Не «все настройки» — пользователь
+добавляет по одному нужному полю через пикер.
+
+Решения владельца:
+- Сборка — **GUI-пикер «Добавить из ноды»** (нода → поле/сигнал из списка → proxy-контрол).
+  Набор хранится в рецепте (как обычные контролы).
+- Выносим: **параметры (правка)** + **мониторинг (чтение)** + **действия/сигналы**.
+- **Только выбранные поля**, не весь набор ноды.
+
+**Дизайн (переиспользует существующее, без дублирования логики):**
+- `ControlSpec.source ∈ {local, param, monitor, action}` (дефолт `local` = текущий
+  pipeline-сигнал на свой порт). Доп. поля: `target_process`, `target_plugin_index`,
+  `target_field` (param/monitor), `target_command` (action).
+- **param** (правка поля чужой ноды): чтение текущего значения из `registers_manager`;
+  запись — через **готовый live field-write** (`SetPluginConfig(target_process, idx, field,
+  value)` → `_on_plugin_config_changed` в app.py → `register_update` IPC владельцу). Тот же
+  путь, что инспектор ноды Pipeline. Только register-поля (live-tunable).
+- **monitor** (чтение): bind к state/значению регистра целевой ноды (read-only виджет).
+- **action** (триггер): `bridge.on_action_command(target_plugin, target_command)` (как «Рисовать»).
+- **Пикер**: список нод — из топологии; список полей — из схемы регистров плагина
+  (`registers_manager`/каталог, те же FieldInfo, что строят инспектор); список команд — из
+  `plugin.commands`. Добавление → proxy-контрол → персист в `controls` ноды пульта (рецепт).
+- **Роутинг operate**: секция смотрит `source` контрола (по id из `current_controls`) и
+  направляет: local→set_control, param→SetPluginConfig, action→on_action_command, monitor→read-only.
+
+**Фазы:** 5.1 модель `ControlSpec.source`+target (backend, тесты) · 5.2 роутинг presenter/section
+(param-write через services.commands; action через bridge) · 5.3 GUI-пикер «Добавить из ноды»
+(нода/поле/команда из реестра) · 5.4 monitor-binding (read-only из state) · 5.5 qt-mcp smoke.
+
+**Вне scope Phase 5:** не-register config-поля (только live-tunable регистры); группировка/вкладки.
+
 ## Вне scope (v1)
 - Динамические именованные порты (по label контрола) — пул `out_N` в v1.
 - Кнопки пульта на HTML-странице телефона (порты `phone_camera` уже есть для будущего).
