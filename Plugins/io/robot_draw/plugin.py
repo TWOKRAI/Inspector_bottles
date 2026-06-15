@@ -57,6 +57,12 @@ class RobotDrawPlugin(ProcessModulePlugin):
             optional=True,
             description="[{x_mm, y_mm, pen}] — задание рисования",
         ),
+        Port(
+            name="trigger",
+            dtype="any",
+            optional=True,
+            description="Сигнал-триггер «Рисовать» (напр. кнопка пульта). Ключ чтения — register trigger_source",
+        ),
     ]
     outputs = []  # sink: side-effect к железу, кадр пробрасывается
 
@@ -113,7 +119,21 @@ class RobotDrawPlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def process(self, items: list[dict]) -> list[dict]:
-        # Отправляем ТОЛЬКО когда взведена команда (одноразово на нажатие).
+        # Pipeline-триггер: сигнал из pipeline (напр. кнопка пульта «Рисовать» на
+        # порту out_1, провод out_1 → robot_draw) взводит рисование — как команда
+        # robot_draw_send. Ключ trigger_source = имя исходного порта (без переименования).
+        # Сигнал и draw_points приходят в РАЗНЫЕ process()-вызовы → _armed взводится
+        # на кадре сигнала, путь уходит на ближайшем кадре с draw_points (одноразово).
+        trig = self._reg.trigger_source
+        if trig:
+            for item in items:
+                if item.get(trig):
+                    if not self._armed:
+                        self._ctx.log_info(f"RobotDrawPlugin: pipeline-триггер '{trig}' — armed")
+                    self._armed = True
+                    break
+
+        # Отправляем ТОЛЬКО когда взведена команда/триггер (одноразово на нажатие).
         if not self._armed:
             return items
         for item in items:

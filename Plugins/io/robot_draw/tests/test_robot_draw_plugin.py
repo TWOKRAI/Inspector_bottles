@@ -123,3 +123,38 @@ def test_forwarder_handles_hub_error() -> None:
 
 def test_has_send_command() -> None:
     assert RobotDrawPlugin.commands == {"robot_draw_send": "cmd_send"}
+
+
+def test_pipeline_trigger_arms_then_sends() -> None:
+    """Pipeline-триггер: сигнал на trigger_source взводит (как cmd_send), путь уходит
+    на ближайшем кадре с точками (сигнал и точки — в разных process()-вызовах)."""
+    plugin = RobotDrawPlugin()
+    ctx = make_ctx({"device_id": "robot_main", "trigger_source": "out_1"})
+    plugin.configure(ctx)
+    client = FakeDeviceHubClient()
+    with patch("Plugins.io.robot_draw.plugin.DeviceHubClient", return_value=client):
+        plugin.start(ctx)
+    plugin._client = client
+
+    assert plugin._reg.trigger_source == "out_1"
+    pts = [{"x_mm": 1.0, "y_mm": 2.0, "pen": 1}]
+    # Кадр сигнала (без точек) — взводит armed, ничего не шлёт.
+    plugin.process([{"out_1": True}])
+    assert plugin._queue.empty()
+    assert plugin._armed is True
+    # Ближайший кадр с точками — отправляет (одноразово).
+    plugin.process([{"draw_points": pts}])
+    assert not plugin._queue.empty()
+    plugin._queue.get_nowait()
+    # Дальше без нового сигнала — не шлёт.
+    plugin.process([{"draw_points": pts}])
+    assert plugin._queue.empty()
+
+
+def test_no_pipeline_trigger_when_source_empty() -> None:
+    """trigger_source пуст (дефолт) — сигнал в item НЕ взводит (только команда)."""
+    plugin, _ctx = make_plugin()  # trigger_source=""
+    assert plugin._reg.trigger_source == ""
+    plugin.process([{"out_1": True, "draw_points": [{"x_mm": 1.0, "y_mm": 2.0}]}])
+    assert plugin._queue.empty()
+    assert plugin._armed is False

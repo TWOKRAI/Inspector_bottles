@@ -123,10 +123,10 @@ def test_widget_button_operate_emits(qtbot):
     captured: list[tuple[str, object]] = []
     w.control_operated.connect(lambda cid, val: captured.append((cid, val)))
     w.set_controls([{"id": "go", "type": "button", "label": "Старт", "port": "out_1"}])
-    # найти кнопку «Нажать» в ряду и кликнуть
+    # кнопка button-контрола подписана меткой контрола («Старт», не «Нажать»)
     from PySide6.QtWidgets import QPushButton
 
-    buttons = [b for b in w.findChildren(QPushButton) if b.text() == "Нажать"]
+    buttons = [b for b in w.findChildren(QPushButton) if b.text() == "Старт"]
     assert buttons
     buttons[0].click()
     assert captured == [("go", True)]

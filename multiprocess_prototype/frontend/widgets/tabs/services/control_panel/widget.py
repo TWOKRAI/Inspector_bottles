@@ -204,9 +204,11 @@ class ControlPanelWidget(QWidget):
         row = QWidget()
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
-        h.addWidget(QLabel(f"{label}"))
+        # Кнопка сама несёт подпись — отдельный лейбл не нужен (иначе «Рисовать [Нажать]»).
+        if ctype != "button":
+            h.addWidget(QLabel(f"{label}"))
 
-        h.addWidget(self._build_operable(cid, ctype, c), 1)
+        h.addWidget(self._build_operable(cid, ctype, c, label), 1)
 
         port_lbl = QLabel(f"→ {port}")
         port_lbl.setProperty("role", "placeholder-italic")
@@ -233,7 +235,7 @@ class ControlPanelWidget(QWidget):
         if resp == QMessageBox.StandardButton.Yes:
             self.control_remove_requested.emit(control_id)
 
-    def _build_operable(self, cid: str, ctype: str, c: dict) -> QWidget:
+    def _build_operable(self, cid: str, ctype: str, c: dict, label: str = "") -> QWidget:
         """Операбельный виджет контрола (эмитит control_operated при действии)."""
         if ctype == "toggle":
             cb = QCheckBox()
@@ -264,7 +266,7 @@ class ControlPanelWidget(QWidget):
             le.setText(str(c.get("value") or ""))
             le.returnPressed.connect(lambda _id=cid, _w=le: self.control_operated.emit(_id, _w.text()))
             return le
-        # button (по умолчанию)
-        btn = QPushButton("Нажать")
+        # button (по умолчанию) — подпись контрола на самой кнопке.
+        btn = QPushButton(label or "Нажать")
         btn.clicked.connect(lambda _=False, _id=cid: self.control_operated.emit(_id, True))
         return btn

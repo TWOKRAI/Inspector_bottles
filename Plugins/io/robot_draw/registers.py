@@ -22,6 +22,15 @@ class RobotDrawRegisters(SchemaBase):
     points_source: Annotated[str, FieldMeta("Ключ точек в item", info="list[{x_mm,y_mm,pen}] → очередь форварда")] = (
         "draw_points"
     )
+    # Pipeline-триггер «Рисовать»: если задан, robot_draw взводится (как кнопка
+    # «Отправить роботу»), когда в item приходит truthy под этим ключом. Ключ = имя
+    # ИСХОДНОГО порта провода (без переименования), напр. сигнал пульта out_1.
+    # Пусто = триггер из pipeline выключен (только команда robot_draw_send). Универсально:
+    # любой контрол пульта вяжется к роботу в графе + trigger_source — без правок кода.
+    trigger_source: Annotated[
+        str,
+        FieldMeta("Ключ триггера в item", info="сигнал из pipeline взводит рисование (напр. out_1); пусто = выкл"),
+    ] = ""
     request_timeout_s: Annotated[
         float,
         FieldMeta("Таймаут IPC (с)", info="enqueue в hub мгновенный; рисование идёт асинхронно", min=0.5, max=60.0),

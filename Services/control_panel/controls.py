@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator
 
-# Типы контролов v1.
+# Типы контролов v1 — все эмитят значение на выходной порт ноды (pipeline-сигнал).
 ControlType = Literal["button", "toggle", "slider", "number", "text"]
 
 _NUMERIC = {"slider", "number"}
