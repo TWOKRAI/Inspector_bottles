@@ -63,16 +63,16 @@ def test_header_property(qtbot):
     assert window.header.objectName() == "AppHeader"
 
 
-# -- AppHeaderWidget содержит INNOTECH --
+# -- AppHeaderWidget содержит ИННОТЕХ --
 
 
 def test_header_brand_label(qtbot):
-    """AppHeaderWidget содержит BrandLabel с текстом 'INNOTECH'."""
+    """AppHeaderWidget содержит BrandLabel с текстом 'ИННОТЕХ'."""
     window = MainWindow()
     qtbot.addWidget(window)
 
     brand = window.header._brand_label
-    assert brand.text() == "INNOTECH"
+    assert brand.text() == "ИННОТЕХ"
     assert brand.objectName() == "BrandLabel"
 
 
