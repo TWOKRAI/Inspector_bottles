@@ -18,12 +18,18 @@ from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionS
 
 
 def build_neural_sections(services: Any, runtime: Any, *, parent_key: str) -> list[SectionSpec]:
-    """SectionSpec'и трёх ML-секций (lazy) под родительским узлом parent_key."""
+    """SectionSpec'и ML-секций (lazy) под родительским узлом parent_key.
+
+    Порядок = ML-конвейер: вырез эталонов → генерация датасета → обучение →
+    модели инференса.
+    """
     from .dataset_gen_section import build_dataset_gen_section
+    from .disk_cutter_section import build_disk_cutter_section
     from .ml_inference_section import build_ml_inference_section
     from .ml_train_section import build_ml_train_section
 
     return [
+        build_disk_cutter_section(services, runtime, parent_key=parent_key),
         build_dataset_gen_section(services, runtime, parent_key=parent_key),
         build_ml_train_section(services, runtime, parent_key=parent_key),
         build_ml_inference_section(services, runtime, parent_key=parent_key),

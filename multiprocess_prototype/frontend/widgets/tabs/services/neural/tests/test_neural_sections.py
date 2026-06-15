@@ -21,9 +21,19 @@ from multiprocess_prototype.frontend.widgets.tabs.services.neural.ml_train_secti
 
 def test_build_neural_sections_specs():
     specs = build_neural_sections(None, None, parent_key="neural_networks")
-    assert [s.key for s in specs] == ["__nn_dataset_gen__", "__nn_ml_train__", "__nn_ml_inference__"]
+    assert [s.key for s in specs] == [
+        "__nn_disk_cutter__",
+        "__nn_dataset_gen__",
+        "__nn_ml_train__",
+        "__nn_ml_inference__",
+    ]
     assert all(s.parent_key == "neural_networks" for s in specs)
-    assert [s.title for s in specs] == ["Генерация датасета", "Обучение", "Модели (инференс)"]
+    assert [s.title for s in specs] == [
+        "Вырез эталона (диск)",
+        "Генерация датасета",
+        "Обучение",
+        "Модели (инференс)",
+    ]
 
 
 def test_dataset_gen_widget_presets_and_guard(qtbot):
