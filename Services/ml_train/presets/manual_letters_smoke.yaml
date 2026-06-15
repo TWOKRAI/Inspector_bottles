@@ -1,0 +1,42 @@
+# СМОУК-пресет: быстрая сквозная проверка конвейера (12 букв, CPU, ~20-40 мин).
+# Цель — НЕ точность, а доказать что цепочка генератор→обучение→ONNX→ml_inference
+# жива и буква+угол ловятся. Боевой прогон — manual_letters.yaml (large, 60 эпох, GPU).
+
+model:
+  arch: mobilenet_v3_small    # втрое быстрее large — для смока на CPU
+  pretrained: true
+  dropout: 0.2
+  angle_head: true
+
+data:
+  source: synthetic
+  generator_preset: Services/dataset_gen/presets/manual_letters_disk.yaml
+  samples_per_epoch: 1200     # ~100/класс на 12 букв
+  val_samples: 360
+  batch_size: 32              # меньше — комфортнее для CPU
+  num_workers: 0              # Windows + генерация на лету: 0 безопаснее (без pickling воркеров)
+  seed: 42
+  augment: {enabled: false}
+
+optim:
+  epochs: 10
+  lr: 3.0e-4
+  warmup_epochs: 1
+  scheduler: cosine
+  label_smoothing: 0.1
+  class_weights: auto
+  angle_loss_weight: 1.0
+
+train:
+  device: auto                # тут cpu
+  amp: auto                   # на CPU → off
+  ema_decay: 0.0              # на коротком прогоне EMA не нужна
+  early_stopping_patience: 0
+  monitor: balanced_accuracy
+  runs_dir: data/ml_train/runs
+  run_name: smoke_manual12
+
+export:
+  auto: true
+  models_dir: data/models
+  opset: 17

@@ -1,0 +1,48 @@
+# Пресет обучения: 33 русские буквы на дисках + угол поворота.
+# Данные — генерация dataset_gen на лету из РУЧНЫХ эталонов (manual_sprites).
+#
+# Запуск:
+#   .venv/Scripts/python -m Services.ml_train train Services/ml_train/presets/manual_letters.yaml
+# Таблица прогонов / лучший чекпоинт:
+#   .venv/Scripts/python -m Services.ml_train runs
+
+model:
+  arch: mobilenet_v3_large    # рекомендация для этой задачи (см. ниже в чате)
+  pretrained: true            # ImageNet-веса → быстрее сходится на малых данных
+  dropout: 0.2
+  angle_head: true            # учим И угол (sin, cos); маска angle_valid по симметрии
+
+data:
+  source: synthetic           # генерация на лету, файлы на диск НЕ пишутся
+  generator_preset: Services/dataset_gen/presets/manual_letters_disk.yaml
+  samples_per_epoch: 6600     # ~200/класс при 33 классах; для смока на 12 буквах можно 2400
+  val_samples: 990            # ~30/класс; для 12 букв — 360
+  batch_size: 32              # RTX 3050 4 ГБ: 32 без риска OOM (на крупном GPU верни 64)
+  num_workers: 4
+  seed: 42
+  augment:
+    enabled: false            # аугментирует движок dataset_gen, НЕ torch-трансформы
+
+optim:
+  epochs: 60
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  warmup_epochs: 3
+  scheduler: cosine
+  label_smoothing: 0.1
+  class_weights: auto
+  angle_loss_weight: 1.0      # подними (1.5–2.0), если важнее точность доворота, чем буква
+
+train:
+  device: auto                # cuda если есть, иначе cpu
+  amp: auto
+  channels_last: true
+  ema_decay: 0.999
+  early_stopping_patience: 15
+  monitor: balanced_accuracy  # буква не должна путаться; угол смотри в metrics.json (angle_mae_deg)
+  runs_dir: data/ml_train/runs
+
+export:
+  auto: true                  # после обучения → ONNX + sidecar в data/models (для ml_inference)
+  models_dir: data/models
+  opset: 17

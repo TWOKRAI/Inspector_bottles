@@ -1,0 +1,62 @@
+# Пресет: русские буквы на дисках — эталоны вырезаны ВРУЧНУЮ из реальных фото
+# и выровнены в 0° (data/dataset_gen/manual_sprites/<буква>/*.png, RGBA 128x128,
+# по 4 угла × 2 света на класс → движок берёт случайный эталон на кадр).
+#
+# Цель: 33 класса. Сейчас в каталоге может быть меньше папок — движок читает
+# столько классов, сколько листовых папок найдёт (num_classes авто).
+#
+# Геометрию (поворот 0..360° = GT-метка) и фотометрию добавляет движок на лету.
+# Относительные пути резолвятся от каталога этого файла.
+
+catalog:
+  classes_dir: ../../../data/dataset_gen/manual_sprites
+  # Реальные тайлы ленты, нарезанные из чистых кадров конвейера (без дисков).
+  # _cover_crop масштабирует и случайно кропает их под кадр.
+  backgrounds_dir: ../../../data/backgrounds/belt
+
+output:
+  size: [128, 128]          # (H, W), кратно 32 (требование MobileNet); вход модели
+  frames_per_class: 300
+  supersample: 1.5          # композиция крупнее + downscale → сглаживает шов вклейки
+
+placement:
+  # диск занимает ~такую долю кадра, как после live-кропа по кругу (HoughCircles)
+  # на инференсе — держим train-фрейминг близким к боевому
+  object_size_frac: [0.72, 0.95]
+  keep_inside: true
+
+symmetry:
+  # auto_detect выключен: на реальных вырезах большой белый диск разбавляет
+  # пиксельную метрику и детектор ошибается. Overrides — топология симметрии
+  # глифа (шрифт-инвариантна), вычислена detect_symmetry по чистым рендерам.
+  auto_detect: false
+  threshold: 0.05
+  rel_threshold: 0.3
+  full_angles: [30, 45, 60, 90, 120, 135]
+  overrides:
+    О: full                 # любой угол одинаков → angle_valid=False, робот не доворачивает
+    Ж: "180"                # под ПОВОРОТОМ на 180° (не зеркало) неразличимы:
+    И: "180"                # метка угла кодируется как 2θ (0° и 180° → одна метка)
+    Н: "180"
+    Ф: "180"
+    Х: "180"
+
+augment:
+  rotation: {enabled: true, range: [0, 360]}              # главный сигнал — угол как GT
+  shift:    {enabled: true, frac: 0.04}                   # небольшой сдвиг центра
+  scale:    {enabled: true, range: [0.92, 1.06]}          # разброс расстояния до камеры
+  brightness_contrast: {enabled: true, prob: 0.9, brightness: [-18, 18], contrast: [0.85, 1.15]}
+  gamma:    {enabled: true, prob: 0.3, gamma: [0.8, 1.25]}
+  vignette: {enabled: true, prob: 0.3, strength: [0.1, 0.35], radius_frac: [0.45, 0.7]}
+  gaussian_blur: {enabled: true, prob: 0.4, sigma: [0.4, 1.6]}     # мягкий расфокус
+  motion_blur:   {enabled: true, prob: 0.3, length: [3, 9]}        # конвейер движется
+  noise:         {enabled: true, prob: 0.6, std: [2, 6]}           # мягкий шум сенсора
+  color_temperature: {enabled: true, prob: 0.4, shift: [-0.06, 0.06]}
+  channel_shift: {enabled: true, prob: 0.3, max_shift: 8}
+  jpeg:  {enabled: true, prob: 0.3, quality: [60, 92]}
+  glare: {enabled: true, prob: 0.4, intensity: [30, 90], radius_frac: [0.15, 0.4]}  # глянец диска
+  shadow: {enabled: true, prob: 0.3, strength: [0.12, 0.35], softness_frac: [0.25, 0.6]}
+  contact_shadow: {enabled: true, prob: 0.6, opacity: [0.3, 0.6], blur_frac: [0.06, 0.16], offset_frac: [0.02, 0.1]}  # тень под диском (анти-«парение») — нужна на реальном фоне
+  occlusion: {enabled: true, prob: 0.15, count: [1, 1], size_frac: [0.04, 0.1]}  # грязь/перекрытие
+
+seed: 42
