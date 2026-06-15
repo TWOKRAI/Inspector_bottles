@@ -1,0 +1,231 @@
+# Рецепт webcam_sketch — рисование портрета роботом (3 дисплея + заморозка кадра).
+#
+# Тракт (линейный pipeline, 4 процесса — каждый питает свой дисплей):
+#   camera_0[capture] → seg[segmentation] → lines[edge_detection→blob_filter→strokes_to_points]
+#                                          → points[points_render→robot_draw]
+#
+# Дисплеи (маршрутизация по процессу-отправителю):
+#   seg    → «Оригинал»  (человек на белом фоне, mediapipe)
+#   lines  → «Line-art»  (TEED-линии)
+#   points → «Карта точек» (точки + путь робота, что реально поедет)
+#
+# Рабочий процесс:
+#   1) живое превью всех трёх дисплеев;
+#   2) кнопка «Стоп камеры» (Services → Робот Delta) — заморозка кадра;
+#   3) подстройка параметров обработки/прореживания на статичном кадре (config-панели
+#      плагинов во вкладке Pipeline — все параметры live);
+#   4) кнопка «Отправить роботу» — текущие точки уходят роботу одной пачкой
+#      (RobotClient.draw чанкует по 100, робот рисует и останавливается).
+#
+# === Сегментация (человек на белом) требует mediapipe ===
+#   uv pip install mediapipe   (модель selfie_segmenter.tflite уже в ~/.cache/sketch_robot)
+#   Без mediapipe плагин seg пропускает кадр (фон не убирается) — остальное работает.
+#
+# === Запуск ===
+#   Без железа: python -m Services.robot_comm.server (sim 127.0.0.1:5021, unit 2),
+#   затем в devices ниже host/port → 127.0.0.1/5021.
+#   python multiprocess_prototype/run.py webcam_sketch
+name: webcam_sketch
+version: 4
+description: "Портрет с вебкамеры → сегментация → TEED → точки → рисование роботом"
+
+devices:
+  - id: robot_main
+    name: "Робот Delta"
+    kind: robot
+    protocol: delta_universal3
+    transport: {type: tcp, host: 192.168.1.7, port: 502, unit_id: 2}
+    params: {word_order: little, feed_poll_s: 0.05, telemetry_interval_s: 0.5}
+
+blueprint:
+  name: webcam_sketch
+  description: "Камера → seg → TEED/blob/strokes → points_render/robot_draw"
+
+  processes:
+    # --- Камера: захват кадров (+ заморозка для тюнинга) ---
+    - process_name: camera_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - seg
+      source_target_fps: 15
+      plugins:
+        - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
+          plugin_name: capture
+          category: source
+          camera_id: 0
+          device_id: 0
+          resolution_width: 640
+          resolution_height: 480
+          fps: 15
+          auto_start: true
+
+    # --- Сегментация + коррекция: человек на белом + яркость/контраст (дисплей «Оригинал») ---
+    - process_name: seg
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - lines
+        - gui
+      plugins:
+        - plugin_class: Plugins.processing.segmentation.plugin.SegmentationPlugin
+          plugin_name: segmentation
+          category: processing
+          threshold: 0.5
+          bg_white: true
+        # Коррекция кадра ДО TEED; дисплей «Оригинал» показывает её результат
+        - plugin_class: Plugins.processing.image_adjust.plugin.ImageAdjustPlugin
+          plugin_name: image_adjust
+          category: processing
+          brightness: 0.0
+          contrast: 1.2
+          saturation: 1.0
+          gamma: 1.0
+
+    # --- Линии: TEED → очистка → линия→точки (дисплей «Line-art») ---
+    - process_name: lines
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - points
+        - gui
+      plugins:
+        - plugin_class: Plugins.processing.edge_detection.plugin.EdgeDetectionPlugin
+          plugin_name: edge_detection
+          category: processing
+          method: teed          # teed (рекомендуется). u2net_portrait в кэше = saliency, не линии
+          invert: false
+          threshold: 0.5        # 0.5 = чистый портрет; ниже 0.5 пересыщает (всё бело)
+          device: cuda
+          inference_every_n: 1
+        - plugin_class: Plugins.processing.blob_filter.plugin.BlobFilterPlugin
+          plugin_name: blob_filter
+          category: processing
+          min_area: 10
+          max_area: 0
+        - plugin_class: Plugins.processing.strokes_to_points.plugin.StrokesToPointsPlugin
+          plugin_name: strokes_to_points
+          category: processing
+          centerline: true
+          reduce_mode: dp
+          simplify_epsilon: 1.5
+          step_px: 5.0
+          angle_threshold_deg: 15.0
+          min_stroke_len: 8.0
+          max_stroke_len: 0.0
+          scale_x: 0.3
+          scale_y: 0.3
+          offset_x: 0.0
+          offset_y: 0.0
+          flip_y: true
+          max_points: 0
+
+    # --- Точки: карта точек (дисплей «Карта точек») + отправка роботу ---
+    - process_name: points
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets:
+        - gui
+      plugins:
+        - plugin_class: Plugins.processing.points_render.plugin.PointsRenderPlugin
+          plugin_name: points_render
+          category: processing
+          canvas_width: 640
+          canvas_height: 480
+          bg_white: true
+          dot_radius: 2
+          show_travel: true
+        - plugin_class: Plugins.io.robot_draw.plugin.RobotDrawPlugin
+          plugin_name: robot_draw
+          category: io
+          device_id: robot_main
+
+  wires:
+    - source: camera_0.capture.frame
+      target: seg.segmentation.frame
+    - source: seg.image_adjust.frame
+      target: lines.edge_detection.frame
+    - source: lines.strokes_to_points.draw_points
+      target: points.points_render.draw_points
+
+  displays:
+    - node_id: seg.image_adjust.frame
+      display_id: orig
+    - node_id: lines.strokes_to_points.frame
+      display_id: lineart
+    - node_id: points.points_render.frame
+      display_id: points
+
+  metadata:
+    gui_positions:
+      camera_0.capture:
+        - 16.0
+        - 40.0
+      seg.segmentation:
+        - 16.0
+        - 640.0
+      seg.image_adjust:
+        - 216.0
+        - 640.0
+      lines.edge_detection:
+        - 16.0
+        - 280.0
+      lines.blob_filter:
+        - 231.00869779293726
+        - 246.98086485553813
+      lines.strokes_to_points:
+        - 416.0
+        - 280.0
+      points.points_render:
+        - 16.0
+        - 520.0
+      points.robot_draw:
+        - 216.0
+        - 520.0
+      orig:
+        - 0.0
+        - 360.0
+      lineart:
+        - 0.0
+        - 120.0
+      points:
+        - 600.0
+        - 290.0
+    locked_nodes: []
+displays:
+  - id: orig
+    name: Оригинал (человек на белом)
+    width: 640
+    height: 480
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position: {x: 0, y: 0}
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+  - id: lineart
+    name: Line-art (TEED)
+    width: 640
+    height: 480
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position: {x: 640, y: 0}
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+  - id: points
+    name: Карта точек робота
+    width: 640
+    height: 480
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position: {x: 1280, y: 0}
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none

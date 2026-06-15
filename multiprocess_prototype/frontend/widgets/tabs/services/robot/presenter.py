@@ -63,6 +63,17 @@ class RobotPresenter:
         """Серво ON/OFF."""
         self._request("robot_set_servo", {"device_id": device_id, "on": bool(on)})
 
+    def jog(self, device_id: str, dx: float, dy: float, spd: int, absolute: bool) -> None:
+        """Ручной ход: смещение dX/dY (мм) при скорости spd (Override %). Включает mode=manual."""
+        self._request(
+            "robot_jog",
+            {"device_id": device_id, "dx": float(dx), "dy": float(dy), "spd": int(spd), "absolute": bool(absolute)},
+        )
+
+    def jog_abort(self, device_id: str) -> None:
+        """Прервать ручной ход."""
+        self._request("robot_jog_abort", {"device_id": device_id})
+
     def set_manual_mode(self, device_id: str, on: bool) -> None:
         """Ручной режим: пауза авто-подачи заданий."""
         self._request("robot_set_manual_mode", {"device_id": device_id, "on": bool(on)})
@@ -115,6 +126,39 @@ class RobotPresenter:
     def abort_draw(self, device_id: str) -> None:
         """Прервать рисование немедленно."""
         self._request("robot_draw_abort", {"device_id": device_id})
+
+    # ------------------------------------------------------------------ #
+    # Портрет (рецепт webcam_sketch) — команды процессам pipeline, НЕ в devices
+    # ------------------------------------------------------------------ #
+
+    def _request_to(
+        self,
+        process_name: str,
+        command: str,
+        on_result: Callable[[dict], None] | None = None,
+    ) -> None:
+        """Команда произвольному процессу pipeline (не ``devices``)."""
+        if self._sender is None or self._runner is None:
+            logger.debug("Robot: команда %s недоступна (нет sender/runner)", command)
+            if on_result:
+                on_result({})
+            return
+        self._runner.submit(
+            lambda: self._sender.request_command(process_name, command, {}),
+            on_result=on_result,
+        )
+
+    def freeze_camera(self, process_name: str = "camera_0", on_result: Callable[[dict], None] | None = None) -> None:
+        """Заморозить кадр камеры (тюнинг на статике)."""
+        self._request_to(process_name, "freeze_capture", on_result)
+
+    def resume_camera(self, process_name: str = "camera_0", on_result: Callable[[dict], None] | None = None) -> None:
+        """Возобновить живой захват камеры."""
+        self._request_to(process_name, "unfreeze_capture", on_result)
+
+    def send_to_robot(self, process_name: str = "points", on_result: Callable[[dict], None] | None = None) -> None:
+        """Отправить текущую карту точек роботу (команда robot_draw_send)."""
+        self._request_to(process_name, "robot_draw_send", on_result)
 
     # ------------------------------------------------------------------ #
     # Request/response — статусы (результат в main-thread)

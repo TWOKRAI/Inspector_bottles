@@ -11,15 +11,15 @@ import time
 
 import cv2
 
-# Максимальное значение счётчика кадров (с rollover как в camera_service)
-_FRAME_ID_MODULO = 100_000
-
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
+    Port,
     ProcessModulePlugin,
+    register_plugin,
 )
-from multiprocess_framework.modules.process_module.plugins import Port
-from multiprocess_framework.modules.process_module.plugins import register_plugin
+
+# Максимальное значение счётчика кадров (с rollover как в camera_service)
+_FRAME_ID_MODULO = 100_000
 
 
 @register_plugin("capture", category="source", description="Захват кадров с вебкамеры (cv2)")
@@ -46,6 +46,10 @@ class CapturePlugin(ProcessModulePlugin):
         "stop_capture": "cmd_stop_capture",
         "pause_capture": "cmd_pause_capture",
         "resume_capture": "cmd_resume_capture",
+        # Заморозка: камера перестаёт читать новые кадры, но переотправляет
+        # последний (pipeline продолжает обрабатывать статичный кадр для тюнинга).
+        "freeze_capture": "cmd_freeze_capture",
+        "unfreeze_capture": "cmd_unfreeze_capture",
     }
 
     def configure(self, ctx: PluginContext) -> None:
@@ -59,8 +63,7 @@ class CapturePlugin(ProcessModulePlugin):
         self._auto_start: bool = cfg.get("auto_start", False)
 
         ctx.log_info(
-            f"CapturePlugin[{self._camera_id}]: device={self._device_id}, "
-            f"{self._width}x{self._height}@{self._fps}fps"
+            f"CapturePlugin[{self._camera_id}]: device={self._device_id}, {self._width}x{self._height}@{self._fps}fps"
         )
 
         # Состояние захвата
@@ -69,6 +72,10 @@ class CapturePlugin(ProcessModulePlugin):
         self._paused = False
         self._frame_count = 0
         self._ctx = ctx
+
+        # Заморозка кадра: re-emit последнего кадра для тюнинга на статике
+        self._frozen = False
+        self._last_frame = None
 
         # Метрики FPS и потерь кадров
         self._state_proxy = ctx.state_proxy  # может быть None (обратная совместимость)
@@ -99,6 +106,22 @@ class CapturePlugin(ProcessModulePlugin):
         self._publish_state()
         return {"status": "ok"}
 
+    def cmd_freeze_capture(self, data: dict) -> dict:
+        """Заморозить кадр: камера не читает новые, переотправляет последний."""
+        if self._last_frame is None:
+            return {"status": "error", "message": "нет кадра для заморозки"}
+        self._frozen = True
+        self._ctx.log_info(f"CapturePlugin[{self._camera_id}]: кадр заморожен (тюнинг)")
+        self._publish_state()
+        return {"status": "ok", "frozen": True}
+
+    def cmd_unfreeze_capture(self, data: dict) -> dict:
+        """Разморозить: вернуться к живому захвату."""
+        self._frozen = False
+        self._ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват разморожен")
+        self._publish_state()
+        return {"status": "ok", "frozen": False}
+
     def start(self, ctx: PluginContext) -> None:
         """Auto-start камеры если задан в конфиге."""
         if self._auto_start:
@@ -116,6 +139,11 @@ class CapturePlugin(ProcessModulePlugin):
         Возвращает [{"frame": ndarray, "camera_id": int, ...}] или [].
         SHM write и IPC send выполняет SourceProducer.
         """
+        # Заморозка: переотправляем последний кадр (новый seq_id), не читая камеру.
+        if self._frozen and self._last_frame is not None:
+            self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
+            return [self._build_item(self._last_frame.copy())]
+
         if not self._is_capturing or self._cap is None or self._paused:
             return []
 
@@ -134,6 +162,9 @@ class CapturePlugin(ProcessModulePlugin):
         if w != self._width or h != self._height:
             frame = cv2.resize(frame, (self._width, self._height))
 
+        # Запоминаем последний кадр для возможной заморозки
+        self._last_frame = frame
+
         # Инкремент счётчика с rollover
         self._frame_count = (self._frame_count % _FRAME_ID_MODULO) + 1
 
@@ -147,7 +178,11 @@ class CapturePlugin(ProcessModulePlugin):
             self._fps_timer = now
             self._publish_state()
 
-        return [{
+        return [self._build_item(frame)]
+
+    def _build_item(self, frame) -> dict:
+        """Собрать item-словарь кадра (общий для живого захвата и заморозки)."""
+        return {
             "frame": frame,
             "camera_id": self._camera_id,
             "seq_id": self._frame_count,
@@ -157,7 +192,7 @@ class CapturePlugin(ProcessModulePlugin):
             "height": self._height,
             "channels": 3,
             "dtype": "uint8",
-        }]
+        }
 
     # --- Внутренние методы ---
 
@@ -173,17 +208,14 @@ class CapturePlugin(ProcessModulePlugin):
             actual_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             actual_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             ctx.log_info(
-                f"CapturePlugin[{self._camera_id}]: камера открыта "
-                f"(реальное разрешение: {actual_w}x{actual_h})"
+                f"CapturePlugin[{self._camera_id}]: камера открыта (реальное разрешение: {actual_w}x{actual_h})"
             )
             self._is_capturing = True
             ctx.log_info(f"CapturePlugin[{self._camera_id}]: захват запущен")
             # Публикуем начальное состояние после старта захвата
             self._publish_state()
         else:
-            ctx.log_error(
-                f"CapturePlugin[{self._camera_id}]: не удалось открыть камеру {self._device_id}"
-            )
+            ctx.log_error(f"CapturePlugin[{self._camera_id}]: не удалось открыть камеру {self._device_id}")
 
     def _stop_capture(self, ctx: PluginContext) -> None:
         """Остановить захват и сбросить FPS-метрику."""
@@ -199,13 +231,17 @@ class CapturePlugin(ProcessModulePlugin):
         if self._state_proxy is None:
             return
         path = f"processes.{self._ctx.process_name}.state"
-        self._state_proxy.merge(path, {
-            "status": "running" if self._is_capturing else "stopped",
-            "fps": round(self._actual_fps, 1),
-            "frame_count": self._frame_count,
-            "drops": self._drops,
-            "paused": self._paused,
-        })
+        self._state_proxy.merge(
+            path,
+            {
+                "status": "running" if self._is_capturing else "stopped",
+                "fps": round(self._actual_fps, 1),
+                "frame_count": self._frame_count,
+                "drops": self._drops,
+                "paused": self._paused,
+                "frozen": self._frozen,
+            },
+        )
 
     def _release_camera(self) -> None:
         """Освободить камеру."""

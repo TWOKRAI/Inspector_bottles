@@ -88,6 +88,39 @@ def test_abort_draw() -> None:
     )
 
 
+# --- webcam_sketch: команды процессам pipeline (camera_0/points), НЕ в devices ---
+
+
+def test_freeze_camera_routed_to_camera_process() -> None:
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"status": "ok", "frozen": True}
+    results: list[dict] = []
+    presenter.freeze_camera("camera_0", results.append)
+    sender.request_command.assert_called_once_with("camera_0", "freeze_capture", {})
+    assert results == [{"status": "ok", "frozen": True}]
+
+
+def test_resume_camera_routed() -> None:
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"status": "ok"}
+    presenter.resume_camera("camera_0")
+    sender.request_command.assert_called_with("camera_0", "unfreeze_capture", {})
+
+
+def test_send_to_robot_routed_to_points_process() -> None:
+    presenter, sender = make_presenter()
+    sender.request_command.return_value = {"status": "ok", "armed": True}
+    presenter.send_to_robot("points")
+    sender.request_command.assert_called_with("points", "robot_draw_send", {})
+
+
+def test_pipeline_command_without_sender() -> None:
+    presenter = RobotPresenter(command_sender=None, request_runner=None)
+    results: list[dict] = []
+    presenter.send_to_robot("points", results.append)
+    assert results == [{}]
+
+
 # --- request/response ---
 
 

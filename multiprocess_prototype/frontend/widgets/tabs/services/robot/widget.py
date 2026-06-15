@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -45,9 +46,11 @@ class RobotControlWidget(QWidget):
     refresh_requested = Signal()
     send_job_requested = Signal(float, float)  # x, y
     stop_requested = Signal(int)  # 1|2|3
-    mode_change_requested = Signal(str)  # cvt|draw
+    mode_change_requested = Signal(str)  # cvt|draw|manual
     servo_requested = Signal(bool)
     manual_mode_toggled = Signal(bool)
+    jog_requested = Signal(float, float, int, bool)  # dx_mm, dy_mm, spd_pct, absolute
+    jog_abort_requested = Signal()
 
     draw_circle_requested = Signal(float, float, float, float)  # cx, cy, r, z
     draw_square_requested = Signal(float, float, float, float, float)  # x1,y1,x2,y2,z
@@ -55,6 +58,11 @@ class RobotControlWidget(QWidget):
     pen_apply_requested = Signal(float, float)  # down, up
     draw_speed_requested = Signal(int)
     overlap_requested = Signal(float)
+
+    # Рецепт webcam_sketch: заморозка камеры / возобновление / отправка точек роботу
+    camera_freeze_requested = Signal(str)  # camera process_name
+    camera_resume_requested = Signal(str)  # camera process_name
+    send_to_robot_requested = Signal(str)  # points process_name
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -68,7 +76,9 @@ class RobotControlWidget(QWidget):
 
         root.addWidget(self._build_status_group())
         root.addWidget(self._build_robot_group())
+        root.addWidget(self._build_jog_group())
         root.addWidget(self._build_draw_group())
+        root.addWidget(self._build_sketch_group())
         root.addStretch(1)
 
     def add_combo_widget(self, widget: QWidget) -> None:
@@ -126,7 +136,7 @@ class RobotControlWidget(QWidget):
 
         grid.addWidget(QLabel("Режим:"), 2, 0)
         self._combo_mode = QComboBox()
-        self._combo_mode.addItems(["cvt", "draw"])
+        self._combo_mode.addItems(["cvt", "draw", "manual"])
         self._combo_mode.currentTextChanged.connect(self.mode_change_requested.emit)
         grid.addWidget(self._combo_mode, 2, 1)
         self._chk_servo = QCheckBox("Серво ON")
@@ -136,6 +146,41 @@ class RobotControlWidget(QWidget):
         self._chk_manual = QCheckBox("Ручной режим (пауза авто-подачи)")
         self._chk_manual.toggled.connect(self.manual_mode_toggled.emit)
         grid.addWidget(self._chk_manual, 2, 3, 1, 2)
+        return group
+
+    def _build_jog_group(self) -> QGroupBox:
+        """Ручной ход (jog): смещение dX/dY на расстояние + скорость (режим manual)."""
+        group = QGroupBox("Ручной ход (jog · режим manual)")
+        grid = QGridLayout(group)
+        grid.addWidget(QLabel("dX, мм:"), 0, 0)
+        self._jog_dx = _dspin(-200.0, 200.0, 0.0)
+        grid.addWidget(self._jog_dx, 0, 1)
+        grid.addWidget(QLabel("dY, мм:"), 0, 2)
+        self._jog_dy = _dspin(-200.0, 200.0, 0.0)
+        grid.addWidget(self._jog_dy, 0, 3)
+        grid.addWidget(QLabel("Скорость, %:"), 0, 4)
+        self._jog_spd = QSpinBox()
+        self._jog_spd.setRange(1, 100)
+        self._jog_spd.setValue(30)
+        grid.addWidget(self._jog_spd, 0, 5)
+
+        self._jog_abs = QCheckBox("Абсолют (ехать в координату X/Y)")
+        grid.addWidget(self._jog_abs, 1, 0, 1, 3)
+        self._btn_jog = QPushButton("Ехать")
+        self._btn_jog.setToolTip("Один линейный ход на dX/dY (≤200 мм) при заданной скорости")
+        self._btn_jog.clicked.connect(
+            lambda: self.jog_requested.emit(
+                self._jog_dx.value(), self._jog_dy.value(), self._jog_spd.value(), self._jog_abs.isChecked()
+            )
+        )
+        grid.addWidget(self._btn_jog, 1, 3, 1, 2)
+        self._btn_jog_stop = QPushButton("Стоп")
+        self._btn_jog_stop.clicked.connect(self.jog_abort_requested.emit)
+        grid.addWidget(self._btn_jog_stop, 1, 5)
+
+        hint = QLabel("Сначала режим «manual» (или кнопка «Ехать» включит его), затем jog. Z/RZ не меняются.")
+        hint.setWordWrap(True)
+        grid.addWidget(hint, 2, 0, 1, 6)
         return group
 
     def _build_draw_group(self) -> QGroupBox:
@@ -197,6 +242,48 @@ class RobotControlWidget(QWidget):
         self._btn_draw_abort = QPushButton("Стоп рисования")
         self._btn_draw_abort.clicked.connect(self.draw_abort_requested.emit)
         grid.addWidget(self._btn_draw_abort, 4, 5)
+        return group
+
+    def _build_sketch_group(self) -> QGroupBox:
+        """Портрет (рецепт webcam_sketch): заморозка кадра, тюнинг, отправка роботу."""
+        group = QGroupBox("Портрет (рецепт webcam_sketch)")
+        grid = QGridLayout(group)
+
+        # Камера: заморозка / возобновление
+        grid.addWidget(QLabel("Процесс камеры:"), 0, 0)
+        self._cam_proc = QLineEdit("camera_0")
+        self._cam_proc.setToolTip("Имя процесса камеры в рецепте (по умолчанию «camera_0»)")
+        grid.addWidget(self._cam_proc, 0, 1)
+        self._btn_freeze = QPushButton("Стоп камеры (заморозить)")
+        self._btn_freeze.setToolTip("Заморозить кадр — обработка идёт по статике для тюнинга")
+        self._btn_freeze.clicked.connect(
+            lambda: self.camera_freeze_requested.emit(self._cam_proc.text().strip() or "camera_0")
+        )
+        grid.addWidget(self._btn_freeze, 0, 2)
+        self._btn_resume = QPushButton("Возобновить камеру")
+        self._btn_resume.clicked.connect(
+            lambda: self.camera_resume_requested.emit(self._cam_proc.text().strip() or "camera_0")
+        )
+        grid.addWidget(self._btn_resume, 0, 3)
+
+        # Точки: отправка роботу
+        grid.addWidget(QLabel("Процесс точек:"), 1, 0)
+        self._points_proc = QLineEdit("points")
+        self._points_proc.setToolTip("Имя процесса с robot_draw (по умолчанию «points»)")
+        grid.addWidget(self._points_proc, 1, 1)
+        self._btn_send = QPushButton("Отправить роботу")
+        self._btn_send.setToolTip("Отправить текущую карту точек роботу одной пачкой")
+        self._btn_send.clicked.connect(
+            lambda: self.send_to_robot_requested.emit(self._points_proc.text().strip() or "points")
+        )
+        grid.addWidget(self._btn_send, 1, 2, 1, 2)
+
+        hint = QLabel(
+            "1) Заморозь кадр → 2) подстрой параметры обработки/прореживания во вкладке "
+            "Pipeline → 3) «Отправить роботу». Робот рисует пачку точек и останавливается."
+        )
+        hint.setWordWrap(True)
+        grid.addWidget(hint, 2, 0, 1, 4)
         return group
 
     # ------------------------------------------------------------------ #

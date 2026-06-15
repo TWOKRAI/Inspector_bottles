@@ -1,0 +1,36 @@
+"""RobotDrawRegisters — приёмник точек рисования в pipeline (live-tunable)."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from multiprocess_framework.modules.process_module.plugins import (
+    FieldMeta,
+    SchemaBase,
+    register_schema,
+)
+
+
+@register_schema("RobotDrawRegistersV1")
+class RobotDrawRegisters(SchemaBase):
+    """Параметры и счётчики форвардера точек рисования robot_draw."""
+
+    # --- Привязка к устройству в реестре hub ---
+    device_id: Annotated[str, FieldMeta("ID устройства", info="id робота в реестре devices")] = "robot_main"
+
+    # --- Ключ задания в item и таймаут IPC ---
+    points_source: Annotated[str, FieldMeta("Ключ точек в item", info="list[{x_mm,y_mm,pen}] → очередь форварда")] = (
+        "draw_points"
+    )
+    request_timeout_s: Annotated[
+        float,
+        FieldMeta("Таймаут IPC (с)", info="enqueue в hub мгновенный; рисование идёт асинхронно", min=0.5, max=60.0),
+    ] = 5.0
+
+    # --- Счётчики (readonly) ---
+    jobs_sent: Annotated[int, FieldMeta("Заданий отправлено", readonly=True)] = 0
+    jobs_dropped: Annotated[int, FieldMeta("Заданий отброшено", readonly=True)] = 0
+    points_total: Annotated[int, FieldMeta("Точек всего", readonly=True)] = 0
+    hub_errors: Annotated[int, FieldMeta("Ошибок hub", readonly=True)] = 0
+    queue_len: Annotated[int, FieldMeta("В очереди", readonly=True)] = 0
+    last_error: Annotated[str, FieldMeta("Последняя ошибка", readonly=True)] = ""

@@ -61,6 +61,8 @@ class RobotWidgetController:
         w.mode_change_requested.connect(self._on_mode)
         w.servo_requested.connect(self._on_servo)
         w.manual_mode_toggled.connect(self._on_manual)
+        w.jog_requested.connect(self._on_jog)
+        w.jog_abort_requested.connect(self._on_jog_abort)
 
         w.draw_circle_requested.connect(self._on_draw_circle)
         w.draw_square_requested.connect(self._on_draw_square)
@@ -68,6 +70,9 @@ class RobotWidgetController:
         w.pen_apply_requested.connect(self._on_pen)
         w.draw_speed_requested.connect(self._on_draw_speed)
         w.overlap_requested.connect(self._on_overlap)
+        w.camera_freeze_requested.connect(self._on_camera_freeze)
+        w.camera_resume_requested.connect(self._on_camera_resume)
+        w.send_to_robot_requested.connect(self._on_send_to_robot)
 
     # ------------------------------------------------------------------ #
     # Смена устройства
@@ -207,6 +212,19 @@ class RobotWidgetController:
         self._widget.set_status("Ручной режим: авто-подача на паузе." if on else "Авто-подача возобновлена.")
         self._presenter.set_manual_mode(self._device_id, on)
 
+    def _on_jog(self, dx: float, dy: float, spd: int, absolute: bool) -> None:
+        if not self._device_id:
+            return
+        kind = "абс" if absolute else "отн"
+        self._widget.set_status(f"Jog dX={dx:.1f} dY={dy:.1f} @ {spd}% ({kind}).")
+        self._presenter.jog(self._device_id, dx, dy, int(spd), bool(absolute))
+
+    def _on_jog_abort(self) -> None:
+        if not self._device_id:
+            return
+        self._widget.set_status("Jog: стоп.")
+        self._presenter.jog_abort(self._device_id)
+
     # ------------------------------------------------------------------ #
     # Рисование
     # ------------------------------------------------------------------ #
@@ -244,6 +262,38 @@ class RobotWidgetController:
         if not self._device_id:
             return
         self._presenter.set_overlap(self._device_id, mm)
+
+    # ------------------------------------------------------------------ #
+    # Портрет (рецепт webcam_sketch): заморозка / возобновление / отправка
+    # ------------------------------------------------------------------ #
+
+    def _on_camera_freeze(self, process_name: str) -> None:
+        proc = process_name or "camera_0"
+        self._widget.set_status(f"Заморозка кадра ({proc})…")
+        self._presenter.freeze_camera(proc, self._on_camera_freeze_result)
+
+    def _on_camera_freeze_result(self, data: dict) -> None:
+        if isinstance(data, dict) and data.get("status") == "ok":
+            self._widget.set_status("Кадр заморожен — подстрой параметры и жми «Отправить роботу».")
+        else:
+            msg = data.get("message", "процесс камеры недоступен?") if isinstance(data, dict) else "?"
+            self._widget.set_status(f"Не удалось заморозить кадр ({msg}).")
+
+    def _on_camera_resume(self, process_name: str) -> None:
+        proc = process_name or "camera_0"
+        self._widget.set_status(f"Возобновление камеры ({proc})…")
+        self._presenter.resume_camera(proc, lambda d: self._widget.set_status("Камера возобновлена."))
+
+    def _on_send_to_robot(self, process_name: str) -> None:
+        proc = process_name or "points"
+        self._widget.set_status(f"Отправка точек роботу ({proc})…")
+        self._presenter.send_to_robot(proc, self._on_send_result)
+
+    def _on_send_result(self, data: dict) -> None:
+        if isinstance(data, dict) and (data.get("armed") or data.get("status") == "ok"):
+            self._widget.set_status("Точки отправлены — робот рисует и остановится по завершении.")
+        else:
+            self._widget.set_status("Не удалось отправить точки (процесс points недоступен?).")
 
     # ------------------------------------------------------------------ #
     # Форс-запрос
