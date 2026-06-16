@@ -318,33 +318,38 @@ class RecipesPresenter:
             self._log_warning("RecipesPresenter.on_set_active: нет выбранного рецепта")
             return
 
-        # G.6.5 (Вариант A): domain dispatch ДО persist — валидирует blueprint
-        # рецепта (плагины/дисплеи/циклы), загружает топологию рецепта в editor
-        # (Pipeline scene reload через TopologyReplaced) и эмитит RecipeActivated
-        # (cross-tab linking, G.6.6). undoable=False — переключение рецепта это
-        # смена контекста, а не правка топологии (не попадает в Ctrl+Z-историю).
-        # DomainError (рецепт ссылается на неизвестный плагин и т.п.) → graceful.
+        # FIX (load-display-rebind): store.set_active ОБЯЗАН выполниться ДО
+        # dispatch(ActivateRecipe). dispatch синхронно публикует RecipeActivated, на
+        # который подписан _rebuild_displays (app.py) — а тот читает recipe_manager.get_active().
+        # Раньше dispatch шёл первым → _rebuild_displays собирал слоты/routing дисплеев по
+        # СТАРОМУ активному рецепту (корень «кривой» загрузки: кадры нового рецепта летели
+        # не в тот слот). Теперь: set_active (engine._active_name обновлён, событий не шлёт)
+        # → dispatch (валидирует blueprint, грузит editor-топологию, эмитит TopologyReplaced
+        # + RecipeActivated уже с НОВЫМ активным). При отклонении валидации — откат slug.
+        # undoable=False: переключение рецепта = смена контекста, не правка (вне Ctrl+Z).
+        prev_active = self._store.get_active()
+        success = self._store.set_active(target_slug)
+        if not success:
+            self._view.show_error(f"Рецепт '{target_slug}' не найден")
+            self._log_warning(f"RecipesPresenter.on_set_active: set_active=False для '{target_slug}'")
+            return
+
         if self._commands is not None:
             try:
                 self._commands.dispatch(ActivateRecipe(slug=target_slug), undoable=False)
             except DomainError as exc:
+                self._store.set_active(prev_active)  # откат: невалидный рецепт не остаётся активным
                 self._view.show_error(f"Не удалось активировать рецепт: {exc}")
                 self._log_error(f"RecipesPresenter.on_set_active: ActivateRecipe отклонён: {exc}")
                 return
             except Exception as exc:  # noqa: BLE001
                 # Surface-not-mask: непредвиденные ошибки dispatch (напр. ValidationError
                 # от битого/несовместимого YAML рецепта) раньше пролетали мимо узкого
-                # except DomainError → «Загрузить» молча ломался. Теперь показываем.
+                # except DomainError → «Загрузить» молча ломался. Теперь показываем + откат.
+                self._store.set_active(prev_active)
                 self._view.show_error(f"Ошибка активации рецепта '{target_slug}': {exc}")
                 self._log_error(f"RecipesPresenter.on_set_active: ActivateRecipe исключение: {exc!r}")
                 return
-
-        # Активируем через RecipeStore Protocol
-        success = self._store.set_active(target_slug)
-        if not success:
-            self._view.show_error(f"Рецепт '{target_slug}' не найден")
-            self._log_warning(f"RecipesPresenter.on_set_active: set_active=False для '{target_slug}'")
-            return
 
         self._log_info(f"RecipesPresenter.on_set_active: активирован '{target_slug}'")
 

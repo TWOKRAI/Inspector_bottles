@@ -251,6 +251,15 @@ class PipelinePresenter:
                 exc,
             )
             self._report(f"Изменение поля отклонено: {exc}")
+            return
+
+        # FIX (field-edit-persist): SetPluginConfig обновил domain-топологию (истину),
+        # но _on_topology_replaced подавлен _suppress (чтобы не дёргать scene на каждый
+        # тик слайдера) → self._model оставался со СТАРЫМ конфигом, и save_to_active_recipe
+        # (graph_to_blueprint(self._model)) сериализовал устаревшие значения — правки полей
+        # НЕ персистились в рецепт. Точечно пересинхронизируем view-модель из domain БЕЗ
+        # rebuild scene: from_topology_dict — чистая dict-операция (deepcopy), без Qt/сигналов.
+        self._model.from_topology_dict(self._services.topology.load().to_dict())
 
     def _on_target_process_changed(self, node_id: str, new_process: str) -> None:
         """Обработчик выбора нового целевого процесса для plugin-узла.

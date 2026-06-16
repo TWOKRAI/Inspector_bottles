@@ -263,6 +263,50 @@ class TestSaveReadRawFails:
 # ---------------------------------------------------------------------------
 
 
+class TestFieldEditPersistsToRecipe:
+    """Регресс: правка поля в инспекторе → save_to_active_recipe пишет НОВОЕ значение.
+
+    Защита от бага field-edit-persist: SetPluginConfig обновлял domain-топологию под
+    _suppress, но self._model (его сериализует graph_to_blueprint при save) оставался
+    со СТАРЫМ конфигом → save писал устаревшее (правки полей не сохранялись в рецепт).
+    Фикс: presenter синкает self._model из domain после dispatch (_on_inspector_field_changed).
+    Нужен РЕАЛЬНЫЙ orchestrator — FakeCommandDispatcher не обновляет topology_store.
+    """
+
+    def test_field_edit_then_save_persists_new_value(self, monkeypatch) -> None:
+        from ._helpers import make_pipeline_services_with_orchestrator
+
+        slug = "edit_recipe"
+        services = make_pipeline_services_with_orchestrator()
+
+        store = FakeRecipeStore(
+            raw={slug: {"name": slug, "version": 3, "blueprint": {"processes": [], "wires": [], "displays": []}}},
+            active=slug,
+        )
+        object.__setattr__(services, "recipes", store)
+
+        presenter = PipelinePresenter(services)
+        # Выровнять view-модель с дефолтной топологией orchestrator (camera/processor),
+        # чтобы graph_to_blueprint при save сериализовал эти процессы.
+        presenter._model.from_topology_dict(services.topology.load().to_dict())
+
+        from PySide6.QtWidgets import QMessageBox
+
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
+        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **kw: None))
+        monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **kw: None))
+
+        # Правка поля плагина процесса 'processor' (как из инспектора Pipeline).
+        presenter._on_inspector_field_changed("processor", "threshold", 128)
+
+        assert presenter.save_to_active_recipe(parent=None) is True
+
+        # В сохранённом рецепте новое значение поля (а не старое/отсутствующее).
+        saved_procs = store._raw[slug]["blueprint"]["processes"]
+        proc = next(p for p in saved_procs if p["process_name"] == "processor")
+        assert proc["plugins"][0]["config"]["threshold"] == 128
+
+
 class TestSaveHandlesException:
     """Исключение при save_raw -> critical, False."""
 
