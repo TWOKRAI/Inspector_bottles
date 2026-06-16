@@ -80,5 +80,8 @@
 - [Always project .venv](feedback_always_project_venv.md) — uv run без --no-sync падает/берёт не тот интерпретатор; всегда проектный .venv (qt-mcp фикс)
 - [CUDA torch setup](project_cuda_torch_setup.md) — RTX 3050 4GB; torch ставить cu124-колесом (uv pip --reinstall --index ...); дефолтный PyPI даёт +cpu, uv sync откатывает
 - [Package install by user](feedback_package_install_by_user.md) — install-команды запускает пользователь сам (deny-правило на pip); агент выдаёт команду, не вызывает
-- [Letter+angle training](project_letter_angle_training.md) — буква+угол на дисках для робота; пресеты manual_letters; 12/33 букв; фокус — точность угла
+- [Letter+angle training](project_letter_angle_training.md) — буква+угол на дисках для робота; 33/33 обучены (acc 100%, angle_mae 1.58°, ONNX 050828); урок: monitor=angle_mae_deg, не accuracy
 - [Pult control panel](project_pult_control_panel.md) — сервис «Пульт» (рецептный, контролы→сигналы pipeline) + дашборд (выбранные поля/сигналы др. нод в одном месте) + узел robot_scale (px→мм по углам листа); «Рисовать»→robot_draw verified live
+- [Recipe inspector join key](project_recipe_inspector_join_key.md) — inspector(join) обязан быть прямым ключом процесса; GUI-save кладёт под metadata → join молча выключен; ПОЧИНЕНО fix-forward в unwrap_recipe (hoist из metadata)
+- [Hikvision letter robot recipe](project_hikvision_letter_robot.md) — рецепт Hikvision→белая маска→круг→линия(вертикаль)→crop→ml_inference(буква+угол); Шаг1 готов live; ROI 560,240,800,600; далее калибровка→px→мм→робот
+- [Recipe save/load arch](project_recipe_save_load_arch.md) — save не писал правки полей (model/domain desync, FIXED) + «кривая» загрузка (порядок set_active/dispatch, FIXED); бэкенд УЖЕ stop-all→load-fresh; долги: on_result, switch≠boot, display-SHM, graceful-stop
