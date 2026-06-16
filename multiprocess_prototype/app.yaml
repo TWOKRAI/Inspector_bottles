@@ -20,7 +20,7 @@ base: backend/topology/base.yaml
 # Активен color_inspect (камера → HSV-маска → контуры/площадь → рисование линии на
 # дисплей + универсальный Modbus-пакет). Переключить на другой рецепт — во вкладке
 # Recipes или сменой этой строки (region_pipeline / modbus_demo / color_inspect).
-pipeline: recipes/webcam_sketch.yaml
+pipeline: recipes/hikvision_letter_robot.yaml
 
 # Каталог GUI-редактируемых рецептов (источник запускаемых топологий)
 recipes: recipes

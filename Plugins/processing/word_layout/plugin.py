@@ -76,6 +76,9 @@ class WordLayoutPlugin(ProcessModulePlugin):
 
         self._assembler: WordAssembler | None = None
         self._sig: tuple | None = None  # подпись (слово+геометрия) — пересборка при смене
+        # Латч слова: слово приходит ОДНИМ item (сигнал пульта/телефона), распознавание —
+        # другими items (без слова). Держим последнее непустое, пока не придёт новое.
+        self._latched_word = ""
         # Детект «нового диска»: новый диск = сменилась буква ИЛИ была пауза (нет диска).
         # Дедуп по БУКВЕ (не углу — угол дрожит на ±1-2° и плодил бы ложные «новые диски»).
         self._armed = True
@@ -181,15 +184,21 @@ class WordLayoutPlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def _resolve_word(self, item: dict) -> str:
-        """Слово из входного порта (приоритет) или из register «Слово»."""
+        """Слово: входной порт (приоритет) → латч последнего → register «Слово».
+
+        Слово приходит ОДНИМ item (сигнал пульта signal_2 / телефон), а распознавание —
+        другими items (без слова). Латчим последнее непустое слово и держим его, пока не
+        придёт новое — иначе target_word терялся бы на следующем же кадре предсказаний.
+        """
         src = self._reg.word_source
         if src:
             w = item.get(src)
             if isinstance(w, dict):
                 w = w.get("word") or w.get("value") or ""
             if isinstance(w, str) and w.strip():
+                self._latched_word = w
                 return w
-        return self._reg.target_word
+        return self._latched_word or self._reg.target_word
 
     def _build_assembler(self, word: str) -> tuple[WordAssembler, list[geometry.Point]]:
         """Собрать матчер по текущему режиму раскладки (шаг от первого / между first-last)."""

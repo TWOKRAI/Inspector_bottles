@@ -65,6 +65,32 @@ def test_emits_pose_xyzr() -> None:
     assert job["raw_angle_deg"] == 30.0
 
 
+def test_word_latched_from_signal_persists() -> None:
+    """Слово приходит ОДНИМ item (signal_2 пульта), распознавание — ДРУГИМИ items.
+
+    Латч: слово взводится сигналом и держится на последующих кадрах предсказаний.
+    Без латча word_source='signal_2' терялся бы на кадре без сигнала → диск не брался.
+    """
+    p = _make_plugin(
+        {
+            "word_source": "signal_2",
+            "use_pitch": False,
+            "first_x": 0.0,
+            "first_y": 0.0,
+            "last_x": 100.0,
+            "last_y": 0.0,
+            "settle_frames": 1,
+        }
+    )
+    # Кадр 1: только сигнал слова (без predictions) — задаёт слово, латчится.
+    out1 = _feed(p, {"signal_2": "КО", "data_type": "signal"})
+    assert "robot_job" not in out1  # диска нет — класть нечего
+    # Кадр 2: предсказание БЕЗ слова в item — слово берётся из латча, выдаётся job.
+    out2 = _feed(p, {"predictions": [_pred("К", angle=0.0, valid=True)]})
+    assert out2["robot_job"]["char"] == "К"
+    assert out2["robot_job"]["slot"] == 0
+
+
 def test_pitch_mode_along_y() -> None:
     # Раскладка от первого диска вдоль +Y: X постоянный, Y растёт с шагом = диаметр.
     p = _make_plugin(

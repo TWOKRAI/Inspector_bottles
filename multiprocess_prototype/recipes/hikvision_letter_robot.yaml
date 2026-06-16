@@ -44,8 +44,6 @@ version: 3
 description: "Hikvision → круги → линия(триггер) → квадратный crop → ml_inference (буква+угол)"
 
 blueprint:
-  name: default
-  description: ''
   processes:
     - process_name: gui
       plugins: []
@@ -314,23 +312,22 @@ blueprint:
           plugin_class: Plugins.processing.word_layout.plugin.WordLayoutPlugin
           category: processing
           config:
-            target_word: ''        # задай слово здесь (или из пульта/инспектора)
-            word_source: ''        # пусто = слово только из target_word
-            # Раскладка: от ПЕРВОГО диска по направлению + шагу (слово любой длины).
+            target_word: ''
+            word_source: signal_2
             use_pitch: true
-            first_x: 300.0         # центр ПЕРВОГО диска (мм робота) — подбери под стол
+            first_x: 300.0
             first_y: -100.0
-            line_angle_deg: 90.0   # 90 = слово вдоль +Y (X постоянный, Y растёт)
-            pitch_mm: 0.0          # 0 = авто = диаметр (2·55=110 мм); задай своё при зазорах
-            last_x: 500.0          # (режим use_pitch=false) центр последнего диска
+            line_angle_deg: 90.0
+            pitch_mm: 0.0
+            last_x: 500.0
             last_y: -100.0
-            place_z_mm: 0.0        # высота Z укладки в команде роботу (x,y,z,r) — подбери
+            place_z_mm: 0.0
             disk_radius_mm: 55.0
-            word_gap_slots: 1      # пробел = 1 диск пустоты (больше → 2,3…)
-            angle_zero_deg: 0.0    # общая целевая ориентация букв (доворот = zero − угол модели)
-            angle_invert: false    # сменить знак доворота под ось робота
+            word_gap_slots: 1
+            angle_zero_deg: 0.0
+            angle_invert: false
             min_confidence: 0.5
-            settle_frames: 1       # тракт даёт ~1 кадр на диск (crop по триггеру линии)
+            settle_frames: 1
             use_trigger: false
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
@@ -341,43 +338,97 @@ blueprint:
       protected: false
       category:
       metadata: {}
+    - process_name: phone
+      plugins:
+        - plugin_name: phone_camera
+          plugin_class: Services.phone_gateway.plugin.plugin.PhoneCameraPlugin
+          category: source
+          config:
+            camera_id: 9
+            host: 0.0.0.0
+            http_port: 8080
+            resolution_width: 640
+            resolution_height: 480
+            auto_start: false
+            show_hint: true
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: low
+      target_process:
+      chain_targets:
+        - gui
+        - layout
+      description:
+      protected: false
+      category:
+      metadata:
+        source_target_fps: 10
   wires:
     - source: camera_0.hikvision.frame
       target: cc.color_convert.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: cc.color_convert.frame
       target: roi.roi_crop.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: roi.roi_crop.frame
       target: detector.hsv_mask.frame
+      src_dtype:
+      tgt_dtype:
       description: вход процесса = ПЕРВЫЙ плагин (hsv_mask); далее morphology→circle_detector линейно
     - source: detector.circle_detector.frame
       target: crop.center_crop.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: detector.circle_detector.frame
       target: draw.circle_draw.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: detector.circle_detector.detections
       target: draw.circle_draw.detections
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: detector.circle_detector.detections
       target: line.line_filter.detections
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: line.line_filter.overlay
       target: crop.center_crop.trigger_in
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: line.line_filter.overlay
       target: draw.overlay_draw.overlay
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: crop.center_crop.frame
       target: infer.ml_inference.frame
+      src_dtype:
+      tgt_dtype:
       description: ''
     - source: detector.circle_detector.mask
       target: maskview.mask_to_frame.mask
+      src_dtype:
+      tgt_dtype:
       description: маска белого → отдельный дисплей для тюнинга
     - source: infer.ml_inference.predictions
       target: layout.word_layout.predictions
+      src_dtype:
+      tgt_dtype:
       description: буква+угол → раскладка слова (задание роботу {x,y,angle})
+    - source: phone.phone_camera.signal_2
+      target: layout.word_layout.word
+      src_dtype:
+      tgt_dtype:
+      description: целевое слово с пульта телефона → раскладка (word_source=signal_2, латчится)
   displays:
     - node_id: draw.overlay_draw.frame
       display_id: main
@@ -385,8 +436,10 @@ blueprint:
       display_id: recog
     - node_id: maskview.mask_to_frame.frame
       display_id: mask
+    - node_id: phone.phone_camera.frame
+      display_id: phone
   metadata:
-    gui_positions: &id001
+    gui_positions:
       camera_0.hikvision:
         - 16.0
         - 160.0
@@ -426,6 +479,9 @@ blueprint:
       layout.word_layout:
         - 2420.0
         - 40.0
+      phone.phone_camera:
+        - 2160.0
+        - 320.0
       main:
         - 2360.0
         - 240.0
@@ -435,7 +491,12 @@ blueprint:
       mask:
         - 1760.0
         - 320.0
+      phone:
+        - 2620.0
+        - 320.0
     locked_nodes: []
+    description: ''
+    name: default
 displays:
   - id: main
     name: Кадр + круги + линия
@@ -485,7 +546,78 @@ displays:
     rotate: 0
     flip: none
     crop:
+  - id: phone
+    name: Фото с телефона
+    enabled: false
+    width: 640
+    height: 480
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 700
+      y: 200
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+    crop:
 created_at: ''
 active_services: []
 display_bindings: []
-gui_positions: *id001
+gui_positions:
+  camera_0.hikvision:
+    - 16.0
+    - 160.0
+  cc.color_convert:
+    - 320.0
+    - 160.0
+  roi.roi_crop:
+    - 561.1730899056462
+    - 168.2632837710127
+  detector.hsv_mask:
+    - 880.0
+    - 160.0
+  detector.morphology:
+    - 1060.0
+    - 160.0
+  detector.circle_detector:
+    - 1240.0
+    - 160.0
+  line.line_filter:
+    - 1500.0
+    - 132.5120664236136
+  crop.center_crop:
+    - 1820.0
+    - 40.0
+  infer.ml_inference:
+    - 2160.0
+    - 40.0
+  draw.circle_draw:
+    - 1820.0
+    - 220.0
+  draw.overlay_draw:
+    - 2020.0
+    - 220.0
+  maskview.mask_to_frame:
+    - 1500.0
+    - 260.0
+  layout.word_layout:
+    - 2420.0
+    - 40.0
+  phone.phone_camera:
+    - 2160.0
+    - 320.0
+  main:
+    - 2360.0
+    - 240.0
+  recog:
+    - 2560.0
+    - 60.0
+  mask:
+    - 1760.0
+    - 320.0
+  phone:
+    - 2620.0
+    - 320.0
+devices: []
