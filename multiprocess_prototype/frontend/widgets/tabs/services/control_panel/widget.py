@@ -47,6 +47,8 @@ class ControlPanelWidget(QWidget):
     control_add_requested = Signal(dict)
     # Запрос удалить контрол: control_id.
     control_remove_requested = Signal(str)
+    # Запрос открыть пикер «Добавить из ноды» (дашборд) — обрабатывает секция.
+    node_pick_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -82,6 +84,12 @@ class ControlPanelWidget(QWidget):
         layout.addWidget(line)
         layout.addWidget(QLabel("<b>Добавить контрол</b>"))
         layout.addLayout(self._build_add_form())
+
+        # Дашборд: вынести параметр/команду ДРУГОЙ ноды в пульт (через пикер).
+        pick_btn = QPushButton("Добавить из ноды…")
+        pick_btn.setToolTip("Вынести в пульт параметр или команду другой ноды (дашборд)")
+        pick_btn.clicked.connect(self.node_pick_requested.emit)
+        layout.addWidget(pick_btn)
 
         layout.addStretch()
 
@@ -199,7 +207,6 @@ class ControlPanelWidget(QWidget):
         cid = str(c.get("id"))
         ctype = c.get("type", "button")
         label = c.get("label") or cid
-        port = c.get("port", "out_1")
 
         row = QWidget()
         h = QHBoxLayout(row)
@@ -210,9 +217,10 @@ class ControlPanelWidget(QWidget):
 
         h.addWidget(self._build_operable(cid, ctype, c, label), 1)
 
-        port_lbl = QLabel(f"→ {port}")
-        port_lbl.setProperty("role", "placeholder-italic")
-        h.addWidget(port_lbl)
+        target_lbl = QLabel(self._target_hint(c))
+        target_lbl.setProperty("role", "placeholder-italic")
+        target_lbl.setToolTip("Куда идёт значение контрола")
+        h.addWidget(target_lbl)
 
         rm = QPushButton("✕")
         rm.setFixedWidth(28)
@@ -220,6 +228,19 @@ class ControlPanelWidget(QWidget):
         rm.clicked.connect(lambda _=False, _id=cid, _lbl=label: self._confirm_remove(_id, _lbl))
         h.addWidget(rm)
         return row
+
+    @staticmethod
+    def _target_hint(c: dict) -> str:
+        """Подпись назначения контрола по источнику (порт / поле / команда чужой ноды)."""
+        source = c.get("source") or "local"
+        proc = c.get("target_process") or ""
+        if source == "param":
+            return f"✎ {proc}.{c.get('target_field', '')}"
+        if source == "monitor":
+            return f"👁 {proc}.{c.get('target_field', '')}"
+        if source == "action":
+            return f"▶ {proc}.{c.get('target_command', '')}"
+        return f"→ {c.get('port', 'out_1')}"
 
     def _confirm_remove(self, control_id: str, label: str) -> None:
         """Подтвердить удаление контрола (защита от случайного клика ✕)."""
@@ -266,6 +287,20 @@ class ControlPanelWidget(QWidget):
             le.setText(str(c.get("value") or ""))
             le.returnPressed.connect(lambda _id=cid, _w=le: self.control_operated.emit(_id, _w.text()))
             return le
+        if ctype == "select":
+            combo = QComboBox()
+            for opt in c.get("options") or []:
+                if isinstance(opt, dict):
+                    combo.addItem(str(opt.get("label", opt.get("value", ""))), opt.get("value"))
+                else:
+                    combo.addItem(str(opt), opt)
+            cur = combo.findData(c.get("value"))
+            if cur >= 0:
+                combo.setCurrentIndex(cur)
+            # activated (не currentIndexChanged) — эмит ТОЛЬКО по выбору пользователя,
+            # перестроение из state (setCurrentIndex) не шлёт ложную команду.
+            combo.activated.connect(lambda _i, _id=cid, _w=combo: self.control_operated.emit(_id, _w.currentData()))
+            return combo
         # button (по умолчанию) — подпись контрола на самой кнопке.
         btn = QPushButton(label or "Нажать")
         btn.clicked.connect(lambda _=False, _id=cid: self.control_operated.emit(_id, True))

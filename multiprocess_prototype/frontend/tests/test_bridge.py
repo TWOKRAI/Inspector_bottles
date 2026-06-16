@@ -43,7 +43,7 @@ class TestCommandSender:
     """Тесты CommandSender."""
 
     def test_send_command_format(self):
-        """send_command формирует корректный dict."""
+        """send_command формирует корректный dict и доставляет через PM-relay."""
         mock_process = MagicMock()
         mock_process.name = "gui"
         sender = CommandSender(mock_process)
@@ -52,8 +52,14 @@ class TestCommandSender:
 
         mock_process.send_message.assert_called_once()
         args = mock_process.send_message.call_args
-        assert args[0][0] == "camera_0"  # target
-        msg = args[0][1]
+        # Команда НЕ-своему процессу идёт конвертом process.relay в ProcessManager
+        assert args[0][0] == "ProcessManager"
+        envelope = args[0][1]
+        assert envelope["command"] == "process.command"
+        relay = envelope["data"]
+        assert relay["cmd"] == "process.relay"
+        assert relay["target_process"] == "camera_0"
+        msg = relay["inner_message"]
         assert msg["type"] == "command"
         assert msg["data_type"] == "start_capture"
         assert msg["sender"] == "gui"
@@ -61,14 +67,15 @@ class TestCommandSender:
         assert msg["data"] == {"resolution": "1080p"}
 
     def test_send_command_no_args(self):
-        """send_command без args → data == {}."""
+        """send_command без args → inner data == {}."""
         mock_process = MagicMock()
         mock_process.name = "gui"
         sender = CommandSender(mock_process)
 
         sender.send_command("camera_0", "stop_capture")
 
-        msg = mock_process.send_message.call_args[0][1]
+        envelope = mock_process.send_message.call_args[0][1]
+        msg = envelope["data"]["inner_message"]
         assert msg["data"] == {}
 
 

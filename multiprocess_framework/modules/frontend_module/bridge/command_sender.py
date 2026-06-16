@@ -90,7 +90,22 @@ class CommandSender:
         """
         # Форма сообщения — общий билдер протокола (один источник правды с driver'ом).
         msg = build_command_message(target_process, command, args, sender=self._process.name)
-        self._process.send_message(target_process, msg)
+        self._route_command(target_process, msg)
+
+    def _route_command(self, target_process: str, msg: dict[str, Any]) -> None:
+        """Доставить команду: свой процесс/PM — напрямую, остальные — через PM-relay.
+
+        PM-relay (см. process.relay в ProcessManager): команды НЕ-своему процессу
+        маршрутизируем через ProcessManager, у которого ВСЕГДА свежие очереди.
+        Прямой send_message из GUI после hot-swap рецепта кладёт билет в мёртвую
+        очередь (стейл pickle-копия PSR GUI — GUI protected, не пересоздаётся) →
+        тихая потеря. Свой процесс (GUI→GUI) и сам PM — напрямую (их очереди
+        стабильны: GUI не пересоздаётся, PM провижинит сам себя).
+        """
+        if target_process == self._process.name or target_process == "ProcessManager":
+            self._process.send_message(target_process, msg)
+            return
+        self.send_system_command({"cmd": "process.relay", "target_process": target_process, "inner_message": msg})
 
     # --- v2: field command с debounce ---
 

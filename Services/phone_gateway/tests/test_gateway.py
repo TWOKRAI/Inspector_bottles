@@ -109,6 +109,22 @@ def test_http_health(running_gateway):
         assert json.loads(resp.read())["ok"] is True
 
 
+def test_http_disables_keepalive(running_gateway):
+    """Ответ закрывает соединение (Connection: close) — телефон не держит
+    мёртвый keep-alive сокет, переподключение всегда по свежему соединению."""
+    url = f"http://127.0.0.1:{running_gateway.port}/health"
+    with urllib.request.urlopen(url, timeout=5) as resp:
+        assert resp.headers.get("Connection", "").lower() == "close"
+
+
+def test_http_reconnect_sequential(running_gateway):
+    """Несколько независимых соединений подряд проходят (имитация переподключения)."""
+    url = f"http://127.0.0.1:{running_gateway.port}/health"
+    for _ in range(5):
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            assert json.loads(resp.read())["ok"] is True
+
+
 def test_http_post_frame_and_word(running_gateway):
     base = f"http://127.0.0.1:{running_gateway.port}"
     status, body = _post(base + "/frame", _jpeg(48, 36), "image/jpeg")

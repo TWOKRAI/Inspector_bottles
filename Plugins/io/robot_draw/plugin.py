@@ -14,6 +14,7 @@ RobotClient.draw() внутри devices, здесь шлётся весь пут
 
 from __future__ import annotations
 
+import os
 import queue
 import time
 from typing import Any
@@ -35,6 +36,10 @@ from .registers import RobotDrawRegisters
 _FORWARDER_POLL_S = 0.1
 # Макс. размер локальной очереди заданий (одно задание = один snapshot).
 _QUEUE_MAXSIZE = 8
+# Буфер робота на один проход (= PTS_MAX / DEFAULT_PASS_LIMIT). Путь длиннее робот
+# рисует несколькими проходами с подъёмом пера и заездом домой между ними — это
+# отражается в предпросмотре (границы проходов). Полный рисунок при этом сохраняется.
+_PASS_LIMIT = 100
 
 
 @register_plugin(
@@ -147,6 +152,13 @@ class RobotDrawPlugin(ProcessModulePlugin):
             ]
             if not points:
                 continue
+
+            # Пробный прогон: пишем точки в текст и НЕ трогаем робот (проверка перед боем).
+            if self._reg.dry_run:
+                self._preview_points(points)
+                self._armed = False
+                break
+
             task = {"device_id": self._reg.device_id, "points": points}
             try:
                 self._queue.put_nowait(task)
@@ -158,6 +170,78 @@ class RobotDrawPlugin(ProcessModulePlugin):
             self._armed = False
             break
         return items
+
+    # ------------------------------------------------------------------ #
+    # ПРОБНЫЙ ПРОГОН — предпросмотр точек в тексте (роботу не отправляем)
+    # ------------------------------------------------------------------ #
+
+    def _preview_points(self, points: list[dict]) -> None:
+        """dry_run: записать точки в текст + краткая сводка в лог, роботу не слать."""
+        try:
+            path = self._dump_points(points)
+        except Exception as exc:  # noqa: BLE001 — превью не должно валить pipeline
+            self._ctx.log_error(f"RobotDrawPlugin: не удалось записать предпросмотр точек: {exc}")
+            return
+        n = len(points)
+        xs = [p["x_mm"] for p in points]
+        ys = [p["y_mm"] for p in points]
+        passes = self._count_passes(points)
+        self._ctx.log_info(
+            f"RobotDrawPlugin: ПРОБНЫЙ ПРОГОН — {n} точек, проходов={passes}, "
+            f"X {min(xs):.1f}..{max(xs):.1f} мм, Y {min(ys):.1f}..{max(ys):.1f} мм → {path} "
+            "(роботу НЕ отправлено)"
+        )
+
+    @staticmethod
+    def _to_draw_points(points: list[dict]) -> list[Any]:
+        """dict-точки → DrawPoint (для split_draw_passes — точные границы проходов)."""
+        from Services.robot_comm.core.datatypes import DrawPoint
+
+        return [DrawPoint(float(p["x_mm"]), float(p["y_mm"]), int(p.get("pen", 1))) for p in points]
+
+    def _count_passes(self, points: list[dict]) -> int:
+        """Сколько проходов ≤ _PASS_LIMIT (резка по штрихам, как у RobotClient.draw)."""
+        from Services.robot_comm.core.datatypes import split_draw_passes
+
+        return len(split_draw_passes(self._to_draw_points(points), _PASS_LIMIT))
+
+    def _dump_points(self, points: list[dict]) -> str:
+        """Записать точки в текстовый файл dump_path (мм + перо + рег 0.1мм + проходы).
+
+        Границы проходов считаются той же split_draw_passes, что и при реальной отправке —
+        предпросмотр показывает, где робот поднимет перо и заедет домой. Возвращает путь.
+        """
+        from Services.robot_comm.core.datatypes import split_draw_passes
+
+        path = self._reg.dump_path or "robot_points_preview.txt"
+        passes = split_draw_passes(self._to_draw_points(points), _PASS_LIMIT)
+        n = len(points)
+        pen_ups = sum(1 for p in points if int(p.get("pen", 1)) == 0)
+        xs = [p["x_mm"] for p in points]
+        ys = [p["y_mm"] for p in points]
+        out = [
+            f"# Робот {self._reg.device_id}: предпросмотр точек рисования ({time.strftime('%Y-%m-%d %H:%M:%S')})",
+            f"# Всего точек: {n} | подводов (pen=0): {pen_ups} | проходов по {_PASS_LIMIT}: {len(passes)}",
+            f"# Диапазон X(мм): {min(xs):.1f}..{max(xs):.1f}   Y(мм): {min(ys):.1f}..{max(ys):.1f}",
+            "# pen: 0 = подвод/перемещение (перо ВВЕРХ), 1 = рисование (перо ВНИЗ)",
+            "# [рег] = что реально уходит роботу (0.1 мм, целое s16)",
+            f"# {'idx':>4} {'x_mm':>9} {'y_mm':>9}  pen   [рег x10  y10]",
+        ]
+        idx = 0
+        for pi, batch in enumerate(passes, start=1):
+            if pi > 1:
+                out.append(f"# --- ПРОХОД {pi}: перо ВВЕРХ + заезд ДОМОЙ, дальше новый проход ---")
+            for p in batch:
+                x, y, pen = float(p.x_mm), float(p.y_mm), int(p.pen)
+                out.append(f"  {idx:>4} {x:>9.2f} {y:>9.2f}   {pen}    [{round(x * 10):>6} {round(y * 10):>6}]")
+                idx += 1
+        text = "\n".join(out) + "\n"
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return path
 
     # ------------------------------------------------------------------ #
     # FORWARDER (worker) — IPC-мост в процесс devices

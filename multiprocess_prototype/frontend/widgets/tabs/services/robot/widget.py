@@ -44,7 +44,7 @@ class RobotControlWidget(QWidget):
 
     # --- сигналы наружу (controller подключается) ---
     refresh_requested = Signal()
-    send_job_requested = Signal(float, float)  # x, y
+    send_job_requested = Signal(float, float, float)  # x, y, z (z=глубина захвата; 0 = дефолт прошивки)
     stop_requested = Signal(int)  # 1|2|3
     mode_change_requested = Signal(str)  # cvt|draw|manual
     servo_requested = Signal(bool)
@@ -117,11 +117,14 @@ class RobotControlWidget(QWidget):
         grid.addWidget(QLabel("Y, мм:"), 0, 2)
         self._spin_y = _dspin(-3276.7, 3276.7, 0.0)
         grid.addWidget(self._spin_y, 0, 3)
+        grid.addWidget(QLabel("Z, мм:"), 0, 4)
+        self._spin_z = _dspin(-3276.7, 3276.7, 0.0)  # 0 = глубина захвата по умолчанию (Z_PICK прошивки)
+        grid.addWidget(self._spin_z, 0, 5)
         self._btn_send_job = QPushButton("Послать тест-job")
         self._btn_send_job.clicked.connect(
-            lambda: self.send_job_requested.emit(self._spin_x.value(), self._spin_y.value())
+            lambda: self.send_job_requested.emit(self._spin_x.value(), self._spin_y.value(), self._spin_z.value())
         )
-        grid.addWidget(self._btn_send_job, 0, 4)
+        grid.addWidget(self._btn_send_job, 0, 6)
 
         # Стопы (семантика Lua)
         self._btn_stop1 = QPushButton("Стоп: домой")

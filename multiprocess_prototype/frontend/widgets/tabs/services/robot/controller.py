@@ -181,11 +181,11 @@ class RobotWidgetController:
     # Робот
     # ------------------------------------------------------------------ #
 
-    def _on_send_job(self, x: float, y: float) -> None:
+    def _on_send_job(self, x: float, y: float, z: float = 0.0) -> None:
         if not self._device_id:
             return
-        self._widget.set_status(f"Тест-job X={x:.1f} Y={y:.1f} отправлен.")
-        self._presenter.send_test_job(self._device_id, x, y)
+        self._widget.set_status(f"Тест-job X={x:.1f} Y={y:.1f} Z={z:.1f} отправлен.")
+        self._presenter.send_test_job(self._device_id, x, y, z)
 
     def _on_stop(self, mode: int) -> None:
         if not self._device_id:

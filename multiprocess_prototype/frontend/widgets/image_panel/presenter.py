@@ -23,6 +23,11 @@ class ImagePanelPresenter:
         # slot_id → последний валидный кадр (для снимка/grab). Храним ссылку (дёшево);
         # снимок — редкая ручная операция, риск рассинхрона кадра приемлем.
         self._last_frames: dict = {}
+        # slot_id незарегистрированных слотов, по которым уже выдано предупреждение.
+        # Источник (например phone_camera) может слать ~30 fps на дисплей, который
+        # выключен (enabled: false) — но всё ещё привязан в routing. Без троттлинга
+        # это заливает лог одинаковыми строками. Предупреждаем один раз на slot_id.
+        self._warned_unknown_slots: set[str] = set()
 
     # ------------------------------------------------------------------
     # Регистрация слотов
@@ -31,6 +36,9 @@ class ImagePanelPresenter:
     def register_slot(self, slot_id: str, slot: DisplaySlot) -> None:
         """Зарегистрировать слот под заданным идентификатором."""
         self._slots[slot_id] = slot
+        # Слот снова доступен — сбросить флаг «уже предупредили», чтобы при
+        # повторном выключении дисплея предупреждение выдалось ещё раз.
+        self._warned_unknown_slots.discard(slot_id)
         logger.debug("Слот зарегистрирован: %s", slot_id)
 
     def unregister_slot(self, slot_id: str) -> None:
@@ -55,10 +63,18 @@ class ImagePanelPresenter:
 
         Конвертирует numpy (BGR) → QImage → QPixmap → DisplaySlot.update_pixmap.
         При frame=None или пустом — показывает placeholder "Нет сигнала".
-        При неизвестном slot_id — предупреждение в лог.
+        При неизвестном slot_id — кадр тихо отбрасывается; предупреждение в лог
+        выдаётся один раз на slot_id (иначе живой источник на выключенный дисплей
+        заливает лог — см. self._warned_unknown_slots).
         """
         if slot_id not in self._slots:
-            logger.warning("on_frame: неизвестный slot_id '%s'", slot_id)
+            if slot_id not in self._warned_unknown_slots:
+                self._warned_unknown_slots.add(slot_id)
+                logger.warning(
+                    "on_frame: неизвестный slot_id '%s' — кадры отбрасываются "
+                    "(дисплей выключен или нет привязки); далее без повтора",
+                    slot_id,
+                )
             return
 
         slot = self._slots[slot_id]

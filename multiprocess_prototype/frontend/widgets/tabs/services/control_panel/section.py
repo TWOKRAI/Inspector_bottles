@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QWidget
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
 
+from .catalog import NodeCatalog
 from .presenter import ControlPanelPresenter
 from .widget import ControlPanelWidget
 
@@ -32,6 +33,7 @@ class _ControlPanelSection:
         self._runtime = runtime
         self._widget: ControlPanelWidget | None = None
         self._presenter: ControlPanelPresenter | None = None
+        self._catalog: NodeCatalog | None = None
         self._handles: list[Any] = []
 
     @property
@@ -60,19 +62,56 @@ class _ControlPanelSection:
     # ------------------------------------------------------------------ #
 
     def _build(self) -> None:
+        bridge = getattr(self._runtime, "topology_bridge", None)
         self._widget = ControlPanelWidget()
-        self._presenter = ControlPanelPresenter(
-            bridge=getattr(self._runtime, "topology_bridge", None),
-            services=self._services,
-        )
+        self._presenter = ControlPanelPresenter(bridge=bridge, services=self._services)
+        # Каталог нод/полей/команд для пикера дашборда. Топологию берём СВЕЖЕЙ из
+        # runtime при каждом вызове (не кэшируем bridge в замыкании — на момент сборки
+        # секции topology_bridge мог быть ещё не присвоен; так же делает _resolve_node).
+        self._catalog = NodeCatalog(self._current_topology)
         self._widget.control_operated.connect(self._on_operated)
         self._widget.control_add_requested.connect(self._on_add)
         self._widget.control_remove_requested.connect(self._on_remove)
+        self._widget.node_pick_requested.connect(self._on_node_pick)
         self._bind()
 
     def _on_operated(self, control_id: str, value: object) -> None:
-        if self._presenter is not None:
-            self._presenter.operate(control_id, value)
+        """Операция над контролом → роутинг по его source (presenter знает куда)."""
+        if self._presenter is None or self._widget is None:
+            return
+        spec = next(
+            (c for c in self._widget.current_controls() if c.get("id") == control_id),
+            {"id": control_id, "source": "local"},
+        )
+        self._presenter.operate(spec, value)
+
+    def _on_node_pick(self) -> None:
+        """Открыть пикер «Добавить из ноды» → построить proxy-контрол → добавить + персист."""
+        if self._presenter is None or self._widget is None:
+            return
+        from .picker import NodePickerDialog
+
+        dlg = NodePickerDialog(self._catalog, parent=self._widget)
+        if dlg.exec() != dlg.DialogCode.Accepted:
+            return
+        spec = dlg.result_spec()
+        if not spec:
+            return
+        spec = self._dedupe_id(spec)
+        proc, idx = self._resolve_node()
+        new_controls = self._widget.current_controls() + [spec]
+        self._presenter.add(spec, proc or "", idx, new_controls)
+
+    def _dedupe_id(self, spec: dict) -> dict:
+        """Сделать id контрола уникальным среди текущего набора (суффикс _N)."""
+        existing = {c.get("id") for c in self._widget.current_controls()} if self._widget else set()
+        sid = spec.get("id") or "ctl"
+        if sid in existing:
+            n = 2
+            while f"{sid}_{n}" in existing:
+                n += 1
+            spec = {**spec, "id": f"{sid}_{n}"}
+        return spec
 
     def _on_add(self, spec: dict) -> None:
         if self._presenter is None or self._widget is None:
@@ -88,13 +127,24 @@ class _ControlPanelSection:
         new_controls = [c for c in self._widget.current_controls() if c.get("id") != control_id]
         self._presenter.remove(control_id, proc or "", idx, new_controls)
 
+    def _current_topology(self) -> dict:
+        """Свежая editor-топология из TopologyRepository (источник истины, как Pipeline/Processes).
+
+        НЕ через ``bridge.topology`` — у конкретного TopologyBridge такого свойства нет
+        (вернул бы None → пустой пикер). Канон — ``services.topology.load().to_dict()``.
+        """
+        topo_repo = getattr(self._services, "topology", None)
+        if topo_repo is None:
+            return {}
+        try:
+            data = topo_repo.load().to_dict()
+        except Exception:  # noqa: BLE001 — топология может быть недоступна (тесты/ранний старт)
+            return {}
+        return data if isinstance(data, dict) else {}
+
     def _resolve_node(self) -> tuple[str | None, int]:
         """Найти ноду control_panel в активной топологии → (process_name, plugin_index)."""
-        bridge = getattr(self._runtime, "topology_bridge", None)
-        topo = getattr(bridge, "topology", None) if bridge is not None else None
-        if not isinstance(topo, dict):
-            return None, 0
-        for proc in topo.get("processes", []) or []:
+        for proc in self._current_topology().get("processes", []) or []:
             for idx, pl in enumerate(proc.get("plugins", []) or []):
                 if isinstance(pl, dict) and pl.get("plugin_name") == _PLUGIN_NAME:
                     return proc.get("process_name"), idx

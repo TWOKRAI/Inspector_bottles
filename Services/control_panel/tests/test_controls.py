@@ -47,6 +47,41 @@ class TestCoerce:
         assert spec.coerce(None) == ""
 
 
+class TestSelect:
+    """select — выпадающий список: дефолт = первый пункт, coerce валидирует value."""
+
+    def _spec(self) -> ControlSpec:
+        return ControlSpec(
+            id="mode",
+            type="select",
+            options=[
+                {"label": "Рисование", "value": "draw"},
+                {"label": "Ручной", "value": "manual"},
+                {"label": "Конвейер", "value": "cvt"},
+            ],
+        )
+
+    def test_default_is_first_option(self) -> None:
+        assert self._spec().default_value() == "draw"
+
+    def test_default_empty_when_no_options(self) -> None:
+        assert ControlSpec(id="s", type="select").default_value() == ""
+
+    def test_coerce_keeps_valid_value(self) -> None:
+        assert self._spec().coerce("manual") == "manual"
+
+    def test_coerce_falls_to_first_when_invalid(self) -> None:
+        assert self._spec().coerce("fly") == "draw"
+
+    def test_option_values_listed(self) -> None:
+        assert self._spec().option_values() == ["draw", "manual", "cvt"]
+
+    def test_roundtrip_keeps_options(self) -> None:
+        specs = parse_controls(controls_to_dicts([self._spec()]))
+        assert specs[0].type == "select"
+        assert specs[0].option_values() == ["draw", "manual", "cvt"]
+
+
 class TestParseControls:
     def test_parse_fills_default_value(self) -> None:
         specs = parse_controls([{"id": "s", "type": "slider", "min": 2.0, "max": 8.0}])

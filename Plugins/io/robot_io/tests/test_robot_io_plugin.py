@@ -274,3 +274,49 @@ def test_once_per_transition_logging() -> None:
 def test_no_commands() -> None:
     """Плагин v2 не имеет команд."""
     assert RobotIoPlugin.commands == {}
+
+
+# ------------------------------------------------------------------ #
+# Тесты: возврат на ленту (robot_return_job)
+# ------------------------------------------------------------------ #
+
+
+def test_process_enqueues_return_jobs() -> None:
+    """Список robot_return_jobs → отдельные задания robot_return_job в deque."""
+    plugin, _ctx = make_plugin()
+    item = {
+        "robot_return_jobs": [
+            {"x_mm": 0.0, "y_mm": 0.0, "z_mm": -90.0, "char": "К"},
+            {"x_mm": 100.0, "y_mm": 0.0, "z_mm": -90.0, "char": "О"},
+        ]
+    }
+    plugin.process([item])
+    assert len(plugin._deque) == 2
+    assert plugin._deque[0]["_command"] == "robot_return_job"
+    assert (plugin._deque[0]["x_mm"], plugin._deque[0]["z_mm"]) == (0.0, -90.0)
+    assert plugin._deque[1]["x_mm"] == 100.0
+
+
+def test_forwarder_sends_return_command() -> None:
+    """Forwarder шлёт robot_return_job (команда из _command, не уходит в args)."""
+    client = FakeDeviceHubClient()
+    plugin, _ctx = make_plugin(client=client)
+    plugin._deque.append(
+        {"_command": "robot_return_job", "device_id": "robot_main", "x_mm": 5.0, "y_mm": 1.0, "z_mm": -90.0}
+    )
+
+    stop = threading.Event()
+    pause = threading.Event()
+    worker = threading.Thread(target=plugin._forwarder_loop, args=(stop, pause), daemon=True)
+    worker.start()
+    for _ in range(200):
+        if not plugin._deque:
+            break
+        threading.Event().wait(0.01)
+    stop.set()
+    worker.join(timeout=2.0)
+
+    assert len(client.calls) == 1
+    assert client.calls[0][0] == "robot_return_job"
+    assert "_command" not in client.calls[0][1]  # служебный ключ снят перед отправкой
+    assert client.calls[0][1]["z_mm"] == -90.0

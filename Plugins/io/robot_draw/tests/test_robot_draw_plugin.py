@@ -158,3 +158,46 @@ def test_no_pipeline_trigger_when_source_empty() -> None:
     plugin.process([{"out_1": True, "draw_points": [{"x_mm": 1.0, "y_mm": 2.0}]}])
     assert plugin._queue.empty()
     assert plugin._armed is False
+
+
+def test_dry_run_writes_preview_and_skips_robot(tmp_path) -> None:
+    """Пробный прогон: «Рисовать» пишет точки в текст и НЕ ставит задание в очередь."""
+    dump = tmp_path / "preview.txt"
+    plugin = RobotDrawPlugin()
+    ctx = make_ctx({"device_id": "robot_main", "dry_run": True, "dump_path": str(dump)})
+    plugin.configure(ctx)
+    client = FakeDeviceHubClient()
+    with patch("Plugins.io.robot_draw.plugin.DeviceHubClient", return_value=client):
+        plugin.start(ctx)
+    plugin._client = client
+
+    plugin.cmd_send({})
+    pts = [{"x_mm": 325.0, "y_mm": -223.0, "pen": 0}, {"x_mm": 544.0, "y_mm": -17.0, "pen": 1}]
+    plugin.process([{"draw_points": pts}])
+
+    assert plugin._queue.empty()  # роботу НЕ отправлено
+    assert dump.exists()
+    text = dump.read_text(encoding="utf-8")
+    assert "Всего точек: 2" in text
+    assert "325.00" in text and "-223.00" in text
+    assert "3250" in text and "-2230" in text  # рег 0.1 мм — то, что реально уходит роботу
+
+
+def test_dry_run_marks_pass_boundaries(tmp_path) -> None:
+    """Путь >100 точек в пробном прогоне → в тексте видны границы проходов."""
+    dump = tmp_path / "preview.txt"
+    plugin = RobotDrawPlugin()
+    ctx = make_ctx({"device_id": "robot_main", "dry_run": True, "dump_path": str(dump)})
+    plugin.configure(ctx)
+    client = FakeDeviceHubClient()
+    with patch("Plugins.io.robot_draw.plugin.DeviceHubClient", return_value=client):
+        plugin.start(ctx)
+    plugin._client = client
+
+    plugin.cmd_send({})
+    pts = [{"x_mm": 0.0, "y_mm": 0.0, "pen": 0}] + [{"x_mm": float(i), "y_mm": 0.0, "pen": 1} for i in range(1, 130)]
+    plugin.process([{"draw_points": pts}])
+
+    assert plugin._queue.empty()
+    text = dump.read_text(encoding="utf-8")
+    assert "ПРОХОД 2" in text  # 130 точек одним штрихом → 2 прохода

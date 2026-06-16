@@ -108,3 +108,47 @@ class TestOverlayAndOutput:
         assert p._counted_total == 1
         p.process([_dets((104, 240))])  # новый трек (>3px от старого), но дедуп ≤5px
         assert p._counted_total == 1
+
+
+class TestZoneEdge:
+    """zone_edge — rising-edge по занятости зоны, БЕЗ трекинга (робастно к скорости)."""
+
+    def test_fires_on_first_frame_in_zone(self):
+        """Засчитывает с ПЕРВОГО кадра в зоне — без min_hits/трекинга."""
+        p = _make_plugin(center_x=320, center_y=240, angle=0, zone_width=40, mode="zone_edge")
+        out = p.process([_dets((100, 240))])  # круг сразу в зоне
+        assert p._counted_total == 1
+        assert out[0]["filtered"][0]["xy"] == [100.0, 240.0]
+
+    def test_robust_to_large_jumps(self):
+        """Диск «телепортируется» большими скачками (быстрая лента) — каждый проход
+        засчитывается ровно один раз, БЕЗ зависимости от max_match_distance."""
+        p = _make_plugin(center_y=240, angle=0, zone_width=40, rearm_frames=1, mode="zone_edge")
+        p.process([_dets((10, 240))])  # появился в зоне скачком → зачёт
+        assert p._counted_total == 1
+        p.process([_dets((30, 240))])  # ещё в зоне → не дубль
+        assert p._counted_total == 1
+        p.process([_dets((500, 50))])  # ушёл из зоны → пере-взвод (rearm_frames=1)
+        p.process([_dets((12, 240))])  # новый проход скачком → зачёт
+        assert p._counted_total == 2
+
+    def test_no_retrigger_while_occupied(self):
+        """Пока зона занята — один триггер (rising-edge), без повторов каждый кадр."""
+        p = _make_plugin(center_y=240, angle=0, zone_width=40, mode="zone_edge")
+        for _ in range(5):
+            p.process([_dets((100, 240))])
+        assert p._counted_total == 1
+
+    def test_rearm_after_empty_streak(self):
+        """Пере-взвод только после rearm_frames пустых кадров (гасит мерцание детекции)."""
+        empty = {"detections": [], "seq_id": 1}
+        p = _make_plugin(center_y=240, angle=0, zone_width=40, rearm_frames=3, mode="zone_edge")
+        p.process([_dets((100, 240))])
+        assert p._counted_total == 1
+        p.process([empty])  # 1 пустой кадр < rearm → НЕ пере-взводим (мерцание)
+        p.process([_dets((100, 240))])  # вернулся — зона ещё «занята»
+        assert p._counted_total == 1  # не дубль
+        for _ in range(3):  # полное освобождение зоны
+            p.process([empty])
+        p.process([_dets((100, 240))])  # новый проход
+        assert p._counted_total == 2

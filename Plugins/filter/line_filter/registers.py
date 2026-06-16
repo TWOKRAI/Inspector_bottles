@@ -14,7 +14,7 @@ from multiprocess_framework.modules.process_module.plugins import register_schem
 from multiprocess_framework.modules.process_module.plugins import FieldMeta
 from multiprocess_framework.modules.process_module.plugins import SchemaBase
 
-LineMode = Literal["enter_zone", "cross_line"]
+LineMode = Literal["enter_zone", "cross_line", "zone_edge"]
 
 
 @register_schema("LineFilterRegistersV1")
@@ -68,7 +68,11 @@ class LineFilterRegisters(SchemaBase):
         LineMode,
         FieldMeta(
             "Mode",
-            info="enter_zone — вход в полосу; cross_line — пересечение линии",
+            info=(
+                "enter_zone/cross_line — по трекеру (нужен match_distance ≥ смещения за кадр); "
+                "zone_edge — rising-edge по занятости зоны БЕЗ трекинга (робастно к скорости, "
+                "один объект в зоне; условие: zone_width ≥ смещения за кадр)"
+            ),
         ),
     ] = "enter_zone"
 
@@ -105,12 +109,21 @@ class LineFilterRegisters(SchemaBase):
         int,
         FieldMeta(
             "Match Distance",
-            info="Радиус ассоциации точки к треку (px)",
+            info="Радиус ассоциации точки к треку (px). НЕ применяется в zone_edge",
             min=1,
             max=200,
             unit="px",
         ),
     ] = 20
+    rearm_frames: Annotated[
+        int,
+        FieldMeta(
+            "Re-arm Frames",
+            info="zone_edge: кадров пустой зоны до пере-взвода триггера (гасит мерцание детекции)",
+            min=1,
+            max=60,
+        ),
+    ] = 2
     hysteresis_margin: Annotated[
         int,
         FieldMeta(

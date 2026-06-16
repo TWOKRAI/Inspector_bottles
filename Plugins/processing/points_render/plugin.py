@@ -70,6 +70,9 @@ class PointsRenderPlugin(ProcessModulePlugin):
             bg_white=bool(self._reg.bg_white),
             dot_radius=int(self._reg.dot_radius),
             show_travel=bool(self._reg.show_travel),
+            show_sheet=bool(self._reg.show_sheet),
+            flip_y=bool(self._reg.flip_y),
+            swap_axes=bool(self._reg.swap_axes),
         )
         self._reg.points_last = len(points) if isinstance(points, list) else 0
         return {**item, "frame": canvas}

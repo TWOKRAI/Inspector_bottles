@@ -64,7 +64,7 @@
 - [Command-bus P4.4 plan](project_command_bus_p4_4.md) — TRH P4.4: убрать двойную диспетчеризацию, CommandManager=библиотека, +lifecycle-feedback; ревью Opus NEEDS REWORK→fixed (3 блокера), вариант B
 - [Recipe hot-swap](project_recipe_hotswap.md) — Task 1-7 DONE; Task 7 кадры-после-switch РЕШЁН (5cd23192) двухфазной регистрацией очередей в replace_blueprint (НЕ SHM/камера); направление — recipe-orchestrator-unify
 - [All components via BaseManager](feedback_all_components_base_manager.md) — владелец 2026-06-07: все компоненты наследуют BaseManager+ObservableMixin (единообразие > минимализм), даже чистые стратегии
-- [Graceful-stop debt](project_graceful_stop_debt.md) — 5с-хан­г при switch/shutdown; cancel_join_thread ИСКЛЮЧЁН (e2e не помог, ребёнок не доходит до finally); копать в stop_all_workers/put()/cv2.read()
+- [Graceful-stop debt](project_graceful_stop_debt.md) — 5с-хан­г при switch/shutdown; ПРИЧИНА ПОДТВЕРЖДЕНА (2026-06-16): блокирующий produce() камеры (Hikvision capture_frame/cv2.read), stop_event не проверяется внутри; фикс — прерываемый produce + plugin.shutdown
 - [Camera settings feature](project_camera_settings_feature.md) — отложено в новый чат: настройки камеры в Services (пресеты + actual params, Live + persist); CapturePlugin/DirectShow, MJPG-долг
 - [Command-result bridge](project_command_result_bridge.md) — DONE 2026-06-07: request/response GUI→PM (дискретные команды узнают результат, field-write fire-and-forget); FE-004; разблокирует lifecycle + pipeline-Этап3
 - [qt-mcp launch](reference_qt_mcp_launch.md) — probe только с QT_MCP_PROBE=1 (порт 9142); backend_ctl флуд на 8765 безобиден; чистка по PID не глобально
@@ -85,3 +85,4 @@
 - [Recipe inspector join key](project_recipe_inspector_join_key.md) — inspector(join) обязан быть прямым ключом процесса; GUI-save кладёт под metadata → join молча выключен; ПОЧИНЕНО fix-forward в unwrap_recipe (hoist из metadata)
 - [Hikvision letter robot recipe](project_hikvision_letter_robot.md) — рецепт Hikvision→белая маска→круг→линия(вертикаль)→crop→ml_inference(буква+угол); Шаг1 готов live; ROI 560,240,800,600; далее калибровка→px→мм→робот
 - [Recipe save/load arch](project_recipe_save_load_arch.md) — save не писал правки полей (model/domain desync, FIXED) + «кривая» загрузка (порядок set_active/dispatch, FIXED); бэкенд УЖЕ stop-all→load-fresh; долги: on_result, switch≠boot, display-SHM, graceful-stop
+- [Switch routing stale](project_switch_routing_stale.md) — ПОСЛЕ switch рецепта параметры молча не доходят (стейл-PSR GUI: старые очереди; mp.Queue нельзя переслать); НЕ коллизия set_config (та мертва/шум); фикс — live-команды через PM-хаб; диагноз docs/audits/2026-06-16_switch-routing-stale.md

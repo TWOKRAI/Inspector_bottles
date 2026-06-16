@@ -283,6 +283,7 @@ class TestProcessManagerProcessBuiltinCommands:
             assert "process.status" in registered_names
             assert "system.shutdown" in registered_names
             assert "system.stats" in registered_names
+            assert "process.relay" in registered_names
 
     def test_register_builtin_commands_skips_if_no_command_manager(self) -> None:
         with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
@@ -399,3 +400,68 @@ class TestProcessCommandResponse:
         )
         call = pmp.router_manager.reply_to_request.call_args
         assert call.kwargs.get("success") is False
+
+
+class TestProcessRelay:
+    """process.relay: PM доставляет вложенный билет процессу через свой свежий PSR.
+
+    Зачем relay: GUI (protected) после hot-swap рецепта держит стейл-копию очередей,
+    прямой GUI→процесс кладёт в мёртвый pipe (тихая потеря). PM держит актуальные
+    очереди, поэтому relay доставляет через PM.send_message.
+    """
+
+    def _make_pmp(self, target_exists: bool = True):
+        pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
+        pmp.name = "ProcessManager"
+        srm = MagicMock()
+        srm.get_process_data.return_value = MagicMock() if target_exists else None
+        pmp.shared_resources = srm
+        pmp.send_message = MagicMock()
+        pmp._log_error = MagicMock()
+        return pmp
+
+    def test_relay_delivers_inner_to_target(self) -> None:
+        pmp = self._make_pmp(target_exists=True)
+        inner = {
+            "type": "command",
+            "command": "register_update",
+            "sender": "gui",
+            "targets": ["vision"],
+            "data": {"register": "hsv_mask", "field": "s_max", "value": 40},
+        }
+
+        result = pmp._cmd_process_relay(data={"target_process": "vision", "inner_message": inner})
+
+        assert result["success"] is True
+        assert result["target_process"] == "vision"
+        # Доставлено через send_message PM (свежий PSR), inner «как есть»
+        pmp.send_message.assert_called_once_with("vision", inner)
+
+    def test_relay_unknown_target_visible_error(self) -> None:
+        """Цель не зарегистрирована в PM → видимая ошибка, БЕЗ тихого дропа."""
+        pmp = self._make_pmp(target_exists=False)
+
+        result = pmp._cmd_process_relay(data={"target_process": "ghost", "inner_message": {"command": "x", "data": {}}})
+
+        assert result["success"] is False
+        assert "не зарегистрирован" in result["error"]
+        pmp.send_message.assert_not_called()
+
+    def test_relay_requires_target_and_inner(self) -> None:
+        pmp = self._make_pmp(target_exists=True)
+
+        assert pmp._cmd_process_relay(data={"inner_message": {"command": "x"}})["success"] is False
+        assert pmp._cmd_process_relay(data={"target_process": "vision"})["success"] is False
+        pmp.send_message.assert_not_called()
+
+    def test_relay_send_failure_returns_visible_error(self) -> None:
+        """Исключение при доставке → видимая ошибка инициатору."""
+        pmp = self._make_pmp(target_exists=True)
+        pmp.send_message.side_effect = RuntimeError("queue dead")
+
+        result = pmp._cmd_process_relay(
+            data={"target_process": "vision", "inner_message": {"command": "x", "data": {}}}
+        )
+
+        assert result["success"] is False
+        assert "queue dead" in result["error"]

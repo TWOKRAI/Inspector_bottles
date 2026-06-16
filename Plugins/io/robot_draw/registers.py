@@ -36,6 +36,18 @@ class RobotDrawRegisters(SchemaBase):
         FieldMeta("Таймаут IPC (с)", info="enqueue в hub мгновенный; рисование идёт асинхронно", min=0.5, max=60.0),
     ] = 5.0
 
+    # --- Пробный прогон (предпросмотр точек перед боем) ---
+    # True = «Рисовать» пишет точки в текст (dump_path) и роботу НЕ отправляет —
+    # можно убедиться, что координаты в рабочей зоне и путь корректен. False = шлём роботу.
+    dry_run: Annotated[
+        bool,
+        FieldMeta("Пробный прогон (без робота)", info="True = точки в текст, роботу не слать (проверка)"),
+    ] = False
+    dump_path: Annotated[
+        str,
+        FieldMeta("Файл предпросмотра", info="куда писать точки при пробном прогоне (мм + перо + проходы)"),
+    ] = "data/robot_points_preview.txt"
+
     # --- Счётчики (readonly) ---
     jobs_sent: Annotated[int, FieldMeta("Заданий отправлено", readonly=True)] = 0
     jobs_dropped: Annotated[int, FieldMeta("Заданий отброшено", readonly=True)] = 0

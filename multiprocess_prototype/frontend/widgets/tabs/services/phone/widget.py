@@ -74,16 +74,17 @@ class PhoneServiceWidget(QWidget):
 
         layout.addStretch()
 
-    def set_connection(self, urls: list[str], qr_png: bytes | None) -> None:
-        """Показать адрес(а) и QR. urls[0] — основной; QR=None если нет segno.
+    def set_connection(self, endpoints: list[tuple[str, str]], qr_png: bytes | None) -> None:
+        """Показать адрес(а) с меткой интерфейса и QR. endpoints[0] — основной.
 
-        Несколько адресов — у ПК несколько интерфейсов (WiFi/Ethernet/VPN).
-        Телефон должен открыть тот, что в его сети WiFi.
+        endpoints = [(метка_интерфейса, url)]; метка — имя адаптера (WiFi/Ethernet/…),
+        чтобы было видно, какой адрес из WiFi. QR=None если нет segno.
         """
-        primary = urls[0] if urls else "—"
-        self._url_label.setText(f"Адрес: {primary}")
-        if len(urls) > 1:
-            self._alt_label.setText("Если не открывается — попробуйте: " + ",  ".join(urls[1:]))
+        primary = endpoints[0] if endpoints else ("", "—")
+        self._url_label.setText(f"Адрес ({primary[0]}): {primary[1]}" if primary[0] else f"Адрес: {primary[1]}")
+        if len(endpoints) > 1:
+            alts = ";   ".join(f"{label}: {url}" if label else url for label, url in endpoints[1:])
+            self._alt_label.setText("Если не открывается — попробуйте: " + alts)
             self._alt_label.setVisible(True)
         else:
             self._alt_label.setVisible(False)

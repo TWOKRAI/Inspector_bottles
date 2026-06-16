@@ -13,7 +13,7 @@ registers:
     address: 0x1109
     access: rw
     label: "Режим работы"
-    hint: "0 = CVT (pick-place), 1 = DRAW (рисование), 2 = MANUAL (ручной jog)"
+    hint: "0 = CVT (pick-place), 1 = DRAW (рисование), 2 = MANUAL (ручной jog), 3 = RETURN (возврат на ленту)"
 
   # --- CVT job (ПК -> робот) ---
   job_flag:
@@ -43,6 +43,16 @@ registers:
     unit: "мм"
     hint: "Координата Y цели ×10"
 
+  job_z:
+    type: reg
+    address: 0x1103
+    scale: 10
+    signed: true
+    access: rw
+    label: "Глубина захвата (Z)"
+    unit: "мм"
+    hint: "Z опускания на picke ×10; 0 = дефолт прошивки Z_PICK"
+
   job_ecap:
     type: dw
     address: 0x1104
@@ -50,6 +60,50 @@ registers:
     access: rw
     label: "Позиция ленты (E_capture)"
     hint: "32-бит значение энкодера в момент захвата (word_order=little)"
+
+  # --- CVT: поза УКЛАДКИ x/y/z/r (доворот). Забор остаётся по job_x/job_y (трекинг). ---
+  place_x:
+    type: reg
+    address: 0x1140
+    scale: 10
+    signed: true
+    access: rw
+    label: "Укладка X"
+    unit: "мм"
+    hint: "X места укладки ×10 (0.1 мм); действует при place_flag=1"
+  place_y:
+    type: reg
+    address: 0x1141
+    scale: 10
+    signed: true
+    access: rw
+    label: "Укладка Y"
+    unit: "мм"
+    hint: "Y места укладки ×10; действует при place_flag=1"
+  place_z:
+    type: reg
+    address: 0x1142
+    scale: 10
+    signed: true
+    access: rw
+    label: "Укладка Z"
+    unit: "мм"
+    hint: "Z (высота) места укладки ×10; действует при place_flag=1"
+  place_rz:
+    type: reg
+    address: 0x1143
+    scale: 10
+    signed: true
+    access: rw
+    label: "R укладки (абсолют)"
+    unit: "°"
+    hint: "Абсолютный R инструмента при укладке ×10 (драйвер = реальный R по телеметрии + доворот)"
+  place_flag:
+    type: reg
+    address: 0x1144
+    access: rw
+    label: "Режим укладки по позе"
+    hint: "1 = класть в place_x/y/z с доворотом; 0 = фикс. место config GL_PLACE (обратн. совм.)"
 
   stop:
     type: reg
@@ -342,17 +396,24 @@ registers:
     unit: "мм"
     hint: "Перекрытие в начале/конце отрезка для качества линии"
 
+  draw_home:
+    type: reg
+    address: 0x1414
+    access: w
+    label: "Домой после прохода"
+    hint: "1 = после прохода ехать домой (последний проход рисунка); 0 = ждать на месте"
+
   # --- MANUAL: ручной jog (mode=2) ---
   man_flag:
     type: reg
-    address: 0x1500
+    address: 0x1340
     access: rw
     label: "Флаг ручного хода"
     hint: "ПК пишет 1 = выполнить ход, робот сбрасывает в 0"
 
   man_dx:
     type: reg
-    address: 0x1501
+    address: 0x1341
     scale: 10
     signed: true
     access: rw
@@ -362,7 +423,7 @@ registers:
 
   man_dy:
     type: reg
-    address: 0x1502
+    address: 0x1342
     scale: 10
     signed: true
     access: rw
@@ -372,7 +433,7 @@ registers:
 
   man_spd:
     type: reg
-    address: 0x1503
+    address: 0x1343
     access: rw
     label: "Скорость ручного хода"
     unit: "%"
@@ -380,21 +441,66 @@ registers:
 
   man_busy:
     type: reg
-    address: 0x1504
+    address: 0x1344
     access: r
     label: "Ручной ход активен"
     hint: "1 = робот выполняет ход"
 
   man_abort:
     type: reg
-    address: 0x1505
+    address: 0x1345
     access: w
     label: "Стоп ручного хода"
     hint: "1 = прервать текущий ход"
 
   man_abs:
     type: reg
-    address: 0x1506
+    address: 0x1346
     access: rw
     label: "Абсолютный ход"
     hint: "0 = относительно (jog на dX/dY), 1 = абсолют (ехать в X/Y)"
+
+  # --- RETURN: возврат буквы на ленту (mode=3) ---
+  ret_flag:
+    type: reg
+    address: 0x1350
+    access: rw
+    label: "Флаг возврата"
+    hint: "ПК пишет 1 = вернуть букву из слота на ленту, робот сбрасывает в 0 при приёме"
+
+  ret_x:
+    type: reg
+    address: 0x1351
+    scale: 10
+    signed: true
+    access: rw
+    label: "Слот X (забор)"
+    unit: "мм"
+    hint: "X слота, откуда забрать букву ×10 (0.1 мм)"
+
+  ret_y:
+    type: reg
+    address: 0x1352
+    scale: 10
+    signed: true
+    access: rw
+    label: "Слот Y (забор)"
+    unit: "мм"
+    hint: "Y слота, откуда забрать букву ×10"
+
+  ret_z:
+    type: reg
+    address: 0x1353
+    scale: 10
+    signed: true
+    access: rw
+    label: "Слот Z (забор)"
+    unit: "мм"
+    hint: "Z слота (высота захвата) ×10; подъём/сдвиг/опускание — константы Lua"
+
+  ret_busy:
+    type: reg
+    address: 0x1354
+    access: r
+    label: "Возврат активен"
+    hint: "1 = робот выполняет возврат буквы на ленту"

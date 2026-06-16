@@ -23,4 +23,16 @@ class PointsRenderRegisters(SchemaBase):
     bg_white: Annotated[bool, FieldMeta("Белый фон", info="True = белый, False = чёрный")] = True
     dot_radius: Annotated[int, FieldMeta("Радиус точки", info="0 = без кружков", min=0, max=10, unit="px")] = 2
     show_travel: Annotated[bool, FieldMeta("Холостые ходы", info="Красный пунктир pen-up переходов")] = True
+    show_sheet: Annotated[
+        bool,
+        FieldMeta("Лист робота", info="Прямоугольник листа + 4 угла с координатами робота (мм) из draw_bounds"),
+    ] = True
+    flip_y: Annotated[
+        bool,
+        FieldMeta("Перевернуть по вертикали", info="Только визуализация: рисунок вверх ногами (углы/подписи на месте)"),
+    ] = False
+    swap_axes: Annotated[
+        bool,
+        FieldMeta("Повернуть оси (лист 90°)", info="Показать ровно при повёрнутом листе (экран-X из робот-Y)"),
+    ] = False
     points_last: Annotated[int, FieldMeta("Точек на карте", readonly=True)] = 0

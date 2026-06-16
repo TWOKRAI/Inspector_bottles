@@ -9,7 +9,10 @@ from Plugins.processing.word_layout.plugin import WordLayoutPlugin
 
 
 def _make_plugin(config: dict | None = None) -> WordLayoutPlugin:
-    cfg = config or {}
+    # По умолчанию require_pick=False (раскладка без робота) — большинство тестов проверяют
+    # логику слотов, а не координату забора. Тесты pick/калибровки задают require_pick явно.
+    cfg = {"require_pick": False}
+    cfg.update(config or {})
     services = MockProcessServices(name="layout", config=cfg)
     ctx = PluginContext(services=services, config=cfg)
     plugin = WordLayoutPlugin()
@@ -60,9 +63,11 @@ def test_emits_pose_xyzr() -> None:
     job = out["robot_job"]
     assert job["char"] == "К"
     assert job["slot"] == 0
-    assert (job["x_mm"], job["y_mm"], job["z_mm"]) == (0.0, 0.0, -90.0)
-    assert job["r_deg"] == -30.0  # доворот до прямой
+    assert (job["place_x_mm"], job["place_y_mm"], job["place_z_mm"]) == (0.0, 0.0, -90.0)
+    assert job["place_rz_deg"] == -30.0  # доворот до прямой
     assert job["raw_angle_deg"] == 30.0
+    # Без pick_xy (демо, require_pick=False) — координаты забора не добавляются.
+    assert "pick_x_mm" not in job
 
 
 def test_word_latched_from_signal_persists() -> None:
@@ -109,8 +114,8 @@ def test_pitch_mode_along_y() -> None:
     a = _feed(p, {"predictions": [_pred("А")]})["robot_job"]
     _feed(p, {"predictions": []})
     b = _feed(p, {"predictions": [_pred("Б")]})["robot_job"]
-    assert (a["x_mm"], a["y_mm"]) == (300.0, -100.0)
-    assert (b["x_mm"], b["y_mm"]) == (300.0, 10.0)  # +110 по Y, X тот же
+    assert (a["place_x_mm"], a["place_y_mm"]) == (300.0, -100.0)
+    assert (b["place_x_mm"], b["place_y_mm"]) == (300.0, 10.0)  # +110 по Y, X тот же
 
 
 def test_streaming_sequence_fills_word() -> None:
@@ -120,7 +125,7 @@ def test_streaming_sequence_fills_word() -> None:
     _feed(p, {"predictions": []})  # разрыв — диск ушёл, взвестись заново
     j2 = _feed(p, {"predictions": [_pred("О")]}).get("robot_job")
     assert j2["slot"] == 1
-    assert j2["x_mm"] == 100.0
+    assert j2["place_x_mm"] == 100.0
     assert p._reg.done is True
 
 
@@ -188,4 +193,102 @@ def test_low_confidence_ignored() -> None:
 def test_symmetry_letter_zero_correction() -> None:
     p = _make_plugin({"target_word": "О", "word_source": "", "settle_frames": 1})
     out = _feed(p, {"predictions": [_pred("О", angle=123.0, valid=False)]})
-    assert out["robot_job"]["r_deg"] == 0.0
+    assert out["robot_job"]["place_rz_deg"] == 0.0
+
+
+def test_pick_and_encoder_forwarded() -> None:
+    # Полный тракт: pick_xy (калибровка) + e_capture едут в job рядом с укладкой.
+    p = _make_plugin(
+        {
+            "target_word": "К",
+            "word_source": "",
+            "use_pitch": False,
+            "first_x": 10.0,
+            "first_y": 20.0,
+            "place_z_mm": -90.0,
+            "settle_frames": 1,
+            "require_pick": True,
+        }
+    )
+    out = _feed(
+        p,
+        {"predictions": [_pred("К", angle=30.0)], "pick_xy": {"x_mm": 333.0, "y_mm": -150.0}, "e_capture": 12345},
+    )
+    job = out["robot_job"]
+    assert (job["pick_x_mm"], job["pick_y_mm"]) == (333.0, -150.0)  # забор с ленты
+    assert job["e_capture"] == 12345
+    assert (job["place_x_mm"], job["place_y_mm"], job["place_z_mm"]) == (10.0, 20.0, -90.0)  # укладка
+    assert job["place_rz_deg"] == -30.0
+
+
+def test_require_pick_blocks_without_calibration() -> None:
+    # require_pick=True + нет pick_xy → диск не берём, слот не занимаем (раскладка не desync).
+    p = _make_plugin({"target_word": "К", "word_source": "", "settle_frames": 1, "require_pick": True})
+    out = _feed(p, {"predictions": [_pred("К")]})  # без pick_xy
+    assert "robot_job" not in out
+    assert p._reg.slots_filled == 0
+    assert p._reg.done is False
+
+
+# ----------------------------------------------------------------------------- #
+# ВОЗВРАТ на ленту
+# ----------------------------------------------------------------------------- #
+
+
+def _make_word_plugin(**extra) -> WordLayoutPlugin:
+    cfg = {
+        "target_word": "КО",
+        "word_source": "",
+        "use_pitch": False,
+        "first_x": 0.0,
+        "first_y": 0.0,
+        "last_x": 100.0,
+        "last_y": 0.0,
+        "place_z_mm": -90.0,
+        "settle_frames": 1,
+    }
+    cfg.update(extra)
+    return _make_plugin(cfg)
+
+
+def test_return_emits_jobs_for_filled_slots() -> None:
+    p = _make_word_plugin()
+    _feed(p, {"predictions": [_pred("К")]})
+    _feed(p, {"predictions": [_pred("О")]})
+    assert p._reg.slots_filled == 2
+
+    out = _feed(p, {"signal_1": {"value": 1}})  # сигнал возврата
+    jobs = out["robot_return_jobs"]
+    assert len(jobs) == 2
+    assert jobs[0]["char"] == "К" and (jobs[0]["x_mm"], jobs[0]["y_mm"], jobs[0]["z_mm"]) == (0.0, 0.0, -90.0)
+    assert jobs[1]["char"] == "О" and jobs[1]["x_mm"] == 100.0
+    # После возврата раскладка сброшена — можно вводить новое слово.
+    assert p._reg.slots_filled == 0
+    assert p._reg.done is False
+
+
+def test_return_fires_once_per_signal_edge() -> None:
+    # Второй кадр с тем же удерживаемым сигналом не повторяет возврат (фронт).
+    p = _make_word_plugin()
+    _feed(p, {"predictions": [_pred("К")]})
+    out1 = _feed(p, {"signal_1": 1})
+    assert "robot_return_jobs" in out1
+    out2 = _feed(p, {"signal_1": 1})  # сигнал ещё держится — повтора нет
+    assert "robot_return_jobs" not in out2
+
+
+def test_return_nothing_when_empty() -> None:
+    p = _make_word_plugin()
+    out = _feed(p, {"signal_1": 1})  # ничего не выложено
+    assert "robot_return_jobs" not in out
+
+
+def test_return_then_new_word_places_again() -> None:
+    p = _make_word_plugin()
+    _feed(p, {"predictions": [_pred("К")]})
+    _feed(p, {"signal_1": 1})  # возврат + сброс
+    assert p._reg.slots_filled == 0
+    # Спад сигнала → взвод, затем снова кладём.
+    out = _feed(p, {"predictions": [_pred("К")]})
+    assert out["robot_job"]["char"] == "К"
+    assert p._reg.slots_filled == 1

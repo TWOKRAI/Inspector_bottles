@@ -28,13 +28,21 @@ from typing import Any
 from Services.modbus import ModbusDevice
 
 from Services.robot_comm.core.config import RobotConfig
-from Services.robot_comm.core.datatypes import DrawPoint, JobEcho, RobotPosition, Telemetry
+from Services.robot_comm.core.datatypes import (
+    DrawPoint,
+    JobEcho,
+    RobotPosition,
+    Telemetry,
+    split_draw_passes,
+)
 from Services.robot_comm.core.registers import (
     DRAW_TYPE_CIRCLE,
     DRAW_TYPE_POLYLINE,
     MODE_CVT,
     MODE_DRAW,
     MODE_MANUAL,
+    MODE_RETURN,
+    MODE_TOOLCHANGE,
     PTS_MAX,
     REG_PTS_BASE,
     SERVO_OFF,
@@ -48,11 +56,23 @@ from Services.robot_comm.interfaces import DeviceTransport
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
-_MODES = {"cvt": MODE_CVT, "draw": MODE_DRAW, "manual": MODE_MANUAL}
+_MODES = {
+    "cvt": MODE_CVT,
+    "draw": MODE_DRAW,
+    "manual": MODE_MANUAL,
+    "return": MODE_RETURN,
+    "toolchange": MODE_TOOLCHANGE,
+}
 
-# Тайминги рисования (из боевого pc_full.py)
-DRAW_TIMEOUT_S = 120.0  # максимум на один проход (батч) рисования
-_BUSY_RISE_S = 1.0  # ждать установки busy после старта прохода
+# Тайминги возврата (handshake как у рисования)
+RETURN_TIMEOUT_S = 30.0  # максимум на одну букву (подвод + захват + траектория + домой)
+_RET_ACCEPT_S = 3.0  # ждать приёма (ret_flag → 0)
+_RET_BUSY_RISE_S = 5.0  # ждать старта (ret_busy → 1)
+
+# Тайминги рисования (handshake прошивки cvt_universal_full.lua)
+DRAW_TIMEOUT_S = 120.0  # максимум на завершение прохода (рисование + перо вверх + домой)
+_ACCEPT_S = 3.0  # ждать приёма задания прошивкой (REG_DRAW_FLAG → 0); Motion-цикл ~0.02с
+_BUSY_RISE_S = 10.0  # ждать старта прохода (подготовка пула distinct-точек в прошивке)
 _POLL_FAST_S = 0.01
 _POLL_SLOW_S = 0.05
 
@@ -136,13 +156,13 @@ class RobotClient:
     # ------------------------------------------------------------------ #
 
     def set_mode(self, mode: str) -> bool:
-        """Переключить режим ``cvt`` | ``draw``.
+        """Переключить режим ``cvt`` | ``draw`` | ``manual`` | ``return`` | ``toolchange``.
 
         Переключать ТОЛЬКО когда робот свободен: Lua применяет режим раз за
         итерацию Motion-цикла, при занятом роботе переключение «зависнет».
         """
         if mode not in _MODES:
-            raise ValueError(f"mode: ожидается 'cvt' | 'draw' | 'manual', получено {mode!r}")
+            raise ValueError(f"mode: ожидается один из {sorted(_MODES)}, получено {mode!r}")
         return self._write_map({"mode": _MODES[mode]})
 
     # ------------------------------------------------------------------ #
@@ -210,23 +230,43 @@ class RobotClient:
         """Принял ли робот задание: job_flag сброшен в 0."""
         return self._map.read(self._device, "job_flag") == 0
 
-    def send_job(self, x_mm: float, y_mm: float, e_capture: int) -> bool:
-        """Отправить CVT-задание: X, Y, E_capture(DW), маркер — одной транзакцией.
+    def send_job(
+        self,
+        x_mm: float,
+        y_mm: float,
+        e_capture: int,
+        place: tuple[float, float, float, float] | None = None,
+        *,
+        z_mm: float = 0.0,
+    ) -> bool:
+        """Отправить CVT-задание: X, Y, E_capture(DW) [+ Z захвата] [+ поза укладки], маркер — одной транзакцией.
+
+        ``z_mm`` — глубина захвата на picke (Z, мм). 0 → ``job_z`` НЕ пишем, прошивка берёт
+        дефолт Z_PICK (обратная совместимость; на проводе байт-в-байт как раньше). ≠0 → пишем
+        ``job_z``; прошивка опускается на эту глубину и сбрасывает регистр после задания.
+
+        ``place=(x, y, z, rz)`` — поза УКЛАДКИ (мм): робот кладёт диск в (x, y, z) под
+        АБСОЛЮТНЫМ R=rz и возвращает R после (place_flag=1). ``rz`` уже абсолютный — драйвер
+        опросил реальный R инструмента (телеметрия) и сложил с доворотом. Забор остаётся по
+        (x_mm, y_mm) с трекингом ленты. Без ``place`` — старое поведение (укладка в фикс.
+        config-место, place_flag не трогаем) → обратная совместимость.
 
         Raises:
-            RobotJobError: координата вне ±xy_limit_mm (предел s16 при scale=10).
+            RobotJobError: координата съёма ИЛИ укладки вне ±xy_limit_mm (предел s16 при scale=10).
         """
         limit = self._cfg.xy_limit_mm
         if abs(x_mm) > limit or abs(y_mm) > limit:
             raise RobotJobError(f"Координата вне ±{limit} мм: X={x_mm}, Y={y_mm}")
-        return self._write_map(
-            {
-                "job_x": x_mm,
-                "job_y": y_mm,
-                "job_ecap": e_capture,
-                "job_flag": 1,  # маркер — последним
-            }
-        )
+        writes: dict[str, Any] = {"job_x": x_mm, "job_y": y_mm, "job_ecap": e_capture}
+        if z_mm != 0.0:
+            writes["job_z"] = z_mm  # глубина захвата; 0 → не трогаем, прошивка берёт Z_PICK
+        if place is not None:
+            px, py, pz, prz = place
+            if abs(px) > limit or abs(py) > limit:
+                raise RobotJobError(f"Координата укладки вне ±{limit} мм: X={px}, Y={py}")
+            writes.update({"place_x": px, "place_y": py, "place_z": pz, "place_rz": prz, "place_flag": 1})
+        writes["job_flag"] = 1  # маркер — последним
+        return self._write_map(writes)
 
     def read_echo(self) -> JobEcho:
         """Эхо последнего принятого задания (блок 0x1120)."""
@@ -242,6 +282,54 @@ class RobotClient:
     def set_servo(self, on: bool) -> bool:
         """Серво ON/OFF (Lua: 1=on, 2=off)."""
         return self._write_map({"servo": SERVO_ON if on else SERVO_OFF})
+
+    # ------------------------------------------------------------------ #
+    # RETURN (возврат буквы на ленту, MODE=3)
+    # ------------------------------------------------------------------ #
+
+    def return_accepted(self) -> bool:
+        """Прошивка подхватила задание возврата: ret_flag сброшен в 0."""
+        return self._map.read(self._device, "ret_flag") == 0
+
+    def return_busy(self) -> bool:
+        """Идёт ли возврат (ret_busy=1)."""
+        return self._map.read(self._device, "ret_busy") == 1
+
+    def do_return(self, x_mm: float, y_mm: float, z_mm: float, timeout: float = RETURN_TIMEOUT_S) -> bool:
+        """Вернуть одну букву на ленту: координата СЛОТА (x,y,z) + маркер, ждать завершения.
+
+        Робот в MODE=3 берёт диск из (x,y,z), линейно поднимает/сдвигает/опускает
+        (смещения — константы Lua) и роняет на ленту. Координату забора пишем, маркер
+        ret_flag — последним (как job_flag/draw_flag). Звать ТОЛЬКО когда робот свободен
+        и в режиме return (переключает драйвер). Handshake — как у рисования.
+
+        Raises:
+            RobotJobError: координата вне ±xy_limit_mm (предел s16 при scale=10).
+        """
+        limit = self._cfg.xy_limit_mm
+        if abs(x_mm) > limit or abs(y_mm) > limit:
+            raise RobotJobError(f"Координата возврата вне ±{limit} мм: X={x_mm}, Y={y_mm}")
+        ok = self._write_map({"ret_x": x_mm, "ret_y": y_mm, "ret_z": z_mm, "ret_flag": 1})  # маркер — последним
+        if not ok:
+            return False
+        return self._wait_return_done(timeout)
+
+    def _wait_return_done(self, timeout: float) -> bool:
+        """Дождаться завершения возврата: ret_flag→0 (приём) → ret_busy↑ (старт) → ret_busy↓ (готово).
+
+        Контракт идентичен рисованию (см. _wait_draw_done): следующую букву нельзя слать,
+        пока текущая не завершена, иначе перезапись координат на лету.
+        """
+        if not self._poll_until(self.return_accepted, _RET_ACCEPT_S, _POLL_FAST_S):
+            self._emit_progress({"stage": "return_not_accepted"})
+            return False
+        if not self._poll_until(self.return_busy, _RET_BUSY_RISE_S, _POLL_FAST_S):
+            self._emit_progress({"stage": "return_no_busy_rise"})
+            return False
+        if not self._poll_until(lambda: self.return_busy() is False, timeout, _POLL_SLOW_S):
+            self._emit_progress({"stage": "return_timeout", "timeout_s": timeout})
+            return False
+        return True
 
     # ------------------------------------------------------------------ #
     # Телеметрия
@@ -331,6 +419,15 @@ class RobotClient:
         """Идёт ли рисование."""
         return self._map.read(self._device, "draw_busy") == 1
 
+    def draw_accepted(self) -> bool:
+        """Прошивка подхватила задание рисования: REG_DRAW_FLAG сброшен в 0.
+
+        Motion-цикл (cvt_universal_full.lua) читает REG_DRAW_FLAG==1 и СРАЗУ пишет 0 —
+        надёжный сигнал приёма (как job_accepted для CVT), не зависящий от тайминга
+        подъёма busy (между приёмом и busy=1 прошивка готовит пул точек).
+        """
+        return self._map.read(self._device, "draw_flag") == 0
+
     def draw_progress(self) -> int:
         """Индекс текущей точки прохода."""
         return int(self._map.read(self._device, "draw_prog"))
@@ -347,6 +444,7 @@ class RobotClient:
                 "circ_cy": cy,
                 "circ_r": r,
                 "draw_type": DRAW_TYPE_CIRCLE,
+                "draw_home": 1,  # круг = единственный проход → подъём + домой в конце
                 "draw_flag": 1,  # маркер — последним
             }
         )
@@ -354,25 +452,43 @@ class RobotClient:
             return False
         return self._wait_draw_done(timeout)
 
-    def draw(self, points: list[DrawPoint] | list[tuple], timeout: float = DRAW_TIMEOUT_S) -> bool:
-        """Полилиния: точки пачками по PTS_MAX, каждая пачка — отдельный проход.
+    def draw(
+        self,
+        points: list[DrawPoint] | list[tuple],
+        timeout: float = DRAW_TIMEOUT_S,
+        *,
+        should_abort: Callable[[], bool] | None = None,
+    ) -> bool:
+        """Полилиния: весь путь рисуется ПОЛНОСТЬЮ, проходами ≤ PTS_MAX точек.
 
-        Два уровня чанкования (оба обязательны, робот не тянет большие блоки):
-        - WRITE_CHUNK=30 регистров на один write_registers при заливке буфера;
-        - PTS_MAX=100 точек на проход, между пачками — ожидание завершения.
+        ``should_abort``: опц. колбэк, проверяется ПЕРЕД каждым проходом. Вернул True —
+        рисование прекращается, оставшиеся проходы НЕ отправляются. Нужно для «Стоп»:
+        без этого прерывается лишь текущий проход (REG_DRAW_ABORT в прошивке), а
+        остальные всё равно уходят роботу.
+
+        Сколько бы точек ни было (хоть 400) — рисунок отрисовывается весь. Два уровня
+        чанкования (оба обязательны, робот не тянет большие блоки):
+        - проход ≤ PTS_MAX точек = буфер робота на один проход. split_draw_passes
+          режет ТОЛЬКО на границах штрихов (перо вверх) — проход не обрывается посреди
+          штриха, иначе после заезда домой робот чертил бы линию «от дома» и линии
+          терялись бы. Между проходами — ожидание завершения (_run_batch);
+        - WRITE_CHUNK=30 регистров (10 точек) на один write при заливке буфера прохода.
         """
         pts = [p if isinstance(p, DrawPoint) else DrawPoint(*p) for p in points]
         if not pts:
             raise RobotJobError("Пустой путь рисования")
+        passes = split_draw_passes(pts, PTS_MAX)
         total = len(pts)
-        for start in range(0, total, PTS_MAX):
-            batch = pts[start : start + PTS_MAX]
-            self._emit_progress(
-                {"stage": "batch", "batch": start // PTS_MAX + 1, "done": start + len(batch), "total": total}
-            )
-            if not self._run_batch(batch, timeout):
+        for n, batch in enumerate(passes, start=1):
+            if should_abort is not None and should_abort():
+                self._emit_progress({"stage": "aborted", "pass": n, "passes": len(passes)})
                 return False
-        self._emit_progress({"stage": "done", "total": total})
+            self._emit_progress({"stage": "batch", "pass": n, "passes": len(passes), "size": len(batch)})
+            # home=True только на ПОСЛЕДНЕМ проходе: робот поднимается +1 см и едет домой в
+            # конце рисунка; между проходами он ждёт на месте (перо вверх).
+            if not self._run_batch(batch, timeout, home=(n == len(passes))):
+                return False
+        self._emit_progress({"stage": "done", "passes": len(passes), "total": total})
         return True
 
     # --- внутреннее рисование ---
@@ -392,14 +508,19 @@ class RobotClient:
                 return False
         return True
 
-    def _run_batch(self, batch: list[DrawPoint], timeout: float) -> bool:
-        """Один проход: залить буфер, запустить, дождаться завершения."""
+    def _run_batch(self, batch: list[DrawPoint], timeout: float, *, home: bool = False) -> bool:
+        """Один проход: залить буфер, запустить, дождаться завершения.
+
+        ``home``: True на последнем проходе рисунка — прошивка после прохода поднимает перо
+        +1 см и едет домой. Между проходами (home=False) робот ждёт на месте (перо вверх).
+        """
         if not self._upload_points(batch):
             return False
         ok = self._write_map(
             {
                 "draw_type": DRAW_TYPE_POLYLINE,
                 "draw_count": len(batch),
+                "draw_home": 1 if home else 0,
                 "draw_flag": 1,  # маркер — последним
             }
         )
@@ -408,16 +529,42 @@ class RobotClient:
         return self._wait_draw_done(timeout)
 
     def _wait_draw_done(self, timeout: float) -> bool:
-        """Дождаться завершения прохода: busy должен подняться, затем упасть."""
-        t0 = self._clock()
-        while self._clock() - t0 < _BUSY_RISE_S and not self.draw_busy():
-            self._sleep(_POLL_FAST_S)
+        """Дождаться завершения прохода по handshake прошивки (flag → busy↑ → busy↓).
+
+        Контракт cvt_universal_full.lua (Motion/execute_path):
+          1. Motion читает REG_DRAW_FLAG==1 и СРАЗУ сбрасывает в 0 — приём задания;
+          2. execute_path готовит пул distinct-точек, затем REG_DRAW_BUSY=1 — старт;
+          3. рисует проход, поднимает перо, едет домой и лишь ПОСЛЕ — REG_DRAW_BUSY=0.
+        Поэтому надёжно: ждём сброс flag (приём) → подъём busy (старт, подготовка пула
+        может занять >1с) → падение busy (проход + перо вверх + домой завершены).
+
+        КРИТИЧНО: следующий проход нельзя заливать в буфер REG_PTS_BASE, пока этот не
+        завершён, иначе перезапись буфера на лету — робот рисует мешанину старого и
+        нового пути. Возврат True ТОЛЬКО после полного завершения прохода это гарантирует.
+        Прежняя версия ждала подъём busy лишь 1с и при медленном старте ОШИБОЧНО
+        считала проход завершённым (терялись проходы + портился буфер).
+        """
+        # 1) Приём задания: прошивка сбросила draw_flag в 0.
+        if not self._poll_until(self.draw_accepted, _ACCEPT_S, _POLL_FAST_S):
+            self._emit_progress({"stage": "not_accepted"})
+            return False
+        # 2) Старт прохода: busy поднялся (после подготовки пула точек).
+        if not self._poll_until(self.draw_busy, _BUSY_RISE_S, _POLL_FAST_S):
+            self._emit_progress({"stage": "no_busy_rise"})
+            return False
+        # 3) Завершение: busy упал (рисование + перо вверх + заезд домой завершены).
+        if not self._poll_until(lambda: self.draw_busy() is False, timeout, _POLL_SLOW_S):
+            self._emit_progress({"stage": "timeout", "timeout_s": timeout})
+            return False
+        return True
+
+    def _poll_until(self, condition: Callable[[], bool], timeout: float, step: float) -> bool:
+        """Поллить ``condition`` до ``timeout`` с шагом ``step`` (по инъектируемым часам)."""
         t0 = self._clock()
         while self._clock() - t0 < timeout:
-            if self.draw_busy() is False:
+            if condition():
                 return True
-            self._sleep(_POLL_SLOW_S)
-        self._emit_progress({"stage": "timeout", "timeout_s": timeout})
+            self._sleep(step)
         return False
 
     # ------------------------------------------------------------------ #

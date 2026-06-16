@@ -51,6 +51,12 @@ class RobotIoPlugin(ProcessModulePlugin):
 
     inputs = [
         Port(name="robot_job", dtype="dict", optional=True, description="Задание {x_mm, y_mm} в forward-deque"),
+        Port(
+            name="robot_return_jobs",
+            dtype="list[dict]",
+            optional=True,
+            description="Список поз возврата {x_mm,y_mm,z_mm} → robot_return_job",
+        ),
     ]
     outputs = []  # side-effect к железу, кадры pass-through
 
@@ -77,6 +83,8 @@ class RobotIoPlugin(ProcessModulePlugin):
         self._client: DeviceHubClient | None = None
         # Флаг once-per-transition: True = последний запрос был ошибкой
         self._last_was_error = False
+        # Отдельный once-флаг для предупреждения «job без pick» (не мешать hub-ошибкам).
+        self._warned_no_pick = False
         ctx.log_info(f"RobotIoPlugin v2: configured (device_id={self._reg.device_id})")
 
     def start(self, ctx: PluginContext) -> None:
@@ -102,22 +110,88 @@ class RobotIoPlugin(ProcessModulePlugin):
     # ------------------------------------------------------------------ #
 
     def process(self, items: list[dict]) -> list[dict]:
-        """Извлечь job-координаты из item[job_source] -> forward-deque; кадр — дальше."""
+        """Извлечь job из item[job_source] -> forward-deque; кадр — дальше.
+
+        Два формата job:
+          - полный (word_layout + калибровка): ``pick_x_mm/pick_y_mm`` (забор с ленты),
+            опц. ``e_capture`` (энкодер кадра), ``place_x_mm/place_y_mm/place_z_mm/place_rz_deg``
+            (укладка + доворот). Без pick — НЕ шлём (робот не поедет брать в неверную точку);
+          - legacy: ``x_mm/y_mm`` (забор), без позы укладки.
+        """
         for item in items:
+            # Укладка: одна поза pick+place.
             job = item.get(self._reg.job_source)
-            if isinstance(job, dict) and "x_mm" in job and "y_mm" in job:
-                job_data = {
-                    "device_id": self._reg.device_id,
-                    "x_mm": float(job["x_mm"]),
-                    "y_mm": float(job["y_mm"]),
-                }
-                # deque(maxlen=N) автоматически дропает старые при переполнении
-                was_full = len(self._deque) >= self._deque.maxlen
-                self._deque.append(job_data)
-                if was_full:
-                    self._reg.jobs_dropped += 1
-                self._reg.queue_len = len(self._deque)
+            if isinstance(job, dict):
+                job_data = self._build_job_data(job)
+                if job_data is not None:
+                    self._enqueue(job_data)
+            # Возврат: список поз → команды robot_return_job (каждая отдельным заданием).
+            ret_jobs = item.get(self._reg.return_jobs_source)
+            if isinstance(ret_jobs, list):
+                for rj in ret_jobs:
+                    rd = self._build_return_data(rj)
+                    if rd is not None:
+                        self._enqueue(rd)
         return items
+
+    def _enqueue(self, data: dict) -> None:
+        """Положить задание в forward-deque (deque(maxlen) дропает старые при переполнении)."""
+        was_full = len(self._deque) >= self._deque.maxlen
+        self._deque.append(data)
+        if was_full:
+            self._reg.jobs_dropped += 1
+        self._reg.queue_len = len(self._deque)
+
+    def _build_return_data(self, rj: dict) -> dict | None:
+        """Поза возврата {x_mm,y_mm,z_mm} → payload robot_return_job. None при кривых данных."""
+        if not isinstance(rj, dict) or "x_mm" not in rj or "y_mm" not in rj:
+            return None
+        return {
+            "_command": "robot_return_job",
+            "device_id": self._reg.device_id,
+            "x_mm": float(rj["x_mm"]),
+            "y_mm": float(rj["y_mm"]),
+            "z_mm": float(rj.get("z_mm", 0.0)),
+        }
+
+    def _build_job_data(self, job: dict) -> dict | None:
+        """Собрать payload robot_enqueue_job из job. None → задание не шлём."""
+        # Полный формат: забор из pick_*; укладка из place_* + доворот.
+        if "pick_x_mm" in job and "pick_y_mm" in job:
+            data = {
+                "device_id": self._reg.device_id,
+                "x_mm": float(job["pick_x_mm"]),
+                "y_mm": float(job["pick_y_mm"]),
+            }
+            if job.get("e_capture") is not None:
+                data["e_capture"] = int(job["e_capture"])
+            if "place_x_mm" in job and "place_y_mm" in job:
+                data["place_x"] = float(job["place_x_mm"])
+                data["place_y"] = float(job["place_y_mm"])
+                data["place_z"] = float(job.get("place_z_mm", 0.0))
+                data["place_rz"] = float(job.get("place_rz_deg", 0.0))
+            self._warned_no_pick = False
+            return data
+        # Legacy: только забор x_mm/y_mm (без укладки/доворота).
+        if "x_mm" in job and "y_mm" in job:
+            self._warned_no_pick = False
+            return {
+                "device_id": self._reg.device_id,
+                "x_mm": float(job["x_mm"]),
+                "y_mm": float(job["y_mm"]),
+            }
+        # Нет координаты забора (нет калибровки) — задание не шлём.
+        self._note_missing_pick()
+        return None
+
+    def _note_missing_pick(self) -> None:
+        """Лог раз на переход: job без pick (обычно нет калибровки → нет pick_xy)."""
+        if not self._warned_no_pick:
+            self._ctx.log_error(
+                "RobotIoPlugin: job без координаты забора (pick) — пропуск "
+                "(нет калибровки? pixel_to_robot не дал pick_xy)"
+            )
+            self._warned_no_pick = True
 
     # ------------------------------------------------------------------ #
     # FORWARDER (worker) — IPC-мост в процесс devices
@@ -141,9 +215,11 @@ class RobotIoPlugin(ProcessModulePlugin):
                 self._reg.jobs_dropped += 1
                 continue
 
+            # Команда: укладка (robot_enqueue_job, дефолт) или возврат (robot_return_job).
+            command = job.pop("_command", "robot_enqueue_job")
             try:
                 result = self._client.request(
-                    "robot_enqueue_job",
+                    command,
                     job,
                     timeout=_HUB_REQUEST_TIMEOUT,
                 )

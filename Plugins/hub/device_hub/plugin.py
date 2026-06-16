@@ -99,6 +99,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
         "device_write": "cmd_device_write",
         # Робот (11)
         "robot_enqueue_job": "cmd_robot_enqueue_job",
+        "robot_return_job": "cmd_robot_return_job",
         "robot_send_test_job": "cmd_robot_send_test_job",
         "robot_abort": "cmd_robot_abort",
         "robot_set_mode": "cmd_robot_set_mode",
@@ -698,6 +699,10 @@ class DeviceHubPlugin(ProcessModulePlugin):
     def cmd_robot_enqueue_job(self, data: dict) -> dict:
         """Поставить CVT-задание: {device_id, x_mm, y_mm, e_capture?}."""
         return self._kind_call(data, "robot", "enqueue_job")
+
+    def cmd_robot_return_job(self, data: dict) -> dict:
+        """Возврат буквы на ленту: {device_id, x_mm, y_mm, z_mm} (координата слота)."""
+        return self._kind_call(data, "robot", "return_job")
 
     def cmd_robot_send_test_job(self, data: dict) -> dict:
         """Тестовое CVT-задание: {device_id, x, y}."""

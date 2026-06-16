@@ -76,6 +76,13 @@ class SourceProducer:
         """LOOP worker: produce() → SHM write → IPC send.
 
         Smart sleep: вычитает время produce() из target_interval.
+
+        КОНТРАКТ КООПЕРАТИВНОСТИ: цикл проверяет ``stop_event`` каждую итерацию,
+        но НЕ может прервать блокирующий ``produce()`` извне (Python-потоки не
+        прерываемы). Поэтому source-плагин ОБЯЗАН делать produce() кооперативным —
+        не блокировать дольше ~2 интервалов кадра (короткий таймаут захвата, возврат
+        ``[]`` при отсутствии кадра). Иначе worker не остановится за дедлайн
+        ``stop_all_workers`` → ``terminate()`` (5с-лаг switch + утечка ресурса).
         """
         while not stop_event.is_set():
             if pause_event.is_set():

@@ -30,6 +30,15 @@ from Services.robot_comm.core.registers import (
     REG_JOB_FLAG,
     REG_JOB_X,
     REG_JOB_Y,
+    REG_PLACE_FLAG,
+    REG_PLACE_X,
+    REG_PLACE_Y,
+    REG_PLACE_Z,
+    REG_RET_BUSY,
+    REG_RET_FLAG,
+    REG_RET_X,
+    REG_RET_Y,
+    REG_RET_Z,
     REG_SERVO,
     REG_SPACE_SIZE,
     REG_STOP,
@@ -73,12 +82,14 @@ class RobotSimCore:
         accept_ticks: int = 1,
         job_ticks: int = 2,
         draw_ticks: int = 3,
+        return_ticks: int = 2,
         enc_rate: int = 7,
     ) -> None:
         self._word_order = word_order
         self._accept_ticks = accept_ticks
         self._job_ticks = job_ticks
         self._draw_ticks = draw_ticks
+        self._return_ticks = return_ticks
         self._enc_rate = enc_rate
 
         self.regs: list[int] = [0] * REG_SPACE_SIZE
@@ -86,6 +97,7 @@ class RobotSimCore:
         self._accept_countdown: int | None = None
         self._job_countdown: int | None = None
         self._draw_countdown: int | None = None
+        self._ret_countdown: int | None = None
         self.regs[REG_FREE] = 1
         self.regs[REG_TLM_BASE + _TLM_SPD] = 50
         self.regs[REG_TLM_BASE + _TLM_SERVO] = 1
@@ -129,6 +141,7 @@ class RobotSimCore:
         self._handle_config()
         self._handle_vfd()
         self._handle_draw()
+        self._handle_return()
 
     # --- обработчики (порядок как в Lua Motion) ---
 
@@ -159,9 +172,17 @@ class RobotSimCore:
         elif self._job_countdown is not None:
             self._job_countdown -= 1
             if self._job_countdown <= 0:
-                # задание выполнено: позиция = координаты задания
-                self.regs[REG_TLM_BASE + _TLM_X] = self.regs[REG_JOB_X]
-                self.regs[REG_TLM_BASE + _TLM_Y] = self.regs[REG_JOB_Y]
+                # задание выполнено: позиция = место УКЛАДКИ (place_flag=1) либо координаты
+                # задания (старое поведение). R на роботе возвращается к base — телеметрию RZ
+                # не двигаем. place_flag сбрасываем (как Lua после чтения).
+                if self.regs[REG_PLACE_FLAG] == 1:
+                    self.regs[REG_TLM_BASE + _TLM_X] = self.regs[REG_PLACE_X]
+                    self.regs[REG_TLM_BASE + _TLM_Y] = self.regs[REG_PLACE_Y]
+                    self.regs[REG_TLM_BASE + _TLM_Z] = self.regs[REG_PLACE_Z]
+                    self.regs[REG_PLACE_FLAG] = 0
+                else:
+                    self.regs[REG_TLM_BASE + _TLM_X] = self.regs[REG_JOB_X]
+                    self.regs[REG_TLM_BASE + _TLM_Y] = self.regs[REG_JOB_Y]
                 self.regs[REG_TLM_BASE + _TLM_MOVING] = 0
                 self.regs[REG_FREE] = 1
                 self._job_countdown = None
@@ -211,6 +232,27 @@ class RobotSimCore:
             if self._draw_countdown <= 0:
                 self.regs[REG_DRAW_BUSY] = 0
                 self._draw_countdown = None
+
+    def _handle_return(self) -> None:
+        """RETURN (mode=3): ret_flag 1→0 (приём) → ret_busy 1 (старт) → ret_busy 0 (готово).
+
+        Handshake идентичен рисованию. По завершении позиция = координата слота (забор) —
+        для проверок в тестах (реальный Lua после забора ещё едет на ленту и домой).
+        """
+        if self.regs[REG_RET_FLAG] == 1 and self._ret_countdown is None:
+            self.regs[REG_RET_FLAG] = 0  # принял
+            self.regs[REG_RET_BUSY] = 1  # старт
+            self.regs[REG_TLM_BASE + _TLM_MOVING] = 1
+            self._ret_countdown = self._return_ticks
+        elif self._ret_countdown is not None:
+            self._ret_countdown -= 1
+            if self._ret_countdown <= 0:
+                self.regs[REG_TLM_BASE + _TLM_X] = self.regs[REG_RET_X]
+                self.regs[REG_TLM_BASE + _TLM_Y] = self.regs[REG_RET_Y]
+                self.regs[REG_TLM_BASE + _TLM_Z] = self.regs[REG_RET_Z]
+                self.regs[REG_TLM_BASE + _TLM_MOVING] = 0
+                self.regs[REG_RET_BUSY] = 0  # готово
+                self._ret_countdown = None
 
     # ------------------------------------------------------------------ #
     # Служебное

@@ -31,7 +31,7 @@ optim:
   scheduler: cosine
   label_smoothing: 0.1
   class_weights: auto
-  angle_loss_weight: 1.0      # подними (1.5–2.0), если важнее точность доворота, чем буква
+  angle_loss_weight: 1.5      # приоритет точности угла (доворот робота) при сохранении классификации
 
 train:
   device: auto                # cuda если есть, иначе cpu
@@ -39,7 +39,7 @@ train:
   channels_last: true
   ema_decay: 0.999
   early_stopping_patience: 15
-  monitor: balanced_accuracy  # буква не должна путаться; угол смотри в metrics.json (angle_mae_deg)
+  monitor: angle_mae_deg      # приоритет угла: классификация и так ~100%, best.pt = минимум angle_mae (bu. acc в metrics.json)
   runs_dir: data/ml_train/runs
 
 export:

@@ -44,11 +44,11 @@ class RobotPresenter:
     # Робот: CVT / режим / конфиг
     # ------------------------------------------------------------------ #
 
-    def send_test_job(self, device_id: str, x_mm: float, y_mm: float) -> None:
-        """Тестовое CVT-задание в очередь feeder."""
+    def send_test_job(self, device_id: str, x_mm: float, y_mm: float, z_mm: float = 0.0) -> None:
+        """Тестовое CVT-задание в очередь feeder. z=глубина захвата (0 = дефолт прошивки Z_PICK)."""
         self._request(
             "robot_send_test_job",
-            {"device_id": device_id, "x": float(x_mm), "y": float(y_mm)},
+            {"device_id": device_id, "x": float(x_mm), "y": float(y_mm), "z": float(z_mm)},
         )
 
     def abort(self, device_id: str, mode: int) -> None:

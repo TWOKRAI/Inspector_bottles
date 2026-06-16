@@ -50,9 +50,17 @@ class WordLayoutPlugin(ProcessModulePlugin):
         ),
         Port(name="word", dtype="any", optional=True, description="Целевое слово (строка/dict); иначе register"),
         Port(name="trigger", dtype="any", optional=True, description="Сигнал «взять диск» (если use_trigger)"),
+        Port(name="pick_xy", dtype="dict", optional=True, description="{x_mm,y_mm} забор с ленты (от pixel_to_robot)"),
+        Port(name="return_trigger", dtype="any", optional=True, description="Сигнал «вернуть всё на ленту» (пульт)"),
     ]
     outputs = [
-        Port(name="robot_job", dtype="dict", optional=True, description="{x_mm, y_mm, angle_deg, char, slot}"),
+        Port(name="robot_job", dtype="dict", optional=True, description="Поза укладки {pick_*, place_*, e_capture}"),
+        Port(
+            name="robot_return_jobs",
+            dtype="list[dict]",
+            optional=True,
+            description="Список поз возврата выложенных букв на ленту",
+        ),
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", optional=True, description="Кадр (pass-through)"),
     ]
 
@@ -86,6 +94,10 @@ class WordLayoutPlugin(ProcessModulePlugin):
         self._cur_label = ""
         # Триггер-режим: взвод по сигналу trigger.
         self._trig_armed = False
+        # Возврат: фронт сигнала «вернуть на ленту» (срабатывает раз на нажатие).
+        self._return_armed = True
+        # Once-флаг предупреждения «нет калибровки/pick» (не флудить лог).
+        self._warned_no_pick = False
         self._last_publish = time.monotonic()
 
         ctx.log_info(f"WordLayoutPlugin: configured (word='{self._reg.target_word}')")
@@ -128,6 +140,13 @@ class WordLayoutPlugin(ProcessModulePlugin):
             return item
         self._ensure_assembler(word)
         assert self._assembler is not None
+
+        # ВОЗВРАТ: сигнал с пульта → вернуть ВСЕ выложенные буквы на ленту, затем сброс.
+        # Проверяем ДО done-выхода — возврат возможен и после готового слова.
+        ret = self._maybe_return(item)
+        if ret is not None:
+            return ret
+
         if self._assembler.done:
             self._reg.done = True
             return item
@@ -143,6 +162,13 @@ class WordLayoutPlugin(ProcessModulePlugin):
             return item
         assert pred is not None
 
+        # Координата ЗАБОРА с ленты (из калибровки pixel_to_robot). Без неё робот не
+        # сможет взять диск → при require_pick слот не съедаем (раскладка не desync'ится).
+        pick = self._resolve_pick(item)
+        if pick is None and self._reg.require_pick:
+            self._note_no_pick()
+            return item
+
         self._reg.last_label = pred["label"]
         self._reg.last_angle_deg = round(float(pred["angle_deg"]), 2)
         job = self._assembler.offer(
@@ -156,26 +182,33 @@ class WordLayoutPlugin(ProcessModulePlugin):
             # Буква не нужна/дубль — диск пропускаем (взвод снят, ждём следующий).
             return item
 
-        # Команда роботу: полная поза перемещения x, y, z, r (доворот). z — высота
-        # укладки (register), r — доворот до общей ориентации (angle_zero − угол модели).
+        # Команда роботу: ЗАБОР (pick с ленты, трекинг по энкодеру) + УКЛАДКА (place в слот
+        # слова) + доворот r (angle_zero − угол модели). z — высота укладки (register).
         pose = {
-            "x_mm": job["x_mm"],
-            "y_mm": job["y_mm"],
-            "z_mm": float(self._reg.place_z_mm),
-            "r_deg": job["angle_deg"],
+            "place_x_mm": job["x_mm"],
+            "place_y_mm": job["y_mm"],
+            "place_z_mm": float(self._reg.place_z_mm),
+            "place_rz_deg": job["angle_deg"],
             "char": job["char"],
             "slot": job["slot"],
             "raw_angle_deg": job["raw_angle_deg"],
         }
+        if pick is not None:
+            pose["pick_x_mm"] = pick[0]
+            pose["pick_y_mm"] = pick[1]
+            e_cap = item.get(self._reg.encoder_source)
+            if e_cap is not None:
+                pose["e_capture"] = int(e_cap)
         self._reg.jobs_emitted += 1
         self._reg.slots_filled = self._assembler.filled_count
         self._reg.last_correction_deg = round(float(job["angle_deg"]), 2)
         self._reg.next_letter = self._assembler.next_letter
         self._reg.done = self._assembler.done
+        pick_txt = f"взять({pick[0]:.1f},{pick[1]:.1f}) → " if pick else ""
         self._ctx.log_info(
-            f"WordLayoutPlugin: слот {job['slot']} '{job['char']}' → "
-            f"x{pose['x_mm']:.1f} y{pose['y_mm']:.1f} z{pose['z_mm']:.1f} r{pose['r_deg']:.1f}° "
-            f"[{self._reg.slots_filled}/{self._reg.slots_total}]"
+            f"WordLayoutPlugin: слот {job['slot']} '{job['char']}' → {pick_txt}положить "
+            f"x{pose['place_x_mm']:.1f} y{pose['place_y_mm']:.1f} z{pose['place_z_mm']:.1f} "
+            f"r{pose['place_rz_deg']:.1f}° [{self._reg.slots_filled}/{self._reg.slots_total}]"
         )
         return {**item, self._reg.job_key: pose}
 
@@ -199,6 +232,78 @@ class WordLayoutPlugin(ProcessModulePlugin):
                 self._latched_word = w
                 return w
         return self._latched_word or self._reg.target_word
+
+    def _resolve_pick(self, item: dict) -> tuple[float, float] | None:
+        """Координата забора с ленты (мм робота) из item[pick_source] = {x_mm, y_mm}."""
+        p = item.get(self._reg.pick_source)
+        if isinstance(p, dict) and "x_mm" in p and "y_mm" in p:
+            self._warned_no_pick = False
+            return float(p["x_mm"]), float(p["y_mm"])
+        return None
+
+    def _note_no_pick(self) -> None:
+        """Лог раз на переход: нет координаты забора (обычно не загружена калибровка)."""
+        if not self._warned_no_pick:
+            self._ctx.log_info(
+                "WordLayoutPlugin: нет pick_xy (калибровка?) — диск не беру, слот не занимаю "
+                "(require_pick=True). Прогони визард / поставь require_pick=False для демо без робота"
+            )
+            self._warned_no_pick = True
+
+    # ------------------------------------------------------------------ #
+    # ВОЗВРАТ на ленту
+    # ------------------------------------------------------------------ #
+
+    def _maybe_return(self, item: dict) -> dict | None:
+        """Сигнал «вернуть на ленту» → задания возврата всех заполненных слотов + сброс.
+
+        Срабатывает на ФРОНТЕ сигнала (раз на нажатие): сигнал приходит одним item
+        (кнопка пульта/телефона, ключ = имя исходного порта), держим взвод между сигналами.
+        Возвращаем то, что РЕАЛЬНО выложено (заполненные слоты) — даже если слово не готово.
+        После выдачи — сброс раскладки (можно вводить новое слово; робот доедет очередь сам).
+        """
+        src = self._reg.return_trigger_source
+        if not src:
+            return None
+        fired = item.get(src)
+        if fired is None or fired is False:
+            self._return_armed = True  # сигнала нет → взвестись на следующий
+            return None
+        if not self._return_armed:
+            return None  # тот же сигнал ещё держится — не повторяем
+        self._return_armed = False
+
+        jobs = self._build_return_jobs()
+        if not jobs:
+            self._ctx.log_info("WordLayoutPlugin: сигнал возврата, но возвращать нечего (нет выложенных)")
+            return None
+
+        self._ctx.log_info(f"WordLayoutPlugin: возврат {len(jobs)} букв на ленту → сброс раскладки")
+        self._assembler.reset()
+        self._reg.slots_filled = 0
+        self._reg.done = False
+        self._reg.next_letter = self._assembler.next_letter
+        # Раскладка взводится заново для нового слова.
+        self._armed = True
+        self._settle = 0
+        self._cur_label = ""
+        return {**item, self._reg.return_jobs_key: jobs}
+
+    def _build_return_jobs(self) -> list[dict]:
+        """Позы возврата для всех заполненных слотов: координата слота + Z (откуда забрать)."""
+        jobs: list[dict] = []
+        for idx, s in enumerate(self._assembler.slots):
+            if s.filled:
+                jobs.append(
+                    {
+                        "x_mm": s.x_mm,
+                        "y_mm": s.y_mm,
+                        "z_mm": float(self._reg.place_z_mm),
+                        "slot": idx,
+                        "char": s.char,
+                    }
+                )
+        return jobs
 
     def _build_assembler(self, word: str) -> tuple[WordAssembler, list[geometry.Point]]:
         """Собрать матчер по текущему режиму раскладки (шаг от первого / между first-last)."""

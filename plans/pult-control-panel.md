@@ -138,6 +138,26 @@ Services/control_panel/
 (param-write через services.commands; action через bridge) · 5.3 GUI-пикер «Добавить из ноды»
 (нода/поле/команда из реестра) · 5.4 monitor-binding (read-only из state) · 5.5 qt-mcp smoke.
 
+**Статус Phase 5 (2026-06-16):** 5.1 DONE · **5.2 DONE** (роутинг presenter по `source`:
+local→set_control, param→`SetPluginConfig` live field-write, action→`on_action_command`,
+monitor→read-only) · **5.3 DONE** (`catalog.py` NodeCatalog + `picker.py` NodePickerDialog:
+процесс→плагин→param/action→поле(`extract_fields`)/команда(`PluginRegistry`); тип контрола по
+типу поля; стартовое значение из config ноды, не min) · 5.4 monitor — отложено (deferred) ·
+**5.5 smoke DONE** (live: пикер открывается, 11 нод видны, 4 угла `robot_scale` правят лист
+вживую, значения 0/144/192/0 из рецепта). 53 теста зелёных, ruff чист.
+
+**Грабли Phase 5 (важно):** топологию в GUI брать из `services.topology.load().to_dict()`
+(канон, как Pipeline/Processes), НЕ из `bridge.topology` — у конкретного `TopologyBridge` нет
+такого свойства (вернул бы None → пустой пикер). Заодно так же починен legacy `_resolve_node`
+(персист контролов читал мёртвый `bridge.topology`). action со значением (speed): фреймворк
+хранит команды как `{имя: метод}` БЕЗ схемы аргументов → GUI не авто-открывает аргументы,
+пользователь задаёт `value_arg`+`command_args` вручную (углы/param — полностью авто из схемы).
+
+**Узел `robot_scale` вписан в phone_sketch (шаг «а», DONE):** strokes_to_points → identity
+(px), `robot_scale` первым в процессе `points` (углы листа 0/144/192/0, Y-вверх), wire
+`lines.strokes_to_points.draw_points → points.robot_scale.draw_points`. blueprint check 0 ошибок,
+live точки рисуют портрет. 4 угла вынесены в pult `controls` (дашборд).
+
 **Вне scope Phase 5:** не-register config-поля (только live-tunable регистры); группировка/вкладки.
 
 ## Вне scope (v1)

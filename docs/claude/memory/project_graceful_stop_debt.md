@@ -12,6 +12,10 @@ metadata:
 - ❌ AsyncSender (router) — он не worker_manager-воркер, стопается в `router_manager.shutdown` ПОСЛЕ `stop_all_workers`, на 5с-join не влияет (sentinel `bbdc8a41` корректен, но не про это).
 - ❌ `data_receiver` вечный put (`bdcbab96`) — реальный баг, починен, но не ТОТ блокер.
 
-**Где копать (вероятная причина):** ребёнок виснет в `process_instance.shutdown()/stop()` ДО atexit — скорее всего `worker_manager.stop_all_workers` join'ит воркер-поток, который не выходит по stop_event: блок внутри `queue.put()` в мёртвый receiver ИЛИ `cv2.read()` камеры. `cancel_join_thread` структурно бессилен против потока, застрявшего ВНУТРИ put(). Нужен дефинитивный thread-dump ВНУТРИ зависшего ребёнка в окне 0–5с (не после terminate). Инструмент: `faulthandler.dump_traceback_later` в `run_process_function` перед stop, или прямой дамп воркер-стеков в `stop_all_workers` при превышении дедлайна.
+**ПРИЧИНА ПОДТВЕРЖДЕНА (HIGH, 2026-06-16, investigator):** воркер-источник застревает в БЛОКИРУЮЩЕМ `produce()`. `SourceProducer.run_loop` (`source_producer.py:80`) проверяет `stop_event` только в начале итерации, НЕ внутри `produce()`. Блокеры: Hikvision `capture_frame(timeout_ms=1000)` (`Services/hikvision_camera/core/camera.py:284` `MV_CC_GetImageBuffer`) и `cv2.VideoCapture.read()` (`Plugins/sources/capture/plugin.py:151`). → `stop_all_workers` join висит до дедлайна → `terminate()`, finally/`plugin.shutdown()` не отрабатывает (камера не освобождается). Совпало с прежней гипотезой «cv2.read/put».
 
-**Стоп-условие владельца:** «если не получится этот подход тормози, в дебри полез уже» — подход cancel_join_thread провалился, дерево откачено к `191732eb` (чистое). Связано с [[project_recipe_hotswap]], [[feedback_fix_framework_forward]].
+**Фикс-направление (без костылей):** прерываемый `produce()` — короткий таймаут камеры + проверка `stop_event` в цикле (Hikvision `capture_frame(timeout_ms=100)` с повтором; cv2 `grab()`+`retrieve()` вместо `read()`); гарантированный `plugin.shutdown()` при превышении дедлайна стопа воркеров; guard в `BatchBuffer.stop()` (`batch_buffer.py:99/200`: не звать `_flush_fn` если `_stop_event.is_set()`) — устраняет `ValueError: I/O operation on closed file` (безобидный шум teardown).
+
+**ВАЖНО:** это ОТДЕЛЬНАЯ проблема от тихой потери параметров после switch — см. [[project_switch_routing_stale]] (стейл-PSR GUI возникает и при ЧИСТОМ стопе). Чинить обе.
+
+Связано: [[project_recipe_hotswap]], [[feedback_fix_framework_forward]], [[project_switch_routing_stale]].

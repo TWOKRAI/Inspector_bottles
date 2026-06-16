@@ -187,7 +187,18 @@ class PhoneCameraPlugin(ProcessModulePlugin):
 
     def _start_server(self) -> dict:
         """Поднять HTTP-сервер (идемпотентно) и опубликовать адрес/QR."""
-        self._gateway.start()
+        try:
+            self._gateway.start()
+        except OSError as exc:
+            # Порт занят (старый процесс не освободил его при switch/перезапуске)
+            # или нет прав. Не падаем — сообщаем причину, GUI остаётся «выключен».
+            self._ctx.log_error(
+                f"PhoneCameraPlugin[{self._camera_id}]: не удалось поднять HTTP-сервер на "
+                f"порту {self._port}: {exc}. Вероятно порт занят (старый процесс не освободил "
+                f"его) — перезапустите процесс или смените http_port в конфиге."
+            )
+            self._publish_connection()
+            return {"status": "error", "running": False, "error": str(exc)}
         port = self._gateway.port
         self._url = f"http://{local_ip()}:{port}/"
         candidates = ", ".join(f"http://{ip}:{port}/" for ip in local_ips())

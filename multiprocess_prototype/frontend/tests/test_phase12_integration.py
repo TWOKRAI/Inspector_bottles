@@ -225,10 +225,14 @@ class TestFullPipeline:
         # rm обновлён
         assert rm._values.get("color_mask", {}).get("h_min") == 50
 
-        # IPC отправлен (через sender → process)
+        # IPC отправлен. send_command не-своему процессу теперь идёт конвертом
+        # process.relay в ProcessManager (свежие очереди после hot-swap).
         assert len(MockProcess.sent) >= 1
-        target, msg = MockProcess.sent[-1]
-        assert target == "processor_0"
+        raw_target, raw_msg = MockProcess.sent[-1]
+        assert raw_target == "ProcessManager"
+        relay = raw_msg["data"]
+        assert relay["target_process"] == "processor_0"
+        msg = relay["inner_message"]
         # set_h_min нет в commands → convention fallback: set_config
         assert msg["command"] == "set_config"
         assert msg["data"] == {"h_min": 50}
@@ -254,9 +258,10 @@ class TestFullPipeline:
         bus.undo()
         sender.flush()
 
-        # IPC с откатом
+        # IPC с откатом (развернуть relay-конверт)
         assert len(MockProcess.sent) >= 1
-        target, msg = MockProcess.sent[-1]
+        raw_target, raw_msg = MockProcess.sent[-1]
+        msg = raw_msg["data"]["inner_message"]
         assert msg["data"] == {"h_min": 0}
 
     def test_state_delta_syncs_rm(self, full_pipeline) -> None:

@@ -241,37 +241,37 @@ blueprint:
     - node_id: maskview.mask_to_frame.frame
       display_id: mask
   metadata:
-    gui_positions: &id001
+    gui_positions:
       camera_0.hikvision:
-        - 16.0
-        - 100.0
+        - 19.20727986021096
+        - 164.27637314694792
       roi.roi_crop:
-        - 956.0
-        - 100.0
+        - 711.2089883319765
+        - 134.29232848494945
       detector.color_convert:
-        - 1876.0
+        - 1420.0
         - 100.0
       detector.hsv_mask:
-        - 2076.0
-        - 122.04540959629236
+        - 1620.0
+        - 100.0
       detector.morphology:
-        - 2276.0
+        - 1820.0
         - 100.0
       detector.contour_finder:
-        - 2476.0
+        - 2020.0
         - 100.0
       cal.camera_robot_calibration:
-        - 2816.0
-        - 40.0
+        - 1760.0
+        - 100.0
       maskview.mask_to_frame:
-        - 2816.0
-        - 160.0
+        - 1120.0
+        - 320.0
       main:
-        - 3720.0
-        - 0.0
+        - 1860.0
+        - 260.0
       mask:
-        - 3720.0
-        - 120.0
+        - 1340.0
+        - 360.0
     locked_nodes: []
 displays:
   - id: main
@@ -309,4 +309,34 @@ displays:
 created_at: ''
 active_services: []
 display_bindings: []
-gui_positions: *id001
+gui_positions:
+  camera_0.hikvision:
+    - 16.0
+    - 100.0
+  roi.roi_crop:
+    - 956.0
+    - 100.0
+  detector.color_convert:
+    - 1876.0
+    - 100.0
+  detector.hsv_mask:
+    - 2076.0
+    - 122.04540959629236
+  detector.morphology:
+    - 2276.0
+    - 100.0
+  detector.contour_finder:
+    - 2476.0
+    - 100.0
+  cal.camera_robot_calibration:
+    - 2816.0
+    - 40.0
+  maskview.mask_to_frame:
+    - 2816.0
+    - 160.0
+  main:
+    - 3720.0
+    - 0.0
+  mask:
+    - 3720.0
+    - 120.0

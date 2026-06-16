@@ -1,48 +1,82 @@
-# Рецепт hikvision_letter_robot — БОЕВОЙ тракт для робота-укладчика на ПРОМ-камере.
+# Рецепт hikvision_letter_robot — БОЕВОЙ тракт робота-укладчика на ПРОМ-камере.
 #
-#   Hikvision → BGR-свап → ROI → круги(белые диски) → линия(триггер) →
-#     КВАДРАТНЫЙ crop → ml_inference(буква+угол) → дисплей
+#   camera_0 → vision(свап→ROI→маска→морфо→круги) ─┬→ line(триггер)
+#                                                  ├→ recog(crop→калибровка→нейронка) → layout(раскладка→робот)
+#                                                  ├→ draw(круги+overlay)               (укладка слова)
+#                                                  └→ maskview
 #
-# Это Hikvision-вариант letter_angle_inspect (там вебкамера). Конечная цель —
-# отдать роботу координату точки съёма круга в мм. Сборка ИНКРЕМЕНТАЛЬНАЯ:
-#   ШАГ 1 (этот файл): инференс на Hikvision + новая 33-буквенная модель  ← СЕЙЧАС
-#   ШАГ 2: калибровка камера↔робот (рецепт camera_robot_calibration) → config/calibration/cam0.yaml
-#   ШАГ 3: узел px→мм (по гомографии) → robot_io → процесс devices → robot_enqueue_job
-#   (угол доворота к роботу — отдельным шагом, требует правки Lua-протокола)
+# Слово задаётся с телефона (phone.signal_2). Цикл:
+#   1) УКЛАДКА: диск едет по ленте → распознаётся буква+угол → робот берёт диск с ленты
+#      (pick = калибровка px→мм) и кладёт в слот слова (place + доворот).
+#   2) ВОЗВРАТ: по сигналу с телефона (phone.signal_1) робот возвращает ВСЕ выложенные буквы
+#      на ленту (mode=3 RETURN: забор из слота → +Z → +X → −Z → отпустить), затем раскладка
+#      сбрасывается — можно вводить новое слово.
 #
-# === ЦВЕТ (важно!) ===
-#   Hikvision отдаёт кадр в RGB-порядке (Bayer-демозаик), а ml_inference сам делает
-#   BGR→RGB по sidecar (color: RGB). Поэтому ПЕРВЫМ стоит color_convert (свап R↔B):
-#   RGB камеры → физический BGR → весь тракт (дисплеи + ml_inference) работает в
-#   BGR-конвенции ровно как вебкамерный letter_angle_inspect. Без свапа модель и
-#   дисплей получили бы перепутанные каналы.
-#   circle_detector работает по grayscale (input_key=frame) — цветопорядок ему безразличен.
+# === ГРУППИРОВКА ПРОЦЕССОВ (эффективность) ===
+#   Плагины внутри процесса идут ЛИНЕЙНОЙ цепочкой — кадр живёт в памяти процесса без
+#   межпроцессных SHM-перегонов. Поэтому линейные соседи слиты:
+#     vision = color_convert→roi_crop→hsv_mask→morphology→circle_detector (вся предобработка+детекция)
+#     recog  = center_crop→pixel_to_robot→ml_inference (кроп→калибровка→нейронка)
+#     layout = word_layout→robot_io (раскладка→форвард роботу)
+#   Ветвления (vision раздаёт в 4 стороны) и источники (camera/phone) — отдельными процессами.
+#   line отдельно: line_filter заменяет item (теряет кадр) — слить в линейную цепочку нельзя.
 #
-# === КООРДИНАТЫ / ROI (важно для будущей калибровки!) ===
-#   roi_crop здесь = проверенное окно диска из dataset_circle_capture (x:560 y:240 800×600).
-#   Калибровки ещё НЕТ → на шаге 2 калиброваться будем с ЭТИМ ЖЕ ROI. Гомография будет
-#   ROI-локальной (px ROI → мм робота), поэтому ИНФЕРЕНС ОБЯЗАН детектить в той же ROI.
-#   Меняешь ROI — перекалибровывай.
+# === ЦВЕТ ===
+#   Hikvision отдаёт RGB → color_convert свопает в физ. BGR → весь тракт + ml_inference
+#   (sidecar color:RGB, сам делает BGR→RGB) в BGR-конвенции. circle_detector по grayscale.
 #
-# === БЕЛАЯ МАСКА (почему так) ===
-#   detector = hsv_mask(белый: s_max мал, v_min велик) → morphology(чистка) →
-#   circle_detector(input_key=mask). Hough по ЧИСТОЙ маске не ловит ложных кругов на
-#   металле ленты. Дисплей "mask" — для тюнинга маски вживую.
+# === КАЛИБРОВКА / КООРДИНАТЫ (важно!) ===
+#   pixel_to_robot грузит config/calibration/cam0.yaml (гомография px→мм робота, артефакт
+#   визарда camera_robot_calibration) и переводит центр сработавшего круга (sidecar.center_px)
+#   → pick_xy (позиция забора с ленты). Энкодер для CVT-трекинга драйвер читает один раз на
+#   задание в enqueue_job (девайс-сторона, только когда робот подключён — без частого Modbus).
+#   ⚠ ROI калибровки ОБЯЗАН совпадать с боевым (560,240,800,600) — гомография ROI-локальна.
+#   Нет cam0.yaml → pick_xy не выдаётся → word_layout(require_pick=True) диск не берёт (видно
+#   по застрявшей раскладке — прод-безопасно).
+#
+# === БЕЛАЯ МАСКА ===
+#   hsv_mask(белый: s_max мал, v_min велик) → morphology(чистка) → circle_detector(input_key=mask).
+#   Hough по чистой маске не ловит ложных кругов на металле ленты. Дисплей "mask" — для тюнинга.
 #
 # === ТЮНИНГ (всё в ПИКСЕЛЯХ ROI) ===
-#   1) roi_crop: x/y/width/height — окно вокруг рабочей зоны (синхронно с калибровкой).
-#   2) hsv_mask: s_max / v_min белого — смотреть дисплей "mask".
-#   3) circle_detector: min/max_radius (px белого диска в ROI ~140px), param2.
-#   4) line_filter: center_x/center_y/angle(90=вертикаль)/zone_width — линия точки съёма.
-#   4) center_crop: size_mode=radius → сторона = 2·radius·radius_scale + 2·margin; output_size=128 = вход модели.
-#   5) ml_inference: model, confidence_threshold; device cpu (можно cuda при onnxruntime-gpu).
+#   roi_crop x/y/w/h (синхронно с калибровкой) · hsv_mask s_max/v_min · circle_detector min/max_radius/param2
+#   · line_filter center_x/angle(90=вертикаль)/zone_width · center_crop size_mode=radius/output_size=128
+#   · ml_inference model/confidence · word_layout first_x/y + line_angle + pitch + place_z + доворот.
 #
-# Предусловие: установлен MVS SDK (MvCameraControl.dll), камера подключена.
+# Предусловие: MVS SDK (MvCameraControl.dll) + камера; робот 192.168.1.7:502 unit2 + лента (ПЧ).
 # Запуск: python multiprocess_prototype/run.py hikvision_letter_robot
 name: hikvision_letter_robot
 version: 3
-description: "Hikvision → круги → линия(триггер) → квадратный crop → ml_inference (буква+угол)"
+description: "Hikvision → круги → линия → crop → калибровка → нейронка → укладка слова роботом"
 
+# Устройства — upsert в реестр devices при активации. Лента управляется через сервис ПЧ
+# (vfd_belt — мост поверх robot_main; команды vfd_run/vfd_set_freq/vfd_stop).
+devices:
+  - id: robot_main
+    name: Робот Delta
+    kind: robot
+    protocol: delta_universal3
+    transport:
+      type: tcp
+      host: 192.168.1.7
+      port: 502
+      unit_id: 2
+    params:
+      word_order: little
+      feed_poll_s: 0.05
+      telemetry_interval_s: 0.5
+  - id: vfd_belt
+    name: ПЧ лента
+    kind: vfd
+    protocol: gd20_bridge
+    transport:
+      type: bridge
+      bridge: robot_main
+    params:
+      freq_max_hz: 50.0
+      default_freq_hz: 10.0
+      poll_interval_s: 0.5
+      stale_polls_limit: 6
 blueprint:
   processes:
     - process_name: gui
@@ -89,51 +123,27 @@ blueprint:
       priority: high
       target_process:
       chain_targets:
-        - cc
+        - vision
       description:
       protected: false
       category:
       metadata:
         source_target_fps: 25
-    - process_name: cc
+    - process_name: vision
       plugins:
         - plugin_name: color_convert
           plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
           category: processing
           config:
             mode: bgr2rgb
-      workers: []
-      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
-      priority: normal
-      target_process:
-      chain_targets:
-        - roi
-      description:
-      protected: false
-      category:
-      metadata: {}
-    - process_name: roi
-      plugins:
         - plugin_name: roi_crop
           plugin_class: Plugins.processing.roi_crop.plugin.RoiCropPlugin
           category: processing
           config:
-            x: 560
-            y: 240
+            x: 367
+            y: 297
             width: 800
-            height: 600
-      workers: []
-      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
-      priority: normal
-      target_process:
-      chain_targets:
-        - detector
-      description:
-      protected: false
-      category:
-      metadata: {}
-    - process_name: detector
-      plugins:
+            height: 481
         - plugin_name: hsv_mask
           plugin_class: Plugins.processing.hsv_mask.plugin.HsvMaskPlugin
           category: processing
@@ -161,12 +171,12 @@ blueprint:
             mode: gradient
             blur_method: gaussian
             blur_ksize: 5
-            dp: 1.2
+            dp: 1.4
             min_dist: 200
             param1: 100
-            param2: 30
+            param2: 40.0
             min_radius: 90
-            max_radius: 200
+            max_radius: 230
             draw_circles: false
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
@@ -174,10 +184,10 @@ blueprint:
       target_process:
       chain_targets:
         - line
-        - crop
+        - recog
         - draw
         - maskview
-      description:
+      description: свап→ROI→маска→морфо→круги (линейно, без межпроцессных SHM-перегонов)
       protected: false
       category:
       metadata: {}
@@ -187,23 +197,24 @@ blueprint:
           plugin_class: Plugins.filter.line_filter.plugin.LineFilterPlugin
           category: filter
           config:
-            center_x: 400
-            center_y: 300
+            center_x: 376
+            center_y: 262
             angle: 90
-            zone_width: 120
-            mode: enter_zone
+            zone_width: 250
+            mode: zone_edge
+            rearm_frames: 2
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
       target_process:
       chain_targets:
-        - crop
+        - recog
         - draw
       description:
       protected: false
       category:
       metadata: {}
-    - process_name: crop
+    - process_name: recog
       plugins:
         - plugin_name: center_crop
           plugin_class: Plugins.processing.center_crop.plugin.CenterCropPlugin
@@ -216,25 +227,16 @@ blueprint:
             output_size: 128
             drop_partial: false
             pad_if_oob: true
-      workers: []
-      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
-      priority: normal
-      target_process:
-      chain_targets:
-        - infer
-      description:
-      protected: false
-      category:
-      metadata:
-        inspector:
-          mode: join
-          inputs:
-            - frame
-            - overlay
-          primary: frame
-          timeout_sec: 0.25
-    - process_name: infer
-      plugins:
+        - plugin_name: pixel_to_robot
+          plugin_class: Plugins.processing.pixel_to_robot.plugin.PixelToRobotPlugin
+          category: processing
+          config:
+            camera_id: cam0
+            calibration_dir: config/calibration
+            center_key: center_px
+            output_key: pick_xy
+            roi_offset_x: 0
+            roi_offset_y: 0
         - plugin_name: ml_inference
           plugin_class: Services.ml_inference.plugin.plugin.MLInferencePlugin
           category: processing
@@ -252,7 +254,56 @@ blueprint:
       chain_targets:
         - gui
         - layout
-      description:
+      description: crop(по триггеру линии) → калибровка px→мм (+энкодер) → нейронка буква+угол
+      protected: false
+      category:
+      metadata:
+        inspector:
+          mode: join
+          inputs:
+            - frame
+            - overlay
+          primary: frame
+          timeout_sec: 0.25
+    - process_name: layout
+      plugins:
+        - plugin_name: word_layout
+          plugin_class: Plugins.processing.word_layout.plugin.WordLayoutPlugin
+          category: processing
+          config:
+            target_word: ''
+            word_source: signal_2
+            use_pitch: true
+            first_x: 300.0
+            first_y: -100.0
+            line_angle_deg: 90.0
+            pitch_mm: 0.0
+            last_x: 500.0
+            last_y: -100.0
+            place_z_mm: 0.0
+            disk_radius_mm: 55.0
+            word_gap_slots: 1
+            angle_zero_deg: 0.0
+            angle_invert: false
+            min_confidence: 0.5
+            settle_frames: 1
+            use_trigger: false
+            pick_source: pick_xy
+            encoder_source: e_capture
+            require_pick: true
+        - plugin_name: robot_io
+          plugin_class: Plugins.io.robot_io.plugin.RobotIoPlugin
+          category: io
+          config:
+            device_id: robot_main
+            job_source: robot_job
+            forward_deque_maxlen: 64
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets: []
+      description: раскладка слова (pick+place+доворот) → форвард роботу (robot_enqueue_job)
       protected: false
       category:
       metadata: {}
@@ -306,38 +357,6 @@ blueprint:
       protected: false
       category:
       metadata: {}
-    - process_name: layout
-      plugins:
-        - plugin_name: word_layout
-          plugin_class: Plugins.processing.word_layout.plugin.WordLayoutPlugin
-          category: processing
-          config:
-            target_word: ''
-            word_source: signal_2
-            use_pitch: true
-            first_x: 300.0
-            first_y: -100.0
-            line_angle_deg: 90.0
-            pitch_mm: 0.0
-            last_x: 500.0
-            last_y: -100.0
-            place_z_mm: 0.0
-            disk_radius_mm: 55.0
-            word_gap_slots: 1
-            angle_zero_deg: 0.0
-            angle_invert: false
-            min_confidence: 0.5
-            settle_frames: 1
-            use_trigger: false
-      workers: []
-      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
-      priority: normal
-      target_process:
-      chain_targets: []
-      description:
-      protected: false
-      category:
-      metadata: {}
     - process_name: phone
       plugins:
         - plugin_name: phone_camera
@@ -365,74 +384,64 @@ blueprint:
         source_target_fps: 10
   wires:
     - source: camera_0.hikvision.frame
-      target: cc.color_convert.frame
+      target: vision.color_convert.frame
       src_dtype:
       tgt_dtype:
-      description: ''
-    - source: cc.color_convert.frame
-      target: roi.roi_crop.frame
+      description: камера → вход vision (далее ROI→маска→морфо→круги линейно внутри процесса)
+    - source: vision.circle_detector.frame
+      target: recog.center_crop.frame
       src_dtype:
       tgt_dtype:
-      description: ''
-    - source: roi.roi_crop.frame
-      target: detector.hsv_mask.frame
-      src_dtype:
-      tgt_dtype:
-      description: вход процесса = ПЕРВЫЙ плагин (hsv_mask); далее morphology→circle_detector линейно
-    - source: detector.circle_detector.frame
-      target: crop.center_crop.frame
-      src_dtype:
-      tgt_dtype:
-      description: ''
-    - source: detector.circle_detector.frame
-      target: draw.circle_draw.frame
-      src_dtype:
-      tgt_dtype:
-      description: ''
-    - source: detector.circle_detector.detections
-      target: draw.circle_draw.detections
-      src_dtype:
-      tgt_dtype:
-      description: ''
-    - source: detector.circle_detector.detections
+      description: кадр+детекции → crop (детекции едут в item, для radius-матчинга)
+    - source: vision.circle_detector.detections
       target: line.line_filter.detections
       src_dtype:
       tgt_dtype:
       description: ''
-    - source: line.line_filter.overlay
-      target: crop.center_crop.trigger_in
+    - source: vision.circle_detector.frame
+      target: draw.circle_draw.frame
       src_dtype:
       tgt_dtype:
       description: ''
+    - source: vision.circle_detector.detections
+      target: draw.circle_draw.detections
+      src_dtype:
+      tgt_dtype:
+      description: ''
+    - source: vision.circle_detector.mask
+      target: maskview.mask_to_frame.mask
+      src_dtype:
+      tgt_dtype:
+      description: маска белого → отдельный дисплей для тюнинга
+    - source: line.line_filter.overlay
+      target: recog.center_crop.trigger_in
+      src_dtype:
+      tgt_dtype:
+      description: триггер «диск пересёк линию» → один crop события
     - source: line.line_filter.overlay
       target: draw.overlay_draw.overlay
       src_dtype:
       tgt_dtype:
       description: ''
-    - source: crop.center_crop.frame
-      target: infer.ml_inference.frame
-      src_dtype:
-      tgt_dtype:
-      description: ''
-    - source: detector.circle_detector.mask
-      target: maskview.mask_to_frame.mask
-      src_dtype:
-      tgt_dtype:
-      description: маска белого → отдельный дисплей для тюнинга
-    - source: infer.ml_inference.predictions
+    - source: recog.ml_inference.predictions
       target: layout.word_layout.predictions
       src_dtype:
       tgt_dtype:
-      description: буква+угол → раскладка слова (задание роботу {x,y,angle})
+      description: буква+угол (+pick_xy/e_capture в item) → раскладка слова → робот
     - source: phone.phone_camera.signal_2
       target: layout.word_layout.word
       src_dtype:
       tgt_dtype:
       description: целевое слово с пульта телефона → раскладка (word_source=signal_2, латчится)
+    - source: phone.phone_camera.signal_1
+      target: layout.word_layout.return_trigger
+      src_dtype:
+      tgt_dtype:
+      description: сигнал «вернуть всё на ленту» (кнопка телефона) → возврат выложенных букв + сброс
   displays:
     - node_id: draw.overlay_draw.frame
       display_id: main
-    - node_id: infer.ml_inference.frame
+    - node_id: recog.ml_inference.frame
       display_id: recog
     - node_id: maskview.mask_to_frame.frame
       display_id: mask
@@ -442,61 +451,67 @@ blueprint:
     gui_positions:
       camera_0.hikvision:
         - 16.0
-        - 160.0
-      cc.color_convert:
-        - 320.0
-        - 160.0
-      roi.roi_crop:
-        - 561.1730899056462
-        - 168.2632837710127
-      detector.hsv_mask:
-        - 880.0
-        - 160.0
-      detector.morphology:
-        - 1060.0
-        - 160.0
-      detector.circle_detector:
-        - 1240.0
-        - 160.0
+        - 40.0
+      vision.color_convert:
+        - 16.0
+        - 1120.0
+      vision.roi_crop:
+        - 212.37063046153224
+        - 1113.6486033076817
+      vision.hsv_mask:
+        - 416.0
+        - 1120.0
+      vision.morphology:
+        - 616.0
+        - 1120.0
+      vision.circle_detector:
+        - 816.0
+        - 1120.0
       line.line_filter:
-        - 1500.0
-        - 132.5120664236136
-      crop.center_crop:
-        - 1820.0
-        - 40.0
-      infer.ml_inference:
-        - 2160.0
-        - 40.0
-      draw.circle_draw:
-        - 1820.0
-        - 220.0
-      draw.overlay_draw:
-        - 2020.0
-        - 220.0
-      maskview.mask_to_frame:
-        - 1500.0
-        - 260.0
+        - 16.0
+        - 400.0
+      recog.center_crop:
+        - 16.0
+        - 1000.0
+      recog.pixel_to_robot:
+        - 216.0
+        - 1000.0
+      recog.ml_inference:
+        - 416.0
+        - 1000.0
       layout.word_layout:
-        - 2420.0
-        - 40.0
+        - 16.0
+        - 280.0
+      layout.robot_io:
+        - 216.0
+        - 280.0
+      draw.circle_draw:
+        - 16.0
+        - 156.91823899371064
+      draw.overlay_draw:
+        - 216.0
+        - 160.0
+      maskview.mask_to_frame:
+        - 16.0
+        - 760.0
       phone.phone_camera:
-        - 2160.0
-        - 320.0
+        - 16.0
+        - 880.0
       main:
-        - 2360.0
-        - 240.0
+        - 0.0
+        - 480.0
       recog:
-        - 2560.0
-        - 60.0
+        - 600.0
+        - 170.0
       mask:
-        - 1760.0
-        - 320.0
+        - 0.0
+        - 600.0
       phone:
-        - 2620.0
-        - 320.0
+        - 600.0
+        - 410.0
     locked_nodes: []
-    description: ''
     name: default
+    description: ''
 displays:
   - id: main
     name: Кадр + круги + линия
@@ -568,56 +583,61 @@ display_bindings: []
 gui_positions:
   camera_0.hikvision:
     - 16.0
-    - 160.0
-  cc.color_convert:
-    - 320.0
-    - 160.0
-  roi.roi_crop:
-    - 561.1730899056462
-    - 168.2632837710127
-  detector.hsv_mask:
-    - 880.0
-    - 160.0
-  detector.morphology:
-    - 1060.0
-    - 160.0
-  detector.circle_detector:
-    - 1240.0
-    - 160.0
+    - 40.0
+  vision.color_convert:
+    - 16.0
+    - 1120.0
+  vision.roi_crop:
+    - 212.37063046153224
+    - 1113.6486033076817
+  vision.hsv_mask:
+    - 416.0
+    - 1120.0
+  vision.morphology:
+    - 616.0
+    - 1120.0
+  vision.circle_detector:
+    - 816.0
+    - 1120.0
   line.line_filter:
-    - 1500.0
-    - 132.5120664236136
-  crop.center_crop:
-    - 1820.0
-    - 40.0
-  infer.ml_inference:
-    - 2160.0
-    - 40.0
-  draw.circle_draw:
-    - 1820.0
-    - 220.0
-  draw.overlay_draw:
-    - 2020.0
-    - 220.0
-  maskview.mask_to_frame:
-    - 1500.0
-    - 260.0
+    - 16.0
+    - 400.0
+  recog.center_crop:
+    - 16.0
+    - 1000.0
+  recog.pixel_to_robot:
+    - 216.0
+    - 1000.0
+  recog.ml_inference:
+    - 416.0
+    - 1000.0
   layout.word_layout:
-    - 2420.0
-    - 40.0
+    - 16.0
+    - 280.0
+  layout.robot_io:
+    - 216.0
+    - 280.0
+  draw.circle_draw:
+    - 16.0
+    - 160.0
+  draw.overlay_draw:
+    - 216.0
+    - 160.0
+  maskview.mask_to_frame:
+    - 16.0
+    - 760.0
   phone.phone_camera:
-    - 2160.0
-    - 320.0
+    - 16.0
+    - 880.0
   main:
-    - 2360.0
-    - 240.0
+    - 0.0
+    - 480.0
   recog:
-    - 2560.0
-    - 60.0
+    - 600.0
+    - 170.0
   mask:
-    - 1760.0
-    - 320.0
+    - 0.0
+    - 600.0
   phone:
-    - 2620.0
-    - 320.0
-devices: []
+    - 600.0
+    - 410.0

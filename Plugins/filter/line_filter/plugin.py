@@ -53,6 +53,9 @@ class LineFilterPlugin(ProcessModulePlugin):
             max_age=self._reg.max_age,
         )
         self._frame = 0
+        # zone_edge: latch занятости зоны (rising-edge) + счётчик пустых кадров для пере-взвода.
+        self._zone_occupied = False
+        self._empty_streak = 0
         # Недавно зачтённые позиции для дедупа: list[(frame_idx, (x, y))].
         self._recent: list[tuple[int, tuple[float, float]]] = []
         # Накопленные события (emit_mode=accumulated): list[dict].
@@ -106,11 +109,54 @@ class LineFilterPlugin(ProcessModulePlugin):
 
     # --- Логика фильтра на одном кадре ---
 
+    def _record_pos(self, pos: tuple[float, float]) -> dict:
+        """Зачесть событие по позиции (zone_edge — без Track-объекта)."""
+        self._counted_total += 1
+        self._recent.append((self._frame, pos))
+        event = {
+            "id": self._counted_total,
+            "xy": [round(pos[0], 1), round(pos[1], 1)],
+            "frame": self._frame,
+        }
+        self._accumulated.append(event)
+        return event
+
+    def _apply_zone_edge(
+        self, points: list[tuple[float, float]], center: tuple[float, float], half: float
+    ) -> list[dict]:
+        """Rising-edge по занятости зоны — БЕЗ трекинга, робастно к скорости.
+
+        Триггер на переходе «зона пуста → есть круг». Пере-взвод после
+        ``rearm_frames`` пустых кадров (гасит мерцание детекции). Не зависит от
+        ассоциации центров между кадрами → стабильно на любой скорости ленты,
+        лишь бы круг попал в зону хотя бы 1 кадр (``zone_width`` ≥ смещения за кадр).
+        Допущение: в зоне один объект за раз (однополосный конвейер).
+        """
+        r = self._reg
+        in_zone = [(p, abs(signed_distance(p, center, r.angle))) for p in points]
+        in_zone = [(p, sd) for p, sd in in_zone if sd <= half]
+        passed: list[dict] = []
+
+        if in_zone:
+            self._empty_streak = 0
+            if not self._zone_occupied:  # rising edge → один триггер до освобождения зоны
+                self._zone_occupied = True
+                for p, _sd in sorted(in_zone, key=lambda x: x[1]):  # ближайший к линии первым
+                    passed.append(self._record_pos(p))
+        else:
+            self._empty_streak += 1
+            if self._empty_streak >= max(1, r.rearm_frames):
+                self._zone_occupied = False
+        return passed
+
     def _apply(self, points: list[tuple[float, float]]) -> list[dict]:
         r = self._reg
         center = (float(r.center_x), float(r.center_y))
         half = r.zone_width / 2.0
         passed: list[dict] = []
+
+        if r.mode == "zone_edge":
+            return self._apply_zone_edge(points, center, half)
 
         for t in self._tracker.update(points):
             sd = signed_distance(t.pos, center, r.angle)

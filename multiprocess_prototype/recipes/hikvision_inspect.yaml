@@ -27,9 +27,15 @@ blueprint:
   # «Раскладки». Авто-сохраняется при перетаскивании (PipelinePresenter).
   metadata:
     gui_positions:
-      camera_0.hikvision: [60, 120]
-      color_convert.color_convert: [340, 120]
-      main: [620, 120]
+      camera_0.hikvision:
+        - 60.0
+        - 205.54638364779876
+      color_convert.color_convert:
+        - 340.0
+        - 120.0
+      main:
+        - 620.0
+        - 120.0
     locked_nodes: []
 
   processes:

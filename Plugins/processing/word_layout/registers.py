@@ -84,10 +84,41 @@ class WordLayoutRegisters(SchemaBase):
     ] = False
     trigger_source: Annotated[str, FieldMeta("Ключ триггера", info="входной порт сигнала «взять диск»")] = "trigger"
 
+    # --- Забор (калибровка) ---
+    # Координата забора диска с ленты приходит из узла pixel_to_robot ({x_mm,y_mm} в мм
+    # робота) + опц. энкодер кадра. Слот слова — это УКЛАДКА (place), забор — это pick.
+    pick_source: Annotated[str, FieldMeta("Ключ забора", info="{x_mm,y_mm} позиции забора от pixel_to_robot")] = (
+        "pick_xy"
+    )
+    encoder_source: Annotated[
+        str, FieldMeta("Ключ энкодера", info="e_capture (энкодер кадра) от pixel_to_robot — для CVT-трекинга")
+    ] = "e_capture"
+    require_pick: Annotated[
+        bool,
+        FieldMeta(
+            "Требовать забор",
+            info="True: без калибровки (нет pick) диск не кладём, слот не съедаем (прод-безопасно); "
+            "False: раскладка идёт без робота (демо)",
+        ),
+    ] = True
+
     # --- Выход ---
     job_key: Annotated[
-        str, FieldMeta("Ключ задания", info="куда положить {x_mm,y_mm,angle_deg} (вяжется к robot_io.job_source)")
+        str,
+        FieldMeta("Ключ задания", info="ключ позы {pick_*, place_*, e_capture} (вяжется к robot_io.job_source)"),
     ] = "robot_job"
+
+    # --- Возврат на ленту ---
+    # По сигналу с пульта (свободная кнопка телефона) робот возвращает ВСЕ выложенные буквы
+    # обратно на конвейер, затем раскладка сбрасывается (можно вводить новое слово).
+    return_trigger_source: Annotated[
+        str,
+        FieldMeta("Ключ сигнала возврата", info="входной порт сигнала «вернуть на ленту» (имя ИСХОДНОГО порта)"),
+    ] = "signal_1"
+    return_jobs_key: Annotated[
+        str,
+        FieldMeta("Ключ заданий возврата", info="список поз возврата (вяжется к robot_io.return_jobs_source)"),
+    ] = "robot_return_jobs"
 
     # --- Readonly: прогресс ---
     word_norm: Annotated[str, FieldMeta("Слово (норм.)", readonly=True)] = ""

@@ -133,6 +133,33 @@ def test_presenter_on_frame_unknown_slot_no_crash(qtbot):
     presenter.on_frame("ghost", frame)
 
 
+def test_presenter_on_frame_unknown_slot_warns_once(qtbot, caplog):
+    """Поток кадров на незарегистрированный слот логируется один раз на slot_id."""
+    presenter = ImagePanelPresenter()
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+    with caplog.at_level("WARNING"):
+        for _ in range(50):
+            presenter.on_frame("ghost", frame)
+
+    warnings = [r for r in caplog.records if "неизвестный slot_id 'ghost'" in r.getMessage()]
+    assert len(warnings) == 1, "50 кадров → ровно одно предупреждение"
+
+
+def test_presenter_unknown_slot_warns_again_after_reregister(qtbot):
+    """Регистрация слота сбрасывает флаг: при повторном выключении предупреждаем снова."""
+    presenter = ImagePanelPresenter()
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+    presenter.on_frame("phone", frame)  # предупредили (slot выключен)
+    assert "phone" in presenter._warned_unknown_slots
+
+    slot = DisplaySlot(slot_id="phone")
+    qtbot.addWidget(slot)
+    presenter.register_slot("phone", slot)  # дисплей включили → сброс флага
+    assert "phone" not in presenter._warned_unknown_slots
+
+
 def test_presenter_on_frames(qtbot):
     """on_frames() обрабатывает несколько кадров сразу."""
     presenter = ImagePanelPresenter()

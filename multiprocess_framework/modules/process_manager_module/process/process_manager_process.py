@@ -262,6 +262,10 @@ class ProcessManagerProcess(ProcessModule):
             "wire.setup": (self._cmd_wire_setup, "Настроить wire-канал (SHM + routes)"),
             "wire.teardown": (self._cmd_wire_teardown, "Разобрать wire-канал"),
             "wire.status": (self._cmd_wire_status, "Статусы wire-каналов"),
+            "process.relay": (
+                self._cmd_process_relay,
+                "Relay: доставить команду в целевой процесс через свежий PSR PM",
+            ),
         }
 
         for cmd_name, (handler, description) in commands.items():
@@ -771,6 +775,47 @@ class ProcessManagerProcess(ProcessModule):
     # -------------------------------------------------------------------------
     # Router endpoint — приём команд от других процессов (AD-8)
     # -------------------------------------------------------------------------
+
+    def _cmd_process_relay(self, data=None, **kwargs) -> dict:
+        """Relay команды в целевой процесс через АКТУАЛЬНЫЙ PSR PM.
+
+        Зачем: GUI (protected) НЕ пересоздаётся при hot-swap рецепта и держит
+        стейл-копию маршрутов (своя pickle-копия PSR с очередями убитых процессов).
+        Прямой GUI→процесс ``send_command`` после switch кладёт билет в мёртвую
+        очередь → ``put_nowait`` возвращает True → ТИХАЯ потеря. PM провижинит
+        процессы и держит СВЕЖИЕ очереди, поэтому доставка идёт через него:
+        ``GUI → process.relay → PM.send_message(target, inner)`` (тот же путь
+        доставки, что и у прямой отправки, но на актуальном реестре).
+
+        Контракт ``data``::
+
+            {"target_process": "vision", "inner_message": {<полный билет>}}
+
+        ``inner_message`` доставляется приёмнику «как есть» — контракт до плагина
+        (CommandManager target → handler) не меняется. Результат возвращается
+        штатным ``reply_to_request`` (process.command.response, ADR-COMM-005):
+        потеря/ошибка ВИДИМА инициатору, а не тихий дроп.
+        """
+        if isinstance(data, dict):
+            kwargs.update(data)
+        target = kwargs.get("target_process") or ""
+        inner = kwargs.get("inner_message")
+        if not target or not isinstance(inner, dict):
+            return {"success": False, "error": "process.relay: нужны target_process и inner_message (dict)"}
+
+        # Существование цели по СВЕЖЕМУ реестру PM — видимая ошибка вместо тихого дропа.
+        pd = self.shared_resources.get_process_data(target) if self.shared_resources else None
+        if pd is None:
+            return {"success": False, "error": f"process.relay: процесс '{target}' не зарегистрирован в PM"}
+
+        try:
+            # send_message PM → ProcessCommunication → RouterManager → queue_registry
+            # на АКТУАЛЬНОМ PSR PM (qtype выбирает роутер, как при обычной доставке).
+            self.send_message(target, inner)
+        except Exception as exc:  # noqa: BLE001 — вернуть видимую ошибку инициатору
+            self._log_error(f"process.relay в '{target}' не удался: {exc}")
+            return {"success": False, "error": str(exc)}
+        return {"success": True, "target_process": target}
 
     def _handle_process_command(self, msg: dict) -> None:
         """Обработчик Router-сообщений с command='process.command'.

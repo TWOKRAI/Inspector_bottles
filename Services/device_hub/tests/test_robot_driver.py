@@ -97,6 +97,27 @@ class TestRobotDriverFeeder:
         # Проверяем что задание выполнено
         assert driver.jobs_sent >= 1
 
+    def test_place_job_pc_converts_rz_to_absolute(self, driver, core, clock) -> None:
+        """PC-side: доворот → абсолютный R = реальный R робота (опрос) + доворот; поза уходит роботу."""
+        from Services.robot_comm.core.registers import (
+            REG_PLACE_RZ,
+            REG_PLACE_X,
+            REG_PLACE_Y,
+            REG_PLACE_Z,
+        )
+
+        # sim TLM_RZ = 0 (реальный R инструмента) → абсолютный R = 0 + доворот(45°)
+        ok = driver.enqueue_job(100.0, 200.0, place=(300.0, -120.0, -90.0, 45.0))
+        assert ok
+        stop = threading.Event()
+        for _ in range(5):
+            driver.tick(stop)
+        assert driver.jobs_sent >= 1
+        assert core.regs[REG_PLACE_X] == 3000  # 300.0 ×10
+        assert core.regs[REG_PLACE_Y] == (-1200) & 0xFFFF
+        assert core.regs[REG_PLACE_Z] == (-900) & 0xFFFF
+        assert core.regs[REG_PLACE_RZ] == 450  # (реальный R 0 + доворот 45) ×10
+
     def test_manual_mode_pauses_feeder(self, driver, clock) -> None:
         """manual_mode=True -> очередь не обрабатывается."""
         driver.manual_mode = True
@@ -106,6 +127,26 @@ class TestRobotDriverFeeder:
         # Задание осталось в очереди
         assert len(driver._job_queue) == 1
         assert driver.jobs_sent == 0
+
+
+class TestRobotDrawSetPenPartial:
+    """draw_set_pen: частичное обновление (дашборд-пульт: два независимых контрола)."""
+
+    def test_both_then_partial(self, driver) -> None:
+        driver._op_draw_set_pen({"down": -10.0, "up": 5.0})
+        assert driver._pen_down_mm == -10.0
+        assert driver._pen_up_mm == 5.0
+
+        # только down — up сохраняется
+        r = driver._op_draw_set_pen({"down": -20.0})
+        assert driver._pen_down_mm == -20.0
+        assert driver._pen_up_mm == 5.0
+        assert r["up"] == 5.0
+
+        # только up — down сохраняется
+        driver._op_draw_set_pen({"up": 8.0})
+        assert driver._pen_down_mm == -20.0
+        assert driver._pen_up_mm == 8.0
 
 
 class TestRobotDriverReconnect:
@@ -268,6 +309,30 @@ class TestRobotDriverDraw:
         """mode видно в snapshot."""
         snap = driver.snapshot()
         assert snap["mode"] == "cvt"
+
+
+class TestRobotDriverReturn:
+    """Возврат буквы на ленту: return_job через call, tick исполняет, режим cvt после."""
+
+    def test_return_job_via_call_enqueues(self, driver) -> None:
+        result = driver.call("return_job", {"x_mm": 120.0, "y_mm": -60.0, "z_mm": -90.0})
+        assert result["status"] == "ok"
+        assert result["return_queue_len"] == 1
+
+    def test_return_executed_and_mode_restored(self, driver) -> None:
+        driver.call("return_job", {"x_mm": 120.0, "y_mm": -60.0, "z_mm": -90.0})
+        stop = threading.Event()
+        # tick №1 — переключение в RETURN + исполнение одного возврата (sim завершает handshake).
+        driver.tick(stop)
+        assert driver.returns_done >= 1
+        # tick №2 — очередь пуста → режим вернулся в cvt (иначе CVT-feeder заглушен).
+        driver.tick(stop)
+        assert driver.mode == "cvt"
+
+    def test_return_counters_in_snapshot(self, driver) -> None:
+        snap = driver.snapshot()
+        assert snap["returns_done"] == 0
+        assert snap["return_queued"] == 0
 
 
 class TestRobotDriverTelemetry:

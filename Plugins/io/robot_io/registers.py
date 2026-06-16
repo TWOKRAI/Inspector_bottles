@@ -26,6 +26,10 @@ class RobotIoRegisters(SchemaBase):
     job_source: Annotated[str, FieldMeta("Ключ задания в item", info="dict {x_mm, y_mm} -> очередь forward")] = (
         "robot_job"
     )
+    return_jobs_source: Annotated[
+        str,
+        FieldMeta("Ключ заданий возврата", info="список поз {x_mm,y_mm,z_mm} -> robot_return_job (возврат на ленту)"),
+    ] = "robot_return_jobs"
     forward_deque_maxlen: Annotated[
         int, FieldMeta("Макс. очередь", info="Макс. размер forward-deque", min=1, max=1024)
     ] = 64

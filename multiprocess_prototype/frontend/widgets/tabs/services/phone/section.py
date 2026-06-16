@@ -12,12 +12,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QPushButton, QWidget
 
 from multiprocess_framework.modules.frontend_module.widgets.tabs import SectionSpec
 
 from Services.phone_gateway import qr as qr_mod
-from Services.phone_gateway.netinfo import local_ips
+from Services.phone_gateway.netinfo import local_endpoints
 
 from .presenter import PhoneServicePresenter
 from .widget import PhoneServiceWidget
@@ -40,6 +41,10 @@ class _PhoneSection:
         self._handles: list[Any] = []
         self._btn_on: QPushButton | None = None
         self._btn_off: QPushButton | None = None
+        # Авто-обновление адреса при смене WiFi: таймер перечитывает IP, пока
+        # панель открыта; QR пересоздаётся только когда адрес реально сменился.
+        self._addr_timer: QTimer | None = None
+        self._last_endpoints: list[tuple[str, str]] = []
 
     @property
     def key(self) -> str:
@@ -65,8 +70,10 @@ class _PhoneSection:
 
     def on_activated(self) -> None:
         self._refresh()
+        self._start_addr_timer()
 
     def on_deactivated(self) -> None:
+        self._stop_addr_timer()
         self._unbind()
 
     # ------------------------------------------------------------------ #
@@ -105,10 +112,49 @@ class _PhoneSection:
         """Показать адрес+QR (вычисляются локально) и (пере)привязать метки."""
         if self._widget is None:
             return
-        urls = [f"http://{ip}:{self._port}/" for ip in local_ips()]
-        qr_png = qr_mod.make_qr_png(urls[0]) if urls else None
-        self._widget.set_connection(urls, qr_png)
+        self._last_endpoints = self._current_endpoints()
+        self._apply_connection(self._last_endpoints)
         self._bind()
+
+    def _current_endpoints(self) -> list[tuple[str, str]]:
+        """[(метка_интерфейса, url)] для телефона, WiFi первым; порт фиксирован."""
+        return [(label, f"http://{ip}:{self._port}/") for label, ip in local_endpoints()]
+
+    def _apply_connection(self, endpoints: list[tuple[str, str]]) -> None:
+        """Показать адрес(а) с метками и сгенерировать QR на основной адрес."""
+        if self._widget is None:
+            return
+        qr_png = qr_mod.make_qr_png(endpoints[0][1]) if endpoints else None
+        self._widget.set_connection(endpoints, qr_png)
+
+    def _maybe_refresh_address(self) -> None:
+        """Перечитать IP (смена WiFi) и обновить адрес+QR, если он изменился.
+
+        Зовётся по таймеру, пока панель открыта. QR пересоздаётся только при
+        реальной смене адреса — иначе мигал бы каждый тик.
+        """
+        if self._widget is None:
+            return
+        endpoints = self._current_endpoints()
+        if endpoints == self._last_endpoints:
+            return
+        self._last_endpoints = endpoints
+        self._apply_connection(endpoints)
+
+    def _start_addr_timer(self) -> None:
+        """Запустить периодическую проверку смены сети (пока панель открыта)."""
+        if self._widget is None:
+            return
+        if self._addr_timer is None:
+            self._addr_timer = QTimer(self._widget)
+            self._addr_timer.setInterval(4000)
+            self._addr_timer.timeout.connect(self._maybe_refresh_address)
+        self._addr_timer.start()
+
+    def _stop_addr_timer(self) -> None:
+        """Остановить проверку смены сети (панель скрыта)."""
+        if self._addr_timer is not None:
+            self._addr_timer.stop()
 
     def _unbind(self) -> None:
         bindings = getattr(self._runtime, "bindings", None)

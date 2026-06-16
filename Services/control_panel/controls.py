@@ -15,7 +15,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, field_validator
 
 # Тип контрола — ВИД виджета (как выглядит/оперируется).
-ControlType = Literal["button", "toggle", "slider", "number", "text"]
+#   select — выпадающий список: options=[{label, value}], эмитит value выбранного
+#            пункта (напр. выбор режима робота: cvt|draw|manual|toolchange).
+ControlType = Literal["button", "toggle", "slider", "number", "text", "select"]
 
 # Источник/назначение контрола — КУДА идёт действие (Phase 5 дашборд):
 #   local   — эмит на свой выходной порт (pipeline-сигнал; дефолт, текущее поведение);
@@ -49,6 +51,9 @@ class ControlSpec(BaseModel):
     max: float = 100.0
     step: float = 1.0
     trigger_value: Any = True
+    # select: список пунктов выпадающего списка [{label, value}]. label — подпись
+    # для GUI, value — что эмитится при выборе. Пусто для остальных типов.
+    options: list[dict[str, Any]] = []
 
     # Дашборд (Phase 5): контрол может управлять/наблюдать ДРУГУЮ ноду.
     source: ControlSource = "local"
@@ -56,6 +61,11 @@ class ControlSpec(BaseModel):
     target_plugin_index: int = 0  # индекс плагина в процессе (мульти-плагин)
     target_field: str = ""  # имя register-поля (param/monitor)
     target_command: str = ""  # имя команды (action)
+    # action со значением: value_arg — имя аргумента команды, куда кладётся значение
+    # контрола (пусто = чистый триггер, как кнопка «Рисовать»); command_args —
+    # фиксированные аргументы команды (напр. {"device_id": "robot_main"}).
+    value_arg: str = ""
+    command_args: dict[str, Any] = {}
 
     @field_validator("id")
     @classmethod
@@ -63,6 +73,10 @@ class ControlSpec(BaseModel):
         if not str(v).strip():
             raise ValueError("ControlSpec.id не может быть пустым")
         return str(v).strip()
+
+    def option_values(self) -> list[Any]:
+        """Список value всех пунктов select (для валидации/дефолта)."""
+        return [o.get("value") for o in self.options if isinstance(o, dict) and "value" in o]
 
     def default_value(self) -> Any:
         """Значение по умолчанию для типа (стартовое состояние контрола)."""
@@ -72,6 +86,9 @@ class ControlSpec(BaseModel):
             return False
         if self.type in _NUMERIC:
             return self.min
+        if self.type == "select":
+            vals = self.option_values()
+            return vals[0] if vals else ""  # первый пункт списка
         return ""  # text
 
     def coerce(self, raw: Any) -> Any:
@@ -90,7 +107,26 @@ class ControlSpec(BaseModel):
             except (TypeError, ValueError):
                 num = self.min
             return _clamp(num, self.min, self.max)
+        if self.type == "select":
+            vals = self.option_values()
+            if raw in vals:
+                return raw
+            return vals[0] if vals else ""  # вне списка → первый пункт (или пусто)
         return "" if raw is None else str(raw)
+
+    def is_operable(self) -> bool:
+        """Можно ли оперировать контролом (monitor — только чтение, операция запрещена)."""
+        return self.source != "monitor"
+
+    def action_args(self, value: Any) -> dict[str, Any]:
+        """Аргументы команды для action-источника: фикс. command_args + значение под value_arg.
+
+        Пустой value_arg = чистый триггер (значение не передаётся, как кнопка «Рисовать»).
+        """
+        args: dict[str, Any] = dict(self.command_args or {})
+        if self.value_arg:
+            args[self.value_arg] = self.coerce(value)
+        return args
 
     def to_dict(self) -> dict[str, Any]:
         """Сериализация на границу (Dict-at-Boundary)."""

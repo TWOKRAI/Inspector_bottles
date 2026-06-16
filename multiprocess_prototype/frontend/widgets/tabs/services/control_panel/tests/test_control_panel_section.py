@@ -34,7 +34,8 @@ def test_operate_routes_to_set_control():
 
     bridge = _FakeBridge()
     p = ControlPanelPresenter(bridge=bridge, services=None)
-    assert p.operate("spd", 42.0) is True
+    # local-источник: операция → set_control плагину control_panel.
+    assert p.operate({"id": "spd", "source": "local"}, 42.0) is True
     assert bridge.calls == [("control_panel", "set_control", {"id": "spd", "value": 42.0})]
 
 
@@ -80,7 +81,7 @@ def test_no_bridge_and_no_services_is_safe():
     )
 
     p = ControlPanelPresenter(bridge=None, services=None)
-    assert p.operate("x", 1) is False
+    assert p.operate({"id": "x", "source": "local"}, 1) is False
     # add без services не падает (персист пропущен), команда без bridge → False
     assert p.add({"id": "a"}, "", 0, []) is False
 

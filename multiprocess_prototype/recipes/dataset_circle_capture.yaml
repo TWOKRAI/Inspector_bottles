@@ -121,9 +121,6 @@ blueprint:
       metadata: {}
     - process_name: detector
       plugins:
-        # ВНИМАНИЕ: на вход идёт ПОСТ-конверт кадр (roi → color_convert bgr2rgb = RGB-порядок),
-        # а hsv_mask делает COLOR_BGR2HSV → физически КРАСНЫЙ читается как «синий» hue (~H120).
-        # Поэтому диапазон H ~ 95..135, НЕ 170/10. Крути слайдеры по дисплею «mask».
         - plugin_name: hsv_mask
           plugin_class: Plugins.processing.hsv_mask.plugin.HsvMaskPlugin
           category: processing
@@ -134,7 +131,6 @@ blueprint:
             s_max: 255
             v_min: 70
             v_max: 255
-        # morphology «вырезает» только круги: open убирает шум-крапинки, close — дырки.
         - plugin_name: morphology
           plugin_class: Plugins.processing.morphology.plugin.MorphologyPlugin
           category: processing
@@ -338,40 +334,43 @@ blueprint:
         - 16.0
         - 160.0
       roi.roi_crop:
-        - 520.0475086492846
-        - 148.01583621642828
+        - 756.0000000000001
+        - 201.4448318293683
       roi.color_convert:
-        - 756.0
+        - 956.0
         - 160.0
       detector.hsv_mask:
-        - 1076.0
+        - 1476.0
+        - 160.0
+      detector.morphology:
+        - 1676.0
         - 160.0
       detector.circle_detector:
-        - 1276.0
+        - 1876.0
         - 160.0
       line.line_filter:
-        - 1616.0
+        - 2216.0
         - 100.0
       crop.center_crop:
-        - 2136.0
+        - 2936.0
         - 40.0
       saver.frame_saver:
-        - 2676.0
+        - 3676.0
         - 100.0
       draw.circle_draw:
-        - 2136.0
+        - 2936.0
         - 160.0
       draw.overlay_draw:
-        - 2336.0
+        - 3136.0
         - 160.0
       maskview.mask_to_frame:
-        - 1616.0
+        - 2216.0
         - 220.0
       main:
-        - 2660.0
+        - 3660.0
         - 180.0
       mask:
-        - 2120.0
+        - 2920.0
         - 240.0
     locked_nodes: []
 displays:

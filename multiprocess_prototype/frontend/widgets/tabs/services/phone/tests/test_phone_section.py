@@ -54,6 +54,33 @@ def test_widget_observation_only(qtbot):
     assert not hasattr(w, "_coord_x")
 
 
+def test_address_auto_refresh_on_wifi_change(qtbot, monkeypatch):
+    """Смена WiFi (новый IP) → обновляется адрес+QR; та же сеть — без перегенерации."""
+    from multiprocess_prototype.frontend.widgets.tabs.services.phone import section as section_mod
+
+    sec = section_mod._PhoneSection(services=object(), runtime=object())
+    widget = sec.widget()  # строит виджет + первичный _refresh
+    qtbot.addWidget(widget)
+
+    # Сеть A (адаптер Wi-Fi)
+    monkeypatch.setattr(section_mod, "local_endpoints", lambda: [("Wi-Fi", "192.168.0.5")])
+    sec._refresh()
+    assert sec._last_endpoints == [("Wi-Fi", "http://192.168.0.5:8080/")]
+
+    applied: list[list[tuple[str, str]]] = []
+    monkeypatch.setattr(sec, "_apply_connection", lambda eps: applied.append(eps))
+
+    # Та же сеть — детектор не трогает адрес/QR
+    sec._maybe_refresh_address()
+    assert applied == []
+
+    # Переход в другой WiFi — новый адрес и новый QR
+    monkeypatch.setattr(section_mod, "local_endpoints", lambda: [("Wi-Fi", "10.10.0.2")])
+    sec._maybe_refresh_address()
+    assert applied == [[("Wi-Fi", "http://10.10.0.2:8080/")]]
+    assert sec._last_endpoints == [("Wi-Fi", "http://10.10.0.2:8080/")]
+
+
 def test_build_phone_section_spec():
     from multiprocess_prototype.frontend.widgets.tabs.services.phone import (
         build_phone_section,

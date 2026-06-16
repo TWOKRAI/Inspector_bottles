@@ -34,6 +34,14 @@ from .registers import HikvisionCameraRegisters
 # Модуль frame_id для wrap-around (совместим с camera_service)
 _FRAME_ID_MODULO = 121
 
+# Кооперативный таймаут захвата (мс). Контракт source-плагина: produce() НЕ должен
+# блокировать дольше ~2 интервалов кадра, иначе SourceProducer.run_loop не увидит
+# stop_event и worker не остановится за дедлайн → terminate() (5с-лаг switch +
+# незакрытая камера). При 25fps кадр приходит каждые 40мс, поэтому 200мс с запасом
+# хватает (кадры НЕ теряются — таймаут просто вернёт [] и цикл перечитает stop_event),
+# а остановка видна ≤200мс вместо 1000мс. См. docs/audits/2026-06-16_switch-routing-stale.md.
+_CAPTURE_TIMEOUT_MS = 200
+
 
 @register_plugin(
     "hikvision",
@@ -153,7 +161,9 @@ class HikvisionCameraPlugin(ProcessModulePlugin):
             return []
 
         with self._camera_lock:
-            raw_frame, pixel_type = self._camera.capture_frame(timeout_ms=1000)
+            # Кооперативный таймаут: короткое ожидание → быстрый возврат управления
+            # циклу (проверка stop_event), без потери кадров. См. _CAPTURE_TIMEOUT_MS.
+            raw_frame, pixel_type = self._camera.capture_frame(timeout_ms=_CAPTURE_TIMEOUT_MS)
 
         if raw_frame is None:
             return []
