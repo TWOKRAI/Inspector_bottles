@@ -1,0 +1,491 @@
+# Рецепт hikvision_letter_robot — БОЕВОЙ тракт для робота-укладчика на ПРОМ-камере.
+#
+#   Hikvision → BGR-свап → ROI → круги(белые диски) → линия(триггер) →
+#     КВАДРАТНЫЙ crop → ml_inference(буква+угол) → дисплей
+#
+# Это Hikvision-вариант letter_angle_inspect (там вебкамера). Конечная цель —
+# отдать роботу координату точки съёма круга в мм. Сборка ИНКРЕМЕНТАЛЬНАЯ:
+#   ШАГ 1 (этот файл): инференс на Hikvision + новая 33-буквенная модель  ← СЕЙЧАС
+#   ШАГ 2: калибровка камера↔робот (рецепт camera_robot_calibration) → config/calibration/cam0.yaml
+#   ШАГ 3: узел px→мм (по гомографии) → robot_io → процесс devices → robot_enqueue_job
+#   (угол доворота к роботу — отдельным шагом, требует правки Lua-протокола)
+#
+# === ЦВЕТ (важно!) ===
+#   Hikvision отдаёт кадр в RGB-порядке (Bayer-демозаик), а ml_inference сам делает
+#   BGR→RGB по sidecar (color: RGB). Поэтому ПЕРВЫМ стоит color_convert (свап R↔B):
+#   RGB камеры → физический BGR → весь тракт (дисплеи + ml_inference) работает в
+#   BGR-конвенции ровно как вебкамерный letter_angle_inspect. Без свапа модель и
+#   дисплей получили бы перепутанные каналы.
+#   circle_detector работает по grayscale (input_key=frame) — цветопорядок ему безразличен.
+#
+# === КООРДИНАТЫ / ROI (важно для будущей калибровки!) ===
+#   roi_crop здесь = проверенное окно диска из dataset_circle_capture (x:560 y:240 800×600).
+#   Калибровки ещё НЕТ → на шаге 2 калиброваться будем с ЭТИМ ЖЕ ROI. Гомография будет
+#   ROI-локальной (px ROI → мм робота), поэтому ИНФЕРЕНС ОБЯЗАН детектить в той же ROI.
+#   Меняешь ROI — перекалибровывай.
+#
+# === БЕЛАЯ МАСКА (почему так) ===
+#   detector = hsv_mask(белый: s_max мал, v_min велик) → morphology(чистка) →
+#   circle_detector(input_key=mask). Hough по ЧИСТОЙ маске не ловит ложных кругов на
+#   металле ленты. Дисплей "mask" — для тюнинга маски вживую.
+#
+# === ТЮНИНГ (всё в ПИКСЕЛЯХ ROI) ===
+#   1) roi_crop: x/y/width/height — окно вокруг рабочей зоны (синхронно с калибровкой).
+#   2) hsv_mask: s_max / v_min белого — смотреть дисплей "mask".
+#   3) circle_detector: min/max_radius (px белого диска в ROI ~140px), param2.
+#   4) line_filter: center_x/center_y/angle(90=вертикаль)/zone_width — линия точки съёма.
+#   4) center_crop: size_mode=radius → сторона = 2·radius·radius_scale + 2·margin; output_size=128 = вход модели.
+#   5) ml_inference: model, confidence_threshold; device cpu (можно cuda при onnxruntime-gpu).
+#
+# Предусловие: установлен MVS SDK (MvCameraControl.dll), камера подключена.
+# Запуск: python multiprocess_prototype/run.py hikvision_letter_robot
+name: hikvision_letter_robot
+version: 3
+description: "Hikvision → круги → линия(триггер) → квадратный crop → ml_inference (буква+угол)"
+
+blueprint:
+  name: default
+  description: ''
+  processes:
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.process.GuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+    - process_name: devices
+      plugins:
+        - plugin_name: device_hub
+          plugin_class: Plugins.hub.device_hub.plugin.DeviceHubPlugin
+          category: hub
+          config:
+            registry_path: data/devices.yaml
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+    - process_name: camera_0
+      plugins:
+        - plugin_name: hikvision
+          plugin_class: Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin
+          category: source
+          config:
+            camera_id: 0
+            camera_index: 0
+            resolution_width: 1440
+            resolution_height: 1080
+            fps: 25
+            auto_start: true
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      target_process:
+      chain_targets:
+        - cc
+      description:
+      protected: false
+      category:
+      metadata:
+        source_target_fps: 25
+    - process_name: cc
+      plugins:
+        - plugin_name: color_convert
+          plugin_class: Plugins.processing.color_convert.plugin.ColorConvertPlugin
+          category: processing
+          config:
+            mode: bgr2rgb
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - roi
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: roi
+      plugins:
+        - plugin_name: roi_crop
+          plugin_class: Plugins.processing.roi_crop.plugin.RoiCropPlugin
+          category: processing
+          config:
+            x: 560
+            y: 240
+            width: 800
+            height: 600
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - detector
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: detector
+      plugins:
+        - plugin_name: hsv_mask
+          plugin_class: Plugins.processing.hsv_mask.plugin.HsvMaskPlugin
+          category: processing
+          config:
+            h_min: 0
+            h_max: 179
+            s_min: 0
+            s_max: 60
+            v_min: 190
+            v_max: 255
+        - plugin_name: morphology
+          plugin_class: Plugins.processing.morphology.plugin.MorphologyPlugin
+          category: processing
+          config:
+            operation: open_close
+            kernel_shape: ellipse
+            kernel_size: 5
+            iterations: 1
+        - plugin_name: circle_detector
+          plugin_class: Plugins.processing.circle_detector.plugin.CircleDetectorPlugin
+          category: processing
+          config:
+            input_key: mask
+            keep_mask: true
+            mode: gradient
+            blur_method: gaussian
+            blur_ksize: 5
+            dp: 1.2
+            min_dist: 200
+            param1: 100
+            param2: 30
+            min_radius: 90
+            max_radius: 200
+            draw_circles: false
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - line
+        - crop
+        - draw
+        - maskview
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: line
+      plugins:
+        - plugin_name: line_filter
+          plugin_class: Plugins.filter.line_filter.plugin.LineFilterPlugin
+          category: filter
+          config:
+            center_x: 400
+            center_y: 300
+            angle: 90
+            zone_width: 120
+            mode: enter_zone
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - crop
+        - draw
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: crop
+      plugins:
+        - plugin_name: center_crop
+          plugin_class: Plugins.processing.center_crop.plugin.CenterCropPlugin
+          category: processing
+          config:
+            size_mode: radius
+            radius_scale: 1.0
+            margin_px: 14
+            side_px: 256
+            output_size: 128
+            drop_partial: false
+            pad_if_oob: true
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - infer
+      description:
+      protected: false
+      category:
+      metadata:
+        inspector:
+          mode: join
+          inputs:
+            - frame
+            - overlay
+          primary: frame
+          timeout_sec: 0.25
+    - process_name: infer
+      plugins:
+        - plugin_name: ml_inference
+          plugin_class: Services.ml_inference.plugin.plugin.MLInferencePlugin
+          category: processing
+          config:
+            model: mobilenet_v3_large_20260616_050828
+            device: cpu
+            confidence_threshold: 0.5
+            top_k: 3
+            inference_every_n: 1
+            draw_overlay: true
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - gui
+        - layout
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: draw
+      plugins:
+        - plugin_name: circle_draw
+          plugin_class: Plugins.render.circle_draw.plugin.CircleDrawPlugin
+          category: rendering
+          config:
+            color_bgr:
+              - 0
+              - 255
+              - 0
+            thickness: 2
+            show_radius: true
+        - plugin_name: overlay_draw
+          plugin_class: Plugins.render.overlay_draw.plugin.OverlayDrawPlugin
+          category: rendering
+          config: {}
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - gui
+      description:
+      protected: false
+      category:
+      metadata:
+        inspector:
+          mode: join
+          inputs:
+            - frame
+            - overlay
+          primary: frame
+          timeout_sec: 0.25
+    - process_name: maskview
+      plugins:
+        - plugin_name: mask_to_frame
+          plugin_class: Plugins.processing.mask_to_frame.plugin.MaskToFramePlugin
+          category: processing
+          config:
+            source_key: mask
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: low
+      target_process:
+      chain_targets:
+        - gui
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: layout
+      plugins:
+        - plugin_name: word_layout
+          plugin_class: Plugins.processing.word_layout.plugin.WordLayoutPlugin
+          category: processing
+          config:
+            target_word: ''        # задай слово здесь (или из пульта/инспектора)
+            word_source: ''        # пусто = слово только из target_word
+            # Раскладка: от ПЕРВОГО диска по направлению + шагу (слово любой длины).
+            use_pitch: true
+            first_x: 300.0         # центр ПЕРВОГО диска (мм робота) — подбери под стол
+            first_y: -100.0
+            line_angle_deg: 90.0   # 90 = слово вдоль +Y (X постоянный, Y растёт)
+            pitch_mm: 0.0          # 0 = авто = диаметр (2·55=110 мм); задай своё при зазорах
+            last_x: 500.0          # (режим use_pitch=false) центр последнего диска
+            last_y: -100.0
+            place_z_mm: 0.0        # высота Z укладки в команде роботу (x,y,z,r) — подбери
+            disk_radius_mm: 55.0
+            word_gap_slots: 1      # пробел = 1 диск пустоты (больше → 2,3…)
+            angle_zero_deg: 0.0    # общая целевая ориентация букв (доворот = zero − угол модели)
+            angle_invert: false    # сменить знак доворота под ось робота
+            min_confidence: 0.5
+            settle_frames: 1       # тракт даёт ~1 кадр на диск (crop по триггеру линии)
+            use_trigger: false
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets: []
+      description:
+      protected: false
+      category:
+      metadata: {}
+  wires:
+    - source: camera_0.hikvision.frame
+      target: cc.color_convert.frame
+      description: ''
+    - source: cc.color_convert.frame
+      target: roi.roi_crop.frame
+      description: ''
+    - source: roi.roi_crop.frame
+      target: detector.hsv_mask.frame
+      description: вход процесса = ПЕРВЫЙ плагин (hsv_mask); далее morphology→circle_detector линейно
+    - source: detector.circle_detector.frame
+      target: crop.center_crop.frame
+      description: ''
+    - source: detector.circle_detector.frame
+      target: draw.circle_draw.frame
+      description: ''
+    - source: detector.circle_detector.detections
+      target: draw.circle_draw.detections
+      description: ''
+    - source: detector.circle_detector.detections
+      target: line.line_filter.detections
+      description: ''
+    - source: line.line_filter.overlay
+      target: crop.center_crop.trigger_in
+      description: ''
+    - source: line.line_filter.overlay
+      target: draw.overlay_draw.overlay
+      description: ''
+    - source: crop.center_crop.frame
+      target: infer.ml_inference.frame
+      description: ''
+    - source: detector.circle_detector.mask
+      target: maskview.mask_to_frame.mask
+      description: маска белого → отдельный дисплей для тюнинга
+    - source: infer.ml_inference.predictions
+      target: layout.word_layout.predictions
+      description: буква+угол → раскладка слова (задание роботу {x,y,angle})
+  displays:
+    - node_id: draw.overlay_draw.frame
+      display_id: main
+    - node_id: infer.ml_inference.frame
+      display_id: recog
+    - node_id: maskview.mask_to_frame.frame
+      display_id: mask
+  metadata:
+    gui_positions: &id001
+      camera_0.hikvision:
+        - 16.0
+        - 160.0
+      cc.color_convert:
+        - 320.0
+        - 160.0
+      roi.roi_crop:
+        - 561.1730899056462
+        - 168.2632837710127
+      detector.hsv_mask:
+        - 880.0
+        - 160.0
+      detector.morphology:
+        - 1060.0
+        - 160.0
+      detector.circle_detector:
+        - 1240.0
+        - 160.0
+      line.line_filter:
+        - 1500.0
+        - 132.5120664236136
+      crop.center_crop:
+        - 1820.0
+        - 40.0
+      infer.ml_inference:
+        - 2160.0
+        - 40.0
+      draw.circle_draw:
+        - 1820.0
+        - 220.0
+      draw.overlay_draw:
+        - 2020.0
+        - 220.0
+      maskview.mask_to_frame:
+        - 1500.0
+        - 260.0
+      layout.word_layout:
+        - 2420.0
+        - 40.0
+      main:
+        - 2360.0
+        - 240.0
+      recog:
+        - 2560.0
+        - 60.0
+      mask:
+        - 1760.0
+        - 320.0
+    locked_nodes: []
+displays:
+  - id: main
+    name: Кадр + круги + линия
+    enabled: true
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 0
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+    crop:
+  - id: recog
+    name: Распознанный диск (буква + угол)
+    enabled: true
+    width: 512
+    height: 512
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 1000
+      y: 0
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+    crop:
+  - id: mask
+    name: Маска белого (hsv_mask)
+    enabled: true
+    width: 1280
+    height: 720
+    format: BGR
+    fps_limit: 30.0
+    ring_buffer_blocks: 3
+    position:
+      x: 500
+      y: 500
+    fit: contain
+    scale: 100
+    rotate: 0
+    flip: none
+    crop:
+created_at: ''
+active_services: []
+display_bindings: []
+gui_positions: *id001
