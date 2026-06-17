@@ -31,6 +31,7 @@ from Services.robot_comm.core.registers import (
     REG_DRAW_COUNT,
     REG_DRAW_DONE_N,
     REG_DRAW_FLAG,
+    REG_DRAW_HOME,
     REG_DRAW_PROG,
     REG_ENC,
     REG_FREE,
@@ -339,6 +340,9 @@ class RobotSimCore:
             self.regs[REG_DRAW_COUNT] = 0
             self.regs[REG_DRAW_PROG] = 0
             self.regs[REG_DRAW_DONE_N] = 0
+            # Заезд домой по REG_DRAW_HOME (паритет с idle-DRAW abort веткой прошивки):
+            # прошивка потребляет флаг и едет домой; здесь моделируем потребление флага.
+            self.regs[REG_DRAW_HOME] = 0
             self._draw_countdown = None
             return
         if self.regs[REG_DRAW_FLAG] == 1 and self._draw_countdown is None:

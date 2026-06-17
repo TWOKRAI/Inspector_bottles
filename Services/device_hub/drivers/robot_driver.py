@@ -121,6 +121,10 @@ class RobotDriver(BaseDeviceDriver):
         # Состояние рисования
         self._draw_busy: bool = False
         self._draw_state: str = "idle"
+        # Последний прогресс рисования от клиента (on_progress): сюда попадают verify_failed/
+        # verify_mismatch/timeout — иначе диагностика «N из M точек» терялась бы (клиент
+        # её формирует, но без on_progress она уходила в никуда). Видна в snapshot/GUI.
+        self._last_draw_progress: dict[str, Any] = {}
 
         # Запрос аборта рисования: ставит _op_draw_abort (командный поток),
         # client.draw() проверяет между проходами. Без этого abort прерывает лишь
@@ -184,7 +188,7 @@ class RobotDriver(BaseDeviceDriver):
             try:
                 self._client.disconnect()
             except Exception:
-                pass
+                self._record_err()  # не глотаем молча — фиксируем сбой закрытия (base rule #5)
         self._last_quality = "bad"
 
     # ------------------------------------------------------------------ #
@@ -830,6 +834,7 @@ class RobotDriver(BaseDeviceDriver):
             "draws_done": self.draws_done,
             "draw_state": self._draw_state,
             "draw_queued": self._draw_queue.qsize(),
+            "draw_progress": self._last_draw_progress,
             "returns_done": self.returns_done,
             "returns_failed": self.returns_failed,
             "return_queued": len(self._return_queue),
@@ -902,7 +907,21 @@ class RobotDriver(BaseDeviceDriver):
             draw_verify=bool(p.get("draw_verify", True)),
             draw_retry=int(p.get("draw_retry", 1)),
         )
-        return RobotClient(config, on_data=self._on_wire, clock=self._clock, sleep=self._sleep)
+        return RobotClient(
+            config,
+            on_data=self._on_wire,
+            on_progress=self._on_draw_progress,
+            clock=self._clock,
+            sleep=self._sleep,
+        )
+
+    def _on_draw_progress(self, payload: dict) -> None:
+        """Прогресс рисования от клиента → snapshot (особенно verify_failed/mismatch/timeout).
+
+        Без этого богатая диагностика клиента (сколько точек реально подтверждено, почему
+        проход не прошёл) терялась бы — оператор видел бы лишь draw_state=failed без причины.
+        """
+        self._last_draw_progress = dict(payload)
 
     def _wait_condition(self, condition: Any, timeout: float, stop_event: Any) -> bool:
         """Поллить условие до timeout (прерываемо stop_event)."""

@@ -294,16 +294,49 @@ def test_draw_splits_on_stroke_boundary() -> None:
 
 
 def test_draw_long_single_stroke_resumes_with_pen_up() -> None:
-    """Один штрих длиннее буфера → куски ≤100, возобновление с подводом (линия не теряется)."""
+    """Один штрих длиннее буфера → куски ≤100, возобновление с подводом + overlap 1."""
     from Services.robot_comm.core.datatypes import split_draw_passes
 
     pts = [DrawPoint(0.0, 0.0, 0)] + [DrawPoint(float(i), 0.0, 1) for i in range(1, 250)]  # 250 одним штрихом
     passes = split_draw_passes(pts, 100)
-    assert [len(p) for p in passes] == [100, 100, 52]
+    assert [len(p) for p in passes] == [100, 100, 54]  # overlap: куски пере-включают точку стыка
     assert passes[1][0].pen == 0 and passes[2][0].pen == 0  # подвод в точку возобновления
-    # Все исходные рисующие точки сохранены (250 = 100 + 99 + 51 оригинальных).
-    drawn_xs = [p.x_mm for batch in passes for p in batch if p.pen == 1]
-    assert drawn_xs == [float(i) for i in range(1, 250)]
+    # Все исходные рисующие точки покрыты (с дублями граничных точек на стыках).
+    drawn_xs = {p.x_mm for batch in passes for p in batch if p.pen == 1}
+    assert drawn_xs == {float(i) for i in range(1, 250)}
+
+
+def _drawn_segments(passes) -> set:
+    """Множество нарисованных сегментов (координатные пары) по всем проходам.
+
+    В проходе сегмент рисуется при переходе К точке pen=1 (move к pen=0 — переезд вверх).
+    """
+    segs = set()
+    for batch in passes:
+        for j in range(1, len(batch)):
+            if batch[j].pen == 1:
+                a, b = batch[j - 1], batch[j]
+                segs.add(((a.x_mm, a.y_mm), (b.x_mm, b.y_mm)))
+    return segs
+
+
+def test_long_stroke_no_segment_gap() -> None:
+    """Связность: длинный штрих, разбитый на проходы, рисует КАЖДЫЙ исходный сегмент.
+
+    Регрессия: раньше на границе прохода терялся сегмент stroke[limit-1]→stroke[limit]
+    (перо вверх между проходами). Overlap-возобновление чинит это — проверяем, что все
+    смежные пары исходного штриха присутствуют как нарисованные сегменты.
+    """
+    from Services.robot_comm.core.datatypes import split_draw_passes
+
+    stroke = [DrawPoint(0.0, 0.0, 0)] + [DrawPoint(float(i), float(i * 2), 1) for i in range(1, 90)]  # 90 точек
+    passes = split_draw_passes(stroke, 20)  # мелкий буфер → много границ
+    drawn = _drawn_segments(passes)
+    # Каждый исходный сегмент (s[k], s[k+1]) обязан быть нарисован.
+    for k in range(len(stroke) - 1):
+        a, b = stroke[k], stroke[k + 1]
+        seg = ((a.x_mm, a.y_mm), (b.x_mm, b.y_mm))
+        assert seg in drawn, f"потерян сегмент {k}: {seg}"
 
 
 def test_wait_draw_done_waits_for_slow_busy_rise(clock) -> None:
@@ -474,18 +507,21 @@ def test_many_points_no_drawing_point_lost(transport: FakeRobotTransport, clock)
     # Все исходные рисующие точки (в формате регистров x*10,y*10) присутствуют у робота, по порядку.
     want_draw = [(round(p.x_mm * XY_SCALE) & 0xFFFF, round(p.y_mm * XY_SCALE) & 0xFFFF) for p in path if p.pen == 1]
     got_draw = [(x, y) for (x, y, pen) in uploaded if pen == 1]
-    assert got_draw == want_draw, f"потеряны рисующие точки: got {len(got_draw)} vs want {len(want_draw)}"
+    # Overlap-возобновление длинного штриха пере-включает точку стыка (подряд идущий дубль) —
+    # схлопываем, чтобы сверить с исходной последовательностью рисующих точек.
+    collapsed = [p for k, p in enumerate(got_draw) if k == 0 or p != got_draw[k - 1]]
+    assert collapsed == want_draw, f"потеряны рисующие точки: got {len(collapsed)} vs want {len(want_draw)}"
 
 
 def test_draw_pass_size_makes_more_passes(transport: FakeRobotTransport, clock) -> None:
-    """draw_pass_size=10 на 25-точечном штрихе → 3 прохода (10,10,7), все верифицированы."""
+    """draw_pass_size=10 на 25-точечном штрихе → 3 прохода (overlap-возобновление), все верифицированы."""
     bot = _make_client(transport, clock, draw_pass_size=10)
     progress: list[dict] = []
     bot._on_progress = progress.append
     pts = [DrawPoint(0.0, 0.0, 0)] + [DrawPoint(float(i), 0.0, 1) for i in range(1, 25)]  # 25 одним штрихом
     assert bot.draw(pts)
     batches = [p for p in progress if p.get("stage") == "batch"]
-    assert [b["size"] for b in batches] == [10, 10, 7]  # 25 = 10 + (1+9) + (1+6)
+    assert [b["size"] for b in batches] == [10, 10, 9]  # 25 + overlap-дубли на стыках (1+9, 1+8)
     assert not any(p.get("stage") in ("verify_mismatch", "verify_failed") for p in progress)
 
 

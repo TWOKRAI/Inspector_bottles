@@ -77,8 +77,11 @@ class CropPlugin(ProcessModulePlugin):
         out_h = int(self._reg.out_height) or h_in
         mode = (self._reg.mode or "resize").lower()
 
-        # Нечего делать (только resize): регион = весь кадр и выход = входу.
-        if mode != "clip" and x == 0 and y == 0 and w == w_in and h == h_in and out_w == w_in and out_h == h_in:
+        # Нечего делать: регион = весь кадр, выход = входу. Для clip — ещё и paste=0 (иначе
+        # пришлось бы реально сдвигать на холсте). Тогда clip = тождество → не тратим холст.
+        full_region = x == 0 and y == 0 and w == w_in and h == h_in and out_w == w_in and out_h == h_in
+        paste_zero = int(self._reg.paste_x) == 0 and int(self._reg.paste_y) == 0
+        if full_region and (mode != "clip" or paste_zero):
             self._reg.last_w, self._reg.last_h = w_in, h_in
             return item
 

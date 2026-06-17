@@ -31,6 +31,20 @@ def test_lowercase_maps_to_uppercase() -> None:
     assert len(up) == len(lo)  # строчные нормализуются в прописные (тот же глиф)
 
 
+def test_full_russian_alphabet_covered() -> None:
+    """Все прописные русские буквы А-Я + Ё есть в шрифте (имена не теряют букв)."""
+    alphabet = [chr(c) for c in range(0x410, 0x430)] + ["Ё"]  # А..Я + Ё
+    sup = set(strokes_font.supported())
+    missing = [ch for ch in alphabet if ch not in sup]
+    assert missing == [], f"нет глифов: {missing}"
+
+
+def test_name_with_yo_not_skipped() -> None:
+    """Имя с буквой ё раскладывается целиком (ё нормализуется в Ё)."""
+    _polys, skipped = geometry.layout_text("Алёна", 50.0)
+    assert skipped == []
+
+
 def test_size_px_sets_cap_height() -> None:
     # Высота прописной 'I' (вертикальный штрих 0..CAP) = size_px.
     polys, _ = geometry.layout_text("I", 100.0)

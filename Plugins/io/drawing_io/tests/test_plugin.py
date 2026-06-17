@@ -61,13 +61,25 @@ def test_load_overrides_draw_points(tmp_path) -> None:
     p.process([{"draw_points": saved, "draw_bounds": [0, 0, 100, 100]}])
     name = p._reg.last_saved
 
-    # Загрузим и проверим подмену живых точек на загруженные.
+    # Загрузим и проверим подмену живых точек на загруженные (лист тот же → без прижима).
     res = p.cmd_load({"path": name})
     assert res["status"] == "ok" and res["points"] == 2
     live = [{"x_mm": 99.0, "y_mm": 99.0, "pen": 1}]
-    out = p.process([{"draw_points": live, "draw_bounds": [1, 1, 2, 2]}])[0]
-    assert out["draw_points"] == saved  # живые заменены загруженными
-    assert out["draw_bounds"] == [0.0, 0.0, 100.0, 100.0]
+    out = p.process([{"draw_points": live, "draw_bounds": [0, 0, 100, 100]}])[0]
+    assert out["draw_points"] == saved  # живые заменены загруженными, в зоне → без изменений
+    assert out["draw_bounds"] == [0, 0, 100, 100]  # текущий лист сохранён
+
+
+def test_load_clamps_to_current_sheet(tmp_path) -> None:
+    """Загруженные точки за ТЕКУЩИМ листом прижимаются к его границе (защита от рисунка мимо бумаги)."""
+    p = _make_plugin({"drawings_dir": str(tmp_path)})
+    saved = [{"x_mm": 5.0, "y_mm": 6.0, "pen": 0}, {"x_mm": 500.0, "y_mm": 6.0, "pen": 1}]  # 500 вне листа
+    p.cmd_save({})
+    p.process([{"draw_points": saved, "draw_bounds": [0, 0, 100, 100]}])
+    p.cmd_load({"path": p._reg.last_saved})
+    out = p.process([{"draw_points": [], "draw_bounds": [0, 0, 100, 100]}])[0]
+    xs = [q["x_mm"] for q in out["draw_points"]]
+    assert max(xs) == 100.0  # точка X=500 прижата к границе листа X=100
 
 
 def test_load_empty_path_clears(tmp_path) -> None:

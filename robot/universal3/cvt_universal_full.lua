@@ -554,7 +554,8 @@ local function execute_path(count)
   -- тянул призрачную линию). Теперь явный П-образный переезд через скретч GL_MAN (в
   -- DRAW простаивает): (1) вертикальный подъём в ТЕКУЩЕМ XY до pen_up → (2) переезд на
   -- высоте до подвода → (3) вертикальное опускание в подводе до pen_down перед штрихом.
-  -- Высота переезда = pen_up (live-tunable из пульта «Перо: подъём»; задаёт зазор ≥10 мм).
+  -- Высота переезда = pen_up (live-tunable из пульта «Перо: подъём»; оператор задаёт зазор,
+  -- рекомендуется ≥10 мм — текущий дефолт рецепта 6 мм для медленного боевого теста).
   PassMode("DISTANT", "PLON")
   SetOverlapDistance(overlap)
   WriteModbus(REG_DRAW_BUSY, "W", 1)
@@ -906,7 +907,23 @@ local function motion_body()
           if count > 0 then execute_path(count) end   -- полилиния через буфер
         end
       else
-        if ReadModbus(REG_DRAW_ABORT, "W") == 1 then WriteModbus(REG_DRAW_ABORT, "W", 0) end
+        -- Стоп МЕЖДУ проходами (робот стоит, busy=0 — Mirror не ловит abort в движении).
+        -- Если ПК взвёл REG_DRAW_HOME=1 (так делает _op_draw_abort), честно уводим домой:
+        -- поднимаем перо +1 см вертикально и едем в GL_HOME (как финал прохода). Иначе
+        -- робот «забывал» приехать домой, если стоп пришёлся на паузу между проходами.
+        if ReadModbus(REG_DRAW_ABORT, "W") == 1 then
+          WriteModbus(REG_DRAW_ABORT, "W", 0)
+          if ReadModbus(REG_DRAW_HOME, "W") == 1 then
+            WriteModbus(REG_DRAW_HOME, "W", 0)
+            local pen_up = ReadModbus(REG_PEN_UP, "W") / XY_SCALE
+            WritePoint(POOL_BASE + 1, "X", RobotX() or 0)
+            WritePoint(POOL_BASE + 1, "Y", RobotY() or 0)
+            WritePoint(POOL_BASE + 1, "Z", pen_up + DRAW_LIFT_MM)  -- перо вверх вертикально
+            MovL(POOL_BASE + 1)
+            MovP("GL_HOME")
+            print("DRAW: стоп между проходами → подъём + домой")
+          end
+        end
         DELAY(0.02)
       end
 

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 
 from multiprocess_framework.modules.process_module.plugins import (
@@ -90,8 +91,6 @@ class DrawingIoPlugin(ProcessModulePlugin):
             self._ctx.log_info("DrawingIoPlugin: загрузка снята (живые точки)")
             return {"status": "ok", "load_active": False}
         full = path if path.endswith(".json") else path + ".json"
-        import os
-
         if not os.path.isabs(full):
             full = os.path.join(self._reg.drawings_dir, full)
         try:
@@ -114,16 +113,44 @@ class DrawingIoPlugin(ProcessModulePlugin):
     def process(self, items: list[dict]) -> list[dict]:
         out: list[dict] = []
         for item in items:
-            # Загрузка активна → подменяем точки/границы (превью и робот рисуют загруженное).
+            # Загрузка активна → подменяем точки (превью и робот рисуют загруженное).
             if self._reg.load_active and self._loaded_points:
-                item = {**item, self._reg.points_source: list(self._loaded_points)}
-                if self._loaded_bounds is not None:
+                # Загруженные точки — АБСОЛЮТНЫЕ мм. Лист физически там, где задаёт текущий
+                # robot_scale (его draw_bounds в item). drawing_io стоит ПОСЛЕ robot_scale,
+                # поэтому прижимаем загруженное к ТЕКУЩЕМУ листу (минует clamp_to_zone) —
+                # точка за зоной ляжет на границу (защита от рисования мимо бумаги). Границы
+                # оставляем текущие (превью совпадает с физлистом); если их нет — берём из файла.
+                cur_bounds = item.get(self._reg.bounds_source)
+                has_cur = isinstance(cur_bounds, list) and len(cur_bounds) == 4
+                use_bounds = cur_bounds if has_cur else self._loaded_bounds
+                pts = self._clamp_to_bounds(self._loaded_points, use_bounds)
+                item = {**item, self._reg.points_source: pts}
+                if not has_cur and self._loaded_bounds is not None:
                     item[self._reg.bounds_source] = list(self._loaded_bounds)
 
             if self._save_armed:
                 self._do_save(item)
                 self._save_armed = False
             out.append(item)
+        return out
+
+    @staticmethod
+    def _clamp_to_bounds(points: list[dict], bounds) -> list[dict]:
+        """Прижать точки к прямоугольнику листа bounds=[x0,y0,x1,y1] (если задан)."""
+        if not (isinstance(bounds, list) and len(bounds) == 4):
+            return list(points)
+        x0, y0, x1, y1 = (float(v) for v in bounds)
+        xlo, xhi = (x0, x1) if x0 <= x1 else (x1, x0)
+        ylo, yhi = (y0, y1) if y0 <= y1 else (y1, y0)
+        out: list[dict] = []
+        for p in points:
+            out.append(
+                {
+                    "x_mm": min(xhi, max(xlo, float(p["x_mm"]))),
+                    "y_mm": min(yhi, max(ylo, float(p["y_mm"]))),
+                    "pen": int(p.get("pen", 1)),
+                }
+            )
         return out
 
     def _do_save(self, item: dict) -> None:
@@ -134,7 +161,8 @@ class DrawingIoPlugin(ProcessModulePlugin):
         bounds = item.get(self._reg.bounds_source)
         frame = item.get("frame") if self._reg.save_image else None
         meta = {"created": time.strftime("%Y-%m-%d %H:%M:%S"), "points": len(pts)}
-        stem = time.strftime("%Y%m%d_%H%M%S")
+        # Суффикс счётчика → два сохранения в одну секунду не затирают друг друга.
+        stem = time.strftime("%Y%m%d_%H%M%S") + f"_{int(self._reg.saves_done):03d}"
         try:
             path = store.save(
                 self._reg.drawings_dir,

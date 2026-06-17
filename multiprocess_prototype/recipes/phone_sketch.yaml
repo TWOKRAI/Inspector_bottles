@@ -1,8 +1,8 @@
 # Рецепт phone_sketch — как webcam_sketch, но источник кадров — ТЕЛЕФОН.
 #
 # Тракт (линейный pipeline, 4 процесса — каждый питает свой дисплей):
-#   camera_0[phone_camera] → seg[segmentation] → lines[edge_detection→blob_filter→strokes_to_points(px)]
-#                                               → points[robot_scale(px→мм)→points_render→robot_draw]
+#   camera_0[phone_camera] → seg[segmentation] → lines[crop→edge_detection→blob_filter→strokes_to_points→text_main→text_name(px)]
+#                                               → points[robot_scale(px→мм)→drawing_io→points_render→robot_draw]
 #
 # Масштаб под лист робота: strokes_to_points отдаёт путь в ПИКСЕЛЯХ (identity),
 # узел robot_scale вписывает кадр 640x480 в прямоугольник листа по углам ЛВ/ПН (мм).
