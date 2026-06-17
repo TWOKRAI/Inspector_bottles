@@ -333,6 +333,13 @@ registers:
     label: "Отмена рисования"
     hint: "1 = прервать текущее задание рисования"
 
+  draw_done_n:
+    type: reg
+    address: 0x1409
+    access: r
+    label: "Выполнено точек (ACK)"
+    hint: "Эхо реально выполненного числа точек прохода (read-back ACK; не обнуляется как prog)"
+
   circ_cx:
     type: reg
     address: 0x1406

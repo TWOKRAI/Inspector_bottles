@@ -12,7 +12,7 @@ from typing import Any
 
 from Services.modbus import ModbusConfig, TransportType
 
-from Services.robot_comm.core.registers import ROBOT_UNIT_ID, XY_LIMIT_MM
+from Services.robot_comm.core.registers import PTS_MAX, ROBOT_UNIT_ID, XY_LIMIT_MM
 
 
 @dataclass(slots=True)
@@ -33,6 +33,15 @@ class RobotConfig:
                      энкодере). НЕ хардкодить.
         xy_limit_mm: Предел |X|,|Y| для send_job (s16 при scale=10).
         lift_mm:     Подъём пера над Z рисования (высота переезда).
+        draw_pass_size: Точек в одном проходе рисования (батч). Меньше = больше
+                     пакетов, каждый верифицируется обратной связью → меньше риск
+                     потери. Зажимается в [2, PTS_MAX]; PTS_MAX — потолок буфера
+                     прошивки (НЕ поднимать). Дефолт PTS_MAX = старое поведение;
+                     рецепт может задать мельче (devices[].params.draw_pass_size).
+        draw_verify: После каждого прохода читать draw_done_n (реально выполнено
+                     точек) и сверять с размером пачки. Расхождение = тихое усечение
+                     в прошивке → повтор/аборт, точки не теряются молча.
+        draw_retry:  Сколько раз повторить проход при расхождении verify до аборта.
     """
 
     host: str = "192.168.1.7"
@@ -43,6 +52,9 @@ class RobotConfig:
     word_order: str = "little"
     xy_limit_mm: float = XY_LIMIT_MM
     lift_mm: float = 10.0
+    draw_pass_size: int = PTS_MAX
+    draw_verify: bool = True
+    draw_retry: int = 1
 
     # ------------------------------------------------------------------ #
     # Dict at Boundary

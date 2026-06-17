@@ -79,6 +79,11 @@ REG_DRAW_COUNT = 0x1402
 REG_DRAW_BUSY = 0x1403
 REG_DRAW_PROG = 0x1404
 REG_DRAW_ABORT = 0x1405
+# Эхо факта выполнения прохода (read-back ACK): прошивка пишет сюда РЕАЛЬНО выполненное
+# число точек (пост-усечённое, см. execute_path: при коротком чтении буфера count
+# уменьшается молча). Клиент сверяет с размером пачки → ловит потерю, повторяет/абортит.
+# В отличие от draw_prog (0x1404), НЕ обнуляется в конце прохода — иначе нечего читать.
+REG_DRAW_DONE_N = 0x1409
 # 1 = после прохода ехать домой (последний проход рисунка); 0 = ждать на месте
 REG_DRAW_HOME = 0x1414
 
@@ -197,6 +202,7 @@ def build_register_map(word_order: str = "little") -> RegisterMap:
             "draw_busy": Reg(REG_DRAW_BUSY),
             "draw_prog": Reg(REG_DRAW_PROG),
             "draw_abort": Reg(REG_DRAW_ABORT),
+            "draw_done_n": Reg(REG_DRAW_DONE_N),  # read-back ACK: реально выполнено точек
             "circ_cx": Reg(0x1406, scale=XY_SCALE, signed=True),
             "circ_cy": Reg(0x1407, scale=XY_SCALE, signed=True),
             "circ_r": Reg(0x1408, scale=XY_SCALE),

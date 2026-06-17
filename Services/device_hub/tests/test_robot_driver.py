@@ -305,6 +305,37 @@ class TestRobotDriverDraw:
         result = driver.call("draw_abort", {})
         assert result["status"] == "ok"
 
+    def test_draw_abort_homes_flushes_and_drains(self, driver, core) -> None:
+        """Стоп: аборт + взвод заезда домой + сброс памяти + очистка очереди (запрос владельца)."""
+        from Services.robot_comm.core.registers import (
+            REG_DRAW_COUNT,
+            REG_DRAW_DONE_N,
+            REG_DRAW_FLAG,
+            REG_DRAW_HOME,
+            REG_DRAW_PROG,
+        )
+
+        # Заполним управляющие регистры «грязью» — flush обязан их обнулить
+        core.regs[REG_DRAW_FLAG] = 1
+        core.regs[REG_DRAW_COUNT] = 42
+        core.regs[REG_DRAW_PROG] = 7
+        core.regs[REG_DRAW_DONE_N] = 5
+        # Несколько заданий в очереди — все должны слиться
+        driver.call("draw_polyline", {"points": [{"x_mm": 0, "y_mm": 0, "pen": 1}]})
+        driver.call("draw_polyline", {"points": [{"x_mm": 1, "y_mm": 1, "pen": 1}]})
+
+        result = driver.call("draw_abort", {})
+
+        assert result["status"] == "ok"
+        assert result["homed"] is True  # взведён заезд домой
+        assert result["flushed"] is True  # память сброшена
+        assert result["dropped_tasks"] == 2  # очередь очищена
+        assert core.regs[REG_DRAW_HOME] == 1  # домой в финале прерванного прохода
+        assert core.regs[REG_DRAW_FLAG] == 0  # flush: чистый старт
+        assert core.regs[REG_DRAW_COUNT] == 0
+        assert core.regs[REG_DRAW_PROG] == 0
+        assert core.regs[REG_DRAW_DONE_N] == 0
+
     def test_mode_exposed_in_snapshot(self, driver) -> None:
         """mode видно в snapshot."""
         snap = driver.snapshot()

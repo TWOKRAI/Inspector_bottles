@@ -82,6 +82,10 @@ REG_DRAW_ABORT = 0x1405  -- W  : 1 = стоп рисования
 REG_CIRC_CX    = 0x1406  -- W  : круг — центр X ×10
 REG_CIRC_CY    = 0x1407  -- W  : круг — центр Y ×10
 REG_CIRC_R     = 0x1408  -- W  : круг — радиус ×10
+REG_DRAW_DONE_N = 0x1409 -- W  : эхо — сколько точек проход РЕАЛЬНО выполнил (read-back ACK для ПК).
+                         --       Пишется ПОСТ-усечённый count (см. execute_path: при коротком
+                         --       чтении буфера count молча уменьшается). НЕ обнуляется в конце
+                         --       прохода (в отличие от PROG) — ПК сверяет с размером пачки.
 -- ── РИСОВАНИЕ: конфиг (ПК пишет напрямую) ──
 REG_PEN_DOWN = 0x1410    -- W  : Z рисования, 0.1 мм
 REG_PEN_UP   = 0x1411    -- W  : Z переезда, 0.1 мм
@@ -545,16 +549,32 @@ local function execute_path(count)
   end
 
   -- 3) проход
+  -- Между штрихами (точка pen=0 — подвод к началу следующего штриха) НЕ едем по
+  -- диагонали (раньше один MovL из (конец штриха, перо ВНИЗ) в (подвод, перо ВВЕРХ)
+  -- тянул призрачную линию). Теперь явный П-образный переезд через скретч GL_MAN (в
+  -- DRAW простаивает): (1) вертикальный подъём в ТЕКУЩЕМ XY до pen_up → (2) переезд на
+  -- высоте до подвода → (3) вертикальное опускание в подводе до pen_down перед штрихом.
+  -- Высота переезда = pen_up (live-tunable из пульта «Перо: подъём»; задаёт зазор ≥10 мм).
   PassMode("DISTANT", "PLON")
   SetOverlapDistance(overlap)
   WriteModbus(REG_DRAW_BUSY, "W", 1)
+  local LIFT = "GL_MAN"   -- скретч-точка для вертикальных подъёма/опускания (в DRAW свободна)
   for i = 1, count do
     if draw_abort then break end
     WriteModbus(REG_DRAW_PROG, "W", i)
-    if pen[i] == 1 and i < count then
+    if pen[i] == 0 then
+      -- подвод к началу штриха — П-образно, без диагонали
+      if i > 1 then
+        WritePoint(LIFT, "X", px[i - 1]); WritePoint(LIFT, "Y", py[i - 1]); WritePoint(LIFT, "Z", pen_up)
+        MovL(LIFT)                                  -- (1) подъём вертикально в текущем XY
+      end
+      MovL(POOL_BASE + i)                           -- (2) переезд на высоте к подводу (Z=pen_up)
+      WritePoint(LIFT, "X", px[i]); WritePoint(LIFT, "Y", py[i]); WritePoint(LIFT, "Z", pen_down)
+      MovL(LIFT)                                    -- (3) опускание вертикально в подводе
+    elseif pen[i] == 1 and i < count then
       MovL(POOL_BASE + i, PASS())                   -- внутри штриха — плавно
     else
-      MovL(POOL_BASE + i)                           -- переезд/перо/последняя — чёткий
+      MovL(POOL_BASE + i)                           -- последняя точка штриха/прохода — чётко
     end
   end
 
@@ -574,6 +594,9 @@ local function execute_path(count)
     MovP("GL_HOME")
     print("DRAW: рисунок завершён → подъём + домой")
   end
+  -- Read-back ACK: эхо РЕАЛЬНО выполненного count (пост-усечённого) — до обнуления PROG.
+  -- ПК сверяет с размером пачки и при расхождении повторяет проход (точки не теряются молча).
+  WriteModbus(REG_DRAW_DONE_N, "W", count)
   WriteModbus(REG_DRAW_PROG, "W", 0)
   WriteModbus(REG_DRAW_BUSY, "W", 0)
   print("DRAW: проход завершён (" .. count .. " точек)")
@@ -610,6 +633,7 @@ local function draw_circle()
     MovP("GL_HOME")
     print("DRAW: круг завершён → подъём + домой")
   end
+  WriteModbus(REG_DRAW_DONE_N, "W", 1)  -- круг = один логический проход (read-back ACK)
   WriteModbus(REG_DRAW_BUSY, "W", 0)
   print("DRAW: круг (" .. cx .. "," .. cy .. ") R=" .. r)
 end
@@ -1077,6 +1101,7 @@ WriteModbus(REG_DRAW_TYPE,  "W", 0)
 WriteModbus(REG_DRAW_COUNT, "W", 0)
 WriteModbus(REG_DRAW_BUSY,  "W", 0)
 WriteModbus(REG_DRAW_PROG,  "W", 0)
+WriteModbus(REG_DRAW_DONE_N, "W", 0)
 WriteModbus(REG_DRAW_ABORT, "W", 0)
 WriteModbus(REG_CIRC_CX,    "W", 0)
 WriteModbus(REG_CIRC_CY,    "W", 0)

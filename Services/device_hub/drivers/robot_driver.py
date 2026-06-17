@@ -735,9 +735,26 @@ class RobotDriver(BaseDeviceDriver):
         return {"status": "ok", "mm": self._overlap_mm}
 
     def _op_draw_abort(self, _args: dict) -> dict:
-        """Прервать рисование НЕМЕДЛЕННО (минуя очередь — thread-safe)."""
+        """Стоп рисования: прервать + домой + сбросить память + очистить очередь.
+
+        Запрос владельца: на Стоп робот должен «выбросить точки из памяти и вернуться
+        домой», а следующее «Рисовать» начинать рисунок С НАЧАЛА (robot_draw шлёт весь
+        путь заново — рестарт структурно гарантирован). Порядок важен:
+          1) draw_home_after(True) — взвести заезд домой в финале прерванного прохода
+             (в DRAW Mirror не опрашивает REG_STOP, отдельной «домой» нет);
+          2) draw_abort() — прервать текущий проход (перо вверх → финал → домой);
+          3) draw_abort_evt — остановить многопроходный draw() между проходами;
+          4) очистить очередь заданий;
+          5) draw_flush() — обнулить управляющие регистры (чистый старт).
+        """
+        homed = False
+        flushed = False
+        try:
+            homed = self._client.draw_home_after(True)
+            self._client.draw_abort()
+        except Exception:
+            self._record_err()
         self._draw_abort_evt.set()  # остановить многопроходный draw() между проходами
-        self._client.draw_abort()
         # Очистить невыполненные задания
         dropped = 0
         while not self._draw_queue.empty():
@@ -746,9 +763,13 @@ class RobotDriver(BaseDeviceDriver):
                 dropped += 1
             except queue.Empty:
                 break
+        try:
+            flushed = self._client.draw_flush()
+        except Exception:
+            self._record_err()
         self._draw_busy = False
         self._draw_state = "idle"
-        return {"status": "ok", "dropped_tasks": dropped}
+        return {"status": "ok", "dropped_tasks": dropped, "homed": homed, "flushed": flushed}
 
     def _op_draw_progress(self, _args: dict) -> dict:
         result: dict[str, Any] = {
@@ -866,6 +887,8 @@ class RobotDriver(BaseDeviceDriver):
             )
 
         # Боевой режим — конфиг из entry.transport + entry.params
+        from Services.robot_comm.core.registers import PTS_MAX
+
         t = self.entry.transport
         p = self.entry.params
         config = RobotConfig(
@@ -874,6 +897,10 @@ class RobotDriver(BaseDeviceDriver):
             unit_id=int(t.get("unit_id", 2)),
             timeout_sec=float(t.get("timeout_sec", 1.0)),
             word_order=str(p.get("word_order", "little")),
+            # Точность рисования: мельче пачки + read-back ACK (см. RobotConfig).
+            draw_pass_size=int(p.get("draw_pass_size", PTS_MAX)),
+            draw_verify=bool(p.get("draw_verify", True)),
+            draw_retry=int(p.get("draw_retry", 1)),
         )
         return RobotClient(config, on_data=self._on_wire, clock=self._clock, sleep=self._sleep)
 

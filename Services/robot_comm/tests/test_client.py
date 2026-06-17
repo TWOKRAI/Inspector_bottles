@@ -423,6 +423,99 @@ def test_pen_and_draw_params(bot: RobotClient, transport: FakeRobotTransport) ->
     assert transport.transactions[-1][0] == ("w", 0x1413, 25)
 
 
+# --- A1/A2: точность точек (мелкие пачки + read-back ACK) и Стоп (flush/home) ---
+
+
+def _make_client(transport: FakeRobotTransport, clock, **cfg) -> RobotClient:
+    client = RobotClient(RobotConfig(**cfg), transport=transport, clock=clock.clock, sleep=clock.sleep)
+    client.connect()
+    return client
+
+
+def test_draw_pass_size_makes_more_passes(transport: FakeRobotTransport, clock) -> None:
+    """draw_pass_size=10 на 25-точечном штрихе → 3 прохода (10,10,7), все верифицированы."""
+    bot = _make_client(transport, clock, draw_pass_size=10)
+    progress: list[dict] = []
+    bot._on_progress = progress.append
+    pts = [DrawPoint(0.0, 0.0, 0)] + [DrawPoint(float(i), 0.0, 1) for i in range(1, 25)]  # 25 одним штрихом
+    assert bot.draw(pts)
+    batches = [p for p in progress if p.get("stage") == "batch"]
+    assert [b["size"] for b in batches] == [10, 10, 7]  # 25 = 10 + (1+9) + (1+6)
+    assert not any(p.get("stage") in ("verify_mismatch", "verify_failed") for p in progress)
+
+
+def test_draw_pass_size_clamped_to_pts_max(transport: FakeRobotTransport, clock) -> None:
+    """draw_pass_size выше PTS_MAX зажимается до буфера прошивки (проход ≤ PTS_MAX)."""
+    from Services.robot_comm.core.registers import PTS_MAX
+
+    bot = _make_client(transport, clock, draw_pass_size=10_000)
+    progress: list[dict] = []
+    bot._on_progress = progress.append
+    pts = [DrawPoint(0.0, 0.0, 0)] + [DrawPoint(float(i), 0.0, 1) for i in range(1, 150)]  # 150 одним штрихом
+    assert bot.draw(pts)
+    batches = [p for p in progress if p.get("stage") == "batch"]
+    assert batches and all(b["size"] <= PTS_MAX for b in batches)
+
+
+def test_draw_verify_mismatch_retries_then_fails(clock) -> None:
+    """Прошивка рапортует на 1 точку меньше (тихое усечение) → повтор draw_retry раз → False.
+
+    Ловит главный путь потери: execute_path молча уменьшает count при коротком чтении буфера.
+    Клиент сверяет draw_done_n с размером пачки, повторяет проход и при стойком расхождении
+    прерывает рисунок (точки НЕ теряются молча).
+    """
+    from Services.robot_comm.core.registers import REG_DRAW_BUSY, REG_DRAW_COUNT, REG_DRAW_DONE_N
+
+    class _ShortAckSim(RobotSimCore):
+        """Sim, занижающий эхо выполненных точек на 1 при завершении прохода."""
+
+        def _handle_draw(self) -> None:
+            was_busy = self.regs[REG_DRAW_BUSY]
+            super()._handle_draw()
+            if was_busy == 1 and self.regs[REG_DRAW_BUSY] == 0:  # busy 1→0: проход завершён
+                self.regs[REG_DRAW_DONE_N] = max(0, self.regs[REG_DRAW_COUNT] - 1)
+
+    transport = FakeRobotTransport(_ShortAckSim())
+    bot = _make_client(transport, clock, draw_retry=1)
+    progress: list[dict] = []
+    bot._on_progress = progress.append
+    pts = [DrawPoint(0.0, 0.0, 0)] + [DrawPoint(float(i), 0.0, 1) for i in range(1, 5)]  # 5 точек, один проход
+    assert bot.draw(pts) is False
+    assert sum(1 for p in progress if p.get("stage") == "verify_mismatch") == 2  # попытка + повтор
+    assert any(p.get("stage") == "verify_failed" for p in progress)
+
+
+def test_draw_verify_off_skips_readback(transport: FakeRobotTransport, clock) -> None:
+    """draw_verify=False → проход завершается без сверки draw_done_n (старое поведение)."""
+    bot = _make_client(transport, clock, draw_verify=False)
+    pts = [DrawPoint(0.0, 0.0, 0)] + [DrawPoint(float(i), 0.0, 1) for i in range(1, 5)]
+    assert bot.draw(pts)
+
+
+def test_draw_flush_clears_control_registers(bot: RobotClient, transport: FakeRobotTransport) -> None:
+    """draw_flush обнуляет flag/count/prog/done_n, НЕ трогая draw_abort (его потребит прошивка)."""
+    from Services.robot_comm.core.registers import (
+        REG_DRAW_ABORT,
+        REG_DRAW_COUNT,
+        REG_DRAW_DONE_N,
+        REG_DRAW_PROG,
+    )
+
+    assert bot.draw_flush()
+    written = {a: v for (_k, a, v) in transport.transactions[-1]}
+    assert written[REG_DRAW_FLAG] == 0
+    assert written[REG_DRAW_COUNT] == 0
+    assert written[REG_DRAW_PROG] == 0
+    assert written[REG_DRAW_DONE_N] == 0
+    assert REG_DRAW_ABORT not in written  # аборт остаётся вызывающему/прошивке
+
+
+def test_draw_home_after_sets_flag(bot: RobotClient, transport: FakeRobotTransport) -> None:
+    """draw_home_after(True) ставит draw_home=1 (взвод заезда домой для Стопа)."""
+    assert bot.draw_home_after(True)
+    assert ("w", REG_DRAW_HOME, 1) in transport.transactions[-1]
+
+
 # --- RETURN: возврат буквы на ленту ---
 
 

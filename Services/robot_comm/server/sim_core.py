@@ -28,6 +28,8 @@ from Services.robot_comm.core.registers import (
     REG_CFG_FLAG,
     REG_DRAW_ABORT,
     REG_DRAW_BUSY,
+    REG_DRAW_COUNT,
+    REG_DRAW_DONE_N,
     REG_DRAW_FLAG,
     REG_DRAW_PROG,
     REG_ENC,
@@ -329,9 +331,14 @@ class RobotSimCore:
 
     def _handle_draw(self) -> None:
         if self.regs[REG_DRAW_ABORT] == 1:
+            # Стоп: прошивка сама потребляет abort и чистит управляющие регистры
+            # (паритет с execute_path-финалом + client.draw_flush) → следующий старт с нуля.
             self.regs[REG_DRAW_ABORT] = 0
             self.regs[REG_DRAW_BUSY] = 0
             self.regs[REG_DRAW_FLAG] = 0
+            self.regs[REG_DRAW_COUNT] = 0
+            self.regs[REG_DRAW_PROG] = 0
+            self.regs[REG_DRAW_DONE_N] = 0
             self._draw_countdown = None
             return
         if self.regs[REG_DRAW_FLAG] == 1 and self._draw_countdown is None:
@@ -345,6 +352,9 @@ class RobotSimCore:
             self._draw_countdown -= 1
             if self._draw_countdown <= 0:
                 self.regs[REG_DRAW_BUSY] = 0
+                # Read-back ACK: эхо реально выполненного числа точек = заявленному count
+                # (паритет с прошивкой). Тест может переопределить, чтобы проверить retry.
+                self.regs[REG_DRAW_DONE_N] = self.regs[REG_DRAW_COUNT]
                 prog = self.regs[REG_DRAW_PROG]
                 self._draw_countdown = None
                 self._emit(f"[DRAW] проход завершён ({prog} точек)")

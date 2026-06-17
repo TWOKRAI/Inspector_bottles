@@ -487,6 +487,30 @@ class RobotClient:
         """Прервать рисование (перо вверх, домой)."""
         return self._write_map({"draw_abort": 1})
 
+    def draw_home_after(self, home: bool = True) -> bool:
+        """Пометить, что после текущего/ближайшего прохода робот едет домой.
+
+        Используется для Стопа: ставим перед draw_abort, чтобы прерванный проход в
+        финале (execute_path) поднял перо +1 см и заехал домой существующей веткой
+        REG_DRAW_HOME (в DRAW-режиме Mirror НЕ опрашивает REG_STOP — отдельной
+        команды «домой» нет, переиспользуем финал прохода).
+        """
+        return self._write_map({"draw_home": 1 if home else 0})
+
+    def draw_flush(self) -> bool:
+        """Сбросить из памяти робота задание рисования (маркеры/счётчики).
+
+        Запрос владельца на Стоп: «выбросить из памяти точки». Буфер точек 0x1420
+        перезаписывается на каждом проходе, поэтому «сброс» = обнулить управляющие
+        регистры, чтобы не осталось взведённого draw_flag/незакрытого count и
+        следующий старт начинался с чистого листа.
+
+        ВАЖНО: draw_abort НЕ трогаем — его взвёл вызывающий (Стоп) и его обязана
+        потребить и САМА обнулить прошивка/sim (финал прохода или idle-ветка DRAW).
+        Обнуление здесь могло бы отменить ещё не обработанный аборт.
+        """
+        return self._write_map({"draw_flag": 0, "draw_count": 0, "draw_prog": 0, "draw_done_n": 0})
+
     def draw_circle(self, cx: float, cy: float, r: float, timeout: float = DRAW_TIMEOUT_S) -> bool:
         """Круг родным MCircle робота: центр + радиус, одной командой (гладко)."""
         ok = self._write_map(
@@ -528,7 +552,10 @@ class RobotClient:
         pts = [p if isinstance(p, DrawPoint) else DrawPoint(*p) for p in points]
         if not pts:
             raise RobotJobError("Пустой путь рисования")
-        passes = split_draw_passes(pts, PTS_MAX)
+        # Размер прохода — конфигурируемый (мельче = больше пакетов, каждый с обратной
+        # связью). Зажимаем в [2, PTS_MAX]: PTS_MAX — потолок буфера прошивки.
+        limit = max(2, min(int(self._cfg.draw_pass_size), PTS_MAX))
+        passes = split_draw_passes(pts, limit)
         total = len(pts)
         for n, batch in enumerate(passes, start=1):
             if should_abort is not None and should_abort():
@@ -560,24 +587,44 @@ class RobotClient:
         return True
 
     def _run_batch(self, batch: list[DrawPoint], timeout: float, *, home: bool = False) -> bool:
-        """Один проход: залить буфер, запустить, дождаться завершения.
+        """Один проход: залить буфер, запустить, дождаться завершения, СВЕРИТЬ факт.
 
         ``home``: True на последнем проходе рисунка — прошивка после прохода поднимает перо
         +1 см и едет домой. Между проходами (home=False) робот ждёт на месте (перо вверх).
+
+        Read-back ACK (draw_verify): прошивка пишет в ``draw_done_n`` реально выполненное
+        число точек (пост-усечённое — execute_path молча уменьшает count при коротком
+        чтении буфера). Если оно != размеру пачки → проход перезаливаем и повторяем до
+        ``draw_retry`` раз; устойчивое расхождение → False (рисунок прерывается, точки
+        НЕ теряются молча). Повтор перезаливает ту же пачку в тот же буфер — безопасно,
+        т.к. _wait_draw_done гарантирует завершение предыдущей попытки.
         """
-        if not self._upload_points(batch):
-            return False
-        ok = self._write_map(
-            {
-                "draw_type": DRAW_TYPE_POLYLINE,
-                "draw_count": len(batch),
-                "draw_home": 1 if home else 0,
-                "draw_flag": 1,  # маркер — последним
-            }
-        )
-        if not ok:
-            return False
-        return self._wait_draw_done(timeout)
+        attempts = (1 + max(0, int(self._cfg.draw_retry))) if self._cfg.draw_verify else 1
+        for attempt in range(1, attempts + 1):
+            if not self._upload_points(batch):
+                return False
+            ok = self._write_map(
+                {
+                    "draw_type": DRAW_TYPE_POLYLINE,
+                    "draw_count": len(batch),
+                    "draw_home": 1 if home else 0,
+                    "draw_flag": 1,  # маркер — последним
+                }
+            )
+            if not ok:
+                return False
+            if not self._wait_draw_done(timeout):
+                return False
+            if not self._cfg.draw_verify:
+                return True
+            executed = int(self._map.read(self._device, "draw_done_n"))
+            if executed == len(batch):
+                return True
+            self._emit_progress(
+                {"stage": "verify_mismatch", "expected": len(batch), "executed": executed, "attempt": attempt}
+            )
+        self._emit_progress({"stage": "verify_failed", "expected": len(batch)})
+        return False
 
     def _wait_draw_done(self, timeout: float) -> bool:
         """Дождаться завершения прохода по handshake прошивки (flag → busy↑ → busy↓).
