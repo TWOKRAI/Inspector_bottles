@@ -30,10 +30,11 @@ Hershey; передача = мельче пачки + read-back ACK (не ping-p
 
 ## Этап C — текст/имя/сердце, векторный Hershey (п.3,4,5)
 
-- [ ] C1. Плагин `text_vector`: strokes_font (0-9, A-Z, А-Я, пробел) + сердце; geometry (layout,
-      матрица 2×2, → px draw_points); registers; plugin (passthrough/override).
-- [ ] C2. Интеграция в рецепт (в конец `lines`, провод через text_vector) + контролы пульта.
-- [ ] C3. Несколько элементов = несколько экземпляров. Тесты.
+- [x] C1. Плагин `text_vector`: strokes_font (0-9, A-Z, А-Я, пробел, сердце); geometry (layout,
+      матрица 2×2 центр+поворот+масштаб, → px draw_points); registers; plugin (merge/override, passthrough).
+- [x] C2. Интеграция в рецепт: 2 экземпляра (text_main/text_name) в конце `lines` (резолв по class_path,
+      distinct plugin_name), провод → robot_scale, 16 контролов пульта. 17 тестов text_vector.
+- [x] C3. Несколько элементов = несколько экземпляров (merge=true накапливает); 48 recipe-тестов зелёные.
 
 ## Этап D — сохранение/загрузка (п.7)
 
