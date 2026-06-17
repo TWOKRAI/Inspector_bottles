@@ -163,6 +163,9 @@ class RobotIoPlugin(ProcessModulePlugin):
                 "x_mm": float(job["pick_x_mm"]),
                 "y_mm": float(job["pick_y_mm"]),
             }
+            # Глубина забора (Z присоски на ленте); 0 = дефолт прошивки Z_PICK.
+            if "pick_z_mm" in job:
+                data["z_mm"] = float(job["pick_z_mm"])
             if job.get("e_capture") is not None:
                 data["e_capture"] = int(job["e_capture"])
             if "place_x_mm" in job and "place_y_mm" in job:

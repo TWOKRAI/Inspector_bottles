@@ -112,6 +112,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
         "robot_read_echo": "cmd_robot_read_echo",
         "robot_set_manual_mode": "cmd_robot_set_manual_mode",
         "robot_clear_queue": "cmd_robot_clear_queue",
+        "robot_set_encoder_offset": "cmd_robot_set_encoder_offset",
+        "robot_toolchange": "cmd_robot_toolchange",
         # Рисование (8)
         "robot_draw_polyline": "cmd_robot_draw_polyline",
         "robot_draw_circle": "cmd_robot_draw_circle",
@@ -751,6 +753,14 @@ class DeviceHubPlugin(ProcessModulePlugin):
     def cmd_robot_clear_queue(self, data: dict) -> dict:
         """Очистить очередь заданий."""
         return self._kind_call(data, "robot", "clear_queue")
+
+    def cmd_robot_set_encoder_offset(self, data: dict) -> dict:
+        """Подстройка компенсации конвейера: {device_id, lead_mm} (мм вдоль ленты, знаковое)."""
+        return self._kind_call(data, "robot", "set_encoder_offset")
+
+    def cmd_robot_toolchange(self, data: dict) -> dict:
+        """Смена инструмента: {device_id, target: 0|1|2, timeout?}."""
+        return self._kind_call(data, "robot", "toolchange")
 
     # ------------------------------------------------------------------ #
     # КОМАНДЫ — Рисование (8)

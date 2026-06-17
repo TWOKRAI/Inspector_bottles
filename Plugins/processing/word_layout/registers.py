@@ -52,6 +52,15 @@ class WordLayoutRegisters(SchemaBase):
     place_z_mm: Annotated[
         float, FieldMeta("Высота укладки Z (мм)", info="Z в команде роботу (x,y,z,r)", min=-2000.0, max=2000.0)
     ] = 0.0
+    pick_z_mm: Annotated[
+        float,
+        FieldMeta(
+            "Высота забора Z (мм)",
+            info="глубина опускания присоски на ленте; 0 = дефолт прошивки Z_PICK",
+            min=-2000.0,
+            max=2000.0,
+        ),
+    ] = 0.0
     disk_radius_mm: Annotated[
         float, FieldMeta("Радиус диска (мм)", info="авто-шаг = диаметр; проверка зазора", min=1.0, max=1000.0)
     ] = 55.0

@@ -381,6 +381,47 @@ class TestRobotDriverTickQuality:
         assert snap["quality"] != "good", "tick с IO-ошибкой в этом тике должен возвращать quality != good"
 
 
+class TestRobotDriverPickZ:
+    """Проброс pick z_mm через _op_enqueue_job → enqueue_job → send_job → REG_JOB_Z."""
+
+    def test_op_enqueue_job_forwards_z_mm(self, driver, core) -> None:
+        """_op_enqueue_job пробрасывает z_mm в enqueue_job; регистр REG_JOB_Z записан."""
+        from Services.robot_comm.core.registers import REG_JOB_Z
+
+        result = driver.call(
+            "enqueue_job",
+            {
+                "x_mm": 100.0,
+                "y_mm": 200.0,
+                "z_mm": -45.0,
+            },
+        )
+        assert result["status"] == "ok"
+        # Прогоняем tick чтобы deliver сработал
+        stop = threading.Event()
+        for _ in range(5):
+            driver.tick(stop)
+        assert driver.jobs_sent >= 1
+        # REG_JOB_Z = -45.0 × 10 = -450 → s16 unsigned
+        expected = (-450) & 0xFFFF
+        assert core.regs[REG_JOB_Z] == expected
+
+    def test_op_enqueue_job_z_mm_default_zero(self, driver, core) -> None:
+        """Без z_mm → не пишем REG_JOB_Z (дефолт прошивки Z_PICK)."""
+        from Services.robot_comm.core.registers import REG_JOB_Z
+
+        # Сбросим регистр в специальное значение-маркер, чтобы убедиться что не трогали
+        core.regs[REG_JOB_Z] = 0xBEEF
+        result = driver.call("enqueue_job", {"x_mm": 10.0, "y_mm": 20.0})
+        assert result["status"] == "ok"
+        stop = threading.Event()
+        for _ in range(5):
+            driver.tick(stop)
+        assert driver.jobs_sent >= 1
+        # z_mm=0 → send_job НЕ пишет job_z → регистр остался маркером
+        assert core.regs[REG_JOB_Z] == 0xBEEF
+
+
 class TestRobotDriverCallOps:
     """Проверка таблицы операций."""
 

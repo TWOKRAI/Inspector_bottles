@@ -146,6 +146,40 @@ def test_process_drops_oldest_on_overflow() -> None:
     assert plugin._reg.jobs_dropped == 1
 
 
+def test_process_forwards_pick_z_mm() -> None:
+    """Полный формат с pick_z_mm → data["z_mm"] попадает в deque."""
+    plugin, _ctx = make_plugin()
+    job = {
+        "pick_x_mm": 100.0,
+        "pick_y_mm": -50.0,
+        "pick_z_mm": -45.0,
+        "place_x_mm": 300.0,
+        "place_y_mm": 200.0,
+        "place_z_mm": -90.0,
+        "place_rz_deg": 15.0,
+    }
+    plugin.process([{"robot_job": job}])
+    assert len(plugin._deque) == 1
+    data = plugin._deque[0]
+    assert data["z_mm"] == -45.0
+    assert data["x_mm"] == 100.0
+
+
+def test_process_no_z_mm_without_pick_z() -> None:
+    """Без pick_z_mm в job → z_mm не кладётся (дефолт прошивки)."""
+    plugin, _ctx = make_plugin()
+    job = {
+        "pick_x_mm": 100.0,
+        "pick_y_mm": -50.0,
+        "place_x_mm": 300.0,
+        "place_y_mm": 200.0,
+    }
+    plugin.process([{"robot_job": job}])
+    assert len(plugin._deque) == 1
+    data = plugin._deque[0]
+    assert "z_mm" not in data
+
+
 def test_process_ignores_malformed_job() -> None:
     """Нет x_mm/y_mm — job не попадает в deque."""
     plugin, _ctx = make_plugin()

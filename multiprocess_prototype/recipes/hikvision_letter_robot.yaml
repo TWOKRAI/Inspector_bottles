@@ -78,6 +78,8 @@ devices:
       poll_interval_s: 0.5
       stale_polls_limit: 6
 blueprint:
+  name: default
+  description: ''
   processes:
     - process_name: gui
       plugins: []
@@ -140,7 +142,7 @@ blueprint:
           plugin_class: Plugins.processing.roi_crop.plugin.RoiCropPlugin
           category: processing
           config:
-            x: 367
+            x: 246
             y: 297
             width: 800
             height: 481
@@ -237,6 +239,17 @@ blueprint:
             output_key: pick_xy
             roi_offset_x: 0
             roi_offset_y: 0
+            use_linear: true
+            lin_src_width: 800
+            lin_src_height: 481
+            lin_tl_x: 497.4
+            lin_tl_y: -282.0
+            lin_tr_x: 497.4
+            lin_tr_y: -380.0
+            lin_br_x: 419.0
+            lin_br_y: -380.0
+            lin_bl_x: 419.0
+            lin_bl_y: -282.0
         - plugin_name: ml_inference
           plugin_class: Services.ml_inference.plugin.plugin.MLInferencePlugin
           category: processing
@@ -274,13 +287,13 @@ blueprint:
             target_word: ''
             word_source: signal_2
             use_pitch: true
-            first_x: 300.0
-            first_y: -100.0
+            first_x: 320.0
+            first_y: -200.0
             line_angle_deg: 90.0
             pitch_mm: 0.0
-            last_x: 500.0
-            last_y: -100.0
-            place_z_mm: 0.0
+            last_x: 320.0
+            last_y: 300.0
+            place_z_mm: -132.0
             disk_radius_mm: 55.0
             word_gap_slots: 1
             angle_zero_deg: 0.0
@@ -291,6 +304,7 @@ blueprint:
             pick_source: pick_xy
             encoder_source: e_capture
             require_pick: true
+            pick_z_mm: -132.0
         - plugin_name: robot_io
           plugin_class: Plugins.io.robot_io.plugin.RobotIoPlugin
           category: io
@@ -385,58 +399,36 @@ blueprint:
   wires:
     - source: camera_0.hikvision.frame
       target: vision.color_convert.frame
-      src_dtype:
-      tgt_dtype:
       description: камера → вход vision (далее ROI→маска→морфо→круги линейно внутри процесса)
     - source: vision.circle_detector.frame
       target: recog.center_crop.frame
-      src_dtype:
-      tgt_dtype:
       description: кадр+детекции → crop (детекции едут в item, для radius-матчинга)
     - source: vision.circle_detector.detections
       target: line.line_filter.detections
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: vision.circle_detector.frame
       target: draw.circle_draw.frame
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: vision.circle_detector.detections
       target: draw.circle_draw.detections
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: vision.circle_detector.mask
       target: maskview.mask_to_frame.mask
-      src_dtype:
-      tgt_dtype:
       description: маска белого → отдельный дисплей для тюнинга
     - source: line.line_filter.overlay
       target: recog.center_crop.trigger_in
-      src_dtype:
-      tgt_dtype:
       description: триггер «диск пересёк линию» → один crop события
     - source: line.line_filter.overlay
       target: draw.overlay_draw.overlay
-      src_dtype:
-      tgt_dtype:
       description: ''
     - source: recog.ml_inference.predictions
       target: layout.word_layout.predictions
-      src_dtype:
-      tgt_dtype:
       description: буква+угол (+pick_xy/e_capture в item) → раскладка слова → робот
     - source: phone.phone_camera.signal_2
       target: layout.word_layout.word
-      src_dtype:
-      tgt_dtype:
       description: целевое слово с пульта телефона → раскладка (word_source=signal_2, латчится)
     - source: phone.phone_camera.signal_1
       target: layout.word_layout.return_trigger
-      src_dtype:
-      tgt_dtype:
       description: сигнал «вернуть всё на ленту» (кнопка телефона) → возврат выложенных букв + сброс
   displays:
     - node_id: draw.overlay_draw.frame
@@ -456,8 +448,8 @@ blueprint:
         - 16.0
         - 1120.0
       vision.roi_crop:
-        - 212.37063046153224
-        - 1113.6486033076817
+        - 214.4678201239235
+        - 1119.9999999999998
       vision.hsv_mask:
         - 416.0
         - 1120.0
@@ -469,25 +461,25 @@ blueprint:
         - 1120.0
       line.line_filter:
         - 16.0
-        - 400.0
+        - 364.833131499135
       recog.center_crop:
         - 16.0
         - 1000.0
       recog.pixel_to_robot:
-        - 216.0
-        - 1000.0
+        - 216.00000000000006
+        - 998.992566860474
       recog.ml_inference:
         - 416.0
         - 1000.0
       layout.word_layout:
-        - 16.0
-        - 280.0
+        - -13.526620798676966
+        - 297.800377322509
       layout.robot_io:
-        - 216.0
-        - 280.0
+        - 403.1381304467671
+        - 285.1041534619722
       draw.circle_draw:
-        - 16.0
-        - 156.91823899371064
+        - 29.90257732545777
+        - 144.93887456408743
       draw.overlay_draw:
         - 216.0
         - 160.0
@@ -510,8 +502,6 @@ blueprint:
         - 600.0
         - 410.0
     locked_nodes: []
-    name: default
-    description: ''
 displays:
   - id: main
     name: Кадр + круги + линия
@@ -588,8 +578,8 @@ gui_positions:
     - 16.0
     - 1120.0
   vision.roi_crop:
-    - 212.37063046153224
-    - 1113.6486033076817
+    - 214.4678201239235
+    - 1119.9999999999998
   vision.hsv_mask:
     - 416.0
     - 1120.0
@@ -606,20 +596,20 @@ gui_positions:
     - 16.0
     - 1000.0
   recog.pixel_to_robot:
-    - 216.0
-    - 1000.0
+    - 216.00000000000006
+    - 998.992566860474
   recog.ml_inference:
     - 416.0
     - 1000.0
   layout.word_layout:
-    - 16.0
-    - 280.0
+    - 11.848385171707896
+    - 280.0000000000001
   layout.robot_io:
-    - 216.0
-    - 280.0
+    - 403.1381304467671
+    - 285.1041534619722
   draw.circle_draw:
-    - 16.0
-    - 160.0
+    - 29.90257732545777
+    - 144.93887456408743
   draw.overlay_draw:
     - 216.0
     - 160.0

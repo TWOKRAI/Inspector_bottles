@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QGraphicsDropShadowEffect
+from PySide6.QtWidgets import (
+    QGraphicsDropShadowEffect,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QWidget,
+)
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.widgets.chrome.login_button import LoginButton
@@ -17,6 +23,9 @@ class AppHeaderWidget(QWidget):
 
     objectName="AppHeader" — для стилизации через QSS.
     """
+
+    # Запрос на переключение полноэкранного режима (обрабатывает MainWindow).
+    fullscreenToggled = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -45,11 +54,30 @@ class AppHeaderWidget(QWidget):
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self._status_label)
 
+        # Кнопка полноэкранного режима (toggle: вход / возврат обратно).
+        self._fullscreen_btn = QPushButton("⛶")
+        self._fullscreen_btn.setObjectName("FullscreenButton")
+        self._fullscreen_btn.setFixedSize(36, 40)
+        self._fullscreen_btn.setToolTip("Полноэкранный режим (F11)")
+        self._fullscreen_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._fullscreen_btn.clicked.connect(self.fullscreenToggled.emit)
+        layout.addWidget(self._fullscreen_btn)
+
     # -- Публичное API --
 
     def update_status(self, text: str) -> None:
         """Обновить текст статуса в правой части header."""
         self._status_label.setText(text)
+
+    def set_fullscreen_state(self, is_fullscreen: bool) -> None:
+        """Обновить вид кнопки под текущий режим окна.
+
+        В полноэкранном режиме кнопка предлагает вернуться обратно.
+        """
+        self._fullscreen_btn.setText("🗗" if is_fullscreen else "⛶")
+        self._fullscreen_btn.setToolTip(
+            "Выйти из полноэкранного режима (F11 / Esc)" if is_fullscreen else "Полноэкранный режим (F11)"
+        )
 
     def set_login_button(self, button: "LoginButton") -> None:
         """Вставить LoginButton справа от _status_label.

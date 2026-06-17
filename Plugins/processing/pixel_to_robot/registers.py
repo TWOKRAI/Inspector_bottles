@@ -50,6 +50,48 @@ class PixelToRobotRegisters(SchemaBase):
         int, FieldMeta("Сдвиг Y (px)", info="прибавить к px перед гомографией (0 = тот же ROI)", min=-10000, max=10000)
     ] = 0
 
+    # --- Линейная калибровка (альтернатива файлу гомографии) ---
+    use_linear: Annotated[
+        bool,
+        FieldMeta(
+            "Линейная калибровка (без файла)",
+            info="True = билинейная интерполяция 4 углов; False = гомография",
+        ),
+    ] = False
+
+    # Размер ROI в пикселях — база маппинга.  Должны совпадать с roi_crop.width/height
+    # активного рецепта.  guard: max(1, значение) применяется в geometry.
+    lin_src_width: Annotated[
+        int,
+        FieldMeta(
+            "Ширина ROI (px)",
+            info="кадр-источник билинейной нормировки (roi_crop.width)",
+            min=1,
+            max=10000,
+        ),
+    ] = 800
+    lin_src_height: Annotated[
+        int,
+        FieldMeta(
+            "Высота ROI (px)",
+            info="кадр-источник билинейной нормировки (roi_crop.height)",
+            min=1,
+            max=10000,
+        ),
+    ] = 481
+
+    # 4 угла ROI в координатах робота (мм).  Порядок: TL(0,0) → TR(W,0) → BR(W,H) → BL(0,H).
+    # Дефолты — невырожденный плейсхолдер (прямоугольник рабочей зоны); владелец перепишет
+    # своими замерами через инспектор или рецепт.
+    lin_tl_x: Annotated[float, FieldMeta("TL X (мм)", info="верх-лево ROI px(0,0) → X робота")] = 200.0
+    lin_tl_y: Annotated[float, FieldMeta("TL Y (мм)", info="верх-лево ROI px(0,0) → Y робота")] = -300.0
+    lin_tr_x: Annotated[float, FieldMeta("TR X (мм)", info="верх-право ROI px(W,0) → X робота")] = 400.0
+    lin_tr_y: Annotated[float, FieldMeta("TR Y (мм)", info="верх-право ROI px(W,0) → Y робота")] = -300.0
+    lin_br_x: Annotated[float, FieldMeta("BR X (мм)", info="низ-право ROI px(W,H) → X робота")] = 400.0
+    lin_br_y: Annotated[float, FieldMeta("BR Y (мм)", info="низ-право ROI px(W,H) → Y робота")] = -100.0
+    lin_bl_x: Annotated[float, FieldMeta("BL X (мм)", info="низ-лево ROI px(0,H) → X робота")] = 200.0
+    lin_bl_y: Annotated[float, FieldMeta("BL Y (мм)", info="низ-лево ROI px(0,H) → Y робота")] = -100.0
+
     # --- Readonly: диагностика ---
     loaded: Annotated[bool, FieldMeta("Калибровка загружена", readonly=True)] = False
     last_x_mm: Annotated[float, FieldMeta("Последний X (мм)", readonly=True)] = 0.0

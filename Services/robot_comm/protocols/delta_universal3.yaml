@@ -13,7 +13,7 @@ registers:
     address: 0x1109
     access: rw
     label: "Режим работы"
-    hint: "0 = CVT (pick-place), 1 = DRAW (рисование), 2 = MANUAL (ручной jog), 3 = RETURN (возврат на ленту)"
+    hint: "0 = CVT (pick-place), 1 = DRAW (рисование), 2 = MANUAL (ручной jog), 3 = RETURN (возврат на ленту), 4 = TOOLCHANGE (смена инструмента)"
 
   # --- CVT job (ПК -> робот) ---
   job_flag:
@@ -504,3 +504,32 @@ registers:
     access: r
     label: "Возврат активен"
     hint: "1 = робот выполняет возврат буквы на ленту"
+
+  # --- TOOLCHANGE: смена инструмента (mode=4) ---
+  tool_flag:
+    type: reg
+    address: 0x1360
+    access: rw
+    label: "Флаг смены инструмента"
+    hint: "ПК пишет 1 = выполнить смену, робот сбрасывает в 0 при приёме"
+
+  tool_target:
+    type: reg
+    address: 0x1361
+    access: rw
+    label: "Целевой инструмент"
+    hint: "0 = снять (пусто), 1 = инструмент 1, 2 = инструмент 2"
+
+  tool_busy:
+    type: reg
+    address: 0x1362
+    access: r
+    label: "Смена активна"
+    hint: "1 = робот выполняет смену инструмента"
+
+  tool_cur:
+    type: reg
+    address: 0x1363
+    access: r
+    label: "Текущий инструмент"
+    hint: "Зеркало: какой инструмент сейчас установлен (0/1/2)"

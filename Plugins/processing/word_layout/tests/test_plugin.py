@@ -221,6 +221,46 @@ def test_pick_and_encoder_forwarded() -> None:
     assert job["place_rz_deg"] == -30.0
 
 
+def test_pick_z_mm_forwarded_in_pose() -> None:
+    """pick_z_mm из register попадает в pose при наличии pick_xy (высота забора)."""
+    p = _make_plugin(
+        {
+            "target_word": "К",
+            "word_source": "",
+            "use_pitch": False,
+            "first_x": 10.0,
+            "first_y": 20.0,
+            "place_z_mm": -90.0,
+            "pick_z_mm": -45.0,
+            "settle_frames": 1,
+            "require_pick": True,
+        }
+    )
+    out = _feed(
+        p,
+        {"predictions": [_pred("К", angle=0.0)], "pick_xy": {"x_mm": 100.0, "y_mm": 50.0}, "e_capture": 999},
+    )
+    job = out["robot_job"]
+    assert job["pick_z_mm"] == -45.0
+    assert job["place_z_mm"] == -90.0
+
+
+def test_pick_z_mm_absent_without_pick() -> None:
+    """Без pick_xy (демо, require_pick=False) — pick_z_mm НЕ появляется в pose."""
+    p = _make_plugin(
+        {
+            "target_word": "К",
+            "word_source": "",
+            "pick_z_mm": -45.0,
+            "settle_frames": 1,
+        }
+    )
+    out = _feed(p, {"predictions": [_pred("К")]})
+    job = out["robot_job"]
+    assert "pick_z_mm" not in job
+    assert "pick_x_mm" not in job
+
+
 def test_require_pick_blocks_without_calibration() -> None:
     # require_pick=True + нет pick_xy → диск не берём, слот не занимаем (раскладка не desync).
     p = _make_plugin({"target_word": "К", "word_source": "", "settle_frames": 1, "require_pick": True})

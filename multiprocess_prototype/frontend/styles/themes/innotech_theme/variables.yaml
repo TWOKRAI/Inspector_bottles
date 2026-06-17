@@ -52,7 +52,7 @@ font_xl_sm: "16px"
 font_xl: "17px"
 font_xxl_sm: "20px"
 font_xxl: "22px"
-font_brand: "35px"
+font_brand: "40px"
 
 # --- Скругления ---
 radius_xs: "3px"
@@ -144,7 +144,7 @@ slot_occupied_bg: "#2d5a2d"
 slot_selected_bg: "#1a5276"
 
 # --- Бренд / каналы ---
-brand_color: "#0b96d6"
+brand_color: "#0a64d6"
 accent_light: "#c0d4ff"
 ch_red: "#ff7894"
 ch_green: "#6ae0a8"

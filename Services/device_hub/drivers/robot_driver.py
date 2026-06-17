@@ -63,16 +63,18 @@ class RobotDriver(BaseDeviceDriver):
         self._client: Any = None
 
         # Feeder-очередь CVT: (x_mm, y_mm, e_capture, place) — place=(x,y,z,rz)|None
-        # deque — thread-safe append/popleft
-        self._job_queue: deque[tuple] = deque()
+        # deque — thread-safe append/popleft. maxlen — защита от роста при отвале робота
+        # (H-1: без лимита очередь росла бесконечно, пока робот недоступен).
+        _qmax = int(entry.params.get("job_queue_maxlen", 256))
+        self._job_queue: deque[tuple] = deque(maxlen=_qmax)
 
         # Draw-очередь: dict с заданиями рисования
         # queue.Queue — thread-safe
         self._draw_queue: queue.Queue[dict] = queue.Queue()
 
         # Return-очередь: (x, y, z) слотов для возврата букв на ленту (MODE=3).
-        # deque — thread-safe append/popleft (ставится из командного потока).
-        self._return_queue: deque[tuple] = deque()
+        # deque — thread-safe append/popleft (ставится из командного потока). maxlen — см. H-1 выше.
+        self._return_queue: deque[tuple] = deque(maxlen=_qmax)
 
         # Режим: cvt | draw
         self._mode: str = "cvt"
@@ -109,6 +111,12 @@ class RobotDriver(BaseDeviceDriver):
         self._overlap_mm: float = float(entry.params.get("overlap_mm", 1.0))
         self._draw_timeout_s: float = float(entry.params.get("draw_timeout_s", 120.0))
         self._lift_mm: float = float(entry.params.get("lift_mm", 10.0))
+
+        # Компенсация задержки конвейера (CVT lead compensation).
+        # Оператор задаёт в мм вдоль ленты: положительное значение = целиться
+        # ДАЛЬШЕ по ходу (компенсация задержки камера→робот). Применяется к
+        # e_capture ПЕРЕД send_job. Живо-тюнится через call("set_encoder_offset").
+        self._pick_lead_mm: float = float(entry.params.get("pick_lead_mm", 0.0))
 
         # Состояние рисования
         self._draw_busy: bool = False
@@ -237,6 +245,28 @@ class RobotDriver(BaseDeviceDriver):
     # Feeder CVT (порт robot_io/plugin.py:151-263)
     # ------------------------------------------------------------------ #
 
+    # Коэффициент мм/счёт энкодера (из cvt_universal_full.lua:121 FACTOR_MM).
+    # Единственный источник истины — прошивка. Дублируем для конверсии offset.
+    _FACTOR_MM: float = 0.144473
+
+    def _apply_pick_lead(self, e_capture: int) -> int:
+        """Применить компенсацию задержки к снимку энкодера.
+
+        pick_lead_mm > 0 → целиться ДАЛЬШЕ по ходу ленты.
+        Lua: trav = (enc_now - job_enc) * FACTOR_MM; py = job_y + UY * trav (UY=1).
+        Чтобы trav стал больше (цель дальше), уменьшаем job_enc: вычитаем offset_counts.
+        Результат: 32-bit signed int (как REG_JOB_ECAP — RegDW signed).
+        """
+        if self._pick_lead_mm == 0.0:
+            return e_capture
+        offset_counts = round(self._pick_lead_mm / self._FACTOR_MM)
+        compensated = e_capture - offset_counts
+        # 32-bit signed wrap (Lua DW signed): clamp to [-2^31, 2^31-1]
+        compensated = compensated & 0xFFFFFFFF
+        if compensated >= 0x80000000:
+            compensated -= 0x100000000
+        return int(compensated)
+
     def enqueue_job(
         self,
         x_mm: float,
@@ -253,6 +283,9 @@ class RobotDriver(BaseDeviceDriver):
         None — читаем энкодер сейчас (как раньше). ``z_mm`` — глубина захвата на picke
         (0 = дефолт прошивки Z_PICK). Вызывается из командного потока (thread-safe:
         deque.append).
+
+        ``pick_lead_mm`` — компенсация задержки (мм вдоль ленты). Применяется к
+        e_capture автоматически (и к поданному извне, и к считанному здесь).
         """
         if not self.is_connected:
             return False
@@ -262,6 +295,7 @@ class RobotDriver(BaseDeviceDriver):
             except Exception:
                 self._record_err()
                 return False
+        e_capture = self._apply_pick_lead(e_capture)
         self._job_queue.append((x_mm, y_mm, z_mm, e_capture, place))
         return True
 
@@ -591,7 +625,10 @@ class RobotDriver(BaseDeviceDriver):
         # Опц. энкодер на момент кадра (снят рано pixel_to_robot); None → драйвер читает сам.
         e_cap = args.get("e_capture")
         e_cap = int(e_cap) if e_cap is not None else None
-        ok = self.enqueue_job(x_mm, y_mm, place, e_cap)
+        # Глубина забора Z (мм); 0 = дефолт прошивки Z_PICK.
+        z_mm_raw = args.get("z_mm")
+        z_mm = float(z_mm_raw) if z_mm_raw is not None else 0.0
+        ok = self.enqueue_job(x_mm, y_mm, place, e_cap, z_mm=z_mm)
         return {"status": "ok" if ok else "error", "queue_len": len(self._job_queue)}
 
     def _op_return_job(self, args: dict) -> dict:
@@ -600,6 +637,54 @@ class RobotDriver(BaseDeviceDriver):
         z_mm = float(args.get("z_mm", 0.0))
         ok = self.enqueue_return(x_mm, y_mm, z_mm)
         return {"status": "ok" if ok else "error", "return_queue_len": len(self._return_queue)}
+
+    def _op_set_encoder_offset(self, args: dict) -> dict:
+        """Живая подстройка компенсации задержки конвейера (pick_lead_mm).
+
+        Положительное значение = целиться ДАЛЬШЕ по ходу ленты (компенсация
+        системной задержки камера→инференс→робот). Конвертируется в счётчики
+        энкодера (FACTOR_MM = 0.144473 мм/счёт) и вычитается из e_capture.
+
+        Args (в data):
+            lead_mm: float — смещение в мм вдоль ленты (знаковое).
+        """
+        lead_mm = float(args.get("lead_mm", 0.0))
+        self._pick_lead_mm = lead_mm
+        offset_counts = round(lead_mm / self._FACTOR_MM) if lead_mm != 0.0 else 0
+        return {
+            "status": "ok",
+            "pick_lead_mm": lead_mm,
+            "offset_counts": offset_counts,
+        }
+
+    def _op_toolchange(self, args: dict) -> dict:
+        """Смена инструмента: target (0=снять/1/2), ждать завершения.
+
+        Переключает режим в toolchange, вызывает client.do_toolchange,
+        возвращает режим в cvt. Handshake: tool_flag→0 (приём) → tool_busy↑
+        (старт) → tool_busy↓ (готово).
+        """
+        target = int(args.get("target", 0))
+        timeout = args.get("timeout")
+        timeout = float(timeout) if timeout is not None else None
+        # Переключить в режим toolchange
+        self._client.set_mode("toolchange")
+        self._mode = "toolchange"
+        try:
+            ok = self._client.do_toolchange(target, timeout=timeout)
+        except Exception as exc:
+            # Вернуть режим при ошибке
+            self._client.set_mode("cvt")
+            self._mode = "cvt"
+            raise exc
+        # Вернуть режим в cvt после смены
+        self._client.set_mode("cvt")
+        self._mode = "cvt"
+        tool_cur = self._client.tool_current()
+        return {
+            "status": "ok" if ok else "error",
+            "tool_current": tool_cur,
+        }
 
     # --- draw-операции ---
 
@@ -696,6 +781,8 @@ class RobotDriver(BaseDeviceDriver):
         "clear_queue": _op_clear_queue,
         "enqueue_job": _op_enqueue_job,
         "return_job": _op_return_job,
+        "set_encoder_offset": _op_set_encoder_offset,
+        "toolchange": _op_toolchange,
         "draw_polyline": _op_draw_polyline,
         "draw_circle": _op_draw_circle,
         "draw_square": _op_draw_square,
@@ -725,6 +812,7 @@ class RobotDriver(BaseDeviceDriver):
             "returns_done": self.returns_done,
             "returns_failed": self.returns_failed,
             "return_queued": len(self._return_queue),
+            "pick_lead_mm": self._pick_lead_mm,
         }
         if data:
             base.update(data)

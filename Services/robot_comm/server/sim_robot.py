@@ -132,10 +132,13 @@ class SimRobotServer:
 
 def run_sim_robot(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, unit_id: int = ROBOT_UNIT_ID) -> None:
     """Блокирующий запуск симулятора (CLI). Ctrl+C — выход."""
-    server = SimRobotServer(host, port, unit_id)
+    # CLI: verbose-лог событий в консоль (зеркало print() прошивки).
+    # flush=True — события видны вживую (без block-буферизации stdout при перенаправлении).
+    core = RobotSimCore(on_event=lambda m: print(m, flush=True))
+    server = SimRobotServer(host, port, unit_id, core=core)
     print(
         f"sim_robot слушает {host}:{port} (unit {unit_id}); карта universal3 "
-        f"(CVT + рисование + зеркало ПЧ). Ctrl+C — выход.",
+        f"(CVT + DRAW + MANUAL + RETURN + TOOLCHANGE + зеркало ПЧ). Ctrl+C — выход.",
         flush=True,
     )
     server._ticker_thread = threading.Thread(target=server._ticker, name="sim-robot-motion", daemon=True)

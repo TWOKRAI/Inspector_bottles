@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
@@ -88,7 +90,37 @@ class InterfaceSection(QWidget):
         group_layout.addLayout(btn_row)
 
         layout.addWidget(group)
+
+        # === Группа: Полноэкранный режим ===
+        fs_group = QGroupBox("Полноэкранный режим")
+        fs_layout = QVBoxLayout(fs_group)
+
+        fs_desc = QLabel(
+            "Развернуть приложение на весь экран (без рамки окна и панели задач). "
+            "Повторное нажатие или клавиша F11 возвращают окно в обычный режим."
+        )
+        fs_desc.setWordWrap(True)
+        fs_desc.setObjectName("HintLabelLg")
+        fs_layout.addWidget(fs_desc)
+
+        fs_btn_row = QHBoxLayout()
+        self._btn_fullscreen = QPushButton("На весь экран")
+        self._btn_fullscreen.setToolTip("Переключить полноэкранный режим (F11)")
+        self._btn_fullscreen.setMinimumWidth(200)
+        self._btn_fullscreen.setMinimumHeight(36)
+        self._btn_fullscreen.setProperty("role", "primary")
+        self._btn_fullscreen.clicked.connect(self._on_toggle_fullscreen)
+        fs_btn_row.addWidget(self._btn_fullscreen)
+        fs_btn_row.addStretch()
+        fs_layout.addLayout(fs_btn_row)
+
+        layout.addWidget(fs_group)
         layout.addStretch()
+
+        # Горячая клавиша F11 — работает во всём приложении (ApplicationShortcut)
+        self._fs_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
+        self._fs_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._fs_shortcut.activated.connect(self._on_toggle_fullscreen)
 
     # ------------------------------------------------------------------
     # SectionProtocol
@@ -104,6 +136,7 @@ class InterfaceSection(QWidget):
 
     def on_activated(self) -> None:
         """Вызывается при переключении на эту секцию."""
+        self._sync_fullscreen_label()
 
     def on_deactivated(self) -> None:
         """Вызывается при уходе с этой секции."""
@@ -123,3 +156,28 @@ class InterfaceSection(QWidget):
 
         _logger.info("[InterfaceSection] Перезапуск UI по запросу пользователя")
         self._request_ui_restart()
+
+    def _on_toggle_fullscreen(self) -> None:
+        """Переключить полноэкранный режим главного окна.
+
+        Использует ``self.window()`` — верхнеуровневое окно, содержащее секцию
+        (главное окно приложения). Инъекция зависимостей не нужна.
+        """
+        window = self.window()
+        if window is None:
+            _logger.warning("[InterfaceSection] window() вернул None — полноэкранный режим недоступен")
+            return
+
+        if window.isFullScreen():
+            _logger.info("[InterfaceSection] Выход из полноэкранного режима")
+            window.showNormal()
+        else:
+            _logger.info("[InterfaceSection] Вход в полноэкранный режим")
+            window.showFullScreen()
+        self._sync_fullscreen_label()
+
+    def _sync_fullscreen_label(self) -> None:
+        """Обновить подпись кнопки под текущее состояние окна."""
+        window = self.window()
+        is_fullscreen = bool(window is not None and window.isFullScreen())
+        self._btn_fullscreen.setText("Свернуть из полноэкранного" if is_fullscreen else "На весь экран")

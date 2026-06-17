@@ -196,6 +196,7 @@ class WordLayoutPlugin(ProcessModulePlugin):
         if pick is not None:
             pose["pick_x_mm"] = pick[0]
             pose["pick_y_mm"] = pick[1]
+            pose["pick_z_mm"] = float(self._reg.pick_z_mm)
             e_cap = item.get(self._reg.encoder_source)
             if e_cap is not None:
                 pose["e_capture"] = int(e_cap)

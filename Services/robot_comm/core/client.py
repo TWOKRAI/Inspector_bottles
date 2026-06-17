@@ -332,6 +332,57 @@ class RobotClient:
         return True
 
     # ------------------------------------------------------------------ #
+    # TOOLCHANGE (смена инструмента, MODE=4)
+    # ------------------------------------------------------------------ #
+
+    # Тайминги смены инструмента (handshake как у RETURN)
+    _TOOL_TIMEOUT_S = 30.0  # максимум на всю смену (снять + надеть + домой)
+    _TOOL_ACCEPT_S = 3.0  # ждать приёма (tool_flag → 0)
+    _TOOL_BUSY_RISE_S = 5.0  # ждать старта (tool_busy → 1)
+
+    def tool_accepted(self) -> bool:
+        """Прошивка подхватила задание смены: tool_flag сброшен в 0."""
+        return self._map.read(self._device, "tool_flag") == 0
+
+    def tool_busy(self) -> bool:
+        """Идёт ли смена инструмента (tool_busy=1)."""
+        return self._map.read(self._device, "tool_busy") == 1
+
+    def tool_current(self) -> int:
+        """Текущий инструмент (зеркало REG_TOOL_CUR)."""
+        return int(self._map.read(self._device, "tool_cur"))
+
+    def do_toolchange(self, target: int, timeout: float | None = None) -> bool:
+        """Сменить инструмент: target (0=снять/1/2) + маркер, ждать завершения.
+
+        Робот в MODE=4 едет в гнездо текущего инструмента, снимает, едет в гнездо
+        целевого, надевает, возвращается домой. Handshake — как у RETURN/DRAW.
+        Звать ТОЛЬКО когда робот свободен и в режиме toolchange (переключает драйвер).
+
+        Raises:
+            ValueError: target вне допустимого диапазона 0..2.
+        """
+        if target not in (0, 1, 2):
+            raise ValueError(f"toolchange target: 0|1|2, получено {target!r}")
+        ok = self._write_map({"tool_target": target, "tool_flag": 1})  # маркер — последним
+        if not ok:
+            return False
+        return self._wait_toolchange_done(timeout or self._TOOL_TIMEOUT_S)
+
+    def _wait_toolchange_done(self, timeout: float) -> bool:
+        """Дождаться завершения смены: tool_flag→0 → tool_busy↑ → tool_busy↓."""
+        if not self._poll_until(self.tool_accepted, self._TOOL_ACCEPT_S, _POLL_FAST_S):
+            self._emit_progress({"stage": "toolchange_not_accepted"})
+            return False
+        if not self._poll_until(self.tool_busy, self._TOOL_BUSY_RISE_S, _POLL_FAST_S):
+            self._emit_progress({"stage": "toolchange_no_busy_rise"})
+            return False
+        if not self._poll_until(lambda: self.tool_busy() is False, timeout, _POLL_SLOW_S):
+            self._emit_progress({"stage": "toolchange_timeout", "timeout_s": timeout})
+            return False
+        return True
+
+    # ------------------------------------------------------------------ #
     # Телеметрия
     # ------------------------------------------------------------------ #
 

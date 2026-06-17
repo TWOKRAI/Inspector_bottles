@@ -106,6 +106,16 @@ REG_RET_Y = 0x1352
 REG_RET_Z = 0x1353
 REG_RET_BUSY = 0x1354
 
+# TOOLCHANGE: смена инструмента (0x1360..0x1363). MODE=4.
+# ПК пишет REG_TOOL_TARGET (0=снять/1/2) + REG_TOOL_FLAG=1 (маркер последним).
+# Робот в MODE=4: едет в гнездо текущего инструмента → снимает → едет в гнездо
+# целевого → надевает → домой. Handshake: tool_flag 1→0 (приём) → tool_busy
+# 1 (старт) → tool_busy 0 (готово). REG_TOOL_CUR — текущий инструмент (зеркало).
+REG_TOOL_FLAG = 0x1360
+REG_TOOL_TARGET = 0x1361
+REG_TOOL_BUSY = 0x1362
+REG_TOOL_CUR = 0x1363
+
 # Размер адресного пространства робота (для симулятора): drawing-буфер
 # 0x1420 + 100 точек * 3 рег = 0x14A4, округляем с запасом.
 REG_SPACE_SIZE = 0x1600
@@ -209,6 +219,11 @@ def build_register_map(word_order: str = "little") -> RegisterMap:
             "ret_y": Reg(REG_RET_Y, scale=XY_SCALE, signed=True),
             "ret_z": Reg(REG_RET_Z, scale=XY_SCALE, signed=True),
             "ret_busy": Reg(REG_RET_BUSY),
+            # --- TOOLCHANGE: смена инструмента (target + handshake) ---
+            "tool_flag": Reg(REG_TOOL_FLAG),
+            "tool_target": Reg(REG_TOOL_TARGET),
+            "tool_busy": Reg(REG_TOOL_BUSY),
+            "tool_cur": Reg(REG_TOOL_CUR),
         },
         word_order=word_order,  # type: ignore[arg-type]
     )

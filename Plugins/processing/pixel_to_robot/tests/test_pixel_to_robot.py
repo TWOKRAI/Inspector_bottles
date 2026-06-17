@@ -87,3 +87,115 @@ def test_reload_after_wizard(tmp_path) -> None:
     assert res["loaded"] is True
     out = p.process([{"sidecar": {"center_px": [0, 0]}}])[0]
     assert out["pick_xy"] == {"x_mm": 10.0, "y_mm": -20.0}
+
+
+# ======================================================================
+# Линейный режим (билинейная интерполяция, без файла калибровки)
+# ======================================================================
+
+
+def test_bilinear_corners() -> None:
+    """Чистая geometry: угловые точки px(0,0)→TL, px(W,0)→TR, px(W,H)→BR, px(0,H)→BL."""
+    from Plugins.processing.pixel_to_robot.geometry import bilinear_px_to_mm
+
+    tl = (100.0, -200.0)
+    tr = (300.0, -200.0)
+    br = (300.0, 0.0)
+    bl = (100.0, 0.0)
+
+    # px(0,0) → TL
+    assert bilinear_px_to_mm(0, 0, 800, 481, tl, tr, br, bl) == tl
+    # px(W,0) → TR
+    assert bilinear_px_to_mm(800, 0, 800, 481, tl, tr, br, bl) == tr
+    # px(W,H) → BR
+    assert bilinear_px_to_mm(800, 481, 800, 481, tl, tr, br, bl) == br
+    # px(0,H) → BL
+    assert bilinear_px_to_mm(0, 481, 800, 481, tl, tr, br, bl) == bl
+
+
+def test_bilinear_center() -> None:
+    """Центр ROI (W/2, H/2) → среднее 4 углов (для прямоугольника)."""
+    from Plugins.processing.pixel_to_robot.geometry import bilinear_px_to_mm
+
+    tl = (100.0, -200.0)
+    tr = (300.0, -200.0)
+    br = (300.0, 0.0)
+    bl = (100.0, 0.0)
+
+    x, y = bilinear_px_to_mm(400, 240.5, 800, 481, tl, tr, br, bl)
+    expected_x = (tl[0] + tr[0] + br[0] + bl[0]) / 4
+    expected_y = (tl[1] + tr[1] + br[1] + bl[1]) / 4
+    assert abs(x - expected_x) < 1e-9
+    assert abs(y - expected_y) < 1e-9
+
+
+def test_bilinear_guard_zero_size() -> None:
+    """src_w/src_h <= 0 не должно давать деление на ноль (guard max(1,...))."""
+    from Plugins.processing.pixel_to_robot.geometry import bilinear_px_to_mm
+
+    tl = (0.0, 0.0)
+    tr = (10.0, 0.0)
+    br = (10.0, 10.0)
+    bl = (0.0, 10.0)
+    # Не бросает ZeroDivisionError
+    result = bilinear_px_to_mm(0, 0, 0, 0, tl, tr, br, bl)
+    assert isinstance(result, tuple) and len(result) == 2
+
+
+def test_linear_mode_produces_pick_xy_without_file(tmp_path) -> None:
+    """use_linear=True → pick_xy выдаётся БЕЗ файла калибровки."""
+    p = _make_plugin(
+        {
+            "camera_id": "nonexistent",
+            "calibration_dir": str(tmp_path),
+            "use_linear": True,
+            "lin_src_width": 800,
+            "lin_src_height": 481,
+            "lin_tl_x": 100.0,
+            "lin_tl_y": -200.0,
+            "lin_tr_x": 300.0,
+            "lin_tr_y": -200.0,
+            "lin_br_x": 300.0,
+            "lin_br_y": 0.0,
+            "lin_bl_x": 100.0,
+            "lin_bl_y": 0.0,
+        }
+    )
+    assert p._reg.loaded is True  # линейный режим «загружен» всегда
+    assert p._reg.use_linear is True
+
+    # px(0,0) → TL
+    out = p.process([{"sidecar": {"center_px": [0, 0]}}])[0]
+    assert "pick_xy" in out
+    assert out["pick_xy"]["x_mm"] == 100.0
+    assert out["pick_xy"]["y_mm"] == -200.0
+    assert p._reg.conversions == 1
+
+
+def test_linear_mode_passthrough_no_center(tmp_path) -> None:
+    """use_linear=True, но item без center_px → passthrough, без ошибки."""
+    p = _make_plugin(
+        {
+            "camera_id": "nonexistent",
+            "calibration_dir": str(tmp_path),
+            "use_linear": True,
+        }
+    )
+    item = {"predictions": [{"label": "А"}]}
+    out = p.process([item])[0]
+    assert "pick_xy" not in out
+    assert out == item
+
+
+def test_linear_mode_reload_keeps_working(tmp_path) -> None:
+    """cmd_reload в линейном режиме не ломает — loaded остаётся True."""
+    p = _make_plugin(
+        {
+            "camera_id": "nonexistent",
+            "calibration_dir": str(tmp_path),
+            "use_linear": True,
+        }
+    )
+    assert p._reg.loaded is True
+    res = p.cmd_reload({})
+    assert res["loaded"] is True

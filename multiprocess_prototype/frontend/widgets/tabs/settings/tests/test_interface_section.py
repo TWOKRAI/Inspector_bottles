@@ -39,3 +39,23 @@ def test_section_protocol_identifiers(qtbot) -> None:
     assert section.title == "Настройка интерфейса"
     assert section.widget() is section
     assert section.action_buttons() == []
+
+
+def test_fullscreen_button_toggles_window(qtbot) -> None:
+    """Клик «На весь экран» переключает полноэкранный режим окна и подпись кнопки."""
+    section = InterfaceSection()
+    qtbot.addWidget(section)
+    section.show()
+    qtbot.waitExposed(section)
+
+    window = section.window()
+    assert not window.isFullScreen()
+    assert section._btn_fullscreen.text() == "На весь экран"
+
+    section._btn_fullscreen.click()
+    assert window.isFullScreen()
+    assert section._btn_fullscreen.text() == "Свернуть из полноэкранного"
+
+    section._btn_fullscreen.click()
+    assert not window.isFullScreen()
+    assert section._btn_fullscreen.text() == "На весь экран"

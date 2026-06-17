@@ -76,13 +76,29 @@ class PixelToRobotPlugin(ProcessModulePlugin):
         return {"status": "ok", "loaded": self._reg.loaded}
 
     def _load_calibration(self) -> None:
-        """Загрузить гомографию из config/calibration/<camera_id>.yaml в numpy-матрицу."""
+        """Загрузить калибровку.
+
+        При ``use_linear=True`` — гомография из файла не нужна: узел работает
+        в режиме билинейной интерполяции по 4 углам ROI (регистры ``lin_*``).
+        Файл не грузим, ``loaded=True`` сразу — узел готов выдавать ``pick_xy``.
+        """
+        self._h = None
+        self._reg.loaded = False
+        self._reg.last_error = ""
+
+        if self._reg.use_linear:
+            # Линейный режим — файл калибровки не нужен.
+            self._reg.loaded = True
+            self._ctx.log_info(
+                f"PixelToRobotPlugin: линейный режим (билинейная интерполяция "
+                f"{self._reg.lin_src_width}x{self._reg.lin_src_height}px → 4 угла мм)"
+            )
+            return
+
         import numpy as np
 
         from Plugins.calibration.camera_robot.store import load_calibration
 
-        self._h = None
-        self._reg.loaded = False
         try:
             payload = load_calibration(self._reg.camera_id, self._reg.calibration_dir)
         except Exception as exc:  # noqa: BLE001 — кривой файл не должен валить процесс
@@ -107,19 +123,41 @@ class PixelToRobotPlugin(ProcessModulePlugin):
 
     @for_each
     def process(self, item: dict) -> dict | None:
-        if self._h is None:
-            return item
         center = self._extract_center(item)
         if center is None:
             return item
 
-        from Plugins.calibration.camera_robot.geometry import apply_homography
-
         px = (center[0] + self._reg.roi_offset_x, center[1] + self._reg.roi_offset_y)
-        try:
-            x_mm, y_mm = apply_homography(self._h, px)
-        except Exception as exc:  # noqa: BLE001 — точка вне области гомографии и т.п.
-            self._reg.last_error = f"apply: {exc}"
+
+        if self._reg.use_linear:
+            # --- Билинейная интерполяция (линейный режим) ---
+            from .geometry import bilinear_px_to_mm
+
+            try:
+                x_mm, y_mm = bilinear_px_to_mm(
+                    px[0],
+                    px[1],
+                    self._reg.lin_src_width,
+                    self._reg.lin_src_height,
+                    tl=(self._reg.lin_tl_x, self._reg.lin_tl_y),
+                    tr=(self._reg.lin_tr_x, self._reg.lin_tr_y),
+                    br=(self._reg.lin_br_x, self._reg.lin_br_y),
+                    bl=(self._reg.lin_bl_x, self._reg.lin_bl_y),
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._reg.last_error = f"linear: {exc}"
+                return item
+        elif self._h is not None:
+            # --- Гомография (классический режим) ---
+            from Plugins.calibration.camera_robot.geometry import apply_homography
+
+            try:
+                x_mm, y_mm = apply_homography(self._h, px)
+            except Exception as exc:  # noqa: BLE001 — точка вне области гомографии и т.п.
+                self._reg.last_error = f"apply: {exc}"
+                return item
+        else:
+            # Нет ни линейного режима, ни гомографии — passthrough.
             return item
 
         self._reg.last_x_mm = round(x_mm, 2)

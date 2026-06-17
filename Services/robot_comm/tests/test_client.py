@@ -452,3 +452,35 @@ def test_do_return_handshake_completes(bot: RobotClient, core: RobotSimCore) -> 
 def test_do_return_rejects_out_of_limit(bot: RobotClient) -> None:
     with pytest.raises(RobotJobError, match="возврата вне"):
         bot.do_return(5000.0, 0.0, -90.0)
+
+
+# --- TOOLCHANGE: смена инструмента ---
+
+
+def test_do_toolchange_wire_format_marker_last(bot: RobotClient, transport: FakeRobotTransport) -> None:
+    """Контракт с Lua: tool_target, маркер tool_flag — ПОСЛЕДНИМ."""
+    bot.do_toolchange(2)
+    ops = transport.transactions[-1]
+    assert ops[0] == ("w", 0x1361, 2)  # tool_target
+    assert ops[1] == ("w", 0x1360, 1)  # маркер tool_flag последним
+
+
+def test_do_toolchange_handshake_completes(bot: RobotClient, core: RobotSimCore) -> None:
+    """do_toolchange проходит handshake (tool_flag->0 -> tool_busy 1->0) и возвращает True."""
+    assert bot.do_toolchange(1) is True
+    assert bot.tool_current() == 1  # sim: текущий инструмент = целевой
+
+
+def test_do_toolchange_rejects_bad_target(bot: RobotClient) -> None:
+    with pytest.raises(ValueError, match="toolchange target"):
+        bot.do_toolchange(5)
+
+
+def test_do_toolchange_updates_tool_cur(bot: RobotClient, core: RobotSimCore) -> None:
+    """Последовательная смена: cur обновляется каждый раз."""
+    assert bot.do_toolchange(1) is True
+    assert bot.tool_current() == 1
+    assert bot.do_toolchange(0) is True
+    assert bot.tool_current() == 0
+    assert bot.do_toolchange(2) is True
+    assert bot.tool_current() == 2

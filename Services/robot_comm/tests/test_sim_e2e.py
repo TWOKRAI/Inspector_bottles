@@ -84,3 +84,11 @@ def test_vfd_mirror_over_bridge(bot: RobotClient) -> None:
         ]
     )
     assert _wait(lambda: bot.read_registers(0x1210, 2) == [1, 5000])
+
+
+def test_toolchange_over_tcp(bot: RobotClient) -> None:
+    """TOOLCHANGE E2E: смена инструмента через TCP (handshake flag->busy->done)."""
+    assert _wait(bot.is_free)
+    bot.set_mode("toolchange")
+    assert bot.do_toolchange(2) is True
+    assert bot.tool_current() == 2

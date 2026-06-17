@@ -140,6 +140,7 @@ class MainWindow(QMainWindow):
         # 1. Header (фиксированная высота — HEADER_HEIGHT_PX)
         self._header = AppHeaderWidget()
         self._header.setFixedHeight(HEADER_HEIGHT_PX)
+        self._header.fullscreenToggled.connect(self._toggle_fullscreen)
         self._layout.addWidget(self._header)
 
         # 1.5. Баннер ошибок/предупреждений (скрыт по умолчанию)
@@ -231,6 +232,13 @@ class MainWindow(QMainWindow):
         # устанавливается через set_undo_controller()
         self._undo_controller: "UndoRedoController | None" = None
 
+        # F11 — toggle полноэкранного режима. Esc (выход) обрабатывается в
+        # keyPressEvent, чтобы не перехватывать Escape у дочерних виджетов
+        # (отмена редактирования, закрытие popup) — туда событие доходит,
+        # только если его не обработал сфокусированный виджет.
+        self._fullscreen_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
+        self._fullscreen_shortcut.activated.connect(self._toggle_fullscreen)
+
         # Восстановить позицию и размер окна из прошлой сессии
         self._settings = QSettings("INNOTECH", "Inspector")
         self._restore_geometry()
@@ -287,6 +295,35 @@ class MainWindow(QMainWindow):
         self._image_panel_placeholder.deleteLater()
         self._layout.insertWidget(idx, widget, stretch=1)
         self._image_panel = widget
+
+    # -- Полноэкранный режим --
+
+    def _toggle_fullscreen(self) -> None:
+        """Переключить полноэкранный режим (вход / возврат обратно)."""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+        self._header.set_fullscreen_state(self.isFullScreen())
+
+    def _exit_fullscreen(self) -> None:
+        """Выйти из полноэкранного режима (Esc). В обычном режиме — no-op."""
+        if self.isFullScreen():
+            self.showNormal()
+            self._header.set_fullscreen_state(False)
+
+    def keyPressEvent(self, event) -> None:
+        """Esc выходит из полноэкранного режима, если он активен.
+
+        Событие доходит сюда только когда сфокусированный виджет его не
+        обработал — поэтому Escape для отмены редактирования / закрытия
+        popup продолжает работать как раньше.
+        """
+        if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
+            self._exit_fullscreen()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     # -- Undo/Redo (G.4.4: domain CommandDispatcher) --
 
