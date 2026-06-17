@@ -102,6 +102,11 @@ class RobotScalePlugin(ProcessModulePlugin):
             sy = ry * scale
             pad_x = pad_y = 0.0
 
+        clamp = bool(self._reg.clamp_to_zone)
+        zx_lo, zx_hi = (x0, x1) if x0 <= x1 else (x1, x0)
+        zy_lo, zy_hi = (y0, y1) if y0 <= y1 else (y1, y0)
+        clamped = 0
+
         out: list[dict] = []
         for p in pts:
             if not isinstance(p, dict) or "x_mm" not in p or "y_mm" not in p:
@@ -111,15 +116,19 @@ class RobotScalePlugin(ProcessModulePlugin):
             # Источник, управляющий каждой осью робота (swap меняет px↔py роли).
             src_for_x = py if swap else px
             src_for_y = px if swap else py
-            out.append(
-                {
-                    "x_mm": x0 + pad_x + ox + src_for_x * sx,
-                    "y_mm": y0 + pad_y + oy + src_for_y * sy,
-                    "pen": int(p.get("pen", 1)),
-                }
-            )
+            mx = x0 + pad_x + ox + src_for_x * sx
+            my = y0 + pad_y + oy + src_for_y * sy
+            if clamp:
+                # Точка за листом → на границу листа («ставится на краю»).
+                cx = min(zx_hi, max(zx_lo, mx))
+                cy = min(zy_hi, max(zy_lo, my))
+                if cx != mx or cy != my:
+                    clamped += 1
+                mx, my = cx, cy
+            out.append({"x_mm": mx, "y_mm": my, "pen": int(p.get("pen", 1))})
 
         self._reg.points_last = len(out)
+        self._reg.points_clamped = clamped
         # Границы мм = УПОРЯДОЧЕННЫЕ углы листа [x0,y0 (ЛВ), x1,y1 (ПН)] — points_render
         # ориентирует превью по ним (ЛВ→верх-лево), совпадая с физлистом при любом знаке Y.
         # Лист (зона A4) фиксирован — рисунок виден ездящим/масштабирующимся внутри.

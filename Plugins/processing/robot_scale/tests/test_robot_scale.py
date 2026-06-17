@@ -145,3 +145,66 @@ def test_skips_malformed_points() -> None:
     out = p.process([{"draw_points": pts}])[0]["draw_points"]
     assert len(out) == 1
     assert out[0]["x_mm"] == 50.0 and out[0]["pen"] == 1  # дефолт pen
+
+
+# --- прижим к рабочей зоне (листу) ---
+
+
+def test_clamp_to_zone_pins_out_of_sheet_to_edge() -> None:
+    # offset выталкивает точку за лист → прижата к границе (X на 200, Y на 200).
+    p = _make_plugin(
+        {
+            "src_width": 640,
+            "src_height": 480,
+            "x0": 0.0,
+            "y0": 0.0,
+            "x1": 200.0,
+            "y1": 200.0,
+            "offset_x": 500.0,  # увести далеко за правый край
+            "offset_y": 500.0,
+            "keep_aspect": False,
+            "clamp_to_zone": True,
+        }
+    )
+    out = p.process([{"draw_points": [{"x_mm": 640.0, "y_mm": 480.0, "pen": 1}]}])[0]
+    assert out["draw_points"][0]["x_mm"] == 200.0  # прижато к ПН-границе
+    assert out["draw_points"][0]["y_mm"] == 200.0
+    assert p._reg.points_clamped == 1
+
+
+def test_clamp_handles_reversed_corners() -> None:
+    # Лист с y0>y1 (Y-вверх): зона по Y = [-200, 0]; точка ниже прижимается к -200.
+    p = _make_plugin(
+        {
+            "src_width": 640,
+            "src_height": 480,
+            "x0": 0.0,
+            "y0": 0.0,
+            "x1": 200.0,
+            "y1": -200.0,
+            "offset_y": -500.0,
+            "keep_aspect": False,
+            "clamp_to_zone": True,
+        }
+    )
+    out = p.process([{"draw_points": [{"x_mm": 0.0, "y_mm": 480.0, "pen": 1}]}])[0]
+    assert out["draw_points"][0]["y_mm"] == -200.0  # прижато к нижней (по модулю) границе
+
+
+def test_clamp_off_allows_out_of_zone() -> None:
+    p = _make_plugin(
+        {
+            "src_width": 640,
+            "src_height": 480,
+            "x0": 0.0,
+            "y0": 0.0,
+            "x1": 200.0,
+            "y1": 200.0,
+            "offset_x": 500.0,
+            "keep_aspect": False,
+            "clamp_to_zone": False,
+        }
+    )
+    out = p.process([{"draw_points": [{"x_mm": 640.0, "y_mm": 0.0, "pen": 1}]}])[0]
+    assert out["draw_points"][0]["x_mm"] == 700.0  # 200 + 500 offset, без прижима
+    assert p._reg.points_clamped == 0

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import cv2
+import numpy as np
 
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
@@ -74,14 +75,42 @@ class CropPlugin(ProcessModulePlugin):
 
         out_w = int(self._reg.out_width) or w_in
         out_h = int(self._reg.out_height) or h_in
+        mode = (self._reg.mode or "resize").lower()
 
-        # Нечего делать: регион = весь кадр и выход = входу.
-        if x == 0 and y == 0 and w == w_in and h == h_in and out_w == w_in and out_h == h_in:
+        # Нечего делать (только resize): регион = весь кадр и выход = входу.
+        if mode != "clip" and x == 0 and y == 0 and w == w_in and h == h_in and out_w == w_in and out_h == h_in:
             self._reg.last_w, self._reg.last_h = w_in, h_in
             return item
 
         region = frame[y : y + h, x : x + w]
+        self._reg.last_w, self._reg.last_h = w, h
+
+        if mode == "clip":
+            # Обрезка БЕЗ масштаба: регион в нативном размере кладём на фикс. холст out_w×out_h
+            # по (paste_x, paste_y); выход за край холста отсекается («точка ставится на краю»).
+            return {**item, "frame": self._paste_clip(region, out_w, out_h)}
+
+        # resize-режим: вырезать + растянуть к выходному размеру (старое поведение).
         if (w, h) != (out_w, out_h):
             region = cv2.resize(region, (out_w, out_h), interpolation=cv2.INTER_AREA)
-        self._reg.last_w, self._reg.last_h = w, h
         return {**item, "frame": region}
+
+    def _paste_clip(self, region, out_w: int, out_h: int):
+        """Вставить регион в нативном масштабе на белый холст out_w×out_h по paste_x/y (clip).
+
+        Прямоугольник вставки пересекается с холстом — часть за краем отсекается (не
+        ресайзится). Белый фон = соглашение тракта (segmentation bg_white).
+        """
+        rh, rw = int(region.shape[0]), int(region.shape[1])
+        if region.ndim == 3:
+            canvas = np.full((out_h, out_w, region.shape[2]), 255, dtype=region.dtype)
+        else:
+            canvas = np.full((out_h, out_w), 255, dtype=region.dtype)
+        px0, py0 = int(self._reg.paste_x), int(self._reg.paste_y)
+        # Пересечение [px0..px0+rw]×[py0..py0+rh] с холстом [0..out_w]×[0..out_h].
+        dst_x0, dst_y0 = max(0, px0), max(0, py0)
+        dst_x1, dst_y1 = min(out_w, px0 + rw), min(out_h, py0 + rh)
+        if dst_x1 > dst_x0 and dst_y1 > dst_y0:
+            sx0, sy0 = dst_x0 - px0, dst_y0 - py0
+            canvas[dst_y0:dst_y1, dst_x0:dst_x1] = region[sy0 : sy0 + (dst_y1 - dst_y0), sx0 : sx0 + (dst_x1 - dst_x0)]
+        return canvas

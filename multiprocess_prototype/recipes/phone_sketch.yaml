@@ -142,13 +142,17 @@ blueprint:
           plugin_class: Plugins.processing.crop.plugin.CropPlugin
           category: processing
           config:
-            # Обрезка лишних краёв источника. Всё 0 = без обрезки. Меняется вживую
-            # из пульта (crop_x/y/w/h). Регион ресайзится обратно к 640x480 —
-            # размерности тракта (strokes/robot_scale src) остаются постоянными.
+            # Обрезка лишних краёв источника. Всё 0 = без обрезки (clip = тождество).
+            # mode=clip: вырезанный регион кладётся на холст 640x480 в НАТИВНОМ масштабе
+            # (без растяжения), сдвиг paste_x/y, выход за край отсекается. mode=resize —
+            # старое поведение (вырезать+растянуть). Меняется вживую из пульта.
+            mode: clip
             crop_x: 0
             crop_y: 0
             crop_w: 0
             crop_h: 0
+            paste_x: 0
+            paste_y: 0
         - plugin_name: edge_detection
           plugin_class: Plugins.processing.edge_detection.plugin.EdgeDetectionPlugin
           category: processing
@@ -215,6 +219,8 @@ blueprint:
             y1: 24.0
             # Лист повёрнут 90° на столе: робот-X по вертикали кадра, робот-Y по горизонтали.
             swap_axes: true
+            # Прижим к листу: точка за рабочей зоной ложится на её границу (не вылетает за лист).
+            clamp_to_zone: true
         - plugin_name: points_render
           plugin_class: Plugins.processing.points_render.plugin.PointsRenderPlugin
           category: processing
@@ -284,10 +290,17 @@ blueprint:
               - {id: param_robot_scale_offset_x, type: number, label: "Сдвиг рисунка X (мм) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: offset_x, min: -2000.0, max: 2000.0, value: 0.0}
               - {id: param_robot_scale_offset_y, type: number, label: "Сдвиг рисунка Y (мм) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: offset_y, min: -2000.0, max: 2000.0, value: 0.0}
               # Обрезка краёв источника (crop в lines, plugin_index 0). 0 = без обрезки.
+              # Режим: clip = обрезать по краям БЕЗ масштаба (двигать paste_x/y); resize = вырезать+растянуть.
+              - {id: param_crop_mode, type: select, label: "Crop: режим [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: mode, value: clip, options: [{label: "Обрезать (без масштаба)", value: clip}, {label: "Вписать (растянуть)", value: resize}]}
               - {id: param_crop_x, type: number, label: "Обрезка X (px) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: crop_x, min: 0.0, max: 2000.0, value: 0.0}
               - {id: param_crop_y, type: number, label: "Обрезка Y (px) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: crop_y, min: 0.0, max: 2000.0, value: 0.0}
               - {id: param_crop_w, type: number, label: "Обрезка ширина (px, 0=край) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: crop_w, min: 0.0, max: 2000.0, value: 0.0}
               - {id: param_crop_h, type: number, label: "Обрезка высота (px, 0=край) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: crop_h, min: 0.0, max: 2000.0, value: 0.0}
+              # clip-режим: сдвиг вырезанного региона на холсте (px) — двигать по X/Y без масштаба.
+              - {id: param_crop_paste_x, type: number, label: "Crop сдвиг X (px) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: paste_x, min: -2000.0, max: 2000.0, value: 0.0}
+              - {id: param_crop_paste_y, type: number, label: "Crop сдвиг Y (px) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: paste_y, min: -2000.0, max: 2000.0, value: 0.0}
+              # Прижим точек к рабочей зоне листа (robot_scale в points, plugin_index 0).
+              - {id: param_robot_scale_clamp, type: toggle, label: "Прижать к листу (точка на краю) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: clamp_to_zone, value: true}
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal

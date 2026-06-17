@@ -69,5 +69,14 @@ class RobotScaleRegisters(SchemaBase):
         float, FieldMeta("Сдвиг рисунка Y (мм)", info="смещение по столу вверх/вниз", min=-2000.0, max=2000.0)
     ] = 0.0
 
-    # Счётчик (readonly).
+    # Прижим к рабочей зоне (листу): точка за прямоугольником листа кладётся на его
+    # границу (а не вылетает за лист). Защита от draw_scale/offset/поворота за пределы
+    # листа; firmware clampW — лишь предел s16, не зона. Точка «ставится на краю».
+    # Дефолт False (без изменения старого поведения); рецепт рисования включает.
+    clamp_to_zone: Annotated[
+        bool, FieldMeta("Прижать к листу", info="точка за листом ложится на его границу (не вылетает)")
+    ] = False
+
+    # Счётчики (readonly).
     points_last: Annotated[int, FieldMeta("Точек смасштабировано", readonly=True)] = 0
+    points_clamped: Annotated[int, FieldMeta("Точек прижато к краю", readonly=True)] = 0
