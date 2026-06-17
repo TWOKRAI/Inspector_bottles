@@ -21,6 +21,7 @@ from Services.robot_comm.core.registers import (
     REG_JOB_FLAG,
     REG_PTS_BASE,
     WRITE_CHUNK,
+    XY_SCALE,
 )
 from Services.robot_comm.errors import RobotJobError
 from Services.robot_comm.server.sim_core import RobotSimCore
@@ -430,6 +431,50 @@ def _make_client(transport: FakeRobotTransport, clock, **cfg) -> RobotClient:
     client = RobotClient(RobotConfig(**cfg), transport=transport, clock=clock.clock, sleep=clock.sleep)
     client.connect()
     return client
+
+
+def _uploaded_points(transport: FakeRobotTransport) -> list[tuple[int, int, int]]:
+    """Реконструировать ВСЕ точки, залитые в буфер робота (по wm-записям REG_PTS_BASE)."""
+    pts: list[tuple[int, int, int]] = []
+    # Группируем по проходам: каждый проход — серия wm в REG_PTS_BASE+offset, затем маркер draw_flag.
+    pass_regs: dict[int, int] = {}
+    for ops in transport.transactions:
+        wm = [op for op in ops if op[0] == "wm" and op[1] >= REG_PTS_BASE and op[1] < REG_PTS_BASE + 300]
+        if wm:
+            for _k, addr, vals in wm:
+                base = addr - REG_PTS_BASE
+                for j, v in enumerate(vals):
+                    pass_regs[base + j] = v
+        if ("w", REG_DRAW_FLAG, 1) in ops and pass_regs:
+            n = (max(pass_regs) + 1) // 3
+            for i in range(n):
+                x, y, pen = pass_regs.get(i * 3, 0), pass_regs.get(i * 3 + 1, 0), pass_regs.get(i * 3 + 2, 0)
+                pts.append((x, y, pen))
+            pass_regs = {}
+    return pts
+
+
+def test_many_points_no_drawing_point_lost(transport: FakeRobotTransport, clock) -> None:
+    """ГЛАВНОЕ: 2000 точек (мелкие пачки + verify) → НИ ОДНА рисующая точка не теряется.
+
+    Реконструируем всё, что реально залито роботу по всем проходам, и сверяем с входом:
+    каждая исходная рисующая точка (pen=1) обязана присутствовать у робота. Это прямой
+    тест на опасение владельца «теряется при большом количестве».
+    """
+    bot = _make_client(transport, clock, draw_pass_size=30, draw_verify=True)
+    # 40 штрихов по 50 точек = 2000 точек (подвод pen=0 + 49 рисующих на штрих).
+    path: list[DrawPoint] = []
+    for s in range(40):
+        path.append(DrawPoint(float(s), 0.0, 0))
+        path += [DrawPoint(float(s), float(i), 1) for i in range(1, 50)]
+    assert len(path) == 40 * 50
+    assert bot.draw(path)  # все проходы прошли и верифицированы
+
+    uploaded = _uploaded_points(transport)
+    # Все исходные рисующие точки (в формате регистров x*10,y*10) присутствуют у робота, по порядку.
+    want_draw = [(round(p.x_mm * XY_SCALE) & 0xFFFF, round(p.y_mm * XY_SCALE) & 0xFFFF) for p in path if p.pen == 1]
+    got_draw = [(x, y) for (x, y, pen) in uploaded if pen == 1]
+    assert got_draw == want_draw, f"потеряны рисующие точки: got {len(got_draw)} vs want {len(want_draw)}"
 
 
 def test_draw_pass_size_makes_more_passes(transport: FakeRobotTransport, clock) -> None:
