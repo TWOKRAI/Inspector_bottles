@@ -251,6 +251,15 @@ blueprint:
             swap_axes: true
             # Прижим к листу: точка за рабочей зоной ложится на её границу (не вылетает за лист).
             clamp_to_zone: true
+        # Сохранение/загрузка рисунка. ПОСЛЕ robot_scale (точки в мм), ДО points_render/robot_draw:
+        # «Сохранить» снимает текущие точки (+границы +кадр-референс) в drawings/<ts>.json(+png);
+        # «Загрузить» подменяет точки → превью и робот рисуют загруженное (пока load_active).
+        - plugin_name: drawing_io
+          plugin_class: Plugins.io.drawing_io.plugin.DrawingIoPlugin
+          category: io
+          config:
+            drawings_dir: drawings
+            save_image: true
         - plugin_name: points_render
           plugin_class: Plugins.processing.points_render.plugin.PointsRenderPlugin
           category: processing
@@ -303,7 +312,7 @@ blueprint:
               - {id: stop, type: button, label: "Стоп", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_abort, command_args: {device_id: robot_main}}
               # Пробный прогон: ВКЛ = «Рисовать» пишет точки в текст (data/robot_points_preview.txt),
               # роботу не шлёт. Проверил точки → выключи → «Рисовать» уйдёт на робота.
-              - {id: param_robot_draw_dry_run, type: toggle, label: "Пробный прогон (без робота) [robot_draw]", source: param, target_process: points, target_plugin_index: 2, target_field: dry_run, value: false}
+              - {id: param_robot_draw_dry_run, type: toggle, label: "Пробный прогон (без робота) [robot_draw]", source: param, target_process: points, target_plugin_index: 3, target_field: dry_run, value: false}
               # Дашборд: углы рабочей зоны A4 (robot_scale в процессе points, plugin_index 0).
               # Статичная зона в координатах робота: ЛВ (340,-174), ПН (545,24). Задаётся один раз.
               - {id: param_robot_scale_x0, type: number, label: "Угол ЛВ X (мм) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: x0, min: -2000.0, max: 2000.0, value: 340.0}
@@ -349,6 +358,13 @@ blueprint:
               - {id: tv_name_pos_y, type: number, label: "Текст 2: позиция Y (px) [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: pos_y, min: -2000.0, max: 2000.0, value: 330.0}
               - {id: tv_name_rot, type: number, label: "Текст 2: поворот (°) [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: rotation_deg, min: -360.0, max: 360.0, value: 0.0}
               - {id: tv_name_scale, type: number, label: "Текст 2: масштаб [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: scale, min: 0.05, max: 20.0, value: 1.0}
+              # === Сохранение/загрузка рисунка (drawing_io в points, plugin_index 1) ===
+              # «Сохранить» — снять текущий рисунок в drawings/<ts>.json(+png).
+              - {id: drawing_save, type: button, label: "Сохранить рисунок", source: action, target_process: points, target_plugin_index: 1, target_command: drawing_save}
+              # «Загрузить» — ввести имя файла (json в drawings/ или полный путь) и подменить точки.
+              - {id: drawing_load, type: text, label: "Загрузить рисунок (имя файла)", source: action, target_process: points, target_plugin_index: 1, target_command: drawing_load, value_arg: path, value: ""}
+              # Переключатель: рисовать загруженное (вкл) или живые точки с камеры (выкл).
+              - {id: param_drawing_load_active, type: toggle, label: "Рисовать загруженное [drawing_io]", source: param, target_process: points, target_plugin_index: 1, target_field: load_active, value: false}
       workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal

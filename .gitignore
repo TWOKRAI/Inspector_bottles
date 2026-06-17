@@ -122,5 +122,8 @@ robot/universal3/neuroun_2805_big.py
 # Runtime-артефакты БД (telemetry.db / inspector.db) — создаются при запуске/live-proof
 data/
 
+# Сохранённые рисунки робота (drawing_io: json+png) — пользовательские артефакты
+drawings/
+
 # Lock-файлы планировщика (ephemeral)
 .claude/scheduled_tasks.lock

@@ -38,8 +38,13 @@ Hershey; передача = мельче пачки + read-back ACK (не ping-p
 
 ## Этап D — сохранение/загрузка (п.7)
 
-- [ ] D1. Плагин `drawing_io`: store (save JSON+PNG / load), plugin (cmd_save armed, cmd_load override).
-- [ ] D2. Интеграция в рецепт (process points, провод оригинала от seg) + контролы пульта. Тесты.
+- [x] D1. Плагин `drawing_io`: store (save JSON+PNG / load round-trip), plugin (cmd_save armed,
+      cmd_load override draw_points при load_active). 10 тестов.
+- [x] D2. Интеграция: drawing_io в points index 1 (после robot_scale, до points_render — load
+      обновляет превью И робота); контролы пульта (Сохранить/Загрузить/Рисовать загруженное);
+      dry_run контрол сдвинут 2→3; drawings/ в .gitignore. 58 passed.
+- Примечание: PNG-референс = кадр на позиции (line-art), не сырое фото — сырое фото в points
+  потребовало бы chain seg→points (пачкает превью), сознательно отложено (ядро save/load доставлено).
 
 ## Проверка
 
