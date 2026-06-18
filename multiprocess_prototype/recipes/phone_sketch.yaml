@@ -175,11 +175,11 @@ blueprint:
           category: processing
           config:
             centerline: true
-            # none = БЕЗ прореживания: зелёные точки на «Карте точек» = РОВНО то, что уходит
-            # роботу (доверие оператора). dp/step/angle оставлены для плотных фото, переключить
-            # из пульта (select «Прореживание») при необходимости. simplify_epsilon/step_px ниже
-            # действуют только в соответствующем режиме.
-            reduce_mode: none
+            # dp (Douglas-Peucker) = убрать МЕЛКИЕ изгибы на прямых (пиксельный «зигзаг»
+            # скелета < epsilon), сохранив реальные углы/кривые → меньше точек, ровные линии.
+            # Превью «Карта точек» (points_render) стоит ПОСЛЕ прореживания → зелёные точки =
+            # РОВНО то, что уходит роботу (доверие сохранено). Режим/epsilon — live из пульта.
+            reduce_mode: dp
             simplify_epsilon: 1.5
             step_px: 5.0
             angle_threshold_deg: 15.0
@@ -343,6 +343,11 @@ blueprint:
               # clip-режим: сдвиг вырезанного региона на холсте (px) — двигать по X/Y без масштаба.
               - {id: param_crop_paste_x, type: number, label: "Crop сдвиг X (px) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: paste_x, min: -2000.0, max: 2000.0, value: 0.0}
               - {id: param_crop_paste_y, type: number, label: "Crop сдвиг Y (px) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: paste_y, min: -2000.0, max: 2000.0, value: 0.0}
+              # Прореживание линий (strokes_to_points в lines, plugin_index 3): убрать мелкие
+              # изгибы на прямых, меньше точек. dp = по отклонению от прямой (epsilon, px).
+              - {id: param_strokes_reduce, type: select, label: "Прореживание линий [strokes]", source: param, target_process: lines, target_plugin_index: 3, target_field: reduce_mode, value: dp, options: [{label: "DP (убрать мелкие изгибы)", value: dp}, {label: "Шаг по длине", value: step}, {label: "По углу", value: angle}, {label: "Без прореживания", value: none}]}
+              - {id: param_strokes_epsilon, type: number, label: "Сглаживание DP (px) — больше=ровнее [strokes]", source: param, target_process: lines, target_plugin_index: 3, target_field: simplify_epsilon, min: 0.0, max: 20.0, value: 1.5}
+              - {id: param_strokes_min_len, type: number, label: "Min длина штриха (px) — убрать крапины [strokes]", source: param, target_process: lines, target_plugin_index: 3, target_field: min_stroke_len, min: 0.0, max: 2000.0, value: 8.0}
               # Прижим точек к рабочей зоне листа (robot_scale в points, plugin_index 0).
               - {id: param_robot_scale_clamp, type: toggle, label: "Прижать к листу (точка на краю) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: clamp_to_zone, value: true}
               # === Векторный элемент 1: основной текст (text_main в lines, plugin_index 4) ===
