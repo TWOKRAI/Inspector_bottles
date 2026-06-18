@@ -143,6 +143,7 @@ SetGlobalPoint(82, "GL_RET",   300, -210, -40,    -100, 1, 0, 0, POSTURE)  -- с
 local PEN_DOWN0 = -100
 local PEN_UP0   = -90
 local DRAW_SPD0 = 30
+local TRAVEL_SPD0 = 100  -- скорость переезда с ПОДНЯТЫМ пером (%), макс → минимум пауз между штрихами
 local OVERLAP0  = 0.5
 local DRAW_LIFT_MM = 10.0   -- подъём вертикально перед заездом домой в конце рисунка, мм (1 см)
 -- возврат на ленту (RETURN, mode=3): смещения траектории — КОНСТАНТЫ (ТЗ владельца).
@@ -519,7 +520,9 @@ local function execute_path(count)
   local pen_up   = ReadModbus(REG_PEN_UP,   "W") / XY_SCALE
   local spd      = ReadModbus(REG_DRAW_SPD, "W")
   local overlap  = ReadModbus(REG_OVERLAP,  "W") / XY_SCALE
-  if spd >= 1 and spd <= 100 then Override(spd) end
+  -- Скорость РИСОВАНИЯ (перо по бумаге) = слайдер draw_spd; ПЕРЕЕЗД (перо вверх) = TRAVEL_SPD0.
+  local draw_spd = (spd and spd >= 1 and spd <= 100) and spd or DRAW_SPD0
+  Override(draw_spd)
   if overlap < 0.1 then overlap = 0.1 end
   if count > PTS_MAX then count = PTS_MAX end
 
@@ -564,16 +567,18 @@ local function execute_path(count)
     if draw_abort then break end
     WriteModbus(REG_DRAW_PROG, "W", i)
     if pen[i] == 0 then
-      -- подвод к началу штриха — П-образно, без диагонали
+      -- подвод к началу штриха — П-образно, БЫСТРО (перо вверх → паузы между штрихами минимальны)
+      Override(TRAVEL_SPD0)
       if i > 1 then
         WritePoint(LIFT, "X", px[i - 1]); WritePoint(LIFT, "Y", py[i - 1]); WritePoint(LIFT, "Z", pen_up)
-        MovL(LIFT)                                  -- (1) подъём вертикально в текущем XY
+        MovL(LIFT)                                  -- (1) подъём вертикально в текущем XY — быстро
       end
-      MovL(POOL_BASE + i)                           -- (2) переезд на высоте к подводу (Z=pen_up)
+      MovL(POOL_BASE + i)                           -- (2) переезд на высоте к подводу (Z=pen_up) — быстро
+      Override(draw_spd)                            -- вернуть скорость пера для опускания+штриха
       WritePoint(LIFT, "X", px[i]); WritePoint(LIFT, "Y", py[i]); WritePoint(LIFT, "Z", pen_down)
-      MovL(LIFT)                                    -- (3) опускание вертикально в подводе
+      MovL(LIFT)                                    -- (3) опускание вертикально в подводе — скорость пера
     elseif pen[i] == 1 and i < count then
-      MovL(POOL_BASE + i, PASS())                   -- внутри штриха — плавно
+      MovL(POOL_BASE + i, PASS())                   -- внутри штриха — скорость пера (по слайдеру)
     else
       MovL(POOL_BASE + i)                           -- последняя точка штриха/прохода — чётко
     end
@@ -584,6 +589,7 @@ local function execute_path(count)
   WriteModbus(REG_DRAW_ABORT, "W", 0)
   draw_abort     = false
   motion_stopped = false
+  Override(TRAVEL_SPD0)                              -- финал — перо вверх/домой, быстро (без рисования)
   WritePoint(POOL_BASE + 1, "X", RobotX() or px[count] or 0)
   WritePoint(POOL_BASE + 1, "Y", RobotY() or py[count] or 0)
   WritePoint(POOL_BASE + 1, "Z", pen_up)
@@ -609,15 +615,17 @@ local function draw_circle()
   local pen_down = ReadModbus(REG_PEN_DOWN, "W") / XY_SCALE
   local pen_up   = ReadModbus(REG_PEN_UP,   "W") / XY_SCALE
   local spd      = ReadModbus(REG_DRAW_SPD, "W")
-  if spd >= 1 and spd <= 100 then Override(spd) end
+  local draw_spd = (spd and spd >= 1 and spd <= 100) and spd or DRAW_SPD0  -- скорость пера по бумаге
   local cx = ReadModbus(REG_CIRC_CX, "W") / XY_SCALE
   local cy = ReadModbus(REG_CIRC_CY, "W") / XY_SCALE
   local r  = ReadModbus(REG_CIRC_R,  "W") / XY_SCALE
 
   WriteModbus(REG_DRAW_BUSY, "W", 1)
   local PS, PR, PT = POOL_BASE + 1, POOL_BASE + 2, POOL_BASE + 3  -- старт, ref-верх, tgt-лево
+  Override(TRAVEL_SPD0)                               -- подвод над стартом — быстро (перо вверх)
   WritePoint(PS, "X", cx + r); WritePoint(PS, "Y", cy);     WritePoint(PS, "Z", pen_up)
   MovL(PS)                                            -- подвод над стартом, перо вверх
+  Override(draw_spd)                                  -- скорость пера для рисования круга
   WritePoint(PS, "Z", pen_down); MovL(PS)             -- перо вниз на старте
   WritePoint(PR, "X", cx);     WritePoint(PR, "Y", cy + r); WritePoint(PR, "Z", pen_down)
   WritePoint(PT, "X", cx - r); WritePoint(PT, "Y", cy);     WritePoint(PT, "Z", pen_down)
@@ -626,6 +634,7 @@ local function draw_circle()
   WriteModbus(REG_DRAW_ABORT, "W", 0)
   draw_abort     = false
   motion_stopped = false
+  Override(TRAVEL_SPD0)                               -- финал — перо вверх/домой, быстро
   WritePoint(PS, "X", RobotX() or (cx + r)); WritePoint(PS, "Y", RobotY() or cy)
   WritePoint(PS, "Z", pen_up); MovL(PS)               -- перо вверх на месте
   if ReadModbus(REG_DRAW_HOME, "W") == 1 then
