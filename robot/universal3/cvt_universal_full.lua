@@ -92,6 +92,7 @@ REG_PEN_UP   = 0x1411    -- W  : Z переезда, 0.1 мм
 REG_DRAW_SPD = 0x1412    -- W  : скорость %, 1..100
 REG_OVERLAP  = 0x1413    -- W  : SetOverlapDistance, 0.1 мм
 REG_DRAW_HOME = 0x1414   -- W  : 1 = после прохода ехать домой (последний проход рисунка); 0 = ждать на месте
+REG_DRAW_TRAVEL = 0x1415 -- W  : скорость ПЕРЕЕЗДА с поднятым пером, % 1..100 (live из пульта)
 -- ── РИСОВАНИЕ: буфер точек (PTS_MAX слотов × 3 рег: X, Y, pen) ──
 REG_PTS_BASE = 0x1420
 local PTS_MAX      = 100
@@ -520,8 +521,10 @@ local function execute_path(count)
   local pen_up   = ReadModbus(REG_PEN_UP,   "W") / XY_SCALE
   local spd      = ReadModbus(REG_DRAW_SPD, "W")
   local overlap  = ReadModbus(REG_OVERLAP,  "W") / XY_SCALE
-  -- Скорость РИСОВАНИЯ (перо по бумаге) = слайдер draw_spd; ПЕРЕЕЗД (перо вверх) = TRAVEL_SPD0.
+  -- Скорость РИСОВАНИЯ (перо по бумаге) и ПЕРЕЕЗДА (перо вверх) — обе с пульта (регистры).
+  local trav     = ReadModbus(REG_DRAW_TRAVEL, "W")
   local draw_spd = (spd and spd >= 1 and spd <= 100) and spd or DRAW_SPD0
+  local travel_spd = (trav and trav >= 1 and trav <= 100) and trav or TRAVEL_SPD0
   Override(draw_spd)
   if overlap < 0.1 then overlap = 0.1 end
   if count > PTS_MAX then count = PTS_MAX end
@@ -568,7 +571,7 @@ local function execute_path(count)
     WriteModbus(REG_DRAW_PROG, "W", i)
     if pen[i] == 0 then
       -- подвод к началу штриха — П-образно, БЫСТРО (перо вверх → паузы между штрихами минимальны)
-      Override(TRAVEL_SPD0)
+      Override(travel_spd)
       if i > 1 then
         WritePoint(LIFT, "X", px[i - 1]); WritePoint(LIFT, "Y", py[i - 1]); WritePoint(LIFT, "Z", pen_up)
         MovL(LIFT)                                  -- (1) подъём вертикально в текущем XY — быстро
@@ -589,7 +592,7 @@ local function execute_path(count)
   WriteModbus(REG_DRAW_ABORT, "W", 0)
   draw_abort     = false
   motion_stopped = false
-  Override(TRAVEL_SPD0)                              -- финал — перо вверх/домой, быстро (без рисования)
+  Override(travel_spd)                              -- финал — перо вверх/домой, быстро (без рисования)
   WritePoint(POOL_BASE + 1, "X", RobotX() or px[count] or 0)
   WritePoint(POOL_BASE + 1, "Y", RobotY() or py[count] or 0)
   WritePoint(POOL_BASE + 1, "Z", pen_up)
@@ -615,14 +618,16 @@ local function draw_circle()
   local pen_down = ReadModbus(REG_PEN_DOWN, "W") / XY_SCALE
   local pen_up   = ReadModbus(REG_PEN_UP,   "W") / XY_SCALE
   local spd      = ReadModbus(REG_DRAW_SPD, "W")
+  local trav     = ReadModbus(REG_DRAW_TRAVEL, "W")
   local draw_spd = (spd and spd >= 1 and spd <= 100) and spd or DRAW_SPD0  -- скорость пера по бумаге
+  local travel_spd = (trav and trav >= 1 and trav <= 100) and trav or TRAVEL_SPD0  -- скорость переезда
   local cx = ReadModbus(REG_CIRC_CX, "W") / XY_SCALE
   local cy = ReadModbus(REG_CIRC_CY, "W") / XY_SCALE
   local r  = ReadModbus(REG_CIRC_R,  "W") / XY_SCALE
 
   WriteModbus(REG_DRAW_BUSY, "W", 1)
   local PS, PR, PT = POOL_BASE + 1, POOL_BASE + 2, POOL_BASE + 3  -- старт, ref-верх, tgt-лево
-  Override(TRAVEL_SPD0)                               -- подвод над стартом — быстро (перо вверх)
+  Override(travel_spd)                               -- подвод над стартом — быстро (перо вверх)
   WritePoint(PS, "X", cx + r); WritePoint(PS, "Y", cy);     WritePoint(PS, "Z", pen_up)
   MovL(PS)                                            -- подвод над стартом, перо вверх
   Override(draw_spd)                                  -- скорость пера для рисования круга
@@ -634,7 +639,7 @@ local function draw_circle()
   WriteModbus(REG_DRAW_ABORT, "W", 0)
   draw_abort     = false
   motion_stopped = false
-  Override(TRAVEL_SPD0)                               -- финал — перо вверх/домой, быстро
+  Override(travel_spd)                               -- финал — перо вверх/домой, быстро
   WritePoint(PS, "X", RobotX() or (cx + r)); WritePoint(PS, "Y", RobotY() or cy)
   WritePoint(PS, "Z", pen_up); MovL(PS)               -- перо вверх на месте
   if ReadModbus(REG_DRAW_HOME, "W") == 1 then
@@ -1135,6 +1140,7 @@ WriteModbus(REG_CIRC_R,     "W", 0)
 WriteModbus(REG_PEN_DOWN, "W", iround(PEN_DOWN0 * XY_SCALE))
 WriteModbus(REG_PEN_UP,   "W", iround(PEN_UP0   * XY_SCALE))
 WriteModbus(REG_DRAW_SPD, "W", DRAW_SPD0)
+WriteModbus(REG_DRAW_TRAVEL, "W", TRAVEL_SPD0)
 WriteModbus(REG_OVERLAP,  "W", iround(OVERLAP0 * XY_SCALE))
 -- дефолты ручного режима (MANUAL)
 WriteModbus(REG_MAN_FLAG,  "W", 0)

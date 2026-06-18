@@ -453,6 +453,10 @@ def test_pen_and_draw_params(bot: RobotClient, transport: FakeRobotTransport) ->
     assert ops[1] == ("w", 0x1411, 50)
     bot.set_draw_speed(150)  # клампится в 100
     assert transport.transactions[-1][0] == ("w", 0x1412, 100)
+    bot.set_draw_travel(80)  # скорость переезда → REG_DRAW_TRAVEL (0x1415)
+    assert transport.transactions[-1][0] == ("w", 0x1415, 80)
+    bot.set_draw_travel(0)  # клампится в 1
+    assert transport.transactions[-1][0] == ("w", 0x1415, 1)
     bot.set_overlap(2.5)
     assert transport.transactions[-1][0] == ("w", 0x1413, 25)
 

@@ -120,6 +120,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
         "robot_draw_square": "cmd_robot_draw_square",
         "robot_draw_set_pen": "cmd_robot_draw_set_pen",
         "robot_draw_set_speed": "cmd_robot_draw_set_speed",
+        "robot_draw_set_travel": "cmd_robot_draw_set_travel",
         "robot_draw_set_overlap": "cmd_robot_draw_set_overlap",
         "robot_draw_abort": "cmd_robot_draw_abort",
         "robot_draw_progress": "cmd_robot_draw_progress",
@@ -783,8 +784,12 @@ class DeviceHubPlugin(ProcessModulePlugin):
         return self._kind_call(data, "robot", "draw_set_pen")
 
     def cmd_robot_draw_set_speed(self, data: dict) -> dict:
-        """Установить скорость рисования: {device_id, speed}."""
+        """Установить скорость рисования (перо по бумаге): {device_id, pct}."""
         return self._kind_call(data, "robot", "draw_set_speed")
+
+    def cmd_robot_draw_set_travel(self, data: dict) -> dict:
+        """Установить скорость переезда (перо вверх): {device_id, pct}."""
+        return self._kind_call(data, "robot", "draw_set_travel")
 
     def cmd_robot_draw_set_overlap(self, data: dict) -> dict:
         """Установить overlap: {device_id, overlap}."""

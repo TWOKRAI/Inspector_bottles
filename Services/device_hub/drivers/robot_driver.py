@@ -108,6 +108,7 @@ class RobotDriver(BaseDeviceDriver):
         self._pen_down_mm: float = float(entry.params.get("pen_down_mm", -50.0))
         self._pen_up_mm: float = float(entry.params.get("pen_up_mm", -40.0))
         self._draw_speed_pct: int = int(entry.params.get("draw_speed_pct", 30))
+        self._draw_travel_pct: int = int(entry.params.get("draw_travel_pct", 100))
         self._overlap_mm: float = float(entry.params.get("overlap_mm", 1.0))
         self._draw_timeout_s: float = float(entry.params.get("draw_timeout_s", 120.0))
         self._lift_mm: float = float(entry.params.get("lift_mm", 10.0))
@@ -406,6 +407,7 @@ class RobotDriver(BaseDeviceDriver):
         else:
             self._client.set_pen(self._pen_down_mm, self._pen_up_mm)
         self._client.set_draw_speed(self._draw_speed_pct)
+        self._client.set_draw_travel(self._draw_travel_pct)
         self._client.set_overlap(self._overlap_mm)
 
     def _run_figure(self, task: dict) -> bool:
@@ -734,6 +736,10 @@ class RobotDriver(BaseDeviceDriver):
         self._draw_speed_pct = max(1, min(100, int(args["pct"])))
         return {"status": "ok", "pct": self._draw_speed_pct}
 
+    def _op_draw_set_travel(self, args: dict) -> dict:
+        self._draw_travel_pct = max(1, min(100, int(args["pct"])))
+        return {"status": "ok", "pct": self._draw_travel_pct}
+
     def _op_draw_set_overlap(self, args: dict) -> dict:
         self._overlap_mm = max(0.1, float(args["mm"]))
         return {"status": "ok", "mm": self._overlap_mm}
@@ -813,6 +819,7 @@ class RobotDriver(BaseDeviceDriver):
         "draw_square": _op_draw_square,
         "draw_set_pen": _op_draw_set_pen,
         "draw_set_speed": _op_draw_set_speed,
+        "draw_set_travel": _op_draw_set_travel,
         "draw_set_overlap": _op_draw_set_overlap,
         "draw_abort": _op_draw_abort,
         "draw_progress": _op_draw_progress,

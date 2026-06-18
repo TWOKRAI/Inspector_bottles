@@ -86,6 +86,9 @@ REG_DRAW_ABORT = 0x1405
 REG_DRAW_DONE_N = 0x1409
 # 1 = после прохода ехать домой (последний проход рисунка); 0 = ждать на месте
 REG_DRAW_HOME = 0x1414
+# Скорость ПЕРЕЕЗДА с поднятым пером, % 1..100 (отдельно от скорости рисования draw_spd):
+# переезд между штрихами/подъём/опускание/домой — на ней (быстро → меньше пауз).
+REG_DRAW_TRAVEL = 0x1415
 
 # ⚠️ Командные блоки режимов — в свободной дыре 0x1340..0x13FF (между CONFIG 0x130B и
 # DRAW 0x1400), НИЖЕ буфера точек рисования 0x1420..0x154B. Раньше стояли на 0x1500/0x1510 —
@@ -209,6 +212,7 @@ def build_register_map(word_order: str = "little") -> RegisterMap:
             "pen_down": Reg(0x1410, scale=XY_SCALE, signed=True),
             "pen_up": Reg(0x1411, scale=XY_SCALE, signed=True),
             "draw_spd": Reg(0x1412),
+            "draw_travel": Reg(REG_DRAW_TRAVEL),  # скорость переезда (перо вверх), %
             "overlap": Reg(0x1413, scale=XY_SCALE),
             "draw_home": Reg(REG_DRAW_HOME),
             # --- MANUAL: ручной jog ---

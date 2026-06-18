@@ -459,8 +459,12 @@ class RobotClient:
         return self._write_map({"pen_down": down_mm, "pen_up": up_mm})
 
     def set_draw_speed(self, pct: int) -> bool:
-        """Скорость рисования, % (клампится в 1..100 как в оригинале)."""
+        """Скорость рисования (перо по бумаге), % (клампится в 1..100)."""
         return self._write_map({"draw_spd": max(1, min(100, pct))})
+
+    def set_draw_travel(self, pct: int) -> bool:
+        """Скорость переезда (перо вверх: между штрихами/подъём/домой), % (1..100)."""
+        return self._write_map({"draw_travel": max(1, min(100, pct))})
 
     def set_overlap(self, mm: float) -> bool:
         """Скругление углов (PASS), мм."""

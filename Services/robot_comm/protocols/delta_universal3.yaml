@@ -394,6 +394,14 @@ registers:
     unit: "%"
     hint: "Скорость движения при рисовании"
 
+  draw_travel:
+    type: reg
+    address: 0x1415
+    access: rw
+    label: "Скорость переезда"
+    unit: "%"
+    hint: "Скорость движения с поднятым пером (между штрихами, домой)"
+
   overlap:
     type: reg
     address: 0x1413
