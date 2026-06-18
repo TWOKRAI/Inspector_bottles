@@ -466,6 +466,15 @@ class RobotClient:
         """Скорость переезда (перо вверх: между штрихами/подъём/домой), % (1..100)."""
         return self._write_map({"draw_travel": max(1, min(100, pct))})
 
+    def set_draw_accel(self, mm_s2: int) -> bool:
+        """Ускорение рисования AccL/DecL, мм/с² (выше = резче на изгибах). Клампится в s16."""
+        return self._write_map({"draw_accel": max(1000, min(32000, int(mm_s2)))})
+
+    def set_pass_size(self, n: int) -> None:
+        """Точек в одном проходе рисования (батч). Меньше = больше пакетов/пауз, чаще
+        обратная связь; больше = реже обмен, быстрее. Клампится в [3, PTS_MAX]."""
+        self._cfg.draw_pass_size = max(3, min(int(n), PTS_MAX))
+
     def set_overlap(self, mm: float) -> bool:
         """Скругление углов (PASS), мм."""
         return self._write_map({"overlap": max(0.1, mm)})

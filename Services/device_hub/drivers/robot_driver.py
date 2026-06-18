@@ -109,6 +109,10 @@ class RobotDriver(BaseDeviceDriver):
         self._pen_up_mm: float = float(entry.params.get("pen_up_mm", -40.0))
         self._draw_speed_pct: int = int(entry.params.get("draw_speed_pct", 30))
         self._draw_travel_pct: int = int(entry.params.get("draw_travel_pct", 100))
+        self._draw_accel: int = int(entry.params.get("draw_accel", 25000))
+        from Services.robot_comm.core.registers import PTS_MAX  # lazy: тяжёлый пакет robot_comm
+
+        self._draw_pass_size: int = int(entry.params.get("draw_pass_size", PTS_MAX))
         self._overlap_mm: float = float(entry.params.get("overlap_mm", 1.0))
         self._draw_timeout_s: float = float(entry.params.get("draw_timeout_s", 120.0))
         self._lift_mm: float = float(entry.params.get("lift_mm", 10.0))
@@ -408,6 +412,8 @@ class RobotDriver(BaseDeviceDriver):
             self._client.set_pen(self._pen_down_mm, self._pen_up_mm)
         self._client.set_draw_speed(self._draw_speed_pct)
         self._client.set_draw_travel(self._draw_travel_pct)
+        self._client.set_draw_accel(self._draw_accel)
+        self._client.set_pass_size(self._draw_pass_size)
         self._client.set_overlap(self._overlap_mm)
 
     def _run_figure(self, task: dict) -> bool:
@@ -740,6 +746,15 @@ class RobotDriver(BaseDeviceDriver):
         self._draw_travel_pct = max(1, min(100, int(args["pct"])))
         return {"status": "ok", "pct": self._draw_travel_pct}
 
+    def _op_draw_set_accel(self, args: dict) -> dict:
+        self._draw_accel = max(1000, min(32000, int(args["accel"])))
+        return {"status": "ok", "accel": self._draw_accel}
+
+    def _op_draw_set_pass_size(self, args: dict) -> dict:
+        self._client.set_pass_size(int(args["n"]))  # клампит в [3, PTS_MAX] внутри клиента
+        self._draw_pass_size = self._client.config.draw_pass_size  # клампленное значение
+        return {"status": "ok", "n": self._draw_pass_size}
+
     def _op_draw_set_overlap(self, args: dict) -> dict:
         self._overlap_mm = max(0.1, float(args["mm"]))
         return {"status": "ok", "mm": self._overlap_mm}
@@ -820,6 +835,8 @@ class RobotDriver(BaseDeviceDriver):
         "draw_set_pen": _op_draw_set_pen,
         "draw_set_speed": _op_draw_set_speed,
         "draw_set_travel": _op_draw_set_travel,
+        "draw_set_accel": _op_draw_set_accel,
+        "draw_set_pass_size": _op_draw_set_pass_size,
         "draw_set_overlap": _op_draw_set_overlap,
         "draw_abort": _op_draw_abort,
         "draw_progress": _op_draw_progress,

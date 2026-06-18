@@ -47,6 +47,7 @@ devices:
       # Дефолты рисования (применяются перед каждым проходом, даже без правки пульта):
       draw_speed_pct: 4         # скорость рисования (перо по бумаге), % — медленно, контакт пера
       draw_travel_pct: 100      # скорость переезда (перо вверх: между штрихами/домой), % — быстро
+      draw_accel: 25000         # ускорение рисования, мм/с² — выше = резче на изгибах (быстрее линии)
       pen_down_mm: -108.0       # перо опущено к плоскости листа (рисование)
       pen_up_mm: -102.0         # перо поднято при перемещении/между проходами (перенос)
       # Точность точек: мельче пачки + проверка обратной связи (draw_done_n). 30 точек на
@@ -324,6 +325,8 @@ blueprint:
               # number (срабатывает по подтверждению ввода) — не флудит робот командами.
               - {id: act_robot_speed, type: number, label: "Скорость рисования (%) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_speed, value_arg: pct, command_args: {device_id: robot_main}, min: 1.0, max: 100.0, value: 4.0}
               - {id: act_robot_travel, type: number, label: "Скорость переезда (%) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_travel, value_arg: pct, command_args: {device_id: robot_main}, min: 1.0, max: 100.0, value: 100.0}
+              - {id: act_robot_accel, type: number, label: "Ускорение рисования (мм/с²) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_accel, value_arg: accel, command_args: {device_id: robot_main}, min: 1000.0, max: 32000.0, value: 25000.0}
+              - {id: act_robot_pass_size, type: number, label: "Точек в пачке (проход) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_pass_size, value_arg: n, command_args: {device_id: robot_main}, min: 10.0, max: 100.0, value: 30.0}
               - {id: act_robot_pen_down, type: number, label: "Перо: низ к плоскости (мм) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_pen, value_arg: down, command_args: {device_id: robot_main}, min: -500.0, max: 500.0, value: -108.0}
               - {id: act_robot_pen_up, type: number, label: "Перо: подъём при перемещении (мм) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_pen, value_arg: up, command_args: {device_id: robot_main}, min: -500.0, max: 500.0, value: -102.0}
               # Размещение рисунка на листе A4 (robot_scale в points): масштаб + сдвиг (мм).

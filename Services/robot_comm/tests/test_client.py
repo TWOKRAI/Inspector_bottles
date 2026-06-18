@@ -457,8 +457,22 @@ def test_pen_and_draw_params(bot: RobotClient, transport: FakeRobotTransport) ->
     assert transport.transactions[-1][0] == ("w", 0x1415, 80)
     bot.set_draw_travel(0)  # клампится в 1
     assert transport.transactions[-1][0] == ("w", 0x1415, 1)
+    bot.set_draw_accel(40000)  # ускорение → REG_DRAW_ACCEL (0x1416), клампится в 32000
+    assert transport.transactions[-1][0] == ("w", 0x1416, 32000)
     bot.set_overlap(2.5)
     assert transport.transactions[-1][0] == ("w", 0x1413, 25)
+
+
+def test_set_pass_size_clamps_config(bot: RobotClient) -> None:
+    """set_pass_size меняет draw_pass_size в конфиге (клампится в [3, PTS_MAX])."""
+    from Services.robot_comm.core.registers import PTS_MAX
+
+    bot.set_pass_size(60)
+    assert bot.config.draw_pass_size == 60
+    bot.set_pass_size(999)  # > PTS_MAX
+    assert bot.config.draw_pass_size == PTS_MAX
+    bot.set_pass_size(1)  # < 3
+    assert bot.config.draw_pass_size == 3
 
 
 # --- A1/A2: точность точек (мелкие пачки + read-back ACK) и Стоп (flush/home) ---

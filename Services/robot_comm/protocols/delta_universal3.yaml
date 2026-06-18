@@ -402,6 +402,14 @@ registers:
     unit: "%"
     hint: "Скорость движения с поднятым пером (между штрихами, домой)"
 
+  draw_accel:
+    type: reg
+    address: 0x1416
+    access: rw
+    label: "Ускорение рисования"
+    unit: "mm/s2"
+    hint: "AccL/DecL при рисовании: выше = резче на изгибах, выше реальная скорость"
+
   overlap:
     type: reg
     address: 0x1413
