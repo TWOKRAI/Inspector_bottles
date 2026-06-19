@@ -41,6 +41,9 @@ class PluginSpec:
     config_schema — схема конфигурации в виде dict (опциональная).
     ports         — tuple входных/выходных портов.
     has_registers — плагин регистрирует доменные классы (bool(entry.register_classes)).
+    class_path    — полный dotted path к классу плагина (PluginEntry.class_path). Позволяет
+                    резолвить плагин по классу, когда plugin_name — instance id (несколько
+                    экземпляров одного класса с уникальными именами, напр. text_main/text_name).
     """
 
     name: str
@@ -49,6 +52,7 @@ class PluginSpec:
     config_schema: dict[str, Any] = field(default_factory=dict)
     ports: tuple[PortSpec, ...] = ()
     has_registers: bool = False
+    class_path: str = ""
 
 
 class PluginCatalog(Protocol):

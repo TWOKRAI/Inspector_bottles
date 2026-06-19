@@ -193,7 +193,14 @@ class PluginOrchestrator:
             raise TypeError(f"'{class_path}' не является ProcessModulePlugin")
 
         instance = cls()
-        if not instance.name:
+        # Имя экземпляра берём из рецепта (plugin_name = instance id), а НЕ классовый
+        # атрибут name. Позволяет несколько экземпляров одного класса с уникальными
+        # именами (text_main/text_name — оба TextVectorPlugin). Конвенция
+        # register_name == plugin_name (registers_backend) требует, чтобы instance.name
+        # совпадал с plugin_name из топологии — иначе регистры экземпляров коллизятся.
+        if plugin_name and plugin_name != "unknown":
+            instance.name = plugin_name
+        elif not instance.name:
             instance.name = plugin_name
         return instance
 

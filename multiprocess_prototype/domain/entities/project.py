@@ -200,6 +200,24 @@ def _check_no_cycles(topology: Topology) -> None:
             _dfs(node)
 
 
+def _plugin_known(catalog: Any, plugin: Any) -> bool:
+    """Плагин известен каталогу: по plugin_name (тип == имя) ИЛИ по plugin_class.
+
+    Каталог индексирован по имени ТИПА из @register_plugin (напр. ``text_vector``).
+    Но plugin_name в рецепте — это instance id: несколько экземпляров одного класса
+    несут уникальные имена (``text_main``/``text_name`` — оба TextVectorPlugin), чтобы
+    node_id был уникален. Резолв по имени для них вернёт None, поэтому falls back на
+    сравнение plugin_class с PluginSpec.class_path (так же, как runtime-лоадер грузит
+    плагин напрямую по dotted path, минуя реестр).
+    """
+    if catalog.resolve(plugin.plugin_name) is not None:
+        return True
+    class_path = getattr(plugin, "plugin_class", None)
+    if class_path:
+        return any(spec.class_path == class_path for spec in catalog.list_plugins())
+    return False
+
+
 def _check_plugin_references(
     topology: Topology,
     catalogs: ApplyContext,
@@ -215,7 +233,7 @@ def _check_plugin_references(
         return
     for proc in topology.processes:
         for pi in proc.plugins:
-            if catalogs.plugins.resolve(pi.plugin_name) is None:
+            if not _plugin_known(catalogs.plugins, pi):
                 raise DomainError(f"plugin '{pi.plugin_name}' not found in catalog")
 
 
@@ -396,7 +414,7 @@ class Project(SchemaBase):
         # Проверка ссылок на плагины
         if catalogs.plugins is not None:
             for pi in cmd.plugins:
-                if catalogs.plugins.resolve(pi.plugin_name) is None:
+                if not _plugin_known(catalogs.plugins, pi):
                     raise DomainError(f"plugin '{pi.plugin_name}' not found in catalog")
 
         new_process = Process(
@@ -537,7 +555,7 @@ class Project(SchemaBase):
 
         # Проверка ссылки на плагин
         if catalogs.plugins is not None:
-            if catalogs.plugins.resolve(cmd.plugin.plugin_name) is None:
+            if not _plugin_known(catalogs.plugins, cmd.plugin):
                 raise DomainError(f"plugin '{cmd.plugin.plugin_name}' not found in catalog")
 
         plugins_list = list(proc.plugins)

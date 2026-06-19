@@ -144,12 +144,16 @@ class RegistersBackendFromManager:
                 f"(плагинов: {len(process.plugins)})"
             )
 
-        # Шаг 3: получить plugin_name
-        plugin_name = process.plugins[plugin_index].plugin_name
+        # Шаг 3: получить plugin (имя + класс)
+        plugin = process.plugins[plugin_index]
+        plugin_name = plugin.plugin_name
 
-        # Шаг 4: проверить наличие в catalog (Variant A — обязательная валидация)
-        spec = self._plugin_catalog.resolve(plugin_name)
-        if spec is None:
+        # Шаг 4: проверить наличие в catalog (Variant A — обязательная валидация).
+        # Резолв по имени ИЛИ по классу: несколько экземпляров одного класса несут
+        # уникальные plugin_name (instance id, напр. text_main/text_name — оба
+        # TextVectorPlugin), которых нет в каталоге как имён типов. Каталог индексирован
+        # по типу, поэтому fallback на сравнение plugin_class с PluginSpec.class_path.
+        if not self._plugin_in_catalog(plugin):
             raise DomainError(
                 f"Плагин '{plugin_name}' (process='{process_name}', "
                 f"plugin_index={plugin_index}) не найден в PluginCatalog."
@@ -157,6 +161,15 @@ class RegistersBackendFromManager:
 
         # Шаг 5: register_name == plugin_name (convention-based, см. docstring)
         return plugin_name
+
+    def _plugin_in_catalog(self, plugin: Any) -> bool:
+        """Плагин известен каталогу: по plugin_name (тип==имя) ИЛИ по plugin_class."""
+        if self._plugin_catalog.resolve(plugin.plugin_name) is not None:
+            return True
+        class_path = getattr(plugin, "plugin_class", None)
+        if class_path:
+            return any(spec.class_path == class_path for spec in self._plugin_catalog.list_plugins())
+        return False
 
     # ------------------------------------------------------------------
     # RegistersBackend Protocol implementation

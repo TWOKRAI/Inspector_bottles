@@ -140,14 +140,29 @@ def test_empty_plugin_defs():
 
 
 def test_load_and_configure_managers_sets_plugin_name():
-    """plugin_name из defs присваивается плагину если у него нет своего имени."""
+    """plugin_name из defs = instance id и переопределяет классовый атрибут name.
+
+    Несколько экземпляров одного класса (напр. text_main/text_name — оба
+    TextVectorPlugin) несут уникальные plugin_name. Конвенция register_name ==
+    plugin_name требует, чтобы instance.name совпадал с plugin_name из топологии,
+    иначе регистры экземпляров коллизятся под классовым именем.
+    """
     services = MockProcessServices(name="test")
     orch = PluginOrchestrator(services=services)
-    # SimplePlugin уже имеет name="simple", поэтому имя не перезаписывается
+    # SimplePlugin имеет name="simple", но plugin_name из defs его переопределяет.
     plugin_defs = [{"plugin_class": _SIMPLE_PATH, "plugin_name": "custom_name"}]
     orch.load_and_configure_managers(plugin_defs)
     plugin, _ = orch._early_plugins[0]
-    # Если у класса есть name — оркестратор не перезаписывает
+    assert plugin.name == "custom_name"
+
+
+def test_load_and_configure_managers_keeps_class_name_without_plugin_name():
+    """Без явного plugin_name (или 'unknown') классовый name сохраняется."""
+    services = MockProcessServices(name="test")
+    orch = PluginOrchestrator(services=services)
+    plugin_defs = [{"plugin_class": _SIMPLE_PATH}]  # plugin_name → дефолт 'unknown'
+    orch.load_and_configure_managers(plugin_defs)
+    plugin, _ = orch._early_plugins[0]
     assert plugin.name == "simple"
 
 
