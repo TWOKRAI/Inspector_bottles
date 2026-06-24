@@ -1,1 +1,0 @@
-"""ProcessorServicePlugin — оркестратор обработки кадров."""
