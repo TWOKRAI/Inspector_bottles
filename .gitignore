@@ -127,3 +127,6 @@ drawings/
 
 # Lock-файлы планировщика (ephemeral)
 .claude/scheduled_tasks.lock
+
+# временные артефакты факт-чека
+.tmp_factcheck/

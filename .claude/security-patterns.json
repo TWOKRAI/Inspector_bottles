@@ -42,12 +42,6 @@
       "reminder": "Plugins MUST NOT import prototype. Plugin knows only PluginContext (ADR-120)."
     },
     {
-      "rule_name": "edit_prototype_backup",
-      "regex": ".",
-      "paths": ["**/multiprocess_prototype_backup/**"],
-      "reminder": "multiprocess_prototype_backup/ is a frozen snapshot. Agents are forbidden to modify it (CLAUDE.md CRITICAL)."
-    },
-    {
       "rule_name": "edit_knowledge_raw",
       "regex": ".",
       "paths": ["**/knowledge/raw/**", "**/knowledge/wiki-llm/**"],
