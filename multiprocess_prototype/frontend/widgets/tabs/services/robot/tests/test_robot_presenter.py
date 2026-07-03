@@ -38,8 +38,9 @@ def test_send_test_job_routed_to_devices() -> None:
     presenter, sender = make_presenter()
     sender.request_command.return_value = {"status": "ok"}
     presenter.send_test_job("robot_main", 10.5, -2.0)
+    # z_mm добавлен в 81664569: дефолт 0.0 уходит в payload как "z"
     sender.request_command.assert_called_with(
-        "devices", "robot_send_test_job", {"device_id": "robot_main", "x": 10.5, "y": -2.0}
+        "devices", "robot_send_test_job", {"device_id": "robot_main", "x": 10.5, "y": -2.0, "z": 0.0}
     )
 
 

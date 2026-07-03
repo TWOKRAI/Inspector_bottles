@@ -42,6 +42,9 @@ def test_dataset_gen_widget_presets_and_guard(qtbot):
     # комплектный пресет dataset_gen подхвачен в комбо
     items = [w.preset_combo.itemText(i) for i in range(w.preset_combo.count())]
     assert "ru_letters_disk.yaml" in items
+    # по умолчанию грузится ПЕРВЫЙ по алфавиту пресет (с 7521579c это manual_letters_disk) —
+    # выбираем ru_letters_disk явно; currentIndexChanged сам перезагрузит форму
+    w.preset_combo.setCurrentIndex(items.index("ru_letters_disk.yaml"))
     # пресет загружен в форму: размер кадра из YAML (128×128)
     assert w.size_h_spin.value() == 128 and w.size_w_spin.value() == 128
     assert w.procedural_check.isChecked()  # backgrounds_dir: null
