@@ -1,3 +1,4 @@
+- [Архивы прототипа удалены](project_archives_removed.md) — v1/v2 и multiprocess_prototype_backup удалены (e128b930); хвосты в конфигах вычищены 2026-07-03
 - [Phone gateway service](project_phone_gateway_service.md) — фото+слово с телефона по WiFi вместо вебкамеры (Services/phone_gateway + плагин phone_camera); v1 готов, GUI-панель + letter-mode wiring follow-up
 - [VFD bridge over robot — reboot fix](project_vfd_bridge_robot_reboot.md) — ПЧ vfd_belt висит мостом поверх robot_main; зависший ПЧ лечится перезагрузкой РОБОТА, не правкой кода ПЧ
 - [Qt widget editing patterns](feedback_widget_qt_patterns.md) — setFlags recursion, blockSignals, EditTriggers (critical)
