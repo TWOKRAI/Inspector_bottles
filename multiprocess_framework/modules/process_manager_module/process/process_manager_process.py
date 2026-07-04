@@ -1255,12 +1255,21 @@ class ProcessManagerProcess(ProcessModule):
         Паритет дороги B: ``stop_many`` с одним общим таймаутом на все
         процессы, а не N×timeout последовательно. Без этого switch
         рецепта занимает N×5с (4 процесса → 20с вместо ~5с).
+
+        Семантика «ensure stopped» (контракт stop_many): «нет в реестре /
+        не был жив» — успех (идемпотентно); ``False`` только если процесс
+        ПОДТВЕРЖДЁННО жив после эскалации stop_event → terminate → kill —
+        тогда cleanup/provision небезопасны и switch обязан остановиться.
         """
         if not names:
             return True
         timeout = float(self.get_config("stop_process_timeout") or 5.0)
         results = self._process_registry.stop_many(list(names), timeout)
-        return all(results.get(n, False) for n in names)
+        failed = sorted(n for n in names if not results.get(n, False))
+        if failed:
+            self._log_error(f"topology stop_all: остановка НЕ подтверждена для {failed}; карта результатов: {results}")
+            return False
+        return True
 
     def _topology_cleanup(self, name: str) -> bool:
         """Сид cleanup: снять с реестра + освободить SHM + удалить конфиг.

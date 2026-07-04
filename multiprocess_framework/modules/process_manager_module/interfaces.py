@@ -301,7 +301,12 @@ class IProcessRegistry(ABC):
 
     @abstractmethod
     def stop_one(self, name: str, timeout: float = 5.0) -> bool:
-        """Остановить один процесс (только его stop_event)."""
+        """Остановить один процесс («ensure stopped», только его stop_event).
+
+        Идемпотентно: нет в реестре / не жив → True. Иначе эскалация
+        stop_event → terminate → kill; True только по ФАКТУ смерти
+        (``not is_alive()`` после финального join).
+        """
         ...
 
     @abstractmethod

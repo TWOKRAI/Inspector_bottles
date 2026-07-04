@@ -144,6 +144,15 @@ class TestTopologyStopAll:
         result = pm._topology_stop_all(["x"])
         assert result is False
 
+    def test_partial_fail_logs_result_map(self) -> None:
+        """При частичном провале в лог уходит список неостановленных + карта результатов."""
+        pm = _make_pm({"a": {"class": "A"}, "b": {"class": "B"}})
+        pm._process_registry.stop_many = MagicMock(return_value={"a": True, "b": False})
+        pm._topology_stop_all(["a", "b"])
+        logged = " ".join(str(c.args[0]) for c in pm._log_error.call_args_list)
+        assert "['b']" in logged
+        assert "'a': True" in logged
+
     def test_missing_name_in_results_returns_false(self) -> None:
         """stop_many не вернул результат для имени → трактуется как False."""
         pm = _make_pm({"a": {"class": "A"}})

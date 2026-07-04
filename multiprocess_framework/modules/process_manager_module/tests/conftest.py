@@ -99,9 +99,10 @@ class MockProcessRegistry:
         self._processes.pop(name, None)
 
     def stop_one(self, name: str, timeout: float = 5.0) -> bool:
+        # Контракт «ensure stopped» (Task 1.1): нет в реестре → уже остановлен → True
         proc = self._processes.get(name)
         if proc is None:
-            return False
+            return True
         proc._alive = False
         return True
 
