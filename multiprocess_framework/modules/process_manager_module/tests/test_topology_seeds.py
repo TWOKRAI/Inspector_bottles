@@ -170,14 +170,16 @@ class TestTopologyStopAll:
 
 class TestTopologyCleanup:
     def test_removes_from_registry_and_config(self) -> None:
-        """cleanup удаляет из реестра, освобождает SHM и удаляет из _process_configs."""
+        """cleanup удаляет из реестра, снимает с SRM (SHM+PSR+конфиг) и из _process_configs."""
         pm = _make_pm({"worker_1": {"class": "mod.W", "priority": "normal"}})
         result = pm._topology_cleanup("worker_1")
         assert result is True
         # Реестр
         pm._process_registry.remove_process.assert_called_once_with("worker_1")
-        # SHM
-        pm.shared_resources.memory_manager.release_process_memory.assert_called_once_with("worker_1")
+        # SRM: единая точка снятия — SHM + запись PSR + конфиг (ADR-SRM-009)
+        pm.shared_resources.unregister_process.assert_called_once_with("worker_1")
+        # Хвосты монитора забыты (heartbeat/счётчики/статусы имени)
+        pm._process_monitor.forget_process.assert_called_once_with("worker_1")
         # Конфиг
         assert "worker_1" not in pm._process_configs
 

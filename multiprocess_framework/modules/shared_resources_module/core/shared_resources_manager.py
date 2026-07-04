@@ -203,6 +203,46 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
             self._log_error(f"register_process('{name}') failed: {e}")
             return False
 
+    def unregister_process(self, name: str) -> bool:
+        """Единая точка СНЯТИЯ процесса — симметрия к ``register_process`` (ADR-SRM-009).
+
+        1. Освобождает SHM процесса (``memory_manager.release_process_memory``).
+        2. Удаляет запись PSR (очереди, события, метаданные — умирают вместе
+           с ProcessData; иначе очереди мёртвого процесса остаются в
+           routing_map новых детей и broadcast наполняет никем не читаемые Queue).
+        3. Удаляет конфиг из ConfigStore.
+
+        Идемпотентно: снятие незарегистрированного имени — no-op, True.
+
+        Args:
+            name: имя процесса.
+
+        Returns:
+            True если снятие прошло без ошибок (включая no-op).
+        """
+        ok = True
+        try:
+            self._memory_manager.release_process_memory(name)
+        except Exception as e:
+            self._log_error(f"unregister_process('{name}'): release SHM failed: {e}")
+            ok = False
+
+        try:
+            self._process_state_registry.unregister_process(name)
+        except Exception as e:
+            self._log_error(f"unregister_process('{name}'): PSR unregister failed: {e}")
+            ok = False
+
+        try:
+            self._config_store.remove(name)
+        except Exception as e:
+            self._log_error(f"unregister_process('{name}'): config remove failed: {e}")
+            ok = False
+
+        if ok:
+            self._log_info(f"Process '{name}' unregistered from SRM")
+        return ok
+
     def _normalize_memory_names(self, memory_names: Dict[str, Any]) -> Dict[str, tuple]:
         """
         Нормализовать memory names к (num_images, shape, dtype).

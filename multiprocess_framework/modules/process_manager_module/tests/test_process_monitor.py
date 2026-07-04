@@ -47,6 +47,37 @@ class TestProcessMonitorInit:
         assert monitor.poll_interval == 1.0
 
 
+class TestForgetProcess:
+    """forget_process — очистка служебной истории имени при cleanup (Task 1.4)."""
+
+    def test_forget_clears_all_name_history(self) -> None:
+        """Все словари истории имени очищены; чужие имена не тронуты."""
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor._last_heartbeat = {"cam": 1.0, "other": 2.0}
+        monitor._restart_counts = {"cam": 3, "other": 1}
+        monitor._workers_status = {"cam": {"w": {}}, "other": {}}
+        monitor._first_seen = {"cam": 10.0, "other": 20.0}
+        monitor.previous_states = {"cam": {"status": "running"}, "other": {"status": "running"}}
+
+        monitor.forget_process("cam")
+
+        for d in (
+            monitor._last_heartbeat,
+            monitor._restart_counts,
+            monitor._workers_status,
+            monitor._first_seen,
+            monitor.previous_states,
+        ):
+            assert "cam" not in d
+            assert "other" in d
+
+    def test_forget_unknown_name_is_noop(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor.forget_process("ghost")  # не должно бросить
+
+
 class TestProcessMonitorStartStop:
     def test_start_sets_monitoring_flag(self) -> None:
         mock_pm = _make_mock_process_manager()

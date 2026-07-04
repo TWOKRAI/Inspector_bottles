@@ -577,6 +577,20 @@ class ProcessMonitor:
         """
         self._restart_counts.pop(process_name, None)
 
+    def forget_process(self, process_name: str) -> None:
+        """Забыть служебную историю имени при cleanup (hot-swap / удаление).
+
+        Вызывается PM._cleanup_process_resources. Без этого новый процесс
+        с тем же именем наследует чужой heartbeat-таймер, счётчик рестартов
+        и previous_states: ложный UNRESPONSIVE сразу после switch и
+        преждевременный FAILED после нескольких замен.
+        """
+        self._last_heartbeat.pop(process_name, None)
+        self._restart_counts.pop(process_name, None)
+        self._workers_status.pop(process_name, None)
+        self._first_seen.pop(process_name, None)
+        self.previous_states.pop(process_name, None)
+
     # ----------------------------------------------------------------
     # Полный broadcast статуса (для синхронизации с GUI)
     # ----------------------------------------------------------------

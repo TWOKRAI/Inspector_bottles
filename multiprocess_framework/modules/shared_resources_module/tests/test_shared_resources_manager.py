@@ -193,3 +193,54 @@ class TestConvenienceAccessors:
         srm.register_process("p1", BASIC_CONFIG)
         e = srm.get_process_event("p1", "stop")
         assert e is not None
+
+
+class TestUnregisterProcess:
+    """unregister_process — единая точка снятия процесса (ADR-SRM-009).
+
+    Симметрия к register_process: SHM + запись PSR (очереди/события/метаданные)
+    + конфиг ConfigStore. release_process_memory больше НЕ трогает PSR —
+    контракт сужен до «только память»
+    (Task 1.4 plans/2026-07-04_topology-switch-hardening.md).
+    """
+
+    def test_unregister_removes_psr_queues_events_and_config(self, srm):
+        """После unregister в PSR нет ни очередей, ни событий, ни конфига."""
+        srm.register_process("p1", BASIC_CONFIG)
+        psr = srm.process_state_registry
+        assert psr.has_process("p1")
+        assert psr.get_queue("p1", "system") is not None
+        assert psr.get_event("p1", "stop") is not None
+        assert srm.get_process_config("p1") is not None
+
+        assert srm.unregister_process("p1") is True
+
+        assert not psr.has_process("p1")
+        assert psr.get_queue("p1", "system") is None
+        assert psr.get_event("p1", "stop") is None
+        assert srm.get_process_config("p1") is None
+
+    def test_unregister_unknown_is_idempotent(self, srm):
+        """Снятие незарегистрированного имени — no-op, True."""
+        assert srm.unregister_process("ghost") is True
+
+    def test_release_process_memory_does_not_unregister_psr(self, srm):
+        """Контракт сужен: release_process_memory — только память, запись PSR живёт."""
+        srm.register_process("p1", BASIC_CONFIG)
+
+        srm.memory_manager.release_process_memory("p1")
+
+        assert srm.process_state_registry.has_process("p1")
+        assert srm.process_state_registry.get_queue("p1", "system") is not None
+
+    def test_reregister_after_unregister_creates_fresh_queues(self, srm):
+        """Снятие → повторная регистрация того же имени даёт свежие очереди."""
+        srm.register_process("p1", BASIC_CONFIG)
+        q_old = srm.process_state_registry.get_queue("p1", "system")
+
+        srm.unregister_process("p1")
+        srm.register_process("p1", BASIC_CONFIG)
+
+        q_new = srm.process_state_registry.get_queue("p1", "system")
+        assert q_new is not None
+        assert q_new is not q_old

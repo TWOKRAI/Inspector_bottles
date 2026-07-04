@@ -141,6 +141,13 @@ class MockSharedResources:
     def register_process(self, name: str, config: dict) -> None:
         self._registered[name] = config
 
+    def unregister_process(self, name: str) -> bool:
+        """Контракт ADR-SRM-009: SHM + запись PSR + конфиг — единая точка снятия."""
+        if self.memory_manager is not None:
+            self.memory_manager.release_process_memory(name)
+        self._registered.pop(name, None)
+        return True
+
     def get_process_data(self, name: str) -> MagicMock:
         mock_data = MagicMock()
         mock_data.custom = {}

@@ -54,3 +54,10 @@
 **Дата:** 2026-04-09  
 **Решение:** Конфиг расширен с 3 полей (stub) до 8 полей: default_queue_maxsize, event_wait_poll_interval, default_memory_coll, cleanup_stale_shm_on_init, standard_events.  
 **Причина:** Конфиг должен реально управлять поведением модуля (паттерн SchemaBase как во всех модулях), а не быть заглушкой.
+
+## ADR-SRM-009: unregister_process — единая точка снятия процесса
+
+**Дата:** 2026-07-04  
+**Решение:** Публичный `SharedResourcesManager.unregister_process(name)` — симметрия к `register_process` (ADR-018): освобождает SHM (`memory_manager.release_process_memory`), удаляет запись PSR (очереди/события/метаданные) и конфиг ConfigStore. Идемпотентен. Контракт `MemoryManager.release_process_memory` СУЖЕН до «только память» — прежний скрытый `psr.unregister_process` внутри него удалён.  
+**Причина:** Снятие процесса с PSR выполнялось побочным эффектом освобождения памяти — скрытая связанность: cleanup-фаза hot-swap чистила очереди мёртвого процесса «случайно», через release SHM. При эволюции memory-слоя очереди/события утекали бы в routing_map новых детей (broadcast наполняет никем не читаемые Queue). Потребитель — `PM._cleanup_process_resources` (switch рецепта, rollback).  
+**Refs:** plans/2026-07-04_topology-switch-hardening.md (Task 1.4).

@@ -46,6 +46,15 @@ class ISharedResourcesManager(ABC):
         """
 
     @abstractmethod
+    def unregister_process(self, name: str) -> bool:
+        """
+        Единая точка снятия процесса — симметрия к register_process (ADR-SRM-009).
+
+        Освобождает SharedMemory, удаляет запись PSR (очереди/события/метаданные)
+        и конфиг ConfigStore. Идемпотентно.
+        """
+
+    @abstractmethod
     def reinitialize_in_child(self) -> bool:
         """Восстановить non-pickle ресурсы после unpickle в дочернем процессе."""
 

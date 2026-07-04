@@ -375,25 +375,23 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
     def release_process_memory(self, process_name: str) -> None:
         """Полностью освободить SHM процесса при hot-swap (replace_blueprint).
 
-        В отличие от ``close_all(process_name)`` (только handles) — это полный
-        teardown процесса: (1) закрыть+unlink (owner) ВСЕ блоки; (2) снять процесс
-        с ProcessStateRegistry (метаданные памяти уже вычищены ``close_memory``);
-        (3) подчистить локальные структуры. После этого имена SHM свободны —
-        новый процесс с тем же именем создаёт свежие ячейки без коллизий.
+        В отличие от ``close_all(process_name)`` (только handles) — полный
+        teardown ПАМЯТИ процесса: (1) закрыть+unlink (owner) ВСЕ блоки
+        (``close_memory`` попутно вычищает memory_* ключи из
+        ProcessData.custom); (2) подчистить локальные структуры. После этого
+        имена SHM свободны — новый процесс с тем же именем создаёт свежие
+        ячейки без коллизий.
+
+        Контракт сужен (ADR-SRM-009): ТОЛЬКО память. Снятие процесса с PSR
+        (очереди/события/запись целиком) — явная операция
+        ``SharedResourcesManager.unregister_process``, а не побочный эффект
+        освобождения памяти.
         """
         # 1. Закрыть и (owner) unlink все блоки процесса.
-        #    close_memory попутно вычищает memory_* ключи из ProcessData.custom.
         for shm_name in list(self._local_handles.get(process_name, {}).keys()):
             self.close_memory(process_name, shm_name)
 
-        # 2. Снять процесс с PSR (с PSR-режимом; без PSR — no-op)
-        if self._process_state_registry is not None:
-            try:
-                self._process_state_registry.unregister_process(process_name)
-            except Exception as e:
-                self._log_error(f"release_process_memory: unregister_process('{process_name}') failed: {e}")
-
-        # 3. Подчистить локальные структуры (handles обнулены close_memory, но
+        # 2. Подчистить локальные структуры (handles обнулены close_memory, но
         #    остаётся пустой dict процесса; meta — для standalone-режима)
         self._local_handles.pop(process_name, None)
         self._local_meta.pop(process_name, None)

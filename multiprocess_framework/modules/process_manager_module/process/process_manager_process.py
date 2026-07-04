@@ -606,11 +606,14 @@ class ProcessManagerProcess(ProcessModule):
     def _cleanup_process_resources(self, name: str) -> None:
         """Снять остановленный процесс с реестров и освободить его ресурсы.
 
-        Три явных шага: (1) ProcessRegistry — Process-объект + stop_event;
-        (2) SHM-сегменты через memory_manager; (3) запись PSR (очереди,
-        события, метаданные) — ЯВНО, а не как побочный эффект release
-        (unregister внутри release_process_memory дублируется до Task 1.4,
-        повторный вызов идемпотентен).
+        Три явных шага:
+        1. ProcessRegistry — Process-объект + stop_event.
+        2. ``SharedResourcesManager.unregister_process`` — SHM + запись PSR
+           (очереди/события/метаданные) + конфиг ConfigStore. Единая точка
+           снятия, симметрия к ``register_process`` (ADR-SRM-009) — раньше
+           PSR чистился побочным эффектом release_process_memory.
+        3. Хвосты монитора (heartbeat-таймер, счётчик рестартов, статусы) —
+           иначе новый процесс с тем же именем наследует чужую историю.
 
         Используется сидом ``_topology_cleanup`` и ``_rollback_to_snapshot``.
         Не бросает исключений.
@@ -623,30 +626,19 @@ class ProcessManagerProcess(ProcessModule):
         except Exception as exc:
             self._log_warning(f"cleanup_process_resources: ошибка удаления '{name}' из реестра: {exc}")
 
-        # Cleanup SHM-сегментов процесса
         if self.shared_resources is not None:
-            mm = getattr(self.shared_resources, "memory_manager", None)
-            if mm is not None:
-                release_fn = getattr(mm, "release_process_memory", None)
-                if release_fn is not None:
-                    try:
-                        release_fn(name)
-                    except Exception as exc:
-                        self._log_warning(f"cleanup_process_resources: SHM cleanup для '{name}' не удался: {exc}")
-                else:
-                    self._log_warning(f"cleanup_process_resources: нет release_process_memory, SHM '{name}' не очищен")
+            try:
+                self.shared_resources.unregister_process(name)
+            except Exception as exc:
+                self._log_warning(f"cleanup_process_resources: SRM unregister '{name}' не удался: {exc}")
 
-        # Снять запись PSR (очереди/события/метаданные) — ЯВНО:
-        # иначе очереди мёртвого процесса остаются в routing_map новых детей
-        # и broadcast продолжает наполнять никем не читаемые Queue.
-        if self.shared_resources is not None:
-            psr = getattr(self.shared_resources, "process_state_registry", None)
-            unregister_fn = getattr(psr, "unregister_process", None)
-            if unregister_fn is not None:
-                try:
-                    unregister_fn(name)
-                except Exception as exc:
-                    self._log_warning(f"cleanup_process_resources: PSR unregister '{name}' не удался: {exc}")
+        monitor = getattr(self, "_process_monitor", None)
+        forget_fn = getattr(monitor, "forget_process", None)
+        if callable(forget_fn):
+            try:
+                forget_fn(name)
+            except Exception as exc:
+                self._log_warning(f"cleanup_process_resources: monitor.forget '{name}' не удался: {exc}")
 
     def _collect_partial_new(
         self,
