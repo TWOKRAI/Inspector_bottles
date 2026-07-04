@@ -1247,12 +1247,21 @@ class ProcessManagerProcess(ProcessModule):
                         **{k: v for k, v in result.items() if k != "success"},
                     }
 
-                # Успех: формируем ответ, совместимый с форматом GUI
-                return {
+                # Успех: readiness-барьер (Task 2.2) + ответ, совместимый с GUI
+                ready = self._wait_started_ready(result.get("results") or [])
+                response = {
                     "success": True,
                     "rolled_back": False,
+                    "ready": ready,
                     **{k: v for k, v in result.items() if k != "success"},
                 }
+                not_ready = sorted(n for n, ok in ready.items() if not ok)
+                if not_ready:
+                    self._log_error(
+                        f"apply_topology: процессы умерли на старте (initialize-провал?): {not_ready} "
+                        f"— топология применена, но эти процессы НЕ работают"
+                    )
+                return response
 
             except Exception as exc:
                 self._log_error(f"apply_topology: exception в manager.apply: {exc}")
@@ -1277,6 +1286,58 @@ class ProcessManagerProcess(ProcessModule):
         finally:
             self._replace_in_progress = False
             self._last_replace_ts = time.monotonic()
+
+    def _wait_started_ready(self, applied_results: list[dict]) -> dict[str, bool]:
+        """Readiness-барьер после start-фазы: death-watch запущенных процессов.
+
+        Ребёнок, упавший в ``initialize()``, выходит с exitcode 0 — до этого
+        барьера switch выглядел успешным, хотя процесс мёртв (типовой случай:
+        камера ещё занята предыдущим владельцем). Барьер ждёт
+        ``start_ready_timeout_s`` (конфиг, дефолт 2.0; 0 → выключен) и следит
+        за ``is_alive`` каждого запущенного имени.
+
+        Семантика результата:
+        - ``False`` — процесс ПОДТВЕРЖДЁННО умер в окне барьера;
+        - ``True`` — жив на дедлайне (готовность в строгом смысле не
+          подтверждается: heartbeat здесь ждать НЕЛЬЗЯ — и heartbeat, и
+          ``topology.apply`` обрабатываются ОДНИМ message_processor-потоком,
+          ожидание заблокировало бы само себя. Медленный initialize-провал
+          (тяжёлые импорты) поймает ProcessMonitor как crashed после resume).
+
+        Args:
+            applied_results: ``result["results"]`` успешного TopologyManager.apply.
+
+        Returns:
+            ``{name: bool}`` по именам команд ``process.start`` (пустой dict —
+            барьер выключен или нечего проверять).
+        """
+        started = [
+            r.get("process_name", "")
+            for r in applied_results
+            if r.get("cmd") == "process.start" and r.get("success") and r.get("process_name")
+        ]
+        if not started:
+            return {}
+        # НЕ «or 2.0»: явный 0 в конфиге = барьер выключен, or съел бы его
+        raw_timeout = self.get_config("start_ready_timeout_s")
+        timeout_s = 2.0 if raw_timeout is None else float(raw_timeout)
+        if timeout_s <= 0:
+            return {}
+
+        ready: dict[str, bool] = {}
+        pending = set(started)
+        deadline = time.monotonic() + timeout_s
+        while pending and time.monotonic() < deadline:
+            for name in list(pending):
+                proc = self._process_registry.get_process_by_name(name)
+                if proc is None or not proc.is_alive():
+                    ready[name] = False
+                    pending.discard(name)
+            if pending:
+                time.sleep(0.05)
+        for name in pending:
+            ready[name] = True  # жив весь барьер — работает
+        return ready
 
     # -------------------------------------------------------------------------
     # Сиды TopologyManager — single-purpose методы (Task 2.0)

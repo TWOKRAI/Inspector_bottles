@@ -498,6 +498,35 @@ def test_on_set_active_second_click_in_flight_rejected(
     assert presenter._apply_in_flight is False
 
 
+def test_on_set_active_partial_ready_shows_warning(
+    mock_view: MagicMock,
+) -> None:
+    """success=True, но ready содержит False → активация финализирована + предупреждение.
+
+    Task 2.2: процессы, умершие на initialize (exitcode 0), больше не выглядят
+    успешным запуском — PM возвращает карту ready, GUI показывает какие.
+    """
+    store = _make_store(slugs=["cup"])
+    persist_fn = MagicMock()
+    replace_fn = _make_async_apply({"success": True, "ready": {"camera": True, "vision": False}})
+    presenter = RecipesPresenter(
+        store=store,
+        view=mock_view,
+        apply_topology_fn=replace_fn,
+        persist_active_fn=persist_fn,
+    )
+
+    presenter._selected_slug = "cup"
+    presenter.on_set_active()
+
+    # Активация состоялась (persist выполнен) — политика: репорт, не rollback
+    persist_fn.assert_called_once_with("cup")
+    # Предупреждение с именем не поднявшегося процесса
+    error_msg = mock_view.show_error.call_args[0][0]
+    assert "vision" in error_msg
+    assert "camera" not in error_msg
+
+
 def test_on_set_active_failure_dispatches_compensating_activate(
     mock_view: MagicMock,
 ) -> None:

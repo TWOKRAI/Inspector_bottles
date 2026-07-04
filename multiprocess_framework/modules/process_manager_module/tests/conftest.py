@@ -286,7 +286,13 @@ def make_pm(
 
     # get_config
     def _get_config(key: str):
-        defaults = {"stop_process_timeout": 1.0, "shutdown_timeout": 1.0}
+        defaults = {
+            "stop_process_timeout": 1.0,
+            "shutdown_timeout": 1.0,
+            # Быстрый readiness-барьер (Task 2.2): не замедлять сьют, но
+            # сохранить карту ready в ответах apply_topology
+            "start_ready_timeout_s": 0.05,
+        }
         return defaults.get(key)
 
     pm.get_config = _get_config

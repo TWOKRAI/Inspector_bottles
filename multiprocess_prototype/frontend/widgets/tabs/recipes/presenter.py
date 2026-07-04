@@ -451,6 +451,18 @@ class RecipesPresenter:
         if isinstance(result, dict) and result.get("success"):
             self._log_info(f"RecipesPresenter: apply_topology подтверждён для '{target_slug}'")
             self._finalize_activation(target_slug)
+            # Task 2.2: частичный успех — топология применена, но часть
+            # процессов умерла на старте (initialize-провал, ready=False)
+            ready = result.get("ready")
+            if isinstance(ready, dict):
+                not_ready = sorted(name for name, ok in ready.items() if not ok)
+                if not_ready:
+                    self._log_error(f"RecipesPresenter: процессы не запустились: {not_ready}")
+                    self._view.show_error(
+                        "Рецепт применён, но процессы не запустились: "
+                        + ", ".join(not_ready)
+                        + " — проверьте вкладку «Процессы»"
+                    )
             return
 
         if isinstance(result, dict):

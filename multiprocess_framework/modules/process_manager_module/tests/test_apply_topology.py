@@ -386,6 +386,80 @@ class TestApplyTopologyRollback:
         pm._process_monitor.start.assert_called()
 
 
+class TestReadinessBarrier:
+    """Task 2.2: death-watch после start-фазы — ready в результате apply."""
+
+    def test_healthy_processes_reported_ready(self) -> None:
+        """Живые на дедлайне барьера процессы → ready=True."""
+        pm = make_pm({"old_w": {"class": "m.OW"}})
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is True
+        assert result["ready"] == {"n1": True}
+
+    def test_died_after_start_reported_not_ready(self) -> None:
+        """Процесс, умерший сразу после start (initialize-провал, exitcode 0) → ready=False.
+
+        До барьера такой switch выглядел полностью успешным.
+        """
+        from .conftest import MockProcess
+
+        class _DiesAfterStart(MockProcess):
+            def start(self) -> None:
+                super().start()
+                self._alive = False  # умер сразу после запуска
+
+        pm = make_pm(
+            {"old_w": {"class": "m.OW"}},
+            next_process_factory={"n1": _DiesAfterStart("n1", alive=False)},
+        )
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is True  # топология применена (политика: репорт, не rollback)
+        assert result["ready"] == {"n1": False}
+
+    def test_barrier_disabled_returns_empty_ready(self) -> None:
+        """start_ready_timeout_s=0 → барьер выключен, ready пустой."""
+        pm = make_pm({"old_w": {"class": "m.OW"}})
+        pm.get_config = lambda key: {
+            "stop_process_timeout": 1.0,
+            "start_ready_timeout_s": 0,
+        }.get(key)
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is True
+        assert result["ready"] == {}
+
+    def test_mixed_ready_map(self) -> None:
+        """Смешанный запуск: живой → True, умерший → False."""
+        from .conftest import MockProcess
+
+        class _DiesAfterStart(MockProcess):
+            def start(self) -> None:
+                super().start()
+                self._alive = False
+
+        pm = make_pm(
+            {},
+            next_process_factory={"dead": _DiesAfterStart("dead", alive=False)},
+        )
+
+        result = pm.apply_topology(
+            {
+                "processes": [
+                    {"process_name": "ok", "process_class": "m.Ok"},
+                    {"process_name": "dead", "process_class": "m.Dead"},
+                ]
+            }
+        )
+
+        assert result["success"] is True
+        assert result["ready"] == {"ok": True, "dead": False}
+
+
 class TestNoGhostConfigs:
     """Провал create не оставляет «призраков» (конфиг без Process-объекта).
 
