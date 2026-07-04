@@ -251,6 +251,113 @@ class TestApplyTopologyRollback:
             )
             assert new_name not in sr._registered, f"provisioned-очередь '{new_name}' осталась (утечка SHM/queue)"
 
+    def test_validation_fail_before_commands_keeps_old_processes_running(self) -> None:
+        """Провал ДО исполнения команд (BlueprintInvalid) — старые процессы НЕ трогаются.
+
+        Ключевой сценарий Task 1.2 (plans/2026-07-04_topology-switch-hardening.md):
+        прежний rollback пересоздавал ЖИВЫЕ процессы поверх самих себя —
+        вторые копии + выброшенный stop_event оригинала (неуправляемые зомби).
+        Теперь: команды не исполнялись → откат не требуется, топология intact.
+        """
+        pm = make_pm(
+            {
+                "old_1": {"class": "m.O1"},
+                "old_2": {"class": "m.O2"},
+            }
+        )
+        old_proc_1 = pm._process_registry.get_process_by_name("old_1")
+        old_proc_2 = pm._process_registry.get_process_by_name("old_2")
+
+        def invalid_blueprint(diff_result: dict, desired: dict) -> list[dict]:
+            raise RuntimeError("BlueprintInvalid: источник wire не найден")
+
+        pm._topology_manager.configure(commands_fn=invalid_blueprint)
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+        # Старые процессы: ТЕ ЖЕ объекты, живые, не пересозданы
+        assert pm._process_registry.get_process_by_name("old_1") is old_proc_1
+        assert pm._process_registry.get_process_by_name("old_2") is old_proc_2
+        assert old_proc_1._alive is True
+        assert old_proc_2._alive is True
+        # Конфиги на месте
+        assert "old_1" in pm._process_configs
+        assert "old_2" in pm._process_configs
+
+    def test_rollback_restores_two_phase_provision_before_create(self) -> None:
+        """Rollback восстанавливает двухфазно: ВСЕ provision ДО первого create.
+
+        Прежний _restore_from_snapshot шёл register→create→start по одному —
+        routing_map первых восстановленных не содержал очередей последующих
+        (полусвязанная топология после отката).
+        """
+        pm = make_pm(
+            {
+                "old_1": {"class": "m.O1"},
+                "old_2": {"class": "m.O2"},
+            }
+        )
+        # Форвард-путь падает на start (сид в manager захвачен при make_pm,
+        # поэтому wrappers ниже видят ТОЛЬКО rollback-вызовы через self._topology_*)
+        pm._topology_manager.configure(start_process_fn=lambda name: False)
+        wire_planner(pm)
+
+        events: list[str] = []
+        orig_provision = pm._topology_provision
+        orig_create = pm._topology_create
+        orig_start = pm._topology_start
+        pm._topology_provision = lambda n, d: (events.append(f"provision:{n}"), orig_provision(n, d))[1]
+        pm._topology_create = lambda n, d: (events.append(f"create:{n}"), orig_create(n, d))[1]
+        pm._topology_start = lambda n: (events.append(f"start:{n}"), orig_start(n))[1]
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+        provision_idx = [i for i, e in enumerate(events) if e.startswith("provision:")]
+        create_idx = [i for i, e in enumerate(events) if e.startswith("create:")]
+        start_idx = [i for i, e in enumerate(events) if e.startswith("start:")]
+        assert provision_idx and create_idx and start_idx
+        assert max(provision_idx) < min(create_idx), f"provision не завершён до create: {events}"
+        assert max(create_idx) < min(start_idx), f"create не завершён до start: {events}"
+        # Старые восстановлены
+        assert "old_1" in pm._process_configs
+        assert "old_2" in pm._process_configs
+
+    def test_rollback_excludes_unstoppable_from_recreate(self) -> None:
+        """Имя с неподтверждённой остановкой НЕ пересоздаётся (дубль хуже отсутствия).
+
+        Конфиг и Process незатронутого имени остаются в реестрах —
+        следующий switch повторит попытку остановки.
+        """
+        pm = make_pm(
+            {
+                "stuck": {"class": "m.Stuck"},
+                "ok_w": {"class": "m.OkW"},
+            }
+        )
+        pm._topology_manager.configure(start_process_fn=lambda name: False)
+        wire_planner(pm)
+
+        # rollback-стоп: stuck не подтверждён мёртвым
+        pm._process_registry.stop_many = MagicMock(
+            side_effect=lambda names, timeout: {n: (n != "stuck") for n in names}
+        )
+        recreated: list[str] = []
+        orig_create = pm._topology_create
+        pm._topology_create = lambda n, d: (recreated.append(n), orig_create(n, d))[1]
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+        assert "stuck" not in recreated, "живой процесс пересоздан — дубль!"
+        assert "ok_w" in recreated
+        # stuck остаётся в конфигах для retry на следующем switch
+        assert "stuck" in pm._process_configs
+
     def test_soft_fail_rolls_back(self) -> None:
         """Сид вернул success=False (без exception) -> rollback, topology НЕ закоммичен."""
         pm = make_pm({"w1": {"class": "m.W1"}})

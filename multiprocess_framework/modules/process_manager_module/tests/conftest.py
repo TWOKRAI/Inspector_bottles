@@ -132,6 +132,11 @@ class MockSharedResources:
         self.process_state_registry = MagicMock()
         self.process_state_registry.queue_registry = None
         self._registered: dict[str, dict] = {}
+        # Моделируем реальный контракт: cleanup снимает запись процесса с PSR
+        # (очереди/события) — _registered здесь и есть «записи PSR».
+        self.process_state_registry.unregister_process = MagicMock(
+            side_effect=lambda name: self._registered.pop(name, None) is not None
+        )
 
     def register_process(self, name: str, config: dict) -> None:
         self._registered[name] = config
