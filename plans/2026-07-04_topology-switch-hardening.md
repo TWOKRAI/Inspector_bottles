@@ -2,7 +2,7 @@
 
 - **Slug:** topology-switch-hardening
 - **Дата:** 2026-07-04
-- **Статус:** DRAFT
+- **Статус:** DONE (реализован 2026-07-04, все 7 задач)
 - **Ветка:** fix/topology-switch-hardening
 
 ## Контекст
@@ -36,7 +36,7 @@
 **Цель фазы:** любой исход `apply_topology` оставляет систему в одном из двух состояний — «новая топология работает» или «старая топология полностью восстановлена», без зомби и дублей.
 
 ### Task 1.1: `stop_many`/`stop_one` — верификация смерти + idempotent-семантика
-- **Статус:** [PENDING]
+- **Статус:** [DONE]
 - **Файлы:** `multiprocess_framework/modules/process_manager_module/core/process_registry.py`, `multiprocess_framework/modules/process_manager_module/process/process_manager_process.py` (`_topology_stop_all`), `multiprocess_framework/modules/process_manager_module/tests/`
 - **Acceptance:**
   - имя без Process/stop_event → `True` («уже остановлен», idempotent — паритет с `PM.stop_process`);
@@ -46,7 +46,7 @@
 - **Module contract:** public-api-change (семантика возвращаемого значения `stop_many` — обновить docstring-контракт; вызывающие: `_topology_stop_all` + тесты)
 
 ### Task 1.2: rollback через 5-фазный конвейер вместо `_restore_from_snapshot`
-- **Статус:** [PENDING]
+- **Статус:** [DONE]
 - **Файлы:** `multiprocess_framework/modules/process_manager_module/process/process_manager_process.py` (`apply_topology`, `_restore_from_snapshot`, `_teardown_partial`)
 - **Acceptance:**
   - rollback = тот же порядок side-effect'ов, что и apply: **stop_all живых** (snapshot-имена + частично созданные новые) → cleanup → provision (все) → create (все) → start (все) — двухфазность сохранена, routing_map восстановленных полный;
@@ -58,13 +58,13 @@
 Заметка по реализации: не чинить `_restore_from_snapshot` точечно — выделить общий приватный хелпер (например `_run_replace_pipeline(proc_dicts, to_stop)`), который использует существующие сиды `_topology_stop_all`/`_topology_cleanup`/`_topology_provision`/`_topology_create`/`_topology_start`. Rollback вызывает его с snapshot-конфигами. Защита от рекурсии: rollback-прогон не запускает вторичный rollback (best-effort + подробный лог).
 
 ### Task 1.3: убрать «призраков» `_process_configs`
-- **Статус:** [PENDING]
+- **Статус:** [DONE]
 - **Файлы:** `multiprocess_framework/modules/process_manager_module/process/process_manager_process.py` (`create_process`, `_create_processes_from_config`)
 - **Acceptance:** конфиг пишется в `_process_configs` **только после** успешного `create_and_register`; при провале создания записи нет; тест: boot с битым class-path у одного процесса → следующий switch не блокируется stop-фазой.
 - **Module contract:** impl-only
 
 ### Task 1.4: явная очистка PSR + сопутствующие хвосты
-- **Статус:** [PENDING]
+- **Статус:** [DONE]
 - **Файлы:** `multiprocess_framework/modules/process_manager_module/process/process_manager_process.py` (`_cleanup_process_resources`), `multiprocess_framework/modules/shared_resources_module/memory/core/manager.py` (`release_process_memory`), `multiprocess_framework/modules/process_manager_module/monitor/process_monitor.py`, локальные `DECISIONS.md`
 - **Acceptance:**
   - `psr.unregister_process(name)` вызывается явно из `_cleanup_process_resources`; `release_process_memory` чистит **только память** (контракт сужен — ADR-запись в `shared_resources_module/DECISIONS.md` + `python -m scripts.sync`);
@@ -77,7 +77,7 @@
 **Цель фазы:** состояние GUI (активный slug, дисплеи, app.yaml) меняется только по подтверждённому результату backend.
 
 ### Task 2.1: Recipes-таб на async request/response
-- **Статус:** [PENDING]
+- **Статус:** [DONE]
 - **Файлы:** `multiprocess_prototype/frontend/widgets/tabs/recipes/tab.py`, `multiprocess_prototype/frontend/widgets/tabs/recipes/presenter.py`, `multiprocess_prototype/frontend/bridge/process_manager_proxy.py` (docstring/ack), тесты `multiprocess_prototype/frontend/widgets/tabs/recipes/tests/`
 - **Acceptance:**
   - «Сделать активным» использует `proxy.apply_topology(source, on_result=...)` (канал уже существует — как в Pipeline-табе);
@@ -90,7 +90,7 @@
 Заметка: порядок отката `ActivateRecipe`/дисплеев решить при реализации (компенсирующий dispatch `ActivateRecipe(prev)` или отложенный dispatch до подтверждения) — зафиксировать выбор в Decisions log плана.
 
 ### Task 2.2: readiness-барьер после start
-- **Статус:** [PENDING]
+- **Статус:** [DONE]
 - **Файлы:** `multiprocess_framework/modules/process_manager_module/process/process_manager_process.py` (`apply_topology`, после успешного `TopologyManager.apply`), конфиг (`start_ready_timeout_s`), тесты
 - **Acceptance:**
   - после успешной start-фазы PM ждёт (poll `is_alive` + первый heartbeat/статус running) до `start_ready_timeout_s` (дефолт ~5с);
@@ -104,7 +104,7 @@
 **Цель фазы:** пауза монитора синхронна, авто-рестарт не может исполняться параллельно со switch.
 
 ### Task 3.1: синхронный `monitor.stop()` + рестарт вне потока монитора
-- **Статус:** [PENDING]
+- **Статус:** [DONE]
 - **Файлы:** `multiprocess_framework/modules/process_manager_module/monitor/process_monitor.py`, `multiprocess_framework/modules/process_manager_module/process/process_manager_process.py`
 - **Acceptance:**
   - `stop()` дожидается завершения текущей итерации цикла (Event/lock, таймаут с warning), после возврата ни один restart не в полёте;
@@ -131,3 +131,16 @@
 - **2026-07-04:** rollback реализуем через тот же конвейер сидов, что и прямое применение (общий хелпер), а НЕ точечной починкой `_restore_from_snapshot` — два расходящихся пути восстановления и были источником багов (aliveness, однофазность).
 - **2026-07-04:** семантика stop для топологии — «ensure stopped» (idempotent), подтверждение смерти обязательно до cleanup/unlink SHM.
 - **2026-07-04:** снятие процесса с PSR — явная операция cleanup-фазы, не побочный эффект освобождения памяти.
+- **2026-07-04 (реализация):** провал ДО исполнения команд (BlueprintInvalid) → откат **no-op**: старые процессы не трогаются вовсе (нулевой downtime). `results == []` из TopologyManager.apply — точный признак «ничего не исполнялось».
+- **2026-07-04 (реализация):** имя с неподтверждённой остановкой в rollback исключается из cleanup/пересоздания, но конфиг/Process/stop_event остаются в реестрах — retry на следующем switch (дубль хуже отсутствия).
+- **2026-07-04 (Task 1.4):** единая точка снятия — публичный `SRM.unregister_process` (SHM + PSR + ConfigStore), ADR-SRM-009; контракт `release_process_memory` сужен до «только память».
+- **2026-07-04 (Task 2.1):** выбран **компенсирующий** dispatch `ActivateRecipe(prev)` при провале, а не отложенный исходный: дисплеи обязаны перестраиваться ДО прихода кадров новой топологии (fix load-display-rebind), значит прямой dispatch остаётся до apply.
+- **2026-07-04 (Task 2.2):** readiness-барьер = **death-watch** по `is_alive` (`start_ready_timeout_s`, дефолт 2.0с, 0 → off). Ждать heartbeat в барьере НЕЛЬЗЯ: heartbeat и `topology.apply` обрабатываются одним `message_processor`-потоком. `ready=False` = подтверждённая смерть; жив на дедлайне = True (медленные initialize-провалы ловит монитор после resume).
+- **2026-07-04 (Task 3.1):** авто-рестарт уходит IPC-командой `process.restart` в собственную очередь PM — исполнение на `message_processor`-потоке, естественная сериализация с `topology.apply`; backoff — через `_pending_restarts` в цикле монитора, без sleep.
+
+## Итог реализации (2026-07-04)
+
+7/7 задач, 7 коммитов кода в `fix/topology-switch-hardening`.
+Gate: `scripts/validate.py` чисто; framework 3395 passed; prototype 2819 passed.
+Pre-existing провалы, не связанные с планом (есть и на `refactor/master-rework`):
+`test_observability_hot_reload` (2 шт.), `test_assembler::test_custom_log_dir_parity` (1 шт.).
