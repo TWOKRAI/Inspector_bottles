@@ -295,14 +295,30 @@ def test_on_delete_no_confirm(
 # ---------------------------------------------------------------------------
 
 
+def _make_async_apply(result: dict | None):
+    """Фейк async apply_topology_fn: сразу доставляет result в on_result.
+
+    Имитация command-result-bridge (Task 2.1): реальный proxy исполняет request
+    на worker-потоке и зовёт on_result в Qt main-thread; в тестах — синхронно.
+    """
+
+    def fn(source: dict, on_result) -> None:
+        fn.calls.append(source)
+        on_result(result)
+
+    fn.calls = []
+    return fn
+
+
 def test_on_set_active_calls_replace(
     mock_view: MagicMock,
 ) -> None:
-    """on_set_active вызывает apply_topology_fn с полным raw-dict рецепта (v3 формат).
+    """on_set_active передаёт в apply полный raw-dict рецепта (v3) + busy-цикл.
 
     Task 2.2 displays-in-recipe: если рецепт содержит top-level blueprint
     (и НЕ содержит top-level processes) — передаём полный raw dict.
-    Backend-овский unwrap_recipe извлечёт blueprint + display_definitions.
+    Task 2.1 hardening: вызов async (source, on_result); на время полёта
+    view.set_switch_busy(True), по результату — set_switch_busy(False).
     """
     blueprint_data = {
         "processes": [{"process_name": "worker_1", "class": "Worker", "plugins": []}],
@@ -318,7 +334,7 @@ def test_on_set_active_calls_replace(
     }
     store = FakeRecipeStore(raw={"cup": raw})
 
-    replace_fn = MagicMock(return_value={"success": True, "replaced": ["worker_1"]})
+    replace_fn = _make_async_apply({"success": True, "replaced": ["worker_1"]})
     presenter = RecipesPresenter(
         store=store,
         view=mock_view,
@@ -328,13 +344,16 @@ def test_on_set_active_calls_replace(
     presenter._selected_slug = "cup"
     presenter.on_set_active()
 
-    # replace_fn вызван с полным raw-dict рецепта (top-level blueprint → v3 формат)
-    replace_fn.assert_called_once()
-    passed = replace_fn.call_args[0][0]
+    # apply вызван с полным raw-dict рецепта (top-level blueprint → v3 формат)
+    assert len(replace_fn.calls) == 1
+    passed = replace_fn.calls[0]
     assert isinstance(passed, dict)
-    # Полный рецепт: blueprint внутри
     assert "blueprint" in passed
     assert passed["blueprint"]["processes"][0]["process_name"] == "worker_1"
+    # busy-цикл: True при отправке, False по результату
+    mock_view.set_switch_busy.assert_any_call(True)
+    mock_view.set_switch_busy.assert_any_call(False)
+    assert presenter._apply_in_flight is False
 
 
 # ---------------------------------------------------------------------------
@@ -371,13 +390,15 @@ def test_on_set_active_no_replace_fn(
 def test_on_set_active_replace_error(
     mock_view: MagicMock,
 ) -> None:
-    """apply_topology_fn возвращает success=False -> view.show_error вызван."""
-    store = _make_store(slugs=["cup"])
-    replace_fn = MagicMock(return_value={"success": False, "error": "Процесс не стартовал"})
+    """Результат success=False → show_error + откат активного slug'а, БЕЗ persist."""
+    store = _make_store(slugs=["cup", "old"], active="old")
+    replace_fn = _make_async_apply({"success": False, "error": "Процесс не стартовал", "rolled_back": True})
+    persist_fn = MagicMock()
     presenter = RecipesPresenter(
         store=store,
         view=mock_view,
         apply_topology_fn=replace_fn,
+        persist_active_fn=persist_fn,
     )
 
     presenter._selected_slug = "cup"
@@ -386,6 +407,117 @@ def test_on_set_active_replace_error(
     mock_view.show_error.assert_called_once()
     error_msg = mock_view.show_error.call_args[0][0]
     assert "Процесс не стартовал" in error_msg
+    # Активный slug откачен к прежнему; persist НЕ выполнен
+    assert store.get_active() == "old"
+    persist_fn.assert_not_called()
+
+
+def test_on_set_active_debounced_rolls_back(
+    mock_view: MagicMock,
+) -> None:
+    """debounced=True (backend занят) → откат slug'а + понятная ошибка, БЕЗ persist.
+
+    Раньше fire-and-forget съедал debounce молча: GUI считал рецепт активным,
+    backend продолжал предыдущую замену — расхождение состояния.
+    """
+    store = _make_store(slugs=["cup", "old"], active="old")
+    replace_fn = _make_async_apply({"success": False, "debounced": True, "error": "замена уже выполняется"})
+    persist_fn = MagicMock()
+    presenter = RecipesPresenter(
+        store=store,
+        view=mock_view,
+        apply_topology_fn=replace_fn,
+        persist_active_fn=persist_fn,
+    )
+
+    presenter._selected_slug = "cup"
+    presenter.on_set_active()
+
+    assert store.get_active() == "old"
+    persist_fn.assert_not_called()
+    error_msg = mock_view.show_error.call_args[0][0]
+    assert "ещё выполняется" in error_msg
+
+
+def test_on_set_active_success_persists_after_confirmation(
+    mock_view: MagicMock,
+) -> None:
+    """persist в манифест — ТОЛЬКО после подтверждённого success от PM."""
+    store = _make_store(slugs=["cup"])
+    persist_order: list[str] = []
+
+    def persist_fn(slug: str) -> None:
+        persist_order.append(slug)
+
+    def replace_fn(source: dict, on_result) -> None:
+        # До прихода результата persist НЕ должен случиться
+        assert persist_order == []
+        on_result({"success": True})
+
+    presenter = RecipesPresenter(
+        store=store,
+        view=mock_view,
+        apply_topology_fn=replace_fn,
+        persist_active_fn=persist_fn,
+    )
+
+    presenter._selected_slug = "cup"
+    presenter.on_set_active()
+
+    assert persist_order == ["cup"]
+
+
+def test_on_set_active_second_click_in_flight_rejected(
+    mock_view: MagicMock,
+) -> None:
+    """Пока результат не пришёл — повторный on_set_active отклоняется без второго запроса."""
+    store = _make_store(slugs=["cup", "other"])
+    captured: list = []
+
+    def replace_fn(source: dict, on_result) -> None:
+        captured.append(on_result)  # результат НЕ доставляем — полёт продолжается
+
+    presenter = RecipesPresenter(
+        store=store,
+        view=mock_view,
+        apply_topology_fn=replace_fn,
+    )
+
+    presenter._selected_slug = "cup"
+    presenter.on_set_active()
+    assert presenter._apply_in_flight is True
+
+    presenter.on_set_active("other")
+
+    assert len(captured) == 1  # второй запрос НЕ отправлен
+    error_msg = mock_view.show_error.call_args[0][0]
+    assert "уже выполняется" in error_msg
+
+    # Доставка результата снимает guard
+    captured[0]({"success": True})
+    assert presenter._apply_in_flight is False
+
+
+def test_on_set_active_failure_dispatches_compensating_activate(
+    mock_view: MagicMock,
+) -> None:
+    """Провал apply → компенсирующий dispatch(ActivateRecipe(prev)) — дисплеи/editor назад."""
+    store = _make_store(slugs=["cup", "old"], active="old")
+    dispatcher = _RecordingDispatcher()
+    replace_fn = _make_async_apply({"success": False, "error": "boom", "rolled_back": True})
+    presenter = RecipesPresenter(
+        store=store,
+        view=mock_view,
+        apply_topology_fn=replace_fn,
+        commands=dispatcher,
+    )
+
+    presenter._selected_slug = "cup"
+    presenter.on_set_active()
+
+    slugs = [cmd.slug for cmd in dispatcher.dispatched if isinstance(cmd, ActivateRecipe)]
+    assert slugs == ["cup", "old"], "нет компенсирующего dispatch'а прежнего рецепта"
+    assert store.get_active() == "old"
 
 
 # ---------------------------------------------------------------------------

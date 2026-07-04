@@ -70,17 +70,20 @@ class RecipesPresenter:
     Attributes:
         _store: RecipeStore Protocol (CRUD + raw dict + duplicate).
         _view: реализация IRecipesView (Qt-виджет или mock в тестах).
-        _apply_topology_fn: callback apply_topology(blueprint) -> dict result.
+        _apply_topology_fn: async callback применения топологии:
+                            (blueprint: dict, on_result: Callable[[dict], None]) -> None.
+                            Реальный результат PM приходит в on_result (Qt main-thread).
                             None -> set_active работает без перезапуска процессов.
         _logger: опциональный логгер (LoggerManager или совместимый).
         _selected_slug: текущий выбранный slug в nav-списке.
+        _apply_in_flight: True пока идёт async-применение (guard от двойного клика).
     """
 
     def __init__(
         self,
         store: "RecipeStore",
         view: "IRecipesView",
-        apply_topology_fn: Callable[[dict], dict] | None = None,
+        apply_topology_fn: Callable[[dict, Callable[[dict], None]], Any] | None = None,
         logger: Any | None = None,
         commands: "CommandDispatcher | None" = None,
         topology_store: Any | None = None,
@@ -92,9 +95,11 @@ class RecipesPresenter:
         Args:
             store: RecipeStore Protocol с доступом к CRUD и raw-dict I/O.
             view: реализация IRecipesView.
-            apply_topology_fn: опциональный callback применения топологии
-                при set_active (proxy.apply_topology → topology.apply). None ->
-                только state обновляется без перезапуска процессов.
+            apply_topology_fn: опциональный async-callback применения топологии
+                при set_active: ``fn(blueprint, on_result)`` — request/response
+                через proxy.apply_topology → topology.apply; реальный результат
+                PM приходит в on_result в Qt main-thread (command-result-bridge).
+                None -> только state обновляется без перезапуска процессов.
             logger: опциональный менеджер логирования (silent при None).
             commands: domain CommandDispatcher (G.6.5). При наличии активация
                 рецепта идёт через dispatch(ActivateRecipe) — валидирует blueprint,
@@ -120,6 +125,9 @@ class RecipesPresenter:
         # Фаза 3 device-hub: upsert устройств рецепта ДО apply_topology.
         self._upsert_devices_fn = upsert_devices_fn
         self._selected_slug: str | None = None
+        # Task 2.1 topology-switch-hardening: guard от повторного apply, пока
+        # результат предыдущего не пришёл (backend дебаунсит МОЛЧА — здесь честно).
+        self._apply_in_flight = False
 
     # ------------------------------------------------------------------
     # Вспомогательные методы логирования (silent fallback)
@@ -301,13 +309,17 @@ class RecipesPresenter:
         self.load()
 
     def on_set_active(self, slug: str | None = None) -> None:
-        """Сделать рецепт активным и применить топологию (apply_topology) если задана.
+        """Сделать рецепт активным и применить топологию к живому backend.
 
-        Порядок:
-        1. store.set_active(slug) -> bool.
-        2. Если _apply_topology_fn задан — читает blueprint из raw dict и вызывает его.
-        3. Если result["success"] -> load() + set_buttons_state(True, True).
-        4. Если ошибка -> view.show_error.
+        Порядок (Task 2.1 topology-switch-hardening — async request/response):
+        1. store.set_active(slug) → dispatch(ActivateRecipe) → upsert устройств.
+        2. Если _apply_topology_fn задан — отправляет blueprint асинхронно;
+           РЕАЛЬНЫЙ результат PM приходит в _on_apply_result (Qt main-thread).
+           На время полёта view.set_switch_busy(True) + guard от второго клика.
+        3. По success → persist в манифест + load() (см. _finalize_activation).
+           По провалу (rolled_back / debounced / error) → откат slug'а,
+           компенсирующий ActivateRecipe(prev), БЕЗ persist (_rollback_activation).
+        4. Без _apply_topology_fn — финализация сразу (нет живого backend).
 
         Args:
             slug: slug для активации. Если None — использует _selected_slug.
@@ -316,6 +328,11 @@ class RecipesPresenter:
         if not target_slug:
             self._view.show_error("Рецепт не выбран")
             self._log_warning("RecipesPresenter.on_set_active: нет выбранного рецепта")
+            return
+
+        if self._apply_in_flight:
+            self._view.show_error("Переключение рецепта уже выполняется — дождитесь завершения")
+            self._log_warning("RecipesPresenter.on_set_active: apply в полёте — повторный запрос отклонён")
             return
 
         # FIX (load-display-rebind): store.set_active ОБЯЗАН выполниться ДО
@@ -373,7 +390,7 @@ class RecipesPresenter:
                         # Деградация: upsert не удался — логируем, но не блокируем активацию
                         self._log_warning(f"RecipesPresenter.on_set_active: upsert устройств не удался: {exc}")
 
-        # Если задан apply_topology_fn — выполняем горячую замену топологии
+        # Если задан apply_topology_fn — горячая замена через async request/response
         if self._apply_topology_fn is not None:
             # Читаем raw YAML через RecipeStore Protocol
             recipe_data = self._store.read_raw(target_slug)
@@ -393,36 +410,103 @@ class RecipesPresenter:
                 # v2/plain: извлечь blueprint
                 topology_source = recipe_data.get("blueprint") or recipe_data.get("data", {}).get("blueprint") or {}
 
+            self._apply_in_flight = True
+            self._view.set_switch_busy(True)
+            self._log_info(f"RecipesPresenter.on_set_active: topology.apply отправлен для '{target_slug}' (async)")
             try:
-                result = self._apply_topology_fn(topology_source)
-            except Exception as exc:  # noqa: BLE001
-                self._view.show_error(f"Ошибка применения топологии: {exc}")
-                self._log_error(f"RecipesPresenter.on_set_active: исключение apply_topology: {exc}")
-                return
-
-            if not isinstance(result, dict) or not result.get("success"):
-                error_msg = (
-                    result.get("error", "Ошибка применения топологии")
-                    if isinstance(result, dict)
-                    else "Ошибка применения топологии"
+                self._apply_topology_fn(
+                    topology_source,
+                    lambda result: self._on_apply_result(target_slug, prev_active, result),
                 )
-                self._view.show_error(error_msg)
-                self._log_error(f"RecipesPresenter.on_set_active: apply_topology failed: {error_msg}")
-                return
+            except Exception as exc:  # noqa: BLE001
+                self._apply_in_flight = False
+                self._view.set_switch_busy(False)
+                self._log_error(f"RecipesPresenter.on_set_active: исключение отправки apply: {exc}")
+                self._rollback_activation(prev_active, f"Ошибка применения топологии: {exc}")
+            # persist/load — ТОЛЬКО в _on_apply_result по подтверждённому success
+            return
 
-            self._log_info(f"RecipesPresenter.on_set_active: apply_topology успешен для '{target_slug}'")
+        # Нет живого backend (apply_topology_fn=None) — финализируем сразу
+        self._finalize_activation(target_slug)
 
-        # persist #1: записать активный slug в манифест (app.yaml → pipeline), чтобы
-        # следующий старт восстановил этот рецепт. Ошибка persist не валит активацию.
+    # ------------------------------------------------------------------
+    # Активация: результат backend + финализация/откат (Task 2.1)
+    # ------------------------------------------------------------------
+
+    def _on_apply_result(self, target_slug: str, prev_active: str | None, result: dict | None) -> None:
+        """Обработать РЕАЛЬНЫЙ результат PM (command-result-bridge, Qt main-thread).
+
+        Раньше здесь был optimistic-ack fire-and-forget: GUI активировал slug и
+        персистил рецепт в app.yaml, даже если backend откатился (rolled_back)
+        или молча съел запрос (debounce) — состояние GUI расходилось с backend.
+
+        Args:
+            target_slug: рецепт, который применялся.
+            prev_active: активный slug ДО активации (для отката).
+            result: dict-ответ PM (success/rolled_back/debounced/error) или None.
+        """
+        self._apply_in_flight = False
+        self._view.set_switch_busy(False)
+
+        if isinstance(result, dict) and result.get("success"):
+            self._log_info(f"RecipesPresenter: apply_topology подтверждён для '{target_slug}'")
+            self._finalize_activation(target_slug)
+            return
+
+        if isinstance(result, dict):
+            if result.get("debounced"):
+                error_msg = "Переключение отклонено backend'ом: предыдущая замена ещё выполняется"
+            else:
+                error_msg = str(result.get("error") or "Ошибка применения топологии")
+                if result.get("rolled_back"):
+                    error_msg += " (выполнен откат к предыдущей топологии)"
+        else:
+            error_msg = "Ошибка применения топологии: нет ответа от ProcessManager"
+
+        self._log_error(f"RecipesPresenter: apply_topology провален для '{target_slug}': {error_msg}")
+        self._rollback_activation(prev_active, error_msg)
+
+    def _finalize_activation(self, slug: str) -> None:
+        """Финализировать активацию ПОСЛЕ подтверждения (или без backend).
+
+        persist активного slug'а в манифест — только здесь: незавершённый или
+        откаченный switch не должен переживать рестарт приложения.
+        """
         if self._persist_active_fn is not None:
             try:
-                self._persist_active_fn(target_slug)
-                self._log_info(f"RecipesPresenter.on_set_active: persist в манифест '{target_slug}'")
+                self._persist_active_fn(slug)
+                self._log_info(f"RecipesPresenter: persist в манифест '{slug}'")
             except Exception as exc:  # noqa: BLE001
-                self._log_warning(f"RecipesPresenter.on_set_active: persist не удался: {exc}")
+                self._log_warning(f"RecipesPresenter: persist не удался: {exc}")
 
         self.load()
         self._view.set_buttons_state(True, True)
+
+    def _rollback_activation(self, prev_active: str | None, error_msg: str) -> None:
+        """Вернуть GUI к prev_active после провала apply: slug + editor/дисплеи.
+
+        Компенсирующий dispatch(ActivateRecipe(prev)) — а не отложенный исходный
+        dispatch: дисплеи обязаны быть перестроены ДО прихода кадров новой
+        топологии (fix load-display-rebind), поэтому прямой dispatch идёт до
+        apply, а при провале выполняется обратный. Best-effort: ошибки отката
+        логируются, пользователь видит error_msg в любом случае.
+        """
+        try:
+            if prev_active:
+                self._store.set_active(prev_active)
+            else:
+                self._store.deactivate()
+        except Exception as exc:  # noqa: BLE001
+            self._log_error(f"RecipesPresenter: откат set_active({prev_active!r}) не удался: {exc}")
+
+        if self._commands is not None and prev_active:
+            try:
+                self._commands.dispatch(ActivateRecipe(slug=prev_active), undoable=False)
+            except Exception as exc:  # noqa: BLE001
+                self._log_error(f"RecipesPresenter: компенсирующий ActivateRecipe('{prev_active}') не удался: {exc}")
+
+        self._view.show_error(error_msg)
+        self.load()
 
     def on_save(self, slug: str | None = None) -> bool:
         """Сохранить текущую живую топологию в выбранный рецепт (Этап 1).

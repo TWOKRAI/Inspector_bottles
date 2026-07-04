@@ -111,8 +111,11 @@ class RecipesTab(BaseListNavTab):
             self._content_stack.setCurrentWidget(_unavailable_label)
             self._create_btn.setEnabled(False)
         else:
-            # Task 4.1: «Сделать активным» применяет рецепт к живому backend через
-            # proxy.apply_topology (fire-and-forget, on_result=None).
+            # Task 2.1 topology-switch-hardening: «Загрузить» применяет рецепт через
+            # proxy.apply_topology(source, on_result) — async request/response
+            # (command-result-bridge): presenter получает РЕАЛЬНЫЙ результат PM
+            # (success/rolled_back/debounced) и откатывает активацию при провале.
+            # Прежний fire-and-forget (optimistic-ack) прятал rollback и debounce.
             # None → graceful: только set_active без перезапуска процессов.
             _apply_fn = (
                 self._pm_proxy.apply_topology
@@ -288,6 +291,23 @@ class RecipesTab(BaseListNavTab):
             message: текст ошибки.
         """
         QMessageBox.warning(self, "Ошибка", message)
+
+    def set_switch_busy(self, busy: bool) -> None:
+        """Busy-состояние применения рецепта (IRecipesView).
+
+        На время async topology.apply кнопка «Загрузить» блокируется и
+        показывает прогресс — защита от двойного клика (backend дебаунсит
+        молча, здесь пользователь видит, что замена идёт).
+
+        Args:
+            busy: True — переключение в полёте.
+        """
+        if busy:
+            self._activate_btn.setEnabled(False)
+            self._activate_btn.setText("Применяется…")
+        else:
+            self._activate_btn.setText("Загрузить")
+            # enabled восстановит set_buttons_state (load() после результата)
 
     # ------------------------------------------------------------------ #
     #  Построение UI — action-колонка                                      #

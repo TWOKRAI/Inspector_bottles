@@ -63,6 +63,18 @@ class IRecipesView(Protocol):
         """
         ...
 
+    def set_switch_busy(self, busy: bool) -> None:
+        """Busy-состояние применения рецепта к backend (async topology.apply).
+
+        True — переключение в полёте: кнопка «Загрузить» блокируется,
+        повторный клик невозможен. False — результат получен, UI разблокирован
+        (enabled-состояние кнопок восстанавливает set_buttons_state).
+
+        Args:
+            busy: True на время ожидания результата PM.
+        """
+        ...
+
     def confirm_delete(self, slug: str) -> bool:
         """Показать диалог подтверждения удаления рецепта.
 
