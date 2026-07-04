@@ -455,26 +455,6 @@ def run_gui(process: "GuiProcess") -> None:
                 module="startup",
             )
 
-    # 3d. Создать legacy ActionBus.
-    # G.4.4: глобальный undo/redo (Ctrl+Z/Y) переведён на domain CommandDispatcher
-    # (см. window.set_undo_controller ниже). Эта legacy-шина БОЛЬШЕ не управляет
-    # undo приложения; сохранена как инфраструктура ещё не мигрированных на domain
-    # доменов (forms binding-aware write через FormContext, roles ROLE_UPDATE,
-    # system-settings field-undo) — их перевод запланирован отдельными задачами
-    # (Phase G+; удаление frontend/actions/ — отдельный cleanup, big-bang здесь запрещён).
-    # G.5.3: после удаления ctx.extras прямых потребителей у шины нет (потребители
-    # отложенных доменов появятся при их миграции) — биндим в `_legacy_action_bus`
-    # (живёт весь lifetime: app.exec() блокирует) как retained-but-unbound infra.
-    from .actions.bus_factory import create_action_bus
-
-    _legacy_action_bus = create_action_bus(
-        registers_manager,
-        topology_store,
-        topology_bridge=topology_bridge,
-        auth_state=_auth_state,
-        auth_manager=_auth_manager,
-    )
-
     # 3h. Phase D (Task D.1): AppServices factory — собирает 10 adapter'ов
     # в типизированный DI-контейнер. G.5.1: фабрика принимает explicit
     # AppServicesDeps из локалов run_gui() (не ctx.extras) — coupling factory→AppContext снят.

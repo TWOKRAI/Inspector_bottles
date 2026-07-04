@@ -108,15 +108,13 @@ def _users_factory(services: AppServices, auth_ctx: "AuthContext | None") -> _Se
 def _roles_factory(services: AppServices, auth_ctx: "AuthContext | None") -> _SectionAdapter:
     """Фабрика RolesPanel (ленивая).
 
-    G.4.4: ROLE_UPDATE — auth-домен; его миграция на domain-команды отложена
-    (Phase G+). У domain `services.commands` нет `action_bus()` (был фантом —
-    всегда None), поэтому передаём `bus=None` явно: редактирование permissions
-    ролей через UI неактивно (как и было — `RolesPanel._on_permissions_changed`
-    при None no-op). Будущая шина для ROLE_UPDATE — отдельная задача.
+    K1 (2026-06-18): legacy ActionBus-мост снят — RolesPanel больше не принимает
+    шину. Редактирование permissions ролей через UI неактивно (как и было);
+    будущий приёмник изменений — domain-команда ROLE_UPDATE (Phase G+).
     """
     from .administration.roles_panel import RolesPanel
 
-    widget = RolesPanel(auth_ctx, None)
+    widget = RolesPanel(auth_ctx)
     return _SectionAdapter(key="roles", title="Роли", widget=widget)
 
 

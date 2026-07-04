@@ -83,8 +83,9 @@ class SystemSection(QWidget):
         # RegisterView — основной виджет редактирования полей.
         # form_ctx=None: SettingsSystem не использует plugin binding.
         # Поля GUI-локальные (тема, i18n, режим отображения).
-        # Legacy путь: editor.change_signal → presenter.on_field_changed (dirty),
-        #              RegisterView.field_changed → presenter.on_field_changed_action_bus (undo/redo).
+        # Путь: editor.change_signal → presenter.on_field_changed (dirty).
+        # K1 (2026-06-18): подписка RegisterView.field_changed → ActionBus снята
+        # (no-op мост мёртвой legacy-шины); undo/redo появится с SetSystemConfig.
         # scrollable=False: SystemSection живёт внутри DiffScrollTabLayout —
         # внешний мастер-скроллбар сам крутит содержимое, а внутренний
         # QScrollArea ломал бы sizeHint секции и блокировал диф-скролл.
@@ -136,8 +137,13 @@ class SystemSection(QWidget):
         """Ничего не делаем при уходе с секции."""
 
     def bus_change_callback(self) -> "Callable[[], None] | None":
-        """Вернуть колбэк для подписки на изменения ActionBus (SectionWithEvents)."""
-        return self._presenter.on_bus_undo_redo_sync if self._presenter is not None else None
+        """Вернуть колбэк подписки на undo/redo (SectionWithEvents).
+
+        K1 (2026-06-18): всегда None — no-op ActionBus-мост снят. Секция
+        подключится к undo/redo с появлением domain-команды SetSystemConfig
+        (Phase G+); контракт SectionWithEvents допускает None (нет подписки).
+        """
+        return None
 
     # ------------------------------------------------------------------
     # SystemSettingsView Protocol
@@ -189,7 +195,7 @@ class SystemSection(QWidget):
 
     @property
     def presenter(self) -> "SystemSettingsPresenter | None":
-        """Вернуть presenter секции (для подписки на ActionBus)."""
+        """Вернуть presenter секции (для тестов и SettingsTab)."""
         return self._presenter
 
     def set_presenter(self, presenter: "SystemSettingsPresenter") -> None:
@@ -201,11 +207,10 @@ class SystemSection(QWidget):
           3. sync_editors_to_cfg() — ДО подключения editor.change_signal,
              иначе change_signal эмитится во время sync → on_field_changed() →
              dirty=True при старте приложения (баг).
-          4. Подключить editor.change_signal и register_view.field_changed.
+          4. Подключить editor.change_signal.
 
-        ВАЖНО: вызывается из BaseTreeNavTab._apply_presenter_factory ПЕРЕД
-        _connect_section_events — так bus_change_callback() уже возвращает
-        валидный callable.
+        Вызывается из BaseTreeNavTab._apply_presenter_factory ПЕРЕД
+        _connect_section_events (порядок инжекта presenter'а контролирует база).
         """
         self._presenter = presenter
 
@@ -219,15 +224,11 @@ class SystemSection(QWidget):
         self._presenter.sync_editors_to_cfg()
 
         # Шаг 4: подключить сигналы редакторов к presenter'у.
-        # АУДИТ (Track 3.5): две подписки намеренны — они обслуживают РАЗНЫЕ цели:
-        #   1. editor.change_signal → on_field_changed: только dirty-флаг (кнопки Сохранить/Сбросить).
-        #      Сигнатура: () — без аргументов.
-        #   2. RegisterView.field_changed → on_field_changed_action_bus: запись в ActionBus (undo/redo).
-        #      Сигнатура: (register_name, field_name, old_value, new_value).
-        # Удаление любой из подписок нарушит UX (исчезнет dirty-флаг) или undo/redo.
+        # editor.change_signal → on_field_changed: dirty-флаг (кнопки Сохранить/Сбросить).
+        # K1 (2026-06-18): вторая подписка (RegisterView.field_changed → запись в
+        # ActionBus) снята — она вела в no-op-плейсхолдер мёртвой legacy-шины.
         for editor in self._register_view.editors().values():
             editor.change_signal.connect(self._presenter.on_field_changed)
-        self._register_view.field_changed.connect(self._presenter.on_field_changed_action_bus)
 
     def field_editors(self) -> dict:
         """Вернуть словарь редакторов (делегация от SettingsTab)."""
