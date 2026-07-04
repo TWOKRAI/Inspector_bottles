@@ -386,6 +386,69 @@ class TestApplyTopologyRollback:
         pm._process_monitor.start.assert_called()
 
 
+class TestNoGhostConfigs:
+    """Провал create не оставляет «призраков» (конфиг без Process-объекта).
+
+    Task 1.3 plans/2026-07-04_topology-switch-hardening.md: призрак попадал
+    в _topology_current_names → stop-фаза switch получала имя без процесса.
+    """
+
+    def test_create_process_failure_leaves_no_config(self) -> None:
+        """create_process: конфиг пишется ТОЛЬКО после успешного создания."""
+        pm = make_pm({}, fail_on_create={"bad"})
+
+        result = pm.create_process("bad", "m.Bad", {"foo": 1})
+
+        assert result is None
+        assert "bad" not in pm._process_configs
+
+    def test_create_process_success_writes_config(self) -> None:
+        """create_process при успехе пишет merged-конфиг с class."""
+        pm = make_pm({})
+
+        result = pm.create_process("ok", "m.Ok", {"foo": 1})
+
+        assert result is not None
+        assert pm._process_configs["ok"]["class"] == "m.Ok"
+        assert pm._process_configs["ok"]["foo"] == 1
+
+    def test_boot_create_failure_rolls_back_config_and_resources(self) -> None:
+        """Boot: провал create → конфиг, PSR-запись и ресурсы процесса откачены."""
+        pm = make_pm({})
+        pm._process_registry._fail_on_create = {"bad"}
+
+        pm._create_processes_from_config(
+            {
+                "good": {"class": "m.Good"},
+                "bad": {"class": "m.Bad"},
+            }
+        )
+
+        assert "good" in pm._process_configs
+        assert "good" in pm.shared_resources._registered
+        assert pm._process_registry.get_process_by_name("good") is not None
+
+        assert "bad" not in pm._process_configs, "призрачный конфиг после провала boot-create"
+        assert "bad" not in pm.shared_resources._registered, "PSR-запись призрака не снята"
+        assert pm._process_registry.get_process_by_name("bad") is None
+
+    def test_switch_not_blocked_by_injected_ghost(self) -> None:
+        """Defense-in-depth: даже с уже существующим призраком switch проходит.
+
+        Связка с Task 1.1: stop-фаза трактует «нет процесса» как успех.
+        """
+        pm = make_pm({"real_w": {"class": "m.RW"}})
+        # Имитация доисторического призрака: конфиг есть, процесса нет
+        pm._process_configs["ghost"] = {"class": "m.Ghost"}
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is True
+        assert result["rolled_back"] is False
+        assert "ghost" not in pm._process_configs  # вычищен cleanup-фазой
+        assert "n1" in pm._process_configs
+
+
 class TestApplyTopologyDebounce:
     """Debounce: in-flight guard + cooldown."""
 

@@ -958,7 +958,13 @@ class ProcessManagerProcess(ProcessModule):
         return None
 
     def _create_processes_from_config(self, processes_config: dict[str, dict[str, Any]]) -> None:
-        """Двухфазно: очереди для всех, затем create + start."""
+        """Двухфазно: очереди для всех, затем create + start.
+
+        Провал create → конфиг и provisioned-ресурсы (очереди/PSR) процесса
+        откатываются: «призрак» (конфиг без Process-объекта) не должен
+        попадать в ``_topology_current_names``/stop-фазу, а его очереди —
+        в routing_map остальных детей.
+        """
         valid = [(n, c) for n, c in processes_config.items() if isinstance(c, dict) and c.get("class")]
         if not valid:
             return
@@ -976,6 +982,10 @@ class ProcessManagerProcess(ProcessModule):
                 if process:
                     process.start()
                     self._priority.apply_priority(process)
+            else:
+                self._log_error(f"boot: создание '{name}' не удалось — конфиг и ресурсы откатываются (не призрак)")
+                self._cleanup_process_resources(name)
+                self._process_configs.pop(name, None)
 
     def shutdown(self) -> bool:
         """
@@ -1010,12 +1020,17 @@ class ProcessManagerProcess(ProcessModule):
         config: dict[str, Any] | None = None,
         priority: str = "normal",
     ):
-        """Создать и зарегистрировать процесс."""
-        merged = copy.deepcopy(config) if config else {}
-        merged["class"] = class_path
-        self._process_configs[name] = merged
+        """Создать и зарегистрировать процесс.
+
+        Конфиг пишется в ``_process_configs`` ТОЛЬКО после успешного
+        создания — иначе остаётся «призрак» (конфиг без Process-объекта),
+        который попадает в ``_topology_current_names`` и в stop-фазу switch.
+        """
         process = self._process_registry.create_and_register(name, class_path, config, priority)
         if process:
+            merged = copy.deepcopy(config) if config else {}
+            merged["class"] = class_path
+            self._process_configs[name] = merged
             self._priority.register_priority(name, priority)
         return process
 
