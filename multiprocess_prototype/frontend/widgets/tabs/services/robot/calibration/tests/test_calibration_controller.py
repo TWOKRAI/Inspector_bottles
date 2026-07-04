@@ -16,11 +16,23 @@ from multiprocess_prototype.frontend.widgets.tabs.services.robot.calibration.wid
 
 
 class FakeBindings:
+    """Фейк GuiStateBindings со счётчиками bind/unbind (проверка баланса подписок)."""
+
     def __init__(self):
         self.fanouts = []
+        self.bind_calls = 0
+        self.unbind_calls = 0
 
     def bind_fanout(self, path, cb, owner=None):
-        self.fanouts.append((path, cb, owner))
+        self.bind_calls += 1
+        handle = (path, cb, owner)
+        self.fanouts.append(handle)
+        return handle
+
+    def unbind_fanout(self, handle):
+        self.unbind_calls += 1
+        if handle in self.fanouts:
+            self.fanouts.remove(handle)
 
 
 class FakeRecipes:
@@ -71,6 +83,67 @@ def test_set_device_binds_progress(qtbot):
     widget, presenter, bindings, controller = _build(qtbot)
     controller.set_device("robot_main")
     assert any(p == "calibration.state.cam0.progress" for p, _cb, _o in bindings.fanouts)
+
+
+def test_rebind_other_robot_no_accumulation(qtbot):
+    """Смена робота НЕ копит fanout-подписки: старая телеметрия снимается."""
+    widget, presenter, bindings, controller = _build(qtbot)
+    controller.set_device("robot_a")
+    controller.set_device("robot_b")
+    tlm_paths = [p for p, _cb, _o in bindings.fanouts if p.startswith("devices.state.")]
+    assert tlm_paths == ["devices.state.robot_b.status"]  # только новая подписка
+    # Всего активных: 1 прогресс (cam0, дедуп по камере) + 1 телеметрия.
+    assert len(bindings.fanouts) == 2
+
+
+def test_set_same_device_twice_no_extra_binds(qtbot):
+    """Повторный set_device того же робота — дедуп-гарды, новых bind нет."""
+    widget, presenter, bindings, controller = _build(qtbot)
+    controller.set_device("robot_main")
+    calls_after_first = bindings.bind_calls
+    controller.set_device("robot_main")
+    assert bindings.bind_calls == calls_after_first
+
+
+def test_begin_other_camera_no_accumulation(qtbot):
+    """begin с другой камерой перепривязывает прогресс без накопления подписок."""
+    widget, presenter, bindings, controller = _build(qtbot)
+    controller.set_device("robot_main")
+    widget.begin_requested.emit("cam7", "vfd_belt")
+    progress_paths = [p for p, _cb, _o in bindings.fanouts if p.startswith("calibration.state.")]
+    assert progress_paths == ["calibration.state.cam7.progress"]  # старая cam0 снята
+
+
+def test_unbind_balances_all_subscriptions(qtbot):
+    """unbind() снимает ОБЕ подписки (прогресс + телеметрия), баланс bind/unbind = 0."""
+    widget, presenter, bindings, controller = _build(qtbot)
+    controller.set_device("robot_main")
+    controller.unbind()
+    assert bindings.fanouts == []
+    assert bindings.bind_calls == bindings.unbind_calls
+    # Метки сброшены — повторный set_device привяжет заново.
+    assert controller._camera_id is None
+    assert controller._robot_tlm_id is None
+    assert controller._progress_owner_path is None
+
+
+def test_unbind_idempotent(qtbot):
+    """Повторный unbind() — не падает и не уводит счётчики в минус."""
+    widget, presenter, bindings, controller = _build(qtbot)
+    controller.set_device("robot_main")
+    controller.unbind()
+    controller.unbind()  # хэндлы уже None → unbind_fanout не зовётся
+    assert bindings.bind_calls == bindings.unbind_calls
+
+
+def test_rebind_after_unbind_works(qtbot):
+    """После unbind() новый set_device снова подписывает (метки сброшены)."""
+    widget, presenter, bindings, controller = _build(qtbot)
+    controller.set_device("robot_main")
+    controller.unbind()
+    controller.set_device("robot_main")
+    paths = sorted(p for p, _cb, _o in bindings.fanouts)
+    assert paths == ["calibration.state.cam0.progress", "devices.state.robot_main.status"]
 
 
 def test_begin_includes_robot_id(qtbot):

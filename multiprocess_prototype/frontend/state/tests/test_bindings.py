@@ -418,3 +418,109 @@ class TestFanout:
             lambda p, v: seen.append((p, v)),
         )
         assert seen == [("processes.detector.workers.pipeline_executor.status", "running")]
+
+
+# ---------------------------------------------------------------------------
+# Fan-out: явная отписка (unbind_fanout / unbind_by_owner)
+# ---------------------------------------------------------------------------
+
+
+class TestFanoutUnbind:
+    """bind_fanout возвращает хэндл; unbind_fanout/unbind_by_owner снимают подписки."""
+
+    def test_bind_fanout_returns_handle(self, bindings):
+        """bind_fanout возвращает не-None хэндл (для последующего unbind_fanout)."""
+        handle = bindings.bind_fanout("a.*", lambda p, v: None)
+        assert handle is not None
+
+    def test_unbind_fanout_stops_callbacks(self, bindings):
+        """После unbind_fanout(handle) callback больше не вызывается."""
+        seen: list[str] = []
+        handle = bindings.bind_fanout("a.*", lambda p, v: seen.append(p))
+
+        bindings._on_state_msg({"data_type": "state_delta", "path": "a.x", "value": 1})
+        assert seen == ["a.x"]
+
+        bindings.unbind_fanout(handle)
+        bindings._on_state_msg({"data_type": "state_delta", "path": "a.y", "value": 2})
+        assert seen == ["a.x"]  # новых вызовов нет
+
+    def test_unbind_fanout_idempotent(self, bindings):
+        """Повторный unbind_fanout того же хэндла — не падает."""
+        handle = bindings.bind_fanout("a.*", lambda p, v: None)
+        bindings.unbind_fanout(handle)
+        bindings.unbind_fanout(handle)  # не должно бросить
+        assert bindings._fanouts == []
+
+    def test_unbind_fanout_removes_only_its_subscription(self, bindings):
+        """Два одинаковых bind_fanout → unbind снимает ИМЕННО свой хэндл (identity, не equality).
+
+        Снимаем ВТОРОЙ хэндл: list.remove по equality удалил бы первый по
+        позиции, поэтому тест жёстко фиксирует eq=False у FanoutHandle.
+        """
+        seen: list[str] = []
+        cb = lambda p, v: seen.append(p)  # noqa: E731
+        h1 = bindings.bind_fanout("a.*", cb)
+        h2 = bindings.bind_fanout("a.*", cb)
+
+        bindings.unbind_fanout(h2)
+        assert bindings._fanouts == [h1]  # остался именно первый хэндл
+        bindings._on_state_msg({"data_type": "state_delta", "path": "a.x", "value": 1})
+        assert seen == ["a.x"]  # осталась ровно одна подписка
+
+    def test_unbind_by_owner_removes_all_owner_subscriptions(self, qtbot, bindings):
+        """unbind_by_owner снимает ВСЕ подписки владельца, чужие — не трогает."""
+        from PySide6.QtWidgets import QLabel
+
+        owner = QLabel()
+        other = QLabel()
+        qtbot.addWidget(owner)
+        qtbot.addWidget(other)
+
+        seen_owner: list[str] = []
+        seen_other: list[str] = []
+        seen_free: list[str] = []
+        bindings.bind_fanout("a.*", lambda p, v: seen_owner.append(p), owner=owner)
+        bindings.bind_fanout("b.*", lambda p, v: seen_owner.append(p), owner=owner)
+        bindings.bind_fanout("a.*", lambda p, v: seen_other.append(p), owner=other)
+        bindings.bind_fanout("a.*", lambda p, v: seen_free.append(p))  # без владельца
+
+        bindings.unbind_by_owner(owner)
+
+        bindings._on_state_msg({"data_type": "state_delta", "path": "a.x", "value": 1})
+        bindings._on_state_msg({"data_type": "state_delta", "path": "b.x", "value": 2})
+
+        assert seen_owner == []  # все подписки owner'а сняты
+        assert seen_other == ["a.x"]  # чужая жива
+        assert seen_free == ["a.x"]  # безвладельческая жива
+
+    def test_owner_destroyed_auto_unbinds(self, qtbot, bindings):
+        """destroyed владельца снимает fanout-подписку (авто-уборка через unbind_fanout)."""
+        from PySide6.QtWidgets import QLabel
+
+        owner = QLabel()
+        qtbot.addWidget(owner)
+        seen: list[str] = []
+        bindings.bind_fanout("a.*", lambda p, v: seen.append(p), owner=owner)
+        assert len(bindings._fanouts) == 1
+
+        owner.deleteLater()
+        qtbot.wait(50)  # даём Qt обработать destroyed
+
+        assert bindings._fanouts == []
+        bindings._on_state_msg({"data_type": "state_delta", "path": "a.x", "value": 1})
+        assert seen == []
+
+    def test_manual_unbind_then_owner_destroyed_safe(self, qtbot, bindings):
+        """Ручной unbind_fanout + последующий destroyed владельца — не падает."""
+        from PySide6.QtWidgets import QLabel
+
+        owner = QLabel()
+        qtbot.addWidget(owner)
+        handle = bindings.bind_fanout("a.*", lambda p, v: None, owner=owner)
+        bindings.unbind_fanout(handle)
+
+        owner.deleteLater()
+        qtbot.wait(50)  # авто-уборка по destroyed идемпотентна
+
+        assert bindings._fanouts == []
