@@ -1288,21 +1288,30 @@ class ProcessManagerProcess(ProcessModule):
             self._last_replace_ts = time.monotonic()
 
     def _wait_started_ready(self, applied_results: list[dict]) -> dict[str, bool]:
-        """Readiness-барьер после start-фазы: death-watch запущенных процессов.
+        """Readiness-барьер после start-фазы: короткий settle-window death-watch.
 
         Ребёнок, упавший в ``initialize()``, выходит с exitcode 0 — до этого
         барьера switch выглядел успешным, хотя процесс мёртв (типовой случай:
-        камера ещё занята предыдущим владельцем). Барьер ждёт
-        ``start_ready_timeout_s`` (конфиг, дефолт 2.0; 0 → выключен) и следит
-        за ``is_alive`` каждого запущенного имени.
+        камера ещё занята предыдущим владельцем). Барьер даёт запущенным
+        процессам «осесть»: следит за ``is_alive`` в течение
+        ``start_ready_timeout_s`` (settle-window, дефолт 0.5с; 0 → выключен).
+
+        **Стоимость:** здоровое переключение ВСЕГДА ждёт весь settle-window —
+        живой процесс не покидает ``pending`` (death-watch не умеет отличить
+        «жив и останется» от «жив, но вот-вот умрёт», не подождав). Поэтому
+        окно короткое: ловит быстрый синхронный fail-fast (open камеры →
+        мгновенный выход), не раздувая латентность switch. Дефолт 0.5с добавляет
+        к и без того секундному switch немного; на медленном spawn часть
+        initialize-провалов не успеет проявиться — их (и любой поздний crash)
+        штатно поймает ProcessMonitor как crashed после resume.
+
+        Строгую готовность (первый heartbeat) здесь ждать НЕЛЬЗЯ: и heartbeat,
+        и ``topology.apply`` обрабатываются ОДНИМ message_processor-потоком —
+        ожидание заблокировало бы само себя.
 
         Семантика результата:
         - ``False`` — процесс ПОДТВЕРЖДЁННО умер в окне барьера;
-        - ``True`` — жив на дедлайне (готовность в строгом смысле не
-          подтверждается: heartbeat здесь ждать НЕЛЬЗЯ — и heartbeat, и
-          ``topology.apply`` обрабатываются ОДНИМ message_processor-потоком,
-          ожидание заблокировало бы само себя. Медленный initialize-провал
-          (тяжёлые импорты) поймает ProcessMonitor как crashed после resume).
+        - ``True`` — жив на дедлайне (готовность в строгом смысле не гарантирует).
 
         Args:
             applied_results: ``result["results"]`` успешного TopologyManager.apply.
@@ -1318,9 +1327,9 @@ class ProcessManagerProcess(ProcessModule):
         ]
         if not started:
             return {}
-        # НЕ «or 2.0»: явный 0 в конфиге = барьер выключен, or съел бы его
+        # НЕ «or 0.5»: явный 0 в конфиге = барьер выключен, or съел бы его
         raw_timeout = self.get_config("start_ready_timeout_s")
-        timeout_s = 2.0 if raw_timeout is None else float(raw_timeout)
+        timeout_s = 0.5 if raw_timeout is None else float(raw_timeout)
         if timeout_s <= 0:
             return {}
 
@@ -1336,7 +1345,7 @@ class ProcessManagerProcess(ProcessModule):
             if pending:
                 time.sleep(0.05)
         for name in pending:
-            ready[name] = True  # жив весь барьер — работает
+            ready[name] = True  # пережил settle-window — считаем работающим
         return ready
 
     # -------------------------------------------------------------------------
