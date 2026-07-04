@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
     from multiprocess_framework.modules.registers_module import RegistersManager
+    from multiprocess_prototype.domain.protocols import Subscription
 
     from .diff import TopologyDiff
     from .graph.graph_scene import GraphScene
@@ -164,7 +165,9 @@ class PipelinePresenter:
         # Scene reload через typed EventBus (G.1): store публикует TopologyReplaced
         # при каждом save/set_topology (G.3). dispatch() внутри себя вызывает
         # topology_repo.save() → publish → _on_topology_replaced (full reload).
-        self._topology_sub = services.events.subscribe(TopologyReplaced, self._on_topology_replaced)
+        self._topology_sub: "Subscription | None" = services.events.subscribe(
+            TopologyReplaced, self._on_topology_replaced
+        )
 
         # Task 2.1: смена рецепта = «новая сессия редактора». Очищаем placed-but-unbound
         # боксы ИМЕННО здесь, а НЕ в _on_topology_replaced. Обоснование точкой в коде:
@@ -174,7 +177,40 @@ class PipelinePresenter:
         # шлёт ТОЛЬКО TopologyReplaced. Поэтому RecipeActivated — единственный надёжный
         # маркер «новая сессия»: чистить set в _on_topology_replaced убило бы непривязанный
         # бокс при первой же мутации (главный риск задачи, см. plans/pipeline-place-display-node.md).
-        self._recipe_activated_sub = services.events.subscribe(RecipeActivated, self._on_recipe_activated)
+        self._recipe_activated_sub: "Subscription | None" = services.events.subscribe(
+            RecipeActivated, self._on_recipe_activated
+        )
+
+    def dispose(self) -> None:
+        """Teardown presenter'а: отписки EventBus + остановка таймера + разрыв ссылок.
+
+        Волна B (M-leak-3): подписки TopologyReplaced/RecipeActivated нигде не
+        отписывались — EventBus держит сильную ссылку на handler → на presenter →
+        на scene, и разрушенная вкладка продолжала получать события (обновление
+        мёртвых Qt-объектов). Вызывается из PipelineTab.dispose()
+        (closeEvent / destroyed). Идемпотентен — повторный вызов безопасен.
+
+        Трогает только Python-состояние (подписки, ссылки) и parentless-QTimer,
+        поэтому безопасен и в destroyed-пути, когда дочерние Qt-виджеты уже мертвы.
+        """
+        if self._topology_sub is not None:
+            self._topology_sub.unsubscribe()
+            self._topology_sub = None
+        if self._recipe_activated_sub is not None:
+            self._recipe_activated_sub.unsubscribe()
+            self._recipe_activated_sub = None
+        # Н-3: дебаунс-таймер авто-персиста — singleShot QTimer БЕЗ parent; без stop()
+        # отложенный timeout после разрушения вкладки дёрнул бы _persist_layout_to_recipe
+        # на мёртвом окружении (scene уже удалена).
+        if self._persist_timer is not None:
+            try:
+                self._persist_timer.stop()
+            except RuntimeError:
+                pass  # C++-объект таймера уже удалён Qt — останавливать нечего
+            self._persist_timer = None
+        # Разорвать ссылки на Qt-объекты: presenter после dispose scene/inspector не трогает.
+        self._scene = None
+        self._inspector = None
 
     def set_scene(self, scene: "GraphScene") -> None:
         """Привязать GraphScene для обновления визуализации."""

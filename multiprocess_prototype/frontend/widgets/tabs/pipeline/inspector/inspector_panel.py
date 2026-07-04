@@ -493,18 +493,36 @@ class NodeInspectorPanel(QWidget):
     #  Камера: actual-телеметрия (Phase 3)                                 #
     # ------------------------------------------------------------------ #
 
-    def _hide_camera_actual(self) -> None:
-        """Скрыть блок actual и снять подписки."""
+    def _unbind_camera_actual(self) -> None:
+        """Снять подписки actual-телеметрии (баланс bind/unbind, волна B Н-4).
+
+        GuiStateBindings.unbind() не бросает (ValueError ловится внутри),
+        поэтому прежний широкий ``except Exception: pass`` убран. Чистый Python
+        (без Qt-вызовов) — безопасно и после разрушения виджетов (destroyed-путь).
+        """
         if self._bindings is not None:
             for h in self._cam_actual_handles:
-                try:
-                    self._bindings.unbind(h)
-                except Exception:
-                    pass
+                self._bindings.unbind(h)
         self._cam_actual_handles = []
+
+    def _hide_camera_actual(self) -> None:
+        """Скрыть блок actual и снять подписки."""
+        self._unbind_camera_actual()
         self._cam_actual_form.setVisible(False)
         for lbl in self._cam_actual_labels.values():
             lbl.setText("—")
+
+    def dispose(self) -> None:
+        """Teardown панели: снять cam-подписки (волна B, Н-4). Идемпотентен.
+
+        При разрушении панели с активной camera-нодой bind-хэндлы оставались
+        жить в GuiStateBindings (утечка + обновление мёртвых QLabel через
+        weakref). Вызывается из PipelineTab.dispose() (closeEvent / destroyed).
+        Намеренно НЕ зовёт _hide_camera_actual целиком: в destroyed-пути
+        дочерние Qt-виджеты уже удалены, setVisible/setText дали бы RuntimeError —
+        снимаем только подписки (чистый Python).
+        """
+        self._unbind_camera_actual()
 
     def _show_camera_actual(self, process_name: str) -> None:
         """Показать блок actual и привязать метки к state store.
