@@ -32,6 +32,7 @@ from multiprocess_prototype.domain.errors import DomainError
 from multiprocess_prototype.domain.events import RecipeActivated, TopologyReplaced
 
 from .graph.data import DisplayNodeData, EdgeData, NodeData, PortSchema
+from .graph_codec import GraphViewState, TopologyGraphCodec
 from .model import PipelineModel
 from .layout import auto_layout
 from .telemetry import WireMetricsModel
@@ -47,38 +48,6 @@ if TYPE_CHECKING:
     from .inspector.inspector_panel import NodeInspectorPanel
 
 logger = logging.getLogger(__name__)
-
-
-# Ключевой config-параметр в подписи ноды: {plugin_name: (config_key, префикс)}.
-_NODE_SUBTITLE_PARAM: dict[str, tuple[str, str]] = {
-    "color_convert": ("mode", ""),
-    "hikvision": ("camera_id", "id "),
-}
-
-
-def _plugin_config_value(pl: Any, key: str) -> Any:
-    """Значение config-параметра плагина (поддержка плоского и вложенного config)."""
-    if isinstance(pl, dict):
-        if key in pl:
-            return pl[key]
-        cfg = pl.get("config")
-        return cfg.get(key) if isinstance(cfg, dict) else None
-    if hasattr(pl, key):
-        return getattr(pl, key)
-    cfg = getattr(pl, "config", None)
-    return cfg.get(key) if isinstance(cfg, dict) else None
-
-
-def _node_subtitle(category: str, plugin_name: str, pl: Any) -> str:
-    """Подпись ноды: 'category · <param>' если у плагина есть ключевой параметр."""
-    spec = _NODE_SUBTITLE_PARAM.get(plugin_name)
-    if spec is None:
-        return category
-    key, prefix = spec
-    val = _plugin_config_value(pl, key)
-    if val is None or val == "":
-        return category
-    return f"{category} · {prefix}{val}"
 
 
 class PipelinePresenter:
@@ -126,6 +95,11 @@ class PipelinePresenter:
         # presenter не знает про Qt — tab передаёт реализацию. None → только лог.
         self._notify = notify
         self._model = PipelineModel()
+        # F.2: чистый (Qt-free) codec топология→граф. presenter владеет GUI-
+        # состоянием (позиции/локи/placed-боксы) и передаёт его снимком
+        # GraphViewState; кэши портов/боксов codec возвращает, presenter кладёт
+        # их в свои поля _port_schemas_cache/_display_nodes_cache.
+        self._codec = TopologyGraphCodec(services.plugins, services.displays)
         self._scene: GraphScene | None = None
         self._suppress = False
         self._gui_positions: dict[str, tuple[float, float]] = {}
@@ -1244,6 +1218,7 @@ class PipelinePresenter:
             TopologyDiff, или None если активного рецепта нет/рецепт нечитаем.
         """
         from .diff import topology_diff
+        from .recipe_io import recipe_blueprint
 
         store = self._services.recipes
         active = store.get_active()
@@ -1253,9 +1228,9 @@ class PipelinePresenter:
         if raw is None:
             logger.warning("compute_active_recipe_diff: рецепт '%s' нечитаем", active)
             return None
-        # Оба формата рецепта встречаются (см. launch_active_recipe): blueprint на
-        # верхнем уровне либо внутри data.
-        saved = raw.get("blueprint") or raw.get("data", {}).get("blueprint") or {}
+        # SC-12: единая READ-точка разбора формата рецепта (v3 top-level / legacy
+        # data.blueprint) — recipe_io.recipe_blueprint поверх backend.unwrap_recipe.
+        saved = recipe_blueprint(raw)
         current = self._services.topology.load().to_dict()
         return topology_diff(current, saved)
 
@@ -1282,282 +1257,28 @@ class PipelinePresenter:
     # ------------------------------------------------------------------ #
 
     def _topology_to_graph(self, topo_dict: dict) -> tuple[list[NodeData], list[EdgeData]]:
-        """Конвертировать topology dict → NodeData/EdgeData.
+        """Конвертировать topology dict → NodeData/EdgeData (делегат codec'а).
 
-        D.1: **нода = плагин**. Один процесс → N плагин-нод (node_id=`{proc}.{plugin}`)
-        + рамка-контейнер (строит scene по NodeData.process_name) + неявные стрелки
-        цепочки (implicit edges) между соседними плагинами. Процесс без плагинов
-        рендерится одной process-fallback нодой (node_id=process_name, plugin_index=-1).
-
-        G.4.2: port_schemas реконструируются из services.plugins.resolve() ПО КАЖДОМУ
-        плагину (не только первому) и кэшируются в _port_schemas_cache по node_id
-        плагин-ноды (передаётся в scene через load_from_data(port_schemas_map=...)).
-
-        Внешние wires (`proc.plugin.* → proc2.plugin2.*`) мапятся на конкретные
-        плагин-ноды (НЕ схлопываются до процесса). Display-боксы — из topo["displays"]
-        (binding-ребро source-плагин-нода → бокс).
+        F.2: чистая логика вынесена в :class:`TopologyGraphCodec` (graph_codec.py,
+        Qt-free, заморожена характеризационными тестами). presenter владеет GUI-
+        состоянием — передаёт его снимком ``GraphViewState`` и раскладывает
+        возвращённые кэши по своим полям (``_port_schemas_cache``/
+        ``_display_nodes_cache``), сохраняя прежний контракт метода: возвращает
+        ``(nodes, edges)`` и наполняет кэши как побочный эффект.
         """
-        nodes: list[NodeData] = []
-        edges: list[EdgeData] = []
-        self._port_schemas_cache = {}
-        self._display_nodes_cache = []
-
-        processes = topo_dict.get("processes", [])
-        used_ids: set[str] = set()  # уникальность node_id (дубликаты plugin_name)
-
-        for pi, proc in enumerate(processes):
-            protected = proc.get("protected", False) if isinstance(proc, dict) else getattr(proc, "protected", False)
-            if protected:
-                # protected-процессы (gui из base.yaml) — фундамент, не рисуем.
-                continue
-
-            if isinstance(proc, dict):
-                name = proc.get("process_name", "unnamed")
-                plugins = proc.get("plugins", [])
-            else:
-                name = getattr(proc, "process_name", "unnamed")
-                plugins = getattr(proc, "plugins", [])
-
-            if not plugins:
-                # Процесс без плагинов → одна process-fallback нода (node_id=process).
-                x, y = self._node_position(name, name, pi, 0)
-                nodes.append(
-                    NodeData(
-                        node_id=name,
-                        title=name,
-                        subtitle="(пусто)",
-                        category="utility",
-                        x=x,
-                        y=y,
-                        process_name=name,
-                        plugin_index=-1,
-                        plugin_name="",
-                        locked=name in self._locked_nodes,
-                    )
-                )
-                used_ids.add(name)
-                continue
-
-            prev_node_id: str | None = None
-            for j, pl in enumerate(plugins):
-                pname = pl.get("plugin_name", "") if isinstance(pl, dict) else getattr(pl, "plugin_name", "")
-                category = "utility"
-                port_schemas: list[PortSchema] | None = None
-                if pname:
-                    spec = self._services.plugins.resolve(pname)
-                    if spec is not None:
-                        category = spec.category
-                        try:
-                            schemas = [
-                                PortSchema(
-                                    name=ps.name,
-                                    direction=ps.direction,
-                                    dtype=ps.dtype,
-                                    optional=ps.optional,
-                                )
-                                for ps in spec.ports
-                            ]
-                            port_schemas = schemas or None
-                        except Exception:
-                            port_schemas = None
-
-                node_id = self._unique_plugin_node_id(name, pname, j, used_ids)
-                used_ids.add(node_id)
-                if port_schemas:
-                    self._port_schemas_cache[node_id] = port_schemas
-
-                # Подпись ноды: категория + ключевой параметр плагина (если задан).
-                subtitle = _node_subtitle(category, pname, pl)
-
-                x, y = self._node_position(node_id, name, pi, j)
-                nodes.append(
-                    NodeData(
-                        node_id=node_id,
-                        title=pname or name,
-                        subtitle=subtitle,
-                        category=category,
-                        x=x,
-                        y=y,
-                        process_name=name,
-                        plugin_index=j,
-                        plugin_name=pname,
-                        locked=node_id in self._locked_nodes,
-                    )
-                )
-
-                # Неявная стрелка цепочки: предыдущий плагин → текущий.
-                if prev_node_id is not None:
-                    edges.append(EdgeData(source_id=prev_node_id, target_id=node_id, implicit=True))
-                prev_node_id = node_id
-
-        # Внешние wires → конкретные плагин-ноды.
-        for w in topo_dict.get("wires", []):
-            if isinstance(w, dict):
-                source = w.get("source", "")
-                target = w.get("target", "")
-            else:
-                source = getattr(w, "source", "")
-                target = getattr(w, "target", "")
-            if source and target:
-                s_node = self._endpoint_to_node_id(source, topo_dict)
-                t_node = self._endpoint_to_node_id(target, topo_dict)
-                if s_node and t_node:
-                    edges.append(EdgeData(source_id=s_node, target_id=t_node))
-
-        # G.4.2b: display-боксы + binding-рёбра из topo["displays"]
-        self._build_display_nodes(topo_dict, edges)
-
-        return nodes, edges
-
-    # ------------------------------------------------------------------ #
-    #  Хелперы node=plugin (D.1)                                           #
-    # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def _unique_plugin_node_id(process: str, plugin_name: str, index: int, used: set[str]) -> str:
-        """node_id плагин-ноды = `{process}.{plugin_name}`.
-
-        Дубликаты plugin_name в одном процессе (против конвенции «1 плагин/процесс»
-        и неразличимы в endpoint-схеме domain) получают суффикс `#i` для GUI-
-        уникальности. Первое вхождение — без суффикса, чтобы wire-endpoint
-        (`proc.plugin`) мапился на него. См. план pipeline-process-container-nodes.
-        """
-        base = f"{process}.{plugin_name}" if plugin_name else f"{process}.plugin{index}"
-        if base not in used:
-            return base
-        suffixed = f"{base}#{index}"
-        logger.warning(
-            "Дубликат plugin_name '%s' в процессе '%s' — GUI node_id '%s' (endpoint неразличим)",
-            plugin_name,
-            process,
-            suffixed,
+        view = GraphViewState(
+            gui_positions=self._gui_positions,
+            locked_nodes=self._locked_nodes,
+            placed_display_ids=self._placed_display_ids,
         )
-        return suffixed
-
-    def _node_position(
-        self,
-        node_id: str,
-        process_name: str,
-        process_index: int,
-        plugin_index: int,
-    ) -> tuple[float, float]:
-        """Позиция плагин-ноды: из gui_positions или дефолтный кластер по процессу.
-
-        Приоритет: (1) позиция самой плагин-ноды (`proc.plugin`) — обычный путь
-        после auto_layout/сохранения; (2) anchor процесса в gui_positions —
-        legacy-рецепты и add_process_from_plugin кладут позицию по имени процесса,
-        плагин 0 встаёт в anchor, остальные смещаются вправо; (3) дефолтный
-        кластер (процесс=колонка). auto_layout_scene переразложит группами.
-        """
-        from .graph.constants import CONTAINER_HEADER_H, CONTAINER_INNER_GAP, CONTAINER_PADDING, NODE_WIDTH
-
-        if node_id in self._gui_positions:
-            return self._gui_positions[node_id]
-        if process_name in self._gui_positions:
-            base_x, base_y = self._gui_positions[process_name]
-        else:
-            base_x = 60.0 + process_index * 340.0
-            base_y = 60.0 + CONTAINER_HEADER_H + CONTAINER_PADDING
-        x = base_x + plugin_index * (NODE_WIDTH + CONTAINER_INNER_GAP)
-        return x, base_y
-
-    @staticmethod
-    def _endpoint_to_node_id(endpoint: str, topo_dict: dict) -> str:
-        """endpoint `proc.plugin.port` → node_id плагин-ноды (`proc.plugin`).
-
-        Процесс без плагинов → node_id = process (process-fallback нода). При
-        отсутствии plugin-сегмента берётся первый плагин процесса.
-        """
-        parts = endpoint.split(".")
-        proc = parts[0]
-        # Найти процесс и его плагины.
-        plugins: list = []
-        for p in topo_dict.get("processes", []):
-            pn = p.get("process_name", "") if isinstance(p, dict) else getattr(p, "process_name", "")
-            if pn == proc:
-                plugins = p.get("plugins", []) if isinstance(p, dict) else getattr(p, "plugins", [])
-                break
-        if not plugins:
-            return proc
-        if len(parts) >= 2:
-            return f"{proc}.{parts[1]}"
-        first = plugins[0]
-        first_name = first.get("plugin_name", "") if isinstance(first, dict) else getattr(first, "plugin_name", "")
-        return f"{proc}.{first_name}" if first_name else proc
-
-    def _build_display_nodes(self, topo_dict: dict, edges: list[EdgeData]) -> None:
-        """Построить display-боксы и binding-рёбра из topo["displays"] (G.4.2b).
-
-        Binding-формат: {node_id: <source endpoint>, display_id, display_name?}.
-        Один бокс на display_id (fan-in: N источников → 1 бокс), binding-ребро
-        source-процесс → бокс на каждый DisplayInstance. Боксы накапливаются в
-        _display_nodes_cache (id бокса = display_id), рёбра дописываются в edges.
-        """
-        boxes_by_display_id: dict[str, DisplayNodeData] = {}
-        next_fallback_index = 0
-
-        for disp in topo_dict.get("displays", []):
-            if isinstance(disp, dict):
-                source_endpoint = disp.get("node_id", "")
-                display_id = disp.get("display_id", "")
-                binding_name = disp.get("display_name") or ""
-            else:
-                source_endpoint = getattr(disp, "node_id", "")
-                display_id = getattr(disp, "display_id", "")
-                binding_name = getattr(disp, "display_name", "") or ""
-
-            if not display_id:
-                continue
-
-            # Бокс на display_id (дедуп при fan-in)
-            if display_id not in boxes_by_display_id:
-                display_name = self._resolve_display_name(display_id) or binding_name
-                x, y = self._gui_positions.get(
-                    display_id,
-                    (600.0, 50.0 + next_fallback_index * 120.0),
-                )
-                next_fallback_index += 1
-                boxes_by_display_id[display_id] = DisplayNodeData(
-                    node_id=display_id,
-                    display_id=display_id,
-                    display_name=display_name,
-                    x=x,
-                    y=y,
-                )
-
-            # Binding-ребро source-плагин-нода → бокс (D.1: node=plugin).
-            if source_endpoint:
-                source_node = self._endpoint_to_node_id(source_endpoint, topo_dict)
-                edges.append(EdgeData(source_id=source_node, target_id=display_id))
-
-        # Task 1.1: дорисовать placed-but-unbound боксы — display_id, которые
-        # пользователь разместил через меню, но ещё не привязал проводом. Их нет
-        # в topo["displays"], поэтому без этого шага они исчезли бы при reload.
-        # Идём ПОСЛЕ построения из topo["displays"] и пропускаем уже существующие
-        # display_id (дедуп) — иначе после bind на scene было бы два бокса.
-        for display_id in self._placed_display_ids:
-            if display_id in boxes_by_display_id:
-                continue
-            x, y = self._gui_positions.get(display_id, (600.0, 50.0))
-            boxes_by_display_id[display_id] = DisplayNodeData(
-                node_id=display_id,
-                display_id=display_id,
-                display_name=self._resolve_display_name(display_id),
-                x=x,
-                y=y,
-            )
-
-        self._display_nodes_cache = list(boxes_by_display_id.values())
+        result = self._codec.topology_to_graph(topo_dict, view)
+        self._port_schemas_cache = result.port_schemas
+        self._display_nodes_cache = result.display_nodes
+        return result.nodes, result.edges
 
     def _resolve_display_name(self, display_id: str) -> str:
-        """Получить человекочитаемое имя канала из DisplayCatalog (best-effort)."""
-        try:
-            spec = self._services.displays.resolve(display_id)
-            if spec is not None:
-                return spec.display_name
-        except Exception:
-            logger.debug("Не удалось получить имя display '%s'", display_id, exc_info=True)
-        return ""
+        """Человекочитаемое имя канала из DisplayCatalog (делегат codec'а)."""
+        return self._codec.resolve_display_name(display_id)
 
     def _blueprint_to_graph(self, bp) -> tuple[list[NodeData], list[EdgeData]]:
         """Конвертировать SystemBlueprint в граф-данные."""
@@ -1681,8 +1402,12 @@ class PipelinePresenter:
             self._notify_status(f"Запуск рецепта: не удалось прочитать рецепт '{active_slug}'", level="error")
             return False
 
-        # Шаг 3: проверить наличие blueprint в рецепте
-        blueprint = current.get("blueprint") or current.get("data", {}).get("blueprint") or {}
+        # Шаг 3: проверить наличие blueprint в рецепте (SC-12: единая READ-точка
+        # recipe_io поверх backend.unwrap_recipe; поддержка v3 top-level и legacy
+        # data.blueprint без локальной or-цепочки разбора формата).
+        from .recipe_io import launch_topology_source, recipe_blueprint
+
+        blueprint = recipe_blueprint(current)
         if not blueprint:
             self._notify_status(f"Запуск рецепта: рецепт '{active_slug}' не содержит blueprint", level="warning")
             return False
@@ -1701,8 +1426,8 @@ class PipelinePresenter:
         # «выполняется…» в статусной строке (не модально, чтобы не блокировать UI).
         # Task 2.2 displays-in-recipe: если рецепт v3 (top-level blueprint) — передаём
         # ПОЛНЫЙ raw-dict, backend-овский unwrap_recipe извлечёт display_definitions.
-        # Иначе (v2 / plain topology) — только blueprint (backward compat).
-        topology_source = current if "blueprint" in current else blueprint
+        # Иначе (legacy v2) — только blueprint (backward compat). Выбор — в recipe_io.
+        topology_source = launch_topology_source(current)
         self._notify_status(f"Запуск рецепта '{active_slug}': выполняется…")
         try:
             proxy.apply_topology(

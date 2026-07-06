@@ -147,7 +147,7 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 | Task | Статус | Суть | Acceptance |
 |---|---|---|---|
 | F.1 | [x] | `graph/data.py` (NodeData/EdgeData/DisplayNodeData/PortSchema без Qt, ре-экспорт из node_item/edge_item/display_node_item/port_schema) + 21 характеризационный тест codec ДО разреза. Путь фактически `frontend/widgets/tabs/pipeline/` (дизайн-док писал `pipeline/`). prototype 2841 passed | тесты фиксируют текущее поведение ✅ |
-| F.2 | [ ] | `graph_codec.py` + `recipe_io.py` из presenter; recipe_io → `unwrap_recipe` (закрывает SC-12-остаток :1225) | характеризационные зелёные; grep or-цепочек в presenter = 0 |
+| F.2 | [x] | `graph_codec.py` (391 LOC, TopologyGraphCodec + GraphViewState/GraphBuildResult, Qt-free) + `recipe_io.py` (67 LOC, recipe_blueprint/launch_topology_source) из presenter; recipe_io → `unwrap_recipe` (закрыт SC-12-остаток: compute_active_recipe_diff + launch_active_recipe, поддержка legacy data.blueprint сохранена). presenter 1860→1585 LOC. prototype 2841 passed | характеризационные зелёные БЕЗ правок ожиданий; grep or-цепочек в presenter = 0 ✅ |
 | F.3 | [ ] | `wire_validation.py` + `runtime_control.py` | qt-smoke Pipeline |
 | F.4 | [ ] | `layout_controller.py` + `mutations.py`; presenter-core ≤ ~400 LOC | публичные методы/сигналы presenter не изменены |
 | F.5 | [ ] | `forms/factory.py` → пакет (kinds/builders_legacy/builders_binding/json_editor/реестр KindBuilders) + Н-5 (`_rm_old_value` helper ×3) | характеризационные тесты форм; qt-smoke inspector |
