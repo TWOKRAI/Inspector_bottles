@@ -35,7 +35,9 @@ from .graph.data import DisplayNodeData, EdgeData, NodeData, PortSchema
 from .graph_codec import GraphViewState, TopologyGraphCodec
 from .model import PipelineModel
 from .layout import auto_layout
+from .runtime_control import RuntimeController
 from .telemetry import WireMetricsModel
+from .wire_validation import validate_wire_ports
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -127,6 +129,16 @@ class PipelinePresenter:
 
         # Модель телеметрии wire-соединений (Task 7b.3)
         self._wire_metrics_model = WireMetricsModel()
+
+        # F.3: контроллер команд управления живым backend (launch/restart/control).
+        # Runtime-объекты (pm_proxy, recipes, model) стабильны за время жизни
+        # presenter — передаём их снимком; scene/позиций контроллер не касается.
+        self._runtime = RuntimeController(
+            pm_proxy=process_manager_proxy,
+            recipes=services.recipes,
+            model=self._model,
+            notify=notify,
+        )
 
         # Ленивый импорт TopologyPresenter (для load/save YAML)
         from multiprocess_prototype.frontend.widgets.topology.presenter import TopologyPresenter
@@ -787,144 +799,34 @@ class PipelinePresenter:
         target: str,
         parent: "QWidget | None" = None,
     ) -> bool:
-        """Проверить совместимость портов source и target перед созданием wire.
+        """Проверить совместимость портов + показать QMessageBox при отказе (делегат).
 
-        Task F.5: использует PluginCatalog Protocol (resolve -> PluginSpec.ports)
-        вместо raw _registry bridge. PortSpec конвертируется в framework Port
-        для проверки через are_ports_compatible.
-
-        Graceful degradation:
-        - PluginSpec не найден -> лог warning, вернуть True (legacy compat)
-        - Port не найден -> лог warning, вернуть True
-        - Display-цель -> использует wildcard Port(dtype="image/*")
+        F.3: чистая проверка совместимости вынесена в
+        :func:`wire_validation.validate_wire_ports` (Qt-free, заморожена
+        ``tests/test_wire_validation.py``). presenter отвечает только за GUI-реакцию:
+        на несовместимость поднимает QMessageBox с типами портов. Graceful
+        degradation (каталог/плагин/порт не найден) → ``ok=True`` → wire разрешён.
 
         Returns:
             True -- wire можно создать, False -- wire заблокирован.
         """
-        from multiprocess_framework.modules.process_module.plugins.port import (
-            Port,
-            are_ports_compatible,
+        result = validate_wire_ports(source, target, self._services.plugins)
+        if result.ok:
+            return True
+
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.warning(
+            parent,
+            "Несовместимые порты",
+            f"Невозможно соединить порты:\n"
+            f"  Источник: {source}\n"
+            f"  Тип: {result.src_dtype}\n\n"
+            f"  Приёмник: {target}\n"
+            f"  Тип: {result.tgt_dtype}\n\n"
+            f"Типы данных несовместимы.",
         )
-        from multiprocess_prototype.domain.protocols.plugin_catalog import PortSpec
-
-        catalog = self._services.plugins
-
-        def _find_port_spec(
-            plugin_name: str,
-            port_name: str,
-            direction: str,
-        ) -> "PortSpec | None":
-            """Найти PortSpec по имени плагина, порта и направлению."""
-            spec = catalog.resolve(plugin_name)
-            if spec is None:
-                return None
-            for ps in spec.ports:
-                if ps.name == port_name and ps.direction == direction:
-                    return ps
-            return None
-
-        def _portspec_to_port(ps: "PortSpec") -> Port:
-            """Сконструировать framework Port из domain PortSpec."""
-            return Port(
-                name=ps.name,
-                dtype=ps.dtype,
-                shape=ps.shape,
-                optional=ps.optional,
-            )
-
-        # Шаг 1: разобрать source endpoint -> (process, plugin, port)
-        src_parts = source.split(".")
-        if len(src_parts) < 3:
-            logger.debug("_validate_wire_ports: некорректный source endpoint '%s', пропуск", source)
-            return True
-
-        src_plugin_name = src_parts[1]
-        src_port_name = src_parts[2]
-
-        # Шаг 2: найти выходной порт источника через PluginCatalog Protocol
-        src_spec = catalog.resolve(src_plugin_name)
-        if src_spec is None:
-            logger.warning(
-                "_validate_wire_ports: плагин '%s' не найден в catalog (source=%s), пропуск",
-                src_plugin_name,
-                source,
-            )
-            return True
-
-        out_ps = _find_port_spec(src_plugin_name, src_port_name, "output")
-        if out_ps is None:
-            logger.warning(
-                "_validate_wire_ports: выходной порт '%s' не найден у плагина '%s', пропуск",
-                src_port_name,
-                src_plugin_name,
-            )
-            return True
-
-        out_port = _portspec_to_port(out_ps)
-
-        # Шаг 3: определить входной порт приёмника
-        tgt_parts = target.split(".")
-        is_display_target = tgt_parts[0] == "display"
-
-        if is_display_target:
-            # Display-узел принимает любой image-выход через wildcard
-            in_port = Port(name="frame", dtype="image/*", shape="")
-        else:
-            if len(tgt_parts) < 3:
-                logger.debug(
-                    "_validate_wire_ports: некорректный target endpoint '%s', пропуск",
-                    target,
-                )
-                return True
-
-            tgt_plugin_name = tgt_parts[1]
-            tgt_port_name = tgt_parts[2]
-
-            tgt_spec = catalog.resolve(tgt_plugin_name)
-            if tgt_spec is None:
-                logger.warning(
-                    "_validate_wire_ports: плагин '%s' не найден в catalog (target=%s), пропуск",
-                    tgt_plugin_name,
-                    target,
-                )
-                return True
-
-            in_ps = _find_port_spec(tgt_plugin_name, tgt_port_name, "input")
-            if in_ps is None:
-                logger.warning(
-                    "_validate_wire_ports: входной порт '%s' не найден у плагина '%s', пропуск",
-                    tgt_port_name,
-                    tgt_plugin_name,
-                )
-                return True
-
-            in_port = _portspec_to_port(in_ps)
-
-        # Шаг 4: проверить совместимость
-        ok = are_ports_compatible(out_port, in_port)
-        if not ok:
-            logger.warning(
-                "Несовместимые порты: %s (%s) -> %s (%s)",
-                source,
-                out_port.dtype,
-                target,
-                in_port.dtype,
-            )
-            from PySide6.QtWidgets import QMessageBox
-
-            QMessageBox.warning(
-                parent,
-                "Несовместимые порты",
-                f"Невозможно соединить порты:\n"
-                f"  Источник: {source}\n"
-                f"  Тип: {out_port.dtype}\n\n"
-                f"  Приёмник: {target}\n"
-                f"  Тип: {in_port.dtype}\n\n"
-                f"Типы данных несовместимы.",
-            )
-            return False
-
-        return True
+        return False
 
     def on_node_moved(self, node_id: str, new_x: float, new_y: float) -> None:
         """Обработчик свободного перемещения ноды (free-layout).
@@ -1358,218 +1260,23 @@ class PipelinePresenter:
         return True
 
     # ------------------------------------------------------------------ #
-    #  Запуск активного рецепта                                           #
+    #  Runtime-контроль живого backend (делегаты RuntimeController, F.3)   #
     # ------------------------------------------------------------------ #
+    # Логика вынесена в :class:`runtime_control.RuntimeController` (launch/
+    # restart/control + разбор PM-ответа + notify). presenter сохраняет
+    # публичные методы как тонкие делегаты — контракт вкладки не изменён.
 
     def launch_active_recipe(self, parent: "QWidget | None" = None) -> bool:
-        """Запустить активный рецепт через ProcessManager-proxy (request/response).
-
-        Получает blueprint из активного рецепта и вызывает
-        ``proxy.apply_topology(blueprint, on_result=...)`` — горячую замену
-        процессов с РЕАЛЬНЫМ результатом (command-result-bridge, Task 4.1).
-
-        В отличие от прежнего fire-and-forget (показывал «отправлено» без знания
-        факта): request исполняется на worker-потоке (UI не фризится), а реальный
-        ответ PM (``success``/``replaced``/``rolled_back``) приходит в
-        :meth:`_on_recipe_launch_result` в Qt main-thread и показывается
-        пользователю как успех (с числом заменённых процессов) или ошибка/rollback.
-
-        Task F.4: использует RecipeStore Protocol (services.recipes).
-
-        Args:
-            parent: родительский виджет для QMessageBox (может быть None).
-
-        Returns:
-            True если запрос отправлен в работу (результат придёт асинхронно в
-            ``_on_recipe_launch_result``); False при pre-flight ошибке (нет
-            активного рецепта / blueprint / proxy / ошибка отправки).
-
-        Note:
-            Feedback не-модальный: статус и результат идут в статусную строку
-            (``_notify``) и лог (терминал), без блокирующих QMessageBox.
-        """
-        store = self._services.recipes
-
-        # Шаг 1: проверить активный рецепт
-        active_slug = store.get_active()
-        if active_slug is None:
-            self._notify_status("Запуск рецепта: не выбран активный рецепт", level="warning")
-            return False
-
-        # Шаг 2: прочитать рецепт через RecipeStore Protocol
-        current = store.read_raw(active_slug)
-        if current is None:
-            self._notify_status(f"Запуск рецепта: не удалось прочитать рецепт '{active_slug}'", level="error")
-            return False
-
-        # Шаг 3: проверить наличие blueprint в рецепте (SC-12: единая READ-точка
-        # recipe_io поверх backend.unwrap_recipe; поддержка v3 top-level и legacy
-        # data.blueprint без локальной or-цепочки разбора формата).
-        from .recipe_io import launch_topology_source, recipe_blueprint
-
-        blueprint = recipe_blueprint(current)
-        if not blueprint:
-            self._notify_status(f"Запуск рецепта: рецепт '{active_slug}' не содержит blueprint", level="warning")
-            return False
-
-        # Шаг 4: ProcessManager-proxy с async request/response (Task 4.1: topology.apply).
-        proxy = self._pm_proxy
-        if proxy is None or not hasattr(proxy, "apply_topology"):
-            self._notify_status(
-                "Запуск рецепта: ProcessManager-proxy недоступен (система не запущена)",
-                level="warning",
-            )
-            return False
-
-        # Шаг 5: request/response — реальный результат придёт в on_result (main-thread),
-        # request исполняется на worker-потоке (UI не фризится). До ответа показываем
-        # «выполняется…» в статусной строке (не модально, чтобы не блокировать UI).
-        # Task 2.2 displays-in-recipe: если рецепт v3 (top-level blueprint) — передаём
-        # ПОЛНЫЙ raw-dict, backend-овский unwrap_recipe извлечёт display_definitions.
-        # Иначе (legacy v2) — только blueprint (backward compat). Выбор — в recipe_io.
-        topology_source = launch_topology_source(current)
-        self._notify_status(f"Запуск рецепта '{active_slug}': выполняется…")
-        try:
-            proxy.apply_topology(
-                topology_source,
-                on_result=lambda resp: self._on_recipe_launch_result(resp, active_slug),
-            )
-        except Exception as exc:
-            logger.exception("launch_active_recipe dispatch failed")
-            self._notify_status(f"Запуск рецепта '{active_slug}': ошибка отправки — {exc}", level="error")
-            return False
-        return True
-
-    def _on_recipe_launch_result(self, resp: dict, slug: str) -> None:
-        """Главный поток: показать реальный результат активации рецепта (P3).
-
-        Не-модально (статус-строка + лог). Форма ответа:
-        - полный PM-ответ ``{"success": bool, "result": {success, replaced,
-          rolled_back, error, ...}}`` (через ``router.request`` → reply PM);
-        - error/timeout-обёртка ``{"success": False, "error": "..."}`` (без
-          ``result``) — от RequestRunner/``request()``.
-
-        Приоритет вердикту самого PM (``result["success"]``); при его отсутствии —
-        транспортный ``success``.
-        """
-        resp = resp if isinstance(resp, dict) else {}
-        inner = resp.get("result")
-        inner = inner if isinstance(inner, dict) else {}
-        ok = bool(inner["success"]) if "success" in inner else bool(resp.get("success"))
-
-        if ok:
-            replaced = inner.get("replaced")
-            count = len(replaced) if isinstance(replaced, list) else replaced
-            detail = f"заменено процессов: {count}" if count is not None else "горячая замена применена"
-            self._notify_status(f"Рецепт '{slug}' запущен ({detail})")
-            return
-
-        # Ошибка / rollback
-        error = inner.get("error") or resp.get("error") or "неизвестная ошибка"
-        if inner.get("rolled_back"):
-            error = f"{error}; изменения откачены (rollback) — прежняя топология сохранена"
-        self._notify_status(f"Рецепт '{slug}': ошибка запуска — {error}", level="error")
-
-    # ------------------------------------------------------------------ #
-    #  Этап 1 pipeline-live-control — кнопки управления процессами         #
-    # ------------------------------------------------------------------ #
+        """Запустить активный рецепт через ProcessManager-proxy (делегат F.3)."""
+        return self._runtime.launch_active_recipe(parent)
 
     def restart_topology(self, parent: "QWidget | None" = None) -> bool:
-        """Применить ТЕКУЩИЙ граф редактора к живому backend (горячая замена).
-
-        В отличие от ``launch_active_recipe`` (берёт сохранённый рецепт) — берёт
-        in-memory модель редактора (``graph_to_blueprint``), тот же формат blueprint,
-        что принимает ``apply_topology`` (Task 4.1). Fire-and-forget IPC.
-
-        Сценарий: удалить ноду → «Перезапустить» → эффект ноды пропадает на дисплее.
-
-        Args:
-            parent: родитель для QMessageBox.
-
-        Returns:
-            True если команда отправлена, False при отсутствии proxy / ошибке.
-        """
-        from PySide6.QtWidgets import QMessageBox
-
-        from .io import graph_to_blueprint
-
-        proxy = self._pm_proxy
-        if proxy is None or not hasattr(proxy, "apply_topology"):
-            QMessageBox.warning(
-                parent,
-                "Перезапустить",
-                "ProcessManager-proxy недоступен.\nУправление возможно только при работающей системе.",
-            )
-            return False
-
-        bp_dict, _bindings, _gui_positions = graph_to_blueprint(self._model)
-        try:
-            result = proxy.apply_topology(bp_dict)
-            if result is not None and result.get("success", False):
-                self._notify_status("Команда перезапуска топологии отправлена в backend")
-                return True
-            QMessageBox.critical(
-                parent,
-                "Перезапустить",
-                f"Не удалось отправить команду: {(result or {}).get('error') or 'неизвестная ошибка'}",
-            )
-            return False
-        except Exception as exc:
-            logger.exception("restart_topology failed")
-            QMessageBox.critical(parent, "Перезапустить", f"Ошибка: {exc}")
-            return False
+        """Применить текущий граф редактора к живому backend (делегат F.3)."""
+        return self._runtime.restart_topology(parent)
 
     def control_process(self, action: str, process_name: str, parent: "QWidget | None" = None) -> bool:
-        """Управление одним процессом по имени (Task 1.2): start / stop / restart.
-
-        Args:
-            action: "start" | "stop" | "restart".
-            process_name: имя процесса (НЕ адрес — per-worker управление это Этап 3).
-            parent: родитель для QMessageBox.
-
-        Returns:
-            True если команда отправлена, False при отсутствии proxy / неизвестном action.
-        """
-        from PySide6.QtWidgets import QMessageBox
-
-        proxy = self._pm_proxy
-        method = {
-            "start": getattr(proxy, "start_process", None) if proxy else None,
-            "stop": getattr(proxy, "stop_process", None) if proxy else None,
-            "restart": getattr(proxy, "restart_process", None) if proxy else None,
-        }.get(action)
-
-        if proxy is None or method is None:
-            QMessageBox.warning(
-                parent,
-                "Управление процессом",
-                "ProcessManager-proxy недоступен или действие не поддержано.",
-            )
-            return False
-        if not process_name:
-            QMessageBox.warning(parent, "Управление процессом", "Не выбран процесс")
-            return False
-
-        try:
-            method(process_name)
-            labels = {"start": "запуск", "stop": "остановка", "restart": "перезапуск"}
-            self._notify_status(f"Команда '{labels[action]}' процесса '{process_name}' отправлена")
-            return True
-        except Exception as exc:
-            logger.exception("control_process(%s, %s) failed", action, process_name)
-            QMessageBox.critical(parent, "Управление процессом", f"Ошибка: {exc}")
-            return False
-
-    def _notify_status(self, message: str, *, level: str = "info") -> None:
-        """Показать статус через notify-callback (statusBar) + лог в терминал.
-
-        Не-модально: вместо блокирующих QMessageBox результат команды виден в
-        статусной строке и в логе (терминал). ``level`` — уровень логгера
-        ("info"/"warning"/"error").
-        """
-        getattr(logger, level, logger.info)(message)
-        if self._notify is not None:
-            self._notify(message)
+        """Start / stop / restart процесса по имени (делегат F.3)."""
+        return self._runtime.control_process(action, process_name, parent)
 
     # ------------------------------------------------------------------ #
     #  Legacy API compatibility                                            #
