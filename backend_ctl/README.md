@@ -98,6 +98,33 @@ with BackendDriver(port=8765) as drv:
         print(evt["command"], evt["data"])
 ```
 
+## Тесты и headless-harness (Ф1 Task 1.3)
+
+`backend_ctl/harness.py::BackendHarness` — pytest-инструмент headless-запуска прототипа
+**без GUI** с гарантированным teardown (никаких висящих процессов — урок Ф0.4):
+
+- **Честный headless:** процесс презентации (`gui`) исключается из топологии функцией
+  `strip_gui()` ДО сборки `SystemBuilder` — Qt/LoginDialog не спавнится. Прод-код не
+  трогается: harness собирает launcher из тех же публичных помощников прототипа.
+- **Гарантированный teardown:** `stop()` зовёт `launcher.shutdown()` в watchdog-потоке с
+  таймаутом и добивает поддерево **своего** оркестратора (scoped по pid — чужой бэкенд не
+  трогает). Переживает зависший shutdown.
+
+```bash
+python -m pytest backend_ctl -m harness_smoke   # live: старт → introspect → стоп (<30с)
+python -m pytest backend_ctl -q                 # весь модуль (быстрые + harness)
+```
+
+Фикстура `headless_backend` (session-scope, `backend_ctl/tests/conftest.py`) отдаёт
+подключённый `BackendDriver` к headless-системе.
+
+> **Известное ограничение (регресс 1.1, xfail):** `state_subscribe(...)` → push
+> `state.changed` **НЕ доходит** до внешнего сокет-driver'а. DeltaDispatcher адресует push
+> `targets=[subscriber]`+`queue_type="system"` → доставка в очередь `{subscriber}_system`
+> через `queue_registry`; `backend_ctl` — не процесс системы, такой очереди нет, а
+> `SocketChannel` вызывается только через `channel=`-резолв. Фикс — на уровне
+> PM/DeltaDispatcher (вне scope 1.2/1.3). Тест помечен `xfail`.
+
 ## Proof of value (сценарий Этапа 2)
 
 ```python

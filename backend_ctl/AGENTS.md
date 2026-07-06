@@ -93,6 +93,23 @@ h = drv.introspect_handlers("preprocessor")
 # приёмника: GUI/driver шлёт, но никто не читает. Диагноз без GUI.
 ```
 
+## Тесты против живого бэкенда (headless)
+
+Нужен живой бэкенд в тесте — используй `BackendHarness` (headless, без GUI, с
+гарантированным teardown), не поднимай прототип вручную:
+
+```python
+from backend_ctl.harness import BackendHarness
+with BackendHarness(with_base=True) as drv:      # старт → driver → гарантированный стоп
+    print(drv.worker_status("preprocessor").status)
+```
+
+Или фикстура `headless_backend`. Прогон: `python -m pytest backend_ctl -m harness_smoke`.
+
+> Регресс 1.1 (xfail): push `state.changed` через `state_subscribe` НЕ доходит до
+> внешнего сокет-driver'а (адресуется `targets=[subscriber]`+`queue_type=system` →
+> очередь `{subscriber}_system`, которой у сокет-клиента нет). Фикс — на уровне PM.
+
 ## Подводные камни
 
 - **`request()` нельзя звать из приёмного потока бэкенда** (дедлок, контракт P0.5). Агенту

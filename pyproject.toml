@@ -118,6 +118,12 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = [
+    # Live-тесты против headless-бэкенда (BackendHarness, Ф1 Task 1.3): поднимают систему
+    # прототипа. НЕ в testpaths (дефолтный прогон их не собирает) — запуск явным путём:
+    #   python -m pytest backend_ctl -m harness_smoke
+    "harness_smoke: live-тесты, поднимающие headless-бэкенд прототипа через BackendHarness",
+]
 filterwarnings = [
     # Task F.7 (Phase F / cross-tab): forcing-функция против регрессии. Прямой
     # ctx.extras[...]/get() с мигрированным ключом из потребителя (презентер/таб) валит тест
