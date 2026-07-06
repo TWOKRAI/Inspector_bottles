@@ -75,20 +75,14 @@ def test_harness_smoke_start_status_stop() -> None:
 
 
 @pytest.mark.harness_smoke
-@pytest.mark.xfail(
-    reason=(
-        "state.changed НЕ доходит до внешнего сокет-driver'а. DeltaDispatcher шлёт push с "
-        "targets=[subscriber], queue_type='system' → RouterManager._deliver_by_targets кладёт "
-        "его в очередь '{subscriber}_system' через queue_registry. backend_ctl — не процесс "
-        "системы, очереди 'backend_ctl_system' нет, SocketChannel вызывается ТОЛЬКО через "
-        "channel=-резолв (не targets=/queue_type) → push дропается, до events() не доходит. "
-        "Фикс (маршрут push'а в сокет для внешних подписчиков) — на уровне PM/DeltaDispatcher, "
-        "вне scope 1.2/1.3 (НЕ хакать driver). Вход для решения на уровне TeamLead."
-    ),
-    strict=False,
-)
 def test_state_changed_push_reaches_driver_regression() -> None:
-    """Регресс 1.1: живой бэкенд, state_subscribe('**') → set_register → push в events()."""
+    """Регресс 1.1 (закрыт Ф1.1b): живой бэкенд, state_subscribe('**') → set_register → push в events().
+
+    Мост push→SocketChannel (RouterManager._deliver_by_targets): DeltaDispatcher шлёт
+    state.changed с targets=['backend_ctl'] + queue_type='system'; очереди
+    'backend_ctl_system' нет (backend_ctl не процесс), но зарегистрирован SocketChannel
+    'backend_ctl' → доставка идёт через канал во внешний driver. Раньше — silent drop.
+    """
     harness = BackendHarness(with_base=True, port=8767)
     try:
         drv = harness.start()

@@ -997,6 +997,99 @@ class TestTargetAwareDeliveryFallback(unittest.TestCase):
         self.assertEqual(result.get("status"), "error")
 
 
+class _NoQueueRegistry:
+    """queue_registry без очередей для целевых имён (мост push→канал, Ф1.1b).
+
+    Моделирует «адресную книгу» оркестратора, в которой у части имён (внешние
+    подписчики — не процессы) очередей нет: `get_queue` → None, `send_to_queue`
+    → False. Имена из `present` считаются реальными процессами (очередь есть).
+    """
+
+    def __init__(self, present: tuple = ()) -> None:
+        self._present = set(present)
+        self.sent: list = []
+
+    def get_queue(self, process, qtype):
+        return object() if process in self._present else None
+
+    def send_to_queue(self, process, qtype, msg) -> bool:
+        if process in self._present:
+            self.sent.append((process, qtype, msg))
+            return True
+        return False  # очереди нет — как реальный QueueRegistry для не-процесса
+
+
+class TestChannelBridgeFallback(unittest.TestCase):
+    """Ф1.1b: target без очереди, но с зарегистрированным каналом того же имени →
+    доставка через канал (мост push→SocketChannel для внешних подписчиков)."""
+
+    def test_target_without_queue_but_with_channel_delivered_via_channel(self):
+        qr = _NoQueueRegistry()  # ни одной очереди
+        router = RouterManager(manager_name="r_br1", queue_registry=qr)
+        ch, q = _make_channel("backend_ctl")
+        router.register_channel(ch)
+
+        result = router.send(
+            {
+                "type": "event",
+                "command": "state.changed",
+                "targets": ["backend_ctl"],
+                "queue_type": "system",
+                "data": {"deltas": []},
+            }
+        )
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(result.get("delivered_by_targets"), 1)
+        # доставлено именно в канал, очередь не тронута
+        self.assertFalse(q.empty())
+        self.assertEqual(len(qr.sent), 0)
+        delivered = q.get_nowait()
+        self.assertEqual(delivered.get("command"), "state.changed")
+
+    def test_target_without_queue_and_without_channel_keeps_error(self):
+        # прежнее поведение: нет очереди И нет канала → ошибка (silent-drop не маскируем)
+        qr = _NoQueueRegistry()
+        router = RouterManager(manager_name="r_br2", queue_registry=qr)
+        result = router.send(
+            {"type": "event", "command": "state.changed", "targets": ["ghost"], "queue_type": "system"}
+        )
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(len(qr.sent), 0)
+
+    def test_existing_process_queue_not_hijacked_by_channel(self):
+        # Безопасность: у процесса ЕСТЬ очередь → доставка в очередь, даже если
+        # (гипотетически) есть канал с тем же именем. Легитимный путь не перехватываем.
+        qr = _NoQueueRegistry(present=("worker_a",))
+        router = RouterManager(manager_name="r_br3", queue_registry=qr)
+        ch, q = _make_channel("worker_a")
+        router.register_channel(ch)
+
+        result = router.send(
+            {"type": "command", "command": "do.thing", "targets": ["worker_a"]}
+        )
+        self.assertEqual(result.get("status"), "success")
+        # доставлено в очередь, канал НЕ тронут
+        self.assertEqual(len(qr.sent), 1)
+        self.assertEqual(qr.sent[0][0], "worker_a")
+        self.assertTrue(q.empty())
+
+    def test_channel_without_clients_reports_no_delivery(self):
+        # SocketChannel-подобный канал без получателя → status='error' → билет не
+        # доставлен (delivered=0), пуш без подписчика не копится (как раньше).
+        class _NoClientChannel(QueueChannel):
+            def send(self, message):
+                return {"status": "error", "reason": "no clients connected", "channel": self.name}
+
+        qr = _NoQueueRegistry()
+        router = RouterManager(manager_name="r_br4", queue_registry=qr)
+        router.register_channel(_NoClientChannel("backend_ctl", Queue()))
+
+        result = router.send(
+            {"type": "event", "command": "state.changed", "targets": ["backend_ctl"], "queue_type": "system"}
+        )
+        self.assertEqual(result.get("status"), "error")
+
+
 class TestHierarchicalDelivery(unittest.TestCase):
     """P2.1: cross-process доставка по address[0]; воркер+ едет в билете (_address)."""
 

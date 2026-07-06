@@ -318,6 +318,24 @@ class RouterManager(ChannelRoutingManager):
             # len==1 (плоское имя) → исходный билет без копии (паритет, горячий путь).
             # Иначе — per-target копия с полным address (воркер+ резолвится на приёме).
             ticket = msg_dict if len(address) == 1 else {**msg_dict, "_address": address}
+
+            # Ф1.1b (мост push→канал для внешних подписчиков): если у имени НЕТ очереди
+            # процесса, но зарегистрирован IMessageChannel с тем же именем (внешний
+            # подписчик — напр. SocketChannel 'backend_ctl' driver'а), доставляем push
+            # через этот канал. Раньше такой билет молча дропался: targets=[X] +
+            # queue_type='system' искал очередь 'X_system', которой у не-процесса нет,
+            # а SocketChannel зовётся только через channel=-резолв.
+            # Строго аддитивно: у реальных процессов канала с bare-именем не бывает
+            # (каналы Router: system_events, {proc}_data/_local — с суффиксами), поэтому
+            # `get(process)` для них → None и путь очереди НЕ меняется ни на бит. Гейт на
+            # отсутствие очереди (`_queue_absent`) исключает перехват легитимного drop'а
+            # у существующего процесса (переполнение очереди → прежнее поведение).
+            channel = self._channel_registry.get(process)
+            if channel is not None and self._queue_absent(process, qtype):
+                if self._deliver_via_channel(channel, process, ticket):
+                    delivered += 1
+                continue
+
             try:
                 if qr.send_to_queue(process, qtype, ticket):
                     delivered += 1
@@ -328,6 +346,52 @@ class RouterManager(ChannelRoutingManager):
             self._inc_stat("sent_ok")
             return {"status": "success", "delivered_by_targets": delivered}
         return None
+
+    def _queue_absent(self, process: str, qtype: str) -> bool:
+        """True, если у процесса нет очереди `(process, qtype)` в queue_registry.
+
+        Гейт моста push→канал (Ф1.1b): fallback на канал разрешён ТОЛЬКО когда
+        очереди действительно нет (dropped-путь). Так канал не перехватывает
+        легитимный сбой доставки в очередь существующего процесса (переполнение),
+        а лишь спасает пуш адресату-не-процессу (внешний сокет-подписчик).
+
+        Если реестр не умеет отвечать (нет метода `get_queue`), подтвердить
+        наличие очереди нельзя — тогда единственным гейтом остаётся сам факт
+        наличия канала (его bare-имя с процессами не пересекается).
+        """
+        get_queue = getattr(self.queue_registry, "get_queue", None)
+        if get_queue is None:
+            return True
+        try:
+            return get_queue(process, qtype) is None
+        except Exception as exc:  # noqa: BLE001 — реестр не должен ронять доставку
+            self._log_debug(f"_queue_absent('{process}', '{qtype}'): get_queue error: {exc}")
+            return True
+
+    def _deliver_via_channel(
+        self, channel: IMessageChannel, process: str, ticket: Dict[str, Any]
+    ) -> bool:
+        """Доставить билет через зарегистрированный канал (мост push→канал, Ф1.1b).
+
+        Возвращает True при успехе. `channel.send` сам решает, есть ли получатель:
+        напр. SocketChannel вернёт `status='error'` (`no clients connected`), если
+        внешний driver не подключён — тогда билет тихо не доставлен, как и раньше
+        при отсутствии очереди (пуш без подписчика не копится).
+        """
+        try:
+            result = channel.send(ticket)
+        except Exception as exc:  # noqa: BLE001 — граница канала не должна ронять доставку
+            self._log_debug(f"_deliver_by_targets: канал '{process}'.send бросил {exc!r}")
+            return False
+        if isinstance(result, dict) and result.get("status") == "error":
+            self._log_debug(
+                f"_deliver_by_targets: канал '{process}' не доставил: {result.get('reason')!r}"
+            )
+            return False
+        self._log_debug(
+            f"_deliver_by_targets: доставлено через канал '{process}' (мост push→канал, Ф1.1b)"
+        )
+        return True
 
     # ================================================================
     # REQUEST-RESPONSE (P0.5) — синхронный round-trip поверх fire-and-forget
