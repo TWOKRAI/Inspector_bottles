@@ -1,21 +1,30 @@
 # Очередь планов
 
-> Снимок на **2026-07-06**. Закрытые/устаревшие планы — в [`_archive/`](_archive/).
-> Статусы сверены с [`master-rework-roadmap.md`](master-rework-roadmap.md) (синтез 2026-06-18) и
-> [`2026-07-03_review-and-constructor-plan.md`](2026-07-03_review-and-constructor-plan.md) (текущий
-> живой роадмап, волны A-G) — где они расходятся со старыми header'ами планов, доверяем синтезу.
+> Снимок на **2026-07-06** (обновлён в Ф0.6 constructor-master). Закрытые/устаревшие планы — в [`_archive/`](_archive/).
 
 ---
 
-## 🧭 Живые синтез-документы (не планы, а координация)
+## 🧭 GOVERNING: constructor-master
+
+**Действующий мастер-план:** [`2026-07-06_constructor-master/plan.md`](2026-07-06_constructor-master/plan.md)
+(фазы Ф0-Ф8 + трек F; исполнение начато 2026-07-06, ветка `fix/constructor-f0`).
+Он поглощает и упорядочивает: волны C-G роадмапа, god-split (трек F), recipe-orchestrator
+Phase 5 (Ф5.3), pipeline-live-control Этап 3 (Ф3.10/G.8), kind-каналы (Ф7), carve E (Ф5),
+app_module «рыба» ([app-template-idea.md](2026-07-06_constructor-master/app-template-idea.md)).
+
+Прежние синтез-документы — теперь **исторический контекст** (сверяться при конфликте статусов,
+но governing — constructor-master):
 
 | Документ | Роль |
 |----------|------|
-| [master-rework-roadmap](master-rework-roadmap.md) | Синтез 6 измерений + adversarial-вердикты (2026-06-18). Порядок волн A-G. |
-| [2026-07-03_review-and-constructor-plan](2026-07-03_review-and-constructor-plan.md) | Текущий governing-роадмап (сверка 2026-07-03) — актуальнее master-rework на статусах. |
-| [2026-07-03_god-split-design](2026-07-03_god-split-design.md) | Дизайн волны F (разбиение god-файлов presenter/factory/inspector_panel) — **НЕ начато**. |
+| [2026-07-06_constructor-master](2026-07-06_constructor-master/plan.md) | **GOVERNING** — фазы Ф0-Ф8, gates G0-G4, метрики приёмки |
+| [master-rework-roadmap](master-rework-roadmap.md) | Синтез 6 измерений (2026-06-18); K-таблица §6 — источник вердиктов G0 |
+| [2026-07-03_review-and-constructor-plan](2026-07-03_review-and-constructor-plan.md) | Прежний governing (волны A-G) — поглощён constructor-master |
+| [2026-07-03_god-split-design](2026-07-03_god-split-design.md) | Дизайн трека F — исполняется внутри constructor-master |
 
-**Незакрытая находка:** [`docs/audits/2026-07-04_arch-advice-constructor-2026.md`](../docs/audits/2026-07-04_arch-advice-constructor-2026.md) — Fable-ревью «конструктор 2026», 52 рекомендации P0-P4 (seqlock/QoS hot-path, Supervisor v2, контракты вместо конвенций). **Ни один план на него не ссылается** — P0-пункты (torn-frame, тихий drop команд под QoS) не затрёкены ни в одной волне. Требует triage в план при следующей волне.
+**Аудит затрёкен:** [`docs/audits/2026-07-04_arch-advice-constructor-2026.md`](../docs/audits/2026-07-04_arch-advice-constructor-2026.md)
+(52 рекомендации P0-P4) — triage в [`2026-07-06_constructor-master/audit-triage.md`](2026-07-06_constructor-master/audit-triage.md)
+(Ф0.6): каждая рекомендация → фаза/gate/отклонено-с-причиной. Дыра «ни один план не ссылается» закрыта.
 
 ---
 

@@ -55,10 +55,45 @@
 | 0.2 | [x] | Починить 3 красных теста (`test_observability_hot_reload` ×2, `test_assembler::test_custom_log_dir_parity`). Причины: env-дрейф (watchdog не в .venv) + хардкод `/var/log/inspector` в тесте (mkdir требует root) | pytest: 0 красных (fw 3401 + proto 2820) | M |
 | 0.3 | [x] | sentrux `session_start` baseline (modularity 5652 / quality 7174 — совпали с ожиданием); **min_depth**: временно порог 0.65→0.60 в `.sentrux/rules.toml` с комментом «вернуть в Ф8» | `baseline.md`; sentrux-check зелёный (9 правил, 0 нарушений) | S |
 | 0.4 | [x] | FPS/CPU baseline: headless-probe снят (boot ~1с, CPU ~24%); FPS обоих рецептов — hardware-gated (нет телефона/Hikvision). Бонус-находки: env-дрейф `[ml]` extras, shutdown-hang 8+ мин (gui/LoginDialog), BACKEND_CTL≠headless → входы для Ф1.3/Ф2/Ф3 | числа в `baseline.md` | S |
-| 0.5 | [ ] | **GATE G0** (бумажный, per-item решения владельца): ярусы core-8/optional/frozen + вердикты по мёртвому весу — chain_module (реком. freeze), dispatch beyond-EXACT_MATCH (freeze), console (freeze), data_schema-мертвецы (kill в Ф8), frontend-флагман (связать с G2/E4), K3-K9. НИЧЕГО не удалять — только вердикты. Правило: Ф4-манифесты пишутся только ярусам core/optional | таблица вердиктов здесь, в plan.md | S |
-| 0.6 | [ ] | Доки: QUEUE.md → governing этот план; триаж-таблица 52 рекомендаций аудита → phase-разметка | QUEUE актуален, аудит затрёкен | S |
+| 0.5 | [~] | **GATE G0**: таблица вердиктов ПОДГОТОВЛЕНА (см. ниже, секция «GATE G0») — ярусная карта (факт: core-15, не core-8) + 13 per-item рекомендаций. НИЧЕГО не удалено. **Ждёт галочек владельца** — единственный блокер закрытия Ф0 | таблица вердиктов здесь, в plan.md | S |
+| 0.6 | [x] | Доки: QUEUE.md → governing этот план; триаж аудита → [`audit-triage.md`](audit-triage.md) (18 fw + 8 proto позиций: 21 → задачи фаз, 5 → defer/вне скоупа с причиной) | QUEUE актуален, аудит затрёкен | S |
 
 Риск/откат: merge тривиален (ветка строго впереди); 0.2 может оказаться глубже — таймбокс + эскалация, xfail только решением владельца.
+
+### GATE G0 — таблица вердиктов (подготовлено 2026-07-06; ждёт per-item решений владельца)
+
+**А. Ярусная карта (рекомендация).** Честное ядро вышло 15 модулей, а не «core-8» аудита —
+CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_schema-ядро транзитивно
+обязательны для любого процесса; за цифрой 8 не гонимся:
+
+| Ярус | Модули | Критерий |
+|---|---|---|
+| **core (15)** | base_manager, message, router, channel_routing, dispatch (ядро EXACT_MATCH), logger, error, statistics, command, config, data_schema (ядро SchemaBase/FieldMeta/DataConverter), process, process_manager, worker, shared_resources | без них не бутится ни одно приложение; покрывает транзитивные зависимости app_module («рыбы», см. app-template-idea.md) |
+| **optional** | state_store, registers, display, service, frontend (внутренности: tabs/forms/bridge/components/graph) | подключаются по потребности приложения |
+| **frozen (кандидаты, см. Б)** | chain_module; фичи: console God-Mode, dispatch beyond-EXACT_MATCH, frontend-флагман | код не трогаем; ярус + sentrux-boundary + пометка в доках |
+| — сверка H.1 | actions_module, event_module, sql_module-шим отсутствуют в MODULES_STATUS (дрейф «20/21/22») | закрывается Ф8 H.1 |
+
+Правило Ф4: манифесты/контракты пишутся только ярусам core/optional.
+
+**Б. Вердикты по мёртвому весу (рекомендации; исполнение — ТОЛЬКО Ф8 H.2/G4, отдельными одобренными коммитами):**
+
+| # | Кандидат | Объём | Рекомендация | Обоснование (analysis.md §7/§10) | Решение владельца |
+|---|---|---|---|---|---|
+| 1 | `chain_module` | 1610 LOC + 77 тестов | **FREEZE** (ярус frozen; снять «флагман» из витрины CONSTRUCTOR_BLUEPRINT) | 0 потребителей; вариант «сделать DAG-движком PipelineExecutor» — отложить до 2-го потребителя (анти-карго-культ §9) | ⬜ |
+| 2 | dispatch beyond-EXACT_MATCH (PATTERN/FALLBACK/CHAIN/ScenarioBuilder) | часть 3447 LOC | **FREEZE фич**, модуль остаётся core | модуль живой (база router/command/CRM), но 0 прод-вызовов не-EXACT_MATCH | ⬜ |
+| 3 | `console_module` God-Mode | часть 2877 LOC | **FREEZE только интерактивной фичи** | §10: ConsoleManager создаётся в КАЖДОМ процессе — модуль НЕ трогать | ⬜ |
+| 4 | data_schema-мертвецы: dna_factory, version_manager, schema_visualizer, storage_manager (+DataSchemaAdapter) | ~2118 LOC | **KILL в Ф8** | 0 потребителей; storage_manager мёртв транзитивно | ⬜ |
+| 5 | frontend-флагман: FrontendManager / WidgetRegistry / LayoutComposer | часть 12039 LOC | FrontendManager+LayoutComposer **FREEZE**; WidgetRegistry (7d) — **KILL после G2** (E4) | флагман мёртв, внутренности — основа прототипа; legacy factory (7a) ЖИВОЙ прод-путь — НЕ кандидат | ⬜ |
+| 6 | K3 `apply_topology_diff` + K5 `connect_wire` | ~133 LOC | **KILL в Ф8**; `disconnect_wire` ОСТАВИТЬ (K5-warn), K5b/K8b НЕ трогать | CONFIRMED dead / dead-chain | ⬜ |
+| 7 | K4 `hot_add_process` | ~24 LOC | **KILL в Ф8** | CONFIRMED dead | ⬜ |
+| 8 | K6 `CommandPanel`, K7 `ProcessStatusWidget` | 117 LOC | **KILL в Ф8** (K7 — предварительно догрепнуть test_bridge.py:87,105) | CONFIRMED dead (test-only) | ⬜ |
+| 9 | K8 `TopologyEditorWidget` + дети | ~722 LOC | **KILL в Ф8** | CONFIRMED dead; изолированный под-граф, заметный +modularity | ⬜ |
+| 10 | K9 `Services/Operation_crop` | 858 LOC | **KILL в Ф8** | CONFIRMED dead; крупнейший +modularity | ⬜ |
+| 11 | K1 прототип-проводка ActionBus (`_legacy_action_bus` + `frontend/actions/`) | — | **KILL в Ф8**; K2 `bus.py` — ОСТАВИТЬ (решение 2026-06-18, patch-tier) | re-scan: 0 потребителей (no-op-guard) | ⬜ |
+| 12 | K10 TRACE в FrameShmMiddleware | ~15 LOC | в **Ф7 G.1** (hot-path, не Ф8; qt-smoke + FPS-проверка) | уже в плане G.1 | ⬜ |
+| 13 | ULTRACODE_BACKLOG.md | док | архивировать | источники закрыты | ⬜ |
+
+Суммарно KILL-объём ≈ 4 000 LOC (owner-decides per-item). FREEZE = ноль правок кода сейчас.
 
 ## Ф1 — backend_ctl v2 (рано — по директиве владельца, ~3 дня)
 
