@@ -1,0 +1,5 @@
+{
+  "name": "hello-world",
+  "version": "0.1.0",
+  "description": "Toy plugin for native Anthropic format validation (Phase 0 of plugin-architecture migration)"
+}

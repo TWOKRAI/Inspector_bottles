@@ -1,0 +1,113 @@
+# rules.layered.toml — sentrux archetype: classic layered (n-tier) architecture
+#
+# WHAT THIS ARCHETYPE ASSUMES
+#   The traditional top-down stack where each layer depends only on the one(s)
+#   beneath it and `infrastructure` is the shared foundation:
+#
+#       presentation  ->  application  ->  domain  ->  infrastructure
+#       (top)                                          (foundation)
+#
+#   "->" means "is allowed to import". Higher layers use lower ones; a lower layer
+#   never reaches up. This is the n-tier style where infrastructure (persistence,
+#   external clients, framework glue) sits at the BOTTOM and everyone may use it.
+#
+#   If you instead want a domain-centric design where infrastructure depends on
+#   the domain (dependency inversion / clean / onion), use the `hexagonal`
+#   archetype — there `domain` is the centre and `adapters` point inward to it.
+#
+# ★ WHAT'S ACTIVE OUT OF THE BOX ★
+#   Opt-in archetype — `claude-kit-project new` auto-deploys `src-package` by default; switch
+#   to this one with `cp` (see README) and replace `your_package` by hand. Active
+#   from day one: `max_cycles` and `no_god_files` — both green on clean code. The
+#   [[boundaries]] block at the bottom ships COMMENTED on purpose (see ★ ENABLE
+#   BOUNDARIES ★).
+#
+# ★ ENABLE BOUNDARIES (the architecture gate) ★
+#   The [[boundaries]] below enforce the dependency direction, but they ship
+#   commented out: a fresh project has no layer folders yet, and an ACTIVE boundary
+#   that matches nothing passes silently — giving a false sense that the
+#   architecture is gated when it enforces zero. Uncomment the block once your
+#   `src/<pkg>/{infrastructure,domain,application,presentation}` folders exist
+#   (rename the layers to match yours if they differ). Then prove it bites: add a
+#   deliberate upward import, confirm `sentrux check` exits 1, remove it.
+#
+# ★ PATHS ARE LITERAL — NOT GLOBS ★
+#   sentrux matches boundary paths as LITERAL directory prefixes — `*` globs a
+#   filename only, it does NOT span directories, so `src/*/domain` or
+#   `src/*/domain/*` silently match nothing. Always use the plain dir path
+#   `src/<pkg>/<layer>` (no trailing slash); it matches that directory recursively
+#   without bleeding into siblings. For multiple packages under src/, duplicate the
+#   [[boundaries]] block per package (paths are literal — each package needs its own).
+#
+# ★ SENTRUX 0.5.7 BLIND SPOTS (an uncommented boundary silently passes these) ★
+#   - RELATIVE imports are NOT resolved: `from ..domain import x` bypasses the gate.
+#     Use ABSOLUTE imports (`from your_package.domain import x`) in gated layers.
+#   - A FLAT module `src/<pkg>/<layer>.py` is NOT matched by the dir-style path
+#     `src/<pkg>/<layer>` — keep layers as sub-packages (`src/<pkg>/<layer>/`), or
+#     add the `.py` suffix to the boundary path for a flat layer.
+#
+#   Switch archetype (src-package / hexagonal):
+#     cp .claude/plugins/mcp-sentrux/templates/rules.hexagonal.toml .sentrux/rules.toml
+#     sentrux check          # exit 0 = clean, 1 = violation
+#
+# Rule reference: .claude/plugins/mcp-sentrux/rules.template.toml + README.md
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Quality gates (scores normalised 0.0–1.0). The metric minimums are COMMENTED OUT
+# by default: a brand-new/small codebase legitimately scores below them with zero
+# real violations, which would paint a fresh project red on day one. Uncomment and
+# raise them as the codebase matures. `max_cycles` and `no_god_files` stay active —
+# both are green on clean code and catch real problems from day one. NOTE: sentrux
+# has no "max file LOC" or "max cyclomatic" knob; per-function size belongs in a
+# pre-commit hook (radon/ruff), not here.
+# ──────────────────────────────────────────────────────────────────────────────
+
+[constraints]
+# min_quality    = 0.50   # uncomment + tune up (toward 0.70+) as the codebase stabilises
+# min_modularity = 0.40
+# min_acyclicity = 0.40
+# min_depth      = 0.50
+# min_equality   = 0.50
+# min_redundancy = 0.70
+max_cycles   = 0       # no import cycles allowed — green on clean code
+no_god_files = true    # flag oversized "knows-everything" modules
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Boundaries (deny upward imports) — UNCOMMENT to enforce the architecture.
+# Shipped commented so a fresh project stays green AND you never get a false sense
+# of enforcement before the layer folders exist (an active no-match boundary passes
+# silently). sentrux checks DIRECT import edges, so every lower->higher pair needs
+# its own entry, including skip-level ones (infrastructure -> presentation).
+# `reason` is required. The package name is already filled in — just remove the
+# leading "# " once the folders exist.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# [[boundaries]]
+# from   = "src/your_package/infrastructure"
+# to     = "src/your_package/domain"
+# reason = "infrastructure is the foundation — it must not depend on the domain"
+#
+# [[boundaries]]
+# from   = "src/your_package/infrastructure"
+# to     = "src/your_package/application"
+# reason = "infrastructure must not depend on the application layer"
+#
+# [[boundaries]]
+# from   = "src/your_package/infrastructure"
+# to     = "src/your_package/presentation"
+# reason = "infrastructure must not depend on presentation"
+#
+# [[boundaries]]
+# from   = "src/your_package/domain"
+# to     = "src/your_package/application"
+# reason = "domain logic must not depend on the application layer"
+#
+# [[boundaries]]
+# from   = "src/your_package/domain"
+# to     = "src/your_package/presentation"
+# reason = "domain logic must not depend on presentation"
+#
+# [[boundaries]]
+# from   = "src/your_package/application"
+# to     = "src/your_package/presentation"
+# reason = "application must not depend on presentation"

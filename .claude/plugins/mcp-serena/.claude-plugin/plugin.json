@@ -1,0 +1,11 @@
+{
+  "name": "mcp-serena",
+  "version": "0.4.0",
+  "description": "LSP-based symbol operations (find_symbol, rename, ...)",
+  "mcpServers": {
+    "serena": {
+      "command": "uvx",
+      "args": ["--from", "serena-agent", "serena", "start-mcp-server", "--context", "claude-code", "--project", "."]
+    }
+  }
+}

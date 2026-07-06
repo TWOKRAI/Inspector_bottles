@@ -1,0 +1,110 @@
+# rules.src-package.toml — sentrux archetype: src-layout package (seed default)
+#
+# WHAT THIS ARCHETYPE ASSUMES
+#   A single `src/<package>/` package split into conventional sub-packages that
+#   form a top-down dependency chain:
+#
+#       cli  ->  services  ->  core  ->  utils
+#       (entrypoint)                     (foundation)
+#
+#   "->" means "is allowed to import". Higher layers import lower ones; a lower
+#   layer must never import a higher one. `utils` is the foundation (pure helpers,
+#   no intra-package deps); `cli` is the entrypoint and may reach anything below.
+#   Tests live OUTSIDE these rules on purpose — only production code is gated.
+#
+# ★ WHAT'S ACTIVE OUT OF THE BOX ★
+#   `claude-kit-project new` deploys this archetype to `.sentrux/rules.toml` with your real
+#   package name already substituted. Active from day one: `max_cycles` and
+#   `no_god_files` — both green on clean code, no manual edit. The [[boundaries]]
+#   block at the bottom ships COMMENTED on purpose (see ★ ENABLE BOUNDARIES ★).
+#
+# ★ ENABLE BOUNDARIES (the architecture gate) ★
+#   The [[boundaries]] below enforce the dependency direction, but they ship
+#   commented out: a fresh project has no layer folders yet, and an ACTIVE boundary
+#   that matches nothing passes silently — giving a false sense that the
+#   architecture is gated when it enforces zero. Uncomment the block once your
+#   `src/<pkg>/{utils,core,services,cli}` folders exist (rename the layers to match
+#   yours if they differ). Then prove it bites: add a deliberate upward import
+#   (e.g. import a cli symbol from core), confirm `sentrux check` exits 1, remove it.
+#
+# ★ PATHS ARE LITERAL — NOT GLOBS ★
+#   sentrux matches boundary paths as LITERAL directory prefixes — `*` globs a
+#   filename only, it does NOT span directories, so `src/*/core` or `src/*/core/*`
+#   silently match nothing. Always use the plain dir path `src/<pkg>/<layer>` (no
+#   trailing slash); it matches that directory recursively without bleeding into
+#   siblings like `core_utils/`. For multiple packages under src/, duplicate the
+#   [[boundaries]] block per package (paths are literal — each package needs its own).
+#
+# ★ SENTRUX 0.5.7 BLIND SPOTS (an uncommented boundary silently passes these) ★
+#   - RELATIVE imports are NOT resolved: `from ..cli import x` bypasses the gate.
+#     Use ABSOLUTE imports (`from your_package.cli import x`) in gated layers.
+#   - A FLAT module `src/<pkg>/<layer>.py` is NOT matched by the dir-style path
+#     `src/<pkg>/<layer>` — keep layers as sub-packages (`src/<pkg>/<layer>/`), or
+#     add the `.py` suffix to the boundary path for a flat layer.
+#
+#   Switch archetype (layered / hexagonal):
+#     cp .claude/plugins/mcp-sentrux/templates/rules.layered.toml .sentrux/rules.toml
+#     sentrux check          # exit 0 = clean, 1 = violation
+#
+# Rule reference: .claude/plugins/mcp-sentrux/rules.template.toml + README.md
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Quality gates (scores normalised 0.0–1.0). The metric minimums are COMMENTED OUT
+# by default: a brand-new/small codebase legitimately scores below them with zero
+# real violations (e.g. modularity ~0.19, redundancy ~0.50 on a toy project), which
+# would paint a fresh project red on day one. Uncomment and raise them as the
+# codebase matures. `max_cycles` and `no_god_files` stay active — both are green on
+# clean code and catch real problems from day one. NOTE: sentrux has no "max file
+# LOC" or "max cyclomatic" knob; per-function size belongs in a pre-commit hook
+# (radon/ruff), not here.
+# ──────────────────────────────────────────────────────────────────────────────
+
+[constraints]
+# min_quality    = 0.50   # uncomment + tune up (toward 0.70+) as the codebase stabilises
+# min_modularity = 0.40
+# min_acyclicity = 0.40
+# min_depth      = 0.50
+# min_equality   = 0.50
+# min_redundancy = 0.70
+max_cycles   = 0       # no import cycles allowed — green on clean code
+no_god_files = true    # flag oversized "knows-everything" modules
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Boundaries (deny upward imports) — UNCOMMENT to enforce the architecture.
+# Shipped commented so a fresh project stays green AND you never get a false sense
+# of enforcement before the layer folders exist (an active no-match boundary passes
+# silently). sentrux checks DIRECT import edges, so every lower->higher pair needs
+# its own entry, including skip-level ones (utils -> cli). `reason` is required.
+# The package name is already filled in — just remove the leading "# " once the
+# folders exist.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# [[boundaries]]
+# from   = "src/your_package/utils"
+# to     = "src/your_package/core"
+# reason = "utils is the foundation — it must not depend on core"
+#
+# [[boundaries]]
+# from   = "src/your_package/utils"
+# to     = "src/your_package/services"
+# reason = "utils must not depend on services"
+#
+# [[boundaries]]
+# from   = "src/your_package/utils"
+# to     = "src/your_package/cli"
+# reason = "utils must not depend on the cli entrypoint"
+#
+# [[boundaries]]
+# from   = "src/your_package/core"
+# to     = "src/your_package/services"
+# reason = "core domain logic must not depend on services"
+#
+# [[boundaries]]
+# from   = "src/your_package/core"
+# to     = "src/your_package/cli"
+# reason = "core must not depend on the cli entrypoint"
+#
+# [[boundaries]]
+# from   = "src/your_package/services"
+# to     = "src/your_package/cli"
+# reason = "services must not depend on the cli entrypoint"

@@ -1,0 +1,31 @@
+{
+  "id": "cr-001",
+  "category": "missed_bug",
+  "description": "Reviewer must catch an f-string-interpolated SQL query (SQL injection) and return CHANGES REQUESTED. Probes the most-penalised axis: false negative on a planted injection.",
+  "source": "real_failure: a past PR where the reviewer APPROVED a diff containing a string-built SQL query.",
+  "diff_path": "fixtures/cr-001/diff.patch",
+  "prompt": "Review this diff for correctness, security and quality issues. Acceptance criteria: add a UserRepo.find_by_id(user_id) lookup.",
+  "ground_truth": {
+    "must_find": [
+      {
+        "id": "d1",
+        "file": "db/users.py",
+        "line": 14,
+        "category": "security",
+        "severity": "blocker",
+        "cwe": "CWE-89"
+      }
+    ],
+    "must_not_flag": []
+  },
+  "expected_verdict": "CHANGES_REQUESTED",
+  "graders": [
+    {"type": "deterministic", "check": "recall_must_find"},
+    {"type": "deterministic", "check": "verdict_match"},
+    {"type": "deterministic", "check": "format_conformance"},
+    {"type": "llm_judge", "dimension": "severity", "rubric": "rubrics/severity.md"}
+  ],
+  "reference_review_path": "fixtures/cr-001/reference_review.md",
+  "difficulty": "easy",
+  "tags": ["sql-injection", "python", "security"]
+}

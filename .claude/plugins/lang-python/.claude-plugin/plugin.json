@@ -1,0 +1,29 @@
+{
+  "name": "lang-python",
+  "version": "0.4.0",
+  "description": "Python toolchain: ruff/pyright/pytest hooks + pyproject/pre-commit/validate_commit templates",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/autoformat-python.sh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/check-imports.sh",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/typecheck-changed.sh",
+            "timeout": 35
+          }
+        ]
+      }
+    ]
+  }
+}

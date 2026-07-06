@@ -1,0 +1,158 @@
+# enabled.yaml — project plugin overlay/lockfile (OUR format, not Anthropic's).
+#
+# Records which plugins a project has enabled/disabled and how external plugins
+# are pinned. This is the bundled default shipped with the seed. The plugin
+# *schemas* live in each plugin's native .claude-plugin/plugin.json; this file
+# only tracks their state. See plans/2026-05-26_plugin-architecture/phase-1.md.
+#
+# Full schema (Task 1.3):
+#   plugins:
+#     <kebab-case-id>:
+#       enabled: true|false   # default: true (omit for enabled)
+#       source: <git-url|local-path|marketplace-ref>   # optional; non-empty
+#       version: "1.2.3"      # optional; quote in YAML to avoid float parsing
+#       sha: "abc1234"        # optional; mutually exclusive with version
+#
+# Rules:
+#   - plugin ids must be kebab-case (lowercase alphanumeric + hyphens)
+#   - core cannot be disabled
+#   - version and sha are mutually exclusive (pin one, not both)
+#   - source must be a non-empty string if provided
+#   - version/sha must be quoted strings in YAML (not bare numbers)
+#
+# Example of an external pinned plugin (uncomment and adapt):
+#
+#   my-extension:
+#     source: "github.com/myorg/my-extension"
+#     version: "0.3.1"
+#
+#   another-plugin:
+#     source: "/path/to/local/plugin"
+#     enabled: true
+#
+# CONSUME plugins (marketplace refs, Phase 6 α) use a marketplace-qualified
+# source "<plugin>@<marketplace>" — the verbatim enabledPlugins key Claude Code
+# honors. The official marketplace `claude-plugins-official` is builtin (no
+# declaration needed). A THIRD-PARTY marketplace must be declared in the optional
+# top-level `marketplaces:` section so the composer can emit it into
+# settings.json's extraKnownMarketplaces:
+#
+#   plugins:
+#     linter:
+#       source: "linter@acme-tools"
+#   marketplaces:
+#     acme-tools:
+#       github: "acme-corp/claude-plugins"   # or: url: "https://git…/repo.git"
+#       # ref: "v1.2.0"                       # optional branch/tag/sha
+#
+schema: 2
+seed_version: "1.0.0"
+plugins:
+  # Empty dict = enabled by default. `core` is the always-on base plugin.
+  core: {}
+  # The Phase-0 toy plugin used for native-format validation.
+  # DISABLED for Inspector_bottles: toy demo, not needed in a production project.
+  hello-world:
+    enabled: false
+  # First real plugin migrated to the vertical layout (Phase 3, Task 3.1).
+  mcp-sentrux:
+    enabled: true
+  # Dev team plugin (Phase 3, Task 3.3) — company/ renamed to dev/.
+  dev:
+    enabled: true
+  # Knowledge team plugin (Phase 3, Task 3.3) — university/ renamed to knowledge/.
+  # Default-off: opt-in for projects that need the science workflow.
+  knowledge:
+    enabled: false
+  # Python toolchain plugin (Phase 3, Task 3.6) — hooks + templates for Python projects.
+  # Default-on: most seed projects are Python. Disable with --lang none for non-Python.
+  lang-python:
+    enabled: true
+  # Semantic code search MCP (Phase 3, Task 3.4) — BM25 + dense embeddings via ollama.
+  mcp-qex:
+    enabled: true
+  # LSP-based symbol operations MCP (Phase 3, Task 3.4) — find_symbol, rename, etc.
+  # BUNDLED (source: None): kept local despite marketplace availability.
+  # Rationale (Task 6.3): upstream oraios/serena explicitly warns against marketplace
+  # install ("contain outdated and suboptimal installation commands"); curated local
+  # glue with `--project-from-cwd` is more reliable. USP-gate: upstream-caveat.
+  mcp-serena:
+    enabled: true
+  # Library docs lookup MCP (Phase 3, Task 3.4) — user-level, configured via npx.
+  # CONSUME (Task 6.3-fix): official context7 plugin in the Anthropic marketplace.
+  # source = marketplace-qualified ref "<plugin>@<marketplace>" — the verbatim
+  # enabledPlugins key CC honors (D6-SOURCE-ENCODING). The official marketplace is
+  # `claude-plugins-official` (auto-available; no extraKnownMarketplaces needed).
+  # No version: this plugin is SHA-pinned upstream and has no version in the
+  # marketplace entry; enabledPlugins does not encode a version either.
+  mcp-context7:
+    source: "context7@claude-plugins-official"
+  # Generic skills: brainstorm + verify-done. Default-on for all projects.
+  skills-base:
+    enabled: true
+  # Pocock-style skills: prototype + zoom-out. Default-on.
+  skills-pocock:
+    enabled: true
+  # Knowledge graph + community detection MCP (Phase 3, Task 3.5). Default-off.
+  mcp-graphify:
+    enabled: true
+  # Qt/PyQt GUI runtime inspection MCP (Phase 3, Task 3.5). Default-off.
+  # ENABLED for Inspector_bottles: PySide6 desktop app — runtime widget inspection is core.
+  mcp-qt:
+    enabled: true
+  # Structural search/rewrite (codemod) MCP (Phase 3, Task 3.5).
+  # Default-on (Phase 0, 2026-06-29): local binary, no network/keys — zero-cost
+  # enable; backs the teamlead agent's `mcp:ast-grep:scan` codemod route.
+  mcp-ast-grep:
+    enabled: true
+  # Pre-indexed call graph + symbol navigation MCP (Phase 3, Task 3.5). Default-off.
+  # ENABLED for Inspector_bottles: developer/investigator agents route through codegraph.
+  mcp-codegraph:
+    enabled: true
+  # Official GitHub MCP (Phase 3, Task 3.5).
+  # CONSUME (Task 6.3-fix): official GitHub MCP plugin in the Anthropic marketplace.
+  # source = marketplace-qualified ref "<plugin>@<marketplace>" — the verbatim
+  # enabledPlugins key CC honors (D6-SOURCE-ENCODING). The official marketplace is
+  # `claude-plugins-official` (auto-available; no extraKnownMarketplaces needed).
+  # No version: SHA-pinned upstream; enabledPlugins does not encode a version.
+  # Default-on (Phase 0, 2026-06-29): consume-only, inert without a GitHub token.
+  mcp-github:
+    source: "github@claude-plugins-official"
+    enabled: true
+  # Niche/meta skills: caveman + grill-me (Phase 3, Task 3.5).
+  # Default-on (seed-max-improvement): token-economy. caveman is the strongest
+  # direct output-token saver (~75% cut) and is trigger-based (only activates on
+  # "caveman mode"/"be brief"), so enabling the plugin just makes it available —
+  # it is NOT always-on, hence low risk. See the Scope guardrail in caveman's
+  # SKILL.md (never apply to orchestrator->subagent Task prompts).
+  skills-meta:
+    enabled: true
+  # Observability: OTel + optional Grafana/ccusage stacks (Phase 3, Task 3.5).
+  # Default-on (Phase 0, 2026-06-29): ships settings.partial.json with
+  # CLAUDE_CODE_ENABLE_TELEMETRY=1 (Layer-1 OTel emission, zero-cost without a
+  # collector). The Grafana/ccusage stacks stay manual (docs only).
+  observability:
+    enabled: true
+  # Browser automation + UI verification MCP (Phase 3, Task 3.7). Default-off.
+  # Enable for web app projects that need browser_navigate/screenshot/click/fill.
+  mcp-playwright:
+    enabled: false
+  # Externalized chain-of-thought reasoning MCP (Phase 3, Task 3.7). Default-off.
+  # Enable for investigator/teamlead agents on complex multi-step tasks.
+  # ENABLED for Inspector_bottles: multi-process/IPC debugging is multi-step.
+  mcp-sequential-thinking:
+    enabled: true
+  # Security gates: Semgrep SAST + OSV CVE scan + CycloneDX SBOM (seed-max-improvement
+  # Phase 1). BUNDLED, no MCP server — every tool is a CLI the wrappers shell out to.
+  # Default-on: inert without the binaries installed (each command/hook skips with a
+  # notice and exits 0). Ships settings.partial.json allow-listing semgrep/osv-scanner/
+  # syft/cdxgen; PostToolUse semgrep hook stays opt-in (slow per-edit).
+  security:
+    enabled: true
+  # Sentry error-monitoring MCP (official getsentry/plugin-claude via marketplace).
+  # CONSUME: source = marketplace-qualified ref; Claude Code wires it. Needs Sentry
+  # auth (org/DSN) — authorize via /mcp in an interactive session. Added 2026-07-05
+  # for Inspector_bottles: multiprocess runtime error triage / stack-trace search.
+  sentry:
+    source: "sentry@claude-plugins-official"
+    enabled: true

@@ -1,0 +1,11 @@
+{
+  "name": "mcp-codegraph",
+  "version": "0.4.0",
+  "description": "Pre-indexed call graph + symbol navigation (SQLite + tree-sitter)",
+  "mcpServers": {
+    "codegraph": {
+      "command": "npx",
+      "args": ["-y", "@colbymchenry/codegraph", "serve", "--mcp"]
+    }
+  }
+}

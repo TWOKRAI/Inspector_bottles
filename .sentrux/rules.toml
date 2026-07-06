@@ -55,9 +55,36 @@ name  = "application"
 paths = ["multiprocess_prototype/*"]
 order = 3
 
+# backend_ctl — headless-драйвер диагностики: гоняет прототип без GUI (BACKEND_CTL=1),
+# request/reply, телеметрия, SQL-sink. Это ТУЛИНГ (как scripts/), а не упорядоченный
+# слой: он легитимно импортирует приложение (драйвит его), поэтому в модель [[layers]]
+# НЕ добавляем (иначе layer_direction ложно ругается на backend_ctl → application).
+# Ограничиваем только обратное направление через boundaries ниже.
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Жёсткие границы (deny-patterns)
 # ──────────────────────────────────────────────────────────────────────────────
+
+# Никто из продуктовых слоёв не импортирует диагностический backend_ctl (он сверху)
+[[boundaries]]
+from   = "multiprocess_framework/*"
+to     = "backend_ctl/*"
+reason = "framework не зависит от диагностического драйвера"
+
+[[boundaries]]
+from   = "Services/*"
+to     = "backend_ctl/*"
+reason = "Services не зависят от backend_ctl"
+
+[[boundaries]]
+from   = "Plugins/*"
+to     = "backend_ctl/*"
+reason = "Plugins не зависят от backend_ctl"
+
+[[boundaries]]
+from   = "multiprocess_prototype/*"
+to     = "backend_ctl/*"
+reason = "приложение не импортирует свой диагностический драйвер (backend_ctl → app, не наоборот)"
 
 # framework → ничто прикладное
 [[boundaries]]

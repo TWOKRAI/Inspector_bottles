@@ -1,0 +1,170 @@
+# pyproject.toml — Python project template
+# Toolchain: uv + ruff + pyright + pytest
+# Adapt: name, description, dependencies, [tool.coverage.run].source
+
+[project]
+name = "{{PACKAGE}}"
+version = "0.1.0"
+# Multi-line literal strings ('''...''') accept any chars except ''' itself —
+# safer than basic strings against quotes/backslashes in user-supplied values.
+description = '''{{DESCRIPTION}}'''
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = '''{{AUTHOR}}''' }]
+dependencies = [
+    # Add runtime deps here. Common starters (uncomment as needed):
+    # "pydantic>=2.10",
+    # "pydantic-settings>=2.7",
+    # "loguru>=0.7",
+    # "httpx>=0.28",
+    # "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# Optional feature groups (install with `uv sync --extra ml`)
+# ml = ["torch>=2.5", "transformers>=4.46"]
+# web = ["fastapi>=0.115", "uvicorn>=0.32"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "pytest-asyncio>=0.24",
+    "hypothesis>=6.0",
+    "ruff>=0.8",
+    "pyright>=1.1.390",
+    "pre-commit>=4.0",
+]
+
+# ─── Build (src-layout) ───────────────────────────────────────────────────────
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/{{PACKAGE}}"]
+
+# ─── uv ───────────────────────────────────────────────────────────────────────
+[tool.uv]
+package = true
+
+# ─── pytest ───────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra --strict-markers --strict-config"
+norecursedirs = [".git", "__pycache__", ".venv", "build", "dist", "data"]
+asyncio_mode = "auto"
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+]
+
+# ─── ruff (lint + format) ─────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+extend-exclude = [
+    "data",
+    "notebooks",
+    ".claude",        # seed/tooling — not part of project code
+]
+
+[tool.ruff.lint]
+# Sensible default set. Add stricter rule families when the project is stable:
+#   "N"     — pep8-naming (can be noisy on existing codebases)
+#   "PTH"   — pathlib over os.path (annoying for one-off scripts)
+#   "ANN"   — type-annotation completeness
+#   "D"     — pydocstyle (docstrings everywhere)
+#   "S"     — flake8-bandit (security)
+#   "TID"   — tidy imports
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort (import sorting)
+    "B",      # flake8-bugbear (likely bugs)
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade (modern Python syntax)
+    "SIM",    # flake8-simplify
+    "RUF",    # ruff-specific
+]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "B008",   # function call in default arg (FastAPI/typer pattern)
+    "RUF001", # ambiguous Unicode in strings — русские тексты
+    "RUF002", # ambiguous Unicode in docstrings — русские комментарии
+    "RUF003", # ambiguous Unicode in comments — русские комментарии
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "N802"]   # asserts ok, test method names ok
+"scripts/**/*.py" = ["T201"]         # print() ok in scripts
+"__init__.py" = ["F401"]             # unused imports ok in __init__
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+# ─── pyright (static type checker) ────────────────────────────────────────────
+# Modern alternative to mypy. Faster, better inference, VS Code extension.
+# Future option: 'ty' from Astral (alpha as of 2026 — switch when stable).
+[tool.pyright]
+include = ["src", "tests"]
+exclude = [
+    "**/__pycache__",
+    "**/.venv",
+    "build",
+    "dist",
+    "data",
+    "notebooks",
+    ".claude",
+]
+pythonVersion = "3.11"
+pythonPlatform = "All"
+typeCheckingMode = "standard"          # "basic" | "standard" | "strict"
+reportMissingImports = "error"
+reportMissingTypeStubs = "warning"
+reportUnnecessaryTypeIgnoreComment = "warning"
+
+# ─── bandit (security) ───────────────────────────────────────────────────────
+# Pre-commit hook reads this section. Skips known false-positives for the
+# project skeleton (subprocess calls with constant `git` / `bash` args).
+#
+# `scripts/` is excluded because it holds bundled dev-utilities (changelog_gen,
+# link_check, claude_md_audit, secrets_audit, ...) which by design call
+# `git log` via subprocess and HEAD requests via urllib. These patterns are
+# safe-but-noisy for bandit; auditing them is the job of code review, not the
+# pre-commit gate. (See plans/sync-script-bundle-propagation.md / ADR 0002.)
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "build", "dist", ".claude", "scripts"]
+skips = [
+    "B404",   # subprocess import — we *are* using subprocess legitimately
+    "B603",   # subprocess without shell=True — that's the safe form
+    "B607",   # partial executable path — resolved via PATH, expected
+    "B310",   # urllib.request — used by link_check for HEAD requests, intentional
+]
+
+# ─── coverage ─────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["src/{{PACKAGE}}"]
+branch = true
+omit = ["*/tests/*", "*/test_*.py", "*/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+# fail_under = 60  # enable when coverage reaches 60%+

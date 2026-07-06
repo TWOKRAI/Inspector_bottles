@@ -48,6 +48,8 @@ CLAUDE.local.md
 .mcp.json
 # Serena MCP (LSP cache + project config)
 .serena/
+# CodeGraph MCP (SQLite symbol/edge index)
+.codegraph/
 
 # Runtime logs
 logs/
@@ -130,3 +132,7 @@ drawings/
 
 # временные артефакты факт-чека
 .tmp_factcheck/
+
+
+
+_archive/

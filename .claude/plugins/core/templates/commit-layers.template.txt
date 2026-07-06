@@ -1,0 +1,37 @@
+# Layer values allowed in commit `Layer:` trailer.
+# Validator: scripts/validate_commit/validate_commit.py
+# One layer per line; '#' for comments; blanks ignored.
+#
+# Keep this list aligned with the sentrux rule archetype you picked
+# (.claude/plugins/mcp-sentrux/templates/) so the project speaks ONE vocabulary
+# for architectural layers — in commit trailers and in dependency rules alike.
+#
+# Active below = `src-package` archetype (the seed default). To switch, comment
+# this block out and uncomment the matching archetype block.
+
+# ── src-package archetype (cli → services → core → utils) ──
+cli
+services
+core
+utils
+
+# ── layered archetype — uncomment if you copied rules.layered.toml ──
+# presentation
+# application
+# domain
+# infrastructure
+
+# ── hexagonal archetype — uncomment if you copied rules.hexagonal.toml ──
+# domain
+# ports
+# adapters
+# app
+
+# ── Cross-cutting categories (useful with any archetype) ──
+tests
+docs
+scripts
+infra
+ci
+build
+mixed

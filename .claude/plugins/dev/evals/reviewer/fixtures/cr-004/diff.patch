@@ -1,0 +1,22 @@
+diff --git a/util/retry.py b/util/retry.py
+index 4d5e6f7..8a9b0c1 100644
+--- a/util/retry.py
++++ b/util/retry.py
+@@ -1,2 +1,16 @@
+ import time
++import logging
++
++log = logging.getLogger(__name__)
++
++
++def retry(fn, attempts=3, delay=0.1):
++    """Call fn(), retrying up to `attempts` times, re-raising the last error."""
++    last: Exception | None = None
++    for _ in range(attempts):
++        try:
++            return fn()
++        except Exception as exc:
++            last = exc
++            log.warning("retry: attempt failed: %s", exc)
++            time.sleep(delay)
++    raise last

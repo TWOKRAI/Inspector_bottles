@@ -1,0 +1,14 @@
+# GPU-оптимизированный variant qwen3-embedding:4b для macOS / Apple Silicon
+# (unified memory). Применяется через setup-embedding-model.sh.
+#
+# Модель 4b выбрана на macOS с 2026-07-05 (см. qex-launcher.py): 2× быстрее
+# индексации и каждого запроса, разрыв точности на коде <1% vs 8b.
+#
+# num_ctx 2048 — embedding-чанки кода почти всегда меньше 2k токенов; урезание
+#                контекста экономит KV cache и держит инференс на Metal без
+#                CPU-offload (иначе — MCP-таймауты на больших реиндексациях).
+# num_gpu  999 — идиома ollama: "выгрузи все слои на GPU" (на Apple Silicon = Metal).
+#                999 — infinity; ollama clamp'нет до фактического числа слоёв.
+FROM qwen3-embedding:4b
+PARAMETER num_ctx 2048
+PARAMETER num_gpu 999

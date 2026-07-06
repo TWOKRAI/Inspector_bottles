@@ -1,0 +1,5 @@
+{
+  "name": "mcp-playwright",
+  "version": "0.4.0",
+  "description": "Browser automation + UI verification MCP (Microsoft official). Enables browser_navigate, browser_screenshot, browser_click, browser_fill and related tools."
+}

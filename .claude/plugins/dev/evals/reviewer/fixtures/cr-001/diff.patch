@@ -1,0 +1,15 @@
+diff --git a/db/users.py b/db/users.py
+index 1a2b3c4..5d6e7f8 100644
+--- a/db/users.py
++++ b/db/users.py
+@@ -8,6 +8,11 @@ class UserRepo:
+     def __init__(self, conn):
+         self._conn = conn
+
++    def find_by_id(self, user_id):
++        cursor = self._conn.cursor()
++        cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")
++        return cursor.fetchone()
++
+     def all(self):
+         return self._conn.execute("SELECT * FROM users").fetchall()
