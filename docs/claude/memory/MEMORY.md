@@ -90,3 +90,4 @@
 - [Draw mode rework](project_draw_mode_rework.md) — режим рисования: точность точек (read-back ACK REG_DRAW_DONE_N, мелкие пачки, lossless preview), crop-clip, text_vector (Hershey текст/имя/сердце), drawing_io save/load; ветка feat/draw-mode-rework, ревью 50 агентов, тесты OK, hardware pending
 - [Framework-first decision rule](feedback_framework_first.md) — framework=мощный/универсальный (контракт+реализации), прототип=расходный (тонкий потребитель); в сомнении оптимизируй фреймворк. Решает ActionBus=держать (patch-impl) + undo как контракт+2 реализации. Док: docs/audits/2026-06-18_command-undo-system.md
 - [project_claude_kit_migration.md](project_claude_kit_migration.md) — .claude на claude-kit v1.0.0 plugin-формате; source=devseed; обновлять через init/sync
+- [constructor-master: прогресс исполнения](project_constructor_master_progress.md) — Ф0 сделан 2026-07-06, G0 ждёт владельца, baseline снят
