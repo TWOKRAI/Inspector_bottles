@@ -17,24 +17,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from multiprocess_prototype.domain.app_services import AppServices
-from multiprocess_prototype.domain.commands import (
-    AddProcess,
-    BindDisplay,
-    ConnectWire,
-    MovePlugin,
-    RemovePlugin,
-    RemoveProcess,
-    SetPluginConfig,
-    UnbindDisplay,
-)
-from multiprocess_prototype.domain.entities.plugin import PluginInstance
-from multiprocess_prototype.domain.errors import DomainError
 from multiprocess_prototype.domain.events import RecipeActivated, TopologyReplaced
 
 from .graph.data import DisplayNodeData, EdgeData, NodeData, PortSchema
 from .graph_codec import GraphViewState, TopologyGraphCodec
+from .layout_controller import LayoutController
 from .model import PipelineModel
-from .layout import auto_layout
+from .mutations import PipelineMutations
 from .runtime_control import RuntimeController
 from .telemetry import WireMetricsModel
 from .wire_validation import validate_wire_ports
@@ -145,6 +134,14 @@ class PipelinePresenter:
 
         self._topo = TopologyPresenter()
 
+        # F.4: контроллеры layout-состояния и graph-мутаций. Владельцем GUI-
+        # состояния (_gui_positions/_locked_nodes/_placed_display_ids/_persist_timer)
+        # остаётся presenter-core (характеризационные тесты мутируют его напрямую);
+        # контроллеры инкапсулируют ОПЕРАЦИИ и обращаются к presenter через
+        # back-reference (host). Публичные методы presenter — тонкие делегаты сюда.
+        self._layout = LayoutController(self)
+        self._mutations = PipelineMutations(self)
+
         # Scene reload через typed EventBus (G.1): store публикует TopologyReplaced
         # при каждом save/set_topology (G.3). dispatch() внутри себя вызывает
         # topology_repo.save() → publish → _on_topology_replaced (full reload).
@@ -227,221 +224,20 @@ class PipelinePresenter:
         field_name: str,
         new_value: Any,
     ) -> None:
-        """Обработчик изменения поля из NodeInspectorPanel.
-
-        G.4.3: dispatch(SetPluginConfig) → domain персистит config в editor-топологию
-        + undo/redo. rm-sync выполняет отдельный listener (app.py) по событию
-        PluginConfigChanged → rm.set_value → IPC в живой процесс.
-
-        _suppress гасит TopologyReplaced → scene full reload НЕ происходит при
-        field-edit (графовая структура не меняется). coalesce_key объединяет
-        slider-burst (десятки правок/сек) в одну undo-запись.
-        """
-        # Защитный re-entry guard: не запускать новый dispatch, пока presenter в
-        # suppressed-окне (собственный dispatch ниже либо full reload в
-        # _on_topology_replaced). Прямой rm→field_changed обратной связи сейчас нет,
-        # поэтому guard — дешёвая страховка, а не обязательная защита от живого пути.
-        if self._suppress:
-            return
-
-        # D.2: per-plugin редактирование. Индекс выбранного плагина читаем из панели
-        # (current_plugin_index) — нода=плагин, в процессе может быть цепочка. Default 0
-        # совместим с прямым field_changed.emit (тесты, 1 плагин/процесс).
-        inspector = getattr(self, "_inspector", None)
-        plugin_index = getattr(inspector, "current_plugin_index", 0) if inspector is not None else 0
-        cmd = SetPluginConfig(
-            process_name=process_name,
-            plugin_index=plugin_index,
-            field=field_name,
-            value=new_value,
-        )
-        try:
-            with self._block_signals():
-                self._services.commands.dispatch(
-                    cmd,
-                    coalesce_key=f"set_config:{process_name}:{field_name}",
-                )
-        except DomainError as exc:
-            logger.warning(
-                "SetPluginConfig отклонён для %s.%s = %s: %s",
-                process_name,
-                field_name,
-                new_value,
-                exc,
-            )
-            self._report(f"Изменение поля отклонено: {exc}")
-            return
-
-        # FIX (field-edit-persist): SetPluginConfig обновил domain-топологию (истину),
-        # но _on_topology_replaced подавлен _suppress (чтобы не дёргать scene на каждый
-        # тик слайдера) → self._model оставался со СТАРЫМ конфигом, и save_to_active_recipe
-        # (graph_to_blueprint(self._model)) сериализовал устаревшие значения — правки полей
-        # НЕ персистились в рецепт. Точечно пересинхронизируем view-модель из domain БЕЗ
-        # rebuild scene: from_topology_dict — чистая dict-операция (deepcopy), без Qt/сигналов.
-        self._model.from_topology_dict(self._services.topology.load().to_dict())
+        """Изменение поля из NodeInspectorPanel (делегат PipelineMutations, F.4)."""
+        self._mutations._on_inspector_field_changed(process_name, field_name, new_value)
 
     def _on_target_process_changed(self, node_id: str, new_process: str) -> None:
-        """Обработчик выбора нового целевого процесса для plugin-узла.
-
-        Записывает target_process как мета-поле в запись процесса в topology.
-        Это метаданные для сериализации в blueprint (Task 7a.4), не переименование.
-
-        Args:
-            node_id: идентификатор узла (обычно совпадает с process_name).
-            new_process: имя целевого процесса из активного рецепта.
-        """
-        if self._suppress:
-            return
-
-        # D.1: node_id может быть плагин-нодой `{process}.{plugin}` — извлекаем процесс.
-        process_name = node_id.split(".")[0] if node_id else node_id
-
-        processes = self._model._topology.get("processes", [])
-
-        # Найти запись узла и записать target_process как мета-поле
-        found = False
-        for proc in processes:
-            if isinstance(proc, dict):
-                if proc.get("process_name") == process_name:
-                    proc["target_process"] = new_process
-                    found = True
-                    break
-            else:
-                if getattr(proc, "process_name", "") == process_name:
-                    try:
-                        proc.target_process = new_process
-                    except AttributeError:
-                        pass
-                    found = True
-                    break
-
-        if found:
-            logger.debug(
-                "target_process обновлён: узел '%s' → процесс '%s'",
-                node_id,
-                new_process,
-            )
-        else:
-            logger.warning(
-                "_on_target_process_changed: узел '%s' не найден в topology",
-                node_id,
-            )
+        """Выбор нового целевого процесса plugin-узла (делегат PipelineMutations, F.4)."""
+        self._mutations._on_target_process_changed(node_id, new_process)
 
     def _on_display_id_changed(self, node_id: str, new_display_id: str) -> None:
-        """Обработчик выбора нового display-канала для display-бокса.
-
-        G.4.2b: смена канала бокса = ребиндинг всех привязок на этот бокс через
-        domain dispatch (Unbind старого + Bind нового на каждый источник). id бокса
-        = старый display_id. Undoable через services.commands.
-
-        Args:
-            node_id: идентификатор display-бокса (= старый display_id канала).
-            new_display_id: новый выбранный display_id.
-        """
-        if self._suppress:
-            return
-
-        old_display_id = node_id  # id бокса = display_id канала
-        if not new_display_id or new_display_id == old_display_id:
-            return
-
-        # Снимок привязок на этот бокс ДО мутаций (dispatch перестроит модель)
-        sources = [
-            d.get("node_id", "")
-            for d in self._model.get_displays()
-            if d.get("display_id") == old_display_id and d.get("node_id")
-        ]
-        if not sources:
-            logger.warning("_on_display_id_changed: бокс '%s' без привязок", old_display_id)
-            return
-
-        # coalesce_key объединяет все Unbind+Bind ребиндинга в ОДНУ undo-запись —
-        # один Ctrl+Z отменяет смену канала целиком (важно при fan-in: N источников).
-        coalesce_key = f"rebind-display:{old_display_id}->{new_display_id}"
-        for src in sources:
-            try:
-                self._services.commands.dispatch(
-                    UnbindDisplay(node_id=src, display_id=old_display_id),
-                    coalesce_key=coalesce_key,
-                )
-                self._services.commands.dispatch(
-                    BindDisplay(node_id=src, display_id=new_display_id),
-                    coalesce_key=coalesce_key,
-                )
-            except DomainError as exc:
-                logger.warning("Ребиндинг display %s→%s отклонён: %s", old_display_id, new_display_id, exc)
-                self._report(f"Смена канала дисплея отклонена: {exc}")
+        """Смена display-канала бокса (делегат PipelineMutations, F.4)."""
+        self._mutations._on_display_id_changed(node_id, new_display_id)
 
     def _on_move_to_process_requested(self, from_process: str, to_process: str) -> None:
-        """Phase B: перенести ВСЕ плагины узла в другой процесс (merge nodes).
-
-        G.4.2-стиль: dispatch(MovePlugin) → store.save → TopologyReplaced → reload.
-        Узел=процесс, поэтому «перенести ноду в процесс» = перенести все его плагины
-        туда по одному (index 0 каждый раз; на последнем источник опустеет и удалится).
-        coalesce_key объединяет серию в одну undo-запись. Domain переписывает концы
-        проводов и убирает ставшие внутрипроцессными.
-        """
-        if self._suppress or not to_process or from_process == to_process:
-            return
-
-        # Счётчик плагинов источника СНИМАЕМ до серии (модель меняется после каждого dispatch).
-        plugin_count = 0
-        for proc in self._model.to_topology_dict().get("processes", []):
-            name = proc.get("process_name", "") if isinstance(proc, dict) else getattr(proc, "process_name", "")
-            if name == from_process:
-                plugins = proc.get("plugins", []) if isinstance(proc, dict) else getattr(proc, "plugins", [])
-                plugin_count = len(plugins)
-                break
-        if plugin_count == 0:
-            return
-
-        coalesce_key = f"move-node:{from_process}->{to_process}"
-        for _ in range(plugin_count):
-            try:
-                self._services.commands.dispatch(
-                    MovePlugin(from_process=from_process, from_index=0, to_process=to_process),
-                    coalesce_key=coalesce_key,
-                )
-            except DomainError as exc:
-                logger.warning("MovePlugin %s→%s отклонён: %s", from_process, to_process, exc)
-                self._report(f"Перенос в процессе отклонён: {exc}")
-                break
-        # Scene обновится из _on_topology_replaced (синхронный dispatch)
-
-    def _delete_command_for(self, node_id: str):
-        """Команда удаления для плагин-ноды/процесса (D.3).
-
-        Плагин-нода `{process}.{plugin}` в процессе с >1 плагином → RemovePlugin
-        (удалить только этот плагин). Иначе (последний плагин, process-fallback нода
-        или legacy-имя процесса) → RemoveProcess. Индекс берём из scene-ноды
-        (надёжно при дубликатах plugin_name); fallback — поиск по plugin_name.
-        """
-        proc = node_id.split(".")[0] if "." in node_id else node_id
-
-        # Плагины процесса из модели.
-        plugins: list = []
-        for p in self._model.to_topology_dict().get("processes", []):
-            pn = p.get("process_name", "") if isinstance(p, dict) else getattr(p, "process_name", "")
-            if pn == proc:
-                plugins = p.get("plugins", []) if isinstance(p, dict) else getattr(p, "plugins", [])
-                break
-
-        if "." not in node_id or len(plugins) <= 1:
-            return RemoveProcess(process_name=proc)
-
-        # Индекс удаляемого плагина: из scene-ноды, иначе по plugin_name.
-        node = self._scene.get_node(node_id) if self._scene else None
-        index = getattr(node, "plugin_index", -1) if node is not None else -1
-        if index < 0:
-            plugin_name = node_id.split(".", 1)[1]
-            for i, pl in enumerate(plugins):
-                pn = pl.get("plugin_name", "") if isinstance(pl, dict) else getattr(pl, "plugin_name", "")
-                if pn == plugin_name:
-                    index = i
-                    break
-        if index < 0:
-            return RemoveProcess(process_name=proc)
-        return RemovePlugin(process_name=proc, index=index)
+        """Перенос всех плагинов узла в другой процесс (делегат PipelineMutations, F.4)."""
+        self._mutations._on_move_to_process_requested(from_process, to_process)
 
     # ------------------------------------------------------------------ #
     #  Signal suppression (из v1)                                         #
@@ -475,323 +271,40 @@ class PipelinePresenter:
     # ------------------------------------------------------------------ #
 
     def load_topology_from_config(self) -> tuple[list[NodeData], list[EdgeData]]:
-        """Загрузить topology из живого источника (services.topology, TopologyRepository).
-
-        F.2b: ранее читалось из config["topology"] — устаревший стартовый snapshot,
-        который не обновлялся. Теперь источник один — TopologyRepository (живой).
-        Dict at Boundary: presenter работает с dict, поэтому .to_dict().
-
-        follow-up ФИКС #4 (Task 2.1, шаг 4): явная загрузка топологии из config —
-        семантически «новая сессия редактора», как и активация рецепта. Сбрасываем
-        placed-but-unbound боксы здесь же: непривязанные боксы не сериализуются (binding
-        нет), поэтому при загрузке новой топологии они не должны протекать из прошлой
-        сессии. Раньше сброс был только в _on_recipe_activated.
-        См. plans/pipeline-place-display-node.md (Task 2.1, шаг 4).
-        """
-        self._placed_display_ids.clear()
-        topology = self._services.topology.load().to_dict()
-        self._model.from_topology_dict(topology)
-
-        # Восстановить позиции и фиксацию из metadata (free-layout Task 2/3):
-        # gui_positions → стартовое размещение без «Раскладки»; locked_nodes →
-        # закреплённые ноды переживают перезапуск.
-        metadata = topology.get("metadata", {})
-        if isinstance(metadata, dict):
-            gui_pos = metadata.get("gui_positions", {})
-            if isinstance(gui_pos, dict):
-                self._gui_positions = {k: tuple(v) for k, v in gui_pos.items()}
-            locked = metadata.get("locked_nodes", [])
-            if isinstance(locked, (list, tuple)):
-                self._locked_nodes = {str(nid) for nid in locked}
-
-        return self._topology_to_graph(topology)
+        """Загрузить topology из живого источника (делегат LayoutController, F.4)."""
+        return self._layout.load_topology_from_config()
 
     def load_topology_from_file(self, path: Path) -> tuple[list[NodeData], list[EdgeData]]:
-        """Загрузить topology из YAML файла."""
-        self._topo.load_from_file(path)
-        bp = self._topo.blueprint
-        data = bp.model_dump() if hasattr(bp, "model_dump") else {}
-        self._model.from_topology_dict(data)
-        return self._topology_to_graph(data)
+        """Загрузить topology из YAML файла (делегат LayoutController, F.4)."""
+        return self._layout.load_topology_from_file(path)
 
     def export_topology_with_positions(self) -> dict:
-        """Экспортировать topology dict с gui_positions в metadata."""
-        topo = self._model.to_topology_dict()
-
-        # Обновить позиции из scene + очистить мусор (ключи не из текущей сцены)
-        self._sync_positions_from_scene()
-
-        # Записать позиции в metadata
-        topo.setdefault("metadata", {})
-        topo["metadata"]["gui_positions"] = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
-        return topo
+        """Экспортировать topology dict с gui_positions (делегат LayoutController, F.4)."""
+        return self._layout.export_topology_with_positions()
 
     def save_topology_to_file(self, path: Path) -> None:
-        """Сохранить topology с позициями в YAML файл."""
-        import yaml
-
-        topo = self.export_topology_with_positions()
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(topo, f, default_flow_style=False, allow_unicode=True)
+        """Сохранить topology с позициями в YAML (делегат LayoutController, F.4)."""
+        self._layout.save_topology_to_file(path)
 
     # ------------------------------------------------------------------ #
     #  Мутации через domain dispatch (process); display — legacy (G.4.2b)  #
     # ------------------------------------------------------------------ #
 
     def add_process_from_plugin(self, plugin_name: str, x: float = 0.0, y: float = 0.0) -> str | None:
-        """Добавить процесс из палитры плагинов через domain dispatch.
-
-        G.4.2: dispatch(AddProcess) → store.save → TopologyReplaced → full scene reload.
-        Оптимистичные scene-апдейты убраны — scene обновляется из _on_topology_replaced.
-
-        Returns: имя процесса или None если не удалось.
-        """
-        # Генерировать уникальное имя (модель синхронна после прошлого reload)
-        base_name = plugin_name.replace("_", "-")
-        existing = set(self._model.get_process_names())
-        name = base_name
-        counter = 1
-        while name in existing:
-            name = f"{base_name}_{counter}"
-            counter += 1
-
-        # Определить категорию через PluginCatalog
-        category = "utility"
-        spec = self._services.plugins.resolve(plugin_name)
-        if spec is not None:
-            category = spec.category
-
-        # Запомнить позицию ДО dispatch (reload читает gui_positions)
-        self._gui_positions[name] = (x, y)
-
-        # G.4.2: domain dispatch — AddProcess обязан нести плагин (иначе нода пустая)
-        cmd = AddProcess(
-            process_name=name,
-            plugins=(PluginInstance(plugin_name=plugin_name, category=category),),
-        )
-        try:
-            self._services.commands.dispatch(cmd)
-        except DomainError as exc:
-            logger.error("AddProcess отклонён: %s", exc)
-            self._report(f"Не удалось добавить процесс: {exc}")
-            self._gui_positions.pop(name, None)
-            return None
-
-        # Scene обновится из _on_topology_replaced (синхронный dispatch → reload уже произошёл)
-        return name
+        """Добавить процесс из палитры плагинов (делегат PipelineMutations, F.4)."""
+        return self._mutations.add_process_from_plugin(plugin_name, x, y)
 
     def remove_selected(self, selected_node_ids: list[str]) -> None:
-        """Удалить выбранные ноды (process-узлы и display-боксы).
-
-        G.4.2: process-ноды → dispatch(RemoveProcess) (domain каскадит wires+displays).
-        G.4.2b: display-боксы → dispatch(UnbindDisplay) для каждой привязки на канал
-        (id бокса = display_id). Всё персистится и undoable через services.commands.
-        Task 2.1: placed-but-unbound боксы (нет binding) удаляются БЕЗ dispatch —
-        нечего отвязывать; чистим только GUI-состояние и перерисовываем scene.
-
-        follow-up ФИКС #2 (бокс-призрак при смешанном удалении): метод двухпроходный.
-        Раньше unbound-ветка делала discard ВНУТРИ единого цикла; при смешанном
-        selected (process + чисто-unbound-бокс) и порядке «process первым» синхронный
-        _on_topology_replaced от RemoveProcess отрабатывал, когда unbound-id ещё был в
-        set → бокс дорисовывался и оставался призраком (финальная перерисовка
-        пропускалась, т.к. dispatched=True). Порядок selected_node_ids не гарантирован.
-        Решение: pre-pass очищает set/позиции для чисто-unbound ДО любого dispatch,
-        поэтому любой синхронный reload видит уже очищенный _placed_display_ids.
-        """
-        # Display-боксы адресуются по display_id (id бокса = канал), не по node_id
-        # (node_id привязки = source endpoint). Снимок — для разведения веток.
-        display_box_ids = {d.get("display_id", "") for d in self._model.get_displays()}
-
-        # ФИКС #2, проход 1 (pre-pass): чисто-unbound боксы (в _placed_display_ids,
-        # но НЕТ в topo["displays"]). Чистим GUI-состояние ДО любого dispatch, чтобы
-        # синхронный _on_topology_replaced от process/bound-ветки во втором проходе
-        # уже не дорисовал такой бокс как placed-but-unbound (иначе — призрак).
-        # pure_unbound — множество уже обработанных id: во втором проходе их нужно
-        # ПРОПУСТИТЬ, иначе узел (уже убранный из set) провалится в process-ветку и
-        # ошибочно вызовет dispatch(RemoveProcess) на несуществующий процесс.
-        pure_unbound: set[str] = set()
-        for node_id in selected_node_ids:
-            if node_id in self._placed_display_ids and node_id not in display_box_ids:
-                self._placed_display_ids.discard(node_id)
-                self._gui_positions.pop(node_id, None)
-                pure_unbound.add(node_id)
-        had_pure_unbound = bool(pure_unbound)
-
-        # Task 2.1: был ли хотя бы один dispatch (bound-display / process). Если все
-        # удаляемые узлы — только чисто-unbound-боксы, _on_topology_replaced НЕ
-        # сработает (dispatch'а нет) → нужна явная перерисовка scene в конце.
-        dispatched = False
-
-        # ФИКС #2, проход 2: dispatch'ащие ветки (bound display → UnbindDisplay;
-        # process → RemoveProcess). Чисто-unbound уже обработаны в pre-pass и
-        # пропускаются явно (см. pure_unbound).
-        for node_id in selected_node_ids:
-            if node_id in pure_unbound:
-                # Уже очищен pre-pass'ом — нечего dispatch'ить.
-                continue
-
-            if node_id in display_box_ids:
-                # G.4.2b: удаление display-бокса = отвязать все binding на этот канал.
-                # get_displays() — снимок (deep copy) на входе в цикл: dispatch внутри
-                # перестраивает модель, но мы итерируем исходный список пар.
-                # Task 2.1 (смешанный placed+bound случай): после ФИКСА #1 bound-бокс
-                # ОСТАЁТСЯ в _placed_display_ids → снимаем его из set ДО dispatch, чтобы
-                # reload из _on_topology_replaced после UnbindDisplay не дорисовал бокс
-                # заново как placed-but-unbound.
-                self._gui_positions.pop(node_id, None)
-                self._placed_display_ids.discard(node_id)
-                for di in self._model.get_displays():
-                    if di.get("display_id") != node_id:
-                        continue
-                    cmd = UnbindDisplay(node_id=di.get("node_id", ""), display_id=node_id)
-                    try:
-                        self._services.commands.dispatch(cmd)
-                        dispatched = True
-                    except DomainError as exc:
-                        logger.warning("UnbindDisplay отклонён: %s", exc)
-                        self._report(f"Не удалось отвязать дисплей: {exc}")
-                # Scene обновится из _on_topology_replaced (синхронный dispatch)
-            elif node_id in self._placed_display_ids:
-                # Защитный остаток: чисто-unbound уже обработан pre-pass'ом. Сюда узел
-                # дойти не должен — оставлено как страховка на случай рассинхрона.
-                self._gui_positions.pop(node_id, None)
-                self._placed_display_ids.discard(node_id)
-            else:
-                # D.1/D.3: node_id может быть плагин-нодой `{process}.{plugin}` или
-                # именем процесса (legacy/тесты). Удаление плагин-ноды:
-                #   - процесс с >1 плагином → RemovePlugin(index) (удалить ТОЛЬКО плагин);
-                #   - последний плагин / process-нода → RemoveProcess (удалить процесс).
-                self._gui_positions.pop(node_id, None)
-                cmd = self._delete_command_for(node_id)
-                try:
-                    self._services.commands.dispatch(cmd)
-                    dispatched = True
-                except DomainError as exc:
-                    logger.error("%s отклонён: %s", type(cmd).__name__, exc)
-                    self._report(f"Не удалось удалить узел: {exc}")
-                # Scene обновится из _on_topology_replaced (синхронный)
-
-        # Task 2.1: явная перерисовка нужна только если удаляли исключительно
-        # чисто-unbound боксы (dispatch'а, а значит и _on_topology_replaced, не было).
-        # Тот же путь, что place_display: _topology_to_graph пройдёт по уже
-        # очищенному _placed_display_ids и не дорисует удалённый бокс.
-        if had_pure_unbound and not dispatched and self._scene:
-            with self._block_signals():
-                nodes, edges = self._topology_to_graph(self._model.to_topology_dict())
-                self.load_scene_with_ports(nodes, edges)
+        """Удалить выбранные ноды и display-боксы (делегат PipelineMutations, F.4)."""
+        self._mutations.remove_selected(selected_node_ids)
 
     def add_wire(self, source: str, target: str, parent: "QWidget | None" = None) -> bool:
-        """Добавить wire с валидацией совместимости портов.
-
-        G.4.2: process→process wire → dispatch(ConnectWire). Port-валидация (QMessageBox)
-        и guard дубликата сохраняются в presenter ДО dispatch.
-        G.4.2b: wire-to-display → dispatch(BindDisplay) — соединение source→бокс есть
-        привязка (node_id=source endpoint, display_id=канал бокса), не wire.
-
-        Args:
-            source: endpoint источника в формате "process.plugin.port"
-            target: endpoint приёмника в формате "process.plugin.port"
-                    или "display.<display_id>.frame" для display-боксов
-            parent: родительский виджет для QMessageBox (может быть None)
-
-        Returns:
-            True если wire/binding создан, False если заблокирован.
-        """
-        # --- Валидация совместимости портов (GUI-concern, остаётся в presenter) ---
-        if not self._validate_wire_ports(source, target, parent):
-            return False
-
-        is_display_target = target.split(".")[0] == "display"
-
-        if is_display_target:
-            # G.4.2b: соединение source→display-бокс = dispatch(BindDisplay).
-            # target = "display.<display_id>.frame" (id бокса = display_id).
-            parts = target.split(".")
-            display_id = parts[1] if len(parts) >= 2 else ""
-            if not display_id:
-                logger.warning("BindDisplay: некорректный display-target '%s'", target)
-                return False
-            cmd = BindDisplay(node_id=source, display_id=display_id)
-            try:
-                self._services.commands.dispatch(cmd)
-            except DomainError as exc:
-                logger.warning("BindDisplay отклонён: %s", exc)
-                self._report(f"Не удалось привязать дисплей: {exc}")
-                return False
-            # Task 2.1 / follow-up ФИКС #1 (потеря данных при undo):
-            # display_id НАМЕРЕННО остаётся в _placed_display_ids после BindDisplay.
-            # Дедуп по display_id в _build_display_nodes и так не плодит дубль (бокс из
-            # topo["displays"] строится первым и имеет приоритет — placed-ветка
-            # пропускает уже существующий id). А сохранение записи в set держит бокс
-            # живым при Ctrl+Z: undo BindDisplay → _on_topology_replaced → topo больше
-            # НЕ содержит этот display_id, но placed-ветка дорисует бокс заново как
-            # placed-but-unbound (корректный UX — возврат в «размещён, но не привязан»).
-            # Прежний discard здесь убивал бокс из ОБОИХ источников безвозвратно.
-            # Запись чистится при явном удалении (bound-ветка remove_selected делает
-            # discard) и при смене рецепта (_on_recipe_activated.clear()). Это вариант,
-            # прямо разрешённый планом («оставить в set до смены рецепта ИЛИ снять
-            # после bind — выбрать»). См. plans/pipeline-place-display-node.md (Task 2.1).
-            # Scene обновится из _on_topology_replaced (синхронный dispatch)
-            return True
-
-        # G.4.2: process→process wire через domain dispatch
-        # Guard дубликата (domain не отвергает дубликаты, находка #5 аудита)
-        for w in self._model.get_wires():
-            if isinstance(w, dict) and w.get("source") == source and w.get("target") == target:
-                logger.warning("Wire %s -> %s уже существует (дубликат)", source, target)
-                return False
-
-        cmd = ConnectWire(source=source, target=target)
-        try:
-            self._services.commands.dispatch(cmd)
-        except DomainError as exc:
-            # Цикл или dangling process → graceful return False, repo не мутирован
-            logger.warning("ConnectWire отклонён: %s", exc)
-            self._report(f"Соединение отклонено: {exc}")
-            return False
-
-        # Scene обновится из _on_topology_replaced (синхронный dispatch → reload уже произошёл)
-        return True
+        """Добавить wire/binding с валидацией портов (делегат PipelineMutations, F.4)."""
+        return self._mutations.add_wire(source, target, parent)
 
     def place_display(self, display_id: str, x: float, y: float) -> None:
-        """Разместить пустой (непривязанный) display-бокс на холсте (Task 1.1).
-
-        Бокс ещё НЕ имеет binding (нет источника кадра), поэтому в topo["displays"]
-        его нет и domain dispatch здесь НЕ вызывается (binding появится позже, когда
-        пользователь протянет провод → add_wire → BindDisplay). Вместо dispatch
-        фиксируем GUI-состояние:
-          - позицию в _gui_positions (чтобы бокс встал в точку клика);
-          - display_id в _placed_display_ids (чтобы _build_display_nodes дорисовал
-            бокс при каждом reload — иначе призрак исчез бы при первой мутации).
-
-        Способ перерисовки: переиспользуем штатный путь scene reload — строим
-        nodes/edges из текущей модели (_topology_to_graph) и зовём
-        load_scene_with_ports внутри _block_signals(). _topology_to_graph →
-        _build_display_nodes дорисует placed-but-unbound боксы (включая этот).
-        Это тот же конвейер, что _on_topology_replaced, поэтому поведение боксов
-        идентично «настоящему» reload. _block_signals() гасит обратные сигналы
-        scene (selectionChanged), как и в остальных programmatic-апдейтах.
-
-        Идемпотентно: повторный вызов того же display_id лишь обновляет позицию
-        (set дедуплицирует). Канал без записи в каталоге допустим — имя резолвится
-        в пустое, подзаголовок бокса = display_id.
-
-        follow-up ФИКС #5 (потеря selection): reload здесь делает clear_all сцены,
-        из-за чего прежнее выделение терялось и inspector очищался (tab не проверяет
-        _suppress в _on_selection_changed). Оборачиваем reload в capture/restore
-        selection по аналогии с _on_topology_replaced — прежнее выделение сохраняется.
-        Новый размещённый бокс выделять не обязательно.
-        """
-        self._gui_positions[display_id] = (x, y)
-        self._placed_display_ids.add(display_id)
-
-        if not self._scene:
-            return
-        selected_ids = self._capture_selection()
-        with self._block_signals():
-            nodes, edges = self._topology_to_graph(self._model.to_topology_dict())
-            self.load_scene_with_ports(nodes, edges)
-            self._restore_selection(selected_ids)
+        """Разместить пустой display-бокс на холсте (делегат PipelineMutations, F.4)."""
+        self._mutations.place_display(display_id, x, y)
 
     def _validate_wire_ports(
         self,
@@ -829,103 +342,24 @@ class PipelinePresenter:
         return False
 
     def on_node_moved(self, node_id: str, new_x: float, new_y: float) -> None:
-        """Обработчик свободного перемещения ноды (free-layout).
-
-        G.4.4: NODE_MOVE — GUI-only (позиции в _gui_positions/metadata), не
-        topology-domain. Drag меняет ТОЛЬКО позицию (членство в процессе не
-        трогается). Позиция дебаунс-сохраняется в активный рецепт (Task 2).
-        """
-        if self._suppress:
-            return
-        self._gui_positions[node_id] = (new_x, new_y)
-        self._schedule_layout_persist()
+        """Свободное перемещение ноды free-layout (делегат LayoutController, F.4)."""
+        self._layout.on_node_moved(node_id, new_x, new_y)
 
     def set_node_lock(self, node_id: str, locked: bool) -> None:
-        """Зафиксировать/освободить ноду явно.
-
-        Locked-нода не перетаскивается (ItemIsMovable=False) и пропускается
-        auto_layout_scene. Состояние живёт в _locked_nodes, переприменяется в
-        _topology_to_graph при reload и дебаунс-сохраняется в рецепт
-        (metadata.locked_nodes) → переживает перезапуск (Task 3).
-        """
-        if not node_id:
-            return
-        if locked:
-            self._locked_nodes.add(node_id)
-        else:
-            self._locked_nodes.discard(node_id)
-        if self._scene:
-            self._scene.set_node_locked(node_id, locked)
-        self._schedule_layout_persist()
-
-    # ------------------------------------------------------------------ #
-    #  Авто-персист layout в рецепт (free-layout Task 2/3)                 #
-    # ------------------------------------------------------------------ #
-
-    # Дебаунс авто-сохранения layout: 400мс после последнего сдвига/фиксации,
-    # чтобы не писать файл рецепта на каждый пиксель перетаскивания.
-    _PERSIST_DEBOUNCE_MS = 400
+        """Зафиксировать/освободить ноду явно (делегат LayoutController, F.4)."""
+        self._layout.set_node_lock(node_id, locked)
 
     def _sync_positions_from_scene(self) -> None:
-        """Синхронизировать _gui_positions с текущей сценой (только её ноды).
-
-        Берём позиции ТОЛЬКО нод, реально присутствующих в сцене. Это убирает
-        накопленный мусор: ключи нод прошлых рецептов (копились через .update при
-        переключении рецепта) и legacy node_id чужого процесса (напр.
-        ``camera_0.frame_saver`` от старого drag→MovePlugin кода). Иначе мусор
-        записывался в активный рецепт и нода рендерилась «в чужом процессе».
-        """
-        if self._scene is None:
-            return
-        self._gui_positions = dict(self._scene.get_all_node_positions())
-
-    def _schedule_layout_persist(self) -> None:
-        """Запланировать (дебаунс) авто-сохранение layout в активный рецепт.
-
-        Ленивая инициализация QTimer: без QApplication (headless-тесты) — no-op,
-        авто-сохранение пропускается (явный save_to_active_recipe не зависит от таймера).
-        """
-        from PySide6.QtWidgets import QApplication
-
-        if QApplication.instance() is None:
-            return
-        if self._persist_timer is None:
-            from PySide6.QtCore import QTimer
-
-            self._persist_timer = QTimer()
-            self._persist_timer.setSingleShot(True)
-            self._persist_timer.timeout.connect(self._persist_layout_to_recipe)
-        self._persist_timer.start(self._PERSIST_DEBOUNCE_MS)
+        """Синхронизировать _gui_positions со сценой (делегат LayoutController, F.4)."""
+        self._layout._sync_positions_from_scene()
 
     def _persist_layout_to_recipe(self) -> None:
-        """Тихо сохранить позиции/фиксацию в активный рецепт (по дебаунс-таймеру).
-
-        Layout — GUI-метаданные: пишем ТОЧЕЧНО ``blueprint.metadata.{gui_positions,
-        locked_nodes}`` через store.save_layout (ruamel, не перезаписывая весь blueprint)
-        — комментарии рецепта целы, processes/wires не тронуты (editor↔runtime decoupling,
-        [[project_pipeline_editor_runtime_decoupled]]). blueprint.metadata переживает
-        cold-start (unwrap_recipe сохраняет blueprint; load_topology_from_config читает
-        оттуда). Без активного рецепта / ошибки записи — только лог, без QMessageBox
-        (авто-сохранение не должно дёргать пользователя).
-        """
-        store = self._services.recipes
-        active_slug = store.get_active()
-        if active_slug is None:
-            return
-
-        # Только ноды текущей сцены → не писать в рецепт мусор от прошлых рецептов / legacy.
-        self._sync_positions_from_scene()
-
-        gui_positions = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
-        try:
-            store.save_layout(active_slug, gui_positions, sorted(self._locked_nodes))
-            logger.debug("Layout pipeline авто-сохранён в рецепт '%s'", active_slug)
-        except Exception:
-            logger.exception("Авто-сохранение layout в рецепт '%s' не удалось", active_slug)
+        """Тихо сохранить позиции/фиксацию в рецепт (делегат LayoutController, F.4)."""
+        self._layout._persist_layout_to_recipe()
 
     def toggle_node_lock(self, node_id: str) -> None:
-        """Переключить фиксацию ноды (правый клик по ноде)."""
-        self.set_node_lock(node_id, node_id not in self._locked_nodes)
+        """Переключить фиксацию ноды (делегат LayoutController, F.4)."""
+        self._layout.toggle_node_lock(node_id)
 
     # ------------------------------------------------------------------ #
     #  Topology sync                                                       #
@@ -1035,75 +469,8 @@ class PipelinePresenter:
     # ------------------------------------------------------------------ #
 
     def auto_layout_scene(self) -> None:
-        """Применить Sugiyama auto-layout на уровне ПРОЦЕССОВ, плагины — группой.
-
-        D.1: нода = плагин, но раскладка считается по процессам (рамкам): каждый
-        процесс — один узел Sugiyama, его плагины раскладываются слева-направо
-        внутри по индексу. Ширина узла = макс ширина контейнера (по числу
-        плагинов), чтобы колонки не накладывались. Display-боксы участвуют как
-        узлы-стоки (binding-ребро source-процесс → бокс).
-        """
-        if not self._scene:
-            return
-        from .graph.constants import CONTAINER_HEADER_H, CONTAINER_INNER_GAP, CONTAINER_PADDING, NODE_WIDTH
-
-        topo = self._model.to_topology_dict()
-        # Карта процесс → число плагинов (для ширины колонки и offset плагинов).
-        plugin_counts: dict[str, int] = {}
-        for proc in topo.get("processes", []):
-            if proc.get("protected", False) if isinstance(proc, dict) else getattr(proc, "protected", False):
-                continue
-            pn = proc.get("process_name", "") if isinstance(proc, dict) else getattr(proc, "process_name", "")
-            pls = proc.get("plugins", []) if isinstance(proc, dict) else getattr(proc, "plugins", [])
-            if pn:
-                plugin_counts[pn] = len(pls)
-
-        nodes = list(plugin_counts.keys())
-        edges = list(self._model.get_edges_as_tuples())
-
-        # Display-боксы (id = display_id) + binding-рёбра source-процесс → box.
-        display_ids: set[str] = set(self._placed_display_ids)
-        for d in self._model.get_displays():
-            display_id = d.get("display_id", "")
-            if not display_id:
-                continue
-            display_ids.add(display_id)
-            source_proc = d.get("node_id", "").split(".")[0]
-            if source_proc:
-                edges.append((source_proc, display_id))
-        for display_id in display_ids:
-            if display_id not in nodes:
-                nodes.append(display_id)
-
-        # Ширина колонки = макс ширина контейнера (учесть цепочку плагинов).
-        max_plugins = max(plugin_counts.values(), default=1) or 1
-        column_width = max_plugins * (NODE_WIDTH + CONTAINER_INNER_GAP) + 2 * CONTAINER_PADDING
-        positions = auto_layout(nodes, edges, node_width=column_width)
-
-        inner_dy = CONTAINER_HEADER_H + CONTAINER_PADDING
-        with self._block_signals():
-            for layout_id, (x, y) in positions.items():
-                if layout_id in plugin_counts:
-                    # Процесс: разложить его плагин-ноды слева-направо группой.
-                    members = self._scene.members_of(layout_id)
-                    # Сортируем по plugin_index для стабильного порядка цепочки.
-                    members.sort(key=lambda m: m.plugin_index)
-                    for j, member in enumerate(members):
-                        # Зафиксированную ноду авто-раскладка не трогает.
-                        if getattr(member.data, "locked", False):
-                            continue
-                        mx = x + CONTAINER_PADDING + j * (NODE_WIDTH + CONTAINER_INNER_GAP)
-                        my = y + inner_dy
-                        member.setPos(mx, my)
-                        self._gui_positions[member.node_id] = (mx, my)
-                else:
-                    # Display-бокс (или fallback) — двигаем сам узел (если не locked).
-                    node_item = self._scene.get_node(layout_id)
-                    if node_item is not None and getattr(getattr(node_item, "data", None), "locked", False):
-                        continue
-                    self._gui_positions[layout_id] = (x, y)
-                    if node_item is not None:
-                        node_item.setPos(x, y)
+        """Применить Sugiyama auto-layout на уровне процессов (делегат LayoutController, F.4)."""
+        self._layout.auto_layout_scene()
 
     # ------------------------------------------------------------------ #
     #  Валидация и утилиты                                                 #
@@ -1192,72 +559,8 @@ class PipelinePresenter:
     # ------------------------------------------------------------------ #
 
     def save_to_active_recipe(self, parent: "QWidget | None" = None) -> bool:
-        """Сохранить текущий граф в активный рецепт.
-
-        Вызывает graph_to_blueprint для сериализации модели,
-        читает текущий YAML рецепта через store.read_raw(), обновляет секции
-        blueprint/display_bindings/gui_positions и записывает через store.save_raw().
-
-        Task F.4: использует RecipeStore Protocol (services.recipes) вместо
-        legacy bridge через adapter._rm.
-
-        Args:
-            parent: родительский виджет для QMessageBox (может быть None).
-
-        Returns:
-            True при успешном сохранении, False при любой ошибке.
-        """
-        from PySide6.QtWidgets import QMessageBox
-
-        from .io import graph_to_blueprint
-
-        store = self._services.recipes
-
-        # Шаг 1: проверить активный рецепт
-        active_slug = store.get_active()
-        if active_slug is None:
-            QMessageBox.warning(parent, "Сохранение рецепта", "Не выбран активный рецепт")
-            return False
-
-        # Шаг 2: сериализовать модель
-        bp_dict, bindings, gui_positions = graph_to_blueprint(self._model)
-
-        # Обновить gui_positions из scene (если привязана)
-        if self._scene:
-            self._gui_positions.update(self._scene.get_all_node_positions())
-        gui_positions = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
-
-        # Шаг 3: прочитать текущий YAML рецепта через RecipeStore Protocol
-        raw_recipe = store.read_raw(active_slug)
-        if raw_recipe is None:
-            QMessageBox.critical(parent, "Сохранение рецепта", "Не удалось прочитать рецепт")
-            return False
-
-        # Шаг 4: обновить top-level секции v3-рецепта (displays ВНУТРЬ blueprint) через
-        # единый нормализатор (one source of truth): без legacy data:-вложения, прочие
-        # ключи (name/version/active_services) сохраняются. save_raw — ruamel round-trip.
-        try:
-            from multiprocess_prototype.recipes.format import normalize_recipe_v3_raw
-
-            bp_dict["displays"] = bindings
-            # free-layout Task 2/3: дублируем layout в blueprint.metadata — именно
-            # оттуда его читает load_topology_from_config и cold-start (unwrap_recipe
-            # сохраняет blueprint.metadata). Top-level gui_positions оставляем для
-            # обратной совместимости (Recipes-tab + старые рецепты).
-            metadata = dict(bp_dict.get("metadata") or {})
-            metadata["gui_positions"] = gui_positions
-            metadata["locked_nodes"] = sorted(self._locked_nodes)
-            bp_dict["metadata"] = metadata
-            store.save_raw(active_slug, normalize_recipe_v3_raw(raw_recipe, bp_dict, gui_positions))
-
-            logger.info("Pipeline сохранён в рецепт '%s'", active_slug)
-        except Exception as exc:
-            logger.exception("Ошибка при сохранении рецепта '%s'", active_slug)
-            QMessageBox.critical(parent, "Сохранение рецепта", f"Ошибка: {exc}")
-            return False
-
-        QMessageBox.information(parent, "Сохранение рецепта", f"Рецепт сохранён: {active_slug}")
-        return True
+        """Сохранить текущий граф в активный рецепт (делегат LayoutController, F.4)."""
+        return self._layout.save_to_active_recipe(parent)
 
     # ------------------------------------------------------------------ #
     #  Runtime-контроль живого backend (делегаты RuntimeController, F.3)   #
