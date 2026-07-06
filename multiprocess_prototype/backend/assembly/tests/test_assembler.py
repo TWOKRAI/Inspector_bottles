@@ -143,9 +143,13 @@ class TestRoadAParity:
 
         assert actual == reference
 
-    def test_custom_log_dir_parity(self) -> None:
-        """Кастомный log_dir: assembler == дорога A."""
-        custom_log_dir = "/var/log/inspector"
+    def test_custom_log_dir_parity(self, tmp_path) -> None:
+        """Кастомный log_dir: assembler == дорога A.
+
+        tmp_path вместо системного пути: managers_from_log_dir делает mkdir
+        каталога логов, а /var/log/* требует root → PermissionError на macOS.
+        """
+        custom_log_dir = str(tmp_path / "custom_logs")
         bp = copy.deepcopy(_MINIMAL_BLUEPRINT)
         reference = _build_reference_road_a(bp, _OBS_OVERLAY, log_dir=custom_log_dir)
 
