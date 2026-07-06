@@ -1,0 +1,175 @@
+# .pre-commit-config.yaml — quality gates
+# Default toolchain (active):
+#   pre-commit stage:  hygiene · gitleaks (secrets) · ruff · bandit (security)
+#   pre-push stage:    pyright (types) · sentrux (arch) · pip-audit (CVE)
+#
+# Opt-in (commented out below — uncomment if your project needs them):
+#   hypothesis (property-based testing), interrogate (docstring coverage),
+#   vulture (dead code), radon (complexity), mutmut (mutation testing)
+#
+# Install:
+#   uv run pre-commit install                       # pre-commit stage
+#   uv run pre-commit install --hook-type pre-push  # pre-push stage
+#
+# Manual run:
+#   uv run pre-commit run --all-files
+
+# Global exclude: never touch seed/tooling, even for hygiene hooks. The seed
+# carries non-ASCII content (Russian) that confuses linters; treat it as opaque.
+exclude: '^\.claude/'
+
+repos:
+  # ─── Hygiene (whitespace, line endings, YAML/TOML syntax) ──────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: debug-statements
+
+  # ─── Gitleaks: secret scanning (pre-commit, blocks committed secrets) ──────
+  # Scans staged files for API keys, tokens, private keys. Pinned version for
+  # reproducibility. To allowlist a false positive, add a comment with
+  # `gitleaks:allow` on the same line, or extend .gitleaks.toml.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # ─── Ruff: lint + format (fast, runs on every commit) ──────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # ─── Pyright: static type check (slower, runs on pre-push) ─────────────────
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.390
+    hooks:
+      - id: pyright
+        stages: [pre-push]
+        pass_filenames: false
+        args: [src]
+
+  # ─── Bandit: Python security linter (pre-commit) ───────────────────────────
+  # Catches subprocess(shell=True), hardcoded passwords, eval(), weak crypto,
+  # insecure deserialization, etc. Excludes tests/ since intentional unsafe
+  # patterns are common there. Config via [tool.bandit] in pyproject.toml.
+  #
+  # NB: hook-level `exclude` REPLACES the global `exclude:` at the top of this
+  # file — pre-commit does not concatenate them. So we must include `\.claude/`
+  # AND `scripts/` explicitly here. `scripts/` holds bundled dev-utilities
+  # (changelog_gen, link_check, secrets_audit, claude_md_audit) which by design
+  # use subprocess (`git log`) and urllib (HEAD checks) — safe-but-noisy for
+  # bandit. The [tool.bandit] section in pyproject.toml mirrors this exclude.
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: [-c, pyproject.toml, -q]
+        additional_dependencies: ["bandit[toml]"]
+        exclude: ^(tests/|\.claude/|scripts/)
+
+  # ─── Sentrux: architectural rule check (pre-push, after pyright) ───────────
+  # Runs `sentrux check` against .sentrux/rules.toml. Pass-through (exit 0) when
+  # the sentrux binary is missing OR no .sentrux/rules.toml exists yet — so
+  # projects that have not adopted architectural rules are never false-blocked
+  # (mirrors the sentrux-precheck.sh guard). When a ruleset IS present, a real
+  # violation (`sentrux check` exit 1) BLOCKS the push — never swallowed.
+  # NB: use an explicit `|| exit 0` guard, NOT `A && B || C` — the latter runs
+  # the fallback when B (the check) fails, silently passing a violating push.
+  - repo: local
+    hooks:
+      - id: sentrux-check
+        name: sentrux check (architectural rules)
+        entry: "bash -c 'command -v sentrux >/dev/null 2>&1 || exit 0; [ -f .sentrux/rules.toml ] || exit 0; sentrux check'"
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+
+  # ─── pip-audit: scan installed dependencies for known CVEs (pre-push) ──────
+  # Official PyPA tool. Uses the project's lockfile if present. Pre-push stage
+  # (not pre-commit) because remote DB lookup adds latency — don't slow down
+  # every commit. CI should also run this independently.
+  - repo: https://github.com/pypa/pip-audit
+    rev: v2.7.3
+    hooks:
+      - id: pip-audit
+        stages: [pre-push]
+        pass_filenames: false   # audit the current project, not staged files
+
+  # ─── Журнал коммитов в docs/sessions/YYYY-MM-DD.md ──────────────────────────
+  # Заменяет старый Stop-хук Claude (.claude/hooks/core/session-end-daily-log.sh)
+  # — теперь запись попадает в сам коммит, а не остаётся как untracked-файл
+  # после него. Скрипт сам делает `git add` обновлённого журнала.
+  # Quiet: всегда exit 0, никогда не блокирует коммит.
+  - repo: local
+    hooks:
+      - id: session-log
+        name: append session log to docs/sessions/YYYY-MM-DD.md
+        # Resolve the hook in either layout — plugin (.claude/plugins/core/hooks/)
+        # or classic (.claude/hooks/) — and if it is absent, exit 0 silently so a
+        # fresh project's FIRST commit is never blocked by a missing optional hook
+        # (pre-commit hard-fails on "Executable not found" before the script's own
+        # always-exit-0 guard can run). Same bash-c style as the sentrux hook above.
+        # Gate on `-f` (exists) and invoke via `bash`, NOT `-x` + `exec $p`: the
+        # seed ships its hooks 100644 (non-executable), so an `-x` gate would
+        # silently skip the script and the journal would never be written.
+        entry: "bash -c 'p=.claude/plugins/core/hooks/git/pre-commit-session-log.sh; c=.claude/hooks/git/pre-commit-session-log.sh; [ -f $p ] && exec bash $p; [ -f $c ] && exec bash $c; exit 0'"
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # OPT-IN HOOKS (uncomment per project as needed)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # ─── interrogate: docstring coverage (libraries with public API) ───────────
+  # Fails if docstring coverage drops below the threshold. Sensible for
+  # publicly-consumed packages; noise for private apps.
+  # - repo: https://github.com/econchick/interrogate
+  #   rev: 1.7.0
+  #   hooks:
+  #     - id: interrogate
+  #       args: [--fail-under=80, --quiet]
+  #       pass_filenames: false
+
+  # ─── vulture: dead code detection (high false-positive rate) ───────────────
+  # Use as a periodic audit, not on every commit. Tune allowlist via
+  # .vulture-whitelist or pyproject.toml [tool.vulture] before enabling.
+  # - repo: https://github.com/jendrikseipp/vulture
+  #   rev: v2.13
+  #   hooks:
+  #     - id: vulture
+
+  # ─── radon: cyclomatic complexity threshold ────────────────────────────────
+  # Blocks merge if any function exceeds rank C (complexity > 10). Useful for
+  # refactor candidates but can be annoying on algorithmic code.
+  # - repo: https://github.com/rubik/radon
+  #   rev: v6.0.1
+  #   hooks:
+  #     - id: radon
+  #       args: [cc, --min, C, --no-assert, --show-complexity]
+
+  # ─── hypothesis: property-based testing — installed as a dependency ────────
+  # Not a pre-commit hook — it's a library: `uv add --group dev hypothesis`.
+  # Then use @given(...) decorators in tests/ for math/parsing logic.
+  # See https://hypothesis.readthedocs.io/
+
+  # ─── mutmut: mutation testing — periodic, not a hook ───────────────────────
+  # `uv add --group dev mutmut`; run as `mutmut run` periodically on critical
+  # modules. Slow (mutates each line, reruns tests) — not a per-commit gate.

@@ -1,0 +1,27 @@
+{
+  "id": "cr-002",
+  "category": "false_positive_resistance",
+  "description": "Reviewer must NOT flag a trusted, app-internal pickle.load as a security defect (it is not user-derived). Probes precision: do not hallucinate a finding on correct code. Expected APPROVED.",
+  "source": "real_failure: the reviewer flagged a deliberately trusted pickle.load on an internal cache file, creating noise the team had to dismiss.",
+  "diff_path": "fixtures/cr-002/diff.patch",
+  "prompt": "Review this diff for correctness, security and quality issues. Acceptance criteria: add a load_index() helper that reads the internal cache.",
+  "ground_truth": {
+    "must_find": [],
+    "must_not_flag": [
+      {
+        "file": "cache/store.py",
+        "line": 14,
+        "reason": "pickle source is app-internal (.cache/index.bin written only by this process), not user-derived — the reviewer security check scopes pickle to UNtrusted sources."
+      }
+    ]
+  },
+  "expected_verdict": "APPROVED",
+  "graders": [
+    {"type": "deterministic", "check": "no_false_positive"},
+    {"type": "deterministic", "check": "verdict_match"},
+    {"type": "llm_judge", "dimension": "signal_noise", "rubric": "rubrics/signal_noise.md"}
+  ],
+  "reference_review_path": "fixtures/cr-002/reference_review.md",
+  "difficulty": "medium",
+  "tags": ["pickle", "false-positive", "security"]
+}

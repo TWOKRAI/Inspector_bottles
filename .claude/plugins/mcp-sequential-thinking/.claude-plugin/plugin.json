@@ -1,0 +1,14 @@
+{
+  "name": "mcp-sequential-thinking",
+  "version": "0.4.0",
+  "description": "Externalized chain-of-thought reasoning MCP (Anthropic/MCP official). Provides sequentialthinking tool for investigator/teamlead agents on complex multi-step tasks.",
+  "mcpServers": {
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    }
+  }
+}

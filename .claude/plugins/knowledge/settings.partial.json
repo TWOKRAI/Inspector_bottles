@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__knowledgeos__kos_search",
+      "mcp__knowledgeos__kos_ask",
+      "mcp__knowledgeos__kos_know",
+      "mcp__knowledgeos__kos_read_wiki",
+      "mcp__knowledgeos__kos_apps"
+    ],
+    "ask": [
+      "mcp__knowledgeos__kos_run",
+      "mcp__knowledgeos__kos_curate",
+      "mcp__knowledgeos__kos_transcribe"
+    ]
+  }
+}

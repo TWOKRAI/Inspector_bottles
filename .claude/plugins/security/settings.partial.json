@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(semgrep *)",
+      "Bash(osv-scanner *)",
+      "Bash(syft *)",
+      "Bash(cdxgen *)"
+    ]
+  }
+}

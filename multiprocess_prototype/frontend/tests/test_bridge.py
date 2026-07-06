@@ -38,6 +38,33 @@ class TestStateListeners:
 
         assert calls == [1]
 
+    def test_remove_state_listener(self, qtbot):
+        """add → listener вызван; remove → больше не вызывается."""
+        bridge = DataReceiverBridge()
+        calls: list[int] = []
+
+        def listener(_m):
+            calls.append(1)
+
+        bridge.add_state_listener(listener)
+        bridge.dispatch({"data_type": "state_delta", "path": "p", "value": 1})
+        assert calls == [1]
+
+        bridge.remove_state_listener(listener)
+        bridge.dispatch({"data_type": "state_delta", "path": "p", "value": 2})
+        assert calls == [1]  # после remove вызовов нет
+
+    def test_remove_missing_listener_noop(self, qtbot):
+        """remove незарегистрированного cb — no-op, без исключений."""
+        bridge = DataReceiverBridge()
+        remaining: list[str] = []
+        bridge.add_state_listener(lambda m: remaining.append("kept"))
+
+        bridge.remove_state_listener(lambda m: None)  # никогда не добавлялся
+
+        bridge.dispatch({"data_type": "state_delta", "path": "p", "value": 1})
+        assert remaining == ["kept"]  # оставшийся слушатель не пострадал
+
 
 class TestCommandSender:
     """Тесты CommandSender."""

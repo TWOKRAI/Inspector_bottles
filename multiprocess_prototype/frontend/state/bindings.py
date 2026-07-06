@@ -63,6 +63,29 @@ class BindingHandle:
 
 
 # ---------------------------------------------------------------------------
+# FanoutHandle — дескриптор одной fan-out подписки
+# ---------------------------------------------------------------------------
+
+
+@dataclass(eq=False)
+class FanoutHandle:
+    """Дескриптор одной fan-out подписки (см. ``bind_fanout``).
+
+    Сравнение — по идентичности (eq=False): два bind_fanout с одинаковыми
+    аргументами дают РАЗНЫЕ хэндлы, unbind_fanout снимает ровно свою подписку.
+
+    Attributes:
+        pattern: glob-паттерн пути StateStore.
+        callback: вызывается как callback(path, value) на каждую matching дельту.
+        owner_ref: weakref на виджет-владелец; None — подписка без владельца.
+    """
+
+    pattern: str
+    callback: Callable[[str, Any], None]
+    owner_ref: weakref.ref | None = None
+
+
+# ---------------------------------------------------------------------------
 # GuiStateBindings — менеджер подписок
 # ---------------------------------------------------------------------------
 
@@ -97,11 +120,11 @@ class GuiStateBindings:
                 (Task 4.1). При None replay не выполняется (legacy-поведение).
         """
         self._bindings: list[BindingHandle] = []
-        # Fan-out подписки: (pattern, callback) — callback(path, value) на каждую
+        # Fan-out подписки (FanoutHandle) — callback(path, value) на каждую
         # дельту с matching path. В отличие от bind (один виджет), позволяет
         # подписчику динамически создавать виджеты по обнаруженным ключам
         # (например строки рантайм-воркеров processes.X.workers.*).
-        self._fanouts: list[tuple[str, Callable[[str, Any], None]]] = []
+        self._fanouts: list[FanoutHandle] = []
         self._cache_snapshot = cache_snapshot
         bridge.set_state_callback(self._on_state_msg)
 
@@ -162,7 +185,7 @@ class GuiStateBindings:
         pattern: str,
         callback: Callable[[str, Any], None],
         owner: QWidget | None = None,
-    ) -> None:
+    ) -> FanoutHandle:
         """Подписать fan-out callback на glob-паттерн (динамическое обнаружение).
 
         В отличие от ``bind`` (привязка к одному виджету), fan-out вызывает
@@ -174,17 +197,30 @@ class GuiStateBindings:
         Сразу проигрывает закэшированные значения (replay) — как ``bind``, чтобы
         ленивые панели увидели уже опубликованные ключи.
 
+        ВНИМАНИЕ: дедупа нет — повторный bind_fanout с теми же аргументами
+        создаёт ВТОРУЮ подписку. Владелец жизненного цикла обязан снять старую
+        через unbind_fanout(handle) / unbind_by_owner(owner).
+
         Args:
             pattern: glob-паттерн пути StateStore.
             callback: вызывается как callback(path, value) на каждую matching дельту.
             owner: опциональный виджет-владелец; при его destroyed подписка
                 автоматически снимается (защита от dangling-callback).
+
+        Returns:
+            FanoutHandle — дескриптор для последующего unbind_fanout().
         """
-        entry = (pattern, callback)
-        self._fanouts.append(entry)
+        handle = FanoutHandle(
+            pattern=pattern,
+            callback=callback,
+            owner_ref=weakref.ref(owner) if owner is not None else None,
+        )
+        self._fanouts.append(handle)
 
         if owner is not None:
-            owner.destroyed.connect(lambda *_: self._fanouts.remove(entry) if entry in self._fanouts else None)
+            # Авто-уборка при уничтожении владельца — через идемпотентный
+            # unbind_fanout: повторный вызов (после ручного unbind) безопасен.
+            owner.destroyed.connect(lambda *_: self.unbind_fanout(handle))
 
         # Replay закэшированных значений.
         if self._cache_snapshot is not None:
@@ -198,6 +234,40 @@ class GuiStateBindings:
                         callback(cached_path, cached_value)
                     except Exception:
                         pass
+
+        return handle
+
+    def unbind_fanout(self, handle: FanoutHandle) -> None:
+        """Снять конкретную fan-out подписку по дескриптору (идемпотентно).
+
+        Args:
+            handle: дескриптор, ранее возвращённый bind_fanout().
+        """
+        try:
+            self._fanouts.remove(handle)
+        except ValueError:
+            pass  # Уже снята — не падаем
+
+    def unbind_by_owner(self, owner: QWidget) -> None:
+        """Снять ВСЕ fan-out подписки данного виджета-владельца.
+
+        Подписки без владельца (owner=None) не затрагиваются. Попутно
+        выметаются хэндлы с уже умершим владельцем (weakref пуст) — их
+        подписка в любом случае осиротела.
+
+        Args:
+            owner: виджет, переданный в bind_fanout(owner=...).
+        """
+        kept: list[FanoutHandle] = []
+        for h in self._fanouts:
+            if h.owner_ref is None:
+                kept.append(h)
+                continue
+            ref = h.owner_ref()
+            if ref is None or ref is owner:
+                continue  # целевой владелец или мёртвый weakref — снять
+            kept.append(h)
+        self._fanouts = kept
 
     def unbind(self, handle: BindingHandle) -> None:
         """Удалить конкретную подписку по дескриптору.
@@ -222,8 +292,9 @@ class GuiStateBindings:
         self._bindings = [h for h in self._bindings if h.widget_ref() is not widget]
 
     def clear(self) -> None:
-        """Снять все подписки (очистить список)."""
+        """Снять ВСЕ подписки — и виджетные, и fan-out."""
         self._bindings.clear()
+        self._fanouts.clear()
 
     # ------------------------------------------------------------------
     # Внутренний callback для bridge
@@ -275,12 +346,14 @@ class GuiStateBindings:
                     pass
 
         # Fan-out: динамическое обнаружение ключей (создание строк подписчиком).
-        for fpattern, fcallback in list(self._fanouts):
-            if match_glob(fpattern, path):
+        for fanout in list(self._fanouts):
+            if match_glob(fanout.pattern, path):
                 try:
-                    fcallback(path, value)
+                    fanout.callback(path, value)
                 except Exception as exc:
-                    _logger.debug("bindings: fan-out callback failed on %s (pattern %s): %s", path, fpattern, exc)
+                    _logger.debug(
+                        "bindings: fan-out callback failed on %s (pattern %s): %s", path, fanout.pattern, exc
+                    )
 
     def _apply_to_widget(self, handle: BindingHandle, value: Any) -> bool:
         """Применить значение к виджету подписки через setter.

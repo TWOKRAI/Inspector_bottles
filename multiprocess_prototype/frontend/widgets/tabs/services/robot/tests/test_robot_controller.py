@@ -92,7 +92,8 @@ def test_send_job_passes_device_id(qtbot) -> None:
     widget._spin_x.setValue(12.5)
     widget._spin_y.setValue(-7.0)
     widget._btn_send_job.click()
-    presenter.send_test_job.assert_called_once_with("robot_main", 12.5, -7.0)
+    # z_mm добавлен в 81664569 (режимы робота): контроллер шлёт третью координату (0.0 без спина z)
+    presenter.send_test_job.assert_called_once_with("robot_main", 12.5, -7.0, 0.0)
 
 
 def test_stop_passes_device_id(qtbot) -> None:

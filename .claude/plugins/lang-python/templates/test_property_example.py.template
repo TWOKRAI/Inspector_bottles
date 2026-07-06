@@ -1,0 +1,94 @@
+"""Example property-based tests (Hypothesis) — copy, adapt, then delete this file.
+
+Property-based testing states a rule that must hold for EVERY input in a domain
+and lets Hypothesis search for a counter-example, then shrink it toward a minimal
+failing case. See the `property-testing` skill for when/which-property guidance.
+
+This file is self-contained and passes as-is
+(`pytest tests/test_property_example.py`) so you see green immediately. Replace
+the toy targets with your own code from `{{PACKAGE}}` and keep the property
+shapes — that is where property-based testing earns its keep.
+"""
+
+from __future__ import annotations
+
+import json
+from itertools import pairwise
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+
+# ── Round-trip: decode(encode(x)) == x ───────────────────────────────────────
+# The single highest-value property for anything that serializes or parses.
+@given(st.lists(st.integers()))
+def test_json_round_trip(xs: list[int]) -> None:
+    assert json.loads(json.dumps(xs)) == xs
+
+
+# ── Invariant: the output always satisfies a rule, regardless of input ────────
+@given(st.lists(st.integers()))
+def test_sorted_output_is_ordered(xs: list[int]) -> None:
+    out = sorted(xs)
+    assert all(a <= b for a, b in pairwise(out))
+
+
+# ── Idempotence: f(f(x)) == f(x) ──────────────────────────────────────────────
+@given(st.lists(st.integers()))
+def test_sorting_is_idempotent(xs: list[int]) -> None:
+    once = sorted(xs)
+    assert sorted(once) == once
+
+
+# ── Oracle / model: a fast implementation must agree with a naive reference ───
+def _reference_max(xs: list[int]) -> int:
+    best = xs[0]
+    for x in xs[1:]:
+        if x > best:
+            best = x
+    return best
+
+
+@given(st.lists(st.integers(), min_size=1))
+def test_builtin_max_agrees_with_reference(xs: list[int]) -> None:
+    assert max(xs) == _reference_max(xs)
+
+
+# ── Metamorphic: transforming the input changes the output predictably ────────
+@given(st.lists(st.integers()), st.lists(st.integers()))
+def test_concat_length_is_additive(a: list[int], b: list[int]) -> None:
+    assert len(a + b) == len(a) + len(b)
+
+
+# ── Never crashes: a total function returns a value (no exception) on any input ─
+def _normalize_ws(s: str) -> str:
+    return " ".join(s.split())
+
+
+@given(st.text())
+def test_normalize_never_raises(s: str) -> None:
+    assert isinstance(_normalize_ws(s), str)
+
+
+# ── Constrain the strategy to the VALID domain, no wider ──────────────────────
+# Lowercase ASCII so upper/lower is a clean round-trip. A wider alphabet (e.g.
+# 'ß', 'İ') would legitimately break this — match the strategy to the property's
+# real domain instead of weakening the assertion.
+@given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz"))
+def test_ascii_case_round_trip(s: str) -> None:
+    assert s.upper().lower() == s
+
+
+# ── Tune runs with @settings for slow or wide properties ──────────────────────
+@settings(max_examples=50)
+@given(st.dictionaries(st.text(), st.integers()))
+def test_dict_round_trips_through_items(d: dict[str, int]) -> None:
+    assert dict(d.items()) == d
+
+
+# ── Adapt to your own code (uncomment and edit) ───────────────────────────────
+# from {{PACKAGE}} import decode, encode
+#
+# @given(st.text())
+# def test_my_codec_round_trips(s: str) -> None:
+#     assert decode(encode(s)) == s

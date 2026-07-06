@@ -58,6 +58,15 @@ class DataReceiverBridge(QObject):
         if cb not in self._state_listeners:
             self._state_listeners.append(cb)
 
+    def remove_state_listener(self, cb: Callable) -> None:
+        """Убрать слушателя state-сообщений (симметрия к add_state_listener, §11.15).
+
+        Идемпотентен: отсутствующий cb — no-op, без исключений.
+        После удаления cb больше не вызывается на state-сообщения.
+        """
+        if cb in self._state_listeners:
+            self._state_listeners.remove(cb)
+
     def set_command_callback(self, cb: Callable) -> None:
         self._command_cb = cb
 
@@ -83,7 +92,9 @@ class DataReceiverBridge(QObject):
         elif kind == "state":
             if self._state_cb:
                 self._state_cb(msg_dict)
-            for listener in self._state_listeners:
+            # Копия списка: слушатель может самоотписаться (remove_state_listener)
+            # прямо из dispatch — мутация оригинала пропустила бы соседний listener.
+            for listener in list(self._state_listeners):
                 listener(msg_dict)
             self.state_updated.emit(msg_dict)
         elif kind == "command":

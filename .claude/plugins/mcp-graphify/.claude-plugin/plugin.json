@@ -1,0 +1,18 @@
+{
+  "name": "mcp-graphify",
+  "version": "0.4.0",
+  "description": "Knowledge graph + community detection",
+  "mcpServers": {
+    "graphify": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "graphifyy[mcp]",
+        "python",
+        "-m",
+        "graphify.serve",
+        "graphify-out/graph.json"
+      ]
+    }
+  }
+}

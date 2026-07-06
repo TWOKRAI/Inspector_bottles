@@ -55,8 +55,12 @@ class CalibrationController:
         self._robot_id: str | None = None
         self._camera_id: str | None = None
         self._progress_owner_path: str | None = None
+        # Хэндл fanout-подписки на прогресс (bind_fanout) — для явной отписки.
+        self._progress_handle: Any = None
         # Push-телеметрия робота (как ручная вкладка): кэш текущих координат/энкодера.
         self._robot_tlm_id: str | None = None
+        # Хэндл fanout-подписки на телеметрию робота — для явной отписки.
+        self._robot_tlm_handle: Any = None
         self._robot_xy: tuple[float, float] | None = None
         self._robot_enc: int | None = None
         # Последний снапшот прогресса — для live_px при записи точки.
@@ -106,10 +110,13 @@ class CalibrationController:
         """Подписаться на devices.state.<id>.status → кэш x/y/encoder робота (push)."""
         if self._bindings is None or not device_id or device_id == self._robot_tlm_id:
             return
+        # Смена робота: сначала снять старую fanout-подписку (bind_fanout НЕ
+        # дедуплицирует — без отписки callbacks копятся на каждую смену).
+        self._unbind_robot_telemetry()
         self._robot_tlm_id = device_id
         path = f"devices.state.{device_id}.status"
         if hasattr(self._bindings, "bind_fanout"):
-            self._bindings.bind_fanout(path, self._on_robot_status, owner=self._widget)
+            self._robot_tlm_handle = self._bindings.bind_fanout(path, self._on_robot_status, owner=self._widget)
 
     def _on_robot_status(self, _path: str, value: Any) -> None:
         """Статус робота (push devices.state.<id>.status ИЛИ ответ pull — одна форма)."""
@@ -140,7 +147,16 @@ class CalibrationController:
         self._robot_presenter.get_telemetry(self._robot_id, lambda data: self._on_robot_status("", data))
 
     def unbind(self) -> None:
+        """Полная отписка контроллера: прогресс калибровки + телеметрия робота."""
         self._unbind_progress()
+        self._unbind_robot_telemetry()
+
+    def _unbind_robot_telemetry(self) -> None:
+        """Снять fanout-подписку на телеметрию робота (если была) и сбросить метку."""
+        if self._robot_tlm_handle is not None and hasattr(self._bindings, "unbind_fanout"):
+            self._bindings.unbind_fanout(self._robot_tlm_handle)
+        self._robot_tlm_handle = None
+        self._robot_tlm_id = None
 
     # ------------------------------------------------------------------ #
     # Подписка на прогресс
@@ -155,12 +171,18 @@ class CalibrationController:
         self._camera_id = camera_id
         path = f"calibration.state.{camera_id}.progress"
         if hasattr(self._bindings, "bind_fanout"):
-            self._bindings.bind_fanout(path, self._on_progress_push, owner=self._widget)
+            self._progress_handle = self._bindings.bind_fanout(path, self._on_progress_push, owner=self._widget)
             self._progress_owner_path = path
 
     def _unbind_progress(self) -> None:
-        # bind_fanout привязан к owner=widget; явного unbind по owner здесь нет —
-        # повторный bind на тот же owner/path фреймворк дедуплицирует. Сбрасываем метку.
+        """Снять fanout-подписку на прогресс (если была) и сбросить метки.
+
+        bind_fanout НЕ дедуплицирует — без явной отписки повторный bind
+        (смена камеры / повторный begin) накапливал бы callbacks.
+        """
+        if self._progress_handle is not None and hasattr(self._bindings, "unbind_fanout"):
+            self._bindings.unbind_fanout(self._progress_handle)
+        self._progress_handle = None
         self._camera_id = None
         self._progress_owner_path = None
 

@@ -3,7 +3,9 @@
 
 PR2: read-only. Кнопки Создать/Изменить/Удалить disabled.
 PR4: при наличии прав roles.edit/create/delete кнопки активируются.
-     Изменения прав идут через ActionBus → AuditMiddleware → audit_log.
+K1 (2026-06-18): legacy ActionBus-мост (V2ActionBuilder.role_update) снят —
+проводка была мёртвой (bus всегда None). Матрица прав read-only до появления
+domain-команды ROLE_UPDATE (Phase G+).
 
 Роли с hidden_in_ui=True (например, dev) не показываются в списке.
 """
@@ -29,30 +31,28 @@ from .permission_matrix import PermissionMatrix
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.auth_context import AuthContext
-    from multiprocess_framework.modules.actions_module.bus import ActionBus
 
 
 class RolesPanel(QWidget):
     """Панель управления ролями.
 
-    При наличии прав roles.edit матрица permissions становится редактируемой,
-    изменения отправляются в ActionBus через V2ActionBuilder.role_update.
+    K1 (2026-06-18): legacy ActionBus-мост (V2ActionBuilder.role_update) снят —
+    проводка была мёртвой (шина всегда None, сигнал не подключался). Матрица
+    прав read-only до появления domain-команды ROLE_UPDATE (Phase G+).
 
-    Кнопка «Удалить роль» вызывает auth_manager.delete_role() напрямую
-    (без ActionBus), так как удаление роли является необратимой операцией
+    Кнопка «Удалить роль» вызывает auth_manager.delete_role() напрямую,
+    так как удаление роли является необратимой операцией
     и не должно быть в undo-стеке.
     """
 
     def __init__(
         self,
         auth: "AuthContext | None",
-        bus: "ActionBus | None",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
 
         self._auth_manager = auth.manager if auth is not None else None
-        self._bus: "ActionBus | None" = bus
 
         # Определяем permissions текущего пользователя
         if auth is not None:
@@ -65,11 +65,11 @@ class RolesPanel(QWidget):
             self._can_edit = False
             self._can_delete = False
 
-        # Редактирование прав требует И права roles.edit, И рабочего приёмника
-        # изменений (ActionBus). Без bus сигнал permissions_changed не подключается
-        # (см. ниже) → правки молча терялись бы при нажатии Save. Поэтому при bus=None
+        # Редактирование прав требует рабочего приёмника изменений. K1: legacy
+        # ActionBus снят (шина всегда была None), domain-команды ROLE_UPDATE ещё
+        # нет (Phase G+) → правки молча терялись бы при нажатии Save. Поэтому
         # матрица read-only, кнопка Save скрыта — без ложной affordance (план §11.5).
-        self._edit_enabled = self._can_edit and self._bus is not None
+        self._edit_enabled = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -93,7 +93,7 @@ class RolesPanel(QWidget):
         # Подсказка «только чтение» (нет прав ИЛИ недоступен редактор)
         if not self._edit_enabled:
             # Различаем «нет прав» и «есть права, но нет приёмника изменений».
-            if self._can_edit and self._bus is None:
+            if self._can_edit:
                 hint = "(только чтение — редактор ролей недоступен)"
             else:
                 hint = "(только чтение)"
@@ -110,13 +110,11 @@ class RolesPanel(QWidget):
         self._roles_list.setFixedWidth(160)
         self._roles_list.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
-        # Матрица прав: редактируема только при наличии прав И рабочего приёмника
+        # Матрица прав: редактируема только при наличии прав И рабочего приёмника.
+        # K1: приёмника нет (ActionBus снят) → всегда read-only; подписка на
+        # permissions_changed вернётся вместе с domain-командой ROLE_UPDATE.
         self._matrix = PermissionMatrix(editable=self._edit_enabled)
         self._matrix.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        # Подключаем сигнал матрицы к ActionBus (только если редактирование реально включено)
-        if self._edit_enabled:
-            self._matrix.permissions_changed.connect(self._on_permissions_changed)
 
         content_layout.addWidget(self._roles_list)
         content_layout.addWidget(self._matrix, stretch=1)
@@ -196,21 +194,11 @@ class RolesPanel(QWidget):
     # Обработчики кнопок
     # ------------------------------------------------------------------
 
-    def _on_permissions_changed(self, role_name: str, old_perms: list[str], new_perms: list[str]) -> None:
-        """Отправить role_update через ActionBus при изменении матрицы."""
-        if self._bus is None:
-            return
-
-        from multiprocess_prototype.frontend.actions.builder import V2ActionBuilder
-
-        action = V2ActionBuilder.role_update(role_name, old_perms, new_perms)
-        self._bus.execute(action)
-
     def _on_delete_clicked(self) -> None:
         """Удалить выбранную роль с подтверждением.
 
         Удаление роли — необратимая операция, поэтому выполняется напрямую
-        через auth_manager.delete_role(), а не через ActionBus (не undoable).
+        через auth_manager.delete_role() и не попадает в undo-стек.
         """
         role_name = self._roles_list.currentItem()
         if role_name is None:

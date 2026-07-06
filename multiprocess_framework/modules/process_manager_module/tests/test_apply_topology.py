@@ -251,6 +251,113 @@ class TestApplyTopologyRollback:
             )
             assert new_name not in sr._registered, f"provisioned-очередь '{new_name}' осталась (утечка SHM/queue)"
 
+    def test_validation_fail_before_commands_keeps_old_processes_running(self) -> None:
+        """Провал ДО исполнения команд (BlueprintInvalid) — старые процессы НЕ трогаются.
+
+        Ключевой сценарий Task 1.2 (plans/2026-07-04_topology-switch-hardening.md):
+        прежний rollback пересоздавал ЖИВЫЕ процессы поверх самих себя —
+        вторые копии + выброшенный stop_event оригинала (неуправляемые зомби).
+        Теперь: команды не исполнялись → откат не требуется, топология intact.
+        """
+        pm = make_pm(
+            {
+                "old_1": {"class": "m.O1"},
+                "old_2": {"class": "m.O2"},
+            }
+        )
+        old_proc_1 = pm._process_registry.get_process_by_name("old_1")
+        old_proc_2 = pm._process_registry.get_process_by_name("old_2")
+
+        def invalid_blueprint(diff_result: dict, desired: dict) -> list[dict]:
+            raise RuntimeError("BlueprintInvalid: источник wire не найден")
+
+        pm._topology_manager.configure(commands_fn=invalid_blueprint)
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+        # Старые процессы: ТЕ ЖЕ объекты, живые, не пересозданы
+        assert pm._process_registry.get_process_by_name("old_1") is old_proc_1
+        assert pm._process_registry.get_process_by_name("old_2") is old_proc_2
+        assert old_proc_1._alive is True
+        assert old_proc_2._alive is True
+        # Конфиги на месте
+        assert "old_1" in pm._process_configs
+        assert "old_2" in pm._process_configs
+
+    def test_rollback_restores_two_phase_provision_before_create(self) -> None:
+        """Rollback восстанавливает двухфазно: ВСЕ provision ДО первого create.
+
+        Прежний _restore_from_snapshot шёл register→create→start по одному —
+        routing_map первых восстановленных не содержал очередей последующих
+        (полусвязанная топология после отката).
+        """
+        pm = make_pm(
+            {
+                "old_1": {"class": "m.O1"},
+                "old_2": {"class": "m.O2"},
+            }
+        )
+        # Форвард-путь падает на start (сид в manager захвачен при make_pm,
+        # поэтому wrappers ниже видят ТОЛЬКО rollback-вызовы через self._topology_*)
+        pm._topology_manager.configure(start_process_fn=lambda name: False)
+        wire_planner(pm)
+
+        events: list[str] = []
+        orig_provision = pm._topology_provision
+        orig_create = pm._topology_create
+        orig_start = pm._topology_start
+        pm._topology_provision = lambda n, d: (events.append(f"provision:{n}"), orig_provision(n, d))[1]
+        pm._topology_create = lambda n, d: (events.append(f"create:{n}"), orig_create(n, d))[1]
+        pm._topology_start = lambda n: (events.append(f"start:{n}"), orig_start(n))[1]
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+        provision_idx = [i for i, e in enumerate(events) if e.startswith("provision:")]
+        create_idx = [i for i, e in enumerate(events) if e.startswith("create:")]
+        start_idx = [i for i, e in enumerate(events) if e.startswith("start:")]
+        assert provision_idx and create_idx and start_idx
+        assert max(provision_idx) < min(create_idx), f"provision не завершён до create: {events}"
+        assert max(create_idx) < min(start_idx), f"create не завершён до start: {events}"
+        # Старые восстановлены
+        assert "old_1" in pm._process_configs
+        assert "old_2" in pm._process_configs
+
+    def test_rollback_excludes_unstoppable_from_recreate(self) -> None:
+        """Имя с неподтверждённой остановкой НЕ пересоздаётся (дубль хуже отсутствия).
+
+        Конфиг и Process незатронутого имени остаются в реестрах —
+        следующий switch повторит попытку остановки.
+        """
+        pm = make_pm(
+            {
+                "stuck": {"class": "m.Stuck"},
+                "ok_w": {"class": "m.OkW"},
+            }
+        )
+        pm._topology_manager.configure(start_process_fn=lambda name: False)
+        wire_planner(pm)
+
+        # rollback-стоп: stuck не подтверждён мёртвым
+        pm._process_registry.stop_many = MagicMock(
+            side_effect=lambda names, timeout: {n: (n != "stuck") for n in names}
+        )
+        recreated: list[str] = []
+        orig_create = pm._topology_create
+        pm._topology_create = lambda n, d: (recreated.append(n), orig_create(n, d))[1]
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+        assert "stuck" not in recreated, "живой процесс пересоздан — дубль!"
+        assert "ok_w" in recreated
+        # stuck остаётся в конфигах для retry на следующем switch
+        assert "stuck" in pm._process_configs
+
     def test_soft_fail_rolls_back(self) -> None:
         """Сид вернул success=False (без exception) -> rollback, topology НЕ закоммичен."""
         pm = make_pm({"w1": {"class": "m.W1"}})
@@ -277,6 +384,143 @@ class TestApplyTopologyRollback:
         pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
 
         pm._process_monitor.start.assert_called()
+
+
+class TestReadinessBarrier:
+    """Task 2.2: death-watch после start-фазы — ready в результате apply."""
+
+    def test_healthy_processes_reported_ready(self) -> None:
+        """Живые на дедлайне барьера процессы → ready=True."""
+        pm = make_pm({"old_w": {"class": "m.OW"}})
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is True
+        assert result["ready"] == {"n1": True}
+
+    def test_died_after_start_reported_not_ready(self) -> None:
+        """Процесс, умерший сразу после start (initialize-провал, exitcode 0) → ready=False.
+
+        До барьера такой switch выглядел полностью успешным.
+        """
+        from .conftest import MockProcess
+
+        class _DiesAfterStart(MockProcess):
+            def start(self) -> None:
+                super().start()
+                self._alive = False  # умер сразу после запуска
+
+        pm = make_pm(
+            {"old_w": {"class": "m.OW"}},
+            next_process_factory={"n1": _DiesAfterStart("n1", alive=False)},
+        )
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is True  # топология применена (политика: репорт, не rollback)
+        assert result["ready"] == {"n1": False}
+
+    def test_barrier_disabled_returns_empty_ready(self) -> None:
+        """start_ready_timeout_s=0 → барьер выключен, ready пустой."""
+        pm = make_pm({"old_w": {"class": "m.OW"}})
+        pm.get_config = lambda key: {
+            "stop_process_timeout": 1.0,
+            "start_ready_timeout_s": 0,
+        }.get(key)
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is True
+        assert result["ready"] == {}
+
+    def test_mixed_ready_map(self) -> None:
+        """Смешанный запуск: живой → True, умерший → False."""
+        from .conftest import MockProcess
+
+        class _DiesAfterStart(MockProcess):
+            def start(self) -> None:
+                super().start()
+                self._alive = False
+
+        pm = make_pm(
+            {},
+            next_process_factory={"dead": _DiesAfterStart("dead", alive=False)},
+        )
+
+        result = pm.apply_topology(
+            {
+                "processes": [
+                    {"process_name": "ok", "process_class": "m.Ok"},
+                    {"process_name": "dead", "process_class": "m.Dead"},
+                ]
+            }
+        )
+
+        assert result["success"] is True
+        assert result["ready"] == {"ok": True, "dead": False}
+
+
+class TestNoGhostConfigs:
+    """Провал create не оставляет «призраков» (конфиг без Process-объекта).
+
+    Task 1.3 plans/2026-07-04_topology-switch-hardening.md: призрак попадал
+    в _topology_current_names → stop-фаза switch получала имя без процесса.
+    """
+
+    def test_create_process_failure_leaves_no_config(self) -> None:
+        """create_process: конфиг пишется ТОЛЬКО после успешного создания."""
+        pm = make_pm({}, fail_on_create={"bad"})
+
+        result = pm.create_process("bad", "m.Bad", {"foo": 1})
+
+        assert result is None
+        assert "bad" not in pm._process_configs
+
+    def test_create_process_success_writes_config(self) -> None:
+        """create_process при успехе пишет merged-конфиг с class."""
+        pm = make_pm({})
+
+        result = pm.create_process("ok", "m.Ok", {"foo": 1})
+
+        assert result is not None
+        assert pm._process_configs["ok"]["class"] == "m.Ok"
+        assert pm._process_configs["ok"]["foo"] == 1
+
+    def test_boot_create_failure_rolls_back_config_and_resources(self) -> None:
+        """Boot: провал create → конфиг, PSR-запись и ресурсы процесса откачены."""
+        pm = make_pm({})
+        pm._process_registry._fail_on_create = {"bad"}
+
+        pm._create_processes_from_config(
+            {
+                "good": {"class": "m.Good"},
+                "bad": {"class": "m.Bad"},
+            }
+        )
+
+        assert "good" in pm._process_configs
+        assert "good" in pm.shared_resources._registered
+        assert pm._process_registry.get_process_by_name("good") is not None
+
+        assert "bad" not in pm._process_configs, "призрачный конфиг после провала boot-create"
+        assert "bad" not in pm.shared_resources._registered, "PSR-запись призрака не снята"
+        assert pm._process_registry.get_process_by_name("bad") is None
+
+    def test_switch_not_blocked_by_injected_ghost(self) -> None:
+        """Defense-in-depth: даже с уже существующим призраком switch проходит.
+
+        Связка с Task 1.1: stop-фаза трактует «нет процесса» как успех.
+        """
+        pm = make_pm({"real_w": {"class": "m.RW"}})
+        # Имитация доисторического призрака: конфиг есть, процесса нет
+        pm._process_configs["ghost"] = {"class": "m.Ghost"}
+
+        result = pm.apply_topology({"processes": [{"process_name": "n1", "process_class": "m.N1"}]})
+
+        assert result["success"] is True
+        assert result["rolled_back"] is False
+        assert "ghost" not in pm._process_configs  # вычищен cleanup-фазой
+        assert "n1" in pm._process_configs
 
 
 class TestApplyTopologyDebounce:

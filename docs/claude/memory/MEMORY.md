@@ -1,3 +1,4 @@
+- [Архивы прототипа удалены](project_archives_removed.md) — v1/v2 и multiprocess_prototype_backup удалены (e128b930); хвосты в конфигах вычищены 2026-07-03
 - [Phone gateway service](project_phone_gateway_service.md) — фото+слово с телефона по WiFi вместо вебкамеры (Services/phone_gateway + плагин phone_camera); v1 готов, GUI-панель + letter-mode wiring follow-up
 - [VFD bridge over robot — reboot fix](project_vfd_bridge_robot_reboot.md) — ПЧ vfd_belt висит мостом поверх robot_main; зависший ПЧ лечится перезагрузкой РОБОТА, не правкой кода ПЧ
 - [Qt widget editing patterns](feedback_widget_qt_patterns.md) — setFlags recursion, blockSignals, EditTriggers (critical)
@@ -87,3 +88,5 @@
 - [Recipe save/load arch](project_recipe_save_load_arch.md) — save не писал правки полей (model/domain desync, FIXED) + «кривая» загрузка (порядок set_active/dispatch, FIXED); бэкенд УЖЕ stop-all→load-fresh; долги: on_result, switch≠boot, display-SHM, graceful-stop
 - [Switch routing stale](project_switch_routing_stale.md) — ПОСЛЕ switch рецепта параметры молча не доходят (стейл-PSR GUI: старые очереди; mp.Queue нельзя переслать); НЕ коллизия set_config (та мертва/шум); фикс — live-команды через PM-хаб; диагноз docs/audits/2026-06-16_switch-routing-stale.md
 - [Draw mode rework](project_draw_mode_rework.md) — режим рисования: точность точек (read-back ACK REG_DRAW_DONE_N, мелкие пачки, lossless preview), crop-clip, text_vector (Hershey текст/имя/сердце), drawing_io save/load; ветка feat/draw-mode-rework, ревью 50 агентов, тесты OK, hardware pending
+- [Framework-first decision rule](feedback_framework_first.md) — framework=мощный/универсальный (контракт+реализации), прототип=расходный (тонкий потребитель); в сомнении оптимизируй фреймворк. Решает ActionBus=держать (patch-impl) + undo как контракт+2 реализации. Док: docs/audits/2026-06-18_command-undo-system.md
+- [project_claude_kit_migration.md](project_claude_kit_migration.md) — .claude на claude-kit v1.0.0 plugin-формате; source=devseed; обновлять через init/sync

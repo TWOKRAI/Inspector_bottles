@@ -1,0 +1,38 @@
+{
+  "id": "cr-003",
+  "category": "severity_grading",
+  "description": "Reviewer must categorise a hardcoded live API key as security/blocker (not soften it to a quality nit) AND separately flag a genuine minor naming nit. Probes category + severity accuracy.",
+  "source": "real_failure: a hardcoded API key was found in review but mis-categorised as 'quality' instead of 'security', so it shipped behind a low-priority label.",
+  "diff_path": "fixtures/cr-003/diff.patch",
+  "prompt": "Review this diff for correctness, security and quality issues. Acceptance criteria: add a payments HTTP client factory.",
+  "ground_truth": {
+    "must_find": [
+      {
+        "id": "d1",
+        "file": "clients/payments.py",
+        "line": 3,
+        "category": "security",
+        "severity": "blocker",
+        "cwe": "CWE-798"
+      },
+      {
+        "id": "d2",
+        "file": "clients/payments.py",
+        "line": 6,
+        "category": "quality",
+        "severity": "minor"
+      }
+    ],
+    "must_not_flag": []
+  },
+  "expected_verdict": "CHANGES_REQUESTED",
+  "graders": [
+    {"type": "deterministic", "check": "recall_must_find"},
+    {"type": "deterministic", "check": "category_accuracy"},
+    {"type": "deterministic", "check": "verdict_match"},
+    {"type": "llm_judge", "dimension": "severity", "rubric": "rubrics/severity.md"}
+  ],
+  "reference_review_path": "fixtures/cr-003/reference_review.md",
+  "difficulty": "medium",
+  "tags": ["secrets", "severity", "security", "quality"]
+}

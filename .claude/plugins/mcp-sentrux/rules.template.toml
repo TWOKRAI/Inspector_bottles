@@ -1,0 +1,62 @@
+# rules.template.toml — bare sentrux rules scaffold (all rules commented)
+#
+# Назначение:
+#   Голый каркас на случай, когда ни один из готовых архетипов не подходит и правила
+#   пишутся с нуля. В большинстве проектов проще взять готовый архетип:
+#     templates/rules.src-package.toml   (дефолт seed — разворачивается `claude-kit-project new`)
+#     templates/rules.layered.toml       (классический n-tier)
+#     templates/rules.hexagonal.toml     (ports & adapters / clean)
+#   См. README.md → "Стартовые архетипы правил".
+#
+# Как использовать этот каркас:
+#   cp .claude/plugins/mcp-sentrux/rules.template.toml .sentrux/rules.toml
+#   затем раскомментируй и заполни [[boundaries]] под свои слои.
+#
+# Проверка:
+#   sentrux check               # CLI, exit 0/1, для CI
+#   /mcp-sentrux:sentrux-rules   # MCP, интерактивно
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Quality gates (scores 0.0–1.0). Активны только `max_cycles` и `no_god_files` —
+# оба зелёные на чистом коде с дня 1. Метрики-минимумы закомментированы: новый/
+# маленький проект законно не дотягивает до них без реальных нарушений. Раскомменти-
+# руй и ужесточай по мере роста. (У sentrux НЕТ порога max-LOC / max-cyclomatic —
+# размер функций гони через pre-commit hook: radon/ruff.)
+# ──────────────────────────────────────────────────────────────────────────────
+
+[constraints]
+# min_quality    = 0.50
+# min_modularity = 0.40
+# min_acyclicity = 0.40
+# min_depth      = 0.50
+# min_equality   = 0.50
+# min_redundancy = 0.70
+max_cycles   = 0
+no_god_files = true
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Boundaries — запрет импорта из `from` в `to`. Это то, что энфорсит архитектуру.
+#
+# ВАЖНО (footguns sentrux):
+#   * Пути — ЛИТЕРАЛЬНЫЕ префиксы директорий. `*` подставляет только имя ФАЙЛА и НЕ
+#     раскрывает сегмент-директорию: "src/*/core" и "src/core/*" матчат не то, что
+#     кажется. Используй полный путь `src/<pkg>/<layer>` без хвостового слэша — он
+#     матчит директорию рекурсивно. Boundary, который ничего не матчит, проходит
+#     МОЛЧА (ложное ощущение защиты).
+#   * Ключи — ровно `from` / `to` / `reason` (`reason` обязателен). Ключа
+#     `forbidden` НЕТ — неизвестные ключи sentrux молча игнорирует.
+#   * Проверяются ПРЯМЫЕ рёбра импорта: на каждую запрещённую пару нужна своя
+#     запись, включая skip-level.
+#
+# Раскомментируй и заполни под свой проект (пример — domain не зависит от adapters):
+# ──────────────────────────────────────────────────────────────────────────────
+
+# [[boundaries]]
+# from   = "src/your_package/domain"
+# to     = "src/your_package/adapters"
+# reason = "ядро/домен не должно зависеть от адаптеров (DIP)"
+#
+# [[boundaries]]
+# from   = "src/your_package/domain"
+# to     = "src/your_package/app"
+# reason = "домен не зависит от слоя композиции/приложения"

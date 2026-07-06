@@ -14,7 +14,6 @@ dirs = [
     "node_modules", ".qex", ".sentrux",
     ".mypy_cache", ".pytest_cache", ".ruff_cache",
     "build", "dist", "*.egg-info",
-    "multiprocess_prototype_backup",
     "tests",   # обычно интересны декларации в production-коде, не в фикстурах
 ]
 file_patterns = ["*_test.py", "test_*.py", "conftest.py"]

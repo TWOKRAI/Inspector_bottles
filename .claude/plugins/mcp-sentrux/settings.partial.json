@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__sentrux__scan",
+      "mcp__sentrux__rescan",
+      "mcp__sentrux__health",
+      "mcp__sentrux__dsm",
+      "mcp__sentrux__check_rules",
+      "mcp__sentrux__test_gaps",
+      "mcp__sentrux__git_stats",
+      "mcp__sentrux__session_start",
+      "mcp__sentrux__session_end"
+    ]
+  }
+}

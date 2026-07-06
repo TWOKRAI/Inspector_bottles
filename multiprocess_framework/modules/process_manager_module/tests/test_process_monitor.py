@@ -47,6 +47,39 @@ class TestProcessMonitorInit:
         assert monitor.poll_interval == 1.0
 
 
+class TestForgetProcess:
+    """forget_process — очистка служебной истории имени при cleanup (Task 1.4)."""
+
+    def test_forget_clears_all_name_history(self) -> None:
+        """Все словари истории имени очищены; чужие имена не тронуты."""
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor._last_heartbeat = {"cam": 1.0, "other": 2.0}
+        monitor._restart_counts = {"cam": 3, "other": 1}
+        monitor._workers_status = {"cam": {"w": {}}, "other": {}}
+        monitor._first_seen = {"cam": 10.0, "other": 20.0}
+        monitor.previous_states = {"cam": {"status": "running"}, "other": {"status": "running"}}
+        monitor._pending_restarts = {"cam": 0.0, "other": 0.0}
+
+        monitor.forget_process("cam")
+
+        for d in (
+            monitor._last_heartbeat,
+            monitor._restart_counts,
+            monitor._workers_status,
+            monitor._first_seen,
+            monitor.previous_states,
+            monitor._pending_restarts,
+        ):
+            assert "cam" not in d
+            assert "other" in d
+
+    def test_forget_unknown_name_is_noop(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor.forget_process("ghost")  # не должно бросить
+
+
 class TestProcessMonitorStartStop:
     def test_start_sets_monitoring_flag(self) -> None:
         mock_pm = _make_mock_process_manager()
@@ -142,14 +175,110 @@ class TestProcessMonitorProtectedAutoRestart:
         mock_pm._log_warning.assert_called()
 
     def test_auto_restart_allows_non_protected(self) -> None:
+        """Не-protected: рестарт планируется и уходит IPC-командой в PM (Task 3.1).
+
+        Прямой restart_process на потоке монитора запрещён — гонка с
+        apply_topology; команда исполнится на message_processor-потоке.
+        """
         mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
         mock_pm._get_protected_names.return_value = {"gui"}
-        mock_pm.restart_process.return_value = True
+        mock_pm.communication.send_message.return_value = True
         monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, backoff_sec=0.0))
 
         monitor._try_auto_restart("camera_0", reason="crashed")
 
-        mock_pm.restart_process.assert_called_once_with("camera_0")
+        # НЕ прямой вызов — только план
+        mock_pm.restart_process.assert_not_called()
+        assert "camera_0" in monitor._pending_restarts
+
+        monitor._dispatch_due_restarts()
+
+        mock_pm.restart_process.assert_not_called()
+        target, msg = mock_pm.communication.send_message.call_args[0]
+        assert target == "ProcessManager"
+        assert msg["data"] == {"cmd": "process.restart", "process_name": "camera_0"}
+        assert monitor._pending_restarts == {}
+
+    def test_pending_restart_not_dispatched_before_backoff(self) -> None:
+        """До истечения backoff рестарт не диспатчится."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm._get_protected_names.return_value = set()
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, backoff_sec=60.0))
+
+        monitor._try_auto_restart("camera_0", reason="crashed")
+        monitor._dispatch_due_restarts()
+
+        mock_pm.communication.send_message.assert_not_called()
+        assert "camera_0" in monitor._pending_restarts
+
+    def test_forget_process_cancels_pending_restart(self) -> None:
+        """Cleanup имени (switch) отменяет его отложенный рестарт."""
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor._pending_restarts["old_cam"] = 0.0
+
+        monitor.forget_process("old_cam")
+
+        assert monitor._pending_restarts == {}
+
+
+class TestMonitorSyncPause:
+    """Task 3.1: stop(wait=True) дожидается завершения текущей итерации."""
+
+    def test_stop_waits_for_inflight_iteration(self) -> None:
+        import threading
+        import time as _time
+
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor._monitoring = True
+
+        # Имитация идущей итерации: замок держится другим потоком 0.2с
+        monitor._iteration_lock.acquire()
+
+        def _release_later() -> None:
+            _time.sleep(0.2)
+            monitor._iteration_lock.release()
+
+        t = threading.Thread(target=_release_later)
+        t.start()
+
+        t0 = _time.monotonic()
+        monitor.stop()
+        elapsed = _time.monotonic() - t0
+        t.join()
+
+        assert elapsed >= 0.15, "stop() не дождался завершения итерации"
+        assert monitor._monitoring is False
+
+    def test_stop_timeout_logs_warning_and_returns(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor._monitoring = True
+        monitor._iteration_lock.acquire()  # никто не отпустит
+
+        monitor.stop(timeout=0.1)
+
+        assert monitor._monitoring is False
+        mock_pm._log_warning.assert_called()
+        monitor._iteration_lock.release()
+
+    def test_stop_no_wait_returns_immediately(self) -> None:
+        import time as _time
+
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor._monitoring = True
+        monitor._iteration_lock.acquire()
+
+        t0 = _time.monotonic()
+        monitor.stop(wait=False)
+        elapsed = _time.monotonic() - t0
+
+        assert elapsed < 0.05
+        assert monitor._monitoring is False
+        monitor._iteration_lock.release()
 
 
 class TestProcessMonitorStateDetection:

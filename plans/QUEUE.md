@@ -1,69 +1,84 @@
 # Очередь планов
 
-> Снимок на **2026-06-07**. Закрытые планы — в [`_archive/`](_archive/).
-> Статусы выведены по git-истории + memory (часть планов не была помечена вручную).
+> Снимок на **2026-07-06**. Закрытые/устаревшие планы — в [`_archive/`](_archive/).
+> Статусы сверены с [`master-rework-roadmap.md`](master-rework-roadmap.md) (синтез 2026-06-18) и
+> [`2026-07-03_review-and-constructor-plan.md`](2026-07-03_review-and-constructor-plan.md) (текущий
+> живой роадмап, волны A-G) — где они расходятся со старыми header'ами планов, доверяем синтезу.
 
 ---
 
-## 🔥 Активно — ветка `fix/recipe-v3-engine-decouple`
+## 🧭 Живые синтез-документы (не планы, а координация)
 
-| План | Состояние | Осталось |
-|------|-----------|----------|
-| [recipe-orchestrator-unify](2026-06-06_recipe-orchestrator-unify.md) | Phase 1-2 **DONE** (`5314d99b`, `362d16df`→`2407f5ac`, rollback `7a845d25`, чистка `191732eb`) | **Phase 3** (RecipeManager — единый владелец активного рецепта), **Phase 4** (тонкий GUI), **Phase 5** (carve-out `RecipeManager`/трансформер во framework) |
+| Документ | Роль |
+|----------|------|
+| [master-rework-roadmap](master-rework-roadmap.md) | Синтез 6 измерений + adversarial-вердикты (2026-06-18). Порядок волн A-G. |
+| [2026-07-03_review-and-constructor-plan](2026-07-03_review-and-constructor-plan.md) | Текущий governing-роадмап (сверка 2026-07-03) — актуальнее master-rework на статусах. |
+| [2026-07-03_god-split-design](2026-07-03_god-split-design.md) | Дизайн волны F (разбиение god-файлов presenter/factory/inspector_panel) — **НЕ начато**. |
+
+**Незакрытая находка:** [`docs/audits/2026-07-04_arch-advice-constructor-2026.md`](../docs/audits/2026-07-04_arch-advice-constructor-2026.md) — Fable-ревью «конструктор 2026», 52 рекомендации P0-P4 (seqlock/QoS hot-path, Supervisor v2, контракты вместо конвенций). **Ни один план на него не ссылается** — P0-пункты (torn-frame, тихий drop команд под QoS) не затрёкены ни в одной волне. Требует triage в план при следующей волне.
 
 ---
 
-## 📋 В очереди
+## 📋 В очереди (partial / deferred / active)
 
-### Рецепты / follow-up
-| План | Статус | Суть |
-|------|--------|------|
-| [displays-in-recipe](../docs/direction/displays-in-recipe.md) (ТЗ) | SPEC plan-ready, ⛔ ждёт unify Phase 2 | Определения дисплеев → в рецепт (секция `recipe.displays`), render-параметры (fit/scale/rotate/flip/crop/position), вкладка recipe-scoped, мигратор. Ревью Opus 6/10 → 3 блокера закрыты в ТЗ. Поглощает recipe-format T1 |
-| [recipe-format-single-source](2026-06-06_recipe-format-single-source.md) | PLANNED (T1 поглощён displays-in-recipe) | T2 defer (prod-safety), T3 drop (косметика). T1 (single source дисплеев) уходит в displays-in-recipe |
+### Рецепты / recipe-orchestrator
+| План | Статус | Осталось |
+|------|--------|----------|
+| [recipe-orchestrator-unify](2026-06-06_recipe-orchestrator-unify.md) | Phase 1-4 **DONE** | **Phase 5** — carve-out `RecipeManager`/трансформер во framework (блокер: `duplicate()` reverse-import) |
 
 ### Pipeline / live-control
 | План | Статус | Осталось |
 |------|--------|----------|
-| [pipeline-live-control](2026-05-31_pipeline-live-control/) | Этап 1-2 **DONE** (Task 2.4 `4327ccf8`) | **Этап 3** — add/remove ноды на лету, адрес `proc.worker`, консистентность полукадров |
+| [pipeline-live-control](2026-05-31_pipeline-live-control/) | Этап 1-2 **DONE** | **Этап 3** — add/remove ноды на лету, адрес `proc.worker`, консистентность полукадров |
+| [transport-router-hub](2026-05-31_transport-router-hub/) | P0-P2 **DONE** (гибрид: кадры-трубы, команды-почта) | P3/P4 — kind-каналы (= волна G роадмапа) |
+
+### Устройства / калибровка (частично hardware-gated)
+| План | Статус | Осталось |
+|------|--------|----------|
+| [device-tree-recipe](device-tree-recipe.md) | Фаза D **DONE** | Фаза E частично (README+conn-индикатор done; остальное ждёт go-ahead владельца) |
+| [camera-robot-calibration](camera-robot-calibration.md) | Часть 1 закрыта | Часть 2 (px→mm), Ф7 — железо |
+| [dataset-circle-capture](dataset-circle-capture.md) | Часть 1 (pipeline) готова | Часть 2 (hand-eye calibration) на отдельной ветке |
+| [robot-calibration](robot-calibration.md) | Частично (пересекается с camera-robot-calibration — уточнить) | Многофазная калибровка, hardware E2E |
+| [robot-place-pose](robot-place-pose.md) | P1+P2 **DONE** (116 тестов) | P3 (съём↔укладка) + прошивка робота |
+| [word-layout](word-layout.md) | Phase 1-2 **DONE** | Phase 3 частично, Phase 4; live-smoke на стенде — hardware-pending |
+| [pult-control-panel](pult-control-panel.md) | Phase 1-3, 5.1-5.3/5.5 **DONE** | 5.4 (монитор) отложен; Phase 4 (README/STATUS + memory) |
+| [letter-robot-cycle](letter-robot-cycle/) | Тракт распознавания **DONE** | Цикл укладки→возврата — в процессе (Tasks 1.1-1.5, 2.1) |
+| [draw-mode-rework](draw-mode-rework/) | Этапы A-D в основном **DONE** (9/13 пунктов) | Остаток hardware-pending — **freeze**, не трогать до железа (роадмап §7 rank 8) |
 
 ### Точечные fix
 | План | Статус | Суть |
 |------|--------|------|
-| [sql-insert-many-atomic](2026-06-05_sql-insert-many-atomic.md) | DRAFT | Атомарный + батчевый `insert_many` в `Services/sql` (`executemany` + 1 commit вместо per-row) |
-
-### Транспорт / comm-system (стратегические; P0 закрыт)
-| План | Статус | Осталось |
-|------|--------|----------|
-| [transport-router-hub](2026-05-31_transport-router-hub/) | P0-P2 **DONE** (гибрид: кадры-трубы, команды-почта) | P3/P4 — kind-каналы (= comm-system P1/P2), отложены ради pipeline-направления |
-| [comm-system-target-architecture](comm-system-target-architecture.md) | мастер-план; §11 P0 **закрыт весь** | P1/P2 (kind-каналы, авто-reply/undo, carve-out). Спутники: [audit](comm-system-communication-audit.md), [REVIEW](comm-system-target-architecture.REVIEW.md) |
-| [comm-system-execution-order](comm-system-execution-order.md) | S0/S1/S3 **DONE** | **S2** (merge ветки в main, ~303 коммита, FF-возможен) → **S4** → **S5** |
-| [backend-control-mcp](2026-05-31_backend-control-mcp/plan.md) | P1.x в работе (fire-and-forget дыры закрыты) | P1.5b — дизайн-док стрима логов через router → ревью → код |
-
----
-
-## 🧊 Отложено (deferred — ждут gate/решения владельца)
-
-| План | Почему отложен |
-|------|----------------|
-| [constructor-maturity](2026-05-29_constructor-maturity/plan.md) | DETAILED, P1.1 audit **DONE** (вердикт A). Ждёт approval. Владелец: **product > engine** — constructor-зрелость отложена |
-| [telemetry-delivery-simplification](telemetry-delivery-simplification.md) | DEFERRED (Option D). Видимый баг «—» решён иначе (self-publish). Ждёт реального масштаба (2-й реактивный потребитель) |
-| [prototype-carveout](prototype-carveout.md) | Handoff. Частично поглощён recipe-orchestrator-unify Phase 5 (carve-out как forcing function) |
-| [pipeline-color-inspection](pipeline-color-inspection.md) | НЕ начат. Отложено (2026-06-07): атомарные плагины цвет-инспекции (`hsv_mask`→`contour_finder`, painter отдельным процессом) + universal Modbus-пакет |
+| [sql-insert-many-atomic](2026-06-05_sql-insert-many-atomic.md) | DRAFT, не начат | Атомарный + батчевый `insert_many` в `Services/sql` |
+| [pipeline-color-inspection](pipeline-color-inspection.md) | **Отложено владельцем** | Атомарные плагины цвет-инспекции (hsv_mask→contour_finder) + universal Modbus-пакет |
+| [telemetry-delivery-simplification](telemetry-delivery-simplification.md) | **DEFERRED (Option D)** | Видимый баг решён иначе (self-publish); ждёт 2-го реактивного потребителя |
+| [constructor-maturity](2026-05-29_constructor-maturity/plan.md) | DETAILED, P1.1 audit DONE | **Отложено владельцем**: product > engine прямо сейчас |
 
 ---
 
 ## 📦 Backlog
 
-- [ULTRACODE_BACKLOG](ULTRACODE_BACKLOG.md) — fan-out-friendly задачи под мульти-агентный ultracode-залп (§11 quick-wins, потеря сообщений в `_route_to_worker`, RolesPanel/get_field).
+- [ULTRACODE_BACKLOG](ULTRACODE_BACKLOG.md) — fan-out-задачи под мульти-агентный залп. **Ревалидировать перед запуском** — часть источников (§11 P0, старый telemetry HANDOFF) уже архивирована.
 
 ---
 
-## ✅ Заархивировано в этой чистке (2026-06-07)
+## ✅ Заархивировано в чистке 2026-07-06 (16 планов)
 
-- `recipe-v3-engine-decouple` — корень порчи v3-рецептов устранён (`6d5b90df`)
-- `replace-blueprint-hotswap` — Task 1-7 **DONE** (двухфазная регистрация `5cd23192`)
-- `frames-blocker-hotswap-resource-release` — блокер кадров решён (`5cd23192`)
-- `recipe-topology-architecture-analysis` — анализ поглощён планом unify
-- `observability-control-plane/` — Phase 1-4 **DONE** (влито в main `d63bae62`)
-- `telemetry-backend-control-HANDOFF` — устарел, телеметрия починена
-- `command-result-bridge` — **DONE 2026-06-07** (P1-P3 verified; P4 закрыт по существу: FE-004 + memory вместо дубль-ADR); разблокировал lifecycle p4.4.4 + pipeline-live Этап 3
+Признаны **FULLY DONE** или **SUPERSEDED** более новыми синтез-документами (master-rework-roadmap / review-and-constructor-plan). Подробности и обоснование по каждому — в истории чата/памяти сессии архивации.
+
+**Fully done:**
+- `2026-06-08_line-filter-virtual.md`, `2026-06-08_pipeline-free-layout.md`
+- `2026-07-04_topology-switch-hardening.md` (7/7 задач)
+- `dataset-gen-service.md`, `device-hub.md` (software; hardware-верификация — единственный незакрытый пункт), `ml-train-service.md`, `robot-vfd-services.md` (software)
+- `displays-in-recipe/` (reviewer Opus APPROVED)
+- `2026-05-31_backend-control-mcp/` (P0-P2 DONE)
+
+**Superseded** (поглощены/переоценены более новыми документами):
+- `comm-system-communication-audit.md`, `comm-system-execution-order.md`, `comm-system-target-architecture.md`, `comm-system-target-architecture.REVIEW.md` — AUDIT/CSA-семья систематически отстала от кода (см. master-rework-roadmap §1); живой статус теперь в роадмапе
+- `2026-06-06_recipe-format-single-source.md` — T1 поглощён `displays-in-recipe` (DONE)
+- `multiprocess-prototype-sparkling-lollipop.md`, `prototype-carveout.md` — carve-out теперь ведёт master-rework-roadmap §5 + review-and-constructor волна E
+
+---
+
+## Заархивировано в чистке 2026-06-07 (предыдущая волна)
+
+- `recipe-v3-engine-decouple`, `replace-blueprint-hotswap`, `frames-blocker-hotswap-resource-release`, `recipe-topology-architecture-analysis`, `observability-control-plane/`, `telemetry-backend-control-HANDOFF`, `command-result-bridge`

@@ -1,0 +1,19 @@
+// graphify MCP launcher snippet — merge into your project's `.mcp.json`
+// under "mcpServers" (strip these `//` comments — JSON disallows them).
+//
+// Canonical launcher: the upstream `graphify-mcp` console script (shipped in
+// graphifyy >= 0.8.36; MCP extra `graphifyy[mcp]`). Pin `graphifyy >= 0.8.42`.
+// This matches `.claude-plugin/plugin.json` -> mcpServers.graphify.
+//
+// Prerequisites:
+//   1. uv tool install 'graphifyy[mcp]'   (>= 0.8.42)
+//   2. graphify .                          (produces graphify-out/graph.json — the server reads it)
+//
+// graphify MCP is OPTIONAL (enabled.yaml -> mcp-graphify.enabled: false). The
+// `/graphify` skill stays the primary path; the MCP adds a live-query layer.
+{
+  "graphify": {
+    "command": "uvx",
+    "args": ["graphify-mcp", "serve", "graphify-out/graph.json"]
+  }
+}

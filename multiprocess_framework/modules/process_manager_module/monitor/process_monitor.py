@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from multiprocessing import Event
 from typing import Any
@@ -91,6 +92,16 @@ class ProcessMonitor:
         # Авто-рестарт: счётчик попыток рестарта per process
         self._restart_counts: dict[str, int] = {}
 
+        # Отложенные рестарты: {name: monotonic-время, когда пора}. Диспатчатся
+        # из цикла (после backoff) IPC-командой в PM — НЕ исполняются на потоке
+        # монитора (Task 3.1: гонка с apply_topology исключена).
+        self._pending_restarts: dict[str, float] = {}
+
+        # Замок текущей итерации цикла: stop(wait=True) дожидается его
+        # освобождения — после возврата stop() ни одна проверка/рестарт
+        # монитора не в полёте (синхронная пауза перед hot-swap).
+        self._iteration_lock = threading.Lock()
+
         # Периодический полный broadcast: счётчик и интервал итераций
         self._full_broadcast_counter: int = 0
         self._full_broadcast_interval: int = 20  # каждые 20 итераций (~10с при poll_interval=0.5)
@@ -127,14 +138,36 @@ class ProcessMonitor:
         else:
             self.process._log_info("Resuming process state monitor")
 
-    def stop(self):
+    def stop(self, wait: bool = True, timeout: float = 10.0):
+        """Пауза цикла (НЕ убийство воркера).
+
+        ``_monitoring=False`` → цикл встаёт на idle и НЕ выполняет
+        ``_check_heartbeats`` — на время hot-swap это исключает ложный
+        UNRESPONSIVE по застывшим heartbeat.
+
+        Task 3.1: пауза СИНХРОННАЯ — ``wait=True`` дожидается завершения
+        текущей итерации (``_iteration_lock``). Раньше stop() был только
+        флагом: итерация в полёте (включая авто-рестарт) продолжалась
+        ПАРАЛЛЕЛЬНО с apply_topology и могла воскресить процесс старой
+        топологии посреди замены.
+
+        Args:
+            wait: дождаться завершения текущей итерации цикла.
+            timeout: максимум ожидания итерации (секунды).
+        """
         if not self._monitoring:
             return
-        # Пауза цикла (НЕ убийство воркера): _monitoring=False, цикл встаёт на
-        # idle и НЕ выполняет _check_heartbeats — на время replace_blueprint это
-        # исключает ложный UNRESPONSIVE по застывшим heartbeat.
         self.process._log_info("Pausing process state monitor")
         self._monitoring = False
+        if not wait:
+            return
+        acquired = self._iteration_lock.acquire(timeout=timeout)
+        if acquired:
+            self._iteration_lock.release()
+        else:
+            self.process._log_warning(
+                f"Monitor: текущая итерация не завершилась за {timeout}с — пауза НЕ синхронна"
+            )
 
     # ----------------------------------------------------------------
     # Heartbeat: приём сообщений
@@ -268,57 +301,65 @@ class ProcessMonitor:
     def _monitoring_loop(self, stop_event: Event, pause_event: Event):
         self.process._log_info("Process monitor loop started")
         while not stop_event.is_set():
-            # _monitoring — пауза от stop() (replace_blueprint): цикл встаёт на idle,
+            # _monitoring — пауза от stop() (hot-swap): цикл встаёт на idle,
             # НЕ выполняет _check_heartbeats → нет ложного UNRESPONSIVE во время
             # горячей замены. pause_event — пауза от worker_manager.
             if not self._monitoring or pause_event.is_set():
                 time.sleep(0.1)
                 continue
-            try:
-                if not self.process.shared_resources:
-                    time.sleep(self.poll_interval)
-                    continue
-                reg = self.process.shared_resources.process_state_registry
-                if not reg:
-                    time.sleep(self.poll_interval)
-                    continue
-                all_processes = reg.get_all_process_data()
-                all_states: dict[str, dict[str, Any]] = {}
-                for name, pd in all_processes.items():
-                    snap = _state_snapshot_from_process_data(pd)
-                    if snap is not None:
-                        all_states[name] = snap
-                for pname, cur in all_states.items():
-                    prev = self.previous_states.get(pname)
-                    if prev != cur:
-                        self._handle_state_change(pname, prev, cur)
-                        self.previous_states[pname] = cur.copy()
-                cur_names = set(all_states.keys())
-                for pname in set(self.previous_states.keys()) - cur_names:
-                    self.process._log_info(f"Process removed: {pname}")
-                    self.previous_states.pop(pname, None)
-                    self._first_seen.pop(pname, None)
-
-                # Live-uptime процессов → StateStore (троттлится middleware до ~1 Гц).
-                self._publish_uptime(all_states)
-
-                # Сводное здоровье системы → StateStore (system.health.*).
-                self._publish_health(all_states)
-
-                # Проверка OS-liveness + heartbeat timeout + авто-рестарт
-                self._check_heartbeats()
-
-                # Периодический полный broadcast для новых подписчиков (GUI)
-                self._full_broadcast_counter += 1
-                if self._full_broadcast_counter >= self._full_broadcast_interval:
-                    self._full_broadcast_counter = 0
-                    self.broadcast_full_status()
-
-                time.sleep(self.poll_interval)
-            except Exception as e:
-                self.process._log_error(f"Error in monitoring loop: {e}")
-                time.sleep(self.poll_interval)
+            # Итерация под замком: stop(wait=True) дожидается его освобождения —
+            # синхронная пауза (Task 3.1). Хвостовой sleep — ВНЕ замка, чтобы
+            # stop() не ждал poll_interval впустую.
+            with self._iteration_lock:
+                if self._monitoring and not pause_event.is_set():
+                    self._run_iteration()
+            time.sleep(self.poll_interval)
         self.process._log_info("Process monitor loop stopped")
+
+    def _run_iteration(self) -> None:
+        """Одна итерация мониторинга (вызывается под ``_iteration_lock``)."""
+        try:
+            if not self.process.shared_resources:
+                return
+            reg = self.process.shared_resources.process_state_registry
+            if not reg:
+                return
+            all_processes = reg.get_all_process_data()
+            all_states: dict[str, dict[str, Any]] = {}
+            for name, pd in all_processes.items():
+                snap = _state_snapshot_from_process_data(pd)
+                if snap is not None:
+                    all_states[name] = snap
+            for pname, cur in all_states.items():
+                prev = self.previous_states.get(pname)
+                if prev != cur:
+                    self._handle_state_change(pname, prev, cur)
+                    self.previous_states[pname] = cur.copy()
+            cur_names = set(all_states.keys())
+            for pname in set(self.previous_states.keys()) - cur_names:
+                self.process._log_info(f"Process removed: {pname}")
+                self.previous_states.pop(pname, None)
+                self._first_seen.pop(pname, None)
+
+            # Live-uptime процессов → StateStore (троттлится middleware до ~1 Гц).
+            self._publish_uptime(all_states)
+
+            # Сводное здоровье системы → StateStore (system.health.*).
+            self._publish_health(all_states)
+
+            # Проверка OS-liveness + heartbeat timeout + планирование рестартов
+            self._check_heartbeats()
+
+            # Отложенные рестарты, чей backoff истёк → IPC-команда в PM
+            self._dispatch_due_restarts()
+
+            # Периодический полный broadcast для новых подписчиков (GUI)
+            self._full_broadcast_counter += 1
+            if self._full_broadcast_counter >= self._full_broadcast_interval:
+                self._full_broadcast_counter = 0
+                self.broadcast_full_status()
+        except Exception as e:
+            self.process._log_error(f"Error in monitoring loop: {e}")
 
     # ----------------------------------------------------------------
     # Проверка liveness: OS + heartbeat timeout
@@ -540,34 +581,60 @@ class ProcessMonitor:
                     pass
             return
 
-        # Выполняем рестарт с backoff
+        # Запланировать рестарт после backoff (Task 3.1): БЕЗ sleep и БЕЗ
+        # прямого restart_process на потоке монитора — исполнение уйдёт
+        # IPC-командой в PM (_dispatch_due_restarts), где оно сериализуется
+        # с apply_topology на message_processor-потоке (гонка исключена).
         attempt = count + 1
         backoff = self.restart_policy.backoff_sec
+        if process_name in self._pending_restarts:
+            return  # уже запланирован
+        self._restart_counts[process_name] = attempt
+        self._pending_restarts[process_name] = time.monotonic() + backoff
         self.process._log_info(
-            f"Авто-рестарт процесса '{process_name}' "
-            f"(причина: {reason}, попытка {attempt}/{max_retries}, "
-            f"backoff: {backoff}с)"
+            f"Авто-рестарт процесса '{process_name}' запланирован "
+            f"(причина: {reason}, попытка {attempt}/{max_retries}, backoff: {backoff}с)"
         )
-        time.sleep(backoff)
 
-        # Очищаем heartbeat перед рестартом — новый процесс пришлёт свой
-        self._last_heartbeat.pop(process_name, None)
+    def _dispatch_due_restarts(self) -> None:
+        """Отправить в PM рестарты, чей backoff истёк (IPC, не прямой вызов).
 
-        try:
-            success = self.process.restart_process(process_name)
-            if success:
-                self._restart_counts[process_name] = attempt
-                self.process._log_info(
-                    f"Process '{process_name}' успешно перезапущен (попытка {attempt}/{max_retries})"
-                )
+        ``process.command {cmd: process.restart}`` в СОБСТВЕННУЮ очередь PM →
+        message_processor-поток → CommandManager → PM.restart_process. На том
+        же потоке исполняется topology.apply, поэтому рестарт НЕ может бежать
+        параллельно с заменой топологии. Если имя заменено switch'ем до
+        диспатча — cleanup уже вызвал forget_process и снял pending.
+        """
+        if not self._pending_restarts:
+            return
+        now = time.monotonic()
+        due = [name for name, ts in self._pending_restarts.items() if ts <= now]
+        for name in due:
+            self._pending_restarts.pop(name, None)
+            # Очищаем heartbeat перед рестартом — новый процесс пришлёт свой
+            self._last_heartbeat.pop(name, None)
+            try:
+                comm = getattr(self.process, "communication", None)
+                sent = bool(
+                    comm.send_message(
+                        self.process.name,
+                        {
+                            "type": "system",
+                            "command": "process.command",
+                            "sender": self.process.name,
+                            "data": {"cmd": "process.restart", "process_name": name},
+                        },
+                    )
+                ) if comm is not None else False
+            except Exception as exc:
+                sent = False
+                self.process._log_error(f"Monitor: отправка рестарта '{name}' не удалась: {exc}")
+            if sent:
+                self.process._log_info(f"Monitor: рестарт '{name}' отправлен PM (вне потока монитора)")
             else:
-                self._restart_counts[process_name] = attempt
                 self.process._log_error(
-                    f"Не удалось перезапустить процесс '{process_name}' (попытка {attempt}/{max_retries})"
+                    f"Monitor: рестарт '{name}' НЕ отправлен — процесс остаётся в текущем статусе"
                 )
-        except Exception as exc:
-            self._restart_counts[process_name] = attempt
-            self.process._log_error(f"Ошибка при авто-рестарте '{process_name}': {exc}")
 
     def reset_restart_count(self, process_name: str) -> None:
         """Сбросить счётчик рестартов для процесса.
@@ -576,6 +643,22 @@ class ProcessMonitor:
         или при ручном вмешательстве оператора.
         """
         self._restart_counts.pop(process_name, None)
+
+    def forget_process(self, process_name: str) -> None:
+        """Забыть служебную историю имени при cleanup (hot-swap / удаление).
+
+        Вызывается PM._cleanup_process_resources. Без этого новый процесс
+        с тем же именем наследует чужой heartbeat-таймер, счётчик рестартов
+        и previous_states: ложный UNRESPONSIVE сразу после switch и
+        преждевременный FAILED после нескольких замен. Отложенный рестарт
+        заменённого имени также отменяется (Task 3.1).
+        """
+        self._last_heartbeat.pop(process_name, None)
+        self._restart_counts.pop(process_name, None)
+        self._workers_status.pop(process_name, None)
+        self._first_seen.pop(process_name, None)
+        self.previous_states.pop(process_name, None)
+        self._pending_restarts.pop(process_name, None)
 
     # ----------------------------------------------------------------
     # Полный broadcast статуса (для синхронизации с GUI)

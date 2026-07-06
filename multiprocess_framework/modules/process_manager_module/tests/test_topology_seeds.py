@@ -144,6 +144,15 @@ class TestTopologyStopAll:
         result = pm._topology_stop_all(["x"])
         assert result is False
 
+    def test_partial_fail_logs_result_map(self) -> None:
+        """При частичном провале в лог уходит список неостановленных + карта результатов."""
+        pm = _make_pm({"a": {"class": "A"}, "b": {"class": "B"}})
+        pm._process_registry.stop_many = MagicMock(return_value={"a": True, "b": False})
+        pm._topology_stop_all(["a", "b"])
+        logged = " ".join(str(c.args[0]) for c in pm._log_error.call_args_list)
+        assert "['b']" in logged
+        assert "'a': True" in logged
+
     def test_missing_name_in_results_returns_false(self) -> None:
         """stop_many не вернул результат для имени → трактуется как False."""
         pm = _make_pm({"a": {"class": "A"}})
@@ -161,14 +170,16 @@ class TestTopologyStopAll:
 
 class TestTopologyCleanup:
     def test_removes_from_registry_and_config(self) -> None:
-        """cleanup удаляет из реестра, освобождает SHM и удаляет из _process_configs."""
+        """cleanup удаляет из реестра, снимает с SRM (SHM+PSR+конфиг) и из _process_configs."""
         pm = _make_pm({"worker_1": {"class": "mod.W", "priority": "normal"}})
         result = pm._topology_cleanup("worker_1")
         assert result is True
         # Реестр
         pm._process_registry.remove_process.assert_called_once_with("worker_1")
-        # SHM
-        pm.shared_resources.memory_manager.release_process_memory.assert_called_once_with("worker_1")
+        # SRM: единая точка снятия — SHM + запись PSR + конфиг (ADR-SRM-009)
+        pm.shared_resources.unregister_process.assert_called_once_with("worker_1")
+        # Хвосты монитора забыты (heartbeat/счётчики/статусы имени)
+        pm._process_monitor.forget_process.assert_called_once_with("worker_1")
         # Конфиг
         assert "worker_1" not in pm._process_configs
 

@@ -1,1 +1,0 @@
-# тесты state_store

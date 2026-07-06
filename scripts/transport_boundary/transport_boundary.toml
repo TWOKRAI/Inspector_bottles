@@ -25,7 +25,6 @@ path_patterns = [
     "**/test_*.py",
     "**/conftest.py",
     "**/_archive/**",
-    "multiprocess_prototype_backup/**",
 ]
 
 [detect]

@@ -83,6 +83,8 @@ class PipelineTab(QWidget):
     ) -> None:
         super().__init__(parent)
         self._services = services
+        # Волна B (M-leak-3): guard идемпотентности teardown (см. dispose()).
+        self._disposed = False
         self._presenter = PipelinePresenter(
             services,
             registers_manager=registers_manager,
@@ -165,6 +167,40 @@ class PipelineTab(QWidget):
         self._connect_signals()
         self._load_topology()
         self._load_palette()
+
+        # Волна B (M-leak-3): teardown-хук на оба реальных пути уничтожения вкладки.
+        # closeEvent приходит не всегда (вкладка в QTabWidget обычно умирает через
+        # deleteLater/разрушение родителя без close()), поэтому дублируем на destroyed.
+        # dispose() идемпотентен и в destroyed-пути трогает только Python-состояние
+        # (подписки), не C++-объекты. Lambda, а не bound-метод: PySide6 хранит
+        # bound-методы QObject-получателя слабой связью, и на умирающем объекте
+        # такой слот мог бы не сработать.
+        self.destroyed.connect(lambda *_, tab=self: tab.dispose())
+
+    def dispose(self) -> None:
+        """Teardown вкладки: снять EventBus-подписки presenter'а/таба и cam-подписки инспектора.
+
+        Волна B (M-leak-3 + Н-3 + Н-4). Идемпотентен — повторный вызов no-op.
+        Вызывается из closeEvent И по сигналу destroyed — каким бы путём вкладка
+        ни уничтожалась (close(), deleteLater, разрушение родителя), подписки
+        снимаются ровно один раз.
+        """
+        if self._disposed:
+            return
+        self._disposed = True
+        # G.6.1-подписка auto-reveal (ProcessAdded) — та же категория утечки:
+        # EventBus держит сильную ссылку на handler → на tab.
+        sub = getattr(self, "_process_added_sub", None)
+        if sub is not None:
+            sub.unsubscribe()
+            self._process_added_sub = None
+        self._presenter.dispose()
+        self._inspector.dispose()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """Снять подписки при закрытии вкладки (штатный Qt-путь teardown)."""
+        self.dispose()
+        super().closeEvent(event)
 
     @classmethod
     def create(

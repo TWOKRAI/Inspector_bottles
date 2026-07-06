@@ -1,0 +1,164 @@
+# .github/workflows/ci.yml — CI for Python projects
+# Toolchain: uv + ruff + pyright + pytest
+# Matrix: Ubuntu × Python 3.11/3.12/3.13 (adjust as needed)
+#
+# Base jobs (lint / typecheck / test) are unconditional.
+# The `quality-gates` and `security-review` jobs add guarded steps/jobs that
+# self-skip when their inputs (config files, the ANTHROPIC_API_KEY secret) are
+# absent — so a freshly bootstrapped project is green from the first commit.
+#
+# Concurrency: cancels in-progress runs on the same branch when a new commit lands.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --group dev --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  typecheck:
+    name: typecheck (pyright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --group dev --frozen
+      - run: uv run pyright src
+
+  test:
+    name: test (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+      - run: uv sync --group dev --frozen
+      - run: uv run pytest --cov={{PACKAGE}} --cov-report=xml --cov-report=term
+      # Uncomment to upload coverage to Codecov:
+      # - uses: codecov/codecov-action@v4
+      #   with:
+      #     files: ./coverage.xml
+      #     fail_ci_if_error: false
+
+  quality-gates:
+    name: quality gates (guarded)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for the PR commit-trailer range
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      # Architecture rules — runs only when .sentrux/rules.toml is present.
+      # sentrux ships as a local binary (no pip package), so a missing binary is a
+      # skip-with-notice, never a failure — keeps freshly bootstrapped projects green.
+      - name: architecture rules (sentrux)
+        if: hashFiles('.sentrux/rules.toml') != ''
+        run: |
+          if command -v sentrux >/dev/null 2>&1; then
+            sentrux check
+          else
+            echo "::notice::sentrux not on PATH — skipping architecture rule check"
+          fi
+
+      # Project-map freshness — PR-only. The aggregator's stdlib-only entrypoint
+      # regenerates docs/PROJECT_CONTEXT.md and exits 1 on drift. Gated to
+      # pull_request (not push) on purpose: a just-bootstrapped project ships a
+      # stub registry, so checking it on the day-1 push to main would false-RED.
+      # On PRs it catches a CONTEXT.md edited without re-running the aggregator.
+      - name: project-context drift
+        if: github.event_name == 'pull_request' && hashFiles('docs/PROJECT_CONTEXT.md') != ''
+        run: uv run --no-project python -m scripts.aggregate_context --check
+
+      # Commit-trailer policy — PR-only, validated over the PR commit range with
+      # the seed-shipped validator (stdlib-only, no project deps required).
+      - name: commit trailers (PR range)
+        if: github.event_name == 'pull_request' && hashFiles('scripts/validate_commit/validate_commit.py') != ''
+        run: |
+          git fetch --no-tags --depth=100 origin "${{ github.base_ref }}"
+          status=0
+          for sha in $(git log --format=%H "origin/${{ github.base_ref }}..HEAD"); do
+            if ! git log -1 --format=%B "$sha" | uv run --no-project python scripts/validate_commit/validate_commit.py -; then
+              echo "::error::commit $sha failed trailer validation"
+              status=1
+            fi
+          done
+          exit $status
+
+  security-review:
+    # AI security review of the PR diff via Anthropic's first-party
+    # claude-code-security-review action. PR-only, and self-skips when the
+    # ANTHROPIC_API_KEY repo secret is absent — so a freshly bootstrapped project
+    # (no secret configured yet) stays green. Add the secret to activate; findings
+    # are posted as inline PR comments. Pin the action to a tag or commit SHA to
+    # harden against supply-chain drift once you trust a published release.
+    name: security review (claude, guarded)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # post inline security findings on the PR
+    steps:
+      # A secret can't be referenced in a step `if:` directly, so probe the key
+      # in a shell step and gate the review on its GITHUB_OUTPUT flag. No key ->
+      # notice + green skip. Fork PRs never receive the secret, so they self-skip
+      # too (and the review never runs with untrusted code holding the key).
+      - name: detect ANTHROPIC_API_KEY
+        id: secret-check
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ANTHROPIC_API_KEY secret not set — skipping Claude security review (PR stays green)"
+          fi
+
+      - name: checkout (PR head)
+        if: steps.secret-check.outputs.present == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2  # base + head — enough for the PR diff
+
+      - name: claude code security review
+        if: steps.secret-check.outputs.present == 'true'
+        uses: anthropics/claude-code-security-review@main
+        with:
+          comment-pr: true
+          claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}

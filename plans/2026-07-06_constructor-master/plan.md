@@ -1,0 +1,230 @@
+# Plan: Конструктор 2026 — мастер-план (фазы Ф0-Ф8 + трек F)
+
+- **Slug:** 2026-07-06_constructor-master
+- **Дата:** 2026-07-06
+- **Статус:** DRAFT — сохранён, исполнение НЕ начато (ждёт команды владельца)
+- **Ветка:** TBD (Ф0 стартует с merge `fix/topology-switch-hardening` → main; далее по фазе: `<type>/constructor-fN`, трек F — worktree `refactor/constructor-godsplit`)
+- **Анализ-основание:** [`analysis.md`](analysis.md) (все находки R1-R16, метрики, ландшафт планов — с file:line)
+- **Закрывает triage:** [`docs/audits/2026-07-04_arch-advice-constructor-2026.md`](../../docs/audits/2026-07-04_arch-advice-constructor-2026.md) (52 рекомендации)
+
+## ПРИНЦИП №1 (директива владельца, 2026-07-06)
+
+> **НИЧЕГО не удаляется, не замораживается и не архивируется без явного per-item одобрения владельца.**
+> Все кандидаты на удаление/freeze проходят только через gates G0 (бумажный вердикт) и G4 (исполнение,
+> каждое удаление — отдельный одобренный коммит). Никаких «гигиенических» удалений по ходу фаз.
+> Это распространяется и на файлы планов/доков (архивация QUEUE/backlog — тоже только по команде).
+
+## Цель
+
+Мощная удобная система создания многопроцессных приложений на Python из модулей, сервисов и плагинов:
+- **без костылей** — контракты вместо конвенций (сообщения/payload/плагины/рецепты версионированы и валидируются), единые механизмы вместо дублей;
+- **живучесть** — рабочий авто-рестарт, routing-epoch, wire re-issue, fault-injection тесты;
+- **безопасный hot-path** — seqlock (нет torn-frame), QoS-профили (system-команды никогда не теряются молча), без двойной конверсии;
+- **backend_ctl — основной инструмент отладки** — события/подписки/логи/метрики/MCP;
+- **composition root**, где второе приложение = рецепт + манифест + тонкий bootstrap.
+
+Директивы: product>engine; hot-path последним; 2 живых рецепта (`phone_sketch`, `hikvision_letter_robot`) не ломать.
+
+## Порядок фаз и параллелизм
+
+```
+Ф0 Фундамент ─► Ф1 backend_ctl v2 ─► Ф2 Наблюдаемость отказов ─► Ф3 Supervisor v2 + гонки ─►
+                └─(worktree)─ Трек F: god-split (параллельно Ф1-Ф3) ─► MERGE-GATE F ─►
+Ф4 Контракты и версии ─► Ф5 Конструктор (carve E + Phase 5) ─► Ф7 Hot-path G (строго последним) ─► Ф8 Фокус H
+```
+
+**Матрица конфликтов файлов** (обоснование порядка):
+
+| Пара | Общие файлы | Решение |
+|---|---|---|
+| F ↔ Ф4.6 | `pipeline/presenter.py` (READ-сайт :1225) | F merge ДО Ф4; F.2 сам переводит recipe_io на unwrap_recipe (закрывает SC-12-остаток) |
+| F ↔ Ф5.6 (E4) | `forms/factory.py` | split пакета = F.5; E4 после F = только diff + унификация |
+| Ф3 ↔ Ф7 | `router_manager.py`, queue manager | строго последовательно |
+| Ф4 ↔ Ф5 | `launch.py` | последовательно |
+| Ф1 ↔ Ф2 | нет (только 2.6 JSONL-sink опц. ↔ 1.4 по logger_module — их не параллелить) | допустим ∥ |
+
+Правила: ≤2 агента без worktree; трек F — единственный worktree; Ф7 — один агент строго последовательно.
+
+---
+
+## Ф0 — Фундамент (~2 дня)
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| 0.1 | [ ] | Merge `fix/topology-switch-hardening` → main (20 коммитов); полный pytest + qt-smoke обоих рецептов до/после | main зелёный, оба рецепта поднимаются | S |
+| 0.2 | [ ] | Починить 3 красных теста (`test_observability_hot_reload` ×2, `test_assembler::test_custom_log_dir_parity`); таймбокс полдня, глубже — эскалация владельцу | pytest: 0 красных | M |
+| 0.3 | [ ] | sentrux `session_start` baseline (modularity 5652 / quality 7174); **min_depth**: временно порог 0.65→0.60 в `.sentrux/rules.toml` с комментом «вернуть в Ф8» | `baseline.md`; sentrux-check зелёный | S |
+| 0.4 | [ ] | FPS/CPU baseline: phone_sketch (qt-smoke + `introspect.router_stats`); hikvision — при доступной камере, иначе headless + пометка hardware-gated | числа в `baseline.md` | S |
+| 0.5 | [ ] | **GATE G0** (бумажный, per-item решения владельца): ярусы core-8/optional/frozen + вердикты по мёртвому весу — chain_module (реком. freeze), dispatch beyond-EXACT_MATCH (freeze), console (freeze), data_schema-мертвецы (kill в Ф8), frontend-флагман (связать с G2/E4), K3-K9. НИЧЕГО не удалять — только вердикты. Правило: Ф4-манифесты пишутся только ярусам core/optional | таблица вердиктов здесь, в plan.md | S |
+| 0.6 | [ ] | Доки: QUEUE.md → governing этот план; триаж-таблица 52 рекомендаций аудита → phase-разметка | QUEUE актуален, аудит затрёкен | S |
+
+Риск/откат: merge тривиален (ветка строго впереди); 0.2 может оказаться глубже — таймбокс + эскалация, xfail только решением владельца.
+
+## Ф1 — backend_ctl v2 (рано — по директиве владельца, ~3 дня)
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| 1.1 | [ ] | **Событийный канал driver**: `_dispatch` (driver.py:167-169) перестаёт дропать сообщения без request_id → очередь событий + `subscribe(callback)/events(timeout)`; `state.subscribe` становится рабочим | push `state.changed` доходит до подписчика; reply-путь не сломан | M |
+| 1.2 | [ ] | Обёртки: `router_stats()`, `queues()`, `worker_*()`, `wire_*()` (dataclass-результаты) поверх готовых introspect/IPC | каждый метод — тест против headless-бэкенда | S |
+| 1.3 | [ ] | **BackendHarness** — pytest-фикстура: headless launch (BACKEND_CTL=1) + driver + гарантированный teardown; маркер smoke | `pytest -m harness_smoke` зелёный; старт/стоп < 30с | M |
+| 1.4 | [ ] | IPC `config.reload` / `logger.sink.enable\|disable` — реализация ADR-CRM-006 поверх готовых reconfigure/sink-реестра | через driver сменить уровень логгера на лету; hot-reload файла и IPC не конфликтуют | M |
+| 1.5 | [ ] | Tail логов через driver: подписка level≥ERROR целевого процесса → событийный канал 1.1 | driver ловит ERROR в тесте | M |
+| 1.6 | [ ] опц | verify-probe (write→readback→diff, P1.5c) | probe на set_register | S |
+| 1.7 | [ ] | **MCP-обёртка backend_ctl** (P3): инструменты status/introspect/state/send_command для Claude. Рекомендация: в Ф1 — все последующие фазы отлаживаются агентами нативно | Claude вызывает против живого бэкенда | M |
+| 1.8 | [ ] опц | record/replay (P4) — решение на GATE G3 (полезен как характеризационный инструмент Ф7) | — | L |
+
+Риск: нулевой для прода (свой пакет + флаг); откат — не включать флаг.
+
+## Ф2 — Наблюдаемость отказов (примитив → 30 сайтов, ~3 дня)
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| 2.1 | [ ] | **`ctx.health`**: `report_error(exc, context, throttle)/set_status/degraded` в PluginContext + **health-схема путей state-дерева как контракт** + публикация через heartbeat self-publish; rate-limit | контракт-тест схемы; ошибка плагина видна в state-дереве и через driver | M |
+| 2.2 | [ ] | Breaker честный: учитывает swallowed-ошибки (report_error инкрементит); produce()-breaker в SourceProducer | N подряд report_error → breaker open → health degraded | M |
+| 2.3 | [ ] | Discovery `debug`→WARNING + видимый failed-list (state/introspect); ObservableMixin._call_manager `pass` → лог+счётчик | плагин с опечаткой виден через driver | S |
+| 2.4 | [ ] ∥ | Волна C ч.1: M-err-1 (camera_service:153-155), M-err-2 (capture:152) + Plugins/sources (~15 сайтов) → one-liner `ctx.health.report_error` + contain→degrade | fault-smoke: выдернуть камеру → видимая ошибка, соседи живут, FPS ≥ baseline | M |
+| 2.5 | [ ] ∥ | Волна C ч.2: остальные ~15 сайтов | grep swallow-без-report в Plugins/ = 0 | M |
+| 2.6 | [ ] опц | JSONL-sink в logger_module (OTel-ID — позже, в G.6) | sink включается через 1.4 | S |
+
+Порядок: 2.1 строго первым; 2.4∥2.5 после 2.1-2.2. Откат: report_error деградирует в лог-only переключателем.
+
+## Ф3 — Supervisor v2 + волна D (живучесть ДО hot-path, ~4 дня)
+
+Внутренний порядок ЖЁСТКИЙ: 3.1/3.2/3.5 — ДО 3.8 (иначе авто-рестарт производит процессы с мёртвыми wire и stale routing_map).
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| 3.1 | [ ] | **routing-epoch**: монотонная эпоха топологии в PSR; PM после switch/restart рассылает идемпотентный `routing.refresh`; роутеры обновляют routing_map | peer→peer send после switch доставляется (сейчас молча теряется) | M |
+| 3.2 | [ ] | Self-reported ready: process_runner шлёт `ready` после init; барьер PM потребляет ready (settle 0.5с — фолбэк) | switch/boot закрывается по ready, не по таймеру | M |
+| 3.3 | [ ] | **Guard system-очереди**: `remove_old_if_full` НИКОГДА не вытесняет system-очередь молча (ERROR-лог + счётчик; политика: не вытеснять). Полная QoS-модель — в Ф7 G.4 | переполнение data-очередей не выбивает `process.stop` | S |
+| 3.4 | [ ] ∥ | M-race-1: `snapshot_registry()/connected_ids()` под `_registry_lock`; плагин перестаёт читать `_manager._entries/_drivers` (10 мест); `list_devices()` на snapshot | grep приваток извне = 0; fault-тест: драйвер умер → хаб и соседи живут | M |
+| 3.5 | [ ] | Wire-статусы first-class: publish `system.wires.*`, re-issue `wire.configure` при рестарте; `broken_wires` реальный (вместо hardcode 0) | kill+restart камеры → кадры снова идут; broken_wires ≠ 0 в момент разрыва | M |
+| 3.6 | [ ] | Supervisor v2 policy: per-process RestartPolicy из blueprint/рецепта; окно стабильности (N рестартов в T → give-up + health=failed); проводка `reset_restart_count` | unit-тесты политики; give-up виден в health | M |
+| 3.7 | [ ] | **Fault-injection фикстура** на BackendHarness: kill → авто-рестарт → wire re-issue → routing.refresh → данные идут | e2e-тест смерти-возрождения зелёный | M |
+| 3.8 | [ ] | **GATE G1** (владелец): включить RestartPolicy в обоих рецептах (реком.: да, per-process для source/hub). Только после 3.1+3.2+3.5 | qt-smoke; откат = флаг в рецепте | S |
+| 3.9 | [ ] опц | depends_on (порядок старта) — отложить в Ф8, если 3.7 не покажет необходимость | — | M |
+| 3.10 | [ ] опц | pipeline-live-control Task 3.1+3.2: `stop_worker/start_worker(address)` + IPC-контракт (Task 3.3 drain — в Ф7 G.8) | по phase-3.md исходного плана | M+M |
+
+## Трек F — God-split (worktree, старт после Ф0, MERGE-GATE до Ф4, ~4 дня ∥ Ф1-Ф3)
+
+По готовому дизайну [`plans/2026-07-03_god-split-design.md`](../2026-07-03_god-split-design.md) (характеризационные тесты перечислены там; предусловие dispose — уже DONE волной B).
+
+| Task | Статус | Суть | Acceptance |
+|---|---|---|---|
+| F.1 | [ ] | `graph/data.py` (NodeData/EdgeData/PortSchema без Qt) + характеризационные тесты codec ДО разреза | тесты фиксируют текущее поведение |
+| F.2 | [ ] | `graph_codec.py` + `recipe_io.py` из presenter; recipe_io → `unwrap_recipe` (закрывает SC-12-остаток :1225) | характеризационные зелёные; grep or-цепочек в presenter = 0 |
+| F.3 | [ ] | `wire_validation.py` + `runtime_control.py` | qt-smoke Pipeline |
+| F.4 | [ ] | `layout_controller.py` + `mutations.py`; presenter-core ≤ ~400 LOC | публичные методы/сигналы presenter не изменены |
+| F.5 | [ ] | `forms/factory.py` → пакет (kinds/builders_legacy/builders_binding/json_editor/реестр KindBuilders) + Н-5 (`_rm_old_value` helper ×3) | характеризационные тесты форм; qt-smoke inspector |
+| F.6 | [ ] | `inspector_panel.py` → 5 секций (по образцу IoDebugSection) + `selectors_data.py`; проверить Н-4 (unbind camera), Н-6 (suppress) | баланс bind/unbind = 0 на fake-bindings |
+
+**MERGE-GATE F**: полный qt-smoke обоих рецептов; sentrux modularity ≥ +250 от 5652; внешние контракты вкладок не изменены; pytest зелёный. Откат: revert-серия (модули аддитивны).
+
+## Ф4 — Контракты и версии (после merge F, ~5 дней)
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| 4.1 | [ ] | **Multi-register fix**: `schemas[reg.name]` вместо перезаписи по plugin.name; контракт-тест Н-7 (уникальность instance.name, семантика override); boot-проверка дубликатов plugin_name | плагин с 2 регистрами — оба живы | S |
+| 4.2 | [ ] ∥ | **Реестр контрактов сообщений**: command/data_type → схема; warn-middleware на receive control-plane; флаг strict (default warn). Инвариант для Ф7: после G data-plane валидируется только 4.3 (зафиксировать текстом в G) | опечатка в команде → WARNING с diff полей | M |
+| 4.3 | [ ] | Payload-валидатор PluginRunner по Port-декларациям (dev-mode флаг, выключен в prod) | несоответствие порту → ошибка на границе в dev | M |
+| 4.4 | [ ] | **Манифест плагина**: version/api_version/requires (только ярусы core/optional по G0); рецепт хранит version при save; boot mismatch → WARNING | манифест-тест на 2-3 пилотных плагинах | M |
+| 4.5 | [ ] ∥ | **Движок миграций dict-документов**: `@migration("recipe", from_=2, to=3)`, ядро framework; property-тест round-trip | новый модуль с contract-тестами | M |
+| 4.6 | [ ] | **Единая READ-точка рецептов**: unwrap_recipe → движок 4.5; `recipes/presenter.py:394` через единый вход (:1225 закрыт F.2). Rank1 аудита ★★★★★ | grep формат-веток вне движка = 0 | S/M |
+| 4.7 | [ ] | **join/inspector из wires** при assembly (BlueprintAssembler); снять костыль `_hoist_inspector_from_metadata` (launch.py:40-55) | регресс-тест: join НЕ деградирует в fanin | M |
+| 4.8 | [ ] | **mini-GATE**: канонизация записи рецепта (дубли displays/gui_positions → одна секция) как migration-шаг; байт-diff обоих рецептов на одобрение владельца | оба рецепта грузятся идентично до/после; diff одобрен | M |
+| 4.9 | [ ] | **StateStore ревизии**: (a) revision в дереве + Delta, DeltaDispatcher включает revision; (b) watch-from-revision + resync (etcd-паттерн) | пропущенная дельта → resync, кэш сходится | M+M |
+| 4.10 | [ ] опц | driver watch-from-revision (поверх 1.1 + 4.9); DeltaJournal — defer | подписка переживает реконнект | S |
+
+Риск: порча рецептов → миграции только in-memory на READ; WRITE-канонизация отдельно (4.8) с бэкапом; strict нигде не default.
+
+## Ф5 — Конструктор: carve E + Phase 5 (~5 дней)
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| 5.1 | [ ] | E3-прекондиция: **характеризационный тест `build()`** (snapshot: blueprint dict → N процессов + orchestrator_config) | зелёный на обоих рецептах | S/M |
+| 5.2 | [ ] | E3: вынос шва `SystemLauncher(...)+add_process` (launch.py:374-394) во framework; `_ORCHESTRATOR_CLASS_PATH` → DI-параметр; + SpawnBackend Protocol (задел multi-node, без постройки) | 5.1 зелёный без изменений; check_rules: 0 reverse-import | M |
+| 5.3 | [ ] | Phase 5 recipe-orchestrator: Assembler/Planner → framework; RecipeManager → framework, `duplicate()` через generic yaml_io/инъекцию (форматы — из движка 4.5); прототип — тонкие шимы | boot=switch=duplicate работают; 0 reverse-import | M+M |
+| 5.4 | [ ] ∥ | E1: `plugin_register_resolver` → framework (чистая функция, тесты есть) | шим в прототипе; check_rules зелёный | S |
+| 5.5 | [ ] ∥ | E2: `qt_event_bus` → `frontend_module/qt_event_bridge` (type-bound → Event-Protocol; решить судьбу `EventBusProtocol`) | cross-thread publish тест | S/M |
+| 5.6 | [ ] | E4: (a) **diff-отчёт 4 механизмов** схема→виджет → **GATE G2** (владелец выбирает целевой); (b) унификация до одного, gate «биндинг-стеков ≤2→1» | отчёт; после (b): один механизм | S + M/L |
+| 5.7 | [ ] | E6: телеметрия helper/mixin поверх `_publish_metrics_to_tree` + **merge-батчинг** (`proxy.merge` одним сообщением вместо 3W+2 set) | счётчик сообщений телеметрии ↓ ~в W раз | S/M |
+| 5.8 | [ ] | RuntimeDeps → двухслойный контракт FrameworkRuntime + app-extras | tab_factory через новый контракт | M |
+| 5.9 | [ ] | GUI state-plane: полный Delta до GUI (frontend/process.py:125 — сейчас теряет delete/MISSING/transaction_id); `StateProxy.ensure_subscription` c refcount (авто-подписка bind — убирает класс ошибок «панель мертва, забыли wildcard»); один glob-матчер вместо трёх | delete-дельта доходит до биндингов | M |
+| 5.10 | [ ] опц | TabSpec/TabRegistry (механизм уже app-agnostic, app-specific только TAB_ORDER) — если останется бюджет фазы | TAB_ORDER = данные | S |
+
+Риск: reverse-import при carve → check_rules в каждом acceptance; шимы сохраняют пути импорта прототипа.
+
+## Ф7 — Hot-path G (ОДНИМ вскрытием, строго последним, один агент, ~5 дней)
+
+**GATE G3 перед стартом**: routing-epoch влит (3.1); контракты warn живут (4.2); baseline подтверждён; ответ на HP-5 (`replace_blueprint` × in-flight кадр); откат = feature-flag; решение по 1.8.
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| G.1 | [ ] | Снять 7 TRACE из on_receive + perf-пробы latency за флагом (HP-1) + повторный baseline (FPS, p50/p99) | TRACE=0; числа в baseline.md | S |
+| G.2 | [ ] | Характеризационный тест паритета каналов на дефолте `"queue"` + feature-flag `use_kind_channels` + проводка `resolve_channel_kind` в `_resolve_channels` (router_manager.py:951, ~15 строк) | флаг off = бит-в-бит прежнее поведение | M |
+| G.3 | [ ] | (a) Унификация ДВУХ стратегий записи FrameShm в одну; (b) **seqlock** (generation-счётчик в header слота: writer инкрементит до/после, reader сверяет после копии → drop + метрика) + torn-frame-репродьюсер | репродьюсер: 0 torn-frame после (до — воспроизводится) | M+M |
+| G.4 | [ ] | **QoS-профили kind** `{reliability, history_depth, drop_policy, deadline_ms}`: system=reliable/never-drop (поглощает 3.3), data=keep_last+drop-oldest со счётчиками → heartbeat → state-дерево (по health-схеме 2.1) → вкладка Pipeline; унификация 3 политик переполнения | system никогда не дропается; дроп data виден в state | M |
+| G.5 | [ ] | Снятие двойной конверсии: `return_messages=False` на data-plane + copy-elision `restore_frame(copy=False)` (строго ПОСЛЕ seqlock) | паритет G.2 зелёный; p99 ≤ baseline | M |
+| G.6 | [ ] | trace_id/OTel-совместимые ID в frame_trace/LogRecord (семантические поля, БЕЗ OTel SDK) | лог↔кадр коррелируются | S |
+| G.7 | [ ] | Приёмка: flip `use_kind_channels` on → soak оба рецепта; FPS ≥ baseline; p99 ≤ baseline; **socket-канал backend_ctl жив** (регресс-тест); drop-счётчики видимы; аудит opt-out'ов `manages_own_reply` (S5-остаток) | все gate-метрики зелёные; откат = флаг off | M |
+| G.8 | [ ] | pipeline-live-control Task 3.3: drain→detach→stop воркера | нет полукадров при detach | M |
+
+P3.2 StateChannel остаётся DEFERRED. Ничего из анти-карго-культ списка (analysis.md §9).
+
+## Ф8 — Фокус H (~4 дня)
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| H.1 | [ ] | Ярусы core-8/optional/frozen: доки + enforcement в `.sentrux/rules.toml` (boundaries на frozen) + сверка «20/21/22 модулей» | ярусная карта = код | M |
+| H.2 | [ ] | **GATE G4**: исполнение вердиктов G0 per-item — каждое удаление/freeze отдельным ОДОБРЕННЫМ коммитом | pytest/qt-smoke после каждого | M |
+| H.3 | [ ] | **Registers⇄StateStore merge**: ADR (реком.: StateStore = истина, RM = view-model) → адаптерный период → снятие «**»-подписки и анти-луп адаптеров после soak; 2-3 захода | 7 реактивных механизмов → 2-3; анти-луп костылей нет | L |
+| H.4 | [ ] | Один стандарт логирования прототипа | grep нестандартных логгеров = 0 | S/M |
+| H.5 | [ ] | Ужесточение sentrux: min_depth назад ≥0.65 (перезамер после F/E), min_quality → 0.70+; если depth не восстановился — решение владельца о пороге, НЕ подгонка кода под метрику | sentrux-check зелёный на новых порогах | S |
+| H.6 | [ ] | Финальная сверка: QUEUE.md, session_end, сводная дельта факт-vs-цель | план закрыт таблицей | S |
+
+---
+
+## Gates (точки решения владельца, с рекомендациями)
+
+| Gate | Когда | Решение | Рекомендация |
+|---|---|---|---|
+| G0 | Ф0.5 | Ярусы + судьбы мёртвого веса (бумажный вердикт per-item) | freeze chain/console/dispatch-extras; kill data_schema-мертвецов в Ф8 |
+| G1 | Ф3.8 | Включить RestartPolicy в рецептах | да, per-process source/hub, после 3.1/3.2/3.5 |
+| mini | Ф4.8 | Байт-diff канонизации рецептов | одобрить при идентичной загрузке |
+| G2 | Ф5.6a | Целевой механизм форм из 4 | по diff-отчёту; стеков ≤2→1 |
+| MERGE-F | конец F | Принять merge god-split | qt-smoke + modularity ≥ +250 |
+| G3 | перед Ф7 | Старт hot-path; HP-5; record/replay | только при зелёных Ф0-Ф5; флаг-откат обязателен |
+| G4 | Ф8.2 | Каждое удаление per-item | по вердиктам G0 |
+
+## Метрики приёмки (числовые)
+
+| Метрика | Сейчас | Чекпойнты | Финал |
+|---|---|---|---|
+| sentrux modularity | 5652 | после F ≥ 5900; после Ф5 ≥ 6050 | **≥ 6200** (stretch 6500) |
+| sentrux quality | 7174 | после Ф4 ≥ 7250 | **≥ 7500** |
+| min_depth | 0.6154 FAIL | Ф0: порог временно 0.60 | Ф8: порог назад 0.65 |
+| циклы импортов | 0 | exit-gate каждой фазы | 0 |
+| pytest красные | 3 | Ф0 → 0 | 0 (новые xfail — только решением владельца) |
+| FPS | baseline Ф0 | каждая фаза ≥ baseline−5% | Ф7: ≥ baseline; p99 ≤ baseline; torn-frame-repro = 0 |
+| grep-инварианты | — | Ф2: swallow-без-report=0; Ф3: приватки device_hub извне=0; Ф4: формат-ветки вне движка=0 | Ф7: TRACE hot-path=0 |
+
+## Сквозные правила исполнения
+
+- Каждая фаза: `session_start` → задачи → `session_end`; дельта в трейлер `Tested:`
+- Каждый task с рантайм-эффектом: qt-smoke ИЛИ BackendHarness-smoke
+- Задачи, меняющие публичные контракты (api-full/api-lite) → дисциплина module-contract (README + Protocol + contract-тесты)
+- Коммиты: Conventional Commits + `Why:`/`Layer:` + `Refs: plans/2026-07-06_constructor-master/plan.md`
+- Ветки: по фазе (`<type>/constructor-fN`), трек F — worktree `refactor/constructor-godsplit`
+- Удаления/freeze — ТОЛЬКО через G0/G4 (Принцип №1); hot-path — один агент, feature-flag откат на каждом под-шаге
+
+## Оценка
+
+~35 рабочих дней последовательно; ~28 с треком F в параллель.
+
+## Вне скоупа
+
+Hardware-gated планы (letter-robot цикл, калибровки, device-tree E), sql-insert-many-atomic, GuiBootstrap/P4-хвосты аудита, IncrementalPlanner/replicas, telemetry Option D (за STOP-gate), E5 generic graph-editor (до 2-го потребителя), всё из анти-карго-культ (analysis.md §9).
+
+## Следующий шаг
+
+**Ничего не исполняется без команды владельца.** По команде: Ф0 Task 0.1 (merge hardening → main) → далее по порядку фаз. Опционально перед стартом: разбить фазы на `phase-N.md` файлы (по текущей грануляции таблиц) и создать `baseline.md` в Ф0.3/0.4.

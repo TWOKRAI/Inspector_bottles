@@ -35,3 +35,44 @@ undo_stack не трогается, опционально вызывается 
 - ActionBus остаётся простым и тестируемым.
 - Приложение (prototype) регистрирует хук через bus_factory.
 - Фреймворк не знает про конкретную auth-логику.
+
+---
+
+## ACT-002: `SnapshotHistory[T]` — generic snapshot-реализация-блок под контракт `UndoRedoController`
+
+**Дата:** 2026-06-18
+**Статус:** Принято
+**Refs:** docs/audits/2026-06-18_command-undo-system.md, memory `feedback_framework_first`
+
+### Контекст
+
+Undo/redo — framework-концерн (нужен любому проекту). Контракт `UndoRedoController`
+(`frontend_module/.../tab_layout_protocol.py`) уже допускает несколько реализаций. PATCH-движок
+`ActionBus` жил во framework, а snapshot-логика была заперта в прототипе
+(`adapters/dispatch/history.py::ProjectHistory`, привязан к `Project`). Конструктор должен
+владеть ОБЕИМИ реализациями (правило framework-first): patch — для простых/сложных проектов,
+snapshot — для проектов с чистым immutable-агрегатом.
+
+### Решение
+
+Вынести generic-ядро snapshot-стека во framework как `SnapshotHistory[T]` (+ `SnapshotEntry`)
+в `actions_module` — рядом с patch-движком `ActionBus`. Стек параметризуется типом агрегата T
+(immutable), Qt-free, без app-импортов. Прототип становится тонким потребителем:
+`ProjectHistory(SnapshotHistory[Project])` переопределяет только `entries()` (проекция в
+доменный `HistoryEntry`). Семантика 1:1 с прежним `ProjectHistory` (coalescing, max_history,
+идентичность снимков) — подтверждено characterization-тестами.
+
+`SnapshotHistory` — это блок ХРАНЕНИЯ (record/take_undo/take_redo/navig), а не контроллер:
+контроллер (orchestrator) строится поверх и реализует `UndoRedoController`.
+
+### Альтернативы
+
+- Оставить snapshot-логику в прототипе — нарушает framework-first: конструктор без snapshot-блока.
+- Вынести весь `CommandDispatcherOrchestrator` — отвергнуто: он привязан к домену
+  (`Project.apply`, 15-арочный match-case) — это домен, а не generic-движок.
+
+### Последствия
+
+- Framework владеет двумя реализациями undo за одним контрактом (patch + snapshot).
+- Прототип-сторона тоньше; 0 обратных импортов (generic над T).
+- Следующий проект получает snapshot-undo переиспользованием `SnapshotHistory[ЕгоАгрегат]`.

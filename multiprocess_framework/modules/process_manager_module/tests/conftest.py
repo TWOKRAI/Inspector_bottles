@@ -99,9 +99,10 @@ class MockProcessRegistry:
         self._processes.pop(name, None)
 
     def stop_one(self, name: str, timeout: float = 5.0) -> bool:
+        # Контракт «ensure stopped» (Task 1.1): нет в реестре → уже остановлен → True
         proc = self._processes.get(name)
         if proc is None:
-            return False
+            return True
         proc._alive = False
         return True
 
@@ -131,9 +132,21 @@ class MockSharedResources:
         self.process_state_registry = MagicMock()
         self.process_state_registry.queue_registry = None
         self._registered: dict[str, dict] = {}
+        # Моделируем реальный контракт: cleanup снимает запись процесса с PSR
+        # (очереди/события) — _registered здесь и есть «записи PSR».
+        self.process_state_registry.unregister_process = MagicMock(
+            side_effect=lambda name: self._registered.pop(name, None) is not None
+        )
 
     def register_process(self, name: str, config: dict) -> None:
         self._registered[name] = config
+
+    def unregister_process(self, name: str) -> bool:
+        """Контракт ADR-SRM-009: SHM + запись PSR + конфиг — единая точка снятия."""
+        if self.memory_manager is not None:
+            self.memory_manager.release_process_memory(name)
+        self._registered.pop(name, None)
+        return True
 
     def get_process_data(self, name: str) -> MagicMock:
         mock_data = MagicMock()
@@ -273,7 +286,13 @@ def make_pm(
 
     # get_config
     def _get_config(key: str):
-        defaults = {"stop_process_timeout": 1.0, "shutdown_timeout": 1.0}
+        defaults = {
+            "stop_process_timeout": 1.0,
+            "shutdown_timeout": 1.0,
+            # Быстрый readiness-барьер (Task 2.2): не замедлять сьют, но
+            # сохранить карту ready в ответах apply_topology
+            "start_ready_timeout_s": 0.05,
+        }
         return defaults.get(key)
 
     pm.get_config = _get_config

@@ -171,9 +171,10 @@ def test_presenter_upsert_before_apply() -> None:
     def fake_upsert(devices, slug):
         call_order.append("upsert")
 
-    def fake_apply(source):
+    def fake_apply(source, on_result):
+        # async-контракт Task 2.1: результат доставляется в on_result
         call_order.append("apply")
-        return {"success": True}
+        on_result({"success": True})
 
     view = MagicMock()
     view.confirm_delete.return_value = True
@@ -215,9 +216,10 @@ def test_presenter_no_upsert_without_devices() -> None:
     def fake_upsert(devices, slug):
         call_order.append("upsert")
 
-    def fake_apply(source):
+    def fake_apply(source, on_result):
+        # async-контракт Task 2.1: результат доставляется в on_result
         call_order.append("apply")
-        return {"success": True}
+        on_result({"success": True})
 
     view = MagicMock()
     presenter = RecipesPresenter(

@@ -170,24 +170,41 @@ class ProcessRegistry:
                     self.logger._log_error(f"Failed to start process {process.name}: {e}")
 
     def stop_one(self, name: str, timeout: float = 5.0) -> bool:
-        ev = self._stop_events.get(name)
+        """Остановить один процесс с подтверждением смерти («ensure stopped»).
+
+        Идемпотентная семантика: процесса нет в реестре или он не жив —
+        уже остановлен → ``True``. Иначе эскалация stop_event → join(timeout)
+        → terminate → kill; после kill финальный join. Результат — ФАКТ
+        смерти (``not is_alive()``), а не «сигнал подан»: cleanup/unlink SHM
+        безопасен только по подтверждённой остановке.
+        """
         process = self.get_process_by_name(name)
-        if not ev or not process:
-            return False
+        if process is None:
+            if self.logger:
+                self.logger._log_info(f"stop_one('{name}'): нет в реестре — считается остановленным")
+            return True
+        if not process.is_alive():
+            return True
+
         if self.logger:
             self.logger._log_info(f"Stopping process '{name}' (timeout={timeout}s)...")
-        ev.set()
-        if process.is_alive():
+        ev = self._stop_events.get(name)
+        if ev is not None:
+            ev.set()
             process.join(timeout=timeout)
+        elif self.logger:
+            self.logger._log_warning(f"stop_one('{name}'): нет stop_event — сразу terminate")
+
         if process.is_alive():
             if self.logger:
                 self.logger._log_warning(f"Process '{name}' did not stop in {timeout}s, terminating...")
             try:
                 process.terminate()
-                process.join(timeout=1.0)
             except Exception as e:
                 if self.logger:
                     self.logger._log_warning(f"Error terminating '{name}': {e}")
+            process.join(timeout=1.0)
+
         if process.is_alive():
             if self.logger:
                 self.logger._log_error(f"Force killing process '{name}'")
@@ -196,7 +213,13 @@ class ProcessRegistry:
             except Exception as e:
                 if self.logger:
                     self.logger._log_error(f"Error killing '{name}': {e}")
-        return True
+            # Финальный join: подтвердить смерть ДО того, как caller начнёт cleanup
+            process.join(timeout=1.0)
+
+        alive = process.is_alive()
+        if alive and self.logger:
+            self.logger._log_error(f"Process '{name}' всё ещё жив после kill — остановка НЕ подтверждена")
+        return not alive
 
     def stop_many(self, names: List[str], timeout: float = 5.0) -> Dict[str, bool]:
         """Остановить НЕСКОЛЬКО процессов ПАРАЛЛЕЛЬНО (один общий дедлайн).
@@ -212,23 +235,35 @@ class ProcessRegistry:
             timeout: общий дедлайн graceful-остановки (секунды).
 
         Returns:
-            Карта ``{name: stopped}``: ``True`` — процесс найден и остановлен
-            (graceful/terminate/kill); ``False`` — не найден в реестре
-            (нет ``stop_event`` или ``Process``).
+            Карта ``{name: stopped}`` — семантика «ensure stopped»:
+            ``True`` — процесса нет в реестре / он не был жив (идемпотентно:
+            «нечего останавливать» — успех) ИЛИ смерть ПОДТВЕРЖДЕНА
+            (graceful/terminate/kill + финальный join);
+            ``False`` — процесс всё ещё жив после полной эскалации
+            (cleanup для него небезопасен).
         """
         result: Dict[str, bool] = {}
         procs: Dict[str, Process] = {}
 
-        # (a) Взвести все stop_event разом — дети гаснут параллельно
+        # (a) Взвести все stop_event разом — дети гаснут параллельно.
+        #     Нет в реестре / уже мёртв → True: идемпотентность (паритет
+        #     PM.stop_process), иначе «призрак» в конфигах валил бы весь switch.
         for name in names:
-            ev = self._stop_events.get(name)
             process = self.get_process_by_name(name)
-            if not ev or not process:
-                result[name] = False
+            if process is None:
+                if self.logger:
+                    self.logger._log_info(f"stop_many: '{name}' нет в реестре — считается остановленным")
+                result[name] = True
                 continue
-            ev.set()
+            if not process.is_alive():
+                result[name] = True
+                continue
+            ev = self._stop_events.get(name)
+            if ev is not None:
+                ev.set()
+            elif self.logger:
+                self.logger._log_warning(f"stop_many: у '{name}' нет stop_event — только terminate/kill")
             procs[name] = process
-            result[name] = True
 
         if not procs:
             return result
@@ -258,16 +293,28 @@ class ProcessRegistry:
                 if process.is_alive():
                     process.join(timeout=max(0.0, term_deadline - time.monotonic()))
 
-        # (d) Kill оставшихся
-        for process in procs.values():
-            if process.is_alive():
+        # (d) Kill оставшихся + финальный join (подтверждение смерти)
+        killed = [p for p in procs.values() if p.is_alive()]
+        for process in killed:
+            if self.logger:
+                self.logger._log_error(f"Force killing process '{process.name}'")
+            try:
+                process.kill()
+            except Exception as e:
                 if self.logger:
-                    self.logger._log_error(f"Force killing process '{process.name}'")
-                try:
-                    process.kill()
-                except Exception as e:
-                    if self.logger:
-                        self.logger._log_error(f"Error killing '{process.name}': {e}")
+                    self.logger._log_error(f"Error killing '{process.name}': {e}")
+        if killed:
+            kill_deadline = time.monotonic() + 1.0
+            for process in killed:
+                if process.is_alive():
+                    process.join(timeout=max(0.0, kill_deadline - time.monotonic()))
+
+        # (e) Результат — по ФАКТУ смерти, а не по «сигнал подан»
+        for name, process in procs.items():
+            alive = process.is_alive()
+            result[name] = not alive
+            if alive and self.logger:
+                self.logger._log_error(f"stop_many: '{name}' всё ещё жив после kill — остановка НЕ подтверждена")
 
         return result
 

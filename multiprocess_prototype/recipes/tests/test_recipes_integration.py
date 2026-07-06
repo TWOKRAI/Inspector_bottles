@@ -94,12 +94,12 @@ def test_create_activate_recipe_smoke(tmp_path: Path) -> None:
 
     manager = _make_manager(tmp_path)
 
-    # Mock apply_topology_fn — записывает переданный аргумент
+    # Mock apply_topology_fn (async-контракт Task 2.1) — записывает аргумент
     _captured_blueprint: list[dict] = []
 
-    def _mock_replace(bp: dict) -> dict:
+    def _mock_replace(bp: dict, on_result) -> None:
         _captured_blueprint.append(bp)
-        return {"success": True, "replaced": ["worker_1"], "rolled_back": False}
+        on_result({"success": True, "replaced": ["worker_1"], "rolled_back": False})
 
     # Mock IRecipesView
     mock_view = MagicMock()

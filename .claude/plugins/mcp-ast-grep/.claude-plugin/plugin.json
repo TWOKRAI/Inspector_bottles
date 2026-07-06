@@ -1,0 +1,15 @@
+{
+  "name": "mcp-ast-grep",
+  "version": "0.4.0",
+  "description": "Structural search/rewrite (codemod) across 20+ languages",
+  "mcpServers": {
+    "ast-grep": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/ast-grep/ast-grep-mcp",
+        "ast-grep-server"
+      ]
+    }
+  }
+}

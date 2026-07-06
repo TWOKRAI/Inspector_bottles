@@ -36,7 +36,6 @@ dirs = [
     "build",
     "dist",
     "*.egg-info",
-    "multiprocess_prototype_backup",
 ]
 # Glob-паттерны имён файлов, которые пропускаем.
 file_patterns = ["*.pyc", "*.pyo", "*.so", "*.dylib", "*.dll", ".DS_Store"]

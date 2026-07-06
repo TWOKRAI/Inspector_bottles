@@ -1,0 +1,25 @@
+{
+  "name": "mcp-sentrux",
+  "version": "0.4.0",
+  "description": "Architectural metrics, DSM, blast radius",
+  "mcpServers": {
+    "sentrux": {
+      "command": "sentrux",
+      "args": ["mcp"]
+    }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/sentrux-precheck.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

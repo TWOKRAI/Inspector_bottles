@@ -1,0 +1,19 @@
+diff --git a/cache/store.py b/cache/store.py
+index 2b3c4d5..6e7f8a9 100644
+--- a/cache/store.py
++++ b/cache/store.py
+@@ -1,6 +1,16 @@
+ import pickle
+ from pathlib import Path
+
+-_CACHE = Path("/var/app/cache/index.bin")
++# Internal cache file, written only by this process. Never user-supplied input.
++_CACHE = Path(__file__).parent / ".cache" / "index.bin"
++
++
++def load_index():
++    """Load the app-internal index cache. Returns {} if no cache exists yet."""
++    if not _CACHE.is_file():
++        return {}
++    with _CACHE.open("rb") as fh:
++        return pickle.load(fh)

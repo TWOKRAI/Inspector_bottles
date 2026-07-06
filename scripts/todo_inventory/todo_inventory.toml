@@ -15,7 +15,6 @@ dirs = [
     "node_modules", ".qex", ".sentrux",
     ".mypy_cache", ".pytest_cache", ".ruff_cache",
     "build", "dist", "*.egg-info",
-    "multiprocess_prototype_backup",
 ]
 file_patterns = []
 path_patterns = []

@@ -9,10 +9,11 @@
 
 НЕ импортирует Qt-классы напрямую. Работает исключительно через SystemSettingsView Protocol.
 
-G.4.4: undo/redo field-edit System-настроек — deferred. У domain `services.commands`
-нет `action_bus()` (был фантом — всегда None). System-настройки — отдельный домен
-(не topology), их undo требует команды `SetSystemConfig` (Phase G+). До неё
-``on_field_changed_action_bus`` / ``on_bus_undo_redo_sync`` — no-op-плейсхолдеры.
+G.4.4: undo/redo field-edit System-настроек — deferred. System-настройки —
+отдельный домен (не topology), их undo требует команды `SetSystemConfig` (Phase G+).
+K1 (решение 2026-06-18): no-op ActionBus-плейсхолдеры (`on_field_changed_action_bus`,
+`on_bus_undo_redo_sync`) сняты вместе с мёртвой legacy-проводкой — до появления
+`SetSystemConfig` field-edit System-настроек не попадает в undo/redo (как и было).
 """
 
 from __future__ import annotations
@@ -128,31 +129,6 @@ class SystemSettingsPresenter(TabPresenterBase[SystemSettingsView, None]):
     def on_field_changed(self) -> None:
         """Обработать изменение любого поля редактора → пометить dirty."""
         self._set_dirty(True)
-
-    def on_field_changed_action_bus(
-        self,
-        register_name: str,
-        field_name: str,
-        old_value: object,
-        new_value: object,
-    ) -> None:
-        """Записать изменение поля в undo/redo (System-настройки).
-
-        G.4.4: deferred. У domain `services.commands` нет `action_bus()` (был
-        фантом — всегда None), а System-настройки — отдельный домен (не topology):
-        их undo требует команды `SetSystemConfig`, которой пока нет (Phase G+).
-        До неё field-edit System-настроек не попадает в undo/redo (как и было).
-        Метод сохранён (подключён к сигналам секции) как no-op-плейсхолдер.
-        """
-        return
-
-    def on_bus_undo_redo_sync(self) -> None:
-        """Синхронизировать редакторы с историей при undo/redo (System-настройки).
-
-        G.4.4: deferred — см. ``on_field_changed_action_bus``. No-op до
-        появления domain-команды `SetSystemConfig`.
-        """
-        return
 
     # ------------------------------------------------------------------
     # Геттеры состояния (делегируют от SettingsTab)

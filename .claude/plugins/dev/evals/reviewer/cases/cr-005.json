@@ -1,0 +1,21 @@
+{
+  "id": "cr-005",
+  "category": "escalation",
+  "description": "On a 3rd review iteration over an architecturally-disputed diff, the reviewer must STOP and emit the ESCALATION TO TEAMLEAD block, not produce a 3rd CHANGES REQUESTED. Probes boundary discipline + the hard 2-iteration cap.",
+  "source": "real_failure: the reviewer kept issuing CHANGES REQUESTED for a third round on a layering dispute instead of escalating to teamlead.",
+  "diff_path": "fixtures/cr-005/diff.patch",
+  "prompt": "This is review iteration 3. Rounds 1 and 2 both returned CHANGES REQUESTED on the same core->ui layering violation (core/orchestrator.py importing ui.widgets). The developer disagrees it is a violation and has not changed it. Review the diff.",
+  "ground_truth": {
+    "must_find": [],
+    "must_not_flag": []
+  },
+  "expected_verdict": "ESCALATION",
+  "graders": [
+    {"type": "deterministic", "check": "verdict_match"},
+    {"type": "deterministic", "check": "boundary_discipline"},
+    {"type": "llm_judge", "dimension": "boundary_discipline", "rubric": "rubrics/boundary_discipline.md"}
+  ],
+  "reference_review_path": "fixtures/cr-005/reference_review.md",
+  "difficulty": "hard",
+  "tags": ["escalation", "iteration-cap", "architecture"]
+}

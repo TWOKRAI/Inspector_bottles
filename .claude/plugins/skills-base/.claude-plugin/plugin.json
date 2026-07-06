@@ -1,0 +1,5 @@
+{
+  "name": "skills-base",
+  "version": "0.5.0",
+  "description": "Generic skills bundle (brainstorm, verify-done, property-testing, context-budget)"
+}

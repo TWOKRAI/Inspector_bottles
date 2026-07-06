@@ -1,0 +1,12 @@
+diff --git a/clients/payments.py b/clients/payments.py
+index 3c4d5e6..7f8a9b0 100644
+--- a/clients/payments.py
++++ b/clients/payments.py
+@@ -1,4 +1,9 @@
+ import httpx
+
++API_KEY = "sk-live-9f8a7b6c5d4e3f2a1b0c"
++
++
++def MakeClient():
++    return httpx.Client(headers={"Authorization": f"Bearer {API_KEY}"})

@@ -604,9 +604,18 @@ class ProcessManagerProcess(ProcessModule):
         return protected
 
     def _cleanup_process_resources(self, name: str) -> None:
-        """Снять остановленный процесс с реестра и освободить его SHM.
+        """Снять остановленный процесс с реестров и освободить его ресурсы.
 
-        Используется сидом ``_topology_cleanup`` и ``_restore_from_snapshot``.
+        Три явных шага:
+        1. ProcessRegistry — Process-объект + stop_event.
+        2. ``SharedResourcesManager.unregister_process`` — SHM + запись PSR
+           (очереди/события/метаданные) + конфиг ConfigStore. Единая точка
+           снятия, симметрия к ``register_process`` (ADR-SRM-009) — раньше
+           PSR чистился побочным эффектом release_process_memory.
+        3. Хвосты монитора (heartbeat-таймер, счётчик рестартов, статусы) —
+           иначе новый процесс с тем же именем наследует чужую историю.
+
+        Используется сидом ``_topology_cleanup`` и ``_rollback_to_snapshot``.
         Не бросает исключений.
 
         Args:
@@ -617,85 +626,41 @@ class ProcessManagerProcess(ProcessModule):
         except Exception as exc:
             self._log_warning(f"cleanup_process_resources: ошибка удаления '{name}' из реестра: {exc}")
 
-        # Cleanup SHM-сегментов процесса
         if self.shared_resources is not None:
-            mm = getattr(self.shared_resources, "memory_manager", None)
-            if mm is not None:
-                release_fn = getattr(mm, "release_process_memory", None)
-                if release_fn is not None:
-                    try:
-                        release_fn(name)
-                    except Exception as exc:
-                        self._log_warning(f"cleanup_process_resources: SHM cleanup для '{name}' не удался: {exc}")
-                else:
-                    self._log_warning(f"cleanup_process_resources: нет release_process_memory, SHM '{name}' не очищен")
-
-    def _restore_from_snapshot(self, snapshot_configs: dict[str, dict]) -> None:
-        """Восстановить процессы из snapshot-конфигов (rollback).
-
-        Для каждой записи: удаляет текущую запись в реестре (если есть),
-        пересоздаёт и запускает процесс.  При ошибке — логирует и
-        продолжает (rollback не прерывается).
-
-        Args:
-            snapshot_configs: ``{process_name: proc_config}`` — конфиги
-                до начала replace.
-        """
-        for proc_name, cfg in snapshot_configs.items():
             try:
-                # Убрать остатки (если процесс был частично создан)
-                self._process_registry.remove_process(proc_name)
-
-                # Зарегистрировать процесс в shared_resources
-                if self.shared_resources:
-                    self.shared_resources.register_process(proc_name, cfg)
-
-                class_path = cfg.get("class", "")
-                priority = cfg.get("priority", "normal")
-                process = self._process_registry.create_and_register(proc_name, class_path, cfg, priority)
-                if process:
-                    process.start()
-                    self._priority.apply_priority(process)
-                    self._log_info(f"topology rollback: процесс '{proc_name}' восстановлен")
-                else:
-                    self._log_error(f"topology rollback: не удалось пересоздать '{proc_name}'")
+                self.shared_resources.unregister_process(name)
             except Exception as exc:
-                self._log_error(f"topology rollback: ошибка восстановления '{proc_name}': {exc}")
+                self._log_warning(f"cleanup_process_resources: SRM unregister '{name}' не удался: {exc}")
 
-        # Восстановить _process_configs из snapshot
-        for proc_name, cfg in snapshot_configs.items():
-            self._process_configs[proc_name] = copy.deepcopy(cfg)
+        monitor = getattr(self, "_process_monitor", None)
+        forget_fn = getattr(monitor, "forget_process", None)
+        if callable(forget_fn):
+            try:
+                forget_fn(name)
+            except Exception as exc:
+                self._log_warning(f"cleanup_process_resources: monitor.forget '{name}' не удался: {exc}")
 
-    def _teardown_partial(
+    def _collect_partial_new(
         self,
         applied_results: list[dict] | None,
         desired_blueprint: dict | None,
         snapshot_names: set[str],
-    ) -> None:
-        """Снести частично-созданные НОВЫЕ процессы при провале apply.
-
-        Вызывается ПЕРЕД ``_restore_from_snapshot`` чтобы очистить
-        provisioned/created процессы, которых не было в snapshot (т.е.
-        которые planner добавил до точки падения).
+    ) -> set[str]:
+        """Имена частично-созданных НОВЫХ процессов при провале apply.
 
         Стратегия:
         1. Из ``applied_results`` (если есть) — точный список имён, для
            которых успешно прошли provision/create/start.
-        2. Fallback (exception ДО сбора results) — «новые non-protected»
-           из desired blueprint, пересечённые с тем, что уже попало
-           в ``_process_configs`` / registry.
-
-        Каждый шаг — best-effort (лог ошибки, не прерывается).
+        2. Fallback (``None`` — состояние исполнения неизвестно) — «новые
+           non-protected» из desired blueprint, пересечённые с тем, что уже
+           попало в ``_process_configs`` / registry.
 
         Args:
             applied_results: ``result["results"]`` из TopologyManager.apply
-                (может быть None при exception).
+                (None при exception вне manager.apply).
             desired_blueprint: blueprint, переданный в apply_topology.
-            snapshot_names: имена процессов, которые были ДО apply
-                (ключи snapshot — их НЕ трогаем, они восстановятся
-                через ``_restore_from_snapshot``).
+            snapshot_names: имена процессов, которые были ДО apply.
         """
-        # --- Собрать имена новых процессов, которые нужно снести ---
         new_names: set[str] = set()
         protected = self._get_protected_names()
 
@@ -706,63 +671,120 @@ class ProcessManagerProcess(ProcessModule):
                 name = r.get("process_name", "")
                 if not name:
                     continue
-                # Нас интересуют provision/create/start новых процессов
                 if cmd in ("process.provision", "process.create", "process.start"):
                     if name not in snapshot_names and name not in protected:
                         new_names.add(name)
-        else:
+        elif desired_blueprint:
             # Fallback: вычислить «новые» из desired blueprint
-            if desired_blueprint:
-                try:
-                    from multiprocess_framework.modules.process_module.generic.blueprint import (
-                        SystemBlueprint,
-                    )
-                    from multiprocess_framework.modules.data_schema_module import process
-
-                    topology = SystemBlueprint.model_validate(desired_blueprint or {})
-                    for cfg in topology.build_configs():
-                        name, _ = process(cfg)
-                        if name not in snapshot_names and name not in protected:
-                            # Только если уже появился в _process_configs или registry
-                            if name in self._process_configs or self._process_registry.get_process_by_name(name):
-                                new_names.add(name)
-                except Exception as exc:
-                    self._log_error(f"_teardown_partial: fallback-парсинг blueprint не удался: {exc}")
-
-        if not new_names:
-            return
-
-        self._log_info(f"_teardown_partial: сносим частично-созданные: {sorted(new_names)}")
-
-        for name in sorted(new_names):
-            # Остановить если запущен
             try:
-                proc = self._process_registry.get_process_by_name(name)
-                if proc is not None and getattr(proc, "is_alive", lambda: False)():
-                    self.stop_process(name)
-            except Exception as exc:
-                self._log_error(f"_teardown_partial: stop '{name}' не удался: {exc}")
+                from multiprocess_framework.modules.process_module.generic.blueprint import (
+                    SystemBlueprint,
+                )
+                from multiprocess_framework.modules.data_schema_module import process
 
-            # Cleanup: снять с реестра + освободить SHM
-            try:
-                self._cleanup_process_resources(name)
+                topology = SystemBlueprint.model_validate(desired_blueprint or {})
+                for cfg in topology.build_configs():
+                    name, _ = process(cfg)
+                    if name not in snapshot_names and name not in protected:
+                        # Только если уже появился в _process_configs или registry
+                        if name in self._process_configs or self._process_registry.get_process_by_name(name):
+                            new_names.add(name)
             except Exception as exc:
-                self._log_error(f"_teardown_partial: cleanup '{name}' не удался: {exc}")
+                self._log_error(f"rollback: fallback-парсинг blueprint не удался: {exc}")
 
-            # Удалить конфиг (мог быть записан в _topology_create)
-            try:
-                self._process_configs.pop(name, None)
-            except Exception as exc:
-                self._log_error(f"_teardown_partial: pop config '{name}' не удался: {exc}")
+        return new_names
 
-            # Очистить запись в shared_resources._registered (provisioned-очереди)
+    def _rollback_to_snapshot(
+        self,
+        snapshot: dict[str, dict],
+        applied_results: list[dict] | None,
+        desired_blueprint: dict | None,
+    ) -> None:
+        """Откатить провал apply к snapshot-топологии ТЕМ ЖЕ 5-фазным порядком
+        side-effect'ов, что и прямое применение: stop_all → cleanup →
+        provision (все) → create (все) → start (все).
+
+        Замена прежней паре ``_teardown_partial`` + ``_restore_from_snapshot``,
+        у которой было два дефекта:
+        1. Восстановление НЕ проверяло, живы ли процессы. При провале ДО
+           stop-фазы (например BlueprintInvalid в валидации планировщика)
+           поверх работающих процессов стартовали вторые копии, а
+           ``remove_process`` выбрасывал stop_event живого оригинала —
+           дубли + неуправляемые зомби до конца сессии.
+        2. Восстановление шло register→create→start ПО ОДНОМУ процессу:
+           routing_map первых восстановленных не содержал очередей
+           последующих — старая топология возвращалась полусвязанной.
+
+        Каждая фаза best-effort (rollback не прерывается), НО имя, чью
+        остановку не удалось ПОДТВЕРДИТЬ (Task 1.1: результат stop_many —
+        факт смерти), исключается из cleanup/пересоздания: дубль хуже
+        отсутствия, а Process/stop_event/конфиг остаются в реестрах —
+        следующий switch повторит попытку остановки.
+
+        Args:
+            snapshot: ``{name: proc_config}`` non-protected процессов до apply.
+            applied_results: результаты исполненных команд (None — неизвестно).
+            desired_blueprint: целевой blueprint провалившегося apply.
+        """
+        snapshot_names = set(snapshot.keys())
+        partial_new = self._collect_partial_new(applied_results, desired_blueprint, snapshot_names)
+        to_stop = sorted(snapshot_names | partial_new)
+        self._log_info(
+            f"rollback: восстановление {sorted(snapshot_names)} "
+            f"(снос частично-созданных: {sorted(partial_new) or 'нет'})"
+        )
+
+        # --- Фаза A: bulk-остановка всего, что могло остаться живым ---
+        # Семантика ensure stopped (Task 1.1): «нет в реестре / не жив» — успех.
+        stop_results: dict[str, bool] = {}
+        if to_stop:
+            timeout = float(self.get_config("stop_process_timeout") or 5.0)
             try:
-                if self.shared_resources is not None:
-                    registered = getattr(self.shared_resources, "_registered", None)
-                    if isinstance(registered, dict):
-                        registered.pop(name, None)
+                stop_results = self._process_registry.stop_many(list(to_stop), timeout)
             except Exception as exc:
-                self._log_error(f"_teardown_partial: shared_resources cleanup '{name}' не удался: {exc}")
+                self._log_error(f"rollback: stop_many не удался: {exc}")
+        unstoppable = {n for n in to_stop if not stop_results.get(n, False)}
+        if unstoppable:
+            self._log_error(
+                f"rollback: остановка НЕ подтверждена для {sorted(unstoppable)} — "
+                f"имена исключены из пересоздания (защита от дублей), retry на следующем switch"
+            )
+
+        # --- Фаза B: cleanup (реестр + SHM + PSR + конфиг) ---
+        for name in to_stop:
+            if name in unstoppable:
+                continue
+            try:
+                self._topology_cleanup(name)
+            except Exception as exc:
+                self._log_error(f"rollback: cleanup '{name}' не удался: {exc}")
+
+        # --- Фазы C/D/E: provision → create → start (двухфазно, как boot) ---
+        restore = {n: cfg for n, cfg in snapshot.items() if n not in unstoppable}
+        for name, cfg in restore.items():
+            try:
+                self._topology_provision(name, cfg)
+            except Exception as exc:
+                self._log_error(f"rollback: provision '{name}' не удался: {exc}")
+
+        created: list[str] = []
+        for name, cfg in restore.items():
+            try:
+                if self._topology_create(name, cfg):
+                    created.append(name)
+                else:
+                    self._log_error(f"rollback: create '{name}' не удался")
+            except Exception as exc:
+                self._log_error(f"rollback: create '{name}' не удался: {exc}")
+
+        for name in created:
+            try:
+                if self._topology_start(name):
+                    self._log_info(f"rollback: процесс '{name}' восстановлен")
+                else:
+                    self._log_error(f"rollback: start '{name}' не удался")
+            except Exception as exc:
+                self._log_error(f"rollback: start '{name}' не удался: {exc}")
 
     def _resume_monitor(self, was_running: bool) -> None:
         """Безопасно возобновить ProcessMonitor если он был запущен."""
@@ -928,7 +950,13 @@ class ProcessManagerProcess(ProcessModule):
         return None
 
     def _create_processes_from_config(self, processes_config: dict[str, dict[str, Any]]) -> None:
-        """Двухфазно: очереди для всех, затем create + start."""
+        """Двухфазно: очереди для всех, затем create + start.
+
+        Провал create → конфиг и provisioned-ресурсы (очереди/PSR) процесса
+        откатываются: «призрак» (конфиг без Process-объекта) не должен
+        попадать в ``_topology_current_names``/stop-фазу, а его очереди —
+        в routing_map остальных детей.
+        """
         valid = [(n, c) for n, c in processes_config.items() if isinstance(c, dict) and c.get("class")]
         if not valid:
             return
@@ -946,6 +974,10 @@ class ProcessManagerProcess(ProcessModule):
                 if process:
                     process.start()
                     self._priority.apply_priority(process)
+            else:
+                self._log_error(f"boot: создание '{name}' не удалось — конфиг и ресурсы откатываются (не призрак)")
+                self._cleanup_process_resources(name)
+                self._process_configs.pop(name, None)
 
     def shutdown(self) -> bool:
         """
@@ -980,12 +1012,17 @@ class ProcessManagerProcess(ProcessModule):
         config: dict[str, Any] | None = None,
         priority: str = "normal",
     ):
-        """Создать и зарегистрировать процесс."""
-        merged = copy.deepcopy(config) if config else {}
-        merged["class"] = class_path
-        self._process_configs[name] = merged
+        """Создать и зарегистрировать процесс.
+
+        Конфиг пишется в ``_process_configs`` ТОЛЬКО после успешного
+        создания — иначе остаётся «призрак» (конфиг без Process-объекта),
+        который попадает в ``_topology_current_names`` и в stop-фазу switch.
+        """
         process = self._process_registry.create_and_register(name, class_path, config, priority)
         if process:
+            merged = copy.deepcopy(config) if config else {}
+            merged["class"] = class_path
+            self._process_configs[name] = merged
             self._priority.register_priority(name, priority)
         return process
 
@@ -1175,7 +1212,6 @@ class ProcessManagerProcess(ProcessModule):
         try:
             # Snapshot (non-protected) для rollback
             snapshot = self._snapshot_processes()
-            snapshot_names = set(snapshot.keys())
 
             # Pause monitor
             monitor_was_running = getattr(self._process_monitor, "_monitoring", False)
@@ -1189,34 +1225,50 @@ class ProcessManagerProcess(ProcessModule):
                 result = self._topology_manager.apply(blueprint or {})
 
                 if not result.get("success"):
-                    # Снести частично-созданные НОВЫЕ процессы
-                    # ДО восстановления старых из snapshot
-                    self._teardown_partial(
-                        result.get("results"),
-                        blueprint,
-                        snapshot_names,
-                    )
-                    # Откат: пересоздать процессы из snapshot
-                    self._restore_from_snapshot(snapshot)
+                    executed = result.get("results") or []
+                    if executed:
+                        # Часть команд исполнилась — откат тем же 5-фазным
+                        # конвейером (stop живых → cleanup → provision →
+                        # create → start, см. _rollback_to_snapshot)
+                        self._rollback_to_snapshot(snapshot, executed, blueprint)
+                    else:
+                        # Провал ДО исполнения команд (валидация blueprint,
+                        # BlueprintInvalid и т.п.) — топология НЕ тронута,
+                        # старые процессы работают: откат не требуется.
+                        # Прежний код здесь пересоздавал ЖИВЫЕ процессы
+                        # поверх самих себя (дубли + зомби).
+                        self._log_info(
+                            "apply_topology: провал до исполнения команд — "
+                            "топология не тронута, откат не требуется"
+                        )
                     return {
                         "success": False,
                         "rolled_back": True,
                         **{k: v for k, v in result.items() if k != "success"},
                     }
 
-                # Успех: формируем ответ, совместимый с форматом GUI
-                return {
+                # Успех: readiness-барьер (Task 2.2) + ответ, совместимый с GUI
+                ready = self._wait_started_ready(result.get("results") or [])
+                response = {
                     "success": True,
                     "rolled_back": False,
+                    "ready": ready,
                     **{k: v for k, v in result.items() if k != "success"},
                 }
+                not_ready = sorted(n for n, ok in ready.items() if not ok)
+                if not_ready:
+                    self._log_error(
+                        f"apply_topology: процессы умерли на старте (initialize-провал?): {not_ready} "
+                        f"— топология применена, но эти процессы НЕ работают"
+                    )
+                return response
 
             except Exception as exc:
                 self._log_error(f"apply_topology: exception в manager.apply: {exc}")
-                # Снести частично-созданные НОВЫЕ процессы (fallback —
-                # results недоступны при exception в TopologyManager.apply)
-                self._teardown_partial(None, blueprint, snapshot_names)
-                self._restore_from_snapshot(snapshot)
+                # Состояние исполнения неизвестно (exception вне manager.apply,
+                # который свои ошибки ловит сам) — консервативный полный откат:
+                # stop живых → cleanup → пересоздание snapshot двухфазно.
+                self._rollback_to_snapshot(snapshot, None, blueprint)
                 if hasattr(self, "error_manager") and self.error_manager:
                     try:
                         self.error_manager.track_error(exc, {"phase": "apply_topology"})
@@ -1234,6 +1286,67 @@ class ProcessManagerProcess(ProcessModule):
         finally:
             self._replace_in_progress = False
             self._last_replace_ts = time.monotonic()
+
+    def _wait_started_ready(self, applied_results: list[dict]) -> dict[str, bool]:
+        """Readiness-барьер после start-фазы: короткий settle-window death-watch.
+
+        Ребёнок, упавший в ``initialize()``, выходит с exitcode 0 — до этого
+        барьера switch выглядел успешным, хотя процесс мёртв (типовой случай:
+        камера ещё занята предыдущим владельцем). Барьер даёт запущенным
+        процессам «осесть»: следит за ``is_alive`` в течение
+        ``start_ready_timeout_s`` (settle-window, дефолт 0.5с; 0 → выключен).
+
+        **Стоимость:** здоровое переключение ВСЕГДА ждёт весь settle-window —
+        живой процесс не покидает ``pending`` (death-watch не умеет отличить
+        «жив и останется» от «жив, но вот-вот умрёт», не подождав). Поэтому
+        окно короткое: ловит быстрый синхронный fail-fast (open камеры →
+        мгновенный выход), не раздувая латентность switch. Дефолт 0.5с добавляет
+        к и без того секундному switch немного; на медленном spawn часть
+        initialize-провалов не успеет проявиться — их (и любой поздний crash)
+        штатно поймает ProcessMonitor как crashed после resume.
+
+        Строгую готовность (первый heartbeat) здесь ждать НЕЛЬЗЯ: и heartbeat,
+        и ``topology.apply`` обрабатываются ОДНИМ message_processor-потоком —
+        ожидание заблокировало бы само себя.
+
+        Семантика результата:
+        - ``False`` — процесс ПОДТВЕРЖДЁННО умер в окне барьера;
+        - ``True`` — жив на дедлайне (готовность в строгом смысле не гарантирует).
+
+        Args:
+            applied_results: ``result["results"]`` успешного TopologyManager.apply.
+
+        Returns:
+            ``{name: bool}`` по именам команд ``process.start`` (пустой dict —
+            барьер выключен или нечего проверять).
+        """
+        started = [
+            r.get("process_name", "")
+            for r in applied_results
+            if r.get("cmd") == "process.start" and r.get("success") and r.get("process_name")
+        ]
+        if not started:
+            return {}
+        # НЕ «or 0.5»: явный 0 в конфиге = барьер выключен, or съел бы его
+        raw_timeout = self.get_config("start_ready_timeout_s")
+        timeout_s = 0.5 if raw_timeout is None else float(raw_timeout)
+        if timeout_s <= 0:
+            return {}
+
+        ready: dict[str, bool] = {}
+        pending = set(started)
+        deadline = time.monotonic() + timeout_s
+        while pending and time.monotonic() < deadline:
+            for name in list(pending):
+                proc = self._process_registry.get_process_by_name(name)
+                if proc is None or not proc.is_alive():
+                    ready[name] = False
+                    pending.discard(name)
+            if pending:
+                time.sleep(0.05)
+        for name in pending:
+            ready[name] = True  # пережил settle-window — считаем работающим
+        return ready
 
     # -------------------------------------------------------------------------
     # Сиды TopologyManager — single-purpose методы (Task 2.0)
@@ -1255,12 +1368,21 @@ class ProcessManagerProcess(ProcessModule):
         Паритет дороги B: ``stop_many`` с одним общим таймаутом на все
         процессы, а не N×timeout последовательно. Без этого switch
         рецепта занимает N×5с (4 процесса → 20с вместо ~5с).
+
+        Семантика «ensure stopped» (контракт stop_many): «нет в реестре /
+        не был жив» — успех (идемпотентно); ``False`` только если процесс
+        ПОДТВЕРЖДЁННО жив после эскалации stop_event → terminate → kill —
+        тогда cleanup/provision небезопасны и switch обязан остановиться.
         """
         if not names:
             return True
         timeout = float(self.get_config("stop_process_timeout") or 5.0)
         results = self._process_registry.stop_many(list(names), timeout)
-        return all(results.get(n, False) for n in names)
+        failed = sorted(n for n in names if not results.get(n, False))
+        if failed:
+            self._log_error(f"topology stop_all: остановка НЕ подтверждена для {failed}; карта результатов: {results}")
+            return False
+        return True
 
     def _topology_cleanup(self, name: str) -> bool:
         """Сид cleanup: снять с реестра + освободить SHM + удалить конфиг.

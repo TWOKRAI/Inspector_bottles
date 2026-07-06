@@ -4,7 +4,7 @@
 # Обновление версий: pre-commit autoupdate
 
 # robot/ — firmware/PLC/Colab (Lua, экспортированные ноутбуки, pc-скрипты), не модульный Python проекта
-exclude: ^(multiprocess_prototype_backup/|robot/)
+exclude: ^robot/
 
 repos:
   # ── Общие проверки ──
@@ -51,7 +51,7 @@ repos:
       - id: bandit
         args: [-c, pyproject.toml, -q]
         additional_dependencies: ["bandit[toml]"]
-        exclude: ^(tests/|multiprocess_prototype_backup/|\.claude/)
+        exclude: ^(tests/|\.claude/)
 
   # ── Журнал коммитов в docs/sessions/YYYY-MM-DD.md ──
   # Заменяет старый Stop-хук Claude — теперь запись попадает в сам коммит,

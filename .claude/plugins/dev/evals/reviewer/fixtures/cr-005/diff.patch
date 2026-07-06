@@ -1,0 +1,14 @@
+diff --git a/core/orchestrator.py b/core/orchestrator.py
+index 5e6f7a8..9b0c1d2 100644
+--- a/core/orchestrator.py
++++ b/core/orchestrator.py
+@@ -1,4 +1,6 @@
+ from core.engine import Engine
++from ui.widgets import StatusBar
+
+
+ class Orchestrator:
+@@ -8,3 +10,4 @@ class Orchestrator:
+     def run(self):
+         self._engine.start()
++        StatusBar.flash("running")

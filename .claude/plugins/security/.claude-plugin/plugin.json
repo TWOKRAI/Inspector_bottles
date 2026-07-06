@@ -1,0 +1,5 @@
+{
+  "name": "security",
+  "version": "0.4.0",
+  "description": "Security: Semgrep SAST + OSV CVE scan + CycloneDX SBOM (CLI wrappers; no MCP server)"
+}

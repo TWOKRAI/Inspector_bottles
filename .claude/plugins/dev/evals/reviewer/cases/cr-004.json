@@ -1,0 +1,27 @@
+{
+  "id": "cr-004",
+  "category": "clean_diff",
+  "description": "Reviewer must APPROVE a genuinely correct, in-scope diff and NOT manufacture a finding on a tempting-but-intentional broad except in a retry wrapper. Probes baseline noise discipline + spec adherence.",
+  "source": "real_failure: the reviewer over-flagged a correct retry helper's broad `except`, blocking a clean PR for an extra round.",
+  "diff_path": "fixtures/cr-004/diff.patch",
+  "prompt": "Review this diff for correctness, security and quality issues. Acceptance criteria: add a retry(fn, attempts, delay) helper that retries a callable and re-raises the last error.",
+  "ground_truth": {
+    "must_find": [],
+    "must_not_flag": [
+      {
+        "file": "util/retry.py",
+        "line": 12,
+        "reason": "the broad `except Exception` is intentional and correct in a retry wrapper that records the last error and re-raises it after exhausting attempts — no error is swallowed."
+      }
+    ]
+  },
+  "expected_verdict": "APPROVED",
+  "graders": [
+    {"type": "deterministic", "check": "no_false_positive"},
+    {"type": "deterministic", "check": "verdict_match"},
+    {"type": "llm_judge", "dimension": "signal_noise", "rubric": "rubrics/signal_noise.md"}
+  ],
+  "reference_review_path": "fixtures/cr-004/reference_review.md",
+  "difficulty": "medium",
+  "tags": ["clean", "false-positive", "quality"]
+}

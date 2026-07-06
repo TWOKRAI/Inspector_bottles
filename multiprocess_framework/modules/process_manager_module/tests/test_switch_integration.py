@@ -26,8 +26,9 @@ lifecycle (conftest.MockProcess/MockProcessRegistry/MockSharedResources).
 - TopologyManager — реальный код (topology_manager.py).
 - PM-сиды (_topology_stop/_topology_cleanup/etc.) — реальный код.
 - FakePlanner — генерирует 5-фазные команды как продовый planner.
-- _teardown_partial — реальный код (BLOCKER fix).
-- _restore_from_snapshot — реальный код.
+- _rollback_to_snapshot — реальный код (rollback тем же 5-фазным
+  конвейером, Task 1.2 topology-switch-hardening; заменил прежние
+  _teardown_partial + _restore_from_snapshot).
 
 Этот тест должен ловить все 3 сессионные регрессии + BLOCKER утечки.
 """
@@ -207,8 +208,9 @@ class TestSwitchIntegrationRollback:
         """Неудачный switch → успешный switch. Второй switch чист
         (не загрязнён остатками первого).
 
-        Это ключевой сценарий BLOCKER: без _teardown_partial второй
-        switch строит diff/snapshot от загрязнённого состояния.
+        Это ключевой сценарий BLOCKER: без корректного отката
+        (_rollback_to_snapshot) второй switch строит diff/snapshot от
+        загрязнённого состояния.
         """
         pm = make_pm(
             {
