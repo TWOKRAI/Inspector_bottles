@@ -36,9 +36,37 @@ quality после Ф4 ≥ 7250, финал ≥ 7500.
 в .venv (→ `uv pip install watchdog`); (б) тест хардкодил `/var/log/inspector` —
 mkdir требует root на macOS (→ tmp_path). Код продукта не менялся.
 
-## Ф0.4 — FPS/CPU baseline
+## Ф0.4 — FPS/CPU baseline (headless, 2026-07-06)
 
-_(заполняется в Ф0.4)_
+Headless-probe (BACKEND_CTL=1, boot phone_sketch + 10с сэмпл):
 
-- phone_sketch (qt-smoke + `introspect.router_stats`): TBD
-- hikvision_letter_robot: hardware-gated — при доступной камере, иначе headless + пометка
+| Метрика | Значение |
+|---|---|
+| boot до ready (`wait_until_ready`) | ~1.0 с |
+| OS-процессов в дереве | 11 |
+| CPU суммарно по дереву (idle, без кадров) | ~23.6 % ¹ |
+| **FPS phone_sketch** | **hardware-gated** — нет телефона-камеры (PhoneCameraPlugin без источника) |
+| **FPS hikvision_letter_robot** | **hardware-gated** — нет камеры Hikvision |
+
+¹ CPU замерен ПРИ error-спаме EdgeDetection (см. находку 2) — как idle-число завышен,
+перемерить после установки extras.
+
+**Находки probe (входные данные для следующих фаз):**
+
+1. **env-дрейф №2: extras `[ml]` не установлены** — EdgeDetectionPlugin в цикле:
+   «Для TEED нужен PyTorch. Установите extras: uv pip install '.[ml]'». Пайплайны
+   sketch-семейства без ML-extras не считают инференс. Решение владельца: ставить
+   PyTorch (~2 ГБ) в это окружение или нет.
+2. **Shutdown-hang**: `[spawner] ProcessManager did not stop in 5.0s, terminating...`,
+   дерево жило 8+ минут до kill -9. Виновник-кандидат: gui-процесс с модальным
+   LoginDialog. → подтверждает приоритет Ф3 (Supervisor v2) и Ф1.3 (honest headless).
+3. **BACKEND_CTL=1 ≠ headless**: gui-процесс топологии всё равно спавнит Qt
+   (LoginDialog поверх рабочего стола). Честный headless-запуск — задача Ф1.3
+   BackendHarness (исключение gui из топологии или offscreen-платформа).
+4. Error-спам п.1 — это ровно класс «swallow/спам без деградации», который чинит
+   Ф2 (`ctx.health.report_error` + breaker): плагин должен перейти в degraded,
+   а не молотить ERROR каждые ~1 мс.
+
+**Вывод:** FPS-baseline обоих живых рецептов снимается только с железом — повторить
+при подключённой камере (или на Ф7 G.1, где повторный baseline обязателен).
+Boot/CPU-числа выше — отправная точка для сравнения.
