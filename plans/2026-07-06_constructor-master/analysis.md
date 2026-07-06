@@ -90,7 +90,7 @@
 | `chain_module` | 1661 LOC + 77 тестов | полный DAG-движок, **0 потребителей** (реальный конвейер — `pipeline_executor.py`); доки продают как флагман |
 | `dispatch_module` | 3447 LOC | PATTERN/FALLBACK/CHAIN/ScenarioBuilder — реально используется только EXACT_MATCH |
 | `data_schema_module` | ~2118 LOC мёртвых | dna_factory, version_manager, storage_manager, visualizer — 0 потребителей |
-| `console_module` | 1675 LOC | «God Mode», 0 использований |
+| `console_module` | 1675 LOC | ~~«God Mode», 0 использований~~ **ОПРОВЕРГНУТО проверкой 2026-07-06**: `ConsoleManager` безусловно создаётся и инициализируется в КАЖДОМ процессе (`process_module/managers/process_managers.py:309,314`, ConsoleAdapter :103,113) + в PM под флагом `console_enabled` (`process_manager_process.py:145`). Спит только интерактивный God-Mode (`ConsoleConfig.enabled=False`, `interactive=False` — `console_config.py:19,25`). Кандидат МАКСИМУМ на freeze интерактивной фичи, НЕ на удаление модуля |
 | `frontend_module` флагман | — | FrontendManager не инстанцируется, WidgetRegistry/LayoutComposer — 0 использований |
 | `Services/Operation_crop` | 858 LOC | K9, dead |
 | K3-K8 (topology_bridge мёртвые ветки, CommandPanel, editor-виджет…) | ~1000 LOC | per-item таблица в master-rework-roadmap §6 |
@@ -112,3 +112,20 @@
 ## 9. Чего НЕ делать (анти-карго-культ, аудит §4)
 
 Кластер/брокер/DDS; CRDT/полный event-sourcing; in-process hot-reload плагинов (честная единица = перезапуск процесса); переписывание CRM на OTel SDK (только семантические поля + JSONL-sink); autoscale до замера; iceoryx2/Arrow биндинги (брать идею seqlock, не зависимость).
+
+## 10. Независимая перепроверка утверждений (2026-07-06, пост-merge 9a5f4b8f)
+
+Два независимых Explore-прохода по живому коду (владелец запросил верификацию перед исполнением).
+
+**Runtime §4 — все 7 проверенных подтверждены**: R1, R2, R4, R6, R10, R14 — точно; R3 — ядро верно (round-robin без seqlock, 7 TRACE в hot-path), но «две стратегии записи :180-181» — неточная привязка (на :180-181 одна round-robin запись; вторая «стратегия» — read-side `on_receive` :331-333 и write+pickle-fallback :183-197). R2 — нюанс: `process.relay` (:801-836) — узкий воркэраунд только для GUI→процесс, стейл-маршруты соседей и restart не покрывает. R10 НЕ устарел после readiness-барьера d73209dc: барьер — death-watch со стороны PM, self-report из process_runner по-прежнему отсутствует.
+
+**Мёртвый вес §7 — подтверждено всё, КРОМЕ console_module** (см. правку в таблице §7):
+- chain_module: единственный импортёр — barrel-реэкспорт `multiprocess_framework/__init__.py:125`; `Plugins/runtime/chain_executor/` — самостоятельная реализация, chain_module не использует. 77 тест-функций в 9 файлах — единственная «жизнь»
+- dispatch_module: модуль ЖИВОЙ (router/command/channel_routing managers), но все сайты — дефолт EXACT_MATCH; PATTERN/FALLBACK/CHAIN/ScenarioBuilder — 0 прод-вызовов
+- data_schema_module: ядро живое (SchemaBase/FieldMeta/register_schema/DataConverter); мертвы dna_factory, version_manager, schema_visualizer; storage_manager мёртв ТРАНЗИТИВНО (его единственный потребитель `DataSchemaAdapter` нигде не инстанцируется)
+- console_module: **ОПРОВЕРГНУТО** — ConsoleManager создаётся в каждом процессе безусловно; спит только интерактивный God-Mode по дефолт-конфигу
+- frontend_module: флагман (FrontendManager/WidgetRegistry/LayoutComposer) мёртв, но «внутренности» — основа прототипа (tabs/SectionSpec, forms/form_context, bridge, components, managers, graph)
+- Механизмы схема→виджет: 7a legacy factory — это ЖИВОЙ прод-путь (form_ctx=None во всех сайтах), не кандидат на удаление; 7b binding-aware (FormContext не инстанцируется нигде), 7c ParamsForm, 7d WidgetRegistry — подтверждённо мертвы
+- Operation_crop: подтверждён мёртвым (0 совпадений в прод-коде и конфигах)
+
+**Вывод для G0**: таблица §7 пригодна для per-item вердиктов с двумя поправками — console_module (freeze только интерактивной фичи, не модуля) и legacy factory (живой путь, целевой механизм для E4 выбирать с учётом этого).

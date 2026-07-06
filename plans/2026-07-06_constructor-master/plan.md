@@ -51,7 +51,7 @@
 
 | Task | Статус | Суть | Acceptance | Усилие |
 |---|---|---|---|---|
-| 0.1 | [ ] | Merge `fix/topology-switch-hardening` → main (20 коммитов); полный pytest + qt-smoke обоих рецептов до/после | main зелёный, оба рецепта поднимаются | S |
+| 0.1 | [x] | Merge `fix/topology-switch-hardening` → main (25 коммитов, merge 9a5f4b8f); framework 3395 + prototype 2819 passed, 3 красных pre-existing (→ 0.2). qt-smoke обоих рецептов — не гонялся, вынесен в 0.4 | main зелёный, оба рецепта поднимаются | S |
 | 0.2 | [ ] | Починить 3 красных теста (`test_observability_hot_reload` ×2, `test_assembler::test_custom_log_dir_parity`); таймбокс полдня, глубже — эскалация владельцу | pytest: 0 красных | M |
 | 0.3 | [ ] | sentrux `session_start` baseline (modularity 5652 / quality 7174); **min_depth**: временно порог 0.65→0.60 в `.sentrux/rules.toml` с комментом «вернуть в Ф8» | `baseline.md`; sentrux-check зелёный | S |
 | 0.4 | [ ] | FPS/CPU baseline: phone_sketch (qt-smoke + `introspect.router_stats`); hikvision — при доступной камере, иначе headless + пометка hardware-gated | числа в `baseline.md` | S |
