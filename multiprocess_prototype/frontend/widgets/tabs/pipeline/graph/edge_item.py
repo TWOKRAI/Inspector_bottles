@@ -1,29 +1,19 @@
-"""EdgeItem -- связь между узлами (wire) на QGraphicsScene."""
+"""EdgeItem -- связь между узлами (wire) на QGraphicsScene.
+
+EdgeData вынесен в чистый модуль ``.data`` (Task F.1, без Qt) и ре-экспортирован
+здесь для обратной совместимости импортов ``from .edge_item import EdgeData``.
+"""
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsPathItem
 
 from .constants import WIRE_COLOR, WIRE_COLOR_HOVER, WIRE_WIDTH
+from .data import EdgeData
 
-
-@dataclass
-class EdgeData:
-    """Абстрактные данные связи.
-
-    implicit=True — внутрипроцессная стрелка цепочки (порядок плагинов внутри
-    одного процесса). Это НЕ domain-wire: рисуется пунктиром, не выделяется,
-    не удаляется пользователем, не экспортируется и не шлёт edge-телеметрию.
-    """
-
-    source_id: str
-    target_id: str
-    label: str = ""
-    implicit: bool = False
+__all__ = ["EdgeData", "EdgeItem"]
 
 
 class EdgeItem(QGraphicsPathItem):

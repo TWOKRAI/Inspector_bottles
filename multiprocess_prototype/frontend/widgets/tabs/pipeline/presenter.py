@@ -31,10 +31,7 @@ from multiprocess_prototype.domain.entities.plugin import PluginInstance
 from multiprocess_prototype.domain.errors import DomainError
 from multiprocess_prototype.domain.events import RecipeActivated, TopologyReplaced
 
-from .graph.node_item import NodeData
-from .graph.edge_item import EdgeData
-from .graph.display_node_item import DisplayNodeData
-from .graph.port_schema import PortSchema
+from .graph.data import DisplayNodeData, EdgeData, NodeData, PortSchema
 from .model import PipelineModel
 from .layout import auto_layout
 from .telemetry import WireMetricsModel
