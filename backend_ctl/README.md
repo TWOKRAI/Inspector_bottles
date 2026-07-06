@@ -70,6 +70,10 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `introspect_handlers(process)` | ключи `message_dispatcher` + команды `CommandManager` |
 | `introspect_registers(process)` | имена регистров + поля (пусто = нет worker-side приёмника) |
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |
+| `introspect_router_stats(process)` / `introspect_queues(process)` | сырой dict: счётчики router'а / глубины очередей |
+| `router_stats(process)` → `RouterStats` | типизированно: `sent_ok`/`received`/`middleware_dropped`/`errors` (+ `.raw`) |
+| `queues(process)` → `QueueDepths` | типизированно: `sizes={тип: глубина\|None}` (+ `.raw`) |
+| `worker_status(process)` → `WorkerStatus` | типизированно: `process`/`status`/`workers` (+ `.raw`) |
 | `set_register(process, plugin, field, value)` | live-запись регистра (`register_update`) |
 | `state_subscribe(pattern, subscriber=None)` | подписка на state-дерево (`state.subscribe`); пуши `state.changed` идут в событийный канал |
 | `subscribe(callback)` / `unsubscribe(callback)` | колбэк на каждое push-событие (зовётся в reader-потоке) |
@@ -96,6 +100,22 @@ with BackendDriver(port=8765) as drv:
     drv.state_subscribe("processes.**")        # подписка → сервер шлёт state.changed
     for evt in drv.events(timeout=2.0):        # либо поллинг накопленного
         print(evt["command"], evt["data"])
+```
+
+### Типизированные обёртки (Ф1 Task 1.2)
+
+`router_stats()`/`queues()`/`worker_status()` возвращают dataclass'ы (`RouterStats`/
+`QueueDepths`/`WorkerStatus`) — форма, а не логика: сырой introspect-ответ приводится к
+явным полям, сырой dict всегда лежит в `.raw` (ничего не теряется). Отдельной
+`introspect.wire`-команды в системе НЕТ (есть только `wire.configure`/`deconfigure` —
+это действия), поэтому `wire_status()` не вводится.
+
+```python
+with BackendDriver(port=8765) as drv:
+    rs = drv.router_stats("preprocessor")   # RouterStats(sent_ok=10, received=21, ...)
+    print(rs.sent_ok, rs.middleware_dropped, rs.errors)
+    print(drv.queues("preprocessor").sizes)          # {'system': None, 'data': 3}
+    print(drv.worker_status("preprocessor").status)  # 'running'
 ```
 
 ## Тесты и headless-harness (Ф1 Task 1.3)

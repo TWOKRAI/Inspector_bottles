@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, Dict, List, Optional
 
 from multiprocess_framework.modules.message_module import (
@@ -33,6 +34,125 @@ from multiprocess_framework.modules.message_module import (
 
 # Колбэк подписчика на события (получает распарсенный push-dict).
 EventCallback = Callable[[Dict[str, Any]], None]
+
+
+# ---------------------------------------------------------------------------
+# Типизированные результаты интроспекции (Ф1 Task 1.2)
+#
+# Форма, а не бизнес-логика: обёртки поверх готовых introspect.*-команд лишь
+# приводят сырой dict-ответ к dataclass'у с явными полями. Сырой ответ всегда
+# сохраняется в поле ``raw`` — ничего не теряется, диагностику можно достать целиком.
+# Ответ команды приезжает через request-response; введённый оркестратором конверт
+# может вкладывать полезную нагрузку под ``result`` (одна-две вложенности), поэтому
+# парсеры ищут её через :func:`_find_payload` — робастно к обеим формам.
+# ---------------------------------------------------------------------------
+
+
+def _find_payload(res: Any, *keys: str) -> Dict[str, Any]:
+    """Найти вложенный dict полезной нагрузки, спускаясь по ключу ``result``.
+
+    Ответ команды может прийти как «плоским» (нужные ключи прямо в ``res``), так и
+    завёрнутым оркестратором в ``{"success": ..., "result": {<payload>}}`` (иногда
+    в два уровня). Спускаемся по ``result``, пока не встретим узел, содержащий любой
+    из ожидаемых ``keys`` (например ``router_stats``/``queue_sizes``/``workers``).
+    Если не нашли — возвращаем сам ``res`` (best-effort), чтобы парсер отдал дефолты.
+    """
+    node = res
+    for _ in range(4):  # защита от бесконечного спуска на кривом ответе
+        if not isinstance(node, dict):
+            break
+        if any(k in node for k in keys):
+            return node
+        node = node.get("result")
+    return res if isinstance(res, dict) else {}
+
+
+def _is_ok(res: Any, payload: Dict[str, Any]) -> bool:
+    """Успех ответа: ``success`` берём из полезной нагрузки или из внешнего конверта."""
+    if isinstance(payload, dict) and "success" in payload:
+        return bool(payload.get("success"))
+    return bool(res.get("success")) if isinstance(res, dict) else False
+
+
+@dataclass
+class RouterStats:
+    """Счётчики router'а процесса (introspect.router_stats).
+
+    Отвечает на «дошло/ушло/дропнулось ли сообщение». ``raw`` — весь сырой ответ.
+    """
+
+    ok: bool
+    sent_ok: int
+    received: int
+    middleware_dropped: int
+    errors: int
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_response(cls, res: Any) -> "RouterStats":
+        payload = _find_payload(res, "router_stats")
+        stats = payload.get("router_stats") if isinstance(payload, dict) else None
+        stats = stats if isinstance(stats, dict) else {}
+        return cls(
+            ok=_is_ok(res, payload),
+            sent_ok=int(stats.get("sent_ok", 0) or 0),
+            received=int(stats.get("received", 0) or 0),
+            middleware_dropped=int(stats.get("middleware_dropped", 0) or 0),
+            errors=int(stats.get("errors", 0) or 0),
+            raw=res if isinstance(res, dict) else {},
+        )
+
+
+@dataclass
+class QueueDepths:
+    """Глубины собственных очередей процесса (introspect.queues).
+
+    ``sizes`` — {тип_очереди: глубина|None}. None = qsize недоступен (macOS) —
+    само по себе диагностично. ``raw`` — весь сырой ответ.
+    """
+
+    ok: bool
+    sizes: Dict[str, Optional[int]]
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_response(cls, res: Any) -> "QueueDepths":
+        payload = _find_payload(res, "queue_sizes")
+        sizes = payload.get("queue_sizes") if isinstance(payload, dict) else None
+        sizes = sizes if isinstance(sizes, dict) else {}
+        return cls(
+            ok=_is_ok(res, payload),
+            sizes=dict(sizes),
+            raw=res if isinstance(res, dict) else {},
+        )
+
+
+@dataclass
+class WorkerStatus:
+    """Статус процесса и его воркеров (introspect.status).
+
+    ``process``/``status`` — имя и текущий статус процесса; ``workers`` —
+    {имя_воркера: сериализуемый статус}. ``raw`` — весь сырой ответ.
+    """
+
+    ok: bool
+    process: Optional[str]
+    status: Optional[str]
+    workers: Dict[str, Any]
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_response(cls, res: Any) -> "WorkerStatus":
+        payload = _find_payload(res, "workers", "status")
+        workers = payload.get("workers") if isinstance(payload, dict) else None
+        workers = workers if isinstance(workers, dict) else {}
+        return cls(
+            ok=_is_ok(res, payload),
+            process=payload.get("process") if isinstance(payload, dict) else None,
+            status=payload.get("status") if isinstance(payload, dict) else None,
+            workers=dict(workers),
+            raw=res if isinstance(res, dict) else {},
+        )
 
 
 class _Pending:
@@ -331,6 +451,36 @@ class BackendDriver:
     def get_status(self, process: str, **kw: Any) -> Dict[str, Any]:
         """Алиас introspect_status (симметрия с MCP-инструментами P3)."""
         return self.introspect_status(process, **kw)
+
+    def introspect_router_stats(self, process: str, **kw: Any) -> Dict[str, Any]:
+        """Счётчики router'а процесса (сырой dict): sent_ok/received/dropped/errors."""
+        return self.send_command(process, "introspect.router_stats", **kw)
+
+    def introspect_queues(self, process: str, **kw: Any) -> Dict[str, Any]:
+        """Глубины очередей процесса (сырой dict): backpressure-диагностика."""
+        return self.send_command(process, "introspect.queues", **kw)
+
+    # ---- Типизированные обёртки (dataclass-результаты, Ф1 Task 1.2) ----
+    #
+    # Никакой бизнес-логики — только форма: сырой introspect-ответ → dataclass с
+    # явными полями (+ сырой dict в .raw). Реальные команды берутся из
+    # BuiltinCommands._register_introspect_commands (router_stats/queues/status).
+    # Отдельной introspect.wire-команды в системе НЕТ (есть только wire.configure/
+    # deconfigure — это действия, не интроспекция), поэтому wire_status() не вводим:
+    # обёртывать нечего (сверено с builtin_commands.py). Появится introspect.wire —
+    # добавим симметрично.
+
+    def router_stats(self, process: str, **kw: Any) -> RouterStats:
+        """Счётчики router'а процесса как :class:`RouterStats` (форма, не логика)."""
+        return RouterStats.from_response(self.introspect_router_stats(process, **kw))
+
+    def queues(self, process: str, **kw: Any) -> QueueDepths:
+        """Глубины очередей процесса как :class:`QueueDepths` (форма, не логика)."""
+        return QueueDepths.from_response(self.introspect_queues(process, **kw))
+
+    def worker_status(self, process: str, **kw: Any) -> WorkerStatus:
+        """Статус процесса и воркеров как :class:`WorkerStatus` (форма, не логика)."""
+        return WorkerStatus.from_response(self.introspect_status(process, **kw))
 
     def set_register(
         self,

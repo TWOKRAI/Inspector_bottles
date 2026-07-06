@@ -61,6 +61,7 @@ PY
 | `introspect_handlers(process)` | ключи router `message_dispatcher` + команды `CommandManager` |
 | `introspect_registers(process)` | имена регистров + поля (**пусто = нет worker-side приёмника**) |
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |
+| `router_stats(p)` / `queues(p)` / `worker_status(p)` | типизированно (dataclass + `.raw`): счётчики router'а / глубины очередей / статус воркеров |
 | `set_register(process, plugin, field, value)` | live-запись регистра (`register_update`) |
 | `send_command(target, command, args=None)` | прямая команда процессу (форма `CommandSender.send_command`) |
 | `system_command({"cmd": ..., ...})` | system-команда в ProcessManager (`process.start`/`stop`/`worker.*`/…) |
