@@ -6,6 +6,12 @@ BackendDriver — socket-клиент к SocketChannel хоста (request-id ma
 request_id в pending-слоты, request() блокирует до ответа/таймаута. Высокоуровневые
 обёртки строят сообщения общими билдерами протокола (один источник правды с GUI).
 
+Помимо reply-пути есть **событийный канал** (Ф1 Task 1.1): push-сообщения без
+request_id (или не матчащие ни один pending) — например `state.changed` — не
+дропаются, а складываются в bounded-очередь и рассылаются подписчикам. Так
+`state.subscribe` через driver становится рабочим end-to-end. Разделение потоков:
+reader-поток пишет события, клиентский поток читает их через events()/subscribe().
+
 Без бизнес-логики: driver только транспортирует router-сообщения. Вся интроспекция/
 команды исполняются процессами системы, ответы едут обратно чистым RouterManager.
 """
@@ -15,13 +21,18 @@ from __future__ import annotations
 import json
 import socket
 import threading
+import time
 import uuid
-from typing import Any, Dict, Optional
+from collections import deque
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 from multiprocess_framework.modules.message_module import (
     build_command_message,
     build_system_command_message,
 )
+
+# Колбэк подписчика на события (получает распарсенный push-dict).
+EventCallback = Callable[[Dict[str, Any]], None]
 
 
 class _Pending:
@@ -44,6 +55,9 @@ class BackendDriver:
         reply_to: адрес ответа. Driver не в queue_registry, ответ физически приходит
             в очередь ProcessManager (где живёт сокет) → reply_to="ProcessManager".
         default_timeout: таймаут request() по умолчанию.
+        event_queue_maxlen: ёмкость bounded-очереди событий. При переполнении
+            вытесняются самые старые (deque maxlen) — очередь не течёт, даже если
+            подписчиков нет и события никто не вычитывает.
     """
 
     def __init__(
@@ -54,6 +68,7 @@ class BackendDriver:
         sender: str = "backend_ctl",
         reply_to: str = "ProcessManager",
         default_timeout: float = 5.0,
+        event_queue_maxlen: int = 1000,
     ) -> None:
         self._host = host
         self._port = port
@@ -67,6 +82,14 @@ class BackendDriver:
         self._pending: Dict[str, _Pending] = {}
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
+
+        # Событийный канал: reader-поток пишет, клиентский поток читает.
+        # _events_cv охраняет и очередь, и список подписчиков; на нём же
+        # блокируется events(timeout) в ожидании первого события.
+        self._events: Deque[Dict[str, Any]] = deque(maxlen=event_queue_maxlen)
+        self._events_cv = threading.Condition()
+        self._subscribers: List[EventCallback] = []
+        self._event_errors = 0  # счётчик исключений колбэков (диагностика)
 
     # ---- Соединение ----
 
@@ -90,12 +113,15 @@ class BackendDriver:
         if self._reader is not None:
             self._reader.join(timeout=1.0)
             self._reader = None
-        # Разбудить всех ожидающих (соединение закрыто).
+        # Разбудить всех ожидающих ответа (соединение закрыто).
         with self._pending_lock:
             pendings = list(self._pending.values())
             self._pending.clear()
         for p in pendings:
             p.event.set()
+        # Разбудить тех, кто блокирует в events(timeout): новых событий не будет.
+        with self._events_cv:
+            self._events_cv.notify_all()
 
     def __enter__(self) -> "BackendDriver":
         self.connect()
@@ -158,6 +184,13 @@ class BackendDriver:
                     self._dispatch(raw)
 
     def _dispatch(self, raw: bytes) -> None:
+        """Распарсить входящую строку и развести по reply-пути или событийному каналу.
+
+        Reply-путь: если у сообщения есть request_id и его ждёт pending-слот — будим
+        ожидающего request(). Иначе (нет request_id ИЛИ никто уже не ждёт — поздний
+        ответ после таймаута / push вроде state.changed) сообщение становится
+        событием и уходит в очередь + подписчикам (раньше здесь молча дропалось).
+        """
         try:
             msg = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
@@ -165,13 +198,97 @@ class BackendDriver:
         if not isinstance(msg, dict):
             return
         cid = msg.get("request_id")
-        if not cid:
-            return
-        with self._pending_lock:
-            pending = self._pending.get(cid)
-        if pending is not None:
-            pending.response = msg
-            pending.event.set()
+        if cid:
+            with self._pending_lock:
+                pending = self._pending.get(cid)
+            if pending is not None:
+                pending.response = msg
+                pending.event.set()
+                return
+        # Нет request_id либо reply уже никто не ждёт → это событие.
+        self._emit_event(msg)
+
+    # ---- Событийный канал (push-сообщения без reply) ----
+
+    def _emit_event(self, msg: Dict[str, Any]) -> None:
+        """Положить событие в bounded-очередь и синхронно оповестить подписчиков.
+
+        Вызывается только из reader-потока. Исключение любого колбэка не роняет
+        reader-поток (глотается, инкрементит счётчик _event_errors) и не мешает
+        остальным подписчикам.
+        """
+        with self._events_cv:
+            self._events.append(msg)
+            subscribers = list(self._subscribers)  # снимок под локом
+            self._events_cv.notify_all()
+        # Колбэки — вне лока: могут быть медленными и/или звать driver повторно.
+        for cb in subscribers:
+            try:
+                cb(msg)
+            except Exception:  # noqa: BLE001 — контракт: колбэк не роняет reader
+                self._event_errors += 1
+
+    def subscribe(self, callback: EventCallback) -> EventCallback:
+        """Подписаться на события: callback зовётся на каждое push-сообщение.
+
+        Колбэк исполняется в reader-потоке — держи его лёгким (тяжёлую работу
+        отдай в свой поток/очередь). Возвращает сам callback (хэндл для unsubscribe).
+        """
+        with self._events_cv:
+            self._subscribers.append(callback)
+        return callback
+
+    def unsubscribe(self, callback: EventCallback) -> None:
+        """Отписать ранее зарегистрированный callback (no-op, если его нет)."""
+        with self._events_cv:
+            try:
+                self._subscribers.remove(callback)
+            except ValueError:
+                pass
+
+    def events(
+        self,
+        timeout: Optional[float] = 0.0,
+        *,
+        max_items: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Прочитать накопленные события (drain).
+
+        Семантика timeout:
+        - `0.0` (по умолчанию) — поллинг: сразу вернуть, что накоплено (может быть []);
+        - `>0` — блокировать до появления хотя бы одного события, но не дольше timeout,
+          затем слить всё накопленное;
+        - `None` — блокировать до первого события (или до close()).
+
+        max_items ограничивает размер пачки (остаток останется в очереди).
+        Возвращает список событий в порядке поступления (FIFO).
+        """
+        deadline = None if (timeout is None or timeout == 0.0) else time.monotonic() + timeout
+        with self._events_cv:
+            while not self._events:
+                if timeout == 0.0:
+                    break  # поллинг: не ждём
+                if timeout is None:
+                    # Бесконечное ожидание: чтобы не висеть вечно на закрытом/не
+                    # открытом соединении — выходим (новых событий не будет).
+                    if not self._running and self._reader is None:
+                        break
+                    self._events_cv.wait()
+                else:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self._events_cv.wait(remaining)
+            if max_items is None:
+                count = len(self._events)
+            else:
+                count = min(max_items, len(self._events))
+            return [self._events.popleft() for _ in range(count)]
+
+    @property
+    def event_errors(self) -> int:
+        """Сколько раз колбэк подписчика бросил исключение (диагностика)."""
+        return self._event_errors
 
     # ---- Высокоуровневые обёртки (общие билдеры протокола) ----
 
@@ -229,4 +346,34 @@ class BackendDriver:
             "register_update",
             {"plugin_name": plugin, "field": field, "value": value},
             **kw,
+        )
+
+    # ---- Подписка на состояние (state.subscribe → событийный канал) ----
+
+    def state_subscribe(
+        self,
+        pattern: str,
+        *,
+        subscriber: Optional[str] = None,
+        exclude_sources: Optional[List[str]] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Подписаться на изменения state-дерева по glob-паттерну.
+
+        Отправляет `state.subscribe` в ProcessManager (форма StateProxy.subscribe).
+        После подтверждения сервер шлёт адресные push `state.changed` (targets=
+        [subscriber], без request_id) — они приходят в событийный канал driver'а:
+        читаются через events()/subscribe(). subscriber по умолчанию = self.sender
+        (адрес, на который сервер направляет пуши). Возвращает result подписки
+        (status + sub_id).
+        """
+        return self.send_command(
+            "ProcessManager",
+            "state.subscribe",
+            {
+                "pattern": pattern,
+                "subscriber": subscriber or self._sender,
+                "exclude_sources": exclude_sources or [],
+            },
+            timeout=timeout,
         )

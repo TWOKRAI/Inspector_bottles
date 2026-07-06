@@ -71,11 +71,32 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `introspect_registers(process)` | имена регистров + поля (пусто = нет worker-side приёмника) |
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |
 | `set_register(process, plugin, field, value)` | live-запись регистра (`register_update`) |
+| `state_subscribe(pattern, subscriber=None)` | подписка на state-дерево (`state.subscribe`); пуши `state.changed` идут в событийный канал |
+| `subscribe(callback)` / `unsubscribe(callback)` | колбэк на каждое push-событие (зовётся в reader-потоке) |
+| `events(timeout=0.0, max_items=None)` | слить накопленные события (0=поллинг, >0=ждать до timeout, None=до события/close) |
 | `request(message, timeout=None)` | низкоуровневый: готовый router-dict → ответ по `request_id` |
 
 Все обёртки возвращают `result` из ответа (или `{"success": False, "error": ...}` при
 таймауте/обрыве). Сообщения строятся `message_module.build_command_message` /
 `build_system_command_message` — один источник правды с GUI.
+
+### Событийный канал (push без reply)
+
+Reply-путь матчит ответы по `request_id`. Push-сообщения **без** `request_id` (или
+не матчащие ни один pending) — например `state.changed` — не дропаются, а идут в
+**bounded-очередь** (deque `maxlen=event_queue_maxlen`, по умолчанию 1000; старые
+вытесняются, не течёт) и синхронно рассылаются подписчикам. Reader-поток пишет,
+клиентский поток читает через `events()`/`subscribe()` (thread-safe). Исключение
+колбёка не роняет reader-поток (глотается, виден в `driver.event_errors`).
+
+```python
+with BackendDriver(port=8765) as drv:
+    got = []
+    drv.subscribe(got.append)                 # синхронный колбэк на каждое событие
+    drv.state_subscribe("processes.**")        # подписка → сервер шлёт state.changed
+    for evt in drv.events(timeout=2.0):        # либо поллинг накопленного
+        print(evt["command"], evt["data"])
+```
 
 ## Proof of value (сценарий Этапа 2)
 

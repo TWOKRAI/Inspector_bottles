@@ -99,7 +99,7 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 
 | Task | Статус | Суть | Acceptance | Усилие |
 |---|---|---|---|---|
-| 1.1 | [ ] | **Событийный канал driver**: `_dispatch` (driver.py:167-169) перестаёт дропать сообщения без request_id → очередь событий + `subscribe(callback)/events(timeout)`; `state.subscribe` становится рабочим | push `state.changed` доходит до подписчика; reply-путь не сломан | M |
+| 1.1 | [x] | **Событийный канал driver**: `_dispatch` перестаёт дропать сообщения без request_id (или не матчащие pending) → bounded-очередь событий (deque maxlen) + `subscribe/unsubscribe/events(timeout)` + `state_subscribe()`; исключения колбэков не роняют reader-поток (`event_errors`). backend_ctl 20 passed | push `state.changed` доходит до подписчика; reply-путь не сломан | M |
 | 1.2 | [ ] | Обёртки: `router_stats()`, `queues()`, `worker_*()`, `wire_*()` (dataclass-результаты) поверх готовых introspect/IPC | каждый метод — тест против headless-бэкенда | S |
 | 1.3 | [ ] | **BackendHarness** — pytest-фикстура: headless launch (BACKEND_CTL=1) + driver + гарантированный teardown; маркер smoke | `pytest -m harness_smoke` зелёный; старт/стоп < 30с | M |
 | 1.4 | [ ] | IPC `config.reload` / `logger.sink.enable\|disable` — реализация ADR-CRM-006 поверх готовых reconfigure/sink-реестра | через driver сменить уровень логгера на лету; hot-reload файла и IPC не конфликтуют | M |
