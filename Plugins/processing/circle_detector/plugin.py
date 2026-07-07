@@ -98,6 +98,7 @@ class CircleDetectorPlugin(ProcessModulePlugin):
             # exception ("Unknown C++ exception from OpenCV code"). Ловим всё — иначе
             # необработанное исключение уходит в PipelineExecutor → circuit breaker
             # (5 подряд → детекция стоит 60с). Плагин самодостаточен: вернуть [] детекций.
+            self._ctx.health.report_error(exc, context="circle_detector.hough", throttle=30.0)
             self._ctx.log_error(f"CircleDetectorPlugin: HoughCircles failed ({args}): {exc}")
             return self._finish(item, [])
 

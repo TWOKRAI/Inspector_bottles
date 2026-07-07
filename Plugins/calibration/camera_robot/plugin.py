@@ -170,7 +170,7 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             try:
                 corners, center = geometry.order_points(live_pts)
                 ordered_live = [*corners, center]
-            except ValueError:
+            except ValueError:  # no-health: control-flow — вырожденная геометрия, рисуем точки без нумерации
                 ordered_live = None
         if ordered_live is not None:
             for i, (x, y) in enumerate(ordered_live):
@@ -237,7 +237,7 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
                 continue
             try:
                 action = self._queue.get(timeout=_QUEUE_POLL_S)
-            except Empty:
+            except Empty:  # no-health: control-flow — очередь пуста, обычный такт воркера
                 # Нет команд — периодически публикуем live-снапшот (real-time px/счётчик).
                 idle += 1
                 if idle >= _LIVE_PUBLISH_EVERY:
@@ -269,10 +269,12 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             try:
                 handler(args)
             except (CalibrationError, ValueError) as exc:
+                # no-health: ожидаемая ошибка калибровки — уходит оператору в state.error
                 self._state["error"] = str(exc)
             except Exception as exc:  # noqa: BLE001 — не валим воркер
                 self._state["error"] = f"внутренняя ошибка: {exc}"
                 if self._ctx is not None:
+                    self._ctx.health.report_error(exc, context=f"camera_robot.{action}")
                     self._ctx.log_error(f"CameraRobotCalibration: {action} упало: {exc}")
         self._publish()
 
@@ -583,7 +585,7 @@ class CameraRobotCalibrationPlugin(ProcessModulePlugin):
             try:
                 corners, center = geometry.order_points(live_pts)
                 live_px = [list(p) for p in [*corners, center]]
-            except ValueError:
+            except ValueError:  # no-health: control-flow — вырожденная геометрия, live_px просто не показываем
                 live_px = None
         px_state = s["px"]
         # px_state — список из 5, отдельные точки могут быть None (записана не вся плата) →

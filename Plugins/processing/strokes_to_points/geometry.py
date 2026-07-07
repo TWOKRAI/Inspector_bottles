@@ -57,14 +57,14 @@ def skeletonize_mask(binary: np.ndarray) -> np.ndarray:
     if ximgproc is not None and hasattr(ximgproc, "thinning"):
         try:
             return ximgproc.thinning((b * 255).astype(np.uint8))
-        except Exception:
+        except Exception:  # no-health: чистая утилита без ctx — fallback на skimage/numpy ниже
             pass
     # 2) scikit-image
     try:
         from skimage.morphology import skeletonize as _sk
 
         return (_sk(b > 0).astype(np.uint8)) * 255
-    except Exception:
+    except Exception:  # no-health: optional-import gate (skimage) — fallback на numpy Zhang-Suen
         pass
     # 3) numpy Zhang-Suen
     return _zhang_suen_thin(b) * 255
