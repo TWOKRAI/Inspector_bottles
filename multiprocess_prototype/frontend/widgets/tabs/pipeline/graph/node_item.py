@@ -1,46 +1,20 @@
-"""NodeItem -- узел процесса на QGraphicsScene."""
+"""NodeItem -- узел процесса на QGraphicsScene.
+
+NodeData вынесен в чистый модуль ``.data`` (Task F.1, без Qt) и ре-экспортирован
+здесь для обратной совместимости импортов ``from .node_item import NodeData``.
+"""
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsTextItem
 
 from .constants import CATEGORY_COLORS, NODE_CORNER_RADIUS, NODE_HEIGHT, NODE_WIDTH
+from .data import NodeData
 from .port_item import PortItem
 from .port_schema import PortSchema
 
-
-@dataclass
-class NodeData:
-    """Абстрактные данные узла (не привязан к SystemBlueprint).
-
-    Pipeline node = плагин (D.1): один процесс рисуется как контейнер с N
-    отдельными нодами-плагинами. `node_id` плагин-ноды = ``{process}.{plugin}``.
-    Поля process_name/plugin_index/plugin_name несут принадлежность к процессу
-    и позицию в цепочке — нужны для группировки в контейнер (scene), drag между
-    контейнерами и маршрутизации SetPluginConfig/MovePlugin (presenter).
-
-    Поля добавлены В КОНЦЕ с дефолтами — позиционные вызовы
-    ``NodeData(node_id, title, subtitle, category, x, y)`` остаются валидны.
-    Узлы без process_name (raw-тесты, legacy) не группируются в контейнер.
-    """
-
-    node_id: str
-    title: str
-    subtitle: str = ""  # обычно category
-    category: str = "utility"
-    x: float = 0.0
-    y: float = 0.0
-    # Принадлежность к процессу (пусто → нода вне контейнера, legacy)
-    process_name: str = ""
-    # Индекс плагина в цепочке процесса (-1 → процесс без плагинов, fallback-нода)
-    plugin_index: int = -1
-    # Имя плагина (= имя регистра; пусто для process-fallback ноды)
-    plugin_name: str = ""
-    # Зафиксирована ли нода: не перетаскивается и пропускается авто-раскладкой.
-    locked: bool = False
+__all__ = ["NodeData", "NodeItem"]
 
 
 class NodeItem(QGraphicsRectItem):

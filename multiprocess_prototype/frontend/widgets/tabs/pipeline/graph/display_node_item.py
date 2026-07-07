@@ -10,32 +10,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsTextItem
 
 from .constants import DISPLAY_CATEGORY_COLOR, NODE_CORNER_RADIUS, NODE_HEIGHT, NODE_WIDTH
+from .data import DisplayNodeData
 from .port_item import PortItem
 
-
-@dataclass
-class DisplayNodeData:
-    """Данные узла Display (привязка к SHM-каналу).
-
-    Категория всегда «display» — отдельный датакласс, не наследует NodeData.
-    """
-
-    node_id: str
-    display_id: str
-    display_name: str = ""
-    x: float = 0.0
-    y: float = 0.0
-
-    @property
-    def category(self) -> str:
-        """Категория фиксирована."""
-        return "display"
+__all__ = ["DisplayNodeData", "DisplayNodeItem"]
 
 
 class DisplayNodeItem(QGraphicsRectItem):
