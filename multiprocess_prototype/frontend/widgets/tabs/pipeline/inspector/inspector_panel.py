@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
 
 from ..graph.constants import CATEGORY_COLORS
+from .cam_actual_section import CamActualSection
 from .io_debug_section import IoDebugSection
 from .selectors_data import (
     DisplayEntry as _DisplayEntry,
@@ -135,6 +136,8 @@ class NodeInspectorPanel(QWidget):
             self._bindings = bindings
             # io-debug секция подписывается на io_peek через те же bindings.
             self._io_debug.set_bindings(bindings)
+            # actual-секция камеры привязывает метки к state store через те же bindings.
+            self._cam_section.set_bindings(bindings)
         if command_sender is not None:
             self._command_sender = command_sender
         if topology_bridge is not None:
@@ -304,29 +307,9 @@ class NodeInspectorPanel(QWidget):
 
         # Блок «Камера (actual)» — read-only телеметрия что камера реально применила
         # (cap.get), привязка к state store processes.{proc}.state.cam.actual.*.
-        # Показывается только для camera_service-ноды (см. _show_camera_actual).
-        self._cam_actual_form = QWidget()
-        self._cam_actual_layout = QFormLayout(self._cam_actual_form)
-        self._cam_actual_layout.setContentsMargins(0, 4, 0, 4)
-        self._cam_actual_layout.setSpacing(2)
-        self._cam_actual_labels: dict[str, QLabel] = {}
-        cam_title = QLabel("Камера (actual)")
-        cam_title.setProperty("role", "plugin-name")
-        self._cam_actual_layout.addRow(cam_title)
-        for key, caption in (
-            ("fps", "FPS:"),
-            ("resolution", "Разрешение:"),
-            ("exposure", "Экспозиция:"),
-            ("gain", "Усиление:"),
-            ("fourcc", "Кодек:"),
-        ):
-            lbl = QLabel("—")
-            self._cam_actual_labels[key] = lbl
-            self._cam_actual_layout.addRow(caption, lbl)
-        content_layout.addWidget(self._cam_actual_form)
-        self._cam_actual_form.setVisible(False)
-        # Дескрипторы активных подписок actual (для отписки при смене ноды)
-        self._cam_actual_handles: list[Any] = []
+        # Секция инкапсулирует 6 подписок + их teardown (F.6, Н-4).
+        self._cam_section = CamActualSection()
+        content_layout.addWidget(self._cam_section)
 
         # Секция «I/O (debug)» — generic наблюдение in/out плагина (в самом низу карточки).
         # bindings придут позже через set_services → set_bindings.
@@ -492,103 +475,35 @@ class NodeInspectorPanel(QWidget):
             self._suppress_changes = False
 
     # ------------------------------------------------------------------ #
-    #  Камера: actual-телеметрия (Phase 3)                                 #
+    #  Камера: actual-телеметрия (делегаты CamActualSection, F.6)          #
     # ------------------------------------------------------------------ #
 
-    def _unbind_camera_actual(self) -> None:
-        """Снять подписки actual-телеметрии (баланс bind/unbind, волна B Н-4).
+    @property
+    def _cam_actual_form(self) -> QWidget:
+        """Compat-шов: виджет actual-секции (тесты проверяют isHidden())."""
+        return self._cam_section
 
-        GuiStateBindings.unbind() не бросает (ValueError ловится внутри),
-        поэтому прежний широкий ``except Exception: pass`` убран. Чистый Python
-        (без Qt-вызовов) — безопасно и после разрушения виджетов (destroyed-путь).
-        """
-        if self._bindings is not None:
-            for h in self._cam_actual_handles:
-                self._bindings.unbind(h)
-        self._cam_actual_handles = []
+    @property
+    def _cam_actual_handles(self) -> list[Any]:
+        """Compat-шов: активные bind-хэндлы actual-секции (тесты проверяют баланс)."""
+        return self._cam_section._handles
 
     def _hide_camera_actual(self) -> None:
-        """Скрыть блок actual и снять подписки."""
-        self._unbind_camera_actual()
-        self._cam_actual_form.setVisible(False)
-        for lbl in self._cam_actual_labels.values():
-            lbl.setText("—")
+        """Скрыть блок actual и снять подписки (делегат секции)."""
+        self._cam_section.hide_and_unbind()
 
     def dispose(self) -> None:
-        """Teardown панели: снять cam-подписки (волна B, Н-4). Идемпотентен.
+        """Teardown панели: снять cam-подписки (Н-4). Идемпотентен.
 
-        При разрушении панели с активной camera-нодой bind-хэндлы оставались
-        жить в GuiStateBindings (утечка + обновление мёртвых QLabel через
-        weakref). Вызывается из PipelineTab.dispose() (closeEvent / destroyed).
-        Намеренно НЕ зовёт _hide_camera_actual целиком: в destroyed-пути
-        дочерние Qt-виджеты уже удалены, setVisible/setText дали бы RuntimeError —
-        снимаем только подписки (чистый Python).
+        Делегирует в CamActualSection.dispose() — снимаются только подписки
+        (чистый Python), без обращения к возможно уже удалённым Qt-виджетам
+        (destroyed-путь). Вызывается из PipelineTab.dispose() (closeEvent / destroyed).
         """
-        self._unbind_camera_actual()
+        self._cam_section.dispose()
 
     def _show_camera_actual(self, process_name: str) -> None:
-        """Показать блок actual и привязать метки к state store.
-
-        Пути: processes.{proc}.state.cam.actual.{fps,width,height,exposure,gain,fourcc}.
-        Разрешение собирается из width+height отдельным форматтером на оба пути.
-        """
-        self._hide_camera_actual()
-        if self._bindings is None or not process_name:
-            # Без bindings actual недоступен (нет live-подписки) — блок не показываем.
-            return
-        self._cam_actual_form.setVisible(True)
-        base = f"processes.{process_name}.state.cam.actual"
-
-        def _num(lbl: QLabel, unit: str = ""):
-            return lambda v: f"{float(v):.0f}{unit}" if isinstance(v, (int, float)) else str(v)
-
-        self._cam_actual_handles.append(
-            self._bindings.bind(
-                f"{base}.fps",
-                self._cam_actual_labels["fps"],
-                "text",
-                formatter=_num(self._cam_actual_labels["fps"], " fps"),
-            )
-        )
-        self._cam_actual_handles.append(
-            self._bindings.bind(
-                f"{base}.exposure",
-                self._cam_actual_labels["exposure"],
-                "text",
-                formatter=_num(self._cam_actual_labels["exposure"]),
-            )
-        )
-        self._cam_actual_handles.append(
-            self._bindings.bind(
-                f"{base}.gain", self._cam_actual_labels["gain"], "text", formatter=_num(self._cam_actual_labels["gain"])
-            )
-        )
-        self._cam_actual_handles.append(
-            self._bindings.bind(f"{base}.fourcc", self._cam_actual_labels["fourcc"], "text")
-        )
-        # Разрешение: width и height приходят раздельно → обновляем общую метку.
-        self._cam_res = {"width": 0, "height": 0}
-
-        def _res_update(key):
-            def _fmt(v):
-                try:
-                    self._cam_res[key] = int(float(v))
-                except (TypeError, ValueError):
-                    pass
-                return f"{self._cam_res['width']}×{self._cam_res['height']}"
-
-            return _fmt
-
-        self._cam_actual_handles.append(
-            self._bindings.bind(
-                f"{base}.width", self._cam_actual_labels["resolution"], "text", formatter=_res_update("width")
-            )
-        )
-        self._cam_actual_handles.append(
-            self._bindings.bind(
-                f"{base}.height", self._cam_actual_labels["resolution"], "text", formatter=_res_update("height")
-            )
-        )
+        """Показать блок actual и привязать метки к state store (делегат секции)."""
+        self._cam_section.show_for(process_name)
 
     def show_display_node(
         self,
