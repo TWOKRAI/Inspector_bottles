@@ -31,16 +31,20 @@ def test_health_path_is_frozen() -> None:
     assert health_path("cam0", HealthField.LAST_ERROR) == "processes.cam0.health.last_error"
     assert health_path("cam0", HealthField.DEGRADED_REASON) == "processes.cam0.health.degraded_reason"
     assert health_path("cam0", HealthField.UPDATED_AT) == "processes.cam0.health.updated_at"
+    assert health_path("cam0", HealthField.BREAKER) == "processes.cam0.health.breaker"
 
 
 def test_health_fields_exact_set_and_order() -> None:
     # Порядок — часть контракта (стабильность публикации/дампов).
+    # Task 2.2: поле "breaker" добавлено АДДИТИВНО в конец — порядок прежних пяти
+    # полей неизменен (волны C 2.4/2.5 читают их по стабильным индексам/путям).
     assert HEALTH_FIELDS == (
         "status",
         "errors",
         "last_error",
         "degraded_reason",
         "updated_at",
+        "breaker",
     )
 
 
@@ -67,4 +71,5 @@ def test_health_field_names_match_fields_tuple() -> None:
         HealthField.LAST_ERROR,
         HealthField.DEGRADED_REASON,
         HealthField.UPDATED_AT,
+        HealthField.BREAKER,
     }

@@ -193,6 +193,11 @@ class ProcessHeartbeat:
         from ..health import publish_health
 
         try:
+            # Task 2.2: пассивный шаг восстановления breaker по тишине — на такте
+            # heartbeat, до публикации (переход open→half_open→closed попадёт в снапшот).
+            poll = getattr(state, "poll", None)
+            if callable(poll):
+                poll()
             publish_health(state, proxy, self._services.name)
         except Exception as exc:  # noqa: BLE001 — health не критичен для работы процесса
             _log = getattr(self._services, "log_debug", self._services.log_info)

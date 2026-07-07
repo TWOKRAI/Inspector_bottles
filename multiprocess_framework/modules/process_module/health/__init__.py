@@ -30,6 +30,8 @@ from .schema import (
     health_root,
 )
 from .state import (
+    BREAKER_COOLDOWN_ENV,
+    BREAKER_THRESHOLD_ENV,
     DEFAULT_THROTTLE,
     LOG_ONLY_ENV,
     HealthReporter,
@@ -61,6 +63,8 @@ __all__ = [
     # breaker (Task 2.2)
     "CircuitBreaker",
     "BreakerState",
+    "BREAKER_THRESHOLD_ENV",
+    "BREAKER_COOLDOWN_ENV",
     "DEFAULT_FAIL_THRESHOLD",
     "DEFAULT_COOLDOWN_SEC",
 ]

@@ -14,6 +14,7 @@
     processes.<name>.health.last_error        # dict | None (см. LastErrorKey)
     processes.<name>.health.degraded_reason  # str | None — причина деградации
     processes.<name>.health.updated_at        # float — epoch последнего изменения
+    processes.<name>.health.breaker          # "closed"|"open"|"half_open" (Task 2.2)
 
 ``last_error`` — вложенный dict (Dict at Boundary: pickle-safe, между процессами
 идёт как обычное значение)::
@@ -49,6 +50,7 @@ class HealthField:
     LAST_ERROR = "last_error"
     DEGRADED_REASON = "degraded_reason"
     UPDATED_AT = "updated_at"
+    BREAKER = "breaker"  # Task 2.2: состояние circuit breaker подряд-ошибок
 
 
 class LastErrorKey:
@@ -68,6 +70,7 @@ HEALTH_FIELDS: tuple[str, ...] = (
     HealthField.LAST_ERROR,
     HealthField.DEGRADED_REASON,
     HealthField.UPDATED_AT,
+    HealthField.BREAKER,  # Task 2.2 — аддитивно, в конце (порядок прежних полей неизменен)
 )
 
 #: Ключи ``last_error`` — тоже часть контракта.
