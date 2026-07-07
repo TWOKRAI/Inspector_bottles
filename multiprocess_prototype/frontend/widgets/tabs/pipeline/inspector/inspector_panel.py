@@ -8,7 +8,6 @@ Protocol — оставлены как bridge через adapter (TODO Phase G: 
 from __future__ import annotations
 
 import logging
-from collections import namedtuple
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt, Signal
@@ -31,10 +30,13 @@ if TYPE_CHECKING:
 
 from ..graph.constants import CATEGORY_COLORS
 from .io_debug_section import IoDebugSection
-
-# Thin wrapper для backward compatibility: combo _populate_display_id_combo
-# ожидает .id и .name, а DisplaySpec имеет display_id/display_name.
-_DisplayEntry = namedtuple("_DisplayEntry", ["id", "name"])
+from .selectors_data import (
+    DisplayEntry as _DisplayEntry,
+    display_entries,
+    process_names_from_recipe,
+    workers_for_process,
+    worker_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -671,18 +673,9 @@ class NodeInspectorPanel(QWidget):
     #  Блок «Исполнение» (Phase A, read-only)                              #
     # ------------------------------------------------------------------ #
 
-    @staticmethod
-    def _worker_for_plugin(plugin_category: str, plugin_name: str, step: int, total: int) -> str:
-        """Метка воркера плагина — соответствует авто-назначению в GenericProcess.
-
-        source → свой поток source_producer_<name> (параллельно);
-        processing → общий pipeline_executor (последовательно, шаг N/total).
-        """
-        if plugin_category == "source":
-            return f"source_producer_{plugin_name} · свой поток (параллельно)"
-        if total > 1:
-            return f"pipeline_executor · последовательно (шаг {step}/{total})"
-        return "pipeline_executor · последовательно"
+    # Тонкий делегат на чистую функцию selectors_data.worker_label (F.6).
+    # Оставлен как staticmethod для совместимости со стабильными швами тестов.
+    _worker_for_plugin = staticmethod(worker_label)
 
     def _populate_exec_info(
         self,
@@ -819,66 +812,14 @@ class NodeInspectorPanel(QWidget):
     # ------------------------------------------------------------------ #
 
     def _get_process_names_from_recipe(self) -> list[str]:
-        """Получить имена процессов из активного рецепта.
-
-        Task F.4: использует RecipeStore Protocol (services.recipes.read_raw).
-
-        Returns:
-            Список имён процессов или пустой список если недоступно.
-        """
-        if self._services is None:
-            return []
-
-        store = self._services.recipes
-
-        try:
-            active_slug = store.get_active()
-            if not active_slug:
-                return []
-
-            recipe_dict = store.read_raw(active_slug)
-            if not isinstance(recipe_dict, dict):
-                return []
-
-            blueprint = recipe_dict.get("blueprint", {})
-            if not isinstance(blueprint, dict):
-                return []
-
-            processes = blueprint.get("processes", [])
-            names = []
-            for proc in processes:
-                if isinstance(proc, dict):
-                    name = proc.get("process_name", "")
-                else:
-                    name = getattr(proc, "process_name", "")
-                if name:
-                    names.append(name)
-            return names
-
-        except Exception:
-            logger.debug("Не удалось получить список процессов из рецепта", exc_info=True)
-            return []
+        """Имена процессов активного рецепта (делегат selectors_data, F.6)."""
+        recipes = self._services.recipes if self._services is not None else None
+        return process_names_from_recipe(recipes)
 
     def _get_display_entries(self) -> list[Any]:
-        """Получить список DisplaySpec из DisplayCatalog (services.displays).
-
-        Returns:
-            Список DisplaySpec-like объектов или пустой список если недоступно.
-        """
-        if self._services is None:
-            return []
-
-        try:
-            specs = self._services.displays.list_displays()
-            # DisplaySpec имеет display_id и display_name. Combo использует .id и .name.
-            # Создаём thin wrapper для backward compatibility с combo код.
-            result = []
-            for spec in specs:
-                result.append(_DisplayEntry(id=spec.display_id, name=spec.display_name))
-            return result
-        except Exception:
-            logger.debug("Не удалось получить список дисплеев из реестра", exc_info=True)
-            return []
+        """Список DisplayEntry из DisplayCatalog (делегат selectors_data, F.6)."""
+        displays = self._services.displays if self._services is not None else None
+        return display_entries(displays)
 
     # ------------------------------------------------------------------ #
     #  Обработчики сигналов combo                                          #
@@ -941,22 +882,9 @@ class NodeInspectorPanel(QWidget):
             self.move_to_process_requested.emit(self._current_process, to_process)
 
     def _get_workers_for_process(self, process_name: str) -> list[str]:
-        """Имена воркеров процесса из топологии (+ синтетический message_processor).
-
-        Единый источник с вкладкой «Процессы»: services.topology → Process.workers.
-        """
-        if self._services is None or not process_name:
-            return ["message_processor"]
-        try:
-            topo = self._services.topology.load()
-            proc = topo.find_process(process_name)
-            workers = [w.worker_name for w in proc.workers] if proc is not None else []
-        except Exception:
-            logger.debug("Не удалось получить воркеры процесса '%s'", process_name, exc_info=True)
-            workers = []
-        if "message_processor" not in workers:
-            workers.insert(0, "message_processor")
-        return workers
+        """Имена воркеров процесса (делегат selectors_data, F.6)."""
+        topology = self._services.topology if self._services is not None else None
+        return workers_for_process(topology, process_name)
 
     def _populate_move_worker_combo(self, process_name: str, current_worker: str = "") -> None:
         """Заполнить воркер-combo воркерами процесса. Пусто/нет процесса → message_processor."""
