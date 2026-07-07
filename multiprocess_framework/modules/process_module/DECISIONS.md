@@ -128,3 +128,26 @@ B. **Mixin-наследование** (ProcessModule + CameraMixin + PluginMixin
 - Тесты: имена методов `_init_configuration()` / `_init_queues()` сохранены на `ProcessModule` → моки продолжают работать
 - `ProcessManagerProcess.initialize()` → `super().initialize()` chain сохранён
 - Composition class теперь предсказуемо работают: input = конфиг, output = структурированные данные, побочные эффекты = отсутствуют
+
+## ADR-PM-010: health-примитив наблюдаемости отказов (`ctx.health`)
+
+**Статус:** принято
+**Дата:** 2026-07-07
+**Refs:** plans/2026-07-06_constructor-master/plan.md (Ф2 Task 2.1)
+
+**Контекст:** Плагины проглатывали ошибки (`try/except: pass`, breaker без счётчика) — отказ железа/соседа был невидим в state-дереве и через driver. Ф2 вводит примитив наблюдаемости, на который волны C (2.4/2.5, ~30 сайтов) и breaker (2.2) будут опираться, поэтому контракт путей важнее сиюминутной реализации.
+
+**Решение:**
+1. **Единый на процесс `HealthState`** (аккумулятор: `errors`-счётчик, `last_error`, `status`, `degraded_reason`) живёт на объекте процесса как приватный `_health_state` — тем же приёмом, что `_state_proxy`. И `ctx.health` (PluginContext), и `ProcessHeartbeat` достают ОДИН инстанс через `services`.
+2. **`ctx.health` = `HealthReporter`** — фасад, который плагин видит через PluginContext (ADR-120): `report_error(exc, context, throttle)` / `set_status` / `degraded`. Плагин не знает о `HealthState`/публикации.
+3. **Схема путей — контракт** (`health/schema.py`): `processes.<name>.health.{status,errors,last_error,degraded_reason,updated_at}`. Стережёт контракт-тест — менять дословно дорого (30 сайтов волн C).
+4. **Публикация — через существующий heartbeat self-publish** (тот же канал, что телеметрия fps/latency), НЕ новый IPC-канал. Rate-limit двухуровневый: state — по такту heartbeat (публикуем только `take_dirty`), лог — окно `throttle` на пару (тип, context). Счётчик `errors` инкрементится ВСЕГДА (честность для breaker 2.2).
+5. **Откат в лог-only** (`INSPECTOR_HEALTH_LOG_ONLY`): report_error/set_status только логируют, state-дерево не трогают — путь отката заложен в дизайн по требованию плана.
+6. **Диагностический хук** `health.report` / `health.status` в BuiltinCommands — детерминированная проверка канала наблюдаемости через driver (acceptance), инструмент отладки для агентов.
+
+**Отклонения от плана:** добавлен диагностический `health.report`/`health.status` (в наброске не был) — нужен как детерминированный live-триггер acceptance «ошибка видна через driver» без ожидания реального отказа железа; регенерирован `docs/contracts/CAPABILITIES.yaml` (новые команды во всех процессах).
+
+**Последствия:**
+- Волны C 2.4/2.5 — one-liner `ctx.health.report_error(...)` на сайт; breaker 2.2 инкрементит от того же счётчика.
+- Здоровье процесса видно в state-дереве и через `backend_ctl` без единого клика в GUI.
+- Reversible: yes (флаг лог-only / не звать report_error). Risk: low — аддитивно, прод-путь не меняется, health не критичен для работы процесса (все ошибки публикации гасятся).
