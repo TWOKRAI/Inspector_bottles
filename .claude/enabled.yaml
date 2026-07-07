@@ -109,6 +109,12 @@ plugins:
   # ENABLED for Inspector_bottles: developer/investigator agents route through codegraph.
   mcp-codegraph:
     enabled: true
+  # Live backend control via backend_ctl driver (constructor-master Ф1 Task 1.7).
+  # BUNDLED project-local plugin: wraps backend_ctl/mcp_server.py (stdio, no SDK deps).
+  # Requires a running backend with BACKEND_CTL=1; tools fail with a clear message otherwise.
+  # Enabled by owner decision 2026-07-07.
+  mcp-backend-ctl:
+    enabled: true
   # Official GitHub MCP (Phase 3, Task 3.5).
   # CONSUME (Task 6.3-fix): official GitHub MCP plugin in the Anthropic marketplace.
   # source = marketplace-qualified ref "<plugin>@<marketplace>" — the verbatim
