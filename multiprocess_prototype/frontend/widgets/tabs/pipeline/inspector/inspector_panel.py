@@ -8,18 +8,14 @@ Protocol — оставлены как bridge через adapter (TODO Phase G: 
 from __future__ import annotations
 
 import logging
-from collections import namedtuple
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFormLayout,
     QFrame,
-    QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -30,11 +26,17 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
 
 from ..graph.constants import CATEGORY_COLORS
+from .cam_actual_section import CamActualSection
+from .exec_info_section import ExecInfoSection
 from .io_debug_section import IoDebugSection
-
-# Thin wrapper для backward compatibility: combo _populate_display_id_combo
-# ожидает .id и .name, а DisplaySpec имеет display_id/display_name.
-_DisplayEntry = namedtuple("_DisplayEntry", ["id", "name"])
+from .params_form_section import ParamsFormSection
+from .process_selector_section import ProcessSelectorSection
+from .selectors_data import (
+    display_entries,
+    process_names_from_recipe,
+    workers_for_process,
+    worker_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,10 +87,8 @@ class NodeInspectorPanel(QWidget):
         # совместимо с прямым field_changed.emit в тестах (1 плагин/процесс).
         self._current_plugin_index: int = 0
         self._suppress_changes: bool = False
-        # Хранит и QLineEdit (fallback) и FieldEditor (cards-режим)
-        self._field_editors: dict[str, Any] = {}
-        # Флаг: используем типизированные виджеты из CardsFieldFactory
-        self._use_cards: bool = False
+        # Форма параметров (cards/QLineEdit), _field_editors/_use_cards/hik-refs —
+        # внутри ParamsFormSection (F.6). Создаётся в _init_ui.
         # AppServices — задаётся через set_services()
         self._services: AppServices | None = None
         # G.2: live RegistersManager (FieldInfo-схемы) — runtime-dep через set_services,
@@ -99,15 +99,9 @@ class NodeInspectorPanel(QWidget):
         # command_sender + topology_bridge — для встраиваемых контролов Hikvision.
         self._command_sender: Any = None
         self._topology_bridge: Any = None
-        # Контроллер встроенного виджета Hikvision (держим ссылку, иначе GC).
-        self._hik_controller: Any = None
-        self._hik_runner: Any = None
         # Текущий режим отображения: "plugin" или "display"
         self._mode: str = "plugin"
-        # Combo «Процесс назначения» (для plugin-узлов)
-        self._target_process_combo: QComboBox | None = None
-        # Combo «Display» (для display-узлов)
-        self._display_id_combo: QComboBox | None = None
+        # Combo/формы селекторов — внутри ProcessSelectorSection (F.6), см. _init_ui.
         self._init_ui()
 
     def set_services(
@@ -129,10 +123,14 @@ class NodeInspectorPanel(QWidget):
         """
         self._services = services
         self._registers_manager = registers_manager
+        # Форма параметров строит cards по FieldInfo из RegistersManager.
+        self._params_section.set_services(services, registers_manager)
         if bindings is not None:
             self._bindings = bindings
             # io-debug секция подписывается на io_peek через те же bindings.
             self._io_debug.set_bindings(bindings)
+            # actual-секция камеры привязывает метки к state store через те же bindings.
+            self._cam_section.set_bindings(bindings)
         if command_sender is not None:
             self._command_sender = command_sender
         if topology_bridge is not None:
@@ -176,15 +174,9 @@ class NodeInspectorPanel(QWidget):
         content_layout.addWidget(self._category_badge)
 
         # Блок «Исполнение» (Phase A, read-only): в каком ПРОЦЕССЕ исполняется нода
-        # и в каком ВОРКЕРЕ каждый плагин (+ порядок в цепочке). Воркеры сейчас
-        # назначаются автоматически в GenericProcess (см. plans/pipeline-node-process-worker.md):
-        # source → свой source_producer_<plugin>; processing → общий pipeline_executor
-        # (последовательно). Поэтому блок read-only — назначение придёт в Phase C.
-        self._exec_info_form = QWidget()
-        self._exec_info_layout = QFormLayout(self._exec_info_form)
-        self._exec_info_layout.setContentsMargins(0, 0, 0, 0)
-        self._exec_info_layout.setSpacing(2)
-        content_layout.addWidget(self._exec_info_form)
+        # и в каком ВОРКЕРЕ каждый плагин (+ порядок). Секция инкапсулирует раскладку (F.6).
+        self._exec_section = ExecInfoSection()
+        content_layout.addWidget(self._exec_section)
 
         # Разделитель
         line = QFrame()
@@ -192,96 +184,21 @@ class NodeInspectorPanel(QWidget):
         line.setObjectName("InspectorDivider")
         content_layout.addWidget(line)
 
-        # Combo «Перенести в процесс» (Phase B): переносит плагины узла в выбранный
-        # процесс — несколько плагинов в одном процессе = последовательная цепочка.
-        # Первый пункт — плейсхолдер «— перенести в… —» (не вызывает мутацию).
-        self._move_process_form = QWidget()
-        mp_layout = QFormLayout(self._move_process_form)
-        mp_layout.setContentsMargins(0, 0, 0, 0)
-        mp_layout.setSpacing(4)
-        self._move_process_combo = QComboBox()
-        self._move_process_combo.setObjectName("MoveProcessCombo")
-        self._move_process_combo.setToolTip(
-            "Перенести этот узел (его плагины) в другой процесс. Плагины в одном\n"
-            "процессе исполняются последовательно; разные процессы — параллельно."
+        # Селекторы процесса/воркера/display + фиксация + bypass — самостоятельная
+        # секция с локальным suppress (F.6, Н-6). Панель маппит её сигналы в внешние.
+        self._selector_section = ProcessSelectorSection()
+        self._selector_section.set_providers(
+            self._get_process_names_from_recipe,
+            self._get_workers_for_process,
+            self._get_display_entries,
         )
-        # Воркер на той же строке, что и выбор процесса (по запросу владельца):
-        # список — воркеры выбранного/текущего процесса (из вкладки «Процессы»).
-        self._move_worker_combo = QComboBox()
-        self._move_worker_combo.setObjectName("MoveWorkerCombo")
-        self._move_worker_combo.setToolTip(
-            "Воркер процесса, в котором исполняется узел.\nСписок — воркеры выбранного процесса (вкладка «Процессы»)."
-        )
-        pw_row = QWidget()
-        pw_layout = QHBoxLayout(pw_row)
-        pw_layout.setContentsMargins(0, 0, 0, 0)
-        pw_layout.setSpacing(6)
-        pw_layout.addWidget(self._move_process_combo, 1)
-        pw_layout.addWidget(self._move_worker_combo, 1)
-        mp_layout.addRow("Процесс / Воркер:", pw_row)
-
-        # Кнопки «Закрепить/Открепить» рядом с выбором процесса/воркера (дубль
-        # правого клика по ноде; крупные — для сенсорного экрана). Действуют на
-        # текущую ноду (_current_node_id) через node_lock_set_requested.
-        self._lock_btn = QPushButton("Закрепить")
-        self._lock_btn.setObjectName("NodeLockButton")
-        self._lock_btn.setMinimumHeight(40)
-        self._lock_btn.setToolTip("Зафиксировать ноду: не двигается и пропускается авто-раскладкой")
-        self._unlock_btn = QPushButton("Открепить")
-        self._unlock_btn.setObjectName("NodeUnlockButton")
-        self._unlock_btn.setMinimumHeight(40)
-        self._unlock_btn.setToolTip("Снять фиксацию ноды")
-        lock_row = QWidget()
-        lock_layout = QHBoxLayout(lock_row)
-        lock_layout.setContentsMargins(0, 0, 0, 0)
-        lock_layout.setSpacing(6)
-        lock_layout.addWidget(self._lock_btn, 1)
-        lock_layout.addWidget(self._unlock_btn, 1)
-        mp_layout.addRow("Фиксация:", lock_row)
-
-        # Тумблер bypass: снять галку → нода пропускает кадр БЕЗ обработки (live).
-        # Нужно, чтобы выключить тяжёлую/зависающую ноду (circle_detector) и спокойно
-        # тюнить остальную цепочку (напр. hsv_mask по дисплею «mask»). Команда set_enabled
-        # уходит в процесс ноды через command_sender. По умолчанию включена.
-        self._bypass_check = QCheckBox("Нода включена (обрабатывает кадр)")
-        self._bypass_check.setObjectName("NodeEnabledCheck")
-        self._bypass_check.setChecked(True)
-        self._bypass_check.setMinimumHeight(32)
-        self._bypass_check.setToolTip(
-            "Снять галку → нода пропускает кадр без обработки (bypass).\n"
-            "Удобно отключить circle_detector, пока настраиваешь hsv-маску."
-        )
-        mp_layout.addRow("Обработка:", self._bypass_check)
-
-        content_layout.addWidget(self._move_process_form)
-        self._move_process_form.setVisible(False)
-
-        # Combo «IPC-таргет команд» (только для plugin-узлов; опциональная маршрутизация
-        # команд через target_process — НЕ влияет на то, в каком процессе исполняется нода).
-        self._target_process_form = QWidget()
-        tp_layout = QFormLayout(self._target_process_form)
-        tp_layout.setContentsMargins(0, 0, 0, 0)
-        tp_layout.setSpacing(4)
-        self._target_process_combo = QComboBox()
-        self._target_process_combo.setObjectName("TargetProcessCombo")
-        self._target_process_combo.setToolTip(
-            "Куда слать команды от плагина (IPC-маршрутизация). НЕ меняет процесс,\n"
-            "в котором исполняется нода — назначение процесса/воркера будет в Phase B/C."
-        )
-        tp_layout.addRow("IPC-таргет команд:", self._target_process_combo)
-        content_layout.addWidget(self._target_process_form)
-        self._target_process_form.setVisible(False)
-
-        # Combo «Display» (только для display-узлов)
-        self._display_id_form = QWidget()
-        di_layout = QFormLayout(self._display_id_form)
-        di_layout.setContentsMargins(0, 0, 0, 0)
-        di_layout.setSpacing(4)
-        self._display_id_combo = QComboBox()
-        self._display_id_combo.setObjectName("DisplayIdCombo")
-        di_layout.addRow("Display:", self._display_id_combo)
-        content_layout.addWidget(self._display_id_form)
-        self._display_id_form.setVisible(False)
+        self._selector_section.sig_target_selected.connect(self._on_target_selected)
+        self._selector_section.sig_display_selected.connect(self._on_display_selected)
+        self._selector_section.sig_move_requested.connect(self.move_to_process_requested)
+        self._selector_section.sig_worker_selected.connect(self._on_worker_selected)
+        self._selector_section.sig_lock_set.connect(self._on_lock_set)
+        self._selector_section.sig_bypass_toggled.connect(self._on_bypass_toggled)
+        content_layout.addWidget(self._selector_section)
 
         # Разделитель между combo и параметрами
         line2 = QFrame()
@@ -294,37 +211,16 @@ class NodeInspectorPanel(QWidget):
         # карточка раскрыта целиком. Вертикальный overflow обрабатывает мастер-
         # скролл DiffScrollTabLayout (правый). Раньше здесь был QScrollArea —
         # он давал второй (внутренний) скроллбар, который путал (убран).
-        self._params_widget = QWidget()
-        self._params_layout = QFormLayout(self._params_widget)
-        self._params_layout.setContentsMargins(0, 4, 0, 4)
-        self._params_layout.setSpacing(6)
-        content_layout.addWidget(self._params_widget, stretch=1)
+        self._params_section = ParamsFormSection()
+        # Секция эмитит field_changed(field, value); панель добавляет процесс.
+        self._params_section.field_changed.connect(self._on_params_field_changed)
+        content_layout.addWidget(self._params_section, stretch=1)
 
         # Блок «Камера (actual)» — read-only телеметрия что камера реально применила
         # (cap.get), привязка к state store processes.{proc}.state.cam.actual.*.
-        # Показывается только для camera_service-ноды (см. _show_camera_actual).
-        self._cam_actual_form = QWidget()
-        self._cam_actual_layout = QFormLayout(self._cam_actual_form)
-        self._cam_actual_layout.setContentsMargins(0, 4, 0, 4)
-        self._cam_actual_layout.setSpacing(2)
-        self._cam_actual_labels: dict[str, QLabel] = {}
-        cam_title = QLabel("Камера (actual)")
-        cam_title.setProperty("role", "plugin-name")
-        self._cam_actual_layout.addRow(cam_title)
-        for key, caption in (
-            ("fps", "FPS:"),
-            ("resolution", "Разрешение:"),
-            ("exposure", "Экспозиция:"),
-            ("gain", "Усиление:"),
-            ("fourcc", "Кодек:"),
-        ):
-            lbl = QLabel("—")
-            self._cam_actual_labels[key] = lbl
-            self._cam_actual_layout.addRow(caption, lbl)
-        content_layout.addWidget(self._cam_actual_form)
-        self._cam_actual_form.setVisible(False)
-        # Дескрипторы активных подписок actual (для отписки при смене ноды)
-        self._cam_actual_handles: list[Any] = []
+        # Секция инкапсулирует 6 подписок + их teardown (F.6, Н-4).
+        self._cam_section = CamActualSection()
+        content_layout.addWidget(self._cam_section)
 
         # Секция «I/O (debug)» — generic наблюдение in/out плагина (в самом низу карточки).
         # bindings придут позже через set_services → set_bindings.
@@ -334,14 +230,29 @@ class NodeInspectorPanel(QWidget):
         self._content.setVisible(False)
         layout.addWidget(self._content, stretch=1)
 
-        # Подключить обработчики изменений combo
-        self._target_process_combo.currentIndexChanged.connect(self._on_target_process_combo_changed)
-        self._display_id_combo.currentIndexChanged.connect(self._on_display_id_combo_changed)
-        self._move_process_combo.currentIndexChanged.connect(self._on_move_process_combo_changed)
-        self._move_worker_combo.currentIndexChanged.connect(self._on_move_worker_combo_changed)
-        self._lock_btn.clicked.connect(lambda: self._emit_lock(True))
-        self._unlock_btn.clicked.connect(lambda: self._emit_lock(False))
-        self._bypass_check.toggled.connect(self._on_bypass_toggled)
+    # ------------------------------------------------------------------ #
+    #  Селекторы: маппинг сигналов секции в внешние сигналы панели (F.6)   #
+    # ------------------------------------------------------------------ #
+
+    def _on_target_selected(self, new_process: str) -> None:
+        """IPC-таргет выбран → target_process_changed для текущей ноды."""
+        if self._current_node_id:
+            self.target_process_changed.emit(self._current_node_id, new_process)
+
+    def _on_display_selected(self, display_id: str) -> None:
+        """Display выбран → display_id_changed для текущей ноды."""
+        if self._current_node_id:
+            self.display_id_changed.emit(self._current_node_id, display_id)
+
+    def _on_worker_selected(self, worker: str) -> None:
+        """Воркер выбран → persist assigned_worker через field_changed (SetPluginConfig)."""
+        if self._current_process:
+            self.field_changed.emit(self._current_process, "assigned_worker", worker)
+
+    def _on_lock_set(self, locked: bool) -> None:
+        """Кнопки «Закрепить/Открепить» → сигнал для текущей ноды."""
+        if self._current_node_id:
+            self.node_lock_set_requested.emit(self._current_node_id, locked)
 
     def _on_bypass_toggled(self, checked: bool) -> None:
         """Тумблер bypass → команда set_enabled в процесс ноды (fire-and-forget).
@@ -349,8 +260,6 @@ class NodeInspectorPanel(QWidget):
         checked=True → нода обрабатывает; False → пропускает кадр без обработки.
         Без command_sender (редактор без живого backend) — no-op (нечего слать).
         """
-        if self._suppress_changes:
-            return
         if self._command_sender is None or not self._current_process or not self._current_plugin_name:
             return
         try:
@@ -361,11 +270,6 @@ class NodeInspectorPanel(QWidget):
             )
         except Exception:
             logger.debug("set_enabled не отправлен для %s.%s", self._current_process, self._current_plugin_name)
-
-    def _emit_lock(self, locked: bool) -> None:
-        """Кнопки «Закрепить/Открепить» → сигнал для текущей ноды."""
-        if self._current_node_id:
-            self.node_lock_set_requested.emit(self._current_node_id, locked)
 
     # ------------------------------------------------------------------ #
     #  Публичный API: show_plugin_node                                     #
@@ -413,9 +317,6 @@ class NodeInspectorPanel(QWidget):
             self._current_process = process_name or node_id
             self._current_plugin_index = plugin_index
             self._current_plugin_name = plugin_name or node_id
-            # Сброс тумблера bypass в «включено» при выборе ноды (readback живого
-            # состояния пока нет — дефолт enabled; signal подавлен, чтобы не слать команду).
-            self._bypass_check.setChecked(True)
             self._placeholder.setVisible(False)
             self._content.setVisible(True)
 
@@ -431,46 +332,19 @@ class NodeInspectorPanel(QWidget):
             self._exec_info_form.setVisible(True)
             self._populate_exec_info(node_id, category, plugins)
 
-            # Скрыть display-combo
-            self._display_id_form.setVisible(False)
+            # Селекторы (IPC-таргет + перенос процесса + воркер + фиксация + bypass):
+            # секция сама подавляет свои сигналы на время наполнения (Н-6). Форму IPC-таргета
+            # показывает только при непустом combo; строку «Процесс / Воркер» — всегда.
+            assigned_worker = str((params or {}).get("assigned_worker", "") or "")
+            self._selector_section.configure_plugin_mode(
+                self._current_process, target_process, available_processes, assigned_worker
+            )
 
-            # Заполнить combo IPC-таргета из активного рецепта. Показываем форму ТОЛЬКО
-            # если есть что выбрать (иначе пустой disabled combo путает — это и была
-            # жалоба «почему не могу поменять»: combo не про исполнение и часто пуст).
-            self._populate_target_process_combo(target_process)
-            has_targets = bool(self._target_process_combo and self._target_process_combo.isEnabled())
-            self._target_process_form.setVisible(has_targets)
-
-            # Строка «Процесс / Воркер»: combo переноса в процесс + combo воркера.
-            # Воркер-combo заполняем воркерами ТЕКУЩЕГО процесса, preselect из config
-            # (assigned_worker). Строку показываем всегда в plugin-режиме — выбор воркера
-            # релевантен независимо от наличия других процессов для переноса.
-            self._suppress_changes = True
-            try:
-                self._populate_move_process_combo(available_processes)
-                assigned_worker = str((params or {}).get("assigned_worker", "") or "")
-                self._populate_move_worker_combo(self._current_process, assigned_worker)
-            finally:
-                self._suppress_changes = False
-            self._move_process_form.setVisible(True)
-
-            # Показать параметры плагина в scroll area
-            self._clear_params()
-            if plugins:
-                for p in plugins:
-                    pname = p.get("plugin_name", "") if isinstance(p, dict) else str(p)
-                    label = QLabel(pname)
-                    label.setProperty("role", "plugin-name")
-                    self._params_layout.addRow(label)
-
-            # Поля строим по plugin_name (имя регистра), а не node_id (process_name):
-            # RegistersManager ключует регистры по имени плагина. _current_process
-            # остаётся node_id — туда уйдёт SetPluginConfig при правке поля.
-            fields_used = self._try_build_cards_editors(plugin_name or node_id, params)
-            self._use_cards = bool(fields_used)
-
-            if not self._use_cards and params:
-                self._build_lineedit_editors(params)
+            # Форма параметров: заголовки плагинов процесса + поля выбранного плагина.
+            # Поля резолвятся по plugin_name (имя регистра), а не node_id: RegistersManager
+            # ключует регистры по имени плагина. _current_process остаётся node_id — туда
+            # уйдёт SetPluginConfig при правке поля.
+            self._params_section.build(plugin_name or node_id, params, plugins)
 
             # Actual-телеметрия камеры (Phase 3): только для camera_service.
             if (plugin_name or node_id) == "camera_service":
@@ -481,7 +355,9 @@ class NodeInspectorPanel(QWidget):
             # Контролы камеры Hikvision (поиск/захват/параметры/SDK App) — дублируют
             # секцию Services прямо в карточке ноды. Только для плагина hikvision.
             if (plugin_name or node_id) == "hikvision":
-                self._embed_hikvision_controls()
+                self._params_section.embed_hikvision(
+                    self._services, self._command_sender, self._topology_bridge
+                )
 
             # io-debug: привязать секцию к io_peek текущего плагина (process+plugin).
             self._io_debug.set_target(self._current_process, plugin_name or node_id)
@@ -490,103 +366,35 @@ class NodeInspectorPanel(QWidget):
             self._suppress_changes = False
 
     # ------------------------------------------------------------------ #
-    #  Камера: actual-телеметрия (Phase 3)                                 #
+    #  Камера: actual-телеметрия (делегаты CamActualSection, F.6)          #
     # ------------------------------------------------------------------ #
 
-    def _unbind_camera_actual(self) -> None:
-        """Снять подписки actual-телеметрии (баланс bind/unbind, волна B Н-4).
+    @property
+    def _cam_actual_form(self) -> QWidget:
+        """Compat-шов: виджет actual-секции (тесты проверяют isHidden())."""
+        return self._cam_section
 
-        GuiStateBindings.unbind() не бросает (ValueError ловится внутри),
-        поэтому прежний широкий ``except Exception: pass`` убран. Чистый Python
-        (без Qt-вызовов) — безопасно и после разрушения виджетов (destroyed-путь).
-        """
-        if self._bindings is not None:
-            for h in self._cam_actual_handles:
-                self._bindings.unbind(h)
-        self._cam_actual_handles = []
+    @property
+    def _cam_actual_handles(self) -> list[Any]:
+        """Compat-шов: активные bind-хэндлы actual-секции (тесты проверяют баланс)."""
+        return self._cam_section._handles
 
     def _hide_camera_actual(self) -> None:
-        """Скрыть блок actual и снять подписки."""
-        self._unbind_camera_actual()
-        self._cam_actual_form.setVisible(False)
-        for lbl in self._cam_actual_labels.values():
-            lbl.setText("—")
+        """Скрыть блок actual и снять подписки (делегат секции)."""
+        self._cam_section.hide_and_unbind()
 
     def dispose(self) -> None:
-        """Teardown панели: снять cam-подписки (волна B, Н-4). Идемпотентен.
+        """Teardown панели: снять cam-подписки (Н-4). Идемпотентен.
 
-        При разрушении панели с активной camera-нодой bind-хэндлы оставались
-        жить в GuiStateBindings (утечка + обновление мёртвых QLabel через
-        weakref). Вызывается из PipelineTab.dispose() (closeEvent / destroyed).
-        Намеренно НЕ зовёт _hide_camera_actual целиком: в destroyed-пути
-        дочерние Qt-виджеты уже удалены, setVisible/setText дали бы RuntimeError —
-        снимаем только подписки (чистый Python).
+        Делегирует в CamActualSection.dispose() — снимаются только подписки
+        (чистый Python), без обращения к возможно уже удалённым Qt-виджетам
+        (destroyed-путь). Вызывается из PipelineTab.dispose() (closeEvent / destroyed).
         """
-        self._unbind_camera_actual()
+        self._cam_section.dispose()
 
     def _show_camera_actual(self, process_name: str) -> None:
-        """Показать блок actual и привязать метки к state store.
-
-        Пути: processes.{proc}.state.cam.actual.{fps,width,height,exposure,gain,fourcc}.
-        Разрешение собирается из width+height отдельным форматтером на оба пути.
-        """
-        self._hide_camera_actual()
-        if self._bindings is None or not process_name:
-            # Без bindings actual недоступен (нет live-подписки) — блок не показываем.
-            return
-        self._cam_actual_form.setVisible(True)
-        base = f"processes.{process_name}.state.cam.actual"
-
-        def _num(lbl: QLabel, unit: str = ""):
-            return lambda v: f"{float(v):.0f}{unit}" if isinstance(v, (int, float)) else str(v)
-
-        self._cam_actual_handles.append(
-            self._bindings.bind(
-                f"{base}.fps",
-                self._cam_actual_labels["fps"],
-                "text",
-                formatter=_num(self._cam_actual_labels["fps"], " fps"),
-            )
-        )
-        self._cam_actual_handles.append(
-            self._bindings.bind(
-                f"{base}.exposure",
-                self._cam_actual_labels["exposure"],
-                "text",
-                formatter=_num(self._cam_actual_labels["exposure"]),
-            )
-        )
-        self._cam_actual_handles.append(
-            self._bindings.bind(
-                f"{base}.gain", self._cam_actual_labels["gain"], "text", formatter=_num(self._cam_actual_labels["gain"])
-            )
-        )
-        self._cam_actual_handles.append(
-            self._bindings.bind(f"{base}.fourcc", self._cam_actual_labels["fourcc"], "text")
-        )
-        # Разрешение: width и height приходят раздельно → обновляем общую метку.
-        self._cam_res = {"width": 0, "height": 0}
-
-        def _res_update(key):
-            def _fmt(v):
-                try:
-                    self._cam_res[key] = int(float(v))
-                except (TypeError, ValueError):
-                    pass
-                return f"{self._cam_res['width']}×{self._cam_res['height']}"
-
-            return _fmt
-
-        self._cam_actual_handles.append(
-            self._bindings.bind(
-                f"{base}.width", self._cam_actual_labels["resolution"], "text", formatter=_res_update("width")
-            )
-        )
-        self._cam_actual_handles.append(
-            self._bindings.bind(
-                f"{base}.height", self._cam_actual_labels["resolution"], "text", formatter=_res_update("height")
-            )
-        )
+        """Показать блок actual и привязать метки к state store (делегат секции)."""
+        self._cam_section.show_for(process_name)
 
     def show_display_node(
         self,
@@ -622,19 +430,14 @@ class NodeInspectorPanel(QWidget):
             self._category_badge.setText("display")
             self._category_badge.setStyleSheet(f"background-color: {DISPLAY_CATEGORY_COLOR}; color: #fff;")
 
-            # Показать display-combo, скрыть target_process / move-process combo
-            self._target_process_form.setVisible(False)
-            self._move_process_form.setVisible(False)
-            self._display_id_form.setVisible(True)
+            # Селекторы: display-режим (combo Display виден, target/move скрыты, populate).
+            self._selector_section.configure_display_mode(display_id)
 
             # Блок «Исполнение» не относится к display-узлам — очистить и спрятать.
             self._clear_exec_info()
             self._exec_info_form.setVisible(False)
             self._hide_camera_actual()
             self._io_debug.clear_target()  # у display-узла нет плагина → io-debug спит
-
-            # Заполнить combo из DisplayRegistry
-            self._populate_display_id_combo(display_id)
 
             # Очистить параметры (у display нет параметров)
             self._clear_params()
@@ -671,428 +474,125 @@ class NodeInspectorPanel(QWidget):
     #  Блок «Исполнение» (Phase A, read-only)                              #
     # ------------------------------------------------------------------ #
 
-    @staticmethod
-    def _worker_for_plugin(plugin_category: str, plugin_name: str, step: int, total: int) -> str:
-        """Метка воркера плагина — соответствует авто-назначению в GenericProcess.
+    # Тонкий делегат на чистую функцию selectors_data.worker_label (F.6).
+    # Оставлен как staticmethod для совместимости со стабильными швами тестов.
+    _worker_for_plugin = staticmethod(worker_label)
 
-        source → свой поток source_producer_<name> (параллельно);
-        processing → общий pipeline_executor (последовательно, шаг N/total).
-        """
-        if plugin_category == "source":
-            return f"source_producer_{plugin_name} · свой поток (параллельно)"
-        if total > 1:
-            return f"pipeline_executor · последовательно (шаг {step}/{total})"
-        return "pipeline_executor · последовательно"
+    @property
+    def _exec_info_form(self) -> QWidget:
+        """Compat-шов: виджет секции «Исполнение» (тесты проверяют isHidden())."""
+        return self._exec_section
 
-    def _populate_exec_info(
-        self,
-        process_name: str,
-        node_category: str,
-        plugins: list | None,
-    ) -> None:
-        """Заполнить блок «Исполнение»: процесс + воркер/порядок по плагинам.
+    @property
+    def _exec_info_layout(self) -> "QFormLayout":
+        """Compat-шов: раскладка секции «Исполнение» (тесты читают строки/count)."""
+        return self._exec_section._layout
 
-        Read-only (Phase A): воркеры назначаются автоматически в GenericProcess,
-        смена процесса/воркера придёт в Phase B/C (plans/pipeline-node-process-worker.md).
-        """
-        self._clear_exec_info()
-
-        proc_value = QLabel(process_name)
-        proc_value.setProperty("role", "exec-process")
-        self._exec_info_layout.addRow("Процесс:", proc_value)
-
-        plugin_list = plugins or []
-        # Шаг считаем только среди processing-плагинов (источники независимы, свой поток).
-        processing_total = sum(
-            1 for p in plugin_list if ((p.get("category") if isinstance(p, dict) else "") or node_category) != "source"
-        )
-        step = 0
-        for p in plugin_list:
-            if isinstance(p, dict):
-                pname = p.get("plugin_name", "")
-                pcat = p.get("category") or node_category
-            else:
-                pname = str(p)
-                pcat = node_category
-            if pcat != "source":
-                step += 1
-                worker = self._worker_for_plugin(pcat, pname, step, processing_total)
-            else:
-                worker = self._worker_for_plugin("source", pname, 0, 0)
-            self._exec_info_layout.addRow(f"{pname}:", QLabel(worker))
+    def _populate_exec_info(self, process_name: str, node_category: str, plugins: list | None) -> None:
+        """Заполнить блок «Исполнение» (делегат ExecInfoSection, F.6)."""
+        self._exec_section.populate(process_name, node_category, plugins)
 
     def _clear_exec_info(self) -> None:
-        """Очистить строки блока «Исполнение»."""
-        while self._exec_info_layout.count():
-            item = self._exec_info_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
+        """Очистить блок «Исполнение» (делегат ExecInfoSection, F.6)."""
+        self._exec_section.clear()
 
     # ------------------------------------------------------------------ #
-    #  Заполнение combo                                                    #
+    #  Селекторы: провайдеры данных + compat-швы + refresh (F.6)           #
     # ------------------------------------------------------------------ #
 
-    def _populate_target_process_combo(self, current_value: str = "") -> None:
-        """Заполнить combo «Процесс назначения» именами процессов из рецепта.
+    @property
+    def _target_process_combo(self) -> QComboBox:
+        """Compat-шов: combo IPC-таргета (тесты читают items/currentText)."""
+        return self._selector_section._target_process_combo
 
-        Если RecipeManager или активный рецепт недоступны — combo пустое и disabled.
+    @property
+    def _display_id_combo(self) -> QComboBox:
+        """Compat-шов: combo Display (тесты читают itemData/currentIndex)."""
+        return self._selector_section._display_id_combo
 
-        Args:
-            current_value: текущее значение, которое нужно выбрать.
-        """
-        combo = self._target_process_combo
-        if combo is None:
-            return
+    @property
+    def _move_worker_combo(self) -> QComboBox:
+        """Compat-шов: combo воркера (тесты читают/выбирают воркеров)."""
+        return self._selector_section._move_worker_combo
 
-        combo.clear()
-        process_names = self._get_process_names_from_recipe()
+    @property
+    def _move_process_form(self) -> QWidget:
+        """Compat-шов: форма «Процесс / Воркер» (тесты проверяют видимость)."""
+        return self._selector_section._move_process_form
 
-        if not process_names:
-            combo.setEnabled(False)
-            return
+    @property
+    def _target_process_form(self) -> QWidget:
+        """Compat-шов: форма IPC-таргета (тесты проверяют видимость)."""
+        return self._selector_section._target_process_form
 
-        combo.setEnabled(True)
-        for name in process_names:
-            combo.addItem(name)
+    @property
+    def _display_id_form(self) -> QWidget:
+        """Compat-шов: форма Display (тесты проверяют видимость)."""
+        return self._selector_section._display_id_form
 
-        # Установить текущее значение
-        if current_value:
-            idx = combo.findText(current_value)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
+    @property
+    def _lock_btn(self) -> QPushButton:
+        """Compat-шов: кнопка «Закрепить» (тесты кликают → node_lock_set_requested)."""
+        return self._selector_section._lock_btn
 
-    def _populate_display_id_combo(self, current_display_id: str = "") -> None:
-        """Заполнить combo «Display» из DisplayRegistry.
-
-        Если DisplayRegistry недоступен — combo пустое и disabled.
-
-        Args:
-            current_display_id: текущий выбранный display_id.
-        """
-        combo = self._display_id_combo
-        if combo is None:
-            return
-
-        combo.clear()
-        entries = self._get_display_entries()
-
-        if not entries:
-            combo.setEnabled(False)
-            return
-
-        combo.setEnabled(True)
-        for entry in entries:
-            label = f"{entry.name} ({entry.id})" if entry.name else entry.id
-            combo.addItem(label, userData=entry.id)
-
-        # Установить текущее значение
-        if current_display_id:
-            for i in range(combo.count()):
-                if combo.itemData(i) == current_display_id:
-                    combo.setCurrentIndex(i)
-                    break
+    @property
+    def _unlock_btn(self) -> QPushButton:
+        """Compat-шов: кнопка «Открепить»."""
+        return self._selector_section._unlock_btn
 
     def refresh_display_combo(self) -> None:
-        """Обновить combo «Display» при изменении DisplayRegistry.
-
-        Вызывается при подписке на state.displays.changed.
-        Работает только в режиме display (иначе no-op).
-        """
+        """Обновить combo «Display» при изменении DisplayRegistry (no-op вне display-режима)."""
         if self._mode != "display":
             return
-        # Получить текущий выбранный display_id
-        current_id = ""
-        if self._display_id_combo is not None:
-            idx = self._display_id_combo.currentIndex()
-            if idx >= 0:
-                current_id = self._display_id_combo.itemData(idx) or ""
-
-        self._suppress_changes = True
-        try:
-            self._populate_display_id_combo(current_id)
-        finally:
-            self._suppress_changes = False
+        self._selector_section.refresh_display(self._selector_section.current_display_id())
 
     # ------------------------------------------------------------------ #
-    #  Вспомогательные методы: получение данных из контекста               #
+    #  Провайдеры данных для секций (делегаты selectors_data, F.6)         #
     # ------------------------------------------------------------------ #
 
     def _get_process_names_from_recipe(self) -> list[str]:
-        """Получить имена процессов из активного рецепта.
-
-        Task F.4: использует RecipeStore Protocol (services.recipes.read_raw).
-
-        Returns:
-            Список имён процессов или пустой список если недоступно.
-        """
-        if self._services is None:
-            return []
-
-        store = self._services.recipes
-
-        try:
-            active_slug = store.get_active()
-            if not active_slug:
-                return []
-
-            recipe_dict = store.read_raw(active_slug)
-            if not isinstance(recipe_dict, dict):
-                return []
-
-            blueprint = recipe_dict.get("blueprint", {})
-            if not isinstance(blueprint, dict):
-                return []
-
-            processes = blueprint.get("processes", [])
-            names = []
-            for proc in processes:
-                if isinstance(proc, dict):
-                    name = proc.get("process_name", "")
-                else:
-                    name = getattr(proc, "process_name", "")
-                if name:
-                    names.append(name)
-            return names
-
-        except Exception:
-            logger.debug("Не удалось получить список процессов из рецепта", exc_info=True)
-            return []
+        """Имена процессов активного рецепта (делегат selectors_data, F.6)."""
+        recipes = self._services.recipes if self._services is not None else None
+        return process_names_from_recipe(recipes)
 
     def _get_display_entries(self) -> list[Any]:
-        """Получить список DisplaySpec из DisplayCatalog (services.displays).
-
-        Returns:
-            Список DisplaySpec-like объектов или пустой список если недоступно.
-        """
-        if self._services is None:
-            return []
-
-        try:
-            specs = self._services.displays.list_displays()
-            # DisplaySpec имеет display_id и display_name. Combo использует .id и .name.
-            # Создаём thin wrapper для backward compatibility с combo код.
-            result = []
-            for spec in specs:
-                result.append(_DisplayEntry(id=spec.display_id, name=spec.display_name))
-            return result
-        except Exception:
-            logger.debug("Не удалось получить список дисплеев из реестра", exc_info=True)
-            return []
-
-    # ------------------------------------------------------------------ #
-    #  Обработчики сигналов combo                                          #
-    # ------------------------------------------------------------------ #
-
-    def _on_target_process_combo_changed(self, index: int) -> None:
-        """Обработчик выбора процесса в combo «Процесс назначения»."""
-        if self._suppress_changes:
-            return
-        if self._target_process_combo is None:
-            return
-        new_process = self._target_process_combo.currentText()
-        if new_process and self._current_node_id:
-            self.target_process_changed.emit(self._current_node_id, new_process)
-
-    def _on_display_id_combo_changed(self, index: int) -> None:
-        """Обработчик выбора display в combo «Display»."""
-        if self._suppress_changes:
-            return
-        if self._display_id_combo is None:
-            return
-        new_display_id = self._display_id_combo.itemData(index) or ""
-        if new_display_id and self._current_node_id:
-            self.display_id_changed.emit(self._current_node_id, new_display_id)
-
-    def _populate_move_process_combo(self, available_processes: list[str] | None) -> None:
-        """Заполнить combo «Перенести в процесс» (Phase B).
-
-        Первый пункт — плейсхолдер (userData=""), не вызывает мутацию.
-        """
-        combo = self._move_process_combo
-        if combo is None:
-            return
-        combo.clear()
-        combo.addItem("— перенести в… —", userData="")
-        for name in available_processes or []:
-            combo.addItem(name, userData=name)
-        combo.setCurrentIndex(0)
-
-    def _on_move_process_combo_changed(self, index: int) -> None:
-        """Обработчик выбора процесса-приёмника (Phase B) → move_to_process_requested.
-
-        D.1: эмитим ИМЯ ПРОЦЕССА (_current_process), а не node_id плагин-ноды —
-        presenter._on_move_to_process_requested ждёт from_process. Per-plugin drag
-        (D.3) — основной путь; combo переносит весь процесс (его плагины).
-        """
-        if self._suppress_changes:
-            return
-        if self._move_process_combo is None:
-            return
-        to_process = self._move_process_combo.itemData(index) or ""
-        # Воркер-combo всегда отражает воркеры РЕЛЕВАНТНОГО процесса: выбранного в
-        # combo, либо текущего (когда плейсхолдер). Перезаполняем при смене процесса.
-        self._suppress_changes = True
-        try:
-            self._populate_move_worker_combo(to_process or self._current_process)
-        finally:
-            self._suppress_changes = False
-        if to_process and self._current_process and to_process != self._current_process:
-            self.move_to_process_requested.emit(self._current_process, to_process)
+        """Список DisplayEntry из DisplayCatalog (делегат selectors_data, F.6)."""
+        displays = self._services.displays if self._services is not None else None
+        return display_entries(displays)
 
     def _get_workers_for_process(self, process_name: str) -> list[str]:
-        """Имена воркеров процесса из топологии (+ синтетический message_processor).
+        """Имена воркеров процесса (делегат selectors_data, F.6)."""
+        topology = self._services.topology if self._services is not None else None
+        return workers_for_process(topology, process_name)
 
-        Единый источник с вкладкой «Процессы»: services.topology → Process.workers.
-        """
-        if self._services is None or not process_name:
-            return ["message_processor"]
-        try:
-            topo = self._services.topology.load()
-            proc = topo.find_process(process_name)
-            workers = [w.worker_name for w in proc.workers] if proc is not None else []
-        except Exception:
-            logger.debug("Не удалось получить воркеры процесса '%s'", process_name, exc_info=True)
-            workers = []
-        if "message_processor" not in workers:
-            workers.insert(0, "message_processor")
-        return workers
+    # ------------------------------------------------------------------ #
+    #  Форма параметров: делегаты ParamsFormSection (F.6)                  #
+    # ------------------------------------------------------------------ #
 
-    def _populate_move_worker_combo(self, process_name: str, current_worker: str = "") -> None:
-        """Заполнить воркер-combo воркерами процесса. Пусто/нет процесса → message_processor."""
-        combo = self._move_worker_combo
-        if combo is None:
-            return
-        combo.clear()
-        workers = self._get_workers_for_process(process_name)
-        combo.setEnabled(bool(workers))
-        for name in workers:
-            combo.addItem(name, userData=name)
-        if current_worker:
-            idx = combo.findData(current_worker)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
+    @property
+    def _field_editors(self) -> dict[str, Any]:
+        """Compat-шов: редакторы полей формы параметров (тесты читают dict)."""
+        return self._params_section._field_editors
 
-    def _on_move_worker_combo_changed(self, index: int) -> None:
-        """Выбор воркера → персист assigned_worker в config плагина (через field_changed).
+    @property
+    def _use_cards(self) -> bool:
+        """Compat-шов: флаг cards-режима формы параметров."""
+        return self._params_section._use_cards
 
-        Переиспользуем существующий путь field_changed → SetPluginConfig (G.4.3):
-        assigned_worker сохраняется в config плагина editor-топологии. Runtime-
-        исполнение по этому полю — отдельный шаг (см. plans/pipeline-node-process-worker.md).
-        """
+    @property
+    def _params_layout(self) -> "QFormLayout":
+        """Compat-шов: раскладка формы параметров (тесты читают count/строки)."""
+        return self._params_section._layout
+
+    def _on_params_field_changed(self, field_name: str, value: Any) -> None:
+        """Переизлучить field_changed секции с адресом процесса (гейт _suppress_changes)."""
         if self._suppress_changes:
             return
-        if self._move_worker_combo is None:
-            return
-        worker = self._move_worker_combo.itemData(index) or ""
-        if worker and self._current_process:
-            self.field_changed.emit(self._current_process, "assigned_worker", worker)
+        self.field_changed.emit(self._current_process, field_name, value)
 
-    # ------------------------------------------------------------------ #
-    #  Оригинальные методы (backward compatibility)                        #
-    # ------------------------------------------------------------------ #
-
-    def _try_build_cards_editors(
-        self,
-        plugin_name: str,
-        params: dict[str, Any] | None,
-    ) -> bool:
-        """Попытаться создать типизированные виджеты через CardsFieldFactory.
-
-        Args:
-            plugin_name: имя плагина (= имя регистра). RegistersManager ключует
-                регистры по имени плагина — тот же путь, что вкладка Plugins
-                (PluginsPresenter.get_register_fields). НЕ имя процесса.
-
-        Returns:
-            True если виджеты успешно созданы, False — нужен fallback.
-        """
-        if self._services is None:
-            return False
-
-        # G.2: live RegistersManager — explicit runtime-dep (через set_services, Q-F1=B).
-        # forms-фабрике нужен framework FieldInfo (get_fields), который domain RegistersBackend
-        # не может экспонировать (FieldSpec lossy + запрет импорта framework в domain).
-        rm = self._registers_manager
-        if rm is None:
-            return False
-
-        # FieldInfo из RegistersManager по имени ПЛАГИНА (= имя регистра).
-        fields = rm.get_fields(plugin_name)
-        if not fields:
-            return False
-
-        from multiprocess_prototype.frontend.forms.factory import CardsFieldFactory
-
-        # TODO Phase G (G.4): form_context() не покрыт AppServices Protocol.
-        # Для binding-aware editors нужен form_ctx. Пока — None (legacy путь).
-        form_ctx = None
-
-        for field_info in fields:
-            editor = CardsFieldFactory.create(
-                field_info,
-                parent=self._params_widget,
-                form_ctx=form_ctx,
-            )
-
-            # Установить значение из params если передан
-            if params and field_info.field_name in params:
-                try:
-                    editor.setter(params[field_info.field_name])
-                except Exception:
-                    logger.debug(
-                        "Не удалось установить значение '%s' для поля '%s'",
-                        params[field_info.field_name],
-                        field_info.field_name,
-                    )
-
-            # Подключить сигнал изменения если есть
-            if editor.change_signal is not None:
-                fn = field_info.field_name
-                editor.change_signal.connect(lambda *_args, _fn=fn, _ed=editor: self._on_field_editor_changed(_fn, _ed))
-
-            self._field_editors[field_info.field_name] = editor
-            self._params_layout.addRow(editor.label, editor.widget)
-
-        return True
-
-    def _embed_hikvision_controls(self) -> None:
-        """Встроить контролы камеры Hikvision (поиск/захват/параметры/SDK App).
-
-        Дублирует Services-секцию «Hikvision Camera» прямо в карточке ноды.
-        Требует command_sender/topology_bridge (через set_services из RuntimeDeps);
-        без них кнопки дадут понятный статус «нет процесса камеры».
-        """
-        from types import SimpleNamespace
-
-        from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
-        from multiprocess_prototype.frontend.widgets.tabs.services.hikvision.controller import (
-            build_hikvision_controls,
-        )
-
-        runtime = SimpleNamespace(
-            command_sender=self._command_sender,
-            topology_bridge=self._topology_bridge,
-        )
-        self._hik_runner = RequestRunner()
-        widget, controller = build_hikvision_controls(
-            services=self._services,
-            runtime=runtime,
-            request_runner=self._hik_runner,
-        )
-        self._hik_runner.setParent(widget)
-        self._hik_controller = controller
-        # Вставляем контролы первой строкой params (над register-полями плагина).
-        self._params_layout.insertRow(0, widget)
-
-    def _build_lineedit_editors(self, params: dict[str, Any]) -> None:
-        """Создать QLineEdit-редакторы (fallback если CardsFieldFactory недоступен)."""
-        for field_name, value in params.items():
-            editor = QLineEdit(str(value))
-            editor.setProperty("field_name", field_name)
-            editor.editingFinished.connect(lambda fn=field_name, ed=editor: self._on_field_edited(fn, ed))
-            self._field_editors[field_name] = editor
-            self._params_layout.addRow(field_name, editor)
+    def _clear_params(self) -> None:
+        """Очистить форму параметров (делегат ParamsFormSection, F.6)."""
+        self._params_section.clear()
 
     def clear(self) -> None:
         """Очистить inspector (показать placeholder)."""
@@ -1100,9 +600,7 @@ class NodeInspectorPanel(QWidget):
         self._current_node_id = ""
         self._placeholder.setVisible(True)
         self._content.setVisible(False)
-        self._target_process_form.setVisible(False)
-        self._move_process_form.setVisible(False)
-        self._display_id_form.setVisible(False)
+        self._selector_section.clear()
         self._clear_exec_info()
         self._hide_camera_actual()
         self._io_debug.clear_target()
@@ -1122,48 +620,13 @@ class NodeInspectorPanel(QWidget):
         """
         return self._current_plugin_index
 
-    def _on_field_edited(self, field_name: str, editor: QLineEdit) -> None:
-        """Обработчик изменения поля пользователем (QLineEdit fallback)."""
-        if self._suppress_changes:
-            return
-        value = editor.text()
-        self.field_changed.emit(self._current_process, field_name, value)
-
     def _on_field_editor_changed(self, field_name: str, editor: "FieldEditor") -> None:
-        """Обработчик изменения поля через FieldEditor (cards-режим).
+        """Compat-шов для прямого вызова из тестов (cards-режим).
 
-        Args:
-            field_name: имя поля.
-            editor: FieldEditor, у которого сработал change_signal.
+        Штатный путь редактирования полей идёт через ParamsFormSection.field_changed →
+        _on_params_field_changed. Метод оставлен для тестов, дёргающих его напрямую.
         """
         if self._suppress_changes:
             return
         value = editor.getter()
         self.field_changed.emit(self._current_process, field_name, value)
-
-    def _clear_params(self) -> None:
-        """Удалить все виджеты параметров.
-
-        Для FieldEditor: отключаем change_signal перед удалением
-        чтобы избежать утечек сигналов при переключении нод.
-        """
-        for field_name, editor in self._field_editors.items():
-            if not isinstance(editor, QLineEdit):
-                # FieldEditor — отключаем change_signal
-                try:
-                    if editor.change_signal is not None:
-                        editor.change_signal.disconnect()
-                except (RuntimeError, TypeError):
-                    pass  # Уже отключён или C++ объект удалён
-
-        self._field_editors.clear()
-        self._use_cards = False
-        # Сбросить ссылки на встроенные контролы Hikvision (виджеты удалит цикл ниже).
-        self._hik_controller = None
-        self._hik_runner = None
-
-        while self._params_layout.count():
-            item = self._params_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
