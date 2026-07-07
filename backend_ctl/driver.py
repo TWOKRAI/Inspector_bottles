@@ -67,6 +67,24 @@ def _find_payload(res: Any, *keys: str) -> Dict[str, Any]:
     return res if isinstance(res, dict) else {}
 
 
+def _leaf_result(res: Any) -> Dict[str, Any]:
+    """Спуститься по вложенным ``result`` до листовой полезной нагрузки хендлера.
+
+    Ответ команды приезжает конвертом ``{success, result: {<payload хендлера>}}``
+    (иногда в два уровня). Для команд, чьи значимые поля лежат В payload (config.reload
+    → ``applied``, logger.sink.* → ``sink``), нужен именно лист, а не внешний конверт.
+    Спускаемся по ``result``, пока следующий уровень — dict; иначе возвращаем текущий.
+    """
+    node = res if isinstance(res, dict) else {}
+    for _ in range(4):  # защита от бесконечного спуска на кривом ответе
+        nxt = node.get("result")
+        if isinstance(nxt, dict):
+            node = nxt
+        else:
+            break
+    return node
+
+
 def _is_ok(res: Any, payload: Dict[str, Any]) -> bool:
     """Успех ответа: ``success`` берём из полезной нагрузки или из внешнего конверта."""
     if isinstance(payload, dict) and "success" in payload:
@@ -496,6 +514,81 @@ class BackendDriver:
             "register_update",
             {"plugin_name": plugin, "field": field, "value": value},
             **kw,
+        )
+
+    # ---- Observability control plane (Ф1 Task 1.4: config.reload / logger.sink.*) ----
+
+    def config_reload(
+        self,
+        process: str,
+        *,
+        observability: Optional[Dict[str, Any]] = None,
+        path: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Перечитать/применить observability-секцию процесса на лету.
+
+        ``observability`` — inline-override (dict), например ``{"log_level": "DEBUG"}``
+        (сменить уровень логгера на лету). Без него процесс читает свой файл конфига
+        (``path`` или ``observability_config_path`` — тот же путь, что hot-reload watcher).
+        Ответ содержит ``applied.log_level`` — применённый уровень (диагностика).
+        """
+        args: Dict[str, Any] = {}
+        if observability is not None:
+            args["observability"] = observability
+        if path is not None:
+            args["path"] = path
+        return _leaf_result(self.send_command(process, "config.reload", args, timeout=timeout))
+
+    def logger_sink_enable(self, process: str, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Включить sink логгера процесса по имени (register_channel)."""
+        return _leaf_result(self.send_command(process, "logger.sink.enable", {"sink": sink}, timeout=timeout))
+
+    def logger_sink_disable(self, process: str, sink: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Выключить sink логгера процесса по имени (unregister_channel)."""
+        return _leaf_result(self.send_command(process, "logger.sink.disable", {"sink": sink}, timeout=timeout))
+
+    # ---- Tail логов (Ф1 Task 1.5: подписка level≥X → событийный канал driver'а) ----
+
+    def log_tail(
+        self,
+        process: str,
+        *,
+        level: str = "ERROR",
+        subscriber: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Подписаться на LogRecord'ы процесса с level ≥ ``level``.
+
+        Процесс ставит router-push sink: записи ≥ level едут пушем на ``subscriber``
+        (по умолчанию self.sender = адрес driver'а) через мост 1.1b и приходят в
+        событийный канал — читаются через :meth:`events` / :meth:`subscribe` как
+        сообщения с ``command == "log.record"`` (``data.record`` — сам LogRecord-dict).
+        """
+        return _leaf_result(
+            self.send_command(
+                process,
+                "log.tail.subscribe",
+                {"subscriber": subscriber or self._sender, "level": level},
+                timeout=timeout,
+            )
+        )
+
+    def log_untail(
+        self,
+        process: str,
+        *,
+        subscriber: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Снять подписку на tail логов процесса (по адресу подписчика)."""
+        return _leaf_result(
+            self.send_command(
+                process,
+                "log.tail.unsubscribe",
+                {"subscriber": subscriber or self._sender},
+                timeout=timeout,
+            )
         )
 
     # ---- Подписка на состояние (state.subscribe → событийный канал) ----
