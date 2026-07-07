@@ -151,3 +151,25 @@ B. **Mixin-наследование** (ProcessModule + CameraMixin + PluginMixin
 - Волны C 2.4/2.5 — one-liner `ctx.health.report_error(...)` на сайт; breaker 2.2 инкрементит от того же счётчика.
 - Здоровье процесса видно в state-дереве и через `backend_ctl` без единого клика в GUI.
 - Reversible: yes (флаг лог-only / не звать report_error). Risk: low — аддитивно, прод-путь не меняется, health не критичен для работы процесса (все ошибки публикации гасятся).
+
+## ADR-PM-011: честный circuit breaker поверх health (подряд-ошибки → degraded)
+
+**Статус:** принято
+**Дата:** 2026-07-07
+**Refs:** plans/2026-07-06_constructor-master/plan.md (Ф2 Task 2.2), ADR-PM-010
+
+**Контекст:** Существовавшие breaker-механики не видели ошибок, проглоченных плагинами (`try/except` + report-less), — процесс мог бесконечно крутить горячий цикл отказов, оставаясь «ok» в state-дереве. Ф2.1 дал честный счётчик (`errors` инкрементится на КАЖДЫЙ `report_error`) — breaker обязан кормиться от него же.
+
+**Решение:**
+1. **`CircuitBreaker`** (`health/breaker.py`): состояния `closed`/`open`/`half_open`, подряд-счётчик отказов, ОТДЕЛЬНЫЙ от кумулятивного `errors` (тот монотонный). `record_failure()` → open по `fail_threshold`; `record_success()` → сброс/закрытие; `poll()` → пассивное восстановление по тишине (`cooldown_sec`): open → half_open → closed. Два пути восстановления осознанно: явный успех — для loop-раннеров, тишина — для сайтов, умеющих только `report_error`.
+2. **Интеграция в `HealthState`**: каждый `report_error` кормит breaker; переход в open → `set_status(degraded, "breaker open: …")`. Деградацию снимает ТОЛЬКО breaker-owned восстановление (`_breaker_owns_degraded`) — чужой явный `degraded`/`failed` не затирается.
+3. **Контракт-поле `health.breaker`** (`closed|open|half_open`) — аддитивно, В КОНЦЕ `HEALTH_FIELDS` (порядок прежних пяти неизменен, дампы стабильны); heartbeat зовёт `poll()` на такте перед публикацией — пассивное восстановление попадает в снапшот.
+4. **produce()-breaker в `SourceProducer`**: подряд-фейлы `produce()` кормят тот же счётчик; при открытом breaker источник спит `breaker_backoff_sec` вместо горячего цикла ошибок.
+5. **Пороги** — env `INSPECTOR_HEALTH_BREAKER_THRESHOLD` (дефолт 5) / `INSPECTOR_HEALTH_BREAKER_COOLDOWN` (дефолт 30с); clock инъектируется (детерминизм тестов).
+
+**Acceptance (live, harness):** 5 подряд `health.report` → в state-дереве `health.breaker=open` + `health.status=degraded` + `degraded_reason` с «breaker» (`test_breaker_opens_and_degrades_after_n_consecutive_errors`).
+
+**Последствия:**
+- Волны C (2.4/2.5): сайтам достаточно `report_error` — breaker и деградация приезжают бесплатно.
+- Уроки инцидента: два инстанса агента в одном дереве (стойло+реанимация) — примитив и интеграцию писали параллельно; выжило благодаря «коммить каждый шаг». Правило: перед реанимацией агента проверять, не ожил ли оригинал.
+- Reversible: yes — лог-only переключатель Ф2.1 гасит и breaker-эффекты (state не трогается). Risk: low — аддитивное поле контракта, дефолты консервативны.
