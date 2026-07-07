@@ -12,13 +12,10 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFormLayout,
     QFrame,
-    QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -33,8 +30,8 @@ from .cam_actual_section import CamActualSection
 from .exec_info_section import ExecInfoSection
 from .io_debug_section import IoDebugSection
 from .params_form_section import ParamsFormSection
+from .process_selector_section import ProcessSelectorSection
 from .selectors_data import (
-    DisplayEntry as _DisplayEntry,
     display_entries,
     process_names_from_recipe,
     workers_for_process,
@@ -104,10 +101,7 @@ class NodeInspectorPanel(QWidget):
         self._topology_bridge: Any = None
         # Текущий режим отображения: "plugin" или "display"
         self._mode: str = "plugin"
-        # Combo «Процесс назначения» (для plugin-узлов)
-        self._target_process_combo: QComboBox | None = None
-        # Combo «Display» (для display-узлов)
-        self._display_id_combo: QComboBox | None = None
+        # Combo/формы селекторов — внутри ProcessSelectorSection (F.6), см. _init_ui.
         self._init_ui()
 
     def set_services(
@@ -190,96 +184,21 @@ class NodeInspectorPanel(QWidget):
         line.setObjectName("InspectorDivider")
         content_layout.addWidget(line)
 
-        # Combo «Перенести в процесс» (Phase B): переносит плагины узла в выбранный
-        # процесс — несколько плагинов в одном процессе = последовательная цепочка.
-        # Первый пункт — плейсхолдер «— перенести в… —» (не вызывает мутацию).
-        self._move_process_form = QWidget()
-        mp_layout = QFormLayout(self._move_process_form)
-        mp_layout.setContentsMargins(0, 0, 0, 0)
-        mp_layout.setSpacing(4)
-        self._move_process_combo = QComboBox()
-        self._move_process_combo.setObjectName("MoveProcessCombo")
-        self._move_process_combo.setToolTip(
-            "Перенести этот узел (его плагины) в другой процесс. Плагины в одном\n"
-            "процессе исполняются последовательно; разные процессы — параллельно."
+        # Селекторы процесса/воркера/display + фиксация + bypass — самостоятельная
+        # секция с локальным suppress (F.6, Н-6). Панель маппит её сигналы в внешние.
+        self._selector_section = ProcessSelectorSection()
+        self._selector_section.set_providers(
+            self._get_process_names_from_recipe,
+            self._get_workers_for_process,
+            self._get_display_entries,
         )
-        # Воркер на той же строке, что и выбор процесса (по запросу владельца):
-        # список — воркеры выбранного/текущего процесса (из вкладки «Процессы»).
-        self._move_worker_combo = QComboBox()
-        self._move_worker_combo.setObjectName("MoveWorkerCombo")
-        self._move_worker_combo.setToolTip(
-            "Воркер процесса, в котором исполняется узел.\nСписок — воркеры выбранного процесса (вкладка «Процессы»)."
-        )
-        pw_row = QWidget()
-        pw_layout = QHBoxLayout(pw_row)
-        pw_layout.setContentsMargins(0, 0, 0, 0)
-        pw_layout.setSpacing(6)
-        pw_layout.addWidget(self._move_process_combo, 1)
-        pw_layout.addWidget(self._move_worker_combo, 1)
-        mp_layout.addRow("Процесс / Воркер:", pw_row)
-
-        # Кнопки «Закрепить/Открепить» рядом с выбором процесса/воркера (дубль
-        # правого клика по ноде; крупные — для сенсорного экрана). Действуют на
-        # текущую ноду (_current_node_id) через node_lock_set_requested.
-        self._lock_btn = QPushButton("Закрепить")
-        self._lock_btn.setObjectName("NodeLockButton")
-        self._lock_btn.setMinimumHeight(40)
-        self._lock_btn.setToolTip("Зафиксировать ноду: не двигается и пропускается авто-раскладкой")
-        self._unlock_btn = QPushButton("Открепить")
-        self._unlock_btn.setObjectName("NodeUnlockButton")
-        self._unlock_btn.setMinimumHeight(40)
-        self._unlock_btn.setToolTip("Снять фиксацию ноды")
-        lock_row = QWidget()
-        lock_layout = QHBoxLayout(lock_row)
-        lock_layout.setContentsMargins(0, 0, 0, 0)
-        lock_layout.setSpacing(6)
-        lock_layout.addWidget(self._lock_btn, 1)
-        lock_layout.addWidget(self._unlock_btn, 1)
-        mp_layout.addRow("Фиксация:", lock_row)
-
-        # Тумблер bypass: снять галку → нода пропускает кадр БЕЗ обработки (live).
-        # Нужно, чтобы выключить тяжёлую/зависающую ноду (circle_detector) и спокойно
-        # тюнить остальную цепочку (напр. hsv_mask по дисплею «mask»). Команда set_enabled
-        # уходит в процесс ноды через command_sender. По умолчанию включена.
-        self._bypass_check = QCheckBox("Нода включена (обрабатывает кадр)")
-        self._bypass_check.setObjectName("NodeEnabledCheck")
-        self._bypass_check.setChecked(True)
-        self._bypass_check.setMinimumHeight(32)
-        self._bypass_check.setToolTip(
-            "Снять галку → нода пропускает кадр без обработки (bypass).\n"
-            "Удобно отключить circle_detector, пока настраиваешь hsv-маску."
-        )
-        mp_layout.addRow("Обработка:", self._bypass_check)
-
-        content_layout.addWidget(self._move_process_form)
-        self._move_process_form.setVisible(False)
-
-        # Combo «IPC-таргет команд» (только для plugin-узлов; опциональная маршрутизация
-        # команд через target_process — НЕ влияет на то, в каком процессе исполняется нода).
-        self._target_process_form = QWidget()
-        tp_layout = QFormLayout(self._target_process_form)
-        tp_layout.setContentsMargins(0, 0, 0, 0)
-        tp_layout.setSpacing(4)
-        self._target_process_combo = QComboBox()
-        self._target_process_combo.setObjectName("TargetProcessCombo")
-        self._target_process_combo.setToolTip(
-            "Куда слать команды от плагина (IPC-маршрутизация). НЕ меняет процесс,\n"
-            "в котором исполняется нода — назначение процесса/воркера будет в Phase B/C."
-        )
-        tp_layout.addRow("IPC-таргет команд:", self._target_process_combo)
-        content_layout.addWidget(self._target_process_form)
-        self._target_process_form.setVisible(False)
-
-        # Combo «Display» (только для display-узлов)
-        self._display_id_form = QWidget()
-        di_layout = QFormLayout(self._display_id_form)
-        di_layout.setContentsMargins(0, 0, 0, 0)
-        di_layout.setSpacing(4)
-        self._display_id_combo = QComboBox()
-        self._display_id_combo.setObjectName("DisplayIdCombo")
-        di_layout.addRow("Display:", self._display_id_combo)
-        content_layout.addWidget(self._display_id_form)
-        self._display_id_form.setVisible(False)
+        self._selector_section.sig_target_selected.connect(self._on_target_selected)
+        self._selector_section.sig_display_selected.connect(self._on_display_selected)
+        self._selector_section.sig_move_requested.connect(self.move_to_process_requested)
+        self._selector_section.sig_worker_selected.connect(self._on_worker_selected)
+        self._selector_section.sig_lock_set.connect(self._on_lock_set)
+        self._selector_section.sig_bypass_toggled.connect(self._on_bypass_toggled)
+        content_layout.addWidget(self._selector_section)
 
         # Разделитель между combo и параметрами
         line2 = QFrame()
@@ -311,14 +230,29 @@ class NodeInspectorPanel(QWidget):
         self._content.setVisible(False)
         layout.addWidget(self._content, stretch=1)
 
-        # Подключить обработчики изменений combo
-        self._target_process_combo.currentIndexChanged.connect(self._on_target_process_combo_changed)
-        self._display_id_combo.currentIndexChanged.connect(self._on_display_id_combo_changed)
-        self._move_process_combo.currentIndexChanged.connect(self._on_move_process_combo_changed)
-        self._move_worker_combo.currentIndexChanged.connect(self._on_move_worker_combo_changed)
-        self._lock_btn.clicked.connect(lambda: self._emit_lock(True))
-        self._unlock_btn.clicked.connect(lambda: self._emit_lock(False))
-        self._bypass_check.toggled.connect(self._on_bypass_toggled)
+    # ------------------------------------------------------------------ #
+    #  Селекторы: маппинг сигналов секции в внешние сигналы панели (F.6)   #
+    # ------------------------------------------------------------------ #
+
+    def _on_target_selected(self, new_process: str) -> None:
+        """IPC-таргет выбран → target_process_changed для текущей ноды."""
+        if self._current_node_id:
+            self.target_process_changed.emit(self._current_node_id, new_process)
+
+    def _on_display_selected(self, display_id: str) -> None:
+        """Display выбран → display_id_changed для текущей ноды."""
+        if self._current_node_id:
+            self.display_id_changed.emit(self._current_node_id, display_id)
+
+    def _on_worker_selected(self, worker: str) -> None:
+        """Воркер выбран → persist assigned_worker через field_changed (SetPluginConfig)."""
+        if self._current_process:
+            self.field_changed.emit(self._current_process, "assigned_worker", worker)
+
+    def _on_lock_set(self, locked: bool) -> None:
+        """Кнопки «Закрепить/Открепить» → сигнал для текущей ноды."""
+        if self._current_node_id:
+            self.node_lock_set_requested.emit(self._current_node_id, locked)
 
     def _on_bypass_toggled(self, checked: bool) -> None:
         """Тумблер bypass → команда set_enabled в процесс ноды (fire-and-forget).
@@ -326,8 +260,6 @@ class NodeInspectorPanel(QWidget):
         checked=True → нода обрабатывает; False → пропускает кадр без обработки.
         Без command_sender (редактор без живого backend) — no-op (нечего слать).
         """
-        if self._suppress_changes:
-            return
         if self._command_sender is None or not self._current_process or not self._current_plugin_name:
             return
         try:
@@ -338,11 +270,6 @@ class NodeInspectorPanel(QWidget):
             )
         except Exception:
             logger.debug("set_enabled не отправлен для %s.%s", self._current_process, self._current_plugin_name)
-
-    def _emit_lock(self, locked: bool) -> None:
-        """Кнопки «Закрепить/Открепить» → сигнал для текущей ноды."""
-        if self._current_node_id:
-            self.node_lock_set_requested.emit(self._current_node_id, locked)
 
     # ------------------------------------------------------------------ #
     #  Публичный API: show_plugin_node                                     #
@@ -390,9 +317,6 @@ class NodeInspectorPanel(QWidget):
             self._current_process = process_name or node_id
             self._current_plugin_index = plugin_index
             self._current_plugin_name = plugin_name or node_id
-            # Сброс тумблера bypass в «включено» при выборе ноды (readback живого
-            # состояния пока нет — дефолт enabled; signal подавлен, чтобы не слать команду).
-            self._bypass_check.setChecked(True)
             self._placeholder.setVisible(False)
             self._content.setVisible(True)
 
@@ -408,28 +332,13 @@ class NodeInspectorPanel(QWidget):
             self._exec_info_form.setVisible(True)
             self._populate_exec_info(node_id, category, plugins)
 
-            # Скрыть display-combo
-            self._display_id_form.setVisible(False)
-
-            # Заполнить combo IPC-таргета из активного рецепта. Показываем форму ТОЛЬКО
-            # если есть что выбрать (иначе пустой disabled combo путает — это и была
-            # жалоба «почему не могу поменять»: combo не про исполнение и часто пуст).
-            self._populate_target_process_combo(target_process)
-            has_targets = bool(self._target_process_combo and self._target_process_combo.isEnabled())
-            self._target_process_form.setVisible(has_targets)
-
-            # Строка «Процесс / Воркер»: combo переноса в процесс + combo воркера.
-            # Воркер-combo заполняем воркерами ТЕКУЩЕГО процесса, preselect из config
-            # (assigned_worker). Строку показываем всегда в plugin-режиме — выбор воркера
-            # релевантен независимо от наличия других процессов для переноса.
-            self._suppress_changes = True
-            try:
-                self._populate_move_process_combo(available_processes)
-                assigned_worker = str((params or {}).get("assigned_worker", "") or "")
-                self._populate_move_worker_combo(self._current_process, assigned_worker)
-            finally:
-                self._suppress_changes = False
-            self._move_process_form.setVisible(True)
+            # Селекторы (IPC-таргет + перенос процесса + воркер + фиксация + bypass):
+            # секция сама подавляет свои сигналы на время наполнения (Н-6). Форму IPC-таргета
+            # показывает только при непустом combo; строку «Процесс / Воркер» — всегда.
+            assigned_worker = str((params or {}).get("assigned_worker", "") or "")
+            self._selector_section.configure_plugin_mode(
+                self._current_process, target_process, available_processes, assigned_worker
+            )
 
             # Форма параметров: заголовки плагинов процесса + поля выбранного плагина.
             # Поля резолвятся по plugin_name (имя регистра), а не node_id: RegistersManager
@@ -521,19 +430,14 @@ class NodeInspectorPanel(QWidget):
             self._category_badge.setText("display")
             self._category_badge.setStyleSheet(f"background-color: {DISPLAY_CATEGORY_COLOR}; color: #fff;")
 
-            # Показать display-combo, скрыть target_process / move-process combo
-            self._target_process_form.setVisible(False)
-            self._move_process_form.setVisible(False)
-            self._display_id_form.setVisible(True)
+            # Селекторы: display-режим (combo Display виден, target/move скрыты, populate).
+            self._selector_section.configure_display_mode(display_id)
 
             # Блок «Исполнение» не относится к display-узлам — очистить и спрятать.
             self._clear_exec_info()
             self._exec_info_form.setVisible(False)
             self._hide_camera_actual()
             self._io_debug.clear_target()  # у display-узла нет плагина → io-debug спит
-
-            # Заполнить combo из DisplayRegistry
-            self._populate_display_id_combo(display_id)
 
             # Очистить параметры (у display нет параметров)
             self._clear_params()
@@ -593,92 +497,57 @@ class NodeInspectorPanel(QWidget):
         self._exec_section.clear()
 
     # ------------------------------------------------------------------ #
-    #  Заполнение combo                                                    #
+    #  Селекторы: провайдеры данных + compat-швы + refresh (F.6)           #
     # ------------------------------------------------------------------ #
 
-    def _populate_target_process_combo(self, current_value: str = "") -> None:
-        """Заполнить combo «Процесс назначения» именами процессов из рецепта.
+    @property
+    def _target_process_combo(self) -> QComboBox:
+        """Compat-шов: combo IPC-таргета (тесты читают items/currentText)."""
+        return self._selector_section._target_process_combo
 
-        Если RecipeManager или активный рецепт недоступны — combo пустое и disabled.
+    @property
+    def _display_id_combo(self) -> QComboBox:
+        """Compat-шов: combo Display (тесты читают itemData/currentIndex)."""
+        return self._selector_section._display_id_combo
 
-        Args:
-            current_value: текущее значение, которое нужно выбрать.
-        """
-        combo = self._target_process_combo
-        if combo is None:
-            return
+    @property
+    def _move_worker_combo(self) -> QComboBox:
+        """Compat-шов: combo воркера (тесты читают/выбирают воркеров)."""
+        return self._selector_section._move_worker_combo
 
-        combo.clear()
-        process_names = self._get_process_names_from_recipe()
+    @property
+    def _move_process_form(self) -> QWidget:
+        """Compat-шов: форма «Процесс / Воркер» (тесты проверяют видимость)."""
+        return self._selector_section._move_process_form
 
-        if not process_names:
-            combo.setEnabled(False)
-            return
+    @property
+    def _target_process_form(self) -> QWidget:
+        """Compat-шов: форма IPC-таргета (тесты проверяют видимость)."""
+        return self._selector_section._target_process_form
 
-        combo.setEnabled(True)
-        for name in process_names:
-            combo.addItem(name)
+    @property
+    def _display_id_form(self) -> QWidget:
+        """Compat-шов: форма Display (тесты проверяют видимость)."""
+        return self._selector_section._display_id_form
 
-        # Установить текущее значение
-        if current_value:
-            idx = combo.findText(current_value)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
+    @property
+    def _lock_btn(self) -> QPushButton:
+        """Compat-шов: кнопка «Закрепить» (тесты кликают → node_lock_set_requested)."""
+        return self._selector_section._lock_btn
 
-    def _populate_display_id_combo(self, current_display_id: str = "") -> None:
-        """Заполнить combo «Display» из DisplayRegistry.
-
-        Если DisplayRegistry недоступен — combo пустое и disabled.
-
-        Args:
-            current_display_id: текущий выбранный display_id.
-        """
-        combo = self._display_id_combo
-        if combo is None:
-            return
-
-        combo.clear()
-        entries = self._get_display_entries()
-
-        if not entries:
-            combo.setEnabled(False)
-            return
-
-        combo.setEnabled(True)
-        for entry in entries:
-            label = f"{entry.name} ({entry.id})" if entry.name else entry.id
-            combo.addItem(label, userData=entry.id)
-
-        # Установить текущее значение
-        if current_display_id:
-            for i in range(combo.count()):
-                if combo.itemData(i) == current_display_id:
-                    combo.setCurrentIndex(i)
-                    break
+    @property
+    def _unlock_btn(self) -> QPushButton:
+        """Compat-шов: кнопка «Открепить»."""
+        return self._selector_section._unlock_btn
 
     def refresh_display_combo(self) -> None:
-        """Обновить combo «Display» при изменении DisplayRegistry.
-
-        Вызывается при подписке на state.displays.changed.
-        Работает только в режиме display (иначе no-op).
-        """
+        """Обновить combo «Display» при изменении DisplayRegistry (no-op вне display-режима)."""
         if self._mode != "display":
             return
-        # Получить текущий выбранный display_id
-        current_id = ""
-        if self._display_id_combo is not None:
-            idx = self._display_id_combo.currentIndex()
-            if idx >= 0:
-                current_id = self._display_id_combo.itemData(idx) or ""
-
-        self._suppress_changes = True
-        try:
-            self._populate_display_id_combo(current_id)
-        finally:
-            self._suppress_changes = False
+        self._selector_section.refresh_display(self._selector_section.current_display_id())
 
     # ------------------------------------------------------------------ #
-    #  Вспомогательные методы: получение данных из контекста               #
+    #  Провайдеры данных для секций (делегаты selectors_data, F.6)         #
     # ------------------------------------------------------------------ #
 
     def _get_process_names_from_recipe(self) -> list[str]:
@@ -691,100 +560,10 @@ class NodeInspectorPanel(QWidget):
         displays = self._services.displays if self._services is not None else None
         return display_entries(displays)
 
-    # ------------------------------------------------------------------ #
-    #  Обработчики сигналов combo                                          #
-    # ------------------------------------------------------------------ #
-
-    def _on_target_process_combo_changed(self, index: int) -> None:
-        """Обработчик выбора процесса в combo «Процесс назначения»."""
-        if self._suppress_changes:
-            return
-        if self._target_process_combo is None:
-            return
-        new_process = self._target_process_combo.currentText()
-        if new_process and self._current_node_id:
-            self.target_process_changed.emit(self._current_node_id, new_process)
-
-    def _on_display_id_combo_changed(self, index: int) -> None:
-        """Обработчик выбора display в combo «Display»."""
-        if self._suppress_changes:
-            return
-        if self._display_id_combo is None:
-            return
-        new_display_id = self._display_id_combo.itemData(index) or ""
-        if new_display_id and self._current_node_id:
-            self.display_id_changed.emit(self._current_node_id, new_display_id)
-
-    def _populate_move_process_combo(self, available_processes: list[str] | None) -> None:
-        """Заполнить combo «Перенести в процесс» (Phase B).
-
-        Первый пункт — плейсхолдер (userData=""), не вызывает мутацию.
-        """
-        combo = self._move_process_combo
-        if combo is None:
-            return
-        combo.clear()
-        combo.addItem("— перенести в… —", userData="")
-        for name in available_processes or []:
-            combo.addItem(name, userData=name)
-        combo.setCurrentIndex(0)
-
-    def _on_move_process_combo_changed(self, index: int) -> None:
-        """Обработчик выбора процесса-приёмника (Phase B) → move_to_process_requested.
-
-        D.1: эмитим ИМЯ ПРОЦЕССА (_current_process), а не node_id плагин-ноды —
-        presenter._on_move_to_process_requested ждёт from_process. Per-plugin drag
-        (D.3) — основной путь; combo переносит весь процесс (его плагины).
-        """
-        if self._suppress_changes:
-            return
-        if self._move_process_combo is None:
-            return
-        to_process = self._move_process_combo.itemData(index) or ""
-        # Воркер-combo всегда отражает воркеры РЕЛЕВАНТНОГО процесса: выбранного в
-        # combo, либо текущего (когда плейсхолдер). Перезаполняем при смене процесса.
-        self._suppress_changes = True
-        try:
-            self._populate_move_worker_combo(to_process or self._current_process)
-        finally:
-            self._suppress_changes = False
-        if to_process and self._current_process and to_process != self._current_process:
-            self.move_to_process_requested.emit(self._current_process, to_process)
-
     def _get_workers_for_process(self, process_name: str) -> list[str]:
         """Имена воркеров процесса (делегат selectors_data, F.6)."""
         topology = self._services.topology if self._services is not None else None
         return workers_for_process(topology, process_name)
-
-    def _populate_move_worker_combo(self, process_name: str, current_worker: str = "") -> None:
-        """Заполнить воркер-combo воркерами процесса. Пусто/нет процесса → message_processor."""
-        combo = self._move_worker_combo
-        if combo is None:
-            return
-        combo.clear()
-        workers = self._get_workers_for_process(process_name)
-        combo.setEnabled(bool(workers))
-        for name in workers:
-            combo.addItem(name, userData=name)
-        if current_worker:
-            idx = combo.findData(current_worker)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
-
-    def _on_move_worker_combo_changed(self, index: int) -> None:
-        """Выбор воркера → персист assigned_worker в config плагина (через field_changed).
-
-        Переиспользуем существующий путь field_changed → SetPluginConfig (G.4.3):
-        assigned_worker сохраняется в config плагина editor-топологии. Runtime-
-        исполнение по этому полю — отдельный шаг (см. plans/pipeline-node-process-worker.md).
-        """
-        if self._suppress_changes:
-            return
-        if self._move_worker_combo is None:
-            return
-        worker = self._move_worker_combo.itemData(index) or ""
-        if worker and self._current_process:
-            self.field_changed.emit(self._current_process, "assigned_worker", worker)
 
     # ------------------------------------------------------------------ #
     #  Форма параметров: делегаты ParamsFormSection (F.6)                  #
@@ -821,9 +600,7 @@ class NodeInspectorPanel(QWidget):
         self._current_node_id = ""
         self._placeholder.setVisible(True)
         self._content.setVisible(False)
-        self._target_process_form.setVisible(False)
-        self._move_process_form.setVisible(False)
-        self._display_id_form.setVisible(False)
+        self._selector_section.clear()
         self._clear_exec_info()
         self._hide_camera_actual()
         self._io_debug.clear_target()
