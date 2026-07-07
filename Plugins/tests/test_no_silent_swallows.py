@@ -26,16 +26,6 @@ _REPO_ROOT = _PLUGINS_ROOT.parent
 #: Тег-конвенция волны C для легитимных swallow без report_error.
 _TAG = "# no-health:"
 
-#: Временный skip-список: зону Plugins/sources/ параллельно правит Task 2.4 —
-#: снимается при merge 2.4 (файлы перечислены по срезу на момент Task 2.5).
-_WAVE_C_PART1: list[str] = [
-    "Plugins/sources/camera_service/backends/hikvision.py",
-    "Plugins/sources/camera_service/backends/webcam.py",
-    "Plugins/sources/camera_service/backends/webcam_controls.py",
-    "Plugins/sources/camera_service/plugin.py",
-    "Plugins/sources/capture/plugin.py",
-]
-
 
 def _iter_plugin_files() -> list[Path]:
     """Все .py слоя Plugins/, кроме тестов (сами тесты гейту не подчиняются)."""
@@ -91,9 +81,6 @@ def test_no_silent_swallows_in_plugins() -> None:
     """Каждый except-handler в Plugins/: report_error ИЛИ raise ИЛИ тег no-health."""
     all_violations: list[str] = []
     for path in _iter_plugin_files():
-        rel = str(path.relative_to(_REPO_ROOT))
-        if rel in _WAVE_C_PART1:
-            continue  # снимается при merge 2.4 (Plugins/sources — параллельный агент)
         all_violations.extend(_scan_file(path))
 
     assert not all_violations, (
@@ -101,21 +88,4 @@ def test_no_silent_swallows_in_plugins() -> None:
         + "\n".join(all_violations)
         + "\nЛибо добавь ctx.health.report_error(exc, context=...), либо пометь "
         f"легитимный swallow тегом '{_TAG} <причина>'."
-    )
-
-
-def test_wave_c_skip_list_shrinks() -> None:
-    """Skip-список — временный: файлы без нарушений обязаны из него уходить.
-
-    Если файл из _WAVE_C_PART1 уже чист (Task 2.4 смержен) — тест требует
-    убрать его из списка, чтобы skip не пережил свою причину.
-    """
-    stale = [
-        rel
-        for rel in _WAVE_C_PART1
-        if not (_REPO_ROOT / rel).exists() or not _scan_file(_REPO_ROOT / rel)
-    ]
-    assert not stale, (
-        "Файлы из skip-списка _WAVE_C_PART1 уже чисты (или удалены) — убери их из списка:\n"
-        + "\n".join(stale)
     )
