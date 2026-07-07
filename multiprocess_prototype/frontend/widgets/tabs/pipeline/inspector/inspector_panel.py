@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
 from ..graph.constants import CATEGORY_COLORS
 from .cam_actual_section import CamActualSection
+from .exec_info_section import ExecInfoSection
 from .io_debug_section import IoDebugSection
 from .selectors_data import (
     DisplayEntry as _DisplayEntry,
@@ -181,15 +182,9 @@ class NodeInspectorPanel(QWidget):
         content_layout.addWidget(self._category_badge)
 
         # Блок «Исполнение» (Phase A, read-only): в каком ПРОЦЕССЕ исполняется нода
-        # и в каком ВОРКЕРЕ каждый плагин (+ порядок в цепочке). Воркеры сейчас
-        # назначаются автоматически в GenericProcess (см. plans/pipeline-node-process-worker.md):
-        # source → свой source_producer_<plugin>; processing → общий pipeline_executor
-        # (последовательно). Поэтому блок read-only — назначение придёт в Phase C.
-        self._exec_info_form = QWidget()
-        self._exec_info_layout = QFormLayout(self._exec_info_form)
-        self._exec_info_layout.setContentsMargins(0, 0, 0, 0)
-        self._exec_info_layout.setSpacing(2)
-        content_layout.addWidget(self._exec_info_form)
+        # и в каком ВОРКЕРЕ каждый плагин (+ порядок). Секция инкапсулирует раскладку (F.6).
+        self._exec_section = ExecInfoSection()
+        content_layout.addWidget(self._exec_section)
 
         # Разделитель
         line = QFrame()
@@ -592,50 +587,23 @@ class NodeInspectorPanel(QWidget):
     # Оставлен как staticmethod для совместимости со стабильными швами тестов.
     _worker_for_plugin = staticmethod(worker_label)
 
-    def _populate_exec_info(
-        self,
-        process_name: str,
-        node_category: str,
-        plugins: list | None,
-    ) -> None:
-        """Заполнить блок «Исполнение»: процесс + воркер/порядок по плагинам.
+    @property
+    def _exec_info_form(self) -> QWidget:
+        """Compat-шов: виджет секции «Исполнение» (тесты проверяют isHidden())."""
+        return self._exec_section
 
-        Read-only (Phase A): воркеры назначаются автоматически в GenericProcess,
-        смена процесса/воркера придёт в Phase B/C (plans/pipeline-node-process-worker.md).
-        """
-        self._clear_exec_info()
+    @property
+    def _exec_info_layout(self) -> "QFormLayout":
+        """Compat-шов: раскладка секции «Исполнение» (тесты читают строки/count)."""
+        return self._exec_section._layout
 
-        proc_value = QLabel(process_name)
-        proc_value.setProperty("role", "exec-process")
-        self._exec_info_layout.addRow("Процесс:", proc_value)
-
-        plugin_list = plugins or []
-        # Шаг считаем только среди processing-плагинов (источники независимы, свой поток).
-        processing_total = sum(
-            1 for p in plugin_list if ((p.get("category") if isinstance(p, dict) else "") or node_category) != "source"
-        )
-        step = 0
-        for p in plugin_list:
-            if isinstance(p, dict):
-                pname = p.get("plugin_name", "")
-                pcat = p.get("category") or node_category
-            else:
-                pname = str(p)
-                pcat = node_category
-            if pcat != "source":
-                step += 1
-                worker = self._worker_for_plugin(pcat, pname, step, processing_total)
-            else:
-                worker = self._worker_for_plugin("source", pname, 0, 0)
-            self._exec_info_layout.addRow(f"{pname}:", QLabel(worker))
+    def _populate_exec_info(self, process_name: str, node_category: str, plugins: list | None) -> None:
+        """Заполнить блок «Исполнение» (делегат ExecInfoSection, F.6)."""
+        self._exec_section.populate(process_name, node_category, plugins)
 
     def _clear_exec_info(self) -> None:
-        """Очистить строки блока «Исполнение»."""
-        while self._exec_info_layout.count():
-            item = self._exec_info_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
+        """Очистить блок «Исполнение» (делегат ExecInfoSection, F.6)."""
+        self._exec_section.clear()
 
     # ------------------------------------------------------------------ #
     #  Заполнение combo                                                    #
