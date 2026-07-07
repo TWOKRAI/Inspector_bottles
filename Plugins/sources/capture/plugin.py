@@ -149,7 +149,11 @@ class CapturePlugin(ProcessModulePlugin):
 
         try:
             ret, frame = self._cap.read()
-        except Exception:
+        except Exception as exc:
+            # contain → report → degrade (Ф2 Task 2.4): ошибку НЕ пробрасываем
+            # (проброс обрушит воркер), но честно кормим health — после порога
+            # подряд-ошибок breaker сам переведёт процесс в degraded.
+            self._ctx.health.report_error(exc, context="capture: чтение кадра камеры (_cap.read)")
             return []
 
         if not ret or frame is None:
