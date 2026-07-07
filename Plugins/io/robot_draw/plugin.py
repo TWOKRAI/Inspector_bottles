@@ -163,8 +163,9 @@ class RobotDrawPlugin(ProcessModulePlugin):
             try:
                 self._queue.put_nowait(task)
                 self._reg.queue_len = self._queue.qsize()
-            except queue.Full:
+            except queue.Full as exc:
                 self._reg.jobs_dropped += 1
+                self._ctx.health.report_error(exc, context="robot_draw.enqueue")
                 self._ctx.log_error("RobotDrawPlugin: очередь заданий полна, задание отброшено")
             # Одноразово: разоружаемся после первой валидной пачки.
             self._armed = False
@@ -180,6 +181,7 @@ class RobotDrawPlugin(ProcessModulePlugin):
         try:
             path = self._dump_points(points)
         except Exception as exc:  # noqa: BLE001 — превью не должно валить pipeline
+            self._ctx.health.report_error(exc, context="robot_draw.preview")
             self._ctx.log_error(f"RobotDrawPlugin: не удалось записать предпросмотр точек: {exc}")
             return
         n = len(points)
@@ -254,7 +256,7 @@ class RobotDrawPlugin(ProcessModulePlugin):
                 continue
             try:
                 task = self._queue.get(timeout=_FORWARDER_POLL_S)
-            except queue.Empty:
+            except queue.Empty:  # no-health: control-flow — очередь пуста, обычный такт воркера
                 continue
 
             self._reg.queue_len = self._queue.qsize()
@@ -273,6 +275,7 @@ class RobotDrawPlugin(ProcessModulePlugin):
                 self._reg.jobs_dropped += 1
                 self._reg.hub_errors += 1
                 self._reg.last_error = str(exc)
+                self._ctx.health.report_error(exc, context="robot_draw.forward", throttle=30.0)
                 if not self._last_was_error:
                     self._ctx.log_error(f"RobotDrawPlugin: hub ошибка: {exc}")
                     self._last_was_error = True

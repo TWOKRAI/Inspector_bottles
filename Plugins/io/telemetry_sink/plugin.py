@@ -141,7 +141,7 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         # Финальный семпл — не потерять последнее окно данных.
         try:
             self._sample_once()
-        except Exception as exc:  # pragma: no cover — defensive на shutdown
+        except Exception as exc:  # pragma: no cover — no-health: defensive на shutdown
             ctx.log_error(f"TelemetrySinkPlugin: финальный семпл упал: {exc}")
 
         if self._sql is not None:
@@ -184,6 +184,7 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
             try:
                 self._sample_once()
             except Exception as exc:
+                self._ctx.health.report_error(exc, context="telemetry_sink.sample")
                 self._ctx.log_error(f"TelemetrySinkPlugin: семпл упал, продолжаю: {exc}")
 
     # Стандартные метрики `processes.<P>.state.<metric>` → колонки.
@@ -275,7 +276,7 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         raw = data.get("retention_days", self._reg.retention_days)
         try:
             days = int(raw)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # no-health: ошибка валидации аргумента — уходит в ответ команды
             return {"status": "error", "error": f"retention_days должно быть int, получено {raw!r}"}
         if days <= 0 or self._sql is None:
             return {"status": "ok", "purged": 0, "note": "ретенция выключена (retention_days=0)"}
