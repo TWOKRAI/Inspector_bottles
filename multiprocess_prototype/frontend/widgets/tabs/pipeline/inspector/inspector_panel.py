@@ -32,6 +32,7 @@ from ..graph.constants import CATEGORY_COLORS
 from .cam_actual_section import CamActualSection
 from .exec_info_section import ExecInfoSection
 from .io_debug_section import IoDebugSection
+from .params_form_section import ParamsFormSection
 from .selectors_data import (
     DisplayEntry as _DisplayEntry,
     display_entries,
@@ -89,10 +90,8 @@ class NodeInspectorPanel(QWidget):
         # совместимо с прямым field_changed.emit в тестах (1 плагин/процесс).
         self._current_plugin_index: int = 0
         self._suppress_changes: bool = False
-        # Хранит и QLineEdit (fallback) и FieldEditor (cards-режим)
-        self._field_editors: dict[str, Any] = {}
-        # Флаг: используем типизированные виджеты из CardsFieldFactory
-        self._use_cards: bool = False
+        # Форма параметров (cards/QLineEdit), _field_editors/_use_cards/hik-refs —
+        # внутри ParamsFormSection (F.6). Создаётся в _init_ui.
         # AppServices — задаётся через set_services()
         self._services: AppServices | None = None
         # G.2: live RegistersManager (FieldInfo-схемы) — runtime-dep через set_services,
@@ -103,9 +102,6 @@ class NodeInspectorPanel(QWidget):
         # command_sender + topology_bridge — для встраиваемых контролов Hikvision.
         self._command_sender: Any = None
         self._topology_bridge: Any = None
-        # Контроллер встроенного виджета Hikvision (держим ссылку, иначе GC).
-        self._hik_controller: Any = None
-        self._hik_runner: Any = None
         # Текущий режим отображения: "plugin" или "display"
         self._mode: str = "plugin"
         # Combo «Процесс назначения» (для plugin-узлов)
@@ -133,6 +129,8 @@ class NodeInspectorPanel(QWidget):
         """
         self._services = services
         self._registers_manager = registers_manager
+        # Форма параметров строит cards по FieldInfo из RegistersManager.
+        self._params_section.set_services(services, registers_manager)
         if bindings is not None:
             self._bindings = bindings
             # io-debug секция подписывается на io_peek через те же bindings.
@@ -294,11 +292,10 @@ class NodeInspectorPanel(QWidget):
         # карточка раскрыта целиком. Вертикальный overflow обрабатывает мастер-
         # скролл DiffScrollTabLayout (правый). Раньше здесь был QScrollArea —
         # он давал второй (внутренний) скроллбар, который путал (убран).
-        self._params_widget = QWidget()
-        self._params_layout = QFormLayout(self._params_widget)
-        self._params_layout.setContentsMargins(0, 4, 0, 4)
-        self._params_layout.setSpacing(6)
-        content_layout.addWidget(self._params_widget, stretch=1)
+        self._params_section = ParamsFormSection()
+        # Секция эмитит field_changed(field, value); панель добавляет процесс.
+        self._params_section.field_changed.connect(self._on_params_field_changed)
+        content_layout.addWidget(self._params_section, stretch=1)
 
         # Блок «Камера (actual)» — read-only телеметрия что камера реально применила
         # (cap.get), привязка к state store processes.{proc}.state.cam.actual.*.
@@ -434,23 +431,11 @@ class NodeInspectorPanel(QWidget):
                 self._suppress_changes = False
             self._move_process_form.setVisible(True)
 
-            # Показать параметры плагина в scroll area
-            self._clear_params()
-            if plugins:
-                for p in plugins:
-                    pname = p.get("plugin_name", "") if isinstance(p, dict) else str(p)
-                    label = QLabel(pname)
-                    label.setProperty("role", "plugin-name")
-                    self._params_layout.addRow(label)
-
-            # Поля строим по plugin_name (имя регистра), а не node_id (process_name):
-            # RegistersManager ключует регистры по имени плагина. _current_process
-            # остаётся node_id — туда уйдёт SetPluginConfig при правке поля.
-            fields_used = self._try_build_cards_editors(plugin_name or node_id, params)
-            self._use_cards = bool(fields_used)
-
-            if not self._use_cards and params:
-                self._build_lineedit_editors(params)
+            # Форма параметров: заголовки плагинов процесса + поля выбранного плагина.
+            # Поля резолвятся по plugin_name (имя регистра), а не node_id: RegistersManager
+            # ключует регистры по имени плагина. _current_process остаётся node_id — туда
+            # уйдёт SetPluginConfig при правке поля.
+            self._params_section.build(plugin_name or node_id, params, plugins)
 
             # Actual-телеметрия камеры (Phase 3): только для camera_service.
             if (plugin_name or node_id) == "camera_service":
@@ -461,7 +446,9 @@ class NodeInspectorPanel(QWidget):
             # Контролы камеры Hikvision (поиск/захват/параметры/SDK App) — дублируют
             # секцию Services прямо в карточке ноды. Только для плагина hikvision.
             if (plugin_name or node_id) == "hikvision":
-                self._embed_hikvision_controls()
+                self._params_section.embed_hikvision(
+                    self._services, self._command_sender, self._topology_bridge
+                )
 
             # io-debug: привязать секцию к io_peek текущего плагина (process+plugin).
             self._io_debug.set_target(self._current_process, plugin_name or node_id)
@@ -800,110 +787,33 @@ class NodeInspectorPanel(QWidget):
             self.field_changed.emit(self._current_process, "assigned_worker", worker)
 
     # ------------------------------------------------------------------ #
-    #  Оригинальные методы (backward compatibility)                        #
+    #  Форма параметров: делегаты ParamsFormSection (F.6)                  #
     # ------------------------------------------------------------------ #
 
-    def _try_build_cards_editors(
-        self,
-        plugin_name: str,
-        params: dict[str, Any] | None,
-    ) -> bool:
-        """Попытаться создать типизированные виджеты через CardsFieldFactory.
+    @property
+    def _field_editors(self) -> dict[str, Any]:
+        """Compat-шов: редакторы полей формы параметров (тесты читают dict)."""
+        return self._params_section._field_editors
 
-        Args:
-            plugin_name: имя плагина (= имя регистра). RegistersManager ключует
-                регистры по имени плагина — тот же путь, что вкладка Plugins
-                (PluginsPresenter.get_register_fields). НЕ имя процесса.
+    @property
+    def _use_cards(self) -> bool:
+        """Compat-шов: флаг cards-режима формы параметров."""
+        return self._params_section._use_cards
 
-        Returns:
-            True если виджеты успешно созданы, False — нужен fallback.
-        """
-        if self._services is None:
-            return False
+    @property
+    def _params_layout(self) -> "QFormLayout":
+        """Compat-шов: раскладка формы параметров (тесты читают count/строки)."""
+        return self._params_section._layout
 
-        # G.2: live RegistersManager — explicit runtime-dep (через set_services, Q-F1=B).
-        # forms-фабрике нужен framework FieldInfo (get_fields), который domain RegistersBackend
-        # не может экспонировать (FieldSpec lossy + запрет импорта framework в domain).
-        rm = self._registers_manager
-        if rm is None:
-            return False
+    def _on_params_field_changed(self, field_name: str, value: Any) -> None:
+        """Переизлучить field_changed секции с адресом процесса (гейт _suppress_changes)."""
+        if self._suppress_changes:
+            return
+        self.field_changed.emit(self._current_process, field_name, value)
 
-        # FieldInfo из RegistersManager по имени ПЛАГИНА (= имя регистра).
-        fields = rm.get_fields(plugin_name)
-        if not fields:
-            return False
-
-        from multiprocess_prototype.frontend.forms.factory import CardsFieldFactory
-
-        # TODO Phase G (G.4): form_context() не покрыт AppServices Protocol.
-        # Для binding-aware editors нужен form_ctx. Пока — None (legacy путь).
-        form_ctx = None
-
-        for field_info in fields:
-            editor = CardsFieldFactory.create(
-                field_info,
-                parent=self._params_widget,
-                form_ctx=form_ctx,
-            )
-
-            # Установить значение из params если передан
-            if params and field_info.field_name in params:
-                try:
-                    editor.setter(params[field_info.field_name])
-                except Exception:
-                    logger.debug(
-                        "Не удалось установить значение '%s' для поля '%s'",
-                        params[field_info.field_name],
-                        field_info.field_name,
-                    )
-
-            # Подключить сигнал изменения если есть
-            if editor.change_signal is not None:
-                fn = field_info.field_name
-                editor.change_signal.connect(lambda *_args, _fn=fn, _ed=editor: self._on_field_editor_changed(_fn, _ed))
-
-            self._field_editors[field_info.field_name] = editor
-            self._params_layout.addRow(editor.label, editor.widget)
-
-        return True
-
-    def _embed_hikvision_controls(self) -> None:
-        """Встроить контролы камеры Hikvision (поиск/захват/параметры/SDK App).
-
-        Дублирует Services-секцию «Hikvision Camera» прямо в карточке ноды.
-        Требует command_sender/topology_bridge (через set_services из RuntimeDeps);
-        без них кнопки дадут понятный статус «нет процесса камеры».
-        """
-        from types import SimpleNamespace
-
-        from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
-        from multiprocess_prototype.frontend.widgets.tabs.services.hikvision.controller import (
-            build_hikvision_controls,
-        )
-
-        runtime = SimpleNamespace(
-            command_sender=self._command_sender,
-            topology_bridge=self._topology_bridge,
-        )
-        self._hik_runner = RequestRunner()
-        widget, controller = build_hikvision_controls(
-            services=self._services,
-            runtime=runtime,
-            request_runner=self._hik_runner,
-        )
-        self._hik_runner.setParent(widget)
-        self._hik_controller = controller
-        # Вставляем контролы первой строкой params (над register-полями плагина).
-        self._params_layout.insertRow(0, widget)
-
-    def _build_lineedit_editors(self, params: dict[str, Any]) -> None:
-        """Создать QLineEdit-редакторы (fallback если CardsFieldFactory недоступен)."""
-        for field_name, value in params.items():
-            editor = QLineEdit(str(value))
-            editor.setProperty("field_name", field_name)
-            editor.editingFinished.connect(lambda fn=field_name, ed=editor: self._on_field_edited(fn, ed))
-            self._field_editors[field_name] = editor
-            self._params_layout.addRow(field_name, editor)
+    def _clear_params(self) -> None:
+        """Очистить форму параметров (делегат ParamsFormSection, F.6)."""
+        self._params_section.clear()
 
     def clear(self) -> None:
         """Очистить inspector (показать placeholder)."""
@@ -933,48 +843,13 @@ class NodeInspectorPanel(QWidget):
         """
         return self._current_plugin_index
 
-    def _on_field_edited(self, field_name: str, editor: QLineEdit) -> None:
-        """Обработчик изменения поля пользователем (QLineEdit fallback)."""
-        if self._suppress_changes:
-            return
-        value = editor.text()
-        self.field_changed.emit(self._current_process, field_name, value)
-
     def _on_field_editor_changed(self, field_name: str, editor: "FieldEditor") -> None:
-        """Обработчик изменения поля через FieldEditor (cards-режим).
+        """Compat-шов для прямого вызова из тестов (cards-режим).
 
-        Args:
-            field_name: имя поля.
-            editor: FieldEditor, у которого сработал change_signal.
+        Штатный путь редактирования полей идёт через ParamsFormSection.field_changed →
+        _on_params_field_changed. Метод оставлен для тестов, дёргающих его напрямую.
         """
         if self._suppress_changes:
             return
         value = editor.getter()
         self.field_changed.emit(self._current_process, field_name, value)
-
-    def _clear_params(self) -> None:
-        """Удалить все виджеты параметров.
-
-        Для FieldEditor: отключаем change_signal перед удалением
-        чтобы избежать утечек сигналов при переключении нод.
-        """
-        for field_name, editor in self._field_editors.items():
-            if not isinstance(editor, QLineEdit):
-                # FieldEditor — отключаем change_signal
-                try:
-                    if editor.change_signal is not None:
-                        editor.change_signal.disconnect()
-                except (RuntimeError, TypeError):
-                    pass  # Уже отключён или C++ объект удалён
-
-        self._field_editors.clear()
-        self._use_cards = False
-        # Сбросить ссылки на встроенные контролы Hikvision (виджеты удалит цикл ниже).
-        self._hik_controller = None
-        self._hik_runner = None
-
-        while self._params_layout.count():
-            item = self._params_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
