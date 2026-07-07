@@ -24,7 +24,7 @@ try:
     )
 
     _HAS_PKG = True
-except ImportError:
+except ImportError:  # no-health: optional-import gate (пакет hikvision_camera/MVS SDK может отсутствовать)
     pass
 
 
