@@ -230,6 +230,7 @@ class RobotIoPlugin(ProcessModulePlugin):
                 self._reg.jobs_dropped += 1
                 self._reg.hub_errors += 1
                 self._reg.last_error = str(exc)
+                self._ctx.health.report_error(exc, context="robot_io.forward", throttle=30.0)
                 # once-per-transition: логируем только при смене состояния
                 if not self._last_was_error:
                     self._ctx.log_error(f"RobotIoPlugin: hub ошибка: {exc}")

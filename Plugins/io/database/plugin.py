@@ -177,6 +177,7 @@ class DatabasePlugin(ProcessModulePlugin):
                 saved += 1
             except Exception as e:
                 self._total_errors += 1
+                self._ctx.health.report_error(e, context="database.insert")
                 if not first_error_logged:
                     # Логируем только первую ошибку пакета — не засорять лог при сбое БД.
                     self._ctx.log_error(f"Detection insert failed: {e}")

@@ -101,7 +101,7 @@ def save_calibration(camera_id: str, payload: dict, base_dir: str | Path = DEFAU
     except BaseException:
         try:
             os.unlink(tmp)
-        except OSError:
+        except OSError:  # no-health: best-effort подчистка tmp, исходная ошибка уходит через raise ниже
             pass
         raise
     return path

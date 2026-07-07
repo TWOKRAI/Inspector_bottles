@@ -96,6 +96,7 @@ class DrawingIoPlugin(ProcessModulePlugin):
         try:
             points, bounds, _meta, _img = store.load(full)
         except Exception as exc:  # noqa: BLE001 — ошибку отдаём в результат команды
+            self._ctx.health.report_error(exc, context="drawing_io.load")
             self._ctx.log_error(f"DrawingIoPlugin: не удалось загрузить {full}: {exc}")
             return {"status": "error", "message": str(exc)}
         self._loaded_points = points
@@ -173,6 +174,7 @@ class DrawingIoPlugin(ProcessModulePlugin):
                 image_bgr=frame,
             )
         except Exception as exc:  # noqa: BLE001 — сохранение не должно ронять pipeline
+            self._ctx.health.report_error(exc, context="drawing_io.save")
             self._ctx.log_error(f"DrawingIoPlugin: ошибка сохранения: {exc}")
             return
         self._reg.last_saved = path

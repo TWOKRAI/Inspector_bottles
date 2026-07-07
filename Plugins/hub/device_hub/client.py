@@ -110,6 +110,11 @@ class DeviceHubClient:
         try:
             raw = router.request(msg, timeout=t)
         except Exception as exc:
+            # IPC-отказ — операционная ошибка процесса-вызывателя: кормим его health,
+            # даже если вызыватель обработает только dict-ответ (getattr — ctx может быть Sub/mock).
+            health = getattr(self._ctx, "health", None)
+            if health is not None:
+                health.report_error(exc, context="device_hub_client.request", throttle=30.0)
             return {"status": "error", "message": f"IPC ошибка: {exc}"}
 
         return _normalize_response(raw)
@@ -151,5 +156,9 @@ class DeviceHubClient:
         try:
             send_async(msg)
             return True
-        except Exception:
+        except Exception as exc:
+            # fire-and-forget: сообщение потеряно — учитываем в health вызывателя
+            health = getattr(self._ctx, "health", None)
+            if health is not None:
+                health.report_error(exc, context="device_hub_client.send_async", throttle=30.0)
             return False

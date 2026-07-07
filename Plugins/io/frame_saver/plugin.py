@@ -219,7 +219,8 @@ class FrameSaverPlugin(ProcessModulePlugin):
                     tmp.write_bytes(buf.tobytes())
                     tmp.replace(path)  # АТОМАРНЫЙ rename
                     ok = True
-            except (cv2.error, OSError, ValueError):
+            except (cv2.error, OSError, ValueError) as exc:
+                self._ctx.health.report_error(exc, context="frame_saver.write", throttle=30.0)
                 ok = False
 
             if ok:
@@ -276,8 +277,9 @@ class FrameSaverPlugin(ProcessModulePlugin):
         except (OSError, TypeError, ValueError) as exc:
             try:
                 tmp.unlink(missing_ok=True)
-            except OSError:
+            except OSError:  # no-health: best-effort подчистка tmp — исходная ошибка отчитывается ниже
                 pass
+            self._ctx.health.report_error(exc, context="frame_saver.sidecar", throttle=30.0)
             self._ctx.log_error(f"FrameSaver: sidecar не записан для {path.name}: {exc}")
 
     def _resolve_dir(self) -> Path:
@@ -316,7 +318,7 @@ class FrameSaverPlugin(ProcessModulePlugin):
         for f in d.glob("*.tmp"):
             try:
                 f.unlink()
-            except OSError:
+            except OSError:  # no-health: best-effort подчистка осиротевших tmp
                 pass
 
     def _cleanup_old_days(self, base: Path) -> None:
@@ -335,12 +337,13 @@ class FrameSaverPlugin(ProcessModulePlugin):
                 continue
             try:
                 folder_date = datetime.strptime(sub.name, DATE_FMT).date()
-            except ValueError:
-                continue  # не папка-дата — не трогаем
+            except ValueError:  # no-health: control-flow — не папка-дата, пропускаем
+                continue
             if folder_date < cutoff:
                 try:
                     shutil.rmtree(sub)
                 except OSError as e:
+                    self._ctx.health.report_error(e, context="frame_saver.retention")
                     self._ctx.log_error(f"FrameSaver retention: не удалось удалить {sub}: {e}")
 
     def _on_write_error(self, tmp: Path) -> None:
@@ -354,7 +357,7 @@ class FrameSaverPlugin(ProcessModulePlugin):
             )
         try:
             tmp.unlink(missing_ok=True)  # частично записанный tmp не нужен
-        except OSError:
+        except OSError:  # no-health: best-effort подчистка tmp — сама ошибка записи уже отчитана
             pass
 
     def _ext(self) -> str:
