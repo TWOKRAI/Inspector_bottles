@@ -129,6 +129,8 @@ class PluginOrchestrator:
                     ctx.registers = registers_manager
                 # frame-trace: имя процесса-узла для process-спанов плагина.
                 plugin._trace_node = self._services.name
+                # health (Ф2 Task 2.1): имя плагина — дефолтный context для ctx.health.
+                ctx._plugin_name = plugin.name
                 plugin._do_configure(ctx)
                 self._plugins.append(plugin)
                 self._contexts.append(ctx)

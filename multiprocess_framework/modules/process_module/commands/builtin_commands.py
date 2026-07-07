@@ -35,6 +35,7 @@ class BuiltinCommands:
         self._register_wire_commands()
         self._register_introspect_commands()
         self._register_observability_commands()
+        self._register_health_commands()
         self._register_relay_commands()
 
     # ========================================================================
@@ -740,6 +741,75 @@ class BuiltinCommands:
             if mgr is not None and hasattr(mgr, "add_log_tap"):
                 managers.append(mgr)
         return managers
+
+    # ========================================================================
+    # HEALTH — наблюдаемость отказов (Ф2 Task 2.1)
+    # ========================================================================
+
+    def _register_health_commands(self) -> None:
+        """Зарегистрировать health.report / health.status.
+
+        ``health.report`` — диагностический впрыск health-события в процесс: даёт
+        детерминированный способ проверить канал наблюдаемости (report_error →
+        heartbeat → state-дерево → driver), не дожидаясь реального отказа железа.
+        ``health.status`` — прочитать текущий снапшот здоровья процесса.
+        """
+        cm = self._services.command_manager
+        if not cm:
+            return
+        specs = [
+            (
+                "health.report",
+                self._cmd_health_report,
+                "Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости",
+            ),
+            (
+                "health.status",
+                self._cmd_health_status,
+                "Текущий снапшот здоровья процесса (status/errors/last_error)",
+            ),
+        ]
+        for name, handler, desc in specs:
+            cm.register_command(name, handler, metadata={"description": desc}, tags=["system", "health"])
+        self._services._log_debug(
+            "Встроенные команды health.report/status зарегистрированы",
+            module="lifecycle",
+        )
+
+    def _cmd_health_report(self, data=None, **kwargs) -> dict:
+        """Впрыснуть синтетическую ошибку в HealthState процесса (диагностика).
+
+        data: ``context`` (сайт-тег, по умолч. "diagnostics"), ``message`` (текст),
+        ``status`` (опц.: перевести процесс в degraded/failed после впрыска).
+        """
+        args = self._merge_args(data, kwargs)
+        context = str(args.get("context") or "diagnostics")
+        message = str(args.get("message") or "synthetic health event")
+
+        from ..health import HealthSelfTestError, get_or_create_health_state
+
+        state = get_or_create_health_state(self._services)
+        state.report_error(HealthSelfTestError(message), context=context)
+
+        status = args.get("status")
+        if status:
+            try:
+                state.set_status(str(status), reason=f"health.report: {message}")
+            except ValueError:
+                return {
+                    "success": False,
+                    "process": self._services.name,
+                    "reason": f"неизвестный status '{status}' (ok|degraded|failed)",
+                }
+
+        return {"success": True, "process": self._services.name, "errors": state.error_count}
+
+    def _cmd_health_status(self, data=None, **kwargs) -> dict:
+        """Вернуть снапшот здоровья процесса (status/errors/last_error/...)."""
+        from ..health import get_or_create_health_state
+
+        state = get_or_create_health_state(self._services)
+        return {"success": True, "process": self._services.name, "health": state.snapshot()}
 
     # ========================================================================
     # WIRE COMMANDS — runtime-настройка SHM-каналов
