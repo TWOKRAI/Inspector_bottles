@@ -122,9 +122,44 @@ class PluginContext:
         new.state_proxy = self.state_proxy
         return new
 
+    @property
+    def health(self) -> "HealthReporter":
+        """Фасад наблюдаемости отказов процесса (Ф2 Task 2.1).
+
+        ``ctx.health.report_error(exc, context=..., throttle=...)`` — учесть
+        проглоченную/обработанную ошибку; ``set_status(...)`` / ``degraded(...)`` —
+        явная деградация. Публикуется в state-дерево через heartbeat процесса
+        (``processes.<name>.health.*`` — см. ``..health.schema``).
+
+        Один :class:`HealthState` на процесс (агрегат уровня процесса); reporter
+        подставляет имя плагина как context по умолчанию. Кэшируется на ctx, чтобы
+        не пересоздавать при каждом обращении из горячего пути обработки.
+        """
+        reporter = getattr(self, "_health_reporter", None)
+        if reporter is None:
+            from ..health import HealthReporter, get_or_create_health_state
+
+            state = get_or_create_health_state(self.services)
+            reporter = HealthReporter(state, source=getattr(self, "_plugin_name", "") or "")
+            self._health_reporter = reporter
+        return reporter
+
 
 def _noop_log(msg: str) -> None:
     """No-op fallback для логирования в SubPluginContext."""
+
+
+def _standalone_health() -> Any:
+    """Fallback-reporter для SubPluginContext без родителя (волна C, Ф2 Task 2.5).
+
+    Sub-плагины зовут ``ctx.health.report_error(...)`` наравне с обычными —
+    без поля health это AttributeError на error-пути. Дефолт — автономный
+    log-only HealthState (не публикуется, счётчик локальный); родительский
+    плагин пробрасывает свой reporter через ``SubPluginContext(health=...)``.
+    """
+    from ..health import HealthReporter, HealthState
+
+    return HealthReporter(HealthState(log_only=True), source="sub_plugin")
 
 
 @dataclass
@@ -158,6 +193,9 @@ class SubPluginContext:
     # StateProxy (Phase 8) — для публикации состояния через реактивное дерево
     # None по умолчанию для обратной совместимости
     state_proxy: Any = None
+    # Health-фасад (Ф2): дефолт — автономный log-only reporter; родитель
+    # пробрасывает свой ctx.health, чтобы ошибки sub-плагинов кормили процесс.
+    health: Any = field(default_factory=_standalone_health)
 
 
 class ProcessModulePlugin(ABC):

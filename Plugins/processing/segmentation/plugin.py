@@ -90,7 +90,7 @@ class SegmentationPlugin(ProcessModulePlugin):
         if self._segmenter is not None:
             try:
                 self._segmenter.close()
-            except Exception:
+            except Exception:  # no-health: defensive close на shutdown
                 pass
         self._segmenter = None
         ctx.log_info("SegmentationPlugin: shutdown")
@@ -99,7 +99,7 @@ class SegmentationPlugin(ProcessModulePlugin):
         """Инициализировать MediaPipe. Вернуть False при недоступности (деградация)."""
         try:
             import mediapipe as mp
-        except ImportError:
+        except ImportError:  # no-health: optional-import gate (mediapipe) — осознанная деградация
             self._ctx.log_error(
                 "SegmentationPlugin: пакет mediapipe не установлен — фон НЕ удаляется "
                 "(passthrough). Установите: uv pip install mediapipe"
@@ -154,6 +154,7 @@ class SegmentationPlugin(ProcessModulePlugin):
             result = self._segmenter.segment(mp_image)
             confidence = result.confidence_masks[0].numpy_view().squeeze()
         except Exception as exc:  # pragma: no cover - защита горячего пути
+            self._ctx.health.report_error(exc, context="segmentation.process")
             self._ctx.log_error(f"SegmentationPlugin: сегментация упала: {exc}")
             self._degraded = True
             return item

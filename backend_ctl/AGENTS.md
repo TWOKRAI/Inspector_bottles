@@ -23,8 +23,17 @@
 | «Применить параметр в живой процесс (live field-write)» | **backend_ctl** (`set_register`) |
 | «Запустить/остановить процесс, послать system-команду» | **backend_ctl** (`system_command`) |
 | «Проверить что GUI-кнопка реально дергает бэкенд» | сперва backend_ctl (доказать backend-путь), потом qt-mcp (GUI-путь) |
+| «Что пользователь нажал в GUI?» (события кнопок/табов агенту) | **backend_ctl** (`ui_tap` → события `ui.event` в `events`) |
 | Состояние **виджетов**, клики, снимок UI | qt-mcp (`QT_MCP_PROBE=1`) — НЕ backend_ctl |
 | Поиск/рефакторинг исходников | qex / Serena / Grep — driver видит только runtime |
+
+## Режимы отладки (бэкенд / фронтенд / совместно)
+
+| Режим | Как | Что видно |
+|-------|-----|-----------|
+| **Бэкенд отдельно** (headless, без Qt) | `BackendHarness` в тестах или `BACKEND_CTL=1` + strip_gui | introspect/state/логи/регистры — весь этот файл |
+| **Фронтенд** (GUI поднят) | полный запуск `BACKEND_CTL=1 python run.py` → `drv.ui_tap("gui")` | нажатия кнопок и переключения табов приходят агенту событиями `ui.event` (`data.record`: kind/text/path/ts); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; инспекция/клики виджетов — qt-mcp (`QT_MCP_PROBE=1`) |
+| **Совместно** (корреляция UI ↔ бэкенд) | **`drv.debug_session()` — одна кнопка**: ui_tap (жесты+команды GUI) + log_tail на все процессы + state_subscribe; выключение — `debug_stop()` | единый событийный поток с ts/seq: «клик (ui.event kind=button, seq=41) → команда GUI→бэкенд (kind=command, seq=42) → log.record → state.changed» — разрыв между уровнями локализует баг |
 
 **Киллер-фича:** `introspect_handlers(process)` за секунду ловит баг «нет приёмника»
 (команда есть в `CommandManager`, но не в router `message_dispatcher`, или у плагина нет
@@ -67,10 +76,14 @@ PY
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |
 | `router_stats(p)` / `queues(p)` / `worker_status(p)` | типизированно (dataclass + `.raw`): счётчики router'а / глубины очередей / статус воркеров |
 | `capabilities()` / `introspect_capabilities(p)` | «контактная книжка»: свод команд/регистров/каналов по всем процессам (или карточка одного) |
-| `set_register(process, plugin, field, value)` | live-запись регистра (`register_update`) |
+| `set_register(process, register, field, value)` | live-запись регистра (`register_update`, ключи `{register, field, value}`) |
+| `set_register_verified(process, register, field, value)` | verify-probe (Ф1.6): write → readback `introspect.registers` → diff (`verified`/`expected`/`actual`) — ловит молчаливые no-op'ы |
 | `send_command(target, command, args=None)` | прямая команда процессу (форма `CommandSender.send_command`) |
 | `system_command({"cmd": ..., ...})` | system-команда в ProcessManager (`process.start`/`stop`/`worker.*`/…) |
 | `state_subscribe(pattern)` | подписка на state-дерево; пуши `state.changed` → событийный канал |
+| `ui_tap("gui")` / `ui_untap("gui")` | подписка на UI-события gui: жесты (kind=button/tab) И намерения — команды GUI→бэкенд через перехват двери CommandSender (kind=command/system_command) → пуши `ui.event` (общий seq) |
+| `ui_tap_ping("gui", note=...)` | синтетическое `ui.event` тем же путём доставки — проверка цепочки без клика |
+| `debug_session(logs_level=, state_pattern=, log_processes=)` / `debug_stop()` | ВСЯ отладочная плоскость одним вызовом: ui_tap + log_tail (по умолчанию на все процессы топологии) + state_subscribe; дизайн — `plans/2026-07-06_constructor-master/debug-plane-idea.md` |
 | `subscribe(cb)` / `events(timeout)` | событийный канал: колбэк или слив накопленных push-событий |
 | `request(message, timeout=None)` | низкоуровневый: готовый router-dict → ответ по `request_id` |
 
@@ -80,7 +93,7 @@ PY
 
 ```python
 # Live field-write: применить параметр плагина в работающий процесс
-drv.set_register("preprocessor", "resize", "width", 640)
+drv.set_register_verified("preprocessor", "resize", "target_width", 640)
 
 # Управление жизненным циклом процесса
 drv.system_command({"cmd": "process.start", "process_name": "camera"})

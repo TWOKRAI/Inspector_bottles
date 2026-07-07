@@ -234,7 +234,7 @@ def apply_param(cap, name: str, value) -> bool:
         cv_value = _clamp(spec, float(value))
     try:
         return bool(cap.set(spec.prop, cv_value))
-    except Exception:
+    except Exception:  # no-health: best-effort cap.set, отказ возвращается вызывателю как False
         return False
 
 
@@ -249,7 +249,7 @@ def set_mjpg(cap, on: bool) -> bool:
         code = "MJPG" if on else "YUY2"
         fourcc = cv2.VideoWriter_fourcc(*code)
         return bool(cap.set(cv2.CAP_PROP_FOURCC, fourcc))
-    except Exception:
+    except Exception:  # no-health: best-effort cap.set, отказ возвращается вызывателю как False
         return False
 
 
@@ -310,13 +310,13 @@ def read_actual(cap, names: list[str] | None = None) -> dict:
         if names is None or name in names:
             try:
                 result[name] = cap.get(prop)
-            except Exception:
+            except Exception:  # no-health: probe capability камеры (cap.get), отсутствие параметра — норма
                 pass
 
     if names is None or "fourcc" in names:
         try:
             result["fourcc"] = decode_fourcc(cap.get(cv2.CAP_PROP_FOURCC))
-        except Exception:
+        except Exception:  # no-health: probe capability камеры (cap.get), отсутствие параметра — норма
             pass
 
     for name, spec in WEBCAM_PARAMS.items():
@@ -324,7 +324,7 @@ def read_actual(cap, names: list[str] | None = None) -> dict:
             continue
         try:
             result[name] = cap.get(spec.prop)
-        except Exception:
+        except Exception:  # no-health: probe capability камеры (cap.get), отсутствие параметра — норма
             pass
 
     return result
@@ -359,13 +359,13 @@ def capture_single_frame(
             if ok and f is not None:
                 frame = f
         return frame
-    except Exception:
+    except Exception:  # no-health: разовый best-effort грабер песочницы, None — контрактный graceful-ответ
         return None
     finally:
         if cap is not None:
             try:
                 cap.release()
-            except Exception:
+            except Exception:  # no-health: defensive release на cleanup, устройство уже отпускается
                 pass
 
 

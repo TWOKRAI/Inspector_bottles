@@ -131,6 +131,7 @@ frontend_module/
 │   ├── tabs/                # TabWidget, TabPresenterBase, RegisterBindingContext, MvpTabBase
 │   ├── windows/             # LoadingWindow, MainWindow
 │   └── tables/              # StructuredTableWidget, TreeWithToolbar
+├── debug/                   # UiEventTap + команды ui.tap.* — UI-события (кнопки/табы) агентам через backend_ctl
 ├── schemas/                 # WidgetDescriptor, WindowConfig, RegisterBinding
 ├── configs/                 # FrontendManagerConfig, WindowManagerConfig
 ├── styling/                 # Стили, тема

@@ -232,7 +232,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                         remove_fn = getattr(ctx.worker_manager, "remove_worker", None)
                         if remove_fn:
                             remove_fn(wname)
-                except Exception:
+                except Exception:  # no-health: defensive teardown воркеров на shutdown
                     pass
             self._device_workers.clear()
 
@@ -263,7 +263,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
         while True:
             try:
                 op, dev_id = self._conn_queue.get_nowait()
-            except queue.Empty:
+            except queue.Empty:  # no-health: control-flow — очередь разобрана
                 break
             try:
                 if op == "connect":
@@ -296,6 +296,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 self._publish_state(f"devices.state.{dev_id}.last_error", str(exc))
                 self._reg.last_error = str(exc)
                 if self._ctx:
+                    self._ctx.health.report_error(exc, context=f"device_hub.{op}")
                     self._ctx.log_error(f"DeviceHubPlugin: {op} {dev_id} ошибка: {exc}")
             self._update_counters()
 
@@ -322,7 +323,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                         if remove_fn:
                             try:
                                 remove_fn(wname)
-                            except Exception:
+                            except Exception:  # no-health: defensive остановка воркера (desired=False)
                                 pass
 
             # Создать воркеры для desired=True без существующего воркера
@@ -378,6 +379,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
                                         {"method": "modbus", **io},
                                     )
                             except Exception as exc:
+                                if self._ctx:
+                                    self._ctx.health.report_error(exc, context=f"device_hub.tick.{did}", throttle=30.0)
                                 self._publish_state(f"devices.state.{did}.last_error", str(exc))
                             time.sleep(interval)
 
@@ -401,6 +404,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                         )
                 except Exception as exc:
                     if self._ctx:
+                        self._ctx.health.report_error(exc, context="device_hub.create_worker")
                         self._ctx.log_error(f"DeviceHubPlugin: не удалось создать воркер {wname}: {exc}")
 
     def _stop_device_worker(self, dev_id: str) -> None:
@@ -418,7 +422,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
             if remove_fn:
                 try:
                     remove_fn(wname)
-                except Exception:
+                except Exception:  # no-health: defensive остановка воркера при disconnect/remove
                     pass
 
     # ------------------------------------------------------------------ #
@@ -467,6 +471,8 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 return result
             return {"status": "ok"}
         except Exception as exc:
+            # no-health: ошибка не глотается — уходит вызывающему в dict-ответ команды
+            # (учёт в commands_err/last_error; false-degrade от пользовательских ошибок не нужен)
             self._reg.commands_err += 1
             self._reg.last_error = str(exc)
             # error= дублирует message: CommandManager логирует reason/error, не message
@@ -481,7 +487,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # Валидация kind
         try:
             entry = self._manager.get(dev_id)
-        except DeviceHubError as exc:
+        except DeviceHubError as exc:  # no-health: неизвестный device_id — ошибка уходит в ответ команды
             return {"status": "error", "message": str(exc)}
         if entry.kind != expected_kind:
             return {
@@ -658,7 +664,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
             return {"status": "error", "message": "device_id обязателен"}
         try:
             self._manager.get(dev_id)  # проверка существования
-        except DeviceHubError as exc:
+        except DeviceHubError as exc:  # no-health: неизвестный device_id — ошибка уходит в ответ команды
             return {"status": "error", "message": str(exc)}
         # НР-1: выставляем desired перед постановкой в очередь
         with self._workers_lock:
@@ -673,7 +679,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
             return {"status": "error", "message": "device_id обязателен"}
         try:
             self._manager.get(dev_id)
-        except DeviceHubError as exc:
+        except DeviceHubError as exc:  # no-health: неизвестный device_id — ошибка уходит в ответ команды
             return {"status": "error", "message": str(exc)}
         # НР-1: desired=False — supervisor НЕ пересоздаст воркер
         with self._workers_lock:
@@ -850,7 +856,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
         """
         try:
             from Services.hikvision_camera.core.discovery import enum_devices
-        except ImportError:
+        except ImportError:  # no-health: optional-import gate (SDK Hikvision) — ошибка уходит в ответ
             return {"status": "error", "message": "SDK Hikvision недоступен"}
         try:
             devices = enum_devices()
@@ -867,6 +873,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 ],
             }
         except Exception as exc:
+            # no-health: ошибка не глотается — уходит вызывающему в dict-ответ команды
             return {"status": "error", "message": f"Ошибка перечисления камер: {exc}"}
 
     def cmd_hik_open(self, data: dict) -> dict:
@@ -905,6 +912,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 try:
                     driver.call("release", {})
                     released.append(entry.id)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # best-effort release-all: не прерываем обход, но отказ учитываем в health
+                    self._ctx.health.report_error(exc, context="device_hub.hik_release")
         return {"status": "ok", "released": released}

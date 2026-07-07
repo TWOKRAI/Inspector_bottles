@@ -114,7 +114,7 @@ class EdgeDetectionPlugin(ProcessModulePlugin):
         # (файл локальный и доверенный, кладётся владельцем вручную).
         try:
             state = torch.load(weights, map_location=device, weights_only=True)
-        except Exception:
+        except Exception:  # no-health: fallback загрузки старого формата чекпоинта (retry ниже)
             self._ctx.log_info(
                 "EdgeDetectionPlugin: weights_only=True не сработал (старый формат), "
                 "загрузка с weights_only=False (доверенный локальный файл)"
@@ -191,9 +191,11 @@ class EdgeDetectionPlugin(ProcessModulePlugin):
             except FileNotFoundError as exc:
                 # Веса не найдены — деградация: логируем один раз, пропускаем кадр.
                 self._load_failed = True
+                self._ctx.health.report_error(exc, context="edge_detection.load")
                 self._ctx.log_error(f"EdgeDetectionPlugin: {exc}")
                 return item
             except Exception as exc:  # pragma: no cover - защита горячего пути
+                self._ctx.health.report_error(exc, context="edge_detection.infer", throttle=30.0)
                 self._ctx.log_error(f"EdgeDetectionPlugin: инференс упал: {exc}")
                 return item
 

@@ -133,6 +133,7 @@ class WorkerPoolPlugin(ProcessModulePlugin):
                 with self._lock:
                     self._total_processed += 1
             except Exception as exc:
+                self._ctx.health.report_error(exc, context="worker_pool.process", throttle=30.0)
                 logger.error(f"WorkerPoolPlugin: ошибка обработки item[{idx}]: {exc}")
                 results[idx] = items[idx]  # fallback: оригинальный item без изменений
                 with self._lock:
@@ -187,10 +188,12 @@ class WorkerPoolPlugin(ProcessModulePlugin):
                 config=self._reg.worker_plugin_config,
                 log_info=self._ctx.log_info,
                 log_error=self._ctx.log_error,
+                health=self._ctx.health,  # ошибки sub-плагина кормят health процесса
             )
             instance.configure(sub_ctx)
             return instance
         except Exception as exc:
+            self._ctx.health.report_error(exc, context="worker_pool.create_worker")
             logger.error(f"WorkerPoolPlugin: ошибка создания worker plugin: {exc}")
             return None
 

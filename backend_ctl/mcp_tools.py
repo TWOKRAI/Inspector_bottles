@@ -107,6 +107,10 @@ def _introspect_queues(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.introspect_queues(args["process"], **_kw_timeout(args))
 
 
+def _introspect_plugins(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.introspect_plugins(args["process"], **_kw_timeout(args))
+
+
 def _send_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.send_command(args["target"], args["command"], args.get("args"), **_kw_timeout(args))
 
@@ -117,7 +121,13 @@ def _system_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 def _set_register(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.set_register(
-        args["process"], args["plugin"], args["field"], args.get("value"), **_kw_timeout(args)
+        args["process"], args["register"], args["field"], args.get("value"), **_kw_timeout(args)
+    )
+
+
+def _set_register_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.set_register_verified(
+        args["process"], args["register"], args["field"], args.get("value"), **_kw_timeout(args)
     )
 
 
@@ -147,6 +157,36 @@ def _log_tail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 def _log_untail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.log_untail(args["process"], **_kw_timeout(args))
+
+
+def _ui_tap(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.ui_tap(args.get("process", "gui"), **_kw_timeout(args))
+
+
+def _ui_untap(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.ui_untap(args.get("process", "gui"), **_kw_timeout(args))
+
+
+def _ui_tap_ping(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.ui_tap_ping(args.get("process", "gui"), note=args.get("note", "ping"), **_kw_timeout(args))
+
+
+def _debug_session(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.debug_session(
+        gui_process=args.get("gui_process", "gui"),
+        logs_level=args.get("logs_level", "WARNING"),
+        log_processes=args.get("log_processes"),
+        state_pattern=args.get("state_pattern", "**"),
+        **_kw_timeout(args),
+    )
+
+
+def _debug_stop(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.debug_stop(
+        gui_process=args.get("gui_process", "gui"),
+        log_processes=args.get("log_processes"),
+        **_kw_timeout(args),
+    )
 
 
 def _config_reload(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -212,6 +252,13 @@ TOOLS: List[ToolSpec] = [
         _introspect_queues,
     ),
     ToolSpec(
+        "introspect_plugins",
+        "Каталог плагинов процесса: зарегистрированные (имя → категория) + failed_imports "
+        "(модули, упавшие на discover — «куда делся мой плагин»).",
+        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        _introspect_plugins,
+    ),
+    ToolSpec(
         "send_command",
         "Прямая команда процессу (та же форма, что GUI через CommandSender) + ожидание ответа. "
         "Escape-hatch для команд, у которых нет отдельного инструмента.",
@@ -253,14 +300,30 @@ TOOLS: List[ToolSpec] = [
         _obj(
             {
                 "process": _PROCESS,
-                "plugin": {"type": "string", "description": "Имя плагина-владельца регистра"},
+                "register": {"type": "string", "description": "Имя регистра (обычно = plugin_name владельца)"},
                 "field": {"type": "string", "description": "Имя поля регистра"},
                 "value": {"description": "Новое значение (любой JSON-тип)"},
                 "timeout": _TIMEOUT,
             },
-            ["process", "plugin", "field", "value"],
+            ["process", "register", "field", "value"],
         ),
         _set_register,
+    ),
+    ToolSpec(
+        "set_register_verified",
+        "Verify-probe записи регистра (Ф1.6): write → readback introspect.registers → diff. "
+        "Возвращает verified/expected/actual — ловит молчаливые no-op'ы (нет регистра/поля).",
+        _obj(
+            {
+                "process": _PROCESS,
+                "register": {"type": "string", "description": "Имя регистра (обычно = plugin_name владельца)"},
+                "field": {"type": "string", "description": "Имя поля регистра"},
+                "value": {"description": "Новое значение (любой JSON-тип)"},
+                "timeout": _TIMEOUT,
+            },
+            ["process", "register", "field", "value"],
+        ),
+        _set_register_verified,
     ),
     ToolSpec(
         "state_get",
@@ -324,6 +387,67 @@ TOOLS: List[ToolSpec] = [
         "Снять подписку на tail логов процесса.",
         _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
         _log_untail,
+    ),
+    ToolSpec(
+        "ui_tap",
+        "Отладка фронтенда: подписаться на UI-события gui (нажатия кнопок, переключения "
+        "табов) — события едут push'ем (command='ui.event') — читать инструментом events.",
+        _obj({"process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"}, "timeout": _TIMEOUT}),
+        _ui_tap,
+    ),
+    ToolSpec(
+        "ui_untap",
+        "Снять подписку на UI-события gui.",
+        _obj({"process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"}, "timeout": _TIMEOUT}),
+        _ui_untap,
+    ),
+    ToolSpec(
+        "ui_tap_ping",
+        "Синтетическое ui.event по пути доставки тапа — проверить цепочку GUI→driver без клика.",
+        _obj(
+            {
+                "process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"},
+                "note": {"type": "string", "description": "Метка события (по умолчанию 'ping')"},
+                "timeout": _TIMEOUT,
+            }
+        ),
+        _ui_tap_ping,
+    ),
+    ToolSpec(
+        "debug_session",
+        "Включить ПОЛНУЮ отладочную плоскость одним вызовом: жесты+команды GUI (ui.event), "
+        "логи процессов (log.record, уровень logs_level) и state-дельты (state.changed). "
+        "Дальше читать инструментом events — единый поток «клик → команда → лог → state».",
+        _obj(
+            {
+                "gui_process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"},
+                "logs_level": {"type": "string", "description": "Мин. уровень логов (по умолчанию WARNING)"},
+                "log_processes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Процессы для log_tail (по умолчанию все из state-топологии)",
+                },
+                "state_pattern": {"type": "string", "description": "Glob подписки state (по умолчанию '**')"},
+                "timeout": _TIMEOUT,
+            }
+        ),
+        _debug_session,
+    ),
+    ToolSpec(
+        "debug_stop",
+        "Выключить отладочную плоскость (ui_untap + log_untail по процессам).",
+        _obj(
+            {
+                "gui_process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"},
+                "log_processes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Процессы для log_untail (по умолчанию все из state-топологии)",
+                },
+                "timeout": _TIMEOUT,
+            }
+        ),
+        _debug_stop,
     ),
     ToolSpec(
         "config_reload",

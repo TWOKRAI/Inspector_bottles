@@ -91,6 +91,11 @@ class ProcessHeartbeat:
                 # Self-publish метрик процесса напрямую в дерево StateStore.
                 # Здоровый путь телеметрии — тот же канал, что и статус процесса.
                 self._publish_metrics_to_tree(workers)
+
+                # Self-publish здоровья процесса (Ф2 Task 2.1) — тот же канал.
+                # Отдельно от метрик: health публикуется даже без воркеров и только
+                # при изменениях (take_dirty) — естественный rate-limit на такт HB.
+                self._publish_health_to_tree()
             except Exception as exc:
                 _log = getattr(self._services, "log_debug", self._services.log_info)
                 _log(f"Не удалось отправить heartbeat: {exc}", module="heartbeat")
@@ -167,3 +172,33 @@ class ProcessHeartbeat:
         except Exception as exc:
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish метрик процесса: {exc}", module="heartbeat")
+
+    def _publish_health_to_tree(self) -> None:
+        """Опубликовать здоровье процесса (Ф2 Task 2.1) в дерево StateStore.
+
+        Тот же self-publish канал, что и телеметрия: процесс сам репортит своё
+        здоровье через ``_state_proxy`` (``processes.<name>.health.*``). Публикатор
+        (``health.publish_health``) снимает грязный снапшот единого HealthState
+        процесса и шлёт только при изменениях — публикация вырождается в no-op,
+        пока никто не звал report_error/set_status. Процессы без StateProxy или без
+        HealthState (никто ещё не трогал health) тихо пропускаются.
+        """
+        proxy = getattr(self._services, "_state_proxy", None)
+        if proxy is None:
+            return
+        state = getattr(self._services, "_health_state", None)
+        if state is None:
+            return
+
+        from ..health import publish_health
+
+        try:
+            # Task 2.2: пассивный шаг восстановления breaker по тишине — на такте
+            # heartbeat, до публикации (переход open→half_open→closed попадёт в снапшот).
+            poll = getattr(state, "poll", None)
+            if callable(poll):
+                poll()
+            publish_health(state, proxy, self._services.name)
+        except Exception as exc:  # noqa: BLE001 — health не критичен для работы процесса
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Не удалось self-publish health процесса: {exc}", module="heartbeat")

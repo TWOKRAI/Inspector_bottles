@@ -145,6 +145,14 @@ class GenericProcess(ProcessModule):
                 )
 
         # --- SourceProducer (для каждого source-плагина) ---
+        # Общий на процесс HealthReporter (Task 2.2): produce()-фейлы кормят тот же
+        # честный breaker, что и плагины через ctx.health — единый агрегат здоровья
+        # процесса (тот же _health_state, что читает heartbeat).
+        from ..health import HealthReporter, get_or_create_health_state
+
+        health_state = get_or_create_health_state(self)
+        breaker_backoff = app_cfg.get("source_breaker_backoff_sec", 1.0)
+
         self._source_producers: list[SourceProducer] = []
         for i, source_plugin in enumerate(source_plugins):
             producer = SourceProducer(
@@ -158,6 +166,8 @@ class GenericProcess(ProcessModule):
                 log_debug=self._log_debug,
                 node_name=self.name,
                 plugin_runner=self._plugin_runner,
+                health=HealthReporter(health_state, source=source_plugin.name),
+                breaker_backoff_sec=breaker_backoff,
             )
             self._source_producers.append(producer)
 

@@ -151,7 +151,13 @@ class CameraServicePlugin(ProcessModulePlugin):
 
         try:
             frame = self._backend.capture_frame()
-        except Exception:
+        except Exception as exc:
+            # contain → report → degrade (Ф2 Task 2.4): ошибку НЕ пробрасываем
+            # (проброс обрушит воркер), но честно кормим health — после порога
+            # подряд-ошибок breaker сам переведёт процесс в degraded.
+            self._ctx.health.report_error(
+                exc, context=f"camera_service: захват кадра (backend={self._camera_type})"
+            )
             return []
 
         if frame is None:
@@ -244,7 +250,7 @@ class CameraServicePlugin(ProcessModulePlugin):
             from Plugins.hub.device_hub.client import DeviceHubClient
 
             client = DeviceHubClient(ctx, default_timeout=1.0)
-        except Exception:
+        except Exception:  # no-health: optional-зависимость (hub-плагин может отсутствовать), best-effort арбитраж уже логируется
             ctx.log_info("CameraServicePlugin: DeviceHubClient недоступен, пропускаем hik_release")
             return
 
@@ -328,8 +334,11 @@ class CameraServicePlugin(ProcessModulePlugin):
         if name in type(self._reg).model_fields:
             try:
                 setattr(self._reg, name, value)
-            except Exception:
-                pass
+            except Exception as exc:
+                # contain → report (Ф2 Task 2.4): невалидное значение register-поля
+                # не должно ронять команду, но и молчать нельзя — GUI/оператор
+                # увидит last_error в health вместо тихо проигнорированной настройки.
+                self._ctx.health.report_error(exc, context=f"camera_service: запись register-поля {name}")
         if name not in ("fps", "mjpg"):
             self._params[name] = value
 

@@ -35,6 +35,7 @@ class BuiltinCommands:
         self._register_wire_commands()
         self._register_introspect_commands()
         self._register_observability_commands()
+        self._register_health_commands()
         self._register_relay_commands()
 
     # ========================================================================
@@ -348,6 +349,11 @@ class BuiltinCommands:
                 self._cmd_introspect_capabilities,
                 "Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers",
             ),
+            (
+                "introspect.plugins",
+                self._cmd_introspect_plugins,
+                "Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover)",
+            ),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
@@ -502,6 +508,28 @@ class BuiltinCommands:
             if isinstance(extra, dict):
                 card.update(extra)
         return card
+
+    def _cmd_introspect_plugins(self, data=None, **kwargs) -> dict:
+        """Каталог плагинов ЭТОГО процесса + failed_imports (Ф2.3).
+
+        Отвечает на «куда делся мой плагин»: модуль с опечаткой падает на
+        import при discover() и раньше молча исчезал из каталога; теперь он
+        в ``failed_imports`` (module_path -> "ExcType: сообщение"). Каталог —
+        глобальный singleton per-process (discover выполняется в каждом
+        процессе отдельно), поэтому ответ честный для процесса-адресата.
+        """
+        svc = self._services
+        from ..plugins.registry import PluginRegistry
+
+        plugins = {entry.name: entry.category for entry in PluginRegistry.list()}
+        failed = PluginRegistry.failed_imports()
+        return {
+            "success": True,
+            "process": svc.name,
+            "plugins": dict(sorted(plugins.items())),
+            "count": len(plugins),
+            "failed_imports": dict(sorted(failed.items())),
+        }
 
     def _cmd_introspect_router_stats(self, data=None, **kwargs) -> dict:
         """Счётчики router'а процесса: отвечает «дошло/ушло/дропнулось ли сообщение».
@@ -740,6 +768,75 @@ class BuiltinCommands:
             if mgr is not None and hasattr(mgr, "add_log_tap"):
                 managers.append(mgr)
         return managers
+
+    # ========================================================================
+    # HEALTH — наблюдаемость отказов (Ф2 Task 2.1)
+    # ========================================================================
+
+    def _register_health_commands(self) -> None:
+        """Зарегистрировать health.report / health.status.
+
+        ``health.report`` — диагностический впрыск health-события в процесс: даёт
+        детерминированный способ проверить канал наблюдаемости (report_error →
+        heartbeat → state-дерево → driver), не дожидаясь реального отказа железа.
+        ``health.status`` — прочитать текущий снапшот здоровья процесса.
+        """
+        cm = self._services.command_manager
+        if not cm:
+            return
+        specs = [
+            (
+                "health.report",
+                self._cmd_health_report,
+                "Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости",
+            ),
+            (
+                "health.status",
+                self._cmd_health_status,
+                "Текущий снапшот здоровья процесса (status/errors/last_error)",
+            ),
+        ]
+        for name, handler, desc in specs:
+            cm.register_command(name, handler, metadata={"description": desc}, tags=["system", "health"])
+        self._services._log_debug(
+            "Встроенные команды health.report/status зарегистрированы",
+            module="lifecycle",
+        )
+
+    def _cmd_health_report(self, data=None, **kwargs) -> dict:
+        """Впрыснуть синтетическую ошибку в HealthState процесса (диагностика).
+
+        data: ``context`` (сайт-тег, по умолч. "diagnostics"), ``message`` (текст),
+        ``status`` (опц.: перевести процесс в degraded/failed после впрыска).
+        """
+        args = self._merge_args(data, kwargs)
+        context = str(args.get("context") or "diagnostics")
+        message = str(args.get("message") or "synthetic health event")
+
+        from ..health import HealthSelfTestError, get_or_create_health_state
+
+        state = get_or_create_health_state(self._services)
+        state.report_error(HealthSelfTestError(message), context=context)
+
+        status = args.get("status")
+        if status:
+            try:
+                state.set_status(str(status), reason=f"health.report: {message}")
+            except ValueError:
+                return {
+                    "success": False,
+                    "process": self._services.name,
+                    "reason": f"неизвестный status '{status}' (ok|degraded|failed)",
+                }
+
+        return {"success": True, "process": self._services.name, "errors": state.error_count}
+
+    def _cmd_health_status(self, data=None, **kwargs) -> dict:
+        """Вернуть снапшот здоровья процесса (status/errors/last_error/...)."""
+        from ..health import get_or_create_health_state
+
+        state = get_or_create_health_state(self._services)
+        return {"success": True, "process": self._services.name, "health": state.snapshot()}
 
     # ========================================================================
     # WIRE COMMANDS — runtime-настройка SHM-каналов

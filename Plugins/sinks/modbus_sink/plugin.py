@@ -167,7 +167,7 @@ class ModbusSinkPlugin(ProcessModulePlugin):
             # Скаляр: берём как есть (None/нечисло → 0)
             try:
                 return int(raw)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # no-health: нечисловое значение → 0 по контракту payload
                 return 0
         lst = raw if isinstance(raw, list) else []
         if reduce == "count":
@@ -202,6 +202,7 @@ class ModbusSinkPlugin(ProcessModulePlugin):
             self._device.write_registers(self._reg.base_address, regs)
         except (ModbusDriverError, ValueError, TypeError) as exc:
             self._reg.last_error = str(exc)
+            self._ctx.health.report_error(exc, context="modbus_sink.write", throttle=30.0)
             self._ctx.log_error(f"ModbusSinkPlugin: write failed: {exc}")
             return
         self._reg.writes_ok += 1

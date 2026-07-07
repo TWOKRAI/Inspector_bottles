@@ -364,3 +364,68 @@ class TestObservableMixin:
 
         assert fn() == "result"
         assert len(stats.metrics) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Ф2.3: отказ менеджера — лог + счётчик (мета-дыра R8 закрыта)
+# ---------------------------------------------------------------------------
+
+class FailingLogger:
+    """Мок-логгер, у которого info() всегда падает."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def info(self, msg, **kwargs):
+        self.calls += 1
+        raise RuntimeError("сломанный sink")
+
+    def error(self, msg, **kwargs):
+        self.calls += 1
+        raise RuntimeError("сломанный sink")
+
+
+class TestCallManagerFailureAccounting:
+    """_call_manager: исключение менеджера не глотается молча (Ф2.3)."""
+
+    def test_failure_does_not_raise_and_returns_none(self):
+        m = ObservableManager("test", logger=FailingLogger())
+        assert m._call_manager('logger', 'info', 'boom') is None
+
+    def test_failure_counter_grows(self):
+        m = ObservableManager("test", logger=FailingLogger())
+        m._log_info("boom1")
+        m._log_info("boom2")
+        m._log_error("boom3")
+        failures = m.manager_call_failures
+        assert failures['logger.info'] == 2
+        assert failures['logger.error'] == 1
+
+    def test_warning_logged_once_per_pair(self, caplog):
+        import logging as _logging
+        m = ObservableManager("test", logger=FailingLogger())
+        logger_name = 'multiprocess_framework.modules.base_manager.mixins.observable_mixin'
+        with caplog.at_level(_logging.WARNING, logger=logger_name):
+            m._log_info("boom1")
+            m._log_info("boom2")  # вторая — только счётчик, без спама
+        warnings = [r for r in caplog.records if r.levelno == _logging.WARNING]
+        assert len(warnings) == 1
+        assert 'logger.info' in warnings[0].getMessage()
+
+    def test_get_state_exposes_failures(self):
+        m = ObservableManager("test", logger=FailingLogger())
+        m._log_info("boom")
+        state = m.get_state()
+        assert state['manager_call_failures'] == {'logger.info': 1}
+
+    def test_no_failures_means_empty_dict(self):
+        m = ObservableManager("test", logger=MockLogger())
+        m._log_info("ok")
+        assert m.manager_call_failures == {}
+
+    def test_pickle_roundtrip_keeps_counter_shape(self):
+        m = ObservableManager("test", logger=FailingLogger())
+        m._log_info("boom")
+        m2 = pickle.loads(pickle.dumps(m))
+        # Счётчик — обычный dict, переживает pickle; свойство не падает
+        assert isinstance(m2.manager_call_failures, dict)

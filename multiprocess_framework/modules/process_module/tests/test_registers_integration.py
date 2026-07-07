@@ -211,3 +211,67 @@ class TestGracefulDegradation:
         )
         plugin.configure(ctx)
         assert plugin._value == 99
+
+
+# --- Tests: контракт register_update (Ф1.6 verify-probe опирается на ack) ---
+
+
+class TestRegisterUpdateHandler:
+    """_on_register_update: канон data {register, field, value}, честный результат.
+
+    Результат уезжает инициатору транспортным авто-reply (reply_to_request — no-op
+    без request_id, GUI-путь остаётся fire-and-forget). Регресс: driver слал
+    plugin_name — обработчик молча выходил, запись была no-op.
+    """
+
+    def _orchestrator_with_register(self):
+        from multiprocess_framework.modules.process_module.generic.plugin_orchestrator import (
+            PluginOrchestrator,
+        )
+
+        services = _MockServices()
+        orch = PluginOrchestrator(services=services)
+        plugin = PluginWithRegister()
+        orch._registers_manager = orch._init_registers([(plugin, MagicMock())])
+        assert orch._registers_manager is not None
+        return orch
+
+    def test_success_returns_ack(self):
+        orch = self._orchestrator_with_register()
+        res = orch._on_register_update(
+            {"data": {"register": "with_register", "field": "threshold", "value": 70}}
+        )
+        assert res == {"success": True, "register": "with_register", "field": "threshold", "value": 70}
+        assert orch._registers_manager.get_register("with_register").threshold == 70
+
+    def test_missing_canonical_keys_fail_loud(self):
+        """Неверные ключи payload (исторический plugin_name) → error, не молчание."""
+        orch = self._orchestrator_with_register()
+        res = orch._on_register_update(
+            {"data": {"plugin_name": "with_register", "field": "threshold", "value": 70}}
+        )
+        assert res["success"] is False
+        assert "data.register" in res["error"]
+        assert "plugin_name" in res["data_keys"]
+        # значение не изменилось
+        assert orch._registers_manager.get_register("with_register").threshold == 50
+
+    def test_unknown_register_reports_error(self):
+        orch = self._orchestrator_with_register()
+        res = orch._on_register_update(
+            {"data": {"register": "no_such", "field": "threshold", "value": 70}}
+        )
+        assert res["success"] is False
+        assert res["register"] == "no_such"
+
+    def test_no_registers_manager_reports_error(self):
+        from multiprocess_framework.modules.process_module.generic.plugin_orchestrator import (
+            PluginOrchestrator,
+        )
+
+        orch = PluginOrchestrator(services=_MockServices())
+        res = orch._on_register_update(
+            {"data": {"register": "x", "field": "y", "value": 1}}
+        )
+        assert res["success"] is False
+        assert "RegistersManager" in res["error"]

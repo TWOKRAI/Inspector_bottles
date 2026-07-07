@@ -238,12 +238,25 @@ class TestIntegration:
         res = driver.introspect_handlers("camera", timeout=3.0)
         assert res["result"]["target"] == "camera"
 
-    def test_set_register_builds_register_update(self, loopback) -> None:
+    def test_introspect_plugins_wrapper(self, loopback) -> None:
+        """Ф2.3: обёртка шлёт introspect.plugins адресату (failed-list плагинов)."""
         driver, calls = loopback
-        driver.set_register("preprocessor", "resize", "width", 640, timeout=3.0)
+        res = driver.introspect_plugins("camera", timeout=3.0)
+        assert res["result"]["command"] == "introspect.plugins"
+        assert calls[0]["command"] == "introspect.plugins"
+        assert calls[0]["targets"] == ["camera"]
+
+    def test_set_register_builds_register_update(self, loopback) -> None:
+        """Payload — канонический контракт register_update: {register, field, value}.
+
+        Регресс: исторически driver слал plugin_name — обработчик оркестратора
+        (data.get("register") is None) молча выходил, запись была no-op.
+        """
+        driver, calls = loopback
+        driver.set_register("preprocessor", "resize", "target_width", 640, timeout=3.0)
         sent = calls[0]
         assert sent["command"] == "register_update"
-        assert sent["data"] == {"plugin_name": "resize", "field": "width", "value": 640}
+        assert sent["data"] == {"register": "resize", "field": "target_width", "value": 640}
 
     def test_system_command_wraps_process_command(self, loopback) -> None:
         driver, calls = loopback
@@ -310,3 +323,108 @@ class TestPushEvents:
         # push осел в событиях
         evts = driver.events(timeout=1.0)
         assert any(e.get("command") == "state.changed" for e in evts)
+
+
+# --- Юнит: verify-probe set_register_verified (Ф1 Task 1.6) ---
+
+
+class TestSetRegisterVerified:
+    """write → readback → diff; probe не доверяет ack'у записи."""
+
+    @staticmethod
+    def _driver_with_fake_backend(registers: Dict[str, Any], monkeypatch) -> BackendDriver:
+        d = BackendDriver()
+
+        def fake_send(process, command, args=None, **kw):
+            if command == "register_update":
+                # имитируем применение записи на бэкенде
+                reg = registers.setdefault(args["register"], {})
+                if args["field"] in reg:
+                    reg[args["field"]] = args["value"]
+                return {"success": True}
+            if command == "introspect.registers":
+                return {"success": True, "process": process, "registers": registers}
+            raise AssertionError(f"неожиданная команда: {command}")
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d
+
+    def test_verified_true_when_readback_matches(self, monkeypatch) -> None:
+        d = self._driver_with_fake_backend({"resize": {"target_width": 0}}, monkeypatch)
+        res = d.set_register_verified("preprocessor", "resize", "target_width", 512)
+        assert res["verified"] is True
+        assert res["success"] is True
+        assert res["actual"] == 512
+
+    def test_unknown_field_is_caught(self, monkeypatch) -> None:
+        """Молчаливый no-op (нет такого поля) — probe возвращает verified=False."""
+        d = self._driver_with_fake_backend({"resize": {"target_width": 0}}, monkeypatch)
+        res = d.set_register_verified("preprocessor", "resize", "width", 512)
+        assert res["verified"] is False
+        assert res["found"] is False
+        assert res["known_registers"] == ["resize"]
+
+    def test_unknown_register_is_caught(self, monkeypatch) -> None:
+        d = self._driver_with_fake_backend({"resize": {"target_width": 0}}, monkeypatch)
+        res = d.set_register_verified("preprocessor", "no_such", "target_width", 512)
+        assert res["verified"] is False
+        assert res["found"] is False
+
+    def test_wrapped_introspect_response_unwrapped(self, monkeypatch) -> None:
+        """Ответ introspect.registers может прийти конвертом {success, result: {...}}."""
+        d = BackendDriver()
+
+        def fake_send(process, command, args=None, **kw):
+            if command == "register_update":
+                return {"success": True}
+            return {"success": True, "result": {"success": True, "registers": {"resize": {"target_width": 512}}}}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        res = d.set_register_verified("preprocessor", "resize", "target_width", 512)
+        assert res["verified"] is True
+
+
+# --- Юнит: debug_session — вся отладочная плоскость одним вызовом ---
+
+
+class TestDebugSession:
+    @staticmethod
+    def _driver_with_recorder(monkeypatch) -> tuple[BackendDriver, List[tuple]]:
+        d = BackendDriver()
+        calls: List[tuple] = []
+
+        def fake_send(process, command, args=None, **kw):
+            calls.append((process, command, args))
+            if command == "state.get_subtree":
+                return {"success": True, "result": {"subtree": {"gui": {}, "preprocessor": {}}}}
+            return {"success": True}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d, calls
+
+    def test_enables_ui_logs_state_in_one_call(self, monkeypatch) -> None:
+        d, calls = self._driver_with_recorder(monkeypatch)
+        res = d.debug_session(logs_level="ERROR")
+        cmds = [(p, c) for p, c, _ in calls]
+        assert ("gui", "ui.tap.subscribe") in cmds
+        # log_tail на все процессы из state-топологии
+        assert ("gui", "log.tail.subscribe") in cmds
+        assert ("preprocessor", "log.tail.subscribe") in cmds
+        assert ("ProcessManager", "state.subscribe") in cmds
+        assert res["success"] is True
+        assert set(res["logs"]) == {"gui", "preprocessor"}
+
+    def test_explicit_process_list_skips_topology_query(self, monkeypatch) -> None:
+        d, calls = self._driver_with_recorder(monkeypatch)
+        d.debug_session(log_processes=["camera_0"])
+        cmds = [(p, c) for p, c, _ in calls]
+        assert ("camera_0", "log.tail.subscribe") in cmds
+        assert ("ProcessManager", "state.get_subtree") not in cmds
+
+    def test_debug_stop_untaps_everything(self, monkeypatch) -> None:
+        d, calls = self._driver_with_recorder(monkeypatch)
+        d.debug_stop(log_processes=["gui", "preprocessor"])
+        cmds = [(p, c) for p, c, _ in calls]
+        assert ("gui", "ui.tap.unsubscribe") in cmds
+        assert ("gui", "log.tail.unsubscribe") in cmds
+        assert ("preprocessor", "log.tail.unsubscribe") in cmds

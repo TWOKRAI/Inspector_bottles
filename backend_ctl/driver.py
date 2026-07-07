@@ -526,6 +526,10 @@ class BackendDriver:
         """Глубины очередей процесса (сырой dict): backpressure-диагностика."""
         return self.send_command(process, "introspect.queues", **kw)
 
+    def introspect_plugins(self, process: str, **kw: Any) -> Dict[str, Any]:
+        """Каталог плагинов процесса + failed_imports (Ф2.3: опечатка в плагине видна)."""
+        return self.send_command(process, "introspect.plugins", **kw)
+
     # ---- Типизированные обёртки (dataclass-результаты, Ф1 Task 1.2) ----
     #
     # Никакой бизнес-логики — только форма: сырой introspect-ответ → dataclass с
@@ -591,18 +595,65 @@ class BackendDriver:
     def set_register(
         self,
         process: str,
-        plugin: str,
+        register: str,
         field: str,
         value: Any,
         **kw: Any,
     ) -> Dict[str, Any]:
-        """Записать значение регистра в живой процесс (live field-write)."""
+        """Записать значение регистра в живой процесс (live field-write).
+
+        Ключи data — канонический контракт ``register_update`` (тот же, что шлёт GUI
+        через routing_map/CommandSender): ``{"register", "field", "value"}``.
+        Исторический баг: driver слал ``plugin_name`` — обработчик оркестратора молча
+        выходил, запись была no-op (найдено verify-probe Ф1.6). Имя регистра обычно
+        совпадает с plugin_name (регистр на плагин).
+        """
         return self.send_command(
             process,
             "register_update",
-            {"plugin_name": plugin, "field": field, "value": value},
+            {"register": register, "field": field, "value": value},
             **kw,
         )
+
+    def set_register_verified(
+        self,
+        process: str,
+        register: str,
+        field: str,
+        value: Any,
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Verify-probe (Ф1 Task 1.6): write → readback → diff.
+
+        Не доверяет ack'у записи: после :meth:`set_register` читает
+        ``introspect.registers`` того же процесса и сравнивает фактическое значение
+        поля с ожидаемым. Ловит весь класс молчаливых no-op'ов: несуществующий
+        регистр/поле, неверные ключи payload, отвал приёмника. ``verified`` может
+        отличаться от ``value`` и при легитимной коэрции значения Pydantic-схемой —
+        тогда смотреть ``actual``.
+        """
+        ack = self.set_register(process, register, field, value, timeout=timeout)
+        res = self.introspect_registers(process, timeout=timeout)
+        payload = _find_payload(res, "registers")
+        registers = payload.get("registers") if isinstance(payload, dict) else None
+        registers = registers if isinstance(registers, dict) else {}
+        reg = registers.get(register)
+        found = isinstance(reg, dict) and field in reg
+        actual = reg.get(field) if found else None
+        verified = bool(found and actual == value)
+        return {
+            "success": verified,
+            "verified": verified,
+            "found": found,
+            "process": process,
+            "register": register,
+            "field": field,
+            "expected": value,
+            "actual": actual,
+            "known_registers": sorted(registers),
+            "ack": ack,
+        }
 
     # ---- Observability control plane (Ф1 Task 1.4: config.reload / logger.sink.*) ----
 
@@ -678,6 +729,119 @@ class BackendDriver:
                 timeout=timeout,
             )
         )
+
+    # ---- UI-tap (отладка фронтенда): кнопки/табы GUI → события ui.event ----
+
+    def ui_tap(
+        self,
+        process: str = "gui",
+        *,
+        subscriber: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Подписаться на UI-события gui-процесса (нажатия кнопок, переключения табов).
+
+        GUI ставит UiEventTap-пуш: события едут тем же маршрутом, что log-tail
+        (мост 1.1b / relay 1.7), и приходят в событийный канал driver'а как
+        сообщения с ``command == "ui.event"`` (``data.record`` — событие:
+        kind=button|tab|ping, text, path, ts). Смоук цепочки — :meth:`ui_tap_ping`.
+        """
+        return _leaf_result(
+            self.send_command(
+                process,
+                "ui.tap.subscribe",
+                {"subscriber": subscriber or self._sender},
+                timeout=timeout,
+            )
+        )
+
+    def ui_untap(
+        self,
+        process: str = "gui",
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Снять подписку на UI-события gui-процесса."""
+        return _leaf_result(self.send_command(process, "ui.tap.unsubscribe", {}, timeout=timeout))
+
+    def ui_tap_ping(
+        self,
+        process: str = "gui",
+        *,
+        note: str = "ping",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Синтетическое ui.event тем же путём доставки — проверка цепочки без клика."""
+        return _leaf_result(
+            self.send_command(process, "ui.tap.ping", {"note": note}, timeout=timeout)
+        )
+
+    # ---- Debug-plane: полная наблюдаемость одним вызовом ----
+
+    def debug_session(
+        self,
+        *,
+        gui_process: str = "gui",
+        logs_level: str = "WARNING",
+        log_processes: Optional[List[str]] = None,
+        state_pattern: str = "**",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Включить отладочную плоскость одним вызовом (debug-plane v1).
+
+        Жест+намерение (``ui_tap`` gui: клики/табы + команды GUI→бэкенд), эффект
+        (``log_tail`` уровня ``logs_level`` на процессы ``log_processes``, по
+        умолчанию — все из state-топологии, + ``state_subscribe(state_pattern)``).
+        Всё приходит в ЕДИНУЮ очередь :meth:`events`: команды ``ui.event`` /
+        ``log.record`` / ``state.changed``, упорядочивание — ts (+seq у ui.event).
+
+        Возвращает сводку по каждому включённому источнику (best-effort: недоступный
+        источник — честная запись об ошибке, остальные работают).
+        """
+        summary: Dict[str, Any] = {"ui": None, "logs": {}, "state": None}
+        summary["ui"] = self.ui_tap(gui_process, timeout=timeout)
+
+        procs = log_processes
+        if procs is None:
+            st = self.send_command(
+                "ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout
+            )
+            tree = _leaf_result(st)
+            node = tree.get("subtree") or tree.get("value") or {}
+            procs = sorted(node) if isinstance(node, dict) else []
+        for p in procs:
+            summary["logs"][p] = self.log_tail(p, level=logs_level, timeout=timeout)
+
+        summary["state"] = self.state_subscribe(state_pattern, timeout=timeout)
+        summary["success"] = bool(
+            (summary["ui"] or {}).get("success") is not False
+        )
+        return summary
+
+    def debug_stop(
+        self,
+        *,
+        gui_process: str = "gui",
+        log_processes: Optional[List[str]] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Выключить отладочную плоскость: ui_untap + log_untail по процессам.
+
+        Подписка state.subscribe снимается вместе с закрытием соединения driver'а
+        (server-side привязана к подписчику) — отдельной команды не требует.
+        """
+        summary: Dict[str, Any] = {"ui": self.ui_untap(gui_process, timeout=timeout), "logs": {}}
+        procs = log_processes
+        if procs is None:
+            st = self.send_command(
+                "ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout
+            )
+            tree = _leaf_result(st)
+            node = tree.get("subtree") or tree.get("value") or {}
+            procs = sorted(node) if isinstance(node, dict) else []
+        for p in procs:
+            summary["logs"][p] = self.log_untail(p, timeout=timeout)
+        return summary
 
     # ---- Подписка на состояние (state.subscribe → событийный канал) ----
 

@@ -103,6 +103,7 @@ class PixelToRobotPlugin(ProcessModulePlugin):
             payload = load_calibration(self._reg.camera_id, self._reg.calibration_dir)
         except Exception as exc:  # noqa: BLE001 — кривой файл не должен валить процесс
             self._reg.last_error = f"load: {exc}"
+            self._ctx.health.report_error(exc, context="pixel_to_robot.load_calibration")
             self._ctx.log_error(f"PixelToRobotPlugin: ошибка чтения калибровки: {exc}")
             return
         if not payload or "px_to_mm" not in payload:
@@ -146,6 +147,7 @@ class PixelToRobotPlugin(ProcessModulePlugin):
                 )
             except Exception as exc:  # noqa: BLE001
                 self._reg.last_error = f"linear: {exc}"
+                self._ctx.health.report_error(exc, context="pixel_to_robot.linear", throttle=30.0)
                 return item
         elif self._h is not None:
             # --- Гомография (классический режим) ---
@@ -155,6 +157,7 @@ class PixelToRobotPlugin(ProcessModulePlugin):
                 x_mm, y_mm = apply_homography(self._h, px)
             except Exception as exc:  # noqa: BLE001 — точка вне области гомографии и т.п.
                 self._reg.last_error = f"apply: {exc}"
+                self._ctx.health.report_error(exc, context="pixel_to_robot.apply", throttle=30.0)
                 return item
         else:
             # Нет ни линейного режима, ни гомографии — passthrough.
