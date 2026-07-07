@@ -27,6 +27,7 @@ from ..configs.logger_manager_config import (
     LoggerScopeSchema,
 )
 from .log_config import LogLevel, LogScope
+from ..log_enums import level_rank
 from .log_types import LogRecord
 from ..channels.log_channel import create_channel, LogChannel
 from .log_paths import resolve_log_file_path
@@ -90,6 +91,12 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
         self._module_channels: Dict[str, LogChannel] = {}
 
         self._context_stack: List[Dict[str, Any]] = []
+
+        # Tap-sink'и (Ф1 Task 1.5): доп. приёмники, получающие КАЖДУЮ эмитируемую
+        # запись с level ≥ порога — независимо от scope/level-роутинга по каналам.
+        # Живут ОТДЕЛЬНО от _channel_registry: reconfigure() их не сбрасывает
+        # (подписка на tail логов переживает hot-reload). {name: (IChannel, min_rank)}.
+        self._tap_sinks: Dict[str, tuple] = {}
 
         self._decision_cache: Dict[str, bool] = {}
         self._cache_enabled = True
@@ -413,6 +420,9 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
             extra=context,
         )
 
+        if self._tap_sinks:
+            self._emit_to_taps(record.to_dict(), level)
+
         if self._buffer:
             for ch_name in channels:
                 self._buffer.enqueue(ch_name, record.to_dict())
@@ -503,6 +513,91 @@ class LoggerManager(ChannelRoutingManager, ILoggerManager):
                 pass
             self._channel_registry.unregister(f"module_{module_name}")
             del self._module_channels[module_name]
+
+    # =========================================================================
+    # SINK CONTROL PLANE (ADR-CRM-006 п.3: logger.sink.enable|disable)
+    # =========================================================================
+
+    def set_sink_enabled(self, name: str, enabled: bool) -> bool:
+        """Включить/выключить sink (канал) по имени на лету — IPC control-plane.
+
+        Реализация якоря ADR-CRM-006 п.3 (``logger.sink.enable`` →
+        ``register_channel`` / ``unregister_channel``). Ядро (``reconfigure``,
+        реестр фабрик) не трогается — только точечная (де)регистрация канала.
+
+        - ``enabled=True``: пересоздать канал из ``self.config.channels[name]`` и
+          зарегистрировать (даже если в конфиге ``enabled=False`` — явный override).
+          Требует, чтобы канал был описан в конфиге (иначе неоткуда взять параметры).
+        - ``enabled=False``: закрыть и снять канал с реестра — записи туда прекращаются.
+
+        Returns:
+            True при успехе; False если канал неизвестен (enable) или отсутствовал
+            в реестре (disable).
+        """
+        if enabled:
+            channel_config = self.config.channels.get(name)
+            if channel_config is None:
+                return False
+            self._setup_channel(str(name), channel_config)  # пересоздаёт + регистрирует
+            return self._channel_registry.get(name) is not None
+        # disable: закрыть и снять с реестра
+        channel = self._channel_registry.get(name)
+        if channel is None:
+            return False
+        try:
+            channel.close()
+        except Exception:  # nosec B110 — закрытие best-effort, не должно валить disable
+            pass
+        return self._channel_registry.unregister(name)
+
+    # =========================================================================
+    # LOG TAP (Ф1 Task 1.5: tail логов ≥ level в произвольный sink)
+    # =========================================================================
+
+    def add_log_tap(self, channel: Any, *, min_level: Any = LogLevel.ERROR, name: Optional[str] = None) -> str:
+        """Подключить tap-sink: получать КАЖДУЮ запись с level ≥ ``min_level``.
+
+        В отличие от обычных каналов, tap не участвует в scope/level-роутинге и не
+        лежит в ``_channel_registry`` — значит переживает ``reconfigure()`` (подписка
+        на tail не рвётся при hot-reload). Идемпотентно по ``name``.
+
+        Args:
+            channel: приёмник (IChannel-совместимый: ``write(dict)``), напр. RouterPushChannel.
+            min_level: порог (LogLevel или строка "ERROR"); ниже — не доставляем.
+            name: имя tap'а (для remove); по умолчанию ``channel.name``.
+
+        Returns:
+            Имя tap'а (хэндл для :meth:`remove_log_tap`).
+        """
+        tap_name = name or getattr(channel, "name", None) or f"tap_{len(self._tap_sinks)}"
+        self._tap_sinks[tap_name] = (channel, level_rank(min_level))
+        return tap_name
+
+    def remove_log_tap(self, name: str) -> bool:
+        """Отключить tap-sink по имени. Возвращает True, если он был."""
+        entry = self._tap_sinks.pop(name, None)
+        if entry is None:
+            return False
+        try:
+            entry[0].close()
+        except Exception:  # nosec B110 — закрытие tap best-effort
+            pass
+        return True
+
+    def _emit_to_taps(self, record_dict: Dict[str, Any], level: Any) -> None:
+        """Разослать запись всем tap'ам, чей порог ≤ уровня записи (Task 1.5).
+
+        Вызывается из ``log()`` (LoggerManager) и переопределённого ``log()``
+        (ErrorManager) только когда ``_tap_sinks`` непуст. Ошибка доставки в один
+        tap не мешает остальным и не роняет логирование.
+        """
+        rank = level_rank(level)
+        for channel, min_rank in list(self._tap_sinks.values()):
+            if rank >= min_rank:
+                try:
+                    channel.write(record_dict)
+                except Exception:  # nosec B110 — tail не должен влиять на логирование
+                    pass
 
     # =========================================================================
     # СТАТИСТИКА

@@ -91,3 +91,5 @@
 - [Framework-first decision rule](feedback_framework_first.md) — framework=мощный/универсальный (контракт+реализации), прототип=расходный (тонкий потребитель); в сомнении оптимизируй фреймворк. Решает ActionBus=держать (patch-impl) + undo как контракт+2 реализации. Док: docs/audits/2026-06-18_command-undo-system.md
 - [project_claude_kit_migration.md](project_claude_kit_migration.md) — .claude на claude-kit v1.0.0 plugin-формате; source=devseed; обновлять через init/sync
 - [constructor-master: прогресс исполнения](project_constructor_master_progress.md) — Ф0 сделан 2026-07-06, G0 ждёт владельца, baseline снят
+- [backend_ctl для агентов](feedback_backend_ctl_for_agents.md) — бэкенд тестировать через driver (имитация фронтенда), qt-mcp только для GUI
+- [Ловушка: два бэкенда в одном прогоне](project_concurrent_backends_trap.md) — общий PID-реестр (исправлено Ф1.9) и SHM-cleanup (латентно) конфликтуют между параллельными системами

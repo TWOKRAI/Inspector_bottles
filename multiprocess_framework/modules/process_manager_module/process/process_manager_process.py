@@ -280,6 +280,37 @@ class ProcessManagerProcess(ProcessModule):
     # Обработчики встроенных команд
     # -------------------------------------------------------------------------
 
+    def capabilities_extra(self) -> dict:
+        """Системная часть «контактной книжки» (Ф1 Task 1.9) — hook BuiltinCommands.
+
+        Вливается в карточку ``introspect.capabilities`` PM (см.
+        ``BuiltinCommands._cmd_introspect_capabilities``): PM не пере-регистрирует
+        ключ и не опрашивает детей из своего хендлера (это дедлок — их ответы идут
+        через тот же message_processor). Только КОНТРАКТ, без runtime-значений:
+
+          - ``processes``: {имя: {"class": dotted-path}} из конфигов управляемых
+            процессов — список адресатов для fan-out driver.capabilities();
+          - ``channels``: [{"name", "kind"}] — каналы router'а PM (SocketChannel
+            backend_ctl, SHM-каналы и т.п.).
+        """
+        processes = {
+            name: {"class": str((cfg or {}).get("class") or "")}
+            for name, cfg in sorted(self._process_configs.items())
+        }
+        channels = []
+        if self.router_manager is not None and hasattr(self.router_manager, "get_all_channels"):
+            try:
+                channels = sorted(
+                    (
+                        {"name": str(ch.name), "kind": type(ch).__name__}
+                        for ch in self.router_manager.get_all_channels()
+                    ),
+                    key=lambda c: c["name"],
+                )
+            except Exception:  # noqa: BLE001 — каналы не критичны для карточки
+                channels = []
+        return {"processes": processes, "channels": channels}
+
     def _cmd_process_list(self, data=None, **kwargs) -> dict:
         """Вернуть список всех процессов и их статусы + конфиг.
 

@@ -18,13 +18,47 @@ Observability hot-reload: ConfigFileWatcher → reconfigure(Logger/Error/Stats).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from ...config_module.core.config import Config
 from ..configs.observability_config import expand_observability
 
 if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
+
+
+def apply_observability_reconfigure(
+    section: Any,
+    *,
+    logger: Any = None,
+    error: Any = None,
+    stats: Any = None,
+    log_info: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Применить секцию ``observability`` к менеджерам через ``reconfigure`` (единый путь).
+
+    ЕДИНСТВЕННОЕ место, где секция раскладывается (``expand_observability``) и
+    применяется (``reconfigure``). И hot-reload watcher (см.
+    :func:`make_observability_on_reload`), и IPC-команда ``config.reload`` (Ф1 Task 1.4)
+    зовут именно эту функцию — поэтому файловый и IPC-пути НЕ конфликтуют: оба идут
+    через один идемпотентный full-rebuild ``reconfigure``, а не два разных механизма.
+
+    None-менеджеры пропускаются (например error/stats отключены).
+
+    Returns:
+        Разложенный конфиг ``{"logger": {...}, "error": {...}, "stats": {...}}`` —
+        чтобы вызывающий мог отдать наружу применённый ``log_level`` (диагностика).
+    """
+    expanded = expand_observability(section or {})
+    if logger is not None:
+        logger.reconfigure(expanded["logger"])
+    if error is not None:
+        error.reconfigure(expanded["error"])
+    if stats is not None:
+        stats.reconfigure(expanded["stats"])
+    if log_info is not None:
+        log_info(f"[observability] reconfigure применён (log_level={expanded['logger'].get('default_level')})")
+    return expanded
 
 
 def make_observability_on_reload(
@@ -39,20 +73,19 @@ def make_observability_on_reload(
 
     Использует ``on_reload`` ConfigFileWatcher'а напрямую (callback вызывается ПОСЛЕ
     ``Config.update``) — pub/sub по ключу не нужен (``update`` шлёт ``_notify("*")``).
-    None-менеджеры пропускаются (например error/stats отключены).
+    Делегирует применение в :func:`apply_observability_reconfigure` — общий путь с
+    IPC ``config.reload`` (гарантия неконфликта watcher ↔ IPC).
     """
 
     def _on_reload(config: Config) -> None:
         section = config.get(section_key, {}) or {}
-        expanded = expand_observability(section)
-        if logger is not None:
-            logger.reconfigure(expanded["logger"])
-        if error is not None:
-            error.reconfigure(expanded["error"])
-        if stats is not None:
-            stats.reconfigure(expanded["stats"])
-        if log_info is not None:
-            log_info(f"[observability] hot-reload применён (log_level={expanded['logger'].get('default_level')})")
+        apply_observability_reconfigure(
+            section,
+            logger=logger,
+            error=error,
+            stats=stats,
+            log_info=log_info,
+        )
 
     return _on_reload
 

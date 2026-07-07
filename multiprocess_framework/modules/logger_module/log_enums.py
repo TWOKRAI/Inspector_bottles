@@ -23,3 +23,20 @@ class LogScope(Enum):
     AUDIT = "audit"
     SECURITY = "security"
     DEBUG = "debug"
+
+
+#: Каноничный порядок уровней (растёт по важности). Единый источник для сравнения
+#: «level ≥ порог» (log tail, should_log). Строки — как в LogRecord.to_dict().
+LEVEL_ORDER = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+
+def level_rank(level) -> int:
+    """Числовой ранг уровня (DEBUG=0 … CRITICAL=4). Принимает ``LogLevel`` или строку.
+
+    Неизвестный уровень → 0 (не фильтруем — безопасный дефолт «пропустить»).
+    """
+    val = getattr(level, "value", level)
+    try:
+        return LEVEL_ORDER.index(str(val).upper())
+    except ValueError:
+        return 0

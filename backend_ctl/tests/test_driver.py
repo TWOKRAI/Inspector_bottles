@@ -4,15 +4,20 @@
 Юнит:
 - request-id matching: ответ по id будит ожидающего;
 - таймаут при отсутствии ответа;
-- обёртки строят корректные router-сообщения (через билдеры).
+- обёртки строят корректные router-сообщения (через билдеры);
+- событийный канал: push без request_id (или не матчащий pending) → очередь +
+  подписчики; исключение колбэка не роняет reader-поток (инжекция входящих строк).
 
 Integration (loopback TCP):
 - driver → SocketChannel → bridge-adapter → фейковый echo-router → ответ driver'у
-  по request_id (полный round-trip без queue_registry).
+  по request_id (полный round-trip без queue_registry);
+- unsolicited push через реальный сокет доходит до подписчика driver'а.
 """
 
 from __future__ import annotations
 
+import json
+import threading
 import time
 from typing import Any, Dict, List
 
@@ -34,6 +39,114 @@ class TestRequestMatching:
         res = d.send_command("preprocessor", "introspect.handlers")
         assert res["success"] is False
         assert "not connected" in res["error"]
+
+
+# --- Юнит: событийный канал (инжекция входящих строк через _dispatch) ---
+
+
+def _line(msg: Dict[str, Any]) -> bytes:
+    """Собрать проводную строку так же, как её видит reader-поток."""
+    return json.dumps(msg, ensure_ascii=False).encode("utf-8")
+
+
+class TestEventChannel:
+    def test_push_without_request_id_goes_to_queue(self) -> None:
+        d = BackendDriver()
+        d._dispatch(_line({"command": "state.changed", "data": {"deltas": [1]}}))
+        evts = d.events()  # поллинг
+        assert len(evts) == 1
+        assert evts[0]["command"] == "state.changed"
+        assert d.events() == []  # очередь опустошена (drain)
+
+    def test_unmatched_request_id_becomes_event(self) -> None:
+        """Ответ с request_id, который никто не ждёт (поздний/чужой), → событие."""
+        d = BackendDriver()
+        d._dispatch(_line({"request_id": "no-such-id", "result": {"x": 1}}))
+        evts = d.events()
+        assert len(evts) == 1
+        assert evts[0]["request_id"] == "no-such-id"
+
+    def test_subscribe_callback_receives_event(self) -> None:
+        d = BackendDriver()
+        received: List[Dict[str, Any]] = []
+        d.subscribe(received.append)
+        d._dispatch(_line({"command": "state.changed", "data": {"n": 42}}))
+        assert len(received) == 1
+        assert received[0]["data"]["n"] == 42
+
+    def test_callback_exception_does_not_break_others(self) -> None:
+        d = BackendDriver()
+        seen: List[Dict[str, Any]] = []
+
+        def boom(_msg: Dict[str, Any]) -> None:
+            raise RuntimeError("callback failure")
+
+        d.subscribe(boom)
+        d.subscribe(seen.append)
+        d._dispatch(_line({"command": "state.changed"}))
+        # Второй подписчик отработал, событие всё равно в очереди, счётчик вырос.
+        assert len(seen) == 1
+        assert len(d.events()) == 1
+        assert d.event_errors == 1
+
+    def test_unsubscribe_stops_delivery(self) -> None:
+        d = BackendDriver()
+        received: List[Dict[str, Any]] = []
+        cb = d.subscribe(received.append)
+        d.unsubscribe(cb)
+        d._dispatch(_line({"command": "state.changed"}))
+        assert received == []
+
+    def test_bounded_queue_drops_oldest(self) -> None:
+        d = BackendDriver(event_queue_maxlen=3)
+        for i in range(5):
+            d._dispatch(_line({"command": "state.changed", "seq": i}))
+        evts = d.events()
+        assert [e["seq"] for e in evts] == [2, 3, 4]  # старые (0,1) вытеснены
+
+    def test_events_max_items_leaves_remainder(self) -> None:
+        d = BackendDriver()
+        for i in range(4):
+            d._dispatch(_line({"seq": i}))
+        first = d.events(max_items=2)
+        assert [e["seq"] for e in first] == [0, 1]
+        rest = d.events()
+        assert [e["seq"] for e in rest] == [2, 3]
+
+    def test_events_polling_returns_empty(self) -> None:
+        d = BackendDriver()
+        t0 = time.monotonic()
+        assert d.events() == []  # timeout=0.0 не блокирует
+        assert time.monotonic() - t0 < 0.5
+
+    def test_events_blocks_until_event_arrives(self) -> None:
+        """Клиентский поток ждёт в events(timeout), reader-«поток» кладёт событие."""
+        d = BackendDriver()
+
+        def producer() -> None:
+            time.sleep(0.05)
+            d._dispatch(_line({"command": "state.changed", "late": True}))
+
+        th = threading.Thread(target=producer)
+        th.start()
+        evts = d.events(timeout=2.0)  # блокируется до появления
+        th.join()
+        assert len(evts) == 1
+        assert evts[0]["late"] is True
+
+    def test_events_timeout_returns_empty_when_silent(self) -> None:
+        d = BackendDriver()
+        t0 = time.monotonic()
+        evts = d.events(timeout=0.1)
+        dt = time.monotonic() - t0
+        assert evts == []
+        assert 0.05 < dt < 1.0  # действительно ждал ~timeout, не вечно
+
+    def test_malformed_line_ignored(self) -> None:
+        d = BackendDriver()
+        d._dispatch(b"{not json")
+        d._dispatch(_line(["not", "a", "dict"]))
+        assert d.events() == []
 
 
 # --- Integration: реальный loopback round-trip ---
@@ -58,9 +171,11 @@ class EchoRouter:
         return {"status": "error", "reason": "unknown channel"}
 
 
-@pytest.fixture
-def loopback():
-    """Поднять SocketChannel + bridge + echo-router; вернуть (driver, calls)."""
+def _start_loopback():
+    """Поднять SocketChannel + bridge + echo-router + подключённый driver.
+
+    Возвращает (driver, calls, channel). Уборка — на вызывающей фикстуре.
+    """
     calls: List[Dict[str, Any]] = []
 
     def handler(msg: Dict[str, Any]) -> Dict[str, Any]:
@@ -81,8 +196,23 @@ def loopback():
     while channel.get_info()["clients"] < 1 and time.time() < deadline:
         time.sleep(0.01)
 
-    yield driver, calls
+    return driver, calls, channel
 
+
+@pytest.fixture
+def loopback():
+    """(driver, calls) — реальный loopback round-trip."""
+    driver, calls, channel = _start_loopback()
+    yield driver, calls
+    driver.close()
+    channel.close()
+
+
+@pytest.fixture
+def loopback_push():
+    """(driver, calls, channel) — с доступом к channel для unsolicited push."""
+    driver, calls, channel = _start_loopback()
+    yield driver, calls, channel
     driver.close()
     channel.close()
 
@@ -130,3 +260,53 @@ class TestIntegration:
         r2 = driver.send_command("p2", "introspect.status", timeout=3.0)
         assert r1["result"]["target"] == "p1"
         assert r2["result"]["target"] == "p2"
+
+
+class TestPushEvents:
+    def test_state_subscribe_builds_command(self, loopback) -> None:
+        """state_subscribe шлёт корректный state.subscribe в ProcessManager."""
+        driver, calls = loopback
+        driver.state_subscribe("processes.**", timeout=3.0)
+        sent = calls[0]
+        assert sent["command"] == "state.subscribe"
+        assert sent["targets"] == ["ProcessManager"]
+        assert sent["data"]["pattern"] == "processes.**"
+        assert sent["data"]["subscriber"] == "backend_ctl"  # = self.sender
+
+    def test_unsolicited_push_reaches_subscriber(self, loopback_push) -> None:
+        """Реальный сокет: сервер шлёт state.changed (без request_id) → подписчик."""
+        driver, _calls, channel = loopback_push
+        received: List[Dict[str, Any]] = []
+        driver.subscribe(received.append)
+
+        push = {
+            "command": "state.changed",
+            "channel": "backend_ctl",  # адресуем в наш socket-канал
+            "data": {"deltas": [{"path": "processes.camera.fps", "value": 30}]},
+        }
+        res = channel.send(push)
+        assert res.get("status") == "success"
+
+        # reader-поток driver'а должен доставить push подписчику
+        evts = driver.events(timeout=2.0)
+        assert len(evts) == 1
+        assert evts[0]["command"] == "state.changed"
+        assert evts[0]["data"]["deltas"][0]["value"] == 30
+        # и синхронный подписчик тоже получил (может прийти чуть позже drain)
+        deadline = time.time() + 1.0
+        while not received and time.time() < deadline:
+            time.sleep(0.01)
+        assert len(received) == 1
+
+    def test_reply_path_still_works_alongside_events(self, loopback_push) -> None:
+        """Reply-путь не сломан: request/response по request_id + push сосуществуют."""
+        driver, _calls, channel = loopback_push
+        # push «до» запроса — уйдёт в очередь событий, не в pending
+        channel.send({"command": "state.changed", "channel": "backend_ctl", "data": {}})
+        # обычный request по-прежнему матчится по request_id
+        res = driver.send_command("preprocessor", "introspect.status", timeout=3.0)
+        assert res["success"] is True
+        assert res["result"]["target"] == "preprocessor"
+        # push осел в событиях
+        evts = driver.events(timeout=1.0)
+        assert any(e.get("command") == "state.changed" for e in evts)

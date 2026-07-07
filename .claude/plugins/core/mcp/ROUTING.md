@@ -37,6 +37,7 @@
 | PyQt/PySide widget tree, screenshot, click | `qt-mcp:qt_find_widget` / `qt_snapshot` / `qt_screenshot` / `qt_batch` | optional (GUI only) | руками через `pytest-qt` |
 | Browser / web UI verify (navigate, screenshot) | `playwright:browser_navigate` / `screenshot` | optional (web only) | `curl` + проверка HTML |
 | Multi-step reasoning (сложная гипотеза) | `sequential-thinking:sequentialthinking` | optional | внутренний chain-of-thought |
+| Живой бэкенд multiprocess_framework (introspect, команды, state, логи) | `backend-ctl:capabilities` / `backend-ctl:send_command` | optional (framework-only) | `backend_ctl` driver из Bash+Python-сниппета |
 | Поиск по базе знаний / wiki / транскриптам | `knowledgeos:kos_search` / `kos_ask` | optional (knowledge plugin) | `Grep` / `Read` по `docs/` |
 | Точная строка / regex | `Grep` | always | — |
 
@@ -213,6 +214,21 @@
 **Используется:** investigator (Workflow §1 при сложных cross-module bugs), teamlead (Escalation mode).
 
 **Canonical refs:** `mcp:sequential-thinking:sequentialthinking`.
+
+### backend-ctl — живой бэкенд multiprocess_framework (optional, framework-only)
+
+**Когда подключён:** проект построен на `multiprocess_framework` и содержит пакет `backend_ctl/` (сервер живёт в репо проекта — плагин лишь лаунчер). Нужен запущенный бэкенд с `BACKEND_CTL=1`; без него инструменты возвращают понятную ошибку.
+
+**Ключевые tools:**
+- `capabilities` — «контактная книжка» системы: процессы, их команды, регистры, каналы (первый вызов сессии — вместо чтения исходников).
+- `get_status`, `introspect_handlers`, `introspect_registers`, `introspect_router_stats`, `introspect_queues` — диагностика процесса («есть ли приёмник команды X»).
+- `send_command`, `system_command`, `set_register` — команды, лайфцикл, live-запись регистров.
+- `state_get`, `state_get_subtree`, `state_subscribe`, `events` — state-дерево и push-события.
+- `log_tail` / `log_untail` — LogRecord'ы процесса с level ≥ порога в `events`.
+
+**Используется:** developer/debugger/tester при отладке бэкенда без GUI (backend-путь до qt-mcp: сперва доказать бэкенд, потом GUI).
+
+**Canonical refs:** `mcp:backend-ctl:capabilities`, `mcp:backend-ctl:get_status`, `mcp:backend-ctl:introspect_handlers`, `mcp:backend-ctl:introspect_registers`, `mcp:backend-ctl:send_command`, `mcp:backend-ctl:set_register`, `mcp:backend-ctl:state_get`, `mcp:backend-ctl:state_subscribe`, `mcp:backend-ctl:events`, `mcp:backend-ctl:log_tail`.
 
 ### knowledgeos — knowledge-base OS (optional, knowledge plugin)
 

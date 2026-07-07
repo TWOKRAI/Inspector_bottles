@@ -34,6 +34,8 @@ class BuiltinCommands:
         self._register_worker_crud_commands()
         self._register_wire_commands()
         self._register_introspect_commands()
+        self._register_observability_commands()
+        self._register_relay_commands()
 
     # ========================================================================
     # КОМАНДЫ УПРАВЛЕНИЯ ВОРКЕРАМИ
@@ -341,6 +343,11 @@ class BuiltinCommands:
                 self._cmd_introspect_queues,
                 "Глубины очередей процесса (backpressure)",
             ),
+            (
+                "introspect.capabilities",
+                self._cmd_introspect_capabilities,
+                "Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers",
+            ),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
@@ -422,6 +429,80 @@ class BuiltinCommands:
             "workers": workers,
         }
 
+    def _cmd_introspect_capabilities(self, data=None, **kwargs) -> dict:
+        """Карточка процесса для «контактной книжки» (Ф1 Task 1.9, capability manifest v0).
+
+        Свод КОНТРАКТА процесса (не runtime-значений — они в introspect.status/registers):
+          - ``commands``: [{name, description, tags}] из CommandManager (metadata.description
+            существующих регистраций — новый реестр НЕ вводится);
+          - ``registers``: {имя_регистра: [имена_полей]} — только структура, без значений
+            (детерминизм дампа: значения волатильны, контракт — нет);
+          - ``router_handlers``: НЕ-командные ключи event_dispatcher (события, heartbeat).
+
+        Расширение хоста: если у services есть callable ``capabilities_extra`` —
+        его dict вливается в карточку (PM добавляет топологию процессов и каналы).
+        Так PM не пере-регистрирует ключ (ExactMatch запрещает дубликаты), а v0
+        обходится без блокирующего fan-out внутри PM-хендлера (ответы детей едут
+        через тот же message_processor → блокировка была бы дедлоком; свод по
+        живым детям собирает driver.capabilities()).
+        """
+        svc = self._services
+
+        commands: list = []
+        cm = svc.command_manager
+        if cm is not None:
+            try:
+                for h in cm.get_commands():
+                    meta = h.get("metadata") or {}
+                    commands.append(
+                        {
+                            "name": h.get("key"),
+                            "description": str(meta.get("description") or ""),
+                            "tags": sorted(h.get("tags") or []),
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"command_manager: {exc}"}
+        commands = sorted((c for c in commands if c["name"]), key=lambda c: c["name"])
+
+        router_handlers: list = []
+        router = svc.router_manager
+        md = getattr(router, "event_dispatcher", None) if router else None
+        if md is not None:
+            try:
+                router_handlers = sorted({h.get("key") for h in md.get_all_handlers() if h.get("key")})
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"event_dispatcher: {exc}"}
+
+        registers: dict = {}
+        orchestrator = getattr(svc, "_orchestrator", None)
+        rm = getattr(orchestrator, "registers_manager", None) if orchestrator else None
+        if rm is not None:
+            try:
+                dump = rm.model_dump_all()
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"model_dump_all: {exc}"}
+            for reg_name, fields in (dump or {}).items():
+                registers[reg_name] = sorted(fields) if isinstance(fields, dict) else []
+
+        card = {
+            "success": True,
+            "process": svc.name,
+            "commands": commands,
+            "router_handlers": router_handlers,
+            "registers": registers,
+        }
+
+        extra_fn = getattr(svc, "capabilities_extra", None)
+        if callable(extra_fn):
+            try:
+                extra = extra_fn()
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"capabilities_extra: {exc}"}
+            if isinstance(extra, dict):
+                card.update(extra)
+        return card
+
     def _cmd_introspect_router_stats(self, data=None, **kwargs) -> dict:
         """Счётчики router'а процесса: отвечает «дошло/ушло/дропнулось ли сообщение».
 
@@ -456,6 +537,209 @@ class BuiltinCommands:
                 except (NotImplementedError, OSError, AttributeError):
                     sizes[qtype] = None  # qsize недоступен (macOS) — диагностично само по себе
         return {"success": True, "process": svc.name, "queue_sizes": sizes}
+
+    # ========================================================================
+    # OBSERVABILITY CONTROL PLANE — config.reload / logger.sink.* (Ф1 Task 1.4)
+    # Реализация ADR-CRM-006 п.3 поверх ГОТОВЫХ reconfigure/sink-реестра.
+    # ========================================================================
+
+    def _register_observability_commands(self) -> None:
+        """Зарегистрировать config.reload / logger.sink.enable / logger.sink.disable.
+
+        IPC-двойник hot-reload watcher'а (тот живёт в оркестраторе, эти команды
+        адресуются ЛЮБОМУ процессу). Оба пути идут через один
+        ``apply_observability_reconfigure`` → ``reconfigure`` — не конфликтуют.
+        """
+        cm = self._services.command_manager
+        if not cm:
+            return
+
+        specs = [
+            (
+                "config.reload",
+                self._cmd_config_reload,
+                "Перечитать/применить секцию observability (уровень логов, sink'и) на лету",
+            ),
+            (
+                "logger.sink.enable",
+                self._cmd_logger_sink_enable,
+                "Включить sink логгера по имени (register_channel)",
+            ),
+            (
+                "logger.sink.disable",
+                self._cmd_logger_sink_disable,
+                "Выключить sink логгера по имени (unregister_channel)",
+            ),
+            (
+                "log.tail.subscribe",
+                self._cmd_log_tail_subscribe,
+                "Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)",
+            ),
+            (
+                "log.tail.unsubscribe",
+                self._cmd_log_tail_unsubscribe,
+                "Снять подписку на tail логов процесса",
+            ),
+        ]
+        for name, handler, desc in specs:
+            cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
+        self._services._log_debug(
+            "Встроенные команды config.reload / logger.sink.* / log.tail.* зарегистрированы",
+            module="lifecycle",
+        )
+
+    def _cmd_config_reload(self, data=None, **kwargs) -> dict:
+        """Перечитать observability-секцию и применить через reconfigure (Ф1 Task 1.4).
+
+        Источник секции (по приоритету):
+          1. ``data["observability"]`` — inline-override (dict), например
+             ``{"log_level": "DEBUG"}`` — сменить уровень логгера на лету через driver;
+          2. файл конфига по ``data["path"]`` или ``get_config("observability_config_path")``
+             (тот же путь, что читает hot-reload watcher).
+
+        Применение делегируется в ``apply_observability_reconfigure`` — ЕДИНЫЙ путь с
+        watcher'ом (идемпотентный full-rebuild ``reconfigure``, конфликта нет).
+        """
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+
+        section = args.get("observability")
+        source = "inline"
+        if not isinstance(section, dict):
+            path = args.get("path") or (
+                svc.get_config("observability_config_path") if hasattr(svc, "get_config") else None
+            )
+            if not path:
+                return {"success": False, "reason": "нет секции observability и пути к конфигу"}
+            try:
+                from ...data_schema_module.serialization.converter import DataConverter
+
+                loaded = DataConverter.load_from_file(path)
+            except Exception as exc:  # noqa: BLE001 — вернуть причину инициатору
+                return {"success": False, "reason": f"не удалось прочитать конфиг {path}: {exc}"}
+            section = (loaded.get("observability", {}) if isinstance(loaded, dict) else {}) or {}
+            source = str(path)
+
+        from ..managers.observability_reload import apply_observability_reconfigure
+
+        try:
+            expanded = apply_observability_reconfigure(
+                section,
+                logger=getattr(svc, "logger_manager", None),
+                error=getattr(svc, "error_manager", None),
+                stats=getattr(svc, "stats_manager", None),
+                log_info=getattr(svc, "_log_info", None),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "reason": f"reconfigure failed: {exc}"}
+
+        return {
+            "success": True,
+            "process": svc.name,
+            "source": source,
+            "applied": {"log_level": expanded["logger"].get("default_level")},
+        }
+
+    def _cmd_logger_sink_enable(self, data=None, **kwargs) -> dict:
+        """Включить sink логгера по имени (ADR-CRM-006 п.3: register_channel)."""
+        return self._toggle_logger_sink(data, kwargs, enabled=True)
+
+    def _cmd_logger_sink_disable(self, data=None, **kwargs) -> dict:
+        """Выключить sink логгера по имени (ADR-CRM-006 п.3: unregister_channel)."""
+        return self._toggle_logger_sink(data, kwargs, enabled=False)
+
+    def _toggle_logger_sink(self, data, kwargs, *, enabled: bool) -> dict:
+        """Общий обработчик logger.sink.enable|disable — делегирует в set_sink_enabled."""
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+        name = str(args.get("sink") or args.get("name") or "").strip()
+        if not name:
+            return {"success": False, "reason": "sink (имя канала) обязателен"}
+        logger = getattr(svc, "logger_manager", None)
+        if logger is None or not hasattr(logger, "set_sink_enabled"):
+            return {"success": False, "reason": "logger_manager недоступен"}
+        ok = logger.set_sink_enabled(name, enabled)
+        return {"success": bool(ok), "sink": name, "enabled": enabled, "process": svc.name}
+
+    def _cmd_log_tail_subscribe(self, data=None, **kwargs) -> dict:
+        """Подписать адрес на LogRecord'ы процесса с level ≥ порога (Ф1 Task 1.5).
+
+        Ставит RouterPushChannel как tap на logger (и, если есть, error) процесса:
+        каждая запись ≥ ``level`` пушится ``targets=[subscriber]`` + ``queue_type=system``
+        → мост 1.1b → внешний driver (events()). Идемпотентно по имени tap'а.
+
+        Параметры (data): ``subscriber`` (адрес получателя, обяз.), ``level`` (по
+        умолчанию "ERROR"), ``command`` (поле command пуша, по умолчанию "log.record").
+        """
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+        subscriber = str(args.get("subscriber") or "").strip()
+        if not subscriber:
+            return {"success": False, "reason": "subscriber (адрес получателя) обязателен"}
+        level = str(args.get("level") or "ERROR").upper()
+        command = str(args.get("command") or "log.record")
+
+        router = getattr(svc, "router_manager", None)
+        if router is None:
+            return {"success": False, "reason": "router_manager недоступен"}
+        logger = getattr(svc, "logger_manager", None)
+        if logger is None or not hasattr(logger, "add_log_tap"):
+            return {"success": False, "reason": "logger_manager недоступен"}
+
+        from multiprocess_framework.modules.logger_module import RouterPushChannel
+
+        tap_name = self._log_tap_name(subscriber)
+        # Отдельные push-каналы на logger и error (у каждого свой реестр tap'ов).
+        installed = []
+        for mgr in self._log_tail_managers():
+            channel = RouterPushChannel(
+                tap_name,
+                router=router,
+                subscriber=subscriber,
+                sender=svc.name,
+                command=command,
+            )
+            mgr.add_log_tap(channel, min_level=level, name=tap_name)
+            installed.append(getattr(mgr, "manager_name", mgr.__class__.__name__))
+
+        if not installed:
+            return {"success": False, "reason": "нет менеджеров логов с поддержкой tap"}
+        return {
+            "success": True,
+            "process": svc.name,
+            "subscriber": subscriber,
+            "level": level,
+            "tap": tap_name,
+            "managers": installed,
+        }
+
+    def _cmd_log_tail_unsubscribe(self, data=None, **kwargs) -> dict:
+        """Снять подписку на tail логов (по subscriber или явному tap-имени)."""
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+        subscriber = str(args.get("subscriber") or "").strip()
+        tap_name = str(args.get("tap") or "").strip() or (self._log_tap_name(subscriber) if subscriber else "")
+        if not tap_name:
+            return {"success": False, "reason": "subscriber или tap обязателен"}
+        removed = False
+        for mgr in self._log_tail_managers():
+            removed = mgr.remove_log_tap(tap_name) or removed
+        return {"success": bool(removed), "process": svc.name, "tap": tap_name}
+
+    @staticmethod
+    def _log_tap_name(subscriber: str) -> str:
+        """Детерминированное имя tap'а по подписчику (идемпотентность подписки)."""
+        return f"log_tail::{subscriber}"
+
+    def _log_tail_managers(self) -> list:
+        """Менеджеры логов процесса, поддерживающие tap (logger + error, если есть)."""
+        svc = self._services
+        managers = []
+        for attr in ("logger_manager", "error_manager"):
+            mgr = getattr(svc, attr, None)
+            if mgr is not None and hasattr(mgr, "add_log_tap"):
+                managers.append(mgr)
+        return managers
 
     # ========================================================================
     # WIRE COMMANDS — runtime-настройка SHM-каналов
@@ -573,3 +857,49 @@ class BuiltinCommands:
             module="wire",
         )
         return {"success": True, "wire_key": wire_key}
+
+    # ========================================================================
+    # RELAY (Ф1 Task 1.7: хаб-релей недоставляемых push'ей к внешним подписчикам)
+    # ========================================================================
+
+    def _register_relay_commands(self) -> None:
+        """Зарегистрировать router.relay — приём билета от RouterManager._relay_via_hub.
+
+        Дочерний процесс не может доставить push внешнему подписчику (канал
+        'backend_ctl' живёт только в router'е хаба) и однократно пересылает билет
+        сюда. Обработчик просто отправляет билет СВОИМ router'ом — дальше работает
+        мост 1.1b (_deliver_by_targets → канал). Команда generic и есть у всех
+        процессов, но реально relay адресуется хабу (ProcessManager).
+        """
+        cm = self._services.command_manager
+        if not cm:
+            return
+        cm.register_command(
+            "router.relay",
+            self._cmd_router_relay,
+            metadata={
+                "description": "Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)",
+                "manages_own_reply": True,  # fire-and-forget: инициатору ничего не едет
+            },
+            tags=["system"],
+        )
+
+    def _cmd_router_relay(self, data=None, **kwargs) -> dict:
+        """Отправить чужой билет своим router'ом (fire-and-forget, без reply).
+
+        Билет уже помечен ``_relayed=True`` отправителем (страховкой ставим и здесь):
+        если и наш router доставить не сможет — билет дропнется, второго relay не будет.
+        """
+        ticket = (data or {}).get("ticket")
+        if not isinstance(ticket, dict) or not ticket.get("targets"):
+            return {"success": False, "reason": "router.relay: нет ticket/targets"}
+        router = self._services.router_manager
+        if router is None:
+            return {"success": False, "reason": "router.relay: router недоступен"}
+        ticket.setdefault("_relayed", True)
+        send_async = getattr(router, "send_async", None)
+        if callable(send_async):
+            send_async(ticket, priority="normal")
+        else:  # тестовые/минимальные router'ы без async-очереди
+            router.send(ticket)
+        return {"success": True, "relayed": True}

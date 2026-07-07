@@ -997,6 +997,190 @@ class TestTargetAwareDeliveryFallback(unittest.TestCase):
         self.assertEqual(result.get("status"), "error")
 
 
+class _NoQueueRegistry:
+    """queue_registry без очередей для целевых имён (мост push→канал, Ф1.1b).
+
+    Моделирует «адресную книгу» оркестратора, в которой у части имён (внешние
+    подписчики — не процессы) очередей нет: `get_queue` → None, `send_to_queue`
+    → False. Имена из `present` считаются реальными процессами (очередь есть).
+    """
+
+    def __init__(self, present: tuple = ()) -> None:
+        self._present = set(present)
+        self.sent: list = []
+
+    def get_queue(self, process, qtype):
+        return object() if process in self._present else None
+
+    def send_to_queue(self, process, qtype, msg) -> bool:
+        if process in self._present:
+            self.sent.append((process, qtype, msg))
+            return True
+        return False  # очереди нет — как реальный QueueRegistry для не-процесса
+
+
+class TestChannelBridgeFallback(unittest.TestCase):
+    """Ф1.1b: target без очереди, но с зарегистрированным каналом того же имени →
+    доставка через канал (мост push→SocketChannel для внешних подписчиков)."""
+
+    def test_target_without_queue_but_with_channel_delivered_via_channel(self):
+        qr = _NoQueueRegistry()  # ни одной очереди
+        router = RouterManager(manager_name="r_br1", queue_registry=qr)
+        ch, q = _make_channel("backend_ctl")
+        router.register_channel(ch)
+
+        result = router.send(
+            {
+                "type": "event",
+                "command": "state.changed",
+                "targets": ["backend_ctl"],
+                "queue_type": "system",
+                "data": {"deltas": []},
+            }
+        )
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(result.get("delivered_by_targets"), 1)
+        # доставлено именно в канал, очередь не тронута
+        self.assertFalse(q.empty())
+        self.assertEqual(len(qr.sent), 0)
+        delivered = q.get_nowait()
+        self.assertEqual(delivered.get("command"), "state.changed")
+
+    def test_target_without_queue_and_without_channel_keeps_error(self):
+        # прежнее поведение: нет очереди И нет канала → ошибка (silent-drop не маскируем)
+        qr = _NoQueueRegistry()
+        router = RouterManager(manager_name="r_br2", queue_registry=qr)
+        result = router.send(
+            {"type": "event", "command": "state.changed", "targets": ["ghost"], "queue_type": "system"}
+        )
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(len(qr.sent), 0)
+
+    def test_existing_process_queue_not_hijacked_by_channel(self):
+        # Безопасность: у процесса ЕСТЬ очередь → доставка в очередь, даже если
+        # (гипотетически) есть канал с тем же именем. Легитимный путь не перехватываем.
+        qr = _NoQueueRegistry(present=("worker_a",))
+        router = RouterManager(manager_name="r_br3", queue_registry=qr)
+        ch, q = _make_channel("worker_a")
+        router.register_channel(ch)
+
+        result = router.send(
+            {"type": "command", "command": "do.thing", "targets": ["worker_a"]}
+        )
+        self.assertEqual(result.get("status"), "success")
+        # доставлено в очередь, канал НЕ тронут
+        self.assertEqual(len(qr.sent), 1)
+        self.assertEqual(qr.sent[0][0], "worker_a")
+        self.assertTrue(q.empty())
+
+    def test_channel_without_clients_reports_no_delivery(self):
+        # SocketChannel-подобный канал без получателя → status='error' → билет не
+        # доставлен (delivered=0), пуш без подписчика не копится (как раньше).
+        class _NoClientChannel(QueueChannel):
+            def send(self, message):
+                return {"status": "error", "reason": "no clients connected", "channel": self.name}
+
+        qr = _NoQueueRegistry()
+        router = RouterManager(manager_name="r_br4", queue_registry=qr)
+        router.register_channel(_NoClientChannel("backend_ctl", Queue()))
+
+        result = router.send(
+            {"type": "event", "command": "state.changed", "targets": ["backend_ctl"], "queue_type": "system"}
+        )
+        self.assertEqual(result.get("status"), "error")
+
+
+class TestRelayFallback(unittest.TestCase):
+    """Ф1.7: target без очереди И без канала → однократный relay билета хабу
+    (router.relay), где канал внешнего подписчика зарегистрирован (мост 1.1b).
+    Раньше такой push (например log.record из дочернего процесса) молча дропался."""
+
+    def test_undeliverable_push_relayed_to_hub(self):
+        qr = _NoQueueRegistry(present=("ProcessManager",))  # очередь только у хаба
+        router = RouterManager(manager_name="r_rel1", queue_registry=qr)
+        result = router.send(
+            {
+                "type": "event",
+                "command": "log.record",
+                "targets": ["backend_ctl"],
+                "queue_type": "system",
+                "data": {"record": {"level": "ERROR"}},
+            }
+        )
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(len(qr.sent), 1)
+        process, qtype, envelope = qr.sent[0]
+        self.assertEqual(process, "ProcessManager")
+        self.assertEqual(qtype, "system")
+        self.assertEqual(envelope["command"], "router.relay")
+        inner = envelope["data"]["ticket"]
+        self.assertEqual(inner["command"], "log.record")
+        self.assertEqual(inner["targets"], ["backend_ctl"])
+        self.assertTrue(inner["_relayed"])  # защита от повторного relay на хабе
+
+    def test_already_relayed_ticket_not_relayed_again(self):
+        # Цикл исключён: билет с меткой _relayed дропается как раньше (error).
+        qr = _NoQueueRegistry(present=("ProcessManager",))
+        router = RouterManager(manager_name="r_rel2", queue_registry=qr)
+        result = router.send(
+            {"type": "event", "command": "log.record", "targets": ["backend_ctl"],
+             "queue_type": "system", "_relayed": True}
+        )
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(len(qr.sent), 0)
+
+    def test_no_hub_queue_keeps_prior_drop(self):
+        # Очереди хаба нет (минимальные конфигурации) → прежнее поведение (error).
+        qr = _NoQueueRegistry()
+        router = RouterManager(manager_name="r_rel3", queue_registry=qr)
+        result = router.send(
+            {"type": "event", "command": "log.record", "targets": ["ghost"], "queue_type": "system"}
+        )
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(len(qr.sent), 0)
+
+    def test_channel_bridge_takes_precedence_over_relay(self):
+        # Есть канал имени target (мы и есть хаб) → мост 1.1b, relay не трогается.
+        qr = _NoQueueRegistry(present=("ProcessManager",))
+        router = RouterManager(manager_name="r_rel4", queue_registry=qr)
+        ch, q = _make_channel("backend_ctl")
+        router.register_channel(ch)
+        result = router.send(
+            {"type": "event", "command": "log.record", "targets": ["backend_ctl"], "queue_type": "system"}
+        )
+        self.assertEqual(result.get("status"), "success")
+        self.assertFalse(q.empty())      # доставлено в канал
+        self.assertEqual(len(qr.sent), 0)  # relay не использовался
+
+    def test_hub_as_target_never_relayed(self):
+        # Недоставляемый билет самому хабу не заворачивается в relay (нет смысла).
+        qr = _NoQueueRegistry()  # даже у хаба нет очереди
+        router = RouterManager(manager_name="r_rel5", queue_registry=qr)
+        result = router.send(
+            {"type": "command", "command": "x", "targets": ["ProcessManager"], "queue_type": "system"}
+        )
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(len(qr.sent), 0)
+
+    def test_relay_disabled_by_none_hub(self):
+        qr = _NoQueueRegistry(present=("ProcessManager",))
+        router = RouterManager(manager_name="r_rel6", queue_registry=qr, relay_hub=None)
+        result = router.send(
+            {"type": "event", "command": "log.record", "targets": ["backend_ctl"], "queue_type": "system"}
+        )
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(len(qr.sent), 0)
+
+    def test_existing_process_queue_unaffected(self):
+        # Паритет: у target есть очередь → обычный путь, relay не вмешивается.
+        qr = _NoQueueRegistry(present=("worker_a", "ProcessManager"))
+        router = RouterManager(manager_name="r_rel7", queue_registry=qr)
+        router.send({"type": "command", "command": "do.thing", "targets": ["worker_a"]})
+        self.assertEqual(len(qr.sent), 1)
+        self.assertEqual(qr.sent[0][0], "worker_a")
+        self.assertEqual(qr.sent[0][2]["command"], "do.thing")  # не конверт relay
+
+
 class TestHierarchicalDelivery(unittest.TestCase):
     """P2.1: cross-process доставка по address[0]; воркер+ едет в билете (_address)."""
 

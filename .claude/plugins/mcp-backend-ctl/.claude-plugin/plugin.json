@@ -1,0 +1,11 @@
+{
+  "name": "mcp-backend-ctl",
+  "version": "1.0.0",
+  "description": "Live backend control via backend_ctl driver (status/introspect/state/send_command) — Ф1 Task 1.7",
+  "mcpServers": {
+    "backend-ctl": {
+      "command": ".venv/bin/python",
+      "args": ["-m", "backend_ctl.mcp_server"]
+    }
+  }
+}

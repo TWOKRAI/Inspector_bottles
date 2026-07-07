@@ -51,6 +51,7 @@ class RouterManager(ChannelRoutingManager):
         dispatch_strategy: DispatchStrategy = DispatchStrategy.EXACT_MATCH,
         send_queue_size: int = 512,
         logger: Optional[Any] = None,
+        relay_hub: Optional[str] = "ProcessManager",
         **kwargs: Any,
     ) -> None:
         managers = kwargs.pop("managers", {})
@@ -73,6 +74,10 @@ class RouterManager(ChannelRoutingManager):
 
         self.router_id = manager_name
         self.queue_registry = queue_registry
+        # Ф1.7 (relay push→хаб): куда однократно пересылать билет, который в ЭТОМ
+        # процессе доставить некому (нет ни очереди, ни канала — внешний подписчик
+        # зарегистрирован каналом только в хабе). None/"" = relay выключен.
+        self._relay_hub = relay_hub
         self._sender = AsyncSender(
             name=manager_name,
             send_fn=self._do_send,
@@ -318,6 +323,44 @@ class RouterManager(ChannelRoutingManager):
             # len==1 (плоское имя) → исходный билет без копии (паритет, горячий путь).
             # Иначе — per-target копия с полным address (воркер+ резолвится на приёме).
             ticket = msg_dict if len(address) == 1 else {**msg_dict, "_address": address}
+
+            # Ф1.1b (мост push→канал для внешних подписчиков): если у имени НЕТ очереди
+            # процесса, но зарегистрирован IMessageChannel с тем же именем (внешний
+            # подписчик — напр. SocketChannel 'backend_ctl' driver'а), доставляем push
+            # через этот канал. Раньше такой билет молча дропался: targets=[X] +
+            # queue_type='system' искал очередь 'X_system', которой у не-процесса нет,
+            # а SocketChannel зовётся только через channel=-резолв.
+            # Строго аддитивно: у реальных процессов канала с bare-именем не бывает
+            # (каналы Router: system_events, {proc}_data/_local — с суффиксами), поэтому
+            # `get(process)` для них → None и путь очереди НЕ меняется ни на бит. Гейт на
+            # отсутствие очереди (`_queue_absent`) исключает перехват легитимного drop'а
+            # у существующего процесса (переполнение очереди → прежнее поведение).
+            channel = self._channel_registry.get(process)
+            if channel is not None and self._queue_absent(process, qtype):
+                if self._deliver_via_channel(channel, process, ticket):
+                    delivered += 1
+                continue
+
+            # Ф1.7 (relay push→хаб для детей): у имени НЕТ ни очереди, ни канала —
+            # в ЭТОМ процессе доставить некому. Внешний сокет-подписчик (например
+            # 'backend_ctl') зарегистрирован каналом ТОЛЬКО в хабе (ProcessManager),
+            # поэтому push дочернего процесса (log.record из RouterPushChannel)
+            # раньше молча дропался здесь. Однократно пересылаем билет хабу командой
+            # router.relay — хаб доставит через свой мост 1.1b. Гейты: метка _relayed
+            # исключает цикл (недоставленный второй hop дропается, как раньше);
+            # сам хаб как таргет не релеится; очередь хаба должна существовать.
+            if (
+                channel is None
+                and self._relay_hub
+                and process != self._relay_hub
+                and not msg_dict.get("_relayed")
+                and self._queue_absent(process, qtype)
+                and not self._queue_absent(self._relay_hub, "system")
+            ):
+                if self._relay_via_hub(ticket):
+                    delivered += 1
+                continue
+
             try:
                 if qr.send_to_queue(process, qtype, ticket):
                     delivered += 1
@@ -328,6 +371,81 @@ class RouterManager(ChannelRoutingManager):
             self._inc_stat("sent_ok")
             return {"status": "success", "delivered_by_targets": delivered}
         return None
+
+    def _queue_absent(self, process: str, qtype: str) -> bool:
+        """True, если у процесса нет очереди `(process, qtype)` в queue_registry.
+
+        Гейт моста push→канал (Ф1.1b): fallback на канал разрешён ТОЛЬКО когда
+        очереди действительно нет (dropped-путь). Так канал не перехватывает
+        легитимный сбой доставки в очередь существующего процесса (переполнение),
+        а лишь спасает пуш адресату-не-процессу (внешний сокет-подписчик).
+
+        Если реестр не умеет отвечать (нет метода `get_queue`), подтвердить
+        наличие очереди нельзя — тогда единственным гейтом остаётся сам факт
+        наличия канала (его bare-имя с процессами не пересекается).
+        """
+        get_queue = getattr(self.queue_registry, "get_queue", None)
+        if get_queue is None:
+            return True
+        try:
+            return get_queue(process, qtype) is None
+        except Exception as exc:  # noqa: BLE001 — реестр не должен ронять доставку
+            self._log_debug(f"_queue_absent('{process}', '{qtype}'): get_queue error: {exc}")
+            return True
+
+    def _relay_via_hub(self, ticket: Dict[str, Any]) -> bool:
+        """Переслать недоставляемый билет хабу командой ``router.relay`` (Ф1.7).
+
+        Билет едет в ``data.ticket`` с меткой ``_relayed=True``: хаб (обработчик
+        BuiltinCommands) отправит его своим router'ом — там сработает мост 1.1b
+        (канал внешнего подписчика). Повторный relay исключён меткой: если и хаб
+        доставить не сможет, билет дропается — прежнее поведение, но с одним
+        диагностируемым hop'ом вместо молчаливого дропа на месте.
+        """
+        envelope = {
+            "type": "command",
+            "command": "router.relay",
+            "sender": self.router_id,
+            "targets": [self._relay_hub],
+            "queue_type": "system",
+            "data": {"ticket": {**ticket, "_relayed": True}},
+        }
+        try:
+            if self.queue_registry.send_to_queue(self._relay_hub, "system", envelope):
+                self._log_debug(
+                    f"_deliver_by_targets: билет command={ticket.get('command')!r} "
+                    f"targets={ticket.get('targets')!r} переслан хабу '{self._relay_hub}' "
+                    "(relay push→хаб, Ф1.7)"
+                )
+                return True
+        except Exception as exc:  # noqa: BLE001 — relay не должен ронять доставку
+            self._log_debug(f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc}")
+        return False
+
+    def _deliver_via_channel(
+        self, channel: IMessageChannel, process: str, ticket: Dict[str, Any]
+    ) -> bool:
+        """Доставить билет через зарегистрированный канал (мост push→канал, Ф1.1b).
+
+        Возвращает True при успехе. `channel.send` сам решает, есть ли получатель:
+        напр. SocketChannel вернёт `status='error'` (`no clients connected`), если
+        внешний driver не подключён — тогда билет тихо не доставлен, как и раньше
+        при отсутствии очереди (пуш без подписчика не копится).
+        """
+        try:
+            result = channel.send(ticket)
+        except Exception as exc:  # noqa: BLE001 — граница канала не должна ронять доставку
+            self._log_debug(f"_deliver_by_targets: канал '{process}'.send бросил {exc!r}")
+            return False
+        if isinstance(result, dict) and result.get("status") == "error":
+            self._log_debug(
+                f"_deliver_by_targets: канал '{process}' не доставил: {result.get('reason')!r}"
+            )
+            return False
+        self._log_debug(
+            f"_deliver_by_targets: доставлено через канал '{process}' (мост push→канал, Ф1.1b)"
+        )
+        return True
 
     # ================================================================
     # REQUEST-RESPONSE (P0.5) — синхронный round-trip поверх fire-and-forget

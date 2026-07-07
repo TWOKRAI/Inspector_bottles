@@ -91,6 +91,7 @@ _SERVER_TO_PLUGIN: dict[str, str] = {
     "qt-mcp": "mcp-qt",
     "playwright": "mcp-playwright",
     "sequential-thinking": "mcp-sequential-thinking",
+    "backend-ctl": "mcp-backend-ctl",
 }
 
 # Fallback-набор включённых плагинов, когда enabled.yaml не найден (например при
