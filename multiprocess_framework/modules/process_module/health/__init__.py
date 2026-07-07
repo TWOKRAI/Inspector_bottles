@@ -14,6 +14,12 @@
 
 from __future__ import annotations
 
+from .breaker import (
+    DEFAULT_COOLDOWN_SEC,
+    DEFAULT_FAIL_THRESHOLD,
+    BreakerState,
+    CircuitBreaker,
+)
 from .schema import (
     HEALTH_FIELDS,
     LAST_ERROR_KEYS,
@@ -52,4 +58,9 @@ __all__ = [
     "publish_health",
     "DEFAULT_THROTTLE",
     "LOG_ONLY_ENV",
+    # breaker (Task 2.2)
+    "CircuitBreaker",
+    "BreakerState",
+    "DEFAULT_FAIL_THRESHOLD",
+    "DEFAULT_COOLDOWN_SEC",
 ]
