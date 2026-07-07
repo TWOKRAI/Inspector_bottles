@@ -116,6 +116,10 @@ processes:
       name: reset_metrics
       tags:
       - stats
+    - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
+      name: router.relay
+      tags:
+      - system
     - description: Прочитать значение из дерева
       name: state.get
       tags:
@@ -296,6 +300,10 @@ processes:
     - description: ''
       name: resume_capture
       tags: []
+    - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
+      name: router.relay
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -556,6 +564,10 @@ processes:
     - description: ''
       name: robot_toolchange
       tags: []
+    - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
+      name: router.relay
+      tags:
+      - system
     - description: ''
       name: set_config
       tags: []
@@ -701,6 +713,10 @@ processes:
       name: reset_metrics
       tags:
       - stats
+    - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
+      name: router.relay
+      tags:
+      - system
     - description: ''
       name: set_config
       tags: []
@@ -823,6 +839,10 @@ processes:
       name: reset_metrics
       tags:
       - stats
+    - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
+      name: router.relay
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -938,6 +958,10 @@ processes:
       name: reset_metrics
       tags:
       - stats
+    - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
+      name: router.relay
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -1053,6 +1077,10 @@ processes:
       name: reset_metrics
       tags:
       - stats
+    - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
+      name: router.relay
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -1168,6 +1196,10 @@ processes:
       name: reset_metrics
       tags:
       - stats
+    - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
+      name: router.relay
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -1283,6 +1315,10 @@ processes:
       name: reset_metrics
       tags:
       - stats
+    - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
+      name: router.relay
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:

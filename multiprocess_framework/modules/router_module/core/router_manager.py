@@ -51,6 +51,7 @@ class RouterManager(ChannelRoutingManager):
         dispatch_strategy: DispatchStrategy = DispatchStrategy.EXACT_MATCH,
         send_queue_size: int = 512,
         logger: Optional[Any] = None,
+        relay_hub: Optional[str] = "ProcessManager",
         **kwargs: Any,
     ) -> None:
         managers = kwargs.pop("managers", {})
@@ -73,6 +74,10 @@ class RouterManager(ChannelRoutingManager):
 
         self.router_id = manager_name
         self.queue_registry = queue_registry
+        # Ф1.7 (relay push→хаб): куда однократно пересылать билет, который в ЭТОМ
+        # процессе доставить некому (нет ни очереди, ни канала — внешний подписчик
+        # зарегистрирован каналом только в хабе). None/"" = relay выключен.
+        self._relay_hub = relay_hub
         self._sender = AsyncSender(
             name=manager_name,
             send_fn=self._do_send,
@@ -336,6 +341,26 @@ class RouterManager(ChannelRoutingManager):
                     delivered += 1
                 continue
 
+            # Ф1.7 (relay push→хаб для детей): у имени НЕТ ни очереди, ни канала —
+            # в ЭТОМ процессе доставить некому. Внешний сокет-подписчик (например
+            # 'backend_ctl') зарегистрирован каналом ТОЛЬКО в хабе (ProcessManager),
+            # поэтому push дочернего процесса (log.record из RouterPushChannel)
+            # раньше молча дропался здесь. Однократно пересылаем билет хабу командой
+            # router.relay — хаб доставит через свой мост 1.1b. Гейты: метка _relayed
+            # исключает цикл (недоставленный второй hop дропается, как раньше);
+            # сам хаб как таргет не релеится; очередь хаба должна существовать.
+            if (
+                channel is None
+                and self._relay_hub
+                and process != self._relay_hub
+                and not msg_dict.get("_relayed")
+                and self._queue_absent(process, qtype)
+                and not self._queue_absent(self._relay_hub, "system")
+            ):
+                if self._relay_via_hub(ticket):
+                    delivered += 1
+                continue
+
             try:
                 if qr.send_to_queue(process, qtype, ticket):
                     delivered += 1
@@ -367,6 +392,35 @@ class RouterManager(ChannelRoutingManager):
         except Exception as exc:  # noqa: BLE001 — реестр не должен ронять доставку
             self._log_debug(f"_queue_absent('{process}', '{qtype}'): get_queue error: {exc}")
             return True
+
+    def _relay_via_hub(self, ticket: Dict[str, Any]) -> bool:
+        """Переслать недоставляемый билет хабу командой ``router.relay`` (Ф1.7).
+
+        Билет едет в ``data.ticket`` с меткой ``_relayed=True``: хаб (обработчик
+        BuiltinCommands) отправит его своим router'ом — там сработает мост 1.1b
+        (канал внешнего подписчика). Повторный relay исключён меткой: если и хаб
+        доставить не сможет, билет дропается — прежнее поведение, но с одним
+        диагностируемым hop'ом вместо молчаливого дропа на месте.
+        """
+        envelope = {
+            "type": "command",
+            "command": "router.relay",
+            "sender": self.router_id,
+            "targets": [self._relay_hub],
+            "queue_type": "system",
+            "data": {"ticket": {**ticket, "_relayed": True}},
+        }
+        try:
+            if self.queue_registry.send_to_queue(self._relay_hub, "system", envelope):
+                self._log_debug(
+                    f"_deliver_by_targets: билет command={ticket.get('command')!r} "
+                    f"targets={ticket.get('targets')!r} переслан хабу '{self._relay_hub}' "
+                    "(relay push→хаб, Ф1.7)"
+                )
+                return True
+        except Exception as exc:  # noqa: BLE001 — relay не должен ронять доставку
+            self._log_debug(f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc}")
+        return False
 
     def _deliver_via_channel(
         self, channel: IMessageChannel, process: str, ticket: Dict[str, Any]

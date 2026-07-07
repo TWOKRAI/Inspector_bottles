@@ -39,10 +39,8 @@ def test_log_tail_catches_error_live(headless_backend) -> None:
     зарегистрирован. Провокация ERROR: команда к несуществующему процессу
     (process.restart '__ghost__') → PM.log_error("No saved config") → push → events().
 
-    Архитектурная граница: tail ДОЧЕРНЕГО процесса ловит записи внутри процесса, но их
-    push targets=[backend_ctl] не доходит до внешнего сокета — канал 'backend_ctl' живёт
-    только в router'е PM. Cross-process доставка потребует relay в PM (вне scope 1.5:
-    Router/PM не трогаем). Механизм tap generic и покрыт юнитами.
+    Граница 1.5 (tail дочернего процесса не доходил до внешнего сокета) закрыта в 1.7
+    relay'ем через хаб — см. test_log_tail_child_process_reaches_driver_via_relay ниже.
     """
     drv = headless_backend
     sub = drv.log_tail("ProcessManager", level="ERROR", timeout=8.0)
@@ -65,3 +63,42 @@ def test_log_tail_catches_error_live(headless_backend) -> None:
     assert "ERROR" in levels, f"ожидали ERROR среди {levels}"
 
     drv.log_untail("ProcessManager", timeout=8.0)  # снять подписку (гигиена сессии)
+
+
+@pytest.mark.harness_smoke
+def test_log_tail_child_process_reaches_driver_via_relay(headless_backend) -> None:
+    """1.7: tail ДОЧЕРНЕГО процесса доходит до внешнего driver'а через relay (граница 1.5 закрыта).
+
+    Цепочка: log_tail('preprocessor') ставит router-push sink в ребёнке → провокация
+    ERROR (register_update с несуществующим полем → log_error PluginOrchestrator) →
+    push targets=[backend_ctl] в router'е ребёнка НЕ доставляем (нет ни очереди, ни
+    канала) → однократный relay билета хабу (router.relay) → PM доставляет своим
+    router'ом через мост 1.1b → SocketChannel → driver.events().
+    """
+    drv = headless_backend
+    sub = drv.log_tail("preprocessor", level="ERROR", timeout=8.0)
+    assert sub.get("success") is True, f"log_tail подписка не success: {sub}"
+
+    drv.events()  # осушить накопленное до провокации
+
+    # Провокация ERROR в ребёнке: register_update по несуществующему полю регистра.
+    # Команда fire-and-forget (manages_own_reply) — ответа не ждём, таймаут не диагноз.
+    drv.send_command(
+        "preprocessor",
+        "register_update",
+        {"register": "resize", "field": "__no_such_field__", "value": 1},
+        timeout=2.0,
+    )
+
+    records = []
+    for _ in range(5):
+        for e in drv.events(timeout=2.0):
+            if e.get("command") == "log.record" and (e.get("data") or {}).get("process") == "preprocessor":
+                records.append(e)
+        if records:
+            break
+    assert records, "LogRecord ребёнка не дошёл до driver.events() (relay через хаб)"
+    levels = {(e.get("data") or {}).get("record", {}).get("level") for e in records}
+    assert "ERROR" in levels, f"ожидали ERROR среди {levels}"
+
+    drv.log_untail("preprocessor", timeout=8.0)  # гигиена сессии

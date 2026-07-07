@@ -35,6 +35,7 @@ class BuiltinCommands:
         self._register_wire_commands()
         self._register_introspect_commands()
         self._register_observability_commands()
+        self._register_relay_commands()
 
     # ========================================================================
     # КОМАНДЫ УПРАВЛЕНИЯ ВОРКЕРАМИ
@@ -856,3 +857,49 @@ class BuiltinCommands:
             module="wire",
         )
         return {"success": True, "wire_key": wire_key}
+
+    # ========================================================================
+    # RELAY (Ф1 Task 1.7: хаб-релей недоставляемых push'ей к внешним подписчикам)
+    # ========================================================================
+
+    def _register_relay_commands(self) -> None:
+        """Зарегистрировать router.relay — приём билета от RouterManager._relay_via_hub.
+
+        Дочерний процесс не может доставить push внешнему подписчику (канал
+        'backend_ctl' живёт только в router'е хаба) и однократно пересылает билет
+        сюда. Обработчик просто отправляет билет СВОИМ router'ом — дальше работает
+        мост 1.1b (_deliver_by_targets → канал). Команда generic и есть у всех
+        процессов, но реально relay адресуется хабу (ProcessManager).
+        """
+        cm = self._services.command_manager
+        if not cm:
+            return
+        cm.register_command(
+            "router.relay",
+            self._cmd_router_relay,
+            metadata={
+                "description": "Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)",
+                "manages_own_reply": True,  # fire-and-forget: инициатору ничего не едет
+            },
+            tags=["system"],
+        )
+
+    def _cmd_router_relay(self, data=None, **kwargs) -> dict:
+        """Отправить чужой билет своим router'ом (fire-and-forget, без reply).
+
+        Билет уже помечен ``_relayed=True`` отправителем (страховкой ставим и здесь):
+        если и наш router доставить не сможет — билет дропнется, второго relay не будет.
+        """
+        ticket = (data or {}).get("ticket")
+        if not isinstance(ticket, dict) or not ticket.get("targets"):
+            return {"success": False, "reason": "router.relay: нет ticket/targets"}
+        router = self._services.router_manager
+        if router is None:
+            return {"success": False, "reason": "router.relay: router недоступен"}
+        ticket.setdefault("_relayed", True)
+        send_async = getattr(router, "send_async", None)
+        if callable(send_async):
+            send_async(ticket, priority="normal")
+        else:  # тестовые/минимальные router'ы без async-очереди
+            router.send(ticket)
+        return {"success": True, "relayed": True}
