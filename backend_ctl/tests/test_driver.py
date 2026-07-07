@@ -239,11 +239,16 @@ class TestIntegration:
         assert res["result"]["target"] == "camera"
 
     def test_set_register_builds_register_update(self, loopback) -> None:
+        """Payload — канонический контракт register_update: {register, field, value}.
+
+        Регресс: исторически driver слал plugin_name — обработчик оркестратора
+        (data.get("register") is None) молча выходил, запись была no-op.
+        """
         driver, calls = loopback
-        driver.set_register("preprocessor", "resize", "width", 640, timeout=3.0)
+        driver.set_register("preprocessor", "resize", "target_width", 640, timeout=3.0)
         sent = calls[0]
         assert sent["command"] == "register_update"
-        assert sent["data"] == {"plugin_name": "resize", "field": "width", "value": 640}
+        assert sent["data"] == {"register": "resize", "field": "target_width", "value": 640}
 
     def test_system_command_wraps_process_command(self, loopback) -> None:
         driver, calls = loopback
@@ -310,3 +315,62 @@ class TestPushEvents:
         # push осел в событиях
         evts = driver.events(timeout=1.0)
         assert any(e.get("command") == "state.changed" for e in evts)
+
+
+# --- Юнит: verify-probe set_register_verified (Ф1 Task 1.6) ---
+
+
+class TestSetRegisterVerified:
+    """write → readback → diff; probe не доверяет ack'у записи."""
+
+    @staticmethod
+    def _driver_with_fake_backend(registers: Dict[str, Any], monkeypatch) -> BackendDriver:
+        d = BackendDriver()
+
+        def fake_send(process, command, args=None, **kw):
+            if command == "register_update":
+                # имитируем применение записи на бэкенде
+                reg = registers.setdefault(args["register"], {})
+                if args["field"] in reg:
+                    reg[args["field"]] = args["value"]
+                return {"success": True}
+            if command == "introspect.registers":
+                return {"success": True, "process": process, "registers": registers}
+            raise AssertionError(f"неожиданная команда: {command}")
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d
+
+    def test_verified_true_when_readback_matches(self, monkeypatch) -> None:
+        d = self._driver_with_fake_backend({"resize": {"target_width": 0}}, monkeypatch)
+        res = d.set_register_verified("preprocessor", "resize", "target_width", 512)
+        assert res["verified"] is True
+        assert res["success"] is True
+        assert res["actual"] == 512
+
+    def test_unknown_field_is_caught(self, monkeypatch) -> None:
+        """Молчаливый no-op (нет такого поля) — probe возвращает verified=False."""
+        d = self._driver_with_fake_backend({"resize": {"target_width": 0}}, monkeypatch)
+        res = d.set_register_verified("preprocessor", "resize", "width", 512)
+        assert res["verified"] is False
+        assert res["found"] is False
+        assert res["known_registers"] == ["resize"]
+
+    def test_unknown_register_is_caught(self, monkeypatch) -> None:
+        d = self._driver_with_fake_backend({"resize": {"target_width": 0}}, monkeypatch)
+        res = d.set_register_verified("preprocessor", "no_such", "target_width", 512)
+        assert res["verified"] is False
+        assert res["found"] is False
+
+    def test_wrapped_introspect_response_unwrapped(self, monkeypatch) -> None:
+        """Ответ introspect.registers может прийти конвертом {success, result: {...}}."""
+        d = BackendDriver()
+
+        def fake_send(process, command, args=None, **kw):
+            if command == "register_update":
+                return {"success": True}
+            return {"success": True, "result": {"success": True, "registers": {"resize": {"target_width": 512}}}}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        res = d.set_register_verified("preprocessor", "resize", "target_width", 512)
+        assert res["verified"] is True

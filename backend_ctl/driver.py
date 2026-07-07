@@ -591,18 +591,65 @@ class BackendDriver:
     def set_register(
         self,
         process: str,
-        plugin: str,
+        register: str,
         field: str,
         value: Any,
         **kw: Any,
     ) -> Dict[str, Any]:
-        """Записать значение регистра в живой процесс (live field-write)."""
+        """Записать значение регистра в живой процесс (live field-write).
+
+        Ключи data — канонический контракт ``register_update`` (тот же, что шлёт GUI
+        через routing_map/CommandSender): ``{"register", "field", "value"}``.
+        Исторический баг: driver слал ``plugin_name`` — обработчик оркестратора молча
+        выходил, запись была no-op (найдено verify-probe Ф1.6). Имя регистра обычно
+        совпадает с plugin_name (регистр на плагин).
+        """
         return self.send_command(
             process,
             "register_update",
-            {"plugin_name": plugin, "field": field, "value": value},
+            {"register": register, "field": field, "value": value},
             **kw,
         )
+
+    def set_register_verified(
+        self,
+        process: str,
+        register: str,
+        field: str,
+        value: Any,
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Verify-probe (Ф1 Task 1.6): write → readback → diff.
+
+        Не доверяет ack'у записи: после :meth:`set_register` читает
+        ``introspect.registers`` того же процесса и сравнивает фактическое значение
+        поля с ожидаемым. Ловит весь класс молчаливых no-op'ов: несуществующий
+        регистр/поле, неверные ключи payload, отвал приёмника. ``verified`` может
+        отличаться от ``value`` и при легитимной коэрции значения Pydantic-схемой —
+        тогда смотреть ``actual``.
+        """
+        ack = self.set_register(process, register, field, value, timeout=timeout)
+        res = self.introspect_registers(process, timeout=timeout)
+        payload = _find_payload(res, "registers")
+        registers = payload.get("registers") if isinstance(payload, dict) else None
+        registers = registers if isinstance(registers, dict) else {}
+        reg = registers.get(register)
+        found = isinstance(reg, dict) and field in reg
+        actual = reg.get(field) if found else None
+        verified = bool(found and actual == value)
+        return {
+            "success": verified,
+            "verified": verified,
+            "found": found,
+            "process": process,
+            "register": register,
+            "field": field,
+            "expected": value,
+            "actual": actual,
+            "known_registers": sorted(registers),
+            "ack": ack,
+        }
 
     # ---- Observability control plane (Ф1 Task 1.4: config.reload / logger.sink.*) ----
 

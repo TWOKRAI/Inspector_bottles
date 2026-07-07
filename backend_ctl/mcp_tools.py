@@ -117,7 +117,13 @@ def _system_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 def _set_register(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.set_register(
-        args["process"], args["plugin"], args["field"], args.get("value"), **_kw_timeout(args)
+        args["process"], args["register"], args["field"], args.get("value"), **_kw_timeout(args)
+    )
+
+
+def _set_register_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.set_register_verified(
+        args["process"], args["register"], args["field"], args.get("value"), **_kw_timeout(args)
     )
 
 
@@ -253,14 +259,30 @@ TOOLS: List[ToolSpec] = [
         _obj(
             {
                 "process": _PROCESS,
-                "plugin": {"type": "string", "description": "Имя плагина-владельца регистра"},
+                "register": {"type": "string", "description": "Имя регистра (обычно = plugin_name владельца)"},
                 "field": {"type": "string", "description": "Имя поля регистра"},
                 "value": {"description": "Новое значение (любой JSON-тип)"},
                 "timeout": _TIMEOUT,
             },
-            ["process", "plugin", "field", "value"],
+            ["process", "register", "field", "value"],
         ),
         _set_register,
+    ),
+    ToolSpec(
+        "set_register_verified",
+        "Verify-probe записи регистра (Ф1.6): write → readback introspect.registers → diff. "
+        "Возвращает verified/expected/actual — ловит молчаливые no-op'ы (нет регистра/поля).",
+        _obj(
+            {
+                "process": _PROCESS,
+                "register": {"type": "string", "description": "Имя регистра (обычно = plugin_name владельца)"},
+                "field": {"type": "string", "description": "Имя поля регистра"},
+                "value": {"description": "Новое значение (любой JSON-тип)"},
+                "timeout": _TIMEOUT,
+            },
+            ["process", "register", "field", "value"],
+        ),
+        _set_register_verified,
     ),
     ToolSpec(
         "state_get",

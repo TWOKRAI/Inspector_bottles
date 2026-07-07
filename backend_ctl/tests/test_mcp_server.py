@@ -107,7 +107,8 @@ class TestRegistry:
         expected = {
             "capabilities", "get_status", "introspect_handlers", "introspect_registers",
             "introspect_router_stats", "introspect_queues", "send_command", "system_command",
-            "set_register", "state_get", "state_get_subtree", "state_subscribe", "events",
+            "set_register", "set_register_verified", "state_get", "state_get_subtree",
+            "state_subscribe", "events",
             "log_tail", "log_untail", "config_reload", "logger_sink_enable", "logger_sink_disable",
         }
         assert names == expected
@@ -187,9 +188,17 @@ class TestToolsCall:
         server, fake = make_server()
         call(server, "tools/call", {
             "name": "set_register",
-            "arguments": {"process": "preprocessor", "plugin": "resize", "field": "width", "value": 512},
+            "arguments": {"process": "preprocessor", "register": "resize", "field": "target_width", "value": 512},
         })
-        assert fake.calls == [("set_register", ("preprocessor", "resize", "width", 512), {})]
+        assert fake.calls == [("set_register", ("preprocessor", "resize", "target_width", 512), {})]
+
+    def test_set_register_verified_signature(self) -> None:
+        server, fake = make_server()
+        call(server, "tools/call", {
+            "name": "set_register_verified",
+            "arguments": {"process": "preprocessor", "register": "resize", "field": "target_width", "value": 512},
+        })
+        assert fake.calls == [("set_register_verified", ("preprocessor", "resize", "target_width", 512), {})]
 
     def test_capabilities_serializes_dataclass(self) -> None:
         server, _ = make_server()

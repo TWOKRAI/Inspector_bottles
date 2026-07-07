@@ -288,15 +288,16 @@ class PluginOrchestrator:
         по плану comm-system §11.7.)
         """
         # P4.4.1 (B2): register_update — обычная команда CommandManager (kind-router
-        # по type=command зовёт CM). manages_own_reply=True: fire-and-forget (handler
-        # ничего не возвращает инициатору), авто-reply пропускается для паритета.
+        # по type=command зовёт CM). Авто-reply транспорта (reply_to_request) — no-op
+        # без request_id, поэтому GUI-путь остаётся fire-and-forget, а инициатор
+        # с request_id (backend_ctl driver, Ф1.6 verify-probe) получает честный ack.
         cm = getattr(self._services, "command_manager", None)
         if cm is not None:
             cm.register_command(
                 "register_update",
                 self._on_register_update,
                 expects_full_message=True,
-                metadata={"description": "GUI/процесс обновляет значение регистра", "manages_own_reply": True},
+                metadata={"description": "GUI/процесс обновляет значение регистра"},
                 tags=["registers"],
             )
         else:  # fallback (нет CommandManager) — прежний прямой путь
@@ -343,19 +344,29 @@ class PluginOrchestrator:
             f"PluginOrchestrator[{self._services.name}]: set_enabled — плагин '{plugin_name}' не найден"
         )
 
-    def _on_register_update(self, msg: dict) -> None:
-        """Handler: GUI/другой процесс обновляет значение регистра."""
-        rm = self._registers_manager
-        if rm is None:
-            return
+    def _on_register_update(self, msg: dict) -> dict:
+        """Handler: GUI/другой процесс обновляет значение регистра.
 
+        Контракт data: ``{"register", "field", "value"}`` (канон — тот же, что шлёт
+        GUI через routing_map/CommandSender). Возвращает результат — авто-reply
+        транспорта доставит его инициатору с request_id (fire-and-forget без
+        request_id остаётся no-op'ом), некорректные ключи больше не тонут молча.
+        """
+        rm = self._registers_manager
         data = msg.get("data", {})
         register_name = data.get("register")
         field_name = data.get("field")
         value = data.get("value")
 
+        if rm is None:
+            return {"success": False, "error": "нет RegistersManager (плагины без register_schema)"}
+
         if not register_name or not field_name:
-            return
+            return {
+                "success": False,
+                "error": "нужны data.register и data.field",
+                "data_keys": sorted(data) if isinstance(data, dict) else [],
+            }
 
         success, error = rm.set_field_value(register_name, field_name, value)
         if success:
@@ -364,8 +375,9 @@ class PluginOrchestrator:
             )
             # (Раньше тут был relay register_changed -> PM «для broadcast» — мёртвое
             # письмо: приёмника msg_type register_changed нет. Удалён по плану §11.7/8.)
-        else:
-            self._services.log_error(
-                f"PluginOrchestrator[{self._services.name}]: register_update failed "
-                f"{register_name}.{field_name}: {error}"
-            )
+            return {"success": True, "register": register_name, "field": field_name, "value": value}
+        self._services.log_error(
+            f"PluginOrchestrator[{self._services.name}]: register_update failed "
+            f"{register_name}.{field_name}: {error}"
+        )
+        return {"success": False, "register": register_name, "field": field_name, "error": str(error)}

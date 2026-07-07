@@ -57,7 +57,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
    with BackendDriver(port=8765) as drv:          # connect/close через контекст
        print(drv.introspect_handlers("preprocessor"))   # что умеет процесс
        print(drv.introspect_registers("preprocessor"))  # регистры (пусто = нет приёмника)
-       drv.set_register("preprocessor", "resize", "width", 640)   # live field-write
+       drv.set_register_verified("preprocessor", "resize", "target_width", 640)   # live field-write
        print(drv.system_command({"cmd": "process.start", "process_name": "camera"}))
    ```
 
@@ -76,7 +76,8 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `worker_status(process)` → `WorkerStatus` | типизированно: `process`/`status`/`workers` (+ `.raw`) |
 | `introspect_capabilities(process)` | карточка процесса: команды+descriptions, регистры (поля), handlers |
 | `capabilities()` → `Capabilities` | «контактная книжка»: свод по ВСЕМ процессам (fan-out) — топология, каналы, карточки |
-| `set_register(process, plugin, field, value)` | live-запись регистра (`register_update`) |
+| `set_register(process, register, field, value)` | live-запись регистра (`register_update`, ключи `{register, field, value}`) |
+| `set_register_verified(process, register, field, value)` | verify-probe (Ф1.6): write → readback `introspect.registers` → diff (`verified`/`expected`/`actual`) — ловит молчаливые no-op'ы |
 | `state_subscribe(pattern, subscriber=None)` | подписка на state-дерево (`state.subscribe`); пуши `state.changed` идут в событийный канал |
 | `subscribe(callback)` / `unsubscribe(callback)` | колбэк на каждое push-событие (зовётся в reader-потоке) |
 | `events(timeout=0.0, max_items=None)` | слить накопленные события (0=поллинг, >0=ждать до timeout, None=до события/close) |

@@ -67,7 +67,8 @@ PY
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |
 | `router_stats(p)` / `queues(p)` / `worker_status(p)` | типизированно (dataclass + `.raw`): счётчики router'а / глубины очередей / статус воркеров |
 | `capabilities()` / `introspect_capabilities(p)` | «контактная книжка»: свод команд/регистров/каналов по всем процессам (или карточка одного) |
-| `set_register(process, plugin, field, value)` | live-запись регистра (`register_update`) |
+| `set_register(process, register, field, value)` | live-запись регистра (`register_update`, ключи `{register, field, value}`) |
+| `set_register_verified(process, register, field, value)` | verify-probe (Ф1.6): write → readback `introspect.registers` → diff (`verified`/`expected`/`actual`) — ловит молчаливые no-op'ы |
 | `send_command(target, command, args=None)` | прямая команда процессу (форма `CommandSender.send_command`) |
 | `system_command({"cmd": ..., ...})` | system-команда в ProcessManager (`process.start`/`stop`/`worker.*`/…) |
 | `state_subscribe(pattern)` | подписка на state-дерево; пуши `state.changed` → событийный канал |
@@ -80,7 +81,7 @@ PY
 
 ```python
 # Live field-write: применить параметр плагина в работающий процесс
-drv.set_register("preprocessor", "resize", "width", 640)
+drv.set_register_verified("preprocessor", "resize", "target_width", 640)
 
 # Управление жизненным циклом процесса
 drv.system_command({"cmd": "process.start", "process_name": "camera"})

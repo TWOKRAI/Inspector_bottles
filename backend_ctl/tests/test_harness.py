@@ -88,7 +88,11 @@ def test_state_changed_push_reaches_driver_regression() -> None:
         drv = harness.start()
         sub = drv.state_subscribe("**", timeout=8.0)
         assert (sub.get("result") or {}).get("status") == "ok" or sub.get("success"), sub
-        drv.set_register("preprocessor", "resize", "width", 512, timeout=8.0)
+        # Verify-probe (Ф1.6): запись реально применилась, не молчаливый no-op.
+        # Исторический урок: тут писали plugin_name+width (несуществующие ключ и
+        # поле) — тест зеленел на чужих state.changed от heartbeat'ов.
+        res = drv.set_register_verified("preprocessor", "resize", "target_width", 512, timeout=8.0)
+        assert res["verified"], res
         evts = drv.events(timeout=5.0)
         changed = [e for e in evts if e.get("command") == "state.changed"]
         assert changed, "push state.changed не дошёл до driver.events()"
