@@ -66,17 +66,20 @@ branch: feat/constructor-f1 (+ worktree refactor/constructor-godsplit)
   правки driver.py, error_manager, logger_module (init/logger_manager/log_enums), builtin_commands,
   observability_reload; новые router_push_channel.py + 4 тест-файла. НЕ закоммичено. Агент застрял
   на маршрутизации push (решение — см. «What did NOT work», последний пункт).
-- **worktree, F.5** (агент делал разрез factory): коммит 1093aca1 (характеризационные тесты форм)
-  ГОТОВ; в пакете `frontend/forms/factory/` только kinds.py (166 строк, незакоммичен). План агента:
-  kinds → _common → builders_binding → builders_legacy → json_editor → __init__ (реестр+ре-экспорты).
+- ~~worktree, F.5~~ — **ЗАКРЫТ после написания handoff**: коммиты 1093aca1 (38 характеризационных
+  тестов) + da7c9a5d (factory.py 1190 LOC → пакет kinds/_common/builders_binding/builders_legacy/
+  json_editor/__init__; Н-5: `_rm_old_value` ×3 → 1). Верифицировано: forms 95 passed, полный
+  proto 2879 passed, дерево чистое. Отклонение от дизайн-дока: реестр KindBuilders НЕ введён
+  (заблокирован тест-контрактом `test_register_type_overrides_builder` — `_BUILDERS` обязан остаться
+  dict[str, fn]) — отложен в E4/G2 (Ф5.6), записано в plan.md и Rejected-trailer.
 
 ## Next step
 
 Дожать Ф1.4+1.5 из in-flight состояния: перечитать незакоммиченные правки в main checkout, применить
 решение по маршрутизации push (targets+queue_type без channel, как DeltaDispatcher), прогнать
-logger/error/process_module/backend_ctl сьюты, закоммитить 1.4 и 1.5 двумя коммитами. Затем F.5
-(допаковать factory от kinds.py), потом 1.9 (контактная книжка v0) → 1.7 (MCP) → F.6 → MERGE-GATE F
-(qt-smoke обоих рецептов + sentrux modularity ≥ 5900 + merge в main).
+logger/error/process_module/backend_ctl сьюты, закоммитить 1.4 и 1.5 двумя коммитами. Затем
+1.9 (контактная книжка v0) → 1.7 (MCP) → F.6 (inspector_panel → 5 секций, последний разрез) →
+MERGE-GATE F (qt-smoke обоих рецептов + sentrux modularity ≥ 5900 + merge в main).
 
 ## Files changed
 
