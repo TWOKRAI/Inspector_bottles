@@ -13,10 +13,16 @@ import time
 from typing import Callable
 
 from ..plugins.base import ProcessModulePlugin
+from ..health import IHealthReporter
 from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
 from .plugin_runner import PluginRunner
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
+
+#: Backoff (сек) при открытом produce-breaker: вместо горячего цикла ошибок на
+#: мёртвом источнике спим дольше, отдавая CPU. Держим отзывчивость на stop_event
+#: порциями внутри smart-sleep.
+DEFAULT_BREAKER_BACKOFF_SEC = 1.0
 
 
 class SourceProducer:
@@ -30,6 +36,10 @@ class SourceProducer:
         target_fps: целевой FPS (для throttle)
         log_info: callback
         log_error: callback
+        health: honest-репортер здоровья (Task 2.2). produce()-фейлы кормят его
+            breaker (report_error), успех — record_success. None → no-op (юниты/
+            обратная совместимость): поведение как раньше, только без наблюдаемости.
+        breaker_backoff_sec: сон при открытом breaker (вместо target_interval).
     """
 
     def __init__(
@@ -44,6 +54,8 @@ class SourceProducer:
         log_debug: Callable[[str], None] | None = None,
         node_name: str = "",
         plugin_runner: PluginRunner | None = None,
+        health: IHealthReporter | None = None,
+        breaker_backoff_sec: float = DEFAULT_BREAKER_BACKOFF_SEC,
     ) -> None:
         self._plugin = plugin
         self._shm = shm_middleware
@@ -59,6 +71,11 @@ class SourceProducer:
         self._log_error = log_error or (lambda msg: None)
         # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль).
         self._log_debug = log_debug or (lambda msg: None)
+        # Honest produce-breaker (Task 2.2). context-тег фиксируем на источнике,
+        # чтобы last_error показывал, ЧЕЙ produce() падает.
+        self._health = health
+        self._health_context = f"produce:{getattr(plugin, 'name', '') or 'source'}"
+        self._breaker_backoff = max(0.0, float(breaker_backoff_sec))
 
         # Тайминг цикла (produce + send + smart-sleep) для телеметрии GUI.
         # target_interval = 1/target_fps, поэтому effective_hz ≈ фактический FPS.
@@ -91,6 +108,7 @@ class SourceProducer:
 
             t_start = time.monotonic()
 
+            produce_failed = False
             try:
                 # Вызов через PluginRunner — единый шов с pre/post-хуками (io-debug).
                 items = self._runner.call_produce(self._plugin)
@@ -101,6 +119,16 @@ class SourceProducer:
             except Exception as e:
                 self._log_error(f"SourceProducer: {self._plugin.name}.produce() error: {e}")
                 items = []
+                produce_failed = True
+                # Honest produce-breaker (Task 2.2): кормим тот же счётчик, что и
+                # плагины — N подряд produce()-фейлов откроют breaker → health degraded.
+                if self._health is not None:
+                    self._health.report_error(e, context=self._health_context)
+
+            # Успешная итерация (produce() не бросил — даже вернув [] «нет кадра»)
+            # сбрасывает подряд-счётчик и закрывает breaker (снимает деградацию).
+            if not produce_failed and self._health is not None:
+                self._health.record_success()
 
             # [TRACE] Логируем каждый 30-й кадр (чтобы не спамить)
             if items and hasattr(self, "_trace_cnt"):
@@ -130,21 +158,32 @@ class SourceProducer:
             for item in items:
                 self._send_item(item)
 
-            # Smart sleep
-            elapsed = time.monotonic() - t_start
-            sleep_time = self._target_interval - elapsed
-            if sleep_time > 0:
-                # Спим порциями для отзывчивости на stop_event.
-                # max(0.0, ...) защищает от race: между проверкой условия
-                # while и вычислением остатка время может «проскочить»
-                # за deadline, и без max() в time.sleep() уйдёт отрицательное
-                # значение → ValueError.
-                deadline = time.monotonic() + sleep_time
-                while time.monotonic() < deadline and not stop_event.is_set():
-                    time.sleep(max(0.0, min(0.01, deadline - time.monotonic())))
+            # Backoff при открытом produce-breaker (Task 2.2): не жечь CPU в горячем
+            # цикле ошибок на мёртвом источнике — спим breaker_backoff (обычно >>
+            # интервала кадра). Иначе — обычный smart-sleep до target FPS.
+            if self._health is not None and self._health.breaker_open:
+                self._sleep_cooperative(self._breaker_backoff, stop_event)
+            else:
+                elapsed = time.monotonic() - t_start
+                sleep_time = self._target_interval - elapsed
+                if sleep_time > 0:
+                    self._sleep_cooperative(sleep_time, stop_event)
 
-            # Полный цикл (produce + send + smart-sleep) → телеметрия.
+            # Полный цикл (produce + send + sleep) → телеметрия.
             self._cycle_metrics.record(time.monotonic() - t_start)
+
+    def _sleep_cooperative(self, sleep_time: float, stop_event: threading.Event) -> None:
+        """Сон порциями с проверкой stop_event (отзывчивость на остановку).
+
+        max(0.0, ...) защищает от race: между проверкой while и вычислением остатка
+        время может «проскочить» за deadline — без max() в time.sleep() уйдёт
+        отрицательное значение → ValueError.
+        """
+        if sleep_time <= 0:
+            return
+        deadline = time.monotonic() + sleep_time
+        while time.monotonic() < deadline and not stop_event.is_set():
+            time.sleep(max(0.0, min(0.01, deadline - time.monotonic())))
 
     def _send_item(self, item: dict) -> None:
         """IPC send одного item.
