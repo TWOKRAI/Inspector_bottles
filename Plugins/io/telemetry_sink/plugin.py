@@ -141,7 +141,7 @@ class TelemetrySinkPlugin(ProcessModulePlugin):
         # Финальный семпл — не потерять последнее окно данных.
         try:
             self._sample_once()
-        except Exception as exc:  # pragma: no cover — no-health: defensive на shutdown
+        except Exception as exc:  # pragma: no cover  # no-health: defensive на shutdown
             ctx.log_error(f"TelemetrySinkPlugin: финальный семпл упал: {exc}")
 
         if self._sql is not None:

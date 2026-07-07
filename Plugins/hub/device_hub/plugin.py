@@ -487,7 +487,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # Валидация kind
         try:
             entry = self._manager.get(dev_id)
-        except DeviceHubError as exc:
+        except DeviceHubError as exc:  # no-health: неизвестный device_id — ошибка уходит в ответ команды
             return {"status": "error", "message": str(exc)}
         if entry.kind != expected_kind:
             return {
@@ -664,7 +664,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
             return {"status": "error", "message": "device_id обязателен"}
         try:
             self._manager.get(dev_id)  # проверка существования
-        except DeviceHubError as exc:
+        except DeviceHubError as exc:  # no-health: неизвестный device_id — ошибка уходит в ответ команды
             return {"status": "error", "message": str(exc)}
         # НР-1: выставляем desired перед постановкой в очередь
         with self._workers_lock:
@@ -679,7 +679,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
             return {"status": "error", "message": "device_id обязателен"}
         try:
             self._manager.get(dev_id)
-        except DeviceHubError as exc:
+        except DeviceHubError as exc:  # no-health: неизвестный device_id — ошибка уходит в ответ команды
             return {"status": "error", "message": str(exc)}
         # НР-1: desired=False — supervisor НЕ пересоздаст воркер
         with self._workers_lock:
