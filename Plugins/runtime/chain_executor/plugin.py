@@ -116,10 +116,11 @@ class ChainExecutorPlugin(ProcessModulePlugin):
                     config=step["config"],
                     log_info=self._ctx.log_info,
                     log_error=self._ctx.log_error,
+                    health=self._ctx.health,
                 )
                 step["plugin"].shutdown(sub_ctx)
-            except Exception:
-                pass  # sub-plugin мог не реализовать shutdown — игнорируем
+            except Exception:  # no-health: defensive teardown — sub-plugin мог не реализовать shutdown
+                pass
 
     # --- Внутренняя инициализация шага ---
 
@@ -157,6 +158,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
                 config=sub_config,
                 log_info=self._ctx.log_info,
                 log_error=self._ctx.log_error,
+                health=self._ctx.health,  # ошибки sub-плагина кормят health процесса
             )
             plugin_instance.configure(sub_ctx)
 
@@ -169,6 +171,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
             return True
 
         except Exception as e:
+            self._ctx.health.report_error(e, context="chain_executor.init_step")
             logger.error(
                 f"ChainExecutorPlugin: ошибка инициализации шага '{step_name}': {e}"
             )
@@ -202,6 +205,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
                     current = [result]
                 # result is None → оставляем current без изменений (skip step)
             except Exception as e:
+                self._ctx.health.report_error(e, context="chain_executor.step", throttle=30.0)
                 logger.error(
                     f"ChainExecutorPlugin: ошибка в шаге '{step['name']}': {e}"
                 )
@@ -235,6 +239,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
                 elif result is not None:
                     all_results.append(result)
             except Exception as e:
+                self._ctx.health.report_error(e, context="chain_executor.parallel_step", throttle=30.0)
                 logger.error(
                     f"ChainExecutorPlugin: ошибка в параллельном шаге '{step_name}': {e}"
                 )
