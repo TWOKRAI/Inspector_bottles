@@ -64,6 +64,9 @@ class UiEventTap(QObject):
         # Счётчики для диагностики (introspect через ui.tap.subscribe-ответ/пинг).
         self.events_sent = 0
         self.send_errors = 0
+        # Сквозной seq всех событий тапа (жест + намерение через emit_event):
+        # упорядочивание «клик → команда» без гонок ts (debug-plane v1).
+        self._seq = 0
 
     # ------------------------------------------------------------------ #
     #  Управление (зовётся из message_processor-потока — только атрибуты)  #
@@ -100,7 +103,8 @@ class UiEventTap(QObject):
         send = self._send
         if send is None:
             return False
-        payload = {"ts": time.time(), **event}
+        self._seq += 1
+        payload = {"ts": time.time(), "seq": self._seq, **event}
         try:
             send(payload)
             self.events_sent += 1

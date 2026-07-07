@@ -110,6 +110,7 @@ class TestRegistry:
             "set_register", "set_register_verified", "state_get", "state_get_subtree",
             "state_subscribe", "events",
             "log_tail", "log_untail", "ui_tap", "ui_untap", "ui_tap_ping",
+            "debug_session", "debug_stop",
             "config_reload", "logger_sink_enable", "logger_sink_disable",
         }
         assert names == expected

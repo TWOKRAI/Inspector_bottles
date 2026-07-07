@@ -374,3 +374,49 @@ class TestSetRegisterVerified:
         monkeypatch.setattr(d, "send_command", fake_send)
         res = d.set_register_verified("preprocessor", "resize", "target_width", 512)
         assert res["verified"] is True
+
+
+# --- Юнит: debug_session — вся отладочная плоскость одним вызовом ---
+
+
+class TestDebugSession:
+    @staticmethod
+    def _driver_with_recorder(monkeypatch) -> tuple[BackendDriver, List[tuple]]:
+        d = BackendDriver()
+        calls: List[tuple] = []
+
+        def fake_send(process, command, args=None, **kw):
+            calls.append((process, command, args))
+            if command == "state.get_subtree":
+                return {"success": True, "result": {"subtree": {"gui": {}, "preprocessor": {}}}}
+            return {"success": True}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d, calls
+
+    def test_enables_ui_logs_state_in_one_call(self, monkeypatch) -> None:
+        d, calls = self._driver_with_recorder(monkeypatch)
+        res = d.debug_session(logs_level="ERROR")
+        cmds = [(p, c) for p, c, _ in calls]
+        assert ("gui", "ui.tap.subscribe") in cmds
+        # log_tail на все процессы из state-топологии
+        assert ("gui", "log.tail.subscribe") in cmds
+        assert ("preprocessor", "log.tail.subscribe") in cmds
+        assert ("ProcessManager", "state.subscribe") in cmds
+        assert res["success"] is True
+        assert set(res["logs"]) == {"gui", "preprocessor"}
+
+    def test_explicit_process_list_skips_topology_query(self, monkeypatch) -> None:
+        d, calls = self._driver_with_recorder(monkeypatch)
+        d.debug_session(log_processes=["camera_0"])
+        cmds = [(p, c) for p, c, _ in calls]
+        assert ("camera_0", "log.tail.subscribe") in cmds
+        assert ("ProcessManager", "state.get_subtree") not in cmds
+
+    def test_debug_stop_untaps_everything(self, monkeypatch) -> None:
+        d, calls = self._driver_with_recorder(monkeypatch)
+        d.debug_stop(log_processes=["gui", "preprocessor"])
+        cmds = [(p, c) for p, c, _ in calls]
+        assert ("gui", "ui.tap.unsubscribe") in cmds
+        assert ("gui", "log.tail.unsubscribe") in cmds
+        assert ("preprocessor", "log.tail.unsubscribe") in cmds

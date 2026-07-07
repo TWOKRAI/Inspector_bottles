@@ -33,7 +33,7 @@
 |-------|-----|-----------|
 | **Бэкенд отдельно** (headless, без Qt) | `BackendHarness` в тестах или `BACKEND_CTL=1` + strip_gui | introspect/state/логи/регистры — весь этот файл |
 | **Фронтенд** (GUI поднят) | полный запуск `BACKEND_CTL=1 python run.py` → `drv.ui_tap("gui")` | нажатия кнопок и переключения табов приходят агенту событиями `ui.event` (`data.record`: kind/text/path/ts); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; инспекция/клики виджетов — qt-mcp (`QT_MCP_PROBE=1`) |
-| **Совместно** (корреляция UI ↔ бэкенд) | один driver: `ui_tap("gui")` + `log_tail(процесс)` + `state_subscribe("**")` | единый событийный поток с ts: «кнопка → команда → лог → state-дельта» — видно, чем ответил бэкенд на клик |
+| **Совместно** (корреляция UI ↔ бэкенд) | **`drv.debug_session()` — одна кнопка**: ui_tap (жесты+команды GUI) + log_tail на все процессы + state_subscribe; выключение — `debug_stop()` | единый событийный поток с ts/seq: «клик (ui.event kind=button, seq=41) → команда GUI→бэкенд (kind=command, seq=42) → log.record → state.changed» — разрыв между уровнями локализует баг |
 
 **Киллер-фича:** `introspect_handlers(process)` за секунду ловит баг «нет приёмника»
 (команда есть в `CommandManager`, но не в router `message_dispatcher`, или у плагина нет
@@ -81,8 +81,9 @@ PY
 | `send_command(target, command, args=None)` | прямая команда процессу (форма `CommandSender.send_command`) |
 | `system_command({"cmd": ..., ...})` | system-команда в ProcessManager (`process.start`/`stop`/`worker.*`/…) |
 | `state_subscribe(pattern)` | подписка на state-дерево; пуши `state.changed` → событийный канал |
-| `ui_tap("gui")` / `ui_untap("gui")` | подписка на UI-события gui (кнопки/табы) → пуши `ui.event` в событийный канал |
+| `ui_tap("gui")` / `ui_untap("gui")` | подписка на UI-события gui: жесты (kind=button/tab) И намерения — команды GUI→бэкенд через перехват двери CommandSender (kind=command/system_command) → пуши `ui.event` (общий seq) |
 | `ui_tap_ping("gui", note=...)` | синтетическое `ui.event` тем же путём доставки — проверка цепочки без клика |
+| `debug_session(logs_level=, state_pattern=, log_processes=)` / `debug_stop()` | ВСЯ отладочная плоскость одним вызовом: ui_tap + log_tail (по умолчанию на все процессы топологии) + state_subscribe; дизайн — `plans/2026-07-06_constructor-master/debug-plane-idea.md` |
 | `subscribe(cb)` / `events(timeout)` | событийный канал: колбэк или слив накопленных push-событий |
 | `request(message, timeout=None)` | низкоуровневый: готовый router-dict → ответ по `request_id` |
 

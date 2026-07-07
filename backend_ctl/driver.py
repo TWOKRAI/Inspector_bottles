@@ -772,6 +772,73 @@ class BackendDriver:
             self.send_command(process, "ui.tap.ping", {"note": note}, timeout=timeout)
         )
 
+    # ---- Debug-plane: полная наблюдаемость одним вызовом ----
+
+    def debug_session(
+        self,
+        *,
+        gui_process: str = "gui",
+        logs_level: str = "WARNING",
+        log_processes: Optional[List[str]] = None,
+        state_pattern: str = "**",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Включить отладочную плоскость одним вызовом (debug-plane v1).
+
+        Жест+намерение (``ui_tap`` gui: клики/табы + команды GUI→бэкенд), эффект
+        (``log_tail`` уровня ``logs_level`` на процессы ``log_processes``, по
+        умолчанию — все из state-топологии, + ``state_subscribe(state_pattern)``).
+        Всё приходит в ЕДИНУЮ очередь :meth:`events`: команды ``ui.event`` /
+        ``log.record`` / ``state.changed``, упорядочивание — ts (+seq у ui.event).
+
+        Возвращает сводку по каждому включённому источнику (best-effort: недоступный
+        источник — честная запись об ошибке, остальные работают).
+        """
+        summary: Dict[str, Any] = {"ui": None, "logs": {}, "state": None}
+        summary["ui"] = self.ui_tap(gui_process, timeout=timeout)
+
+        procs = log_processes
+        if procs is None:
+            st = self.send_command(
+                "ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout
+            )
+            tree = _leaf_result(st)
+            node = tree.get("subtree") or tree.get("value") or {}
+            procs = sorted(node) if isinstance(node, dict) else []
+        for p in procs:
+            summary["logs"][p] = self.log_tail(p, level=logs_level, timeout=timeout)
+
+        summary["state"] = self.state_subscribe(state_pattern, timeout=timeout)
+        summary["success"] = bool(
+            (summary["ui"] or {}).get("success") is not False
+        )
+        return summary
+
+    def debug_stop(
+        self,
+        *,
+        gui_process: str = "gui",
+        log_processes: Optional[List[str]] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Выключить отладочную плоскость: ui_untap + log_untail по процессам.
+
+        Подписка state.subscribe снимается вместе с закрытием соединения driver'а
+        (server-side привязана к подписчику) — отдельной команды не требует.
+        """
+        summary: Dict[str, Any] = {"ui": self.ui_untap(gui_process, timeout=timeout), "logs": {}}
+        procs = log_processes
+        if procs is None:
+            st = self.send_command(
+                "ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout
+            )
+            tree = _leaf_result(st)
+            node = tree.get("subtree") or tree.get("value") or {}
+            procs = sorted(node) if isinstance(node, dict) else []
+        for p in procs:
+            summary["logs"][p] = self.log_untail(p, timeout=timeout)
+        return summary
+
     # ---- Подписка на состояние (state.subscribe → событийный канал) ----
 
     def state_subscribe(

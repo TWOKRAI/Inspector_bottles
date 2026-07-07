@@ -208,3 +208,132 @@ class TestUiTapCommands:
         res = handlers["ui.tap.subscribe"]({"subscriber": "backend_ctl"})
         assert res["success"] is False
         assert "не поднят" in res["reason"]
+
+
+# ---------------------------------------------------------------------------
+# Debug-plane v1: уровень «намерение» (CommandSenderTap) + sources в подписке
+# ---------------------------------------------------------------------------
+
+
+class _FakeCommandSender:
+    """Дверь GUI→бэкенд: записывает реальные отправки (проверка прозрачности тапа)."""
+
+    def __init__(self) -> None:
+        self.sent: List[tuple] = []
+
+    def send_command(self, target_process, command, args=None):
+        self.sent.append(("cmd", target_process, command, args))
+
+    def send_system_command(self, command):
+        self.sent.append(("sys", command))
+
+
+class TestCommandSenderTap:
+    def test_wraps_and_emits_then_delegates(self) -> None:
+        from multiprocess_framework.modules.frontend_module.debug import CommandSenderTap
+
+        sender = _FakeCommandSender()
+        events: List[Dict[str, Any]] = []
+        tap = CommandSenderTap(sender, events.append)
+        tap.install()
+
+        sender.send_command("preprocessor", "register_update", {"register": "resize", "field": "target_width", "value": 512})
+        sender.send_system_command({"cmd": "process.start", "process_name": "camera"})
+
+        # события эмитятся
+        assert [e["kind"] for e in events] == ["command", "system_command"]
+        assert events[0]["target"] == "preprocessor"
+        assert events[0]["command"] == "register_update"
+        assert events[0]["args"]["value"] == 512
+        # прод-путь прозрачен: команды реально ушли
+        assert sender.sent[0][:3] == ("cmd", "preprocessor", "register_update")
+        assert sender.sent[1] == ("sys", {"cmd": "process.start", "process_name": "camera"})
+
+    def test_remove_restores_originals(self) -> None:
+        from multiprocess_framework.modules.frontend_module.debug import CommandSenderTap
+
+        sender = _FakeCommandSender()
+        events: List[Dict[str, Any]] = []
+        tap = CommandSenderTap(sender, events.append)
+        tap.install()
+        tap.remove()
+        sender.send_command("x", "y")
+        assert events == []  # перехват снят
+        assert sender.sent  # команда ушла
+
+    def test_emit_error_does_not_block_command(self) -> None:
+        from multiprocess_framework.modules.frontend_module.debug import CommandSenderTap
+
+        sender = _FakeCommandSender()
+
+        def boom(_e):
+            raise RuntimeError("доставка упала")
+
+        CommandSenderTap(sender, boom).install()
+        sender.send_command("x", "y")  # не должно бросить
+        assert sender.sent  # прод-путь важнее отладки
+
+    def test_install_idempotent(self) -> None:
+        from multiprocess_framework.modules.frontend_module.debug import CommandSenderTap
+
+        sender = _FakeCommandSender()
+        events: List[Dict[str, Any]] = []
+        tap = CommandSenderTap(sender, events.append)
+        tap.install()
+        tap.install()  # повторный — no-op, не двойная обёртка
+        sender.send_command("x", "y")
+        assert len(events) == 1
+
+    def test_long_args_truncated(self) -> None:
+        from multiprocess_framework.modules.frontend_module.debug import CommandSenderTap
+
+        sender = _FakeCommandSender()
+        events: List[Dict[str, Any]] = []
+        CommandSenderTap(sender, events.append).install()
+        sender.send_command("x", "y", {"blob": "A" * 1000})
+        assert len(events[0]["args"]["blob"]) < 250  # обрезано, поток не раздувается
+
+
+class TestSubscribeSources:
+    def _setup(self, qapp, with_sender: bool = True):
+        services = _FakeServices()
+        tap = UiEventTap(qapp)
+        sender = _FakeCommandSender() if with_sender else None
+        assert register_ui_tap_commands(services, lambda: tap, lambda: sender) is True
+        return services, tap, sender, _registered_handlers(services)
+
+    def test_default_sources_include_command_gate(self, qapp) -> None:
+        services, tap, sender, handlers = self._setup(qapp)
+        res = handlers["ui.tap.subscribe"]({"subscriber": "backend_ctl"})
+        assert set(res["sources"]) == {"gesture", "command"}
+        # дверь перехвачена: send_command порождает ui.event kind=command с seq
+        sender.send_command("preprocessor", "introspect.status")
+        msg = services.router_manager.sent[-1]
+        assert msg["command"] == "ui.event"
+        assert msg["data"]["record"]["kind"] == "command"
+        assert msg["data"]["record"]["seq"] >= 1
+
+    def test_unsubscribe_removes_command_gate(self, qapp) -> None:
+        services, tap, sender, handlers = self._setup(qapp)
+        handlers["ui.tap.subscribe"]({"subscriber": "backend_ctl"})
+        handlers["ui.tap.unsubscribe"]({})
+        n = len(services.router_manager.sent)
+        sender.send_command("x", "y")
+        assert len(services.router_manager.sent) == n  # перехват снят
+
+    def test_gesture_only_when_requested(self, qapp) -> None:
+        services, tap, sender, handlers = self._setup(qapp)
+        res = handlers["ui.tap.subscribe"]({"subscriber": "backend_ctl", "sources": ["gesture"]})
+        assert res["sources"] == ["gesture"]
+        sender.send_command("x", "y")
+        assert services.router_manager.sent == []  # дверь не перехвачена
+
+    def test_no_sender_degrades_to_gesture(self, qapp) -> None:
+        _, _, _, handlers = self._setup(qapp, with_sender=False)
+        res = handlers["ui.tap.subscribe"]({"subscriber": "backend_ctl"})
+        assert res["sources"] == ["gesture"]  # честно: намерение недоступно
+
+    def test_unknown_source_fails_loud(self, qapp) -> None:
+        _, _, _, handlers = self._setup(qapp)
+        res = handlers["ui.tap.subscribe"]({"subscriber": "backend_ctl", "sources": ["telepathy"]})
+        assert res["success"] is False

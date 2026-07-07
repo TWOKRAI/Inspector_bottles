@@ -76,7 +76,11 @@ def run_gui(process: "GuiProcess") -> None:
     process._ui_event_tap = _ui_tap
     if not getattr(process, "_ui_tap_commands_registered", False):
         process._ui_tap_commands_registered = register_ui_tap_commands(
-            process, lambda: getattr(process, "_ui_event_tap", None)
+            process,
+            lambda: getattr(process, "_ui_event_tap", None),
+            # Дверь GUI→бэкенд для уровня «намерение» (debug-plane v1);
+            # command_sender создаётся ниже и вешается на process.
+            lambda: getattr(process, "_ui_command_sender", None),
         )
 
     # qt-mcp probe — активируется только при QT_MCP_PROBE=1.
@@ -131,6 +135,8 @@ def run_gui(process: "GuiProcess") -> None:
     # живут локальными переменными run_gui() (живы весь lifetime: app.exec() блокирует),
     # AppServices собирается из них через AppServicesDeps, runtime — через RuntimeDeps.
     command_sender = CommandSender(process)
+    # Ссылка для debug-plane (перехват двери GUI→бэкенд по ui.tap.subscribe).
+    process._ui_command_sender = command_sender
 
     # 3-bis. ProcessManagerProxy — IPC-фасад управления живым ProcessManagerProcess
     # (Task 4.1 recipe-orchestrator-unify). Тонкая обёртка над command_sender: шлёт
