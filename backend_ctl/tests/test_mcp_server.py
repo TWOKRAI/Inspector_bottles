@@ -106,7 +106,8 @@ class TestRegistry:
         # Минимальный набор P3 из плана + observability Ф1.4/1.5 + state/events (1.1).
         expected = {
             "capabilities", "get_status", "introspect_handlers", "introspect_registers",
-            "introspect_router_stats", "introspect_queues", "send_command", "system_command",
+            "introspect_router_stats", "introspect_queues", "introspect_plugins",
+            "send_command", "system_command",
             "set_register", "set_register_verified", "state_get", "state_get_subtree",
             "state_subscribe", "events",
             "log_tail", "log_untail", "ui_tap", "ui_untap", "ui_tap_ping",

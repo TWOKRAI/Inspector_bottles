@@ -107,6 +107,10 @@ def _introspect_queues(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.introspect_queues(args["process"], **_kw_timeout(args))
 
 
+def _introspect_plugins(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.introspect_plugins(args["process"], **_kw_timeout(args))
+
+
 def _send_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.send_command(args["target"], args["command"], args.get("args"), **_kw_timeout(args))
 
@@ -246,6 +250,13 @@ TOOLS: List[ToolSpec] = [
         "None = qsize недоступен на платформе (macOS) — само по себе диагностично.",
         _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
         _introspect_queues,
+    ),
+    ToolSpec(
+        "introspect_plugins",
+        "Каталог плагинов процесса: зарегистрированные (имя → категория) + failed_imports "
+        "(модули, упавшие на discover — «куда делся мой плагин»).",
+        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        _introspect_plugins,
     ),
     ToolSpec(
         "send_command",

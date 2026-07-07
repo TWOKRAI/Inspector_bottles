@@ -349,6 +349,11 @@ class BuiltinCommands:
                 self._cmd_introspect_capabilities,
                 "Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers",
             ),
+            (
+                "introspect.plugins",
+                self._cmd_introspect_plugins,
+                "Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover)",
+            ),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
@@ -503,6 +508,28 @@ class BuiltinCommands:
             if isinstance(extra, dict):
                 card.update(extra)
         return card
+
+    def _cmd_introspect_plugins(self, data=None, **kwargs) -> dict:
+        """Каталог плагинов ЭТОГО процесса + failed_imports (Ф2.3).
+
+        Отвечает на «куда делся мой плагин»: модуль с опечаткой падает на
+        import при discover() и раньше молча исчезал из каталога; теперь он
+        в ``failed_imports`` (module_path -> "ExcType: сообщение"). Каталог —
+        глобальный singleton per-process (discover выполняется в каждом
+        процессе отдельно), поэтому ответ честный для процесса-адресата.
+        """
+        svc = self._services
+        from ..plugins.registry import PluginRegistry
+
+        plugins = {entry.name: entry.category for entry in PluginRegistry.list()}
+        failed = PluginRegistry.failed_imports()
+        return {
+            "success": True,
+            "process": svc.name,
+            "plugins": dict(sorted(plugins.items())),
+            "count": len(plugins),
+            "failed_imports": dict(sorted(failed.items())),
+        }
 
     def _cmd_introspect_router_stats(self, data=None, **kwargs) -> dict:
         """Счётчики router'а процесса: отвечает «дошло/ушло/дропнулось ли сообщение».

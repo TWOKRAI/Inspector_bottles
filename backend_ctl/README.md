@@ -71,6 +71,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `introspect_registers(process)` | имена регистров + поля (пусто = нет worker-side приёмника) |
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |
 | `introspect_router_stats(process)` / `introspect_queues(process)` | сырой dict: счётчики router'а / глубины очередей |
+| `introspect_plugins(process)` | каталог плагинов процесса + `failed_imports` (Ф2.3: «куда делся мой плагин» — модуль с опечаткой виден, не исчезает молча) |
 | `router_stats(process)` → `RouterStats` | типизированно: `sent_ok`/`received`/`middleware_dropped`/`errors` (+ `.raw`) |
 | `queues(process)` → `QueueDepths` | типизированно: `sizes={тип: глубина\|None}` (+ `.raw`) |
 | `worker_status(process)` → `WorkerStatus` | типизированно: `process`/`status`/`workers` (+ `.raw`) |

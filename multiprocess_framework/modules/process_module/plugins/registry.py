@@ -76,6 +76,11 @@ class _PluginRegistry:
 
     def __init__(self) -> None:
         self._plugins: dict[str, PluginEntry] = {}
+        # Модули, которые не удалось импортировать при discover():
+        # module_path -> "ExcType: сообщение". Персистентно между вызовами
+        # discover() (Ф2.3): плагин с опечаткой НЕ исчезает молча из каталога,
+        # а виден через introspect.plugins / failed_imports().
+        self._failed_imports: dict[str, str] = {}
 
     def register(
         self,
@@ -170,12 +175,15 @@ class _PluginRegistry:
 
                 try:
                     importlib.import_module(module_path)
+                    # Успешный повторный импорт снимает модуль из failed-list
+                    self._failed_imports.pop(module_path, None)
                 except Exception as exc:
-                    logger.debug(
-                        "PluginRegistry.discover: %s — %s: %s",
+                    error_text = f"{type(exc).__name__}: {exc}"
+                    self._failed_imports[module_path] = error_text
+                    logger.warning(
+                        "PluginRegistry.discover: не импортирован %s — %s",
                         module_path,
-                        type(exc).__name__,
-                        exc,
+                        error_text,
                     )
 
         discovered = len(self._plugins) - count_before
@@ -185,7 +193,21 @@ class _PluginRegistry:
                 discovered,
                 len(self._plugins),
             )
+        if self._failed_imports:
+            logger.warning(
+                "PluginRegistry.discover: %d модулей не импортировано: %s",
+                len(self._failed_imports),
+                ", ".join(sorted(self._failed_imports)),
+            )
         return discovered
+
+    def failed_imports(self) -> dict[str, str]:
+        """Модули, не импортированные при discover(): module_path -> ошибка.
+
+        Персистентно между вызовами discover(); успешный повторный импорт
+        модуля убирает его из списка. Видимость через introspect.plugins.
+        """
+        return dict(self._failed_imports)
 
     @staticmethod
     def _file_to_module(file_path) -> str | None:
@@ -216,6 +238,7 @@ class _PluginRegistry:
     def clear(self) -> None:
         """Очистить каталог (для тестов)."""
         self._plugins.clear()
+        self._failed_imports.clear()
 
     def __len__(self) -> int:
         return len(self._plugins)

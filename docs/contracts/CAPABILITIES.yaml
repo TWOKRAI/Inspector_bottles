@@ -50,6 +50,11 @@ processes:
       name: introspect.handlers
       tags:
       - system
+    - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
+        discover)'
+      name: introspect.plugins
+      tags:
+      - system
     - description: Глубины очередей процесса (backpressure)
       name: introspect.queues
       tags:
@@ -278,6 +283,11 @@ processes:
       name: introspect.handlers
       tags:
       - system
+    - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
+        discover)'
+      name: introspect.plugins
+      tags:
+      - system
     - description: Глубины очередей процесса (backpressure)
       name: introspect.queues
       tags:
@@ -471,6 +481,11 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
+        discover)'
+      name: introspect.plugins
       tags:
       - system
     - description: Глубины очередей процесса (backpressure)
@@ -713,6 +728,11 @@ processes:
       name: introspect.handlers
       tags:
       - system
+    - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
+        discover)'
+      name: introspect.plugins
+      tags:
+      - system
     - description: Глубины очередей процесса (backpressure)
       name: introspect.queues
       tags:
@@ -853,6 +873,11 @@ processes:
       name: introspect.handlers
       tags:
       - system
+    - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
+        discover)'
+      name: introspect.plugins
+      tags:
+      - system
     - description: Глубины очередей процесса (backpressure)
       name: introspect.queues
       tags:
@@ -980,6 +1005,11 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
+        discover)'
+      name: introspect.plugins
       tags:
       - system
     - description: Глубины очередей процесса (backpressure)
@@ -1111,6 +1141,11 @@ processes:
       name: introspect.handlers
       tags:
       - system
+    - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
+        discover)'
+      name: introspect.plugins
+      tags:
+      - system
     - description: Глубины очередей процесса (backpressure)
       name: introspect.queues
       tags:
@@ -1240,6 +1275,11 @@ processes:
       name: introspect.handlers
       tags:
       - system
+    - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
+        discover)'
+      name: introspect.plugins
+      tags:
+      - system
     - description: Глубины очередей процесса (backpressure)
       name: introspect.queues
       tags:
@@ -1367,6 +1407,11 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
+        discover)'
+      name: introspect.plugins
       tags:
       - system
     - description: Глубины очередей процесса (backpressure)

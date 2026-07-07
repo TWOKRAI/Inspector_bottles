@@ -238,6 +238,14 @@ class TestIntegration:
         res = driver.introspect_handlers("camera", timeout=3.0)
         assert res["result"]["target"] == "camera"
 
+    def test_introspect_plugins_wrapper(self, loopback) -> None:
+        """Ф2.3: обёртка шлёт introspect.plugins адресату (failed-list плагинов)."""
+        driver, calls = loopback
+        res = driver.introspect_plugins("camera", timeout=3.0)
+        assert res["result"]["command"] == "introspect.plugins"
+        assert calls[0]["command"] == "introspect.plugins"
+        assert calls[0]["targets"] == ["camera"]
+
     def test_set_register_builds_register_update(self, loopback) -> None:
         """Payload — канонический контракт register_update: {register, field, value}.
 

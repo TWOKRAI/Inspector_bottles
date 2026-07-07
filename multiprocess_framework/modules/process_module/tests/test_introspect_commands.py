@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from multiprocess_framework.modules.process_module.commands.builtin_commands import BuiltinCommands
 
 
@@ -123,6 +125,7 @@ class TestRegistration:
             "introspect.registers",
             "introspect.status",
             "introspect.capabilities",
+            "introspect.plugins",
         ):
             assert key in cm.handlers
 
@@ -322,3 +325,50 @@ class TestIntrospectQueues:
         _svc, cm = _make(queues=None)
         result = cm.dispatch("introspect.queues")
         assert result["queue_sizes"] == {}
+
+
+# ====================================================================== #
+#  introspect.plugins (Ф2.3)                                              #
+# ====================================================================== #
+
+
+class TestIntrospectPlugins:
+    """Каталог плагинов + failed_imports — «куда делся мой плагин»."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_registry(self):
+        from multiprocess_framework.modules.process_module.plugins.registry import (
+            PluginRegistry,
+        )
+
+        PluginRegistry.clear()
+        yield
+        PluginRegistry.clear()
+
+    def test_reports_registered_and_failed(self) -> None:
+        from multiprocess_framework.modules.process_module.plugins.registry import (
+            PluginRegistry,
+        )
+
+        class _DummyPlugin:
+            pass
+
+        PluginRegistry.register("dummy", _DummyPlugin, category="testing")
+        # Инъекция отказа импорта (как после discover со сломанным модулем)
+        PluginRegistry._failed_imports["pkg.broken.plugin"] = "SyntaxError: опечатка"
+
+        _svc, cm = _make()
+        result = cm.dispatch("introspect.plugins")
+        assert result["success"] is True
+        assert result["process"] == "preprocessor"
+        assert result["plugins"] == {"dummy": "testing"}
+        assert result["count"] == 1
+        assert result["failed_imports"] == {"pkg.broken.plugin": "SyntaxError: опечатка"}
+
+    def test_empty_registry_is_valid_answer(self) -> None:
+        _svc, cm = _make()
+        result = cm.dispatch("introspect.plugins")
+        assert result["success"] is True
+        assert result["plugins"] == {}
+        assert result["count"] == 0
+        assert result["failed_imports"] == {}

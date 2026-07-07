@@ -526,6 +526,10 @@ class BackendDriver:
         """Глубины очередей процесса (сырой dict): backpressure-диагностика."""
         return self.send_command(process, "introspect.queues", **kw)
 
+    def introspect_plugins(self, process: str, **kw: Any) -> Dict[str, Any]:
+        """Каталог плагинов процесса + failed_imports (Ф2.3: опечатка в плагине видна)."""
+        return self.send_command(process, "introspect.plugins", **kw)
+
     # ---- Типизированные обёртки (dataclass-результаты, Ф1 Task 1.2) ----
     #
     # Никакой бизнес-логики — только форма: сырой introspect-ответ → dataclass с
