@@ -27,6 +27,8 @@ from .channels.log_channel import (
     register_sink_factory,
     get_registered_sink_types,
 )
+from .channels.router_push_channel import RouterPushChannel
+from .log_enums import LEVEL_ORDER, level_rank
 from .adapters.logger_adapter import LoggerAdapter
 from .interfaces import ILoggerManager, ILogChannel
 
@@ -45,6 +47,9 @@ __all__ = [
     "create_channel",
     "register_sink_factory",
     "get_registered_sink_types",
+    "RouterPushChannel",
+    "LEVEL_ORDER",
+    "level_rank",
     "LoggerAdapter",
     "ILoggerManager",
     "ILogChannel",

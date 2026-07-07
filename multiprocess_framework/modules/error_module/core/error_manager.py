@@ -238,6 +238,11 @@ class ErrorManager(LoggerManager):
             extra={**self._get_thread_context(), **extra},
         ).to_dict()
 
+        # Tail логов (Task 1.5): severity-путь ErrorManager не зовёт super().log(),
+        # поэтому tap'ы кормим здесь явно (DEBUG/INFO уходят в LoggerManager.log выше).
+        if self._tap_sinks:
+            self._emit_to_taps(record_dict, level)
+
         if self._buffer is not None:
             self._buffer.enqueue(channel_name, record_dict)
             self.stats["messages_batched"] += 1
