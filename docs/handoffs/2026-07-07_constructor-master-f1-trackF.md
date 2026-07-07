@@ -62,10 +62,13 @@ branch: feat/constructor-f1 (+ worktree refactor/constructor-godsplit)
 
 ## In-flight (НЕ закоммичено, агенты оборваны — состояние на диске)
 
-- **main checkout, Ф1.4+1.5** (агент делал 1.4 config.reload/logger.sink.* + 1.5 tail логов):
-  правки driver.py, error_manager, logger_module (init/logger_manager/log_enums), builtin_commands,
-  observability_reload; новые router_push_channel.py + 4 тест-файла. НЕ закоммичено. Агент застрял
-  на маршрутизации push (решение — см. «What did NOT work», последний пункт).
+- ~~main checkout, Ф1.4+1.5~~ — **ЗАКРЫТ после написания handoff**: коммиты 09a359d9 (1.4:
+  config.reload + logger.sink.enable|disable + tap-инфраструктура, единый путь
+  `apply_observability_reconfigure` для watcher и IPC) + 0e102895 (1.5: RouterPushChannel по
+  ADR-CRM-006, log_tail/log_untail в driver). Верифицировано: 470 passed (logger+error+process+
+  backend_ctl, вкл. 2 live harness_smoke). **Известная граница** (в plan.md:107): tail дочернего
+  процесса не доходит до внешнего сокета — канал 'backend_ctl' есть только в router'е PM;
+  cross-process relay — кандидат в задачу при 1.7/1.9 или Ф2.
 - ~~worktree, F.5~~ — **ЗАКРЫТ после написания handoff**: коммиты 1093aca1 (38 характеризационных
   тестов) + da7c9a5d (factory.py 1190 LOC → пакет kinds/_common/builders_binding/builders_legacy/
   json_editor/__init__; Н-5: `_rm_old_value` ×3 → 1). Верифицировано: forms 95 passed, полный
@@ -75,10 +78,11 @@ branch: feat/constructor-f1 (+ worktree refactor/constructor-godsplit)
 
 ## Next step
 
-Дожать Ф1.4+1.5 из in-flight состояния: перечитать незакоммиченные правки в main checkout, применить
-решение по маршрутизации push (targets+queue_type без channel, как DeltaDispatcher), прогнать
-logger/error/process_module/backend_ctl сьюты, закоммитить 1.4 и 1.5 двумя коммитами. Затем
-1.9 (контактная книжка v0) → 1.7 (MCP) → F.6 (inspector_panel → 5 секций, последний разрез) →
+In-flight пуст — всё закоммичено и верифицировано. Следующая задача: **Ф1.9 контактная книжка v0**
+(`introspect.capabilities` в PM + `driver.capabilities()` + `dump_capabilities` →
+docs/contracts/CAPABILITIES.yaml + CI-gate; дизайн в capability-manifest-idea.md; команды 1.4/1.5
+уже несут metadata.description — войдут в свод). Затем 1.7 (MCP-обёртка; заодно решить cross-process
+relay для tail детей) → F.6 (inspector_panel → 5 секций, последний разрез трека F) →
 MERGE-GATE F (qt-smoke обоих рецептов + sentrux modularity ≥ 5900 + merge в main).
 
 ## Files changed
