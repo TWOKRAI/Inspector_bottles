@@ -173,6 +173,54 @@ class WorkerStatus:
         )
 
 
+@dataclass
+class ProcessCapabilities:
+    """Карточка процесса из introspect.capabilities (контактная книжка, Ф1 Task 1.9).
+
+    Контракт процесса: ``commands`` — [{name, description, tags}], ``registers`` —
+    {имя_регистра: [имена_полей]} (структура, без значений), ``router_handlers`` —
+    НЕ-командные ключи event_dispatcher. ``raw`` — весь сырой ответ.
+    """
+
+    ok: bool
+    process: Optional[str]
+    commands: List[Dict[str, Any]]
+    router_handlers: List[str]
+    registers: Dict[str, List[str]]
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_response(cls, res: Any) -> "ProcessCapabilities":
+        payload = _find_payload(res, "commands", "registers")
+        commands = payload.get("commands") if isinstance(payload, dict) else None
+        registers = payload.get("registers") if isinstance(payload, dict) else None
+        handlers = payload.get("router_handlers") if isinstance(payload, dict) else None
+        return cls(
+            ok=_is_ok(res, payload),
+            process=payload.get("process") if isinstance(payload, dict) else None,
+            commands=list(commands) if isinstance(commands, list) else [],
+            router_handlers=list(handlers) if isinstance(handlers, list) else [],
+            registers=dict(registers) if isinstance(registers, dict) else {},
+            raw=res if isinstance(res, dict) else {},
+        )
+
+
+@dataclass
+class Capabilities:
+    """Свод «контактной книжки» по всей системе (driver-side fan-out, Ф1 Task 1.9).
+
+    ``processes`` — карточки всех процессов (включая ProcessManager);
+    ``topology`` — {имя: {"class": dotted-path}} управляемых процессов (из PM);
+    ``channels`` — каналы router'а PM. ``ok`` = PM ответил и все карточки собраны.
+    """
+
+    ok: bool
+    processes: Dict[str, ProcessCapabilities]
+    topology: Dict[str, Dict[str, Any]]
+    channels: List[Dict[str, str]]
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
 class _Pending:
     """Слот ожидания ответа по request_id."""
 
@@ -499,6 +547,46 @@ class BackendDriver:
     def worker_status(self, process: str, **kw: Any) -> WorkerStatus:
         """Статус процесса и воркеров как :class:`WorkerStatus` (форма, не логика)."""
         return WorkerStatus.from_response(self.introspect_status(process, **kw))
+
+    def introspect_capabilities(self, process: str, **kw: Any) -> Dict[str, Any]:
+        """Карточка процесса (сырой dict): команды+descriptions, регистры, handlers."""
+        return self.send_command(process, "introspect.capabilities", **kw)
+
+    def capabilities(
+        self,
+        *,
+        pm_name: str = "ProcessManager",
+        timeout: float = 8.0,
+    ) -> Capabilities:
+        """Свод «контактной книжки» по всей системе (Ф1 Task 1.9).
+
+        Fan-out на стороне driver'а (НЕ внутри PM-хендлера — там блокирующий сбор
+        ответов детей дедлочит message_processor): сперва карточка PM (в ней
+        ``processes``-топология и ``channels`` из ``capabilities_extra``), затем
+        ``introspect.capabilities`` каждому управляемому процессу. Карточка,
+        не ответившая за timeout, попадает в свод с ``ok=False`` (диагностично).
+        """
+        pm_res = self.introspect_capabilities(pm_name, timeout=timeout)
+        pm_card = ProcessCapabilities.from_response(pm_res)
+        pm_payload = _find_payload(pm_res, "processes", "commands")
+        topology = pm_payload.get("processes") if isinstance(pm_payload, dict) else None
+        topology = topology if isinstance(topology, dict) else {}
+        channels = pm_payload.get("channels") if isinstance(pm_payload, dict) else None
+        channels = channels if isinstance(channels, list) else []
+
+        cards: Dict[str, ProcessCapabilities] = {pm_name: pm_card}
+        for name in sorted(topology):
+            cards[name] = ProcessCapabilities.from_response(
+                self.introspect_capabilities(name, timeout=timeout)
+            )
+
+        return Capabilities(
+            ok=pm_card.ok and all(c.ok for c in cards.values()),
+            processes=cards,
+            topology={k: dict(v) if isinstance(v, dict) else {} for k, v in topology.items()},
+            channels=[dict(c) for c in channels if isinstance(c, dict)],
+            raw=pm_res if isinstance(pm_res, dict) else {},
+        )
 
     def set_register(
         self,

@@ -1,0 +1,1356 @@
+# CAPABILITIES.yaml — «контактная книжка» бэкенда (capability manifest v0).
+# ГЕНЕРИРУЕТСЯ: python -m backend_ctl.dump_capabilities — руками не править.
+# CI-gate: backend_ctl/tests/test_capabilities.py сверяет с runtime (дрейф = красный).
+channels:
+- kind: QueueChannel
+  name: ProcessManager_data
+- kind: QueueChannel
+  name: ProcessManager_local
+- kind: QueueChannel
+  name: ProcessManager_system
+- kind: SocketChannel
+  name: backend_ctl
+- kind: QueueChannel
+  name: system_events
+processes:
+  ProcessManager:
+    commands:
+    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+      name: config.reload
+      tags:
+      - system
+    - description: ''
+      name: flush_stats
+      tags:
+      - stats
+    - description: ''
+      name: get_metric
+      tags:
+      - stats
+    - description: ''
+      name: get_metrics
+      tags:
+      - stats
+    - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
+        router-handlers'
+      name: introspect.capabilities
+      tags:
+      - system
+    - description: Router message-handlers + команды CommandManager процесса
+      name: introspect.handlers
+      tags:
+      - system
+    - description: Глубины очередей процесса (backpressure)
+      name: introspect.queues
+      tags:
+      - system
+    - description: Регистры процесса (имена + поля) из RegistersManager
+      name: introspect.registers
+      tags:
+      - system
+    - description: 'Счётчики router''а: sent_ok/received/dropped/errors (дошло ли сообщение)'
+      name: introspect.router_stats
+      tags:
+      - system
+    - description: Имя процесса, статус, воркеры (имена + статусы)
+      name: introspect.status
+      tags:
+      - system
+    - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
+      name: log.tail.subscribe
+      tags:
+      - system
+    - description: Снять подписку на tail логов процесса
+      name: log.tail.unsubscribe
+      tags:
+      - system
+    - description: Выключить sink логгера по имени (unregister_channel)
+      name: logger.sink.disable
+      tags:
+      - system
+    - description: Включить sink логгера по имени (register_channel)
+      name: logger.sink.enable
+      tags:
+      - system
+    - description: 'Router endpoint: вложенная команда PM'
+      name: process.command
+      tags:
+      - system
+    - description: Создать процесс из inline-конфига
+      name: process.create
+      tags:
+      - system
+    - description: Список всех процессов и статусов
+      name: process.list
+      tags:
+      - system
+    - description: Поставить процесс на паузу
+      name: process.pause
+      tags:
+      - system
+    - description: 'Relay: доставить команду в целевой процесс через свежий PSR PM'
+      name: process.relay
+      tags:
+      - system
+    - description: Перезапустить именованный процесс
+      name: process.restart
+      tags:
+      - system
+    - description: Возобновить процесс
+      name: process.resume
+      tags:
+      - system
+    - description: Запустить именованный процесс
+      name: process.start
+      tags:
+      - system
+    - description: Статус именованного процесса
+      name: process.status
+      tags:
+      - system
+    - description: Остановить именованный процесс
+      name: process.stop
+      tags:
+      - system
+    - description: ''
+      name: reset_metrics
+      tags:
+      - stats
+    - description: Прочитать значение из дерева
+      name: state.get
+      tags:
+      - state_store
+    - description: Прочитать поддерево
+      name: state.get_subtree
+      tags:
+      - state_store
+    - description: Глубокий merge dict в поддерево
+      name: state.merge
+      tags:
+      - state_store
+    - description: Установить значение в дереве
+      name: state.set
+      tags:
+      - state_store
+    - description: Подписаться на изменения
+      name: state.subscribe
+      tags:
+      - state_store
+    - description: Отписаться от подписки
+      name: state.unsubscribe
+      tags:
+      - state_store
+    - description: Отписать все подписки процесса
+      name: state.unsubscribe_all
+      tags:
+      - state_store
+    - description: ''
+      name: stats_snapshot
+      tags:
+      - diagnostics
+      - stats
+    - description: Завершить систему
+      name: system.shutdown
+      tags:
+      - system
+    - description: Статистика системы
+      name: system.stats
+      tags:
+      - system
+    - description: Применить топологию процессов
+      name: topology.apply
+      tags:
+      - system
+    - description: Вычислить diff топологии (dry-run)
+      name: topology.diff
+      tags:
+      - system
+    - description: Получить текущую топологию
+      name: topology.get
+      tags:
+      - system
+    - description: Настроить wire middleware (SHM sender/receiver)
+      name: wire.configure
+      tags:
+      - system
+    - description: Удалить wire middleware
+      name: wire.deconfigure
+      tags:
+      - system
+    - description: Настроить wire-канал (SHM + routes)
+      name: wire.setup
+      tags:
+      - system
+    - description: Статусы wire-каналов
+      name: wire.status
+      tags:
+      - system
+    - description: Разобрать wire-канал
+      name: wire.teardown
+      tags:
+      - system
+    - description: Создать воркер в процессе
+      name: worker.create
+      tags:
+      - system
+    - description: Поставить все прикладные воркеры процесса на паузу
+      name: worker.pause_all
+      tags:
+      - system
+    - description: Удалить воркер из процесса
+      name: worker.remove
+      tags:
+      - system
+    - description: Перезапустить воркер
+      name: worker.restart
+      tags:
+      - system
+    - description: Возобновить все прикладные воркеры процесса
+      name: worker.resume_all
+      tags:
+      - system
+    - description: Запустить остановленный воркер
+      name: worker.start
+      tags:
+      - system
+    - description: Остановить воркер (без удаления)
+      name: worker.stop
+      tags:
+      - system
+    - description: Перенастроить воркер (приоритет/интервал)
+      name: worker.update
+      tags:
+      - system
+    registers: {}
+    router_handlers:
+    - heartbeat
+  camera_0:
+    commands:
+    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+      name: config.reload
+      tags:
+      - system
+    - description: ''
+      name: flush_stats
+      tags:
+      - stats
+    - description: ''
+      name: freeze_capture
+      tags: []
+    - description: ''
+      name: get_metric
+      tags:
+      - stats
+    - description: ''
+      name: get_metrics
+      tags:
+      - stats
+    - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
+        router-handlers'
+      name: introspect.capabilities
+      tags:
+      - system
+    - description: Router message-handlers + команды CommandManager процесса
+      name: introspect.handlers
+      tags:
+      - system
+    - description: Глубины очередей процесса (backpressure)
+      name: introspect.queues
+      tags:
+      - system
+    - description: Регистры процесса (имена + поля) из RegistersManager
+      name: introspect.registers
+      tags:
+      - system
+    - description: 'Счётчики router''а: sent_ok/received/dropped/errors (дошло ли сообщение)'
+      name: introspect.router_stats
+      tags:
+      - system
+    - description: Имя процесса, статус, воркеры (имена + статусы)
+      name: introspect.status
+      tags:
+      - system
+    - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
+      name: log.tail.subscribe
+      tags:
+      - system
+    - description: Снять подписку на tail логов процесса
+      name: log.tail.unsubscribe
+      tags:
+      - system
+    - description: Выключить sink логгера по имени (unregister_channel)
+      name: logger.sink.disable
+      tags:
+      - system
+    - description: Включить sink логгера по имени (register_channel)
+      name: logger.sink.enable
+      tags:
+      - system
+    - description: ''
+      name: pause_capture
+      tags: []
+    - description: ''
+      name: reset_metrics
+      tags:
+      - stats
+    - description: ''
+      name: resume_capture
+      tags: []
+    - description: Включить/выключить ноду (bypass)
+      name: set_enabled
+      tags:
+      - control
+    - description: ''
+      name: start_capture
+      tags: []
+    - description: ''
+      name: stats_snapshot
+      tags:
+      - diagnostics
+      - stats
+    - description: ''
+      name: stop_capture
+      tags: []
+    - description: ''
+      name: unfreeze_capture
+      tags: []
+    - description: Настроить wire middleware (SHM sender/receiver)
+      name: wire.configure
+      tags:
+      - system
+    - description: Удалить wire middleware
+      name: wire.deconfigure
+      tags:
+      - system
+    - description: Создать воркер в процессе
+      name: worker.create
+      tags:
+      - system
+    - description: Поставить все прикладные воркеры процесса на паузу
+      name: worker.pause_all
+      tags:
+      - system
+    - description: Удалить воркер из процесса
+      name: worker.remove
+      tags:
+      - system
+    - description: Перезапустить воркер
+      name: worker.restart
+      tags:
+      - system
+    - description: Возобновить все прикладные воркеры процесса
+      name: worker.resume_all
+      tags:
+      - system
+    - description: Запустить остановленный воркер
+      name: worker.start
+      tags:
+      - system
+    - description: Остановить воркер (без удаления)
+      name: worker.stop
+      tags:
+      - system
+    - description: Перенастроить воркер (приоритет/интервал)
+      name: worker.update
+      tags:
+      - system
+    registers: {}
+    router_handlers:
+    - state.changed
+  devices:
+    commands:
+    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+      name: config.reload
+      tags:
+      - system
+    - description: ''
+      name: device_connect
+      tags: []
+    - description: ''
+      name: device_describe
+      tags: []
+    - description: ''
+      name: device_disconnect
+      tags: []
+    - description: ''
+      name: device_list
+      tags: []
+    - description: ''
+      name: device_protocols
+      tags: []
+    - description: ''
+      name: device_read
+      tags: []
+    - description: ''
+      name: device_remove
+      tags: []
+    - description: ''
+      name: device_sync_set
+      tags: []
+    - description: ''
+      name: device_upsert
+      tags: []
+    - description: ''
+      name: device_upsert_many
+      tags: []
+    - description: ''
+      name: device_write
+      tags: []
+    - description: ''
+      name: flush_stats
+      tags:
+      - stats
+    - description: ''
+      name: get_metric
+      tags:
+      - stats
+    - description: ''
+      name: get_metrics
+      tags:
+      - stats
+    - description: ''
+      name: hik_close
+      tags: []
+    - description: ''
+      name: hik_enum
+      tags: []
+    - description: ''
+      name: hik_get_params
+      tags: []
+    - description: ''
+      name: hik_open
+      tags: []
+    - description: ''
+      name: hik_release
+      tags: []
+    - description: ''
+      name: hik_set_params
+      tags: []
+    - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
+        router-handlers'
+      name: introspect.capabilities
+      tags:
+      - system
+    - description: Router message-handlers + команды CommandManager процесса
+      name: introspect.handlers
+      tags:
+      - system
+    - description: Глубины очередей процесса (backpressure)
+      name: introspect.queues
+      tags:
+      - system
+    - description: Регистры процесса (имена + поля) из RegistersManager
+      name: introspect.registers
+      tags:
+      - system
+    - description: 'Счётчики router''а: sent_ok/received/dropped/errors (дошло ли сообщение)'
+      name: introspect.router_stats
+      tags:
+      - system
+    - description: Имя процесса, статус, воркеры (имена + статусы)
+      name: introspect.status
+      tags:
+      - system
+    - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
+      name: log.tail.subscribe
+      tags:
+      - system
+    - description: Снять подписку на tail логов процесса
+      name: log.tail.unsubscribe
+      tags:
+      - system
+    - description: Выключить sink логгера по имени (unregister_channel)
+      name: logger.sink.disable
+      tags:
+      - system
+    - description: Включить sink логгера по имени (register_channel)
+      name: logger.sink.enable
+      tags:
+      - system
+    - description: GUI/процесс обновляет значение регистра
+      name: register_update
+      tags:
+      - registers
+    - description: ''
+      name: reset_metrics
+      tags:
+      - stats
+    - description: ''
+      name: robot_abort
+      tags: []
+    - description: ''
+      name: robot_clear_queue
+      tags: []
+    - description: ''
+      name: robot_draw_abort
+      tags: []
+    - description: ''
+      name: robot_draw_circle
+      tags: []
+    - description: ''
+      name: robot_draw_polyline
+      tags: []
+    - description: ''
+      name: robot_draw_progress
+      tags: []
+    - description: ''
+      name: robot_draw_set_accel
+      tags: []
+    - description: ''
+      name: robot_draw_set_overlap
+      tags: []
+    - description: ''
+      name: robot_draw_set_pass_size
+      tags: []
+    - description: ''
+      name: robot_draw_set_pen
+      tags: []
+    - description: ''
+      name: robot_draw_set_speed
+      tags: []
+    - description: ''
+      name: robot_draw_set_travel
+      tags: []
+    - description: ''
+      name: robot_draw_square
+      tags: []
+    - description: ''
+      name: robot_enqueue_job
+      tags: []
+    - description: ''
+      name: robot_get_robot_config
+      tags: []
+    - description: ''
+      name: robot_get_telemetry
+      tags: []
+    - description: ''
+      name: robot_jog
+      tags: []
+    - description: ''
+      name: robot_jog_abort
+      tags: []
+    - description: ''
+      name: robot_read_echo
+      tags: []
+    - description: ''
+      name: robot_return_job
+      tags: []
+    - description: ''
+      name: robot_send_test_job
+      tags: []
+    - description: ''
+      name: robot_set_encoder_offset
+      tags: []
+    - description: ''
+      name: robot_set_manual_mode
+      tags: []
+    - description: ''
+      name: robot_set_mode
+      tags: []
+    - description: ''
+      name: robot_set_robot_config
+      tags: []
+    - description: ''
+      name: robot_set_servo
+      tags: []
+    - description: ''
+      name: robot_toolchange
+      tags: []
+    - description: ''
+      name: set_config
+      tags: []
+    - description: Включить/выключить ноду (bypass)
+      name: set_enabled
+      tags:
+      - control
+    - description: ''
+      name: stats_snapshot
+      tags:
+      - diagnostics
+      - stats
+    - description: ''
+      name: vfd_get_status
+      tags: []
+    - description: ''
+      name: vfd_reset_fault
+      tags: []
+    - description: ''
+      name: vfd_run
+      tags: []
+    - description: ''
+      name: vfd_set_freq
+      tags: []
+    - description: ''
+      name: vfd_stop
+      tags: []
+    - description: Настроить wire middleware (SHM sender/receiver)
+      name: wire.configure
+      tags:
+      - system
+    - description: Удалить wire middleware
+      name: wire.deconfigure
+      tags:
+      - system
+    - description: Создать воркер в процессе
+      name: worker.create
+      tags:
+      - system
+    - description: Поставить все прикладные воркеры процесса на паузу
+      name: worker.pause_all
+      tags:
+      - system
+    - description: Удалить воркер из процесса
+      name: worker.remove
+      tags:
+      - system
+    - description: Перезапустить воркер
+      name: worker.restart
+      tags:
+      - system
+    - description: Возобновить все прикладные воркеры процесса
+      name: worker.resume_all
+      tags:
+      - system
+    - description: Запустить остановленный воркер
+      name: worker.start
+      tags:
+      - system
+    - description: Остановить воркер (без удаления)
+      name: worker.stop
+      tags:
+      - system
+    - description: Перенастроить воркер (приоритет/интервал)
+      name: worker.update
+      tags:
+      - system
+    registers:
+      device_hub:
+      - commands_err
+      - commands_ok
+      - devices_connected
+      - devices_total
+      - last_error
+      - registry_path
+      - supervisor_interval_s
+    router_handlers:
+    - state.changed
+  preprocessor:
+    commands:
+    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+      name: config.reload
+      tags:
+      - system
+    - description: ''
+      name: flush_stats
+      tags:
+      - stats
+    - description: ''
+      name: get_metric
+      tags:
+      - stats
+    - description: ''
+      name: get_metrics
+      tags:
+      - stats
+    - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
+        router-handlers'
+      name: introspect.capabilities
+      tags:
+      - system
+    - description: Router message-handlers + команды CommandManager процесса
+      name: introspect.handlers
+      tags:
+      - system
+    - description: Глубины очередей процесса (backpressure)
+      name: introspect.queues
+      tags:
+      - system
+    - description: Регистры процесса (имена + поля) из RegistersManager
+      name: introspect.registers
+      tags:
+      - system
+    - description: 'Счётчики router''а: sent_ok/received/dropped/errors (дошло ли сообщение)'
+      name: introspect.router_stats
+      tags:
+      - system
+    - description: Имя процесса, статус, воркеры (имена + статусы)
+      name: introspect.status
+      tags:
+      - system
+    - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
+      name: log.tail.subscribe
+      tags:
+      - system
+    - description: Снять подписку на tail логов процесса
+      name: log.tail.unsubscribe
+      tags:
+      - system
+    - description: Выключить sink логгера по имени (unregister_channel)
+      name: logger.sink.disable
+      tags:
+      - system
+    - description: Включить sink логгера по имени (register_channel)
+      name: logger.sink.enable
+      tags:
+      - system
+    - description: GUI/процесс обновляет значение регистра
+      name: register_update
+      tags:
+      - registers
+    - description: ''
+      name: reset_metrics
+      tags:
+      - stats
+    - description: ''
+      name: set_config
+      tags: []
+    - description: Включить/выключить ноду (bypass)
+      name: set_enabled
+      tags:
+      - control
+    - description: ''
+      name: stats_snapshot
+      tags:
+      - diagnostics
+      - stats
+    - description: Настроить wire middleware (SHM sender/receiver)
+      name: wire.configure
+      tags:
+      - system
+    - description: Удалить wire middleware
+      name: wire.deconfigure
+      tags:
+      - system
+    - description: Создать воркер в процессе
+      name: worker.create
+      tags:
+      - system
+    - description: Поставить все прикладные воркеры процесса на паузу
+      name: worker.pause_all
+      tags:
+      - system
+    - description: Удалить воркер из процесса
+      name: worker.remove
+      tags:
+      - system
+    - description: Перезапустить воркер
+      name: worker.restart
+      tags:
+      - system
+    - description: Возобновить все прикладные воркеры процесса
+      name: worker.resume_all
+      tags:
+      - system
+    - description: Запустить остановленный воркер
+      name: worker.start
+      tags:
+      - system
+    - description: Остановить воркер (без удаления)
+      name: worker.stop
+      tags:
+      - system
+    - description: Перенастроить воркер (приоритет/интервал)
+      name: worker.update
+      tags:
+      - system
+    registers:
+      resize:
+      - scale_factor
+      - target_height
+      - target_width
+    router_handlers:
+    - state.changed
+  process_flip:
+    commands:
+    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+      name: config.reload
+      tags:
+      - system
+    - description: ''
+      name: flush_stats
+      tags:
+      - stats
+    - description: ''
+      name: get_metric
+      tags:
+      - stats
+    - description: ''
+      name: get_metrics
+      tags:
+      - stats
+    - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
+        router-handlers'
+      name: introspect.capabilities
+      tags:
+      - system
+    - description: Router message-handlers + команды CommandManager процесса
+      name: introspect.handlers
+      tags:
+      - system
+    - description: Глубины очередей процесса (backpressure)
+      name: introspect.queues
+      tags:
+      - system
+    - description: Регистры процесса (имена + поля) из RegistersManager
+      name: introspect.registers
+      tags:
+      - system
+    - description: 'Счётчики router''а: sent_ok/received/dropped/errors (дошло ли сообщение)'
+      name: introspect.router_stats
+      tags:
+      - system
+    - description: Имя процесса, статус, воркеры (имена + статусы)
+      name: introspect.status
+      tags:
+      - system
+    - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
+      name: log.tail.subscribe
+      tags:
+      - system
+    - description: Снять подписку на tail логов процесса
+      name: log.tail.unsubscribe
+      tags:
+      - system
+    - description: Выключить sink логгера по имени (unregister_channel)
+      name: logger.sink.disable
+      tags:
+      - system
+    - description: Включить sink логгера по имени (register_channel)
+      name: logger.sink.enable
+      tags:
+      - system
+    - description: ''
+      name: reset_metrics
+      tags:
+      - stats
+    - description: Включить/выключить ноду (bypass)
+      name: set_enabled
+      tags:
+      - control
+    - description: ''
+      name: stats_snapshot
+      tags:
+      - diagnostics
+      - stats
+    - description: Настроить wire middleware (SHM sender/receiver)
+      name: wire.configure
+      tags:
+      - system
+    - description: Удалить wire middleware
+      name: wire.deconfigure
+      tags:
+      - system
+    - description: Создать воркер в процессе
+      name: worker.create
+      tags:
+      - system
+    - description: Поставить все прикладные воркеры процесса на паузу
+      name: worker.pause_all
+      tags:
+      - system
+    - description: Удалить воркер из процесса
+      name: worker.remove
+      tags:
+      - system
+    - description: Перезапустить воркер
+      name: worker.restart
+      tags:
+      - system
+    - description: Возобновить все прикладные воркеры процесса
+      name: worker.resume_all
+      tags:
+      - system
+    - description: Запустить остановленный воркер
+      name: worker.start
+      tags:
+      - system
+    - description: Остановить воркер (без удаления)
+      name: worker.stop
+      tags:
+      - system
+    - description: Перенастроить воркер (приоритет/интервал)
+      name: worker.update
+      tags:
+      - system
+    registers: {}
+    router_handlers:
+    - state.changed
+  process_grayscale:
+    commands:
+    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+      name: config.reload
+      tags:
+      - system
+    - description: ''
+      name: flush_stats
+      tags:
+      - stats
+    - description: ''
+      name: get_metric
+      tags:
+      - stats
+    - description: ''
+      name: get_metrics
+      tags:
+      - stats
+    - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
+        router-handlers'
+      name: introspect.capabilities
+      tags:
+      - system
+    - description: Router message-handlers + команды CommandManager процесса
+      name: introspect.handlers
+      tags:
+      - system
+    - description: Глубины очередей процесса (backpressure)
+      name: introspect.queues
+      tags:
+      - system
+    - description: Регистры процесса (имена + поля) из RegistersManager
+      name: introspect.registers
+      tags:
+      - system
+    - description: 'Счётчики router''а: sent_ok/received/dropped/errors (дошло ли сообщение)'
+      name: introspect.router_stats
+      tags:
+      - system
+    - description: Имя процесса, статус, воркеры (имена + статусы)
+      name: introspect.status
+      tags:
+      - system
+    - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
+      name: log.tail.subscribe
+      tags:
+      - system
+    - description: Снять подписку на tail логов процесса
+      name: log.tail.unsubscribe
+      tags:
+      - system
+    - description: Выключить sink логгера по имени (unregister_channel)
+      name: logger.sink.disable
+      tags:
+      - system
+    - description: Включить sink логгера по имени (register_channel)
+      name: logger.sink.enable
+      tags:
+      - system
+    - description: ''
+      name: reset_metrics
+      tags:
+      - stats
+    - description: Включить/выключить ноду (bypass)
+      name: set_enabled
+      tags:
+      - control
+    - description: ''
+      name: stats_snapshot
+      tags:
+      - diagnostics
+      - stats
+    - description: Настроить wire middleware (SHM sender/receiver)
+      name: wire.configure
+      tags:
+      - system
+    - description: Удалить wire middleware
+      name: wire.deconfigure
+      tags:
+      - system
+    - description: Создать воркер в процессе
+      name: worker.create
+      tags:
+      - system
+    - description: Поставить все прикладные воркеры процесса на паузу
+      name: worker.pause_all
+      tags:
+      - system
+    - description: Удалить воркер из процесса
+      name: worker.remove
+      tags:
+      - system
+    - description: Перезапустить воркер
+      name: worker.restart
+      tags:
+      - system
+    - description: Возобновить все прикладные воркеры процесса
+      name: worker.resume_all
+      tags:
+      - system
+    - description: Запустить остановленный воркер
+      name: worker.start
+      tags:
+      - system
+    - description: Остановить воркер (без удаления)
+      name: worker.stop
+      tags:
+      - system
+    - description: Перенастроить воркер (приоритет/интервал)
+      name: worker.update
+      tags:
+      - system
+    registers: {}
+    router_handlers:
+    - state.changed
+  process_negative:
+    commands:
+    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+      name: config.reload
+      tags:
+      - system
+    - description: ''
+      name: flush_stats
+      tags:
+      - stats
+    - description: ''
+      name: get_metric
+      tags:
+      - stats
+    - description: ''
+      name: get_metrics
+      tags:
+      - stats
+    - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
+        router-handlers'
+      name: introspect.capabilities
+      tags:
+      - system
+    - description: Router message-handlers + команды CommandManager процесса
+      name: introspect.handlers
+      tags:
+      - system
+    - description: Глубины очередей процесса (backpressure)
+      name: introspect.queues
+      tags:
+      - system
+    - description: Регистры процесса (имена + поля) из RegistersManager
+      name: introspect.registers
+      tags:
+      - system
+    - description: 'Счётчики router''а: sent_ok/received/dropped/errors (дошло ли сообщение)'
+      name: introspect.router_stats
+      tags:
+      - system
+    - description: Имя процесса, статус, воркеры (имена + статусы)
+      name: introspect.status
+      tags:
+      - system
+    - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
+      name: log.tail.subscribe
+      tags:
+      - system
+    - description: Снять подписку на tail логов процесса
+      name: log.tail.unsubscribe
+      tags:
+      - system
+    - description: Выключить sink логгера по имени (unregister_channel)
+      name: logger.sink.disable
+      tags:
+      - system
+    - description: Включить sink логгера по имени (register_channel)
+      name: logger.sink.enable
+      tags:
+      - system
+    - description: ''
+      name: reset_metrics
+      tags:
+      - stats
+    - description: Включить/выключить ноду (bypass)
+      name: set_enabled
+      tags:
+      - control
+    - description: ''
+      name: stats_snapshot
+      tags:
+      - diagnostics
+      - stats
+    - description: Настроить wire middleware (SHM sender/receiver)
+      name: wire.configure
+      tags:
+      - system
+    - description: Удалить wire middleware
+      name: wire.deconfigure
+      tags:
+      - system
+    - description: Создать воркер в процессе
+      name: worker.create
+      tags:
+      - system
+    - description: Поставить все прикладные воркеры процесса на паузу
+      name: worker.pause_all
+      tags:
+      - system
+    - description: Удалить воркер из процесса
+      name: worker.remove
+      tags:
+      - system
+    - description: Перезапустить воркер
+      name: worker.restart
+      tags:
+      - system
+    - description: Возобновить все прикладные воркеры процесса
+      name: worker.resume_all
+      tags:
+      - system
+    - description: Запустить остановленный воркер
+      name: worker.start
+      tags:
+      - system
+    - description: Остановить воркер (без удаления)
+      name: worker.stop
+      tags:
+      - system
+    - description: Перенастроить воркер (приоритет/интервал)
+      name: worker.update
+      tags:
+      - system
+    registers: {}
+    router_handlers:
+    - state.changed
+  region_splitter:
+    commands:
+    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+      name: config.reload
+      tags:
+      - system
+    - description: ''
+      name: flush_stats
+      tags:
+      - stats
+    - description: ''
+      name: get_metric
+      tags:
+      - stats
+    - description: ''
+      name: get_metrics
+      tags:
+      - stats
+    - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
+        router-handlers'
+      name: introspect.capabilities
+      tags:
+      - system
+    - description: Router message-handlers + команды CommandManager процесса
+      name: introspect.handlers
+      tags:
+      - system
+    - description: Глубины очередей процесса (backpressure)
+      name: introspect.queues
+      tags:
+      - system
+    - description: Регистры процесса (имена + поля) из RegistersManager
+      name: introspect.registers
+      tags:
+      - system
+    - description: 'Счётчики router''а: sent_ok/received/dropped/errors (дошло ли сообщение)'
+      name: introspect.router_stats
+      tags:
+      - system
+    - description: Имя процесса, статус, воркеры (имена + статусы)
+      name: introspect.status
+      tags:
+      - system
+    - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
+      name: log.tail.subscribe
+      tags:
+      - system
+    - description: Снять подписку на tail логов процесса
+      name: log.tail.unsubscribe
+      tags:
+      - system
+    - description: Выключить sink логгера по имени (unregister_channel)
+      name: logger.sink.disable
+      tags:
+      - system
+    - description: Включить sink логгера по имени (register_channel)
+      name: logger.sink.enable
+      tags:
+      - system
+    - description: ''
+      name: reset_metrics
+      tags:
+      - stats
+    - description: Включить/выключить ноду (bypass)
+      name: set_enabled
+      tags:
+      - control
+    - description: ''
+      name: stats_snapshot
+      tags:
+      - diagnostics
+      - stats
+    - description: Настроить wire middleware (SHM sender/receiver)
+      name: wire.configure
+      tags:
+      - system
+    - description: Удалить wire middleware
+      name: wire.deconfigure
+      tags:
+      - system
+    - description: Создать воркер в процессе
+      name: worker.create
+      tags:
+      - system
+    - description: Поставить все прикладные воркеры процесса на паузу
+      name: worker.pause_all
+      tags:
+      - system
+    - description: Удалить воркер из процесса
+      name: worker.remove
+      tags:
+      - system
+    - description: Перезапустить воркер
+      name: worker.restart
+      tags:
+      - system
+    - description: Возобновить все прикладные воркеры процесса
+      name: worker.resume_all
+      tags:
+      - system
+    - description: Запустить остановленный воркер
+      name: worker.start
+      tags:
+      - system
+    - description: Остановить воркер (без удаления)
+      name: worker.stop
+      tags:
+      - system
+    - description: Перенастроить воркер (приоритет/интервал)
+      name: worker.update
+      tags:
+      - system
+    registers: {}
+    router_handlers:
+    - state.changed
+  stitcher:
+    commands:
+    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+      name: config.reload
+      tags:
+      - system
+    - description: ''
+      name: flush_stats
+      tags:
+      - stats
+    - description: ''
+      name: get_metric
+      tags:
+      - stats
+    - description: ''
+      name: get_metrics
+      tags:
+      - stats
+    - description: 'Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля),
+        router-handlers'
+      name: introspect.capabilities
+      tags:
+      - system
+    - description: Router message-handlers + команды CommandManager процесса
+      name: introspect.handlers
+      tags:
+      - system
+    - description: Глубины очередей процесса (backpressure)
+      name: introspect.queues
+      tags:
+      - system
+    - description: Регистры процесса (имена + поля) из RegistersManager
+      name: introspect.registers
+      tags:
+      - system
+    - description: 'Счётчики router''а: sent_ok/received/dropped/errors (дошло ли сообщение)'
+      name: introspect.router_stats
+      tags:
+      - system
+    - description: Имя процесса, статус, воркеры (имена + статусы)
+      name: introspect.status
+      tags:
+      - system
+    - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
+      name: log.tail.subscribe
+      tags:
+      - system
+    - description: Снять подписку на tail логов процесса
+      name: log.tail.unsubscribe
+      tags:
+      - system
+    - description: Выключить sink логгера по имени (unregister_channel)
+      name: logger.sink.disable
+      tags:
+      - system
+    - description: Включить sink логгера по имени (register_channel)
+      name: logger.sink.enable
+      tags:
+      - system
+    - description: ''
+      name: reset_metrics
+      tags:
+      - stats
+    - description: Включить/выключить ноду (bypass)
+      name: set_enabled
+      tags:
+      - control
+    - description: ''
+      name: stats_snapshot
+      tags:
+      - diagnostics
+      - stats
+    - description: Настроить wire middleware (SHM sender/receiver)
+      name: wire.configure
+      tags:
+      - system
+    - description: Удалить wire middleware
+      name: wire.deconfigure
+      tags:
+      - system
+    - description: Создать воркер в процессе
+      name: worker.create
+      tags:
+      - system
+    - description: Поставить все прикладные воркеры процесса на паузу
+      name: worker.pause_all
+      tags:
+      - system
+    - description: Удалить воркер из процесса
+      name: worker.remove
+      tags:
+      - system
+    - description: Перезапустить воркер
+      name: worker.restart
+      tags:
+      - system
+    - description: Возобновить все прикладные воркеры процесса
+      name: worker.resume_all
+      tags:
+      - system
+    - description: Запустить остановленный воркер
+      name: worker.start
+      tags:
+      - system
+    - description: Остановить воркер (без удаления)
+      name: worker.stop
+      tags:
+      - system
+    - description: Перенастроить воркер (приоритет/интервал)
+      name: worker.update
+      tags:
+      - system
+    registers: {}
+    router_handlers:
+    - state.changed
+source: python -m backend_ctl.dump_capabilities
+topology:
+  camera_0:
+    class: multiprocess_prototype.generic_process_app.GenericProcessApp
+  devices:
+    class: multiprocess_prototype.generic_process_app.GenericProcessApp
+  preprocessor:
+    class: multiprocess_prototype.generic_process_app.GenericProcessApp
+  process_flip:
+    class: multiprocess_prototype.generic_process_app.GenericProcessApp
+  process_grayscale:
+    class: multiprocess_prototype.generic_process_app.GenericProcessApp
+  process_negative:
+    class: multiprocess_prototype.generic_process_app.GenericProcessApp
+  region_splitter:
+    class: multiprocess_prototype.generic_process_app.GenericProcessApp
+  stitcher:
+    class: multiprocess_prototype.generic_process_app.GenericProcessApp
+version: 0

@@ -20,15 +20,17 @@ class _FakeCommandManager:
 
     def __init__(self) -> None:
         self.handlers: dict = {}
+        self.meta: dict = {}
 
     def register_command(self, name, handler, metadata=None, tags=None) -> None:
         self.handlers[name] = handler
+        self.meta[name] = {"metadata": metadata or {}, "tags": list(tags or [])}
 
     def dispatch(self, command: str, data: dict | None = None) -> dict:
         return self.handlers[command](data or {})
 
     def get_commands(self) -> list:
-        return [{"key": k} for k in self.handlers]
+        return [{"key": k, **self.meta.get(k, {})} for k in self.handlers]
 
 
 class _FakeMessageDispatcher:
@@ -116,7 +118,12 @@ def _make(**kw) -> tuple:
 class TestRegistration:
     def test_register_adds_three_introspect_commands(self) -> None:
         _svc, cm = _make()
-        for key in ("introspect.handlers", "introspect.registers", "introspect.status"):
+        for key in (
+            "introspect.handlers",
+            "introspect.registers",
+            "introspect.status",
+            "introspect.capabilities",
+        ):
             assert key in cm.handlers
 
     def test_register_skips_without_command_manager(self) -> None:
@@ -207,6 +214,66 @@ class TestIntrospectStatus:
         _svc, cm = _make(worker_manager=None)
         result = cm.dispatch("introspect.status")
         assert result["workers"] == {}
+
+
+# ====================================================================== #
+#  introspect.capabilities (Ф1 Task 1.9 — контактная книжка v0)           #
+# ====================================================================== #
+
+
+class TestIntrospectCapabilities:
+    def test_card_contains_commands_with_descriptions_and_tags(self) -> None:
+        _svc, cm = _make()
+        result = cm.dispatch("introspect.capabilities")
+        assert result["success"] is True
+        assert result["process"] == "preprocessor"
+        by_name = {c["name"]: c for c in result["commands"]}
+        card = by_name["introspect.capabilities"]
+        assert "книжк" in card["description"]  # description из metadata регистрации
+        assert card["tags"] == ["system"]
+        # отсортировано по имени
+        assert [c["name"] for c in result["commands"]] == sorted(by_name)
+
+    def test_registers_reduced_to_field_names(self) -> None:
+        # Контракт, не значения: {register: {field: value}} → {register: [field]}.
+        rm = _FakeRegistersManager({"resize": {"scale_factor": 0.5, "algo": "area"}})
+        _svc, cm = _make(orchestrator=_FakeOrchestrator(rm))
+        result = cm.dispatch("introspect.capabilities")
+        assert result["registers"] == {"resize": ["algo", "scale_factor"]}
+
+    def test_router_handlers_sorted_unique(self) -> None:
+        router = _FakeRouter(["state.changed", "heartbeat", "state.changed"])
+        _svc, cm = _make(router=router)
+        result = cm.dispatch("introspect.capabilities")
+        assert result["router_handlers"] == ["heartbeat", "state.changed"]
+
+    def test_capabilities_extra_hook_merged(self) -> None:
+        # PM-хук: dict из svc.capabilities_extra() вливается в карточку.
+        svc, cm = _make()
+        svc.capabilities_extra = lambda: {
+            "processes": {"preprocessor": {"class": "x.Y"}},
+            "channels": [{"name": "backend_ctl", "kind": "SocketChannel"}],
+        }
+        result = cm.dispatch("introspect.capabilities")
+        assert result["processes"] == {"preprocessor": {"class": "x.Y"}}
+        assert result["channels"][0]["name"] == "backend_ctl"
+
+    def test_no_extra_keys_without_hook(self) -> None:
+        _svc, cm = _make()
+        result = cm.dispatch("introspect.capabilities")
+        assert "processes" not in result
+        assert "channels" not in result
+
+    def test_extra_hook_failure_reported(self) -> None:
+        svc, cm = _make()
+
+        def _boom() -> dict:
+            raise RuntimeError("boom")
+
+        svc.capabilities_extra = _boom
+        result = cm.dispatch("introspect.capabilities")
+        assert result["success"] is False
+        assert "capabilities_extra" in result["reason"]
 
 
 # ====================================================================== #

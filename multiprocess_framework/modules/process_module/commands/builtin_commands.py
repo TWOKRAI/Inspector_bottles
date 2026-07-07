@@ -342,6 +342,11 @@ class BuiltinCommands:
                 self._cmd_introspect_queues,
                 "Глубины очередей процесса (backpressure)",
             ),
+            (
+                "introspect.capabilities",
+                self._cmd_introspect_capabilities,
+                "Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers",
+            ),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
@@ -422,6 +427,80 @@ class BuiltinCommands:
             "status": getattr(svc, "_current_process_status", "unknown"),
             "workers": workers,
         }
+
+    def _cmd_introspect_capabilities(self, data=None, **kwargs) -> dict:
+        """Карточка процесса для «контактной книжки» (Ф1 Task 1.9, capability manifest v0).
+
+        Свод КОНТРАКТА процесса (не runtime-значений — они в introspect.status/registers):
+          - ``commands``: [{name, description, tags}] из CommandManager (metadata.description
+            существующих регистраций — новый реестр НЕ вводится);
+          - ``registers``: {имя_регистра: [имена_полей]} — только структура, без значений
+            (детерминизм дампа: значения волатильны, контракт — нет);
+          - ``router_handlers``: НЕ-командные ключи event_dispatcher (события, heartbeat).
+
+        Расширение хоста: если у services есть callable ``capabilities_extra`` —
+        его dict вливается в карточку (PM добавляет топологию процессов и каналы).
+        Так PM не пере-регистрирует ключ (ExactMatch запрещает дубликаты), а v0
+        обходится без блокирующего fan-out внутри PM-хендлера (ответы детей едут
+        через тот же message_processor → блокировка была бы дедлоком; свод по
+        живым детям собирает driver.capabilities()).
+        """
+        svc = self._services
+
+        commands: list = []
+        cm = svc.command_manager
+        if cm is not None:
+            try:
+                for h in cm.get_commands():
+                    meta = h.get("metadata") or {}
+                    commands.append(
+                        {
+                            "name": h.get("key"),
+                            "description": str(meta.get("description") or ""),
+                            "tags": sorted(h.get("tags") or []),
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"command_manager: {exc}"}
+        commands = sorted((c for c in commands if c["name"]), key=lambda c: c["name"])
+
+        router_handlers: list = []
+        router = svc.router_manager
+        md = getattr(router, "event_dispatcher", None) if router else None
+        if md is not None:
+            try:
+                router_handlers = sorted({h.get("key") for h in md.get_all_handlers() if h.get("key")})
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"event_dispatcher: {exc}"}
+
+        registers: dict = {}
+        orchestrator = getattr(svc, "_orchestrator", None)
+        rm = getattr(orchestrator, "registers_manager", None) if orchestrator else None
+        if rm is not None:
+            try:
+                dump = rm.model_dump_all()
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"model_dump_all: {exc}"}
+            for reg_name, fields in (dump or {}).items():
+                registers[reg_name] = sorted(fields) if isinstance(fields, dict) else []
+
+        card = {
+            "success": True,
+            "process": svc.name,
+            "commands": commands,
+            "router_handlers": router_handlers,
+            "registers": registers,
+        }
+
+        extra_fn = getattr(svc, "capabilities_extra", None)
+        if callable(extra_fn):
+            try:
+                extra = extra_fn()
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"capabilities_extra: {exc}"}
+            if isinstance(extra, dict):
+                card.update(extra)
+        return card
 
     def _cmd_introspect_router_stats(self, data=None, **kwargs) -> dict:
         """Счётчики router'а процесса: отвечает «дошло/ушло/дропнулось ли сообщение».
@@ -526,7 +605,9 @@ class BuiltinCommands:
         section = args.get("observability")
         source = "inline"
         if not isinstance(section, dict):
-            path = args.get("path") or (svc.get_config("observability_config_path") if hasattr(svc, "get_config") else None)
+            path = args.get("path") or (
+                svc.get_config("observability_config_path") if hasattr(svc, "get_config") else None
+            )
             if not path:
                 return {"success": False, "reason": "нет секции observability и пути к конфигу"}
             try:

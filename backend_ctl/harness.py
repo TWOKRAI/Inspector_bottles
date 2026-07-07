@@ -266,6 +266,16 @@ class BackendHarness:
         # совпасть с endpoint'ом — фиксируем BACKEND_CTL_PORT (его читает endpoint).
         os.environ["BACKEND_CTL"] = "1"
         os.environ["BACKEND_CTL_PORT"] = str(self._port)
+        # PID-реестр (INSPECTOR_PID_FILE) — свой файл на инстанс harness. Общий
+        # дефолт рассчитан на «одна система на машину»: reap_and_reset при старте
+        # ВТОРОГО бэкенда (test_harness при живой session-фикстуре) убил бы процессы
+        # первого как «хвосты прошлого запуска». Осиротевшие хвосты harness добивает
+        # сам (watchdog + kill дерева в stop()) — глобальный reap ему не нужен.
+        import tempfile
+
+        os.environ["INSPECTOR_PID_FILE"] = str(
+            Path(tempfile.gettempdir()) / f"inspector_pids_harness_{os.getpid()}_{self._port}.jsonl"
+        )
 
         self._launcher = build_headless_launcher(recipe=self._recipe, with_base=self._with_base)
         self._launcher.start()
@@ -304,6 +314,13 @@ class BackendHarness:
             self._launcher = None
         self._descendants = []
         self._orch_pid = None
+        # Свой PID-файл больше не нужен (дерево гарантированно добито выше).
+        try:
+            pid_file = os.environ.get("INSPECTOR_PID_FILE", "")
+            if f"_harness_{os.getpid()}_{self._port}" in pid_file:
+                Path(pid_file).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def _orchestrator_pid(self) -> Optional[int]:
         """pid процесса-оркестратора (ProcessManager) для scoped-teardown. None если нет."""
