@@ -63,6 +63,22 @@ def run_gui(process: "GuiProcess") -> None:
 
     app.installEventFilter(WheelGuard(app))
 
+    # UI-tap для агентов (backend_ctl): фильтр событий кнопок/табов, ВЫКЛЮЧЕН до
+    # команды ui.tap.subscribe. Живёт рядом с WheelGuard (parent=app → не уберёт GC);
+    # при рестарте UI (новый app) ставится заново, команды регистрируются один раз.
+    from multiprocess_framework.modules.frontend_module.debug import (
+        UiEventTap,
+        register_ui_tap_commands,
+    )
+
+    _ui_tap = UiEventTap(app)
+    app.installEventFilter(_ui_tap)
+    process._ui_event_tap = _ui_tap
+    if not getattr(process, "_ui_tap_commands_registered", False):
+        process._ui_tap_commands_registered = register_ui_tap_commands(
+            process, lambda: getattr(process, "_ui_event_tap", None)
+        )
+
     # qt-mcp probe — активируется только при QT_MCP_PROBE=1.
     # Слушает localhost:9142, видимо MCP-сервером qt-mcp для UI-интроспекции.
     # Прод-поведение не меняется без env-флага.

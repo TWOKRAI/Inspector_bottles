@@ -155,6 +155,18 @@ def _log_untail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.log_untail(args["process"], **_kw_timeout(args))
 
 
+def _ui_tap(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.ui_tap(args.get("process", "gui"), **_kw_timeout(args))
+
+
+def _ui_untap(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.ui_untap(args.get("process", "gui"), **_kw_timeout(args))
+
+
+def _ui_tap_ping(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.ui_tap_ping(args.get("process", "gui"), note=args.get("note", "ping"), **_kw_timeout(args))
+
+
 def _config_reload(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.config_reload(
         args["process"],
@@ -346,6 +358,31 @@ TOOLS: List[ToolSpec] = [
         "Снять подписку на tail логов процесса.",
         _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
         _log_untail,
+    ),
+    ToolSpec(
+        "ui_tap",
+        "Отладка фронтенда: подписаться на UI-события gui (нажатия кнопок, переключения "
+        "табов) — события едут push'ем (command='ui.event') — читать инструментом events.",
+        _obj({"process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"}, "timeout": _TIMEOUT}),
+        _ui_tap,
+    ),
+    ToolSpec(
+        "ui_untap",
+        "Снять подписку на UI-события gui.",
+        _obj({"process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"}, "timeout": _TIMEOUT}),
+        _ui_untap,
+    ),
+    ToolSpec(
+        "ui_tap_ping",
+        "Синтетическое ui.event по пути доставки тапа — проверить цепочку GUI→driver без клика.",
+        _obj(
+            {
+                "process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"},
+                "note": {"type": "string", "description": "Метка события (по умолчанию 'ping')"},
+                "timeout": _TIMEOUT,
+            }
+        ),
+        _ui_tap_ping,
     ),
     ToolSpec(
         "config_reload",

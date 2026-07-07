@@ -726,6 +726,52 @@ class BackendDriver:
             )
         )
 
+    # ---- UI-tap (отладка фронтенда): кнопки/табы GUI → события ui.event ----
+
+    def ui_tap(
+        self,
+        process: str = "gui",
+        *,
+        subscriber: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Подписаться на UI-события gui-процесса (нажатия кнопок, переключения табов).
+
+        GUI ставит UiEventTap-пуш: события едут тем же маршрутом, что log-tail
+        (мост 1.1b / relay 1.7), и приходят в событийный канал driver'а как
+        сообщения с ``command == "ui.event"`` (``data.record`` — событие:
+        kind=button|tab|ping, text, path, ts). Смоук цепочки — :meth:`ui_tap_ping`.
+        """
+        return _leaf_result(
+            self.send_command(
+                process,
+                "ui.tap.subscribe",
+                {"subscriber": subscriber or self._sender},
+                timeout=timeout,
+            )
+        )
+
+    def ui_untap(
+        self,
+        process: str = "gui",
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Снять подписку на UI-события gui-процесса."""
+        return _leaf_result(self.send_command(process, "ui.tap.unsubscribe", {}, timeout=timeout))
+
+    def ui_tap_ping(
+        self,
+        process: str = "gui",
+        *,
+        note: str = "ping",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Синтетическое ui.event тем же путём доставки — проверка цепочки без клика."""
+        return _leaf_result(
+            self.send_command(process, "ui.tap.ping", {"note": note}, timeout=timeout)
+        )
+
     # ---- Подписка на состояние (state.subscribe → событийный канал) ----
 
     def state_subscribe(

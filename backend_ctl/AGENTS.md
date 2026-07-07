@@ -23,8 +23,17 @@
 | «Применить параметр в живой процесс (live field-write)» | **backend_ctl** (`set_register`) |
 | «Запустить/остановить процесс, послать system-команду» | **backend_ctl** (`system_command`) |
 | «Проверить что GUI-кнопка реально дергает бэкенд» | сперва backend_ctl (доказать backend-путь), потом qt-mcp (GUI-путь) |
+| «Что пользователь нажал в GUI?» (события кнопок/табов агенту) | **backend_ctl** (`ui_tap` → события `ui.event` в `events`) |
 | Состояние **виджетов**, клики, снимок UI | qt-mcp (`QT_MCP_PROBE=1`) — НЕ backend_ctl |
 | Поиск/рефакторинг исходников | qex / Serena / Grep — driver видит только runtime |
+
+## Режимы отладки (бэкенд / фронтенд / совместно)
+
+| Режим | Как | Что видно |
+|-------|-----|-----------|
+| **Бэкенд отдельно** (headless, без Qt) | `BackendHarness` в тестах или `BACKEND_CTL=1` + strip_gui | introspect/state/логи/регистры — весь этот файл |
+| **Фронтенд** (GUI поднят) | полный запуск `BACKEND_CTL=1 python run.py` → `drv.ui_tap("gui")` | нажатия кнопок и переключения табов приходят агенту событиями `ui.event` (`data.record`: kind/text/path/ts); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; инспекция/клики виджетов — qt-mcp (`QT_MCP_PROBE=1`) |
+| **Совместно** (корреляция UI ↔ бэкенд) | один driver: `ui_tap("gui")` + `log_tail(процесс)` + `state_subscribe("**")` | единый событийный поток с ts: «кнопка → команда → лог → state-дельта» — видно, чем ответил бэкенд на клик |
 
 **Киллер-фича:** `introspect_handlers(process)` за секунду ловит баг «нет приёмника»
 (команда есть в `CommandManager`, но не в router `message_dispatcher`, или у плагина нет
@@ -72,6 +81,8 @@ PY
 | `send_command(target, command, args=None)` | прямая команда процессу (форма `CommandSender.send_command`) |
 | `system_command({"cmd": ..., ...})` | system-команда в ProcessManager (`process.start`/`stop`/`worker.*`/…) |
 | `state_subscribe(pattern)` | подписка на state-дерево; пуши `state.changed` → событийный канал |
+| `ui_tap("gui")` / `ui_untap("gui")` | подписка на UI-события gui (кнопки/табы) → пуши `ui.event` в событийный канал |
+| `ui_tap_ping("gui", note=...)` | синтетическое `ui.event` тем же путём доставки — проверка цепочки без клика |
 | `subscribe(cb)` / `events(timeout)` | событийный канал: колбэк или слив накопленных push-событий |
 | `request(message, timeout=None)` | низкоуровневый: готовый router-dict → ответ по `request_id` |
 
