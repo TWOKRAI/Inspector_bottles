@@ -113,3 +113,15 @@ extension-point). Адресация полностью покрывается `
 **Причина:** Иерархия живёт **внутри** существующего `targets: list[str]` — мультикаст сохранён, новое поле не вводится, JSON-safe (Dict-at-Boundary, правило #1). Транспортная семантика (доставка по `address[0]`, intra-process резолв воркера) — в `router_module`/P1–P2, здесь только парсинг/валидация.  
 **Последствия:** `targets` обретает иерархию без миграции данных (плоские имена продолжают работать). `AddressValidationError` ловится существующими обработчиками `MessageValidationError`.  
 **Refs:** [ADR-COMM-004](../../DECISIONS.md), [ADR-COMM-001](../../DECISIONS.md), [plans/2026-05-31_transport-router-hub/plan.md](../../../plans/2026-05-31_transport-router-hub/plan.md)
+
+---
+
+## ADR-MSG-008: Реестр контрактов сообщений (`contracts/`) — Ф4.2
+
+**Статус:** принято (частично — шаг 1: реестр+middleware; проводка в роутер отдельно)
+**Дата:** 2026-07-08
+**Контекст:** Ф4 «контракты вместо конвенций». Сейчас `command`/`data_type` → обработчик по конвенции, без реестра схем: опечатка в имени команды или неверное поле payload молча проходит (класс бага 1.6 — `set_register` слал `plugin_name` вместо `register`, обработчик тихо выходил). Нужен источник истины «форма сообщения X» + диагностика на границе.
+**Решение:** Подпакет `message_module/contracts/`: `MessageContractRegistry` (`register(key, schema, *, plane, override)` / `get` / `validate`) связывает ключ маршрутизации (`command`|`data_type`) с Pydantic-схемой; `MessageContract` (key/schema/plane), `ContractCheck` (раздельные списки missing/unexpected/errors + `diff_summary()`). Чистая фабрica `make_contract_check_middleware(registry, *, strict, on_violation)` возвращает `fn(dict)->dict|None`, совместимую с `add_receive_middleware`: **warn** (дефолт) — нарушение → `on_violation(check)`, сообщение проходит; **strict** — дроп. Ключ извлекается `command → data_type → type`. Пустой реестр / неизвестный ключ → `validate` возвращает `None` (ноль оверхеда, частичное покрытие допустимо).
+**Причина:** Реестр и middleware — чистые, Qt-free, не знают про `RouterManager` (проводка = отдельный шаг композиции, чтобы риск изменения hot receive-пути был изолирован). Diff полей раздельными списками → читаемый WARNING вместо сырого Pydantic-текста. `plane="data"` помечен, но здесь НЕ валидируется — инвариант для Ф7 (data-plane валидирует только payload-валидатор 4.3).
+**Последствия:** Основа для warn-middleware на receive (шаг 2, флаг `FW_CONTRACTS_STRICT`), fencing-token drop-middleware (тот же pipeline) и `introspect.capabilities` v1 (`params_schema` из реестра). 26 контракт-тестов; полный `message_module` 181 passed.
+**Refs:** [plans/2026-07-06_constructor-master/f4.2-fencing-contracts.md](../../../plans/2026-07-06_constructor-master/f4.2-fencing-contracts.md), [ADR-PMM-010](../process_manager_module/DECISIONS.md)
