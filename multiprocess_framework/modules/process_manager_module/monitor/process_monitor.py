@@ -514,9 +514,10 @@ class ProcessMonitor:
             except Exception:  # nosec B110 — best-effort обновление статуса в SR, сбой некритичен
                 pass
 
-        # Авто-рестарт при crash или логирование
+        # Авто-рестарт при crash или логирование (политика — per-process/глобальная)
         if new_status == "crashed":
-            if self.restart_policy.enabled and self.restart_policy.restart_on_crash:
+            policy = self._resolve_policy(proc.name)
+            if policy.enabled and policy.restart_on_crash:
                 self._try_auto_restart(proc.name, reason="crashed")
             else:
                 # Не останавливаем систему при crash одного процесса —
@@ -586,9 +587,10 @@ class ProcessMonitor:
         # горячей замены, пока новый процесс не прислал первый heartbeat) каскадом
         # инициировал shutdown и ронял protected GUI (SIGTERM). Процесс остаётся
         # помеченным unresponsive (статус выставлен выше); восстановится по heartbeat.
-        if self.restart_policy.enabled and self.restart_policy.restart_on_unresponsive:
+        policy = self._resolve_policy(process_name)
+        if policy.enabled and policy.restart_on_unresponsive:
             self._try_auto_restart(process_name, reason="unresponsive")
-        elif not self.restart_policy.enabled:
+        elif not policy.enabled:
             self.process._log_error(
                 f"Process '{process_name}' unresponsive, авто-рестарт отключён — "
                 f"оставлен в состоянии unresponsive (система не останавливается)"
@@ -598,14 +600,45 @@ class ProcessMonitor:
     # Авто-рестарт
     # ----------------------------------------------------------------
 
+    def _resolve_policy(self, process_name: str) -> RestartPolicy:
+        """Резолвить RestartPolicy процесса: per-process из рецепта или глобальная.
+
+        PM хранит per-process конфиг в ``_process_configs[name]``; рецепт кладёт
+        ``restart_policy`` (dict) на верхний уровень proc_dict — рядом с
+        ``protected`` (см. ProcessLaunchConfig.build). Непустой dict → per-process
+        политика перекрывает глобальную ``self.restart_policy``. Пустой/отсутствует
+        → глобальная (дефолт ``enabled=False`` — прод без рецепт-флага не меняется).
+
+        Ссылка на ``_process_configs`` берётся живьём (как ``_active_wires`` в Ф3.5):
+        монитор читает актуальный конфиг PM без своей копии/рассинхрона.
+        """
+        configs = getattr(self.process, "_process_configs", None)
+        if isinstance(configs, dict):
+            cfg = configs.get(process_name)
+            if isinstance(cfg, dict):
+                rp = cfg.get("restart_policy")
+                if isinstance(rp, dict) and rp:
+                    try:
+                        return RestartPolicy(**rp)
+                    except Exception:  # nosec B110 — кривой per-process конфиг → глобальная политика
+                        self.process._log_warning(
+                            f"Process '{process_name}': некорректный restart_policy в конфиге — "
+                            f"используется глобальная политика"
+                        )
+        return self.restart_policy
+
     def _try_auto_restart(self, process_name: str, reason: str) -> None:
         """Попытка авто-рестарта процесса с учётом RestartPolicy.
+
+        Политика резолвится per-process (``_resolve_policy``): рецепт может
+        включить авто-рестарт для source/hub, оставив глобальную выключенной.
 
         Args:
             process_name: Имя процесса для рестарта
             reason: Причина рестарта (crashed / unresponsive)
         """
-        if not self.restart_policy.enabled:
+        policy = self._resolve_policy(process_name)
+        if not policy.enabled:
             return
 
         # Protected-процессы (GUI, ProcessManager) НИКОГДА не авто-рестартим:
@@ -621,8 +654,8 @@ class ProcessMonitor:
             self.process._log_warning(f"Process '{process_name}' protected — авто-рестарт ({reason}) пропущен")
             return
 
-        max_retries = self.restart_policy.max_retries
-        window_sec = self.restart_policy.window_sec
+        max_retries = policy.max_retries
+        window_sec = policy.window_sec
 
         # Окно стабильности N/T: считаем только метки рестартов В ОКНЕ.
         # window_sec=0 → пожизненный счётчик (метки не протухают, как раньше).
@@ -671,7 +704,7 @@ class ProcessMonitor:
         # IPC-командой в PM (_dispatch_due_restarts), где оно сериализуется
         # с apply_topology на message_processor-потоке (гонка исключена).
         attempt = count + 1
-        backoff = self.restart_policy.backoff_sec
+        backoff = policy.backoff_sec
         if process_name in self._pending_restarts:
             return  # уже запланирован
         # Записываем метку текущей попытки (уже отфильтрованный по окну список +

@@ -297,6 +297,60 @@ class TestRestartWindow:
         assert ssm.handle_state_get({"data": {"path": "processes.cam.health.updated_at"}})["status"] == "ok"
 
 
+class TestPerProcessPolicy:
+    """Ф3.6: per-process RestartPolicy перекрывает глобальную (_resolve_policy)."""
+
+    def test_per_process_enables_when_global_disabled(self) -> None:
+        """Глобальная выключена, но per-process source включена → рестарт планируется."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        # Реальный dict конфигов: у camera_0 есть per-process restart_policy
+        mock_pm._process_configs = {
+            "camera_0": {"class": "X", "restart_policy": {"enabled": True, "backoff_sec": 0.0}},
+            "worker_0": {"class": "Y"},  # без policy → глобальная
+        }
+        # Глобальная политика ВЫКЛючена
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=False))
+
+        monitor._try_auto_restart("camera_0", reason="crashed")
+        assert "camera_0" in monitor._pending_restarts  # per-process включила
+
+        monitor._try_auto_restart("worker_0", reason="crashed")
+        assert "worker_0" not in monitor._pending_restarts  # глобальная выключена
+
+    def test_resolve_policy_fallback_to_global(self) -> None:
+        """Пустой/битый restart_policy → глобальная политика."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm._process_configs = {
+            "a": {"class": "X", "restart_policy": {}},  # пустой → глобальная
+            "b": {"class": "X", "restart_policy": "broken"},  # не dict → глобальная
+        }
+        global_pol = RestartPolicy(enabled=True, max_retries=7)
+        monitor = ProcessMonitor(mock_pm, restart_policy=global_pol)
+
+        assert monitor._resolve_policy("a") is global_pol
+        assert monitor._resolve_policy("b") is global_pol
+        assert monitor._resolve_policy("unknown") is global_pol
+
+    def test_per_process_max_retries_overrides(self) -> None:
+        """per-process max_retries=1 → give-up быстрее глобальной."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        mock_pm._process_configs = {
+            "hub": {"class": "X", "restart_policy": {"enabled": True, "max_retries": 1, "window_sec": 0.0}},
+        }
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, max_retries=99))
+
+        monitor._restart_history["hub"] = [time.monotonic()]  # уже 1 попытка
+        monitor._try_auto_restart("hub", reason="crashed")
+
+        assert monitor.previous_states["hub"]["status"] == "failed"  # give-up при max_retries=1
+
+
 class TestMonitorSyncPause:
     """Task 3.1: stop(wait=True) дожидается завершения текущей итерации."""
 
