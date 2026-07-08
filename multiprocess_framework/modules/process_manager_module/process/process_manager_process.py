@@ -205,9 +205,16 @@ class ProcessManagerProcess(ProcessModule):
                 log_error=self._log_error,
             )
 
+            # Ф3.2: boot-барьер — дождаться self-reported ready стартованных детей
+            # ПЕРЕД сигналом SystemLauncher. Это initialize-поток PM (НЕ
+            # message_processor) → блокирующее ожидание допустимо и дедлока нет.
+            # По таймауту всё равно сигналим готовность (boot не блокировать
+            # навсегда) + WARNING со списком не-ready.
+            self._wait_boot_ready()
+
             # Сигнализируем SystemLauncher, что инициализация завершена (ADR-116).
-            # К этому моменту: все дочерние процессы spawned и started,
-            # ProcessMonitor запущен.
+            # К этому моменту: все дочерние процессы spawned, started и (Ф3.2)
+            # сообщили о готовности либо истёк boot_ready_timeout_s.
             if self._system_ready_event is not None:
                 self._system_ready_event.set()
                 self._log_info("system_ready_event выставлен — система готова")
@@ -1602,6 +1609,29 @@ class ProcessManagerProcess(ProcessModule):
             ready[name] = True  # пережил окно — считаем работающим
             self._log_warning(f"{reason}: '{name}' ready via liveness-fallback (event не получен за {timeout_s}s)")
         return ready
+
+    def _wait_boot_ready(self) -> None:
+        """Ф3.2: boot-барьер — дождаться ready всех стартованных на boot детей.
+
+        Вызывается в ``initialize()`` PM (initialize-поток, НЕ message_processor)
+        ПЕРЕД ``_system_ready_event.set()``. Ждёт до ``boot_ready_timeout_s``
+        (дефолт 5.0с; 0 → барьер выключен). По таймауту система стартует ВСЁ
+        РАВНО (boot не блокировать навсегда) — не-ready логируются WARNING'ом.
+        Медленный ребёнок (ML-веса) не ломает boot: liveness-фолбэк → ready.
+        """
+        raw_timeout = self.get_config("boot_ready_timeout_s")
+        timeout_s = 5.0 if raw_timeout is None else float(raw_timeout)
+        if timeout_s <= 0:
+            return
+        names = [p.name for p in self._process_registry.os_processes]
+        if not names:
+            return
+        ready = self._wait_processes_ready(names, timeout_s, "boot")
+        not_ready = sorted(n for n, ok in ready.items() if not ok)
+        if not_ready:
+            self._log_warning(
+                f"boot: процессы не сообщили ready за {timeout_s}s: {not_ready} — система стартует всё равно"
+            )
 
     def _wait_started_ready(self, applied_results: list[dict]) -> dict[str, bool]:
         """Readiness-барьер после start-фазы switch: ready_event + death-watch.
