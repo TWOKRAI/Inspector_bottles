@@ -204,3 +204,31 @@ class TestProcessRegistry:
         registry.remove_process("X")
         assert registry.get_process_by_name("X") is None
         assert "X" not in registry._stop_events
+
+    def test_create_and_register_provides_ready_event(self) -> None:
+        """Ф3.2: create_and_register создаёт ready_event, доступный через get_ready_event."""
+        registry = ProcessRegistry(logger=None)
+        proc = registry.create_and_register("R", "os.getpid", {}, "normal")
+        assert proc is not None
+        ev = registry.get_ready_event("R")
+        assert ev is not None
+        assert not ev.is_set()
+
+    def test_remove_process_clears_ready_event(self) -> None:
+        """Ф3.2: remove_process снимает ссылку на ready_event."""
+        registry = ProcessRegistry(logger=None)
+        registry.create_and_register("R", "os.getpid", {}, "normal")
+        registry.remove_process("R")
+        assert registry.get_ready_event("R") is None
+
+    def test_restart_recreates_fresh_ready_event(self) -> None:
+        """Ф3.2: пересоздание процесса даёт НОВЫЙ event-объект (не .clear() старого)."""
+        registry = ProcessRegistry(logger=None)
+        registry.create_and_register("R", "os.getpid", {}, "normal")
+        ev_old = registry.get_ready_event("R")
+        ev_old.set()  # старый инстанс «был готов»
+        registry.remove_process("R")
+        registry.create_and_register("R", "os.getpid", {}, "normal")
+        ev_new = registry.get_ready_event("R")
+        assert ev_new is not ev_old
+        assert not ev_new.is_set()

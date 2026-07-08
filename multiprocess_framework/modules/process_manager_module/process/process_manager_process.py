@@ -1337,6 +1337,13 @@ class ProcessManagerProcess(ProcessModule):
         process.start()
         self._priority.register_priority(process_name, priority)
         self._priority.apply_priority(process)
+        # Ф3.2: дождаться self-reported ready пересозданного инстанса (тот же
+        # барьер на один процесс). Свежий ready_event создан create_and_register;
+        # старый (у прежнего инстанса) не мешает — это другой объект.
+        raw_timeout = self.get_config("start_ready_timeout_s")
+        restart_timeout = 0.5 if raw_timeout is None else float(raw_timeout)
+        if restart_timeout > 0:
+            self._wait_processes_ready([process_name], restart_timeout, "restart")
         # Обновить epoch и разослать refresh (при reuse incarnation не менялась →
         # выжившие соседи оставят валидную переиспользованную очередь).
         self._bump_routing_epoch()
