@@ -138,7 +138,9 @@ class MockSharedResources:
             side_effect=lambda name: self._registered.pop(name, None) is not None
         )
 
-    def register_process(self, name: str, config: dict) -> None:
+    def register_process(self, name: str, config: dict, *, reuse_queues: bool = False) -> None:
+        # reuse_queues (Ф3.1) — паритет реального SRM; в mock очередей нет,
+        # поэтому флаг лишь принимается (не ломает вызовы restart_process).
         self._registered[name] = config
 
     def unregister_process(self, name: str) -> bool:
