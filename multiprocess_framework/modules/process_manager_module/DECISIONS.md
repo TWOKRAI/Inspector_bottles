@@ -114,3 +114,29 @@
 - Всегда сажать соседей на hub-relay после restart — все кадры через system-очередь PM (бутылочное горло).
 
 **Последствия:** peer→peer send выжившего процесса после switch/restart доставляется (было — тихо терялось). Наблюдаемость: `relayed_to_hub` (окольная доставка), `routing_epoch`/`routing_refresh_applied` в `introspect.router_stats`. Полный откат к поведению main — двумя флагами (env/конфиг). Диагностический `routing.probe` даёт детерминированное воспроизведение дыры без реального железа.
+
+## ADR-PMM-011: self-reported ready через per-process mp.Event (вне message-loop)
+
+**Статус:** принято
+**Дата:** 2026-07-08
+**Refs:** plans/2026-07-06_constructor-master/plan.md (Ф3.2), f3.2-self-reported-ready.md
+
+**Контекст:** Ребёнок не сообщал PM о завершении `initialize()`. switch-барьер `_wait_started_ready` был death-watch: здоровое переключение ВСЕГДА ждало весь settle-window `start_ready_timeout_s` (дефолт 0.5с), `True` означал «не умер», а НЕ «готов». Boot-барьера не было вовсе — PM выставлял `_system_ready_event` сразу после своего `initialize()`, хотя дети могли ещё инициализироваться (докстринг `system_launcher` прямо выносил это в Ф3.2). Требовалось: switch/boot закрывается по факту готовности, а не по таймеру.
+
+**Жёсткое ограничение (дедлок):** heartbeat/любое IPC-сообщение и `topology.apply` обрабатываются ОДНИМ `message_processor`-потоком PM. Блокирующе ждать IPC-`ready` в барьере НЕЛЬЗЯ — поток заблокировал бы сам себя (комментарий `process_manager_process.py`).
+
+**Решение:** `ready` — НЕ IPC-сообщение, а per-process `multiprocessing.Event`.
+- PM создаёт event при спавне (`ProcessRegistry.create_and_register`), кладёт его в bundle `custom["ready_event"]` (inheritance при spawn — легально, как `stop_event`; bundle никогда не ре-сериализуется на стороне PM), хранит ссылку у себя (`_ready_events`, `get_ready_event`).
+- Runner ставит event сразу после успешного `initialize()`, ДО `_run_lifecycle` (guard None → фолбэк на death-watch для SRM-mode/старых bundle).
+- Барьер (`_wait_processes_ready`, общий для switch/boot/restart) поллит 0.05с: event set → `True` немедленно (ранний выход); процесс мёртв → `False`; живой-без-event на дедлайне → `True` + WARNING «liveness-fallback» (прежнее поведение, mock без event тоже сюда).
+- **switch:** `_wait_started_ready` — window `start_ready_timeout_s` (0 → выкл).
+- **boot:** `_wait_boot_ready` в `initialize()` PM ПЕРЕД `_system_ready_event.set()` — window `boot_ready_timeout_s` (дефолт 5.0с; 0 → выкл). Это initialize-поток, НЕ message_processor → блокировка допустима. По таймауту система стартует ВСЁ РАВНО (boot не блокировать навсегда) + WARNING.
+- **restart:** свежий event на каждый (пере)спавн (новый объект, НЕ `.clear()` — у прежнего инстанса могла остаться ссылка на старый); после start — барьер на один процесс.
+- `ready_event` в `_CUSTOM_EXCLUDE_KEYS` монитора (mp.Event не пиклится через Queue при broadcast'е состояния).
+
+**Отклонённые альтернативы:**
+- (1) IPC-сообщение `ready` от ребёнка + блокирующее ожидание в барьере — **дедлок** message_processor (heartbeat и topology.apply — один поток).
+- (2) Первый heartbeat как признак готовности — тот же дедлок (heartbeat обрабатывается message_processor'ом).
+- (3) `ready_event` отдельным Process-аргументом (как stop_event) — рабочий, но лишний позиционный аргумент top-level функции; bundle custom проще и уже несёт connection-данные (inheritance для custom-values так же валиден).
+
+**Последствия:** здоровый switch/boot закрывается по факту готовности, а не по фиксированному settle-window; медленный ребёнок (ML-веса) не ломает boot (liveness-fallback + WARNING). Обратная совместимость: bundle без `ready_event` и mock-реестр без `get_ready_event` → чистый фолбэк на прежнее death-watch поведение (существующие тесты зелёные без правок). Полный откат: `start_ready_timeout_s: 0` (switch-барьер выкл) + `boot_ready_timeout_s: 0` (boot как на main) — event-механика пассивна без потребителей.
