@@ -351,6 +351,59 @@ class TestPerProcessPolicy:
         assert monitor.previous_states["hub"]["status"] == "failed"  # give-up при max_retries=1
 
 
+class TestResetOnStable:
+    """Ф3.6: стабильная работа > window_sec сбрасывает историю рестартов."""
+
+    def test_stable_running_resets_history(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        mock_pm._process_configs = {"cam": {"class": "X"}}
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, window_sec=10.0))
+        monitor.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        monitor._restart_history["cam"] = [time.monotonic() - 100.0]
+        # running_since — далеко в прошлом (стабилен дольше окна)
+        monitor._running_since["cam"] = time.monotonic() - 999.0
+
+        monitor._maybe_reset_on_stable("cam")
+
+        assert "cam" not in monitor._restart_history  # сброшен
+
+    def test_running_since_set_on_first_stable_check(self) -> None:
+        """Первая проверка running-процесса лишь ставит точку отсчёта, не сбрасывает."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm._process_configs = {"cam": {"class": "X"}}
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, window_sec=10.0))
+        monitor.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        monitor._restart_history["cam"] = [time.monotonic()]
+
+        monitor._maybe_reset_on_stable("cam")
+
+        assert "cam" in monitor._running_since  # точка отсчёта поставлена
+        assert "cam" in monitor._restart_history  # ещё не сброшен (только что стал стабилен)
+
+    def test_not_running_clears_running_since(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, window_sec=10.0))
+        monitor.previous_states["cam"] = {"status": "crashed", "metadata": {}, "custom": {}}
+        monitor._running_since["cam"] = time.monotonic()
+
+        monitor._maybe_reset_on_stable("cam")
+
+        assert "cam" not in monitor._running_since
+
+    def test_window_zero_disables_auto_reset(self) -> None:
+        """window_sec=0 (пожизненный) → авто-reset не применяется."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm._process_configs = {"cam": {"class": "X"}}
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, window_sec=0.0))
+        monitor.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        monitor._restart_history["cam"] = [time.monotonic() - 999.0]
+        monitor._running_since["cam"] = time.monotonic() - 999.0
+
+        monitor._maybe_reset_on_stable("cam")
+
+        assert "cam" in monitor._restart_history  # не сброшен (пожизненный счётчик)
+
+
 class TestMonitorSyncPause:
     """Task 3.1: stop(wait=True) дожидается завершения текущей итерации."""
 

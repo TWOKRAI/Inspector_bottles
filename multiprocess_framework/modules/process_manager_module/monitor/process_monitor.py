@@ -99,6 +99,12 @@ class ProcessMonitor:
         # вечной flap-петли). count = число меток В ОКНЕ (см. _try_auto_restart).
         self._restart_history: dict[str, list[float]] = {}
 
+        # Ф3.6: время (time.monotonic()), с которого процесс непрерывно "running".
+        # Стабильная работа дольше window_sec → авто-reset истории рестартов
+        # (_maybe_reset_on_stable). Монотонное время — окно не должно зависеть
+        # от системных часов. Сбрасывается когда процесс уходит из "running".
+        self._running_since: dict[str, float] = {}
+
         # Отложенные рестарты: {name: monotonic-время, когда пора}. Диспатчатся
         # из цикла (после backoff) IPC-командой в PM — НЕ исполняются на потоке
         # монитора (Task 3.1: гонка с apply_topology исключена).
@@ -446,6 +452,7 @@ class ProcessMonitor:
         for proc in self.process._process_registry.os_processes:
             if not proc.is_alive():
                 self._handle_dead_process(proc)
+                self._running_since.pop(proc.name, None)  # мёртвый — сбросить точку отсчёта стабильности
                 continue
 
             # Процесс жив: повысить до "running" из любого pre-running статуса.
@@ -471,6 +478,40 @@ class ProcessMonitor:
 
             # Проверяем heartbeat
             self._check_heartbeat_timeout(proc.name, now)
+
+            # Ф3.6: стабильная работа дольше window_sec → сброс истории рестартов
+            self._maybe_reset_on_stable(proc.name)
+
+    def _maybe_reset_on_stable(self, process_name: str) -> None:
+        """Сбросить историю рестартов, если процесс стабильно "running" > window_sec.
+
+        Точка отсчёта — ``_running_since[name]`` (time.monotonic()). Пока процесс
+        держит "running" дольше окна политики — flap-петли нет, счётчик можно
+        обнулить (иначе редкие рестарты за всё время накопились бы к give-up).
+
+        window_sec=0 (пожизненный счётчик) → авто-reset ВЫКЛючен: оператор
+        осознанно выбрал вечный счётчик. Сброс только при наличии истории —
+        чтобы не шуметь логами на каждом здоровом процессе.
+        """
+        cur_status = (self.previous_states.get(process_name) or {}).get("status", "unknown")
+        if cur_status != "running":
+            self._running_since.pop(process_name, None)
+            return
+
+        policy = self._resolve_policy(process_name)
+        if policy.window_sec <= 0:
+            return  # пожизненный счётчик — авто-reset не применяется
+
+        now_m = time.monotonic()
+        since = self._running_since.get(process_name)
+        if since is None:
+            self._running_since[process_name] = now_m
+            return
+        if now_m - since >= policy.window_sec and self._restart_history.get(process_name):
+            self.reset_restart_count(process_name)
+            self.process._log_info(
+                f"Process '{process_name}' стабилен > {policy.window_sec}с — счётчик рестартов сброшен"
+            )
 
     def _handle_dead_process(self, proc) -> None:
         """Обработка мёртвого OS-процесса: обновить статус, запустить авто-рестарт."""
@@ -778,6 +819,7 @@ class ProcessMonitor:
         self._restart_history.pop(process_name, None)
         self._workers_status.pop(process_name, None)
         self._first_seen.pop(process_name, None)
+        self._running_since.pop(process_name, None)
         self.previous_states.pop(process_name, None)
         self._pending_restarts.pop(process_name, None)
 
