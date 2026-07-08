@@ -2,6 +2,8 @@
 Тесты для queues/core/manager.py.
 """
 
+import time
+
 import pytest
 import multiprocessing
 
@@ -78,6 +80,47 @@ class TestQueueRegistryBroadcast:
         assert count == 1
         assert qr.receive_from_queue("p2", "system", timeout=0.5) == "msg"
         assert qr.receive_from_queue("p1", "system") is None
+
+
+class TestQueueRegistrySystemGuard:
+    """Ф3.3: предохранитель от вытеснения system-очереди."""
+
+    def test_system_queue_not_evicted_on_full(self, qr, psr):
+        """Полная system-очередь: старый элемент НЕ вытесняется, счётчик растёт."""
+        psr.register_process("p1")
+        qr.create_and_register_queues("p1", {"system": {"maxsize": 2}})
+        # Заполняем system-очередь до предела (maxsize=2)
+        assert qr.send_to_queue("p1", "system", "first") is True
+        assert qr.send_to_queue("p1", "system", "second") is True
+        # Очередь полна — попытка положить process.stop
+        before = qr.get_stats()["queues"]["system_evict_blocked"]
+        qr.send_to_queue("p1", "system", "process.stop")
+        after = qr.get_stats()["queues"]["system_evict_blocked"]
+        # Счётчик заблокированных вытеснений вырос
+        assert after == before + 1
+        # Старый элемент НЕ вытеснен — первым по-прежнему "first"
+        assert qr.receive_from_queue("p1", "system", timeout=0.5) == "first"
+
+    def test_data_queue_still_evicts_on_full(self, qr, psr):
+        """Регресс: data-очередь по-прежнему вытесняет самый старый элемент."""
+        psr.register_process("p1")
+        qr.create_and_register_queues("p1", {"data": {"maxsize": 2}})
+        assert qr.send_to_queue("p1", "data", "old") is True
+        assert qr.send_to_queue("p1", "data", "mid") is True
+        # macOS/spawn: multiprocessing.Queue флашит через фоновый feeder-поток
+        # асинхронно — даём элементам осесть в pipe, иначе get_nowait при
+        # вытеснении поймает Empty (это pre-existing поведение data-пути).
+        time.sleep(0.1)
+        # Очередь полна — вытеснение "old", место под "new"
+        assert qr.send_to_queue("p1", "data", "new") is True
+        # Счётчик system-блокировок не тронут (это data-путь)
+        assert qr.get_stats()["queues"]["system_evict_blocked"] == 0
+        # "old" вытеснен — первым идёт "mid"
+        assert qr.receive_from_queue("p1", "data", timeout=0.5) == "mid"
+
+    def test_get_stats_exposes_counter(self, qr):
+        """get_stats отдаёт новый счётчик system_evict_blocked."""
+        assert qr.get_stats()["queues"]["system_evict_blocked"] == 0
 
 
 class TestQueueRegistryUtils:
