@@ -297,25 +297,41 @@ class ProcessMonitor:
             self._publish_state("system.health.avg_fps", round(sum(fps_values) / len(fps_values), 2))
 
         # broken_wires (Ф3.5): реальный счёт из PM._active_wires + per-wire статусы.
-        broken_wires = self._publish_wires(set(running))
+        broken_wires = self._publish_wires()
         self._publish_state("system.health.broken_wires", broken_wires)
 
-    def _publish_wires(self, running: set[str]) -> int:
+    def _endpoint_alive(self, name: str) -> bool:
+        """OS-liveness endpoint'а провода через ProcessRegistry (не status-снимок).
+
+        Намеренно НЕ полагаемся на статус процесса из state-дерева: после
+        graceful stop / restart монитор может не промотировать «stopped»→«running»
+        (whitelist промоушена), из-за чего живой (is_alive) процесс ложно
+        выглядел бы мёртвым endpoint'ом. Истина — ``proc.is_alive()`` (pid жив).
+        """
+        reg = getattr(self.process, "_process_registry", None)
+        getp = getattr(reg, "get_process_by_name", None) if reg is not None else None
+        if not callable(getp):
+            return False
+        try:
+            proc = getp(name)
+        except Exception:  # nosec B110 — liveness-проба не критична
+            return False
+        is_alive = getattr(proc, "is_alive", None)
+        return bool(proc is not None and callable(is_alive) and is_alive())
+
+    def _publish_wires(self) -> int:
         """Опубликовать per-wire статусы (``system.wires.<key>.status``) + счёт broken.
 
         Источник — ``ProcessManager._active_wires`` (wire_key → метаданные,
         заполняется ``wire.setup``). Провод считается ``broken``, если его
         сохранённый статус ``"broken"`` (окно рестарта/switch, honest-marking PM)
-        ИЛИ хотя бы один endpoint (source/target) не в ``running``. Иначе
-        ``pending`` (не активирован) либо ``active``.
+        ИЛИ хотя бы один endpoint (source/target) не ``is_alive`` (OS-liveness).
+        Иначе ``pending`` (не активирован) либо ``active``.
 
         Guard'ы: ``_active_wires`` отсутствует / не dict (mock-PM, здоровая
         топология без проводов) → 0 без публикаций. Это сохраняет прежнее
         поведение «0 при живой топологии» — но теперь это ЧЕСТНЫЙ ноль, а не
         безусловная константа.
-
-        Args:
-            running: имена процессов в статусе "running" (из ``_publish_health``).
 
         Returns:
             Число оборванных проводов (для ``system.health.broken_wires``).
@@ -329,7 +345,7 @@ class ProcessMonitor:
                 continue
             src = info.get("source_process", "")
             tgt = info.get("target_process", "")
-            endpoints_alive = src in running and tgt in running
+            endpoints_alive = self._endpoint_alive(src) and self._endpoint_alive(tgt)
             if info.get("status") == "broken" or not endpoints_alive:
                 status = "broken"
                 broken += 1

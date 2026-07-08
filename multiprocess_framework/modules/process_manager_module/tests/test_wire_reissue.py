@@ -148,12 +148,29 @@ class TestRestartReissue:
 # ---------------------------------------------------------------------------
 
 
-def _monitor_with_wires(wires: dict) -> tuple[ProcessMonitor, dict]:
-    """ProcessMonitor + захват публикаций в StateStore."""
+class _FakeProc:
+    def __init__(self, alive: bool) -> None:
+        self._alive = alive
+
+    def is_alive(self) -> bool:
+        return self._alive
+
+
+class _FakeRegistry:
+    def __init__(self, alive_map: dict) -> None:
+        self._procs = {n: _FakeProc(a) for n, a in alive_map.items()}
+
+    def get_process_by_name(self, name: str):
+        return self._procs.get(name)
+
+
+def _monitor_with_wires(wires: dict, alive: dict | None = None) -> tuple[ProcessMonitor, dict]:
+    """ProcessMonitor + захват публикаций; ``alive`` — карта {process: is_alive}."""
     published: dict = {}
     pm = MagicMock()
     pm.name = "ProcessManager"
     pm._active_wires = wires
+    pm._process_registry = _FakeRegistry(alive or {})
     pm.worker_manager.create_worker = lambda *a, **kw: None
 
     ssm = MagicMock()
@@ -172,25 +189,38 @@ def _monitor_with_wires(wires: dict) -> tuple[ProcessMonitor, dict]:
 class TestBrokenWiresMonitor:
     def test_broken_when_target_dead(self) -> None:
         wires = _wire(source="cam", target="proc")
-        monitor, published = _monitor_with_wires(wires)
-        # cam running, proc остановлен → провод broken
-        monitor._publish_health({"cam": {"status": "running"}, "proc": {"status": "stopped"}})
+        # cam жив, proc мёртв (is_alive False) → провод broken
+        monitor, published = _monitor_with_wires(wires, alive={"cam": True, "proc": False})
+        monitor._publish_health({"cam": {"status": "running"}})
         assert published["system.health.broken_wires"] == 1
         assert published["system.wires.cam→proc.status"] == "broken"
 
     def test_zero_when_all_alive(self) -> None:
         wires = _wire(source="cam", target="proc")
-        monitor, published = _monitor_with_wires(wires)
+        monitor, published = _monitor_with_wires(wires, alive={"cam": True, "proc": True})
         monitor._publish_health({"cam": {"status": "running"}, "proc": {"status": "running"}})
         assert published["system.health.broken_wires"] == 0
         assert published["system.wires.cam→proc.status"] == "active"
 
     def test_explicit_broken_status_counted(self) -> None:
         wires = _wire(source="cam", target="proc", status="broken")
-        monitor, published = _monitor_with_wires(wires)
-        # Оба endpoint'а живы, но статус помечен broken (окно рестарта)
+        # Оба endpoint'а живы, но статус помечен broken (окно рестарта) → broken
+        monitor, published = _monitor_with_wires(wires, alive={"cam": True, "proc": True})
         monitor._publish_health({"cam": {"status": "running"}, "proc": {"status": "running"}})
         assert published["system.health.broken_wires"] == 1
+
+    def test_alive_process_stale_status_not_broken(self) -> None:
+        """Живой (is_alive) процесс со stale-статусом 'stopped' — НЕ broken endpoint.
+
+        Регресс: liveness через status-снимок ложно держал провод broken после
+        restart (монитор не промотировал stopped→running). Теперь истина — is_alive.
+        """
+        wires = _wire(source="cam", target="proc")
+        monitor, published = _monitor_with_wires(wires, alive={"cam": True, "proc": True})
+        # all_states отдаёт stale 'stopped' для proc, но is_alive=True → active
+        monitor._publish_health({"cam": {"status": "running"}, "proc": {"status": "stopped"}})
+        assert published["system.health.broken_wires"] == 0
+        assert published["system.wires.cam→proc.status"] == "active"
 
     def test_no_wires_healthy_zero(self) -> None:
         monitor, published = _monitor_with_wires({})
