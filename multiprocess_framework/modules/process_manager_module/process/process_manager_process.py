@@ -635,6 +635,105 @@ class ProcessManagerProcess(ProcessModule):
         return {"success": True, "wires": result}
 
     # -------------------------------------------------------------------------
+    # Wire re-issue при рестарте/switch (Ф3.5) — first-class wire-статусы
+    #
+    # КОНТЕКСТ A vs B (см. plans/.../f3.5-wire-status.md §Контекст):
+    #   A. generic data-path (живой поток камеры) — самовосстанавливается через
+    #      routing-epoch Ф3.1 (mw пересоздаётся, shm_actual_name едет в каждом msg).
+    #   B. wire.* абстракция (PM-управляемые «провода», заводится ТОЛЬКО GUI
+    #      connect_wire → wire.setup) — статический FrameShmMiddleware в дочернем
+    #      `_wire_middlewares`. Новый инстанс после рестарта рождается с ПУСТЫМ
+    #      `_wire_middlewares` → провод B висит на мёртвом инстансе. Это и есть баг.
+    #
+    # SHM-регион owner-scoped и переживает рестарт (restart_process зовёт
+    # register_process(reuse_queues), а НЕ unregister_process — SHM не освобождается),
+    # поэтому re-issue = переслать wire.configure ТОЛЬКО в перезапущенный инстанс
+    # (пересоздать его middleware); партнёр не трогаем — он читает per-message
+    # shm_actual_name и остаётся валиден. Переаллокация SHM не требуется.
+    # -------------------------------------------------------------------------
+
+    def _wire_reissue_enabled(self) -> bool:
+        """Гейт wire re-issue: конфиг ``wire_reissue_enabled`` (дефолт True).
+
+        Аварийный откат к старому поведению (провода не переигрываются,
+        broken_wires снова оседает на 0 при живой топологии): выставить
+        ``wire_reissue_enabled: false`` в конфиге PM.
+        """
+        cfg = self.get_config("wire_reissue_enabled") if hasattr(self, "get_config") else None
+        return True if cfg is None else bool(cfg)
+
+    def _mark_wires_broken_for(self, process_name: str) -> None:
+        """Пометить задетые провода ``status="broken"`` (honest-статус до re-issue).
+
+        Вызывается при рестарте/switch ПЕРЕД пересозданием инстанса: провод,
+        чей source или target — ``process_name``, в этот момент реально мёртв
+        (у нового инстанса ещё нет middleware). Монитор публикует
+        ``broken_wires ≠ 0`` в это окно (acceptance Ф3.5). После успешного
+        re-issue статус вернётся в ``"active"``.
+        """
+        wires = getattr(self, "_active_wires", None)
+        if not isinstance(wires, dict) or not wires:
+            return
+        for info in wires.values():
+            if not isinstance(info, dict):
+                continue
+            if process_name in (info.get("source_process"), info.get("target_process")):
+                info["status"] = "broken"
+
+    def _reissue_wires_for(self, process_name: str) -> int:
+        """Переиграть ``wire.configure`` для проводов, задевающих ``process_name``.
+
+        Перебирает ``_active_wires``; для каждого провода, где ``process_name`` —
+        source или target, шлёт ``wire.configure`` в перезапущенный инстанс с
+        ролью (``sender`` для source, ``receiver`` для target) и сохранённым
+        ``shm_config`` (как в ``_cmd_wire_setup``). Успех → провод снова
+        ``"active"``.
+
+        Guard'ы (безопасно на mock-PM и без проводов):
+          - ``_active_wires`` пуст/не dict → no-op (return 0);
+          - сбой ``send_message`` (communication mock/None) → провод остаётся
+            broken, ошибка логируется, перебор продолжается.
+
+        Returns:
+            Число успешно переигранных проводов.
+        """
+        wires = getattr(self, "_active_wires", None)
+        if not isinstance(wires, dict) or not wires:
+            return 0
+        reissued = 0
+        for wire_key, info in list(wires.items()):
+            if not isinstance(info, dict):
+                continue
+            src = info.get("source_process", "")
+            tgt = info.get("target_process", "")
+            if process_name not in (src, tgt):
+                continue
+            role = "sender" if process_name == src else "receiver"
+            shm_cfg = info.get("shm_config") or {}
+            configure_cmd = {
+                "type": "system",
+                "command": "wire.configure",
+                "sender": self.name,
+                "data": {
+                    "wire_key": wire_key,
+                    "shm_name": shm_cfg.get("shm_name", wire_key),
+                    "shm_owner": shm_cfg.get("owner_process", src),
+                    "buffer_slots": shm_cfg.get("buffer_slots", 4),
+                    "role": role,
+                },
+            }
+            try:
+                self.send_message(process_name, configure_cmd)
+                info["status"] = "active"
+                reissued += 1
+                self._log_info(
+                    f"wire re-issue: '{wire_key}' переигран в '{process_name}' (role={role})"
+                )
+            except Exception as exc:  # noqa: BLE001 — провод остаётся broken, lifecycle не роняем
+                self._log_error(f"wire re-issue '{wire_key}' в '{process_name}' не удался: {exc}")
+        return reissued
+
+    # -------------------------------------------------------------------------
     # Protected / cleanup / rollback / snapshot — общие хелперы topology
     # -------------------------------------------------------------------------
 
@@ -1317,6 +1416,12 @@ class ProcessManagerProcess(ProcessModule):
             return False
         self._process_registry.remove_process(process_name)
 
+        # Ф3.5: старый инстанс мёртв → задетые wire-провода реально оборваны.
+        # Помечаем broken ДО пересоздания — монитор публикует broken_wires ≠ 0
+        # в это окно (honest-статус, acceptance). Re-issue ниже вернёт «active».
+        if self._wire_reissue_enabled():
+            self._mark_wires_broken_for(process_name)
+
         reuse_cfg = self.get_config("restart_reuse_queues")
         reuse_queues = True if reuse_cfg is None else bool(reuse_cfg)  # дефолт True
         ids_before = self._process_queue_ids(process_name)
@@ -1344,6 +1449,12 @@ class ProcessManagerProcess(ProcessModule):
         restart_timeout = 0.5 if raw_timeout is None else float(raw_timeout)
         if restart_timeout > 0:
             self._wait_processes_ready([process_name], restart_timeout, "restart")
+        # Ф3.5: инстанс готов принимать команды (после _wait_processes_ready) —
+        # переигрываем wire.configure в него (путь B: GUI-провода). Ортогонально
+        # epoch/ready Ф3.1/Ф3.2 — не трогает их инварианты. Путь A (generic
+        # data-path) самовосстанавливается через refresh ниже.
+        if self._wire_reissue_enabled():
+            self._reissue_wires_for(process_name)
         # Обновить epoch и разослать refresh (при reuse incarnation не менялась →
         # выжившие соседи оставят валидную переиспользованную очередь).
         self._bump_routing_epoch()
@@ -1476,6 +1587,14 @@ class ProcessManagerProcess(ProcessModule):
             # Snapshot (non-protected) для rollback
             snapshot = self._snapshot_processes()
 
+            # Ф3.5: switch сносит/пересоздаёт non-protected процессы → их
+            # wire-провода на время замены оборваны. Помечаем broken ДО apply
+            # (honest broken_wires в окне switch); success-ветка ниже переиграет
+            # wire.configure в пересозданные инстансы и вернёт «active».
+            if self._wire_reissue_enabled():
+                for _sname in snapshot:
+                    self._mark_wires_broken_for(_sname)
+
             # Pause monitor
             monitor_was_running = getattr(self._process_monitor, "_monitoring", False)
             if monitor_was_running:
@@ -1517,6 +1636,12 @@ class ProcessManagerProcess(ProcessModule):
 
                 # Успех: readiness-барьер (Task 2.2) + ответ, совместимый с GUI
                 ready = self._wait_started_ready(result.get("results") or [])
+                # Ф3.5: пересозданные switch-ем процессы готовы → переиграть их
+                # wire-провода (путь B). Провода, чьи endpoint'ы switch НЕ вернул,
+                # остаются broken — это честный статус (монитор их учтёт).
+                if self._wire_reissue_enabled():
+                    for _rname in ready:
+                        self._reissue_wires_for(_rname)
                 response = {
                     "success": True,
                     "rolled_back": False,
