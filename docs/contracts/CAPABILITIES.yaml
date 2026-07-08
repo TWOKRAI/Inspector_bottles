@@ -135,6 +135,14 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Прочитать значение из дерева
       name: state.get
       tags:
@@ -332,6 +340,14 @@ processes:
       tags: []
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      tags:
+      - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
       tags:
       - system
     - description: Включить/выключить ноду (bypass)
@@ -613,6 +629,14 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: ''
       name: set_config
       tags: []
@@ -777,6 +801,14 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: ''
       name: set_config
       tags: []
@@ -918,6 +950,14 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -1050,6 +1090,14 @@ processes:
       - stats
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      tags:
+      - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
       tags:
       - system
     - description: Включить/выключить ноду (bypass)
@@ -1186,6 +1234,14 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -1320,6 +1376,14 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -1452,6 +1516,14 @@ processes:
       - stats
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      tags:
+      - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
       tags:
       - system
     - description: Включить/выключить ноду (bypass)
