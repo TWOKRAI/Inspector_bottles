@@ -55,7 +55,7 @@ class TestForgetProcess:
         mock_pm = _make_mock_process_manager()
         monitor = ProcessMonitor(mock_pm)
         monitor._last_heartbeat = {"cam": 1.0, "other": 2.0}
-        monitor._restart_counts = {"cam": 3, "other": 1}
+        monitor._restart_history = {"cam": [1.0, 2.0, 3.0], "other": [1.0]}
         monitor._workers_status = {"cam": {"w": {}}, "other": {}}
         monitor._first_seen = {"cam": 10.0, "other": 20.0}
         monitor.previous_states = {"cam": {"status": "running"}, "other": {"status": "running"}}
@@ -65,7 +65,7 @@ class TestForgetProcess:
 
         for d in (
             monitor._last_heartbeat,
-            monitor._restart_counts,
+            monitor._restart_history,
             monitor._workers_status,
             monitor._first_seen,
             monitor.previous_states,
@@ -221,6 +221,60 @@ class TestProcessMonitorProtectedAutoRestart:
         monitor.forget_process("old_cam")
 
         assert monitor._pending_restarts == {}
+
+
+class TestRestartWindow:
+    """Ф3.6: окно стабильности N/T — метки протухают, счётчик не пожизненный."""
+
+    def _monitor(self, **policy_kw):
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        pol = RestartPolicy(enabled=True, backoff_sec=0.0, **policy_kw)
+        return mock_pm, ProcessMonitor(mock_pm, restart_policy=pol)
+
+    def test_giveup_after_max_retries_in_window(self) -> None:
+        """N рестартов в окне → give-up (status failed), больше не планируем."""
+        mock_pm, monitor = self._monitor(max_retries=3, window_sec=60.0)
+
+        for _ in range(3):
+            monitor._try_auto_restart("cam", reason="crashed")
+            monitor._dispatch_due_restarts()  # снять pending, чтобы след. попытка прошла
+
+        # 4-я попытка — give-up
+        monitor._try_auto_restart("cam", reason="crashed")
+
+        assert monitor.previous_states["cam"]["status"] == "failed"
+        assert "cam" not in monitor._pending_restarts
+
+    def test_expired_marks_reset_counter(self) -> None:
+        """Метки старше window протухли → счётчик обнулился, рестарт продолжается."""
+        mock_pm, monitor = self._monitor(max_retries=3, window_sec=10.0)
+
+        # Три «старых» метки (протухшие относительно окна 10с)
+        old = time.monotonic() - 999.0
+        monitor._restart_history["cam"] = [old, old, old]
+
+        monitor._try_auto_restart("cam", reason="crashed")
+
+        # Протухшие метки не считаются → это первая попытка в окне, НЕ give-up
+        assert monitor.previous_states.get("cam", {}).get("status") != "failed"
+        assert "cam" in monitor._pending_restarts
+        # В истории осталась только свежая метка
+        assert len(monitor._restart_history["cam"]) == 1
+
+    def test_window_zero_is_lifetime_counter(self) -> None:
+        """window_sec=0 → пожизненный счётчик (метки не протухают)."""
+        mock_pm, monitor = self._monitor(max_retries=2, window_sec=0.0)
+
+        # Даже очень старые метки считаются при window_sec=0
+        old = time.monotonic() - 9999.0
+        monitor._restart_history["cam"] = [old, old]
+
+        monitor._try_auto_restart("cam", reason="crashed")
+
+        assert monitor.previous_states["cam"]["status"] == "failed"
 
 
 class TestMonitorSyncPause:

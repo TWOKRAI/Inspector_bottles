@@ -92,8 +92,11 @@ class ProcessMonitor:
         # Сбрасывается при остановке/удалении процесса.
         self._first_seen: dict[str, float] = {}
 
-        # Авто-рестарт: счётчик попыток рестарта per process
-        self._restart_counts: dict[str, int] = {}
+        # Авто-рестарт: история меток рестарта per process (time.monotonic()).
+        # Раньше был пожизненный int-счётчик; теперь список меток, чтобы окно
+        # стабильности window_sec могло протухать старые попытки (защита от
+        # вечной flap-петли). count = число меток В ОКНЕ (см. _try_auto_restart).
+        self._restart_history: dict[str, list[float]] = {}
 
         # Отложенные рестарты: {name: monotonic-время, когда пора}. Диспатчатся
         # из цикла (после backoff) IPC-командой в PM — НЕ исполняются на потоке
@@ -617,13 +620,23 @@ class ProcessMonitor:
             self.process._log_warning(f"Process '{process_name}' protected — авто-рестарт ({reason}) пропущен")
             return
 
-        count = self._restart_counts.get(process_name, 0)
         max_retries = self.restart_policy.max_retries
+        window_sec = self.restart_policy.window_sec
+
+        # Окно стабильности N/T: считаем только метки рестартов В ОКНЕ.
+        # window_sec=0 → пожизненный счётчик (метки не протухают, как раньше).
+        # time.monotonic() — важна монотонность окна (не Date.now/time.time).
+        now_m = time.monotonic()
+        history = self._restart_history.get(process_name, [])
+        if window_sec > 0:
+            history = [t for t in history if now_m - t <= window_sec]
+        count = len(history)
 
         if count >= max_retries:
-            # Исчерпаны попытки — статус FAILED, больше не пытаемся
+            # Исчерпаны попытки в окне — статус FAILED, больше не пытаемся
             self.process._log_error(
-                f"Process '{process_name}' превысил лимит рестартов ({count}/{max_retries}), статус -> FAILED"
+                f"Process '{process_name}' превысил лимит рестартов ({count}/{max_retries} за {window_sec}с), "
+                f"статус -> FAILED"
             )
             snap = {
                 "status": "failed",
@@ -651,8 +664,11 @@ class ProcessMonitor:
         backoff = self.restart_policy.backoff_sec
         if process_name in self._pending_restarts:
             return  # уже запланирован
-        self._restart_counts[process_name] = attempt
-        self._pending_restarts[process_name] = time.monotonic() + backoff
+        # Записываем метку текущей попытки (уже отфильтрованный по окну список +
+        # новая метка) — прунит протухшие метки заодно, история не растёт вечно.
+        history.append(now_m)
+        self._restart_history[process_name] = history
+        self._pending_restarts[process_name] = now_m + backoff
         self.process._log_info(
             f"Авто-рестарт процесса '{process_name}' запланирован "
             f"(причина: {reason}, попытка {attempt}/{max_retries}, backoff: {backoff}с)"
@@ -702,9 +718,9 @@ class ProcessMonitor:
         """Сбросить счётчик рестартов для процесса.
 
         Вызывается когда процесс стабильно работает после рестарта,
-        или при ручном вмешательстве оператора.
+        или при ручном вмешательстве оператора. Очищает всю историю меток имени.
         """
-        self._restart_counts.pop(process_name, None)
+        self._restart_history.pop(process_name, None)
 
     def forget_process(self, process_name: str) -> None:
         """Забыть служебную историю имени при cleanup (hot-swap / удаление).
@@ -716,7 +732,7 @@ class ProcessMonitor:
         заменённого имени также отменяется (Task 3.1).
         """
         self._last_heartbeat.pop(process_name, None)
-        self._restart_counts.pop(process_name, None)
+        self._restart_history.pop(process_name, None)
         self._workers_status.pop(process_name, None)
         self._first_seen.pop(process_name, None)
         self.previous_states.pop(process_name, None)
@@ -828,7 +844,7 @@ class ProcessMonitor:
             "heartbeat_timeout": self.heartbeat_timeout,
             "restart_policy": self.restart_policy.model_dump(),
             "last_heartbeats": {name: round(time.time() - ts, 1) for name, ts in self._last_heartbeat.items()},
-            "restart_counts": dict(self._restart_counts),
+            "restart_counts": {name: len(marks) for name, marks in self._restart_history.items()},
             "crashed_processes": [n for n, st in self.previous_states.items() if st.get("status") == "crashed"],
             "unresponsive_processes": [
                 n for n, st in self.previous_states.items() if st.get("status") == "unresponsive"
