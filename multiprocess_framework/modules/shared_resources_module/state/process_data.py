@@ -170,6 +170,21 @@ class ProcessData:
         self._queues_dict[queue_type] = queue
         self.update_timestamp()
 
+    def clear_queues(self) -> None:
+        """Очистить словарь очередей IN-PLACE (routing-epoch, Ф3.1).
+
+        Мутирует ``_queues_dict`` на месте (``clear()``), а НЕ заменяет ссылку:
+        ``QueuesProxy`` держит ссылку на этот же dict, поэтому после очистки все
+        обращения через ``.queues`` видят пустой набор. Так выживший после switch
+        ребёнок роняет ссылки на пересозданные соседом очереди — следующий send
+        по этому имени не найдёт очередь и упадёт в hub-relay (Ф1.7), а не в
+        осиротевшую мёртвую очередь (тихая потеря). Сами Queue-объекты не
+        закрываются: их владелец — пересоздавший сосед, здесь лишь снимается
+        локальная стейл-ссылка.
+        """
+        self._queues_dict.clear()
+        self.update_timestamp()
+
     def add_event(self, event_name: str, event: Event) -> None:
         self._events_dict[event_name] = event
         self.update_timestamp()

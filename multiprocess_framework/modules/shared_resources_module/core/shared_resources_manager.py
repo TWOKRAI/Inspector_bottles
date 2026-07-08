@@ -159,7 +159,7 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
     # ISharedResourcesManager — register_process (ADR-018)
     # =========================================================================
 
-    def register_process(self, name: str, config: dict) -> bool:
+    def register_process(self, name: str, config: dict, *, reuse_queues: bool = False) -> bool:
         """
         Единая точка регистрации процесса.
 
@@ -168,6 +168,17 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
         3. Создаёт очереди из config["queues"].
         4. Создаёт стандартные события stop/pause.
         5. Создаёт SharedMemory если config["memory"] задан.
+
+        Args:
+            name: имя процесса.
+            config: dict-конфиг процесса (Dict at Boundary).
+            reuse_queues: routing-epoch (Ф3.1). При ``True`` создаются ТОЛЬКО
+                отсутствующие qtype — уже существующие очереди процесса не
+                перезаписываются, их identity (``id()``) сохраняется. Так рестарт
+                процесса переиспользует Queue-объекты, и стейл-ссылки соседей на
+                них остаются валидными (hot-path не деградирует). Дефолт ``False``
+                — прежнее поведение (все очереди пересоздаются) не меняется ни на
+                бит.
         """
         try:
             # 1. Конфиг
@@ -178,6 +189,12 @@ class SharedResourcesManager(BaseManager, ObservableMixin, ISharedResourcesManag
 
             # 3. Очереди
             queues_config = config.get("queues", {})
+            if queues_config and reuse_queues:
+                # Переиспользование (Ф3.1): создаём только недостающие qtype, уже
+                # существующие очереди сохраняем (identity стабильна для соседей).
+                existing = self._process_state_registry.get_process_data(name)
+                present = set(existing.queues.keys()) if existing else set()
+                queues_config = {qt: cfg for qt, cfg in queues_config.items() if qt not in present}
             if queues_config:
                 self._queue_registry.create_and_register_queues(name, queues_config)
 
