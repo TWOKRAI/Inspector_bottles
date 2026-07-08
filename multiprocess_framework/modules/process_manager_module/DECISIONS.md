@@ -271,3 +271,58 @@ is_alive-liveness.
   give-up наблюдаем (health), авто-рестарт де-факто работает (фикс type). Откат: убрать
   `restart_policy` из рецептов (или `enabled:false`); `window_sec=0` возвращает пожизненный
   счётчик.
+
+## ADR-PMM-014: Fencing-token — жёсткий барьер против stale от заменённого инстанса (Ф4.2, 2026-07-08)
+
+- **Контекст.** Требование владельца (2026-07-08): у каждого процесса свой id; при смене
+  топологии старые процессы не должны вкидывать данные/сообщения в новую. ADR-PMM-010
+  ввёл `incarnation`/`epoch`, но применял их лишь к CLEANUP очередей (выживший сбрасывает
+  стейл-очередь) и к самому `routing.refresh` (guard `epoch<=last_seen`). Оставалось
+  задокументированное ОКНО ГОНКИ: билет, отправленный старым инстансом до пересоздания,
+  мог проскочить в handler.
+
+- **Решение.** Fence поверх конверта в receive/send-pipeline (тот же, что реестр
+  контрактов Ф4.2). Код фабрик — `message_module/fencing/` ([ADR-MSG-009]
+  (../message_module/DECISIONS.md)); здесь — интеграция с routing-epoch и семантика.
+  1. **Штамп (send-mw).** Каждый control-plane билет получает `_fence={sender, inc, epoch}`,
+     где `inc`/`epoch` — из своей PSR-записи (`routing_incarnation` проставлен при spawn
+     в `bundle_builder`; `routing_epoch` растёт с применёнными refresh). Data-plane (кадры)
+     НЕ штампуется (горячий путь). Свой incarnation неизвестен → не штампуем (fail-open).
+  2. **Дроп (receive-mw).** Билет отбрасывается, если `_fence.inc < PSR[sender].
+     routing_incarnation` — прислал СТАРЫЙ инстанс отправителя (его заменил новый с
+     incarnation+1). Получатель знает текущий incarnation соседа из `routing.refresh`.
+  3. **Проводка** — `BuiltinCommands._register_message_guards` за флагом `FW_FENCE`
+     (дефолт ON, откат `FW_FENCE=0`). Счётчик `fence_dropped` в router-stats.
+
+- **КЛЮЧЕВОЙ УРОК (live e2e, как в Ф3.7): дроп по incarnation, НЕ по epoch.** Первая
+  реализация дропала по глобальному epoch (`epoch < known`). Юниты зелёные, но
+  `test_routing_epoch_live` покраснел: epoch — счётчик поколения ВСЕЙ топологии, растёт
+  на любой switch/restart; в переходном окне ТЕКУЩИЙ процесс, ещё не применивший refresh,
+  штампует отставший epoch, и получатель с новым epoch ложно дропает его легитимный
+  state/telemetry. Incarnation же меняется ТОЛЬКО при пересоздании очередей КОНКРЕТНОГО
+  процесса (`_bump_incarnation`: restart-no-reuse `ids_before!=ids_after`, provision при
+  switch) → устаревший инстанс отличим точно, текущий (даже отставший по epoch) не
+  трогается. Мораль: юнит «сообщение отброшено» ≠ доказательство корректной семантики;
+  истину вскрыл только живой прогон с реальной сменой топологии.
+
+- **Композиция с ADR-PMM-010.** Fence — ужесточение epoch-guard'а с одного сообщения
+  (`routing.refresh`) до всех control-plane, но по incarnation. Cleanup-очередей остаётся
+  (закрывает «очередь мертва»); fence закрывает «старый инстанс ещё шлёт». Два слоя, не
+  дубль. `restart-reuse` (incarnation НЕ меняется) корректно НЕ фенсится — сообщения
+  старого инстанса летят в ту же переиспользованную очередь, что читает новый.
+
+- **Валидация.** `backend_ctl/tests/test_fencing_live.py` (порты 8790/8791): restart с
+  `restart_reuse_queues=false` бампит incarnation `preprocessor` → умирающий старый инстанс
+  шлёт heartbeat/state.set с `inc=0` → ProcessManager (знает `inc=1`) дропает (наблюдали
+  11 дропов), `fence_dropped>=1` (GREEN); при `FW_FENCE=0` те же билеты проходят
+  (`fence_dropped==0`, RED). `routing_epoch_live` зелёный (нет ложных дропов). Юниты:
+  `message_module/tests/test_fencing.py` + `process_module/tests/test_message_guards.py`.
+
+- **Последствия / откат.** Жёсткая гарантия «заменённый инстанс не вкидывает в новую
+  топологию». Откат — `FW_FENCE=0` (hot-path не затронут ни в каком режиме — data-plane
+  не штампуется). Data-plane fence — Ф7 G.4 под флагом; `epoch` остаётся в штампе для
+  диагностики и Ф4.9 (StateStore-ревизии — тот же монотонный счётчик).
+
+- **Отклонено:** дроп по глобальному epoch — ложные дропы легитимного control-plane в
+  переходном окне (см. урок). Sender-side epoch-check на каждом send для data-plane —
+  отвергнут ещё в ADR-PMM-010 (горячий путь кадров).

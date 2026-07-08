@@ -39,6 +39,7 @@ class BuiltinCommands:
         self._register_health_commands()
         self._register_relay_commands()
         self._register_routing_commands()
+        self._register_message_guards()
 
     # ========================================================================
     # КОМАНДЫ УПРАВЛЕНИЯ ВОРКЕРАМИ
@@ -1164,3 +1165,138 @@ class BuiltinCommands:
         except Exception as exc:  # noqa: BLE001 — вернуть видимую ошибку инициатору
             return {"success": False, "reason": f"routing.probe: send_to_process упал: {exc}", "target": target}
         return {"success": bool(ok), "target": target}
+
+    # ========================================================================
+    # MESSAGE GUARDS (Ф4.2: реестр контрактов warn/strict + fencing-token)
+    # ========================================================================
+
+    def _routing_meta_of(self, name) -> Any:
+        """metadata PSR-записи процесса ``name`` (или ``None``). Тот же путь, что у
+        ``_cmd_routing_refresh``: ``routing_epoch``/``routing_incarnation`` в metadata."""
+        svc = self._services
+        sr = getattr(svc, "shared_resources", None)
+        psr = getattr(sr, "process_state_registry", None) if sr is not None else None
+        if psr is None or not name:
+            return None
+        try:
+            pd = psr.get_process_data(name)
+            meta = getattr(pd, "metadata", None) if pd is not None else None
+            return meta if isinstance(meta, dict) else None
+        except Exception:  # noqa: BLE001 — PSR-сбой не должен ронять проводку/приём
+            return None
+
+    def _get_own_fence(self) -> tuple:
+        """(own_incarnation | None, own_epoch | None) для штампа отправителя.
+
+        Свой incarnation проставлен при spawn (bundle_builder), epoch растёт с каждым
+        применённым ``routing.refresh`` — оба в своей PSR-записи.
+        """
+        meta = self._routing_meta_of(getattr(self._services, "name", None))
+        if meta is None:
+            return (None, None)
+        inc = meta.get("routing_incarnation")
+        epoch = meta.get("routing_epoch")
+        return (
+            int(inc) if isinstance(inc, int) else None,
+            int(epoch) if isinstance(epoch, int) else None,
+        )
+
+    def _get_expected_incarnation(self, sender):
+        """Известный получателю текущий incarnation отправителя (или ``None``).
+
+        Читает ``PSR[sender].routing_incarnation`` — обновляется ``routing.refresh``
+        при смене incarnation соседа. ``None`` (неизвестный процесс) → fail-open.
+        """
+        meta = self._routing_meta_of(sender)
+        if meta is None:
+            return None
+        inc = meta.get("routing_incarnation")
+        return int(inc) if isinstance(inc, int) else None
+
+    def _register_message_guards(self) -> None:
+        """Проводка receive/send-middleware процесса (Ф4.2): контракты + fencing.
+
+        Оба живут в одном receive-pipeline (``_recv_mw.apply`` первым шагом
+        ``receive()``), плюс fence добавляет send-mw для штампа. Порядок приёма:
+        **fence-filter ПЕРВЫМ** (дроп стейл до валидации контракта), затем
+        contract-check. Флаги:
+
+          - ``FW_FENCE`` (дефолт **ON**; ``FW_FENCE=0`` → откат) — штамп+фильтр.
+          - ``FW_CONTRACTS_STRICT`` (дефолт warn) — нарушение контракта дропает.
+
+        Реестр контрактов создаётся пустым (ноль оверхеда) и вешается на процесс
+        (``services.contract_registry``) — наполняется при регистрации обработчиков
+        и отдаётся `introspect.capabilities` v1. Идемпотентно: если router уже нет
+        (bare/тест без транспорта) — тихий no-op.
+        """
+        svc = self._services
+        router = getattr(svc, "router_manager", None)
+        if router is None:
+            return
+
+        # --- Реестр контрактов (пуст; наполнение — позже, декларативно) ---
+        registry = getattr(svc, "contract_registry", None)
+        if registry is None:
+            from ...message_module import MessageContractRegistry
+
+            registry = MessageContractRegistry()
+            try:
+                svc.contract_registry = registry
+            except Exception:  # noqa: BLE001 — не все services допускают set-атрибут
+                pass
+
+        inc_stat = getattr(router, "_inc_stat", None)
+
+        # --- Fencing-token (FW_FENCE, дефолт ON) ---
+        fence_on = os.environ.get("FW_FENCE", "1").strip().lower() not in ("0", "false", "no", "off", "")
+        if fence_on:
+            from ...message_module import (
+                make_fence_filter_middleware,
+                make_fence_stamp_middleware,
+            )
+
+            sender_name = getattr(svc, "name", None) or "process"
+
+            def _on_fence_drop(message, _inc=inc_stat, _svc=svc):
+                if callable(_inc):
+                    _inc("fence_dropped")
+                log_warning = getattr(_svc, "_log_warning", None)
+                if callable(log_warning):
+                    fence = message.get("_fence") or {}
+                    log_warning(
+                        f"fence: отброшено от устаревшего инстанса {fence.get('sender')!r} "
+                        f"inc={fence.get('inc')} (command={message.get('command')!r})",
+                        module="lifecycle",
+                    )
+
+            router.add_send_middleware(make_fence_stamp_middleware(sender_name, self._get_own_fence))
+            # fence-filter добавляем ПЕРВЫМ на receive (до contract-check).
+            router.add_receive_middleware(
+                make_fence_filter_middleware(self._get_expected_incarnation, on_drop=_on_fence_drop)
+            )
+
+        # --- Контракт-мидлвар (warn по умолчанию; strict за флагом) ---
+        from ...message_module import make_contract_check_middleware
+
+        strict = os.environ.get("FW_CONTRACTS_STRICT", "").strip().lower() in ("1", "true", "yes", "on")
+
+        def _on_violation(check, _inc=inc_stat, _svc=svc, _strict=strict):
+            if callable(_inc):
+                _inc("contract_violations")
+            log_warning = getattr(_svc, "_log_warning", None)
+            if callable(log_warning):
+                verb = "ДРОП (strict)" if _strict else "WARNING"
+                log_warning(
+                    f"contract {verb}: '{check.key}' — {check.diff_summary()}",
+                    module="lifecycle",
+                )
+
+        router.add_receive_middleware(
+            make_contract_check_middleware(registry, strict=strict, on_violation=_on_violation)
+        )
+
+        self._services._log_debug(
+            f"Message guards зарегистрированы (fence={'on' if fence_on else 'off'}, "
+            f"contracts={'strict' if strict else 'warn'})",
+            module="lifecycle",
+        )

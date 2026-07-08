@@ -147,7 +147,14 @@ class MessageContractRegistry:
         forbid_extra = schema.model_config.get("extra") == "forbid"
 
         missing = [name for name, info in fields.items() if info.is_required() and name not in message]
-        unexpected = [k for k in message if k not in fields] if forbid_extra else []
+        # `_`-префиксные ключи — служебные transport-поля (`_address`, `_receive_info`,
+        # `_source_channel`, `_relayed`, `_fence` fencing-токена Ф4.2). Они не часть
+        # payload-контракта и не должны попадать в diff «лишних» полей.
+        unexpected = (
+            [k for k in message if k not in fields and not k.startswith("_")]
+            if forbid_extra
+            else []
+        )
 
         errors: List[str] = []
         # Валидируем только известные поля — типы/диапазоны; missing/unexpected уже

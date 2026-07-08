@@ -115,6 +115,24 @@ class TestValidate:
         assert check.errors and "count" in check.errors[0]
         assert check.missing == [] and check.unexpected == []
 
+    def test_transport_underscore_keys_not_flagged_unexpected(self):
+        """Служебные `_`-поля (`_fence` fencing-Ф4.2, `_address`, `_receive_info`)
+        не часть payload-контракта → не попадают в `unexpected` даже при extra=forbid."""
+        check = _reg().validate(
+            "ping",
+            {
+                "id": "1",
+                "command": "p",
+                "_fence": {"epoch": 5},
+                "_address": ["proc", "worker"],
+                "_receive_info": {"router_id": "x"},
+                "_source_channel": "proc_system",
+            },
+        )
+        assert check is not None
+        assert check.unexpected == []
+        assert check.ok
+
     def test_command_schema_realistic(self):
         r = MessageContractRegistry()
         r.register("process.restart", CommandMessageSchema)
