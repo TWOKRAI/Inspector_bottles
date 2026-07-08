@@ -78,7 +78,9 @@ class DeviceManager(BaseManager, ObservableMixin):
 
     def shutdown(self) -> bool:
         """Отключить все устройства и сохранить реестр."""
-        for dev_id in list(self._drivers):
+        with self._registry_lock:
+            driver_ids = list(self._drivers)
+        for dev_id in driver_ids:
             try:
                 self.disconnect(dev_id)
             except Exception:
@@ -118,7 +120,7 @@ class DeviceManager(BaseManager, ObservableMixin):
 
     def list_devices(self) -> list[dict]:
         """Список всех устройств реестра (dict-формат)."""
-        return [e.to_dict() for e in self._entries.values()]
+        return [e.to_dict() for e in self.snapshot_registry()]
 
     def get(self, dev_id: str) -> DeviceEntry:
         """Получить запись устройства по id.
@@ -126,10 +128,55 @@ class DeviceManager(BaseManager, ObservableMixin):
         Raises:
             DeviceNotFoundError: Устройство не найдено.
         """
-        entry = self._entries.get(dev_id)
+        with self._registry_lock:
+            entry = self._entries.get(dev_id)
         if entry is None:
             raise DeviceNotFoundError(f"Устройство {dev_id!r} не найдено")
         return entry
+
+    # ------------------------------------------------------------------ #
+    # Публичный snapshot-API реестра (M-race-1)
+    # ------------------------------------------------------------------ #
+    #
+    # Единственный потокобезопасный способ читать реестр/драйверы ИЗВНЕ
+    # менеджера (плагин, supervisor, per-device tick-воркеры). Прямой обход
+    # приваток (`._entries.values()`, `._drivers.get`) из другого потока при
+    # параллельном upsert/remove даёт `RuntimeError: dictionary changed size
+    # during iteration` либо полу-удалённое состояние. Гейт
+    # `Plugins/hub/device_hub/tests/test_no_private_access.py` держит прод-код
+    # плагина чистым от прямого доступа к приваткам менеджера.
+    #
+    # Контракт: методы возвращают КОПИЮ верхнего уровня под локом (shallow) —
+    # защищают от мутации словаря, НО НЕ от мутации самого DeviceEntry/драйвера.
+
+    def snapshot_registry(self) -> list[DeviceEntry]:
+        """Снимок всех записей реестра под локом (shallow-копия значений)."""
+        with self._registry_lock:
+            return list(self._entries.values())
+
+    def get_driver(self, dev_id: str) -> Any:
+        """Живой драйвер по id под локом (``None`` если ещё не создан)."""
+        with self._registry_lock:
+            return self._drivers.get(dev_id)
+
+    def connected_ids(self) -> list[str]:
+        """ID подключённых устройств (по ``driver.is_connected``).
+
+        Ссылки на драйверы снимаются под локом; сам ``is_connected`` (чтение
+        флага) вычисляется ВНЕ лока — критическая секция максимально короткая.
+        """
+        with self._registry_lock:
+            drivers = list(self._drivers.items())
+        return [dev_id for dev_id, drv in drivers if drv.is_connected]
+
+    def device_count(self) -> int:
+        """Число записей в реестре (под локом)."""
+        with self._registry_lock:
+            return len(self._entries)
+
+    def connected_count(self) -> int:
+        """Число подключённых устройств (по ``is_connected``)."""
+        return len(self.connected_ids())
 
     def upsert(
         self,
@@ -245,7 +292,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         # Bridge: проверить connected-носителя
         if entry.transport.get("type") == "bridge":
             bridge_id = entry.transport.get("bridge", "")
-            carrier = self._drivers.get(bridge_id)
+            carrier = self.get_driver(bridge_id)
             if carrier is None or not carrier.is_connected:
                 raise DeviceHubError(
                     f"Устройство {dev_id!r}: носитель {bridge_id!r} не подключён. Подключите носителя сначала."
@@ -263,18 +310,21 @@ class DeviceManager(BaseManager, ObservableMixin):
         Raises:
             DeviceNotFoundError: Устройство не найдено.
         """
-        if dev_id not in self._entries:
+        with self._registry_lock:
+            exists = dev_id in self._entries
+        if not exists:
             raise DeviceNotFoundError(f"Устройство {dev_id!r} не найдено")
 
-        driver = self._drivers.get(dev_id)
+        driver = self.get_driver(dev_id)
         if driver is not None:
             driver.disconnect()
             self._publish(f"devices.state.{dev_id}.conn", {"conn": "disconnected"})
 
-        # Cascade degraded для зависимых bridge-устройств
-        for e in self._entries.values():
+        # Cascade degraded для зависимых bridge-устройств (итерация по снапшоту —
+        # реестр может мутироваться параллельно; сам disconnect-IO вне лока).
+        for e in self.snapshot_registry():
             if e.transport.get("type") == "bridge" and e.transport.get("bridge") == dev_id:
-                dep_driver = self._drivers.get(e.id)
+                dep_driver = self.get_driver(e.id)
                 if dep_driver is not None and hasattr(dep_driver, "set_degraded"):
                     dep_driver.set_degraded()
                     self._publish(f"devices.state.{e.id}.conn", {"conn": "disconnected"})
@@ -295,7 +345,7 @@ class DeviceManager(BaseManager, ObservableMixin):
         except DeviceNotFoundError as exc:
             return {"status": "error", "message": str(exc)}
 
-        driver = self._drivers.get(dev_id)
+        driver = self.get_driver(dev_id)
         if driver is None or not driver.is_connected:
             # error= дублирует message для CommandManager-лога (он читает reason/error)
             msg = f"Устройство {dev_id!r} не подключено"
@@ -315,7 +365,7 @@ class DeviceManager(BaseManager, ObservableMixin):
              "conn": ..., "stats": ...}
         """
         entry = self.get(dev_id)
-        driver = self._drivers.get(dev_id)
+        driver = self.get_driver(dev_id)
 
         result: dict[str, Any] = {
             "entry": entry.to_dict(),
@@ -409,13 +459,16 @@ class DeviceManager(BaseManager, ObservableMixin):
     # ------------------------------------------------------------------ #
 
     def _get_driver(self, dev_id: str) -> Any:
-        """Получить драйвер по id (для resolve_device в VfdDriver и transports)."""
-        return self._drivers.get(dev_id)
+        """Получить драйвер по id (для resolve_device в VfdDriver и transports).
+
+        Внутренний алиас публичного :meth:`get_driver` (лукап под локом).
+        """
+        return self.get_driver(dev_id)
 
     def _get_connected_driver(self, dev_id: str) -> Any:
         """Получить подключённый драйвер; raise при ошибке."""
         self.get(dev_id)  # проверка существования (DeviceNotFoundError)
-        driver = self._drivers.get(dev_id)
+        driver = self.get_driver(dev_id)
         if driver is None or not driver.is_connected:
             raise DeviceHubError(f"Устройство {dev_id!r} не подключено")
         return driver

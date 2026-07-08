@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -37,6 +38,7 @@ class BuiltinCommands:
         self._register_observability_commands()
         self._register_health_commands()
         self._register_relay_commands()
+        self._register_routing_commands()
 
     # ========================================================================
     # КОМАНДЫ УПРАВЛЕНИЯ ВОРКЕРАМИ
@@ -419,7 +421,13 @@ class BuiltinCommands:
         return {"success": True, "process": svc.name, "registers": registers}
 
     def _cmd_introspect_status(self, data=None, **kwargs) -> dict:
-        """Имя процесса, статус, воркеры (имена + сериализуемые статусы)."""
+        """Имя процесса, PID, статус, воркеры (имена + сериализуемые статусы).
+
+        ``pid`` — реальный OS-pid процесса (``os.getpid()`` исполняется ВНУТРИ
+        целевого процесса). Честная наблюдаемость для debug-plane и fault-injection
+        (Ф3.7): harness читает pid → ``os.kill(pid, SIGKILL)`` для проверки
+        авто-рестарта. Аддитивно — прежние поля не тронуты.
+        """
         svc = self._services
         workers: dict = {}
         wm = svc.worker_manager
@@ -431,6 +439,7 @@ class BuiltinCommands:
         return {
             "success": True,
             "process": svc.name,
+            "pid": os.getpid(),
             "status": getattr(svc, "_current_process_status", "unknown"),
             "workers": workers,
         }
@@ -547,7 +556,20 @@ class BuiltinCommands:
             return {"success": False, "reason": f"get_stats: {exc}"}
         # get_stats() возвращает {"router": {...счётчики...}, ...}; берём router-секцию
         router_stats = stats.get("router", stats) if isinstance(stats, dict) else {}
-        return {"success": True, "process": svc.name, "router_stats": router_stats}
+        result = {"success": True, "process": svc.name, "router_stats": router_stats}
+        # Ф3.1: аддитивно epoch и число применённых refresh из своей PSR-записи
+        # (наблюдаемость routing-epoch; driver-обёртка читает только router_stats).
+        try:
+            sr = getattr(svc, "shared_resources", None)
+            psr = getattr(sr, "process_state_registry", None) if sr is not None else None
+            pd = psr.get_process_data(svc.name) if psr is not None else None
+            meta = getattr(pd, "metadata", None) if pd is not None else None
+            if isinstance(meta, dict):
+                result["routing_epoch"] = int(meta.get("routing_epoch", 0) or 0)
+                result["routing_refresh_applied"] = int(meta.get("routing_refresh_applied", 0) or 0)
+        except Exception:  # noqa: BLE001 — наблюдаемость не критична
+            pass
+        return result
 
     def _cmd_introspect_queues(self, data=None, **kwargs) -> dict:
         """Глубины собственных очередей процесса (backpressure-диагностика).
@@ -1000,3 +1022,145 @@ class BuiltinCommands:
         else:  # тестовые/минимальные router'ы без async-очереди
             router.send(ticket)
         return {"success": True, "relayed": True}
+
+    # ========================================================================
+    # ROUTING-EPOCH (Ф3.1: probe для воспроизведения дыры + refresh-handler)
+    # ========================================================================
+
+    def _register_routing_commands(self) -> None:
+        """Зарегистрировать routing.probe (диагностика) + routing.refresh (Ф3.1).
+
+        ``routing.probe`` — детерминированный способ проверить peer→peer доставку
+        после switch/restart: процесс-отправитель шлёт ``inner``-билет соседу тем
+        же путём, что и обычный трафик (``send_to_process`` → RouterManager →
+        _deliver_by_targets по стейл/свежей очереди). Нельзя использовать
+        ``router.relay`` — он ставит ``_relayed=True`` и отключает hub-fallback,
+        маскируя дыру. Результат доставки НЕ наблюдается по ack (``put_nowait`` в
+        осиротевшую очередь возвращает успех) — только по downstream-эффекту у
+        соседа (например health-дельта в state-дереве).
+
+        ``routing.refresh`` — приём авторитетного снимка epoch+incarnation от хаба
+        (PM). Выживший ребёнок сбрасывает локальные стейл-очереди соседей, которых
+        PM пересоздал → последующий send падает в hub-relay (Ф1.7) → PM со свежим
+        PSR доставит. Идемпотентно (guard epoch<=last_seen).
+        """
+        cm = self._services.command_manager
+        if not cm:
+            return
+        cm.register_command(
+            "routing.probe",
+            self._cmd_routing_probe,
+            metadata={"description": "Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)"},
+            tags=["system"],
+        )
+        cm.register_command(
+            "routing.refresh",
+            self._cmd_routing_refresh,
+            metadata={
+                "description": "Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)",
+                "manages_own_reply": True,  # broadcast fire-and-forget: инициатору ничего не едет
+            },
+            tags=["system"],
+        )
+        self._services._log_debug(
+            "Встроенные команды routing.probe/refresh зарегистрированы",
+            module="lifecycle",
+        )
+
+    def _cmd_routing_refresh(self, data=None, **kwargs) -> dict:
+        """Применить авторитетный снимок routing-epoch от хаба (Ф3.1).
+
+        Контракт ``data``: ``epoch`` (int), ``hub`` (имя хаба), ``reason``,
+        ``processes`` ({имя: {"incarnation": N}}), ``ts``. Все ветки идемпотентны:
+
+          - ``epoch <= last_seen`` → ignored (повтор/устаревшая рассылка);
+          - имя отсутствует в снимке → сбросить его локальные очереди;
+          - incarnation ≠ локальной → сбросить очереди + запомнить новую;
+          - свою запись и ``hub`` не трогаем (их очереди всегда валидны);
+          - в конце: last_seen = epoch + счётчик ``routing_refresh_applied`` в
+            своей PSR-записи.
+
+        Ошибки не роняют message-loop: логируются и возвращают success=False.
+        """
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+        sr = getattr(svc, "shared_resources", None)
+        psr = getattr(sr, "process_state_registry", None) if sr is not None else None
+        if psr is None:
+            return {"success": False, "reason": "routing.refresh: PSR недоступен"}
+
+        self_name = getattr(svc, "name", None)
+        hub = str(args.get("hub") or "")
+        try:
+            epoch = int(args.get("epoch", 0) or 0)
+        except (TypeError, ValueError):
+            epoch = 0
+        snapshot = args.get("processes")
+        snapshot = snapshot if isinstance(snapshot, dict) else {}
+
+        try:
+            self_pd = psr.get_process_data(self_name)
+            self_meta = getattr(self_pd, "metadata", None) if self_pd is not None else None
+            last_seen = (
+                int(self_meta.get("routing_epoch", -1) or -1) if isinstance(self_meta, dict) else -1
+            )
+            # Guard: устаревшая/повторная рассылка — no-op (самовосстановление
+            # обеспечивает следующий полный снимок).
+            if epoch <= last_seen:
+                return {"success": True, "ignored": True, "epoch": epoch, "last_seen": last_seen}
+
+            reset: list[str] = []
+            for name in list(psr.get_process_names()):
+                if name == self_name or name == hub:
+                    continue
+                pd = psr.get_process_data(name)
+                meta = getattr(pd, "metadata", None) if pd is not None else None
+                meta = meta if isinstance(meta, dict) else {}
+                if name not in snapshot:
+                    # Имя исчезло из авторитетного снимка → его очереди мертвы.
+                    if psr.drop_process_queues(name):
+                        reset.append(name)
+                    continue
+                local_inc = int(meta.get("routing_incarnation", 0) or 0)
+                new_inc = int((snapshot.get(name) or {}).get("incarnation", 0) or 0)
+                if new_inc != local_inc:
+                    if psr.drop_process_queues(name):
+                        reset.append(name)
+                    meta["routing_incarnation"] = new_inc
+
+            # Зафиксировать epoch (last_seen) + счётчик применений.
+            if isinstance(self_meta, dict):
+                self_meta["routing_epoch"] = epoch
+                self_meta["routing_refresh_applied"] = (
+                    int(self_meta.get("routing_refresh_applied", 0) or 0) + 1
+                )
+            return {"success": True, "epoch": epoch, "reset": sorted(reset), "reset_count": len(reset)}
+        except Exception as exc:  # noqa: BLE001 — не ронять message-loop
+            log_error = getattr(svc, "_log_error", None)
+            if callable(log_error):
+                log_error(f"routing.refresh handler упал: {exc}", module="lifecycle")
+            err_mgr = getattr(svc, "error_manager", None)
+            if err_mgr is not None and hasattr(err_mgr, "track_error"):
+                try:
+                    err_mgr.track_error(exc, {"phase": "routing.refresh"})
+                except Exception:  # noqa: BLE001
+                    pass
+            return {"success": False, "reason": str(exc)}
+
+    def _cmd_routing_probe(self, data=None, **kwargs) -> dict:
+        """Отправить ``inner``-билет процессу ``target`` (peer→peer probe, Ф3.1).
+
+        data: ``target`` (имя процесса-соседа), ``inner`` (полный билет-команда,
+        доставляемый соседу «как есть»). Идёт через ``send_to_process`` —
+        нормальный peer-путь, тот же, что теряется на стейл-очереди после switch.
+        """
+        args = self._merge_args(data, kwargs)
+        target = str(args.get("target") or "").strip()
+        inner = args.get("inner")
+        if not target or not isinstance(inner, dict):
+            return {"success": False, "reason": "routing.probe: нужны target и inner (dict)"}
+        try:
+            ok = self._services.send_to_process(target, inner)
+        except Exception as exc:  # noqa: BLE001 — вернуть видимую ошибку инициатору
+            return {"success": False, "reason": f"routing.probe: send_to_process упал: {exc}", "target": target}
+        return {"success": bool(ok), "target": target}

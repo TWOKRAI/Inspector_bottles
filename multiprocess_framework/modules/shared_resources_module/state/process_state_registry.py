@@ -123,6 +123,33 @@ class ProcessStateRegistry(IProcessStateRegistry):
         with self._lock:
             return process_name in self.states
 
+    def drop_process_queues(self, process_name: str) -> bool:
+        """Сбросить очереди процесса под локом (routing-epoch, Ф3.1).
+
+        Выживший после switch/restart ребёнок держит стейл-ссылки на очереди
+        соседа, которые тот пересоздал (identity сменилась). Этот метод роняет
+        их локально: запись процесса в реестре остаётся (метаданные/incarnation
+        сохраняются), но словарь очередей очищается — следующий send по этому
+        имени не найдёт очередь и штатно уйдёт в hub-relay.
+
+        Идемпотентно: повторный вызов на уже пустом процессе снова вернёт True
+        (запись есть — очереди очищены). Возвращает False только если процесса
+        нет в реестре.
+
+        Args:
+            process_name: имя процесса, чьи локальные очереди нужно сбросить.
+
+        Returns:
+            True — процесс есть в реестре и его очереди очищены;
+            False — процесса нет в реестре.
+        """
+        with self._lock:
+            pd = self.states.get(process_name)
+            if pd is None:
+                return False
+            pd.clear_queues()
+            return True
+
     def unregister_process(self, process_name: str) -> bool:
         with self._lock:
             try:

@@ -108,6 +108,11 @@ class RouterManager(ChannelRoutingManager):
             "received": 0,
             "errors": 0,
             "middleware_dropped": 0,
+            # Ф3.1 (routing-epoch): сколько билетов ушло в хаб-relay (Ф1.7).
+            # На горячем direct-пути = 0; рост означает, что доставка шла окольно
+            # через system-очередь PM (диагностика: стейл-очередь сброшена refresh'ем
+            # → send упал в relay). Попадает в introspect.router_stats автоматически.
+            "relayed_to_hub": 0,
         }
         self._stats_lock = threading.Lock()
 
@@ -412,6 +417,7 @@ class RouterManager(ChannelRoutingManager):
         }
         try:
             if self.queue_registry.send_to_queue(self._relay_hub, "system", envelope):
+                self._inc_stat("relayed_to_hub")
                 self._log_debug(
                     f"_deliver_by_targets: билет command={ticket.get('command')!r} "
                     f"targets={ticket.get('targets')!r} переслан хабу '{self._relay_hub}' "

@@ -105,7 +105,7 @@ multiprocess_framework/
 ├── DECISIONS.md            ← глобальные ADR
 ├── STRUCTURE.md
 ├── __init__.py             ← публичный фасад (60 экспортов)
-├── modules/                ← 21 модуль
+├── modules/                ← 24 модуля
 │   ├── base_manager/
 │   ├── data_schema_module/
 │   ├── ...

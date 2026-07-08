@@ -460,6 +460,99 @@ class TestReadinessBarrier:
         assert result["ready"] == {"ok": True, "dead": False}
 
 
+class TestReadinessBarrierEvent:
+    """Ф3.2: self-reported ready через per-process mp.Event (ранний выход барьера)."""
+
+    def test_early_exit_via_event(self) -> None:
+        """ready_event выставлен → барьер возвращает True НЕ дожидаясь окна."""
+        import time
+        from multiprocessing import Event
+
+        from .conftest import MockProcess
+
+        pm = make_pm({})
+        pm._process_registry._processes["n1"] = MockProcess("n1", alive=True)
+        ev = Event()
+        ev.set()  # ребёнок «уже готов»
+        pm._process_registry._ready_events["n1"] = ev
+
+        start = time.monotonic()
+        ready = pm._wait_processes_ready(["n1"], timeout_s=2.0, reason="switch")
+        elapsed = time.monotonic() - start
+
+        assert ready == {"n1": True}
+        assert elapsed < 0.5, f"барьер ждал {elapsed:.3f}s вместо раннего выхода по event"
+
+    def test_liveness_fallback_when_no_event(self) -> None:
+        """Живой, но без event → True по liveness-фолбэку на дедлайне (прежнее поведение)."""
+        from .conftest import MockProcess
+
+        pm = make_pm({})
+        pm._process_registry._processes["n1"] = MockProcess("n1", alive=True)
+        # event не задан → death-watch фолбэк
+
+        ready = pm._wait_processes_ready(["n1"], timeout_s=0.1, reason="switch")
+
+        assert ready == {"n1": True}
+
+    def test_dead_process_not_ready(self) -> None:
+        """Подтверждённо мёртвый → False даже с не-выставленным event."""
+        from multiprocessing import Event
+
+        from .conftest import MockProcess
+
+        pm = make_pm({})
+        pm._process_registry._processes["dead"] = MockProcess("dead", alive=False)
+        pm._process_registry._ready_events["dead"] = Event()  # НЕ set
+
+        ready = pm._wait_processes_ready(["dead"], timeout_s=0.2, reason="switch")
+
+        assert ready == {"dead": False}
+
+
+class TestBootReadyBarrier:
+    """Ф3.2: boot-барьер _wait_boot_ready — ждать ready детей до system_ready."""
+
+    def test_disabled_when_timeout_zero(self) -> None:
+        """boot_ready_timeout_s=0 → барьер выключен, мгновенный возврат."""
+        pm = make_pm({})
+        pm.get_config = lambda key: {"boot_ready_timeout_s": 0}.get(key)
+        pm._process_registry._processes["n1"] = MagicMock()  # не должен опрашиваться
+        pm._wait_boot_ready()  # не бросает, не логирует not-ready
+        pm._log_warning.assert_not_called()
+
+    def test_ready_children_no_warning(self) -> None:
+        """Дети с выставленным event → ready, WARNING не логируется."""
+        from multiprocessing import Event
+
+        from .conftest import MockProcess
+
+        pm = make_pm({})
+        pm.get_config = lambda key: {"boot_ready_timeout_s": 2.0}.get(key)
+        ev = Event()
+        ev.set()
+        pm._process_registry._processes["n1"] = MockProcess("n1", alive=True)
+        pm._process_registry._ready_events["n1"] = ev
+
+        pm._wait_boot_ready()
+
+        pm._log_warning.assert_not_called()
+
+    def test_dead_child_warns_but_proceeds(self) -> None:
+        """Мёртвый ребёнок → not-ready WARNING, но boot не бросает исключение."""
+        from .conftest import MockProcess
+
+        pm = make_pm({})
+        pm.get_config = lambda key: {"boot_ready_timeout_s": 0.2}.get(key)
+        pm._process_registry._processes["dead"] = MockProcess("dead", alive=False)
+
+        pm._wait_boot_ready()
+
+        assert pm._log_warning.called
+        warned = " ".join(str(c) for c in pm._log_warning.call_args_list)
+        assert "dead" in warned
+
+
 class TestNoGhostConfigs:
     """Провал create не оставляет «призраков» (конфиг без Process-объекта).
 

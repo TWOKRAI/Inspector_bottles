@@ -9,6 +9,8 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
+import os
+import threading
 import time
 from typing import Any
 
@@ -60,6 +62,12 @@ class ProcessManagerProcess(ProcessModule):
         # Дебаунс hot-swap: in-flight guard + cooldown (см. apply_topology).
         self._replace_in_progress: bool = False
         self._last_replace_ts: float = 0.0
+        # Ф3.1 (routing-epoch): монотонный epoch рассылок + авторитетная карта
+        # incarnation'ов процессов. Под _routing_lock (мутируется из handler'ов и
+        # lifecycle-путей). См. _bump_routing_epoch / _broadcast_routing_refresh.
+        self._routing_epoch: int = 0
+        self._incarnations: dict[str, int] = {}
+        self._routing_lock = threading.Lock()
         self._create_components()
 
     def _create_components(self) -> None:
@@ -88,6 +96,7 @@ class ProcessManagerProcess(ProcessModule):
             config_manager=None,
             shared_resources=self.shared_resources,
             system_stop_event=self._system_stop_event,
+            routing_meta_fn=self._routing_meta_snapshot,
         )
         self._priority = ProcessPriority(logger=self, platform_adapter=platform_adapter)
         self._status = ProcessStatusMonitor(self._process_registry.os_processes)
@@ -196,9 +205,16 @@ class ProcessManagerProcess(ProcessModule):
                 log_error=self._log_error,
             )
 
+            # Ф3.2: boot-барьер — дождаться self-reported ready стартованных детей
+            # ПЕРЕД сигналом SystemLauncher. Это initialize-поток PM (НЕ
+            # message_processor) → блокирующее ожидание допустимо и дедлока нет.
+            # По таймауту всё равно сигналим готовность (boot не блокировать
+            # навсегда) + WARNING со списком не-ready.
+            self._wait_boot_ready()
+
             # Сигнализируем SystemLauncher, что инициализация завершена (ADR-116).
-            # К этому моменту: все дочерние процессы spawned и started,
-            # ProcessMonitor запущен.
+            # К этому моменту: все дочерние процессы spawned, started и (Ф3.2)
+            # сообщили о готовности либо истёк boot_ready_timeout_s.
             if self._system_ready_event is not None:
                 self._system_ready_event.set()
                 self._log_info("system_ready_event выставлен — система готова")
@@ -619,6 +635,105 @@ class ProcessManagerProcess(ProcessModule):
         return {"success": True, "wires": result}
 
     # -------------------------------------------------------------------------
+    # Wire re-issue при рестарте/switch (Ф3.5) — first-class wire-статусы
+    #
+    # КОНТЕКСТ A vs B (см. plans/.../f3.5-wire-status.md §Контекст):
+    #   A. generic data-path (живой поток камеры) — самовосстанавливается через
+    #      routing-epoch Ф3.1 (mw пересоздаётся, shm_actual_name едет в каждом msg).
+    #   B. wire.* абстракция (PM-управляемые «провода», заводится ТОЛЬКО GUI
+    #      connect_wire → wire.setup) — статический FrameShmMiddleware в дочернем
+    #      `_wire_middlewares`. Новый инстанс после рестарта рождается с ПУСТЫМ
+    #      `_wire_middlewares` → провод B висит на мёртвом инстансе. Это и есть баг.
+    #
+    # SHM-регион owner-scoped и переживает рестарт (restart_process зовёт
+    # register_process(reuse_queues), а НЕ unregister_process — SHM не освобождается),
+    # поэтому re-issue = переслать wire.configure ТОЛЬКО в перезапущенный инстанс
+    # (пересоздать его middleware); партнёр не трогаем — он читает per-message
+    # shm_actual_name и остаётся валиден. Переаллокация SHM не требуется.
+    # -------------------------------------------------------------------------
+
+    def _wire_reissue_enabled(self) -> bool:
+        """Гейт wire re-issue: конфиг ``wire_reissue_enabled`` (дефолт True).
+
+        Аварийный откат к старому поведению (провода не переигрываются,
+        broken_wires снова оседает на 0 при живой топологии): выставить
+        ``wire_reissue_enabled: false`` в конфиге PM.
+        """
+        cfg = self.get_config("wire_reissue_enabled") if hasattr(self, "get_config") else None
+        return True if cfg is None else bool(cfg)
+
+    def _mark_wires_broken_for(self, process_name: str) -> None:
+        """Пометить задетые провода ``status="broken"`` (honest-статус до re-issue).
+
+        Вызывается при рестарте/switch ПЕРЕД пересозданием инстанса: провод,
+        чей source или target — ``process_name``, в этот момент реально мёртв
+        (у нового инстанса ещё нет middleware). Монитор публикует
+        ``broken_wires ≠ 0`` в это окно (acceptance Ф3.5). После успешного
+        re-issue статус вернётся в ``"active"``.
+        """
+        wires = getattr(self, "_active_wires", None)
+        if not isinstance(wires, dict) or not wires:
+            return
+        for info in wires.values():
+            if not isinstance(info, dict):
+                continue
+            if process_name in (info.get("source_process"), info.get("target_process")):
+                info["status"] = "broken"
+
+    def _reissue_wires_for(self, process_name: str) -> int:
+        """Переиграть ``wire.configure`` для проводов, задевающих ``process_name``.
+
+        Перебирает ``_active_wires``; для каждого провода, где ``process_name`` —
+        source или target, шлёт ``wire.configure`` в перезапущенный инстанс с
+        ролью (``sender`` для source, ``receiver`` для target) и сохранённым
+        ``shm_config`` (как в ``_cmd_wire_setup``). Успех → провод снова
+        ``"active"``.
+
+        Guard'ы (безопасно на mock-PM и без проводов):
+          - ``_active_wires`` пуст/не dict → no-op (return 0);
+          - сбой ``send_message`` (communication mock/None) → провод остаётся
+            broken, ошибка логируется, перебор продолжается.
+
+        Returns:
+            Число успешно переигранных проводов.
+        """
+        wires = getattr(self, "_active_wires", None)
+        if not isinstance(wires, dict) or not wires:
+            return 0
+        reissued = 0
+        for wire_key, info in list(wires.items()):
+            if not isinstance(info, dict):
+                continue
+            src = info.get("source_process", "")
+            tgt = info.get("target_process", "")
+            if process_name not in (src, tgt):
+                continue
+            role = "sender" if process_name == src else "receiver"
+            shm_cfg = info.get("shm_config") or {}
+            configure_cmd = {
+                "type": "system",
+                "command": "wire.configure",
+                "sender": self.name,
+                "data": {
+                    "wire_key": wire_key,
+                    "shm_name": shm_cfg.get("shm_name", wire_key),
+                    "shm_owner": shm_cfg.get("owner_process", src),
+                    "buffer_slots": shm_cfg.get("buffer_slots", 4),
+                    "role": role,
+                },
+            }
+            try:
+                self.send_message(process_name, configure_cmd)
+                info["status"] = "active"
+                reissued += 1
+                self._log_info(
+                    f"wire re-issue: '{wire_key}' переигран в '{process_name}' (role={role})"
+                )
+            except Exception as exc:  # noqa: BLE001 — провод остаётся broken, lifecycle не роняем
+                self._log_error(f"wire re-issue '{wire_key}' в '{process_name}' не удался: {exc}")
+        return reissued
+
+    # -------------------------------------------------------------------------
     # Protected / cleanup / rollback / snapshot — общие хелперы topology
     # -------------------------------------------------------------------------
 
@@ -824,6 +939,192 @@ class ProcessManagerProcess(ProcessModule):
                 self._process_monitor.start()
             except Exception as exc:
                 self._log_warning(f"apply_topology: ошибка возобновления ProcessMonitor: {exc}")
+
+    # -------------------------------------------------------------------------
+    # ROUTING-EPOCH (Ф3.1) — гибрид данные-refresh (switch) + стабильные очереди
+    # -------------------------------------------------------------------------
+
+    def _ensure_routing_state(self) -> None:
+        """Ленивая инициализация routing-состояния (Ф3.1).
+
+        Продовый ``__init__`` всегда ставит ``_routing_lock``/``_routing_epoch``/
+        ``_incarnations``. Но unit-тесты строят PM, патча ``__init__`` в no-op
+        (см. conftest.make_pm) — тогда атрибутов нет. Этот guard делает routing-
+        методы безопасными в таких PM (та же философия, что communication/mock=None).
+        """
+        if not hasattr(self, "_routing_lock"):
+            self._routing_lock = threading.Lock()
+            self._routing_epoch = getattr(self, "_routing_epoch", 0)
+            self._incarnations = getattr(self, "_incarnations", {})
+
+    def _routing_meta_snapshot(self) -> dict[str, Any]:
+        """Снимок {epoch, incarnations} для bundle нового ребёнка (Ф3.1).
+
+        Вызывается ProcessRegistry на спавне — новый ребёнок рождается с
+        актуальными epoch/incarnation'ами соседей.
+        """
+        self._ensure_routing_state()
+        with self._routing_lock:
+            return {"epoch": self._routing_epoch, "incarnations": dict(self._incarnations)}
+
+    def _mirror_routing_to_psr(
+        self, name: str, *, epoch: int | None = None, incarnation: int | None = None
+    ) -> None:
+        """Best-effort зеркалирование epoch/incarnation в metadata PM-PSR.
+
+        Диагностика/консистентность: PM хранит истину в ``_incarnations``/
+        ``_routing_epoch``, но дублирует её в свою PSR-запись. Всё за guard'ами —
+        в unit-тестах shared_resources/get_process_data бывают mock/None.
+        """
+        sr = getattr(self, "shared_resources", None)
+        if sr is None:
+            return
+        try:
+            pd = sr.get_process_data(name)
+            meta = getattr(pd, "metadata", None) if pd is not None else None
+            if not isinstance(meta, dict):
+                return
+            if epoch is not None:
+                meta["routing_epoch"] = epoch
+            if incarnation is not None:
+                meta["routing_incarnation"] = incarnation
+        except Exception:  # noqa: BLE001 — зеркало не критично
+            pass
+
+    def _bump_routing_epoch(self) -> int:
+        """Инкремент epoch рассылок под локом (+ зеркало в PM-PSR)."""
+        self._ensure_routing_state()
+        with self._routing_lock:
+            self._routing_epoch += 1
+            epoch = self._routing_epoch
+        self._mirror_routing_to_psr(self.name, epoch=epoch)
+        return epoch
+
+    def _bump_incarnation(self, name: str) -> int:
+        """Инкремент incarnation процесса под локом (+ зеркало в PM-PSR).
+
+        Каждое пере-провижинивание/пересоздание очередей процесса поднимает его
+        incarnation: выжившие соседи по расхождению incarnation сбрасывают
+        стейл-ссылку на его очереди.
+        """
+        self._ensure_routing_state()
+        with self._routing_lock:
+            self._incarnations[name] = self._incarnations.get(name, 0) + 1
+            inc = self._incarnations[name]
+        self._mirror_routing_to_psr(name, incarnation=inc)
+        return inc
+
+    def _routing_refresh_enabled(self) -> bool:
+        """Гейт рассылки refresh: конфиг routing_refresh_enabled (дефолт True) +
+        env FW_ROUTING_REFRESH != "0" (аварийный откат к поведению main)."""
+        cfg = self.get_config("routing_refresh_enabled") if hasattr(self, "get_config") else None
+        if cfg is False:
+            return False
+        if os.environ.get("FW_ROUTING_REFRESH", "1") == "0":
+            return False
+        return True
+
+    def _broadcast_routing_refresh(self, reason: str) -> bool:
+        """Разослать routing.refresh всем детям (декларативная сверка снимка, Ф3.1).
+
+        Payload — ПОЛНЫЙ снимок (не дельта): имена из PSR + их incarnation +
+        текущий epoch. Идемпотентно у ребёнка (guard epoch<=last_seen);
+        потерянная рассылка самовосстанавливается следующей. Отправка — существующим
+        путём ``communication.broadcast(exclude_self=True)`` (system-очереди детей).
+
+        Все обращения за guard'ами: в unit-тестах communication/shared_resources
+        бывают mock/None → тихий no-op (поведение switch-тестов не меняется).
+        """
+        if not self._routing_refresh_enabled():
+            return False
+        comm = getattr(self, "communication", None)
+        sr = getattr(self, "shared_resources", None)
+        if comm is None or sr is None:
+            return False
+        try:
+            names = list(sr.get_process_names())
+        except Exception:  # noqa: BLE001
+            return False
+        self._ensure_routing_state()
+        with self._routing_lock:
+            epoch = self._routing_epoch
+            processes = {n: {"incarnation": self._incarnations.get(n, 0)} for n in names}
+        msg = {
+            "type": "command",
+            "command": "routing.refresh",
+            "sender": self.name,
+            "queue_type": "system",
+            "data": {
+                "epoch": epoch,
+                "hub": self.name,
+                "reason": reason,
+                "processes": processes,
+                "ts": time.time(),
+            },
+        }
+        try:
+            comm.broadcast(msg, exclude_self=True)
+            self._log_info(
+                f"routing.refresh разослан (reason={reason}, epoch={epoch}, "
+                f"процессов={len(processes)})"
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 — рассылка не должна ронять lifecycle
+            self._log_error(f"_broadcast_routing_refresh({reason}) упал: {exc}")
+            return False
+
+    def _refresh_after_topology(self, reason: str, executed: list | None) -> int | None:
+        """Если топология что-то исполнила (executed непуст) — bump epoch + broadcast.
+
+        Успех И rollback пересоздают очереди → в обоих случаях выжившие соседи
+        обязаны сверить снимок. Возвращает новый epoch (или None, если нечего слать).
+        """
+        if not executed:
+            return None
+        epoch = self._bump_routing_epoch()
+        self._broadcast_routing_refresh(reason)
+        return epoch
+
+    def _drain_process_queues(self, name: str) -> None:
+        """Дренаж мусора прошлой жизни из очередей процесса (get_nowait до Empty).
+
+        Осознанно НЕ ``clear_queue`` (тот спит ~0.2с/очередь на macOS). Перед
+        рестартом с reuse_queues=True переиспользуемые очереди могут держать
+        недочитанные билеты убитого процесса — сливаем их, чтобы новый инстанс
+        стартовал с чистыми очередями. Best-effort, за guard'ами.
+        """
+        sr = getattr(self, "shared_resources", None)
+        if sr is None:
+            return
+        try:
+            pd = sr.get_process_data(name)
+            queues = getattr(pd, "queues", None) if pd is not None else None
+            if queues is None:
+                return
+            for q in list(queues.values()):
+                if q is None:
+                    continue
+                for _ in range(10_000):
+                    try:
+                        q.get_nowait()
+                    except Exception:  # noqa: BLE001 — Empty (и прочее) → стоп дренажа
+                        break
+        except Exception:  # noqa: BLE001 — дренаж не критичен
+            pass
+
+    def _process_queue_ids(self, name: str) -> dict[str, int]:
+        """id() очередей процесса из PSR — для сверки identity до/после рестарта."""
+        sr = getattr(self, "shared_resources", None)
+        if sr is None:
+            return {}
+        try:
+            pd = sr.get_process_data(name)
+            queues = getattr(pd, "queues", None) if pd is not None else None
+            if queues is None:
+                return {}
+            return {qt: id(q) for qt, q in queues.items()}
+        except Exception:  # noqa: BLE001
+            return {}
 
     # -------------------------------------------------------------------------
     # Router endpoint — приём команд от других процессов (AD-8)
@@ -1098,7 +1399,15 @@ class ProcessManagerProcess(ProcessModule):
         return True
 
     def restart_process(self, process_name: str) -> bool:
-        """Перезапустить процесс: stop → снять с реестра → create → start."""
+        """Перезапустить процесс: stop → снять с реестра → (reuse-очереди) → create → start.
+
+        Ф3.1 (routing-epoch, дорога B): очереди процесса ПЕРЕИСПОЛЬЗУЮТСЯ
+        (``reuse_queues=True``, конфиг-откат ``restart_reuse_queues: false``) —
+        identity сохраняется, стейл-ссылки выживших соседей остаются валидными,
+        hot-path не деградирует. Мусор прошлой жизни дренируется. Если identity
+        всё же сменилась (reuse выключен) — соседям поднимается incarnation.
+        В конце — bump epoch + broadcast refresh (декларативная сверка снимка).
+        """
         config = self._process_configs.get(process_name)
         if not config:
             self._log_error(f"No saved config for '{process_name}'")
@@ -1106,16 +1415,50 @@ class ProcessManagerProcess(ProcessModule):
         if not self.stop_process(process_name):
             return False
         self._process_registry.remove_process(process_name)
+
+        # Ф3.5: старый инстанс мёртв → задетые wire-провода реально оборваны.
+        # Помечаем broken ДО пересоздания — монитор публикует broken_wires ≠ 0
+        # в это окно (honest-статус, acceptance). Re-issue ниже вернёт «active».
+        if self._wire_reissue_enabled():
+            self._mark_wires_broken_for(process_name)
+
+        reuse_cfg = self.get_config("restart_reuse_queues")
+        reuse_queues = True if reuse_cfg is None else bool(reuse_cfg)  # дефолт True
+        ids_before = self._process_queue_ids(process_name)
         if self.shared_resources:
-            self.shared_resources.register_process(process_name, config)
+            self.shared_resources.register_process(process_name, config, reuse_queues=reuse_queues)
+            # Дренаж переиспользованных очередей: новый инстанс стартует чистым.
+            self._drain_process_queues(process_name)
+        ids_after = self._process_queue_ids(process_name)
+
         priority = config.get("priority", "normal")
         process = self._process_registry.create_and_register(process_name, config["class"], config, priority)
         if not process:
             self._log_error(f"Failed to recreate process '{process_name}'")
             return False
+        # Identity очередей сменилась → соседи должны сбросить стейл-ссылки.
+        if ids_before != ids_after:
+            self._bump_incarnation(process_name)
         process.start()
         self._priority.register_priority(process_name, priority)
         self._priority.apply_priority(process)
+        # Ф3.2: дождаться self-reported ready пересозданного инстанса (тот же
+        # барьер на один процесс). Свежий ready_event создан create_and_register;
+        # старый (у прежнего инстанса) не мешает — это другой объект.
+        raw_timeout = self.get_config("start_ready_timeout_s")
+        restart_timeout = 0.5 if raw_timeout is None else float(raw_timeout)
+        if restart_timeout > 0:
+            self._wait_processes_ready([process_name], restart_timeout, "restart")
+        # Ф3.5: инстанс готов принимать команды (после _wait_processes_ready) —
+        # переигрываем wire.configure в него (путь B: GUI-провода). Ортогонально
+        # epoch/ready Ф3.1/Ф3.2 — не трогает их инварианты. Путь A (generic
+        # data-path) самовосстанавливается через refresh ниже.
+        if self._wire_reissue_enabled():
+            self._reissue_wires_for(process_name)
+        # Обновить epoch и разослать refresh (при reuse incarnation не менялась →
+        # выжившие соседи оставят валидную переиспользованную очередь).
+        self._bump_routing_epoch()
+        self._broadcast_routing_refresh("process.restart")
         self._log_info(f"Process '{process_name}' restarted")
         return True
 
@@ -1244,6 +1587,14 @@ class ProcessManagerProcess(ProcessModule):
             # Snapshot (non-protected) для rollback
             snapshot = self._snapshot_processes()
 
+            # Ф3.5: switch сносит/пересоздаёт non-protected процессы → их
+            # wire-провода на время замены оборваны. Помечаем broken ДО apply
+            # (honest broken_wires в окне switch); success-ветка ниже переиграет
+            # wire.configure в пересозданные инстансы и вернёт «active».
+            if self._wire_reissue_enabled():
+                for _sname in snapshot:
+                    self._mark_wires_broken_for(_sname)
+
             # Pause monitor
             monitor_was_running = getattr(self._process_monitor, "_monitoring", False)
             if monitor_was_running:
@@ -1272,14 +1623,25 @@ class ProcessManagerProcess(ProcessModule):
                             "apply_topology: провал до исполнения команд — "
                             "топология не тронута, откат не требуется"
                         )
-                    return {
+                    resp = {
                         "success": False,
                         "rolled_back": True,
                         **{k: v for k, v in result.items() if k != "success"},
                     }
+                    # Ф3.1: rollback тоже пересоздаёт очереди — разослать refresh.
+                    epoch = self._refresh_after_topology("rollback", executed)
+                    if epoch is not None:
+                        resp["routing_epoch"] = epoch
+                    return resp
 
                 # Успех: readiness-барьер (Task 2.2) + ответ, совместимый с GUI
                 ready = self._wait_started_ready(result.get("results") or [])
+                # Ф3.5: пересозданные switch-ем процессы готовы → переиграть их
+                # wire-провода (путь B). Провода, чьи endpoint'ы switch НЕ вернул,
+                # остаются broken — это честный статус (монитор их учтёт).
+                if self._wire_reissue_enabled():
+                    for _rname in ready:
+                        self._reissue_wires_for(_rname)
                 response = {
                     "success": True,
                     "rolled_back": False,
@@ -1292,6 +1654,10 @@ class ProcessManagerProcess(ProcessModule):
                         f"apply_topology: процессы умерли на старте (initialize-провал?): {not_ready} "
                         f"— топология применена, но эти процессы НЕ работают"
                     )
+                # Ф3.1: switch пересоздал очереди — bump epoch + broadcast refresh.
+                epoch = self._refresh_after_topology("topology.apply", result.get("results") or [])
+                if epoch is not None:
+                    response["routing_epoch"] = epoch
                 return response
 
             except Exception as exc:
@@ -1305,6 +1671,10 @@ class ProcessManagerProcess(ProcessModule):
                         self.error_manager.track_error(exc, {"phase": "apply_topology"})
                     except Exception:
                         pass
+                # Ф3.1: rollback пере-провижинил snapshot (новые incarnation) —
+                # разослать refresh, чтобы выжившие сверили снимок.
+                self._bump_routing_epoch()
+                self._broadcast_routing_refresh("rollback")
                 return {
                     "success": False,
                     "rolled_back": True,
@@ -1318,31 +1688,97 @@ class ProcessManagerProcess(ProcessModule):
             self._replace_in_progress = False
             self._last_replace_ts = time.monotonic()
 
+    def _wait_processes_ready(self, names: list[str], timeout_s: float, reason: str) -> dict[str, bool]:
+        """Ф3.2: ждать self-reported ready указанных процессов (event + death-watch).
+
+        Общий примитив барьеров switch и boot. Цикл poll 0.05с до дедлайна:
+
+        - ready_event ребёнка выставлен → ``True`` **немедленно** (ранний выход,
+          здоровый процесс больше НЕ ждёт весь settle-window — acceptance Ф3.2);
+        - процесс ПОДТВЕРЖДЁННО умер (нет в реестре / ``not is_alive``) → ``False``;
+        - иначе процесс остаётся в ``pending`` до дедлайна.
+
+        На дедлайне живые-без-event → ``True`` с WARNING «фолбэк по liveness»
+        (прежнее death-watch поведение; так же ведёт себя mock без ready_event —
+        существующие тесты зелёные без правок ожиданий).
+
+        Строгую готовность здесь ждать НЕЛЬЗЯ через IPC: и heartbeat, и
+        ``topology.apply`` обрабатываются ОДНИМ message_processor-потоком —
+        ожидание заблокировало бы само себя. ready_event живёт ВНЕ message-loop
+        (mp.Event, inheritance при spawn) → дедлок исключён.
+
+        Args:
+            names: имена процессов, чью готовность ждать.
+            timeout_s: дедлайн ожидания (секунды).
+            reason: метка контекста для логов («switch» / «boot» / «restart»).
+
+        Returns:
+            ``{name: bool}`` — ``True`` готов (по event или liveness-фолбэку),
+            ``False`` подтверждённо мёртв.
+        """
+        # Guard: mock-реестр может не иметь get_ready_event → чистый death-watch.
+        get_ready_event = getattr(self._process_registry, "get_ready_event", None)
+
+        ready: dict[str, bool] = {}
+        pending = set(names)
+        deadline = time.monotonic() + timeout_s
+        while pending and time.monotonic() < deadline:
+            for name in list(pending):
+                event = get_ready_event(name) if get_ready_event is not None else None
+                if event is not None and event.is_set():
+                    ready[name] = True
+                    pending.discard(name)
+                    self._log_info(f"{reason}: '{name}' ready via event")
+                    continue
+                proc = self._process_registry.get_process_by_name(name)
+                if proc is None or not proc.is_alive():
+                    ready[name] = False
+                    pending.discard(name)
+                    self._log_warning(f"{reason}: '{name}' умер до готовности → not-ready")
+            if pending:
+                time.sleep(0.05)
+        for name in pending:
+            ready[name] = True  # пережил окно — считаем работающим
+            self._log_warning(f"{reason}: '{name}' ready via liveness-fallback (event не получен за {timeout_s}s)")
+        return ready
+
+    def _wait_boot_ready(self) -> None:
+        """Ф3.2: boot-барьер — дождаться ready всех стартованных на boot детей.
+
+        Вызывается в ``initialize()`` PM (initialize-поток, НЕ message_processor)
+        ПЕРЕД ``_system_ready_event.set()``. Ждёт до ``boot_ready_timeout_s``
+        (дефолт 5.0с; 0 → барьер выключен). По таймауту система стартует ВСЁ
+        РАВНО (boot не блокировать навсегда) — не-ready логируются WARNING'ом.
+        Медленный ребёнок (ML-веса) не ломает boot: liveness-фолбэк → ready.
+        """
+        raw_timeout = self.get_config("boot_ready_timeout_s")
+        timeout_s = 5.0 if raw_timeout is None else float(raw_timeout)
+        if timeout_s <= 0:
+            return
+        names = [p.name for p in self._process_registry.os_processes]
+        if not names:
+            return
+        ready = self._wait_processes_ready(names, timeout_s, "boot")
+        not_ready = sorted(n for n, ok in ready.items() if not ok)
+        if not_ready:
+            self._log_warning(
+                f"boot: процессы не сообщили ready за {timeout_s}s: {not_ready} — система стартует всё равно"
+            )
+
     def _wait_started_ready(self, applied_results: list[dict]) -> dict[str, bool]:
-        """Readiness-барьер после start-фазы: короткий settle-window death-watch.
+        """Readiness-барьер после start-фазы switch: ready_event + death-watch.
 
-        Ребёнок, упавший в ``initialize()``, выходит с exitcode 0 — до этого
-        барьера switch выглядел успешным, хотя процесс мёртв (типовой случай:
-        камера ещё занята предыдущим владельцем). Барьер даёт запущенным
-        процессам «осесть»: следит за ``is_alive`` в течение
-        ``start_ready_timeout_s`` (settle-window, дефолт 0.5с; 0 → выключен).
+        Ф3.2: ребёнок сам сигналит готовность (``ready_event`` после успешного
+        ``initialize()``) — здоровый switch закрывается по факту, НЕ по таймеру.
+        Ребёнок, упавший в ``initialize()``, выходит с exitcode 0 → death-watch
+        ловит его как ``False`` (типовой случай: камера ещё занята предыдущим
+        владельцем). Окно ``start_ready_timeout_s`` (дефолт 0.5с; 0 → выключен)
+        остаётся фолбэком: медленный ребёнок, не успевший поставить event, но
+        живой на дедлайне, считается работающим (WARNING).
 
-        **Стоимость:** здоровое переключение ВСЕГДА ждёт весь settle-window —
-        живой процесс не покидает ``pending`` (death-watch не умеет отличить
-        «жив и останется» от «жив, но вот-вот умрёт», не подождав). Поэтому
-        окно короткое: ловит быстрый синхронный fail-fast (open камеры →
-        мгновенный выход), не раздувая латентность switch. Дефолт 0.5с добавляет
-        к и без того секундному switch немного; на медленном spawn часть
-        initialize-провалов не успеет проявиться — их (и любой поздний crash)
-        штатно поймает ProcessMonitor как crashed после resume.
-
-        Строгую готовность (первый heartbeat) здесь ждать НЕЛЬЗЯ: и heartbeat,
-        и ``topology.apply`` обрабатываются ОДНИМ message_processor-потоком —
-        ожидание заблокировало бы само себя.
-
-        Семантика результата:
-        - ``False`` — процесс ПОДТВЕРЖДЁННО умер в окне барьера;
-        - ``True`` — жив на дедлайне (готовность в строгом смысле не гарантирует).
+        Строгую готовность (первый heartbeat) через IPC здесь ждать НЕЛЬЗЯ:
+        heartbeat и ``topology.apply`` — один message_processor-поток; ready_event
+        живёт вне message-loop (см. ``_wait_processes_ready``).
 
         Args:
             applied_results: ``result["results"]`` успешного TopologyManager.apply.
@@ -1363,21 +1799,7 @@ class ProcessManagerProcess(ProcessModule):
         timeout_s = 0.5 if raw_timeout is None else float(raw_timeout)
         if timeout_s <= 0:
             return {}
-
-        ready: dict[str, bool] = {}
-        pending = set(started)
-        deadline = time.monotonic() + timeout_s
-        while pending and time.monotonic() < deadline:
-            for name in list(pending):
-                proc = self._process_registry.get_process_by_name(name)
-                if proc is None or not proc.is_alive():
-                    ready[name] = False
-                    pending.discard(name)
-            if pending:
-                time.sleep(0.05)
-        for name in pending:
-            ready[name] = True  # пережил settle-window — считаем работающим
-        return ready
+        return self._wait_processes_ready(started, timeout_s, "switch")
 
     # -------------------------------------------------------------------------
     # Сиды TopologyManager — single-purpose методы (Task 2.0)
@@ -1437,6 +1859,9 @@ class ProcessManagerProcess(ProcessModule):
         # Очереди
         if self.shared_resources:
             self.shared_resources.register_process(name, proc_dict)
+            # Ф3.1: провижининг создаёт свежие очереди → новая incarnation
+            # (выжившие соседи по расхождению сбросят стейл-ссылку на них).
+            self._bump_incarnation(name)
 
         # SHM (если секция memory задана)
         memory = proc_dict.get("memory")

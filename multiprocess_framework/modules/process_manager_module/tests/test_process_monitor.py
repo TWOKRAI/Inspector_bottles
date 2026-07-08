@@ -55,7 +55,7 @@ class TestForgetProcess:
         mock_pm = _make_mock_process_manager()
         monitor = ProcessMonitor(mock_pm)
         monitor._last_heartbeat = {"cam": 1.0, "other": 2.0}
-        monitor._restart_counts = {"cam": 3, "other": 1}
+        monitor._restart_history = {"cam": [1.0, 2.0, 3.0], "other": [1.0]}
         monitor._workers_status = {"cam": {"w": {}}, "other": {}}
         monitor._first_seen = {"cam": 10.0, "other": 20.0}
         monitor.previous_states = {"cam": {"status": "running"}, "other": {"status": "running"}}
@@ -65,7 +65,7 @@ class TestForgetProcess:
 
         for d in (
             monitor._last_heartbeat,
-            monitor._restart_counts,
+            monitor._restart_history,
             monitor._workers_status,
             monitor._first_seen,
             monitor.previous_states,
@@ -197,7 +197,11 @@ class TestProcessMonitorProtectedAutoRestart:
         mock_pm.restart_process.assert_not_called()
         target, msg = mock_pm.communication.send_message.call_args[0]
         assert target == "ProcessManager"
-        assert msg["data"] == {"cmd": "process.restart", "process_name": "camera_0"}
+        # Ф3.7: прямая process.restart-команда (type=command), НЕ обёртка process.command
+        # с type=system — иначе kind-router не позовёт CommandManager и рестарт молчит.
+        assert msg["type"] == "command"
+        assert msg["command"] == "process.restart"
+        assert msg["data"] == {"process_name": "camera_0"}
         assert monitor._pending_restarts == {}
 
     def test_pending_restart_not_dispatched_before_backoff(self) -> None:
@@ -221,6 +225,187 @@ class TestProcessMonitorProtectedAutoRestart:
         monitor.forget_process("old_cam")
 
         assert monitor._pending_restarts == {}
+
+
+class TestRestartWindow:
+    """Ф3.6: окно стабильности N/T — метки протухают, счётчик не пожизненный."""
+
+    def _monitor(self, **policy_kw):
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        pol = RestartPolicy(enabled=True, backoff_sec=0.0, **policy_kw)
+        return mock_pm, ProcessMonitor(mock_pm, restart_policy=pol)
+
+    def test_giveup_after_max_retries_in_window(self) -> None:
+        """N рестартов в окне → give-up (status failed), больше не планируем."""
+        mock_pm, monitor = self._monitor(max_retries=3, window_sec=60.0)
+
+        for _ in range(3):
+            monitor._try_auto_restart("cam", reason="crashed")
+            monitor._dispatch_due_restarts()  # снять pending, чтобы след. попытка прошла
+
+        # 4-я попытка — give-up
+        monitor._try_auto_restart("cam", reason="crashed")
+
+        assert monitor.previous_states["cam"]["status"] == "failed"
+        assert "cam" not in monitor._pending_restarts
+
+    def test_expired_marks_reset_counter(self) -> None:
+        """Метки старше window протухли → счётчик обнулился, рестарт продолжается."""
+        mock_pm, monitor = self._monitor(max_retries=3, window_sec=10.0)
+
+        # Три «старых» метки (протухшие относительно окна 10с)
+        old = time.monotonic() - 999.0
+        monitor._restart_history["cam"] = [old, old, old]
+
+        monitor._try_auto_restart("cam", reason="crashed")
+
+        # Протухшие метки не считаются → это первая попытка в окне, НЕ give-up
+        assert monitor.previous_states.get("cam", {}).get("status") != "failed"
+        assert "cam" in monitor._pending_restarts
+        # В истории осталась только свежая метка
+        assert len(monitor._restart_history["cam"]) == 1
+
+    def test_window_zero_is_lifetime_counter(self) -> None:
+        """window_sec=0 → пожизненный счётчик (метки не протухают)."""
+        mock_pm, monitor = self._monitor(max_retries=2, window_sec=0.0)
+
+        # Даже очень старые метки считаются при window_sec=0
+        old = time.monotonic() - 9999.0
+        monitor._restart_history["cam"] = [old, old]
+
+        monitor._try_auto_restart("cam", reason="crashed")
+
+        assert monitor.previous_states["cam"]["status"] == "failed"
+
+    def test_giveup_publishes_health_failed(self) -> None:
+        """Ф3.6: give-up публикует processes.<name>.health.status=failed в дерево."""
+        from multiprocess_framework.modules.state_store_module import StateStoreManager
+
+        ssm = StateStoreManager(initial_state={}, logger=None)
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm._state_store_manager = ssm
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, max_retries=1, window_sec=0.0))
+
+        # Уже исчерпан лимит (одна метка при max_retries=1) → следующая = give-up
+        monitor._restart_history["cam"] = [time.monotonic()]
+        monitor._try_auto_restart("cam", reason="crashed")
+
+        assert ssm.handle_state_get({"data": {"path": "processes.cam.health.status"}})["value"] == "failed"
+        reason = ssm.handle_state_get({"data": {"path": "processes.cam.health.degraded_reason"}})["value"]
+        assert "give-up" in reason
+        assert ssm.handle_state_get({"data": {"path": "processes.cam.health.updated_at"}})["status"] == "ok"
+
+
+class TestPerProcessPolicy:
+    """Ф3.6: per-process RestartPolicy перекрывает глобальную (_resolve_policy)."""
+
+    def test_per_process_enables_when_global_disabled(self) -> None:
+        """Глобальная выключена, но per-process source включена → рестарт планируется."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        # Реальный dict конфигов: у camera_0 есть per-process restart_policy
+        mock_pm._process_configs = {
+            "camera_0": {"class": "X", "restart_policy": {"enabled": True, "backoff_sec": 0.0}},
+            "worker_0": {"class": "Y"},  # без policy → глобальная
+        }
+        # Глобальная политика ВЫКЛючена
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=False))
+
+        monitor._try_auto_restart("camera_0", reason="crashed")
+        assert "camera_0" in monitor._pending_restarts  # per-process включила
+
+        monitor._try_auto_restart("worker_0", reason="crashed")
+        assert "worker_0" not in monitor._pending_restarts  # глобальная выключена
+
+    def test_resolve_policy_fallback_to_global(self) -> None:
+        """Пустой/битый restart_policy → глобальная политика."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm._process_configs = {
+            "a": {"class": "X", "restart_policy": {}},  # пустой → глобальная
+            "b": {"class": "X", "restart_policy": "broken"},  # не dict → глобальная
+        }
+        global_pol = RestartPolicy(enabled=True, max_retries=7)
+        monitor = ProcessMonitor(mock_pm, restart_policy=global_pol)
+
+        assert monitor._resolve_policy("a") is global_pol
+        assert monitor._resolve_policy("b") is global_pol
+        assert monitor._resolve_policy("unknown") is global_pol
+
+    def test_per_process_max_retries_overrides(self) -> None:
+        """per-process max_retries=1 → give-up быстрее глобальной."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        mock_pm._process_configs = {
+            "hub": {"class": "X", "restart_policy": {"enabled": True, "max_retries": 1, "window_sec": 0.0}},
+        }
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, max_retries=99))
+
+        monitor._restart_history["hub"] = [time.monotonic()]  # уже 1 попытка
+        monitor._try_auto_restart("hub", reason="crashed")
+
+        assert monitor.previous_states["hub"]["status"] == "failed"  # give-up при max_retries=1
+
+
+class TestResetOnStable:
+    """Ф3.6: стабильная работа > window_sec сбрасывает историю рестартов."""
+
+    def test_stable_running_resets_history(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        mock_pm._process_configs = {"cam": {"class": "X"}}
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, window_sec=10.0))
+        monitor.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        monitor._restart_history["cam"] = [time.monotonic() - 100.0]
+        # running_since — далеко в прошлом (стабилен дольше окна)
+        monitor._running_since["cam"] = time.monotonic() - 999.0
+
+        monitor._maybe_reset_on_stable("cam")
+
+        assert "cam" not in monitor._restart_history  # сброшен
+
+    def test_running_since_set_on_first_stable_check(self) -> None:
+        """Первая проверка running-процесса лишь ставит точку отсчёта, не сбрасывает."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm._process_configs = {"cam": {"class": "X"}}
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, window_sec=10.0))
+        monitor.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        monitor._restart_history["cam"] = [time.monotonic()]
+
+        monitor._maybe_reset_on_stable("cam")
+
+        assert "cam" in monitor._running_since  # точка отсчёта поставлена
+        assert "cam" in monitor._restart_history  # ещё не сброшен (только что стал стабилен)
+
+    def test_not_running_clears_running_since(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, window_sec=10.0))
+        monitor.previous_states["cam"] = {"status": "crashed", "metadata": {}, "custom": {}}
+        monitor._running_since["cam"] = time.monotonic()
+
+        monitor._maybe_reset_on_stable("cam")
+
+        assert "cam" not in monitor._running_since
+
+    def test_window_zero_disables_auto_reset(self) -> None:
+        """window_sec=0 (пожизненный) → авто-reset не применяется."""
+        mock_pm = _make_mock_process_manager()
+        mock_pm._process_configs = {"cam": {"class": "X"}}
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, window_sec=0.0))
+        monitor.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        monitor._restart_history["cam"] = [time.monotonic() - 999.0]
+        monitor._running_since["cam"] = time.monotonic() - 999.0
+
+        monitor._maybe_reset_on_stable("cam")
+
+        assert "cam" in monitor._restart_history  # не сброшен (пожизненный счётчик)
 
 
 class TestMonitorSyncPause:

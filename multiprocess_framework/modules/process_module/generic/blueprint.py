@@ -99,6 +99,15 @@ class ProcessConfig(SchemaBase):
         FieldMeta("Protected", info="always-on: replace_blueprint/hot-apply процесс не останавливает."),
     ] = False
 
+    restart_policy: Annotated[
+        dict[str, Any],
+        FieldMeta(
+            "Restart policy",
+            info="Per-process авто-рестарт: {enabled, max_retries, backoff_sec, window_sec}. "
+            "Пусто → глобальная политика. Рецепт задаёт для source/hub (Ф3.8/G1).",
+        ),
+    ] = {}
+
     # --- Data Pipeline routing (Phase 5) ---
 
     chain_targets: Annotated[
@@ -133,6 +142,10 @@ class ProcessConfig(SchemaBase):
         # protected пробрасываем всегда (нужен PM для skip при replace_blueprint)
         if self.protected:
             base_kwargs["protected"] = self.protected
+        # restart_policy per-process (Ф3.6): непустой → в GenericProcessConfig →
+        # build() вынесет на верхний уровень proc_dict → ProcessMonitor._resolve_policy.
+        if self.restart_policy:
+            base_kwargs["restart_policy"] = self.restart_policy
 
         # Data Pipeline routing
         if self.chain_targets:

@@ -56,7 +56,7 @@ Multiprocess Framework — **конструктор многопроцессны
 
 ## 3. Слои архитектуры
 
-21 модуль сгруппирован по слоям снизу вверх. Внутри слоя модули независимы или зависят только от нижележащих слоёв.
+24 модуля сгруппированы по слоям снизу вверх. Внутри слоя модули независимы или зависят только от нижележащих слоёв.
 
 | Слой | Модули | Роль |
 |------|--------|------|
@@ -65,14 +65,17 @@ Multiprocess Framework — **конструктор многопроцессны
 | **L3. Messaging** | `message_module`, `router_module` | `Message` (Dict at Boundary) и `RouterManager` поверх CRM |
 | **L4. Observability** | `logger_module`, `error_module`, `statistics_module` | Наследники CRM с каналами (файл, консоль, prometheus, UI) |
 | **L5. Resources & Config** | `shared_resources_module`, `config_module`, `state_store_module` | Pickle-safe SRM (Queue/Event/SharedMemory + ConfigStore), runtime-конфиги, реактивное дерево состояния (StateStoreManager + StateProxy + glob-подписки) |
-| **L6. Command & Work** | `command_module`, `worker_module`, `chain_module` | Команды поверх dispatch, потоки-воркеры внутри процесса, DAG/Chain execution engine (ChainRunnable, DagRunnable, WorkerPoolDispatcher) |
-| **L7. Process** | `process_module`, `console_module` | `ProcessModule` — база дочернего процесса; `ConsoleManager` — терминальный I/O |
-| **L8. Orchestration** | `process_manager_module` | `SystemLauncher`, `ProcessManagerProcess`, `ProcessRegistry`, `ProcessMonitor` |
-| **L9. Storage** | `sql_module` | SQL-инструментарий (DDL, QuerySet, UoW, Repository) |
-| **L10. Application kit** | `registers_module` | Runtime вокруг экземпляров регистров: pub/sub, dispatch, routing map |
-| **L11. UI (опционально)** | `frontend_module` | PySide6-виджеты с привязкой к регистрам |
+| **L6. Events (in-proc)** | `event_module` | `EventBus` — synchronous typed pub/sub «фактов» (диспетчеризация по `type(event)`). Не путать с cross-proc `EventManager` (SRM) |
+| **L7. Command & Work** | `command_module`, `actions_module`, `worker_module`, `chain_module` | Команды поверх dispatch, action-bus undo/redo (GUI), потоки-воркеры, DAG/Chain execution engine |
+| **L8. Process** | `process_module`, `console_module` | `ProcessModule` — база дочернего процесса; `ConsoleManager` — терминальный I/O |
+| **L9. Orchestration** | `process_manager_module` | `SystemLauncher`, `ProcessManagerProcess`, `ProcessRegistry`, `ProcessMonitor` |
+| **L10. Registries** | `service_module`, `display_module` | Реестры сущностей: сервисы с lifecycle (`ServiceRegistry`) и SHM-каналы кадров (`DisplayRegistry`) |
+| **L11. Application kit** | `registers_module` | Runtime вокруг экземпляров регистров: pub/sub, dispatch, routing map |
+| **L12. UI (опционально)** | `frontend_module` | PySide6-виджеты с привязкой к регистрам |
 
-Подробное описание каждого модуля — в [`MODULES_OVERVIEW.md`](docs/MODULES_OVERVIEW.md) и `modules/<name>/README.md`.
+> **Storage вынесен:** `sql_module` → `Services/sql` (Phase 4.1, ADR-121). Во фреймворке его нет.
+
+Подробное описание каждого модуля — в [`MODULES_OVERVIEW.md`](docs/MODULES_OVERVIEW.md); границы ответственности — в [`MODULES_RESPONSIBILITY_MAP.md`](docs/MODULES_RESPONSIBILITY_MAP.md); и `modules/<name>/README.md`.
 
 ---
 
@@ -98,7 +101,10 @@ graph BT
     process[process_module]
     pmgr[process_manager_module]
     console[console_module]
-    sql[sql_module]
+    event[event_module]
+    actions[actions_module]
+    service[service_module]
+    display[display_module]
     registers[registers_module]
     frontend[frontend_module]
 
@@ -132,13 +138,15 @@ graph BT
     console --> base
     console --> schema
     console --> logger
-    sql --> base
-    sql --> schema
+    actions --> schema
+    service --> base
     registers --> schema
     frontend --> process
     frontend --> router
     frontend --> schema
 ```
+
+> `event_module` и `display_module` — leaf-узлы (stdlib/pyyaml). `sql_module` убран из графа — вынесен в `Services/sql` (Phase 4.1).
 
 **Правило:** стрелка «зависит от» направлена только снизу вверх по слоям. Циклы запрещены.
 

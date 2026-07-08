@@ -89,4 +89,185 @@
 - (2) `state.fps` = hz конкретного «data»-воркера по имени — отвергнута: имена воркеров зависят от плагина, нет универсального признака «главного» воркера; max устойчивее.
 - (3) Публиковать 0 при отсутствии hz — отвергнута: «0» вводит в заблуждение (выглядит как «работает, но 0 кадров»); «—» честнее отражает «метрика недоступна».
 
-**Последствия:** Карточки получают живые FPS/latency и health без новых путей доставки (reuse существующего heartbeat→StateStore). Семантика max задокументирована в docstring `_publish_process_aggregate`. broken_wires остаётся заглушкой до интеграции WireStatus.
+**Последствия:** Карточки получают живые FPS/latency и health без новых путей доставки (reuse существующего heartbeat→StateStore). Семантика max задокументирована в docstring `_publish_process_aggregate`. ~~broken_wires остаётся заглушкой до интеграции WireStatus.~~ **Обновлено (Ф3.5, ADR-PMM-012):** `broken_wires` больше НЕ заглушка — считается из `ProcessManager._active_wires` + OS-liveness endpoint'ов.
+
+## ADR-PMM-010: routing-epoch — гибрид данные-refresh (switch) + стабильные очереди (restart)
+
+**Статус:** принято
+**Дата:** 2026-07-08
+**Refs:** plans/2026-07-06_constructor-master/plan.md (Ф3.1), f3.1-routing-epoch.md
+
+**Контекст:** Каждый дочерний процесс получает при спавне **замороженный снимок** routing_map (свои Queue-ссылки соседей из bundle). После `restart_process`/`apply_topology` PM создавал НОВЫЕ Queue-объекты, а выжившие соседи (protected: `gui`, `devices`; при инкрементальном diff — любой не тронутый) оставались со стейл-ссылками на осиротевшие очереди убитых процессов. `put_nowait` в мёртвую очередь возвращает успех → **тихая потеря** peer→peer трафика (задокументировано в docstring `_cmd_process_relay`). Fallback'и router'а (мост 1.1b, hub-relay 1.7) срабатывают ТОЛЬКО при ОТСУТСТВИИ очереди — а у стейл-соседа она есть (мёртвая). Жёсткое ограничение: `multiprocessing.Queue` не пиклится вне spawn → `routing.refresh` не может нести Queue-объекты, только данные.
+
+**Решение (гибрид A+B):**
+- **B (restart) — переиспользование очередей.** `SharedResourcesManager.register_process(reuse_queues=True)` создаёт только недостающие qtype; существующие Queue сохраняют `id()`. Новый инстанс наследует те же очереди через bundle, стейл-ссылки соседей остаются ВАЛИДНЫМИ, hot-path кадров не деградирует. Мусор прошлой жизни дренируется (`get_nowait` до Empty, НЕ `clear_queue` — тот спит ~0.2с/очередь). Откат: конфиг `restart_reuse_queues: false`.
+- **A (switch) — декларативный refresh.** Пере-провижининг поднимает `incarnation` процесса (`_bump_incarnation`). После исполнения топологии (успех ИЛИ rollback — оба пересоздают очереди) PM поднимает монотонный `epoch` и рассылает `routing.refresh` (`communication.broadcast`, exclude_self). Payload — ПОЛНЫЙ авторитетный снимок `{epoch, hub, processes: {имя: incarnation}}` (не дельта): повторная/потерянная рассылка самовосстанавливается. Выживший ребёнок сверяет снимок со своей PSR: имя вне снимка ИЛИ incarnation ≠ локальной → `drop_process_queues` → последующий send не найдёт очередь → упадёт в существующий hub-relay (Ф1.7) → PM со свежим PSR доставит. Идемпотентно (guard `epoch ≤ last_seen → ignore`). Bundle несёт `routing_meta` — новые дети рождаются с актуальными epoch/incarnation. Гейт: конфиг `routing_refresh_enabled` (дефолт True) + env `FW_ROUTING_REFRESH != "0"`.
+
+**Окно гонки (осознанно вне scope):** сообщения, уже лежащие в мёртвых очередях или отправленные ДО обработки refresh, теряются (окно ≈ switch + один цикл message-loop получателя; плюс краткий race, когда только что пересозданный ребёнок получает refresh раньше регистрации своего handler'а — безвредно, у него свежие очереди). Sender-side epoch-check на КАЖДОМ send — сознательно отвергнут: это hot-path кадров (`send_to_queue`), проверка epoch на каждый put недопустима. Потерянный refresh лечится следующим (полный снимок). Переполнение system-очереди рассылкой — тема Ф3.3.
+
+**Граница с wire/SHM (Ф3.5):** routing-epoch управляет ТОЛЬКО in-process mp.Queue routing_map. SHM/wire-каналы (`wire.configure`/`wire.teardown`, FrameShmMiddleware) живут отдельным жизненным циклом и пере-issue при switch — ответственность Ф3.5, вне scope этого ADR. `routing.refresh` их не трогает.
+
+**Отклонённые альтернативы:**
+- (C) Manager-proxy очереди (сокет-раундтрип на каждый put) — недопустимо на пути кадров.
+- Sender-side epoch-check на каждом send — hot-path (см. «Окно гонки»).
+- Нести Queue-объекты в refresh — невозможно (`mp.Queue` не пиклится вне inheritance).
+- Всегда сажать соседей на hub-relay после restart — все кадры через system-очередь PM (бутылочное горло).
+
+**Последствия:** peer→peer send выжившего процесса после switch/restart доставляется (было — тихо терялось). Наблюдаемость: `relayed_to_hub` (окольная доставка), `routing_epoch`/`routing_refresh_applied` в `introspect.router_stats`. Полный откат к поведению main — двумя флагами (env/конфиг). Диагностический `routing.probe` даёт детерминированное воспроизведение дыры без реального железа.
+
+## ADR-PMM-011: self-reported ready через per-process mp.Event (вне message-loop)
+
+**Статус:** принято
+**Дата:** 2026-07-08
+**Refs:** plans/2026-07-06_constructor-master/plan.md (Ф3.2), f3.2-self-reported-ready.md
+
+**Контекст:** Ребёнок не сообщал PM о завершении `initialize()`. switch-барьер `_wait_started_ready` был death-watch: здоровое переключение ВСЕГДА ждало весь settle-window `start_ready_timeout_s` (дефолт 0.5с), `True` означал «не умер», а НЕ «готов». Boot-барьера не было вовсе — PM выставлял `_system_ready_event` сразу после своего `initialize()`, хотя дети могли ещё инициализироваться (докстринг `system_launcher` прямо выносил это в Ф3.2). Требовалось: switch/boot закрывается по факту готовности, а не по таймеру.
+
+**Жёсткое ограничение (дедлок):** heartbeat/любое IPC-сообщение и `topology.apply` обрабатываются ОДНИМ `message_processor`-потоком PM. Блокирующе ждать IPC-`ready` в барьере НЕЛЬЗЯ — поток заблокировал бы сам себя (комментарий `process_manager_process.py`).
+
+**Решение:** `ready` — НЕ IPC-сообщение, а per-process `multiprocessing.Event`.
+- PM создаёт event при спавне (`ProcessRegistry.create_and_register`), кладёт его в bundle `custom["ready_event"]` (inheritance при spawn — легально, как `stop_event`; bundle никогда не ре-сериализуется на стороне PM), хранит ссылку у себя (`_ready_events`, `get_ready_event`).
+- Runner ставит event сразу после успешного `initialize()`, ДО `_run_lifecycle` (guard None → фолбэк на death-watch для SRM-mode/старых bundle).
+- Барьер (`_wait_processes_ready`, общий для switch/boot/restart) поллит 0.05с: event set → `True` немедленно (ранний выход); процесс мёртв → `False`; живой-без-event на дедлайне → `True` + WARNING «liveness-fallback» (прежнее поведение, mock без event тоже сюда).
+- **switch:** `_wait_started_ready` — window `start_ready_timeout_s` (0 → выкл).
+- **boot:** `_wait_boot_ready` в `initialize()` PM ПЕРЕД `_system_ready_event.set()` — window `boot_ready_timeout_s` (дефолт 5.0с; 0 → выкл). Это initialize-поток, НЕ message_processor → блокировка допустима. По таймауту система стартует ВСЁ РАВНО (boot не блокировать навсегда) + WARNING.
+- **restart:** свежий event на каждый (пере)спавн (новый объект, НЕ `.clear()` — у прежнего инстанса могла остаться ссылка на старый); после start — барьер на один процесс.
+- `ready_event` в `_CUSTOM_EXCLUDE_KEYS` монитора (mp.Event не пиклится через Queue при broadcast'е состояния).
+
+**Отклонённые альтернативы:**
+- (1) IPC-сообщение `ready` от ребёнка + блокирующее ожидание в барьере — **дедлок** message_processor (heartbeat и topology.apply — один поток).
+- (2) Первый heartbeat как признак готовности — тот же дедлок (heartbeat обрабатывается message_processor'ом).
+- (3) `ready_event` отдельным Process-аргументом (как stop_event) — рабочий, но лишний позиционный аргумент top-level функции; bundle custom проще и уже несёт connection-данные (inheritance для custom-values так же валиден).
+
+**Последствия:** здоровый switch/boot закрывается по факту готовности, а не по фиксированному settle-window; медленный ребёнок (ML-веса) не ломает boot (liveness-fallback + WARNING). Обратная совместимость: bundle без `ready_event` и mock-реестр без `get_ready_event` → чистый фолбэк на прежнее death-watch поведение (существующие тесты зелёные без правок). Полный откат: `start_ready_timeout_s: 0` (switch-барьер выкл) + `boot_ready_timeout_s: 0` (boot как на main) — event-механика пассивна без потребителей.
+
+## ADR-PMM-012: wire-статусы first-class — re-issue при рестарте + honest broken_wires
+
+**Статус:** принято
+**Дата:** 2026-07-08
+**Refs:** plans/2026-07-06_constructor-master/plan.md (Ф3.5), f3.5-wire-status.md
+
+**Контекст (два независимых SHM-механизма кадров — НЕ путать):**
+- **A. generic data-path** (живой поток камеры): `FrameShmMiddleware` в конструкторе
+  процесса; receiver берёт `shm_actual_name`/`owner` per-frame из каждого сообщения.
+  **Самовосстанавливается** при рестарте (middleware пересоздаётся, имя едет в каждом
+  msg) — это территория routing-epoch Ф3.1 (ADR-PMM-010).
+- **B. wire.\* абстракция** (PM-управляемые «провода»): статический `FrameShmMiddleware`,
+  подключаемый через `wire.configure`, трекается в дочернем `_wire_middlewares`.
+  Заводится **ТОЛЬКО из GUI** (`TopologyBridge.connect_wire` → `wire.setup`) — в
+  headless-рецепте путь B пуст (`_active_wires == {}`). При рестарте новый инстанс
+  рождается с ПУСТЫМ `_wire_middlewares` → провод B висит на мёртвом процессе. Это баг.
+
+`broken_wires` был захардкожен `0` (ProcessMonitor не имел источника истины);
+GUI/telemetry не видели оборванных проводов.
+
+**Решение:**
+1. **Wire re-issue (путь B).** `ProcessManager._reissue_wires_for(process)` перебирает
+   `_active_wires`, где процесс — source или target, и переигрывает `wire.configure`
+   **только в перезапущенный инстанс** (роль sender/receiver, сохранённый `shm_config`).
+   Партнёр не трогаем: он читает per-message `shm_actual_name` и остаётся валиден.
+   SHM-регион owner-scoped и переживает рестарт (`restart_process` зовёт
+   `register_process(reuse_queues)`, а НЕ `unregister_process` — SHM не освобождается),
+   поэтому переаллокация SHM не требуется. Вызовы: в `restart_process` после
+   `_wait_processes_ready`, в `apply_topology` success-ветке после readiness-барьера.
+   Ортогонально epoch/ready (Ф3.1/Ф3.2) — инварианты не тронуты. Гейт: конфиг
+   `wire_reissue_enabled` (дефолт True).
+2. **Honest broken-marking.** `_mark_wires_broken_for(process)` помечает задетые провода
+   `status="broken"` ДО пересоздания инстанса (в restart — после `remove_process`; в
+   switch — на входе, по snapshot). После успешного re-issue → `"active"`. Даёт
+   `broken_wires ≠ 0` в момент разрыва (acceptance).
+3. **Реальный broken_wires + system.wires.\*.** `ProcessMonitor._publish_wires` публикует
+   per-wire `system.wires.<key>.status` (active/broken/pending) и агрегат
+   `system.health.broken_wires`. Провод broken, если `status=="broken"` ИЛИ endpoint
+   не `is_alive`. **Liveness — через `ProcessRegistry.is_alive` (OS-факт), НЕ status-снимок
+   state-дерева:** после graceful stop/restart монитор не всегда промотирует
+   `stopped→running` (whitelist промоушена), из-за чего живой процесс ложно выглядел бы
+   мёртвым endpoint'ом и `broken_wires` застревал ≠0.
+
+**Граница A vs B (live-верификация):** «кадры снова идут» после рестарта проверяется
+на пути A (`test_routing_epoch_live` — peer→peer доставка после restart; A и так
+самовосстанавливается через routing-epoch). Ф3.5-специфику (honest broken_wires +
+re-issue провода B) — на **синтетическом** wire (`test_wire_status_live`: `wire.setup`
+devices→preprocessor, `process.stop` peer → `broken_wires≥1`, `process.restart` →
+re-issue → `0`). Реального B-провода в headless-рецепте нет — не выдумываем.
+
+**Отклонённые альтернативы:**
+- Liveness endpoint'ов через status-снимок state-дерева — отвергнут: stale `stopped`
+  у живого процесса после restart → ложный broken, acceptance не восстанавливался.
+- Переаллокация SHM при каждом re-issue — не нужна: регион переживает рестарт (нет
+  `unregister_process`).
+- Re-issue `wire.configure` в оба endpoint'а — избыточно: партнёр не терял middleware,
+  читает per-message `shm_actual_name`.
+
+**Последствия:** GUI-провода (путь B) восстанавливаются после рестарта/switch (было —
+висели на мёртвом инстансе); `broken_wires` честный (≠0 в разрыв, 0 при живой топологии,
+а не безусловная константа). Полный откат: `wire_reissue_enabled: false`. Замечание:
+монитор оставляет stale `state.status="stopped"` у пере-restart'нутого процесса
+(отдельная латентная проблема промоушена статуса) — на broken_wires не влияет благодаря
+is_alive-liveness.
+
+## ADR-PMM-013: Supervisor v2 — окно стабильности, per-process policy, health=failed, fault-injection (2026-07-08)
+
+- **Контекст (Ф3.6/3.7/3.8):** авто-рестарт (ADR-PMM-004) имел ПОЖИЗНЕННЫЙ счётчик
+  попыток (`_restart_counts:int`) — редкие краши за всё время системы копились к
+  give-up даже у здорового процесса. Политика была ГЛОБАЛЬНОЙ (одна на монитор), нельзя
+  включить рестарт точечно. Give-up писал только `state.status="failed"`, а acceptance
+  и вкладка «Процессы»/QoS читают `health.status`. И — латентный баг: путь монитор→
+  авто-рестарт живьём никогда не гонялся (юнит-тест ловил лишь факт отправки IPC).
+
+- **Решение:**
+  1. **Окно стабильности N/T.** `_restart_counts:int` → `_restart_history:list[float]`
+     (метки `time.monotonic()` — важна монотонность, не системные часы). `count` = число
+     меток В ОКНЕ `RestartPolicy.window_sec`; give-up при `count >= max_retries` в окне.
+     Протухшие метки отбрасываются (защита от вечной flap-петли и от преждевременной
+     сдачи). `window_sec=0` → пожизненный счётчик как раньше (обратная совместимость).
+  2. **Reset при стабильной работе.** `_running_since` (monotonic) — процесс держит
+     "running" дольше `window_sec` → `reset_restart_count`. `window_sec=0` → авто-reset
+     выключен (осознанный пожизненный счётчик).
+  3. **Per-process policy.** `_resolve_policy(name)` резолвит `restart_policy` из
+     `ProcessManager._process_configs[name]` (верхний уровень proc_dict, рядом с
+     `protected`) — непустой dict перекрывает глобальную `self.restart_policy`, пустой/
+     битый → фолбэк на глобальную. Монитор читает live `_process_configs` (как
+     `_active_wires` в ADR-PMM-012), без своей копии. Gates `_handle_dead_process`/
+     `_check_heartbeat_timeout` тоже резолвят per-process → рецепт включает source/hub
+     при выключенной глобальной (дефолт `enabled=False` — прод безопасен).
+  4. **Blueprint-канал.** `ProcessConfig.restart_policy` (blueprint) + `ProcessLaunchConfig.
+     restart_policy` → `build()` выносит непустой на верхний уровень proc_dict (пустой не
+     меняет форму). Рецепт задаёт политику per-process.
+  5. **health=failed при give-up.** Give-ветка публикует `processes.<name>.health.status=
+     "failed"` + `degraded_reason` + `updated_at` (контракт `process_module/health/schema.py`).
+     `state.status` оставлен (обратная совместимость). Не конфликтует с honest
+     `broken_wires` Ф3.5 (`system.wires.*` — иное поддерево).
+  6. **Fault-injection.** `pid` в `introspect.status` (`os.getpid()` внутри процесса —
+     честная наблюдаемость) + `BackendHarness.kill_child(name)` = SIGKILL по pid.
+     Постоянная фикстура `test_fault_injection_live` (порт 8783): boot camera_0 с
+     per-process policy → SIGKILL → авто-рестарт → новый pid. SIGKILL (crash), а НЕ
+     `process.stop` (graceful → exitcode 0 → рестарт не триггерится).
+  7. **Фикс self-IPC рестарта.** `_dispatch_due_restarts` слал `type="system"` c обёрткой
+     `process.command`, но после регистрации `process.command` как CM-команды (P4.4.1 B2)
+     kind-router зовёт CM только при `type="command"` → авто-рестарт молча не срабатывал.
+     Теперь монитор шлёт прямую `process.restart` (`type="command"`, форма как
+     `build_command_message` — доказанно рабочий driver-путь `test_routing_epoch_live`).
+
+- **GATE G1 (владелец 2026-07-08: ДА).** RestartPolicy включён per-process для source/hub
+  (`camera_0` phone_camera/hikvision) в обоих рецептах; gui/devices — protected, монитор
+  их и так skip. Митигация рисков прода: give-up виден в health-дереве, окно N/T ловит
+  flap, откат = флаг в рецепте.
+
+- **Отклонённые альтернативы:**
+  - Копия `_process_configs` в мониторе — отвергнута: live-чтение исключает рассинхрон.
+  - Сохранить `process.command`-обёртку (с `type=command`) для self-IPC — отвергнута:
+    прямая `process.restart` проще и совпадает с рабочим driver-envelope.
+  - Пожизненный счётчик оставить дефолтом — отвергнут: копил give-up у здоровых.
+
+- **Валидация Ф3.8.** Полный boot hardware-рецептов headless невозможен (блок на
+  подключении железа — phone gateway/RTSP/robot TCP → `wait_until_ready` timeout, qt
+  недоступен). Проверено вместо boot: recipes load + реальный путь сборки base⊕recipe→
+  normalize→`BlueprintAssembler.assemble` даёт валидные proc_dict с `restart_policy` на
+  camera_0 top-level; сам механизм смерть→авто-рестарт доказан живьём на эквивалентном
+  source (`test_fault_injection_live`).
+
+- **Последствия:** супервизор устойчив к flap (окно), включаем точечно (per-process),
+  give-up наблюдаем (health), авто-рестарт де-факто работает (фикс type). Откат: убрать
+  `restart_policy` из рецептов (или `enabled:false`); `window_sec=0` возвращает пожизненный
+  счётчик.

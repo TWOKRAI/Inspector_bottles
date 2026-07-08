@@ -1578,5 +1578,57 @@ class TestDispatchCommand(unittest.TestCase):
         self.assertEqual(router.reply_to_request.call_args[0][1].get("status"), "error")
 
 
+class _RelayFakeQueueRegistry:
+    """Ф3.1: queue_registry для тестов relay — hub есть, таргеты нет (get_queue)."""
+
+    def __init__(self, present=("ProcessManager",)):
+        self._present = set(present)
+        self.sent: list = []
+
+    def get_queue(self, process, qtype):
+        return object() if process in self._present else None
+
+    def send_to_queue(self, process, qtype, message, timeout: float = 0.0):
+        self.sent.append((process, qtype, message))
+        return process in self._present
+
+
+class TestRelayCounter(unittest.TestCase):
+    """Ф3.1: счётчик relayed_to_hub + guard _relayed → relay не зовётся."""
+
+    def test_relay_via_hub_increments_counter(self):
+        qr = _RelayFakeQueueRegistry()
+        router = RouterManager(manager_name="r_relay", queue_registry=qr)
+        before = router.get_stats()["router"]["relayed_to_hub"]
+        ok = router._relay_via_hub({"targets": ["vision"], "command": "x"})
+        self.assertTrue(ok)
+        after = router.get_stats()["router"]["relayed_to_hub"]
+        self.assertEqual(after, before + 1)
+        # Реально переслал хабу конвертом router.relay.
+        self.assertTrue(any(p == "ProcessManager" for p, _q, _m in qr.sent))
+
+    def test_relayed_flag_blocks_relay(self):
+        qr = _RelayFakeQueueRegistry()
+        router = RouterManager(manager_name="r_relayed", queue_registry=qr)
+        called: list = []
+        router._relay_via_hub = lambda t: called.append(t) or True
+        # Таргет без очереди/канала, но _relayed=True → hub-relay пропущен.
+        router._deliver_by_targets(
+            {"targets": ["vision"], "type": "command", "command": "x", "_relayed": True}
+        )
+        self.assertEqual(called, [])
+
+    def test_no_relayed_flag_triggers_relay(self):
+        qr = _RelayFakeQueueRegistry()
+        router = RouterManager(manager_name="r_norelayed", queue_registry=qr)
+        called: list = []
+        router._relay_via_hub = lambda t: called.append(t) or True
+        # Тот же билет без _relayed → relay срабатывает (позитивный контроль).
+        router._deliver_by_targets(
+            {"targets": ["vision"], "type": "command", "command": "x"}
+        )
+        self.assertEqual(len(called), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

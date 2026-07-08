@@ -13,6 +13,7 @@ import time
 from multiprocessing import Event
 from typing import Any
 
+from ...process_module.health.schema import HealthField, HealthStatus, health_path
 from ...worker_module import ThreadConfig, ThreadPriority
 from ..core.restart_policy import RestartPolicy
 
@@ -22,6 +23,9 @@ _CUSTOM_EXCLUDE_KEYS = frozenset(
         "pause_event",
         "error_manager",
         "system_ready_event",
+        # Ф3.2: per-process ready-event — mp.Event не пиклится через Queue,
+        # broadcast состояния обязан его исключать (как прочие сырые события).
+        "ready_event",
     }
 )
 
@@ -89,8 +93,17 @@ class ProcessMonitor:
         # Сбрасывается при остановке/удалении процесса.
         self._first_seen: dict[str, float] = {}
 
-        # Авто-рестарт: счётчик попыток рестарта per process
-        self._restart_counts: dict[str, int] = {}
+        # Авто-рестарт: история меток рестарта per process (time.monotonic()).
+        # Раньше был пожизненный int-счётчик; теперь список меток, чтобы окно
+        # стабильности window_sec могло протухать старые попытки (защита от
+        # вечной flap-петли). count = число меток В ОКНЕ (см. _try_auto_restart).
+        self._restart_history: dict[str, list[float]] = {}
+
+        # Ф3.6: время (time.monotonic()), с которого процесс непрерывно "running".
+        # Стабильная работа дольше window_sec → авто-reset истории рестартов
+        # (_maybe_reset_on_stable). Монотонное время — окно не должно зависеть
+        # от системных часов. Сбрасывается когда процесс уходит из "running".
+        self._running_since: dict[str, float] = {}
 
         # Отложенные рестарты: {name: monotonic-время, когда пора}. Диспатчатся
         # из цикла (после backoff) IPC-командой в PM — НЕ исполняются на потоке
@@ -267,10 +280,12 @@ class ProcessMonitor:
           его публикует сам процесс (self-publish), а монитор лишь ЧИТАЕТ
           опубликованное из локального дерева. Нет ни одного fps — НЕ публикуем
           (карточка остаётся «—», не «0»). См. plans/telemetry-self-publish-redesign.md.
-        - ``system.health.broken_wires`` = число оборванных связей. Источник
-          (wire/topology runtime-статус) ProcessMonitor-у недоступен — публикуем 0.
-          TODO(telemetry): подключить, когда появится реестр WireStatus в
-          ProcessManager (см. project_pipeline_demo / WireStatus). Не выдумываем.
+        - ``system.health.broken_wires`` = число оборванных wire-проводов (Ф3.5).
+          Источник истины — ``ProcessManager._active_wires`` (заполняется
+          ``wire.setup``; путь B — GUI ``connect_wire``). Провод broken, если его
+          статус помечен ``"broken"`` (окно рестарта/switch) ИЛИ source/target не
+          в числе running. При ЖИВОЙ топологии без проводов → 0 (не «константа»,
+          а честный ноль). Публикация per-wire статусов — ``_publish_wires``.
         """
         running = [pname for pname, snap in all_states.items() if snap.get("status") == "running"]
         self._publish_state("system.health.active", len(running))
@@ -291,8 +306,65 @@ class ProcessMonitor:
         if fps_values:
             self._publish_state("system.health.avg_fps", round(sum(fps_values) / len(fps_values), 2))
 
-        # broken_wires: источник недоступен на уровне ProcessMonitor → 0 + TODO выше.
-        self._publish_state("system.health.broken_wires", 0)
+        # broken_wires (Ф3.5): реальный счёт из PM._active_wires + per-wire статусы.
+        broken_wires = self._publish_wires()
+        self._publish_state("system.health.broken_wires", broken_wires)
+
+    def _endpoint_alive(self, name: str) -> bool:
+        """OS-liveness endpoint'а провода через ProcessRegistry (не status-снимок).
+
+        Намеренно НЕ полагаемся на статус процесса из state-дерева: после
+        graceful stop / restart монитор может не промотировать «stopped»→«running»
+        (whitelist промоушена), из-за чего живой (is_alive) процесс ложно
+        выглядел бы мёртвым endpoint'ом. Истина — ``proc.is_alive()`` (pid жив).
+        """
+        reg = getattr(self.process, "_process_registry", None)
+        getp = getattr(reg, "get_process_by_name", None) if reg is not None else None
+        if not callable(getp):
+            return False
+        try:
+            proc = getp(name)
+        except Exception:  # nosec B110 — liveness-проба не критична
+            return False
+        is_alive = getattr(proc, "is_alive", None)
+        return bool(proc is not None and callable(is_alive) and is_alive())
+
+    def _publish_wires(self) -> int:
+        """Опубликовать per-wire статусы (``system.wires.<key>.status``) + счёт broken.
+
+        Источник — ``ProcessManager._active_wires`` (wire_key → метаданные,
+        заполняется ``wire.setup``). Провод считается ``broken``, если его
+        сохранённый статус ``"broken"`` (окно рестарта/switch, honest-marking PM)
+        ИЛИ хотя бы один endpoint (source/target) не ``is_alive`` (OS-liveness).
+        Иначе ``pending`` (не активирован) либо ``active``.
+
+        Guard'ы: ``_active_wires`` отсутствует / не dict (mock-PM, здоровая
+        топология без проводов) → 0 без публикаций. Это сохраняет прежнее
+        поведение «0 при живой топологии» — но теперь это ЧЕСТНЫЙ ноль, а не
+        безусловная константа.
+
+        Returns:
+            Число оборванных проводов (для ``system.health.broken_wires``).
+        """
+        wires = getattr(self.process, "_active_wires", None)
+        if not isinstance(wires, dict) or not wires:
+            return 0
+        broken = 0
+        for wire_key, info in wires.items():
+            if not isinstance(info, dict):
+                continue
+            src = info.get("source_process", "")
+            tgt = info.get("target_process", "")
+            endpoints_alive = self._endpoint_alive(src) and self._endpoint_alive(tgt)
+            if info.get("status") == "broken" or not endpoints_alive:
+                status = "broken"
+                broken += 1
+            elif info.get("status") == "pending":
+                status = "pending"
+            else:
+                status = "active"
+            self._publish_state(f"system.wires.{wire_key}.status", status)
+        return broken
 
     # ----------------------------------------------------------------
     # Мониторинг: основной цикл
@@ -380,6 +452,7 @@ class ProcessMonitor:
         for proc in self.process._process_registry.os_processes:
             if not proc.is_alive():
                 self._handle_dead_process(proc)
+                self._running_since.pop(proc.name, None)  # мёртвый — сбросить точку отсчёта стабильности
                 continue
 
             # Процесс жив: повысить до "running" из любого pre-running статуса.
@@ -405,6 +478,40 @@ class ProcessMonitor:
 
             # Проверяем heartbeat
             self._check_heartbeat_timeout(proc.name, now)
+
+            # Ф3.6: стабильная работа дольше window_sec → сброс истории рестартов
+            self._maybe_reset_on_stable(proc.name)
+
+    def _maybe_reset_on_stable(self, process_name: str) -> None:
+        """Сбросить историю рестартов, если процесс стабильно "running" > window_sec.
+
+        Точка отсчёта — ``_running_since[name]`` (time.monotonic()). Пока процесс
+        держит "running" дольше окна политики — flap-петли нет, счётчик можно
+        обнулить (иначе редкие рестарты за всё время накопились бы к give-up).
+
+        window_sec=0 (пожизненный счётчик) → авто-reset ВЫКЛючен: оператор
+        осознанно выбрал вечный счётчик. Сброс только при наличии истории —
+        чтобы не шуметь логами на каждом здоровом процессе.
+        """
+        cur_status = (self.previous_states.get(process_name) or {}).get("status", "unknown")
+        if cur_status != "running":
+            self._running_since.pop(process_name, None)
+            return
+
+        policy = self._resolve_policy(process_name)
+        if policy.window_sec <= 0:
+            return  # пожизненный счётчик — авто-reset не применяется
+
+        now_m = time.monotonic()
+        since = self._running_since.get(process_name)
+        if since is None:
+            self._running_since[process_name] = now_m
+            return
+        if now_m - since >= policy.window_sec and self._restart_history.get(process_name):
+            self.reset_restart_count(process_name)
+            self.process._log_info(
+                f"Process '{process_name}' стабилен > {policy.window_sec}с — счётчик рестартов сброшен"
+            )
 
     def _handle_dead_process(self, proc) -> None:
         """Обработка мёртвого OS-процесса: обновить статус, запустить авто-рестарт."""
@@ -448,9 +555,10 @@ class ProcessMonitor:
             except Exception:  # nosec B110 — best-effort обновление статуса в SR, сбой некритичен
                 pass
 
-        # Авто-рестарт при crash или логирование
+        # Авто-рестарт при crash или логирование (политика — per-process/глобальная)
         if new_status == "crashed":
-            if self.restart_policy.enabled and self.restart_policy.restart_on_crash:
+            policy = self._resolve_policy(proc.name)
+            if policy.enabled and policy.restart_on_crash:
                 self._try_auto_restart(proc.name, reason="crashed")
             else:
                 # Не останавливаем систему при crash одного процесса —
@@ -520,9 +628,10 @@ class ProcessMonitor:
         # горячей замены, пока новый процесс не прислал первый heartbeat) каскадом
         # инициировал shutdown и ронял protected GUI (SIGTERM). Процесс остаётся
         # помеченным unresponsive (статус выставлен выше); восстановится по heartbeat.
-        if self.restart_policy.enabled and self.restart_policy.restart_on_unresponsive:
+        policy = self._resolve_policy(process_name)
+        if policy.enabled and policy.restart_on_unresponsive:
             self._try_auto_restart(process_name, reason="unresponsive")
-        elif not self.restart_policy.enabled:
+        elif not policy.enabled:
             self.process._log_error(
                 f"Process '{process_name}' unresponsive, авто-рестарт отключён — "
                 f"оставлен в состоянии unresponsive (система не останавливается)"
@@ -532,14 +641,45 @@ class ProcessMonitor:
     # Авто-рестарт
     # ----------------------------------------------------------------
 
+    def _resolve_policy(self, process_name: str) -> RestartPolicy:
+        """Резолвить RestartPolicy процесса: per-process из рецепта или глобальная.
+
+        PM хранит per-process конфиг в ``_process_configs[name]``; рецепт кладёт
+        ``restart_policy`` (dict) на верхний уровень proc_dict — рядом с
+        ``protected`` (см. ProcessLaunchConfig.build). Непустой dict → per-process
+        политика перекрывает глобальную ``self.restart_policy``. Пустой/отсутствует
+        → глобальная (дефолт ``enabled=False`` — прод без рецепт-флага не меняется).
+
+        Ссылка на ``_process_configs`` берётся живьём (как ``_active_wires`` в Ф3.5):
+        монитор читает актуальный конфиг PM без своей копии/рассинхрона.
+        """
+        configs = getattr(self.process, "_process_configs", None)
+        if isinstance(configs, dict):
+            cfg = configs.get(process_name)
+            if isinstance(cfg, dict):
+                rp = cfg.get("restart_policy")
+                if isinstance(rp, dict) and rp:
+                    try:
+                        return RestartPolicy(**rp)
+                    except Exception:  # nosec B110 — кривой per-process конфиг → глобальная политика
+                        self.process._log_warning(
+                            f"Process '{process_name}': некорректный restart_policy в конфиге — "
+                            f"используется глобальная политика"
+                        )
+        return self.restart_policy
+
     def _try_auto_restart(self, process_name: str, reason: str) -> None:
         """Попытка авто-рестарта процесса с учётом RestartPolicy.
+
+        Политика резолвится per-process (``_resolve_policy``): рецепт может
+        включить авто-рестарт для source/hub, оставив глобальную выключенной.
 
         Args:
             process_name: Имя процесса для рестарта
             reason: Причина рестарта (crashed / unresponsive)
         """
-        if not self.restart_policy.enabled:
+        policy = self._resolve_policy(process_name)
+        if not policy.enabled:
             return
 
         # Protected-процессы (GUI, ProcessManager) НИКОГДА не авто-рестартим:
@@ -555,13 +695,23 @@ class ProcessMonitor:
             self.process._log_warning(f"Process '{process_name}' protected — авто-рестарт ({reason}) пропущен")
             return
 
-        count = self._restart_counts.get(process_name, 0)
-        max_retries = self.restart_policy.max_retries
+        max_retries = policy.max_retries
+        window_sec = policy.window_sec
+
+        # Окно стабильности N/T: считаем только метки рестартов В ОКНЕ.
+        # window_sec=0 → пожизненный счётчик (метки не протухают, как раньше).
+        # time.monotonic() — важна монотонность окна (не Date.now/time.time).
+        now_m = time.monotonic()
+        history = self._restart_history.get(process_name, [])
+        if window_sec > 0:
+            history = [t for t in history if now_m - t <= window_sec]
+        count = len(history)
 
         if count >= max_retries:
-            # Исчерпаны попытки — статус FAILED, больше не пытаемся
+            # Исчерпаны попытки в окне — статус FAILED, больше не пытаемся
             self.process._log_error(
-                f"Process '{process_name}' превысил лимит рестартов ({count}/{max_retries}), статус -> FAILED"
+                f"Process '{process_name}' превысил лимит рестартов ({count}/{max_retries} за {window_sec}с), "
+                f"статус -> FAILED"
             )
             snap = {
                 "status": "failed",
@@ -571,6 +721,15 @@ class ProcessMonitor:
             prev = self.previous_states.get(process_name)
             self._handle_state_change(process_name, prev, snap)
             self.previous_states[process_name] = snap.copy()
+
+            # Ф3.6: give-up виден и в health-поддереве (контракт health/schema.py).
+            # state.status="failed" оставлен для обратной совместимости, но
+            # acceptance/вкладка «Процессы»/QoS читают именно health.status.
+            # honest broken_wires Ф3.5 живёт под system.wires.* — не конфликтует.
+            reason_txt = f"supervisor give-up: {count} рестартов за {window_sec}с ({reason})"
+            self._publish_state(health_path(process_name, HealthField.STATUS), HealthStatus.FAILED.value)
+            self._publish_state(health_path(process_name, HealthField.DEGRADED_REASON), reason_txt)
+            self._publish_state(health_path(process_name, HealthField.UPDATED_AT), time.time())
 
             if self.process.shared_resources:
                 try:
@@ -586,11 +745,14 @@ class ProcessMonitor:
         # IPC-командой в PM (_dispatch_due_restarts), где оно сериализуется
         # с apply_topology на message_processor-потоке (гонка исключена).
         attempt = count + 1
-        backoff = self.restart_policy.backoff_sec
+        backoff = policy.backoff_sec
         if process_name in self._pending_restarts:
             return  # уже запланирован
-        self._restart_counts[process_name] = attempt
-        self._pending_restarts[process_name] = time.monotonic() + backoff
+        # Записываем метку текущей попытки (уже отфильтрованный по окну список +
+        # новая метка) — прунит протухшие метки заодно, история не растёт вечно.
+        history.append(now_m)
+        self._restart_history[process_name] = history
+        self._pending_restarts[process_name] = now_m + backoff
         self.process._log_info(
             f"Авто-рестарт процесса '{process_name}' запланирован "
             f"(причина: {reason}, попытка {attempt}/{max_retries}, backoff: {backoff}с)"
@@ -599,11 +761,19 @@ class ProcessMonitor:
     def _dispatch_due_restarts(self) -> None:
         """Отправить в PM рестарты, чей backoff истёк (IPC, не прямой вызов).
 
-        ``process.command {cmd: process.restart}`` в СОБСТВЕННУЮ очередь PM →
-        message_processor-поток → CommandManager → PM.restart_process. На том
-        же потоке исполняется topology.apply, поэтому рестарт НЕ может бежать
-        параллельно с заменой топологии. Если имя заменено switch'ем до
+        Прямая команда ``process.restart`` (``type=command``) в СОБСТВЕННУЮ
+        очередь PM → message_processor-поток → CommandManager → PM.restart_process.
+        На том же потоке исполняется topology.apply, поэтому рестарт НЕ может
+        бежать параллельно с заменой топологии. Если имя заменено switch'ем до
         диспатча — cleanup уже вызвал forget_process и снял pending.
+
+        ВАЖНО (Ф3.7): ``type`` обязан быть ``"command"`` — kind-router зовёт
+        CommandManager только для type=command. Раньше слался ``type="system"``
+        с обёрткой ``process.command``, но после регистрации ``process.command``
+        как CM-команды (P4.4.1 B2) system-сообщение до CM не доходило → авто-
+        рестарт молча не срабатывал (юнит-тест ловил лишь факт отправки, не
+        исполнение). Форма envelope повторяет build_command_message (driver-путь,
+        доказанно рабочий: routing_epoch/live).
         """
         if not self._pending_restarts:
             return
@@ -619,10 +789,12 @@ class ProcessMonitor:
                     comm.send_message(
                         self.process.name,
                         {
-                            "type": "system",
-                            "command": "process.command",
+                            "type": "command",
+                            "command": "process.restart",
+                            "data_type": "process.restart",
                             "sender": self.process.name,
-                            "data": {"cmd": "process.restart", "process_name": name},
+                            "targets": [self.process.name],
+                            "data": {"process_name": name},
                         },
                     )
                 ) if comm is not None else False
@@ -640,9 +812,9 @@ class ProcessMonitor:
         """Сбросить счётчик рестартов для процесса.
 
         Вызывается когда процесс стабильно работает после рестарта,
-        или при ручном вмешательстве оператора.
+        или при ручном вмешательстве оператора. Очищает всю историю меток имени.
         """
-        self._restart_counts.pop(process_name, None)
+        self._restart_history.pop(process_name, None)
 
     def forget_process(self, process_name: str) -> None:
         """Забыть служебную историю имени при cleanup (hot-swap / удаление).
@@ -654,9 +826,10 @@ class ProcessMonitor:
         заменённого имени также отменяется (Task 3.1).
         """
         self._last_heartbeat.pop(process_name, None)
-        self._restart_counts.pop(process_name, None)
+        self._restart_history.pop(process_name, None)
         self._workers_status.pop(process_name, None)
         self._first_seen.pop(process_name, None)
+        self._running_since.pop(process_name, None)
         self.previous_states.pop(process_name, None)
         self._pending_restarts.pop(process_name, None)
 
@@ -766,7 +939,7 @@ class ProcessMonitor:
             "heartbeat_timeout": self.heartbeat_timeout,
             "restart_policy": self.restart_policy.model_dump(),
             "last_heartbeats": {name: round(time.time() - ts, 1) for name, ts in self._last_heartbeat.items()},
-            "restart_counts": dict(self._restart_counts),
+            "restart_counts": {name: len(marks) for name, marks in self._restart_history.items()},
             "crashed_processes": [n for n, st in self.previous_states.items() if st.get("status") == "crashed"],
             "unresponsive_processes": [
                 n for n, st in self.previous_states.items() if st.get("status") == "unresponsive"

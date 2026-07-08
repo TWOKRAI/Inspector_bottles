@@ -188,6 +188,20 @@ def run_process_function(
                 _update_process_state(shared_resources, process_name, "error")
                 return
 
+        # Ф3.2 (self-reported ready): сигнализируем готовность СРАЗУ после успешного
+        # initialize(), ДО _run_lifecycle. Барьер PM (switch/boot) видит event
+        # немедленно и не ждёт весь settle-window. Event приходит через bundle
+        # custom (inheritance при spawn); в SRM-mode/старых bundle его нет —
+        # guard None, чистый фолбэк на death-watch (обратная совместимость).
+        if isinstance(shared_resources_or_bundle, dict):
+            ready_event = shared_resources_or_bundle.get("custom", {}).get("ready_event")
+            if ready_event is not None:
+                try:
+                    ready_event.set()
+                    log.info("ready_event выставлен — инициализация завершена")
+                except Exception as ready_err:  # noqa: BLE001 — сигнал не критичен
+                    log.error(f"Не удалось выставить ready_event: {ready_err}")
+
         # ОБЩИЙ system-wide stop приходит отдельным Process-аргументом (inheritance).
         # Fallback — атрибут на shared_resources (на случай SRM-mode без явного аргумента).
         if system_stop_event is None and shared_resources is not None:

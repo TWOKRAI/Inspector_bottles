@@ -60,9 +60,22 @@ def _build_shared_resources_from_bundle(
     custom = dict(bundle.get("custom", {}))
     custom.setdefault("process_config", process_config)
 
+    # Ф3.1 (routing-epoch): epoch + incarnation'ы соседей на момент спавна.
+    routing_meta = bundle.get("routing_meta", {}) or {}
+    _epoch = int(routing_meta.get("epoch", 0) or 0)
+    _incarnations = routing_meta.get("incarnations", {}) or {}
+
     shared_resources.process_state_registry.register_process(
         process_name,
-        initial_state={"custom": custom},
+        initial_state={
+            "custom": custom,
+            # last_seen epoch собственной записи + своя incarnation (ребёнок
+            # рождён «видевшим» текущий epoch → refresh, породивший его, игнор).
+            "metadata": {
+                "routing_epoch": _epoch,
+                "routing_incarnation": int(_incarnations.get(process_name, 0) or 0),
+            },
+        },
     )
     _pc = process_config if isinstance(process_config, dict) else {}
     shared_resources.config_store.store(
@@ -108,7 +121,16 @@ def _build_shared_resources_from_bundle(
     for target_name, target_queues in routing_map.items():
         if target_name == process_name:
             continue
-        shared_resources.process_state_registry.register_process(target_name)
+        # Ф3.1: incarnation соседа посевом в metadata — база для сверки refresh'ем.
+        shared_resources.process_state_registry.register_process(
+            target_name,
+            initial_state={
+                "metadata": {
+                    "routing_epoch": _epoch,
+                    "routing_incarnation": int(_incarnations.get(target_name, 0) or 0),
+                }
+            },
+        )
         shared_resources.config_store.store(
             target_name, {"process": {}, "managers": {}}
         )

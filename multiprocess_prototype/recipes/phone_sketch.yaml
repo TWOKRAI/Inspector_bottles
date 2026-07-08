@@ -108,6 +108,10 @@ blueprint:
         - seg
       description:
       protected: false
+      # Ф3.8/GATE G1 (владелец: ДА): авто-рестарт source-камеры. Смерть плагина
+      # (краш phone_gateway) → монитор пересоздаёт процесс (окно 3/60с), поток
+      # кадров возобновляется. gui/devices — protected (skip), их не трогаем.
+      restart_policy: {enabled: true, max_retries: 3, window_sec: 60}
       category:
       metadata:
         source_target_fps: 15

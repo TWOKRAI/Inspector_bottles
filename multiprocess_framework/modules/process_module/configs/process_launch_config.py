@@ -49,6 +49,15 @@ class ProcessLaunchConfig(SchemaBase):
         ),
     ] = False
 
+    restart_policy: Annotated[
+        dict[str, Any],
+        FieldMeta(
+            "Restart policy",
+            info="Per-process RestartPolicy (enabled/max_retries/backoff_sec/window_sec). "
+            "Пусто → глобальная политика ProcessManager. Читает ProcessMonitor._resolve_policy.",
+        ),
+    ] = {}
+
     queues: dict[str, Any] | None = None
 
     log_dir: str | None = None
@@ -92,6 +101,11 @@ class ProcessLaunchConfig(SchemaBase):
         # protected выносим на верхний уровень proc_dict — его читает
         # ProcessManagerProcess._get_protected_names (cfg.get("protected")), а не config.
         protected = bool(payload.pop("protected", False))
+        # restart_policy — на верхний уровень proc_dict (рядом с protected): его
+        # читает ProcessMonitor._resolve_policy(cfg.get("restart_policy")). Пустой
+        # dict в proc_dict НЕ кладём — иначе меняли бы форму каждого proc_dict;
+        # монитор трактует отсутствие как «глобальная политика».
+        restart_policy = payload.pop("restart_policy", None) or {}
         # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
         workers = payload.pop("workers", None) or {}
 
@@ -111,6 +125,8 @@ class ProcessLaunchConfig(SchemaBase):
             "config": payload,
             "managers": managers,
         }
+        if restart_policy:
+            proc_dict["restart_policy"] = restart_policy
         if self.memory is not None:
             proc_dict["memory"] = self.memory
         return name, proc_dict
