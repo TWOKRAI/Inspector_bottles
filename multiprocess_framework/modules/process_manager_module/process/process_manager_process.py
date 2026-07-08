@@ -9,6 +9,8 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
+import os
+import threading
 import time
 from typing import Any
 
@@ -60,6 +62,12 @@ class ProcessManagerProcess(ProcessModule):
         # Дебаунс hot-swap: in-flight guard + cooldown (см. apply_topology).
         self._replace_in_progress: bool = False
         self._last_replace_ts: float = 0.0
+        # Ф3.1 (routing-epoch): монотонный epoch рассылок + авторитетная карта
+        # incarnation'ов процессов. Под _routing_lock (мутируется из handler'ов и
+        # lifecycle-путей). См. _bump_routing_epoch / _broadcast_routing_refresh.
+        self._routing_epoch: int = 0
+        self._incarnations: dict[str, int] = {}
+        self._routing_lock = threading.Lock()
         self._create_components()
 
     def _create_components(self) -> None:
@@ -88,6 +96,7 @@ class ProcessManagerProcess(ProcessModule):
             config_manager=None,
             shared_resources=self.shared_resources,
             system_stop_event=self._system_stop_event,
+            routing_meta_fn=self._routing_meta_snapshot,
         )
         self._priority = ProcessPriority(logger=self, platform_adapter=platform_adapter)
         self._status = ProcessStatusMonitor(self._process_registry.os_processes)
@@ -826,6 +835,192 @@ class ProcessManagerProcess(ProcessModule):
                 self._log_warning(f"apply_topology: ошибка возобновления ProcessMonitor: {exc}")
 
     # -------------------------------------------------------------------------
+    # ROUTING-EPOCH (Ф3.1) — гибрид данные-refresh (switch) + стабильные очереди
+    # -------------------------------------------------------------------------
+
+    def _ensure_routing_state(self) -> None:
+        """Ленивая инициализация routing-состояния (Ф3.1).
+
+        Продовый ``__init__`` всегда ставит ``_routing_lock``/``_routing_epoch``/
+        ``_incarnations``. Но unit-тесты строят PM, патча ``__init__`` в no-op
+        (см. conftest.make_pm) — тогда атрибутов нет. Этот guard делает routing-
+        методы безопасными в таких PM (та же философия, что communication/mock=None).
+        """
+        if not hasattr(self, "_routing_lock"):
+            self._routing_lock = threading.Lock()
+            self._routing_epoch = getattr(self, "_routing_epoch", 0)
+            self._incarnations = getattr(self, "_incarnations", {})
+
+    def _routing_meta_snapshot(self) -> dict[str, Any]:
+        """Снимок {epoch, incarnations} для bundle нового ребёнка (Ф3.1).
+
+        Вызывается ProcessRegistry на спавне — новый ребёнок рождается с
+        актуальными epoch/incarnation'ами соседей.
+        """
+        self._ensure_routing_state()
+        with self._routing_lock:
+            return {"epoch": self._routing_epoch, "incarnations": dict(self._incarnations)}
+
+    def _mirror_routing_to_psr(
+        self, name: str, *, epoch: int | None = None, incarnation: int | None = None
+    ) -> None:
+        """Best-effort зеркалирование epoch/incarnation в metadata PM-PSR.
+
+        Диагностика/консистентность: PM хранит истину в ``_incarnations``/
+        ``_routing_epoch``, но дублирует её в свою PSR-запись. Всё за guard'ами —
+        в unit-тестах shared_resources/get_process_data бывают mock/None.
+        """
+        sr = getattr(self, "shared_resources", None)
+        if sr is None:
+            return
+        try:
+            pd = sr.get_process_data(name)
+            meta = getattr(pd, "metadata", None) if pd is not None else None
+            if not isinstance(meta, dict):
+                return
+            if epoch is not None:
+                meta["routing_epoch"] = epoch
+            if incarnation is not None:
+                meta["routing_incarnation"] = incarnation
+        except Exception:  # noqa: BLE001 — зеркало не критично
+            pass
+
+    def _bump_routing_epoch(self) -> int:
+        """Инкремент epoch рассылок под локом (+ зеркало в PM-PSR)."""
+        self._ensure_routing_state()
+        with self._routing_lock:
+            self._routing_epoch += 1
+            epoch = self._routing_epoch
+        self._mirror_routing_to_psr(self.name, epoch=epoch)
+        return epoch
+
+    def _bump_incarnation(self, name: str) -> int:
+        """Инкремент incarnation процесса под локом (+ зеркало в PM-PSR).
+
+        Каждое пере-провижинивание/пересоздание очередей процесса поднимает его
+        incarnation: выжившие соседи по расхождению incarnation сбрасывают
+        стейл-ссылку на его очереди.
+        """
+        self._ensure_routing_state()
+        with self._routing_lock:
+            self._incarnations[name] = self._incarnations.get(name, 0) + 1
+            inc = self._incarnations[name]
+        self._mirror_routing_to_psr(name, incarnation=inc)
+        return inc
+
+    def _routing_refresh_enabled(self) -> bool:
+        """Гейт рассылки refresh: конфиг routing_refresh_enabled (дефолт True) +
+        env FW_ROUTING_REFRESH != "0" (аварийный откат к поведению main)."""
+        cfg = self.get_config("routing_refresh_enabled") if hasattr(self, "get_config") else None
+        if cfg is False:
+            return False
+        if os.environ.get("FW_ROUTING_REFRESH", "1") == "0":
+            return False
+        return True
+
+    def _broadcast_routing_refresh(self, reason: str) -> bool:
+        """Разослать routing.refresh всем детям (декларативная сверка снимка, Ф3.1).
+
+        Payload — ПОЛНЫЙ снимок (не дельта): имена из PSR + их incarnation +
+        текущий epoch. Идемпотентно у ребёнка (guard epoch<=last_seen);
+        потерянная рассылка самовосстанавливается следующей. Отправка — существующим
+        путём ``communication.broadcast(exclude_self=True)`` (system-очереди детей).
+
+        Все обращения за guard'ами: в unit-тестах communication/shared_resources
+        бывают mock/None → тихий no-op (поведение switch-тестов не меняется).
+        """
+        if not self._routing_refresh_enabled():
+            return False
+        comm = getattr(self, "communication", None)
+        sr = getattr(self, "shared_resources", None)
+        if comm is None or sr is None:
+            return False
+        try:
+            names = list(sr.get_process_names())
+        except Exception:  # noqa: BLE001
+            return False
+        self._ensure_routing_state()
+        with self._routing_lock:
+            epoch = self._routing_epoch
+            processes = {n: {"incarnation": self._incarnations.get(n, 0)} for n in names}
+        msg = {
+            "type": "command",
+            "command": "routing.refresh",
+            "sender": self.name,
+            "queue_type": "system",
+            "data": {
+                "epoch": epoch,
+                "hub": self.name,
+                "reason": reason,
+                "processes": processes,
+                "ts": time.time(),
+            },
+        }
+        try:
+            comm.broadcast(msg, exclude_self=True)
+            self._log_info(
+                f"routing.refresh разослан (reason={reason}, epoch={epoch}, "
+                f"процессов={len(processes)})"
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 — рассылка не должна ронять lifecycle
+            self._log_error(f"_broadcast_routing_refresh({reason}) упал: {exc}")
+            return False
+
+    def _refresh_after_topology(self, reason: str, executed: list | None) -> int | None:
+        """Если топология что-то исполнила (executed непуст) — bump epoch + broadcast.
+
+        Успех И rollback пересоздают очереди → в обоих случаях выжившие соседи
+        обязаны сверить снимок. Возвращает новый epoch (или None, если нечего слать).
+        """
+        if not executed:
+            return None
+        epoch = self._bump_routing_epoch()
+        self._broadcast_routing_refresh(reason)
+        return epoch
+
+    def _drain_process_queues(self, name: str) -> None:
+        """Дренаж мусора прошлой жизни из очередей процесса (get_nowait до Empty).
+
+        Осознанно НЕ ``clear_queue`` (тот спит ~0.2с/очередь на macOS). Перед
+        рестартом с reuse_queues=True переиспользуемые очереди могут держать
+        недочитанные билеты убитого процесса — сливаем их, чтобы новый инстанс
+        стартовал с чистыми очередями. Best-effort, за guard'ами.
+        """
+        sr = getattr(self, "shared_resources", None)
+        if sr is None:
+            return
+        try:
+            pd = sr.get_process_data(name)
+            queues = getattr(pd, "queues", None) if pd is not None else None
+            if queues is None:
+                return
+            for q in list(queues.values()):
+                if q is None:
+                    continue
+                for _ in range(10_000):
+                    try:
+                        q.get_nowait()
+                    except Exception:  # noqa: BLE001 — Empty (и прочее) → стоп дренажа
+                        break
+        except Exception:  # noqa: BLE001 — дренаж не критичен
+            pass
+
+    def _process_queue_ids(self, name: str) -> dict[str, int]:
+        """id() очередей процесса из PSR — для сверки identity до/после рестарта."""
+        sr = getattr(self, "shared_resources", None)
+        if sr is None:
+            return {}
+        try:
+            pd = sr.get_process_data(name)
+            queues = getattr(pd, "queues", None) if pd is not None else None
+            if queues is None:
+                return {}
+            return {qt: id(q) for qt, q in queues.items()}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    # -------------------------------------------------------------------------
     # Router endpoint — приём команд от других процессов (AD-8)
     # -------------------------------------------------------------------------
 
@@ -1098,7 +1293,15 @@ class ProcessManagerProcess(ProcessModule):
         return True
 
     def restart_process(self, process_name: str) -> bool:
-        """Перезапустить процесс: stop → снять с реестра → create → start."""
+        """Перезапустить процесс: stop → снять с реестра → (reuse-очереди) → create → start.
+
+        Ф3.1 (routing-epoch, дорога B): очереди процесса ПЕРЕИСПОЛЬЗУЮТСЯ
+        (``reuse_queues=True``, конфиг-откат ``restart_reuse_queues: false``) —
+        identity сохраняется, стейл-ссылки выживших соседей остаются валидными,
+        hot-path не деградирует. Мусор прошлой жизни дренируется. Если identity
+        всё же сменилась (reuse выключен) — соседям поднимается incarnation.
+        В конце — bump epoch + broadcast refresh (декларативная сверка снимка).
+        """
         config = self._process_configs.get(process_name)
         if not config:
             self._log_error(f"No saved config for '{process_name}'")
@@ -1106,16 +1309,31 @@ class ProcessManagerProcess(ProcessModule):
         if not self.stop_process(process_name):
             return False
         self._process_registry.remove_process(process_name)
+
+        reuse_cfg = self.get_config("restart_reuse_queues")
+        reuse_queues = True if reuse_cfg is None else bool(reuse_cfg)  # дефолт True
+        ids_before = self._process_queue_ids(process_name)
         if self.shared_resources:
-            self.shared_resources.register_process(process_name, config)
+            self.shared_resources.register_process(process_name, config, reuse_queues=reuse_queues)
+            # Дренаж переиспользованных очередей: новый инстанс стартует чистым.
+            self._drain_process_queues(process_name)
+        ids_after = self._process_queue_ids(process_name)
+
         priority = config.get("priority", "normal")
         process = self._process_registry.create_and_register(process_name, config["class"], config, priority)
         if not process:
             self._log_error(f"Failed to recreate process '{process_name}'")
             return False
+        # Identity очередей сменилась → соседи должны сбросить стейл-ссылки.
+        if ids_before != ids_after:
+            self._bump_incarnation(process_name)
         process.start()
         self._priority.register_priority(process_name, priority)
         self._priority.apply_priority(process)
+        # Обновить epoch и разослать refresh (при reuse incarnation не менялась →
+        # выжившие соседи оставят валидную переиспользованную очередь).
+        self._bump_routing_epoch()
+        self._broadcast_routing_refresh("process.restart")
         self._log_info(f"Process '{process_name}' restarted")
         return True
 
@@ -1272,11 +1490,16 @@ class ProcessManagerProcess(ProcessModule):
                             "apply_topology: провал до исполнения команд — "
                             "топология не тронута, откат не требуется"
                         )
-                    return {
+                    resp = {
                         "success": False,
                         "rolled_back": True,
                         **{k: v for k, v in result.items() if k != "success"},
                     }
+                    # Ф3.1: rollback тоже пересоздаёт очереди — разослать refresh.
+                    epoch = self._refresh_after_topology("rollback", executed)
+                    if epoch is not None:
+                        resp["routing_epoch"] = epoch
+                    return resp
 
                 # Успех: readiness-барьер (Task 2.2) + ответ, совместимый с GUI
                 ready = self._wait_started_ready(result.get("results") or [])
@@ -1292,6 +1515,10 @@ class ProcessManagerProcess(ProcessModule):
                         f"apply_topology: процессы умерли на старте (initialize-провал?): {not_ready} "
                         f"— топология применена, но эти процессы НЕ работают"
                     )
+                # Ф3.1: switch пересоздал очереди — bump epoch + broadcast refresh.
+                epoch = self._refresh_after_topology("topology.apply", result.get("results") or [])
+                if epoch is not None:
+                    response["routing_epoch"] = epoch
                 return response
 
             except Exception as exc:
@@ -1305,6 +1532,10 @@ class ProcessManagerProcess(ProcessModule):
                         self.error_manager.track_error(exc, {"phase": "apply_topology"})
                     except Exception:
                         pass
+                # Ф3.1: rollback пере-провижинил snapshot (новые incarnation) —
+                # разослать refresh, чтобы выжившие сверили снимок.
+                self._bump_routing_epoch()
+                self._broadcast_routing_refresh("rollback")
                 return {
                     "success": False,
                     "rolled_back": True,
@@ -1437,6 +1668,9 @@ class ProcessManagerProcess(ProcessModule):
         # Очереди
         if self.shared_resources:
             self.shared_resources.register_process(name, proc_dict)
+            # Ф3.1: провижининг создаёт свежие очереди → новая incarnation
+            # (выжившие соседи по расхождению сбросят стейл-ссылку на них).
+            self._bump_incarnation(name)
 
         # SHM (если секция memory задана)
         memory = proc_dict.get("memory")
