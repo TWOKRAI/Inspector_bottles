@@ -52,7 +52,19 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         self._process_state_registry = process_state_registry
         # Queue refs хранятся в PSR (ProcessData._queues_dict) — единственный source of truth
 
-        self._stats = {"created": 0, "registered": 0, "removed": 0, "errors": 0}
+        self._stats = {
+            "created": 0,
+            "registered": 0,
+            "removed": 0,
+            "errors": 0,
+            # Ф3.3: сколько раз вытеснение из полной system-очереди было заблокировано.
+            # System-команды (process.stop/heartbeat) терять нельзя. Полная QoS-модель — Ф7 G.4.
+            "system_evict_blocked": 0,
+        }
+        # Throttle для ERROR-лога переполнения system-очереди: логируем раз на окно,
+        # а не на каждый put (send_to_queue — hot-path). Счётчик инкрементируется всегда.
+        self._system_evict_log_window: float = 5.0
+        self._system_evict_last_log: float = 0.0
 
     # =========================================================================
     # Жизненный цикл
@@ -153,7 +165,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             self._log_warning(f"Queue '{queue_type}' not found for '{process_name}'")
             return False
         try:
-            self.remove_old_if_full(queue)
+            self.remove_old_if_full(queue, queue_type)
             if timeout > 0:
                 queue.put(message, timeout=timeout)
             else:
@@ -263,12 +275,35 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             self._log_error(f"clear_queue() failed: {e}")
             self._stats["errors"] += 1
 
-    def remove_old_if_full(self, queue: Queue) -> None:
-        if queue.full():
-            try:
-                queue.get_nowait()
-            except Empty:
-                pass
+    def remove_old_if_full(self, queue: Queue, queue_type: Optional[str] = None) -> None:
+        """Освободить место в полной очереди перед put.
+
+        - ``queue_type is None`` или data-очередь: старое поведение — вытеснить
+          самый старый элемент (by design до полной QoS-модели Ф7 G.4).
+        - ``queue_type == "system"``: НЕ вытеснять. System-команды
+          (process.stop/heartbeat) терять нельзя, иначе процесс не остановится.
+          При переполнении — throttled ERROR-лог + счётчик ``system_evict_blocked``;
+          put затем упадёт штатно (put_nowait → Full → обработка в send_to_queue),
+          то есть потеря system-команды становится ВИДИМОЙ, а не тихой.
+        """
+        if not queue.full():
+            return
+        # process_data.QUEUE_SYSTEM == "system" — каноническое имя system-очереди.
+        if queue_type == "system":
+            self._stats["system_evict_blocked"] += 1
+            now = time.monotonic()
+            if now - self._system_evict_last_log >= self._system_evict_log_window:
+                self._system_evict_last_log = now
+                self._log_error(
+                    "system-очередь переполнена — вытеснение заблокировано "
+                    f"(system_evict_blocked={self._stats['system_evict_blocked']}); "
+                    "system-команда может быть потеряна при put"
+                )
+            return
+        try:
+            queue.get_nowait()
+        except Empty:
+            pass
 
     # =========================================================================
     # Статистика
