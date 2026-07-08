@@ -207,7 +207,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
         # запись в devices: подразумевает auto_connect — иначе pipeline молча
         # дропает job'ы до ручного «Подключить»).
         # НР-1: выставляем desired_connected=True, чтобы supervisor знал намерение.
-        for entry in self._manager._entries.values():
+        for entry in self._manager.snapshot_registry():
             if entry.enabled and (entry.auto_connect or entry.id in recipe_ids):
                 self._desired_connected[entry.id] = True
                 self._conn_queue.put(("connect", entry.id))
@@ -220,7 +220,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
             cfg,
             auto_start=True,
         )
-        ctx.log_info(f"DeviceHubPlugin: started ({len(self._manager._entries)} устройств)")
+        ctx.log_info(f"DeviceHubPlugin: started ({self._manager.device_count()} устройств)")
 
     def shutdown(self, ctx: PluginContext) -> None:
         """* -> STOPPED: отключить всех, сохранить реестр."""
@@ -272,7 +272,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                     conn = "connected" if ok else "error"
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": conn})
                     # НР-1/НР-2: проставляем desired на драйвере (для reconnect в tick)
-                    driver = self._manager._drivers.get(dev_id)
+                    driver = self._manager.get_driver(dev_id)
                     if driver is not None:
                         driver.desired_connected = True
                         # Ручной/повторный connect: сбросить лимит попыток, чтобы
@@ -284,7 +284,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 elif op == "disconnect":
                     self._publish_state(f"devices.state.{dev_id}.conn", {"conn": "disconnecting"})
                     # НР-1: desired=False на драйвере ДО disconnect (tick не реконнектит)
-                    driver = self._manager._drivers.get(dev_id)
+                    driver = self._manager.get_driver(dev_id)
                     if driver is not None:
                         driver.desired_connected = False
                     self._manager.disconnect(dev_id)
@@ -333,7 +333,7 @@ class DeviceHubPlugin(ProcessModulePlugin):
                 if dev_id in self._device_workers:
                     continue
                 # НР-3: драйвер должен существовать (не удалён remove)
-                driver = self._manager._drivers.get(dev_id)
+                driver = self._manager.get_driver(dev_id)
                 if driver is None:
                     continue
 
@@ -447,14 +447,13 @@ class DeviceHubPlugin(ProcessModulePlugin):
 
     def _publish_full_registry(self) -> None:
         """Опубликовать весь реестр в state-дерево."""
-        for entry in self._manager._entries.values():
+        for entry in self._manager.snapshot_registry():
             self._publish_state(f"devices.registry.{entry.id}", entry.to_dict())
 
     def _update_counters(self) -> None:
         """Обновить счётчики в register."""
-        self._reg.devices_total = len(self._manager._entries)
-        connected = sum(1 for d in self._manager._drivers.values() if d.is_connected)
-        self._reg.devices_connected = connected
+        self._reg.devices_total = self._manager.device_count()
+        self._reg.devices_connected = self._manager.connected_count()
 
     # ------------------------------------------------------------------ #
     # SAFE CALL — обёртка ошибок в dict-ответ
@@ -904,10 +903,10 @@ class DeviceHubPlugin(ProcessModulePlugin):
             return self._kind_call(data, "hikvision", "release")
         # Без device_id — release всех hikvision-устройств
         released = []
-        for entry in list(self._manager._entries.values()):
+        for entry in self._manager.snapshot_registry():
             if entry.kind != "hikvision":
                 continue
-            driver = self._manager._drivers.get(entry.id)
+            driver = self._manager.get_driver(entry.id)
             if driver is not None and driver.is_connected:
                 try:
                     driver.call("release", {})
