@@ -1,6 +1,8 @@
 # Modules Overview — Из чего собирать приложение
 
-**Назначение документа:** короткая карта 21 модуля фреймворка. Помогает разработчику и агенту понять, какой модуль закрывает какую задачу. Подробности — в `modules/<имя>/README.md`.
+**Назначение документа:** короткая карта 24 модулей фреймворка. Помогает разработчику и агенту понять, какой модуль закрывает какую задачу. Подробности — в `modules/<имя>/README.md`.
+
+> **Границы и «где что»:** если сомневаешься, какой модуль отвечает за задачу (особенно config vs state vs registers, или два разных «EventBus») — сначала [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md) (карта ответственности + матрица границ), потом сюда за деталями.
 
 > **Формат:** для каждого модуля указано: роль, импорт с корня, ключевые классы, типичные применения, зависимости, ссылка на детали.
 
@@ -19,18 +21,22 @@ Observability      L4   logger_module  error_module  statistics_module
                                          │
 Resources & Config L5   shared_resources_module  config_module  state_store_module
                                          │
-Command & Work     L6   command_module  worker_module  chain_module
+Events (in-proc)   L6   event_module  ◀── generic typed pub/sub (факты)
                                          │
-Process            L7   process_module  console_module
+Command & Work     L7   command_module  actions_module  worker_module  chain_module
                                          │
-Orchestration      L8   process_manager_module  ◀── SystemLauncher (точка входа)
+Process            L8   process_module  console_module
                                          │
-Storage            L9   sql_module
+Orchestration      L9   process_manager_module  ◀── SystemLauncher (точка входа)
                                          │
-Application kit    L10  registers_module
+Registries         L10  service_module  display_module
                                          │
-UI (опционально)   L11  frontend_module (PySide6)
+Application kit    L11  registers_module
+                                         │
+UI (опционально)   L12  frontend_module (PySide6)
 ```
+
+> **Storage вынесен из фреймворка:** `sql_module` переехал в `Services/sql` (Phase 4.1, ADR-121) — импорт `from Services.sql import SQLManager`. Во фреймворке его больше нет. Прикладные сервисы — см. [`Services/STATUS.md`](../../Services/STATUS.md).
 
 ---
 
@@ -155,7 +161,19 @@ UI (опционально)   L11  frontend_module (PySide6)
 
 ---
 
-## L6 — Command & Work
+## L6 — Events (in-proc)
+
+### `event_module` — generic typed in-proc pub/sub
+**Импорт:** `from multiprocess_framework.modules.event_module import EventBus, EventBusProtocol, Subscription`
+**Когда применять:** нужно синхронно оповестить внутрипроцессных слушателей о **факте** («что произошло»: `TopologyReplaced`, `PluginConfigChanged`). Диспетчеризация по `type(event)` — подписчик на тип A получает только события типа A.
+**Ключевое:** `EventBus` (`subscribe(Type, handler)` → `Subscription`; `publish(event)`), `EventBusProtocol`, `Subscription` (context-manager). Pure Python, шина не знает о доменных типах.
+**Не путать:** это **in-proc факты**, а не cross-proc системные события (`EventManager` в `shared_resources_module`), не команды (`dispatch_module`) и не реактивное состояние (`state_store_module`). См. [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md) §«Три оси событий».
+**Зависимости:** stdlib (leaf).
+**Подробно:** [`modules/event_module/README.md`](../modules/event_module/README.md)
+
+---
+
+## L7 — Command & Work
 
 ### `command_module` — команды (тонкий фасад над dispatch)
 **Импорт:** `from multiprocess_framework import CommandManager`
@@ -163,6 +181,15 @@ UI (опционально)   L11  frontend_module (PySide6)
 **Ключевое:** `CommandManager` (с `BaseManager + ObservableMixin`), `BaseCommandManager` (lite). Синхронный by design — async-буфер уже выше через `RouterManager`.
 **Зависимости:** `dispatch_module`, `base_manager`.
 **Подробно:** [`modules/command_module/README.md`](../modules/command_module/README.md)
+
+### `actions_module` — action-bus с undo/redo (для GUI)
+**Импорт:** `from multiprocess_framework.modules.actions_module import Action, ActionBus, ActionBuilder`
+**Когда применять:** нужна **отменяемая** мутация состояния из GUI: `ActionBus.execute(action)` с undo/redo-стеками, coalescing по `coalesce_key`, опциональным журналом. Carve-out из `frontend_module/actions/` (ADR-124).
+**Ключевое:** `Action` (`SchemaBase`, `forward_patch`/`backward_patch`), `ActionBus` (undo/redo, coalescing, `IActionLogWriter`), `ActionBuilder` (фабрика; приложения наследуют), `SnapshotHistory`, `IRegistersManagerGui` (Protocol). Не требует PySide6; writer лога — в `Services/sql/action_log/`.
+**Не путать:** `command_module` — это `имя → handler` (IPC-команды, без отката); `actions_module` — **действия с undo/redo** поверх регистров. Разные оси.
+**Статус:** прод-undo в прототипе сейчас идёт через domain `CommandDispatcherOrchestrator` (не `ActionBus`); модуль сохраняется как переиспользуемый building-block. Подробнее — [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md) §«command vs action».
+**Зависимости:** `data_schema_module`.
+**Подробно:** [`modules/actions_module/README.md`](../modules/actions_module/README.md)
 
 ### `worker_module` — потоки внутри процесса
 **Импорт:** `from multiprocess_framework import WorkerManager, ThreadConfig, ThreadPriority`
@@ -197,7 +224,7 @@ UI (опционально)   L11  frontend_module (PySide6)
 
 ---
 
-## L7 — Process
+## L8 — Process
 
 ### `process_module` — база дочернего процесса
 **Импорт:** `from multiprocess_framework import ProcessModule`
@@ -215,7 +242,7 @@ UI (опционально)   L11  frontend_module (PySide6)
 
 ---
 
-## L8 — Orchestration
+## L9 — Orchestration
 
 ### `process_manager_module` — оркестратор системы
 **Импорт:** `from multiprocess_framework import SystemLauncher, ProcessManagerProcess, ProcessRegistry, ProcessMonitor, ProcessPriority`
@@ -233,18 +260,29 @@ UI (опционально)   L11  frontend_module (PySide6)
 
 ---
 
-## L9 — Storage
+## L10 — Registries (реестры сущностей)
 
-### `sql_module` — SQL поверх SchemaBase
-**Импорт:** `from Services.sql import SQLManager, SQLManagerConfig`
-**Когда применять:** работа с БД (SQLite / PostgreSQL / MySQL) — DDL из `SchemaBase`, типизированные репозитории, Django-style `QuerySet`, `UnitOfWork`, экспорт в TXT/CSV/XLSX. Dict at Boundary для команд.
-**Ключевое:** `SQLManager`, `DDLBuilder`, `QuerySet[T]`, `GenericRepository[T, ID]`, `SchemaBaseMapper`, `SQLMeta`, `UnitOfWork`/`AsyncUnitOfWork`, `TableExporter`.
-**Зависимости:** `base_manager`, `data_schema_module`.
-**Подробно:** [`modules/sql_module/README.md`](../modules/sql_module/README.md)
+> Семейство «реестр именованных сущностей»: singleton + lifecycle (+ YAML-persist у display). Разные **сущности**, общий паттерн — см. [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md) §«Семейство реестров».
+
+### `service_module` — реестр long-running сервисов
+**Импорт:** `from multiprocess_framework.modules.service_module import ServiceRegistry, register_service, IService, discover`
+**Когда применять:** метаданные и жизненный цикл объектов с явным lifecycle (камеры, БД-подключения, auth-провайдеры). В отличие от `PluginRegistry` — без hot-reload, расширенный автомат `UNREGISTERED → READY → RUNNING → STOPPED → ERROR`.
+**Ключевое:** `ServiceRegistry` (singleton), `IService` (Protocol), `@register_service`, `scanner.discover(*dirs)` → `DiscoveryResult`, `ServiceEntry`, `ServiceLifecycle`. Не знает о реализациях из `Services/` — инстанцирование на application-слое.
+**Зависимости:** `base_manager` (+ stdlib). ADR-129.
+**Подробно:** [`modules/service_module/README.md`](../modules/service_module/README.md)
+
+### `display_module` — реестр SHM-каналов отображения кадров
+**Импорт:** `from multiprocess_framework.modules.display_module import DisplayRegistry, DisplayEntry`
+**Когда применять:** декларативно объявить именованные SHM-каналы для кадров; при старте `SharedResourcesManager` читает blueprint и создаёт SHM-сегменты. Модуль generic — не знает о numpy/vision-семантике (shape/dtype вычисляет prototype-слой).
+**Ключевое:** `DisplayRegistry` (singleton, thread-safe, YAML persist/load), `DisplayEntry` (dataclass), `IDisplayRegistry`/`IDisplayChannel` (Protocol). ADR-130.
+**Зависимости:** stdlib + `pyyaml`.
+**Подробно:** [`modules/display_module/README.md`](../modules/display_module/README.md)
+
+> **Storage (`sql_module`)** вынесен в `Services/sql` (Phase 4.1, ADR-121): `from Services.sql import SQLManager, SQLManagerConfig` — DDL из `SchemaBase`, `QuerySet[T]`, `UnitOfWork`, `TableExporter`. Детали — [`Services/sql/README.md`](../../Services/sql/README.md).
 
 ---
 
-## L10 — Application kit
+## L11 — Application kit
 
 ### `registers_module` — runtime регистров
 **Импорт:** `from multiprocess_framework import RegistersManager`
@@ -255,7 +293,7 @@ UI (опционально)   L11  frontend_module (PySide6)
 
 ---
 
-## L11 — UI (опционально)
+## L12 — UI (опционально)
 
 ### `frontend_module` — PySide6-виджеты с привязкой к регистрам
 **Импорт:** `from multiprocess_framework.modules.frontend_module import FrontendManager`

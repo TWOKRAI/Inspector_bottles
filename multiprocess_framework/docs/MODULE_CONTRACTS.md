@@ -1,8 +1,9 @@
 # Module Contracts — Контракты модулей
 
-**Назначение:** для каждого из 21 модуля указано: цель, публичный контракт (`interfaces.py` + ключевые классы), обязательные инварианты, входы/выходы, зависимости. Документ — параллельная сетка к [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md): тот навигатор «когда применять», этот — «что обязано быть».
+**Назначение:** для каждого из 24 модулей указано: цель, публичный контракт (`interfaces.py` + ключевые классы), обязательные инварианты, входы/выходы, зависимости. Документ — параллельная сетка к [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md): тот навигатор «когда применять», этот — «что обязано быть». Границы и разбор путающих осей — [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md).
 
-**Обновлено:** 2026-05-07 — `state_store_module` актуализирован под ADR-SS-011/012/013, `chain_module` — под ADR-CHN-006/007 (renamed из ADR-CM-*; код модуля **CHN**, не **CM** — последний за `console_module`).
+**Обновлено:** 2026-07-08 — добавлены контракты `event_module`, `actions_module`, `service_module`, `display_module` (сверка с фактом, 24 модуля); `sql_module` вынесен в `Services/sql` (раздел Storage → заметка).
+**Ранее** 2026-05-07 — `state_store_module` актуализирован под ADR-SS-011/012/013, `chain_module` — под ADR-CHN-006/007 (renamed из ADR-CM-*; код модуля **CHN**, не **CM** — последний за `console_module`).
 
 > **Формат записи модуля:**
 > - **Цель** — одно предложение
@@ -307,7 +308,30 @@
 
 ---
 
-## L6 — Command & Work
+## L6 — Events (in-proc)
+
+### `event_module`
+
+**Цель:** Generic typed in-proc pub/sub — синхронная шина «фактов» с диспетчеризацией по `type(event)`.
+
+**Контракт:**
+- `EventBusProtocol` (Protocol) — `subscribe(event_type, handler) -> Subscription`, `publish(event) -> None`.
+- `EventBus` — реализация; опц. `error_handler: (exc, event) -> None`. Хранит подписчиков по `type`.
+- `Subscription` — дескриптор подписки: `unsubscribe()`; поддерживает context-manager (`with bus.subscribe(...) as sub`).
+- `ErrorHandler` — тип колбэка ошибок.
+
+**Инварианты:**
+1. Диспетчеризация строго по `type(event)` — подписчик на тип A не видит подтипы/другие типы.
+2. Шина **не знает** доменных типов событий — доменные dataclass-события живут в приложении/плагине.
+3. **In-proc** и синхронно: не для межпроцессной доставки (это `EventManager` в `shared_resources_module`), не для команд (`dispatch_module`), не для реактивного состояния (`state_store_module`).
+4. Leaf: зависимостей от других модулей фреймворка нет.
+
+**Зависимости:** — (stdlib).
+**Тестов:** +
+
+---
+
+## L7 — Command & Work
 
 ### `command_module`
 
@@ -327,6 +351,31 @@
 
 **Зависимости:** `dispatch_module`, `base_manager`.
 **Тестов:** 34
+
+---
+
+### `actions_module`
+
+**Цель:** Action-bus с undo/redo и coalescing для GUI — отменяемые мутации состояния (carve-out из `frontend_module/actions/`, ADR-124).
+
+**Контракт:**
+- `Action(SchemaBase)` — иммутабельная единица изменения: `forward_patch`, `backward_patch`, `coalesce_key`.
+- `ActionBus` — единая точка выполнения: `execute(action)`, `undo()`, `redo()`, coalescing по `coalesce_key`, опц. журнал через `IActionLogWriter`.
+- `ActionBuilder` — generic-фабрика действий (приложения наследуют для доменных методов); `from_field()` принимает объект с `register_name`/`field_name` (локальный Protocol `RegisterBindingLike`).
+- `ActionHandler` — обработчик применения патча.
+- `IRegistersManagerGui` (Protocol) — контракт менеджера регистров для GUI (`ActionBus` работает с любым, кто его реализует; PySide6 не требуется).
+- `SnapshotHistory` / `SnapshotEntry` — история снимков для undo/redo.
+- `persistence/interfaces.py`: `IActionLogWriter`, `IActionLogRepository` — контракты для Services (реализация writer'а — в `Services/sql/action_log/`).
+
+**Инварианты:**
+1. `Action` иммутабельна; откат — через `backward_patch`, не мутацией.
+2. Модуль **не зависит** от `frontend_module` и PySide6 — только `IRegistersManagerGui` Protocol.
+3. Конкретный лог-writer — в Services; framework знает только Protocol-контракт (правило слоёв, ADR-120).
+4. Ось «действия с undo/redo» ≠ `command_module` (IPC-команды `имя→handler`, без отката).
+5. **Статус:** прод-undo в прототипе идёт через domain `CommandDispatcherOrchestrator`, `ActionBus` как прод-путь не задействован; модуль сохраняется как building-block (решение владельца 2026-07-08; ADR-COMM-002 об удалении не исполняется).
+
+**Зависимости:** `data_schema_module`.
+**Тестов:** +
 
 ---
 
@@ -394,7 +443,7 @@
 
 ---
 
-## L7 — Process
+## L8 — Process
 
 ### `process_module`
 
@@ -452,7 +501,7 @@
 
 ---
 
-## L8 — Orchestration
+## L9 — Orchestration
 
 ### `process_manager_module`
 
@@ -485,37 +534,53 @@
 
 ---
 
-## L9 — Storage
+## L10 — Registries (реестры сущностей)
 
-### `sql_module`
+### `service_module`
 
-**Цель:** SQL-инструментарий поверх `SchemaBase` (DDL, типизированные репозитории, QuerySet, UoW, экспорт).
+**Цель:** Реестр и lifecycle-метаданные long-running сервисов (камеры, БД-подключения, auth-провайдеры) — generic, без знания о конкретных реализациях (ADR-129).
 
 **Контракт:**
-- `SQLManager(BaseManager, ObservableMixin)` — `execute(sql, params)`, `query(sql, params)`, `create_tables(schema_classes, dialect)`, `objects(schema_class) -> QuerySet`, `get_repository(schema_class) -> IRepository`, `uow()/uow_async()`, `execute_command(cmd_dict) -> dict`.
-- `ISyncEngineAdapter`/`IAsyncEngineAdapter` — Strategy pattern.
-- `ISchemaMapper` — `entity_to_row/row_to_entity`.
-- `IRepository[T, ID]` / `GenericRepository` — типизированный CRUD.
-- `IUnitOfWork` / `IAsyncUnitOfWork` — транзакции.
-- `QuerySet[T]` — Django-style immutable builder.
-- `DDLBuilder` — генерация DDL для SQLite/PostgreSQL/MySQL.
-- `SchemaBaseMapper` — реализация ISchemaMapper.
-- `SQLMeta` — ClassVar (table_name, indexes, unique_together).
-- `TableExporter` — TXT/CSV/XLSX.
-- `DBQueryCommand`, `DBExecuteCommand`, `DBInsertCommand` — typed dict commands.
+- `IService` (Protocol) — контракт сервиса с явным жизненным циклом.
+- `ServiceLifecycle(Enum)` — `UNREGISTERED → READY → RUNNING → STOPPED → ERROR`.
+- `ServiceRegistry` (singleton) — `register/get/list`, `ServiceEntry` (метаданные записи).
+- `@register_service` — декоратор регистрации.
+- `discover(*dirs) -> DiscoveryResult` — сканер директорий сервисов.
 
 **Инварианты:**
-1. **Dict at Boundary**: `execute/query/execute_command` принимают/возвращают `dict`.
-2. `QuerySet` — immutable, без побочных эффектов.
-3. **Fork-safety:** при `INSPECTOR_MULTIPROCESS=1` или `config.fork_safe=True` адаптер использует `NullPool`.
-4. Async-адаптер создаётся лениво при первом вызове.
+1. Generic-компонент: не знает о `Services/`, `Plugins/`, `multiprocess_prototype/` — инстанцирование и запуск на application-слое.
+2. В отличие от `PluginRegistry` — **без hot-reload**, расширенный lifecycle-автомат.
+3. Реестр **сервисов** ≠ реестр регистров (`registers_module`) ≠ реестр дисплеев (`display_module`).
 
-**Зависимости:** `base_manager`, `data_schema_module`.
-**Тестов:** ~70+
+**Зависимости:** `base_manager` (+ stdlib).
+**Тестов:** 91 (`registry` 26 + `scanner` 15 + …).
 
 ---
 
-## L10 — Application kit
+### `display_module`
+
+**Цель:** Декларативный реестр именованных SHM-каналов отображения кадров (blueprint) — generic, без vision-семантики (ADR-130).
+
+**Контракт:**
+- `DisplayEntry` (dataclass) — описание канала (имя, метаданные; без numpy shape/dtype).
+- `IDisplayRegistry` / `IDisplayChannel` (Protocol) — контракты реестра и канала.
+- `DisplayRegistry` (singleton, thread-safe) — `register(entry)`, `persist(path)`/`load(path)` (YAML).
+
+**Инварианты:**
+1. Модуль **не создаёт** SHM-сегменты — только blueprint; создание при старте делает `SharedResourcesManager` (ADR-025).
+2. Не знает о numpy/vision — конкретный shape/dtype вычисляет prototype-слой.
+3. Реестр **SHM-каналов кадров** ≠ прочие реестры (см. семейство в `MODULES_RESPONSIBILITY_MAP.md`).
+
+**Зависимости:** stdlib + `pyyaml`.
+**Тестов:** 12.
+
+---
+
+> **Storage — `sql_module`** вынесен в `Services/sql` (Phase 4.1, ADR-121): `SQLManager`, `DDLBuilder`, `QuerySet[T]`, `GenericRepository[T, ID]`, `UnitOfWork`/`AsyncUnitOfWork`, `TableExporter`, Dict-at-Boundary команды. Инварианты (immutable QuerySet, fork-safe `NullPool`, ленивый async-адаптер) — там же. Контракт: [`../../Services/sql/README.md`](../../Services/sql/README.md).
+
+---
+
+## L11 — Application kit
 
 ### `registers_module`
 
@@ -537,7 +602,7 @@
 
 ---
 
-## L11 — UI (опционально)
+## L12 — UI (опционально)
 
 ### `frontend_module`
 
@@ -579,16 +644,19 @@
 | `shared_resources_module` | 5 233 | L5 | base | 50+ |
 | `config_module` | 2 393 | L5 | base, schema | 49 |
 | `state_store_module` | ~3 300 | L5 | base | 421 |
-| `command_module` | 1 220 | L6 | dispatch, base | 34 |
-| `worker_module` | 2 356 | L6 | base | 49 |
-| `chain_module` | ~1 610 | L6 | base | 67 |
-| `process_module` | 3 965 | L7 | worker, router, logger, srm, schema | 60+ |
-| `console_module` | 2 877 | L7 | base, schema, logger | 40+ |
-| `process_manager_module` | 4 612 | L8 | process, command | 80+ |
-| `sql_module` | 3 775 | L9 | base, schema | 70+ |
-| `registers_module` | 1 169 | L10 | schema | 30+ |
-| `frontend_module` | 12 039 | L11 | process, router, schema, logger | 150+ |
+| `event_module` | ~150 | L6 | — | + |
+| `command_module` | 1 220 | L7 | dispatch, base | 34 |
+| `actions_module` | ~700 | L7 | schema | + |
+| `worker_module` | 2 356 | L7 | base | 49 |
+| `chain_module` | ~1 610 | L7 | base | 67 |
+| `process_module` | 3 965 | L8 | worker, router, logger, srm, schema | 60+ |
+| `console_module` | 2 877 | L8 | base, schema, logger | 40+ |
+| `process_manager_module` | 4 612 | L9 | process, command | 80+ |
+| `service_module` | ~500 | L10 | base | 91 |
+| `display_module` | ~300 | L10 | pyyaml | 12 |
+| `registers_module` | 1 169 | L11 | schema | 30+ |
+| `frontend_module` | 12 039 | L12 | process, router, schema, logger | 150+ |
 
-**Итого:** 21 модуль, ~80 000 LOC (с тестами), 670+ файлов.
+**Итого:** 24 модуля во фреймворке, ~76 000 LOC (с тестами). `sql_module` (~3 775 LOC) вынесен в `Services/sql` (Phase 4.1) — в счётчик фреймворка не входит.
 
 \* `message_module` в SPEC.md классифицируется как L3 (Messaging), в карте слоёв `MODULES_OVERVIEW.md` — как L1-foundation для message-данных. Обе классификации валидны; зависит только от `data_schema_module`.
