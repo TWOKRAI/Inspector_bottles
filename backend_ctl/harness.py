@@ -26,12 +26,13 @@
 from __future__ import annotations
 
 import os
+import signal
 import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
-from backend_ctl.driver import BackendDriver
+from backend_ctl.driver import BackendDriver, _find_payload
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
@@ -321,6 +322,37 @@ class BackendHarness:
                 Path(pid_file).unlink(missing_ok=True)
         except OSError:
             pass
+
+    def kill_child(self, name: str) -> int:
+        """Fault-injection (Ф3.7): жёстко убить дочерний процесс по имени (SIGKILL).
+
+        PID берётся через driver ``introspect.status`` (честная наблюдаемость —
+        сам процесс отдаёт ``os.getpid()``). SIGKILL, а НЕ ``process.stop``:
+        graceful stop → exitcode 0 → статус "stopped" → авто-рестарт не триггерится.
+        SIGKILL → crash (exitcode != 0) → монитор ловит по ``is_alive()`` за ≤ poll
+        (0.5с), а не ждёт heartbeat_timeout 15с. Так тест проверяет реальную
+        супервизию: смерть → авто-рестарт → поток данных возобновился.
+
+        Args:
+            name: имя дочернего процесса в топологии (source/hub).
+
+        Returns:
+            PID убитого процесса.
+
+        Raises:
+            RuntimeError: имя не найдено / нет pid в ответе / driver не поднят.
+        """
+        res = self.driver.introspect_status(name)
+        payload = _find_payload(res, "pid", "process")
+        pid = payload.get("pid") if isinstance(payload, dict) else None
+        if not isinstance(pid, int) or pid <= 0:
+            raise RuntimeError(f"kill_child('{name}'): pid не найден в introspect.status (ответ: {res!r})")
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError as exc:  # процесс уже мёртв — считаем как «убит»
+            self._log(f"[harness] kill_child('{name}'): процесс pid={pid} уже мёртв ({exc})")
+        self._log(f"[harness] kill_child('{name}') → SIGKILL pid={pid}")
+        return pid
 
     def _orchestrator_pid(self) -> Optional[int]:
         """pid процесса-оркестратора (ProcessManager) для scoped-teardown. None если нет."""

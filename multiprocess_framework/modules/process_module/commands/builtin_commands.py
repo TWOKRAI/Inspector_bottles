@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -420,7 +421,13 @@ class BuiltinCommands:
         return {"success": True, "process": svc.name, "registers": registers}
 
     def _cmd_introspect_status(self, data=None, **kwargs) -> dict:
-        """Имя процесса, статус, воркеры (имена + сериализуемые статусы)."""
+        """Имя процесса, PID, статус, воркеры (имена + сериализуемые статусы).
+
+        ``pid`` — реальный OS-pid процесса (``os.getpid()`` исполняется ВНУТРИ
+        целевого процесса). Честная наблюдаемость для debug-plane и fault-injection
+        (Ф3.7): harness читает pid → ``os.kill(pid, SIGKILL)`` для проверки
+        авто-рестарта. Аддитивно — прежние поля не тронуты.
+        """
         svc = self._services
         workers: dict = {}
         wm = svc.worker_manager
@@ -432,6 +439,7 @@ class BuiltinCommands:
         return {
             "success": True,
             "process": svc.name,
+            "pid": os.getpid(),
             "status": getattr(svc, "_current_process_status", "unknown"),
             "workers": workers,
         }

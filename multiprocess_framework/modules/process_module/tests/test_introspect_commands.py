@@ -218,6 +218,14 @@ class TestIntrospectStatus:
         result = cm.dispatch("introspect.status")
         assert result["workers"] == {}
 
+    def test_reports_own_pid(self) -> None:
+        """Ф3.7: introspect.status отдаёт реальный OS-pid (os.getpid) для fault-injection."""
+        import os
+
+        _svc, cm = _make(worker_manager=None)
+        result = cm.dispatch("introspect.status")
+        assert result["pid"] == os.getpid()
+
 
 # ====================================================================== #
 #  introspect.capabilities (Ф1 Task 1.9 — контактная книжка v0)           #
