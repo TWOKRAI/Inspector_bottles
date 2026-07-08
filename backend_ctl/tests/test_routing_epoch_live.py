@@ -27,7 +27,11 @@ from backend_ctl.harness import BackendHarness
 
 _SENDER = "devices"       # protected → выживает full-replace switch и restart соседа
 _PEER = "preprocessor"    # non-protected → пересоздаётся на switch/restart
-_PORT = 8778              # уникальный порт этого модуля (≥8770)
+# По СВОЕМУ бэкенду на каждый тест (изоляция): switch необратимо роняет очередь
+# соседа у devices (тот навсегда доставляет через relay), поэтому restart-тест
+# обязан стартовать с чистого бэкенда, иначе relayed_to_hub-проба ложно растёт.
+_PORT_SWITCH = 8778       # уникальные порты (≥8770)
+_PORT_RESTART = 8779
 
 
 def _result(res: dict) -> dict:
@@ -38,9 +42,20 @@ def _result(res: dict) -> dict:
 
 
 @pytest.fixture(scope="module")
-def routing_backend():
-    """Headless-бэкенд с фундаментом (base.yaml → devices) на уникальном порту."""
-    harness = BackendHarness(with_base=True, port=_PORT)
+def switch_backend():
+    """Свой headless-бэкенд для switch-теста (base.yaml → devices)."""
+    harness = BackendHarness(with_base=True, port=_PORT_SWITCH)
+    drv = harness.start()
+    try:
+        yield drv
+    finally:
+        harness.stop()
+
+
+@pytest.fixture(scope="module")
+def restart_backend():
+    """Свой headless-бэкенд для restart-теста (изоляция от switch)."""
+    harness = BackendHarness(with_base=True, port=_PORT_RESTART)
     drv = harness.start()
     try:
         yield drv
@@ -86,10 +101,9 @@ def _relayed_to_hub(drv, proc: str) -> int:
 
 
 @pytest.mark.harness_smoke
-@pytest.mark.xfail(strict=True, reason="дыра Ф3.1: стейл-очереди после switch — фикс в шагах 5-6")
-def test_peer_send_after_switch_delivered(routing_backend) -> None:
+def test_peer_send_after_switch_delivered(switch_backend) -> None:
     """peer→peer send выжившего процесса после switch доставляется (acceptance A)."""
-    drv = routing_backend
+    drv = switch_backend
 
     sub = _result(drv.state_subscribe(f"processes.{_PEER}.**", timeout=8.0))
     assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
@@ -122,10 +136,9 @@ def test_peer_send_after_switch_delivered(routing_backend) -> None:
 
 
 @pytest.mark.harness_smoke
-@pytest.mark.xfail(strict=True, reason="дыра Ф3.1: стейл-очереди после restart — фикс в шагах 5-6")
-def test_peer_send_after_restart_delivered(routing_backend) -> None:
+def test_peer_send_after_restart_delivered(restart_backend) -> None:
     """peer→peer send после restart соседа доставлен И relayed_to_hub==0 (acceptance B)."""
-    drv = routing_backend
+    drv = restart_backend
 
     sub = _result(drv.state_subscribe(f"processes.{_PEER}.**", timeout=8.0))
     assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
