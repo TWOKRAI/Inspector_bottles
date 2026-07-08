@@ -73,3 +73,31 @@ Python-карты остаются source of truth для `RobotClient` (46 те
 **Отвергнуто:** кодирование карт через SchemaBase/Pydantic — слишком тяжело для
 декларативных данных; YAML проще редактировать оператору.
 **Связь:** ADR-DH-003 (первоначальное решение), ADR-MB-001 (RegisterMap).
+
+## ADR-DH-008: Чтение реестра/драйверов — только через snapshot-API (M-race-1)
+
+**Дата:** 2026-07-08
+**Статус:** accepted (Ф3.4 constructor-master)
+
+Реестр (`_entries`) и живые драйверы (`_drivers`) `DeviceManager` мутируются из
+командного потока (upsert/remove) и читаются из supervisor- и per-device
+tick-воркеров. Прямой обход приваток из другого потока при параллельном
+`pop`/`[]=` даёт `RuntimeError: dictionary changed size during iteration` либо
+полу-удалённое состояние.
+
+**Решение:** единственный потокобезопасный способ читать реестр/драйверы
+ИЗВНЕ менеджера — публичный snapshot-API под `_registry_lock` (RLock):
+`snapshot_registry()`, `get_driver()`, `connected_ids()`, `device_count()`,
+`connected_count()`. Внутренние чтения менеджера (get/connect/disconnect/call/
+describe) тоже переведены на лок/снапшот.
+
+**Контракт:** методы возвращают КОПИЮ верхнего уровня под локом (shallow) —
+защищают от мутации словаря, НЕ от мутации самого DeviceEntry/драйвера. IO
+(connect/disconnect/tick/is_connected) выполняется ВНЕ лока — критические секции
+максимально короткие (RLock реентрантен, но IO под локом держать нельзя).
+
+Enforced гейтом `Plugins/hub/device_hub/tests/test_no_private_access.py`
+(прямой доступ `_manager._entries/._drivers` из прод-кода плагина = 0).
+
+**Отвергнуто:** обход приваток из потоков напрямую — исходная гонка.
+**Связь:** ADR-DH-004 (remove под локом), ADR-DH-006 (supervisor-воркер).
