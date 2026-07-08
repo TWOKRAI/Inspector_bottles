@@ -270,10 +270,12 @@ class ProcessMonitor:
           его публикует сам процесс (self-publish), а монитор лишь ЧИТАЕТ
           опубликованное из локального дерева. Нет ни одного fps — НЕ публикуем
           (карточка остаётся «—», не «0»). См. plans/telemetry-self-publish-redesign.md.
-        - ``system.health.broken_wires`` = число оборванных связей. Источник
-          (wire/topology runtime-статус) ProcessMonitor-у недоступен — публикуем 0.
-          TODO(telemetry): подключить, когда появится реестр WireStatus в
-          ProcessManager (см. project_pipeline_demo / WireStatus). Не выдумываем.
+        - ``system.health.broken_wires`` = число оборванных wire-проводов (Ф3.5).
+          Источник истины — ``ProcessManager._active_wires`` (заполняется
+          ``wire.setup``; путь B — GUI ``connect_wire``). Провод broken, если его
+          статус помечен ``"broken"`` (окно рестарта/switch) ИЛИ source/target не
+          в числе running. При ЖИВОЙ топологии без проводов → 0 (не «константа»,
+          а честный ноль). Публикация per-wire статусов — ``_publish_wires``.
         """
         running = [pname for pname, snap in all_states.items() if snap.get("status") == "running"]
         self._publish_state("system.health.active", len(running))
@@ -294,8 +296,49 @@ class ProcessMonitor:
         if fps_values:
             self._publish_state("system.health.avg_fps", round(sum(fps_values) / len(fps_values), 2))
 
-        # broken_wires: источник недоступен на уровне ProcessMonitor → 0 + TODO выше.
-        self._publish_state("system.health.broken_wires", 0)
+        # broken_wires (Ф3.5): реальный счёт из PM._active_wires + per-wire статусы.
+        broken_wires = self._publish_wires(set(running))
+        self._publish_state("system.health.broken_wires", broken_wires)
+
+    def _publish_wires(self, running: set[str]) -> int:
+        """Опубликовать per-wire статусы (``system.wires.<key>.status``) + счёт broken.
+
+        Источник — ``ProcessManager._active_wires`` (wire_key → метаданные,
+        заполняется ``wire.setup``). Провод считается ``broken``, если его
+        сохранённый статус ``"broken"`` (окно рестарта/switch, honest-marking PM)
+        ИЛИ хотя бы один endpoint (source/target) не в ``running``. Иначе
+        ``pending`` (не активирован) либо ``active``.
+
+        Guard'ы: ``_active_wires`` отсутствует / не dict (mock-PM, здоровая
+        топология без проводов) → 0 без публикаций. Это сохраняет прежнее
+        поведение «0 при живой топологии» — но теперь это ЧЕСТНЫЙ ноль, а не
+        безусловная константа.
+
+        Args:
+            running: имена процессов в статусе "running" (из ``_publish_health``).
+
+        Returns:
+            Число оборванных проводов (для ``system.health.broken_wires``).
+        """
+        wires = getattr(self.process, "_active_wires", None)
+        if not isinstance(wires, dict) or not wires:
+            return 0
+        broken = 0
+        for wire_key, info in wires.items():
+            if not isinstance(info, dict):
+                continue
+            src = info.get("source_process", "")
+            tgt = info.get("target_process", "")
+            endpoints_alive = src in running and tgt in running
+            if info.get("status") == "broken" or not endpoints_alive:
+                status = "broken"
+                broken += 1
+            elif info.get("status") == "pending":
+                status = "pending"
+            else:
+                status = "active"
+            self._publish_state(f"system.wires.{wire_key}.status", status)
+        return broken
 
     # ----------------------------------------------------------------
     # Мониторинг: основной цикл
