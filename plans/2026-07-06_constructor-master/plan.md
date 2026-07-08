@@ -191,7 +191,15 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 | 5.9 | [ ] | GUI state-plane: полный Delta до GUI (frontend/process.py:125 — сейчас теряет delete/MISSING/transaction_id); `StateProxy.ensure_subscription` c refcount (авто-подписка bind — убирает класс ошибок «панель мертва, забыли wildcard»); один glob-матчер вместо трёх | delete-дельта доходит до биндингов | M |
 | 5.10 | [ ] опц | TabSpec/TabRegistry (механизм уже app-agnostic, app-specific только TAB_ORDER) — если останется бюджет фазы | TAB_ORDER = данные | S |
 
-Риск: reverse-import при carve → check_rules в каждом acceptance; шимы сохраняют пути импорта прототипа.
+**ObservabilityHub — фасад наблюдаемости модуля** (идея владельца 2026-07-07, [observability-hub-idea.md](observability-hub-idea.md); триаж на G1, исполнение здесь). Один недостающий слой поверх готовых примитивов (ObservableMixin развязал эмиссию от доставки; `channel_routing_module` даёт `IChannel`/`IBufferStrategy`). Класс = механизм ур.1; wiring в слоты = композиция ур.2 («рыба»). Идёт после skeleton `app_module` (5.11–5.13 из app-template-idea.md):
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| 5.15 | [ ] | **ObservabilityHub core** (механизм ур.1, `channel_routing_module`): duck-type протоколы logger (`debug…critical`) / stats (`record_metric/increment/record_timing/gauge`) / error (`track_error/record_error`); вместо доставки — кладёт записи в bounded-каналы (`log/error/stats`) на базе `IChannel`+`IBufferStrategy` с тегом модуля; `drain_logs/errors/stats`; overflow **drop_oldest + счётчик потерь** (урок 3.3/G.4: терять можно, молчать — нельзя); записи — pickle-safe dict (Dict at Boundary), severity-роутинг ErrorManager и context сохранены. **module-contract** (README + Protocol + contract-тесты) | contract-тесты: эмиссия→канал; overflow→счётчик потерь растёт; drain опустошает; severity/context не теряются. Ноль правок внутри существующих модулей (только конструктор-инъекция в слоты) | M |
+| 5.16 | [ ] | **Wiring в composition root**: `app_module` раздаёт hub в слоты ObservableMixin (`logger/stats/error`) выбранных **non-hot-path** модулей (пилот: `worker_module` + один сервис); владелец дренирует **по такту heartbeat** (прецедент health self-publish 2.1) в `LoggerManager/ErrorManager/StatsManager`; teardown-политика при смерти владельца (flush или drop — явно). Гранулярность: один hub на процесс с module-тегом в записи | оба рецепта бутятся; логи/метрики/ошибки доходят до менеджеров через hub — **паритет** с прямой доставкой; minimal_app тоже через hub; hot-path модули НЕ затронуты | M |
+| 5.17 | [ ] опц | **Разделение hub↔health**: контракт-тест, что канал (доставка) и `ctx.health` (агрегация) кормятся из одной точки эмиссии, но живут раздельно — hub не дублирует health-счётчики | тест «одна эмиссия → и в канал, и в health, без двойного учёта» | S |
+
+Риск: reverse-import при carve → check_rules в каждом acceptance; шимы сохраняют пути импорта прототипа. ObservabilityHub — hot-path adoption НЕ здесь (см. cross-ref Ф7 G.4); до Ф7 кадровые модули на прямой доставке.
 
 ## Ф7 — Hot-path G (ОДНИМ вскрытием, строго последним, один агент, ~5 дней)
 
@@ -209,6 +217,8 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 | G.8 | [ ] | pipeline-live-control Task 3.3: drain→detach→stop воркера | нет полукадров при detach | M |
 
 P3.2 StateChannel остаётся DEFERRED. Ничего из анти-карго-культ списка (analysis.md §9).
+
+**Cross-ref ObservabilityHub → G.4:** adoption ObservabilityHub (Ф5.15/5.16) на hot-path модулях (frame processing) — под тем же `use_kind_channels`-флагом и drop-counter'ом QoS-профилей G.4, строго ПОСЛЕ seqlock (G.3). До Ф7 hot-path модули остаются на прямой доставке (не через hub).
 
 ## Ф8 — Фокус H (~4 дня)
 
