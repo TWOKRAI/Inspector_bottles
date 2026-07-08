@@ -5,7 +5,7 @@ Per-process stop_event: остановка одного процесса не т
 """
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from multiprocessing import Event, Process
 
@@ -23,6 +23,7 @@ class ProcessRegistry:
         config_manager=None,
         shared_resources=None,
         system_stop_event: Optional[Event] = None,
+        routing_meta_fn: Optional[Callable[[], Dict[str, Any]]] = None,
     ) -> None:
         self.logger = logger
         self.queue_registry = queue_registry
@@ -33,6 +34,9 @@ class ProcessRegistry:
         # ОБЩИЙ system-wide stop: кладётся в bundle КАЖДОГО ребёнка → его lifecycle
         # наблюдает общий event наравне со своим per-process stop_event.
         self._system_stop_event: Optional[Event] = system_stop_event
+        # Ф3.1 (routing-epoch): поставщик routing_meta для bundle нового ребёнка
+        # ({"epoch": N, "incarnations": {...}}). None → пустой meta (совместимость).
+        self._routing_meta_fn: Optional[Callable[[], Dict[str, Any]]] = routing_meta_fn
 
     def add_process(self, process: Process) -> None:
         self.os_processes.append(process)
@@ -117,11 +121,22 @@ class ProcessRegistry:
                             all_process_memory[pname] = mem
             custom["_all_process_memory"] = all_process_memory
 
+            # Ф3.1: снимок epoch/incarnations на момент спавна — новый ребёнок
+            # рождается с актуальными значениями соседей (сверка с routing.refresh).
+            routing_meta: Dict[str, Any] = {}
+            if self._routing_meta_fn is not None:
+                try:
+                    routing_meta = self._routing_meta_fn() or {}
+                except Exception as e:  # noqa: BLE001 — meta не критична для спавна
+                    if self.logger:
+                        self.logger._log_warning(f"routing_meta_fn для '{name}' упал: {e}")
+
             bundle = build_bundle(
                 queues=queues,
                 config=process_config,
                 custom=custom,
                 routing_map=routing_map,
+                routing_meta=routing_meta,
             )
 
             process = Process(
