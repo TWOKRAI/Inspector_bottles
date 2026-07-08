@@ -90,3 +90,27 @@
 - (3) Публиковать 0 при отсутствии hz — отвергнута: «0» вводит в заблуждение (выглядит как «работает, но 0 кадров»); «—» честнее отражает «метрика недоступна».
 
 **Последствия:** Карточки получают живые FPS/latency и health без новых путей доставки (reuse существующего heartbeat→StateStore). Семантика max задокументирована в docstring `_publish_process_aggregate`. broken_wires остаётся заглушкой до интеграции WireStatus.
+
+## ADR-PMM-010: routing-epoch — гибрид данные-refresh (switch) + стабильные очереди (restart)
+
+**Статус:** принято
+**Дата:** 2026-07-08
+**Refs:** plans/2026-07-06_constructor-master/plan.md (Ф3.1), f3.1-routing-epoch.md
+
+**Контекст:** Каждый дочерний процесс получает при спавне **замороженный снимок** routing_map (свои Queue-ссылки соседей из bundle). После `restart_process`/`apply_topology` PM создавал НОВЫЕ Queue-объекты, а выжившие соседи (protected: `gui`, `devices`; при инкрементальном diff — любой не тронутый) оставались со стейл-ссылками на осиротевшие очереди убитых процессов. `put_nowait` в мёртвую очередь возвращает успех → **тихая потеря** peer→peer трафика (задокументировано в docstring `_cmd_process_relay`). Fallback'и router'а (мост 1.1b, hub-relay 1.7) срабатывают ТОЛЬКО при ОТСУТСТВИИ очереди — а у стейл-соседа она есть (мёртвая). Жёсткое ограничение: `multiprocessing.Queue` не пиклится вне spawn → `routing.refresh` не может нести Queue-объекты, только данные.
+
+**Решение (гибрид A+B):**
+- **B (restart) — переиспользование очередей.** `SharedResourcesManager.register_process(reuse_queues=True)` создаёт только недостающие qtype; существующие Queue сохраняют `id()`. Новый инстанс наследует те же очереди через bundle, стейл-ссылки соседей остаются ВАЛИДНЫМИ, hot-path кадров не деградирует. Мусор прошлой жизни дренируется (`get_nowait` до Empty, НЕ `clear_queue` — тот спит ~0.2с/очередь). Откат: конфиг `restart_reuse_queues: false`.
+- **A (switch) — декларативный refresh.** Пере-провижининг поднимает `incarnation` процесса (`_bump_incarnation`). После исполнения топологии (успех ИЛИ rollback — оба пересоздают очереди) PM поднимает монотонный `epoch` и рассылает `routing.refresh` (`communication.broadcast`, exclude_self). Payload — ПОЛНЫЙ авторитетный снимок `{epoch, hub, processes: {имя: incarnation}}` (не дельта): повторная/потерянная рассылка самовосстанавливается. Выживший ребёнок сверяет снимок со своей PSR: имя вне снимка ИЛИ incarnation ≠ локальной → `drop_process_queues` → последующий send не найдёт очередь → упадёт в существующий hub-relay (Ф1.7) → PM со свежим PSR доставит. Идемпотентно (guard `epoch ≤ last_seen → ignore`). Bundle несёт `routing_meta` — новые дети рождаются с актуальными epoch/incarnation. Гейт: конфиг `routing_refresh_enabled` (дефолт True) + env `FW_ROUTING_REFRESH != "0"`.
+
+**Окно гонки (осознанно вне scope):** сообщения, уже лежащие в мёртвых очередях или отправленные ДО обработки refresh, теряются (окно ≈ switch + один цикл message-loop получателя; плюс краткий race, когда только что пересозданный ребёнок получает refresh раньше регистрации своего handler'а — безвредно, у него свежие очереди). Sender-side epoch-check на КАЖДОМ send — сознательно отвергнут: это hot-path кадров (`send_to_queue`), проверка epoch на каждый put недопустима. Потерянный refresh лечится следующим (полный снимок). Переполнение system-очереди рассылкой — тема Ф3.3.
+
+**Граница с wire/SHM (Ф3.5):** routing-epoch управляет ТОЛЬКО in-process mp.Queue routing_map. SHM/wire-каналы (`wire.configure`/`wire.teardown`, FrameShmMiddleware) живут отдельным жизненным циклом и пере-issue при switch — ответственность Ф3.5, вне scope этого ADR. `routing.refresh` их не трогает.
+
+**Отклонённые альтернативы:**
+- (C) Manager-proxy очереди (сокет-раундтрип на каждый put) — недопустимо на пути кадров.
+- Sender-side epoch-check на каждом send — hot-path (см. «Окно гонки»).
+- Нести Queue-объекты в refresh — невозможно (`mp.Queue` не пиклится вне inheritance).
+- Всегда сажать соседей на hub-relay после restart — все кадры через system-очередь PM (бутылочное горло).
+
+**Последствия:** peer→peer send выжившего процесса после switch/restart доставляется (было — тихо терялось). Наблюдаемость: `relayed_to_hub` (окольная доставка), `routing_epoch`/`routing_refresh_applied` в `introspect.router_stats`. Полный откат к поведению main — двумя флагами (env/конфиг). Диагностический `routing.probe` даёт детерминированное воспроизведение дыры без реального железа.
