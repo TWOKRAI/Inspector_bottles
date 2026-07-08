@@ -276,6 +276,26 @@ class TestRestartWindow:
 
         assert monitor.previous_states["cam"]["status"] == "failed"
 
+    def test_giveup_publishes_health_failed(self) -> None:
+        """Ф3.6: give-up публикует processes.<name>.health.status=failed в дерево."""
+        from multiprocess_framework.modules.state_store_module import StateStoreManager
+
+        ssm = StateStoreManager(initial_state={}, logger=None)
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm._state_store_manager = ssm
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, max_retries=1, window_sec=0.0))
+
+        # Уже исчерпан лимит (одна метка при max_retries=1) → следующая = give-up
+        monitor._restart_history["cam"] = [time.monotonic()]
+        monitor._try_auto_restart("cam", reason="crashed")
+
+        assert ssm.handle_state_get({"data": {"path": "processes.cam.health.status"}})["value"] == "failed"
+        reason = ssm.handle_state_get({"data": {"path": "processes.cam.health.degraded_reason"}})["value"]
+        assert "give-up" in reason
+        assert ssm.handle_state_get({"data": {"path": "processes.cam.health.updated_at"}})["status"] == "ok"
+
 
 class TestMonitorSyncPause:
     """Task 3.1: stop(wait=True) дожидается завершения текущей итерации."""

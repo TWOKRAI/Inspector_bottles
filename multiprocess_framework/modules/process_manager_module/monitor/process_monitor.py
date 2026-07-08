@@ -13,6 +13,7 @@ import time
 from multiprocessing import Event
 from typing import Any
 
+from ...process_module.health.schema import HealthField, HealthStatus, health_path
 from ...worker_module import ThreadConfig, ThreadPriority
 from ..core.restart_policy import RestartPolicy
 
@@ -646,6 +647,15 @@ class ProcessMonitor:
             prev = self.previous_states.get(process_name)
             self._handle_state_change(process_name, prev, snap)
             self.previous_states[process_name] = snap.copy()
+
+            # Ф3.6: give-up виден и в health-поддереве (контракт health/schema.py).
+            # state.status="failed" оставлен для обратной совместимости, но
+            # acceptance/вкладка «Процессы»/QoS читают именно health.status.
+            # honest broken_wires Ф3.5 живёт под system.wires.* — не конфликтует.
+            reason_txt = f"supervisor give-up: {count} рестартов за {window_sec}с ({reason})"
+            self._publish_state(health_path(process_name, HealthField.STATUS), HealthStatus.FAILED.value)
+            self._publish_state(health_path(process_name, HealthField.DEGRADED_REASON), reason_txt)
+            self._publish_state(health_path(process_name, HealthField.UPDATED_AT), time.time())
 
             if self.process.shared_resources:
                 try:
