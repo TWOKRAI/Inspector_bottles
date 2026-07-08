@@ -31,6 +31,12 @@ class ProcessRegistry:
         self.shared_resources = shared_resources
         self.os_processes: List[Process] = []
         self._stop_events: Dict[str, Event] = {}
+        # Ф3.2 (self-reported ready): per-process mp.Event готовности. PM создаёт
+        # event при спавне, кладёт его в bundle custom (inheritance при spawn, как
+        # stop_event) и хранит ссылку у себя. Ребёнок ставит event сразу после
+        # успешного initialize() → барьер PM видит готовность НЕМЕДЛЕННО, не
+        # message-loop'ом (дедлок message_processor исключён). См. DECISIONS.md.
+        self._ready_events: Dict[str, Event] = {}
         # ОБЩИЙ system-wide stop: кладётся в bundle КАЖДОГО ребёнка → его lifecycle
         # наблюдает общий event наравне со своим per-process stop_event.
         self._system_stop_event: Optional[Event] = system_stop_event
@@ -50,6 +56,18 @@ class ProcessRegistry:
     def remove_process(self, name: str) -> None:
         self.os_processes = [p for p in self.os_processes if p.name != name]
         self._stop_events.pop(name, None)
+        # Ф3.2: снять ссылку на ready_event. При restart create_and_register
+        # создаст СВЕЖИЙ event (новый объект, а не .clear() — у старого ребёнка
+        # могла остаться ссылка на прежний).
+        self._ready_events.pop(name, None)
+
+    def get_ready_event(self, name: str) -> Optional[Event]:
+        """Ф3.2: event готовности процесса (``None`` — процесс не создавался).
+
+        Ставится ребёнком после успешного ``initialize()``; барьеры switch/boot
+        читают ``is_set()`` для раннего выхода без ожидания settle-window.
+        """
+        return self._ready_events.get(name)
 
     def _create_process(
         self,
@@ -58,6 +76,7 @@ class ProcessRegistry:
         config: Dict[str, Any],
         priority: str,
         stop_event: Event,
+        ready_event: Optional[Event] = None,
     ) -> Optional[Process]:
         try:
             if self.logger:
@@ -131,6 +150,14 @@ class ProcessRegistry:
                     if self.logger:
                         self.logger._log_warning(f"routing_meta_fn для '{name}' упал: {e}")
 
+            # Ф3.2: ready_event кладём в bundle custom ПОСЛЕ pop-фильтра выше.
+            # Легально в отличие от stop_event/system_stop_event: bundle целиком
+            # передаётся Process-аргументом (inheritance при spawn) и НИКОГДА не
+            # ре-сериализуется на стороне PM. Ключ занесён в EXCLUDE монитора
+            # (process_monitor.py) — при broadcast'е состояния он не пиклится.
+            if ready_event is not None:
+                custom["ready_event"] = ready_event
+
             bundle = build_bundle(
                 queues=queues,
                 config=process_config,
@@ -165,11 +192,18 @@ class ProcessRegistry:
     ) -> Optional[Process]:
         process_stop_event = Event()
         self._stop_events[name] = process_stop_event
-        process = self._create_process(name, class_path, config or {}, priority, process_stop_event)
+        # Ф3.2: свежий ready_event на каждый (пере)спавн. При restart старый
+        # инстанс мог держать ссылку на прежний event — новый объект её обнуляет.
+        process_ready_event = Event()
+        self._ready_events[name] = process_ready_event
+        process = self._create_process(
+            name, class_path, config or {}, priority, process_stop_event, process_ready_event
+        )
         if process:
             self.add_process(process)
         else:
             self._stop_events.pop(name, None)
+            self._ready_events.pop(name, None)
         return process
 
     def start_all(self) -> None:

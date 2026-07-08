@@ -22,6 +22,9 @@ _CUSTOM_EXCLUDE_KEYS = frozenset(
         "pause_event",
         "error_manager",
         "system_ready_event",
+        # Ф3.2: per-process ready-event — mp.Event не пиклится через Queue,
+        # broadcast состояния обязан его исключать (как прочие сырые события).
+        "ready_event",
     }
 )
 
