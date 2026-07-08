@@ -161,10 +161,15 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 
 ## Ф4 — Контракты и версии (после merge F, ~5 дней)
 
+> **ОТКРЫТА 2026-07-08** на ветке `feat/constructor-f4`. Приоритеты владельца: fencing-token
+> (жёсткий id против stale после switch) и авто-рестарт-ВСЕХ процессов + громкая наблюдаемость.
+> Дизайн 4.2+fencing → [f4.2-fencing-contracts.md](f4.2-fencing-contracts.md). Авто-рестарт-всех —
+> механизм-добор поверх Ф3.6 (в основном конфиг + громкое уведомление; хаб-панель → Ф5.15/5.16).
+
 | Task | Статус | Суть | Acceptance | Усилие |
 |---|---|---|---|---|
 | 4.1 | [ ] | **Multi-register fix**: `schemas[reg.name]` вместо перезаписи по plugin.name; контракт-тест Н-7 (уникальность instance.name, семантика override); boot-проверка дубликатов plugin_name | плагин с 2 регистрами — оба живы | S |
-| 4.2 | [ ] ∥ | **Реестр контрактов сообщений**: command/data_type → схема; warn-middleware на receive control-plane; флаг strict (default warn). Инвариант для Ф7: после G data-plane валидируется только 4.3 (зафиксировать текстом в G). + Контактная книжка v1: `introspect.capabilities` отдаёт params_schema из реестра (см. capability-manifest-idea.md) | опечатка в команде → WARNING с diff полей; capabilities со схемами | M |
+| 4.2 | [ ] ∥ | **Реестр контрактов сообщений + fencing-token** ([дизайн](f4.2-fencing-contracts.md)): command/data_type → схема; warn-middleware на receive control-plane; флаг strict (default warn). **+ fencing-token (требование владельца):** fence-поля `sender_incarnation`/`epoch` в конверте + receiver drop-middleware (stale epoch → drop + счётчик `fence_dropped`), control-plane только; ужесточает epoch-guard ADR-PMM-010 с 1 сообщения до всех. Инвариант для Ф7: после G data-plane валидируется только 4.3 (зафиксировать текстом в G). + Контактная книжка v1: `introspect.capabilities` отдаёт params_schema из реестра (см. capability-manifest-idea.md) | опечатка в команде → WARNING с diff полей; после switch stale от старого процесса НЕ доходит (fence_dropped++); capabilities со схемами | M |
 | 4.3 | [ ] | Payload-валидатор PluginRunner по Port-декларациям (dev-mode флаг, выключен в prod) | несоответствие порту → ошибка на границе в dev | M |
 | 4.4 | [ ] | **Манифест плагина**: version/api_version/requires (только ярусы core/optional по G0); рецепт хранит version при save; boot mismatch → WARNING | манифест-тест на 2-3 пилотных плагинах | M |
 | 4.5 | [ ] ∥ | **Движок миграций dict-документов**: `@migration("recipe", from_=2, to=3)`, ядро framework; property-тест round-trip | новый модуль с contract-тестами | M |
