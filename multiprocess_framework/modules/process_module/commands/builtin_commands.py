@@ -37,6 +37,7 @@ class BuiltinCommands:
         self._register_observability_commands()
         self._register_health_commands()
         self._register_relay_commands()
+        self._register_routing_commands()
 
     # ========================================================================
     # КОМАНДЫ УПРАВЛЕНИЯ ВОРКЕРАМИ
@@ -1000,3 +1001,51 @@ class BuiltinCommands:
         else:  # тестовые/минимальные router'ы без async-очереди
             router.send(ticket)
         return {"success": True, "relayed": True}
+
+    # ========================================================================
+    # ROUTING-EPOCH (Ф3.1: probe для воспроизведения дыры + refresh-handler)
+    # ========================================================================
+
+    def _register_routing_commands(self) -> None:
+        """Зарегистрировать routing.probe (диагностика peer→peer доставки).
+
+        ``routing.probe`` — детерминированный способ проверить peer→peer доставку
+        после switch/restart: процесс-отправитель шлёт ``inner``-билет соседу тем
+        же путём, что и обычный трафик (``send_to_process`` → RouterManager →
+        _deliver_by_targets по стейл/свежей очереди). Нельзя использовать
+        ``router.relay`` — он ставит ``_relayed=True`` и отключает hub-fallback,
+        маскируя дыру. Результат доставки НЕ наблюдается по ack (``put_nowait`` в
+        осиротевшую очередь возвращает успех) — только по downstream-эффекту у
+        соседа (например health-дельта в state-дереве).
+        """
+        cm = self._services.command_manager
+        if not cm:
+            return
+        cm.register_command(
+            "routing.probe",
+            self._cmd_routing_probe,
+            metadata={"description": "Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)"},
+            tags=["system"],
+        )
+        self._services._log_debug(
+            "Встроенная команда routing.probe зарегистрирована",
+            module="lifecycle",
+        )
+
+    def _cmd_routing_probe(self, data=None, **kwargs) -> dict:
+        """Отправить ``inner``-билет процессу ``target`` (peer→peer probe, Ф3.1).
+
+        data: ``target`` (имя процесса-соседа), ``inner`` (полный билет-команда,
+        доставляемый соседу «как есть»). Идёт через ``send_to_process`` —
+        нормальный peer-путь, тот же, что теряется на стейл-очереди после switch.
+        """
+        args = self._merge_args(data, kwargs)
+        target = str(args.get("target") or "").strip()
+        inner = args.get("inner")
+        if not target or not isinstance(inner, dict):
+            return {"success": False, "reason": "routing.probe: нужны target и inner (dict)"}
+        try:
+            ok = self._services.send_to_process(target, inner)
+        except Exception as exc:  # noqa: BLE001 — вернуть видимую ошибку инициатору
+            return {"success": False, "reason": f"routing.probe: send_to_process упал: {exc}", "target": target}
+        return {"success": bool(ok), "target": target}
