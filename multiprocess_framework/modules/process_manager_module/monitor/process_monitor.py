@@ -761,11 +761,19 @@ class ProcessMonitor:
     def _dispatch_due_restarts(self) -> None:
         """Отправить в PM рестарты, чей backoff истёк (IPC, не прямой вызов).
 
-        ``process.command {cmd: process.restart}`` в СОБСТВЕННУЮ очередь PM →
-        message_processor-поток → CommandManager → PM.restart_process. На том
-        же потоке исполняется topology.apply, поэтому рестарт НЕ может бежать
-        параллельно с заменой топологии. Если имя заменено switch'ем до
+        Прямая команда ``process.restart`` (``type=command``) в СОБСТВЕННУЮ
+        очередь PM → message_processor-поток → CommandManager → PM.restart_process.
+        На том же потоке исполняется topology.apply, поэтому рестарт НЕ может
+        бежать параллельно с заменой топологии. Если имя заменено switch'ем до
         диспатча — cleanup уже вызвал forget_process и снял pending.
+
+        ВАЖНО (Ф3.7): ``type`` обязан быть ``"command"`` — kind-router зовёт
+        CommandManager только для type=command. Раньше слался ``type="system"``
+        с обёрткой ``process.command``, но после регистрации ``process.command``
+        как CM-команды (P4.4.1 B2) system-сообщение до CM не доходило → авто-
+        рестарт молча не срабатывал (юнит-тест ловил лишь факт отправки, не
+        исполнение). Форма envelope повторяет build_command_message (driver-путь,
+        доказанно рабочий: routing_epoch/live).
         """
         if not self._pending_restarts:
             return
@@ -781,10 +789,12 @@ class ProcessMonitor:
                     comm.send_message(
                         self.process.name,
                         {
-                            "type": "system",
-                            "command": "process.command",
+                            "type": "command",
+                            "command": "process.restart",
+                            "data_type": "process.restart",
                             "sender": self.process.name,
-                            "data": {"cmd": "process.restart", "process_name": name},
+                            "targets": [self.process.name],
+                            "data": {"process_name": name},
                         },
                     )
                 ) if comm is not None else False

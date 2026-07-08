@@ -197,7 +197,11 @@ class TestProcessMonitorProtectedAutoRestart:
         mock_pm.restart_process.assert_not_called()
         target, msg = mock_pm.communication.send_message.call_args[0]
         assert target == "ProcessManager"
-        assert msg["data"] == {"cmd": "process.restart", "process_name": "camera_0"}
+        # Ф3.7: прямая process.restart-команда (type=command), НЕ обёртка process.command
+        # с type=system — иначе kind-router не позовёт CommandManager и рестарт молчит.
+        assert msg["type"] == "command"
+        assert msg["command"] == "process.restart"
+        assert msg["data"] == {"process_name": "camera_0"}
         assert monitor._pending_restarts == {}
 
     def test_pending_restart_not_dispatched_before_backoff(self) -> None:
