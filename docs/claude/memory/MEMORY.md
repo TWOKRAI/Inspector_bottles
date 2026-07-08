@@ -1,3 +1,6 @@
+- [fencing-token топологии](project_topology_fencing_token.md) — требование владельца: message-fence по incarnation/epoch (старый процесс не вкидывает stale); кандидат в Ф4.2
+- [авто-рестарт всех процессов](project_all_process_autorestart.md) — идея владельца: default-on + громкая наблюдаемость (упал/восстановился) + chain-level health (Ф4/Ф5)
+- [использовать qex/codegraph/serena/graphify](feedback_use_graph_semantic_tools.md) — звать напрямую, не только через Explore; Ф4 контракты — идеальный кейс
 - [Архивы прототипа удалены](project_archives_removed.md) — v1/v2 и multiprocess_prototype_backup удалены (e128b930); хвосты в конфигах вычищены 2026-07-03
 - [Phone gateway service](project_phone_gateway_service.md) — фото+слово с телефона по WiFi вместо вебкамеры (Services/phone_gateway + плагин phone_camera); v1 готов, GUI-панель + letter-mode wiring follow-up
 - [VFD bridge over robot — reboot fix](project_vfd_bridge_robot_reboot.md) — ПЧ vfd_belt висит мостом поверх robot_main; зависший ПЧ лечится перезагрузкой РОБОТА, не правкой кода ПЧ
