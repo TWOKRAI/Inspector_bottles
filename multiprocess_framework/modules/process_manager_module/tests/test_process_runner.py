@@ -293,6 +293,48 @@ class TestRunProcessFunction:
                 assert mock_update.call_args[0][1] == "TestProcess"
                 assert mock_update.call_args[0][2] == "error"
 
+    def test_ready_event_set_on_successful_init(self) -> None:
+        """Ф3.2: ready_event из bundle custom выставляется после успешного initialize()."""
+        stop_event = Event()
+        stop_event.set()
+
+        ready_event = Event()
+        bundle = {"queues": {}, "config": {}, "custom": {"ready_event": ready_event}}
+
+        with patch(
+            "multiprocess_framework.modules.process_manager_module.runner.process_runner._load_process_class"
+        ) as mock_load:
+            mock_class = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.initialize.return_value = True
+            mock_instance.should_stop.return_value = True
+            mock_class.return_value = mock_instance
+            mock_load.return_value = mock_class
+
+            run_process_function("fake.module.FakeClass", "TestProcess", stop_event, bundle)
+
+            assert ready_event.is_set(), "ready_event должен быть выставлен после успешного initialize()"
+
+    def test_ready_event_not_set_on_init_failure(self) -> None:
+        """Ф3.2: провал initialize() → ready_event НЕ выставляется (ранний return)."""
+        stop_event = Event()
+
+        ready_event = Event()
+        bundle = {"queues": {}, "config": {}, "custom": {"ready_event": ready_event}}
+
+        with patch(
+            "multiprocess_framework.modules.process_manager_module.runner.process_runner._load_process_class"
+        ) as mock_load:
+            mock_class = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.initialize.return_value = False
+            mock_class.return_value = mock_instance
+            mock_load.return_value = mock_class
+
+            run_process_function("fake.module.FakeClass", "TestProcess", stop_event, bundle)
+
+            assert not ready_event.is_set(), "ready_event НЕ должен выставляться при провале initialize()"
+
     def test_shutdown_called_in_finally(self) -> None:
         """shutdown() вызывается в блоке finally."""
         stop_event = Event()

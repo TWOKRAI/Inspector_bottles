@@ -77,9 +77,17 @@ class MockProcessRegistry:
         self._processes: dict[str, MockProcess] = {}
         self._fail_on_create: set[str] = fail_on_create or set()
         self._next_process_factory: dict[str, MockProcess] = {}
+        # Ф3.2: per-process ready-event. По умолчанию пусто → get_ready_event
+        # вернёт None → барьер PM работает в режиме death-watch (прежнее
+        # поведение). Тесты готовности могут заполнить событиями явно.
+        self._ready_events: dict[str, object] = {}
 
     def get_process_by_name(self, name: str) -> MockProcess | None:
         return self._processes.get(name)
+
+    def get_ready_event(self, name: str):
+        """Ф3.2: event готовности процесса (None — не задан → death-watch фолбэк)."""
+        return self._ready_events.get(name)
 
     def create_and_register(
         self,

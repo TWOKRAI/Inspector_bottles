@@ -1549,31 +1549,74 @@ class ProcessManagerProcess(ProcessModule):
             self._replace_in_progress = False
             self._last_replace_ts = time.monotonic()
 
+    def _wait_processes_ready(self, names: list[str], timeout_s: float, reason: str) -> dict[str, bool]:
+        """Ф3.2: ждать self-reported ready указанных процессов (event + death-watch).
+
+        Общий примитив барьеров switch и boot. Цикл poll 0.05с до дедлайна:
+
+        - ready_event ребёнка выставлен → ``True`` **немедленно** (ранний выход,
+          здоровый процесс больше НЕ ждёт весь settle-window — acceptance Ф3.2);
+        - процесс ПОДТВЕРЖДЁННО умер (нет в реестре / ``not is_alive``) → ``False``;
+        - иначе процесс остаётся в ``pending`` до дедлайна.
+
+        На дедлайне живые-без-event → ``True`` с WARNING «фолбэк по liveness»
+        (прежнее death-watch поведение; так же ведёт себя mock без ready_event —
+        существующие тесты зелёные без правок ожиданий).
+
+        Строгую готовность здесь ждать НЕЛЬЗЯ через IPC: и heartbeat, и
+        ``topology.apply`` обрабатываются ОДНИМ message_processor-потоком —
+        ожидание заблокировало бы само себя. ready_event живёт ВНЕ message-loop
+        (mp.Event, inheritance при spawn) → дедлок исключён.
+
+        Args:
+            names: имена процессов, чью готовность ждать.
+            timeout_s: дедлайн ожидания (секунды).
+            reason: метка контекста для логов («switch» / «boot» / «restart»).
+
+        Returns:
+            ``{name: bool}`` — ``True`` готов (по event или liveness-фолбэку),
+            ``False`` подтверждённо мёртв.
+        """
+        # Guard: mock-реестр может не иметь get_ready_event → чистый death-watch.
+        get_ready_event = getattr(self._process_registry, "get_ready_event", None)
+
+        ready: dict[str, bool] = {}
+        pending = set(names)
+        deadline = time.monotonic() + timeout_s
+        while pending and time.monotonic() < deadline:
+            for name in list(pending):
+                event = get_ready_event(name) if get_ready_event is not None else None
+                if event is not None and event.is_set():
+                    ready[name] = True
+                    pending.discard(name)
+                    self._log_info(f"{reason}: '{name}' ready via event")
+                    continue
+                proc = self._process_registry.get_process_by_name(name)
+                if proc is None or not proc.is_alive():
+                    ready[name] = False
+                    pending.discard(name)
+                    self._log_warning(f"{reason}: '{name}' умер до готовности → not-ready")
+            if pending:
+                time.sleep(0.05)
+        for name in pending:
+            ready[name] = True  # пережил окно — считаем работающим
+            self._log_warning(f"{reason}: '{name}' ready via liveness-fallback (event не получен за {timeout_s}s)")
+        return ready
+
     def _wait_started_ready(self, applied_results: list[dict]) -> dict[str, bool]:
-        """Readiness-барьер после start-фазы: короткий settle-window death-watch.
+        """Readiness-барьер после start-фазы switch: ready_event + death-watch.
 
-        Ребёнок, упавший в ``initialize()``, выходит с exitcode 0 — до этого
-        барьера switch выглядел успешным, хотя процесс мёртв (типовой случай:
-        камера ещё занята предыдущим владельцем). Барьер даёт запущенным
-        процессам «осесть»: следит за ``is_alive`` в течение
-        ``start_ready_timeout_s`` (settle-window, дефолт 0.5с; 0 → выключен).
+        Ф3.2: ребёнок сам сигналит готовность (``ready_event`` после успешного
+        ``initialize()``) — здоровый switch закрывается по факту, НЕ по таймеру.
+        Ребёнок, упавший в ``initialize()``, выходит с exitcode 0 → death-watch
+        ловит его как ``False`` (типовой случай: камера ещё занята предыдущим
+        владельцем). Окно ``start_ready_timeout_s`` (дефолт 0.5с; 0 → выключен)
+        остаётся фолбэком: медленный ребёнок, не успевший поставить event, но
+        живой на дедлайне, считается работающим (WARNING).
 
-        **Стоимость:** здоровое переключение ВСЕГДА ждёт весь settle-window —
-        живой процесс не покидает ``pending`` (death-watch не умеет отличить
-        «жив и останется» от «жив, но вот-вот умрёт», не подождав). Поэтому
-        окно короткое: ловит быстрый синхронный fail-fast (open камеры →
-        мгновенный выход), не раздувая латентность switch. Дефолт 0.5с добавляет
-        к и без того секундному switch немного; на медленном spawn часть
-        initialize-провалов не успеет проявиться — их (и любой поздний crash)
-        штатно поймает ProcessMonitor как crashed после resume.
-
-        Строгую готовность (первый heartbeat) здесь ждать НЕЛЬЗЯ: и heartbeat,
-        и ``topology.apply`` обрабатываются ОДНИМ message_processor-потоком —
-        ожидание заблокировало бы само себя.
-
-        Семантика результата:
-        - ``False`` — процесс ПОДТВЕРЖДЁННО умер в окне барьера;
-        - ``True`` — жив на дедлайне (готовность в строгом смысле не гарантирует).
+        Строгую готовность (первый heartbeat) через IPC здесь ждать НЕЛЬЗЯ:
+        heartbeat и ``topology.apply`` — один message_processor-поток; ready_event
+        живёт вне message-loop (см. ``_wait_processes_ready``).
 
         Args:
             applied_results: ``result["results"]`` успешного TopologyManager.apply.
@@ -1594,21 +1637,7 @@ class ProcessManagerProcess(ProcessModule):
         timeout_s = 0.5 if raw_timeout is None else float(raw_timeout)
         if timeout_s <= 0:
             return {}
-
-        ready: dict[str, bool] = {}
-        pending = set(started)
-        deadline = time.monotonic() + timeout_s
-        while pending and time.monotonic() < deadline:
-            for name in list(pending):
-                proc = self._process_registry.get_process_by_name(name)
-                if proc is None or not proc.is_alive():
-                    ready[name] = False
-                    pending.discard(name)
-            if pending:
-                time.sleep(0.05)
-        for name in pending:
-            ready[name] = True  # пережил settle-window — считаем работающим
-        return ready
+        return self._wait_processes_ready(started, timeout_s, "switch")
 
     # -------------------------------------------------------------------------
     # Сиды TopologyManager — single-purpose методы (Task 2.0)
