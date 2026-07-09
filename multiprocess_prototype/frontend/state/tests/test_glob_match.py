@@ -137,3 +137,38 @@ class TestNormalization:
             )
             is True
         )
+
+
+# ---------------------------------------------------------------------------
+# 5.9: match_glob делегирует единому framework-матчеру (дубль устранён)
+# ---------------------------------------------------------------------------
+
+
+class TestDelegatesToFramework:
+    """match_glob == core.match_pattern (без нормализации точек) — один матчер."""
+
+    def test_agrees_with_core_match_pattern(self):
+        from multiprocess_framework.modules.state_store_module.core import (
+            match_pattern,
+            split_pattern,
+        )
+        from multiprocess_prototype.frontend.state.glob_match import match_glob
+
+        cases = [
+            ("processes.cam.state.fps", "processes.cam.state.fps"),
+            ("processes.*.state.fps", "processes.cam.state.fps"),
+            ("processes.**", "processes.x.y.z"),
+            ("processes.cam.config.fps", "processes.cam.state.fps"),
+            ("a.**.d", "a.b.c.d"),
+            ("*", "single"),
+            ("**", "a.b.c"),
+        ]
+        for pattern, path in cases:
+            expected = match_pattern(split_pattern(pattern), split_pattern(path))
+            assert match_glob(pattern, path) is expected, (pattern, path)
+
+    def test_no_local_matcher_duplicate(self):
+        """Модуль не переопределяет собственный сегмент-матчер (только фасад)."""
+        from multiprocess_prototype.frontend.state import glob_match
+
+        assert not hasattr(glob_match, "_match_segments")

@@ -5,11 +5,13 @@
     GuiStateBindings            — менеджер реактивных подписок
     BindingHandle               — дескриптор одной подписки
 """
+
 from .glob_match import match_glob
-from .bindings import BindingHandle, GuiStateBindings
+from .bindings import DELETED, BindingHandle, GuiStateBindings
 
 __all__ = [
     "match_glob",
     "GuiStateBindings",
     "BindingHandle",
+    "DELETED",
 ]

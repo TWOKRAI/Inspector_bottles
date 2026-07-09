@@ -306,6 +306,160 @@ class TestIgnoreInvalidMessages:
 
 
 # ---------------------------------------------------------------------------
+# Delete-дельта (5.9: полный Delta до биндингов)
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteDelta:
+    """delete-дельта (deleted=True) доходит до биндингов и обрабатывается."""
+
+    def test_delete_without_reset_does_not_push_garbage(self, qtbot, bindings):
+        """reset не задан → при удалении виджет не трогаем (никакого None/MISSING)."""
+        label = QLabel("original")
+        qtbot.addWidget(label)
+        bindings.bind("processes.cam.state.status", label, "text")
+
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.status",
+                "value": None,
+                "deleted": True,
+            }
+        )
+
+        # Значение НЕ затёрто "None"/"MISSING" — удаление доставлено, но не мусорит
+        assert label.text() == "original"
+
+    def test_delete_with_reset_applies_reset(self, qtbot, bindings):
+        """reset задан → при удалении применяется reset-значение."""
+        spinbox = QSpinBox()
+        qtbot.addWidget(spinbox)
+        spinbox.setValue(42)
+
+        bindings.bind("processes.cam.state.fps", spinbox, "value", reset=0)
+
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.fps",
+                "value": None,
+                "deleted": True,
+            }
+        )
+
+        assert spinbox.value() == 0
+
+    def test_delete_with_reset_none_via_formatter(self, qtbot, bindings):
+        """reset=None + formatter → удаление отображает 'пусто' (различимо от set)."""
+        label = QLabel("running")
+        qtbot.addWidget(label)
+
+        bindings.bind(
+            "processes.cam.state.status",
+            label,
+            "text",
+            formatter=lambda v: "—" if v is None else str(v),
+            reset=None,
+        )
+
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.status",
+                "value": None,
+                "deleted": True,
+            }
+        )
+
+        assert label.text() == "—"
+
+    def test_set_none_value_still_applied(self, qtbot, bindings):
+        """deleted=False + value=None → обычный set (None различим от удаления)."""
+        label = QLabel("running")
+        qtbot.addWidget(label)
+
+        bindings.bind("processes.cam.state.status", label, "text")
+
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.status",
+                "value": None,
+                "deleted": False,
+            }
+        )
+
+        # set None → setText(str(None)) = "None" (это НЕ удаление)
+        assert label.text() == "None"
+
+
+# ---------------------------------------------------------------------------
+# Авто-подписка bind ↔ ensure/release_subscription (5.9)
+# ---------------------------------------------------------------------------
+
+
+class TestAutoSubscription:
+    """bind()/unbind() дёргают ensure/release_subscription с pattern."""
+
+    def _make(self, bridge):
+        ensure = MagicMock()
+        release = MagicMock()
+        b = GuiStateBindings(bridge, ensure_subscription=ensure, release_subscription=release)
+        return b, ensure, release
+
+    def test_bind_calls_ensure_with_pattern(self, qtbot, bridge):
+        b, ensure, _ = self._make(bridge)
+        label = QLabel()
+        qtbot.addWidget(label)
+        b.bind("processes.cam.state.fps", label, "text")
+        ensure.assert_called_once_with("processes.cam.state.fps")
+
+    def test_unbind_calls_release_with_pattern(self, qtbot, bridge):
+        b, _, release = self._make(bridge)
+        label = QLabel()
+        qtbot.addWidget(label)
+        handle = b.bind("processes.cam.state.fps", label, "text")
+        b.unbind(handle)
+        release.assert_called_once_with("processes.cam.state.fps")
+
+    def test_unbind_widget_releases_each_binding(self, qtbot, bridge):
+        b, _, release = self._make(bridge)
+        label = QLabel()
+        qtbot.addWidget(label)
+        b.bind("a.b", label, "text")
+        b.bind("c.d", label, "text")
+        b.unbind_widget(label)
+        assert release.call_count == 2
+        released = {c.args[0] for c in release.call_args_list}
+        assert released == {"a.b", "c.d"}
+
+    def test_fanout_bind_unbind_ensure_release(self, qtbot, bridge):
+        b, ensure, release = self._make(bridge)
+        h = b.bind_fanout("processes.*.workers.*.status", lambda p, v: None)
+        ensure.assert_called_once_with("processes.*.workers.*.status")
+        b.unbind_fanout(h)
+        release.assert_called_once_with("processes.*.workers.*.status")
+
+    def test_double_unbind_releases_once(self, qtbot, bridge):
+        b, _, release = self._make(bridge)
+        label = QLabel()
+        qtbot.addWidget(label)
+        handle = b.bind("a.b", label, "text")
+        b.unbind(handle)
+        b.unbind(handle)  # повторный — no-op, без второго release
+        release.assert_called_once_with("a.b")
+
+    def test_no_callbacks_configured_is_safe(self, qtbot, bridge):
+        """Без ensure/release (legacy) bind/unbind работают как раньше."""
+        b = GuiStateBindings(bridge)  # без колбэков
+        label = QLabel()
+        qtbot.addWidget(label)
+        handle = b.bind("a.b", label, "text")
+        b.unbind(handle)  # не падает
+
+
+# ---------------------------------------------------------------------------
 # Replay из кэша при bind() (Task 4.1)
 # ---------------------------------------------------------------------------
 
@@ -524,3 +678,50 @@ class TestFanoutUnbind:
         qtbot.wait(50)  # авто-уборка по destroyed идемпотентна
 
         assert bindings._fanouts == []
+
+
+# ---------------------------------------------------------------------------
+# Review-фиксы 5.20: reap→release (#1), fan-out DELETED (#2)
+# ---------------------------------------------------------------------------
+
+
+class TestReviewFixes:
+    def test_reap_dead_widget_releases_subscription(self, qtbot, bridge):
+        """#1: уборка мёртвого weakref-биндинга отпускает подписку (нет leak).
+
+        widget.destroyed.connect(lambda) в bind() держит strong-ref на виджет,
+        поэтому reap-путь в жизни редок (обычно раньше срабатывает destroyed→
+        unbind_widget). Инжектируем мёртвый weakref, чтобы проверить именно
+        reap→_release: без него refcount паттерна утёк бы.
+        """
+        ensure, release = MagicMock(), MagicMock()
+        b = GuiStateBindings(bridge, ensure_subscription=ensure, release_subscription=release)
+        w = QLabel()
+        qtbot.addWidget(w)
+        handle = b.bind("a.b", w, "text")
+        ensure.assert_called_once_with("a.b")
+
+        # Симулируем «виджет собран GC»: weakref теперь возвращает None
+        handle.widget_ref = lambda: None
+        b._on_state_msg({"data_type": "state_delta", "path": "a.b", "value": 1})
+
+        assert handle not in b._bindings  # reap убрал
+        release.assert_called_once_with("a.b")
+
+    def test_fanout_receives_DELETED_sentinel_on_delete(self, qtbot, bindings):
+        """#2: fan-out получает sentinel DELETED на delete (не None)."""
+        from multiprocess_prototype.frontend.state.bindings import DELETED
+
+        seen: list = []
+        bindings.bind_fanout("proc.*.workers.*", lambda p, v: seen.append((p, v)))
+
+        bindings._on_state_msg(
+            {"data_type": "state_delta", "path": "proc.cam.workers.w1", "value": None, "deleted": True}
+        )
+        assert seen == [("proc.cam.workers.w1", DELETED)]
+
+        seen.clear()
+        bindings._on_state_msg(
+            {"data_type": "state_delta", "path": "proc.cam.workers.w1", "value": 42, "deleted": False}
+        )
+        assert seen == [("proc.cam.workers.w1", 42)]

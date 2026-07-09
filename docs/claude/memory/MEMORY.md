@@ -98,3 +98,4 @@
 - [Ловушка: два бэкенда в одном прогоне](project_concurrent_backends_trap.md) — общий PID-реестр (исправлено Ф1.9) и SHM-cleanup (латентно) конфликтуют между параллельными системами
 - [Реанимация агента → призрак-дубль](feedback_agent_resume_ghost.md) — проверять mtime зоны перед SendMessage-resume; коммить каждый шаг
 - [git/hook грабли merge в main](feedback_git_main_merge_hook_traps.md) — git merge -F - не читает stdin; protect-branch блокирует commit на main (в т.ч. compound); git add на удалённом пути фаталит; split commands + проверять staged
+- [observability-стор: маршрут ошибок](project_observability_store_error_routing.md) — ошибки идут в logger_manager (ctx.log_error), не error_manager; store-tap на ОБА; live-boot вскрыл

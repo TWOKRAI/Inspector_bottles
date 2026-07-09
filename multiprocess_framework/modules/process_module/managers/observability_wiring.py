@@ -26,9 +26,19 @@ from __future__ import annotations
 from typing import Any, Optional, Tuple
 
 from ...channel_routing_module.observability import (
+    KIND_LOG,
+    KIND_STATS,
     ObservabilityDrainAdapter,
     ObservabilityHub,
+    ObservabilityStore,
+    StoreTapChannel,
 )
+
+# Имена store-tap'ов (хэндлы для remove_log_tap на teardown). Вешаем на ОБА
+# менеджера: error_manager (track_error/write-through) и logger_manager
+# (logger.error/ctx.log_error) — приложение логирует ошибки и туда, и туда.
+STORE_ERROR_TAP = "observability_store::error"
+STORE_LOGGER_TAP = "observability_store::logger_error"
 
 
 def wire_process_observability(
@@ -73,14 +83,83 @@ def wire_process_observability(
 def drain_process_observability(
     hub: Optional[ObservabilityHub],
     adapter: Optional[ObservabilityDrainAdapter],
+    store: Optional[ObservabilityStore] = None,
 ) -> None:
-    """Слить буфер hub'а (log/stats) в реальные менеджеры.
+    """Слить буфер hub'а (log/stats) в реальные менеджеры и (опц.) в стор.
 
-    Зовётся по такту heartbeat и финально на graceful-teardown. error-канал
-    hub'а пуст (error идёт write-through мимо буфера) — apply_drained по нему
-    вырождается в no-op. Исключения глушим: дренаж телеметрии не должен ронять
-    такт heartbeat (урок 2.1 — health self-publish не критичен).
+    Зовётся по такту heartbeat и финально на graceful-teardown. `drain_all()`
+    осушает каналы — вызываем ОДИН раз и разветвляем: adapter → sink-менеджеры,
+    store → персистентная история (Ф5.20a). error-канал hub'а пуст (error идёт
+    write-through мимо буфера) — в стор ошибки попадают отдельным store-tap'ом на
+    error_manager, НЕ отсюда. Исключения глушим: дренаж телеметрии не должен
+    ронять такт heartbeat (урок 2.1 — health self-publish не критичен).
     """
-    if hub is None or adapter is None:
+    if hub is None:
         return
-    adapter.apply_drained(hub.drain_all())
+    drained = hub.drain_all()
+    if adapter is not None:
+        adapter.apply_drained(drained)
+    if store is not None:
+        # log + stats из hub'а → стор (пачкой). error сюда НЕ идёт (write-through
+        # ловит store-tap на error_manager) — иначе дублирование либо потеря.
+        records = drained.get(KIND_LOG, []) + drained.get(KIND_STATS, [])
+        if records:
+            try:
+                store.append_records(records)
+            except Exception:  # nosec B110 — сбой стора не критичен для heartbeat
+                pass
+
+
+def wire_observability_store(
+    error_manager: Optional[Any],
+    logger_manager: Optional[Any] = None,
+    db_path: Optional[str] = None,
+) -> Tuple[ObservabilityStore, list]:
+    """Создать персистентный стор и повесить store-tap на менеджеры ошибок (Ф5.20a).
+
+    error/critical идут write-through в error_manager (Ф5.16) — tap ловит их у
+    реального sink'а и кладёт в стор (так вкладка «Ошибки» получает историю).
+    log/stats пишутся в стор из drain-петли (см. drain_process_observability).
+
+    **Live-урок (2026-07-09):** ошибки приложения (напр. CapturePlugin через
+    `ctx.log_error`) идут в logger_manager, НЕ в error_manager — tap только на
+    error_manager видит ~0 ошибок. Поэтому store-tap вешаем НА ОБА менеджера на
+    уровне ERROR: и error_manager (write-through track_error/log_exception), и
+    logger_manager (`logger.error`/`ctx.log_error`). Оба пишут kind='error'; это
+    разные менеджеры-инстансы, одна запись попадает ровно в один → без дублей.
+
+    Args:
+        error_manager: реальный ErrorManager (LoggerCore с add_log_tap).
+        logger_manager: реальный LoggerManager (LoggerCore с add_log_tap).
+        db_path: путь к SQLite-файлу стора. None → resolve_default_db_path().
+
+    Returns:
+        (store, taps) — taps: список (manager, tap_name) для unwire.
+    """
+    store = ObservabilityStore(db_path)
+    taps: list[Tuple[Any, str]] = []
+    for mgr, tap_name in ((error_manager, STORE_ERROR_TAP), (logger_manager, STORE_LOGGER_TAP)):
+        if mgr is None or not hasattr(mgr, "add_log_tap"):
+            continue
+        # min_level=ERROR → ловим error + critical, ниже не пишем (вкладка «Ошибки»).
+        mgr.add_log_tap(StoreTapChannel(store, name=tap_name), min_level="ERROR", name=tap_name)
+        taps.append((mgr, tap_name))
+    return store, taps
+
+
+def unwire_observability_store(
+    store: Optional[ObservabilityStore],
+    taps: Optional[list],
+) -> None:
+    """Снять store-tap'ы с их менеджеров и закрыть стор (graceful teardown)."""
+    for mgr, tap_name in taps or []:
+        if mgr is not None and hasattr(mgr, "remove_log_tap"):
+            try:
+                mgr.remove_log_tap(tap_name)
+            except Exception:  # nosec B110 — teardown best-effort
+                pass
+    if store is not None:
+        try:
+            store.close()
+        except Exception:  # nosec B110
+            pass

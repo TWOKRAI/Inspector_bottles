@@ -254,6 +254,11 @@ def run_gui(process: "GuiProcess") -> None:
     bindings = GuiStateBindings(
         process._bridge,
         cache_snapshot=(lambda: _gui_proxy.cache) if _gui_proxy is not None else None,
+        # Авто-подписка (5.9): bind() на pattern гарантирует серверную подписку,
+        # даже если он не покрыт стартовыми wildcard'ами (processes.**/system.**/
+        # devices.**/calibration.**). refcount в proxy схлопывает дубли.
+        ensure_subscription=(_gui_proxy.ensure_subscription if _gui_proxy is not None else None),
+        release_subscription=(_gui_proxy.release_subscription if _gui_proxy is not None else None),
     )
 
     # 3c. Phase 12: CommandCatalog + CommandValidator + TopologyBridge
@@ -283,6 +288,10 @@ def run_gui(process: "GuiProcess") -> None:
     # сохранён: сначала bindings (_state_cb), затем этот listener.
     def _forward_state_delta_to_topology(msg_dict: dict) -> None:
         if msg_dict.get("data_type") == "state_delta":
+            # Удаление узла (deleted=True) в RegistersManager не форвардим:
+            # value — None-заглушка envelope, запись None затёрла бы конфиг.
+            if msg_dict.get("deleted"):
+                return
             path = msg_dict.get("path", "")
             value = msg_dict.get("value")
             if path:

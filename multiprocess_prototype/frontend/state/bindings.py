@@ -31,6 +31,33 @@ _logger = logging.getLogger(__name__)
 # Property setters — маппинг имени свойства на вызов метода виджета
 # ---------------------------------------------------------------------------
 
+# Sentinel: «reset-значение для delete не задано». Отличает «сбрасывать в None»
+# (reset=None) от «не трогать виджет при удалении» (reset не передан).
+_UNSET: Any = object()
+
+
+class _Deleted:
+    """Sentinel-тип для delete в fan-out callback (path, value). Отличает
+    удаление узла от легитимного None-значения. repr — для читаемых логов."""
+
+    _instance = None
+
+    def __new__(cls) -> "_Deleted":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "DELETED"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+# Публичный sentinel: fan-out получает его как value при удалении узла.
+DELETED = _Deleted()
+
+
 _PROP_SETTERS: dict[str, Callable[[QWidget, Any], None]] = {
     "value": lambda w, v: w.setValue(v),  # type: ignore[attr-defined]
     "text": lambda w, v: w.setText(str(v)),  # type: ignore[attr-defined]
@@ -54,12 +81,17 @@ class BindingHandle:
         widget_ref: weakref на Qt-виджет; None если виджет уже уничтожен.
         prop: имя свойства виджета ('value', 'text', 'checked', ...).
         formatter: опциональный конвертор значения перед применением setter.
+        reset: значение, применяемое к виджету при удалении узла
+            (delete-дельта). _UNSET (по умолчанию) → виджет при удалении не
+            трогаем (только не пушим мусор). reset=None → сбросить в None
+            (через formatter/setter).
     """
 
     pattern: str
     widget_ref: weakref.ref
     prop: str
     formatter: Callable[[Any], Any] | None = None
+    reset: Any = _UNSET
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +140,8 @@ class GuiStateBindings:
         self,
         bridge: "DataReceiverBridge",
         cache_snapshot: Callable[[], dict[str, Any]] | None = None,
+        ensure_subscription: Callable[[str], Any] | None = None,
+        release_subscription: Callable[[str], Any] | None = None,
     ) -> None:
         """Инициализировать и занять state_callback у bridge.
 
@@ -118,7 +152,16 @@ class GuiStateBindings:
                 последнее известное значение (replay) — закрывает разрыв
                 ленивых вкладок, созданных после прохождения разовых дельт
                 (Task 4.1). При None replay не выполняется (legacy-поведение).
+            ensure_subscription: опциональный колбэк (обычно
+                StateProxy.ensure_subscription) — bind()/bind_fanout() вызывают
+                его на pattern, чтобы серверная подписка гарантированно
+                существовала (авто-подписка, 5.9). Закрывает класс ошибок
+                «панель мертва, забыли wildcard». refcount живёт в proxy.
+            release_subscription: симметричный колбэк для unbind — снимает
+                ссылку на подписку (при обнулении refcount proxy отписывается).
         """
+        self._ensure_subscription = ensure_subscription
+        self._release_subscription = release_subscription
         self._bindings: list[BindingHandle] = []
         # Fan-out подписки (FanoutHandle) — callback(path, value) на каждую
         # дельту с matching path. В отличие от bind (один виджет), позволяет
@@ -127,6 +170,28 @@ class GuiStateBindings:
         self._fanouts: list[FanoutHandle] = []
         self._cache_snapshot = cache_snapshot
         bridge.set_state_callback(self._on_state_msg)
+
+    # ------------------------------------------------------------------
+    # Авто-подписка (5.9): bind/unbind ↔ proxy.ensure/release_subscription
+    # ------------------------------------------------------------------
+
+    def _ensure(self, pattern: str) -> None:
+        """Гарантировать серверную подписку на pattern (если задан колбэк)."""
+        if self._ensure_subscription is None:
+            return
+        try:
+            self._ensure_subscription(pattern)
+        except Exception as exc:
+            _logger.debug("bindings: ensure_subscription('%s') failed: %s", pattern, exc)
+
+    def _release(self, pattern: str) -> None:
+        """Снять ссылку на подписку pattern (если задан колбэк)."""
+        if self._release_subscription is None:
+            return
+        try:
+            self._release_subscription(pattern)
+        except Exception as exc:
+            _logger.debug("bindings: release_subscription('%s') failed: %s", pattern, exc)
 
     # ------------------------------------------------------------------
     # Публичное API
@@ -139,6 +204,7 @@ class GuiStateBindings:
         prop: str = "value",
         *,
         formatter: Callable[[Any], Any] | None = None,
+        reset: Any = _UNSET,
     ) -> BindingHandle:
         """Подписать виджет на изменения по glob-паттерну.
 
@@ -151,6 +217,10 @@ class GuiStateBindings:
             prop: имя свойства ('value', 'text', 'checked', 'currentText',
                   'plainText', или любой метод через getattr).
             formatter: опциональный конвертор; вызывается перед setter.
+            reset: значение, применяемое при удалении узла (delete-дельта).
+                По умолчанию (_UNSET) удаление не меняет виджет — но дельта
+                всё равно доставлена и классифицирована (никакого мусора
+                вместо sentinel MISSING в виджет не попадёт).
 
         Returns:
             BindingHandle — дескриптор для последующего unbind().
@@ -160,8 +230,12 @@ class GuiStateBindings:
             widget_ref=weakref.ref(widget),
             prop=prop,
             formatter=formatter,
+            reset=reset,
         )
         self._bindings.append(handle)
+
+        # Авто-подписка: серверная подписка на pattern гарантированно есть.
+        self._ensure(handle.pattern)
 
         # Авто-уборка при уничтожении виджета Qt
         widget.destroyed.connect(lambda *_: self.unbind_widget(widget))
@@ -217,6 +291,9 @@ class GuiStateBindings:
         )
         self._fanouts.append(handle)
 
+        # Авто-подписка на pattern fan-out (как для bind).
+        self._ensure(pattern)
+
         if owner is not None:
             # Авто-уборка при уничтожении владельца — через идемпотентный
             # unbind_fanout: повторный вызов (после ручного unbind) безопасен.
@@ -246,7 +323,8 @@ class GuiStateBindings:
         try:
             self._fanouts.remove(handle)
         except ValueError:
-            pass  # Уже снята — не падаем
+            return  # Уже снята — не падаем и не отпускаем подписку повторно
+        self._release(handle.pattern)
 
     def unbind_by_owner(self, owner: QWidget) -> None:
         """Снять ВСЕ fan-out подписки данного виджета-владельца.
@@ -259,15 +337,19 @@ class GuiStateBindings:
             owner: виджет, переданный в bind_fanout(owner=...).
         """
         kept: list[FanoutHandle] = []
+        removed: list[FanoutHandle] = []
         for h in self._fanouts:
             if h.owner_ref is None:
                 kept.append(h)
                 continue
             ref = h.owner_ref()
             if ref is None or ref is owner:
-                continue  # целевой владелец или мёртвый weakref — снять
+                removed.append(h)  # целевой владелец или мёртвый weakref — снять
+                continue
             kept.append(h)
         self._fanouts = kept
+        for h in removed:
+            self._release(h.pattern)
 
     def unbind(self, handle: BindingHandle) -> None:
         """Удалить конкретную подписку по дескриптору.
@@ -278,7 +360,8 @@ class GuiStateBindings:
         try:
             self._bindings.remove(handle)
         except ValueError:
-            pass  # Уже удалена — не падаем
+            return  # Уже удалена — не падаем и не отпускаем подписку повторно
+        self._release(handle.pattern)
 
     def unbind_widget(self, widget: QWidget) -> None:
         """Удалить все подписки для данного виджета.
@@ -289,12 +372,18 @@ class GuiStateBindings:
         Args:
             widget: Qt-виджет, чьи подписки нужно снять.
         """
+        removed = [h for h in self._bindings if h.widget_ref() is widget]
         self._bindings = [h for h in self._bindings if h.widget_ref() is not widget]
+        for h in removed:
+            self._release(h.pattern)
 
     def clear(self) -> None:
         """Снять ВСЕ подписки — и виджетные, и fan-out."""
+        patterns = [h.pattern for h in self._bindings] + [h.pattern for h in self._fanouts]
         self._bindings.clear()
         self._fanouts.clear()
+        for pat in patterns:
+            self._release(pat)
 
     # ------------------------------------------------------------------
     # Внутренний callback для bridge
@@ -321,6 +410,11 @@ class GuiStateBindings:
             return
 
         value = msg_dict["value"]
+        # Полный Delta (5.9): удаление узла отличается флагом deleted, а не
+        # значением. При delete не пушим value (там None-заглушка envelope,
+        # раньше — sentinel MISSING) в виджет: применяем reset подписки, если
+        # задан; иначе виджет не трогаем (дельта всё равно доставлена).
+        deleted = bool(msg_dict.get("deleted"))
 
         # Собираем «мёртвые» дескрипторы для последующей уборки
         dead: list[BindingHandle] = []
@@ -335,25 +429,39 @@ class GuiStateBindings:
             if not match_glob(handle.pattern, path):
                 continue
 
+            if deleted:
+                if handle.reset is not _UNSET:
+                    self._apply_to_widget(handle, handle.reset)
+                # reset не задан → удаление доставлено, но виджет не трогаем
+                continue
+
             self._apply_to_widget(handle, value)
 
-        # Убираем мёртвые weakref-ы
+        # Убираем мёртвые weakref-ы. ВАЖНО: отпускаем подписку (_release), иначе
+        # refcount паттерна в proxy не декрементится, если reap опередил
+        # widget.destroyed→unbind_widget (единственный другой release-путь) →
+        # серверная подписка утекает (5.20 review #1).
         if dead:
             for d in dead:
                 try:
                     self._bindings.remove(d)
                 except ValueError:
-                    pass
+                    continue
+                self._release(d.pattern)
 
         # Fan-out: динамическое обнаружение ключей (создание строк подписчиком).
+        # При delete передаём sentinel DELETED (не None), чтобы динамический
+        # потребитель мог отличить удаление узла от легитимного None-значения и
+        # удалить строку/запись (5.9 review #2). Прежние потребители, делающие
+        # `if not isinstance(value, dict): return`, DELETED (не dict) пропускают —
+        # обратная совместимость.
+        fanout_value = DELETED if deleted else value
         for fanout in list(self._fanouts):
             if match_glob(fanout.pattern, path):
                 try:
-                    fanout.callback(path, value)
+                    fanout.callback(path, fanout_value)
                 except Exception as exc:
-                    _logger.debug(
-                        "bindings: fan-out callback failed on %s (pattern %s): %s", path, fanout.pattern, exc
-                    )
+                    _logger.debug("bindings: fan-out callback failed on %s (pattern %s): %s", path, fanout.pattern, exc)
 
     def _apply_to_widget(self, handle: BindingHandle, value: Any) -> bool:
         """Применить значение к виджету подписки через setter.

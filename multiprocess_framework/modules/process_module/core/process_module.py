@@ -115,6 +115,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # дренируется по heartbeat, финально flush'ится на graceful-teardown.
         self._observability_hub = None
         self._observability_drain = None
+        # Персистентный стор наблюдаемости (Ф5.20a): drain log/stats + error-tap'ы.
+        self._observability_store = None
+        self._observability_store_taps = []
 
         # Plugin orchestrator — опциональная композиция
         # Активируется если config["plugins"] непуст (см. _init_custom_managers)
@@ -260,7 +263,10 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         """Ф5.16: создать hub наблюдаемости процесса и инъектировать его в слоты
         пилота (worker_module). log/stats буферизуются в hub и дренируются по
         heartbeat; error-слот остаётся реальным error_manager (write-through)."""
-        from ..managers.observability_wiring import wire_process_observability
+        from ..managers.observability_wiring import (
+            wire_observability_store,
+            wire_process_observability,
+        )
 
         self._observability_hub, self._observability_drain = wire_process_observability(
             self.name,
@@ -269,6 +275,22 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self.stats_manager,
             self.error_manager,
         )
+        # Ф5.20a: персистентный стор — только когда есть hub (пилот-телеметрия).
+        # log/stats из drain-петли, error через store-tap'ы на error+logger-менеджерах.
+        if self._observability_hub is not None:
+            self._observability_store, self._observability_store_taps = wire_observability_store(
+                self.error_manager, self.logger_manager
+            )
+            # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
+            # Ни одного tap → вкладка «Ошибки» молча пуста — предупреждаем
+            # (терять можно, молчать нельзя; 5.20 review #6).
+            if not self._observability_store_taps:
+                self._log_warning(
+                    f"Process '{self.name}': ObservabilityStore без error-tap "
+                    "(ни logger_manager, ни error_manager не поддержали add_log_tap) "
+                    "— ошибки в стор попадать НЕ будут",
+                    module="observability",
+                )
 
     def _init_communication(self):
         """Инициализация коммуникации процесса."""
@@ -652,14 +674,30 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self.shutdown()
 
     def _flush_observability(self) -> None:
-        """Ф5.16 (c): последний слив log/stats-буфера hub'а перед остановкой.
+        """Ф5.16 (c): последний слив log/stats-буфера hub'а перед остановкой (в
+        менеджеры и в стор Ф5.20a). Затем снять store-tap и закрыть стор.
         Дренаж не критичен — исключения глушим, чтобы не сорвать teardown."""
-        from ..managers.observability_wiring import drain_process_observability
+        from ..managers.observability_wiring import (
+            drain_process_observability,
+            unwire_observability_store,
+        )
 
         try:
-            drain_process_observability(self._observability_hub, self._observability_drain)
+            drain_process_observability(
+                self._observability_hub,
+                self._observability_drain,
+                self._observability_store,
+            )
         except Exception:  # noqa: BLE001 — потеря телеметрии не должна ронять stop()
             pass
+        # Снять store-tap'ы и закрыть стор (graceful; SIGKILL этот путь обходит,
+        # но записи уже во WAL-файле — стор переживает рестарт).
+        unwire_observability_store(
+            self._observability_store,
+            self._observability_store_taps,
+        )
+        self._observability_store = None
+        self._observability_store_taps = []
 
     # ========================================================================
     # СТАТИСТИКА
