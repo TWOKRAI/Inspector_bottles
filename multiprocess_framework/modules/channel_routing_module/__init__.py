@@ -38,6 +38,13 @@ from .configs.channel_routing_manager_config import ChannelRoutingManagerConfig
 from .buffers.async_sender_buffer import AsyncSenderBuffer
 from .buffers.batch_buffer import BatchBuffer, BatchConfig
 from .buffers.direct_buffer import DirectBuffer
+from .observability import (
+    BoundedChannel,
+    ErrorLike,
+    LoggerLike,
+    ObservabilityHub,
+    StatsLike,
+)
 
 __all__ = [
     # Интерфейсы
@@ -55,6 +62,12 @@ __all__ = [
     "BatchBuffer",
     "BatchConfig",
     "DirectBuffer",
+    # Observability (Ф5.15) — фасад наблюдаемости модуля
+    "ObservabilityHub",
+    "BoundedChannel",
+    "LoggerLike",
+    "StatsLike",
+    "ErrorLike",
 ]
 
 __version__ = "1.0.0"
