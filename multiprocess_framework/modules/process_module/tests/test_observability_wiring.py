@@ -109,3 +109,31 @@ def test_worker_error_write_through_immediately():
     assert any(exc in c[1] for c in error.calls)
     # hub error-канал пуст — ошибка мимо буфера.
     assert len(hub.drain_all()["error"]) == 0
+
+
+def test_worker_critical_error_write_through():
+    """severity=critical также идёт write-through (не в буфер hub'а)."""
+    worker, _, _, error, hub, _ = _wire()
+    worker._track_error(RuntimeError("fatal"), {"severity": "critical"})
+    assert error.calls  # доставлено немедленно
+    assert len(hub.drain_all()["error"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Контракт: каждый слот → ЛИБО sink, ЛИБО hub, не оба
+# ---------------------------------------------------------------------------
+
+
+def test_slot_is_either_sink_or_hub_not_both():
+    """Плановый контракт-тест Ф5.16: буферизуемые слоты (logger/stats) — это hub;
+    write-through слот (error) — реальный sink; пересечения нет."""
+    worker, logger, stats, error, hub, _ = _wire()
+
+    slots = {name: worker.get_manager(name) for name in ("logger", "stats", "error")}
+
+    # log/stats — строго hub (буфер), error — строго реальный sink (write-through).
+    assert slots["logger"] is hub and slots["stats"] is hub
+    assert slots["error"] is error
+    # Ни один слот не указывает одновременно и на hub, и на реальный sink.
+    assert slots["error"] is not hub
+    assert slots["logger"] is not logger and slots["stats"] is not stats
