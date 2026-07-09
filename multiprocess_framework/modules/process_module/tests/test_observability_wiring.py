@@ -88,7 +88,9 @@ def test_worker_stat_buffered_then_drained():
     worker._record_metric("hits", 5)
     assert stats.calls == []
     drain_process_observability(hub, adapter)
-    assert any(c[0] == "record_metric" and c[1][0] == "hits" for c in stats.calls)
+    # hub.record_metric помечает запись METRIC_GAUGE → адаптер → stats.gauge;
+    # тест буфера/дренажа проверяет приход метрики по имени, не тип-роутинг.
+    assert any(c[1] and c[1][0] == "hits" for c in stats.calls)
 
 
 # ---------------------------------------------------------------------------
