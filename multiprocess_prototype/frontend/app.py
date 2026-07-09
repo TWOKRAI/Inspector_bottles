@@ -299,6 +299,32 @@ def run_gui(process: "GuiProcess") -> None:
 
     process._bridge.add_state_listener(_forward_state_delta_to_topology)
 
+    # Ф5.20b: активировать live-хвост наблюдаемости. Форвардер на каждом backend-
+    # процессе «мёртв» без подписчика (как log_tail), поэтому GUI сам инициирует
+    # подписку по мере обнаружения процессов в processes.* state-дельтах — каждый
+    # процесс шлёт свои log/stats/error записи на GUI (command=observability.record).
+    # Дедуп по имени: одна подписка на процесс (идемпотентно и не спамит команды).
+    _obs_tail_subscribed: set[str] = set()
+
+    def _activate_observability_tail(msg_dict: dict) -> None:
+        if msg_dict.get("data_type") != "state_delta":
+            return
+        path = msg_dict.get("path", "")
+        if not path.startswith("processes."):
+            return
+        parts = path.split(".")
+        proc = parts[1] if len(parts) >= 2 else ""
+        # Себя не подписываем (у GUI нет пилот-hub'а); каждый процесс — один раз.
+        if not proc or proc == process.name or proc in _obs_tail_subscribed:
+            return
+        _obs_tail_subscribed.add(proc)
+        try:
+            command_sender.send_command(proc, "observability.tail.subscribe", {"subscriber": process.name})
+        except Exception:  # noqa: BLE001 — активация хвоста best-effort, не рушим GUI
+            pass
+
+    process._bridge.add_state_listener(_activate_observability_tail)
+
     # 3f. ServiceStateAdapter — подключить ПОСЛЕ bindings (proxy-aware step)
     # В GUI-процессе нет StateProxy (он живёт только в ProcessModule-процессах),
     # поэтому adapter создаётся с state_proxy=None → sync_domain_to_state() — no-op.

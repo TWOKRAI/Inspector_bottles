@@ -122,6 +122,36 @@ class TestDataReceiverBridgeDispatch:
         assert len(received) == 1
         assert received[0] == msg
 
+    def test_dispatch_observability_record_goes_to_observability_signal(self, qtbot):
+        """Ф5.20b: data_type='observability_record' → observability_received, НЕ state."""
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+
+        bridge = DataReceiverBridge()
+        obs, state = [], []
+        bridge.observability_received.connect(obs.append)
+        bridge.state_updated.connect(state.append)
+
+        msg = {
+            "data_type": "observability_record",
+            "process": "cam",
+            "records": [{"kind": "log", "module": "cam", "ts": 1.0, "severity": "info", "message": "hi"}],
+        }
+        bridge.dispatch(msg)
+
+        assert len(obs) == 1
+        assert obs[0] == msg
+        assert state == []  # НЕ путается со state-плоскостью
+
+    def test_observability_callback_invoked(self, qtbot):
+        """set_observability_callback вызывается перед сигналом."""
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+
+        bridge = DataReceiverBridge()
+        seen = []
+        bridge.set_observability_callback(seen.append)
+        bridge.dispatch({"data_type": "observability_record", "records": []})
+        assert len(seen) == 1
+
     def test_dispatch_unknown_goes_to_command_response(self, qtbot):
         """Неизвестный data_type → signal command_response."""
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
@@ -143,6 +173,50 @@ class TestDataReceiverBridgeDispatch:
 
         bridge.dispatch({})
         assert len(received) == 1
+
+
+class TestObservabilityRecordHandler:
+    """Ф5.20b: GuiProcess._on_observability_record нормализует push → bridge.dispatch."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_qapp(self, qapp):
+        pass
+
+    def _handler(self):
+        """Вызвать handler на fake-self с реальным bridge (метод трогает только _bridge)."""
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        bridge = DataReceiverBridge()
+        got = []
+        bridge.observability_received.connect(got.append)
+        fake_self = MagicMock()
+        fake_self._bridge = bridge
+        return GuiProcess._on_observability_record, fake_self, got
+
+    def test_batch_records_forwarded(self, qtbot):
+        handler, fake_self, got = self._handler()
+        msg = {
+            "command": "observability.record",
+            "sender": "cam",
+            "data": {"process": "cam", "records": [{"m": 1}, {"m": 2}]},
+        }
+        handler(fake_self, msg)
+        assert len(got) == 1
+        assert got[0]["data_type"] == "observability_record"
+        assert got[0]["process"] == "cam"
+        assert got[0]["records"] == [{"m": 1}, {"m": 2}]
+
+    def test_single_record_wrapped_in_list(self, qtbot):
+        handler, fake_self, got = self._handler()
+        msg = {"data": {"process": "cam", "record": {"m": 9}}}
+        handler(fake_self, msg)
+        assert got[0]["records"] == [{"m": 9}]
+
+    def test_empty_no_dispatch(self, qtbot):
+        handler, fake_self, got = self._handler()
+        handler(fake_self, {"data": {"process": "cam"}})
+        assert got == []
 
 
 # ============================================================================

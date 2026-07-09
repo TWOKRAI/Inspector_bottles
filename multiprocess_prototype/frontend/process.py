@@ -70,6 +70,11 @@ class GuiProcess(ProcessModule):
             # активировать сторонние GUI-адаптеры и не словить двойную регистрацию
             # через _init_state_proxy / ADR-SS-006).
             self.router_manager.register_message_handler("state.changed", self._gui_state_proxy.on_state_changed)
+            # Ф5.20b: живой хвост наблюдаемости (Логи/Ошибки/Статистика). Бэкенд
+            # пушит command="observability.record" (targets=[gui], queue_type=system);
+            # handler превращает его в bridge.dispatch(data_type="observability_record")
+            # — ОТДЕЛЬНЫЙ канал, НЕ state-дельта. Подписку активирует app-wiring.
+            self.router_manager.register_message_handler("observability.record", self._on_observability_record)
             # Серверная подписка на телеметрию (callback пуст — доставку в виджеты
             # делает emitter через bridge; подписка нужна, чтобы DeltaDispatcher слал
             # дельты на 'gui'). Не блокирует старт: subscribe — fire-and-forget.
@@ -126,6 +131,30 @@ class GuiProcess(ProcessModule):
         """
         for d in deltas:
             self._bridge.dispatch(state_delta_message(d))
+
+    def _on_observability_record(self, message) -> None:
+        """Handler command="observability.record" (Ф5.20b): живой хвост hub→GUI.
+
+        Приходит из IO-потока (message_processor). Бэкенд шлёт либо пачку
+        (``data.records`` — из drain log/stats), либо одну запись (``data.record``
+        — error/critical у tap'а). Нормализуем в список и гоним в bridge отдельным
+        data_type="observability_record" → сигнал observability_received (НЕ
+        state_updated) → вкладки Логи/Ошибки/Статистика.
+        """
+        data = message.get("data", {}) if isinstance(message, dict) else {}
+        records = data.get("records")
+        if records is None:
+            single = data.get("record")
+            records = [single] if single is not None else []
+        if not records:
+            return
+        self._bridge.dispatch(
+            {
+                "data_type": "observability_record",
+                "process": data.get("process", message.get("sender", "") if isinstance(message, dict) else ""),
+                "records": records,
+            }
+        )
 
     def _data_receiver_loop(self, stop_event, pause_event) -> None:
         """Цикл получения IPC data-сообщений и передачи в Qt через bridge."""
