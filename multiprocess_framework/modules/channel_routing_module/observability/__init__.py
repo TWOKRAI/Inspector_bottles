@@ -26,12 +26,14 @@ from .observability_hub import (
 )
 from .drain_adapter import ObservabilityDrainAdapter
 from .observability_store import ObservabilityStore, resolve_default_db_path
+from .store_tap import StoreTapChannel
 from .protocols import ErrorLike, LoggerLike, StatsLike
 
 __all__ = [
     "ObservabilityHub",
     "ObservabilityDrainAdapter",
     "ObservabilityStore",
+    "StoreTapChannel",
     "resolve_default_db_path",
     "BoundedChannel",
     "DROP_OLDEST",

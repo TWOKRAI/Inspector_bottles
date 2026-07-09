@@ -26,9 +26,16 @@ from __future__ import annotations
 from typing import Any, Optional, Tuple
 
 from ...channel_routing_module.observability import (
+    KIND_LOG,
+    KIND_STATS,
     ObservabilityDrainAdapter,
     ObservabilityHub,
+    ObservabilityStore,
+    StoreTapChannel,
 )
+
+# Имя store-tap'а на error_manager (хэндл для remove_log_tap на teardown).
+STORE_ERROR_TAP = "observability_store::error"
 
 
 def wire_process_observability(
@@ -73,14 +80,73 @@ def wire_process_observability(
 def drain_process_observability(
     hub: Optional[ObservabilityHub],
     adapter: Optional[ObservabilityDrainAdapter],
+    store: Optional[ObservabilityStore] = None,
 ) -> None:
-    """Слить буфер hub'а (log/stats) в реальные менеджеры.
+    """Слить буфер hub'а (log/stats) в реальные менеджеры и (опц.) в стор.
 
-    Зовётся по такту heartbeat и финально на graceful-teardown. error-канал
-    hub'а пуст (error идёт write-through мимо буфера) — apply_drained по нему
-    вырождается в no-op. Исключения глушим: дренаж телеметрии не должен ронять
-    такт heartbeat (урок 2.1 — health self-publish не критичен).
+    Зовётся по такту heartbeat и финально на graceful-teardown. `drain_all()`
+    осушает каналы — вызываем ОДИН раз и разветвляем: adapter → sink-менеджеры,
+    store → персистентная история (Ф5.20a). error-канал hub'а пуст (error идёт
+    write-through мимо буфера) — в стор ошибки попадают отдельным store-tap'ом на
+    error_manager, НЕ отсюда. Исключения глушим: дренаж телеметрии не должен
+    ронять такт heartbeat (урок 2.1 — health self-publish не критичен).
     """
-    if hub is None or adapter is None:
+    if hub is None:
         return
-    adapter.apply_drained(hub.drain_all())
+    drained = hub.drain_all()
+    if adapter is not None:
+        adapter.apply_drained(drained)
+    if store is not None:
+        # log + stats из hub'а → стор (пачкой). error сюда НЕ идёт (write-through
+        # ловит store-tap на error_manager) — иначе дублирование либо потеря.
+        records = drained.get(KIND_LOG, []) + drained.get(KIND_STATS, [])
+        if records:
+            try:
+                store.append_records(records)
+            except Exception:  # nosec B110 — сбой стора не критичен для heartbeat
+                pass
+
+
+def wire_observability_store(
+    error_manager: Optional[Any],
+    db_path: Optional[str] = None,
+) -> Tuple[Optional[ObservabilityStore], Optional[str]]:
+    """Создать персистентный стор и повесить store-tap на error_manager (Ф5.20a).
+
+    error/critical идут write-through в error_manager (Ф5.16) — tap ловит их у
+    реального sink'а и кладёт в стор (так вкладка «Ошибки» получает историю).
+    log/stats пишутся в стор из drain-петли (см. drain_process_observability).
+
+    Args:
+        error_manager: реальный ErrorManager (LoggerCore с add_log_tap). None или
+            без add_log_tap → стор создаётся, но error-tap не вешается.
+        db_path: путь к SQLite-файлу стора. None → resolve_default_db_path().
+
+    Returns:
+        (store, tap_name) или (store, None) если tap не повешен.
+    """
+    store = ObservabilityStore(db_path)
+    if error_manager is None or not hasattr(error_manager, "add_log_tap"):
+        return store, None
+    channel = StoreTapChannel(store, name=STORE_ERROR_TAP)
+    # min_level=ERROR → ловим error + critical, ниже не пишем (вкладка «Ошибки»).
+    error_manager.add_log_tap(channel, min_level="ERROR", name=STORE_ERROR_TAP)
+    return store, STORE_ERROR_TAP
+
+
+def unwire_observability_store(
+    error_manager: Optional[Any],
+    store: Optional[ObservabilityStore],
+    tap_name: Optional[str],
+) -> None:
+    """Снять store-tap с error_manager и закрыть стор (graceful teardown)."""
+    if error_manager is not None and tap_name and hasattr(error_manager, "remove_log_tap"):
+        try:
+            error_manager.remove_log_tap(tap_name)
+        except Exception:  # nosec B110 — teardown best-effort
+            pass
+    if store is not None:
+        try:
+            store.close()
+        except Exception:  # nosec B110
+            pass
