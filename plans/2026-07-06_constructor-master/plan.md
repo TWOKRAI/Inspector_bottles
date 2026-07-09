@@ -165,6 +165,14 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 > (жёсткий id против stale после switch) и авто-рестарт-ВСЕХ процессов + громкая наблюдаемость.
 > Дизайн 4.2+fencing → [f4.2-fencing-contracts.md](f4.2-fencing-contracts.md). Авто-рестарт-всех —
 > механизм-добор поверх Ф3.6 (в основном конфиг + громкое уведомление; хаб-панель → Ф5.15/5.16).
+>
+> **Авто-рестарт-всех МЕХАНИЗМ ЗАКРЫТ (2026-07-09, 8ac43361, ADR-PMM-015):** default-on
+> (`RestartPolicy(enabled=True)` глобальный дефолт PM; protected skip; per-process рецепт
+> перекрывает; откат `FW_AUTORESTART=0`) + громкие supervisor-события `processes.<name>.
+> supervisor.*` (crashed/unresponsive/restarting k/N/gave_up/recovered; recovered — по возврату
+> heartbeat). Дедуп crash-loop = окно give-up Ф3.6. Live `test_autorestart_all_live` (GREEN/RED).
+> **ОСТАЁТСЯ на Ф5:** ObservabilityHub-панель (3 сигнала) + chain-level health (данные ТЕКУТ) +
+> depends_on (3.9). См. [[project-all-process-autorestart]].
 
 | Task | Статус | Суть | Acceptance | Усилие |
 |---|---|---|---|---|
