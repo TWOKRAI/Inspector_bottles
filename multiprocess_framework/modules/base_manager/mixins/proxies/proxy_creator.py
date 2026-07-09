@@ -2,7 +2,7 @@
 Создатель прокси-методов для ObservableMixin.
 
 Автоматически создает публичные методы-прокси для стандартных менеджеров
-(logger, stats/statistics, errors/error).
+(logger, stats/statistics, error).
 """
 
 from typing import Callable, Any
@@ -87,21 +87,16 @@ class ProxyCreator:
             instance.gauge = gauge
 
         # --- Error ---
-        # Task 5.14: каноничный слот — 'error'. 'errors' оставлен как legacy-alias
-        # для внешнего кода, но приоритет у 'error'.
-        error_name = None
+        # Task 5.16 (след 5.14): каноничный слот — 'error'. Legacy-alias 'errors'
+        # убран — симметрия с ObservableMixin._track_error, который тоже пробует
+        # только 'error'. Все точки регистрации переведены на 'error'.
         if "error" in managers:
-            error_name = "error"
-        elif "errors" in managers:
-            error_name = "errors"
-
-        if error_name is not None:
 
             def track_error(error, context=None):
-                return call_manager_func(error_name, "track_error", error, context or {})
+                return call_manager_func("error", "track_error", error, context or {})
 
             def record_error(error, context=None):
-                return call_manager_func(error_name, "record_error", error, context or {})
+                return call_manager_func("error", "record_error", error, context or {})
 
             instance.track_error = track_error
             instance.record_error = record_error
