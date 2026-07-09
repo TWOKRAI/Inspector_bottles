@@ -7,6 +7,7 @@ incarnation новых bump'нуты), повторный switch → epoch==2, r
 """
 
 import os
+from unittest.mock import MagicMock
 
 from .conftest import make_pm, wire_planner
 
@@ -97,6 +98,49 @@ class TestRollbackBroadcast:
         refreshes = _refreshes(pm)
         assert len(refreshes) >= 1
         assert refreshes[-1]["data"]["reason"] == "rollback"
+
+
+class TestRestartIncarnationOrder:
+    """H2 (Ф4-добор): при рестарте incarnation бампится ДО create_and_register."""
+
+    def test_restart_bumps_incarnation_before_create(self) -> None:
+        """Смена identity очередей → bump ДО create: новый инстанс рождается со
+        СВЕЖЕЙ incarnation в routing_meta-снимке (не stale). На старом коде bump
+        шёл ПОСЛЕ create → инстанс штамповал stale incarnation → PM/соседи дропали
+        его легитимные сообщения как stale (fence false-positive, ADR-PMM-014)."""
+        pm = _pm_with_comm({"worker": {"class": "m.W", "priority": "normal"}})
+        pm.send_message = MagicMock()
+
+        # Форсируем смену identity очередей: ids_before != ids_after (иначе bump
+        # не нужен). Реальный _process_queue_ids в mock отдаёт {} (identity стабильна).
+        seq = iter([{"data": 1}, {"data": 2}])
+        pm._process_queue_ids = lambda name: next(seq, {"data": 2})
+
+        calls: list = []
+        orig_bump = pm._bump_incarnation
+        orig_create = pm._process_registry.create_and_register
+
+        def rec_bump(name):
+            r = orig_bump(name)
+            calls.append(("bump", name))
+            return r
+
+        def rec_create(name, cls, cfg, prio):
+            # incarnation, «видимая» на момент create (снимок в bundle нового инстанса)
+            calls.append(("create", name, pm._incarnations.get(name)))
+            return orig_create(name, cls, cfg, prio)
+
+        pm._bump_incarnation = rec_bump
+        pm._process_registry.create_and_register = rec_create
+
+        assert pm.restart_process("worker") is True
+
+        kinds = [c[0] for c in calls]
+        assert "bump" in kinds and "create" in kinds
+        assert kinds.index("bump") < kinds.index("create"), f"bump обязан быть ДО create: {calls}"
+        # incarnation на момент create == финальной → инстанс родился со свежей, не stale
+        create_inc = next(c[2] for c in calls if c[0] == "create")
+        assert create_inc == pm._incarnations.get("worker")
 
 
 class TestProvisionIncarnation:
