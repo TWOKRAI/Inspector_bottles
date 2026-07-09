@@ -108,6 +108,13 @@ class SourceProducer:
 
             t_start = time.monotonic()
 
+            # Снимок кумулятивного счётчика ошибок ДО produce() — чтобы отличить
+            # честно-успешную итерацию от той, где плагин ПРОГЛОТИЛ ошибку внутри
+            # (contain→report→degrade, M-err-1/2, волна C): такой плагин ловит отказ
+            # железа/соседа в своём produce(), зовёт ctx.health.report_error и
+            # возвращает [] — produce() НЕ бросает, но итерация НЕ успешна.
+            errors_before = self._health.error_count if self._health is not None else 0
+
             produce_failed = False
             try:
                 # Вызов через PluginRunner — единый шов с pre/post-хуками (io-debug).
@@ -125,10 +132,15 @@ class SourceProducer:
                 if self._health is not None:
                     self._health.report_error(e, context=self._health_context)
 
-            # Успешная итерация (produce() не бросил — даже вернув [] «нет кадра»)
-            # сбрасывает подряд-счётчик и закрывает breaker (снимает деградацию).
+            # record_success сбрасывает подряд-счётчик breaker → закрывает деградацию.
+            # Зовём ТОЛЬКО если итерация честно успешна: produce() не бросил И плагин
+            # не отчитался об ошибке внутри (error_count не вырос). Иначе безусловный
+            # record_success «съедал» бы report_error флагман-источников
+            # (capture/camera_service ловят ошибку внутри и возвращают []) —
+            # breaker никогда бы не открылся, degrade не наступил (баг Ф2 prod-пути).
             if not produce_failed and self._health is not None:
-                self._health.record_success()
+                if self._health.error_count == errors_before:
+                    self._health.record_success()
 
             # [TRACE] Логируем каждый 30-й кадр (чтобы не спамить)
             if items and hasattr(self, "_trace_cnt"):

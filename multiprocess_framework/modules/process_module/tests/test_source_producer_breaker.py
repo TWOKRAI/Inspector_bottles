@@ -99,6 +99,50 @@ def test_successful_produce_recovers_breaker() -> None:
     assert hs.error_count == 2
 
 
+class _SwallowingPlugin:
+    """Плагин волны C (M-err-1/2): ловит отказ железа ВНУТРИ produce(), отчитывается
+    через ctx.health.report_error и возвращает [] (contain→report→degrade).
+
+    produce() НЕ бросает — раньше безусловный record_success() в SourceProducer это
+    «съедал» (сброс подряд-счётчика), и breaker флагман-источников не открывался.
+    """
+
+    is_source = True
+
+    def __init__(self, name: str, health: HealthReporter, n_fail: int, stop_event: threading.Event) -> None:
+        self.name = name
+        self._health = health
+        self._n_fail = n_fail
+        self._stop = stop_event
+        self.calls = 0
+
+    def produce(self):
+        self.calls += 1
+        if self.calls >= self._n_fail:
+            self._stop.set()
+        # Как capture/camera_service: ошибка железа проглочена + отчитана, вернули [].
+        self._health.report_error(RuntimeError("hardware gone"), context="produce:cam0")
+        return []
+
+
+def test_internally_swallowed_errors_open_breaker() -> None:
+    """Регресс Ф2 prod-путь: плагин глотает ошибку внутри produce() и возвращает [];
+    breaker ДОЛЖЕН открыться (record_success не «съедает» внутренний report_error).
+
+    На старом коде (безусловный record_success) breaker оставался бы CLOSED —
+    флагман-источники capture/camera_service никогда не деградировали.
+    """
+    stop = threading.Event()
+    hs, reporter = _health(threshold=3)
+    plugin = _SwallowingPlugin("cam0", reporter, n_fail=3, stop_event=stop)
+    _run(_producer(plugin, reporter), stop)
+
+    assert plugin.calls == 3
+    assert hs.error_count == 3
+    assert hs.breaker_state == BreakerState.OPEN
+    assert hs.status == HealthStatus.DEGRADED
+
+
 def test_no_health_still_runs_backward_compat() -> None:
     # health=None → поведение как раньше: produce() падает, items=[], без краха.
     stop = threading.Event()
