@@ -36,6 +36,28 @@ _logger = logging.getLogger(__name__)
 _UNSET: Any = object()
 
 
+class _Deleted:
+    """Sentinel-тип для delete в fan-out callback (path, value). Отличает
+    удаление узла от легитимного None-значения. repr — для читаемых логов."""
+
+    _instance = None
+
+    def __new__(cls) -> "_Deleted":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "DELETED"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+# Публичный sentinel: fan-out получает его как value при удалении узла.
+DELETED = _Deleted()
+
+
 _PROP_SETTERS: dict[str, Callable[[QWidget, Any], None]] = {
     "value": lambda w, v: w.setValue(v),  # type: ignore[attr-defined]
     "text": lambda w, v: w.setText(str(v)),  # type: ignore[attr-defined]
@@ -415,19 +437,29 @@ class GuiStateBindings:
 
             self._apply_to_widget(handle, value)
 
-        # Убираем мёртвые weakref-ы
+        # Убираем мёртвые weakref-ы. ВАЖНО: отпускаем подписку (_release), иначе
+        # refcount паттерна в proxy не декрементится, если reap опередил
+        # widget.destroyed→unbind_widget (единственный другой release-путь) →
+        # серверная подписка утекает (5.20 review #1).
         if dead:
             for d in dead:
                 try:
                     self._bindings.remove(d)
                 except ValueError:
-                    pass
+                    continue
+                self._release(d.pattern)
 
         # Fan-out: динамическое обнаружение ключей (создание строк подписчиком).
+        # При delete передаём sentinel DELETED (не None), чтобы динамический
+        # потребитель мог отличить удаление узла от легитимного None-значения и
+        # удалить строку/запись (5.9 review #2). Прежние потребители, делающие
+        # `if not isinstance(value, dict): return`, DELETED (не dict) пропускают —
+        # обратная совместимость.
+        fanout_value = DELETED if deleted else value
         for fanout in list(self._fanouts):
             if match_glob(fanout.pattern, path):
                 try:
-                    fanout.callback(path, value)
+                    fanout.callback(path, fanout_value)
                 except Exception as exc:
                     _logger.debug("bindings: fan-out callback failed on %s (pattern %s): %s", path, fanout.pattern, exc)
 

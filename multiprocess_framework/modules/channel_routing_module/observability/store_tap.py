@@ -21,11 +21,12 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from ..interfaces import IChannel
 from .observability_store import KIND_ERROR, ObservabilityStore
 
 
-class StoreTapChannel:
-    """Tap-sink: LogRecord-dict → ObservabilityStore.append_records одной записью."""
+class StoreTapChannel(IChannel):
+    """Tap-sink (IChannel): LogRecord-dict → ObservabilityStore.append_records."""
 
     def __init__(
         self,
@@ -41,7 +42,15 @@ class StoreTapChannel:
         """
         self._store = store
         self._kind = kind
-        self.name = name
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def channel_type(self) -> str:
+        return "observability_store_tap"
 
     def write(self, record_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Нормализовать LogRecord-dict и добавить в стор. Ошибку глушим (tail не критичен)."""
@@ -56,8 +65,8 @@ class StoreTapChannel:
         try:
             self._store.append_records([rec])
         except Exception:  # nosec B110 — сбой стора не должен ронять логирование
-            return {"status": "error"}
-        return {"status": "ok"}
+            return {"status": "error", "channel": self._name}
+        return {"status": "success", "channel": self._name}
 
     def close(self) -> None:
         """IChannel-совместимость: tap закрывается без побочных эффектов (стор общий)."""

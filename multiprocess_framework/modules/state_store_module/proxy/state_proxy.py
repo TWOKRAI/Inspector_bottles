@@ -81,6 +81,9 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         # серверная подписка, снимается при обнулении refcount.
         self._pattern_sub_id: dict[str, str] = {}
         self._pattern_refcount: dict[str, int] = {}
+        # Обратная карта sub_id → pattern: O(1)-очистка ensure-реестра в
+        # unsubscribe без линейного скана (5.20 review #10).
+        self._sub_id_pattern: dict[str, str] = {}
 
     def initialize(self) -> bool:
         self.is_initialized = True
@@ -308,10 +311,11 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
 
         # Чистим refcount-реестр, если этот sub_id был ensure-подпиской —
         # иначе прямой unsubscribe оставил бы висячий pattern → refcount.
-        for pat, sid in list(self._pattern_sub_id.items()):
-            if sid == sub_id:
-                self._pattern_sub_id.pop(pat, None)
-                self._pattern_refcount.pop(pat, None)
+        # O(1) через обратную карту (не линейный скан на каждый unsubscribe).
+        pat = self._sub_id_pattern.pop(sub_id, None)
+        if pat is not None:
+            self._pattern_sub_id.pop(pat, None)
+            self._pattern_refcount.pop(pat, None)
 
         # IPC-отписка
         if self._router is not None:
@@ -362,6 +366,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         sub_id = self.subscribe(pattern, cb, exclude_self=exclude_self)
         self._pattern_sub_id[pattern] = sub_id
         self._pattern_refcount[pattern] = 1
+        self._sub_id_pattern[sub_id] = pattern
         return sub_id
 
     def release_subscription(
@@ -448,6 +453,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._sub_ids.clear()
         self._pattern_sub_id.clear()
         self._pattern_refcount.clear()
+        self._sub_id_pattern.clear()
         self.is_initialized = False
         self._log_debug(f"StateProxy '{self._process_name}': shutdown, все подписки удалены")
         return True

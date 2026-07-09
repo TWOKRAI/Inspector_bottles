@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta
+from multiprocess_framework.modules.state_store_module.core.delta import Delta
 
 STATE_DELTA = "state_delta"
 
@@ -40,13 +40,14 @@ def state_delta_message(delta: Delta) -> dict[str, Any]:
     Returns:
         dict формата state_delta (см. модульный docstring).
     """
-    is_delete = delta.new_value is MISSING
+    # Используем готовые предикаты Delta (единый источник семантики MISSING),
+    # не сравниваем `is MISSING` вручную (5.9 review #8).
     return {
         "data_type": STATE_DELTA,
         "path": delta.path,
-        "value": None if is_delete else delta.new_value,
-        "deleted": is_delete,
-        "old_value": None if delta.old_value is MISSING else delta.old_value,
+        "value": None if delta.is_delete else delta.new_value,
+        "deleted": delta.is_delete,
+        "old_value": None if delta.is_create else delta.old_value,
         "transaction_id": delta.transaction_id,
         "source": delta.source,
     }

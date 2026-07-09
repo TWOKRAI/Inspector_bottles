@@ -109,7 +109,7 @@ class TestQuery:
 
     def test_filter_by_severity(self, tmp_path):
         store = self._seed(tmp_path)
-        rows = store.list_records(kind="log", min_severity_in=["warning"])
+        rows = store.list_records(kind="log", severity_in=["WARNING"])  # case-insensitive
         assert [r["message"] for r in rows] == ["l2"]
         store.close()
 

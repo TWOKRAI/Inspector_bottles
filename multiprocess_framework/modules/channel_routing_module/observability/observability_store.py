@@ -86,6 +86,9 @@ class ObservabilityStore:
         # sqlite3-соединение не thread-safe при общем использовании — сериализуем
         # доступ RLock'ом (drain и возможные диагностические чтения в одном процессе).
         self._lock = threading.RLock()
+        # Счётчик потерянных при записи строк (busy_timeout/locked) — терять можно,
+        # молчать нельзя (5.20 review #3). Виден через .dropped.
+        self._dropped = 0
         if self._db_path not in (":memory:", "") and os.path.dirname(self._db_path):
             os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
@@ -97,7 +100,13 @@ class ObservabilityStore:
             # WAL: конкурентная запись нескольких процессов + чтение GUI без блокировки.
             if self._db_path not in (":memory:", ""):
                 self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA busy_timeout=3000")
+                # synchronous=NORMAL: под WAL безопасно (потеря только при OS-crash,
+                # не при app-crash) и убирает fsync на КАЖДЫЙ commit → commit ~µs.
+                # Критично: append_records зовётся с heartbeat-потока (drain) и с
+                # logging-потока (store-tap), fsync-на-commit блокировал бы их и
+                # раздувал окно файловой блокировки на shared WAL (5.20 review #3).
+                self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA busy_timeout=2000")
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS records (
@@ -127,12 +136,19 @@ class ObservabilityStore:
             return 0
         rows = [_row_from_record(r) for r in records]
         with self._lock:
-            self._conn.executemany(
-                "INSERT INTO records (kind, module, ts, severity, message, extra) "
-                "VALUES (:kind, :module, :ts, :severity, :message, :extra)",
-                rows,
-            )
-            self._conn.commit()
+            try:
+                self._conn.executemany(
+                    "INSERT INTO records (kind, module, ts, severity, message, extra) "
+                    "VALUES (:kind, :module, :ts, :severity, :message, :extra)",
+                    rows,
+                )
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                # database is locked / busy_timeout истёк: терять можно, молчать
+                # нельзя — считаем потерю (видна через .dropped), не роняем
+                # heartbeat/логирование (5.20 review #3).
+                self._dropped += len(rows)
+                return 0
         return len(rows)
 
     # ------------------------------------------------------------------
@@ -143,7 +159,7 @@ class ObservabilityStore:
         self,
         kind: Optional[str] = None,
         module: Optional[str] = None,
-        min_severity_in: Optional[List[str]] = None,
+        severity_in: Optional[List[str]] = None,
         offset: int = 0,
         limit: int = 100,
         newest_first: bool = True,
@@ -153,8 +169,10 @@ class ObservabilityStore:
         Args:
             kind: фильтр по kind (log/error/stats) или None (все).
             module: фильтр по модулю-источнику или None.
-            min_severity_in: список допустимых severity (например ['error','critical'])
-                или None (без фильтра по уровню).
+            severity_in: membership-фильтр по severity — список допустимых значений
+                (например ['error','critical']), НЕ порог. None → без фильтра.
+                Значения нормализуются в lower-case (severity хранится в нижнем
+                регистре), поэтому 'ERROR' и 'error' эквивалентны (5.20 review #7).
             offset/limit: пагинация.
             newest_first: True → ORDER BY id DESC.
 
@@ -169,10 +187,10 @@ class ObservabilityStore:
         if module is not None:
             clauses.append("module = ?")
             params.append(module)
-        if min_severity_in:
-            placeholders = ",".join("?" for _ in min_severity_in)
+        if severity_in:
+            placeholders = ",".join("?" for _ in severity_in)
             clauses.append(f"severity IN ({placeholders})")
-            params.extend(min_severity_in)
+            params.extend(s.lower() for s in severity_in)
 
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         order = "DESC" if newest_first else "ASC"
@@ -229,3 +247,8 @@ class ObservabilityStore:
     @property
     def db_path(self) -> str:
         return self._db_path
+
+    @property
+    def dropped(self) -> int:
+        """Число строк, потерянных при записи (database locked / busy_timeout)."""
+        return self._dropped

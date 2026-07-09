@@ -281,6 +281,16 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self._observability_store, self._observability_store_taps = wire_observability_store(
                 self.error_manager, self.logger_manager
             )
+            # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
+            # Ни одного tap → вкладка «Ошибки» молча пуста — предупреждаем
+            # (терять можно, молчать нельзя; 5.20 review #6).
+            if not self._observability_store_taps:
+                self._log_warning(
+                    f"Process '{self.name}': ObservabilityStore без error-tap "
+                    "(ни logger_manager, ни error_manager не поддержали add_log_tap) "
+                    "— ошибки в стор попадать НЕ будут",
+                    module="observability",
+                )
 
     def _init_communication(self):
         """Инициализация коммуникации процесса."""

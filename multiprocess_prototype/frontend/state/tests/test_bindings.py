@@ -678,3 +678,50 @@ class TestFanoutUnbind:
         qtbot.wait(50)  # авто-уборка по destroyed идемпотентна
 
         assert bindings._fanouts == []
+
+
+# ---------------------------------------------------------------------------
+# Review-фиксы 5.20: reap→release (#1), fan-out DELETED (#2)
+# ---------------------------------------------------------------------------
+
+
+class TestReviewFixes:
+    def test_reap_dead_widget_releases_subscription(self, qtbot, bridge):
+        """#1: уборка мёртвого weakref-биндинга отпускает подписку (нет leak).
+
+        widget.destroyed.connect(lambda) в bind() держит strong-ref на виджет,
+        поэтому reap-путь в жизни редок (обычно раньше срабатывает destroyed→
+        unbind_widget). Инжектируем мёртвый weakref, чтобы проверить именно
+        reap→_release: без него refcount паттерна утёк бы.
+        """
+        ensure, release = MagicMock(), MagicMock()
+        b = GuiStateBindings(bridge, ensure_subscription=ensure, release_subscription=release)
+        w = QLabel()
+        qtbot.addWidget(w)
+        handle = b.bind("a.b", w, "text")
+        ensure.assert_called_once_with("a.b")
+
+        # Симулируем «виджет собран GC»: weakref теперь возвращает None
+        handle.widget_ref = lambda: None
+        b._on_state_msg({"data_type": "state_delta", "path": "a.b", "value": 1})
+
+        assert handle not in b._bindings  # reap убрал
+        release.assert_called_once_with("a.b")
+
+    def test_fanout_receives_DELETED_sentinel_on_delete(self, qtbot, bindings):
+        """#2: fan-out получает sentinel DELETED на delete (не None)."""
+        from multiprocess_prototype.frontend.state.bindings import DELETED
+
+        seen: list = []
+        bindings.bind_fanout("proc.*.workers.*", lambda p, v: seen.append((p, v)))
+
+        bindings._on_state_msg(
+            {"data_type": "state_delta", "path": "proc.cam.workers.w1", "value": None, "deleted": True}
+        )
+        assert seen == [("proc.cam.workers.w1", DELETED)]
+
+        seen.clear()
+        bindings._on_state_msg(
+            {"data_type": "state_delta", "path": "proc.cam.workers.w1", "value": 42, "deleted": False}
+        )
+        assert seen == [("proc.cam.workers.w1", 42)]
