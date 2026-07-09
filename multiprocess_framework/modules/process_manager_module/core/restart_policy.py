@@ -24,11 +24,21 @@ class RestartPolicy(SchemaBase):
             пожизненный счётчик как раньше (метки не протухают).
         restart_on_crash: Рестартовать при crashed (exitcode != 0)
         restart_on_unresponsive: Рестартовать при отсутствии heartbeat
+        restart_on_health_failed: Рестартовать живой (heartbeating) процесс, который
+            САМ выставил ``health.status=failed`` (тихо-мёртвый: liveness ОК, но
+            плагин/breaker объявил фатальный отказ). H4 (Ф4-добор). Срабатывает
+            только при включённом env-флаге ``FW_HEALTH_RESTART`` (default off) —
+            liveness-рестарт (crash/unresponsive) от этого флага не зависит.
     """
 
-    enabled: bool = False  # TODO: вернуть True после стабилизации запуска
+    # Raw-дефолт enabled=False — безопасный «нейтральный» для прямого
+    # RestartPolicy() в тестах/минимальных конфигах. В проде композиция ставит
+    # enabled=True per-process через FW_AUTORESTART (авто-рестарт-всех, Ф4) —
+    # см. process_manager_process._resolve_policy. Т.е. дефолт off, прод on.
+    enabled: bool = False
     max_retries: int = 3
     backoff_sec: float = 2.0
     window_sec: float = 60.0
     restart_on_crash: bool = True
     restart_on_unresponsive: bool = True
+    restart_on_health_failed: bool = True
