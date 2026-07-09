@@ -6,8 +6,8 @@
 
 | Критерий | Оценка | Комментарий |
 |---|---|---|
-| Код | 9 | CRM + ChannelRegistry + 3 буфера + normalize_config + ChannelRoutingConfig |
-| Тесты | 8 | 58 тестов (registry + buffers + CRM); все проходят |
+| Код | 9 | CRM + ChannelRegistry + 3 буфера + normalize_config + ChannelRoutingConfig + observability/ObservabilityHub (Ф5.15) |
+| Тесты | 9 | 84 теста (58 base + 26 observability: hub/bounded-channel); все проходят |
 | Документация | 10 | README полный; `DECISIONS.md` (ADR-013…016, ADR-108); §6.4 в `ARCHITECTURE.md` |
 | Связанность | 10 | Зависит только от base_manager + dispatch_module + data_schema_module. Нет циклов |
 | Работоспособность | 9 | Все наследники мигрированы; 155 тестов зелёные |
@@ -53,3 +53,4 @@ ChannelRoutingManager
 | 2026-03-12 | Фаза 5: README полный, DECISIONS.md ADR-013..016, STATUS.md всех модулей | 5 |
 | 2026-03-31 | ADR-108: убран дублирующий `build()` у `ChannelRoutingConfig`; зафиксированы две роли схем | — |
 | 2026-04-09 | Фаза 0.5 документации: локальный `DECISIONS.md`, §6.4, строка в главном `DECISIONS.md`; удалён `base_buffer.py` | 9 |
+| 2026-07-09 | Ф5.15: `observability/` — ObservabilityHub + BoundedChannel + Protocol-контракты (drop-in ObservableMixin, pull-drain, drop_oldest + счётчик потерь, две плоскости фасада); 26 contract-тестов; ADR-CRM-007 | Ф5.15 |
