@@ -12,6 +12,7 @@ Thread-safe: dispatch() может вызываться из разных пот
 Все три параметра опциональны: при отсутствии менеджера вызовы тихо
 возвращают ``None`` (см. ObservableMixin._call_manager).
 """
+
 from __future__ import annotations
 
 import threading
@@ -62,16 +63,14 @@ class WorkerPoolDispatcher(BaseManager, ObservableMixin):
         BaseManager.__init__(self, manager_name="WorkerPoolDispatcher")
         ObservableMixin.__init__(
             self,
-            managers={"logger": logger, "stats": stats, "errors": errors},
+            managers={"logger": logger, "stats": stats, "error": errors},
         )
 
         self._send_fn = send_fn
         self._timeout = timeout
         self._input_queue_size = max(1, input_queue_size)
 
-        self._worker_names: list[str] = [
-            f"processor_worker_{i}" for i in range(worker_count)
-        ]
+        self._worker_names: list[str] = [f"processor_worker_{i}" for i in range(worker_count)]
 
         self._lock = threading.Lock()
         self._pending: dict[str, PendingTask] = {}
@@ -147,10 +146,7 @@ class WorkerPoolDispatcher(BaseManager, ObservableMixin):
             "worker_pool.dispatched",
             tags={"worker": worker_name, "operation": operation_ref},
         )
-        self._log_debug(
-            f"Задача {request.task_id} отправлена worker={worker_name},"
-            f" operation={operation_ref}"
-        )
+        self._log_debug(f"Задача {request.task_id} отправлена worker={worker_name}, operation={operation_ref}")
 
         signaled = pending.event.wait(timeout=self._timeout)
 
@@ -163,10 +159,7 @@ class WorkerPoolDispatcher(BaseManager, ObservableMixin):
                 "worker_pool.timeouts",
                 tags={"worker": worker_name, "operation": operation_ref},
             )
-            self._log_warning(
-                f"Timeout задачи {request.task_id} ({self._timeout:.1f}s),"
-                f" operation={operation_ref}"
-            )
+            self._log_warning(f"Timeout задачи {request.task_id} ({self._timeout:.1f}s), operation={operation_ref}")
             return WorkerTaskResponse.error_response(
                 task_id=request.task_id,
                 error="timeout",
@@ -207,10 +200,7 @@ class WorkerPoolDispatcher(BaseManager, ObservableMixin):
 
         if pending is None:
             self._record_metric("worker_pool.late_responses")
-            self._log_warning(
-                f"Late response для task_id={response.task_id}"
-                f" (нет в pending), игнорируем"
-            )
+            self._log_warning(f"Late response для task_id={response.task_id} (нет в pending), игнорируем")
             return
 
         pending.response = response

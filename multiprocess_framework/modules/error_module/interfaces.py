@@ -24,6 +24,7 @@ error_module — специализация logger_module для обработ�
             except Exception as exc:
                 self._errors.log_exception(exc, "processing failed", module="my_handler")
 """
+
 from typing import Any, Dict, Optional, Union, Protocol, runtime_checkable
 
 
@@ -32,10 +33,10 @@ class IErrorManager(Protocol):
     """Контракт менеджера ошибок.
 
     Специализация ILoggerManager с фокусом на обработку исключений.
-    Реализуется классом ErrorManager (наследником LoggerManager).
+    Реализуется классом ErrorManager (брат LoggerManager, общий предок LoggerCore).
 
     Паттерн использования через ObservableMixin:
-        ObservableMixin.__init__(self, managers={'errors': error_manager})
+        ObservableMixin.__init__(self, managers={'error': error_manager})
         self._track_error(exc, context={"method": "process"})
 
     Прямое использование:

@@ -118,7 +118,7 @@ class TestSQLManager:
     def test_track_error_on_execute_command_failure(self, sql_config):
         """При исключении в execute_command вызывается _track_error."""
         mock_errors = MagicMock()
-        mgr = SQLManager(config=sql_config, managers={"errors": mock_errors})
+        mgr = SQLManager(config=sql_config, managers={"error": mock_errors})
         mgr.initialize()
         result = mgr.execute_command({"command": "db.query", "sql": "SELECT * FROM nonexistent"})
         mgr.shutdown()

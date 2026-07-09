@@ -10,8 +10,9 @@ ChannelRoutingManager — базовый менеджер маршрутизац
 
 Наследники настраивают, но не переписывают:
   - RouterManager  — key=command/type, buffer=AsyncSenderBuffer, channels=IMessageChannel
-  - LoggerManager  — key=level/scope,  buffer=BatchBuffer,       channels=ILogChannel
-  - ErrorManager   — наследует LoggerManager, добавляет severity routing
+  - LoggerCore     — key=level/scope,  buffer=BatchBuffer,       channels=ILogChannel
+                     (LoggerManager = LoggerCore + process-singleton)
+  - ErrorManager   — брат LoggerManager (общий предок LoggerCore), + severity routing
   - StatsManager   — key=metric_name,  buffer=AggregationWindow, channels=IMetricChannel
 """
 

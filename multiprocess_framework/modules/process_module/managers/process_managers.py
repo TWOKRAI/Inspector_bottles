@@ -79,7 +79,9 @@ class ProcessManagers:
         process.register_manager("router", bundle.router, enabled=True)
         process.register_manager("console", bundle.console, enabled=bundle.console_enabled)
         if bundle.error is not None:
-            process.register_manager("errors", bundle.error, enabled=True)
+            # Task 5.14: каноничное имя error-гнезда — "error" (совпадает с
+            # ObservableMixin._track_error, которое пробует именно "error").
+            process.register_manager("error", bundle.error, enabled=True)
 
     def attach_adapters(self, bundle: ManagersBundle, process) -> None:
         """Создать адаптеры и привязать их к менеджерам.
