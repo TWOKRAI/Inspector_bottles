@@ -78,9 +78,8 @@ Generated: April 1, 2026 by [codebase-mcp](https://github.com/Dipanshu-js/codeba
 │   │   ├── logs/  # 0 files
 │   │   └── registers/  # 8 files
 │   ├── scripts/  # 5 files
-│   ├── Services/  # 5 files
+│   ├── Services/  # 4 files
 │   │   ├── hikvision_camera/  # 1 files
-│   │   ├── Operation_crop/  # 9 files
 │   │   └── Region_processors/  # 5 files
 │   ├── Utils/  # 11 files
 │   │   ├── file_comments/  # 12 files
