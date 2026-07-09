@@ -302,6 +302,10 @@ class PipelinePresenter:
         """Добавить wire/binding с валидацией портов (делегат PipelineMutations, F.4)."""
         return self._mutations.add_wire(source, target, parent)
 
+    def remove_wire(self, source: str, target: str) -> bool:
+        """Удалить wire/binding source→target (делегат PipelineMutations)."""
+        return self._mutations.remove_wire(source, target)
+
     def place_display(self, display_id: str, x: float, y: float) -> None:
         """Разместить пустой display-бокс на холсте (делегат PipelineMutations, F.4)."""
         self._mutations.place_display(display_id, x, y)

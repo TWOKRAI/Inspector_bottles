@@ -289,6 +289,9 @@ class PipelineTab(QWidget):
         self._scene.node_lock_toggle_requested.connect(self._on_node_lock_toggle)
         # free-layout: drag меняет ТОЛЬКО позицию ноды (не процесс) → персист в рецепт.
         self._scene.node_position_changed.connect(self._on_node_position_changed)
+        # Удаление ОДНОГО провода через контекст-меню edge (паритет со старым
+        # topology-редактором): dispatch DisconnectWire / UnbindDisplay.
+        self._scene.edge_delete_requested.connect(self._on_edge_delete_requested)
         # G.4.4: field_changed → presenter._on_inspector_field_changed (dispatch
         # SetPluginConfig, G.4.3) подключается в presenter.set_inspector. Дублирующий
         # tab-коннект (только лог + stale TODO) убран.
@@ -469,6 +472,19 @@ class PipelineTab(QWidget):
         if not self._can_edit():
             return
         self._presenter.add_wire(source_endpoint, target_endpoint, parent=self)
+
+    def _on_edge_delete_requested(self, edge_item) -> None:
+        """Удаление одного провода из контекст-меню edge (обратное к add_wire).
+
+        implicit-стрелки (внутрипроцессная цепочка плагинов) НЕ удаляются
+        пользователем (EdgeData.implicit) — молча игнорируем.
+        """
+        if not self._can_edit():
+            return
+        data = getattr(edge_item, "edge_data", None)
+        if data is None or getattr(data, "implicit", False):
+            return
+        self._presenter.remove_wire(data.source_id, data.target_id)
 
     def _on_node_delete_requested(self, node_id: str) -> None:
         """Контекстное меню «Delete» для узла (NodeItem или DisplayNodeItem).

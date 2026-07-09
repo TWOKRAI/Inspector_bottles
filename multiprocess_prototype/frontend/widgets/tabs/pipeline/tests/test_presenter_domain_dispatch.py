@@ -272,6 +272,65 @@ class TestAddWireDomainDispatch:
 
 
 # ===========================================================================
+# remove_wire — dispatch(DisconnectWire / UnbindDisplay) — паритет со старым
+# topology-редактором (удаление одного провода из контекст-меню edge)
+# ===========================================================================
+
+
+class TestRemoveWireDomainDispatch:
+    """remove_wire через domain dispatch: process-wire и display-unbind."""
+
+    def _two_proc_one_wire(self):
+        return _make_orchestrator_services(
+            topology={
+                "processes": [
+                    {"process_name": "a", "plugins": [{"plugin_name": "capture"}]},
+                    {"process_name": "b", "plugins": [{"plugin_name": "blur"}]},
+                ],
+                "wires": [{"source": "a.capture.frame", "target": "b.blur.frame"}],
+            }
+        )
+
+    def test_process_wire_removed_from_repo(self):
+        """remove_wire(proc→proc) → DisconnectWire → wire снят из repo и модели."""
+        services = self._two_proc_one_wire()
+        p = PipelinePresenter(services)
+        p.load_topology_from_config()
+        assert len(p.model.get_wires()) == 1
+
+        assert p.remove_wire("a.capture.frame", "b.blur.frame") is True
+        assert len(p.model.get_wires()) == 0
+        assert services.topology.load().to_dict().get("wires", []) == []
+
+    def test_remove_wire_undo_restores(self):
+        """undo после remove_wire → провод восстановлен."""
+        services = self._two_proc_one_wire()
+        p = PipelinePresenter(services)
+        p.load_topology_from_config()
+
+        p.remove_wire("a.capture.frame", "b.blur.frame")
+        assert len(p.model.get_wires()) == 0
+        services.commands.undo()
+        assert len(p.model.get_wires()) == 1
+
+    def test_remove_wire_display_target_unbinds(self):
+        """remove_wire(source → display.<id>.frame) → UnbindDisplay → привязка снята."""
+        services = _make_display_services(
+            topology={
+                "processes": [{"process_name": "cam", "plugins": [{"plugin_name": "capture"}]}],
+                "wires": [],
+                "displays": [{"node_id": "cam.capture.frame", "display_id": "main"}],
+            }
+        )
+        p = PipelinePresenter(services)
+        p.load_topology_from_config()
+        assert len(p.model.get_displays()) == 1
+
+        assert p.remove_wire("cam.capture.frame", "display.main.frame") is True
+        assert len(p.model.get_displays()) == 0
+
+
+# ===========================================================================
 # undo / redo — services.commands.undo() / redo()
 # ===========================================================================
 
