@@ -114,6 +114,15 @@ def test_sorting_is_idempotent(xs):
 6. `qt_wait_for` — for async transitions (instead of `time.sleep` or `QTest.qWait`).
 7. Fallback (qt-mcp not connected) → `pytest-qt` (`qtbot`, `QSignalSpy`) — standard path for unit GUI tests.
 
+**Backend integration tests (if backend-ctl is connected):**
+1. Launch/connect to the running backend with `BACKEND_CTL=1` (process manager socket, port 8765 by default). Inspect system shape with `capabilities` — understand processes, available commands, registers, channels.
+2. Test backend scenarios: use `send_command` to trigger operations, `state_get` / `state_subscribe` to verify state changes, `events` to trace message routing between processes.
+3. Validate concurrency & timing: `log_tail` for event sequence and timing, `debug_session` for one-button reproduction of complex interaction scenarios.
+4. Spot-check error paths: `state_get` after sending invalid commands to verify error handling.
+5. Inspect process health: `get_status` for incarnation/epoch (stale-message fencing).
+6. **Critical rule:** backend-ctl for backend scenarios; qt-mcp for UI interaction. Do NOT spawn two backends at once (shared PID registry + SHM cleanup conflict) — connect one test client to the running backend.
+7. Fallback (backend-ctl not connected) → `pytest` with mocked driver (in-process simulation, limited scope).
+
 **Do not duplicate:** if codegraph gave you callers → don't Grep for the same. If `qt_snapshot` already gives state → don't run `qt_screenshot` to check text/properties.
 
 ## Workflow

@@ -49,6 +49,13 @@ You are the Developer. You receive a specific task (Task X.Y) and implement it s
 2. `qt_messages` — verify that no new Qt warnings have appeared (especially thread / lifecycle warnings).
 3. Deep verification (`qt_thread_check`, batch scenarios) — task for `tester`, not the developer.
 
+**After implementing backend feature (if backend-ctl is connected):**
+1. Start/connect to the running backend with `BACKEND_CTL=1` (process manager socket, port 8765 by default). Begin with `capabilities` — the system's contact book of processes, commands, registers, channels.
+2. Verify implementation via live backend: `send_command` for behavior validation, `state_get` to confirm state changes, `state_subscribe` to trace state propagation.
+3. Collect logs: `log_tail` for runtime evidence of control flow.
+4. **Critical rule:** backend-ctl tests backend logic; qt-mcp tests GUI only. Do NOT run two backends simultaneously (shared PID registry + SHM cleanup conflict) — connect one client to an already-running backend.
+5. Report any live-backend deviations that unit tests don't catch.
+
 **Do not duplicate:** if codegraph gave callers → do not Grep. If context7 gave API — do not guess. If serena gave references — do not Grep the same symbols.
 
 ## Workflow
