@@ -1,0 +1,3263 @@
+{
+  "orchestrator_class_path": "multiprocess_prototype.orchestrator.ProcessManagerProcessApp",
+  "orchestrator_config": {
+    "backend_ctl": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8765
+    },
+    "initial_state": {
+      "displays": {},
+      "plugins": {
+        "catalog": [],
+        "paths": []
+      },
+      "processes": {
+        "camera_0": {
+          "config": {
+            "chain_targets": [
+              "vision"
+            ],
+            "plugins": [
+              {
+                "category": "source",
+                "config": {
+                  "auto_start": true,
+                  "camera_id": 0,
+                  "camera_index": 0,
+                  "fps": 25,
+                  "resolution_height": 1080,
+                  "resolution_width": 1440
+                },
+                "fps": 25,
+                "plugin_class": "Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin",
+                "plugin_name": "hikvision",
+                "resolution_height": 480,
+                "resolution_width": 640,
+                "ring_buffer_size": 3,
+                "source_type": "simulator"
+              }
+            ],
+            "priority": "high"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "devices": {
+          "config": {
+            "chain_targets": [],
+            "plugins": [
+              {
+                "category": "hub",
+                "plugin_class": "Plugins.hub.device_hub.plugin.DeviceHubPlugin",
+                "plugin_name": "device_hub",
+                "recipe_devices": [
+                  {
+                    "id": "robot_main",
+                    "kind": "robot",
+                    "name": "Робот Delta",
+                    "params": {
+                      "feed_poll_s": 0.05,
+                      "telemetry_interval_s": 0.5,
+                      "word_order": "little"
+                    },
+                    "protocol": "delta_universal3",
+                    "transport": {
+                      "host": "192.168.1.7",
+                      "port": 502,
+                      "type": "tcp",
+                      "unit_id": 2
+                    }
+                  },
+                  {
+                    "id": "vfd_belt",
+                    "kind": "vfd",
+                    "name": "ПЧ лента",
+                    "params": {
+                      "default_freq_hz": 10.0,
+                      "freq_max_hz": 50.0,
+                      "poll_interval_s": 0.5,
+                      "stale_polls_limit": 6
+                    },
+                    "protocol": "gd20_bridge",
+                    "transport": {
+                      "bridge": "robot_main",
+                      "type": "bridge"
+                    }
+                  }
+                ],
+                "recipe_origin": "recipe:hikvision_letter_robot",
+                "registry_path": "data/devices.yaml"
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "draw": {
+          "config": {
+            "chain_targets": [
+              "gui"
+            ],
+            "plugins": [
+              {
+                "category": "rendering",
+                "config": {
+                  "color_bgr": [
+                    0,
+                    255,
+                    0
+                  ],
+                  "show_radius": true,
+                  "thickness": 2
+                },
+                "plugin_class": "Plugins.render.circle_draw.plugin.CircleDrawPlugin",
+                "plugin_name": "circle_draw"
+              },
+              {
+                "category": "rendering",
+                "config": {},
+                "plugin_class": "Plugins.render.overlay_draw.plugin.OverlayDrawPlugin",
+                "plugin_name": "overlay_draw"
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "gui": {
+          "config": {
+            "chain_targets": [],
+            "plugins": [],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "layout": {
+          "config": {
+            "chain_targets": [],
+            "plugins": [
+              {
+                "category": "processing",
+                "config": {
+                  "angle_invert": false,
+                  "angle_zero_deg": 0.0,
+                  "disk_radius_mm": 55.0,
+                  "encoder_source": "e_capture",
+                  "first_x": 320.0,
+                  "first_y": -200.0,
+                  "last_x": 320.0,
+                  "last_y": 300.0,
+                  "line_angle_deg": 90.0,
+                  "min_confidence": 0.5,
+                  "pick_source": "pick_xy",
+                  "pick_z_mm": -132.0,
+                  "pitch_mm": 0.0,
+                  "place_z_mm": -132.0,
+                  "require_pick": true,
+                  "settle_frames": 1,
+                  "target_word": "",
+                  "use_pitch": true,
+                  "use_trigger": false,
+                  "word_gap_slots": 1,
+                  "word_source": "signal_2"
+                },
+                "plugin_class": "Plugins.processing.word_layout.plugin.WordLayoutPlugin",
+                "plugin_name": "word_layout",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "io",
+                "config": {
+                  "device_id": "robot_main",
+                  "forward_deque_maxlen": 64,
+                  "job_source": "robot_job"
+                },
+                "plugin_class": "Plugins.io.robot_io.plugin.RobotIoPlugin",
+                "plugin_name": "robot_io"
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "line": {
+          "config": {
+            "chain_targets": [
+              "recog",
+              "draw"
+            ],
+            "plugins": [
+              {
+                "category": "filter",
+                "config": {
+                  "angle": 90,
+                  "center_x": 376,
+                  "center_y": 262,
+                  "mode": "zone_edge",
+                  "rearm_frames": 2,
+                  "zone_width": 250
+                },
+                "plugin_class": "Plugins.filter.line_filter.plugin.LineFilterPlugin",
+                "plugin_name": "line_filter"
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "maskview": {
+          "config": {
+            "chain_targets": [
+              "gui"
+            ],
+            "plugins": [
+              {
+                "category": "processing",
+                "config": {
+                  "source_key": "mask"
+                },
+                "plugin_class": "Plugins.processing.mask_to_frame.plugin.MaskToFramePlugin",
+                "plugin_name": "mask_to_frame",
+                "worker_pool_size": 0
+              }
+            ],
+            "priority": "low"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "phone": {
+          "config": {
+            "chain_targets": [
+              "gui",
+              "layout"
+            ],
+            "plugins": [
+              {
+                "category": "source",
+                "config": {
+                  "auto_start": false,
+                  "camera_id": 9,
+                  "host": "0.0.0.0",
+                  "http_port": 8080,
+                  "resolution_height": 480,
+                  "resolution_width": 640,
+                  "show_hint": true
+                },
+                "fps": 25,
+                "plugin_class": "Services.phone_gateway.plugin.plugin.PhoneCameraPlugin",
+                "plugin_name": "phone_camera",
+                "resolution_height": 480,
+                "resolution_width": 640,
+                "ring_buffer_size": 3,
+                "source_type": "simulator"
+              }
+            ],
+            "priority": "low"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "recog": {
+          "config": {
+            "chain_targets": [
+              "gui",
+              "layout"
+            ],
+            "plugins": [
+              {
+                "category": "processing",
+                "config": {
+                  "drop_partial": false,
+                  "margin_px": 14,
+                  "output_size": 128,
+                  "pad_if_oob": true,
+                  "radius_scale": 1.0,
+                  "side_px": 256,
+                  "size_mode": "radius"
+                },
+                "plugin_class": "Plugins.processing.center_crop.plugin.CenterCropPlugin",
+                "plugin_name": "center_crop",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "calibration_dir": "config/calibration",
+                  "camera_id": "cam0",
+                  "center_key": "center_px",
+                  "lin_bl_x": 419.0,
+                  "lin_bl_y": -282.0,
+                  "lin_br_x": 419.0,
+                  "lin_br_y": -380.0,
+                  "lin_src_height": 481,
+                  "lin_src_width": 800,
+                  "lin_tl_x": 497.4,
+                  "lin_tl_y": -282.0,
+                  "lin_tr_x": 497.4,
+                  "lin_tr_y": -380.0,
+                  "output_key": "pick_xy",
+                  "roi_offset_x": 0,
+                  "roi_offset_y": 0,
+                  "use_linear": true
+                },
+                "plugin_class": "Plugins.processing.pixel_to_robot.plugin.PixelToRobotPlugin",
+                "plugin_name": "pixel_to_robot",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "confidence_threshold": 0.5,
+                  "device": "cpu",
+                  "draw_overlay": true,
+                  "inference_every_n": 1,
+                  "model": "mobilenet_v3_large_20260616_050828",
+                  "top_k": 3
+                },
+                "plugin_class": "Services.ml_inference.plugin.plugin.MLInferencePlugin",
+                "plugin_name": "ml_inference",
+                "worker_pool_size": 0
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "vision": {
+          "config": {
+            "chain_targets": [
+              "line",
+              "recog",
+              "draw",
+              "maskview"
+            ],
+            "plugins": [
+              {
+                "category": "processing",
+                "config": {
+                  "mode": "bgr2rgb"
+                },
+                "plugin_class": "Plugins.processing.color_convert.plugin.ColorConvertPlugin",
+                "plugin_name": "color_convert",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "height": 481,
+                  "width": 800,
+                  "x": 246,
+                  "y": 297
+                },
+                "plugin_class": "Plugins.processing.roi_crop.plugin.RoiCropPlugin",
+                "plugin_name": "roi_crop",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "h_max": 179,
+                  "h_min": 0,
+                  "s_max": 60,
+                  "s_min": 0,
+                  "v_max": 255,
+                  "v_min": 190
+                },
+                "plugin_class": "Plugins.processing.hsv_mask.plugin.HsvMaskPlugin",
+                "plugin_name": "hsv_mask",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "iterations": 1,
+                  "kernel_shape": "ellipse",
+                  "kernel_size": 5,
+                  "operation": "open_close"
+                },
+                "plugin_class": "Plugins.processing.morphology.plugin.MorphologyPlugin",
+                "plugin_name": "morphology",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "blur_ksize": 5,
+                  "blur_method": "gaussian",
+                  "dp": 1.4,
+                  "draw_circles": false,
+                  "input_key": "mask",
+                  "keep_mask": true,
+                  "max_radius": 230,
+                  "min_dist": 200,
+                  "min_radius": 90,
+                  "mode": "gradient",
+                  "param1": 100,
+                  "param2": 40.0
+                },
+                "plugin_class": "Plugins.processing.circle_detector.plugin.CircleDetectorPlugin",
+                "plugin_name": "circle_detector",
+                "worker_pool_size": 0
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        }
+      },
+      "recipes": {
+        "active": null,
+        "available": []
+      },
+      "services": {},
+      "system": {
+        "log_dir": "logs/prototype_2",
+        "shm_budget_mb": 512,
+        "stop_timeout": 5.0
+      },
+      "wires": {
+        "camera_0.hikvision.frame->vision.color_convert.frame": {
+          "source": "camera_0.hikvision.frame",
+          "status": "pending",
+          "target": "vision.color_convert.frame"
+        },
+        "line.line_filter.overlay->draw.overlay_draw.overlay": {
+          "source": "line.line_filter.overlay",
+          "status": "pending",
+          "target": "draw.overlay_draw.overlay"
+        },
+        "line.line_filter.overlay->recog.center_crop.trigger_in": {
+          "source": "line.line_filter.overlay",
+          "status": "pending",
+          "target": "recog.center_crop.trigger_in"
+        },
+        "phone.phone_camera.signal_1->layout.word_layout.return_trigger": {
+          "source": "phone.phone_camera.signal_1",
+          "status": "pending",
+          "target": "layout.word_layout.return_trigger"
+        },
+        "phone.phone_camera.signal_2->layout.word_layout.word": {
+          "source": "phone.phone_camera.signal_2",
+          "status": "pending",
+          "target": "layout.word_layout.word"
+        },
+        "recog.ml_inference.predictions->layout.word_layout.predictions": {
+          "source": "recog.ml_inference.predictions",
+          "status": "pending",
+          "target": "layout.word_layout.predictions"
+        },
+        "vision.circle_detector.detections->draw.circle_draw.detections": {
+          "source": "vision.circle_detector.detections",
+          "status": "pending",
+          "target": "draw.circle_draw.detections"
+        },
+        "vision.circle_detector.detections->line.line_filter.detections": {
+          "source": "vision.circle_detector.detections",
+          "status": "pending",
+          "target": "line.line_filter.detections"
+        },
+        "vision.circle_detector.frame->draw.circle_draw.frame": {
+          "source": "vision.circle_detector.frame",
+          "status": "pending",
+          "target": "draw.circle_draw.frame"
+        },
+        "vision.circle_detector.frame->recog.center_crop.frame": {
+          "source": "vision.circle_detector.frame",
+          "status": "pending",
+          "target": "recog.center_crop.frame"
+        },
+        "vision.circle_detector.mask->maskview.mask_to_frame.mask": {
+          "source": "vision.circle_detector.mask",
+          "status": "pending",
+          "target": "maskview.mask_to_frame.mask"
+        }
+      }
+    },
+    "observability_config_path": "<ROOT>/multiprocess_prototype/backend/config/system.yaml",
+    "replace_debounce_s": 1.0,
+    "state_throttle_rules": {
+      "processes.**.state.drops": 5.0,
+      "processes.**.state.fps": 1.0,
+      "processes.**.state.frame_count": 2.0,
+      "processes.**.state.latency_ms": 1.0,
+      "processes.**.state.uptime": 1.0,
+      "processes.**.workers.*.cycle_duration_ms": 1.0,
+      "processes.**.workers.*.effective_hz": 1.0
+    },
+    "sys_config": {
+      "backend_ctl": {
+        "enabled": true,
+        "host": "127.0.0.1",
+        "port": 8765
+      },
+      "camera": {
+        "fps": 25,
+        "resolution_height": 480,
+        "resolution_width": 640,
+        "ring_buffer_size": 3,
+        "source_type": "simulator"
+      },
+      "discovery": {
+        "auto_discover": true,
+        "plugin_paths": [
+          "Plugins",
+          "Services"
+        ],
+        "service_paths": [
+          "Services"
+        ]
+      },
+      "display": {
+        "enabled": true
+      },
+      "observability": {
+        "console": true,
+        "enable_batching": true,
+        "errors": {
+          "enabled": true,
+          "include_stacktrace": true,
+          "level": "WARNING"
+        },
+        "file": true,
+        "log_directory": null,
+        "log_level": "INFO",
+        "stats": {
+          "aggregation_interval": 5.0,
+          "enabled": true,
+          "log_level": "INFO"
+        }
+      },
+      "processing": {
+        "worker_pool_size": 0
+      },
+      "storage": {
+        "batch_size": 100,
+        "db_path": "data/inspector.db"
+      },
+      "system": {
+        "log_dir": "logs/prototype_2",
+        "shm_budget_mb": 512,
+        "stop_timeout": 5.0
+      }
+    }
+  },
+  "proc_dicts": {
+    "camera_0": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "vision"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "auto_start": false,
+            "camera_id": 0,
+            "camera_index": 0,
+            "category": "source",
+            "config": {
+              "auto_start": true,
+              "camera_id": 0,
+              "camera_index": 0,
+              "fps": 25,
+              "resolution_height": 1080,
+              "resolution_width": 1440
+            },
+            "fps": 25,
+            "plugin_class": "Services.hikvision_camera.plugin.plugin.HikvisionCameraPlugin",
+            "plugin_name": "hikvision",
+            "resize_mode": "letterbox",
+            "resolution_height": 480,
+            "resolution_width": 640,
+            "ring_buffer_size": 3,
+            "source_type": "simulator"
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "memory": {
+        "coll": 3,
+        "hikvision_0_frame": [
+          480,
+          640,
+          3
+        ]
+      },
+      "priority": "high",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "restart_policy": {
+        "enabled": true,
+        "max_retries": 3,
+        "window_sec": 60
+      },
+      "workers": {}
+    },
+    "devices": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "hub",
+            "plugin_class": "Plugins.hub.device_hub.plugin.DeviceHubPlugin",
+            "plugin_name": "device_hub",
+            "recipe_devices": [
+              {
+                "id": "robot_main",
+                "kind": "robot",
+                "name": "Робот Delta",
+                "params": {
+                  "feed_poll_s": 0.05,
+                  "telemetry_interval_s": 0.5,
+                  "word_order": "little"
+                },
+                "protocol": "delta_universal3",
+                "transport": {
+                  "host": "192.168.1.7",
+                  "port": 502,
+                  "type": "tcp",
+                  "unit_id": 2
+                }
+              },
+              {
+                "id": "vfd_belt",
+                "kind": "vfd",
+                "name": "ПЧ лента",
+                "params": {
+                  "default_freq_hz": 10.0,
+                  "freq_max_hz": 50.0,
+                  "poll_interval_s": 0.5,
+                  "stale_polls_limit": 6
+                },
+                "protocol": "gd20_bridge",
+                "transport": {
+                  "bridge": "robot_main",
+                  "type": "bridge"
+                }
+              }
+            ],
+            "recipe_origin": "recipe:hikvision_letter_robot",
+            "registry_path": "data/devices.yaml"
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": true,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "draw": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "gui"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {
+          "inputs": [
+            "frame",
+            "overlay"
+          ],
+          "mode": "join",
+          "primary": "frame",
+          "timeout_sec": 0.25
+        },
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "rendering",
+            "config": {
+              "color_bgr": [
+                0,
+                255,
+                0
+              ],
+              "show_radius": true,
+              "thickness": 2
+            },
+            "plugin_class": "Plugins.render.circle_draw.plugin.CircleDrawPlugin",
+            "plugin_name": "circle_draw"
+          },
+          {
+            "category": "rendering",
+            "config": {},
+            "plugin_class": "Plugins.render.overlay_draw.plugin.OverlayDrawPlugin",
+            "plugin_name": "overlay_draw"
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "gui": {
+      "class": "multiprocess_prototype.frontend.process.GuiProcess",
+      "config": {
+        "chain_targets": [],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": true,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "layout": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "processing",
+            "config": {
+              "angle_invert": false,
+              "angle_zero_deg": 0.0,
+              "disk_radius_mm": 55.0,
+              "encoder_source": "e_capture",
+              "first_x": 320.0,
+              "first_y": -200.0,
+              "last_x": 320.0,
+              "last_y": 300.0,
+              "line_angle_deg": 90.0,
+              "min_confidence": 0.5,
+              "pick_source": "pick_xy",
+              "pick_z_mm": -132.0,
+              "pitch_mm": 0.0,
+              "place_z_mm": -132.0,
+              "require_pick": true,
+              "settle_frames": 1,
+              "target_word": "",
+              "use_pitch": true,
+              "use_trigger": false,
+              "word_gap_slots": 1,
+              "word_source": "signal_2"
+            },
+            "plugin_class": "Plugins.processing.word_layout.plugin.WordLayoutPlugin",
+            "plugin_name": "word_layout",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "io",
+            "config": {
+              "device_id": "robot_main",
+              "forward_deque_maxlen": 64,
+              "job_source": "robot_job"
+            },
+            "device_id": "robot_main",
+            "plugin_class": "Plugins.io.robot_io.plugin.RobotIoPlugin",
+            "plugin_name": "robot_io"
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "line": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "recog",
+          "draw"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "filter",
+            "config": {
+              "angle": 90,
+              "center_x": 376,
+              "center_y": 262,
+              "mode": "zone_edge",
+              "rearm_frames": 2,
+              "zone_width": 250
+            },
+            "plugin_class": "Plugins.filter.line_filter.plugin.LineFilterPlugin",
+            "plugin_name": "line_filter"
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "maskview": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "gui"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "processing",
+            "config": {
+              "source_key": "mask"
+            },
+            "plugin_class": "Plugins.processing.mask_to_frame.plugin.MaskToFramePlugin",
+            "plugin_name": "mask_to_frame",
+            "worker_pool_size": 0
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "low",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "phone": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "gui",
+          "layout"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "auto_start": true,
+            "camera_id": 0,
+            "category": "source",
+            "config": {
+              "auto_start": false,
+              "camera_id": 9,
+              "host": "0.0.0.0",
+              "http_port": 8080,
+              "resolution_height": 480,
+              "resolution_width": 640,
+              "show_hint": true
+            },
+            "fps": 25,
+            "host": "0.0.0.0",
+            "http_port": 8080,
+            "plugin_class": "Services.phone_gateway.plugin.plugin.PhoneCameraPlugin",
+            "plugin_name": "phone_camera",
+            "resolution_height": 480,
+            "resolution_width": 640,
+            "ring_buffer_size": 3,
+            "show_hint": true,
+            "source_type": "simulator",
+            "wifi_password": "",
+            "wifi_ssid": ""
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "memory": {
+        "camera_0_frame": [
+          480,
+          640,
+          3
+        ],
+        "coll": 3
+      },
+      "priority": "low",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "recog": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "gui",
+          "layout"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {
+          "inputs": [
+            "frame",
+            "overlay"
+          ],
+          "mode": "join",
+          "primary": "frame",
+          "timeout_sec": 0.25
+        },
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "processing",
+            "config": {
+              "drop_partial": false,
+              "margin_px": 14,
+              "output_size": 128,
+              "pad_if_oob": true,
+              "radius_scale": 1.0,
+              "side_px": 256,
+              "size_mode": "radius"
+            },
+            "plugin_class": "Plugins.processing.center_crop.plugin.CenterCropPlugin",
+            "plugin_name": "center_crop",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "calibration_dir": "config/calibration",
+              "camera_id": "cam0",
+              "center_key": "center_px",
+              "lin_bl_x": 419.0,
+              "lin_bl_y": -282.0,
+              "lin_br_x": 419.0,
+              "lin_br_y": -380.0,
+              "lin_src_height": 481,
+              "lin_src_width": 800,
+              "lin_tl_x": 497.4,
+              "lin_tl_y": -282.0,
+              "lin_tr_x": 497.4,
+              "lin_tr_y": -380.0,
+              "output_key": "pick_xy",
+              "roi_offset_x": 0,
+              "roi_offset_y": 0,
+              "use_linear": true
+            },
+            "plugin_class": "Plugins.processing.pixel_to_robot.plugin.PixelToRobotPlugin",
+            "plugin_name": "pixel_to_robot",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "confidence_threshold": 0.5,
+            "config": {
+              "confidence_threshold": 0.5,
+              "device": "cpu",
+              "draw_overlay": true,
+              "inference_every_n": 1,
+              "model": "mobilenet_v3_large_20260616_050828",
+              "top_k": 3
+            },
+            "device": "cpu",
+            "model": "",
+            "plugin_class": "Services.ml_inference.plugin.plugin.MLInferencePlugin",
+            "plugin_name": "ml_inference",
+            "top_k": 5,
+            "worker_pool_size": 0
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "vision": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "line",
+          "recog",
+          "draw",
+          "maskview"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "processing",
+            "config": {
+              "mode": "bgr2rgb"
+            },
+            "mode": "bgr2rgb",
+            "plugin_class": "Plugins.processing.color_convert.plugin.ColorConvertPlugin",
+            "plugin_name": "color_convert",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "height": 481,
+              "width": 800,
+              "x": 246,
+              "y": 297
+            },
+            "plugin_class": "Plugins.processing.roi_crop.plugin.RoiCropPlugin",
+            "plugin_name": "roi_crop",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "h_max": 179,
+              "h_min": 0,
+              "s_max": 60,
+              "s_min": 0,
+              "v_max": 255,
+              "v_min": 190
+            },
+            "plugin_class": "Plugins.processing.hsv_mask.plugin.HsvMaskPlugin",
+            "plugin_name": "hsv_mask",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "iterations": 1,
+              "kernel_shape": "ellipse",
+              "kernel_size": 5,
+              "operation": "open_close"
+            },
+            "plugin_class": "Plugins.processing.morphology.plugin.MorphologyPlugin",
+            "plugin_name": "morphology",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "blur_ksize": 5,
+              "blur_method": "gaussian",
+              "dp": 1.4,
+              "draw_circles": false,
+              "input_key": "mask",
+              "keep_mask": true,
+              "max_radius": 230,
+              "min_dist": 200,
+              "min_radius": 90,
+              "mode": "gradient",
+              "param1": 100,
+              "param2": 40.0
+            },
+            "plugin_class": "Plugins.processing.circle_detector.plugin.CircleDetectorPlugin",
+            "plugin_name": "circle_detector",
+            "worker_pool_size": 0
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    }
+  },
+  "process_count": 10,
+  "process_names": [
+    "gui",
+    "devices",
+    "camera_0",
+    "vision",
+    "line",
+    "recog",
+    "layout",
+    "draw",
+    "maskview",
+    "phone"
+  ],
+  "stop_timeout": 5.0
+}

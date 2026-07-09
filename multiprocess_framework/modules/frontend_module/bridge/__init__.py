@@ -39,6 +39,9 @@ from multiprocess_framework.modules.frontend_module.bridge.wire_monitor import (
     WireStatus,
     WireStatusMonitor,
 )
+from multiprocess_framework.modules.frontend_module.bridge.plugin_register_resolver import (
+    resolve_plugin_register,
+)
 from multiprocess_framework.modules.frontend_module.bridge.wire_protocol import (
     ShmConfig,
     WireConfig,
@@ -46,6 +49,8 @@ from multiprocess_framework.modules.frontend_module.bridge.wire_protocol import 
 )
 
 __all__ = [
+    # plugin_register_resolver
+    "resolve_plugin_register",
     # command_sender
     "CommandSender",
     "IProcess",

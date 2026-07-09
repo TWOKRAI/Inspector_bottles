@@ -133,42 +133,17 @@ class ProcessHeartbeat:
         if proxy is None or not workers:
             return
 
-        name = self._services.name
-        hz_values: list[float] = []
-        latency_values: list[float] = []
+        # E6/Task 5.7: собрать все листья (per-worker + агрегат) в один вложенный
+        # payload и отправить ОДНИМ proxy.merge вместо 3W+2 proxy.set — глубокий
+        # merge сохраняет сиблинги (health.* и пр.), число сообщений ↓ ~в W раз.
+        from .telemetry import build_worker_telemetry
 
-        for wname, w in workers.items():
-            if not isinstance(w, dict):
-                continue
-            status = w.get("status")
-            hz = w.get("effective_hz")
-            lat = w.get("cycle_duration_ms")
-
-            # Per-worker телеметрия → строка WorkerTable. Статус — всегда;
-            # частоту/цикл — только для воркеров, реально измеряющих цикл.
-            try:
-                if status is not None:
-                    proxy.set(f"processes.{name}.workers.{wname}.status", status)
-                if isinstance(hz, (int, float)) and hz > 0:
-                    proxy.set(f"processes.{name}.workers.{wname}.effective_hz", round(hz, 1))
-                if isinstance(lat, (int, float)) and lat > 0:
-                    proxy.set(f"processes.{name}.workers.{wname}.cycle_duration_ms", round(lat, 1))
-            except Exception:  # nosec B110 — телеметрия не критична
-                pass
-
-            # Агрегат процесса: только running-воркеры с реальной частотой.
-            if status == "running" and isinstance(hz, (int, float)) and hz > 0:
-                hz_values.append(float(hz))
-                if isinstance(lat, (int, float)) and lat > 0:
-                    latency_values.append(float(lat))
-
-        if not hz_values:
+        result = build_worker_telemetry(workers, self._services.name)
+        if result is None:
             return
-
+        path, data = result
         try:
-            proxy.set(f"processes.{name}.state.fps", round(max(hz_values), 1))
-            if latency_values:
-                proxy.set(f"processes.{name}.state.latency_ms", round(max(latency_values), 1))
+            proxy.merge(path, data)
         except Exception as exc:
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish метрик процесса: {exc}", module="heartbeat")

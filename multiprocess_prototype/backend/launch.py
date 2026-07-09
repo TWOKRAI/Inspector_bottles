@@ -308,10 +308,10 @@ class SystemBuilder:
         build_initial_state, throttle_rules, INSPECTOR_LOG_DIR env, баннер,
         SystemLauncher-конструктор, orchestrator_config) остаются здесь.
         """
-        from multiprocess_framework.modules.process_module.configs import expand_observability
-        from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
-            SystemLauncher,
+        from multiprocess_framework.modules.process_manager_module.launcher import (
+            assemble_launcher,
         )
+        from multiprocess_framework.modules.process_module.configs import expand_observability
         from multiprocess_framework.modules.process_module.plugins.registry import (
             PluginRegistry,
         )
@@ -371,8 +371,11 @@ class SystemBuilder:
 
         self._print_banner(n_processes=len(proc_dicts), n_plugins=discovered, log_dir=log_dir)
 
-        launcher = SystemLauncher(
-            stop_timeout=sys_config.system.stop_timeout,
+        # Universal-шов вынесен во framework (E3/Task 5.2): конструктор
+        # SystemLauncher + add_process-цикл. Прототип-специфика — orchestrator_class_path
+        # (DI-параметр, а не хардкод во framework) и содержимое orchestrator_config.
+        return assemble_launcher(
+            proc_dicts,
             orchestrator_class_path=_ORCHESTRATOR_CLASS_PATH,
             orchestrator_config={
                 "initial_state": initial_state,
@@ -389,11 +392,8 @@ class SystemBuilder:
                 # blueprint (per-category defaults) + observability overlay + log_dir.
                 "sys_config": sys_config.model_dump(),
             },
+            stop_timeout=sys_config.system.stop_timeout,
         )
-        for name, proc_dict in proc_dicts.items():
-            launcher.add_process(name, proc_dict)
-
-        return launcher
 
     def _print_banner(self, *, n_processes: int, n_plugins: Any, log_dir: str) -> None:
         """Единый startup-баннер: какие файлы реально подхвачены."""
