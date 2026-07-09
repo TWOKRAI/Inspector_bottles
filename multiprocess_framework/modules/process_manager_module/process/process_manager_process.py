@@ -105,14 +105,23 @@ class ProcessManagerProcess(ProcessModule):
         monitor_poll = float(self.get_config("monitor_poll_interval") or 0.5)
         heartbeat_timeout = float(self.get_config("heartbeat_timeout") or 15.0)
 
-        # RestartPolicy из конфига (dict -> SchemaBase) или default
+        # RestartPolicy из конфига (dict -> SchemaBase) или default.
+        # Ф4-добор (владелец 2026-07-08): авто-рестарт ВСЕХ процессов по умолчанию —
+        # конвейер работает только целиком, частичная живучесть = ложная надёжность.
+        # Глобальный дефолт enabled=True (protected gui/PM монитор всё равно skip;
+        # per-process рецепт перекрывает; окно give-up Ф3.6 ловит crash-loop).
+        # Безопасность обеспечивают ГРОМКИЕ supervisor-события (не прячут баг).
+        # Откат: env FW_AUTORESTART=0 или restart_policy.enabled в конфиге.
+        from ..core.restart_policy import RestartPolicy
+
         restart_cfg = self.get_config("restart_policy")
         if isinstance(restart_cfg, dict):
-            from ..core.restart_policy import RestartPolicy
-
             restart_policy = RestartPolicy(**restart_cfg)
         else:
-            restart_policy = None
+            _autorestart_on = os.environ.get("FW_AUTORESTART", "1").strip().lower() not in (
+                "0", "false", "no", "off", "",
+            )
+            restart_policy = RestartPolicy(enabled=_autorestart_on)
 
         self._process_monitor = ProcessMonitor(
             self,

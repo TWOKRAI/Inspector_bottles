@@ -326,3 +326,53 @@ is_alive-liveness.
 - **Отклонено:** дроп по глобальному epoch — ложные дропы легитимного control-plane в
   переходном окне (см. урок). Sender-side epoch-check на каждом send для data-plane —
   отвергнут ещё в ADR-PMM-010 (горячий путь кадров).
+
+## ADR-PMM-015: Авто-рестарт ВСЕХ процессов по умолчанию + громкие supervisor-события (Ф4-добор, 2026-07-09)
+
+- **Контекст.** Требование владельца (2026-07-08): конвейер работает только целиком —
+  частичная живучесть = ложная надёжность. Сделать ВСЕ процессы автовосстанавливаемыми
+  (не только source/hub из G1), а не точечно per-recipe. Механизм Ф3.6 (per-process
+  policy, окно N/T, give-up, health) уже готов — включить = в основном конфиг. Риск
+  маскировки багов авто-рестартом СНЯТ решением владельца «громко ВСЕГДА»: каждое
+  падение/рестарт/восстановление/give-up громко видно, баг не прячется.
+
+- **Решение (две части).**
+  1. **Default-on.** PM при отсутствии `restart_policy` в конфиге строит глобальную
+     `RestartPolicy(enabled=True)` (было `None`→`enabled=False`). Все non-protected
+     процессы без своего рецепт-флага теперь авто-рестартятся. Protected (gui/PM) монитор
+     всё равно skip (`_try_auto_restart`); per-process рецепт перекрывает; окно give-up
+     Ф3.6 (`max_retries`/`window_sec`) ловит crash-loop. Дефолт `RestartPolicy` dataclass
+     остаётся `enabled=False` (юниты с явным `RestartPolicy()` не затронуты). Откат:
+     env `FW_AUTORESTART=0` или `restart_policy.enabled` в конфиге.
+  2. **Громкие supervisor-события.** `ProcessMonitor._emit_supervisor_event` публикует
+     `processes.<name>.supervisor.{event,reason,attempt,at}` в StateStore (GUI/подписчики)
+     + громкий лог. События: `crashed` (`_handle_dead_process`), `unresponsive`
+     (`_check_heartbeat_timeout`), `restarting` k/N (`_try_auto_restart` план), `gave_up`
+     со счётчиком (give-up), `recovered` (`_check_heartbeats` alive-ветка). **Детект
+     «recovered» — по ВОЗВРАТУ heartbeat**, не по статус-переходу: `_last_heartbeat`
+     сбрасывается при рестарте (`_dispatch_due_restarts`), первый heartbeat нового
+     инстанса — однозначный сигнал живости (после рестарта `prev_status="crashed"` не
+     проходит промоушен в «running», поэтому статус-переход ненадёжен). Реестр
+     `_pending_recovery` (add при план-рестарте, discard при recovered/give-up/forget).
+
+- **Дедуп crash-loop.** Окно give-up само схлопывает всплеск: ≤`max_retries` событий
+  `restarting` + одно `gave_up` со счётчиком «N рестартов за Tс», а не поток из десятков
+  строк. Отдельный throttle не нужен — это и есть «счётчик, а не 47 строк» из требования.
+
+- **Валидация.** Юниты `test_process_monitor.py::TestSupervisorEvents` (crashed/restarting/
+  attempt/gave_up/recovered/forget через реальный StateStoreManager). Live
+  `backend_ctl/tests/test_autorestart_all_live.py`: SIGKILL `preprocessor` (non-source, БЕЗ
+  per-process policy) → GREEN воскрешение с новым pid + событие `recovered`; RED
+  `FW_AUTORESTART=0` → тот же kill НЕ воскрешает (дефолт выключен). Как Ф3.7: юнит «событие
+  опубликовано» ≠ доказательство воскрешения по глобальному дефолту — нужен живой kill.
+
+- **Последствия.** Все процессы живучи по умолчанию, каждый переход громко наблюдаем
+  (state-путь → GUI; в Ф5 заберёт ObservabilityHub-панель, Ф5.15/5.16). Chain-level health
+  (агрегат «конвейер здоров/деградировал» + факт что данные ТЕКУТ) — Ф5. Нюансы (потеря
+  in-memory состояния при рестарте ML/калибровки; лавина при смерти общей зависимости →
+  `depends_on` 3.9) — оставлены на Ф5. Откат — `FW_AUTORESTART=0`.
+
+- **Отклонено:** dev/prod-флаг авто-рестарта (владелец: «громко ВСЕГДА» вместо тихого prod —
+  наблюдаемость важнее приглушения). Смена дефолта `RestartPolicy.enabled` на уровне
+  dataclass — отвергнута (сломала бы юниты с явным `RestartPolicy()`); флип на уровне
+  композиции PM изолирован и env-откатен.
