@@ -2,6 +2,14 @@
 """
 frontend_module/qt_event_bridge.py — Qt-aware мост над event_module.EventBus (E2/Task 5.5).
 
+Purpose:
+    Механизм cross-thread маршалинга событий на main thread Qt (уровень 1,
+    UI-toolkit). App-agnostic: не завязан на конкретный тип события.
+
+Public API:
+    ``QtEventBus`` — Qt-обёртка (``publish``/``subscribe``), удовлетворяет
+    ``event_module.EventBusProtocol``.
+
 ``QtEventBus`` — механизм cross-thread маршалинга событий на main thread Qt.
 Ранее жил в ``multiprocess_prototype/frontend/qt_event_bus.py`` и был привязан к
 прототип-типам (``domain.EventBus``/``ProjectEvent``/``Subscription``). При выносе
