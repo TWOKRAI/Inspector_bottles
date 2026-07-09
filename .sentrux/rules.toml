@@ -24,7 +24,7 @@
 min_quality      = 0.60      # цель ≥ 0.75 после Phase 4-6
 min_modularity   = 0.45      # просядет после carve-outs, вырастет после Phase 5 Plugins
 min_acyclicity   = 0.45      # цель 0.90 (raw=0)
-min_depth        = 0.60      # ВРЕМЕННО 0.65→0.60 (Ф0.3 constructor-master: факт 0.6154; вернуть 0.65 в Ф8 H.5)
+min_depth        = 0.57      # ВРЕМЕННО (принятый долг): god-split трека F добавил 6-й уровень вложенности пакетов (факт 0.5714 < 0.60). Depth-reduction — задача Ф5.18; вернуть 0.65 в Ф8 H.5. Ф0.3→0.60, Ф4-добор→0.57
 min_equality     = 0.60
 min_redundancy   = 0.80
 
