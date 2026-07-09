@@ -1,7 +1,7 @@
-"""Тесты Topology Editor — Task 4.3.
+"""Тесты TopologyPresenter (CRUD, load/save, валидация).
 
-Покрывает: TopologyPresenter (CRUD, load/save, валидация)
-           TopologyEditorWidget (создание без crash).
+GUI-виджет TopologyEditorWidget удалён как мёртвый код (K8, Ф4-добор H7) —
+его 3 smoke-теста сняты вместе с ним. Presenter остаётся живым.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ from pathlib import Path
 
 
 from multiprocess_prototype.frontend.widgets.topology.presenter import TopologyPresenter
-from multiprocess_prototype.frontend.widgets.topology.editor import TopologyEditorWidget
 
 
 # ------------------------------------------------------------------ #
@@ -136,29 +135,3 @@ def test_presenter_file_path_none_after_new():
     presenter = TopologyPresenter()
     presenter.new_topology("fresh")
     assert presenter.file_path is None
-
-
-# ------------------------------------------------------------------ #
-#  Тесты GUI-виджетов                                                 #
-# ------------------------------------------------------------------ #
-
-
-def test_topology_editor_widget_creates(qtbot):
-    """TopologyEditorWidget создаётся без crash."""
-    widget = TopologyEditorWidget()
-    qtbot.addWidget(widget)
-    assert widget is not None
-
-
-def test_topology_editor_has_presenter(qtbot):
-    """TopologyEditorWidget содержит TopologyPresenter."""
-    widget = TopologyEditorWidget()
-    qtbot.addWidget(widget)
-    assert isinstance(widget._presenter, TopologyPresenter)
-
-
-def test_topology_editor_initial_state(qtbot):
-    """После создания ProcessListWidget пустой."""
-    widget = TopologyEditorWidget()
-    qtbot.addWidget(widget)
-    assert widget._process_list._list.count() == 0
