@@ -254,6 +254,11 @@ def run_gui(process: "GuiProcess") -> None:
     bindings = GuiStateBindings(
         process._bridge,
         cache_snapshot=(lambda: _gui_proxy.cache) if _gui_proxy is not None else None,
+        # Авто-подписка (5.9): bind() на pattern гарантирует серверную подписку,
+        # даже если он не покрыт стартовыми wildcard'ами (processes.**/system.**/
+        # devices.**/calibration.**). refcount в proxy схлопывает дубли.
+        ensure_subscription=(_gui_proxy.ensure_subscription if _gui_proxy is not None else None),
+        release_subscription=(_gui_proxy.release_subscription if _gui_proxy is not None else None),
     )
 
     # 3c. Phase 12: CommandCatalog + CommandValidator + TopologyBridge

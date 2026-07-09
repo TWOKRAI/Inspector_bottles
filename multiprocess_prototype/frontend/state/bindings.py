@@ -118,6 +118,8 @@ class GuiStateBindings:
         self,
         bridge: "DataReceiverBridge",
         cache_snapshot: Callable[[], dict[str, Any]] | None = None,
+        ensure_subscription: Callable[[str], Any] | None = None,
+        release_subscription: Callable[[str], Any] | None = None,
     ) -> None:
         """Инициализировать и занять state_callback у bridge.
 
@@ -128,7 +130,16 @@ class GuiStateBindings:
                 последнее известное значение (replay) — закрывает разрыв
                 ленивых вкладок, созданных после прохождения разовых дельт
                 (Task 4.1). При None replay не выполняется (legacy-поведение).
+            ensure_subscription: опциональный колбэк (обычно
+                StateProxy.ensure_subscription) — bind()/bind_fanout() вызывают
+                его на pattern, чтобы серверная подписка гарантированно
+                существовала (авто-подписка, 5.9). Закрывает класс ошибок
+                «панель мертва, забыли wildcard». refcount живёт в proxy.
+            release_subscription: симметричный колбэк для unbind — снимает
+                ссылку на подписку (при обнулении refcount proxy отписывается).
         """
+        self._ensure_subscription = ensure_subscription
+        self._release_subscription = release_subscription
         self._bindings: list[BindingHandle] = []
         # Fan-out подписки (FanoutHandle) — callback(path, value) на каждую
         # дельту с matching path. В отличие от bind (один виджет), позволяет
@@ -137,6 +148,28 @@ class GuiStateBindings:
         self._fanouts: list[FanoutHandle] = []
         self._cache_snapshot = cache_snapshot
         bridge.set_state_callback(self._on_state_msg)
+
+    # ------------------------------------------------------------------
+    # Авто-подписка (5.9): bind/unbind ↔ proxy.ensure/release_subscription
+    # ------------------------------------------------------------------
+
+    def _ensure(self, pattern: str) -> None:
+        """Гарантировать серверную подписку на pattern (если задан колбэк)."""
+        if self._ensure_subscription is None:
+            return
+        try:
+            self._ensure_subscription(pattern)
+        except Exception as exc:
+            _logger.debug("bindings: ensure_subscription('%s') failed: %s", pattern, exc)
+
+    def _release(self, pattern: str) -> None:
+        """Снять ссылку на подписку pattern (если задан колбэк)."""
+        if self._release_subscription is None:
+            return
+        try:
+            self._release_subscription(pattern)
+        except Exception as exc:
+            _logger.debug("bindings: release_subscription('%s') failed: %s", pattern, exc)
 
     # ------------------------------------------------------------------
     # Публичное API
@@ -178,6 +211,9 @@ class GuiStateBindings:
             reset=reset,
         )
         self._bindings.append(handle)
+
+        # Авто-подписка: серверная подписка на pattern гарантированно есть.
+        self._ensure(handle.pattern)
 
         # Авто-уборка при уничтожении виджета Qt
         widget.destroyed.connect(lambda *_: self.unbind_widget(widget))
@@ -233,6 +269,9 @@ class GuiStateBindings:
         )
         self._fanouts.append(handle)
 
+        # Авто-подписка на pattern fan-out (как для bind).
+        self._ensure(pattern)
+
         if owner is not None:
             # Авто-уборка при уничтожении владельца — через идемпотентный
             # unbind_fanout: повторный вызов (после ручного unbind) безопасен.
@@ -262,7 +301,8 @@ class GuiStateBindings:
         try:
             self._fanouts.remove(handle)
         except ValueError:
-            pass  # Уже снята — не падаем
+            return  # Уже снята — не падаем и не отпускаем подписку повторно
+        self._release(handle.pattern)
 
     def unbind_by_owner(self, owner: QWidget) -> None:
         """Снять ВСЕ fan-out подписки данного виджета-владельца.
@@ -275,15 +315,19 @@ class GuiStateBindings:
             owner: виджет, переданный в bind_fanout(owner=...).
         """
         kept: list[FanoutHandle] = []
+        removed: list[FanoutHandle] = []
         for h in self._fanouts:
             if h.owner_ref is None:
                 kept.append(h)
                 continue
             ref = h.owner_ref()
             if ref is None or ref is owner:
-                continue  # целевой владелец или мёртвый weakref — снять
+                removed.append(h)  # целевой владелец или мёртвый weakref — снять
+                continue
             kept.append(h)
         self._fanouts = kept
+        for h in removed:
+            self._release(h.pattern)
 
     def unbind(self, handle: BindingHandle) -> None:
         """Удалить конкретную подписку по дескриптору.
@@ -294,7 +338,8 @@ class GuiStateBindings:
         try:
             self._bindings.remove(handle)
         except ValueError:
-            pass  # Уже удалена — не падаем
+            return  # Уже удалена — не падаем и не отпускаем подписку повторно
+        self._release(handle.pattern)
 
     def unbind_widget(self, widget: QWidget) -> None:
         """Удалить все подписки для данного виджета.
@@ -305,12 +350,18 @@ class GuiStateBindings:
         Args:
             widget: Qt-виджет, чьи подписки нужно снять.
         """
+        removed = [h for h in self._bindings if h.widget_ref() is widget]
         self._bindings = [h for h in self._bindings if h.widget_ref() is not widget]
+        for h in removed:
+            self._release(h.pattern)
 
     def clear(self) -> None:
         """Снять ВСЕ подписки — и виджетные, и fan-out."""
+        patterns = [h.pattern for h in self._bindings] + [h.pattern for h in self._fanouts]
         self._bindings.clear()
         self._fanouts.clear()
+        for pat in patterns:
+            self._release(pat)
 
     # ------------------------------------------------------------------
     # Внутренний callback для bridge

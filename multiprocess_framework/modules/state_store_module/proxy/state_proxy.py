@@ -11,6 +11,7 @@ IPC-протокол (Dict at Boundary):
 ADR-SS-002: server_target — конфигурируемое имя процесса-сервера StateStore.
 По умолчанию "ProcessManager" — для обратной совместимости.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -75,6 +76,11 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._sub_patterns: dict[str, str] = {}
         # Список активных sub_id для shutdown cleanup
         self._sub_ids: list[str] = []
+        # ensure_subscription refcount: pattern → server sub_id, pattern → счётчик.
+        # Дедуп идемпотентных подписок: N подписчиков на один pattern → одна
+        # серверная подписка, снимается при обнулении refcount.
+        self._pattern_sub_id: dict[str, str] = {}
+        self._pattern_refcount: dict[str, int] = {}
 
     def initialize(self) -> bool:
         self.is_initialized = True
@@ -275,22 +281,17 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                     local_sub_id = server_sub_id
                 else:
                     self._log_warning(
-                        f"StateProxy '{self._process_name}': подписка на '{pattern}' "
-                        "не вернула sub_id от сервера"
+                        f"StateProxy '{self._process_name}': подписка на '{pattern}' не вернула sub_id от сервера"
                     )
         else:
-            self._log_debug(
-                f"StateProxy.subscribe: router=None, подписка '{pattern}' только локальная"
-            )
+            self._log_debug(f"StateProxy.subscribe: router=None, подписка '{pattern}' только локальная")
 
         # Регистрируем callback локально
         self._callbacks[local_sub_id] = [callback]
         self._sub_patterns[local_sub_id] = pattern
         self._sub_ids.append(local_sub_id)
 
-        self._log_debug(
-            f"StateProxy '{self._process_name}': подписка sub_id={local_sub_id}, pattern={pattern}"
-        )
+        self._log_debug(f"StateProxy '{self._process_name}': подписка sub_id={local_sub_id}, pattern={pattern}")
         return local_sub_id
 
     def unsubscribe(self, sub_id: str) -> None:
@@ -305,6 +306,13 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         if sub_id in self._sub_ids:
             self._sub_ids.remove(sub_id)
 
+        # Чистим refcount-реестр, если этот sub_id был ensure-подпиской —
+        # иначе прямой unsubscribe оставил бы висячий pattern → refcount.
+        for pat, sid in list(self._pattern_sub_id.items()):
+            if sid == sub_id:
+                self._pattern_sub_id.pop(pat, None)
+                self._pattern_refcount.pop(pat, None)
+
         # IPC-отписка
         if self._router is not None:
             msg = {
@@ -315,6 +323,81 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 "data": {"sub_id": sub_id},
             }
             self._send(msg)
+
+    def ensure_subscription(
+        self,
+        pattern: str,
+        callback: Callable[[list[Delta]], None] | None = None,
+        exclude_self: bool = True,
+    ) -> str:
+        """Идемпотентная подписка на pattern с refcount.
+
+        Если на этот pattern уже есть подписка — переиспользует её серверный
+        sub_id (второй state.subscribe НЕ отправляется), добавляет callback (если
+        задан) и инкрементит refcount. Иначе создаёт новую подписку.
+
+        Закрывает класс ошибок «панель мертва, забыли wildcard»: потребитель
+        (например GUI-биндинг) вызывает ensure_subscription на свой pattern —
+        подписка гарантированно существует, дубли схлопываются по refcount.
+        Снятие — release_subscription с тем же pattern.
+
+        Args:
+            pattern: glob-паттерн пути.
+            callback: опциональный callback (для GUI-доставки через delta_sink
+                можно не передавать — важно лишь наличие серверной подписки).
+            exclude_self: исключить изменения от этого же процесса (учитывается
+                только при СОЗДАНИИ подписки; для существующей — first-wins).
+
+        Returns:
+            sub_id серверной подписки (общий для всех ensure на этот pattern).
+        """
+        existing = self._pattern_sub_id.get(pattern)
+        if existing is not None:
+            if callback is not None:
+                self._callbacks.setdefault(existing, []).append(callback)
+            self._pattern_refcount[pattern] = self._pattern_refcount.get(pattern, 0) + 1
+            return existing
+
+        cb = callback if callback is not None else (lambda _deltas: None)
+        sub_id = self.subscribe(pattern, cb, exclude_self=exclude_self)
+        self._pattern_sub_id[pattern] = sub_id
+        self._pattern_refcount[pattern] = 1
+        return sub_id
+
+    def release_subscription(
+        self,
+        pattern: str,
+        callback: Callable[[list[Delta]], None] | None = None,
+    ) -> bool:
+        """Уменьшить refcount ensure-подписки; при 0 — снять серверную подписку.
+
+        Идемпотентна: release неизвестного pattern — no-op (False).
+
+        Args:
+            pattern: glob-паттерн, ранее переданный в ensure_subscription.
+            callback: если задан — снять именно этот callback из подписки.
+
+        Returns:
+            True если серверная подписка снята (refcount обнулился), иначе False.
+        """
+        sub_id = self._pattern_sub_id.get(pattern)
+        if sub_id is None:
+            return False
+
+        if callback is not None:
+            cbs = self._callbacks.get(sub_id)
+            if cbs is not None:
+                try:
+                    cbs.remove(callback)
+                except ValueError:
+                    pass
+
+        self._pattern_refcount[pattern] = self._pattern_refcount.get(pattern, 0) - 1
+        if self._pattern_refcount[pattern] <= 0:
+            # unsubscribe сам подчистит _pattern_sub_id/_pattern_refcount
+            self.unsubscribe(sub_id)
+            return True
+        return False
 
     # -------------------------------------------------------------------
     # Обработка входящих сообщений
@@ -363,6 +446,8 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._callbacks.clear()
         self._sub_patterns.clear()
         self._sub_ids.clear()
+        self._pattern_sub_id.clear()
+        self._pattern_refcount.clear()
         self.is_initialized = False
         self._log_debug(f"StateProxy '{self._process_name}': shutdown, все подписки удалены")
         return True
@@ -385,9 +470,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             raw_deltas = data.get("deltas", [])
             return [Delta.from_dict(d) for d in raw_deltas]
         except Exception as exc:
-            self._log_error(
-                f"StateProxy '{self._process_name}': ошибка десериализации дельт: {exc}"
-            )
+            self._log_error(f"StateProxy '{self._process_name}': ошибка десериализации дельт: {exc}")
             return []
 
     def _update_cache(self, deltas: list[Delta]) -> None:
@@ -435,9 +518,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 try:
                     cb(matched)
                 except Exception as exc:
-                    self._log_error(
-                        f"StateProxy '{self._process_name}': ошибка в callback sub_id={sub_id}: {exc}"
-                    )
+                    self._log_error(f"StateProxy '{self._process_name}': ошибка в callback sub_id={sub_id}: {exc}")
 
     @staticmethod
     def _filter_deltas_by_pattern(deltas: list[Delta], pattern: str) -> list[Delta]:

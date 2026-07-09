@@ -395,6 +395,71 @@ class TestDeleteDelta:
 
 
 # ---------------------------------------------------------------------------
+# Авто-подписка bind ↔ ensure/release_subscription (5.9)
+# ---------------------------------------------------------------------------
+
+
+class TestAutoSubscription:
+    """bind()/unbind() дёргают ensure/release_subscription с pattern."""
+
+    def _make(self, bridge):
+        ensure = MagicMock()
+        release = MagicMock()
+        b = GuiStateBindings(bridge, ensure_subscription=ensure, release_subscription=release)
+        return b, ensure, release
+
+    def test_bind_calls_ensure_with_pattern(self, qtbot, bridge):
+        b, ensure, _ = self._make(bridge)
+        label = QLabel()
+        qtbot.addWidget(label)
+        b.bind("processes.cam.state.fps", label, "text")
+        ensure.assert_called_once_with("processes.cam.state.fps")
+
+    def test_unbind_calls_release_with_pattern(self, qtbot, bridge):
+        b, _, release = self._make(bridge)
+        label = QLabel()
+        qtbot.addWidget(label)
+        handle = b.bind("processes.cam.state.fps", label, "text")
+        b.unbind(handle)
+        release.assert_called_once_with("processes.cam.state.fps")
+
+    def test_unbind_widget_releases_each_binding(self, qtbot, bridge):
+        b, _, release = self._make(bridge)
+        label = QLabel()
+        qtbot.addWidget(label)
+        b.bind("a.b", label, "text")
+        b.bind("c.d", label, "text")
+        b.unbind_widget(label)
+        assert release.call_count == 2
+        released = {c.args[0] for c in release.call_args_list}
+        assert released == {"a.b", "c.d"}
+
+    def test_fanout_bind_unbind_ensure_release(self, qtbot, bridge):
+        b, ensure, release = self._make(bridge)
+        h = b.bind_fanout("processes.*.workers.*.status", lambda p, v: None)
+        ensure.assert_called_once_with("processes.*.workers.*.status")
+        b.unbind_fanout(h)
+        release.assert_called_once_with("processes.*.workers.*.status")
+
+    def test_double_unbind_releases_once(self, qtbot, bridge):
+        b, _, release = self._make(bridge)
+        label = QLabel()
+        qtbot.addWidget(label)
+        handle = b.bind("a.b", label, "text")
+        b.unbind(handle)
+        b.unbind(handle)  # повторный — no-op, без второго release
+        release.assert_called_once_with("a.b")
+
+    def test_no_callbacks_configured_is_safe(self, qtbot, bridge):
+        """Без ensure/release (legacy) bind/unbind работают как раньше."""
+        b = GuiStateBindings(bridge)  # без колбэков
+        label = QLabel()
+        qtbot.addWidget(label)
+        handle = b.bind("a.b", label, "text")
+        b.unbind(handle)  # не падает
+
+
+# ---------------------------------------------------------------------------
 # Replay из кэша при bind() (Task 4.1)
 # ---------------------------------------------------------------------------
 

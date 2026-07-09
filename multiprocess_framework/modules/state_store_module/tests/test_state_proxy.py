@@ -838,3 +838,103 @@ class TestStateProxyIntegration:
         proxy.on_state_changed(msg)
 
         assert proxy.cache["system.status"] == "running"
+
+
+# ---------------------------------------------------------------------------
+# ensure_subscription / release_subscription (refcount, 5.9)
+# ---------------------------------------------------------------------------
+
+
+def _count_sent(router: "MockRouter", command: str) -> int:
+    return sum(1 for m in router.sent if isinstance(m, dict) and m.get("command") == command)
+
+
+class TestEnsureSubscription:
+    """Идемпотентная подписка с refcount — дедуп по паттерну."""
+
+    def test_ensure_creates_one_server_subscription(self):
+        """Два ensure на один pattern → ровно один state.subscribe."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "srv-1"})
+        proxy = StateProxy("cam", router=router)
+
+        s1 = proxy.ensure_subscription("processes.**")
+        s2 = proxy.ensure_subscription("processes.**")
+
+        assert s1 == s2 == "srv-1"
+        assert _count_sent(router, "state.subscribe") == 1
+        assert proxy._pattern_refcount["processes.**"] == 2
+
+    def test_ensure_dedup_returns_same_sub_id_no_router(self):
+        """router=None: повторный ensure возвращает тот же локальный sub_id."""
+        proxy = StateProxy("cam", router=None)
+        s1 = proxy.ensure_subscription("a.b.*")
+        s2 = proxy.ensure_subscription("a.b.*")
+        assert s1 == s2
+        assert proxy._pattern_refcount["a.b.*"] == 2
+
+    def test_release_decrements_then_unsubscribes(self):
+        """release снимает серверную подписку только при обнулении refcount."""
+        router = MockRouter()
+        router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "srv-1"})
+        proxy = StateProxy("cam", router=router)
+
+        proxy.ensure_subscription("processes.**")
+        proxy.ensure_subscription("processes.**")
+
+        assert proxy.release_subscription("processes.**") is False  # 2 → 1
+        assert _count_sent(router, "state.unsubscribe") == 0
+
+        assert proxy.release_subscription("processes.**") is True  # 1 → 0
+        assert _count_sent(router, "state.unsubscribe") == 1
+        assert "processes.**" not in proxy._pattern_sub_id
+        assert "processes.**" not in proxy._pattern_refcount
+
+    def test_release_unknown_pattern_is_noop(self):
+        router = MockRouter()
+        proxy = StateProxy("cam", router=router)
+        assert proxy.release_subscription("never.subscribed") is False
+        assert _count_sent(router, "state.unsubscribe") == 0
+
+    def test_ensure_multiple_callbacks_all_invoked_once(self):
+        """Оба callback'а одной ensure-подписки вызываются, дельта доставлена один раз."""
+        proxy = StateProxy("cam", router=None)
+        seen1: list = []
+        seen2: list = []
+        proxy.ensure_subscription("processes.*.state.fps", seen1.append)
+        proxy.ensure_subscription("processes.*.state.fps", seen2.append)
+
+        delta = Delta(
+            path="processes.cam.state.fps",
+            old_value=10,
+            new_value=30,
+            source="other",
+        )
+        proxy.on_state_changed({"data": {"deltas": [delta.to_dict()]}})
+
+        assert len(seen1) == 1
+        assert len(seen2) == 1
+        assert seen1[0][0].new_value == 30
+
+    def test_ensure_without_callback_subscribes_safely(self):
+        """ensure без callback — серверная подписка есть, доставка не падает."""
+        proxy = StateProxy("cam", router=None)
+        sub_id = proxy.ensure_subscription("processes.**")
+        assert sub_id in proxy._sub_ids
+        delta = Delta(path="processes.cam.state.fps", old_value=1, new_value=2, source="x")
+        proxy.on_state_changed({"data": {"deltas": [delta.to_dict()]}})  # не бросает
+
+    def test_direct_unsubscribe_clears_refcount_registry(self):
+        """Прямой unsubscribe ensure-подписки чистит pattern-реестр (нет висяка)."""
+        proxy = StateProxy("cam", router=None)
+        sub_id = proxy.ensure_subscription("a.**")
+        proxy.unsubscribe(sub_id)
+        assert "a.**" not in proxy._pattern_sub_id
+        assert "a.**" not in proxy._pattern_refcount
+
+    def test_shutdown_clears_refcount_registry(self):
+        proxy = StateProxy("cam", router=None)
+        proxy.ensure_subscription("a.**")
+        proxy.shutdown()
+        assert proxy._pattern_sub_id == {}
+        assert proxy._pattern_refcount == {}
