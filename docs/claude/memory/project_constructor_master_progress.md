@@ -1,6 +1,6 @@
 ---
 name: project-constructor-master-progress
-description: "constructor-master: Ф0-Ф3+трек F в MAIN; Ф4 на feat/constructor-f4; 4.2 ЗАКРЫТА ЦЕЛИКОМ (шаги 1-6: fencing incarnation-based + capabilities params_schema v1) + авто-рестарт-всех МЕХАНИЗМ закрыт (ADR-PMM-015); СЛЕДУЮЩЕЕ: merge f4→main + ревью Ф1-Ф4 в новом чате, затем Ф5 (ObservabilityHub+chain-health); hook-правка блокирована классификатором"
+description: "constructor-master: Ф0-Ф4.2 в MAIN; честное ревью Ф0-Ф4 сделано (36 агентов); Pre-Ф5 hardening на ветке fix/pre-f5-hardening (H1-H8: breaker/incarnation/recovery-watchdog/health-restart/контракты + 2 kill'а); depth-долг 0.57 (Ф5.18 fix); NEXT: Ф5 путь B (ObservabilityHub 5.15-5.17 + carve E1/E2/E6, recipe-carve отложить до 4.5-4.7)"
 metadata: 
   node_type: memory
   type: project
@@ -9,6 +9,13 @@ metadata:
 
 Мастер-план `plans/2026-07-06_constructor-master/` в исполнении с 2026-07-06.
 **Актуальный handoff: docs/handoffs/2026-07-07_constructor-master-f2-close.md** — читать первым.
+
+**LATEST 2026-07-09 — Ф4 в main + честное ревью Ф0-Ф4 + Pre-Ф5 hardening:**
+- Ф4.2 влита в main (28118017). Честный multi-agent аудит Ф0-Ф4 (36 агентов, 19/21 CONFIRMED): направление ВЕРНОЕ (no-rewrite + tooling-first доказали эффект латентными багами), но числовые цели НЕ достигнуты (quality 7174→7074, depth 0.615→0.571 пробил порог, modularity flat).
+- **Pre-Ф5 hardening — ветка `fix/pre-f5-hardening` (от main @28118017), H1-H8 закрыты:** H1 breaker прод-путь источников (record_success только если error_count не вырос); H2 restart bump incarnation ДО create (stale-fence); H3 recovery-watchdog `_check_recovery_timeouts` (тихий провал рестарта path A/B → ретрай/give-up); H4 health-restart `_maybe_health_restart` за флагом `FW_HEALTH_RESTART` (default off, гейт `_given_up`); H5 контракты `MessageContract.params_in_data` (валидация `message["data"]`, была инертна). H6/H7 kill'ы (Operation_crop 858 + topology-editor-виджет 722). Удобство: Pipeline edge-delete (v1-паритет).
+- **УРОК: kill'ы изолированных мёртвых листьев НЕ двигают метрики** (modularity 5665→5667, depth не сдвинулся). Реальный фикс depth (god-split добавил 6-й уровень пакетов) = Ф5.18, НЕ удаление.
+- **Depth-гейт = принятый долг:** min_depth 0.60→0.57 (датировано, возврат 0.65 Ф8 H.5). `sentrux check` exit 0. fw 3673 / proto 2932 passed, 0 красных.
+- **NEXT — Ф5 путь B:** Ф5 НЕ готова целиком (merged только 4.2; recipe/manifest-ядро 4.5-4.7 блокирует carve launch.py). Старт на НЕзаблокированном: ObservabilityHub 5.15-5.17 + E1/E2/E6 + 5.6a форм-diff (G2) + Ф5.18. Recipe-carve отложить до 4.5-4.7. ДО старта: session_start baseline Ф5, решить scope открытой Ф4.
 
 - В main ВСЁ (merge 2f4e212c, гейт 3536 passed): Ф0, Ф1 (backend_ctl v2), трек F (god-split), Ф2 целиком (health+breaker+discovery+волны C), debug-plane v1, MCP 25. feat/constructor-f2 можно удалить. Урок MERGE-GATE F: repo-wide modularity не видит разрез god-файлов — мерить max-LOC зоны.
 - Состав Ф2 (уже в main): Ф2.1 ctx.health (ADR-PM-010), Ф2.2 честный breaker (ADR-PM-011), Ф2.3 discovery честный (failed_imports + introspect.plugins + счётчик отказов ObservableMixin), волны C (см. ниже), 1.10 UI-tap, 1.11 debug-plane v1. Ф2.6 (JSONL-sink) — опц, не делалась.
