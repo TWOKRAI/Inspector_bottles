@@ -1,6 +1,6 @@
 ---
 name: project-constructor-master-progress
-description: "constructor-master: Ф0-Ф3+трек F в MAIN; Ф4 ОТКРЫТА на feat/constructor-f4; 4.2 шаги 1-5 ЗАКРЫТЫ (fencing incarnation-based e16e2ea8) + авто-рестарт-всех МЕХАНИЗМ закрыт (8ac43361, ADR-PMM-015: default-on + supervisor-события); next = 4.2 шаг 6 (capabilities params_schema) ИЛИ Ф5 (ObservabilityHub + chain-health); hook-правка блокирована классификатором"
+description: "constructor-master: Ф0-Ф3+трек F в MAIN; Ф4 на feat/constructor-f4; 4.2 ЗАКРЫТА ЦЕЛИКОМ (шаги 1-6: fencing incarnation-based + capabilities params_schema v1) + авто-рестарт-всех МЕХАНИЗМ закрыт (ADR-PMM-015); СЛЕДУЮЩЕЕ: merge f4→main + ревью Ф1-Ф4 в новом чате, затем Ф5 (ObservabilityHub+chain-health); hook-правка блокирована классификатором"
 metadata: 
   node_type: memory
   type: project

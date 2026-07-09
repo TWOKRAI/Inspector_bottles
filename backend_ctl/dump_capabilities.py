@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Статический дамп «контактной книжки» бэкенда (Ф1 Task 1.9, capability manifest v0).
+"""Статический дамп «контактной книжки» бэкенда (Ф1 Task 1.9, capability manifest v1).
 
 Поднимает прототип headless через :class:`BackendHarness`, собирает свод
 ``driver.capabilities()`` (fan-out introspect.capabilities по всем процессам)
@@ -30,8 +30,8 @@ from typing import Any, Dict, Optional
 
 from backend_ctl.driver import Capabilities
 
-#: Версия схемы дампа (v0 — без params_schema; v1 добавит их в Ф4.2).
-DUMP_VERSION = 0
+#: Версия схемы дампа (v1 — с params_schema из реестра контрактов, Ф4.2 шаг 6).
+DUMP_VERSION = 1
 
 #: Дефолтное место артефактов (относительно корня репозитория).
 DEFAULT_OUT_DIR = Path("docs/contracts")
@@ -42,6 +42,34 @@ MD_NAME = "CAPABILITIES.md"
 # ---------------------------------------------------------------------------
 # Чистые преобразования: Capabilities → dump-dict → yaml/md (тестируются юнитом)
 # ---------------------------------------------------------------------------
+
+
+def _command_dump(c: Dict[str, Any]) -> Dict[str, Any]:
+    """Детерминированная запись одной команды для дампа.
+
+    ``params_schema`` (Ф4.2 шаг 6) добавляется ТОЛЬКО если карточка его несёт —
+    команды без контракта остаются {name, description, tags} (обратная совместимость).
+    """
+    entry: Dict[str, Any] = {
+        "name": str(c.get("name") or ""),
+        "description": str(c.get("description") or ""),
+        "tags": sorted(c.get("tags") or []),
+    }
+    ps = c.get("params_schema")
+    if isinstance(ps, list) and ps:
+        entry["params_schema"] = sorted(
+            (
+                {
+                    "name": str(f.get("name") or ""),
+                    "type": str(f.get("type") or ""),
+                    "required": bool(f.get("required")),
+                }
+                for f in ps
+                if isinstance(f, dict)
+            ),
+            key=lambda f: f["name"],
+        )
+    return entry
 
 
 def to_dump(caps: Capabilities) -> Dict[str, Any]:
@@ -55,15 +83,7 @@ def to_dump(caps: Capabilities) -> Dict[str, Any]:
         card = caps.processes[name]
         processes[name] = {
             "commands": sorted(
-                (
-                    {
-                        "name": str(c.get("name") or ""),
-                        "description": str(c.get("description") or ""),
-                        "tags": sorted(c.get("tags") or []),
-                    }
-                    for c in card.commands
-                    if c.get("name")
-                ),
+                (_command_dump(c) for c in card.commands if c.get("name")),
                 key=lambda c: c["name"],
             ),
             "router_handlers": sorted(card.router_handlers),
@@ -89,7 +109,7 @@ def render_yaml(dump: Dict[str, Any]) -> str:
     import yaml
 
     header = (
-        "# CAPABILITIES.yaml — «контактная книжка» бэкенда (capability manifest v0).\n"
+        "# CAPABILITIES.yaml — «контактная книжка» бэкенда (capability manifest v1).\n"
         "# ГЕНЕРИРУЕТСЯ: python -m backend_ctl.dump_capabilities — руками не править.\n"
         "# CI-gate: backend_ctl/tests/test_capabilities.py сверяет с runtime (дрейф = красный).\n"
     )
@@ -103,7 +123,7 @@ def render_md(dump: Dict[str, Any]) -> str:
     какие команды у каждого (имя+описание+теги), регистры и события.
     """
     lines: list[str] = [
-        "# Контактная книжка бэкенда (capability manifest v0)",
+        "# Контактная книжка бэкенда (capability manifest v1)",
         "",
         "> ГЕНЕРИРУЕТСЯ: `python -m backend_ctl.dump_capabilities` — руками не править.",
         "> Дрейф с runtime ловит CI (`backend_ctl/tests/test_capabilities.py`).",
@@ -195,7 +215,7 @@ def _diff(expected: str, actual: str, name: str) -> str:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Дамп «контактной книжки» бэкенда (capability manifest v0)")
+    parser = argparse.ArgumentParser(description="Дамп «контактной книжки» бэкенда (capability manifest v1)")
     parser.add_argument("--check", action="store_true", help="не писать, а сравнить с файлами (дрейф → exit 2)")
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR), help="куда писать YAML+MD")
     parser.add_argument("--recipe", default=None, help="путь к рецепту топологии (None → дефолт harness)")

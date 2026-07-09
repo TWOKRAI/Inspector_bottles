@@ -464,19 +464,27 @@ class BuiltinCommands:
         """
         svc = self._services
 
+        # Ф4.2 шаг 6: реестр контрактов → params_schema команды (форма параметров).
+        registry = getattr(svc, "contract_registry", None)
+
         commands: list = []
         cm = svc.command_manager
         if cm is not None:
             try:
+                from .command_contracts import params_schema_of
+
                 for h in cm.get_commands():
                     meta = h.get("metadata") or {}
-                    commands.append(
-                        {
-                            "name": h.get("key"),
-                            "description": str(meta.get("description") or ""),
-                            "tags": sorted(h.get("tags") or []),
-                        }
-                    )
+                    name = h.get("key")
+                    entry = {
+                        "name": name,
+                        "description": str(meta.get("description") or ""),
+                        "tags": sorted(h.get("tags") or []),
+                    }
+                    contract = registry.get(name) if (registry is not None and name) else None
+                    if contract is not None:
+                        entry["params_schema"] = params_schema_of(contract.schema)
+                    commands.append(entry)
             except Exception as exc:  # noqa: BLE001
                 return {"success": False, "reason": f"command_manager: {exc}"}
         commands = sorted((c for c in commands if c["name"]), key=lambda c: c["name"])
@@ -1243,6 +1251,17 @@ class BuiltinCommands:
             try:
                 svc.contract_registry = registry
             except Exception:  # noqa: BLE001 — не все services допускают set-атрибут
+                pass
+
+        # Ф4.2 шаг 6: декларативное наполнение реестра контрактами параметров
+        # built-in команд → introspect.capabilities отдаёт params_schema. Идемпотентно
+        # (override=True): повторная проводка не падает на дубле.
+        from .command_contracts import BUILTIN_COMMAND_CONTRACTS
+
+        for _cmd, _schema in BUILTIN_COMMAND_CONTRACTS.items():
+            try:
+                registry.register(_cmd, _schema, override=True)
+            except Exception:  # noqa: BLE001 — кривой контракт не должен ронять проводку
                 pass
 
         inc_stat = getattr(router, "_inc_stat", None)

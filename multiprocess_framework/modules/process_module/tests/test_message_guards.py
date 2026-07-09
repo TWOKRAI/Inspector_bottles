@@ -83,10 +83,12 @@ def _wire(monkeypatch, *, fence="1", strict=None, own_inc=2, peer_inc=3):
 # Fencing
 # --------------------------------------------------------------------------- #
 
-def test_registry_attached_and_empty(monkeypatch):
+def test_registry_attached_with_builtin_contracts(monkeypatch):
+    """Ф4.2 шаг 6: реестр наполнен контрактами built-in команд (wire.configure и т.п.)."""
     svc, _ = _wire(monkeypatch)
     assert svc.contract_registry is not None
-    assert len(svc.contract_registry) == 0  # пуст → ноль оверхеда
+    assert "wire.configure" in svc.contract_registry
+    assert "routing.probe" in svc.contract_registry
 
 
 def test_send_stamps_control_plane_from_psr(monkeypatch):

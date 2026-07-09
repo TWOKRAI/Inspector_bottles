@@ -1,4 +1,4 @@
-# Контактная книжка бэкенда (capability manifest v0)
+# Контактная книжка бэкенда (capability manifest v1)
 
 > ГЕНЕРИРУЕТСЯ: `python -m backend_ctl.dump_capabilities` — руками не править.
 > Дрейф с runtime ловит CI (`backend_ctl/tests/test_capabilities.py`).
