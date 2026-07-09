@@ -1,6 +1,6 @@
 ---
 name: project-constructor-master-progress
-description: "constructor-master: Ф0-Ф4.2 в MAIN; честное ревью Ф0-Ф4 сделано (36 агентов); Pre-Ф5 hardening на ветке fix/pre-f5-hardening (H1-H8: breaker/incarnation/recovery-watchdog/health-restart/контракты + 2 kill'а); depth-долг 0.57 (Ф5.18 fix); NEXT: Ф5 путь B (ObservabilityHub 5.15-5.17 + carve E1/E2/E6, recipe-carve отложить до 4.5-4.7)"
+description: "constructor-master: Ф0-Ф4.2 + Ф5 carve(5.1-5.7) + ObservabilityHub(5.14-5.17) + Ф5.9 GUI state-plane + Ф5.20a persistent-стор — ВСЁ в MAIN (merge fd963396). NEXT: 5.20b hub→GUI live-tail + 5.19 виджет 3 вкладок (вместе, новый чат) — см. docs/handoffs/2026-07-10_f5-gui-observability.md"
 metadata: 
   node_type: memory
   type: project
@@ -8,14 +8,20 @@ metadata:
 ---
 
 Мастер-план `plans/2026-07-06_constructor-master/` в исполнении с 2026-07-06.
-**Актуальный handoff: docs/handoffs/2026-07-07_constructor-master-f2-close.md** — читать первым.
+**Актуальный handoff: docs/handoffs/2026-07-10_f5-gui-observability.md** — читать первым.
+
+**LATEST 2026-07-10 — Ф5.9 + Ф5.20a влиты в main (merge fd963396, --no-ff):**
+- **Ф5.9 GUI state-plane**: полный Delta до GUI (delete/transaction_id, `state_delta_message`), fan-out на delete получает sentinel `DELETED` (не None), `StateProxy.ensure_subscription`/refcount + авто-подписка bind, один glob-матчер (frontend→framework `match_pattern`).
+- **Ф5.20a persistent-стор**: `ObservabilityStore` (SQLite/WAL/synchronous=NORMAL) + `StoreTapChannel` на logger_manager И error_manager (min ERROR) + drain fan-out (log/stats пачкой из heartbeat). **Live-урок: ошибки приложения идут через logger.error/ctx.log_error, не error_manager** → [[project-observability-store-error-routing]].
+- **Code-review (8 finder-агентов high) → 8/10 findings закрыто** (refcount-leak reap, fan-out delete, heartbeat-блокировка, warn-no-tap, severity_in, Delta.is_delete, IChannel, O(1) unsubscribe). НЕ закрыто: #4 topology-delete-remove (early-return, призрак в RM), #5 double-write (нет idempotency-ключа) — учесть в 5.19/5.20b.
+- **NEXT (новый чат): 5.20b hub→GUI live-tail (router-push по образцу log_tail, отдельный data_type «observability_record», НЕ state-дельта) + 5.19 виджет 3 вкладок (RecordHistoryPanel из AuditLogPanel, история из ObservabilityStore.list_records)** — делать ВМЕСТЕ (5.20b e2e нужен виджет-потребитель + live backend). Убрать 4 поддельные state-дельты app.py:851-871. Свободны также 5.8/5.18/5.6a. main НЕ запушен (206 коммитов, owner-gated). Гейт: fw/modules 3926 + proto 2953.
 
 **LATEST 2026-07-09 — Ф4 в main + честное ревью Ф0-Ф4 + Pre-Ф5 hardening:**
 - Ф4.2 влита в main (28118017). Честный multi-agent аудит Ф0-Ф4 (36 агентов, 19/21 CONFIRMED): направление ВЕРНОЕ (no-rewrite + tooling-first доказали эффект латентными багами), но числовые цели НЕ достигнуты (quality 7174→7074, depth 0.615→0.571 пробил порог, modularity flat).
-- **Pre-Ф5 hardening — ветка `fix/pre-f5-hardening` (от main @28118017), H1-H8 закрыты:** H1 breaker прод-путь источников (record_success только если error_count не вырос); H2 restart bump incarnation ДО create (stale-fence); H3 recovery-watchdog `_check_recovery_timeouts` (тихий провал рестарта path A/B → ретрай/give-up); H4 health-restart `_maybe_health_restart` за флагом `FW_HEALTH_RESTART` (default off, гейт `_given_up`); H5 контракты `MessageContract.params_in_data` (валидация `message["data"]`, была инертна). H6/H7 kill'ы (Operation_crop 858 + topology-editor-виджет 722). Удобство: Pipeline edge-delete (v1-паритет).
+- **Pre-Ф5 hardening — ветка `fix/pre-f5-hardening` (от main @28118017), H1-H8 закрыты:** H1 breaker прод-путь источников (record_success только если error_count не вырос); H2 restart bump incarnation ДО create (stale-fence); H3 recovery-watchdog `_check_recovery_timeouts` (тихий провал рестарта path A/B → ретрай/give-up); H4 health-restart `_maybe_health_restart` за флагом `FW_HEALTH_RESTART` (default off, гейт `_given_up`); H5 контракты `MessageContract.params_in_data` (валидация `message["data"]`). H6/H7 kill'ы (Operation_crop 858 + topology-editor-виджет 722). Удобство: Pipeline edge-delete (v1-паритет).
 - **УРОК: kill'ы изолированных мёртвых листьев НЕ двигают метрики** (modularity 5665→5667, depth не сдвинулся). Реальный фикс depth (god-split добавил 6-й уровень пакетов) = Ф5.18, НЕ удаление.
-- **Depth-гейт = принятый долг:** min_depth 0.60→0.57 (датировано, возврат 0.65 Ф8 H.5). `sentrux check` exit 0. fw 3673 / proto 2932 passed, 0 красных.
-- **NEXT — Ф5 путь B:** Ф5 НЕ готова целиком (merged только 4.2; recipe/manifest-ядро 4.5-4.7 блокирует carve launch.py). Старт на НЕзаблокированном: ObservabilityHub 5.15-5.17 + E1/E2/E6 + 5.6a форм-diff (G2) + Ф5.18. Recipe-carve отложить до 4.5-4.7. ДО старта: session_start baseline Ф5, решить scope открытой Ф4.
+- **Depth-гейт = принятый долг:** min_depth 0.60→0.57 (датировано, возврат 0.65 Ф8 H.5). `sentrux check` exit 0. fw 3673 / proto 2932 passed.
+- **NEXT — Ф5 путь B:** merged только 4.2; recipe/manifest-ядро 4.5-4.7 блокирует carve launch.py. Старт на НЕзаблокированном: ObservabilityHub 5.15-5.17 + E1/E2/E6 + 5.6a форм-diff (G2) + Ф5.18. Recipe-carve отложить. ДО старта: session_start baseline Ф5, решить scope открытой Ф4.
 
 - В main ВСЁ (merge 2f4e212c, гейт 3536 passed): Ф0, Ф1 (backend_ctl v2), трек F (god-split), Ф2 целиком (health+breaker+discovery+волны C), debug-plane v1, MCP 25. feat/constructor-f2 можно удалить. Урок MERGE-GATE F: repo-wide modularity не видит разрез god-файлов — мерить max-LOC зоны.
 - Состав Ф2 (уже в main): Ф2.1 ctx.health (ADR-PM-010), Ф2.2 честный breaker (ADR-PM-011), Ф2.3 discovery честный (failed_imports + introspect.plugins + счётчик отказов ObservableMixin), волны C (см. ниже), 1.10 UI-tap, 1.11 debug-plane v1. Ф2.6 (JSONL-sink) — опц, не делалась.
