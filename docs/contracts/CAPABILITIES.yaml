@@ -1,4 +1,4 @@
-# CAPABILITIES.yaml — «контактная книжка» бэкенда (capability manifest v0).
+# CAPABILITIES.yaml — «контактная книжка» бэкенда (capability manifest v1).
 # ГЕНЕРИРУЕТСЯ: python -m backend_ctl.dump_capabilities — руками не править.
 # CI-gate: backend_ctl/tests/test_capabilities.py сверяет с runtime (дрейф = красный).
 channels:
@@ -135,6 +135,21 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      params_schema:
+      - name: inner
+        required: false
+        type: Dict
+      - name: target
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Прочитать значение из дерева
       name: state.get
       tags:
@@ -190,10 +205,30 @@ processes:
       - system
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
+      params_schema:
+      - name: buffer_slots
+        required: false
+        type: int
+      - name: role
+        required: false
+        type: str
+      - name: shm_name
+        required: false
+        type: str
+      - name: shm_owner
+        required: false
+        type: str
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Удалить wire middleware
       name: wire.deconfigure
+      params_schema:
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Настроить wire-канал (SHM + routes)
@@ -334,6 +369,21 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      params_schema:
+      - name: inner
+        required: false
+        type: Dict
+      - name: target
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -354,10 +404,30 @@ processes:
       tags: []
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
+      params_schema:
+      - name: buffer_slots
+        required: false
+        type: int
+      - name: role
+        required: false
+        type: str
+      - name: shm_name
+        required: false
+        type: str
+      - name: shm_owner
+        required: false
+        type: str
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Удалить wire middleware
       name: wire.deconfigure
+      params_schema:
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Создать воркер в процессе
@@ -613,6 +683,21 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      params_schema:
+      - name: inner
+        required: false
+        type: Dict
+      - name: target
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: ''
       name: set_config
       tags: []
@@ -642,10 +727,30 @@ processes:
       tags: []
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
+      params_schema:
+      - name: buffer_slots
+        required: false
+        type: int
+      - name: role
+        required: false
+        type: str
+      - name: shm_name
+        required: false
+        type: str
+      - name: shm_owner
+        required: false
+        type: str
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Удалить wire middleware
       name: wire.deconfigure
+      params_schema:
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Создать воркер в процессе
@@ -777,6 +882,21 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      params_schema:
+      - name: inner
+        required: false
+        type: Dict
+      - name: target
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: ''
       name: set_config
       tags: []
@@ -791,10 +911,30 @@ processes:
       - stats
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
+      params_schema:
+      - name: buffer_slots
+        required: false
+        type: int
+      - name: role
+        required: false
+        type: str
+      - name: shm_name
+        required: false
+        type: str
+      - name: shm_owner
+        required: false
+        type: str
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Удалить wire middleware
       name: wire.deconfigure
+      params_schema:
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Создать воркер в процессе
@@ -918,6 +1058,21 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      params_schema:
+      - name: inner
+        required: false
+        type: Dict
+      - name: target
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -929,10 +1084,30 @@ processes:
       - stats
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
+      params_schema:
+      - name: buffer_slots
+        required: false
+        type: int
+      - name: role
+        required: false
+        type: str
+      - name: shm_name
+        required: false
+        type: str
+      - name: shm_owner
+        required: false
+        type: str
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Удалить wire middleware
       name: wire.deconfigure
+      params_schema:
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Создать воркер в процессе
@@ -1052,6 +1227,21 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      params_schema:
+      - name: inner
+        required: false
+        type: Dict
+      - name: target
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -1063,10 +1253,30 @@ processes:
       - stats
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
+      params_schema:
+      - name: buffer_slots
+        required: false
+        type: int
+      - name: role
+        required: false
+        type: str
+      - name: shm_name
+        required: false
+        type: str
+      - name: shm_owner
+        required: false
+        type: str
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Удалить wire middleware
       name: wire.deconfigure
+      params_schema:
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Создать воркер в процессе
@@ -1186,6 +1396,21 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      params_schema:
+      - name: inner
+        required: false
+        type: Dict
+      - name: target
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -1197,10 +1422,30 @@ processes:
       - stats
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
+      params_schema:
+      - name: buffer_slots
+        required: false
+        type: int
+      - name: role
+        required: false
+        type: str
+      - name: shm_name
+        required: false
+        type: str
+      - name: shm_owner
+        required: false
+        type: str
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Удалить wire middleware
       name: wire.deconfigure
+      params_schema:
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Создать воркер в процессе
@@ -1320,6 +1565,21 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      params_schema:
+      - name: inner
+        required: false
+        type: Dict
+      - name: target
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -1331,10 +1591,30 @@ processes:
       - stats
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
+      params_schema:
+      - name: buffer_slots
+        required: false
+        type: int
+      - name: role
+        required: false
+        type: str
+      - name: shm_name
+        required: false
+        type: str
+      - name: shm_owner
+        required: false
+        type: str
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Удалить wire middleware
       name: wire.deconfigure
+      params_schema:
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Создать воркер в процессе
@@ -1454,6 +1734,21 @@ processes:
       name: router.relay
       tags:
       - system
+    - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
+      name: routing.probe
+      params_schema:
+      - name: inner
+        required: false
+        type: Dict
+      - name: target
+        required: false
+        type: str
+      tags:
+      - system
+    - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
+      name: routing.refresh
+      tags:
+      - system
     - description: Включить/выключить ноду (bypass)
       name: set_enabled
       tags:
@@ -1465,10 +1760,30 @@ processes:
       - stats
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
+      params_schema:
+      - name: buffer_slots
+        required: false
+        type: int
+      - name: role
+        required: false
+        type: str
+      - name: shm_name
+        required: false
+        type: str
+      - name: shm_owner
+        required: false
+        type: str
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Удалить wire middleware
       name: wire.deconfigure
+      params_schema:
+      - name: wire_key
+        required: false
+        type: str
       tags:
       - system
     - description: Создать воркер в процессе
@@ -1524,4 +1839,4 @@ topology:
     class: multiprocess_prototype.generic_process_app.GenericProcessApp
   stitcher:
     class: multiprocess_prototype.generic_process_app.GenericProcessApp
-version: 0
+version: 1

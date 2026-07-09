@@ -141,7 +141,7 @@ class TestDumpRendering:
         dump = to_dump(_sample_caps())
         loaded = yaml.safe_load(render_yaml(dump))
         assert loaded == dump
-        assert loaded["version"] == 0
+        assert loaded["version"] == 1
         # регистры — только имена полей (контракт), не значения
         assert loaded["processes"]["preprocessor"]["registers"]["resize"] == ["algo", "scale_factor"]
 
@@ -201,3 +201,40 @@ def test_dump_matches_committed(headless_backend) -> None:
         "ДРЕЙФ книжки: runtime-свод != docs/contracts/CAPABILITIES.yaml — "
         "перегенерируй: python -m backend_ctl.dump_capabilities"
     )
+
+
+class TestParamsSchemaV1:
+    """Ф4.2 шаг 6: params_schema в дампе (v1)."""
+
+    def test_command_dump_includes_sorted_params_schema(self) -> None:
+        from backend_ctl.dump_capabilities import _command_dump
+
+        c = {
+            "name": "wire.configure",
+            "description": "d",
+            "tags": ["system"],
+            "params_schema": [
+                {"name": "wire_key", "type": "str", "required": True},
+                {"name": "role", "type": "str", "required": False},
+            ],
+        }
+        d = _command_dump(c)
+        assert [f["name"] for f in d["params_schema"]] == ["role", "wire_key"]  # sorted
+        assert {f["name"]: f["required"] for f in d["params_schema"]} == {"wire_key": True, "role": False}
+
+    def test_command_dump_omits_empty_params_schema(self) -> None:
+        from backend_ctl.dump_capabilities import _command_dump
+
+        d = _command_dump({"name": "x", "description": "", "tags": []})
+        assert "params_schema" not in d  # обратная совместимость: команда без контракта
+
+    def test_params_schema_of_unwraps_optional(self) -> None:
+        from multiprocess_framework.modules.process_module.commands.command_contracts import (
+            WireConfigureParams,
+            params_schema_of,
+        )
+
+        fields = {f["name"]: f for f in params_schema_of(WireConfigureParams)}
+        assert fields["wire_key"]["type"] == "str"  # Optional[str] развёрнут в str
+        assert fields["buffer_slots"]["type"] == "int"
+        assert fields["wire_key"]["required"] is False

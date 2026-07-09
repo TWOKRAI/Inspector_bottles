@@ -113,3 +113,46 @@ extension-point). Адресация полностью покрывается `
 **Причина:** Иерархия живёт **внутри** существующего `targets: list[str]` — мультикаст сохранён, новое поле не вводится, JSON-safe (Dict-at-Boundary, правило #1). Транспортная семантика (доставка по `address[0]`, intra-process резолв воркера) — в `router_module`/P1–P2, здесь только парсинг/валидация.  
 **Последствия:** `targets` обретает иерархию без миграции данных (плоские имена продолжают работать). `AddressValidationError` ловится существующими обработчиками `MessageValidationError`.  
 **Refs:** [ADR-COMM-004](../../DECISIONS.md), [ADR-COMM-001](../../DECISIONS.md), [plans/2026-05-31_transport-router-hub/plan.md](../../../plans/2026-05-31_transport-router-hub/plan.md)
+
+---
+
+## ADR-MSG-008: Реестр контрактов сообщений (`contracts/`) — Ф4.2
+
+**Статус:** принято (частично — шаг 1: реестр+middleware; проводка в роутер отдельно)
+**Дата:** 2026-07-08
+**Контекст:** Ф4 «контракты вместо конвенций». Сейчас `command`/`data_type` → обработчик по конвенции, без реестра схем: опечатка в имени команды или неверное поле payload молча проходит (класс бага 1.6 — `set_register` слал `plugin_name` вместо `register`, обработчик тихо выходил). Нужен источник истины «форма сообщения X» + диагностика на границе.
+**Решение:** Подпакет `message_module/contracts/`: `MessageContractRegistry` (`register(key, schema, *, plane, override)` / `get` / `validate`) связывает ключ маршрутизации (`command`|`data_type`) с Pydantic-схемой; `MessageContract` (key/schema/plane), `ContractCheck` (раздельные списки missing/unexpected/errors + `diff_summary()`). Чистая фабрica `make_contract_check_middleware(registry, *, strict, on_violation)` возвращает `fn(dict)->dict|None`, совместимую с `add_receive_middleware`: **warn** (дефолт) — нарушение → `on_violation(check)`, сообщение проходит; **strict** — дроп. Ключ извлекается `command → data_type → type`. Пустой реестр / неизвестный ключ → `validate` возвращает `None` (ноль оверхеда, частичное покрытие допустимо).
+**Причина:** Реестр и middleware — чистые, Qt-free, не знают про `RouterManager` (проводка = отдельный шаг композиции, чтобы риск изменения hot receive-пути был изолирован). Diff полей раздельными списками → читаемый WARNING вместо сырого Pydantic-текста. `plane="data"` помечен, но здесь НЕ валидируется — инвариант для Ф7 (data-plane валидирует только payload-валидатор 4.3).
+**Последствия:** Основа для warn-middleware на receive (шаг 2, флаг `FW_CONTRACTS_STRICT`), fencing-token drop-middleware (тот же pipeline) и `introspect.capabilities` v1 (`params_schema` из реестра). 26 контракт-тестов; полный `message_module` 181 passed.
+**Refs:** [plans/2026-07-06_constructor-master/f4.2-fencing-contracts.md](../../../plans/2026-07-06_constructor-master/f4.2-fencing-contracts.md), [ADR-PMM-010](../process_manager_module/DECISIONS.md)
+
+**Обновление (шаг 2, 2026-07-08):** реестр проведён в receive-pipeline процесса —
+`BuiltinCommands._register_message_guards` вешает `make_contract_check_middleware`
+на `RouterManager.add_receive_middleware` (per-process пустой реестр на
+`services.contract_registry`, наполняется позже декларативно). Дефолт **warn**
+(`FW_CONTRACTS_STRICT` unset), нарушение → счётчик `contract_violations` +
+WARNING с diff. Служебные `_`-префиксные transport-ключи (`_address`,
+`_receive_info`, `_fence` fencing-Ф4.2) исключены из `unexpected` в `_check`.
+Наполнение реестра прод-контрактами и `introspect.capabilities` — отдельный шаг.
+
+**Обновление (шаг 6, 2026-07-09):** реестр наполнен контрактами параметров built-in
+команд (`process_module/commands/command_contracts.py`: `wire.configure`/
+`wire.deconfigure`/`routing.probe`), регистрируются per-process в
+`_register_message_guards`. `introspect.capabilities` отдаёт `params_schema`
+(`[{name,type,required}]`, `Optional[X]`→`X`) из реестра; `dump_capabilities`
+включает его, `DUMP_VERSION=1`, CAPABILITIES регенерирован (drift-gate зелёный).
+**v1 — документирующие схемы** (`extra="allow"`, поля опциональны): warn-mw валидирует
+конверт, а параметры едут вложенно в `data`, поэтому ложных предупреждений на реальном
+трафике нет. Строгая валидация вложенного `data` — следующий инкремент. **Ф4.2 закрыта.**
+
+---
+
+## ADR-MSG-009: Fencing-token — штамп конверта + drop билета устаревшего инстанса (`fencing/`) — Ф4.2
+
+**Статус:** принято
+**Дата:** 2026-07-08
+**Контекст:** Требование владельца (2026-07-08): после замены инстанса (switch/restart с пересозданием очередей) старый процесс НЕ должен вкинуть сообщение в новую топологию. `incarnation`/`epoch` есть (ADR-PMM-010), но применялись лишь к CLEANUP очередей и к самому `routing.refresh` — оставалось окно гонки.
+**Решение:** Подпакет `message_module/fencing/` — две чистые фабрики (Qt-free, не знают про роутер): `make_fence_stamp_middleware(sender, get_fence)` (send-mw: штампует `_fence={sender,inc,epoch}` на control-plane, когда свой incarnation известен) и `make_fence_filter_middleware(get_expected_incarnation, on_drop)` (receive-mw: дропает `return None`, если `_fence.inc < PSR[sender].routing_incarnation` — билет от СТАРОГО инстанса, заменённого новым). `_fence` — nested transport-ключ (не поле `Message`; реестр контрактов его игнорирует). Инварианты: **только control-plane** (data-plane/кадры не трогаются — горячий путь ADR-PMM-010); **fail-open** (нет incarnation → не штампуем/не дропаем); **обратная совместимость** (без `_fence` — прозрачно). Проводка — `BuiltinCommands._register_message_guards` за флагом `FW_FENCE` (дефолт ON); провайдеры читают PSR (`routing_incarnation`). Полный разбор + урок live — [ADR-PMM-014](../process_manager_module/DECISIONS.md).
+**Причина / ключевое отличие:** дроп по **per-sender incarnation**, НЕ по глобальному epoch. Live-e2e показал: epoch-критерий ложно дропает легитимный state/telemetry ТЕКУЩИХ процессов в переходном окне после switch (пока они не применили refresh, их epoch отстаёт от получателя). Incarnation же меняется ТОЛЬКО при пересоздании очередей процесса (`_bump_incarnation`) → устаревший инстанс отличим точно, текущий (даже отставший по epoch) не трогается. Урок как в Ф3.7: unit «сообщение отброшено» зелёный, а истинную семантику вскрыл только живой прогон.
+**Последствия:** Жёсткая гарантия «старый инстанс не вкидывает в новую топологию» вместо окна гонки. Счётчик `fence_dropped` в router-stats. Live-доказательство — `backend_ctl/tests/test_fencing_live.py` (restart-no-reuse → PM дропает стейл старого инстанса, RED/GREEN по `FW_FENCE`); `routing_epoch_live` зелёный (нет ложных дропов). restart-reuse корректно НЕ фенсит (та же очередь). Data-plane — Ф7 G.4 под флагом; epoch остаётся в штампе для диагностики/Ф4.9.
+**Refs:** [ADR-PMM-010](../process_manager_module/DECISIONS.md), [ADR-PMM-014](../process_manager_module/DECISIONS.md), [ADR-MSG-008](#adr-msg-008-реестр-контрактов-сообщений-contracts--ф42), [plans/2026-07-06_constructor-master/f4.2-fencing-contracts.md](../../../plans/2026-07-06_constructor-master/f4.2-fencing-contracts.md)

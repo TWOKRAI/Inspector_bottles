@@ -108,6 +108,14 @@ class RouterManager(ChannelRoutingManager):
             "received": 0,
             "errors": 0,
             "middleware_dropped": 0,
+            # Ф4.2 (fencing-token): сколько входящих отброшено fence-фильтром как
+            # stale (epoch отправителя < известного получателю). Подмножество
+            # middleware_dropped; растёт только на стейл control-plane после switch
+            # (жёсткая гарантия «старый процесс не вкидывает в новую топологию»).
+            "fence_dropped": 0,
+            # Ф4.2 (реестр контрактов): сколько входящих нарушили контракт (warn-режим
+            # — залогировано + пропущено; strict — дроп попадает и в middleware_dropped).
+            "contract_violations": 0,
             # Ф3.1 (routing-epoch): сколько билетов ушло в хаб-relay (Ф1.7).
             # На горячем direct-пути = 0; рост означает, что доставка шла окольно
             # через system-очередь PM (диагностика: стейл-очередь сброшена refresh'ем

@@ -776,3 +776,76 @@ class TestHealthIntegrationRealStore:
         assert ssm.handle_state_get({"data": {"path": "system.health.active"}})["value"] == 1
         assert ssm.handle_state_get({"data": {"path": "system.health.avg_fps"}})["value"] == 25.0
         assert ssm.handle_state_get({"data": {"path": "system.health.broken_wires"}})["value"] == 0
+
+
+class TestSupervisorEvents:
+    """Ф4-добор: громкие supervisor-события (упал/рестартится/восстановился/сдался)
+    публикуются в processes.<name>.supervisor.* + pending_recovery-цикл."""
+
+    def _monitor_with_store(self, **policy_kw):
+        from multiprocess_framework.modules.state_store_module import StateStoreManager
+
+        ssm = StateStoreManager(initial_state={}, logger=None)
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        mock_pm._state_store_manager = ssm
+        pol = RestartPolicy(enabled=True, backoff_sec=0.0, **policy_kw)
+        return ssm, mock_pm, ProcessMonitor(mock_pm, restart_policy=pol)
+
+    @staticmethod
+    def _event(ssm, name):
+        return ssm.handle_state_get({"data": {"path": f"processes.{name}.supervisor.event"}}).get("value")
+
+    def test_crashed_event_published(self) -> None:
+        ssm, pm, m = self._monitor_with_store()
+        proc = MagicMock()
+        proc.name = "cam"
+        proc.is_alive.return_value = False
+        proc.pid = 123
+        proc.exitcode = 1
+        m.previous_states["cam"] = {"status": "running"}
+        m._handle_dead_process(proc)
+        # crashed → авто-рестарт (enabled) → последнее событие restarting; но crashed
+        # прошло по пути (reason exitcode виден в reason при crashed-фазе). Проверяем,
+        # что supervisor-путь заполнен и процесс встал в очередь на восстановление.
+        assert self._event(ssm, "cam") in ("crashed", "restarting")
+        assert "cam" in m._pending_recovery
+
+    def test_restarting_event_and_attempt(self) -> None:
+        ssm, pm, m = self._monitor_with_store(max_retries=3)
+        m._try_auto_restart("cam", reason="crashed")
+        assert self._event(ssm, "cam") == "restarting"
+        attempt = ssm.handle_state_get({"data": {"path": "processes.cam.supervisor.attempt"}}).get("value")
+        assert attempt == "1/3"
+        assert "cam" in m._pending_recovery
+
+    def test_giveup_event_clears_recovery(self) -> None:
+        ssm, pm, m = self._monitor_with_store(max_retries=1, window_sec=0.0)
+        m._pending_recovery.add("cam")
+        m._restart_history["cam"] = [time.monotonic()]  # лимит исчерпан → give-up
+        m._try_auto_restart("cam", reason="crashed")
+        assert self._event(ssm, "cam") == "gave_up"
+        assert "cam" not in m._pending_recovery
+
+    def test_recovered_event_on_heartbeat_return(self) -> None:
+        ssm, pm, m = self._monitor_with_store()
+        m._pending_recovery.add("cam")
+        m._last_heartbeat["cam"] = time.time()  # новый инстанс прислал heartbeat
+        proc = MagicMock()
+        proc.name = "cam"
+        proc.is_alive.return_value = True
+        proc.pid = 999
+        proc.exitcode = None
+        pm._process_registry.os_processes = [proc]
+        m.previous_states["cam"] = {"status": "running"}
+        m._check_heartbeats()
+        assert self._event(ssm, "cam") == "recovered"
+        assert "cam" not in m._pending_recovery
+
+    def test_forget_clears_pending_recovery(self) -> None:
+        ssm, pm, m = self._monitor_with_store()
+        m._pending_recovery.add("old_cam")
+        m.forget_process("old_cam")
+        assert "old_cam" not in m._pending_recovery

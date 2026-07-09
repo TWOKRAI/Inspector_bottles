@@ -49,6 +49,23 @@ from .builders import build_command_message, build_system_command_message
 # --- Публичные интерфейсы (для type hints и моков) ---
 from .interfaces import IMessage
 
+# --- Реестр контрактов сообщений (Ф4.2) ---
+from .contracts import (
+    ContractCheck,
+    MessageContract,
+    MessageContractRegistry,
+    contract_key_of,
+    make_contract_check_middleware,
+)
+
+# --- Fencing-token: штамп конверта + drop stale на приёме (Ф4.2) ---
+from .fencing import (
+    FENCE_KEY,
+    make_fence_filter_middleware,
+    make_fence_stamp_middleware,
+    read_fence,
+)
+
 __all__ = [
     # Основной класс
     "Message",
@@ -79,4 +96,15 @@ __all__ = [
     "LogMessageSchema",
     # Интерфейсы (публичный контракт)
     "IMessage",
+    # Реестр контрактов (Ф4.2)
+    "MessageContract",
+    "ContractCheck",
+    "MessageContractRegistry",
+    "make_contract_check_middleware",
+    "contract_key_of",
+    # Fencing-token (Ф4.2)
+    "FENCE_KEY",
+    "make_fence_stamp_middleware",
+    "make_fence_filter_middleware",
+    "read_fence",
 ]

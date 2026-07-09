@@ -110,6 +110,12 @@ class ProcessMonitor:
         # монитора (Task 3.1: гонка с apply_topology исключена).
         self._pending_restarts: dict[str, float] = {}
 
+        # Ф4-добор (авто-рестарт-всех + громкая наблюдаемость): имена, которым
+        # запланирован авто-рестарт и которые ещё не вернулись к жизни. Возврат
+        # heartbeat (self._last_heartbeat снова не None после сброса при рестарте)
+        # → событие "recovered". Снимается при give-up и forget_process.
+        self._pending_recovery: set[str] = set()
+
         # Замок текущей итерации цикла: stop(wait=True) дожидается его
         # освобождения — после возврата stop() ни одна проверка/рестарт
         # монитора не в полёте (синхронная пауза перед hot-swap).
@@ -252,6 +258,45 @@ class ProcessMonitor:
             ssm.handle_state_set({"data": {"path": path, "value": value, "source": "ProcessMonitor"}})
         except Exception as exc:  # nosec B110 — телеметрия не критична
             self.process._log_debug(f"_publish_state('{path}') failed: {exc}")
+
+    def _emit_supervisor_event(
+        self,
+        process_name: str,
+        event: str,
+        *,
+        reason: str = "",
+        attempt: str | None = None,
+        level: str = "warning",
+    ) -> None:
+        """Ф4-добор: громкое supervisor-событие о жизни процесса.
+
+        Владелец (2026-07-08): авто-рестарт ВСЕХ процессов безопасен ТОЛЬКО если
+        каждое падение/рестарт/восстановление/give-up ГРОМКО видно — иначе баг
+        прячется за авто-рестартом. Публикует ``processes.<name>.supervisor.*`` в
+        StateStore (GUI/подписчики видят поток «упал → рестартится k/N →
+        восстановился / сдался») + громкий лог. В Ф5 те же события заберёт
+        ObservabilityHub-панель (пока — прямой state-путь).
+
+        ``event`` ∈ {crashed, unresponsive, restarting, recovered, gave_up}.
+        **Дедуп crash-loop:** окно give-up (max_retries за window_sec) ограничивает
+        всплеск падений ≤N событиями ``restarting`` + одним ``gave_up`` со счётчиком,
+        а не потоком из десятков строк.
+        """
+        base = f"processes.{process_name}.supervisor"
+        self._publish_state(f"{base}.event", event)
+        self._publish_state(f"{base}.reason", reason)
+        if attempt is not None:
+            self._publish_state(f"{base}.attempt", attempt)
+        self._publish_state(f"{base}.at", time.time())
+
+        parts = [f"[supervisor] {process_name}: {event}"]
+        if attempt:
+            parts.append(f"(попытка {attempt})")
+        if reason:
+            parts.append(f"— {reason}")
+        msg = " ".join(parts)
+        log = getattr(self.process, f"_log_{level}", None) or self.process._log_warning
+        log(msg)
 
     def _publish_uptime(self, all_states: dict[str, dict[str, Any]]) -> None:
         """Опубликовать uptime каждого running-процесса в StateStore.
@@ -476,6 +521,18 @@ class ProcessMonitor:
                     except Exception:  # nosec B110 — best-effort синхронизация реестра
                         pass
 
+            # Ф4-добор: авто-восстановление после рестарта. Процесс, которому был
+            # запланирован рестарт, снова жив И прислал heartbeat (self._last_heartbeat
+            # сброшен при рестарте, строка _dispatch_due_restarts) → «восстановился».
+            # Heartbeat как критерий (а не статус-переход) надёжен: после рестарта
+            # prev_status="crashed" не проходит промоушен выше, а первый heartbeat
+            # нового инстанса — однозначный сигнал живости.
+            if proc.name in self._pending_recovery and self._last_heartbeat.get(proc.name) is not None:
+                self._pending_recovery.discard(proc.name)
+                self._emit_supervisor_event(
+                    proc.name, "recovered", reason="снова жив и шлёт heartbeat после рестарта", level="info"
+                )
+
             # Проверяем heartbeat
             self._check_heartbeat_timeout(proc.name, now)
 
@@ -535,7 +592,9 @@ class ProcessMonitor:
         new_status = "stopped" if exitcode == 0 else "crashed"
 
         if new_status == "crashed":
-            self.process._log_warning(f"Process '{proc.name}' crashed (exitcode={exitcode})")
+            # Ф4-добор: громкое supervisor-событие «упал» (видно даже когда
+            # авто-рестарт затем отключён per-process — баг не прячется).
+            self._emit_supervisor_event(proc.name, "crashed", reason=f"exitcode={exitcode}", level="warning")
 
         snap = {
             "status": new_status,
@@ -599,8 +658,12 @@ class ProcessMonitor:
         if prev_status in ("unresponsive", "failed"):
             return
 
-        self.process._log_warning(
-            f"Process '{process_name}' не отвечает (heartbeat timeout: {elapsed:.1f}с > {self.heartbeat_timeout}с)"
+        # Ф4-добор: громкое supervisor-событие «не отвечает» (та же категория «упал»).
+        self._emit_supervisor_event(
+            process_name,
+            "unresponsive",
+            reason=f"heartbeat timeout {elapsed:.1f}с > {self.heartbeat_timeout}с",
+            level="warning",
         )
 
         snap = {
@@ -727,6 +790,15 @@ class ProcessMonitor:
             # acceptance/вкладка «Процессы»/QoS читают именно health.status.
             # honest broken_wires Ф3.5 живёт под system.wires.* — не конфликтует.
             reason_txt = f"supervisor give-up: {count} рестартов за {window_sec}с ({reason})"
+            # Ф4-добор: терминальное событие «сдался» со счётчиком (дедуп crash-loop
+            # — одно событие вместо потока падений).
+            self._pending_recovery.discard(process_name)
+            self._emit_supervisor_event(
+                process_name,
+                "gave_up",
+                reason=f"{count} рестартов за {window_sec}с ({reason}) → сдался",
+                level="error",
+            )
             self._publish_state(health_path(process_name, HealthField.STATUS), HealthStatus.FAILED.value)
             self._publish_state(health_path(process_name, HealthField.DEGRADED_REASON), reason_txt)
             self._publish_state(health_path(process_name, HealthField.UPDATED_AT), time.time())
@@ -753,9 +825,15 @@ class ProcessMonitor:
         history.append(now_m)
         self._restart_history[process_name] = history
         self._pending_restarts[process_name] = now_m + backoff
-        self.process._log_info(
-            f"Авто-рестарт процесса '{process_name}' запланирован "
-            f"(причина: {reason}, попытка {attempt}/{max_retries}, backoff: {backoff}с)"
+        # Ф4-добор: помечаем ожидание восстановления (снимется по возврату heartbeat)
+        # + громкое событие «рестартится k/N».
+        self._pending_recovery.add(process_name)
+        self._emit_supervisor_event(
+            process_name,
+            "restarting",
+            reason=f"причина: {reason}, backoff {backoff}с",
+            attempt=f"{attempt}/{max_retries}",
+            level="warning",
         )
 
     def _dispatch_due_restarts(self) -> None:
@@ -832,6 +910,7 @@ class ProcessMonitor:
         self._running_since.pop(process_name, None)
         self.previous_states.pop(process_name, None)
         self._pending_restarts.pop(process_name, None)
+        self._pending_recovery.discard(process_name)  # Ф4-добор: не тащить recovery через switch
 
     # ----------------------------------------------------------------
     # Полный broadcast статуса (для синхронизации с GUI)
