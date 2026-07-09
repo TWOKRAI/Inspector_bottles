@@ -116,10 +116,11 @@ class ProcessHeartbeat:
         if hub is None or drain is None:
             return
         store = getattr(self._services, "_observability_store", None)
+        forwarder = getattr(self._services, "_observability_forwarder", None)
         from ..managers.observability_wiring import drain_process_observability
 
         try:
-            drain_process_observability(hub, drain, store)
+            drain_process_observability(hub, drain, store, forwarder)
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось слить observability-буфер: {exc}", module="heartbeat")

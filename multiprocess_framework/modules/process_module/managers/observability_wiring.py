@@ -23,7 +23,7 @@ Wiring ObservabilityHub в composition root процесса (Ф5.16).
 
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 from ...channel_routing_module.observability import (
     KIND_LOG,
@@ -31,7 +31,9 @@ from ...channel_routing_module.observability import (
     ObservabilityDrainAdapter,
     ObservabilityHub,
     ObservabilityStore,
+    RecordForwardChannel,
     StoreTapChannel,
+    hub_record_to_display,
 )
 
 # Имена store-tap'ов (хэндлы для remove_log_tap на teardown). Вешаем на ОБА
@@ -39,6 +41,10 @@ from ...channel_routing_module.observability import (
 # (logger.error/ctx.log_error) — приложение логирует ошибки и туда, и туда.
 STORE_ERROR_TAP = "observability_store::error"
 STORE_LOGGER_TAP = "observability_store::logger_error"
+
+# Имена forward-tap'ов live-хвоста hub→GUI (Ф5.20b), симметрично store-tap'ам.
+FORWARD_ERROR_TAP = "observability_forward::error"
+FORWARD_LOGGER_TAP = "observability_forward::logger_error"
 
 
 def wire_process_observability(
@@ -84,29 +90,88 @@ def drain_process_observability(
     hub: Optional[ObservabilityHub],
     adapter: Optional[ObservabilityDrainAdapter],
     store: Optional[ObservabilityStore] = None,
+    forwarder: Optional[Callable[[List[dict]], None]] = None,
 ) -> None:
-    """Слить буфер hub'а (log/stats) в реальные менеджеры и (опц.) в стор.
+    """Слить буфер hub'а (log/stats) в реальные менеджеры, стор и live-хвост GUI.
 
     Зовётся по такту heartbeat и финально на graceful-teardown. `drain_all()`
     осушает каналы — вызываем ОДИН раз и разветвляем: adapter → sink-менеджеры,
-    store → персистентная история (Ф5.20a). error-канал hub'а пуст (error идёт
-    write-through мимо буфера) — в стор ошибки попадают отдельным store-tap'ом на
-    error_manager, НЕ отсюда. Исключения глушим: дренаж телеметрии не должен
-    ронять такт heartbeat (урок 2.1 — health self-publish не критичен).
+    store → персистентная история (Ф5.20a), forwarder → live-хвост hub→GUI
+    (Ф5.20b). error-канал hub'а пуст (error идёт write-through мимо буфера) — в
+    стор и в GUI ошибки попадают отдельными tap'ами на error/logger-менеджерах,
+    НЕ отсюда. Исключения глушим: дренаж телеметрии не должен ронять такт
+    heartbeat (урок 2.1 — health self-publish не критичен).
     """
     if hub is None:
         return
     drained = hub.drain_all()
     if adapter is not None:
         adapter.apply_drained(drained)
-    if store is not None:
-        # log + stats из hub'а → стор (пачкой). error сюда НЕ идёт (write-through
-        # ловит store-tap на error_manager) — иначе дублирование либо потеря.
-        records = drained.get(KIND_LOG, []) + drained.get(KIND_STATS, [])
-        if records:
+    # log + stats из hub'а — общий срез для стора и live-хвоста (error сюда НЕ
+    # идёт: write-through ловят tap'ы на error/logger-менеджерах — иначе дубль/потеря).
+    records = drained.get(KIND_LOG, []) + drained.get(KIND_STATS, [])
+    if store is not None and records:
+        try:
+            store.append_records(records)
+        except Exception:  # nosec B110 — сбой стора не критичен для heartbeat
+            pass
+    if forwarder is not None and records:
+        try:
+            forwarder(records)
+        except Exception:  # nosec B110 — сбой доставки хвоста не критичен для heartbeat
+            pass
+
+
+def wire_observability_forward(
+    router: Any,
+    subscriber: str,
+    sender: str,
+    logger_manager: Optional[Any] = None,
+    error_manager: Optional[Any] = None,
+) -> Tuple[Callable[[List[dict]], None], list]:
+    """Собрать live-форвардер hub→GUI и повесить error-tap'ы (Ф5.20b).
+
+    Симметрично ``wire_observability_store`` (Ф5.20a), но записи не в SQLite, а
+    адресным router-пушем ``command="observability.record"`` на GUI-подписчика:
+      - log/stats — пачкой из drain-петли: возвращаемый ``forwarder(hub_records)``
+        нормализует hub-записи в display-вид и пушит одним сообщением;
+      - error/critical — по одной у tap'а на logger+error менеджерах (min ERROR),
+        те же write-through записи, что ловит store-tap.
+
+    Args:
+        router: живой RouterManager процесса (``send_async``). None → forwarder-no-op.
+        subscriber: адрес GUI-процесса (``targets=[subscriber]``).
+        sender: имя процесса-источника.
+        logger_manager/error_manager: менеджеры с ``add_log_tap`` (error-хвост).
+
+    Returns:
+        (forwarder, taps) — forwarder: Callable для drain-петли; taps: список
+        (manager, tap_name) для unwire.
+    """
+    batch_channel = RecordForwardChannel(
+        router=router, subscriber=subscriber, sender=sender, name="observability_forward::batch"
+    )
+
+    def forwarder(hub_records: List[dict]) -> None:
+        batch_channel.push_batch([hub_record_to_display(r) for r in hub_records])
+
+    taps: list[Tuple[Any, str]] = []
+    for mgr, tap_name in ((error_manager, FORWARD_ERROR_TAP), (logger_manager, FORWARD_LOGGER_TAP)):
+        if mgr is None or not hasattr(mgr, "add_log_tap"):
+            continue
+        channel = RecordForwardChannel(router=router, subscriber=subscriber, sender=sender, name=tap_name)
+        mgr.add_log_tap(channel, min_level="ERROR", name=tap_name)
+        taps.append((mgr, tap_name))
+    return forwarder, taps
+
+
+def unwire_observability_forward(taps: Optional[list]) -> None:
+    """Снять forward-tap'ы live-хвоста с их менеджеров (unsubscribe/teardown)."""
+    for mgr, tap_name in taps or []:
+        if mgr is not None and hasattr(mgr, "remove_log_tap"):
             try:
-                store.append_records(records)
-            except Exception:  # nosec B110 — сбой стора не критичен для heartbeat
+                mgr.remove_log_tap(tap_name)
+            except Exception:  # nosec B110 — teardown best-effort
                 pass
 
 
