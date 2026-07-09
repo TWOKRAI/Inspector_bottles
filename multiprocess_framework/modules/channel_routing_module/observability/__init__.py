@@ -24,10 +24,12 @@ from .observability_hub import (
     METRIC_TIMING,
     ObservabilityHub,
 )
+from .drain_adapter import ObservabilityDrainAdapter
 from .protocols import ErrorLike, LoggerLike, StatsLike
 
 __all__ = [
     "ObservabilityHub",
+    "ObservabilityDrainAdapter",
     "BoundedChannel",
     "DROP_OLDEST",
     "DROP_NEWEST",

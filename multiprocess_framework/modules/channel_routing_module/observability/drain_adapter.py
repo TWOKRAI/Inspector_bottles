@@ -51,6 +51,14 @@ Sink'и передаются в конструктор, вызовы идут п
 
 from typing import Any, Dict, List, Optional
 
+from .observability_hub import (
+    KIND_ERROR,
+    KIND_LOG,
+    KIND_STATS,
+    METRIC_COUNTER,
+    METRIC_GAUGE,
+    METRIC_TIMING,
+)
 
 # Разрешённые severity-имена методов на Logger/Error sink'ах.
 _LOG_SEVERITIES = frozenset({"debug", "info", "warning", "error", "critical"})
@@ -79,17 +87,61 @@ class ObservabilityDrainAdapter:
     # ------------------------------------------------------------------
 
     def apply_log(self, record: Dict[str, Any]) -> bool:
-        raise NotImplementedError
+        if self._logger is None:
+            return False
+        severity = record.get("severity", "info")
+        if severity not in _LOG_SEVERITIES:
+            severity = "info"
+        context = dict(record.get("context") or {})
+        # Тот же вызов, что делал прямой путь ObservableMixin:
+        # _call_manager("logger", severity, msg, **kw) → паритет по построению.
+        getattr(self._logger, severity)(record.get("message", ""), **context)
+        return True
 
     def apply_error(self, record: Dict[str, Any]) -> bool:
-        raise NotImplementedError
+        if self._error is None:
+            return False
+        severity = record.get("severity") or "error"
+        if severity not in _LOG_SEVERITIES:
+            severity = "error"
+        # Объект исключения через границу hub'а не пережил — восстанавливаем
+        # человекочитаемое сообщение из сериализованных полей.
+        error_type = record.get("error_type")
+        message = record.get("message", "")
+        full = f"{error_type}: {message}" if error_type else message
+        traceback = record.get("traceback")
+        if traceback:
+            full = f"{full}\n{traceback}"
+        module = record.get("context", {}).get("module") or record.get("module") or "unknown"
+        getattr(self._error, severity)(full, module=module)
+        return True
 
     def apply_stat(self, record: Dict[str, Any]) -> bool:
-        raise NotImplementedError
+        if self._stats is None:
+            return False
+        name = record.get("metric", "")
+        value = record.get("value", 1)
+        tags = dict(record.get("tags") or {})
+        metric_type = record.get("metric_type")
+        if metric_type == METRIC_COUNTER:
+            self._stats.record_metric(name, value, tags)
+        elif metric_type == METRIC_TIMING:
+            self._stats.record_timing(name, value, tags)
+        elif metric_type == METRIC_GAUGE:
+            self._stats.gauge(name, value, tags)
+        else:
+            # Инвариант: неизвестный тип не теряем — пишем как метрику.
+            self._stats.record_metric(name, value, tags)
+        return True
 
     # ------------------------------------------------------------------
     # Пакетный дренаж
     # ------------------------------------------------------------------
 
     def apply_drained(self, drained: Dict[str, List[Dict[str, Any]]]) -> None:
-        raise NotImplementedError
+        for rec in drained.get(KIND_LOG, ()):  # порядок каналов сохранён
+            self.apply_log(rec)
+        for rec in drained.get(KIND_ERROR, ()):
+            self.apply_error(rec)
+        for rec in drained.get(KIND_STATS, ()):
+            self.apply_stat(rec)
