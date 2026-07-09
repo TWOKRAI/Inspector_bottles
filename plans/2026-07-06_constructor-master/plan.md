@@ -191,6 +191,21 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 
 Риск: порча рецептов → миграции только in-memory на READ; WRITE-канонизация отдельно (4.8) с бэкапом; strict нигде не default.
 
+### Ф4-добор — Pre-Ф5 hardening (ревью-добор, 2026-07-09)
+
+> Источник: честный multi-agent аудит Ф0-Ф4 (36 агентов, 19/21 находок CONFIRMED скептиком). Закрываем подтверждённые баги живучести/наблюдаемости + ранние одобренные kill'ы ДО старта Ф5, чтобы не строить конструктор на дырах. Ветка `fix/pre-f5-hardening`. Решения владельца 2026-07-09: объём = все баги + контракты + health-restart; depth-гейт = поднять метрику ранними kill'ами.
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| H1 | [ ] | **#1 [HIGH] breaker прод-путь источников**: `SourceProducer.record_success()` звался безусловно на не-бросившей итерации → «съедал» внутренний `report_error` флагманов (capture/camera_service ловят ошибку в produce() и возвращают []) → breaker никогда не открывался. Фикс: record_success только если `error_count` не вырос за итерацию | регресс-тест: плагин глотает+report внутри produce() → breaker OPEN → degraded (кусается на старом коде) | S |
+| H2 | [ ] | **#4 [MED] stale incarnation на рестарте**: `restart_process` делал `_bump_incarnation` ПОСЛЕ `create_and_register` (bundle-снимок routing_meta со старой incarnation). Фикс: bump ДО create (как в `_topology_provision`) | unit: восстановленный инстанс штампует свежую incarnation | S |
+| H3 | [ ] | **#5 [MED] тихий провал рестарта**: провал `restart_process`/спавна не ретраится и не эмитит give-up → супервизор молчит. Фикс: ретрай в окне политики + громкое supervisor-событие + `health.status=failed` при исчерпании | тест: рестарт падает N раз → give-up событие + failed | S/M |
+| H4 | [ ] | **#3 [MED] health-based restart**: `_try_auto_restart` реагирует только на liveness (crashed/unresponsive); тихо-мёртвый (degraded/error, но живой) процесс не рестартится. Фикс: триггер рестарта по `health.status` в мониторе (за флагом, дедуп с breaker-cooldown) | тест: процесс → status=failed → авто-рестарт | M |
+| H5 | [ ] | **#2 [MED] контракты не no-op**: warn/strict middleware валидировала плоский конверт, а параметры команд — во вложенном `data` → сверка всегда пустая. Фикс: валидация `msg["data"]` против params_schema контракта | тест: опечатка в поле data → WARNING с diff; strict → drop | M |
+| H6 | [ ] | **KILL Operation_crop** (K9, 858 LOC, G0-одобрен): `git rm Services/Operation_crop` — zero-consumer, крупнейший +modularity | тесты зелёные; sentrux depth/modularity вверх | S |
+| H7 | [ ] | **KILL topology-editor-виджет** (K8, ~722 LOC, G0-одобрен): удалить `TopologyEditorWidget`+дети, СОХРАНИТЬ живой `TopologyPresenter` (SC-8) | тесты зелёные; presenter импортируется; depth/modularity вверх | S |
+| H8 | [ ] | **Governance**: depth-гейт (kill'ы должны вернуть ≥0.60, иначе решение владельца); прогон pytest 0-красных на main; docs(plans) реальный scope открытой Ф4; baseline Ф5 | `sentrux check` exit 0; оба сьюта зелёные | S |
+
 ## Ф5 — Конструктор: carve E + Phase 5 (~5 дней)
 
 | Task | Статус | Суть | Acceptance | Усилие |
