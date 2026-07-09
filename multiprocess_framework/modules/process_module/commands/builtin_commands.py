@@ -1260,7 +1260,9 @@ class BuiltinCommands:
 
         for _cmd, _schema in BUILTIN_COMMAND_CONTRACTS.items():
             try:
-                registry.register(_cmd, _schema, override=True)
+                # params_in_data=True: параметры команды едут в message["data"] —
+                # warn-mw сверяет их, а не плоский конверт (H5, иначе инертна).
+                registry.register(_cmd, _schema, params_in_data=True, override=True)
             except Exception:  # noqa: BLE001 — кривой контракт не должен ронять проводку
                 pass
 
