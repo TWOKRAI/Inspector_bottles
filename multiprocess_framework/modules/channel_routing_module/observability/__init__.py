@@ -25,11 +25,14 @@ from .observability_hub import (
     ObservabilityHub,
 )
 from .drain_adapter import ObservabilityDrainAdapter
+from .observability_store import ObservabilityStore, resolve_default_db_path
 from .protocols import ErrorLike, LoggerLike, StatsLike
 
 __all__ = [
     "ObservabilityHub",
     "ObservabilityDrainAdapter",
+    "ObservabilityStore",
+    "resolve_default_db_path",
     "BoundedChannel",
     "DROP_OLDEST",
     "DROP_NEWEST",
