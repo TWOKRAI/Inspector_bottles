@@ -17,6 +17,7 @@ from ..interfaces import IObservableMixin
 # Mocks
 # ---------------------------------------------------------------------------
 
+
 class MockLogger:
     """Мок-логгер: собирает вызовы в self.logs."""
 
@@ -24,19 +25,19 @@ class MockLogger:
         self.logs = []
 
     def debug(self, msg, **kwargs):
-        self.logs.append(('debug', msg))
+        self.logs.append(("debug", msg))
 
     def info(self, msg, **kwargs):
-        self.logs.append(('info', msg))
+        self.logs.append(("info", msg))
 
     def warning(self, msg, **kwargs):
-        self.logs.append(('warning', msg))
+        self.logs.append(("warning", msg))
 
     def error(self, msg, **kwargs):
-        self.logs.append(('error', msg))
+        self.logs.append(("error", msg))
 
     def critical(self, msg, **kwargs):
-        self.logs.append(('critical', msg))
+        self.logs.append(("critical", msg))
 
 
 class MockStats:
@@ -46,16 +47,16 @@ class MockStats:
         self.metrics = []
 
     def record_metric(self, name, value=1, tags=None):
-        self.metrics.append(('record_metric', name, value))
+        self.metrics.append(("record_metric", name, value))
 
     def increment(self, name, tags=None):
-        self.metrics.append(('increment', name))
+        self.metrics.append(("increment", name))
 
     def record_timing(self, name, duration, tags=None):
-        self.metrics.append(('record_timing', name, duration))
+        self.metrics.append(("record_timing", name, duration))
 
     def gauge(self, name, value, tags=None):
-        self.metrics.append(('gauge', name, value))
+        self.metrics.append(("gauge", name, value))
 
 
 class MockErrorTracker:
@@ -65,10 +66,10 @@ class MockErrorTracker:
         self.errors = []
 
     def track_error(self, error, context=None):
-        self.errors.append(('track_error', error))
+        self.errors.append(("track_error", error))
 
     def record_error(self, error, context=None):
-        self.errors.append(('record_error', error))
+        self.errors.append(("record_error", error))
 
 
 class ObservableManager(BaseManager, ObservableMixin):
@@ -89,15 +90,15 @@ class ObservableManager(BaseManager, ObservableMixin):
 
         managers = {}
         if logger is not None:
-            managers['logger'] = logger
+            managers["logger"] = logger
         if stats is not None:
-            managers['stats'] = stats
+            managers["stats"] = stats
         if error_tracker is not None:
-            managers['error'] = error_tracker
+            managers["error"] = error_tracker
 
         config = {k: True for k in managers}
         if enable_decorators:
-            config['enable_decorators'] = True
+            config["enable_decorators"] = True
 
         ObservableMixin.__init__(self, managers=managers, config=config, auto_proxy=auto_proxy)
 
@@ -114,15 +115,15 @@ class ObservableManager(BaseManager, ObservableMixin):
 # TestObservableMixin
 # ---------------------------------------------------------------------------
 
-class TestObservableMixin:
 
+class TestObservableMixin:
     # ---- Приватные методы (класс-level, всегда доступны) ----
 
     def test_private_log_info_calls_logger(self):
         logger = MockLogger()
         m = ObservableManager("test", logger=logger)
         m._log_info("hello")
-        assert logger.logs == [('info', 'hello')]
+        assert logger.logs == [("info", "hello")]
 
     def test_private_log_levels(self):
         logger = MockLogger()
@@ -131,10 +132,10 @@ class TestObservableMixin:
         m._log_warning("w")
         m._log_error("e")
         m._log_critical("c")
-        assert ('debug', 'd') in logger.logs
-        assert ('warning', 'w') in logger.logs
-        assert ('error', 'e') in logger.logs
-        assert ('critical', 'c') in logger.logs
+        assert ("debug", "d") in logger.logs
+        assert ("warning", "w") in logger.logs
+        assert ("error", "e") in logger.logs
+        assert ("critical", "c") in logger.logs
 
     def test_private_log_without_logger_is_noop(self):
         m = ObservableManager("test")
@@ -144,13 +145,13 @@ class TestObservableMixin:
         stats = MockStats()
         m = ObservableManager("test", stats=stats)
         m._record_metric("ops.count", value=5)
-        assert ('record_metric', 'ops.count', 5) in stats.metrics
+        assert ("record_metric", "ops.count", 5) in stats.metrics
 
     def test_private_record_timing(self):
         stats = MockStats()
         m = ObservableManager("test", stats=stats)
         m._record_timing("query.time", 0.025)
-        assert ('record_timing', 'query.time', 0.025) in stats.metrics
+        assert ("record_timing", "query.time", 0.025) in stats.metrics
 
     def test_private_track_error_via_error_manager(self):
         tracker = MockErrorTracker()
@@ -159,27 +160,57 @@ class TestObservableMixin:
         m._track_error(err)
         assert any(entry[1] is err for entry in tracker.errors)
 
+    def test_proxy_ignores_legacy_errors_slot(self):
+        """Task 5.16 (след 5.14): каноничный слот error-менеджера — 'error'.
+        Legacy-alias 'errors' в proxy_creator убран (симметрия с _track_error,
+        который тоже перестал пробовать 'errors'). Регистрация под слотом
+        'errors' НЕ должна порождать прокси track_error/record_error."""
+
+        class LegacySlotManager(BaseManager, ObservableMixin):
+            __test__ = False
+
+            def __init__(self, tracker):
+                BaseManager.__init__(self, "legacy")
+                ObservableMixin.__init__(
+                    self,
+                    managers={"errors": tracker},
+                    config={"errors": True},
+                    auto_proxy=True,
+                )
+
+            def initialize(self) -> bool:
+                self.is_initialized = True
+                return True
+
+            def shutdown(self) -> bool:
+                self.is_initialized = False
+                return True
+
+        m = LegacySlotManager(MockErrorTracker())
+        assert "track_error" not in m.__dict__
+        assert "record_error" not in m.__dict__
+
     # ---- Auto-proxy ----
 
     def test_auto_proxy_creates_public_methods(self):
         logger = MockLogger()
         stats = MockStats()
         m = ObservableManager("test", logger=logger, stats=stats, auto_proxy=True)
-        assert hasattr(m, 'log_info')
-        assert hasattr(m, 'record_metric')
+        assert hasattr(m, "log_info")
+        assert hasattr(m, "record_metric")
 
     def test_auto_proxy_log_info_works(self):
         logger = MockLogger()
         m = ObservableManager("test", logger=logger, auto_proxy=True)
         m.log_info("via proxy")
-        assert logger.logs == [('info', 'via proxy')]
+        assert logger.logs == [("info", "via proxy")]
 
     def test_auto_proxy_both_private_and_public(self):
         logger = MockLogger()
         m = ObservableManager("test", logger=logger, auto_proxy=True)
         m._log_info("private")
         m.log_info("public")
-        assert logger.logs == [('info', 'private'), ('info', 'public')]
+        assert logger.logs == [("info", "private"), ("info", "public")]
 
     def test_public_log_methods_available_without_auto_proxy(self):
         """Публичные log_* — методы класса (ADR-CHN-008): доступны всегда,
@@ -188,9 +219,9 @@ class TestObservableMixin:
         logger = MockLogger()
         m = ObservableManager("test", logger=logger, auto_proxy=False)
         m.log_info("via class method")
-        assert logger.logs == [('info', 'via class method')]
+        assert logger.logs == [("info", "via class method")]
         # record_metric — нет; auto_proxy не запрошен → замыкания не создаются
-        assert 'record_metric' not in m.__dict__
+        assert "record_metric" not in m.__dict__
 
     # ---- Enable / Disable ----
 
@@ -198,58 +229,58 @@ class TestObservableMixin:
         logger = MockLogger()
         m = ObservableManager("test", logger=logger)
         m._log_info("before disable")
-        m.disable('logger')
+        m.disable("logger")
         m._log_info("after disable")
         assert len(logger.logs) == 1
 
     def test_enable_restores_logging(self):
         logger = MockLogger()
         m = ObservableManager("test", logger=logger)
-        m.disable('logger')
-        m.enable('logger')
+        m.disable("logger")
+        m.enable("logger")
         m._log_info("after enable")
         assert len(logger.logs) == 1
 
     def test_is_enabled(self):
         logger = MockLogger()
         m = ObservableManager("test", logger=logger)
-        assert m.is_enabled('logger') is True
-        m.disable('logger')
-        assert m.is_enabled('logger') is False
+        assert m.is_enabled("logger") is True
+        m.disable("logger")
+        assert m.is_enabled("logger") is False
 
     def test_get_enabled_managers(self):
         logger = MockLogger()
         stats = MockStats()
         m = ObservableManager("test", logger=logger, stats=stats)
         enabled = m.get_enabled_managers()
-        assert 'logger' in enabled
-        assert 'stats' in enabled
+        assert "logger" in enabled
+        assert "stats" in enabled
 
     # ---- Context manager ----
 
     def test_context_temporarily_disables(self):
         logger = MockLogger()
         m = ObservableManager("test", logger=logger)
-        with m.context('logger', enabled=False):
+        with m.context("logger", enabled=False):
             m._log_info("suppressed")
         m._log_info("after context")
-        assert logger.logs == [('info', 'after context')]
+        assert logger.logs == [("info", "after context")]
 
     # ---- Register / Unregister ----
 
     def test_register_manager_after_init(self):
         m = ObservableManager("test")
         logger = MockLogger()
-        m.register_manager('logger', logger)
-        assert m.has_manager('logger')
+        m.register_manager("logger", logger)
+        assert m.has_manager("logger")
         m._log_info("via late-registered logger")
-        assert logger.logs == [('info', 'via late-registered logger')]
+        assert logger.logs == [("info", "via late-registered logger")]
 
     def test_unregister_manager(self):
         logger = MockLogger()
         m = ObservableManager("test", logger=logger)
-        m.unregister_manager('logger')
-        assert not m.has_manager('logger')
+        m.unregister_manager("logger")
+        assert not m.has_manager("logger")
         m._log_info("should be silent")
         assert logger.logs == []
 
@@ -259,13 +290,13 @@ class TestObservableMixin:
         (ADR-CHN-008), доступен независимо от auto_proxy."""
         m = ObservableManager("test", auto_proxy=True)
         # log_info — метод класса, есть всегда:
-        assert hasattr(m, 'log_info')
+        assert hasattr(m, "log_info")
         # Замыканий для stats нет (менеджер не зарегистрирован):
-        assert 'record_metric' not in m.__dict__
+        assert "record_metric" not in m.__dict__
         # После регистрации stats-менеджера — появляются stats-замыкания:
         stats = MockStats()
-        m.register_manager('stats', stats)
-        assert 'record_metric' in m.__dict__
+        m.register_manager("stats", stats)
+        assert "record_metric" in m.__dict__
 
     # ---- Get state / config ----
 
@@ -273,13 +304,13 @@ class TestObservableMixin:
         logger = MockLogger()
         m = ObservableManager("test", logger=logger)
         state = m.get_state()
-        assert 'managers' in state
-        assert 'logger' in state['managers']
+        assert "managers" in state
+        assert "logger" in state["managers"]
 
     def test_update_config(self):
         logger = MockLogger()
         m = ObservableManager("test", logger=logger)
-        m.update_config({'logger': False})
+        m.update_config({"logger": False})
         m._log_info("should be suppressed")
         assert logger.logs == []
 
@@ -309,7 +340,7 @@ class TestObservableMixin:
         """После unpickle все вызовы _log_* тихо возвращают None."""
         m = ObservableManager("test")
         m2 = pickle.loads(pickle.dumps(m))
-        result = m2._call_manager('logger', 'info', 'test')
+        result = m2._call_manager("logger", "info", "test")
         assert result is None
 
     def test_pickle_roundtrip_auto_proxy_without_managers(self):
@@ -322,18 +353,18 @@ class TestObservableMixin:
         """
         logger = MockLogger()
         m = ObservableManager("test", logger=logger, auto_proxy=True)
-        assert hasattr(m, 'log_info')
-        assert 'record_metric' not in m.__dict__  # logger ≠ stats
+        assert hasattr(m, "log_info")
+        assert "record_metric" not in m.__dict__  # logger ≠ stats
 
         m2 = pickle.loads(pickle.dumps(m))
         # log_info — метод класса, остаётся; но тихо no-op без менеджеров
-        assert hasattr(m2, 'log_info')
+        assert hasattr(m2, "log_info")
         m2.log_info("silent")  # не падает
 
         # После register_manager — replay замыканий (если auto_proxy был включён)
         stats = MockStats()
-        m2.register_manager('stats', stats)
-        assert 'record_metric' in m2.__dict__
+        m2.register_manager("stats", stats)
+        assert "record_metric" in m2.__dict__
 
     # ---- Декораторы (опционально, skip если не поддерживаются) ----
 
@@ -341,10 +372,10 @@ class TestObservableMixin:
         logger = MockLogger()
         m = ObservableManager("test", logger=logger, enable_decorators=True)
 
-        if not hasattr(m, 'logged'):
+        if not hasattr(m, "logged"):
             pytest.skip("Декораторы отключены")
 
-        @m.logged(manager_name='logger', level='info')
+        @m.logged(manager_name="logger", level="info")
         def fn():
             return "result"
 
@@ -355,10 +386,10 @@ class TestObservableMixin:
         stats = MockStats()
         m = ObservableManager("test", stats=stats, enable_decorators=True)
 
-        if not hasattr(m, 'timed'):
+        if not hasattr(m, "timed"):
             pytest.skip("Декораторы отключены")
 
-        @m.timed(manager_name='stats', metric_name='fn.time')
+        @m.timed(manager_name="stats", metric_name="fn.time")
         def fn():
             return "result"
 
@@ -369,6 +400,7 @@ class TestObservableMixin:
 # ---------------------------------------------------------------------------
 # Ф2.3: отказ менеджера — лог + счётчик (мета-дыра R8 закрыта)
 # ---------------------------------------------------------------------------
+
 
 class FailingLogger:
     """Мок-логгер, у которого info() всегда падает."""
@@ -390,7 +422,7 @@ class TestCallManagerFailureAccounting:
 
     def test_failure_does_not_raise_and_returns_none(self):
         m = ObservableManager("test", logger=FailingLogger())
-        assert m._call_manager('logger', 'info', 'boom') is None
+        assert m._call_manager("logger", "info", "boom") is None
 
     def test_failure_counter_grows(self):
         m = ObservableManager("test", logger=FailingLogger())
@@ -398,25 +430,26 @@ class TestCallManagerFailureAccounting:
         m._log_info("boom2")
         m._log_error("boom3")
         failures = m.manager_call_failures
-        assert failures['logger.info'] == 2
-        assert failures['logger.error'] == 1
+        assert failures["logger.info"] == 2
+        assert failures["logger.error"] == 1
 
     def test_warning_logged_once_per_pair(self, caplog):
         import logging as _logging
+
         m = ObservableManager("test", logger=FailingLogger())
-        logger_name = 'multiprocess_framework.modules.base_manager.mixins.observable_mixin'
+        logger_name = "multiprocess_framework.modules.base_manager.mixins.observable_mixin"
         with caplog.at_level(_logging.WARNING, logger=logger_name):
             m._log_info("boom1")
             m._log_info("boom2")  # вторая — только счётчик, без спама
         warnings = [r for r in caplog.records if r.levelno == _logging.WARNING]
         assert len(warnings) == 1
-        assert 'logger.info' in warnings[0].getMessage()
+        assert "logger.info" in warnings[0].getMessage()
 
     def test_get_state_exposes_failures(self):
         m = ObservableManager("test", logger=FailingLogger())
         m._log_info("boom")
         state = m.get_state()
-        assert state['manager_call_failures'] == {'logger.info': 1}
+        assert state["manager_call_failures"] == {"logger.info": 1}
 
     def test_no_failures_means_empty_dict(self):
         m = ObservableManager("test", logger=MockLogger())
