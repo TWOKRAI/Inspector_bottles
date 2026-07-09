@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from multiprocessing import Event
@@ -115,6 +116,21 @@ class ProcessMonitor:
         # heartbeat (self._last_heartbeat снова не None после сброса при рестарте)
         # → событие "recovered". Снимается при give-up и forget_process.
         self._pending_recovery: set[str] = set()
+
+        # H3 (Ф4-добор): дедлайн (monotonic) восстановления для каждого имени в
+        # _pending_recovery. Если рестарт тихо провалился (path A: restart_process
+        # вернул False и снял процесс с реестра; path B: send рестарта не ушёл) —
+        # heartbeat не вернётся, _pending_recovery не снимется. Watchdog по
+        # истечении дедлайна пере-инициирует _try_auto_restart (ретрай в окне
+        # политики → в итоге громкий give-up). Закрывает тихую дыру живучести.
+        self._recovery_deadline: dict[str, float] = {}
+
+        # H4 (Ф4-добор): имена, по которым супервизор ОКОНЧАТЕЛЬНО сдался (give-up).
+        # Гейт против restart-шторма health-рестарта: монитор сам пишет
+        # health.status=failed на give-up, а H4 читает health.status — без этого
+        # гейта дал бы бесконечную петлю. Снимается только при health.status=ok
+        # (истинное выздоровление) или forget_process.
+        self._given_up: set[str] = set()
 
         # Замок текущей итерации цикла: stop(wait=True) дожидается его
         # освобождения — после возврата stop() ни одна проверка/рестарт
@@ -470,6 +486,10 @@ class ProcessMonitor:
             # Отложенные рестарты, чей backoff истёк → IPC-команда в PM
             self._dispatch_due_restarts()
 
+            # H3: тихо-провалившиеся рестарты (не вернулись к жизни в дедлайн) →
+            # пере-инициировать (ретрай в окне политики / громкий give-up).
+            self._check_recovery_timeouts()
+
             # Периодический полный broadcast для новых подписчиков (GUI)
             self._full_broadcast_counter += 1
             if self._full_broadcast_counter >= self._full_broadcast_interval:
@@ -529,12 +549,18 @@ class ProcessMonitor:
             # нового инстанса — однозначный сигнал живости.
             if proc.name in self._pending_recovery and self._last_heartbeat.get(proc.name) is not None:
                 self._pending_recovery.discard(proc.name)
+                self._recovery_deadline.pop(proc.name, None)  # H3: восстановился — снять watchdog
                 self._emit_supervisor_event(
                     proc.name, "recovered", reason="снова жив и шлёт heartbeat после рестарта", level="info"
                 )
 
             # Проверяем heartbeat
             self._check_heartbeat_timeout(proc.name, now)
+
+            # H4: тихо-мёртвый процесс (liveness ОК, но health.status=failed) →
+            # рестарт (за флагом FW_HEALTH_RESTART). Liveness-рестарт выше не ловит
+            # процесс, который жив и heartbeat'ит, но сам объявил фатальный отказ.
+            self._maybe_health_restart(proc.name)
 
             # Ф3.6: стабильная работа дольше window_sec → сброс истории рестартов
             self._maybe_reset_on_stable(proc.name)
@@ -569,6 +595,54 @@ class ProcessMonitor:
             self.process._log_info(
                 f"Process '{process_name}' стабилен > {policy.window_sec}с — счётчик рестартов сброшен"
             )
+
+    def _read_health_status(self, process_name: str) -> str | None:
+        """Прочитать ``processes.<name>.health.status`` из локального StateStore."""
+        ssm = getattr(self.process, "_state_store_manager", None)
+        if ssm is None:
+            return None
+        try:
+            resp = ssm.handle_state_get(
+                {"data": {"path": health_path(process_name, HealthField.STATUS)}}
+            )
+            return resp.get("value") if resp.get("status") == "ok" else None
+        except Exception:  # nosec B110 — чтение health не критично для монитора
+            return None
+
+    def _maybe_health_restart(self, process_name: str) -> None:
+        """H4: рестарт ЖИВОГО процесса, который сам выставил ``health.status=failed``.
+
+        За флагом ``FW_HEALTH_RESTART`` (default off) — liveness-рестарт (crash/
+        unresponsive) от него не зависит. Ловит «тихо-мёртвый» процесс: heartbeat
+        идёт, но плагин/breaker объявил фатальный отказ (liveness ОК → crash/
+        unresponsive-пути молчат).
+
+        Гейты против restart-шторма (важно — монитор САМ пишет health.status=failed
+        на give-up, поэтому без гейтов была бы бесконечная петля):
+          - только ``failed`` (``degraded`` восстанавливается сама через breaker.poll);
+          - ``_given_up`` (супервизор уже сдался; снимается при ``ok``/forget);
+          - уже в ``_pending_restarts``/``_pending_recovery`` (рестарт в работе);
+          - политика ``enabled`` + ``restart_on_health_failed``.
+        """
+        if os.environ.get("FW_HEALTH_RESTART", "0") != "1":
+            return
+        status = self._read_health_status(process_name)
+        if status == HealthStatus.OK.value:
+            self._given_up.discard(process_name)  # истинное выздоровление → снять гейт
+            return
+        if status != HealthStatus.FAILED.value:
+            return  # None/degraded — H4 не трогает
+        if process_name in self._given_up:
+            return  # уже сдались (в т.ч. give-up самого монитора) — не штормить
+        if process_name in self._pending_restarts or process_name in self._pending_recovery:
+            return  # рестарт уже в работе
+        policy = self._resolve_policy(process_name)
+        if not (policy.enabled and getattr(policy, "restart_on_health_failed", True)):
+            return
+        self.process._log_warning(
+            f"Process '{process_name}' жив, но health.status=failed — health-based рестарт (H4)"
+        )
+        self._try_auto_restart(process_name, reason="health-failed")
 
     def _handle_dead_process(self, proc) -> None:
         """Обработка мёртвого OS-процесса: обновить статус, запустить авто-рестарт."""
@@ -793,6 +867,8 @@ class ProcessMonitor:
             # Ф4-добор: терминальное событие «сдался» со счётчиком (дедуп crash-loop
             # — одно событие вместо потока падений).
             self._pending_recovery.discard(process_name)
+            self._recovery_deadline.pop(process_name, None)  # H3: сдались — watchdog больше не нужен
+            self._given_up.add(process_name)  # H4: гейт против health-restart-шторма
             self._emit_supervisor_event(
                 process_name,
                 "gave_up",
@@ -828,6 +904,10 @@ class ProcessMonitor:
         # Ф4-добор: помечаем ожидание восстановления (снимется по возврату heartbeat)
         # + громкое событие «рестартится k/N».
         self._pending_recovery.add(process_name)
+        # H3: дедлайн восстановления. Успешный рестарт вернёт heartbeat задолго до
+        # него (backoff + boot + первый heartbeat). Истёк, а имя ещё в
+        # _pending_recovery → рестарт тихо провалился → watchdog пере-инициирует.
+        self._recovery_deadline[process_name] = now_m + backoff + self.heartbeat_timeout + 5.0
         self._emit_supervisor_event(
             process_name,
             "restarting",
@@ -886,6 +966,40 @@ class ProcessMonitor:
                     f"Monitor: рестарт '{name}' НЕ отправлен — процесс остаётся в текущем статусе"
                 )
 
+    def _check_recovery_timeouts(self) -> None:
+        """H3: пере-инициировать рестарты, тихо не вернувшиеся к жизни.
+
+        Дыра, которую закрывает: рестарт мог провалиться молча —
+        (A) ``restart_process`` на стороне PM вернул False (create упал) и снял
+        процесс с реестра → монитор его больше не видит; (B) IPC-отправка рестарта
+        не ушла. В обоих случаях heartbeat не вернётся, ``_pending_recovery`` не
+        снимется и give-up НИКОГДА не наступит — процесс тихо исчезает.
+
+        Watchdog: имя, чей дедлайн восстановления истёк, но всё ещё в
+        ``_pending_recovery`` (успешный рестарт снял бы его по первому heartbeat),
+        отправляем обратно в ``_try_auto_restart``. Тот либо перепланирует рестарт
+        (ещё есть попытки в окне), либо громко сдаётся (лимит исчерпан) —
+        восстанавливая ретрай + give-up для обоих тихих путей.
+        """
+        if not self._recovery_deadline:
+            return
+        now_m = time.monotonic()
+        due = [
+            name
+            for name, deadline in self._recovery_deadline.items()
+            if deadline <= now_m and name in self._pending_recovery
+        ]
+        for name in due:
+            # Снять дедлайн и pending: _try_auto_restart переустановит их, если
+            # решит перепланировать (иначе — give-up уже снимет pending).
+            self._recovery_deadline.pop(name, None)
+            self._pending_recovery.discard(name)
+            self.process._log_error(
+                f"Monitor: рестарт '{name}' не подтвердился восстановлением к дедлайну "
+                f"— повторная попытка (тихий провал рестарта)"
+            )
+            self._try_auto_restart(name, reason="restart-not-confirmed")
+
     def reset_restart_count(self, process_name: str) -> None:
         """Сбросить счётчик рестартов для процесса.
 
@@ -911,6 +1025,8 @@ class ProcessMonitor:
         self.previous_states.pop(process_name, None)
         self._pending_restarts.pop(process_name, None)
         self._pending_recovery.discard(process_name)  # Ф4-добор: не тащить recovery через switch
+        self._recovery_deadline.pop(process_name, None)  # H3: и watchdog-дедлайн
+        self._given_up.discard(process_name)  # H4: имя переиспользуется — снять give-up-гейт
 
     # ----------------------------------------------------------------
     # Полный broadcast статуса (для синхронизации с GUI)

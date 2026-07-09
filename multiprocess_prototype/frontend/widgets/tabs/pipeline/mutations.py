@@ -30,6 +30,7 @@ from multiprocess_prototype.domain.commands import (
     AddProcess,
     BindDisplay,
     ConnectWire,
+    DisconnectWire,
     MovePlugin,
     RemovePlugin,
     RemoveProcess,
@@ -503,6 +504,31 @@ class PipelineMutations:
             return False
 
         # Scene обновится из _on_topology_replaced (синхронный dispatch → reload уже произошёл)
+        return True
+
+    def remove_wire(self, source: str, target: str) -> bool:
+        """Удалить wire/привязку source→target — обратное к add_wire.
+
+        process→process → dispatch(DisconnectWire); source→display-бокс
+        ("display.<id>.frame") → dispatch(UnbindDisplay). Scene перерисуется
+        реактивно из TopologyReplaced. Graceful на DomainError (repo не мутирован).
+        """
+        is_display_target = target.split(".")[0] == "display"
+        if is_display_target:
+            parts = target.split(".")
+            display_id = parts[1] if len(parts) >= 2 else ""
+            if not display_id:
+                logger.warning("UnbindDisplay: некорректный display-target '%s'", target)
+                return False
+            cmd = UnbindDisplay(node_id=source, display_id=display_id)
+        else:
+            cmd = DisconnectWire(source=source, target=target)
+        try:
+            self._p._services.commands.dispatch(cmd)
+        except DomainError as exc:
+            logger.warning("%s отклонён: %s", type(cmd).__name__, exc)
+            self._p._report(f"Не удалось удалить связь: {exc}")
+            return False
         return True
 
     def place_display(self, display_id: str, x: float, y: float) -> None:

@@ -1440,14 +1440,20 @@ class ProcessManagerProcess(ProcessModule):
             self._drain_process_queues(process_name)
         ids_after = self._process_queue_ids(process_name)
 
+        # Identity очередей сменилась → соседи должны сбросить стейл-ссылки. Bump
+        # ДО create_and_register (как в _topology_provision): create_and_register
+        # захватывает routing_meta-снимок (_routing_meta_snapshot) в bundle нового
+        # инстанса. Если бампить ПОСЛЕ create, инстанс рождается со СТЕЙЛ incarnation
+        # и штампует её в исходящие → PM/соседи дропают его легитимные сообщения как
+        # stale (fence false-positive, ADR-PMM-014). Порядок обязан совпадать с seed.
+        if ids_before != ids_after:
+            self._bump_incarnation(process_name)
+
         priority = config.get("priority", "normal")
         process = self._process_registry.create_and_register(process_name, config["class"], config, priority)
         if not process:
             self._log_error(f"Failed to recreate process '{process_name}'")
             return False
-        # Identity очередей сменилась → соседи должны сбросить стейл-ссылки.
-        if ids_before != ids_after:
-            self._bump_incarnation(process_name)
         process.start()
         self._priority.register_priority(process_name, priority)
         self._priority.apply_priority(process)

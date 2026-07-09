@@ -198,3 +198,87 @@ class TestMiddleware:
         mw = make_contract_check_middleware(MessageContractRegistry(), strict=True)
         msg = {"command": "ping"}
         assert mw(msg) is msg
+
+
+# --------------------------------------------------------------------------- #
+# H5 (Ф4-добор): command-контракты валидируют message["data"], а не конверт
+# --------------------------------------------------------------------------- #
+
+
+class _WireParams(BaseModel):
+    """Схема параметров команды — параметры едут в message["data"]."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    wire_key: str  # обязательный
+    buffer_slots: int = 4  # типизированный, опциональный
+
+
+class TestParamsInData:
+    """H5: params_in_data=True → сверка идёт по message["data"] (не по конверту).
+
+    Без этого схема параметров сверялась с ключами конверта (command/data/target)
+    и НИКОГДА не видела своих полей → warn-mw была структурно инертна.
+    """
+
+    def _reg(self):
+        r = MessageContractRegistry()
+        r.register("wire.configure", _WireParams, params_in_data=True)
+        return r
+
+    def test_contract_stores_params_in_data(self):
+        assert self._reg().get("wire.configure").params_in_data is True
+
+    def test_valid_params_ok(self):
+        msg = {"command": "wire.configure", "data": {"wire_key": "a→b", "buffer_slots": 8}}
+        check = self._reg().validate("wire.configure", msg)
+        assert check is not None and check.ok
+
+    def test_type_error_in_data_caught(self):
+        """Type-ошибка параметра в data теперь ловится (раньше была невидима)."""
+        msg = {"command": "wire.configure", "data": {"wire_key": "a→b", "buffer_slots": "NaN"}}
+        check = self._reg().validate("wire.configure", msg)
+        assert check is not None and not check.ok
+        assert check.errors and "buffer_slots" in check.errors[0]
+
+    def test_missing_required_in_data_caught(self):
+        msg = {"command": "wire.configure", "data": {"buffer_slots": 4}}  # нет wire_key
+        check = self._reg().validate("wire.configure", msg)
+        assert check is not None and not check.ok
+        assert check.missing == ["wire_key"]
+
+    def test_typo_field_in_data_caught_when_forbid(self):
+        """Опечатка имени параметра (extra=forbid) → unexpected → WARNING (acceptance H5)."""
+        msg = {"command": "wire.configure", "data": {"wire_key": "a", "buffer_slotss": 4}}
+        check = self._reg().validate("wire.configure", msg)
+        assert check is not None and not check.ok
+        assert check.unexpected == ["buffer_slotss"]
+
+    def test_envelope_keys_ignored(self):
+        """Ключи конверта (command/target/type) НЕ считаются лишними/missing —
+        сверяется только data."""
+        msg = {
+            "command": "wire.configure",
+            "target": "b",
+            "type": "command",
+            "data": {"wire_key": "a→b"},
+        }
+        check = self._reg().validate("wire.configure", msg)
+        assert check is not None and check.ok
+
+    def test_no_data_key_uses_empty_payload(self):
+        """Нет data (или не dict) → payload={} → обязательные всё равно missing, не падает."""
+        check = self._reg().validate("wire.configure", {"command": "wire.configure"})
+        assert check is not None and not check.ok
+        assert check.missing == ["wire_key"]
+
+    def test_old_flat_path_would_miss_data_error(self):
+        """Демонстрация инертности, которую чиним: БЕЗ params_in_data type-ошибка
+        в data не видна (сверялся конверт, не data)."""
+        r = MessageContractRegistry()
+        r.register("wire.configure", _WireParams)  # params_in_data=False (старый путь)
+        msg = {"command": "wire.configure", "data": {"buffer_slots": "NaN"}}
+        check = r.validate("wire.configure", msg)
+        assert check is not None
+        # type-ошибка buffer_slots в data НЕ попадает в errors (data не проверялась)
+        assert not any("buffer_slots" in e for e in check.errors)

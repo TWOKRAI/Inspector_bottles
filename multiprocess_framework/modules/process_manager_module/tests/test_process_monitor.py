@@ -301,6 +301,129 @@ class TestRestartWindow:
         assert ssm.handle_state_get({"data": {"path": "processes.cam.health.updated_at"}})["status"] == "ok"
 
 
+class TestRecoveryWatchdog:
+    """H3 (Ф4-добор): тихо-провалившийся рестарт → watchdog пере-инициирует."""
+
+    def _monitor(self, **policy_kw):
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        pol = RestartPolicy(enabled=True, backoff_sec=0.0, **policy_kw)
+        return mock_pm, ProcessMonitor(mock_pm, restart_policy=pol)
+
+    def test_watchdog_retriggers_on_silent_failure(self) -> None:
+        """Рестарт улетел, но процесс не вернулся к дедлайну → повторная попытка."""
+        mock_pm, monitor = self._monitor(max_retries=3, window_sec=60.0)
+        monitor._try_auto_restart("cam", reason="crashed")
+        monitor._dispatch_due_restarts()  # backoff=0 → отправлен, pending_restarts снят
+        assert "cam" in monitor._pending_recovery
+        assert len(monitor._restart_history["cam"]) == 1
+
+        # Тихий провал: heartbeat не вернулся, дедлайн истёк.
+        monitor._recovery_deadline["cam"] = time.monotonic() - 1.0
+        monitor._check_recovery_timeouts()
+
+        # Watchdog пере-инициировал → новая попытка запланирована (2-я в окне)
+        assert "cam" in monitor._pending_restarts
+        assert len(monitor._restart_history["cam"]) == 2
+
+    def test_watchdog_noop_before_deadline(self) -> None:
+        """До дедлайна watchdog молчит (процесс ещё может восстановиться)."""
+        mock_pm, monitor = self._monitor(max_retries=3, window_sec=60.0)
+        monitor._try_auto_restart("cam", reason="crashed")
+        monitor._dispatch_due_restarts()
+        assert "cam" in monitor._pending_recovery
+
+        # Дедлайн в будущем (установлен при планировании) → не due
+        monitor._check_recovery_timeouts()
+        assert "cam" not in monitor._pending_restarts  # не перепланирован
+        assert "cam" in monitor._pending_recovery  # всё ещё ждём
+
+    def test_watchdog_noop_after_recovery(self) -> None:
+        """Восстановившийся процесс (снят из pending_recovery) не пере-инициируется."""
+        mock_pm, monitor = self._monitor()
+        monitor._try_auto_restart("cam", reason="crashed")
+        monitor._dispatch_due_restarts()
+        # Симулируем восстановление: heartbeat вернулся → снят из pending_recovery
+        monitor._pending_recovery.discard("cam")
+        monitor._recovery_deadline.pop("cam", None)
+
+        monitor._recovery_deadline["cam"] = time.monotonic() - 1.0  # даже если дедлайн повис
+        monitor._check_recovery_timeouts()
+        assert "cam" not in monitor._pending_restarts
+
+    def test_watchdog_eventual_giveup(self) -> None:
+        """Повторные тихие провалы через watchdog → в итоге громкий give-up."""
+        mock_pm, monitor = self._monitor(max_retries=2, window_sec=60.0)
+        monitor._try_auto_restart("cam", reason="crashed")
+        monitor._dispatch_due_restarts()
+
+        for _ in range(6):
+            if "cam" not in monitor._pending_recovery:
+                break
+            monitor._recovery_deadline["cam"] = time.monotonic() - 1.0
+            monitor._check_recovery_timeouts()
+            monitor._dispatch_due_restarts()
+
+        assert monitor.previous_states.get("cam", {}).get("status") == "failed"
+        assert "cam" not in monitor._pending_recovery
+
+
+class TestHealthBasedRestart:
+    """H4 (Ф4-добор): рестарт живого процесса с health.status=failed (за флагом)."""
+
+    def _monitor_with_health(self, status: str):
+        from multiprocess_framework.modules.state_store_module import StateStoreManager
+
+        ssm = StateStoreManager(initial_state={}, logger=None)
+        ssm.handle_state_set({"data": {"path": "processes.cam.health.status", "value": status}})
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        mock_pm._state_store_manager = ssm
+        monitor = ProcessMonitor(mock_pm, restart_policy=RestartPolicy(enabled=True, backoff_sec=0.0))
+        return mock_pm, monitor
+
+    def test_flag_off_no_restart(self, monkeypatch) -> None:
+        """Дефолт (флаг off): health.status=failed НЕ вызывает рестарт."""
+        monkeypatch.delenv("FW_HEALTH_RESTART", raising=False)
+        mock_pm, monitor = self._monitor_with_health("failed")
+        monitor._maybe_health_restart("cam")
+        assert "cam" not in monitor._pending_restarts
+
+    def test_flag_on_failed_triggers_restart(self, monkeypatch) -> None:
+        """Флаг on + health.status=failed + процесс жив → health-based рестарт."""
+        monkeypatch.setenv("FW_HEALTH_RESTART", "1")
+        mock_pm, monitor = self._monitor_with_health("failed")
+        monitor._maybe_health_restart("cam")
+        assert "cam" in monitor._pending_restarts
+
+    def test_flag_on_degraded_no_restart(self, monkeypatch) -> None:
+        """degraded (транзиентная деградация breaker) НЕ рестартим — восстановится сам."""
+        monkeypatch.setenv("FW_HEALTH_RESTART", "1")
+        mock_pm, monitor = self._monitor_with_health("degraded")
+        monitor._maybe_health_restart("cam")
+        assert "cam" not in monitor._pending_restarts
+
+    def test_given_up_gate_blocks_storm(self, monkeypatch) -> None:
+        """Гейт против шторма: имя в _given_up (монитор сам пишет failed на give-up)."""
+        monkeypatch.setenv("FW_HEALTH_RESTART", "1")
+        mock_pm, monitor = self._monitor_with_health("failed")
+        monitor._given_up.add("cam")
+        monitor._maybe_health_restart("cam")
+        assert "cam" not in monitor._pending_restarts
+
+    def test_ok_clears_given_up(self, monkeypatch) -> None:
+        """health.status=ok (истинное выздоровление) снимает give-up-гейт."""
+        monkeypatch.setenv("FW_HEALTH_RESTART", "1")
+        mock_pm, monitor = self._monitor_with_health("ok")
+        monitor._given_up.add("cam")
+        monitor._maybe_health_restart("cam")
+        assert "cam" not in monitor._given_up
+
+
 class TestPerProcessPolicy:
     """Ф3.6: per-process RestartPolicy перекрывает глобальную (_resolve_policy)."""
 

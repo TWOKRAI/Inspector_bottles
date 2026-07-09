@@ -38,11 +38,17 @@ class MessageContract:
 
     plane: "control" (по умолчанию — валидируется реестром) | "data" (hot-path;
     валидируется НЕ здесь, а payload-валидатором 4.3 — инвариант для Ф7).
+
+    params_in_data: True для command-контрактов, чьи ПАРАМЕТРЫ едут вложенно в
+    ``message["data"]`` (схема описывает параметры команды, не конверт). Тогда
+    сверка идёт по ``message["data"]``, а не по плоскому конверту — иначе схема
+    параметров никогда не видит своих полей и warn-mw инертна (H5, Ф4-добор).
     """
 
     key: str
     schema: Type[BaseModel]
     plane: str = "control"
+    params_in_data: bool = False
 
 
 @dataclass
@@ -89,12 +95,14 @@ class MessageContractRegistry:
         schema: Type[BaseModel],
         *,
         plane: str = "control",
+        params_in_data: bool = False,
         override: bool = False,
     ) -> MessageContract:
         """Зарегистрировать контракт для ключа маршрутизации.
 
         Повторная регистрация того же ключа без ``override=True`` — ошибка
-        (дубль контрактов = рассинхрон источника истины).
+        (дубль контрактов = рассинхрон источника истины). ``params_in_data=True``
+        — параметры команды едут в ``message["data"]`` (сверять именно их).
         """
         if not key or not isinstance(key, str):
             raise ValueError(f"contract key должен быть непустой строкой, получено: {key!r}")
@@ -105,7 +113,7 @@ class MessageContractRegistry:
                 f"контракт для '{key}' уже зарегистрирован "
                 f"({self._contracts[key].schema.__name__}); передайте override=True для замены"
             )
-        contract = MessageContract(key=key, schema=schema, plane=plane)
+        contract = MessageContract(key=key, schema=schema, plane=plane, params_in_data=params_in_data)
         self._contracts[key] = contract
         return contract
 
@@ -146,12 +154,23 @@ class MessageContractRegistry:
         fields = schema.model_fields
         forbid_extra = schema.model_config.get("extra") == "forbid"
 
-        missing = [name for name, info in fields.items() if info.is_required() and name not in message]
+        # H5: для command-контрактов параметры вложены в message["data"] — сверяем
+        # именно их. Иначе схема параметров (wire_key/role/…) сверяется с ключами
+        # конверта (command/data/target) и НИКОГДА не видит своих полей → warn-mw
+        # инертна. data не dict (или нет) → {} (нечего сверять, не нарушение).
+        if contract.params_in_data:
+            payload = message.get("data")
+            if not isinstance(payload, dict):
+                payload = {}
+        else:
+            payload = message
+
+        missing = [name for name, info in fields.items() if info.is_required() and name not in payload]
         # `_`-префиксные ключи — служебные transport-поля (`_address`, `_receive_info`,
         # `_source_channel`, `_relayed`, `_fence` fencing-токена Ф4.2). Они не часть
         # payload-контракта и не должны попадать в diff «лишних» полей.
         unexpected = (
-            [k for k in message if k not in fields and not k.startswith("_")]
+            [k for k in payload if k not in fields and not k.startswith("_")]
             if forbid_extra
             else []
         )
@@ -159,7 +178,7 @@ class MessageContractRegistry:
         errors: List[str] = []
         # Валидируем только известные поля — типы/диапазоны; missing/unexpected уже
         # посчитаны отдельно, чтобы diff был читаемым, а не сырым Pydantic-текстом.
-        known = {k: v for k, v in message.items() if k in fields}
+        known = {k: v for k, v in payload.items() if k in fields}
         try:
             schema(**known)
         except ValidationError as exc:
