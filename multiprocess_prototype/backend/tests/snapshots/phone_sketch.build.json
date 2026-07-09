@@ -1,0 +1,3603 @@
+{
+  "orchestrator_class_path": "multiprocess_prototype.orchestrator.ProcessManagerProcessApp",
+  "orchestrator_config": {
+    "backend_ctl": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8765
+    },
+    "initial_state": {
+      "displays": {},
+      "plugins": {
+        "catalog": [],
+        "paths": []
+      },
+      "processes": {
+        "camera_0": {
+          "config": {
+            "chain_targets": [
+              "seg"
+            ],
+            "plugins": [
+              {
+                "category": "source",
+                "config": {
+                  "auto_start": true,
+                  "camera_id": 0,
+                  "host": "0.0.0.0",
+                  "http_port": 8080,
+                  "resolution_height": 480,
+                  "resolution_width": 640,
+                  "show_hint": true
+                },
+                "fps": 25,
+                "plugin_class": "Services.phone_gateway.plugin.plugin.PhoneCameraPlugin",
+                "plugin_name": "phone_camera",
+                "resolution_height": 480,
+                "resolution_width": 640,
+                "ring_buffer_size": 3,
+                "source_type": "simulator"
+              }
+            ],
+            "priority": "high"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "devices": {
+          "config": {
+            "chain_targets": [],
+            "plugins": [
+              {
+                "category": "hub",
+                "plugin_class": "Plugins.hub.device_hub.plugin.DeviceHubPlugin",
+                "plugin_name": "device_hub",
+                "recipe_devices": [
+                  {
+                    "id": "robot_main",
+                    "kind": "robot",
+                    "name": "Робот Delta",
+                    "params": {
+                      "draw_accel": 25000,
+                      "draw_pass_size": 30,
+                      "draw_retry": 1,
+                      "draw_speed_pct": 4,
+                      "draw_travel_pct": 100,
+                      "draw_verify": true,
+                      "feed_poll_s": 0.05,
+                      "pen_down_mm": -108.0,
+                      "pen_up_mm": -102.0,
+                      "telemetry_interval_s": 0.5,
+                      "word_order": "little"
+                    },
+                    "protocol": "delta_universal3",
+                    "transport": {
+                      "host": "192.168.1.7",
+                      "port": 502,
+                      "type": "tcp",
+                      "unit_id": 2
+                    }
+                  }
+                ],
+                "recipe_origin": "recipe:phone_sketch",
+                "registry_path": "data/devices.yaml"
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "gui": {
+          "config": {
+            "chain_targets": [],
+            "plugins": [],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "lines": {
+          "config": {
+            "chain_targets": [
+              "points",
+              "gui"
+            ],
+            "plugins": [
+              {
+                "category": "processing",
+                "config": {
+                  "crop_h": 0,
+                  "crop_w": 0,
+                  "crop_x": 0,
+                  "crop_y": 0,
+                  "mode": "clip",
+                  "paste_x": 0,
+                  "paste_y": 0
+                },
+                "plugin_class": "Plugins.processing.crop.plugin.CropPlugin",
+                "plugin_name": "crop",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "device": "cuda",
+                  "inference_every_n": 1,
+                  "invert": false,
+                  "method": "teed",
+                  "threshold": 0.5
+                },
+                "plugin_class": "Plugins.processing.edge_detection.plugin.EdgeDetectionPlugin",
+                "plugin_name": "edge_detection",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "max_area": 0,
+                  "min_area": 10
+                },
+                "plugin_class": "Plugins.processing.blob_filter.plugin.BlobFilterPlugin",
+                "plugin_name": "blob_filter",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "angle_threshold_deg": 15.0,
+                  "centerline": true,
+                  "flip_y": false,
+                  "max_points": 0,
+                  "max_stroke_len": 0.0,
+                  "min_stroke_len": 8.0,
+                  "offset_x": 0.0,
+                  "offset_y": 0.0,
+                  "reduce_mode": "dp",
+                  "scale_x": 1.0,
+                  "scale_y": 1.0,
+                  "simplify_epsilon": 1.0,
+                  "step_px": 5.0
+                },
+                "plugin_class": "Plugins.processing.strokes_to_points.plugin.StrokesToPointsPlugin",
+                "plugin_name": "strokes_to_points",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "element": "text",
+                  "enabled": true,
+                  "merge": true,
+                  "pos_x": 320.0,
+                  "pos_y": 180.0,
+                  "rotation_deg": 0.0,
+                  "scale": 1.0,
+                  "size_px": 90.0,
+                  "text": ""
+                },
+                "plugin_class": "Plugins.processing.text_vector.plugin.TextVectorPlugin",
+                "plugin_name": "text_main",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "element": "text",
+                  "enabled": true,
+                  "merge": true,
+                  "pos_x": 320.0,
+                  "pos_y": 330.0,
+                  "rotation_deg": 0.0,
+                  "scale": 1.0,
+                  "size_px": 60.0,
+                  "text": ""
+                },
+                "plugin_class": "Plugins.processing.text_vector.plugin.TextVectorPlugin",
+                "plugin_name": "text_name",
+                "worker_pool_size": 0
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "points": {
+          "config": {
+            "chain_targets": [
+              "gui"
+            ],
+            "plugins": [
+              {
+                "category": "processing",
+                "config": {
+                  "clamp_to_zone": true,
+                  "src_height": 480,
+                  "src_width": 640,
+                  "swap_axes": true,
+                  "x0": 340.0,
+                  "x1": 545.0,
+                  "y0": -174.0,
+                  "y1": 24.0
+                },
+                "plugin_class": "Plugins.processing.robot_scale.plugin.RobotScalePlugin",
+                "plugin_name": "robot_scale",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "io",
+                "config": {
+                  "drawings_dir": "drawings",
+                  "save_image": true
+                },
+                "plugin_class": "Plugins.io.drawing_io.plugin.DrawingIoPlugin",
+                "plugin_name": "drawing_io"
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "bg_white": true,
+                  "canvas_height": 480,
+                  "canvas_width": 640,
+                  "dot_radius": 2,
+                  "flip_y": false,
+                  "show_travel": true,
+                  "swap_axes": true
+                },
+                "plugin_class": "Plugins.processing.points_render.plugin.PointsRenderPlugin",
+                "plugin_name": "points_render",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "io",
+                "config": {
+                  "device_id": "robot_main",
+                  "dry_run": false,
+                  "dump_path": "data/robot_points_preview.txt",
+                  "trigger_source": "out_1"
+                },
+                "plugin_class": "Plugins.io.robot_draw.plugin.RobotDrawPlugin",
+                "plugin_name": "robot_draw"
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "pult": {
+          "config": {
+            "chain_targets": [
+              "points"
+            ],
+            "plugins": [
+              {
+                "category": "source",
+                "config": {
+                  "controls": [
+                    {
+                      "command_args": {
+                        "device_id": "robot_main"
+                      },
+                      "id": "robot_mode",
+                      "label": "Режим робота",
+                      "options": [
+                        {
+                          "label": "Рисование",
+                          "value": "draw"
+                        },
+                        {
+                          "label": "Ручной (jog)",
+                          "value": "manual"
+                        },
+                        {
+                          "label": "Смена инструмента",
+                          "value": "toolchange"
+                        },
+                        {
+                          "label": "Конвейер (CVT)",
+                          "value": "cvt"
+                        }
+                      ],
+                      "source": "action",
+                      "target_command": "robot_set_mode",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "select",
+                      "value": "draw",
+                      "value_arg": "mode"
+                    },
+                    {
+                      "id": "draw",
+                      "label": "Рисовать",
+                      "port": "out_1",
+                      "trigger_value": true,
+                      "type": "button"
+                    },
+                    {
+                      "command_args": {
+                        "device_id": "robot_main"
+                      },
+                      "id": "stop",
+                      "label": "Стоп",
+                      "source": "action",
+                      "target_command": "robot_draw_abort",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "button"
+                    },
+                    {
+                      "id": "param_robot_draw_dry_run",
+                      "label": "Пробный прогон (без робота) [robot_draw]",
+                      "source": "param",
+                      "target_field": "dry_run",
+                      "target_plugin_index": 3,
+                      "target_process": "points",
+                      "type": "toggle",
+                      "value": false
+                    },
+                    {
+                      "id": "param_robot_scale_x0",
+                      "label": "Угол ЛВ X (мм) [robot_scale]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "x0",
+                      "target_plugin_index": 0,
+                      "target_process": "points",
+                      "type": "number",
+                      "value": 340.0
+                    },
+                    {
+                      "id": "param_robot_scale_y0",
+                      "label": "Угол ЛВ Y (мм) [robot_scale]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "y0",
+                      "target_plugin_index": 0,
+                      "target_process": "points",
+                      "type": "number",
+                      "value": -174.0
+                    },
+                    {
+                      "id": "param_robot_scale_x1",
+                      "label": "Угол ПН X (мм) [robot_scale]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "x1",
+                      "target_plugin_index": 0,
+                      "target_process": "points",
+                      "type": "number",
+                      "value": 545.0
+                    },
+                    {
+                      "id": "param_robot_scale_y1",
+                      "label": "Угол ПН Y (мм) [robot_scale]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "y1",
+                      "target_plugin_index": 0,
+                      "target_process": "points",
+                      "type": "number",
+                      "value": 24.0
+                    },
+                    {
+                      "command_args": {
+                        "device_id": "robot_main"
+                      },
+                      "id": "act_robot_speed",
+                      "label": "Скорость рисования (%) [робот]",
+                      "max": 100.0,
+                      "min": 1.0,
+                      "source": "action",
+                      "target_command": "robot_draw_set_speed",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "number",
+                      "value": 4.0,
+                      "value_arg": "pct"
+                    },
+                    {
+                      "command_args": {
+                        "device_id": "robot_main"
+                      },
+                      "id": "act_robot_travel",
+                      "label": "Скорость переезда (%) [робот]",
+                      "max": 100.0,
+                      "min": 1.0,
+                      "source": "action",
+                      "target_command": "robot_draw_set_travel",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "number",
+                      "value": 100.0,
+                      "value_arg": "pct"
+                    },
+                    {
+                      "command_args": {
+                        "device_id": "robot_main"
+                      },
+                      "id": "act_robot_accel",
+                      "label": "Ускорение рисования (мм/с²) [робот]",
+                      "max": 32000.0,
+                      "min": 1000.0,
+                      "source": "action",
+                      "target_command": "robot_draw_set_accel",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "number",
+                      "value": 25000.0,
+                      "value_arg": "accel"
+                    },
+                    {
+                      "command_args": {
+                        "device_id": "robot_main"
+                      },
+                      "id": "act_robot_pass_size",
+                      "label": "Точек в пачке (проход) [робот]",
+                      "max": 100.0,
+                      "min": 10.0,
+                      "source": "action",
+                      "target_command": "robot_draw_set_pass_size",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "number",
+                      "value": 30.0,
+                      "value_arg": "n"
+                    },
+                    {
+                      "command_args": {
+                        "device_id": "robot_main"
+                      },
+                      "id": "act_robot_pen_down",
+                      "label": "Перо: низ к плоскости (мм) [робот]",
+                      "max": 500.0,
+                      "min": -500.0,
+                      "source": "action",
+                      "target_command": "robot_draw_set_pen",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "number",
+                      "value": -108.0,
+                      "value_arg": "down"
+                    },
+                    {
+                      "command_args": {
+                        "device_id": "robot_main"
+                      },
+                      "id": "act_robot_pen_up",
+                      "label": "Перо: подъём при перемещении (мм) [робот]",
+                      "max": 500.0,
+                      "min": -500.0,
+                      "source": "action",
+                      "target_command": "robot_draw_set_pen",
+                      "target_plugin_index": 0,
+                      "target_process": "devices",
+                      "type": "number",
+                      "value": -102.0,
+                      "value_arg": "up"
+                    },
+                    {
+                      "id": "param_robot_scale_draw_scale",
+                      "label": "Масштаб рисунка (доля листа) [robot_scale]",
+                      "max": 10.0,
+                      "min": 0.01,
+                      "source": "param",
+                      "target_field": "draw_scale",
+                      "target_plugin_index": 0,
+                      "target_process": "points",
+                      "type": "number",
+                      "value": 1.0
+                    },
+                    {
+                      "id": "param_robot_scale_offset_x",
+                      "label": "Сдвиг рисунка X (мм) [robot_scale]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "offset_x",
+                      "target_plugin_index": 0,
+                      "target_process": "points",
+                      "type": "number",
+                      "value": 0.0
+                    },
+                    {
+                      "id": "param_robot_scale_offset_y",
+                      "label": "Сдвиг рисунка Y (мм) [robot_scale]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "offset_y",
+                      "target_plugin_index": 0,
+                      "target_process": "points",
+                      "type": "number",
+                      "value": 0.0
+                    },
+                    {
+                      "id": "param_crop_mode",
+                      "label": "Crop: режим [crop]",
+                      "options": [
+                        {
+                          "label": "Обрезать (без масштаба)",
+                          "value": "clip"
+                        },
+                        {
+                          "label": "Вписать (растянуть)",
+                          "value": "resize"
+                        }
+                      ],
+                      "source": "param",
+                      "target_field": "mode",
+                      "target_plugin_index": 0,
+                      "target_process": "lines",
+                      "type": "select",
+                      "value": "clip"
+                    },
+                    {
+                      "id": "param_crop_x",
+                      "label": "Обрезка X (px) [crop]",
+                      "max": 2000.0,
+                      "min": 0.0,
+                      "source": "param",
+                      "target_field": "crop_x",
+                      "target_plugin_index": 0,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 0.0
+                    },
+                    {
+                      "id": "param_crop_y",
+                      "label": "Обрезка Y (px) [crop]",
+                      "max": 2000.0,
+                      "min": 0.0,
+                      "source": "param",
+                      "target_field": "crop_y",
+                      "target_plugin_index": 0,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 0.0
+                    },
+                    {
+                      "id": "param_crop_w",
+                      "label": "Обрезка ширина (px, 0=край) [crop]",
+                      "max": 2000.0,
+                      "min": 0.0,
+                      "source": "param",
+                      "target_field": "crop_w",
+                      "target_plugin_index": 0,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 0.0
+                    },
+                    {
+                      "id": "param_crop_h",
+                      "label": "Обрезка высота (px, 0=край) [crop]",
+                      "max": 2000.0,
+                      "min": 0.0,
+                      "source": "param",
+                      "target_field": "crop_h",
+                      "target_plugin_index": 0,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 0.0
+                    },
+                    {
+                      "id": "param_crop_paste_x",
+                      "label": "Crop сдвиг X (px) [crop]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "paste_x",
+                      "target_plugin_index": 0,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 0.0
+                    },
+                    {
+                      "id": "param_crop_paste_y",
+                      "label": "Crop сдвиг Y (px) [crop]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "paste_y",
+                      "target_plugin_index": 0,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 0.0
+                    },
+                    {
+                      "id": "param_strokes_reduce",
+                      "label": "Прореживание линий [strokes]",
+                      "options": [
+                        {
+                          "label": "DP (убрать мелкие изгибы)",
+                          "value": "dp"
+                        },
+                        {
+                          "label": "Шаг по длине",
+                          "value": "step"
+                        },
+                        {
+                          "label": "По углу",
+                          "value": "angle"
+                        },
+                        {
+                          "label": "Без прореживания",
+                          "value": "none"
+                        }
+                      ],
+                      "source": "param",
+                      "target_field": "reduce_mode",
+                      "target_plugin_index": 3,
+                      "target_process": "lines",
+                      "type": "select",
+                      "value": "dp"
+                    },
+                    {
+                      "id": "param_strokes_epsilon",
+                      "label": "Сглаживание DP (px) — больше=ровнее [strokes]",
+                      "max": 20.0,
+                      "min": 0.0,
+                      "source": "param",
+                      "target_field": "simplify_epsilon",
+                      "target_plugin_index": 3,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 1.0
+                    },
+                    {
+                      "id": "param_strokes_min_len",
+                      "label": "Min длина штриха (px) — убрать крапины [strokes]",
+                      "max": 2000.0,
+                      "min": 0.0,
+                      "source": "param",
+                      "target_field": "min_stroke_len",
+                      "target_plugin_index": 3,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 8.0
+                    },
+                    {
+                      "id": "param_robot_scale_clamp",
+                      "label": "Прижать к листу (точка на краю) [robot_scale]",
+                      "source": "param",
+                      "target_field": "clamp_to_zone",
+                      "target_plugin_index": 0,
+                      "target_process": "points",
+                      "type": "toggle",
+                      "value": true
+                    },
+                    {
+                      "id": "tv_main_enabled",
+                      "label": "Текст 1: включён [text_main]",
+                      "source": "param",
+                      "target_field": "enabled",
+                      "target_plugin_index": 4,
+                      "target_process": "lines",
+                      "type": "toggle",
+                      "value": true
+                    },
+                    {
+                      "id": "tv_main_element",
+                      "label": "Текст 1: тип [text_main]",
+                      "options": [
+                        {
+                          "label": "Текст",
+                          "value": "text"
+                        },
+                        {
+                          "label": "Сердце",
+                          "value": "heart"
+                        }
+                      ],
+                      "source": "param",
+                      "target_field": "element",
+                      "target_plugin_index": 4,
+                      "target_process": "lines",
+                      "type": "select",
+                      "value": "text"
+                    },
+                    {
+                      "id": "tv_main_text",
+                      "label": "Текст 1: строка [text_main]",
+                      "source": "param",
+                      "target_field": "text",
+                      "target_plugin_index": 4,
+                      "target_process": "lines",
+                      "type": "text",
+                      "value": ""
+                    },
+                    {
+                      "id": "tv_main_size",
+                      "label": "Текст 1: размер (px) [text_main]",
+                      "max": 1000.0,
+                      "min": 4.0,
+                      "source": "param",
+                      "target_field": "size_px",
+                      "target_plugin_index": 4,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 90.0
+                    },
+                    {
+                      "id": "tv_main_pos_x",
+                      "label": "Текст 1: позиция X (px) [text_main]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "pos_x",
+                      "target_plugin_index": 4,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 320.0
+                    },
+                    {
+                      "id": "tv_main_pos_y",
+                      "label": "Текст 1: позиция Y (px) [text_main]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "pos_y",
+                      "target_plugin_index": 4,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 180.0
+                    },
+                    {
+                      "id": "tv_main_rot",
+                      "label": "Текст 1: поворот (°) [text_main]",
+                      "max": 360.0,
+                      "min": -360.0,
+                      "source": "param",
+                      "target_field": "rotation_deg",
+                      "target_plugin_index": 4,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 0.0
+                    },
+                    {
+                      "id": "tv_main_scale",
+                      "label": "Текст 1: масштаб [text_main]",
+                      "max": 20.0,
+                      "min": 0.05,
+                      "source": "param",
+                      "target_field": "scale",
+                      "target_plugin_index": 4,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 1.0
+                    },
+                    {
+                      "id": "tv_name_enabled",
+                      "label": "Текст 2: включён [text_name]",
+                      "source": "param",
+                      "target_field": "enabled",
+                      "target_plugin_index": 5,
+                      "target_process": "lines",
+                      "type": "toggle",
+                      "value": true
+                    },
+                    {
+                      "id": "tv_name_element",
+                      "label": "Текст 2: тип [text_name]",
+                      "options": [
+                        {
+                          "label": "Текст",
+                          "value": "text"
+                        },
+                        {
+                          "label": "Сердце",
+                          "value": "heart"
+                        }
+                      ],
+                      "source": "param",
+                      "target_field": "element",
+                      "target_plugin_index": 5,
+                      "target_process": "lines",
+                      "type": "select",
+                      "value": "text"
+                    },
+                    {
+                      "id": "tv_name_text",
+                      "label": "Текст 2: строка (имя) [text_name]",
+                      "source": "param",
+                      "target_field": "text",
+                      "target_plugin_index": 5,
+                      "target_process": "lines",
+                      "type": "text",
+                      "value": ""
+                    },
+                    {
+                      "id": "tv_name_size",
+                      "label": "Текст 2: размер (px) [text_name]",
+                      "max": 1000.0,
+                      "min": 4.0,
+                      "source": "param",
+                      "target_field": "size_px",
+                      "target_plugin_index": 5,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 60.0
+                    },
+                    {
+                      "id": "tv_name_pos_x",
+                      "label": "Текст 2: позиция X (px) [text_name]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "pos_x",
+                      "target_plugin_index": 5,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 320.0
+                    },
+                    {
+                      "id": "tv_name_pos_y",
+                      "label": "Текст 2: позиция Y (px) [text_name]",
+                      "max": 2000.0,
+                      "min": -2000.0,
+                      "source": "param",
+                      "target_field": "pos_y",
+                      "target_plugin_index": 5,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 330.0
+                    },
+                    {
+                      "id": "tv_name_rot",
+                      "label": "Текст 2: поворот (°) [text_name]",
+                      "max": 360.0,
+                      "min": -360.0,
+                      "source": "param",
+                      "target_field": "rotation_deg",
+                      "target_plugin_index": 5,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 0.0
+                    },
+                    {
+                      "id": "tv_name_scale",
+                      "label": "Текст 2: масштаб [text_name]",
+                      "max": 20.0,
+                      "min": 0.05,
+                      "source": "param",
+                      "target_field": "scale",
+                      "target_plugin_index": 5,
+                      "target_process": "lines",
+                      "type": "number",
+                      "value": 1.0
+                    },
+                    {
+                      "id": "drawing_save",
+                      "label": "Сохранить рисунок",
+                      "source": "action",
+                      "target_command": "drawing_save",
+                      "target_plugin_index": 1,
+                      "target_process": "points",
+                      "type": "button"
+                    },
+                    {
+                      "id": "drawing_load",
+                      "label": "Загрузить рисунок (имя файла)",
+                      "source": "action",
+                      "target_command": "drawing_load",
+                      "target_plugin_index": 1,
+                      "target_process": "points",
+                      "type": "text",
+                      "value": "",
+                      "value_arg": "path"
+                    },
+                    {
+                      "id": "param_drawing_load_active",
+                      "label": "Рисовать загруженное [drawing_io]",
+                      "source": "param",
+                      "target_field": "load_active",
+                      "target_plugin_index": 1,
+                      "target_process": "points",
+                      "type": "toggle",
+                      "value": false
+                    }
+                  ],
+                  "panel_id": "pult"
+                },
+                "fps": 25,
+                "plugin_class": "Services.control_panel.plugin.plugin.ControlPanelPlugin",
+                "plugin_name": "control_panel",
+                "resolution_height": 480,
+                "resolution_width": 640,
+                "ring_buffer_size": 3,
+                "source_type": "simulator"
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        },
+        "seg": {
+          "config": {
+            "chain_targets": [
+              "lines",
+              "gui"
+            ],
+            "plugins": [
+              {
+                "category": "processing",
+                "config": {
+                  "bg_white": true,
+                  "threshold": 0.5
+                },
+                "plugin_class": "Plugins.processing.segmentation.plugin.SegmentationPlugin",
+                "plugin_name": "segmentation",
+                "worker_pool_size": 0
+              },
+              {
+                "category": "processing",
+                "config": {
+                  "brightness": 0.0,
+                  "contrast": 1.2,
+                  "gamma": 1.0,
+                  "saturation": 1.0
+                },
+                "plugin_class": "Plugins.processing.image_adjust.plugin.ImageAdjustPlugin",
+                "plugin_name": "image_adjust",
+                "worker_pool_size": 0
+              }
+            ],
+            "priority": "normal"
+          },
+          "state": {
+            "error": null,
+            "fps": 0.0,
+            "frame_count": 0,
+            "pid": null,
+            "status": "stopped"
+          }
+        }
+      },
+      "recipes": {
+        "active": null,
+        "available": []
+      },
+      "services": {},
+      "system": {
+        "log_dir": "logs/prototype_2",
+        "shm_budget_mb": 512,
+        "stop_timeout": 5.0
+      },
+      "wires": {
+        "camera_0.phone_camera.frame->seg.segmentation.frame": {
+          "source": "camera_0.phone_camera.frame",
+          "status": "pending",
+          "target": "seg.segmentation.frame"
+        },
+        "lines.text_name.draw_points->points.robot_scale.draw_points": {
+          "source": "lines.text_name.draw_points",
+          "status": "pending",
+          "target": "points.robot_scale.draw_points"
+        },
+        "pult.control_panel.out_1->points.robot_draw.trigger": {
+          "source": "pult.control_panel.out_1",
+          "status": "pending",
+          "target": "points.robot_draw.trigger"
+        },
+        "seg.image_adjust.frame->lines.crop.frame": {
+          "source": "seg.image_adjust.frame",
+          "status": "pending",
+          "target": "lines.crop.frame"
+        }
+      }
+    },
+    "observability_config_path": "<ROOT>/multiprocess_prototype/backend/config/system.yaml",
+    "replace_debounce_s": 1.0,
+    "state_throttle_rules": {
+      "processes.**.state.drops": 5.0,
+      "processes.**.state.fps": 1.0,
+      "processes.**.state.frame_count": 2.0,
+      "processes.**.state.latency_ms": 1.0,
+      "processes.**.state.uptime": 1.0,
+      "processes.**.workers.*.cycle_duration_ms": 1.0,
+      "processes.**.workers.*.effective_hz": 1.0
+    },
+    "sys_config": {
+      "backend_ctl": {
+        "enabled": true,
+        "host": "127.0.0.1",
+        "port": 8765
+      },
+      "camera": {
+        "fps": 25,
+        "resolution_height": 480,
+        "resolution_width": 640,
+        "ring_buffer_size": 3,
+        "source_type": "simulator"
+      },
+      "discovery": {
+        "auto_discover": true,
+        "plugin_paths": [
+          "Plugins",
+          "Services"
+        ],
+        "service_paths": [
+          "Services"
+        ]
+      },
+      "display": {
+        "enabled": true
+      },
+      "observability": {
+        "console": true,
+        "enable_batching": true,
+        "errors": {
+          "enabled": true,
+          "include_stacktrace": true,
+          "level": "WARNING"
+        },
+        "file": true,
+        "log_directory": null,
+        "log_level": "INFO",
+        "stats": {
+          "aggregation_interval": 5.0,
+          "enabled": true,
+          "log_level": "INFO"
+        }
+      },
+      "processing": {
+        "worker_pool_size": 0
+      },
+      "storage": {
+        "batch_size": 100,
+        "db_path": "data/inspector.db"
+      },
+      "system": {
+        "log_dir": "logs/prototype_2",
+        "shm_budget_mb": 512,
+        "stop_timeout": 5.0
+      }
+    }
+  },
+  "proc_dicts": {
+    "camera_0": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "seg"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "auto_start": true,
+            "camera_id": 0,
+            "category": "source",
+            "config": {
+              "auto_start": true,
+              "camera_id": 0,
+              "host": "0.0.0.0",
+              "http_port": 8080,
+              "resolution_height": 480,
+              "resolution_width": 640,
+              "show_hint": true
+            },
+            "fps": 25,
+            "host": "0.0.0.0",
+            "http_port": 8080,
+            "plugin_class": "Services.phone_gateway.plugin.plugin.PhoneCameraPlugin",
+            "plugin_name": "phone_camera",
+            "resolution_height": 480,
+            "resolution_width": 640,
+            "ring_buffer_size": 3,
+            "show_hint": true,
+            "source_type": "simulator",
+            "wifi_password": "",
+            "wifi_ssid": ""
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "memory": {
+        "camera_0_frame": [
+          480,
+          640,
+          3
+        ],
+        "coll": 3
+      },
+      "priority": "high",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "restart_policy": {
+        "enabled": true,
+        "max_retries": 3,
+        "window_sec": 60
+      },
+      "workers": {}
+    },
+    "devices": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "hub",
+            "plugin_class": "Plugins.hub.device_hub.plugin.DeviceHubPlugin",
+            "plugin_name": "device_hub",
+            "recipe_devices": [
+              {
+                "id": "robot_main",
+                "kind": "robot",
+                "name": "Робот Delta",
+                "params": {
+                  "draw_accel": 25000,
+                  "draw_pass_size": 30,
+                  "draw_retry": 1,
+                  "draw_speed_pct": 4,
+                  "draw_travel_pct": 100,
+                  "draw_verify": true,
+                  "feed_poll_s": 0.05,
+                  "pen_down_mm": -108.0,
+                  "pen_up_mm": -102.0,
+                  "telemetry_interval_s": 0.5,
+                  "word_order": "little"
+                },
+                "protocol": "delta_universal3",
+                "transport": {
+                  "host": "192.168.1.7",
+                  "port": 502,
+                  "type": "tcp",
+                  "unit_id": 2
+                }
+              }
+            ],
+            "recipe_origin": "recipe:phone_sketch",
+            "registry_path": "data/devices.yaml"
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": true,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "gui": {
+      "class": "multiprocess_prototype.frontend.process.GuiProcess",
+      "config": {
+        "chain_targets": [],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": true,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "lines": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "points",
+          "gui"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "processing",
+            "config": {
+              "crop_h": 0,
+              "crop_w": 0,
+              "crop_x": 0,
+              "crop_y": 0,
+              "mode": "clip",
+              "paste_x": 0,
+              "paste_y": 0
+            },
+            "plugin_class": "Plugins.processing.crop.plugin.CropPlugin",
+            "plugin_name": "crop",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "device": "cuda",
+              "inference_every_n": 1,
+              "invert": false,
+              "method": "teed",
+              "threshold": 0.5
+            },
+            "plugin_class": "Plugins.processing.edge_detection.plugin.EdgeDetectionPlugin",
+            "plugin_name": "edge_detection",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "max_area": 0,
+              "min_area": 10
+            },
+            "plugin_class": "Plugins.processing.blob_filter.plugin.BlobFilterPlugin",
+            "plugin_name": "blob_filter",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "angle_threshold_deg": 15.0,
+              "centerline": true,
+              "flip_y": false,
+              "max_points": 0,
+              "max_stroke_len": 0.0,
+              "min_stroke_len": 8.0,
+              "offset_x": 0.0,
+              "offset_y": 0.0,
+              "reduce_mode": "dp",
+              "scale_x": 1.0,
+              "scale_y": 1.0,
+              "simplify_epsilon": 1.0,
+              "step_px": 5.0
+            },
+            "plugin_class": "Plugins.processing.strokes_to_points.plugin.StrokesToPointsPlugin",
+            "plugin_name": "strokes_to_points",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "element": "text",
+              "enabled": true,
+              "merge": true,
+              "pos_x": 320.0,
+              "pos_y": 180.0,
+              "rotation_deg": 0.0,
+              "scale": 1.0,
+              "size_px": 90.0,
+              "text": ""
+            },
+            "plugin_class": "Plugins.processing.text_vector.plugin.TextVectorPlugin",
+            "plugin_name": "text_main",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "element": "text",
+              "enabled": true,
+              "merge": true,
+              "pos_x": 320.0,
+              "pos_y": 330.0,
+              "rotation_deg": 0.0,
+              "scale": 1.0,
+              "size_px": 60.0,
+              "text": ""
+            },
+            "plugin_class": "Plugins.processing.text_vector.plugin.TextVectorPlugin",
+            "plugin_name": "text_name",
+            "worker_pool_size": 0
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "points": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "gui"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "processing",
+            "config": {
+              "clamp_to_zone": true,
+              "src_height": 480,
+              "src_width": 640,
+              "swap_axes": true,
+              "x0": 340.0,
+              "x1": 545.0,
+              "y0": -174.0,
+              "y1": 24.0
+            },
+            "plugin_class": "Plugins.processing.robot_scale.plugin.RobotScalePlugin",
+            "plugin_name": "robot_scale",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "io",
+            "config": {
+              "drawings_dir": "drawings",
+              "save_image": true
+            },
+            "plugin_class": "Plugins.io.drawing_io.plugin.DrawingIoPlugin",
+            "plugin_name": "drawing_io"
+          },
+          {
+            "category": "processing",
+            "config": {
+              "bg_white": true,
+              "canvas_height": 480,
+              "canvas_width": 640,
+              "dot_radius": 2,
+              "flip_y": false,
+              "show_travel": true,
+              "swap_axes": true
+            },
+            "plugin_class": "Plugins.processing.points_render.plugin.PointsRenderPlugin",
+            "plugin_name": "points_render",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "io",
+            "config": {
+              "device_id": "robot_main",
+              "dry_run": false,
+              "dump_path": "data/robot_points_preview.txt",
+              "trigger_source": "out_1"
+            },
+            "device_id": "robot_main",
+            "plugin_class": "Plugins.io.robot_draw.plugin.RobotDrawPlugin",
+            "plugin_name": "robot_draw"
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "pult": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "points"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "source",
+            "config": {
+              "controls": [
+                {
+                  "command_args": {
+                    "device_id": "robot_main"
+                  },
+                  "id": "robot_mode",
+                  "label": "Режим робота",
+                  "options": [
+                    {
+                      "label": "Рисование",
+                      "value": "draw"
+                    },
+                    {
+                      "label": "Ручной (jog)",
+                      "value": "manual"
+                    },
+                    {
+                      "label": "Смена инструмента",
+                      "value": "toolchange"
+                    },
+                    {
+                      "label": "Конвейер (CVT)",
+                      "value": "cvt"
+                    }
+                  ],
+                  "source": "action",
+                  "target_command": "robot_set_mode",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "select",
+                  "value": "draw",
+                  "value_arg": "mode"
+                },
+                {
+                  "id": "draw",
+                  "label": "Рисовать",
+                  "port": "out_1",
+                  "trigger_value": true,
+                  "type": "button"
+                },
+                {
+                  "command_args": {
+                    "device_id": "robot_main"
+                  },
+                  "id": "stop",
+                  "label": "Стоп",
+                  "source": "action",
+                  "target_command": "robot_draw_abort",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "button"
+                },
+                {
+                  "id": "param_robot_draw_dry_run",
+                  "label": "Пробный прогон (без робота) [robot_draw]",
+                  "source": "param",
+                  "target_field": "dry_run",
+                  "target_plugin_index": 3,
+                  "target_process": "points",
+                  "type": "toggle",
+                  "value": false
+                },
+                {
+                  "id": "param_robot_scale_x0",
+                  "label": "Угол ЛВ X (мм) [robot_scale]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "x0",
+                  "target_plugin_index": 0,
+                  "target_process": "points",
+                  "type": "number",
+                  "value": 340.0
+                },
+                {
+                  "id": "param_robot_scale_y0",
+                  "label": "Угол ЛВ Y (мм) [robot_scale]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "y0",
+                  "target_plugin_index": 0,
+                  "target_process": "points",
+                  "type": "number",
+                  "value": -174.0
+                },
+                {
+                  "id": "param_robot_scale_x1",
+                  "label": "Угол ПН X (мм) [robot_scale]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "x1",
+                  "target_plugin_index": 0,
+                  "target_process": "points",
+                  "type": "number",
+                  "value": 545.0
+                },
+                {
+                  "id": "param_robot_scale_y1",
+                  "label": "Угол ПН Y (мм) [robot_scale]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "y1",
+                  "target_plugin_index": 0,
+                  "target_process": "points",
+                  "type": "number",
+                  "value": 24.0
+                },
+                {
+                  "command_args": {
+                    "device_id": "robot_main"
+                  },
+                  "id": "act_robot_speed",
+                  "label": "Скорость рисования (%) [робот]",
+                  "max": 100.0,
+                  "min": 1.0,
+                  "source": "action",
+                  "target_command": "robot_draw_set_speed",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "number",
+                  "value": 4.0,
+                  "value_arg": "pct"
+                },
+                {
+                  "command_args": {
+                    "device_id": "robot_main"
+                  },
+                  "id": "act_robot_travel",
+                  "label": "Скорость переезда (%) [робот]",
+                  "max": 100.0,
+                  "min": 1.0,
+                  "source": "action",
+                  "target_command": "robot_draw_set_travel",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "number",
+                  "value": 100.0,
+                  "value_arg": "pct"
+                },
+                {
+                  "command_args": {
+                    "device_id": "robot_main"
+                  },
+                  "id": "act_robot_accel",
+                  "label": "Ускорение рисования (мм/с²) [робот]",
+                  "max": 32000.0,
+                  "min": 1000.0,
+                  "source": "action",
+                  "target_command": "robot_draw_set_accel",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "number",
+                  "value": 25000.0,
+                  "value_arg": "accel"
+                },
+                {
+                  "command_args": {
+                    "device_id": "robot_main"
+                  },
+                  "id": "act_robot_pass_size",
+                  "label": "Точек в пачке (проход) [робот]",
+                  "max": 100.0,
+                  "min": 10.0,
+                  "source": "action",
+                  "target_command": "robot_draw_set_pass_size",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "number",
+                  "value": 30.0,
+                  "value_arg": "n"
+                },
+                {
+                  "command_args": {
+                    "device_id": "robot_main"
+                  },
+                  "id": "act_robot_pen_down",
+                  "label": "Перо: низ к плоскости (мм) [робот]",
+                  "max": 500.0,
+                  "min": -500.0,
+                  "source": "action",
+                  "target_command": "robot_draw_set_pen",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "number",
+                  "value": -108.0,
+                  "value_arg": "down"
+                },
+                {
+                  "command_args": {
+                    "device_id": "robot_main"
+                  },
+                  "id": "act_robot_pen_up",
+                  "label": "Перо: подъём при перемещении (мм) [робот]",
+                  "max": 500.0,
+                  "min": -500.0,
+                  "source": "action",
+                  "target_command": "robot_draw_set_pen",
+                  "target_plugin_index": 0,
+                  "target_process": "devices",
+                  "type": "number",
+                  "value": -102.0,
+                  "value_arg": "up"
+                },
+                {
+                  "id": "param_robot_scale_draw_scale",
+                  "label": "Масштаб рисунка (доля листа) [robot_scale]",
+                  "max": 10.0,
+                  "min": 0.01,
+                  "source": "param",
+                  "target_field": "draw_scale",
+                  "target_plugin_index": 0,
+                  "target_process": "points",
+                  "type": "number",
+                  "value": 1.0
+                },
+                {
+                  "id": "param_robot_scale_offset_x",
+                  "label": "Сдвиг рисунка X (мм) [robot_scale]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "offset_x",
+                  "target_plugin_index": 0,
+                  "target_process": "points",
+                  "type": "number",
+                  "value": 0.0
+                },
+                {
+                  "id": "param_robot_scale_offset_y",
+                  "label": "Сдвиг рисунка Y (мм) [robot_scale]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "offset_y",
+                  "target_plugin_index": 0,
+                  "target_process": "points",
+                  "type": "number",
+                  "value": 0.0
+                },
+                {
+                  "id": "param_crop_mode",
+                  "label": "Crop: режим [crop]",
+                  "options": [
+                    {
+                      "label": "Обрезать (без масштаба)",
+                      "value": "clip"
+                    },
+                    {
+                      "label": "Вписать (растянуть)",
+                      "value": "resize"
+                    }
+                  ],
+                  "source": "param",
+                  "target_field": "mode",
+                  "target_plugin_index": 0,
+                  "target_process": "lines",
+                  "type": "select",
+                  "value": "clip"
+                },
+                {
+                  "id": "param_crop_x",
+                  "label": "Обрезка X (px) [crop]",
+                  "max": 2000.0,
+                  "min": 0.0,
+                  "source": "param",
+                  "target_field": "crop_x",
+                  "target_plugin_index": 0,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 0.0
+                },
+                {
+                  "id": "param_crop_y",
+                  "label": "Обрезка Y (px) [crop]",
+                  "max": 2000.0,
+                  "min": 0.0,
+                  "source": "param",
+                  "target_field": "crop_y",
+                  "target_plugin_index": 0,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 0.0
+                },
+                {
+                  "id": "param_crop_w",
+                  "label": "Обрезка ширина (px, 0=край) [crop]",
+                  "max": 2000.0,
+                  "min": 0.0,
+                  "source": "param",
+                  "target_field": "crop_w",
+                  "target_plugin_index": 0,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 0.0
+                },
+                {
+                  "id": "param_crop_h",
+                  "label": "Обрезка высота (px, 0=край) [crop]",
+                  "max": 2000.0,
+                  "min": 0.0,
+                  "source": "param",
+                  "target_field": "crop_h",
+                  "target_plugin_index": 0,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 0.0
+                },
+                {
+                  "id": "param_crop_paste_x",
+                  "label": "Crop сдвиг X (px) [crop]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "paste_x",
+                  "target_plugin_index": 0,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 0.0
+                },
+                {
+                  "id": "param_crop_paste_y",
+                  "label": "Crop сдвиг Y (px) [crop]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "paste_y",
+                  "target_plugin_index": 0,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 0.0
+                },
+                {
+                  "id": "param_strokes_reduce",
+                  "label": "Прореживание линий [strokes]",
+                  "options": [
+                    {
+                      "label": "DP (убрать мелкие изгибы)",
+                      "value": "dp"
+                    },
+                    {
+                      "label": "Шаг по длине",
+                      "value": "step"
+                    },
+                    {
+                      "label": "По углу",
+                      "value": "angle"
+                    },
+                    {
+                      "label": "Без прореживания",
+                      "value": "none"
+                    }
+                  ],
+                  "source": "param",
+                  "target_field": "reduce_mode",
+                  "target_plugin_index": 3,
+                  "target_process": "lines",
+                  "type": "select",
+                  "value": "dp"
+                },
+                {
+                  "id": "param_strokes_epsilon",
+                  "label": "Сглаживание DP (px) — больше=ровнее [strokes]",
+                  "max": 20.0,
+                  "min": 0.0,
+                  "source": "param",
+                  "target_field": "simplify_epsilon",
+                  "target_plugin_index": 3,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 1.0
+                },
+                {
+                  "id": "param_strokes_min_len",
+                  "label": "Min длина штриха (px) — убрать крапины [strokes]",
+                  "max": 2000.0,
+                  "min": 0.0,
+                  "source": "param",
+                  "target_field": "min_stroke_len",
+                  "target_plugin_index": 3,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 8.0
+                },
+                {
+                  "id": "param_robot_scale_clamp",
+                  "label": "Прижать к листу (точка на краю) [robot_scale]",
+                  "source": "param",
+                  "target_field": "clamp_to_zone",
+                  "target_plugin_index": 0,
+                  "target_process": "points",
+                  "type": "toggle",
+                  "value": true
+                },
+                {
+                  "id": "tv_main_enabled",
+                  "label": "Текст 1: включён [text_main]",
+                  "source": "param",
+                  "target_field": "enabled",
+                  "target_plugin_index": 4,
+                  "target_process": "lines",
+                  "type": "toggle",
+                  "value": true
+                },
+                {
+                  "id": "tv_main_element",
+                  "label": "Текст 1: тип [text_main]",
+                  "options": [
+                    {
+                      "label": "Текст",
+                      "value": "text"
+                    },
+                    {
+                      "label": "Сердце",
+                      "value": "heart"
+                    }
+                  ],
+                  "source": "param",
+                  "target_field": "element",
+                  "target_plugin_index": 4,
+                  "target_process": "lines",
+                  "type": "select",
+                  "value": "text"
+                },
+                {
+                  "id": "tv_main_text",
+                  "label": "Текст 1: строка [text_main]",
+                  "source": "param",
+                  "target_field": "text",
+                  "target_plugin_index": 4,
+                  "target_process": "lines",
+                  "type": "text",
+                  "value": ""
+                },
+                {
+                  "id": "tv_main_size",
+                  "label": "Текст 1: размер (px) [text_main]",
+                  "max": 1000.0,
+                  "min": 4.0,
+                  "source": "param",
+                  "target_field": "size_px",
+                  "target_plugin_index": 4,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 90.0
+                },
+                {
+                  "id": "tv_main_pos_x",
+                  "label": "Текст 1: позиция X (px) [text_main]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "pos_x",
+                  "target_plugin_index": 4,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 320.0
+                },
+                {
+                  "id": "tv_main_pos_y",
+                  "label": "Текст 1: позиция Y (px) [text_main]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "pos_y",
+                  "target_plugin_index": 4,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 180.0
+                },
+                {
+                  "id": "tv_main_rot",
+                  "label": "Текст 1: поворот (°) [text_main]",
+                  "max": 360.0,
+                  "min": -360.0,
+                  "source": "param",
+                  "target_field": "rotation_deg",
+                  "target_plugin_index": 4,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 0.0
+                },
+                {
+                  "id": "tv_main_scale",
+                  "label": "Текст 1: масштаб [text_main]",
+                  "max": 20.0,
+                  "min": 0.05,
+                  "source": "param",
+                  "target_field": "scale",
+                  "target_plugin_index": 4,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 1.0
+                },
+                {
+                  "id": "tv_name_enabled",
+                  "label": "Текст 2: включён [text_name]",
+                  "source": "param",
+                  "target_field": "enabled",
+                  "target_plugin_index": 5,
+                  "target_process": "lines",
+                  "type": "toggle",
+                  "value": true
+                },
+                {
+                  "id": "tv_name_element",
+                  "label": "Текст 2: тип [text_name]",
+                  "options": [
+                    {
+                      "label": "Текст",
+                      "value": "text"
+                    },
+                    {
+                      "label": "Сердце",
+                      "value": "heart"
+                    }
+                  ],
+                  "source": "param",
+                  "target_field": "element",
+                  "target_plugin_index": 5,
+                  "target_process": "lines",
+                  "type": "select",
+                  "value": "text"
+                },
+                {
+                  "id": "tv_name_text",
+                  "label": "Текст 2: строка (имя) [text_name]",
+                  "source": "param",
+                  "target_field": "text",
+                  "target_plugin_index": 5,
+                  "target_process": "lines",
+                  "type": "text",
+                  "value": ""
+                },
+                {
+                  "id": "tv_name_size",
+                  "label": "Текст 2: размер (px) [text_name]",
+                  "max": 1000.0,
+                  "min": 4.0,
+                  "source": "param",
+                  "target_field": "size_px",
+                  "target_plugin_index": 5,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 60.0
+                },
+                {
+                  "id": "tv_name_pos_x",
+                  "label": "Текст 2: позиция X (px) [text_name]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "pos_x",
+                  "target_plugin_index": 5,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 320.0
+                },
+                {
+                  "id": "tv_name_pos_y",
+                  "label": "Текст 2: позиция Y (px) [text_name]",
+                  "max": 2000.0,
+                  "min": -2000.0,
+                  "source": "param",
+                  "target_field": "pos_y",
+                  "target_plugin_index": 5,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 330.0
+                },
+                {
+                  "id": "tv_name_rot",
+                  "label": "Текст 2: поворот (°) [text_name]",
+                  "max": 360.0,
+                  "min": -360.0,
+                  "source": "param",
+                  "target_field": "rotation_deg",
+                  "target_plugin_index": 5,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 0.0
+                },
+                {
+                  "id": "tv_name_scale",
+                  "label": "Текст 2: масштаб [text_name]",
+                  "max": 20.0,
+                  "min": 0.05,
+                  "source": "param",
+                  "target_field": "scale",
+                  "target_plugin_index": 5,
+                  "target_process": "lines",
+                  "type": "number",
+                  "value": 1.0
+                },
+                {
+                  "id": "drawing_save",
+                  "label": "Сохранить рисунок",
+                  "source": "action",
+                  "target_command": "drawing_save",
+                  "target_plugin_index": 1,
+                  "target_process": "points",
+                  "type": "button"
+                },
+                {
+                  "id": "drawing_load",
+                  "label": "Загрузить рисунок (имя файла)",
+                  "source": "action",
+                  "target_command": "drawing_load",
+                  "target_plugin_index": 1,
+                  "target_process": "points",
+                  "type": "text",
+                  "value": "",
+                  "value_arg": "path"
+                },
+                {
+                  "id": "param_drawing_load_active",
+                  "label": "Рисовать загруженное [drawing_io]",
+                  "source": "param",
+                  "target_field": "load_active",
+                  "target_plugin_index": 1,
+                  "target_process": "points",
+                  "type": "toggle",
+                  "value": false
+                }
+              ],
+              "panel_id": "pult"
+            },
+            "controls": [],
+            "fps": 25,
+            "panel_id": "pult",
+            "plugin_class": "Services.control_panel.plugin.plugin.ControlPanelPlugin",
+            "plugin_name": "control_panel",
+            "port_count": 8,
+            "resolution_height": 480,
+            "resolution_width": 640,
+            "ring_buffer_size": 3,
+            "source_type": "simulator"
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    },
+    "seg": {
+      "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
+      "config": {
+        "chain_targets": [
+          "lines",
+          "gui"
+        ],
+        "error_auto_reset_sec": 60.0,
+        "error_critical_plugins": [],
+        "error_max_consecutive_fails": 5,
+        "inspector": {},
+        "io_peek": {},
+        "lag_alert_threshold_sec": 2.0,
+        "plugins": [
+          {
+            "category": "processing",
+            "config": {
+              "bg_white": true,
+              "threshold": 0.5
+            },
+            "plugin_class": "Plugins.processing.segmentation.plugin.SegmentationPlugin",
+            "plugin_name": "segmentation",
+            "worker_pool_size": 0
+          },
+          {
+            "category": "processing",
+            "config": {
+              "brightness": 0.0,
+              "contrast": 1.2,
+              "gamma": 1.0,
+              "saturation": 1.0
+            },
+            "plugin_class": "Plugins.processing.image_adjust.plugin.ImageAdjustPlugin",
+            "plugin_name": "image_adjust",
+            "worker_pool_size": 0
+          }
+        ],
+        "queue_size": 64,
+        "source_target_fps": 25.0
+      },
+      "managers": {
+        "command": {
+          "default_strategy": "exact",
+          "enable_error_tracking": true,
+          "enable_logging": true,
+          "enable_statistics": true,
+          "manager_name": "CommandManager"
+        },
+        "console": {
+          "enabled": false,
+          "interactive": false,
+          "redirect_stdout": false,
+          "title": ""
+        },
+        "error": {
+          "app_name": "errors",
+          "batch_interval": 0.5,
+          "batch_size": 50,
+          "channels": {},
+          "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
+          "default_level": "WARNING",
+          "enable_batching": true,
+          "error_file_path": "<ROOT>/logs/prototype_2/errors.log",
+          "include_stacktrace": true,
+          "manager_name": "ErrorManager",
+          "warnings_file_path": "<ROOT>/logs/prototype_2/warnings.log"
+        },
+        "logger": {
+          "app_name": "inspector",
+          "batch_interval": 1.0,
+          "batch_size": 100,
+          "channels": {
+            "console": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": null,
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "console",
+              "url": null
+            },
+            "messages_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "messages.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            },
+            "system_file": {
+              "backup_count": 5,
+              "enabled": true,
+              "file_path": "system.log",
+              "format": "%(asctime)s [%(levelname)s] [%(proc_name)s] %(name)s: %(message)s",
+              "headers": {},
+              "max_size": 10485760,
+              "name": "",
+              "rotate": true,
+              "type": "file",
+              "url": null
+            }
+          },
+          "default_level": "INFO",
+          "enable_batching": true,
+          "log_directory": "<ROOT>/logs/prototype_2",
+          "manager_name": "LoggerManager",
+          "modules": {
+            "camera": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "camera.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "database": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "database.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "gui": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "gui.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "processor.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "processor_frames": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "frames.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": false
+            },
+            "renderer": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "renderer.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "robot": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "robot.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "router_messages": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "messages.log",
+              "max_size": null,
+              "min_level": "INFO",
+              "rotate": true
+            },
+            "trace": {
+              "backup_count": null,
+              "enabled": true,
+              "file_path": "trace.log",
+              "max_size": null,
+              "min_level": "DEBUG",
+              "rotate": true
+            }
+          },
+          "scopes": {
+            "BUSINESS": {
+              "channels": [
+                "system_file",
+                "messages_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "DEBUG": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": false,
+              "min_level": "DEBUG",
+              "modules": []
+            },
+            "PERFORMANCE": {
+              "channels": [
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "INFO",
+              "modules": []
+            },
+            "SYSTEM": {
+              "channels": [
+                "console",
+                "system_file"
+              ],
+              "enabled": true,
+              "min_level": "WARNING",
+              "modules": []
+            }
+          }
+        },
+        "router": {
+          "dispatch_strategy": "exact",
+          "dispatcher_key_field": "command",
+          "duplicate_messages_to_logger": true,
+          "manager_name": "RouterManager",
+          "send_queue_size": 512
+        },
+        "stats": {
+          "aggregation_interval": 5.0,
+          "channels": {},
+          "default_tags": {},
+          "enable_logging": true,
+          "flush_interval": 10.0,
+          "log_level": "INFO",
+          "manager_name": "StatsManager",
+          "retention_seconds": 3600.0
+        }
+      },
+      "priority": "normal",
+      "protected": false,
+      "queues": {
+        "data": {
+          "maxsize": 50
+        },
+        "system": {
+          "maxsize": 100
+        }
+      },
+      "workers": {}
+    }
+  },
+  "process_count": 7,
+  "process_names": [
+    "gui",
+    "devices",
+    "camera_0",
+    "seg",
+    "lines",
+    "points",
+    "pult"
+  ],
+  "stop_timeout": 5.0
+}
