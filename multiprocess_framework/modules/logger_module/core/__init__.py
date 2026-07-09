@@ -3,6 +3,7 @@
 Основные классы LoggerModule.
 """
 
+from .logger_core import LoggerCore
 from .logger_manager import LoggerManager
 from .log_config import (
     LogLevel,
@@ -15,6 +16,7 @@ from .log_config import (
 from .log_types import LogRecord
 
 __all__ = [
+    "LoggerCore",
     "LoggerManager",
     "LoggerManagerConfig",
     "LoggerChannelSchema",

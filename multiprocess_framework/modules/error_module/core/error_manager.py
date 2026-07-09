@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-ErrorManager — специализированный наследник LoggerManager с severity-based routing.
+ErrorManager — брат LoggerManager (общий предок LoggerCore) с severity-based routing.
+
+Task 5.14 (CRM-развязка): ErrorManager наследует общий лог-слой ``LoggerCore``,
+а НЕ ``LoggerManager`` (композиция общего слоя вместо IS-A). Оба — потомки
+``LoggerCore`` → ``ChannelRoutingManager``.
 
 Ключевые улучшения (Фаза 3 — CRM унификация):
   - _setup_level_routes() строит _level_to_channel: {level_str → channel_name}
     и регистрирует маршруты в self._dispatcher (из CRM) напрямую.
-  - log() перегружает LoggerManager.log() для WARNING/ERROR/CRITICAL:
+  - log() перегружает LoggerCore.log() для WARNING/ERROR/CRITICAL:
     → ищет channel_name через _level_to_channel (O(1))
     → пишет через buffer (если есть) или напрямую в channel
-  - DEBUG/INFO → fallback на LoggerManager.log() (scope-based)
+  - DEBUG/INFO → fallback на LoggerCore.log() (scope-based)
   - Результат: level routing теперь РЕАЛЬНО используется, не просто регистрируется.
 
 Архитектурная аналогия:
@@ -20,10 +24,11 @@ import time
 import traceback
 from typing import Optional, Any, Union, Dict
 
-from ...logger_module import LoggerManager
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
 from ...logger_module.core.log_types import LogRecord
+from ...logger_module.core.logger_core import LoggerCore
 from ..configs.error_manager_config import ErrorManagerConfig
+from ..interfaces import IErrorManager
 from .error_config_assembly import expand_error_manager_config
 
 
@@ -109,15 +114,19 @@ def _normalize_error_config(
     )
 
 
-class ErrorManager(LoggerManager):
+class ErrorManager(LoggerCore, IErrorManager):
     """Менеджер ошибок с severity-based channel routing.
 
-    Добавляет поверх LoggerManager:
+    Task 5.14: брат ``LoggerManager`` (оба — потомки ``LoggerCore``), а НЕ его
+    наследник (композиция общего лог-слоя вместо IS-A). Общий слой берётся из
+    ``LoggerCore``; специфика severity-routing добавляется здесь.
+
+    Добавляет поверх LoggerCore:
       1. _level_to_channel: Dict[str, str] — прямой маппинг уровня → канал.
          WARNING → warnings_file, ERROR → errors_file, CRITICAL → critical_file.
 
       2. log() override — для WARNING/ERROR/CRITICAL использует _level_to_channel
-         вместо scope-based routing. DEBUG/INFO идут через LoggerManager.log().
+         вместо scope-based routing. DEBUG/INFO идут через LoggerCore.log().
          Buffer-aware: если _buffer задан → enqueue, иначе прямой write().
 
       3. log_exception() — traceback + self.error().
@@ -143,9 +152,11 @@ class ErrorManager(LoggerManager):
         resolved_name, log_config, include_stacktrace = _normalize_error_config(config)
         manager_name = resolved_name
 
-        # До super(): LoggerManager.__init__ в конце выставляет LoggerManager._instance = self.
-        # Если self — ErrorManager, до строки ниже у подкласса ещё нет _level_to_channel,
-        # а косвенные вызовы (get_logger().error/…) приводят к AttributeError в log().
+        # Guard до super(): LoggerCore.__init__ дёргает self.log()/self.info() косвенно
+        # (напр. _setup_module_channel → self.debug()), а переопределённый ErrorManager.log()
+        # читает self._level_to_channel. Инициализируем его ДО super(), иначе AttributeError.
+        # (Task 5.14: ErrorManager — брат LoggerManager через LoggerCore, singleton _instance
+        #  живёт только на LoggerManager и здесь НЕ выставляется.)
         self._level_to_channel: Dict[str, str] = {}
         self._include_stacktrace = include_stacktrace
 
@@ -191,7 +202,7 @@ class ErrorManager(LoggerManager):
     def _rebuild_from_config(self, config: Dict[str, Any]) -> None:
         """Хук CRM.reconfigure: пересобрать каналы + перестроить severity-routing.
 
-        Специфика ErrorManager поверх LoggerManager:
+        Специфика ErrorManager поверх LoggerCore:
           - конфиг проходит через ``_normalize_error_config`` (принимает и плоский
             error-dict, и развёрнутый LoggerManagerConfig);
           - обновляется ``self._include_stacktrace``;
@@ -215,7 +226,7 @@ class ErrorManager(LoggerManager):
     ) -> None:
         """Override: WARNING/ERROR/CRITICAL → level-based routing.
 
-        DEBUG/INFO → fallback to LoggerManager.log() (scope-based).
+        DEBUG/INFO → fallback to LoggerCore.log() (scope-based).
 
         Теперь level routing РЕАЛЬНО используется (в старом коде маршруты
         были зарегистрированы но route_by_level() никогда не вызывался).
@@ -227,7 +238,7 @@ class ErrorManager(LoggerManager):
             # DEBUG / INFO / unknown level → parent scope-based routing
             # Don't double-count messages_processed
             self.stats["messages_processed"] -= 1
-            return LoggerManager.log(self, scope, level, message, module, **extra)
+            return LoggerCore.log(self, scope, level, message, module, **extra)
 
         record_dict = LogRecord(
             timestamp=time.time(),
@@ -239,7 +250,7 @@ class ErrorManager(LoggerManager):
         ).to_dict()
 
         # Tail логов (Task 1.5): severity-путь ErrorManager не зовёт super().log(),
-        # поэтому tap'ы кормим здесь явно (DEBUG/INFO уходят в LoggerManager.log выше).
+        # поэтому tap'ы кормим здесь явно (DEBUG/INFO уходят в LoggerCore.log выше).
         if self._tap_sinks:
             self._emit_to_taps(record_dict, level)
 
@@ -292,7 +303,7 @@ class ErrorManager(LoggerManager):
         self.log_exception(error, message=message or "", module=module)
 
     def get_stats(self) -> Dict[str, Any]:
-        """Статистика ErrorManager — расширяет LoggerManager.get_stats()."""
+        """Статистика ErrorManager — расширяет LoggerCore.get_stats()."""
         stats = super().get_stats()
         stats["include_stacktrace"] = self._include_stacktrace
         stats["level_routes"] = dict(self._level_to_channel)

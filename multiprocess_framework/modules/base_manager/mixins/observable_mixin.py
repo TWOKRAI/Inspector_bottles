@@ -103,27 +103,27 @@ class ObservableMixin(IObservableMixin):
 
     def _log(self, level: str, message: str, **kwargs) -> None:
         """Логирование через logger manager (любой уровень)."""
-        self._call_manager('logger', level, message, **kwargs)
+        self._call_manager("logger", level, message, **kwargs)
 
     def _log_debug(self, message: str, **kwargs) -> None:
         """Логирование уровня DEBUG через logger manager."""
-        self._call_manager('logger', 'debug', message, **kwargs)
+        self._call_manager("logger", "debug", message, **kwargs)
 
     def _log_info(self, message: str, **kwargs) -> None:
         """Логирование уровня INFO через logger manager."""
-        self._call_manager('logger', 'info', message, **kwargs)
+        self._call_manager("logger", "info", message, **kwargs)
 
     def _log_warning(self, message: str, **kwargs) -> None:
         """Логирование уровня WARNING через logger manager."""
-        self._call_manager('logger', 'warning', message, **kwargs)
+        self._call_manager("logger", "warning", message, **kwargs)
 
     def _log_error(self, message: str, **kwargs) -> None:
         """Логирование уровня ERROR через logger manager."""
-        self._call_manager('logger', 'error', message, **kwargs)
+        self._call_manager("logger", "error", message, **kwargs)
 
     def _log_critical(self, message: str, **kwargs) -> None:
         """Логирование уровня CRITICAL через logger manager."""
-        self._call_manager('logger', 'critical', message, **kwargs)
+        self._call_manager("logger", "critical", message, **kwargs)
 
     # Публичные алиасы — для внешнего кода, который принимает менеджер
     # как зависимость (например, ChainContext.logger). _log_* остаются
@@ -143,38 +143,24 @@ class ObservableMixin(IObservableMixin):
     def log_critical(self, message: str, **kwargs) -> None:
         self._log_critical(message, **kwargs)
 
-    def _record_metric(
-        self,
-        metric_name: str,
-        value: Any = 1,
-        tags: Optional[Dict[str, str]] = None
-    ) -> None:
+    def _record_metric(self, metric_name: str, value: Any = 1, tags: Optional[Dict[str, str]] = None) -> None:
         """Запись метрики через stats/statistics manager (stats имеет приоритет)."""
-        if not self._call_manager('stats', 'record_metric', metric_name, value, tags or {}):
-            self._call_manager('statistics', 'record_metric', metric_name, value, tags or {})
+        if not self._call_manager("stats", "record_metric", metric_name, value, tags or {}):
+            self._call_manager("statistics", "record_metric", metric_name, value, tags or {})
 
-    def _record_timing(
-        self,
-        metric_name: str,
-        duration: float,
-        tags: Optional[Dict[str, str]] = None
-    ) -> None:
+    def _record_timing(self, metric_name: str, duration: float, tags: Optional[Dict[str, str]] = None) -> None:
         """Запись времени выполнения через stats/statistics manager."""
-        if not self._call_manager('stats', 'record_timing', metric_name, duration, tags or {}):
-            self._call_manager('statistics', 'record_timing', metric_name, duration, tags or {})
+        if not self._call_manager("stats", "record_timing", metric_name, duration, tags or {}):
+            self._call_manager("statistics", "record_timing", metric_name, duration, tags or {})
 
-    def _track_error(
-        self,
-        error: Exception,
-        context: Optional[Dict[str, Any]] = None
-    ) -> None:
-        """Отслеживание ошибки через error/errors manager."""
+    def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
+        """Отслеживание ошибки через error manager (каноничный слот 'error')."""
         ctx = context or {}
-        result = self._call_manager('error', 'track_error', error, ctx)
+        # Task 5.14: имя error-гнезда каноникализировано на 'error'. Legacy-fallback
+        # на слот 'errors' убран — все точки регистрации переведены на 'error'.
+        result = self._call_manager("error", "track_error", error, ctx)
         if result is None:
-            result = self._call_manager('errors', 'track_error', error, ctx)
-        if result is None:
-            self._call_manager('error', 'record_error', error, ctx)
+            self._call_manager("error", "record_error", error, ctx)
 
     # =========================================================================
     # ПУБЛИЧНЫЙ API — УПРАВЛЕНИЕ МЕНЕДЖЕРАМИ
@@ -187,13 +173,13 @@ class ObservableMixin(IObservableMixin):
         Если auto_proxy был включён — прокси-методы будут пересозданы.
 
         Args:
-            name:    Имя менеджера ('logger', 'stats', 'errors' и т.д.)
+            name:    Имя менеджера ('logger', 'stats', 'error' и т.д.)
             manager: Экземпляр менеджера
             enabled: Включён ли сразу после регистрации
         """
         self._registry.register(name, manager, enabled)
 
-        if getattr(self, '_proxy_created', False) or getattr(self, '_auto_proxy', False):
+        if getattr(self, "_proxy_created", False) or getattr(self, "_auto_proxy", False):
             self._proxy_created = True
             self._create_proxy_methods()
 
@@ -263,7 +249,7 @@ class ObservableMixin(IObservableMixin):
             manager_call_failures (Ф2.3 — проглоченные отказы _call_manager)
         """
         state = self._registry.get_state()
-        state['manager_call_failures'] = self.manager_call_failures
+        state["manager_call_failures"] = self.manager_call_failures
         return state
 
     # =========================================================================
@@ -280,27 +266,26 @@ class ObservableMixin(IObservableMixin):
             dict с ключами 'private', 'public', 'managers', 'adapters'
         """
         methods: Dict[str, List[str]] = {
-            'private': [],
-            'public': [],
-            'managers': list(self._registry.managers.keys()),
-            'adapters': list(getattr(self, '_adapters', {}).keys()),
+            "private": [],
+            "public": [],
+            "managers": list(self._registry.managers.keys()),
+            "adapters": list(getattr(self, "_adapters", {}).keys()),
         }
         for attr_name in dir(self):
-            if attr_name.startswith('__'):
+            if attr_name.startswith("__"):
                 continue
-            if attr_name.startswith('_'):
-                methods['private'].append(attr_name)
+            if attr_name.startswith("_"):
+                methods["private"].append(attr_name)
             else:
-                methods['public'].append(attr_name)
+                methods["public"].append(attr_name)
         return methods
 
     def print_available_methods(self) -> None:
         """Вывести список доступных методов через логгер (для отладки)."""
         import json
+
         methods = self.get_available_methods()
-        self._log_debug(
-            f"Доступные методы и менеджеры:\n{json.dumps(methods, indent=2, ensure_ascii=False)}"
-        )
+        self._log_debug(f"Доступные методы и менеджеры:\n{json.dumps(methods, indent=2, ensure_ascii=False)}")
 
     # =========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ
@@ -309,7 +294,7 @@ class ObservableMixin(IObservableMixin):
     @property
     def manager_call_failures(self) -> Dict[str, int]:
         """Счётчики проглоченных отказов _call_manager: 'manager.method' -> N (Ф2.3)."""
-        return dict(self.__dict__.get('_manager_call_failures', {}))
+        return dict(self.__dict__.get("_manager_call_failures", {}))
 
     def _call_manager(self, manager_name: str, method_name: str, *args, **kwargs) -> Any:
         """
@@ -322,7 +307,7 @@ class ObservableMixin(IObservableMixin):
         Returns:
             Результат вызова или None (если менеджер недоступен/выключен/упал)
         """
-        registry: Optional[ManagerRegistry] = self.__dict__.get('_registry')
+        registry: Optional[ManagerRegistry] = self.__dict__.get("_registry")
         if registry is None or not registry.is_enabled(manager_name):
             return None
 
@@ -347,7 +332,7 @@ class ObservableMixin(IObservableMixin):
         один раз на пару manager.method, дальше растёт только счётчик
         (_call_manager стоит на hot-path каждого лога/метрики — спам недопустим).
         """
-        failures: Dict[str, int] = self.__dict__.setdefault('_manager_call_failures', {})
+        failures: Dict[str, int] = self.__dict__.setdefault("_manager_call_failures", {})
         key = f"{manager_name}.{method_name}"
         first_failure = key not in failures
         failures[key] = failures.get(key, 0) + 1
@@ -380,11 +365,20 @@ class ObservableMixin(IObservableMixin):
         state = self.__dict__.copy()
         _EXCLUDE = (
             # Публичные прокси-методы (замыкания)
-            'log_debug', 'log_info', 'log_warning', 'log_error', 'log_critical',
-            'record_metric', 'increment', 'record_timing', 'gauge',
-            'track_error', 'record_error',
+            "log_debug",
+            "log_info",
+            "log_warning",
+            "log_error",
+            "log_critical",
+            "record_metric",
+            "increment",
+            "record_timing",
+            "gauge",
+            "track_error",
+            "record_error",
             # Внутренние компоненты (содержат ссылки на менеджеры)
-            '_registry', '_proxy_created',
+            "_registry",
+            "_proxy_created",
         )
         for key in _EXCLUDE:
             state.pop(key, None)
@@ -405,7 +399,7 @@ class ObservableMixin(IObservableMixin):
         # and must be re-injected by the owner after unpickle.
         self._registry = ManagerRegistry()
         # Recreate proxy methods shell (they call _call_manager which returns None for empty registry)
-        if getattr(self, '_auto_proxy', False):
+        if getattr(self, "_auto_proxy", False):
             self._proxy_created = True
             self._create_proxy_methods()
         else:

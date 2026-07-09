@@ -111,6 +111,11 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._heartbeat = None
         self._builtin_cmds = None
 
+        # ObservabilityHub процесса (Ф5.16): создаётся в _apply_managers_bundle,
+        # дренируется по heartbeat, финально flush'ится на graceful-teardown.
+        self._observability_hub = None
+        self._observability_drain = None
+
         # Plugin orchestrator — опциональная композиция
         # Активируется если config["plugins"] непуст (см. _init_custom_managers)
         self._orchestrator = None
@@ -249,6 +254,21 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._process_managers.register_all(bundle, self)
         self._process_managers.attach_adapters(bundle, self)
         self._process_managers.connect_event_manager(self)
+        self._wire_observability_hub()
+
+    def _wire_observability_hub(self) -> None:
+        """Ф5.16: создать hub наблюдаемости процесса и инъектировать его в слоты
+        пилота (worker_module). log/stats буферизуются в hub и дренируются по
+        heartbeat; error-слот остаётся реальным error_manager (write-through)."""
+        from ..managers.observability_wiring import wire_process_observability
+
+        self._observability_hub, self._observability_drain = wire_process_observability(
+            self.name,
+            self.worker_manager,
+            self.logger_manager,
+            self.stats_manager,
+            self.error_manager,
+        )
 
     def _init_communication(self):
         """Инициализация коммуникации процесса."""
@@ -624,7 +644,22 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         if self.worker_manager:
             self.worker_manager.stop_all_workers()
 
+        # Ф5.16 (c): финальный дренаж hub'а на graceful-teardown — воркеры уже
+        # остановлены, новых эмиссий нет. SIGKILL этот путь обходит (потому
+        # error/critical идут write-through, а не в буфер).
+        self._flush_observability()
+
         self.shutdown()
+
+    def _flush_observability(self) -> None:
+        """Ф5.16 (c): последний слив log/stats-буфера hub'а перед остановкой.
+        Дренаж не критичен — исключения глушим, чтобы не сорвать teardown."""
+        from ..managers.observability_wiring import drain_process_observability
+
+        try:
+            drain_process_observability(self._observability_hub, self._observability_drain)
+        except Exception:  # noqa: BLE001 — потеря телеметрии не должна ронять stop()
+            pass
 
     # ========================================================================
     # СТАТИСТИКА

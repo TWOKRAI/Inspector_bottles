@@ -96,11 +96,32 @@ class ProcessHeartbeat:
                 # Отдельно от метрик: health публикуется даже без воркеров и только
                 # при изменениях (take_dirty) — естественный rate-limit на такт HB.
                 self._publish_health_to_tree()
+
+                # Дренаж ObservabilityHub процесса (Ф5.16): log/stats-буфер hub'а
+                # → реальные менеджеры адаптером. error/critical идут мимо буфера
+                # (write-through), здесь их нет. Прецедент — health self-publish 2.1.
+                self._drain_observability()
             except Exception as exc:
                 _log = getattr(self._services, "log_debug", self._services.log_info)
                 _log(f"Не удалось отправить heartbeat: {exc}", module="heartbeat")
             # Ожидание с проверкой stop_event для быстрого завершения
             stop_event.wait(timeout=self._interval)
+
+    def _drain_observability(self) -> None:
+        """Ф5.16: слить log/stats-буфер ObservabilityHub процесса в реальные
+        менеджеры по такту heartbeat. Процессы без hub'а тихо пропускаются;
+        исключения глушим — дренаж телеметрии не критичен для такта HB."""
+        hub = getattr(self._services, "_observability_hub", None)
+        drain = getattr(self._services, "_observability_drain", None)
+        if hub is None or drain is None:
+            return
+        from ..managers.observability_wiring import drain_process_observability
+
+        try:
+            drain_process_observability(hub, drain)
+        except Exception as exc:  # noqa: BLE001 — телеметрия не критична
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Не удалось слить observability-буфер: {exc}", module="heartbeat")
 
     def _publish_metrics_to_tree(self, workers: dict) -> None:
         """Опубликовать телеметрию процесса и каждого воркера в дерево StateStore.
