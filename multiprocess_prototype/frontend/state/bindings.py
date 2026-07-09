@@ -31,6 +31,11 @@ _logger = logging.getLogger(__name__)
 # Property setters — маппинг имени свойства на вызов метода виджета
 # ---------------------------------------------------------------------------
 
+# Sentinel: «reset-значение для delete не задано». Отличает «сбрасывать в None»
+# (reset=None) от «не трогать виджет при удалении» (reset не передан).
+_UNSET: Any = object()
+
+
 _PROP_SETTERS: dict[str, Callable[[QWidget, Any], None]] = {
     "value": lambda w, v: w.setValue(v),  # type: ignore[attr-defined]
     "text": lambda w, v: w.setText(str(v)),  # type: ignore[attr-defined]
@@ -54,12 +59,17 @@ class BindingHandle:
         widget_ref: weakref на Qt-виджет; None если виджет уже уничтожен.
         prop: имя свойства виджета ('value', 'text', 'checked', ...).
         formatter: опциональный конвертор значения перед применением setter.
+        reset: значение, применяемое к виджету при удалении узла
+            (delete-дельта). _UNSET (по умолчанию) → виджет при удалении не
+            трогаем (только не пушим мусор). reset=None → сбросить в None
+            (через formatter/setter).
     """
 
     pattern: str
     widget_ref: weakref.ref
     prop: str
     formatter: Callable[[Any], Any] | None = None
+    reset: Any = _UNSET
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +149,7 @@ class GuiStateBindings:
         prop: str = "value",
         *,
         formatter: Callable[[Any], Any] | None = None,
+        reset: Any = _UNSET,
     ) -> BindingHandle:
         """Подписать виджет на изменения по glob-паттерну.
 
@@ -151,6 +162,10 @@ class GuiStateBindings:
             prop: имя свойства ('value', 'text', 'checked', 'currentText',
                   'plainText', или любой метод через getattr).
             formatter: опциональный конвертор; вызывается перед setter.
+            reset: значение, применяемое при удалении узла (delete-дельта).
+                По умолчанию (_UNSET) удаление не меняет виджет — но дельта
+                всё равно доставлена и классифицирована (никакого мусора
+                вместо sentinel MISSING в виджет не попадёт).
 
         Returns:
             BindingHandle — дескриптор для последующего unbind().
@@ -160,6 +175,7 @@ class GuiStateBindings:
             widget_ref=weakref.ref(widget),
             prop=prop,
             formatter=formatter,
+            reset=reset,
         )
         self._bindings.append(handle)
 
@@ -321,6 +337,11 @@ class GuiStateBindings:
             return
 
         value = msg_dict["value"]
+        # Полный Delta (5.9): удаление узла отличается флагом deleted, а не
+        # значением. При delete не пушим value (там None-заглушка envelope,
+        # раньше — sentinel MISSING) в виджет: применяем reset подписки, если
+        # задан; иначе виджет не трогаем (дельта всё равно доставлена).
+        deleted = bool(msg_dict.get("deleted"))
 
         # Собираем «мёртвые» дескрипторы для последующей уборки
         dead: list[BindingHandle] = []
@@ -333,6 +354,12 @@ class GuiStateBindings:
 
             # Проверяем совпадение паттерна
             if not match_glob(handle.pattern, path):
+                continue
+
+            if deleted:
+                if handle.reset is not _UNSET:
+                    self._apply_to_widget(handle, handle.reset)
+                # reset не задан → удаление доставлено, но виджет не трогаем
                 continue
 
             self._apply_to_widget(handle, value)
@@ -351,9 +378,7 @@ class GuiStateBindings:
                 try:
                     fanout.callback(path, value)
                 except Exception as exc:
-                    _logger.debug(
-                        "bindings: fan-out callback failed on %s (pattern %s): %s", path, fanout.pattern, exc
-                    )
+                    _logger.debug("bindings: fan-out callback failed on %s (pattern %s): %s", path, fanout.pattern, exc)
 
     def _apply_to_widget(self, handle: BindingHandle, value: Any) -> bool:
         """Применить значение к виджету подписки через setter.

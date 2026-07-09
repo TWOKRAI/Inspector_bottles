@@ -655,6 +655,7 @@ class TestStateDeltasToBridge:
     def test_sink_converts_deltas_to_state_delta(self, qtbot):
         from types import SimpleNamespace
 
+        from multiprocess_framework.modules.state_store_module.core.delta import Delta
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
         from multiprocess_prototype.frontend.process import GuiProcess
 
@@ -665,8 +666,20 @@ class TestStateDeltasToBridge:
         # _on_state_deltas_to_bridge нужен только self._bridge — лёгкий stand-in
         fake = SimpleNamespace(_bridge=bridge)
         deltas = [
-            SimpleNamespace(path="processes.cam.workers.w1.status", new_value="running"),
-            SimpleNamespace(path="processes.cam.workers.w1.effective_hz", new_value=12.5),
+            Delta(
+                path="processes.cam.workers.w1.status",
+                old_value="init",
+                new_value="running",
+                source="camera_0",
+                transaction_id="tx-1",
+            ),
+            Delta(
+                path="processes.cam.workers.w1.effective_hz",
+                old_value=10.0,
+                new_value=12.5,
+                source="camera_0",
+                transaction_id="tx-1",
+            ),
         ]
         GuiProcess._on_state_deltas_to_bridge(fake, deltas)
 
@@ -674,8 +687,43 @@ class TestStateDeltasToBridge:
         assert states[0]["data_type"] == "state_delta"
         assert states[0]["path"] == "processes.cam.workers.w1.status"
         assert states[0]["value"] == "running"
+        assert states[0]["deleted"] is False
+        assert states[0]["old_value"] == "init"
+        # transaction_id больше не теряется (акцептанс 5.9)
+        assert states[0]["transaction_id"] == "tx-1"
+        assert states[0]["source"] == "camera_0"
         assert states[1]["path"] == "processes.cam.workers.w1.effective_hz"
         assert states[1]["value"] == 12.5
+
+    def test_sink_delete_delta_marked_deleted(self, qtbot):
+        """Удаление узла (new_value=MISSING) → deleted=True, value=None (не sentinel)."""
+        from types import SimpleNamespace
+
+        from multiprocess_framework.modules.state_store_module.core.delta import (
+            MISSING,
+            Delta,
+        )
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        bridge = DataReceiverBridge()
+        states = []
+        bridge.state_updated.connect(states.append)
+
+        delta = Delta(
+            path="processes.cam.workers.w1.status",
+            old_value="running",
+            new_value=MISSING,
+            source="camera_0",
+            transaction_id="tx-del",
+        )
+        GuiProcess._on_state_deltas_to_bridge(SimpleNamespace(_bridge=bridge), [delta])
+
+        assert len(states) == 1
+        assert states[0]["deleted"] is True
+        assert states[0]["value"] is None  # sentinel MISSING не протекает в GUI
+        assert states[0]["old_value"] == "running"
+        assert states[0]["transaction_id"] == "tx-del"
 
     def test_sink_empty_deltas_noop(self, qtbot):
         from types import SimpleNamespace

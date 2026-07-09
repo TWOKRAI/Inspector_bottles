@@ -283,6 +283,10 @@ def run_gui(process: "GuiProcess") -> None:
     # сохранён: сначала bindings (_state_cb), затем этот listener.
     def _forward_state_delta_to_topology(msg_dict: dict) -> None:
         if msg_dict.get("data_type") == "state_delta":
+            # Удаление узла (deleted=True) в RegistersManager не форвардим:
+            # value — None-заглушка envelope, запись None затёрла бы конфиг.
+            if msg_dict.get("deleted"):
+                return
             path = msg_dict.get("path", "")
             value = msg_dict.get("value")
             if path:

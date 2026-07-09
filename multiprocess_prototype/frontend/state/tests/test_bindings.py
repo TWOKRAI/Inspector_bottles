@@ -306,6 +306,95 @@ class TestIgnoreInvalidMessages:
 
 
 # ---------------------------------------------------------------------------
+# Delete-дельта (5.9: полный Delta до биндингов)
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteDelta:
+    """delete-дельта (deleted=True) доходит до биндингов и обрабатывается."""
+
+    def test_delete_without_reset_does_not_push_garbage(self, qtbot, bindings):
+        """reset не задан → при удалении виджет не трогаем (никакого None/MISSING)."""
+        label = QLabel("original")
+        qtbot.addWidget(label)
+        bindings.bind("processes.cam.state.status", label, "text")
+
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.status",
+                "value": None,
+                "deleted": True,
+            }
+        )
+
+        # Значение НЕ затёрто "None"/"MISSING" — удаление доставлено, но не мусорит
+        assert label.text() == "original"
+
+    def test_delete_with_reset_applies_reset(self, qtbot, bindings):
+        """reset задан → при удалении применяется reset-значение."""
+        spinbox = QSpinBox()
+        qtbot.addWidget(spinbox)
+        spinbox.setValue(42)
+
+        bindings.bind("processes.cam.state.fps", spinbox, "value", reset=0)
+
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.fps",
+                "value": None,
+                "deleted": True,
+            }
+        )
+
+        assert spinbox.value() == 0
+
+    def test_delete_with_reset_none_via_formatter(self, qtbot, bindings):
+        """reset=None + formatter → удаление отображает 'пусто' (различимо от set)."""
+        label = QLabel("running")
+        qtbot.addWidget(label)
+
+        bindings.bind(
+            "processes.cam.state.status",
+            label,
+            "text",
+            formatter=lambda v: "—" if v is None else str(v),
+            reset=None,
+        )
+
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.status",
+                "value": None,
+                "deleted": True,
+            }
+        )
+
+        assert label.text() == "—"
+
+    def test_set_none_value_still_applied(self, qtbot, bindings):
+        """deleted=False + value=None → обычный set (None различим от удаления)."""
+        label = QLabel("running")
+        qtbot.addWidget(label)
+
+        bindings.bind("processes.cam.state.status", label, "text")
+
+        bindings._on_state_msg(
+            {
+                "data_type": "state_delta",
+                "path": "processes.cam.state.status",
+                "value": None,
+                "deleted": False,
+            }
+        )
+
+        # set None → setText(str(None)) = "None" (это НЕ удаление)
+        assert label.text() == "None"
+
+
+# ---------------------------------------------------------------------------
 # Replay из кэша при bind() (Task 4.1)
 # ---------------------------------------------------------------------------
 

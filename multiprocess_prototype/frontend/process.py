@@ -17,6 +17,7 @@ from multiprocess_framework.modules.router_module.middleware import FrameShmMidd
 from multiprocess_framework.modules.worker_module import ThreadConfig, ThreadPriority
 
 from .bridge import DataReceiverBridge
+from .state.delta_message import state_delta_message
 from . import app as gui_app
 
 
@@ -116,13 +117,15 @@ class GuiProcess(ProcessModule):
         """delta_sink для GuiStateProxy: гонит дельты в bridge (IO→Qt).
 
         Вызывается из IO-потока (message_processor) при получении state.changed.
-        Каждая дельта превращается в state_delta-сообщение и уходит в тот же
+        Каждая дельта превращается в state_delta-сообщение (state_delta_message —
+        полный Delta: value/deleted/old_value/transaction_id/source, без потери
+        удаления и transaction_id) и уходит в тот же
         DataReceiverBridge, что доставляет кадры — bridge.dispatch внутри делает
         _deliver.emit (AutoConnection), что надёжно пересекает поток в Qt main
         thread, где GuiStateBindings обновляют виджеты карточек/воркеров.
         """
         for d in deltas:
-            self._bridge.dispatch({"data_type": "state_delta", "path": d.path, "value": d.new_value})
+            self._bridge.dispatch(state_delta_message(d))
 
     def _data_receiver_loop(self, stop_event, pause_event) -> None:
         """Цикл получения IPC data-сообщений и передачи в Qt через bridge."""
