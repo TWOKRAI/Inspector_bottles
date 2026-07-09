@@ -71,4 +71,13 @@ def assemble_launcher(
         - функция НЕ спавнит процессы (только конфигурирует launcher);
         - ``proc_dicts`` не мутируется.
     """
-    raise NotImplementedError
+    from .system_launcher import SystemLauncher
+
+    launcher = SystemLauncher(
+        stop_timeout=stop_timeout,
+        orchestrator_class_path=orchestrator_class_path,
+        orchestrator_config=orchestrator_config,
+    )
+    for name, proc_dict in proc_dicts.items():
+        launcher.add_process(name, proc_dict)
+    return launcher
