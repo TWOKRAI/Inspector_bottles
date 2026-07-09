@@ -9,14 +9,15 @@ from multiprocess_framework.modules.channel_routing_module.observability import 
 )
 from multiprocess_framework.modules.process_module.managers.observability_wiring import (
     STORE_ERROR_TAP,
+    STORE_LOGGER_TAP,
     drain_process_observability,
     unwire_observability_store,
     wire_observability_store,
 )
 
 
-class FakeErrorManager:
-    """Мини-LoggerCore: реестр tap'ов + эмиссия error через них."""
+class FakeLoggerCore:
+    """Мини-LoggerCore: реестр tap'ов + эмиссия записи через них."""
 
     def __init__(self):
         self._taps = {}
@@ -35,18 +36,19 @@ class FakeErrorManager:
 
 
 class TestWireStore:
-    def test_wire_creates_store_and_error_tap(self, tmp_path):
-        err = FakeErrorManager()
-        store, tap = wire_observability_store(err, db_path=str(tmp_path / "obs.db"))
+    def test_wire_creates_store_and_taps_on_both(self, tmp_path):
+        err, log = FakeLoggerCore(), FakeLoggerCore()
+        store, taps = wire_observability_store(err, log, db_path=str(tmp_path / "obs.db"))
         assert isinstance(store, ObservabilityStore)
-        assert tap == STORE_ERROR_TAP
+        assert {name for _, name in taps} == {STORE_ERROR_TAP, STORE_LOGGER_TAP}
         assert STORE_ERROR_TAP in err._taps
+        assert STORE_LOGGER_TAP in log._taps
         store.close()
 
-    def test_error_emission_reaches_store_via_tap(self, tmp_path):
-        """Write-through error (мимо hub) попадает в стор через tap."""
-        err = FakeErrorManager()
-        store, _ = wire_observability_store(err, db_path=str(tmp_path / "obs.db"))
+    def test_error_via_error_manager_reaches_store(self, tmp_path):
+        """Write-through error (error_manager) попадает в стор через tap."""
+        err = FakeLoggerCore()
+        store, _ = wire_observability_store(err, None, db_path=str(tmp_path / "obs.db"))
         err.emit_error("crash-1")
         err.emit_error("crash-2", level="CRITICAL")
         rows = store.list_records(kind="error")
@@ -54,17 +56,29 @@ class TestWireStore:
         assert rows[0]["severity"] == "critical"
         store.close()
 
-    def test_wire_without_error_manager(self, tmp_path):
-        store, tap = wire_observability_store(None, db_path=str(tmp_path / "obs.db"))
-        assert isinstance(store, ObservabilityStore)
-        assert tap is None
+    def test_error_via_logger_manager_reaches_store(self, tmp_path):
+        """Live-урок: logger.error/ctx.log_error (logger_manager) тоже в стор."""
+        log = FakeLoggerCore()
+        store, _ = wire_observability_store(None, log, db_path=str(tmp_path / "obs.db"))
+        log.emit_error("camera open failed", module="camera_0")
+        rows = store.list_records(kind="error")
+        assert len(rows) == 1
+        assert rows[0]["message"] == "camera open failed"
+        assert rows[0]["module"] == "camera_0"
         store.close()
 
-    def test_unwire_removes_tap(self, tmp_path):
-        err = FakeErrorManager()
-        store, tap = wire_observability_store(err, db_path=str(tmp_path / "obs.db"))
-        unwire_observability_store(err, store, tap)
+    def test_wire_without_managers(self, tmp_path):
+        store, taps = wire_observability_store(None, None, db_path=str(tmp_path / "obs.db"))
+        assert isinstance(store, ObservabilityStore)
+        assert taps == []
+        store.close()
+
+    def test_unwire_removes_all_taps(self, tmp_path):
+        err, log = FakeLoggerCore(), FakeLoggerCore()
+        store, taps = wire_observability_store(err, log, db_path=str(tmp_path / "obs.db"))
+        unwire_observability_store(store, taps)
         assert STORE_ERROR_TAP not in err._taps
+        assert STORE_LOGGER_TAP not in log._taps
 
 
 class TestDrainToStore:

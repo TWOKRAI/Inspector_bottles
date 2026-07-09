@@ -115,9 +115,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # дренируется по heartbeat, финально flush'ится на graceful-teardown.
         self._observability_hub = None
         self._observability_drain = None
-        # Персистентный стор наблюдаемости (Ф5.20a): drain log/stats + error-tap.
+        # Персистентный стор наблюдаемости (Ф5.20a): drain log/stats + error-tap'ы.
         self._observability_store = None
-        self._observability_store_tap = None
+        self._observability_store_taps = []
 
         # Plugin orchestrator — опциональная композиция
         # Активируется если config["plugins"] непуст (см. _init_custom_managers)
@@ -276,9 +276,11 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self.error_manager,
         )
         # Ф5.20a: персистентный стор — только когда есть hub (пилот-телеметрия).
-        # log/stats из drain-петли, error через store-tap на error_manager.
+        # log/stats из drain-петли, error через store-tap'ы на error+logger-менеджерах.
         if self._observability_hub is not None:
-            self._observability_store, self._observability_store_tap = wire_observability_store(self.error_manager)
+            self._observability_store, self._observability_store_taps = wire_observability_store(
+                self.error_manager, self.logger_manager
+            )
 
     def _init_communication(self):
         """Инициализация коммуникации процесса."""
@@ -678,15 +680,14 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             )
         except Exception:  # noqa: BLE001 — потеря телеметрии не должна ронять stop()
             pass
-        # Снять error-tap и закрыть стор (graceful; SIGKILL этот путь обходит,
+        # Снять store-tap'ы и закрыть стор (graceful; SIGKILL этот путь обходит,
         # но записи уже во WAL-файле — стор переживает рестарт).
         unwire_observability_store(
-            self.error_manager,
             self._observability_store,
-            self._observability_store_tap,
+            self._observability_store_taps,
         )
         self._observability_store = None
-        self._observability_store_tap = None
+        self._observability_store_taps = []
 
     # ========================================================================
     # СТАТИСТИКА
