@@ -101,3 +101,4 @@
 - [git/hook грабли merge в main](feedback_git_main_merge_hook_traps.md) — git merge -F - не читает stdin; protect-branch блокирует commit на main (в т.ч. compound); git add на удалённом пути фаталит; split commands + проверять staged
 - [observability-стор: маршрут ошибок](project_observability_store_error_routing.md) — ошибки идут в logger_manager (ctx.log_error), не error_manager; store-tap на ОБА; live-boot вскрыл
 - [sentrux depth непрозрачна](feedback_sentrux_depth_opaque.md) — не каталоги и не цепочка (замер опроверг); не гоняться за числом вслепую, нужен Pro root-cause
+- [freeze, не kill](feedback_freeze_over_kill.md) — владелец предпочитает замораживать мёртвый/дремлющий код, не удалять (actions_module, G2 форм)
