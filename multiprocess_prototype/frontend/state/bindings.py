@@ -397,13 +397,18 @@ class GuiStateBindings:
         Формат ожидаемого сообщения:
             {'data_type': 'state_delta', 'path': 'processes.cam.state.fps', 'value': 25.3}
 
+        Ф5.19: принимаем также ``gui_local_metric`` — GUI-локальные метрики
+        (chain_fps/latency/trace_*), измеряемые самим фронтендом и адресованные
+        панели «Все процессы». Это НЕ IPC state-дельта (в топологию/стор не течёт),
+        но питает те же path-биндинги — раньше маскировалось под фейковый state_delta.
+
         Сообщения с другим data_type или без ключей path/value — игнорируются.
 
         Args:
             msg_dict: словарь сообщения.
         """
         # Проверяем обязательные поля
-        if msg_dict.get("data_type") != "state_delta":
+        if msg_dict.get("data_type") not in ("state_delta", "gui_local_metric"):
             return
         path = msg_dict.get("path")
         if path is None or "value" not in msg_dict:

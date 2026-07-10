@@ -73,6 +73,22 @@ class TestPropertySetters:
 
         assert spinbox.value() == 42
 
+    def test_gui_local_metric_feeds_binding(self, qtbot, bindings):
+        """Ф5.19: data_type='gui_local_metric' питает те же path-биндинги (замена fake state_delta)."""
+        label = QLabel()
+        qtbot.addWidget(label)
+
+        bindings.bind("system.chain_fps", label, "text", formatter=lambda v: f"FPS {v}")
+        bindings._on_state_msg(
+            {
+                "data_type": "gui_local_metric",
+                "path": "system.chain_fps",
+                "value": 30.0,
+            }
+        )
+
+        assert label.text() == "FPS 30.0"
+
     def test_bind_text_property_updates_label(self, qtbot, bindings):
         """prop='text' → label.setText()."""
         label = QLabel()

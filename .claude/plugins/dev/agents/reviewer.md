@@ -63,6 +63,14 @@ that module's `CONTEXT.md` and rebuild with `/core:quality:sync-context`
 4. `qt_snapshot` / `qt_find_widget` — spot-check that new widgets are created with the correct parent (resource leak prevention).
 5. Fallback (qt-mcp not connected) → static analysis of the diff: look for `QThread`, `moveToThread`, `QTimer.singleShot` without a main-thread guard.
 
+**When reviewing backend/IPC/concurrency changes (if backend-ctl is connected):**
+1. Launch/connect to the running backend with `BACKEND_CTL=1` (process manager socket, port 8765 by default). Establish baseline with `capabilities` — live system shape (processes, commands, registers).
+2. Trace the change: apply diff, start backend, use `send_command` / `events` to observe message flow, `state_subscribe` for state propagation across processes.
+3. Check edge cases: concurrent sends via `send_command`, inspect process health with `get_status`, collect traces via `log_tail`.
+4. Validate concurrency: race conditions and timing issues are often invisible in unit tests but appear live.
+5. **Critical rule:** backend-ctl for backend behavior; qt-mcp for GUI. Do NOT run two backends in parallel (shared PID registry + SHM cleanup conflict) — use one backend instance with multiple clients.
+6. Fallback (backend-ctl not connected) → static analysis of diff: IPC routing integrity, message serialization at boundaries, lock coverage (see Specialization: IPC / Concurrency above).
+
 **Do not duplicate:** if codegraph provided callers → do not Grep the same symbols. If sentrux provided a list of violations → do not re-examine them manually. If qt_thread_check already reports violations → do not reason about them manually.
 
 ---

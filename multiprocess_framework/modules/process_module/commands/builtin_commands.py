@@ -639,6 +639,16 @@ class BuiltinCommands:
                 self._cmd_log_tail_unsubscribe,
                 "Снять подписку на tail логов процесса",
             ),
+            (
+                "observability.tail.subscribe",
+                self._cmd_observability_tail_subscribe,
+                "Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)",
+            ),
+            (
+                "observability.tail.unsubscribe",
+                self._cmd_observability_tail_unsubscribe,
+                "Снять подписку на live-хвост наблюдаемости процесса",
+            ),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
@@ -784,6 +794,32 @@ class BuiltinCommands:
         for mgr in self._log_tail_managers():
             removed = mgr.remove_log_tap(tap_name) or removed
         return {"success": bool(removed), "process": svc.name, "tap": tap_name}
+
+    def _cmd_observability_tail_subscribe(self, data=None, **kwargs) -> dict:
+        """Подписать GUI-адрес на live-хвост наблюдаемости процесса (Ф5.20b).
+
+        Делегирует в ProcessModule.subscribe_observability_tail: ставит форвардер
+        (drain log/stats) + error-tap'ы (write-through) → адресный push
+        ``command="observability.record"`` на подписчика. Живой хвост вкладок
+        Логи/Ошибки/Статистика (Ф5.19). Идемпотентно по подписчику.
+
+        Параметры (data): ``subscriber`` (адрес GUI-процесса, обяз.).
+        """
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+        subscriber = str(args.get("subscriber") or "").strip()
+        if not subscriber:
+            return {"success": False, "reason": "subscriber (адрес получателя) обязателен"}
+        if not hasattr(svc, "subscribe_observability_tail"):
+            return {"success": False, "reason": "процесс не поддерживает observability-tail"}
+        return svc.subscribe_observability_tail(subscriber)
+
+    def _cmd_observability_tail_unsubscribe(self, data=None, **kwargs) -> dict:
+        """Снять подписку на live-хвост наблюдаемости (форвардер + error-tap'ы)."""
+        svc = self._services
+        if not hasattr(svc, "unsubscribe_observability_tail"):
+            return {"success": False, "reason": "процесс не поддерживает observability-tail"}
+        return svc.unsubscribe_observability_tail()
 
     @staticmethod
     def _log_tap_name(subscriber: str) -> str:
@@ -1110,9 +1146,7 @@ class BuiltinCommands:
         try:
             self_pd = psr.get_process_data(self_name)
             self_meta = getattr(self_pd, "metadata", None) if self_pd is not None else None
-            last_seen = (
-                int(self_meta.get("routing_epoch", -1) or -1) if isinstance(self_meta, dict) else -1
-            )
+            last_seen = int(self_meta.get("routing_epoch", -1) or -1) if isinstance(self_meta, dict) else -1
             # Guard: устаревшая/повторная рассылка — no-op (самовосстановление
             # обеспечивает следующий полный снимок).
             if epoch <= last_seen:
@@ -1140,9 +1174,7 @@ class BuiltinCommands:
             # Зафиксировать epoch (last_seen) + счётчик применений.
             if isinstance(self_meta, dict):
                 self_meta["routing_epoch"] = epoch
-                self_meta["routing_refresh_applied"] = (
-                    int(self_meta.get("routing_refresh_applied", 0) or 0) + 1
-                )
+                self_meta["routing_refresh_applied"] = int(self_meta.get("routing_refresh_applied", 0) or 0) + 1
             return {"success": True, "epoch": epoch, "reset": sorted(reset), "reset_count": len(reset)}
         except Exception as exc:  # noqa: BLE001 — не ронять message-loop
             log_error = getattr(svc, "_log_error", None)

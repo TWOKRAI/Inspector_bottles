@@ -25,12 +25,16 @@ class DataReceiverBridge(QObject):
     frame_received = Signal(object)
     state_updated = Signal(object)
     command_response = Signal(object)
+    # Ф5.20b: живой хвост наблюдаемости (Логи/Ошибки/Статистика) — ОТДЕЛЬНЫЙ
+    # сигнал, НЕ state_updated: это не state-дельта, а поток записей hub→GUI.
+    observability_received = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._frame_cb: Callable | None = None
         self._state_cb: Callable | None = None
         self._command_cb: Callable | None = None
+        self._observability_cb: Callable | None = None
         # §11.15: multi-subscriber для state. Раньше второй потребитель
         # (topology_bridge) подключался обёрткой-closure поверх single-slot
         # set_state_callback (скрытый fan-out _state_multiplexer в app.py) —
@@ -70,12 +74,21 @@ class DataReceiverBridge(QObject):
     def set_command_callback(self, cb: Callable) -> None:
         self._command_cb = cb
 
+    def set_observability_callback(self, cb: Callable) -> None:
+        """Ф5.20b: колбэк живого хвоста наблюдаемости (записи Логи/Ошибки/Статистика)."""
+        self._observability_cb = cb
+
     def dispatch(self, msg_dict: dict) -> None:
         """Из worker thread — отправить в main thread через internal signal."""
         data_type = msg_dict.get("data_type", "")
         if data_type in ("frame_ready", "frame") or "frame" in msg_dict:
             kind = "frame"
-        elif data_type in ("status", "state_changed", "fps_update", "state_delta"):
+        elif data_type == "observability_record":
+            # Ф5.20b: живой хвост наблюдаемости — отдельный kind, НЕ state.
+            kind = "observability"
+        elif data_type in ("status", "state_changed", "fps_update", "state_delta", "gui_local_metric"):
+            # gui_local_metric (Ф5.19): GUI-локальная метрика → те же state-биндинги,
+            # но НЕ IPC-дельта (topology/observability-активатор её игнорируют).
             kind = "state"
         else:
             kind = "command"
@@ -97,6 +110,10 @@ class DataReceiverBridge(QObject):
             for listener in list(self._state_listeners):
                 listener(msg_dict)
             self.state_updated.emit(msg_dict)
+        elif kind == "observability":
+            if self._observability_cb:
+                self._observability_cb(msg_dict)
+            self.observability_received.emit(msg_dict)
         elif kind == "command":
             if self._command_cb:
                 self._command_cb(msg_dict)

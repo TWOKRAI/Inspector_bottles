@@ -118,6 +118,11 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # Персистентный стор наблюдаемости (Ф5.20a): drain log/stats + error-tap'ы.
         self._observability_store = None
         self._observability_store_taps = []
+        # Live-хвост hub→GUI (Ф5.20b): форвардер (drain log/stats) + error-tap'ы.
+        # None до подписки командой observability.tail.subscribe (форвардер «мёртв»
+        # без подписчика — как log_tail).
+        self._observability_forwarder = None
+        self._observability_forward_taps = []
 
         # Plugin orchestrator — опциональная композиция
         # Активируется если config["plugins"] непуст (см. _init_custom_managers)
@@ -679,6 +684,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         Дренаж не критичен — исключения глушим, чтобы не сорвать teardown."""
         from ..managers.observability_wiring import (
             drain_process_observability,
+            unwire_observability_forward,
             unwire_observability_store,
         )
 
@@ -687,6 +693,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
                 self._observability_hub,
                 self._observability_drain,
                 self._observability_store,
+                self._observability_forwarder,
             )
         except Exception:  # noqa: BLE001 — потеря телеметрии не должна ронять stop()
             pass
@@ -698,6 +705,48 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         )
         self._observability_store = None
         self._observability_store_taps = []
+        # Снять live-forward-tap'ы (Ф5.20b): подписчик уходит вместе с процессом.
+        unwire_observability_forward(self._observability_forward_taps)
+        self._observability_forwarder = None
+        self._observability_forward_taps = []
+
+    def subscribe_observability_tail(self, subscriber: str) -> dict:
+        """Ф5.20b: подписать GUI-адрес на live-хвост записей наблюдаемости.
+
+        Ставит форвардер (drain log/stats) + error-tap'ы (write-through) на push
+        ``command="observability.record"`` → GUI. Идемпотентно: повторная подписка
+        снимает прежние tap'ы и ставит заново (смена подписчика). Требует hub —
+        без него дренировать нечего.
+        """
+        from ..managers.observability_wiring import (
+            unwire_observability_forward,
+            wire_observability_forward,
+        )
+
+        if self.router_manager is None:
+            return {"success": False, "reason": "router_manager недоступен"}
+        if self._observability_hub is None:
+            return {"success": False, "reason": "observability hub не активен (нет пилот-воркеров)"}
+        # Идемпотентность: снять прежние tap'ы перед переустановкой.
+        unwire_observability_forward(self._observability_forward_taps)
+        self._observability_forwarder, self._observability_forward_taps = wire_observability_forward(
+            self.router_manager,
+            subscriber,
+            self.name,
+            self.logger_manager,
+            self.error_manager,
+        )
+        return {"success": True, "process": self.name, "subscriber": subscriber}
+
+    def unsubscribe_observability_tail(self) -> dict:
+        """Ф5.20b: снять подписку на live-хвост (форвардер + error-tap'ы)."""
+        from ..managers.observability_wiring import unwire_observability_forward
+
+        had = bool(self._observability_forwarder or self._observability_forward_taps)
+        unwire_observability_forward(self._observability_forward_taps)
+        self._observability_forwarder = None
+        self._observability_forward_taps = []
+        return {"success": had, "process": self.name}
 
     # ========================================================================
     # СТАТИСТИКА

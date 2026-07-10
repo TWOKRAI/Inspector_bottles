@@ -64,6 +64,7 @@ that module's `CONTEXT.md` and rebuild with `/core:quality:sync-context`
 5. **If bulk-codemod across N files + ast-grep is connected** → `ast-grep:scan` for AST-safe pattern (instead of risky Grep+Edit).
 6. **If cross-file symbol refactoring + serena is connected** → `serena:rename_symbol` (atomic LSP-rename), `serena:replace_symbol_body`, `serena:safe_delete_symbol` — more precise than Grep+Edit for individual symbols.
 7. **If editing GUI + qt-mcp is connected** → after changes do a smoke-check via `qt_find_widget` / `qt_snapshot` (widget exists, parent is correct) + `qt_messages` (no new warnings).
+8. **After implementing backend feature (if backend-ctl is connected)** → start/connect to the running backend with `BACKEND_CTL=1` (process manager socket, port 8765 by default). Begin with `capabilities` for system shape. Verify via `send_command` (behavior), `state_get` / `state_subscribe` (state correctness), `events` (message flow). Inspect `log_tail` for runtime traces. **Critical:** backend-ctl for backend logic; qt-mcp for GUI only. Do NOT run two backends in parallel (shared PID registry + SHM cleanup conflict) — attach one client to the existing backend.
 
 **Mode: Express review:**
 1. **If sentrux is connected** → `sentrux:check_rules` for quick violation check.

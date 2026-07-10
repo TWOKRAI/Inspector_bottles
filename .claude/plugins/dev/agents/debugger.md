@@ -42,6 +42,15 @@ Your goal — **find root cause and fix it** (if in scope).
 5. State-propagation bug → `qt_object_tree` — parent/children hierarchy (often the issue is a wrong parent or a reference leak).
 6. Fallback (qt-mcp not connected) → `pytest-qt` + manual run via `/core:infra:run-proto` + reading Qt logs from stderr.
 
+**Reproducing backend bugs (if backend-ctl is connected):**
+1. Start/connect to the running backend with `BACKEND_CTL=1` (process manager socket, port 8765 by default). Gather runtime evidence: `log_tail` **first** — often the error trace is already there (same priority as `qt_messages` for GUI bugs).
+2. Trace state before/after the bug: `state_get` at key points, `state_subscribe` for propagation across processes.
+3. Replay scenario: `send_command` to trigger the exact sequence, `events` to watch message routing, `debug_session` to halt and inspect.
+4. Validate hypothesis: repeat the scenario with different inputs or timing (`send_command` batches, timing variance).
+5. Inspect process health: `get_status` for process state, zombie checks, incarnation/epoch for stale-message fencing.
+6. **Critical rule:** backend-ctl for backend logic bugs; qt-mcp for GUI bugs. Do NOT start a second backend (shared PID registry + SHM cleanup conflict) — reproduce with the existing one.
+7. Fallback (backend-ctl not connected) → `pytest -s` + manual scenario via Bash, read logs from stderr/files.
+
 **Do not duplicate:** codegraph gave callers → don't Grep. context7 gave the API → don't guess behaviour. `qt_messages` gave a warning with a trace → don't reason from scratch.
 
 ## Workflow

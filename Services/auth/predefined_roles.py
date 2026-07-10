@@ -10,6 +10,7 @@
 (см. `multiprocess_prototype/frontend/tab_factory.TAB_ORDER`). При
 добавлении/удалении табов — синхронизировать оба места.
 """
+
 from __future__ import annotations
 
 from .models import Role
@@ -23,6 +24,7 @@ _TAB_IDS_ALL_VIEW: tuple[str, ...] = (
     "plugins",
     "pipeline",
     "displays",
+    "observability",
 )
 
 
@@ -37,29 +39,23 @@ def _tabs(*tab_ids: str, edit: bool = False) -> list[str]:
 
 
 # admin: все табы view+edit, users CRUD, roles read + edit (PR4).
-_ADMIN_PERMISSIONS: list[str] = (
-    _tabs(*_TAB_IDS_ALL_VIEW, edit=True)
-    + [
-        "users.view",
-        "users.create",
-        "users.edit",
-        "users.delete",
-        "users.reset_password",
-        "roles.view",
-        "roles.edit",  # PR4 Group D: admin может редактировать права ролей
-    ]
-)
+_ADMIN_PERMISSIONS: list[str] = _tabs(*_TAB_IDS_ALL_VIEW, edit=True) + [
+    "users.view",
+    "users.create",
+    "users.edit",
+    "users.delete",
+    "users.reset_password",
+    "roles.view",
+    "roles.edit",  # PR4 Group D: admin может редактировать права ролей
+]
 
 # operator: все табы view, edit на «рабочих» табах (recipes/processes/pipeline).
 # settings/services/plugins/displays — view-only (системные).
-_OPERATOR_PERMISSIONS: list[str] = (
-    _tabs(*_TAB_IDS_ALL_VIEW)
-    + [
-        "tabs.recipes.edit",
-        "tabs.processes.edit",
-        "tabs.pipeline.edit",
-    ]
-)
+_OPERATOR_PERMISSIONS: list[str] = _tabs(*_TAB_IDS_ALL_VIEW) + [
+    "tabs.recipes.edit",
+    "tabs.processes.edit",
+    "tabs.pipeline.edit",
+]
 
 # viewer: все табы view, никаких edit.
 _VIEWER_PERMISSIONS: list[str] = _tabs(*_TAB_IDS_ALL_VIEW)
