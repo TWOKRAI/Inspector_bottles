@@ -59,5 +59,9 @@ def log_record_to_display(record_dict: Dict[str, Any], kind: str = KIND_ERROR) -
         "ts": float(record_dict.get("timestamp", 0.0) or 0.0),
         "severity": str(record_dict.get("level", "")).lower(),
         "message": record_dict.get("message", ""),
-        "extra": record_dict.get("extra", {}) or {},
+        # extra под ключом "context" — паритет с историей: StoreTapChannel кладёт
+        # LogRecord.extra в "context", и _row_from_record сохраняет его как
+        # {"context": {...}}. Плоский extra здесь давал бы РАЗНУЮ форму записи в
+        # live-хвосте и после reload из стора (нарушение контракта record_display).
+        "extra": {"context": record_dict.get("extra", {}) or {}},
     }

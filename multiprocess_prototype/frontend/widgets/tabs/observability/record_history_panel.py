@@ -206,11 +206,23 @@ class RecordHistoryPanel(BaseAdminPanel):
         fresh = [rec for rec in records if self._presenter.matches_live(rec)]
         if not fresh:
             return 0
-        # Свежие сверху: вставляем в начало модели self._rows и перерисовываем «шапку».
+        # Свежие сверху. Инкрементально (O(fresh), не O(всей таблицы)): вставляем
+        # строки в начало таблицы, не пересоздавая её целиком — под busy-хвостом
+        # полный rebuild на каждый батч давал бы GUI-jank.
         self._rows = fresh + self._rows
-        if len(self._rows) > self._MAX_LIVE_ROWS:
-            self._rows = self._rows[: self._MAX_LIVE_ROWS]
-        self._fill_table(self._rows)
+        self._table.setUpdatesEnabled(False)
+        try:
+            for i, rec in enumerate(fresh):
+                self._table.insertRow(i)
+                self._set_row(i, rec)
+            # drop_oldest: обрезаем хвост модели И таблицы до _MAX_LIVE_ROWS.
+            while len(self._rows) > self._MAX_LIVE_ROWS:
+                self._rows.pop()
+                self._table.removeRow(self._table.rowCount() - 1)
+        finally:
+            self._table.setUpdatesEnabled(True)
+        # Пагинация зависит от числа строк (has_next) — держим кнопки честными.
+        self._update_pagination()
         return len(fresh)
 
     # ------------------------------------------------------------------

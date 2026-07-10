@@ -130,6 +130,21 @@ class TestPanel:
         assert panel._table.item(0, 3).text() == "new"  # свежая сверху
         assert panel._table.item(1, 3).text() == "old"
 
+    def test_live_append_trims_oldest_and_updates_pagination(self, qtbot):
+        """drop_oldest: модель и таблица обрезаются до _MAX_LIVE_ROWS; пагинация обновляется."""
+        from multiprocess_prototype.frontend.widgets.tabs.observability import RecordHistoryPanel
+
+        panel = RecordHistoryPanel(FakeSource(), "log", page_size=100)
+        qtbot.addWidget(panel)
+        panel._MAX_LIVE_ROWS = 3
+        added = panel.append_live_records([_rec("log", f"m{i}") for i in range(5)])
+        assert added == 5
+        assert panel._table.rowCount() == 3
+        assert len(panel._rows) == 3
+        assert panel._table.item(0, 3).text() == "m0"  # первая в батче — сверху
+        # has_next честный: 3 строки >= page_size? нет (100) → Next выключен
+        assert panel._btn_next.isEnabled() is False
+
     def test_live_append_skipped_off_first_page(self, qtbot):
         from multiprocess_prototype.frontend.widgets.tabs.observability import RecordHistoryPanel
 

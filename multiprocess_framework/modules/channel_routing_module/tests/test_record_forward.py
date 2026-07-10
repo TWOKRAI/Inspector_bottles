@@ -54,9 +54,24 @@ def test_hub_stats_record_to_display():
 
 
 def test_log_record_dict_to_display_defaults_error():
-    rec = {"timestamp": 3.0, "level": "CRITICAL", "scope": "system", "message": "boom", "module": "cam", "extra": {}}
+    rec = {
+        "timestamp": 3.0,
+        "level": "CRITICAL",
+        "scope": "system",
+        "message": "boom",
+        "module": "cam",
+        "extra": {"rid": 7},
+    }
     d = log_record_to_display(rec)
-    assert d == {"kind": "error", "module": "cam", "ts": 3.0, "severity": "critical", "message": "boom", "extra": {}}
+    # extra под "context" — паритет со стором (StoreTapChannel → _row_from_record).
+    assert d == {
+        "kind": "error",
+        "module": "cam",
+        "ts": 3.0,
+        "severity": "critical",
+        "message": "boom",
+        "extra": {"context": {"rid": 7}},
+    }
 
 
 # ---------------------------------------------------------------------------
