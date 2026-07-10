@@ -2,13 +2,16 @@
 """
 StoreTapChannel — tap-sink LoggerCore, пишущий записи в ObservabilityStore (Ф5.20a).
 
-По дизайну Ф5.16 error/critical идут write-through в РЕАЛЬНЫЙ error_manager
-(минуя буфер hub — SIGKILL обходит finally/atexit). Значит `hub.drain_all()`
-ошибки НЕ содержит, и стор, наполняемый только из drain-петли, вкладку «Ошибки»
-не покажет. Решение (владелец 2026-07-09): повесить этот tap на error_manager —
-он ловит КАЖДУЮ error/critical-запись у реального sink'а (тот же проверенный
+По дизайну Ф5.16 (+ уточнение R1/R3 2026-07-10) error/critical идут write-through
+в РЕАЛЬНЫЕ менеджеры, минуя буфер hub (SIGKILL обходит finally/atexit): через
+error_manager (track_error) И через logger_manager (расщепитель logger-слота
+пишет error/critical лог напрямую). Значит `hub.drain_all()` ошибки НЕ содержит,
+и стор, наполняемый только из drain-петли, вкладку «Ошибки» не покажет. Решение
+(владелец 2026-07-09): повесить этот tap на error_manager И logger_manager — он
+ловит КАЖДУЮ error/critical-запись у реального sink'а (тот же проверенный
 механизм, что log_tail: `LoggerCore.add_log_tap(channel, min_level)`), и кладёт
-её в стор. log/stats при этом идут в стор пачкой из drain-петли (батчинг).
+её в стор РОВНО один раз (write-through исключает переигровку из drain → нет
+дубля). log (severity < ERROR)/stats при этом идут в стор пачкой из drain-петли.
 
 Канал — IChannel-совместимый (`write(dict)` / `name` / `close()`), duck-typed:
 модуль НЕ импортирует logger_module (иначе core-слой получил бы обратную связь).

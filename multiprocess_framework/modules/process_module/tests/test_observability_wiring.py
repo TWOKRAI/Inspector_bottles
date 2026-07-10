@@ -5,14 +5,19 @@
 Контракт (решение владельца 2026-07-09 §6.1):
   - hub — один на процесс, тег = имя процесса;
   - пилот — worker_module (пустой реестр слотов → безопасная подмена);
-  - log/stats worker'а → hub (буфер, drain по heartbeat);
+  - stats worker'а → hub (буфер, drain по heartbeat);
+  - logger-слот worker'а → _LoggerSlotSplitter (уточнение R1/R3 2026-07-10):
+    info/warning/debug → hub-буфер; error/critical → write-through в реальный
+    logger_manager (иначе петля drain↔tap задваивала ошибку — R1);
   - error-слот worker'а → реальный error_manager (write-through, переживает
     SIGKILL: инвариант 3, буфер не полагается на finally/atexit);
-  - контракт «слот менеджера → ЛИБО sink, ЛИБО hub, не оба».
+  - контракт «слот менеджера → ЛИБО sink, ЛИБО hub, не оба» уточнён до
+    пер-severity: КАЖДАЯ severity уходит РОВНО в один приёмник (sink XOR буфер).
 """
 
 from ...worker_module.core.worker_manager import WorkerManager
 from ..managers.observability_wiring import (
+    _LoggerSlotSplitter,
     drain_process_observability,
     wire_process_observability,
 )
@@ -44,10 +49,16 @@ def _wire():
 # ---------------------------------------------------------------------------
 
 
-def test_wire_injects_hub_into_log_and_stats_slots():
+def test_wire_injects_hub_into_stats_and_splitter_into_logger():
+    """stats-слот — чистый hub; logger-слот — расщепитель поверх того же hub'а
+    (R1/R3: info/warning/debug буферизуются в hub, error/critical — write-through)."""
     worker, _, _, _, hub, _ = _wire()
-    assert worker.get_manager("logger") is hub
     assert worker.get_manager("stats") is hub
+    logger_slot = worker.get_manager("logger")
+    assert isinstance(logger_slot, _LoggerSlotSplitter)
+    # Не-error эмиссия оседает в буфере того же hub'а (буферизуемый путь сохранён).
+    worker._log_info("hi", module="w")
+    assert len(hub.get_channel("log").drain()) == 1
 
 
 def test_wire_keeps_error_slot_write_through():
@@ -120,20 +131,39 @@ def test_worker_critical_error_write_through():
 
 
 # ---------------------------------------------------------------------------
-# Контракт: каждый слот → ЛИБО sink, ЛИБО hub, не оба
+# Контракт: КАЖДАЯ severity → ЛИБО sink, ЛИБО hub, не оба (уточнён пер-severity)
 # ---------------------------------------------------------------------------
 
 
-def test_slot_is_either_sink_or_hub_not_both():
-    """Плановый контракт-тест Ф5.16: буферизуемые слоты (logger/stats) — это hub;
-    write-through слот (error) — реальный sink; пересечения нет."""
+def test_each_severity_routed_to_exactly_one_receiver():
+    """Контракт-тест Ф5.16, уточнён R1/R3 (2026-07-10): исходный инвариант «слот →
+    ЛИБО sink, ЛИБО hub» огрублял logger-слот (одна ошибка задваивалась петлёй
+    drain↔tap — R1). Точный инвариант — пер-severity: КАЖДАЯ эмиссия уходит РОВНО
+    в один приёмник (реальный sink XOR hub-буфер), пересечения нет.
+
+    - stats-слот — чистый hub (буфер);
+    - error-слот (track_error) — реальный error_manager (write-through);
+    - logger-слот — расщепитель: severity<ERROR → hub-буфер, ≥ERROR → реальный
+      logger (write-through). Проверяем ПОВЕДЕНЧЕСКИ обе ветки на непересечение.
+    """
     worker, logger, stats, error, hub, _ = _wire()
 
-    slots = {name: worker.get_manager(name) for name in ("logger", "stats", "error")}
+    # stats — строго hub; error-слот — строго реальный sink (не hub).
+    assert worker.get_manager("stats") is hub
+    assert worker.get_manager("error") is error
+    assert worker.get_manager("error") is not hub
 
-    # log/stats — строго hub (буфер), error — строго реальный sink (write-through).
-    assert slots["logger"] is hub and slots["stats"] is hub
-    assert slots["error"] is error
-    # Ни один слот не указывает одновременно и на hub, и на реальный sink.
-    assert slots["error"] is not hub
-    assert slots["logger"] is not logger and slots["stats"] is not stats
+    # logger-слот — расщепитель, не сам hub и не сам реальный logger.
+    logger_slot = worker.get_manager("logger")
+    assert isinstance(logger_slot, _LoggerSlotSplitter)
+    assert logger_slot is not hub and logger_slot is not logger
+
+    # severity < ERROR → РОВНО в hub-буфер, реальный logger НЕ тронут.
+    worker._log_info("i", module="w")
+    assert logger.calls == []
+    assert len(hub.get_channel("log").drain()) == 1
+
+    # severity ≥ ERROR → РОВНО в реальный logger (write-through), hub-буфер пуст.
+    worker._log_error("e", module="w")
+    assert any(c[0] == "error" and c[1][0] == "e" for c in logger.calls)
+    assert len(hub.get_channel("log").drain()) == 0
