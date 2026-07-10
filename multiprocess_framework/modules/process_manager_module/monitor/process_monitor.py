@@ -200,9 +200,7 @@ class ProcessMonitor:
         if acquired:
             self._iteration_lock.release()
         else:
-            self.process._log_warning(
-                f"Monitor: текущая итерация не завершилась за {timeout}с — пауза НЕ синхронна"
-            )
+            self.process._log_warning(f"Monitor: текущая итерация не завершилась за {timeout}с — пауза НЕ синхронна")
 
     # ----------------------------------------------------------------
     # Heartbeat: приём сообщений
@@ -541,12 +539,17 @@ class ProcessMonitor:
                     except Exception:  # nosec B110 — best-effort синхронизация реестра
                         pass
 
-            # Ф4-добор: авто-восстановление после рестарта. Процесс, которому был
-            # запланирован рестарт, снова жив И прислал heartbeat (self._last_heartbeat
-            # сброшен при рестарте, строка _dispatch_due_restarts) → «восстановился».
-            # Heartbeat как критерий (а не статус-переход) надёжен: после рестарта
-            # prev_status="crashed" не проходит промоушен выше, а первый heartbeat
-            # нового инстанса — однозначный сигнал живости.
+            # Ф4-добор: авто-восстановление. Процесс, которому запланирован рестарт,
+            # снова жив И прислал heartbeat → «восстановился». Heartbeat как критерий
+            # (а не статус-переход) надёжен: после рестарта prev_status="crashed" не
+            # проходит промоушен выше, а heartbeat — однозначный сигнал живости.
+            # R2 (ADR-PMM-015): критерий «heartbeat ПОСЛЕ планирования». _last_heartbeat
+            # обнуляется уже при постановке рестарта в план (_try_auto_restart), а не
+            # только в _dispatch_due_restarts — иначе для ЖИВОГО-но-сломанного процесса
+            # (unresponsive / health-failed H4) с backoff_sec>0 устаревший (до-план)
+            # heartbeat в окне до диспатча давал ложное 'recovered' и снимал watchdog
+            # H3. Здесь не-None => heartbeat пришёл после сброса: само-исцеление до
+            # диспатча ИЛИ новая инкарнация после рестарта — оба легитимны.
             if proc.name in self._pending_recovery and self._last_heartbeat.get(proc.name) is not None:
                 self._pending_recovery.discard(proc.name)
                 self._recovery_deadline.pop(proc.name, None)  # H3: восстановился — снять watchdog
@@ -602,9 +605,7 @@ class ProcessMonitor:
         if ssm is None:
             return None
         try:
-            resp = ssm.handle_state_get(
-                {"data": {"path": health_path(process_name, HealthField.STATUS)}}
-            )
+            resp = ssm.handle_state_get({"data": {"path": health_path(process_name, HealthField.STATUS)}})
             return resp.get("value") if resp.get("status") == "ok" else None
         except Exception:  # nosec B110 — чтение health не критично для монитора
             return None
@@ -639,9 +640,7 @@ class ProcessMonitor:
         policy = self._resolve_policy(process_name)
         if not (policy.enabled and getattr(policy, "restart_on_health_failed", True)):
             return
-        self.process._log_warning(
-            f"Process '{process_name}' жив, но health.status=failed — health-based рестарт (H4)"
-        )
+        self.process._log_warning(f"Process '{process_name}' жив, но health.status=failed — health-based рестарт (H4)")
         self._try_auto_restart(process_name, reason="health-failed")
 
     def _handle_dead_process(self, proc) -> None:
@@ -904,6 +903,15 @@ class ProcessMonitor:
         # Ф4-добор: помечаем ожидание восстановления (снимется по возврату heartbeat)
         # + громкое событие «рестартится k/N».
         self._pending_recovery.add(process_name)
+        # R2 (ADR-PMM-015): сбрасываем heartbeat-базу ПРЯМО при планировании, а не
+        # только в _dispatch_due_restarts. Иначе для ЖИВОГО-но-сломанного процесса
+        # (unresponsive / health-failed H4) с backoff_sec>0 устаревший (до-план)
+        # heartbeat оставался не-None в окне до диспатча и ложно триггерил
+        # 'recovered' (_check_heartbeats), снимая watchdog H3 (_recovery_deadline).
+        # Критерий 'recovered' = heartbeat, пришедший ПОСЛЕ планирования: сброс
+        # здесь делает базу None, и только новый heartbeat (само-исцеление до
+        # диспатча ИЛИ новая инкарнация после рестарта) снова её поднимет.
+        self._last_heartbeat.pop(process_name, None)
         # H3: дедлайн восстановления. Успешный рестарт вернёт heartbeat задолго до
         # него (backoff + boot + первый heartbeat). Истёк, а имя ещё в
         # _pending_recovery → рестарт тихо провалился → watchdog пере-инициирует.
@@ -939,32 +947,37 @@ class ProcessMonitor:
         due = [name for name, ts in self._pending_restarts.items() if ts <= now]
         for name in due:
             self._pending_restarts.pop(name, None)
-            # Очищаем heartbeat перед рестартом — новый процесс пришлёт свой
+            # Второй сброс heartbeat-базы — на момент фактического исполнения рестарта
+            # (первый — при планировании, R2/ADR-PMM-015). Если процесс само-исцелился
+            # в окне backoff и heartbeat поднялся, здесь снова обнуляем: рестарт
+            # исполняется, и следующий recovery-сигнал — heartbeat новой инкарнации.
             self._last_heartbeat.pop(name, None)
             try:
                 comm = getattr(self.process, "communication", None)
-                sent = bool(
-                    comm.send_message(
-                        self.process.name,
-                        {
-                            "type": "command",
-                            "command": "process.restart",
-                            "data_type": "process.restart",
-                            "sender": self.process.name,
-                            "targets": [self.process.name],
-                            "data": {"process_name": name},
-                        },
+                sent = (
+                    bool(
+                        comm.send_message(
+                            self.process.name,
+                            {
+                                "type": "command",
+                                "command": "process.restart",
+                                "data_type": "process.restart",
+                                "sender": self.process.name,
+                                "targets": [self.process.name],
+                                "data": {"process_name": name},
+                            },
+                        )
                     )
-                ) if comm is not None else False
+                    if comm is not None
+                    else False
+                )
             except Exception as exc:
                 sent = False
                 self.process._log_error(f"Monitor: отправка рестарта '{name}' не удалась: {exc}")
             if sent:
                 self.process._log_info(f"Monitor: рестарт '{name}' отправлен PM (вне потока монитора)")
             else:
-                self.process._log_error(
-                    f"Monitor: рестарт '{name}' НЕ отправлен — процесс остаётся в текущем статусе"
-                )
+                self.process._log_error(f"Monitor: рестарт '{name}' НЕ отправлен — процесс остаётся в текущем статусе")
 
     def _check_recovery_timeouts(self) -> None:
         """H3: пере-инициировать рестарты, тихо не вернувшиеся к жизни.
