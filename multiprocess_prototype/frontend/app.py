@@ -881,22 +881,27 @@ def _setup_timers(
         window.update_status(fps=float(count))
         # Сквозной FPS цепочки → health-панель «Все процессы». count = кадров/с,
         # дошедших до дисплея через ВСЕ процессы (выходная пропускная способность
-        # пайплайна). Инъекция локальной state-дельты в bridge (тот же канал, что
-        # телеметрия): через дерево нельзя — GUI не получает свои дельты (exclude_self).
+        # пайплайна). Ф5.19: это GUI-ЛОКАЛЬНАЯ метрика (измеряет фронтенд), а НЕ
+        # IPC state-дельта — маршрут data_type="gui_local_metric": те же path-
+        # биндинги панели «Все процессы», но в топологию/стор/observability-активатор
+        # не течёт (раньше маскировалось под фейковый state_delta). Через дерево
+        # нельзя — GUI не получает свои дельты (exclude_self).
         try:
-            process._bridge.dispatch({"data_type": "state_delta", "path": "system.chain_fps", "value": float(count)})
+            process._bridge.dispatch(
+                {"data_type": "gui_local_metric", "path": "system.chain_fps", "value": float(count)}
+            )
             # Сквозная задержка цепочки (среднее за секунду, мс): capture→display.
             latency = window.reset_chain_latency()
             if latency is not None:
                 process._bridge.dispatch(
-                    {"data_type": "state_delta", "path": "system.chain_latency_ms", "value": latency}
+                    {"data_type": "gui_local_metric", "path": "system.chain_latency_ms", "value": latency}
                 )
             # Пер-сегментная разбивка кадра (среднее за секунду) → таблица в
             # «Все процессы». Не пусто только при INSPECTOR_FRAME_TRACE=1.
             segments = window.reset_trace_segments()
             if segments is not None:
                 process._bridge.dispatch(
-                    {"data_type": "state_delta", "path": "system.trace_segments", "value": segments}
+                    {"data_type": "gui_local_metric", "path": "system.trace_segments", "value": segments}
                 )
             # Сводка ветвей fan-in (последний снимок за период) → блок ветвей в
             # «Все процессы». Не пусто только при INSPECTOR_FRAME_TRACE=1 +
@@ -904,7 +909,7 @@ def _setup_timers(
             branches = window.reset_trace_branches()
             if branches is not None:
                 process._bridge.dispatch(
-                    {"data_type": "state_delta", "path": "system.trace_branches", "value": branches}
+                    {"data_type": "gui_local_metric", "path": "system.trace_branches", "value": branches}
                 )
         except Exception:  # noqa: BLE001 — телеметрия не критична
             pass

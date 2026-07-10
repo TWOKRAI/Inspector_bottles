@@ -86,7 +86,9 @@ class DataReceiverBridge(QObject):
         elif data_type == "observability_record":
             # Ф5.20b: живой хвост наблюдаемости — отдельный kind, НЕ state.
             kind = "observability"
-        elif data_type in ("status", "state_changed", "fps_update", "state_delta"):
+        elif data_type in ("status", "state_changed", "fps_update", "state_delta", "gui_local_metric"):
+            # gui_local_metric (Ф5.19): GUI-локальная метрика → те же state-биндинги,
+            # но НЕ IPC-дельта (topology/observability-активатор её игнорируют).
             kind = "state"
         else:
             kind = "command"

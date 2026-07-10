@@ -122,6 +122,22 @@ class TestDataReceiverBridgeDispatch:
         assert len(received) == 1
         assert received[0] == msg
 
+    def test_dispatch_gui_local_metric_goes_to_state(self, qtbot):
+        """Ф5.19: data_type='gui_local_metric' → state_updated (замена fake state_delta), НЕ observability."""
+        from multiprocess_prototype.frontend.bridge import DataReceiverBridge
+
+        bridge = DataReceiverBridge()
+        state, obs = [], []
+        bridge.state_updated.connect(state.append)
+        bridge.observability_received.connect(obs.append)
+
+        msg = {"data_type": "gui_local_metric", "path": "system.chain_fps", "value": 30.0}
+        bridge.dispatch(msg)
+
+        assert len(state) == 1
+        assert state[0] == msg
+        assert obs == []
+
     def test_dispatch_observability_record_goes_to_observability_signal(self, qtbot):
         """Ф5.20b: data_type='observability_record' → observability_received, НЕ state."""
         from multiprocess_prototype.frontend.bridge import DataReceiverBridge
