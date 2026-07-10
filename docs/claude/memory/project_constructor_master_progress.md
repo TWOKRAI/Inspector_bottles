@@ -1,6 +1,6 @@
 ---
 name: project-constructor-master-progress
-description: "constructor-master: Ф0-Ф4.2 + Ф5 carve(5.1-5.7) + ObservabilityHub(5.14-5.17) + Ф5.9 GUI state-plane + Ф5.20a стор — в MAIN. Ф5.19+Ф5.20b (виджет 3 вкладок + hub→GUI live-хвост) — на ветке feat/observability-gui-tabs (НЕ в main). NEXT свободны: 5.3 recipe-carve→5.11-5.13 app_module, 5.8 RuntimeDeps, 5.18 depth, 5.6a форм-diff"
+description: "constructor-master: Ф0-Ф4.2 + Ф5 carve(5.1-5.7) + ObservabilityHub(5.14-5.17) + Ф5.9 + Ф5.20a + Ф5.19 + Ф5.20b — ВСЁ в MAIN (последний merge a1338f37). NEXT свободны: 5.3 recipe-carve→5.11-5.13 app_module, 5.8 RuntimeDeps, 5.18 depth, 5.6a форм-diff, 5.21 добор наблюдаемости. Handoff: docs/handoffs/2026-07-10_f5-observability-merged.md"
 metadata: 
   node_type: memory
   type: project
@@ -8,15 +8,15 @@ metadata:
 ---
 
 Мастер-план `plans/2026-07-06_constructor-master/` в исполнении с 2026-07-06.
-**Актуальный handoff: docs/handoffs/2026-07-10_f5-gui-observability.md** — читать первым.
+**Актуальный handoff: docs/handoffs/2026-07-10_f5-observability-merged.md** — читать первым.
 
-**LATEST 2026-07-10 (вечер) — Ф5.19 + Ф5.20b закрыты (ветка `feat/observability-gui-tabs`, НЕ в main):**
+**LATEST 2026-07-10 (вечер) — Ф5.19 + Ф5.20b ВЛИТЫ В MAIN (merge a1338f37, --no-ff; ветка feat/observability-gui-tabs, 14 коммитов):**
 - **5.20b hub→GUI live-хвост**: `RecordForwardChannel` (IChannel: `write` одна error-запись у tap'а + `push_batch` пачка log/stats из drain), `record_display` (единый display-вид `{kind,module,ts,severity,message,extra}` из hub-записи И LogRecord-dict — форма == `store.list_records` без id), `wire_observability_forward` (форвардер + error-tap'ы на logger+error min ERROR — симметрия store-tap 5.20a), `drain_process_observability(+forwarder)`, `ProcessModule.subscribe/unsubscribe_observability_tail` + команды `observability.tail.subscribe/unsubscribe`. GUI: `DataReceiverBridge.observability_received` (ОТДЕЛЬНЫЙ сигнал, НЕ state_updated), `GuiProcess.register_message_handler("observability.record")`, app-активатор подписывает каждый процесс по обнаружению в `processes.*` (дедуп).
 - **5.19 виджет 3 вкладок**: `widgets/tabs/observability/` — `RecordSource` Protocol + `open_default_source` (общий `observability.db` на чтение), `RecordHistoryPresenter` (Qt-free пагинация/фильтры/matches_live), `RecordHistoryPanel` (переиспольз. `BaseAdminPanel`: фильтр уровня, Источник, Копировать TSV, Очистить, live-append свежие-сверху-на-1й-странице), `ObservabilityTabs` (3 инстанса log/error/stats). Вкладка «Наблюдаемость» в TAB_ORDER + register_all_tabs + `RuntimeDeps.data_bridge` + predefined_roles.
 - **Fake-дельты убраны**: 4 GUI-метрики (chain_fps/chain_latency_ms/trace_segments/trace_branches) → `data_type="gui_local_metric"` (не фейковый state_delta); bindings принимают оба; в топологию/стор/observability-активатор gui_local_metric НЕ течёт.
 - **Live-валидация (region_pipeline, BACKEND_CTL, 2026-07-10):** subscribe camera_0 → `start_capture` (ERROR камеры) → events() показал `command="observability.record"` с `{kind:error,severity:error,message:"...не удалось открыть камеру 0"}` ОТДЕЛЬНЫМ каналом от log.record. **Урок: health.report логирует на WARNING (не ERROR) → forward-tap min ERROR его не ловит; настоящий ERROR даёт start_capture.**
 - **Тесты**: 28 (backend 14 + GUI-plumbing 5 + widget/route 9); регресс fw 822 + proto 2173 + tab/auth зелёные; ruff/pyright 0; sentrux 9/9 (0 reverse-import, quality 7077). 8 коммитов.
-- **ОТКРЫТЫЙ ДОЛГ**: авто-рестарт процесса теряет подписку live-хвоста (дедуп по имени не переподписывает новую инкарнацию) — кандидат в Ф4-хвост fencing [[project-topology-fencing-token]]. Побочно: backend-ctl прописан в 5 dev-агентов (developer/teamlead/tester/reviewer/debugger, оба зеркала).
+- **Долг рестарт-переподписки ЗАКРЫТ**: `ObservabilityTailActivator` переподписывает новую инкарнацию по `supervisor.event=recovered` (ADR-PMM-015). **Код-ревью (4 угла) → исправлено F1 (паритет формы extra live↔history — extra под "context") + F3/F7 (инкрементальный live-append + честная пагинация); остаточные долги → задача 5.21** (BaseAdminPanel в общий widgets/base, единый нормализатор display↔store, имя процесса в record, QoS live-хвоста). Побочно: backend-ctl прописан в 5 dev-агентов (оба зеркала).
 - **NEXT**: 5.3 recipe-carve (крупная) → 5.11-5.13 app_module skeleton; свободны 5.8 RuntimeDeps, 5.18 depth, 5.6a форм-diff; **5.21 — добор наблюдаемости после ревью** (BaseAdminPanel в общий widgets/base, единый нормализатор display↔store, имя процесса в record, QoS live-хвоста, мелочи). main НЕ запушен (owner-gated).
 
 **LATEST 2026-07-10 — Ф5.9 + Ф5.20a влиты в main (merge fd963396, --no-ff):**
