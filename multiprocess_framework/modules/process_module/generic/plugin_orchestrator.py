@@ -238,11 +238,13 @@ class PluginOrchestrator:
         V3_MY_PURE: register_schema() — classmethod, возвращает list[type[SchemaBase]].
         Для обратной совместимости поддерживает и старый формат (SchemaBase instance).
 
-        Convention mapping: plugin.name -> register name в RegistersManager (для ОДНОГО
-        регистра экземпляра). Несколько регистров одного экземпляра квалифицируются
-        классом (`plugin.name.ClassName`) — иначе перезапись под одним ключом (R6/Н-7).
-        Дубликат имени регистра (в т.ч. дубликат plugin_name между плагинами) — громкий
-        лог + пропуск (выживает первый), молча не теряем.
+        Единое правило имени (4.1, R6/Н-7): ``reg_name = SchemaBase.REGISTER_NAME or
+        plugin_name`` — регистр владеет своим именем через classvar ``REGISTER_NAME``;
+        пусто → конвенция register_name == plugin_name (обратная совместимость адресации
+        GUI/live-write для одиночного регистра). Несколько регистров одного экземпляра
+        ОБЯЗАНЫ объявить distinct ``REGISTER_NAME``. Коллизия ключа (multi без имён ИЛИ
+        дубликат plugin_name между плагинами) — громкий лог + пропуск (выживает ПЕРВЫЙ),
+        молча не теряем.
         """
         schemas: dict[str, Any] = {}
 

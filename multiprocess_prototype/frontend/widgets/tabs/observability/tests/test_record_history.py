@@ -207,6 +207,21 @@ class TestPanel:
         assert "усеч" in panel._lbl_page.text()
         assert "3" in panel._lbl_page.text()
 
+    def test_reload_resets_truncation_counter(self, qtbot):
+        """R4 (d) ревью 2026-07-10: после reload() таблица показывает историю из
+        стора — счётчик «хвост усечён» сбрасывается вместе с tooltip'ом."""
+        from multiprocess_prototype.frontend.widgets.tabs.observability import RecordHistoryPanel
+
+        panel = RecordHistoryPanel(FakeSource([_rec("log", "old")]), "log", page_size=100)
+        qtbot.addWidget(panel)
+        panel._MAX_LIVE_ROWS = 2
+        panel.append_live_records([_rec("log", f"m{i}") for i in range(5)])
+        assert panel._dropped_live == 4  # 1 из стора + 5 live − лимит 2
+        panel.reload()
+        assert panel._dropped_live == 0
+        assert "усеч" not in panel._lbl_page.text()
+        assert panel._lbl_page.toolTip() == ""
+
     def test_owns_default_source_closed(self, qtbot):
         """5.21 (e): вкладки закрывают собственный стор (не переданный извне)."""
         from multiprocess_prototype.frontend.widgets.tabs.observability import ObservabilityTabs
