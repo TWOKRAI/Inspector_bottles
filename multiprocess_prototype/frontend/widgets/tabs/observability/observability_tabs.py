@@ -30,12 +30,42 @@ class ObservabilityTabs(QTabWidget):
     def __init__(self, source: Optional[RecordSource] = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         # source=None → открыть общий стор по умолчанию (в тестах передаётся fake).
+        # Владеем стором ТОЛЬКО когда открыли его сами → только его и закрываем
+        # (переданный извне закрывает владелец) — 5.21 (e).
+        self._owns_source = source is None
         self._source = source if source is not None else open_default_source()
         self._panels: Dict[str, RecordHistoryPanel] = {}
         for kind, title in _TABS:
             panel = RecordHistoryPanel(self._source, kind, title=title)
             self._panels[kind] = panel
             self.addTab(panel, title)
+        # Стор держит WAL-reader на observability.db — освобождаем на выходе из
+        # приложения (вкладка живёт весь сеанс, closeEvent у child не приходит).
+        self._wire_close_on_quit()
+
+    def _wire_close_on_quit(self) -> None:
+        """Закрыть собственный стор по QApplication.aboutToQuit (leak WAL-reader; 5.21 (e))."""
+        if not self._owns_source or self._source is None:
+            return
+        try:
+            from PySide6.QtWidgets import QApplication
+
+            app = QApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(self.close_source)
+        except Exception:  # noqa: BLE001 — отсутствие app не должно ронять конструктор
+            pass
+
+    def close_source(self) -> None:
+        """Закрыть стор, если владеем им (teardown/тесты). Идемпотентно."""
+        if self._owns_source and self._source is not None:
+            close = getattr(self._source, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001 — best-effort teardown
+                    pass
+        self._source = None
 
     def panel(self, kind: str) -> Optional[RecordHistoryPanel]:
         """Панель по kind (для тестов/интеграции)."""
@@ -54,6 +84,13 @@ class ObservabilityTabs(QTabWidget):
         records: List[Dict[str, Any]] = msg_dict.get("records", []) if isinstance(msg_dict, dict) else []
         if not records:
             return
+        # 5.21 (c): бэкенд штампует process в каждую запись; на всякий случай
+        # добираем из конверта сообщения (data.process) для записей без поля.
+        envelope_process = msg_dict.get("process", "") if isinstance(msg_dict, dict) else ""
+        if envelope_process:
+            for rec in records:
+                if isinstance(rec, dict) and not rec.get("process"):
+                    rec["process"] = envelope_process
         for panel in self._panels.values():
             panel.append_live_records(records)
 

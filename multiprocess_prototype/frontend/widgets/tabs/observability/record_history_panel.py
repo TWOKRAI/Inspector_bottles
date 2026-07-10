@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..settings.administration._base_panel import BaseAdminPanel
+from ...primitives import BaseAdminPanel
 from .record_history_presenter import RecordHistoryPresenter
 from .record_source import RecordSource
 
@@ -62,6 +62,9 @@ class RecordHistoryPanel(BaseAdminPanel):
     _TABLE_COLUMNS = [
         ("ts", "Время", 190),
         ("severity", "Уровень", 90),
+        # 5.21 (c): «Процесс» — процесс-источник (camera_0), «Источник» — scope
+        # логгера/модуль (для hub-записей совпадают, для error-write-through — нет).
+        ("process", "Процесс", 130),
         ("module", "Источник", 150),
         ("message", "Сообщение", 300),
     ]
@@ -80,6 +83,10 @@ class RecordHistoryPanel(BaseAdminPanel):
         self._HEADER_TITLE = title or kind.capitalize()
         self._presenter = RecordHistoryPresenter(source, kind, page_size=page_size)
         self._rows: List[Dict[str, Any]] = []
+        # 5.21 (e): счётчик live-записей, отброшенных при переполнении _MAX_LIVE_ROWS.
+        # Полная история — в сторе (кнопка «Обновить»); тут показываем, что хвост
+        # усечён, чтобы усечение не читалось как «больше ничего не было».
+        self._dropped_live = 0
         self._setup_ui()
         self.reload()
 
@@ -182,6 +189,7 @@ class RecordHistoryPanel(BaseAdminPanel):
         cells = [
             _format_ts(rec.get("ts")),
             str(rec.get("severity", "") or "—"),
+            str(rec.get("process", "") or "—"),
             str(rec.get("module", "") or "—"),
             str(rec.get("message", "") or ""),
         ]
@@ -219,6 +227,7 @@ class RecordHistoryPanel(BaseAdminPanel):
             while len(self._rows) > self._MAX_LIVE_ROWS:
                 self._rows.pop()
                 self._table.removeRow(self._table.rowCount() - 1)
+                self._dropped_live += 1  # 5.21 (e): усечение хвоста не молчим
         finally:
             self._table.setUpdatesEnabled(True)
         # Пагинация зависит от числа строк (has_next) — держим кнопки честными.
@@ -240,6 +249,7 @@ class RecordHistoryPanel(BaseAdminPanel):
                     [
                         _format_ts(rec.get("ts")),
                         str(rec.get("severity", "")),
+                        str(rec.get("process", "")),
                         str(rec.get("module", "")),
                         str(rec.get("message", "")),
                     ]
@@ -268,7 +278,15 @@ class RecordHistoryPanel(BaseAdminPanel):
             self.reload()
 
     def _update_pagination(self) -> None:
-        self._lbl_page.setText(f"Стр. {self._presenter.page_number}")
+        label = f"Стр. {self._presenter.page_number}"
+        if self._dropped_live:
+            # Видимый счётчик усечённого live-хвоста (полная история — в сторе).
+            label += f" · хвост усечён: {self._dropped_live}"
+            self._lbl_page.setToolTip(
+                f"{self._dropped_live} live-записей вытеснено из хвоста "
+                f"(лимит {self._MAX_LIVE_ROWS}); полная история — по кнопке «Обновить»"
+            )
+        self._lbl_page.setText(label)
         self._btn_prev.setEnabled(self._presenter.has_prev)
         self._btn_next.setEnabled(self._presenter.has_next(self._rows))
 
@@ -297,6 +315,7 @@ class _RecordDetailDialog(QDialog):
             f"<b>Время:</b> {escape(_format_ts(record.get('ts')))}",
             f"<b>Kind:</b> {escape(str(record.get('kind', '')))}",
             f"<b>Уровень:</b> {escape(str(record.get('severity', '')))}",
+            f"<b>Процесс:</b> {escape(str(record.get('process', '')))}",
             f"<b>Источник:</b> {escape(str(record.get('module', '')))}",
             f"<b>Сообщение:</b> {escape(str(record.get('message', '')))}",
         ]

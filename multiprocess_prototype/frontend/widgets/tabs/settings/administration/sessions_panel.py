@@ -27,7 +27,7 @@ from multiprocess_prototype.frontend.widgets.tabs.settings.administration._forma
     format_duration as _format_duration,
 )
 
-from ._base_panel import BaseAdminPanel
+from ....primitives import BaseAdminPanel
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.auth_context import AuthContext

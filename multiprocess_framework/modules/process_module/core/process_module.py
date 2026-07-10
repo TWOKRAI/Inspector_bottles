@@ -284,7 +284,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         # log/stats из drain-петли, error через store-tap'ы на error+logger-менеджерах.
         if self._observability_hub is not None:
             self._observability_store, self._observability_store_taps = wire_observability_store(
-                self.error_manager, self.logger_manager
+                self.error_manager, self.logger_manager, process=self.name
             )
             # error-записи в стор идут ТОЛЬКО через tap (drain их не пишет).
             # Ни одного tap → вкладка «Ошибки» молча пуста — предупреждаем

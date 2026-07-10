@@ -15,6 +15,7 @@ from multiprocess_framework.modules.frontend_module.components.primitives import
 
 # Локальные виджеты (в активной разработке или зависимы от прото)
 from .action_toolbar import ActionToolbar
+from .base_admin_panel import BaseAdminPanel
 from .slot_selector import SlotSelector
 from .sectioned_form import SectionedForm
 from .side_nav_layout import SideNavLayout
@@ -27,6 +28,7 @@ __all__ = [
     "EntityCard",
     "CardAction",
     "ActionToolbar",
+    "BaseAdminPanel",
     "MasterDetailLayout",
     "SideNavLayout",
     "SlotSelector",

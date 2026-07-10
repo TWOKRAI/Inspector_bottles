@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3  # noqa: F401 — используется в TestProcessColumn (legacy-миграция)
 
 from multiprocess_framework.modules.channel_routing_module.observability import (
     ObservabilityStore,
@@ -11,8 +12,11 @@ from multiprocess_framework.modules.channel_routing_module.observability import 
 )
 
 
-def _log_rec(module="worker_module", ts=1.0, severity="info", message="hi", **ctx):
-    return {"kind": "log", "module": module, "ts": ts, "severity": severity, "message": message, "context": ctx}
+def _log_rec(module="worker_module", ts=1.0, severity="info", message="hi", process=None, **ctx):
+    rec = {"kind": "log", "module": module, "ts": ts, "severity": severity, "message": message, "context": ctx}
+    if process is not None:
+        rec["process"] = process
+    return rec
 
 
 def _err_rec(module="worker_module", ts=2.0, severity="error", message="boom"):
@@ -84,6 +88,48 @@ class TestNormalization:
         store.append_records([_log_rec(message="m", worker="w1")])
         row = store.list_records(kind="log")[0]
         assert row["extra"]["context"] == {"worker": "w1"}
+        store.close()
+
+
+class TestProcessColumn:
+    """5.21 (c): колонка process — имя процесса-источника, с миграцией старой БД."""
+
+    def test_explicit_process_stored_and_read(self, tmp_path):
+        store = ObservabilityStore(str(tmp_path / "obs.db"))
+        store.append_records([_log_rec(module="worker_module", process="camera_0", message="m")])
+        row = store.list_records(kind="log")[0]
+        assert row["process"] == "camera_0"  # процесс-источник
+        assert row["module"] == "worker_module"  # scope сохранён отдельно
+        store.close()
+
+    def test_missing_process_falls_back_to_module(self, tmp_path):
+        store = ObservabilityStore(str(tmp_path / "obs.db"))
+        store.append_records([_log_rec(module="main", message="m")])  # без process
+        row = store.list_records(kind="log")[0]
+        assert row["process"] == "main"
+        store.close()
+
+    def test_migration_adds_process_column_to_legacy_db(self, tmp_path):
+        """Файл без колонки process (дореформенная схема) → ALTER доливает её."""
+        db = str(tmp_path / "legacy.db")
+        legacy = sqlite3.connect(db)
+        legacy.execute(
+            "CREATE TABLE records (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, "
+            "module TEXT NOT NULL, ts REAL NOT NULL, severity TEXT, message TEXT, extra TEXT)"
+        )
+        legacy.execute(
+            "INSERT INTO records (kind, module, ts, severity, message, extra) "
+            "VALUES ('log','old_mod',1.0,'info','legacy','{}')"
+        )
+        legacy.commit()
+        legacy.close()
+
+        store = ObservabilityStore(db)  # открытие мигрирует схему
+        store.append_records([_log_rec(module="worker_module", process="camera_0", message="new")])
+        rows = store.list_records(kind="log")
+        by_msg = {r["message"]: r for r in rows}
+        assert by_msg["legacy"]["process"] == "old_mod"  # NULL → падаем на module
+        assert by_msg["new"]["process"] == "camera_0"
         store.close()
 
 
