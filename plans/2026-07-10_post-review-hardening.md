@@ -1,0 +1,37 @@
+# Plan: Post-review hardening — фиксы ревью 2026-07-10
+
+- **Slug:** 2026-07-10_post-review-hardening
+- **Дата:** 2026-07-10
+- **Статус:** IN PROGRESS
+- **Источник:** независимое ревью Ф0→main (Fable, 5 агентов: свежий батч Ф5/Ф4, контур наблюдаемости, живучесть Ф1–Ф4, god-split/carve E, верификация гейтов). Оба HIGH подтверждены исполняемыми репродьюсерами.
+- **Ветки:** R1+R3 — `fix/obs-error-write-through` (worktree); R2 — `fix/supervisor-recovered-criterion` (worktree); R4+R5 — `fix/review-quick-tails`
+- **Связь:** дополняет [`2026-07-06_constructor-master`](2026-07-06_constructor-master/plan.md) (зоны Ф5.16/5.20 и Ф3.6/Ф4-добор H3/H4); Принцип №1 действует — никаких удалений
+
+## Задачи
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| R1 | [ ] | **[HIGH] Петля drain↔tap — дубль ошибок в сторе и GUI.** Drain-адаптер (`drain_adapter.py:98`) переигрывает log-записи hub'а в `logger_manager`, на котором висят store-tap и forward-tap (min ERROR, `observability_wiring.py:160-165, 210-215`) → одна ошибка воркера пишется дважды (`kind=log` из прямого пути + `kind=error` из tap) и приходит в GUI в обе вкладки. Направление фикса — по инварианту 3 плана constructor-master («crash-логи — error/critical синхронным fast-path в sink»): записи log-канала hub'а с severity ≥ ERROR идут **write-through** (симметрично слоту `error`), в буфер НЕ дублируются → tap ловит ровно один раз живьём, drain их не переигрывает; info/warning остаются буфер+drain (tap их не ловит — min ERROR). Дизайн-развилки решает teamlead, но итог обязан давать ровно одну запись на эмиссию | Репро ревью зелёный: 1 эмиссия `severity=error` через logger-слот hub-wired процесса → ровно 1 строка в сторе и ровно 1 live-запись; интеграционный регресс-тест на **реальном** `LoggerCore._emit_to_taps` + ERROR + реальном адаптере (закрыть слепую зону `test_observability_store_wiring.py:85-97` — INFO + `adapter=None`); зона observability/logger/process_module зелёная | M |
+| R2 | [ ] | **[HIGH] Ложное `recovered` снимает recovery-watchdog H3/H4** (`process_monitor.py:550`). Для живого-но-сломанного процесса (unresponsive / health-failed) критерий «восстановился» = любой не-None heartbeat; `_last_heartbeat` чистится только в `_dispatch_due_restarts:943` → с прод-дефолтом `backoff_sec=2.0` на следующей итерации эмитится фальшивое `recovered` и снимается дедлайн H3 (`_recovery_deadline.pop:552`); тихий провал рестарта далее не даёт give-up. Фикс: критерий «heartbeat, полученный ПОСЛЕ планирования рестарта» — (а) `_last_heartbeat.pop(name)` в момент постановки в `_pending_recovery`, либо (б) `restart_scheduled_ts[name]` + сверка времени. Честное `recovered` (процесс реально ожил сам или после рестарта) обязано остаться | Регресс-тесты с `backoff_sec>0` на ОБОИХ путях (unresponsive и health-failed H4), кусаются на старом коде; существующие supervisor-тесты (`TestSupervisorEvents` и соседи) зелёные без правок ожиданий; give-up после тихого провала рестарта живого процесса реально наступает | M |
+| R3 | [ ] | **[MED] Write-through не покрывает error-severity через logger-слот** (`observability_wiring.py:82-84` — только слот `error`). Ошибка через `logger.error`/`_log_error` hub-wired модуля буферизуется и при SIGKILL теряется, хотя дизайн 5.16 подаёт инвариант 3 как закрытый. Решается ВМЕСТЕ с R1 (то же изменение: severity ≥ ERROR лог-канала → write-through); та же ветка, тот же агент | Тест crash-пути: эмиссия `logger.error` в hub-wired слот → запись в файловом sink ДО drain (write-through), буфер её не содержит; docstring 5.16-wiring обновлён под фактическую семантику | S (в R1) |
+| R4 | [ ] | **Быстрые хвосты верификации** (все pre-existing, не из батча): (a) `python -m scripts.sync` — ADR-дрифт после Ф5.15, `scripts/validate.py` сейчас FAIL; (b) `process_module/plugins/base.py:126` — аннотация `"HealthReporter"` без импорта (F821 + единственная pyright-error); (c) стейл-докстринг `plugin_orchestrator.py:242-243` — противоречит реализации 4.1 (реально `reg_name = REGISTER_NAME or plugin_name`, коллизия → loud skip); (d) `record_history_panel.py` — `reload()` не сбрасывает `_dropped_live` (метка «хвост усечён» врёт после обновления) | `python scripts/validate.py` зелёный; pyright errors 0; докстринг соответствует коду; после reload метка усечения сброшена (+1 тест на (d)) | S |
+| R5 | [ ] | **Docs/план-хвосты:** (a) долг «перенос владения GUI-состоянием presenter→LayoutController» потерял дом (G2 закрыт decision-only) → добавить тикет в constructor-master (кандидат H-блок Ф8 или отдельная задача Ф5-хвоста); (b) PLAUSIBLE-граница fencing: restart с `reuse_queues=True` не бампит incarnation (зомби-инстанс неразличим) → заметка в ADR-PMM-014; (c) вопрос владельцу (НЕ действие): перекалибровка таблицы «Метрики приёмки» constructor-master | Тикет в плане constructor-master; заметка в ADR; вопрос зафиксирован в этом плане для владельца | S |
+| R6 | [ ] | **Push main** — 247 локальных коммитов без удалённой копии (риск потери работы). Owner-gated: исполняет только владелец | `git push` выполнен владельцем | — |
+
+## Не входит в scope
+
+- LOW-находки ревью без owner-решения: тройной `KIND_ERROR` (осознанный размен), `open_default_source` DDL на read-стороне, гонка ALTER-миграции (узкое окно), кросс-плагинное подавление `record_success` (безопасное направление, self-healing) — кандидаты в отдельный груминг.
+- Перекалибровка метрик-таблицы (R5c — только вопрос, решает владелец).
+- Ранний вынос frozen-boundaries из Ф8 H.1 — предложение владельцу, отдельным решением.
+
+## Вопросы владельцу
+
+1. **R5c:** перекалибровать «Метрики приёмки» constructor-master (quality 7078 < старт 7174; modularity-чекпойнты структурно недостижимы по конструкции метрики)? Рекомендация: заменить repo-wide чекпойнты на пофазные гейты (max-LOC зоны, характеризационные тесты, grep-инварианты) — по уроку MERGE-F.
+2. Вынести frozen-boundaries (`.sentrux/rules.toml`) из Ф8 H.1 раньше, чтобы frozen-код не обрастал зависимостями ещё 2–3 фазы?
+
+## Порядок исполнения
+
+1. R1+R3 (teamlead, Opus, worktree `fix/obs-error-write-through`) ∥ R2 (teamlead, Opus, worktree `fix/supervisor-recovered-criterion`) — зоны файлов не пересекаются.
+2. Merge обеих веток → main (--no-ff), полный регресс-гейт.
+3. R4 + R5 — сессия-владелец плана, ветка `fix/review-quick-tails`.
+4. R6 — владелец.
