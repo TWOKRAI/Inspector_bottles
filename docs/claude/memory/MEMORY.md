@@ -43,6 +43,7 @@
 - [Cross-tab Phase F legacy removal](project_cross_tab_phase_f.md) — DONE 2026-05-28 (ретро-ревью Opus, без блокеров); F.7 переосмыслен (peek bridge-readers, no-op фильтр найден); F.1+ActionBus→G; Phase G handoff-долг зафиксирован
 - [Cross-tab Phase G final](project_cross_tab_phase_g.md) — ЗАВЕРШЕНА 2026-05-29: все G.0–G.6 DONE. G.6 UX (auto-reveal/validation/selection/diff + RecipeActivated prod вариант A + cross-tab Services-highlight); reviewer APPROVED; 2035 passed/sentrux 9-9/quality 7136; boot-smoke — долг перед merge
 - [Commit message format](feedback_commit_msg_format.md) — каждый trailer (Why/Layer/...) одной строкой (перенос ломает парсер); pre-commit ruff-format → re-stage + re-commit
+- [ruff убирает свежий импорт](feedback_ruff_strips_unused_import.md) — PostToolUse ruff --fix вырезает импорт, добавленный Edit'ом раньше его использования → добавлять импорт+использование одним Edit
 - [Priority: product over engine](project_priority_product_over_engine.md) — 2026-05-29 владелец: запускать прототип/функции/цепочки важнее красоты движка; constructor-maturity отложен
 - [Command-engine P1.1 audit](project_command_engine_audit.md) — ActionBus в проде мёртв (0 потребителей), domain-dispatch единственный живой; «двух движков» нет; RBAC field-edit дыра
 - [Pipeline reuse Plugins widgets](feedback_pipeline_reuse_plugins_widgets.md) — карточка ноды Pipeline переиспользует config-виджеты Plugins (поля по plugin_name); gui скрыт (protected); auto-layout на старте; дисплеи в палитре
