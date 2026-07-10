@@ -17,7 +17,7 @@ metadata:
 - **Live-валидация (region_pipeline, BACKEND_CTL, 2026-07-10):** subscribe camera_0 → `start_capture` (ERROR камеры) → events() показал `command="observability.record"` с `{kind:error,severity:error,message:"...не удалось открыть камеру 0"}` ОТДЕЛЬНЫМ каналом от log.record. **Урок: health.report логирует на WARNING (не ERROR) → forward-tap min ERROR его не ловит; настоящий ERROR даёт start_capture.**
 - **Тесты**: 28 (backend 14 + GUI-plumbing 5 + widget/route 9); регресс fw 822 + proto 2173 + tab/auth зелёные; ruff/pyright 0; sentrux 9/9 (0 reverse-import, quality 7077). 8 коммитов.
 - **ОТКРЫТЫЙ ДОЛГ**: авто-рестарт процесса теряет подписку live-хвоста (дедуп по имени не переподписывает новую инкарнацию) — кандидат в Ф4-хвост fencing [[project-topology-fencing-token]]. Побочно: backend-ctl прописан в 5 dev-агентов (developer/teamlead/tester/reviewer/debugger, оба зеркала).
-- **NEXT**: 5.3 recipe-carve (крупная) → 5.11-5.13 app_module skeleton; свободны 5.8 RuntimeDeps, 5.18 depth, 5.6a форм-diff. main НЕ запушен (owner-gated).
+- **NEXT**: 5.3 recipe-carve (крупная) → 5.11-5.13 app_module skeleton; свободны 5.8 RuntimeDeps, 5.18 depth, 5.6a форм-diff; **5.21 — добор наблюдаемости после ревью** (BaseAdminPanel в общий widgets/base, единый нормализатор display↔store, имя процесса в record, QoS live-хвоста, мелочи). main НЕ запушен (owner-gated).
 
 **LATEST 2026-07-10 — Ф5.9 + Ф5.20a влиты в main (merge fd963396, --no-ff):**
 - **Ф5.9 GUI state-plane**: полный Delta до GUI (delete/transaction_id, `state_delta_message`), fan-out на delete получает sentinel `DELETED` (не None), `StateProxy.ensure_subscription`/refcount + авто-подписка bind, один glob-матчер (frontend→framework `match_pattern`).
