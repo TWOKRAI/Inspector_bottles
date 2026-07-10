@@ -238,32 +238,47 @@ class PluginOrchestrator:
         V3_MY_PURE: register_schema() — classmethod, возвращает list[type[SchemaBase]].
         Для обратной совместимости поддерживает и старый формат (SchemaBase instance).
 
-        Convention mapping: plugin.name -> register name в RegistersManager.
+        Convention mapping: plugin.name -> register name в RegistersManager (для ОДНОГО
+        регистра экземпляра). Несколько регистров одного экземпляра квалифицируются
+        классом (`plugin.name.ClassName`) — иначе перезапись под одним ключом (R6/Н-7).
+        Дубликат имени регистра (в т.ч. дубликат plugin_name между плагинами) — громкий
+        лог + пропуск (выживает первый), молча не теряем.
         """
         schemas: dict[str, Any] = {}
+
+        def _put(reg_name: str, instance: Any, source: str) -> None:
+            # Н-7: не затираем существующий регистр молча. Конфликт имени (несколько
+            # регистров одного экземпляра ИЛИ два плагина с одинаковым plugin_name)
+            # логируется громко, выживает ПЕРВЫЙ (fail-loud: «терять можно — молчать нельзя»).
+            # Раньше `schemas[plugin.name] = instance` в цикле молча терял все регистры,
+            # кроме последнего (R6 multi-register overwrite).
+            if reg_name in schemas:
+                self._services.log_error(
+                    f"PluginOrchestrator[{self._services.name}]: конфликт имени регистра "
+                    f"'{reg_name}' ({source}) — имя уже занято, регистр ПРОПУЩЕН (Н-7); "
+                    f"дубликат plugin_name или несколько регистров под одним именем"
+                )
+                return
+            schemas[reg_name] = instance
+            self._services.log_info(
+                f"PluginOrchestrator[{self._services.name}]: register '{reg_name}' schema loaded ({source})"
+            )
 
         for plugin, _ctx in early:
             try:
                 result = plugin.register_schema()
-
-                if isinstance(result, list):
-                    # V3_MY_PURE: list of classes -> инстанцировать каждый
-                    for reg_cls in result:
-                        instance = reg_cls()
-                        schemas[plugin.name] = instance
-                        self._services.log_info(
-                            f"PluginOrchestrator[{self._services.name}]: "
-                            f"register '{plugin.name}' schema loaded "
-                            f"({reg_cls.__name__})"
-                        )
-                elif result is not None:
-                    # Legacy: SchemaBase instance
-                    schemas[plugin.name] = result
-                    self._services.log_info(
-                        f"PluginOrchestrator[{self._services.name}]: "
-                        f"register '{plugin.name}' schema loaded "
-                        f"({type(result).__name__})"
-                    )
+                # Нормализуем в список (V3_MY_PURE: list классов; legacy: одиночный instance).
+                reg_items = result if isinstance(result, list) else ([result] if result is not None else [])
+                for reg_item in reg_items:
+                    instance = reg_item() if isinstance(reg_item, type) else reg_item
+                    # Единое правило: имя регистра — СОБСТВЕННОЕ имя регистра
+                    # (classvar `REGISTER_NAME`), если объявлено; иначе конвенция
+                    # register_name == plugin_name (адресация GUI/live-write/топологии).
+                    # Несколько регистров одного экземпляра ОБЯЗАНЫ объявить distinct
+                    # `REGISTER_NAME` — без этого оба падают на plugin.name и второй
+                    # ловится как коллизия в _put (loud-fail, не молча теряем — R6/Н-7).
+                    reg_name = getattr(type(instance), "REGISTER_NAME", "") or plugin.name
+                    _put(reg_name, instance, type(instance).__name__)
             except Exception as e:
                 self._services.log_error(
                     f"PluginOrchestrator[{self._services.name}]: register_schema '{plugin.name}': {e}"
@@ -379,7 +394,6 @@ class PluginOrchestrator:
             # письмо: приёмника msg_type register_changed нет. Удалён по плану §11.7/8.)
             return {"success": True, "register": register_name, "field": field_name, "value": value}
         self._services.log_error(
-            f"PluginOrchestrator[{self._services.name}]: register_update failed "
-            f"{register_name}.{field_name}: {error}"
+            f"PluginOrchestrator[{self._services.name}]: register_update failed {register_name}.{field_name}: {error}"
         )
         return {"success": False, "register": register_name, "field": field_name, "error": str(error)}

@@ -30,6 +30,7 @@ from multiprocess_framework.modules.process_module.plugins.testing import MockPr
 
 class SimplePlugin(ProcessModulePlugin):
     """Плагин без регистра — graceful degradation."""
+
     name = "simple"
     category = "processing"
 
@@ -42,12 +43,14 @@ class SimplePlugin(ProcessModulePlugin):
 
 class _WithRegisterRegisters(SchemaBase):
     """Register-класс для тестового плагина."""
+
     threshold: Annotated[int, FieldMeta("Threshold", min=0, max=100)] = 50
     enabled: Annotated[bool, FieldMeta("Enabled")] = True
 
 
 class PluginWithRegister(ProcessModulePlugin):
     """Плагин с регистром (V3_MY_PURE)."""
+
     name = "with_register"
     category = "processing"
 
@@ -142,6 +145,7 @@ class TestPluginContextRegisters:
 
 class _MockServices:
     """Мок-сервисы для PluginOrchestrator."""
+
     name = "test"
     worker_manager = None
     command_manager = None
@@ -238,18 +242,14 @@ class TestRegisterUpdateHandler:
 
     def test_success_returns_ack(self):
         orch = self._orchestrator_with_register()
-        res = orch._on_register_update(
-            {"data": {"register": "with_register", "field": "threshold", "value": 70}}
-        )
+        res = orch._on_register_update({"data": {"register": "with_register", "field": "threshold", "value": 70}})
         assert res == {"success": True, "register": "with_register", "field": "threshold", "value": 70}
         assert orch._registers_manager.get_register("with_register").threshold == 70
 
     def test_missing_canonical_keys_fail_loud(self):
         """Неверные ключи payload (исторический plugin_name) → error, не молчание."""
         orch = self._orchestrator_with_register()
-        res = orch._on_register_update(
-            {"data": {"plugin_name": "with_register", "field": "threshold", "value": 70}}
-        )
+        res = orch._on_register_update({"data": {"plugin_name": "with_register", "field": "threshold", "value": 70}})
         assert res["success"] is False
         assert "data.register" in res["error"]
         assert "plugin_name" in res["data_keys"]
@@ -258,9 +258,7 @@ class TestRegisterUpdateHandler:
 
     def test_unknown_register_reports_error(self):
         orch = self._orchestrator_with_register()
-        res = orch._on_register_update(
-            {"data": {"register": "no_such", "field": "threshold", "value": 70}}
-        )
+        res = orch._on_register_update({"data": {"register": "no_such", "field": "threshold", "value": 70}})
         assert res["success"] is False
         assert res["register"] == "no_such"
 
@@ -270,8 +268,131 @@ class TestRegisterUpdateHandler:
         )
 
         orch = PluginOrchestrator(services=_MockServices())
-        res = orch._on_register_update(
-            {"data": {"register": "x", "field": "y", "value": 1}}
-        )
+        res = orch._on_register_update({"data": {"register": "x", "field": "y", "value": 1}})
         assert res["success"] is False
         assert "RegistersManager" in res["error"]
+
+
+# --- Tests: Н-7 multi-register naming (задача 4.1) ---
+
+
+class _RegA(SchemaBase):
+    REGISTER_NAME = "reg_a"
+    a: Annotated[int, FieldMeta("A", min=0, max=10)] = 1
+
+
+class _RegB(SchemaBase):
+    REGISTER_NAME = "reg_b"
+    b: Annotated[int, FieldMeta("B", min=0, max=10)] = 2
+
+
+class _RegNoName1(SchemaBase):
+    x: Annotated[int, FieldMeta("X", min=0, max=10)] = 1
+
+
+class _RegNoName2(SchemaBase):
+    y: Annotated[int, FieldMeta("Y", min=0, max=10)] = 2
+
+
+class _MultiNamed(ProcessModulePlugin):
+    """Экземпляр с ДВУМЯ регистрами, у каждого свой register_name."""
+
+    name = "multi_named"
+    category = "processing"
+
+    @classmethod
+    def register_schema(cls) -> list:
+        return [_RegA, _RegB]
+
+    def configure(self, ctx: PluginContext) -> None:
+        pass
+
+    def start(self, ctx: PluginContext) -> None:
+        pass
+
+
+class _MultiUnnamed(ProcessModulePlugin):
+    """Два регистра БЕЗ register_name → оба падают на plugin.name → коллизия."""
+
+    name = "multi_unnamed"
+    category = "processing"
+
+    @classmethod
+    def register_schema(cls) -> list:
+        return [_RegNoName1, _RegNoName2]
+
+    def configure(self, ctx: PluginContext) -> None:
+        pass
+
+    def start(self, ctx: PluginContext) -> None:
+        pass
+
+
+def _orch():
+    from multiprocess_framework.modules.process_module.generic.plugin_orchestrator import (
+        PluginOrchestrator,
+    )
+
+    return PluginOrchestrator(services=_MockServices())
+
+
+class TestMultiRegisterNamingH7:
+    """Н-7: несколько регистров одного экземпляра + дубликаты plugin_name (4.1)."""
+
+    def test_multi_register_both_alive(self):
+        """Два регистра с distinct register_name — ОБА живы (был overwrite R6)."""
+        orch = _orch()
+        rm = orch._init_registers([(_MultiNamed(), MagicMock())])
+        assert rm is not None
+        assert rm.get_register("reg_a") is not None
+        assert rm.get_register("reg_b") is not None
+        assert rm.get_register("reg_a").a == 1
+        assert rm.get_register("reg_b").b == 2
+
+    def test_single_register_keeps_plugin_name(self):
+        """Один регистр без register_name — конвенция register_name == plugin_name (compat)."""
+        orch = _orch()
+        rm = orch._init_registers([(PluginWithRegister(), MagicMock())])
+        assert rm.get_register("with_register") is not None
+
+    def test_register_name_override_wins(self):
+        """Объявленный register_name перекрывает plugin_name даже для одного регистра."""
+        orch = _orch()
+
+        class _Named(ProcessModulePlugin):
+            name = "plug_x"
+            category = "processing"
+
+            @classmethod
+            def register_schema(cls) -> list:
+                return [_RegA]  # register_name="reg_a"
+
+            def configure(self, ctx):
+                pass
+
+            def start(self, ctx):
+                pass
+
+        rm = orch._init_registers([(_Named(), MagicMock())])
+        assert rm.get_register("reg_a") is not None
+        assert rm.get_register("plug_x") is None  # НЕ по plugin_name
+
+    def test_unnamed_multi_collides_loud_first_wins(self):
+        """Два регистра без имён коллизят под plugin.name: первый жив, второй пропущен + log_error."""
+        orch = _orch()
+        rm = orch._init_registers([(_MultiUnnamed(), MagicMock())])
+        # Первый (_RegNoName1) жив под plugin.name, второй пропущен (не молча).
+        reg = rm.get_register("multi_unnamed")
+        assert reg is not None
+        assert hasattr(reg, "x")  # это _RegNoName1, не _RegNoName2
+        orch._services.log_error.assert_called()  # громкая коллизия (Н-7)
+
+    def test_duplicate_plugin_name_collides_loud(self):
+        """Два РАЗНЫХ экземпляра с одинаковым plugin_name — второй регистр коллизит + log_error."""
+        orch = _orch()
+        p1 = PluginWithRegister()
+        p2 = PluginWithRegister()
+        p2.name = "with_register"  # тот же plugin_name (дубль в топологии)
+        rm = orch._init_registers([(p1, MagicMock()), (p2, MagicMock())])
+        assert rm.get_register("with_register") is not None  # первый жив
+        orch._services.log_error.assert_called()  # boot dup-check громкий
