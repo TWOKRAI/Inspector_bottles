@@ -102,3 +102,4 @@
 - [observability-стор: маршрут ошибок](project_observability_store_error_routing.md) — ошибки идут в logger_manager (ctx.log_error), не error_manager; store-tap на ОБА; live-boot вскрыл
 - [sentrux depth непрозрачна](feedback_sentrux_depth_opaque.md) — не каталоги и не цепочка (замер опроверг); не гоняться за числом вслепую, нужен Pro root-cause
 - [freeze, не kill](feedback_freeze_over_kill.md) — владелец предпочитает замораживать мёртвый/дремлющий код, не удалять (actions_module, G2 форм)
+- [Тест-параметры прячут окно дефекта](feedback_test_params_hide_defect_window.md) — оба HIGH ревью 2026-07-10 жили под зелёными тестами (backoff=0; INFO+adapter=None); прод-значения параметров хотя бы в одном тесте
