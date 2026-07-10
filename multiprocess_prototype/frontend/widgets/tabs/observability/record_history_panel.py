@@ -175,7 +175,13 @@ class RecordHistoryPanel(BaseAdminPanel):
         self.reload()
 
     def reload(self) -> None:
-        """Перечитать текущую страницу истории и заполнить таблицу."""
+        """Перечитать текущую страницу истории и заполнить таблицу.
+
+        Счётчик усечения live-хвоста сбрасывается: после перечитки таблица
+        показывает полную историю из стора, и метка «хвост усечён: N»
+        относилась бы к уже не отображаемому хвосту (ревью 2026-07-10, R4d).
+        """
+        self._dropped_live = 0
         self._rows = self._presenter.load()
         self._fill_table(self._rows)
         self._update_pagination()
@@ -286,6 +292,8 @@ class RecordHistoryPanel(BaseAdminPanel):
                 f"{self._dropped_live} live-записей вытеснено из хвоста "
                 f"(лимит {self._MAX_LIVE_ROWS}); полная история — по кнопке «Обновить»"
             )
+        else:
+            self._lbl_page.setToolTip("")
         self._lbl_page.setText(label)
         self._btn_prev.setEnabled(self._presenter.has_prev)
         self._btn_next.setEnabled(self._presenter.has_next(self._rows))

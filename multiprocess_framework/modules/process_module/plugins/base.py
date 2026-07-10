@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Callable, ClassVar
 from .interfaces import IProcessServices
 
 if TYPE_CHECKING:
+    from ..health import HealthReporter
     from .metrics import PluginMetrics
 
 
