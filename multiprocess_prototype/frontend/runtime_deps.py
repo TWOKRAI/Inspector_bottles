@@ -79,3 +79,7 @@ class RuntimeDeps:
     # восстанавливает рецепт (см. app.py restore). None → no-op (persist отключён).
     # Запись через ruamel round-trip — комментарии app.yaml сохраняются.
     persist_active_recipe: "Callable[[str], None] | None" = None
+    # DataReceiverBridge процесса — нужен вкладкам наблюдаемости (Ф5.20b) для
+    # подписки на observability_received (живой хвост Логи/Ошибки/Статистика).
+    # None → вкладки работают только на истории из стора, без живого хвоста.
+    data_bridge: Any = None

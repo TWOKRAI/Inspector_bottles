@@ -31,6 +31,7 @@ def register_all_tabs() -> dict[str, Callable[["AppServices", "RuntimeDeps"], "Q
     from .displays import DisplaysTab
     from .recipes import RecipesTab
     from .pipeline import PipelineTab
+    from .observability import ObservabilityTabs
 
     return {
         "settings": SettingsTab.create,
@@ -40,4 +41,5 @@ def register_all_tabs() -> dict[str, Callable[["AppServices", "RuntimeDeps"], "Q
         "plugins": PluginsTab.create,
         "pipeline": PipelineTab.create,
         "displays": DisplaysTab.create,
+        "observability": ObservabilityTabs.create,
     }

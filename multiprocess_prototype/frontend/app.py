@@ -677,6 +677,7 @@ def run_gui(process: "GuiProcess") -> None:
         request_ui_restart=_request_ui_restart,
         persist_active_recipe=_persist_active_recipe,
         image_panel=image_panel,
+        data_bridge=process._bridge,
     )
 
     tab_factory = TabFactory(

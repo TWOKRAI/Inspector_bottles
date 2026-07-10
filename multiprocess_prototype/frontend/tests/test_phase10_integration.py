@@ -24,10 +24,10 @@ def _make_app_services():
 class TestPhase10Integration:
     """Smoke-тесты интеграции всех табов Phase 10."""
 
-    def test_register_all_tabs_returns_7(self):
-        """register_all_tabs() возвращает dict с 7 factory functions."""
+    def test_register_all_tabs_covers_tab_order(self):
+        """register_all_tabs() покрывает все id из TAB_ORDER (Ф5.19: +observability = 8)."""
         factories = register_all_tabs()
-        assert len(factories) == 7
+        assert len(factories) == len(TAB_ORDER)
         for tab_info in TAB_ORDER:
             assert tab_info["id"] in factories, f"Таб '{tab_info['id']}' не зарегистрирован"
 
@@ -53,7 +53,7 @@ class TestPhase10Integration:
         qtbot.addWidget(tab_widget)
         factory.create_tabs(tab_widget)
 
-        assert tab_widget.count() == 7
+        assert tab_widget.count() == len(TAB_ORDER)
 
         # Проверить что ни один таб не PlaceholderTab
         for i in range(tab_widget.count()):

@@ -94,6 +94,12 @@ TAB_ORDER: list[dict] = [
         "description": "Управление экранами вывода",
         "view_permission": "tabs.displays.view",
     },
+    {
+        "id": "observability",
+        "title": "Наблюдаемость",
+        "description": "Логи / Ошибки / Статистика — история и живой хвост (Ф5.19)",
+        "view_permission": "tabs.observability.view",
+    },
 ]
 
 
