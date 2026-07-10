@@ -28,7 +28,7 @@ from Services.auth.exceptions import (
     WeakPassword,
 )
 
-from ._base_panel import BaseAdminPanel
+from ....primitives import BaseAdminPanel
 from .user_form import UserForm
 
 if TYPE_CHECKING:
@@ -51,9 +51,7 @@ class UsersPanel(BaseAdminPanel):
         ("is_active", "Активен", 70),
     ]
 
-    def __init__(
-        self, auth: "AuthContext | None", parent: QWidget | None = None
-    ) -> None:
+    def __init__(self, auth: "AuthContext | None", parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
         self._auth_manager = auth.manager if auth is not None else None
@@ -91,9 +89,7 @@ class UsersPanel(BaseAdminPanel):
         self._btn_change_role.clicked.connect(self._on_change_role_clicked)
 
         self._btn_reset_pwd = QPushButton("Сбросить пароль")
-        self._btn_reset_pwd.setToolTip(
-            "Сгенерировать новый пароль для выбранного пользователя"
-        )
+        self._btn_reset_pwd.setToolTip("Сгенерировать новый пароль для выбранного пользователя")
         self._btn_reset_pwd.clicked.connect(self._on_reset_password_clicked)
 
     def action_buttons(self) -> list[QPushButton]:
@@ -127,9 +123,7 @@ class UsersPanel(BaseAdminPanel):
         """
         if self._auth_state is None:
             return
-        self._auth_state.access_context_changed.connect(
-            lambda _ctx: self._apply_permissions()
-        )
+        self._auth_state.access_context_changed.connect(lambda _ctx: self._apply_permissions())
         self._apply_permissions()
 
     def _apply_permissions(self) -> None:
@@ -286,9 +280,7 @@ class UsersPanel(BaseAdminPanel):
 
         username = self._get_selected_username()
         if username is None:
-            QMessageBox.information(
-                self, "Выбор пользователя", "Выберите пользователя для удаления"
-            )
+            QMessageBox.information(self, "Выбор пользователя", "Выберите пользователя для удаления")
             return
 
         confirmed = self._open_confirm_dialog(f"Удалить пользователя «{username}»")
@@ -315,9 +307,7 @@ class UsersPanel(BaseAdminPanel):
 
         username = self._get_selected_username()
         if username is None:
-            QMessageBox.information(
-                self, "Выбор пользователя", "Выберите пользователя для смены роли"
-            )
+            QMessageBox.information(self, "Выбор пользователя", "Выберите пользователя для смены роли")
             return
 
         # Получить роли, исключая hidden_in_ui=True
@@ -327,9 +317,7 @@ class UsersPanel(BaseAdminPanel):
             QMessageBox.critical(self, "Ошибка загрузки ролей", str(e))
             return
 
-        visible_roles = [
-            r["name"] for r in all_roles if not r.get("hidden_in_ui", False)
-        ]
+        visible_roles = [r["name"] for r in all_roles if not r.get("hidden_in_ui", False)]
         if not visible_roles:
             QMessageBox.warning(self, "Нет доступных ролей", "Нет ролей для назначения")
             return
@@ -340,9 +328,7 @@ class UsersPanel(BaseAdminPanel):
         if 0 <= row < len(self._users):
             current_role = self._users[row].get("role_name", "")
 
-        current_index = (
-            visible_roles.index(current_role) if current_role in visible_roles else 0
-        )
+        current_index = visible_roles.index(current_role) if current_role in visible_roles else 0
 
         new_role, ok = QInputDialog.getItem(
             self,
@@ -377,14 +363,10 @@ class UsersPanel(BaseAdminPanel):
 
         username = self._get_selected_username()
         if username is None:
-            QMessageBox.information(
-                self, "Выбор пользователя", "Выберите пользователя для сброса пароля"
-            )
+            QMessageBox.information(self, "Выбор пользователя", "Выберите пользователя для сброса пароля")
             return
 
-        confirmed = self._open_confirm_dialog(
-            f"Сбросить пароль пользователя «{username}»"
-        )
+        confirmed = self._open_confirm_dialog(f"Сбросить пароль пользователя «{username}»")
         if not confirmed:
             return
 

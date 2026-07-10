@@ -1,16 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-BaseAdminPanel — базовый класс для admin-панелей с таблицей.
+BaseAdminPanel — базовый класс read-only панели с таблицей (примитив).
 
-Извлекает общий паттерн:
-  - заголовок (QLabel с objectName="PanelHeader") — _create_header()
+Извлекает общий паттерн панели «заголовок + QTableWidget по _TABLE_COLUMNS»:
+  - QGroupBox с заголовком _HEADER_TITLE — _create_group()
+  - заголовок панели (QLabel objectName="PanelHeader") — _create_header()
   - QTableWidget с конфигурацией из _TABLE_COLUMNS — _create_table()
-  - метод action_buttons() для action-колонки
+  - action_buttons() для action-колонки
+
+Домен-нейтрален (только QWidget + Qt, без AppContext) — поэтому живёт в
+``primitives/`` (5.21 (a)): раньше лежал в приватном ``settings/administration/
+_base_panel.py`` и вкладка наблюдаемости тянула приватный класс чужого
+auth-домена cross-domain. Подклассы: admin-панели users/roles/sessions +
+audit_log и вкладка наблюдаемости (RecordHistoryPanel).
 
 Подклассы:
   - определяют _TABLE_COLUMNS: list[tuple[str, str, int]]
   - определяют _HEADER_TITLE: str
-  - вызывают _create_header() и _create_table() в _setup_ui()
+  - вызывают _create_header()/_create_table() в _setup_ui()
   - создают кнопки и возвращают через action_buttons()
 """
 
@@ -30,7 +37,7 @@ from PySide6.QtWidgets import (
 
 
 class BaseAdminPanel(QWidget):
-    """Базовый класс для admin-панелей с таблицей.
+    """Базовый класс read-only панели с таблицей.
 
     Класс-переменные для подклассов:
         _TABLE_COLUMNS: список (key, title, width) — определение колонок

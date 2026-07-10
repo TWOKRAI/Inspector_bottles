@@ -33,16 +33,20 @@ class StoreTapChannel(IChannel):
         store: ObservabilityStore,
         kind: str = KIND_ERROR,
         name: str = "observability_store_tap",
+        process: str = "",
     ) -> None:
         """
         Args:
             store: целевой ObservabilityStore.
             kind: kind стор-записи (обычно 'error' — tap висит на error_manager).
             name: имя tap'а (хэндл для remove_log_tap).
+            process: имя процесса-источника (5.21 (c)) — стор проставит колонку
+                ``process``; пусто → падаем на ``module`` LogRecord.
         """
         self._store = store
         self._kind = kind
         self._name = name
+        self._process = process
 
     @property
     def name(self) -> str:
@@ -56,6 +60,7 @@ class StoreTapChannel(IChannel):
         """Нормализовать LogRecord-dict и добавить в стор. Ошибку глушим (tail не критичен)."""
         rec = {
             "kind": self._kind,
+            "process": self._process,
             "module": record_dict.get("module", ""),
             "ts": record_dict.get("timestamp", 0.0),
             "severity": str(record_dict.get("level", "")).lower(),

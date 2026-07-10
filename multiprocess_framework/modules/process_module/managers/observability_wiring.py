@@ -153,7 +153,8 @@ def wire_observability_forward(
     )
 
     def forwarder(hub_records: List[dict]) -> None:
-        batch_channel.push_batch([hub_record_to_display(r) for r in hub_records])
+        # process=sender (5.21 (c)): каждая live-запись несёт имя процесса-источника.
+        batch_channel.push_batch([hub_record_to_display(r, process=sender) for r in hub_records])
 
     taps: list[Tuple[Any, str]] = []
     for mgr, tap_name in ((error_manager, FORWARD_ERROR_TAP), (logger_manager, FORWARD_LOGGER_TAP)):
@@ -179,6 +180,7 @@ def wire_observability_store(
     error_manager: Optional[Any],
     logger_manager: Optional[Any] = None,
     db_path: Optional[str] = None,
+    process: str = "",
 ) -> Tuple[ObservabilityStore, list]:
     """Создать персистентный стор и повесить store-tap на менеджеры ошибок (Ф5.20a).
 
@@ -197,6 +199,8 @@ def wire_observability_store(
         error_manager: реальный ErrorManager (LoggerCore с add_log_tap).
         logger_manager: реальный LoggerManager (LoggerCore с add_log_tap).
         db_path: путь к SQLite-файлу стора. None → resolve_default_db_path().
+        process: имя процесса-источника (5.21 (c)) — tap проставит колонку
+            ``process`` в стор-записи (иначе виден только scope логгера).
 
     Returns:
         (store, taps) — taps: список (manager, tap_name) для unwire.
@@ -207,7 +211,7 @@ def wire_observability_store(
         if mgr is None or not hasattr(mgr, "add_log_tap"):
             continue
         # min_level=ERROR → ловим error + critical, ниже не пишем (вкладка «Ошибки»).
-        mgr.add_log_tap(StoreTapChannel(store, name=tap_name), min_level="ERROR", name=tap_name)
+        mgr.add_log_tap(StoreTapChannel(store, name=tap_name, process=process), min_level="ERROR", name=tap_name)
         taps.append((mgr, tap_name))
     return store, taps
 

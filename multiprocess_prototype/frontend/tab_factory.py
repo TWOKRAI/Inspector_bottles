@@ -12,6 +12,10 @@ G.5.2: TabFactory принимает explicit (app_services, auth_ctx, runtime) 
 AppContext. RuntimeDeps собирается в composition root (app.py) и передаётся готовым;
 фабрики получают (services, runtime).
 
+Ф5.8: ``runtime`` — двухслойный контракт (``FrameworkRuntime`` + app-extras, см.
+runtime_deps). Фабрика форвардит его целиком app-фабрикам; framework-оболочка
+(``app_module``, Ф5.11) типизируется по узкому базовому слою ``FrameworkRuntime``.
+
 Фильтрация по permissions:
     После создания всех табов фабрика читает `auth_ctx.state.access_context`
     и скрывает табы, у которых `view_permission` не выдан текущему пользователю

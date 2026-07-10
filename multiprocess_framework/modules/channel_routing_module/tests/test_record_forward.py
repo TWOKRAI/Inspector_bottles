@@ -36,12 +36,21 @@ def test_hub_log_record_to_display():
     d = hub_record_to_display(rec)
     assert d == {
         "kind": "log",
+        "process": "worker",  # 5.21 (c): пусто → падаем на module
         "module": "worker",
         "ts": 1.5,
         "severity": "info",  # нормализуется в lower
         "message": "hi",
         "extra": {"context": {"a": 1}},
     }
+
+
+def test_hub_record_to_display_explicit_process():
+    """5.21 (c): явный process переопределяет module (процесс ≠ scope)."""
+    rec = {"kind": "log", "module": "worker_module", "ts": 1.5, "severity": "info", "message": "hi"}
+    d = hub_record_to_display(rec, process="camera_0")
+    assert d["process"] == "camera_0"
+    assert d["module"] == "worker_module"
 
 
 def test_hub_stats_record_to_display():
@@ -62,10 +71,11 @@ def test_log_record_dict_to_display_defaults_error():
         "module": "cam",
         "extra": {"rid": 7},
     }
-    d = log_record_to_display(rec)
+    d = log_record_to_display(rec, process="camera_0")
     # extra под "context" — паритет со стором (StoreTapChannel → _row_from_record).
     assert d == {
         "kind": "error",
+        "process": "camera_0",  # 5.21 (c): процесс-источник, не scope логгера
         "module": "cam",
         "ts": 3.0,
         "severity": "critical",

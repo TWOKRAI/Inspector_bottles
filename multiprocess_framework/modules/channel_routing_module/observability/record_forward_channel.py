@@ -16,6 +16,15 @@ DataReceiverBridge.dispatch(data_type="observability_record").
 
 Канал duck-typed: НЕ импортирует logger_module/router (только IChannel + router с
 ``send_async``); Dict at Boundary — наружу едет чистый pickle-safe dict.
+
+QoS live-хвоста (решение 5.21 (d), 2026-07-10): хвост едет ``queue_type="system"``
+и активатор держит подписку always-on на всех процессах — при error-storm это
+теснит heartbeat (system-очередь никогда не дропается молча, Ф3.3). Отдельный
+rate-limit/event-канал здесь НЕ вводим: единая QoS-модель профилей kind
+(``reliability/history_depth/drop_policy/deadline_ms`` + drop-counter в state-дерево)
+приземляется одним вскрытием в Ф7 G.4 (см. plan.md, «Cross-ref ObservabilityHub →
+G.4»). Городить второй частный механизм до G.4 — это тот самый двойной проход по
+доставке, которого консолидация Ф7 избегает. До G.4 живём на system-guard 3.3.
 """
 
 from __future__ import annotations
@@ -68,7 +77,8 @@ class RecordForwardChannel(IChannel):
 
     def write(self, record_dict: Dict[str, Any]) -> Dict[str, Any]:
         """IChannel (tap-путь): LogRecord-dict error/critical → display → push (одна запись)."""
-        display = log_record_to_display(record_dict, kind=self._kind)
+        # process=sender (5.21 (c)): запись несёт процесс-источник, а не scope логгера.
+        display = log_record_to_display(record_dict, kind=self._kind, process=self._sender)
         return self._push({"record": display})
 
     def push_batch(self, display_records: List[Dict[str, Any]]) -> Dict[str, Any]:

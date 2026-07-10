@@ -39,8 +39,17 @@ class FakeSource:
         return before - len(self.records)
 
 
-def _rec(kind, message, module="worker", severity="info", ts=1.0):
-    return {"kind": kind, "module": module, "ts": ts, "severity": severity, "message": message, "extra": {}}
+def _rec(kind, message, module="worker", severity="info", ts=1.0, process=None):
+    rec = {"kind": kind, "module": module, "ts": ts, "severity": severity, "message": message, "extra": {}}
+    if process is not None:
+        rec["process"] = process
+    return rec
+
+
+# Индексы колонок панели (5.21 (c) добавил «Процесс» между «Уровень» и «Источник»).
+_COL_PROCESS = 2
+_COL_MODULE = 3
+_COL_MESSAGE = 4
 
 
 # ===========================================================================
@@ -114,7 +123,7 @@ class TestPanel:
         assert tabs.panel("log")._table.rowCount() == 1
         assert tabs.panel("error")._table.rowCount() == 1
         assert tabs.panel("stats")._table.rowCount() == 1
-        assert tabs.panel("log")._table.item(0, 3).text() == "L1"
+        assert tabs.panel("log")._table.item(0, _COL_MESSAGE).text() == "L1"
 
     def test_live_append_prepends_matching(self, qtbot):
         """Живой хвост (mock-источник): подходящие записи — сверху таблицы."""
@@ -127,8 +136,8 @@ class TestPanel:
         added = panel.append_live_records([_rec("log", "new"), _rec("error", "skip")])
         assert added == 1  # error отфильтрован
         assert panel._table.rowCount() == 2
-        assert panel._table.item(0, 3).text() == "new"  # свежая сверху
-        assert panel._table.item(1, 3).text() == "old"
+        assert panel._table.item(0, _COL_MESSAGE).text() == "new"  # свежая сверху
+        assert panel._table.item(1, _COL_MESSAGE).text() == "old"
 
     def test_live_append_trims_oldest_and_updates_pagination(self, qtbot):
         """drop_oldest: модель и таблица обрезаются до _MAX_LIVE_ROWS; пагинация обновляется."""
@@ -141,7 +150,7 @@ class TestPanel:
         assert added == 5
         assert panel._table.rowCount() == 3
         assert len(panel._rows) == 3
-        assert panel._table.item(0, 3).text() == "m0"  # первая в батче — сверху
+        assert panel._table.item(0, _COL_MESSAGE).text() == "m0"  # первая в батче — сверху
         # has_next честный: 3 строки >= page_size? нет (100) → Next выключен
         assert panel._btn_next.isEnabled() is False
 
@@ -171,8 +180,49 @@ class TestPanel:
             }
         )
         assert tabs.panel("error")._table.rowCount() == 1
-        assert tabs.panel("error")._table.item(0, 3).text() == "boom"
+        assert tabs.panel("error")._table.item(0, _COL_MESSAGE).text() == "boom"
+        # 5.21 (c): запись без process добирает его из конверта (data.process="cam").
+        assert tabs.panel("error")._table.item(0, _COL_PROCESS).text() == "cam"
         assert tabs.panel("log")._table.rowCount() == 0
+
+    def test_process_column_shows_record_process(self, qtbot):
+        """5.21 (c): колонка «Процесс» питается из record['process'] (≠ module)."""
+        from multiprocess_prototype.frontend.widgets.tabs.observability import RecordHistoryPanel
+
+        src = FakeSource([_rec("error", "boom", module="CapturePlugin", process="camera_0", severity="error")])
+        panel = RecordHistoryPanel(src, "error")
+        qtbot.addWidget(panel)
+        assert panel._table.item(0, _COL_PROCESS).text() == "camera_0"
+        assert panel._table.item(0, _COL_MODULE).text() == "CapturePlugin"
+
+    def test_live_truncation_counter_visible(self, qtbot):
+        """5.21 (e): вытеснение хвоста за _MAX_LIVE_ROWS видно в метке страницы."""
+        from multiprocess_prototype.frontend.widgets.tabs.observability import RecordHistoryPanel
+
+        panel = RecordHistoryPanel(FakeSource(), "log", page_size=100)
+        qtbot.addWidget(panel)
+        panel._MAX_LIVE_ROWS = 2
+        panel.append_live_records([_rec("log", f"m{i}") for i in range(5)])
+        assert panel._dropped_live == 3
+        assert "усеч" in panel._lbl_page.text()
+        assert "3" in panel._lbl_page.text()
+
+    def test_owns_default_source_closed(self, qtbot):
+        """5.21 (e): вкладки закрывают собственный стор (не переданный извне)."""
+        from multiprocess_prototype.frontend.widgets.tabs.observability import ObservabilityTabs
+
+        closed = {"n": 0}
+
+        class ClosableSource(FakeSource):
+            def close(self):
+                closed["n"] += 1
+
+        # Переданный извне источник НЕ закрываем (владелец — тест).
+        external = ClosableSource()
+        tabs = ObservabilityTabs(source=external)
+        qtbot.addWidget(tabs)
+        tabs.close_source()
+        assert closed["n"] == 0  # не владеем — не закрыли
 
     def test_copy_puts_tsv_on_clipboard(self, qtbot):
         from PySide6.QtWidgets import QApplication
