@@ -107,25 +107,25 @@ class TestPlaceholderTab:
 class TestTabFactoryCreateTabs:
     """Тесты метода create_tabs."""
 
-    def test_creates_7_tabs(self, qtbot):
-        """create_tabs добавляет ровно 7 табов в QTabWidget."""
+    def test_creates_all_tabs(self, qtbot):
+        """create_tabs добавляет ровно len(TAB_ORDER) табов (Ф5.19: +Наблюдаемость = 8)."""
         tab_widget = QTabWidget()
         qtbot.addWidget(tab_widget)
 
         factory = _make_tab_factory()
         factory.create_tabs(tab_widget)
 
-        assert tab_widget.count() == 7
+        assert tab_widget.count() == len(TAB_ORDER)
 
     def test_tab_order(self, qtbot):
-        """Табы идут в порядке: Settings → Recipes → Processes → Services → Plugins → Pipeline → Displays."""
+        """Табы идут в порядке TAB_ORDER: Settings → … → Displays → Наблюдаемость."""
         tab_widget = QTabWidget()
         qtbot.addWidget(tab_widget)
 
         factory = _make_tab_factory()
         factory.create_tabs(tab_widget)
 
-        expected_titles = ["Settings", "Recipes", "Processes", "Services", "Plugins", "Pipeline", "Displays"]
+        expected_titles = [t["title"] for t in TAB_ORDER]
         actual_titles = [tab_widget.tabText(i) for i in range(tab_widget.count())]
         assert actual_titles == expected_titles
 
