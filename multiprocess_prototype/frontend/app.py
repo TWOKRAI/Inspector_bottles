@@ -303,27 +303,11 @@ def run_gui(process: "GuiProcess") -> None:
     # процессе «мёртв» без подписчика (как log_tail), поэтому GUI сам инициирует
     # подписку по мере обнаружения процессов в processes.* state-дельтах — каждый
     # процесс шлёт свои log/stats/error записи на GUI (command=observability.record).
-    # Дедуп по имени: одна подписка на процесс (идемпотентно и не спамит команды).
-    _obs_tail_subscribed: set[str] = set()
+    # Переподписывает НОВУЮ инкарнацию после авто-рестарта (supervisor.event=recovered).
+    from .widgets.tabs.observability import ObservabilityTailActivator
 
-    def _activate_observability_tail(msg_dict: dict) -> None:
-        if msg_dict.get("data_type") != "state_delta":
-            return
-        path = msg_dict.get("path", "")
-        if not path.startswith("processes."):
-            return
-        parts = path.split(".")
-        proc = parts[1] if len(parts) >= 2 else ""
-        # Себя не подписываем (у GUI нет пилот-hub'а); каждый процесс — один раз.
-        if not proc or proc == process.name or proc in _obs_tail_subscribed:
-            return
-        _obs_tail_subscribed.add(proc)
-        try:
-            command_sender.send_command(proc, "observability.tail.subscribe", {"subscriber": process.name})
-        except Exception:  # noqa: BLE001 — активация хвоста best-effort, не рушим GUI
-            pass
-
-    process._bridge.add_state_listener(_activate_observability_tail)
+    _obs_tail_activator = ObservabilityTailActivator(command_sender.send_command, process.name)
+    process._bridge.add_state_listener(_obs_tail_activator.on_state_delta)
 
     # 3f. ServiceStateAdapter — подключить ПОСЛЕ bindings (proxy-aware step)
     # В GUI-процессе нет StateProxy (он живёт только в ProcessModule-процессах),
