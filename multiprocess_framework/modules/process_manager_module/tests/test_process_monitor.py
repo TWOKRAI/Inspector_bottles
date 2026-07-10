@@ -972,3 +972,179 @@ class TestSupervisorEvents:
         m._pending_recovery.add("old_cam")
         m.forget_process("old_cam")
         assert "old_cam" not in m._pending_recovery
+
+
+class TestRecoveredCriterionAfterScheduling:
+    """R2 (post-review hardening): критерий 'recovered' = heartbeat, полученный
+    ПОСЛЕ планирования рестарта.
+
+    Дефект (см. plans/2026-07-10_post-review-hardening.md, ADR-PMM-015): критерий
+    recovered считал процесс восстановившимся по ЛЮБОМУ не-None heartbeat, а
+    _last_heartbeat чистился только в _dispatch_due_restarts (в момент диспатча
+    по истечении backoff). С прод-дефолтом backoff_sec>0 для ЖИВОГО-но-сломанного
+    процесса (unresponsive / health-failed H4) на итерации ДО диспатча устаревший
+    heartbeat давал ложное 'recovered' и снимал watchdog H3 (_recovery_deadline),
+    из-за чего тихий провал рестарта не приводил к give-up.
+
+    Фикс: _last_heartbeat сбрасывается уже при постановке рестарта в план
+    (_try_auto_restart), поэтому 'recovered' триггерит только heartbeat,
+    пришедший ПОСЛЕ планирования.
+    """
+
+    def _live_monitor(self, **policy_kw):
+        from multiprocess_framework.modules.state_store_module import StateStoreManager
+
+        ssm = StateStoreManager(initial_state={}, logger=None)
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        mock_pm._state_store_manager = ssm
+        pol = RestartPolicy(enabled=True, **policy_kw)
+        monitor = ProcessMonitor(mock_pm, heartbeat_timeout=1.0, restart_policy=pol)
+        return ssm, mock_pm, monitor
+
+    @staticmethod
+    def _live_proc(pm, name: str = "cam"):
+        proc = MagicMock()
+        proc.name = name
+        proc.is_alive.return_value = True
+        proc.pid = 999
+        proc.exitcode = None
+        pm._process_registry.os_processes = [proc]
+        return proc
+
+    @staticmethod
+    def _event(ssm, name: str = "cam"):
+        return ssm.handle_state_get({"data": {"path": f"processes.{name}.supervisor.event"}}).get("value")
+
+    # -- unresponsive (heartbeat timeout) путь --------------------------------
+
+    def test_unresponsive_backoff_no_false_recovered(self) -> None:
+        """backoff>0: устаревший heartbeat unresponsive-процесса НЕ даёт ложное
+        recovered и НЕ снимает watchdog до диспатча."""
+        ssm, pm, m = self._live_monitor(backoff_sec=5.0, max_retries=1, window_sec=0.0)
+        self._live_proc(pm)
+        m.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        m._last_heartbeat["cam"] = time.time() - 999.0  # устаревший → heartbeat timeout
+
+        # Итерация 1: timeout → рестарт запланирован (backoff=5 ещё не истёк).
+        m._check_heartbeats()
+        assert "cam" in m._pending_recovery
+        assert "cam" in m._pending_restarts
+        assert "cam" in m._recovery_deadline
+
+        # Итерация 2 ДО истечения backoff: dispatch ничего не отправил и не чистил
+        # heartbeat. На старом коде устаревший heartbeat != None → ложное recovered.
+        m._dispatch_due_restarts()
+        m._check_heartbeats()
+
+        assert self._event(ssm) != "recovered"
+        assert "cam" in m._pending_recovery
+        assert "cam" in m._recovery_deadline
+
+    def test_unresponsive_backoff_silent_failure_reaches_giveup(self) -> None:
+        """backoff>0 + тихий провал рестарта живого процесса → give-up наступает."""
+        ssm, pm, m = self._live_monitor(backoff_sec=5.0, max_retries=1, window_sec=0.0)
+        self._live_proc(pm)
+        m.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        m._last_heartbeat["cam"] = time.time() - 999.0
+
+        m._check_heartbeats()  # план рестарта
+        m._dispatch_due_restarts()  # backoff не истёк
+        m._check_heartbeats()  # НЕ должно быть ложного recovered
+
+        # Тихий провал: heartbeat не вернулся, дедлайн восстановления истёк.
+        m._recovery_deadline["cam"] = time.monotonic() - 1.0
+        m._check_recovery_timeouts()  # watchdog: лимит исчерпан → громкий give-up
+
+        assert self._event(ssm) == "gave_up"
+        assert m.previous_states["cam"]["status"] == "failed"
+
+    # -- health-failed (H4) путь ----------------------------------------------
+
+    def test_health_failed_backoff_no_false_recovered(self, monkeypatch) -> None:
+        """H4 backoff>0: heartbeat живого health-failed процесса, снятый ДО
+        планирования, НЕ засчитывается как recovered после планирования."""
+        monkeypatch.setenv("FW_HEALTH_RESTART", "1")
+        ssm, pm, m = self._live_monitor(backoff_sec=5.0, max_retries=1, window_sec=0.0)
+        ssm.handle_state_set({"data": {"path": "processes.cam.health.status", "value": "failed"}})
+        self._live_proc(pm)
+        m.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        m._last_heartbeat["cam"] = time.time()  # живой процесс heartbeat'ит
+
+        m._check_heartbeats()  # H4 → план рестарта (backoff=5)
+        assert "cam" in m._pending_recovery
+        assert "cam" in m._pending_restarts
+
+        m._dispatch_due_restarts()  # backoff не истёк
+        m._check_heartbeats()
+
+        assert self._event(ssm) != "recovered"
+        assert "cam" in m._pending_recovery
+        assert "cam" in m._recovery_deadline
+
+    def test_health_failed_backoff_silent_failure_reaches_giveup(self, monkeypatch) -> None:
+        """H4 backoff>0 + тихий провал рестарта → give-up наступает."""
+        monkeypatch.setenv("FW_HEALTH_RESTART", "1")
+        ssm, pm, m = self._live_monitor(backoff_sec=5.0, max_retries=1, window_sec=0.0)
+        ssm.handle_state_set({"data": {"path": "processes.cam.health.status", "value": "failed"}})
+        self._live_proc(pm)
+        m.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        m._last_heartbeat["cam"] = time.time()
+
+        m._check_heartbeats()
+        m._dispatch_due_restarts()
+        m._check_heartbeats()
+
+        m._recovery_deadline["cam"] = time.monotonic() - 1.0
+        m._check_recovery_timeouts()
+
+        assert self._event(ssm) == "gave_up"
+        assert m.previous_states["cam"]["status"] == "failed"
+
+    # -- честное recovered остаётся -------------------------------------------
+
+    def test_honest_recovered_self_heal_before_dispatch(self) -> None:
+        """Процесс сам ожил: НОВЫЙ heartbeat после планирования (до диспатча) →
+        честное recovered. Запланированный рестарт при этом сознательно НЕ
+        отменяется (см. docstring фикса) — процесс всё равно будет перезапущен."""
+        ssm, pm, m = self._live_monitor(backoff_sec=5.0, max_retries=2, window_sec=60.0)
+        self._live_proc(pm)
+        m.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        m._last_heartbeat["cam"] = time.time() - 999.0  # устаревший → unresponsive
+
+        m._check_heartbeats()  # планирует рестарт (устаревший heartbeat снят)
+        assert "cam" in m._pending_recovery
+
+        # Процесс самовосстановился: пришёл НОВЫЙ heartbeat уже после планирования.
+        m._on_heartbeat_received({"sender": "cam", "timestamp": time.time()})
+        m._check_heartbeats()
+
+        assert self._event(ssm) == "recovered"
+        assert "cam" not in m._pending_recovery
+        assert "cam" not in m._recovery_deadline
+        # Preserved-поведение (R2): recovered — только событие; pending-рестарт
+        # НЕ снимается (иначе непрерывно heartbeat'ящий H4-процесс никогда бы не
+        # рестартнулся). Восстановившийся процесс всё равно будет перезапущен.
+        assert "cam" in m._pending_restarts
+
+    def test_honest_recovered_after_executed_restart(self) -> None:
+        """Рестарт исполнен (dispatch очистил heartbeat), новая инкарнация шлёт
+        heartbeat → честное recovered."""
+        ssm, pm, m = self._live_monitor(backoff_sec=0.0, max_retries=2, window_sec=60.0)
+        self._live_proc(pm)
+        m.previous_states["cam"] = {"status": "running", "metadata": {}, "custom": {}}
+        m._last_heartbeat["cam"] = time.time() - 999.0
+
+        m._check_heartbeats()  # unresponsive → план (backoff=0)
+        m._dispatch_due_restarts()  # отправлен, _last_heartbeat очищен
+        assert "cam" in m._pending_recovery
+        assert m._last_heartbeat.get("cam") is None
+
+        # Новая инкарнация прислала первый heartbeat.
+        m._on_heartbeat_received({"sender": "cam", "timestamp": time.time()})
+        m._check_heartbeats()
+
+        assert self._event(ssm) == "recovered"
+        assert "cam" not in m._pending_recovery
