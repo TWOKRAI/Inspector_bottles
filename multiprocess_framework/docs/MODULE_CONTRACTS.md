@@ -1,8 +1,9 @@
 # Module Contracts — Контракты модулей
 
-**Назначение:** для каждого из 24 модулей указано: цель, публичный контракт (`interfaces.py` + ключевые классы), обязательные инварианты, входы/выходы, зависимости. Документ — параллельная сетка к [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md): тот навигатор «когда применять», этот — «что обязано быть». Границы и разбор путающих осей — [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md).
+**Назначение:** для каждого из 25 модулей указано: цель, публичный контракт (`interfaces.py` + ключевые классы), обязательные инварианты, входы/выходы, зависимости. Документ — параллельная сетка к [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md): тот навигатор «когда применять», этот — «что обязано быть». Границы и разбор путающих осей — [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md).
 
-**Обновлено:** 2026-07-08 — добавлены контракты `event_module`, `actions_module`, `service_module`, `display_module` (сверка с фактом, 24 модуля); `sql_module` вынесен в `Services/sql` (раздел Storage → заметка).
+**Обновлено:** 2026-07-11 — добавлен контракт `recipe` (крыша над рецептами, C1/ADR-RCP-001/002); счётчик 24 → **25**.
+**Ранее** 2026-07-08 — добавлены контракты `event_module`, `actions_module`, `service_module`, `display_module` (сверка с фактом); `sql_module` вынесен в `Services/sql` (раздел Storage → заметка).
 **Ранее** 2026-05-07 — `state_store_module` актуализирован под ADR-SS-011/012/013, `chain_module` — под ADR-CHN-006/007 (renamed из ADR-CM-*; код модуля **CHN**, не **CM** — последний за `console_module`).
 
 > **Формат записи модуля:**
@@ -292,7 +293,7 @@
 - `MiddlewarePipeline` — цепочка middleware (пустой pipeline — нулевой overhead).
 - `ValidationMiddleware` — поддерживает `rule['type']` как одиночный тип или `tuple[type, ...]`.
 - `PersistenceManager` — доменно-нейтральный (ADR-SS-011): принимает `file_mapping: dict[str, Path]` (root → файл) и опциональные `path_predicate` / `value_filter`. Без жёстко зашитых имён файлов (`recipes.yaml`, `settings_recipes.yaml` и т.п.) — конфигурируется приложением.
-- `RecipeEngine` — `save / load / list / delete / diff / is_dirty` + миграции через callback-и `migration_fn` / `migration_check_fn` (ADR-SS-003).
+- `RecipeEngine` — **переехал в модуль `recipe`** (C1, ADR-RCP-001); `state_store_module.recipes` — тонкий шим-реэкспорт.
 - `InMemoryRouter` — тестовый router без IPC (синхронная диспатч), экспортирован публично (ADR-SS-010).
 
 **Инварианты:**
@@ -305,6 +306,31 @@
 
 **Зависимости:** `base_manager`, `pyyaml`. Внешние: опционально `PySide6` (lazy).
 **Тестов:** 421
+
+---
+
+### `recipe`
+
+**Цель:** Крыша над управлением рецептами: snapshot/restore config-ветвей, распознавание формата (v3-blueprint vs config-snapshot), точка миграций через callbacks, CRUD-менеджер. Доменных схем не знает — пути/миграции/yaml-writer инжектируются.
+
+**Контракт:**
+- `StoreProtocol` (Protocol) — `has`, `get`, `transaction`; доменно-нейтральный срез `TreeStore`. Движок типизирует store через него и **не импортирует** `state_store_module` (нет цикла).
+- `RecipeEngineProtocol` (Protocol) — `save / load / list / delete / set_active / deactivate / get_active / is_dirty / recipes_dir`.
+- `RecipeManagerProtocol` (Protocol) — то же + `duplicate / read_recipe` + синхронизация `state.recipes.active`.
+- `RecipeEngine` — snapshot/restore; миграции через `migration_fn` / `migration_check_fn` (ADR-SS-003); доменные ветви через `default_paths` (ADR-RCP-001, паттерн ADR-SS-011). v3-blueprint (`is_v3_recipe`) на `load()` помечается active без replay/migrate/write.
+- `RecipeManager` — CRUD + state-sync; `duplicate()` пишет comment-preserving через инжектируемый `yaml_updater` (ADR-RCP-002), fallback — plain-PyYAML.
+- `is_v3_recipe` — единая точка распознавания формата.
+- `normalize_recipe_v3_raw` — единая сборка v3-raw на запись.
+
+**Инварианты:**
+1. Фреймворк не знает доменных ветвей рецептов — `default_paths` инжектируется приложением (ADR-RCP-001).
+2. Модуль не импортирует `state_store_module` — store только через `StoreProtocol` (нет цикла recipe ↔ state_store).
+3. v3-blueprint никогда не реплеится в store и не перезаписывается миграцией (generic-ветвь в `load()`).
+4. `duplicate()` без инжектированного `yaml_updater` теряет комментарии (plain-PyYAML) — прикладной шим инжектирует ruamel-writer.
+
+**Границы:** реестр `@migration` + property-тесты — задача C2; consolidation `yaml_io`/assembler + переработка `duplicate()` — C3.
+**Зависимости:** `pyyaml`, stdlib. Store — через `StoreProtocol`.
+**Тестов:** 55
 
 ---
 
@@ -644,6 +670,7 @@
 | `shared_resources_module` | 5 233 | L5 | base | 50+ |
 | `config_module` | 2 393 | L5 | base, schema | 49 |
 | `state_store_module` | ~3 300 | L5 | base | 421 |
+| `recipe` | ~750 | L5 | pyyaml | 55 |
 | `event_module` | ~150 | L6 | — | + |
 | `command_module` | 1 220 | L7 | dispatch, base | 34 |
 | `actions_module` | ~700 | L7 | schema | + |
@@ -657,6 +684,6 @@
 | `registers_module` | 1 169 | L11 | schema | 30+ |
 | `frontend_module` | 12 039 | L12 | process, router, schema, logger | 150+ |
 
-**Итого:** 24 модуля во фреймворке, ~76 000 LOC (с тестами). `sql_module` (~3 775 LOC) вынесен в `Services/sql` (Phase 4.1) — в счётчик фреймворка не входит.
+**Итого:** 25 модулей во фреймворке, ~76 750 LOC (с тестами). `sql_module` (~3 775 LOC) вынесен в `Services/sql` (Phase 4.1) — в счётчик фреймворка не входит.
 
 \* `message_module` в SPEC.md классифицируется как L3 (Messaging), в карте слоёв `MODULES_OVERVIEW.md` — как L1-foundation для message-данных. Обе классификации валидны; зависит только от `data_schema_module`.

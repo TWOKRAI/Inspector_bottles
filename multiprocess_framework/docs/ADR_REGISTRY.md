@@ -34,6 +34,7 @@
 | **RM** | `registers_module` | `modules/registers_module/DECISIONS.md` |
 | **CM** | `console_module` | `modules/console_module/DECISIONS.md` |
 | **SS** | `state_store_module` | `modules/state_store_module/DECISIONS.md` |
+| **RCP** | `recipe` | `modules/recipe/DECISIONS.md` |
 | **CHN** | `chain_module` | `modules/chain_module/DECISIONS.md` |
 | **SVC** | `service_module` | `modules/service_module/DECISIONS.md` |
 | **DM** | `display_module` | `modules/display_module/DECISIONS.md` |

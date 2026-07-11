@@ -15,7 +15,7 @@
 - **Pipeline-исполнители:** `chain_module` — DAG/Chain engine (ChainRunnable, DagRunnable, WorkerPoolDispatcher)
 - **GUI:** `frontend_module` (PySide6), схемы регистров в приложении. Виджеты v3 сгруппированы по доменам (`chrome/`, `sources/`, `recipes/`, `processing/`, `settings/`, `pipeline/`, `tabs_setting/`, `base/`) — детали в [`docs/refactors/2026-04_widgets_reorg.md`](docs/refactors/2026-04_widgets_reorg.md).
 - **Роутинг:** НЕ путать **имя процесса** (`targets`, `send_message`) и **канал Router** (`FieldRouting.channel`, `msg["channel"]`). См. `ROUTING_GLOSSARY.md`
-- **Всего модулей в `multiprocess_framework/modules/`:** 24 (`sql_module` вынесен в `Services/sql`, Phase 4.1). Карта ответственности и границы модулей — [`docs/MODULES_RESPONSIBILITY_MAP.md`](multiprocess_framework/docs/MODULES_RESPONSIBILITY_MAP.md). См. также [`MODULES_STATUS.md`](multiprocess_framework/MODULES_STATUS.md), [`Services/STATUS.md`](Services/STATUS.md), [`docs/MODULES_OVERVIEW.md`](multiprocess_framework/docs/MODULES_OVERVIEW.md).
+- **Всего модулей в `multiprocess_framework/modules/`:** 25 (`sql_module` вынесен в `Services/sql`, Phase 4.1; `recipe` — крыша над рецептами, C1/ADR-RCP-001). Карта ответственности и границы модулей — [`docs/MODULES_RESPONSIBILITY_MAP.md`](multiprocess_framework/docs/MODULES_RESPONSIBILITY_MAP.md). См. также [`MODULES_STATUS.md`](multiprocess_framework/MODULES_STATUS.md), [`Services/STATUS.md`](Services/STATUS.md), [`docs/MODULES_OVERVIEW.md`](multiprocess_framework/docs/MODULES_OVERVIEW.md).
 
 ## Ключевые пути
 
@@ -27,7 +27,7 @@
 | Vocabulary плагинов (19 шт., reuse между приложениями) | `Plugins/` ← Phase 5 carve-out (см. ADR-120) |
 | Документация фреймворка | `multiprocess_framework/docs/` (`MODULES_OVERVIEW.md`, `MODULE_CONTRACTS.md`, `DIAGRAMS.md`) |
 | Диаграммы архитектуры | `docs/diagrams/` (Mermaid, PlantUML, SVG — diagrams-as-code) |
-| Конструктор-blueprint фреймворка (24 модуля) | [`multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md`](multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md) |
+| Конструктор-blueprint фреймворка (25 модулей) | [`multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md`](multiprocess_framework/docs/CONSTRUCTOR_BLUEPRINT.md) |
 | Точка входа v3 | `multiprocess_prototype/run.py` |
 | Регистры приложения v3 | `multiprocess_prototype/registers/` |
 | Конспект правил | `docs/claude/FRAMEWORK_RULES_EXTRACT.md` |
