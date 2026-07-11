@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .manifest import canonicalize_category
+
 if TYPE_CHECKING:
     from .base import ProcessModulePlugin
     from .port import Port
@@ -35,8 +37,15 @@ class PluginEntry:
     ) -> None:
         self.name = name
         self.plugin_class = plugin_class
+        # Канонизировано вызывающей стороной (_PluginRegistry.register()) — здесь
+        # только сохраняем как есть, чтобы PluginEntry оставался простым value-object.
         self.category = category
         self.description = description
+
+        # Манифест-поля (Ф4 Task 4.4) — читаются с plugin_class, дефолты см. ProcessModulePlugin.
+        self.version: str = getattr(plugin_class, "VERSION", "0.0.0")
+        self.api_version: str = getattr(plugin_class, "API_VERSION", "")
+        self.requires: tuple[str, ...] = tuple(getattr(plugin_class, "REQUIRES", ()) or ())
 
         # Register-классы плагина: приоритет register_class на классе,
         # fallback на register_schema() (через config_class → register_bindings)
@@ -88,8 +97,17 @@ class _PluginRegistry:
         plugin_class: type[ProcessModulePlugin],
         category: str = "",
         description: str = "",
-    ) -> None:
-        """Зарегистрировать плагин в каталоге."""
+    ) -> PluginEntry:
+        """Зарегистрировать плагин в каталоге.
+
+        `category` канонизируется здесь — ЕДИНСТВЕННАЯ точка (прямые вызовы
+        `.register()`, напр. в тестах, И `@register_plugin` идут через неё):
+        легаси-алиас → канон; неканоничное значение — громкий WARNING, не
+        отказ (Принцип №1, ADR-PM-013). Возвращает созданную/существующую
+        запись — `register_plugin()` использует `entry.category` (уже
+        канонизированную), чтобы не канонизировать дважды (двойной WARNING).
+        """
+        canonical_category = canonicalize_category(category)
         if name in self._plugins:
             existing = self._plugins[name]
             # Перезапись того же класса — OK (reload)
@@ -100,12 +118,14 @@ class _PluginRegistry:
                     f"Попытка перезаписать: {plugin_class.__module__}.{plugin_class.__qualname__}"
                 )
 
-        self._plugins[name] = PluginEntry(
+        entry = PluginEntry(
             name=name,
             plugin_class=plugin_class,
-            category=category,
+            category=canonical_category,
             description=description,
         )
+        self._plugins[name] = entry
+        return entry
 
     def get(self, name: str) -> PluginEntry | None:
         """Получить плагин по имени."""
@@ -269,7 +289,7 @@ def register_plugin(
     """
 
     def decorator(cls):
-        PluginRegistry.register(
+        entry = PluginRegistry.register(
             name=name,
             plugin_class=cls,
             category=category,
@@ -279,7 +299,9 @@ def register_plugin(
         if not getattr(cls, "name", ""):
             cls.name = name
         if not getattr(cls, "category", ""):
-            cls.category = category
+            # entry.category — уже канонизированное значение (см. _PluginRegistry.register()),
+            # не «сырой» category-аргумент — иначе cls.category разошёлся бы с entry.category.
+            cls.category = entry.category
         return cls
 
     return decorator

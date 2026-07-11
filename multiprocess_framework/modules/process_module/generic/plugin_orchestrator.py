@@ -17,6 +17,7 @@ from typing import Any
 
 from ..plugins.base import PluginContext, ProcessModulePlugin
 from ..plugins.interfaces import IProcessServices
+from ..plugins.manifest import PLUGIN_API_VERSION, api_version_major_mismatch, check_requires
 
 
 class PluginOrchestrator:
@@ -131,6 +132,29 @@ class PluginOrchestrator:
                 plugin._trace_node = self._services.name
                 # health (Ф2 Task 2.1): имя плагина — дефолтный context для ctx.health.
                 ctx._plugin_name = plugin.name
+
+                # Манифест (Ф4 Task 4.4): API_VERSION mismatch по major — громкий
+                # WARNING, boot ПРОДОЛЖАЕТСЯ (план: «boot mismatch → WARNING», не
+                # отказ — несовместимость контракта не гарантирована, только вероятна).
+                if api_version_major_mismatch(plugin.API_VERSION):
+                    self._services.log_warning(
+                        f"PluginOrchestrator[{self._services.name}]: '{plugin.name}' "
+                        f"API_VERSION={plugin.API_VERSION!r} расходится по major с текущим "
+                        f"контрактом плагин-фреймворк {PLUGIN_API_VERSION!r}"
+                    )
+
+                # REQUIRES (Ф4 Task 4.4): недостающий manager/service/shm — fail-fast ДО
+                # configure(), той же строгостью, что и провал самого configure() (skip
+                # + громкий лог, процесс жив) — вместо позднего немого AttributeError
+                # из getattr(ctx, ..., None) внутри плагина.
+                missing = check_requires(ctx, plugin.REQUIRES)
+                if missing:
+                    self._services.log_error(
+                        f"PluginOrchestrator[{self._services.name}]: '{plugin.name}' REQUIRES не "
+                        f"удовлетворены, плагин пропущен: {'; '.join(missing)}"
+                    )
+                    continue
+
                 plugin._do_configure(ctx)
                 self._plugins.append(plugin)
                 self._contexts.append(ctx)

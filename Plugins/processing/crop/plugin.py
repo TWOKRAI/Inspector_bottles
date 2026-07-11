@@ -37,6 +37,11 @@ class CropPlugin(ProcessModulePlugin):
     category = "processing"
     thread_safe = True
 
+    # Манифест (Ф4 Task 4.4, пилот): чистое frame->frame преобразование —
+    # без framework-зависимостей (register_class сам умеет fallback на
+    # локальный инстанс без RegistersManager, см. _init_register).
+    VERSION = "1.0.0"
+
     inputs = [Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Исходный кадр")]
     outputs = [Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="Обрезанный кадр")]
 

@@ -21,6 +21,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 from .interfaces import IProcessServices
+from .manifest import PLUGIN_API_VERSION
 
 if TYPE_CHECKING:
     from ..health import HealthReporter
@@ -224,10 +225,31 @@ class ProcessModulePlugin(ABC):
 
     Команды — {имя_команды: имя_метода}
         Автоматически регистрируются в CommandManager процесса.
+
+    Статический манифест (Ф4 Task 4.4, см. ``plugins/manifest.py``):
+        VERSION      — semver плагина (не версия контракта). Дефолт "0.0.0".
+        API_VERSION  — semver контракта плагин↔фреймворк. Дефолт — текущий
+                        ``PLUGIN_API_VERSION``. Boot mismatch по major → WARNING
+                        (не отказ, см. ``PluginOrchestrator.boot()``).
+        REQUIRES     — декларация зависимостей, проверяется на boot ДО
+                        configure(): "manager:<атрибут ctx>" (напр.
+                        "manager:worker_manager"), "service:<имя>" (менеджер на
+                        ctx.services, напр. "service:sql_manager"), "shm".
+                        Недостающая зависимость → громкая ошибка с именем
+                        плагина вместо позднего немого AttributeError.
     """
 
     name: str = ""
-    category: str = ""  # "source" | "processing" | "output"
+    # Канон — plugins.manifest.PluginCategory (source/processing/render/io/sink/
+    # hub/control/filter/calibration/runtime/utility). Легаси-строки (rendering/
+    # output и любые другие) канонизируются PluginRegistry.register() через
+    # CATEGORY_LEGACY_ALIASES; неканоничное значение — громкий WARNING, не отказ.
+    category: str = ""
+
+    # --- Манифест плагина (Ф4 Task 4.4) — статически читаемые метаданные ---
+    VERSION: ClassVar[str] = "0.0.0"
+    API_VERSION: ClassVar[str] = PLUGIN_API_VERSION
+    REQUIRES: ClassVar[tuple[str, ...]] = ()
 
     # Контракт портов — переопределяется в подклассах
     inputs: list = []  # list[Port]
