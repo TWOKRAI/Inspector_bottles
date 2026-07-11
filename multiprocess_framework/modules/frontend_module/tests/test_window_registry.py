@@ -40,7 +40,7 @@ class TestWindowConfig:
         cfg = WindowConfig.model_validate(
             {
                 "window_id": "main",
-                "title": "Inspector",
+                "title": "TestApp",
                 "width": 1024,
                 "height": 768,
                 "widgets": [
@@ -50,6 +50,6 @@ class TestWindowConfig:
             }
         )
         assert cfg.window_id == "main"
-        assert cfg.title == "Inspector"
+        assert cfg.title == "TestApp"
         assert len(cfg.widgets) == 2
         assert cfg.widgets[0]["register_name"] == "draw"

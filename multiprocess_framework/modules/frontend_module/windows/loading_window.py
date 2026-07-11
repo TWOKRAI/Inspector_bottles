@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from multiprocess_framework.modules.frontend_module.core.app_identity import get_app_identity
 from multiprocess_framework.modules.frontend_module.core.qt_imports import (
     QImage,
     QLabel,
@@ -28,6 +29,8 @@ class LoadingWindow(QMainWindow):
 
     Параметры:
         logo_path: путь к изображению логотипа
+        logo_text: фолбэк-текст логотипа, если нет logo_path/pixmap; по умолчанию —
+            AppIdentity.logo_text (инъекция composition root, см. core.app_identity)
         min_width, min_height: минимальный размер окна
         title: заголовок окна
     """
@@ -36,6 +39,7 @@ class LoadingWindow(QMainWindow):
         self,
         *,
         logo_path: Optional[str] = None,
+        logo_text: Optional[str] = None,
         min_width: int = 400,
         min_height: int = 300,
         title: str = "Загрузка...",
@@ -43,6 +47,7 @@ class LoadingWindow(QMainWindow):
     ):
         super().__init__(parent)
         self._logo_path = logo_path
+        self._logo_text = logo_text if logo_text is not None else get_app_identity().logo_text
         self.setMinimumSize(min_width, min_height)
         self.setWindowTitle(title)
         self._init_ui()
@@ -68,7 +73,7 @@ class LoadingWindow(QMainWindow):
                 if not pixmap.isNull():
                     logo_label.setPixmap(pixmap)
         if logo_label.pixmap() is None or logo_label.pixmap().isNull():
-            logo_label.setText("Inspector")
+            logo_label.setText(self._logo_text)
             logo_label.setStyleSheet("font-size: 24px; color: #333;")
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(logo_label)

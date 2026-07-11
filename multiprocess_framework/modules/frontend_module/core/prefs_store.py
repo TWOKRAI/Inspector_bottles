@@ -7,9 +7,9 @@ view_mode — user preference (не свойство рецепта/алгори
 
 from __future__ import annotations
 
+from multiprocess_framework.modules.frontend_module.core.app_identity import get_app_identity
 from multiprocess_framework.modules.frontend_module.core.qt_imports import QSettings
 
-_ORG = "Inspector"
 _APP = "ui_preferences"
 
 KEY_SETTINGS_MODE = "settings/view_mode"
@@ -18,7 +18,9 @@ KEY_HEADER_MODE = "header/mode"
 
 
 def _settings() -> QSettings:
-    return QSettings(_ORG, _APP)
+    # org — из инжектированной AppIdentity (composition root), не зашит в фреймворк.
+    # Критично: смена org теряет сохранённые preferences пользователя (см. AppIdentity).
+    return QSettings(get_app_identity().org, _APP)
 
 
 def get_view_mode(key: str, default: int = 0) -> int:
