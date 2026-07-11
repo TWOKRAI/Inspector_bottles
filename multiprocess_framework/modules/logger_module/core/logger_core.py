@@ -26,7 +26,7 @@ from contextvars import ContextVar
 if TYPE_CHECKING:
     from multiprocessing import Process
 
-from ...channel_routing_module import ChannelRoutingManager
+from ...channel_routing_module import ChannelRoutingManager, resolve_build_result
 from ...channel_routing_module.buffers.batch_buffer import BatchBuffer, BatchConfig as CRMBatchConfig
 from ..interfaces import ILoggerManager
 from ..configs.logger_manager_config import (
@@ -168,22 +168,23 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
     @staticmethod
     def _resolve_log_config(config: Any) -> LoggerManagerConfig:
-        """Convert config (None | dict | LoggerManagerConfig | build()) to LoggerManagerConfig."""
+        """Convert config (None | dict | LoggerManagerConfig | build()) to LoggerManagerConfig.
+
+        D1 (constructor-master Ф5-добор, ADR-CRM-008): разбор build()-объекта
+        (tuple/dict payload) делегирован общему примитиву CRM
+        ``resolve_build_result`` — не переопределяем эту логику здесь.
+        Исключения из ``config.build()`` НЕ перехватываются (как и раньше).
+        """
         if config is None:
             return LoggerManagerConfig()
         if isinstance(config, LoggerManagerConfig):
             return config
         if isinstance(config, dict):
             return LoggerManagerConfig.model_validate(config) if config else LoggerManagerConfig()
-        if hasattr(config, "build") and callable(config.build):
-            result = config.build()
-            if isinstance(result, tuple) and len(result) == 2:
-                _, cfg_dict = result
-                if isinstance(cfg_dict, dict):
-                    return LoggerManagerConfig.model_validate(cfg_dict) if cfg_dict else LoggerManagerConfig()
-                return LoggerManagerConfig()
-            if isinstance(result, dict):
-                return LoggerManagerConfig.model_validate(result) if result else LoggerManagerConfig()
+        resolved = resolve_build_result(config)
+        if resolved is not None:
+            _, cfg_dict = resolved
+            return LoggerManagerConfig.model_validate(cfg_dict) if cfg_dict else LoggerManagerConfig()
         return LoggerManagerConfig()
 
     def _scope_schema(self, scope: LogScope) -> LoggerScopeSchema:
