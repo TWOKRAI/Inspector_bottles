@@ -528,23 +528,39 @@ class BuiltinCommands:
         return card
 
     def _cmd_introspect_plugins(self, data=None, **kwargs) -> dict:
-        """Каталог плагинов ЭТОГО процесса + failed_imports (Ф2.3).
+        """Каталог плагинов ЭТОГО процесса + failed_imports (Ф2.3) + манифест (Ф4.4).
 
         Отвечает на «куда делся мой плагин»: модуль с опечаткой падает на
         import при discover() и раньше молча исчезал из каталога; теперь он
         в ``failed_imports`` (module_path -> "ExcType: сообщение"). Каталог —
         глобальный singleton per-process (discover выполняется в каждом
         процессе отдельно), поэтому ответ честный для процесса-адресата.
+
+        ``manifest`` (Ф4 Task 4.4) — аддитивное поле рядом с уже существующим
+        ``plugins`` (name -> category, НЕ трогаем — обратная совместимость):
+        runtime-зеркало статического манифеста плагина (version/api_version/
+        category/requires — см. ``ProcessModulePlugin``/``plugins/manifest.py``).
         """
         svc = self._services
         from ..plugins.registry import PluginRegistry
 
-        plugins = {entry.name: entry.category for entry in PluginRegistry.list()}
+        entries = PluginRegistry.list()
+        plugins = {entry.name: entry.category for entry in entries}
+        manifest = {
+            entry.name: {
+                "category": entry.category,
+                "version": entry.version,
+                "api_version": entry.api_version,
+                "requires": list(entry.requires),
+            }
+            for entry in entries
+        }
         failed = PluginRegistry.failed_imports()
         return {
             "success": True,
             "process": svc.name,
             "plugins": dict(sorted(plugins.items())),
+            "manifest": dict(sorted(manifest.items())),
             "count": len(plugins),
             "failed_imports": dict(sorted(failed.items())),
         }
