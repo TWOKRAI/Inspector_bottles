@@ -10,6 +10,16 @@ metadata:
 Мастер-план `plans/2026-07-06_constructor-master/` в исполнении с 2026-07-06.
 **Актуальный handoff: docs/handoffs/2026-07-10_f5-observability-merged.md** — читать первым.
 
+**LATEST 2026-07-11 (вечер) — В0+старт В1: C1/C4/C5/NEW-8 закрыты параллельными агентами, ВСЁ в main:**
+- Ветка `fix/codegraph-routing-single-tool` влита в main (--no-ff); затем 4 параллельных агента в worktree (директива владельца; C5/C1/NEW-8 — Opus, C4 — Sonnet 5 после сбоя первого запуска: агент вернул подсчёт LOC вместо задачи — перезапуск помог).
+- **C1 ✅**: framework-модуль `modules/recipe/` — **25-й** (engine+manager+detect+format+interfaces, ADR-RCP-001/002, 55 тестов); store через Protocol; шимы state_store/backend/recipes; домен (миграции v1→v2, DEFAULT_CONFIG_PATHS, yaml_io) остался в прототипе осознанно; seam yaml_updater → снять в C3.
+- **C4 ✅**: `resolve_build_result()` в CRM (ADR-CRM-008), LoggerCore/ErrorManager на нём; 24 характеризационных ДО; ужесточение: вырожденный build() у ErrorManager → fallback имени.
+- **C5 ✅**: канон deep_merge в `data_schema/core/helpers.py` (ADR-DS-007; канон в config дал бы цикл), config/prototype — делегаты; shallow→deepcopy поглощён (снят aliasing DEFAULT_PROCESS_SCHEMA); `state_store._deep_merge_inplace` вне scope (N2).
+- **NEW-8 ✅ (В0)**: README UTF-8 (старый дамп → docs/notes/), `.github/workflows/ci.yml` (validate+tests blocking, ruff advisory — 19 нарушений долг), AGENTS.md без d:/-путей.
+- Гейты объединённого main: 1701 passed (все зоны C1+C4+C5), снапшот 5.1 зелёный, scripts.sync+validate чисто, sentrux rescan quality 7081, check_rules 9/9. main НЕ запушен (owner-gated).
+- **Уроки оркестрации**: (1) worktree агентов создаётся от origin/main, НЕ от текущего HEAD — агенты не видели свежих доков (plans/current-path, аудит-карту), задачи ставить самодостаточными промптами; (2) `git stash` ОБЩИЙ на все worktree — C4-агент случайно pop'нул чужой f2.2-wip (восстановил корректно); (3) первый запуск агента может молча исполнить НЕ ту задачу — сверять результат с ТЗ до merge.
+- **NEXT: C2** (реестр @migration + property-тесты + единый detect) → 4.8 (mini-GATE канонизация записи) → C3 (yaml_io/assembler/duplicate) → C6 (дизайн) → C7 → C8; параллельно можно 4.9. Открытые owner-вопросы прежние + одобрение Master plan current-path.
+
 **LATEST 2026-07-11 — срез согласования планов (анализ рефакторинга):**
 - **main ЗАПУШЕН** (origin/main == main @ a50d1f74) → R6 закрыт, план `plans/2026-07-10_post-review-hardening.md` ЗАКРЫТ целиком (R1–R6).
 - **Трек F ПОЛНОСТЬЮ закрыт**: F.7 (владение GUI-состоянием presenter→LayoutController, back-ref `self._p` снят, `PipelineHost` Protocol, −97 LOC compat-швов) ✅ 2026-07-11. Коммиты в ветке `fix/codegraph-routing-single-tool` (6 впереди main: F.7 ×3 + открытие Ф5-добора 48a64f0c + codegraph-фикс + memory) — **ЖДУТ merge → main (владелец)**.
