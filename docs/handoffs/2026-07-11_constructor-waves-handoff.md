@@ -6,7 +6,7 @@
 
 ## ⚠️ Первым делом в новом чате
 
-1. **Проверить одного фонового агента** (ветка могла дозреть после handoff):
+1. ~~Проверить фонового агента~~ **✅ ЗАКРЫТО перед передачей:** фикс 4.9 влит в main (агент упёрся в session-limit на финише — хвост дожат владельцем сессии: ADR-заметка, коммит ядра, merge, регресс 802 passed). PLAUSIBLE-6 подтвердился (`router.send()` возвращал transport-ack — переход на `router.request()`, ADR-SS-016). 4.9 полностью закрыта, в полёте НИЧЕГО нет. Исторический контекст находок ревью ↓ (для понимания, действий не требует):
    - `fix/statestore-revision-continuity` — **фикс 4.9 по Fable-ревью** (CHANGES REQUESTED: HIGH-1 континуальность ломается мульти-лист merge — dispatcher шлёт пакет с revision=max(), proxy ждёт last+1; HIGH-2 глобальный revision + фильтрованная доставка (узкие подписки GUI, exclude_self) → ложные gap на каждом пакете + проглатывание callbacks (`on_state_changed` return до `_invoke_callbacks`); MED-3 stale-пакет→resync-шторм; MED-4 неудачный resync→перманентная блокировка callbacks; MED-5 гонка snapshot/revision вне лока (`state_store_manager.py:294`); PLAUSIBLE-6 `_resync` полагается, что router.send вернёт ответ handler'а — `_RelayRouter` в тестах это маскирует). Агенту выданы направления фикса (а)-(е), ключевой инвариант: дельты доставленного пакета ВСЕГДА доходят до callbacks, resync — дополнение, не замена. До merge фикса 4.9 НЕ считать закрытой для живого прогона.
    Если ветка есть — ревью отчёта, merge --no-ff, регресс state_store+frontend, статус 4.9 в плане дополнить.
    (NEW-5 `feat/forms-from-schema` — уже влит в main перед handoff, ADR-DS-008.)
