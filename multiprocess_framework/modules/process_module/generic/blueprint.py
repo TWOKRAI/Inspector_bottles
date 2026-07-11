@@ -130,6 +130,19 @@ class ProcessConfig(SchemaBase):
         FieldMeta("io-debug", info="Сводка in/out плагинов в дерево: {enabled, rate_hz, head_len}"),
     ] = {}
 
+    # --- Domain-opaque bag (C6 рычаг 1) ---
+
+    extras: Annotated[
+        dict[str, Any],
+        FieldMeta(
+            "Extras",
+            info="Domain-opaque мешок: pipeline-специфичные ключи (inspector/chain_targets/"
+            "io_peek/...), которые framework не обязан знать по имени. Зеркалит формат "
+            "app.yaml/manifest 'version + extras'. Типизированные поля выше — shorthand для "
+            "самых частых ключей и имеют приоритет над одноимёнными в extras.",
+        ),
+    ] = {}
+
     def as_generic_config(self) -> GenericProcessConfig:
         """Конвертировать в GenericProcessConfig для launcher."""
         # Восстановить PluginConfig-инстансы для агрегации memory
@@ -147,15 +160,23 @@ class ProcessConfig(SchemaBase):
         if self.restart_policy:
             base_kwargs["restart_policy"] = self.restart_policy
 
-        # Data Pipeline routing
-        if self.chain_targets:
-            base_kwargs["chain_targets"] = self.chain_targets
-        if self.source_target_fps != 25.0:
-            base_kwargs["source_target_fps"] = self.source_target_fps
-        if self.inspector:
-            base_kwargs["inspector"] = self.inspector
-        if self.io_peek:
-            base_kwargs["io_peek"] = self.io_peek
+        # Data Pipeline routing.
+        # C6 рычаг 1: приоритет typed-поля (если непусто), иначе extras[key] —
+        # 100% back-compat для старых рецептов, новые доменные ключи живут в extras
+        # без правки framework-схемы ProcessConfig.
+        extras = self.extras or {}
+        chain_targets = self.chain_targets or extras.get("chain_targets", [])
+        source_fps = self.source_target_fps if self.source_target_fps != 25.0 else extras.get("source_target_fps", 25.0)
+        inspector = self.inspector or extras.get("inspector", {})
+        io_peek = self.io_peek or extras.get("io_peek", {})
+        if chain_targets:
+            base_kwargs["chain_targets"] = chain_targets
+        if source_fps != 25.0:
+            base_kwargs["source_target_fps"] = source_fps
+        if inspector:
+            base_kwargs["inspector"] = inspector
+        if io_peek:
+            base_kwargs["io_peek"] = io_peek
 
         if plugin_configs:
             return GenericProcessConfig.from_plugins(
