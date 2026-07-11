@@ -679,3 +679,49 @@ class TestFieldMetaWidgetAliases:
 
     def test_empty_widget_unchanged(self):
         assert FieldMeta(widget="").widget == ""
+
+
+# =============================================================================
+# FieldMeta: UI-hints каталог (NEW-5, аддитивное расширение для build_form_for_schema)
+# =============================================================================
+
+
+class TestFieldMetaUiHints:
+    """ui_group/ui_order/ui_hidden — аддитивные UI-подсказки для генератора форм.
+
+    Дефолты (None/None/False) не меняют поведение существующих схем.
+    widget (существующее поле) остаётся единым источником widget-подсказки —
+    отдельного ui_widget-атрибута не заводим (см. DECISIONS.md ADR-DS-008:
+    избежать повторного дублирования widget→kind, устранённого ранее в
+    ADR "FieldMeta.widget — единственный источник").
+    """
+
+    def test_defaults(self):
+        m = FieldMeta("X")
+        assert m.ui_group is None
+        assert m.ui_order is None
+        assert m.ui_hidden is False
+
+    def test_explicit_values(self):
+        m = FieldMeta("X", ui_group="Оптика", ui_order=3, ui_hidden=True)
+        assert m.ui_group == "Оптика"
+        assert m.ui_order == 3
+        assert m.ui_hidden is True
+
+    def test_to_dict_includes_ui_hints(self):
+        m = FieldMeta("X", ui_group="grp", ui_order=1, ui_hidden=True)
+        d = m.to_dict()
+        assert d["ui_group"] == "grp"
+        assert d["ui_order"] == 1
+        assert d["ui_hidden"] is True
+
+    def test_to_dict_defaults(self):
+        d = FieldMeta("X").to_dict()
+        assert d["ui_group"] is None
+        assert d["ui_order"] is None
+        assert d["ui_hidden"] is False
+
+    def test_repr_unaffected(self):
+        """UI-hints не должны ломать __repr__ (не добавлены в repr намеренно)."""
+        m = FieldMeta("X", ui_group="grp", ui_order=1)
+        assert "X" in repr(m)
