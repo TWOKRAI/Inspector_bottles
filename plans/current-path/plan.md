@@ -14,7 +14,7 @@
 
 ## 2. Где мы (срез 2026-07-11)
 
-**Сделано** (детали в constructor-master): Ф0–Ф3 целиком, трек F целиком (god-split + F.7), Ф4.1/4.2 + добор H1–H8, Ф5-ядро (carve E1–E3, RuntimeDeps, state-plane, вся наблюдаемость 5.14–5.21), post-review R1–R6. main запушен. Инженерная база: 0 циклов импортов, чистое слоение, fencing, supervisor с watchdog, debug-plane, персистентная наблюдаемость.
+**Сделано** (детали в constructor-master): Ф0–Ф3 целиком, трек F целиком (god-split + F.7), Ф4.1/4.2/4.4 + добор H1–H8, Ф5-ядро (carve E1–E3, RuntimeDeps, state-plane, вся наблюдаемость 5.14–5.21), post-review R1–R6, C1/C2/C4/C5/C7 (Ф5-добор). main запушен. Инженерная база: 0 циклов импортов, чистое слоение, fencing, supervisor с watchdog, debug-plane, персистентная наблюдаемость.
 
 **Оценка готовности к цели: ~5.5–6/10.** Разбивка по доменам (ревью):
 
@@ -45,7 +45,7 @@
 ### В0 — Гигиена ✅ ИСПОЛНЕНА 2026-07-11
 - Merge `fix/codegraph-routing-single-tool` → main (--no-ff). ✅
 - **Быстрые победы вне фаз** (NEW-8): README → UTF-8 + реальный quickstart; CI-шаблон `.github/workflows`; убрать `d:/PROJECT_INNOTECH/...` из backend_ctl/AGENTS.md. ✅ (ветка `chore/dx-quick-wins-new8`, merge в main): README переписан (старые заметки сохранены в `docs/notes/2026_shared-resources-pickle-notes.md`), CI: validate+tests blocking (fw 3817 passed headless локально), ruff advisory (19 нарушений — накопленный долг, TODO снять `continue-on-error` после разбора), pyright отложен; AGENTS.md очищен.
-- **Старт В1 — 2026-07-11:** C4/C5/C1 закрыты параллельными агентами (статусы в constructor-master; объединённый гейт 1701 passed, sentrux 9/9, quality 7081); далее C2 → 4.8 → C3.
+- **Старт В1 — 2026-07-11:** C4/C5/C1 закрыты параллельными агентами (статусы в constructor-master; объединённый гейт 1701 passed, sentrux 9/9, quality 7081); далее C2 → 4.8 → C3. **Прогресс среза 2026-07-11 (обновлено):** C2 ✅ (merge 07993e22, ADR-RCP-003), C7 ✅ (merge 50798fa6), 4.3/4.9 ✅, 4.4 ✅ (ADR-PM-013, детали — constructor-master); 4.8 mini-GATE — prep влит (merge d4e29943, ADR-RCP-004), ждёт вердикта владельца; C6(a) дизайн влит (merge 39236585), рычаги (b)+(c) исполняются агентом; C3 остаётся заблокирован вердиктом 4.8; NEW-2/NEW-5 (В3, ниже) исполнены досрочно.
 
 ### В1 — Фундамент модулей (= C-волна + Ф4-хвосты, ~2 нед)
 Как в constructor-master: C4/C5 → C1→C2 (+4.8 mini-GATE) →C3 → C6 → C7 → C8. Уточнения из ревью:
@@ -65,8 +65,8 @@
 
 ### В3 — GUI-конструктор (параллельно/после В2, ~1 нед)
 - **5.10 расширить S→M (NEW-D1):** перенести МЕХАНИЗМ (TabFactory/lazy/permission-фильтр) во frontend_module как TabRegistry; прототип = `TABS: list[TabSpec]`; permissions и predefined_roles деривятся из реестра (D-1/D-4/D-5).
-- **NEW-2 AppIdentity (S):** `_ORG`/лого/title — инъекция из composition root; acceptance: grep «Inspector» по frontend_module = 0 (D-2/D-3, F3).
-- **NEW-5 Формы из схемы (S):** `build_form_for_schema(SchemaBase)` поверх `FieldInfo.from_schema` + каталог UI-hint полей FieldMeta; 7b/7c/7d остаются frozen (G2), новые фичи только через FieldMeta (D-6).
+- **NEW-2 AppIdentity (S):** `_ORG`/лого/title — инъекция из composition root; acceptance: grep «Inspector» по frontend_module = 0 (D-2/D-3, F3). **✅ 2026-07-11 досрочно** (ветка `feat/frontend-app-identity`, merge f5deff73): `frontend_module/core/app_identity.py` — `AppIdentity` frozen-dataclass + `set_app_identity()`, дефолт нейтральный (`MultiprocessApp`/env `MPF_APP_NAME`), composition root (`multiprocess_prototype/frontend/app.py`) инжектит явно; `prefs_store`/`window_registry`/`loading_window` читают идентичность вместо хардкода; QSettings прототипа не тронуты (не теряют user prefs). **Уточнение acceptance:** grep «Inspector» по `frontend_module` НЕ строго 0 — остаются generic-имена виджетов (`InspectorPanel`/`SchemaInspectorPanel`, паттерн «инспектор-панель», не бренд) и упоминания в ROADMAP.md; брендовые строки (org/лого/title) вынесены полностью.
+- **NEW-5 Формы из схемы (S):** `build_form_for_schema(SchemaBase)` поверх `FieldInfo.from_schema` + каталог UI-hint полей FieldMeta; 7b/7c/7d остаются frozen (G2), новые фичи только через FieldMeta (D-6). **✅ 2026-07-11 досрочно** (ветка `feat/forms-from-schema`, merge e13b8721, ADR-DS-008): `FieldMeta` +`ui_group`/`ui_order`/`ui_hidden` (data_schema_module) + зеркало в `registers_module/core/field_info.py`; `frontend/forms/form_builder.py::build_form_for_schema` — новый механизм поверх каталога, НЕ трогает 7a/7b/7c/7d (frozen-вердикт G2/5.6 держится). Тесты: field_meta 46 + field_info 77 + build_form_for_schema 129.
 
 ### В4 — Hot-path Ф7 (как в constructor-master, строго одним вскрытием)
 Уточнения из ревью: G.6 (trace-id) — вынести ПЕРВЫМ шагом фазы (семантические поля, не hot-path-рискованно; главный разрыв наблюдаемости E-4); в G.2/G.4 — свёртка оси kind (`queue_type` выводится из kind, один резолвер) = ось B архитектуры; G.4 приёмка «error-storm не топит heartbeat» live-тестом.
