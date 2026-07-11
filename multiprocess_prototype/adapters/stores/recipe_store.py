@@ -27,6 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
 from multiprocess_prototype.domain.entities.recipe import Recipe
 
 if TYPE_CHECKING:
@@ -200,7 +201,7 @@ class RecipeStoreFromManager:
                 denormalized["displays"] = result.pop("displays")
 
             # 3. blueprint — топология (процессы, провода, привязки дисплеев)
-            if "blueprint" in result:
+            if has_top_level_blueprint(result):
                 denormalized["blueprint"] = result.pop("blueprint")
 
             # 4. Остальные поля Recipe (active_services, display_bindings, gui_positions, ...)

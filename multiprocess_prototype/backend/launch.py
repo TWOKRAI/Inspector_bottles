@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
+
 if TYPE_CHECKING:
     from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
         SystemLauncher,
@@ -71,7 +73,7 @@ def unwrap_recipe(raw: dict) -> dict:
       - ``display_definitions`` — **определения** дисплеев (list[dict], id/name/width/...),
         top-level секция ``displays`` рецепта. Не путать с привязками.
     """
-    if not (isinstance(raw, dict) and "blueprint" in raw and "processes" not in raw):
+    if not (has_top_level_blueprint(raw) and "processes" not in raw):
         # Сырая topology (processes на верхнем уровне) — тоже honor-им inspector в metadata.
         if isinstance(raw, dict) and isinstance(raw.get("processes"), list):
             _hoist_inspector_from_metadata(raw["processes"])
