@@ -447,3 +447,88 @@ def test_keys_on_missing_path_raises(empty_store: TreeStore) -> None:
     """keys() несуществующего пути вызывает KeyError."""
     with pytest.raises(KeyError):
         empty_store.keys("missing.path")
+
+
+# ===========================================================================
+# Тесты revision (Ф4.9a, ADR-SS-014) — монотонный счётчик мутаций
+# ===========================================================================
+
+
+def test_revision_starts_at_zero(empty_store: TreeStore) -> None:
+    """Свежее хранилище — revision=0 (ещё не менялось)."""
+    assert empty_store.revision == 0
+
+
+def test_set_increments_revision(empty_store: TreeStore) -> None:
+    """Каждый успешный set() увеличивает revision на 1."""
+    empty_store.set("a", 1)
+    assert empty_store.revision == 1
+    empty_store.set("b", 2)
+    assert empty_store.revision == 2
+
+
+def test_set_no_change_does_not_increment_revision(camera_store: TreeStore) -> None:
+    """Идемпотентный set() (значение не изменилось) не трогает revision."""
+    before = camera_store.revision
+    delta = camera_store.set("cameras.0.config.fps", 30)  # то же значение
+    assert delta is None
+    assert camera_store.revision == before
+
+
+def test_delta_carries_current_revision(empty_store: TreeStore) -> None:
+    """Delta.revision == TreeStore.revision после мутации, вызвавшей эту Delta."""
+    delta = empty_store.set("a", 1)
+    assert delta is not None
+    assert delta.revision == empty_store.revision == 1
+
+
+def test_delete_increments_revision(camera_store: TreeStore) -> None:
+    """delete() успешного узла увеличивает revision."""
+    before = camera_store.revision
+    delta = camera_store.delete("cameras.0.config.fps")
+    assert delta is not None
+    assert camera_store.revision == before + 1
+    assert delta.revision == camera_store.revision
+
+
+def test_delete_missing_node_does_not_increment_revision(empty_store: TreeStore) -> None:
+    """delete() несуществующего узла (Delta=None) не трогает revision."""
+    before = empty_store.revision
+    delta = empty_store.delete("no.such.path")
+    assert delta is None
+    assert empty_store.revision == before
+
+
+def test_merge_increments_revision_per_changed_leaf(empty_store: TreeStore) -> None:
+    """merge() инкрементирует revision по разу на каждый изменившийся лист."""
+    deltas = empty_store.merge("cameras.0.config", {"fps": 30, "width": 1920, "height": 1080})
+    assert len(deltas) == 3
+    assert empty_store.revision == 3
+    # Дельты получают ПОСЛЕДОВАТЕЛЬНЫЕ revision в порядке применения.
+    revisions = sorted(d.revision for d in deltas)
+    assert revisions == [1, 2, 3]
+
+
+def test_revision_monotonic_across_mixed_operations(empty_store: TreeStore) -> None:
+    """revision растёт монотонно через set/merge/delete вперемешку, не сбрасывается."""
+    empty_store.set("a", 1)  # rev=1
+    empty_store.merge("b", {"x": 1, "y": 2})  # rev=2,3
+    empty_store.delete("a")  # rev=4
+    assert empty_store.revision == 4
+
+
+def test_restore_root_increments_revision(empty_store: TreeStore) -> None:
+    """restore() корня — одна мутация, один инкремент revision."""
+    deltas = empty_store.restore({"a": 1})
+    assert len(deltas) == 1
+    assert deltas[0].revision == 1
+    assert empty_store.revision == 1
+
+
+def test_restore_subtree_increments_revision(camera_store: TreeStore) -> None:
+    """restore() поддерева — одна мутация, один инкремент revision."""
+    before = camera_store.revision
+    deltas = camera_store.restore({"fps": 60}, path="cameras.0.config")
+    assert len(deltas) == 1
+    assert camera_store.revision == before + 1
+    assert deltas[0].revision == camera_store.revision

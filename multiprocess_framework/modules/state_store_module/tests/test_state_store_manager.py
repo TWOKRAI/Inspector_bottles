@@ -242,6 +242,42 @@ class TestStateStoreManagerGet:
         assert result["status"] == "ok"
         assert result["value"] == {"fps": 30, "type": "webcam"}
 
+    def test_get_subtree_includes_revision(self):
+        """Ф4.9a: ответ несёт текущую revision дерева (аддитивное поле)."""
+        mgr = StateStoreManager()
+        mgr.handle_state_set({"data": {"path": "x.y", "value": 1, "source": "s"}})
+        mgr.handle_state_set({"data": {"path": "x.z", "value": 2, "source": "s"}})
+        result = mgr.handle_state_get_subtree({"data": {"path": "x", "request_id": "req-rev"}})
+        assert result["status"] == "ok"
+        assert result["revision"] == mgr.store.revision == 2
+
+    def test_get_subtree_with_paths_uses_snapshot(self):
+        """Ф4.9b, ADR-SS-015: data.paths (список glob-паттернов) → TreeStore.snapshot.
+
+        Существующий канал state.get_subtree переиспользуется для resync — вместо
+        одного литерального 'path' можно передать 'paths' (glob-паттерны, как
+        в state.subscribe), сервер строит объединённый снимок.
+        """
+        mgr = StateStoreManager(
+            initial_state={
+                "cameras": {"0": {"fps": 30}, "1": {"fps": 25}},
+                "renderer": {"theme": "dark"},
+            }
+        )
+        result = mgr.handle_state_get_subtree({"data": {"paths": ["cameras.*.fps"], "request_id": "req-resync"}})
+        assert result["status"] == "ok"
+        assert result["value"] == {"cameras": {"0": {"fps": 30}, "1": {"fps": 25}}}
+        assert result["revision"] == mgr.store.revision
+
+    def test_get_subtree_paths_takes_priority_over_path(self):
+        """Если задан 'paths' — используется snapshot, 'path' игнорируется."""
+        mgr = StateStoreManager(initial_state={"cameras": {"0": {"fps": 30}}})
+        result = mgr.handle_state_get_subtree(
+            {"data": {"path": "renderer", "paths": ["cameras.**"], "request_id": "req"}}
+        )
+        assert result["status"] == "ok"
+        assert result["value"] == {"cameras": {"0": {"fps": 30}}}
+
 
 class TestStateStoreManagerSubscriptions:
     """Тесты handle_state_subscribe / unsubscribe / unsubscribe_all."""
@@ -311,6 +347,27 @@ class TestStateStoreManagerSubscriptions:
         mgr = StateStoreManager(initial_state={"processes": {"camera_0": {"state": {"status": "running"}}}})
         result = mgr.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": "gui"}})
         assert result["status"] == "ok"
+
+    def test_subscribe_replay_deltas_carry_current_revision(self):
+        """Ф4.9a: реплей-дельты несут revision дерева на момент реплея.
+
+        Даёт клиенту (StateProxy._check_and_handle_revision_gap) корректную
+        базу отсчёта для watch-from-revision сразу с первого сообщения.
+        """
+        router = MockRouter()
+        mgr = StateStoreManager(router=router)
+        mgr.handle_state_set({"data": {"path": "cameras.0.fps", "value": 30, "source": "s"}})
+        mgr.handle_state_set({"data": {"path": "cameras.0.type", "value": "usb", "source": "s"}})
+        assert mgr.store.revision == 2
+
+        result = mgr.handle_state_subscribe({"data": {"pattern": "cameras.**", "subscriber": "gui"}})
+        assert result["status"] == "ok"
+
+        replay_msg = router.sent_messages[-1]
+        assert replay_msg["command"] == "state.changed"
+        assert replay_msg["data"]["revision"] == 2
+        for d in replay_msg["data"]["deltas"]:
+            assert d["revision"] == 2
 
     def test_unsubscribe(self):
         """Отписка по sub_id."""

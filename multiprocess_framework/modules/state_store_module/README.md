@@ -32,11 +32,13 @@
 | `state.set` | client → server | Установить значение по пути |
 | `state.merge` | client → server | Слияние dict в поддерево |
 | `state.get` | client → server | Получить значение (синхронно) |
-| `state.get_subtree` | client → server | Получить поддерево (синхронно) |
+| `state.get_subtree` | client → server | Получить поддерево (синхронно); `data.path` — литеральный путь, `data.paths` — список glob-паттернов для объединённого снимка (Ф4.9b, ADR-SS-015 — переиспользуется для resync) |
 | `state.subscribe` | client → server | Подписаться на паттерн |
 | `state.unsubscribe` | client → server | Отписаться по sub_id |
 | `state.unsubscribe_all` | client → server | Отписаться от всех подписок процесса |
-| `state.changed` | server → client(s) | Адресная рассылка дельт подписчикам |
+| `state.changed` | server → client(s) | Адресная рассылка дельт подписчикам; `data.revision` — монотонная revision дерева на момент отправки (Ф4.9a, ADR-SS-014) |
+
+**Watch-from-revision + resync (Ф4.9, ADR-SS-014/015):** каждая мутация дерева получает монотонно растущую `revision` (`TreeStore.revision`, `Delta.revision`). `StateProxy` отслеживает `revision` последнего полученного `state.changed`; при разрыве (пришла `N+k` вместо ожидаемой `N+1`) автоматически ресинкается — запрашивает свежий снимок через `state.get_subtree(paths=...)` для всех своих активных подписок и заменяет затронутые пути в кэше. Полностью прозрачно для прикладного кода — ничего вызывать вручную не нужно. Обратная совместимость: пакеты без `revision` (старые отправители) обрабатываются как раньше (fail-open).
 
 ---
 
@@ -424,13 +426,15 @@ state_store_module/
 │   ├── in_memory_router.py        # InMemoryRouter (реализует IRouter)
 │   └── README.md
 │
-├── tests/                         # Unit-тесты модуля (~421 теста)
-│   ├── test_tree_store.py
-│   ├── test_delta.py
+├── tests/                         # Unit-тесты модуля (~496 тестов)
+│   ├── test_tree_store.py         # включая revision (Ф4.9, ADR-SS-014)
+│   ├── test_delta.py              # включая revision roundtrip/rebind/coalesce
 │   ├── test_subscription_manager.py
 │   ├── test_core_integration.py
 │   ├── test_state_store_manager.py
-│   ├── test_state_proxy.py        # включая фильтрацию callbacks
+│   ├── test_delta_dispatcher.py   # включая envelope.revision
+│   ├── test_state_proxy.py        # включая фильтрацию callbacks + watch-from-revision
+│   ├── test_watch_from_revision.py  # сквозной приёмочный тест resync (Ф4.9b)
 │   ├── test_middleware.py
 │   ├── test_throttle.py
 │   ├── test_validation.py
@@ -442,7 +446,7 @@ state_store_module/
 │   └── test_recipe_engine.py
 │
 ├── STATUS.md                      # Статус компонентов
-└── DECISIONS.md                   # Архитектурные решения (ADR-SS-001..012)
+└── DECISIONS.md                   # Архитектурные решения (ADR-SS-001..015)
 ```
 
 ---
@@ -464,7 +468,7 @@ state_store_module/
 
 - **Server-side:** TreeStore + SubscriptionManager + DeltaDispatcher = `StateStoreManager`
 - **Client-side:** `StateProxy` (или `GuiStateProxy`) = локальный кэш + IPC + per-pattern фильтрация callbacks
-- **IPC:** 7 команд + событие `state.changed` с адресной доставкой
+- **IPC:** 7 команд + событие `state.changed` с адресной доставкой; watch-from-revision + resync поверх `state.get_subtree` (Ф4.9, ADR-SS-014/015)
 - **Расширяемость:** Middleware (4 встроенных), Selectors, DevTools, Health, Persistence, Recipes
 - **Тестирование:** `InMemoryRouter` встроен в публичный API
 - **Доменно-нейтральный:** Persistence-маппинги и Recipe-миграции передаются через параметры

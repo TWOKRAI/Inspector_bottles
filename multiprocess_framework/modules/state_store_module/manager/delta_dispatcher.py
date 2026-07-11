@@ -104,6 +104,12 @@ class DeltaDispatcher:
             subscriber: имя процесса-подписчика.
             deltas: список дельт для отправки.
         """
+        # revision конверта (Ф4.9, ADR-SS-014) — максимальная revision среди
+        # дельт этого пакета, т.е. "дерево не старше этой revision, насколько
+        # известно этому пакету". Аддитивное поле: старые получатели (без
+        # watch-from-revision) его игнорируют, обратная совместимость сохранена.
+        envelope_revision = max((d.revision for d in deltas), default=0)
+
         message = {
             "type": "event",
             "sender": self._sender,
@@ -116,6 +122,7 @@ class DeltaDispatcher:
             "command": "state.changed",
             "data": {
                 "deltas": [d.to_dict() for d in deltas],
+                "revision": envelope_revision,
             },
         }
 

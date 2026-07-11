@@ -266,20 +266,34 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         """Обработчик state.get_subtree: прочитать поддерево по пути.
 
         msg.data: {path: str, request_id: str}
+            ИЛИ (Ф4.9b, watch-from-revision resync): {paths: list[str], request_id: str} —
+            список glob-паттернов (те же, что в state.subscribe). Используется
+            StateProxy для resync при обнаруженном разрыве revision — переиспользует
+            этот же канал вместо отдельной команды (см. ADR-SS-015), т.к.
+            семантика идентична: "дай мне текущее состояние поддерева(ьев)".
 
         Returns:
             dict с value (поддерево) и request_id, или ошибкой.
+            'revision' (Ф4.9a) — текущая revision дерева на момент ответа,
+            аддитивное поле, старые клиенты его игнорируют.
         """
         data = self._extract_data(msg)
         path = data.get("path", "")
+        paths = data.get("paths")
         request_id = data.get("request_id", "")
 
         try:
-            value = self._store.get_subtree(path)
+            if paths:
+                # resync по нескольким glob-паттернам: снимок объединяет все
+                # поддеревья, совпадающие хотя бы с одним паттерном.
+                value = self._store.snapshot(paths=list(paths))
+            else:
+                value = self._store.get_subtree(path)
             return {
                 "status": "ok",
                 "request_id": request_id,
                 "value": value,
+                "revision": self._store.revision,
             }
         except (KeyError, TypeError) as exc:
             return {
@@ -343,8 +357,19 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
             from ..core.glob_walker import iter_matches
 
             snapshot = self._store.get_subtree("")  # thread-safe deep-copy всего дерева
+            # revision реплея (Ф4.9, ADR-SS-014) — фиксируем ПОСЛЕ снимка снапшота,
+            # т.к. store.revision читается под собственным локом и может уйти
+            # вперёд между snapshot и этой строкой; для реплея это не критично
+            # (best-effort, как и весь _replay_initial_state).
+            replay_revision = self._store.revision
             deltas = [
-                Delta(path=p, old_value=MISSING, new_value=v, source="__replay__")
+                Delta(
+                    path=p,
+                    old_value=MISSING,
+                    new_value=v,
+                    source="__replay__",
+                    revision=replay_revision,
+                )
                 for p, v in iter_matches(snapshot, pattern)
                 if not isinstance(v, dict)
             ]

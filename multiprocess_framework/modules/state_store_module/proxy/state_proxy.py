@@ -18,7 +18,7 @@ import uuid
 from typing import Any, Callable
 
 from ...base_manager import BaseManager, ObservableMixin
-from ..core import match_pattern, split_pattern
+from ..core import iter_matches, match_pattern, split_pattern
 from ..core.delta import MISSING, Delta
 from ..interfaces import IRouter, IStateProxy
 
@@ -84,6 +84,11 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         # Обратная карта sub_id → pattern: O(1)-очистка ensure-реестра в
         # unsubscribe без линейного скана (5.20 review #10).
         self._sub_id_pattern: dict[str, str] = {}
+        # Watch-from-revision (Ф4.9b, ADR-SS-014/015): revision последнего
+        # успешно применённого пакета state.changed. None — ещё не было ни
+        # одного пакета с revision (либо proxy только создан, либо все
+        # входящие пакеты были от старых отправителей без revision).
+        self._last_revision: int | None = None
 
     def initialize(self) -> bool:
         self.is_initialized = True
@@ -415,8 +420,11 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             router.register_message_handler("state.changed", proxy.on_state_changed)
 
         1. Десериализует дельты из msg["data"]["deltas"].
-        2. Обновляет кэш.
-        3. Вызывает все зарегистрированные callbacks.
+        2. Проверяет непрерывность revision (Ф4.9b) — при разрыве ресинкается
+           и ЗАВЕРШАЕТ обработку (кэш уже актуализирован свежим снапшотом,
+           дельты устаревшего пакета не применяются и коллбеки не зовутся).
+        3. Обновляет кэш.
+        4. Вызывает все зарегистрированные callbacks.
 
         Args:
             msg: IPC-сообщение с полем data.deltas.
@@ -425,8 +433,130 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         if not deltas:
             return
 
+        envelope_revision = msg.get("data", {}).get("revision")
+        if self._check_and_handle_revision_gap(envelope_revision):
+            return
+
         self._update_cache(deltas)
         self._invoke_callbacks(deltas)
+
+    # -------------------------------------------------------------------
+    # Watch-from-revision + resync (Ф4.9b, ADR-SS-014/015)
+    # -------------------------------------------------------------------
+
+    def _check_and_handle_revision_gap(self, envelope_revision: Any) -> bool:
+        """Проверить непрерывность revision пакета, при разрыве — ресинк.
+
+        Модель: клиент ожидает, что revision КОНВЕРТА (msg["data"]["revision"],
+        проставленная DeltaDispatcher как max revision дельт пакета) растёт
+        строго на 1 от пакета к пакету. Разрыв (пришла revision N+k при
+        ожидаемой N+1) означает, что клиент пропустил хотя бы один пакет
+        state.changed — вызывается resync(). Сверяемся именно с revision
+        конверта, а не отдельных дельт: конверт — единица доставки, и именно
+        её потерю нужно детектить (см. DeltaDispatcher._send_state_changed).
+
+        Fail-open (Ф4.9a): envelope_revision is None → отправитель не
+        поддерживает revision (старый формат) — проверка пропускается,
+        _last_revision не трогается, обработка идёт по старому пути.
+
+        Известное ограничение (ADR-SS-015): revision — глобальный счётчик
+        дерева, а не per-pattern. Если этот процесс подписан на несколько
+        паттернов и где-то ВНЕ его подписок происходят мутации, revision
+        всё равно растёт — это может вызвать ложный resync (разрыв, которого
+        реально не было для ЭТОГО подписчика). Ресинк идемпотентен и дёшев
+        (просто досрочно сверяет кэш с сервером), поэтому ложные срабатывания
+        безопасны, лишь не бесплатны.
+
+        Args:
+            envelope_revision: msg["data"]["revision"] (int) или None.
+
+        Returns:
+            True — обнаружен разрыв, resync запущен, кэш уже актуализирован
+            (дельты ЭТОГО пакета применять/коллбеки звать не нужно).
+            False — либо revision отсутствует (fail-open), либо разрыва нет
+            (нормальная обработка пакета продолжается как раньше).
+        """
+        if envelope_revision is None:
+            return False
+
+        if self._last_revision is None:
+            # Первый пакет с revision — база отсчёта, разрыв не проверяем.
+            self._last_revision = envelope_revision
+            return False
+
+        expected = self._last_revision + 1
+        if envelope_revision == expected:
+            self._last_revision = envelope_revision
+            return False
+
+        self._log_warning(
+            f"StateProxy '{self._process_name}': разрыв revision "
+            f"(ожидалось {expected}, пришло {envelope_revision}) — запускаю resync"
+        )
+        patterns = list(dict.fromkeys(self._sub_patterns.values()))
+        self._resync(patterns)
+        return True
+
+    def _resync(self, patterns: list[str]) -> None:
+        """Ресинк кэша: запросить свежий снапшот поддеревьев по patterns.
+
+        Переиспользует существующий канал state.get_subtree (не заводит
+        отдельную команду — ADR-SS-015): передаёт data.paths вместо data.path,
+        сервер (handle_state_get_subtree) распознаёт это и строит снимок через
+        TreeStore.snapshot(paths). Полностью замещает в кэше все пути,
+        попадающие под patterns, свежими значениями с сервера и обновляет
+        self._last_revision до серверной revision на момент ответа.
+
+        No-op при router=None или пустом patterns (нечего ресинкать).
+        """
+        if self._router is None or not patterns:
+            return
+
+        request_id = str(uuid.uuid4())
+        msg = {
+            "type": "command",
+            "sender": self._process_name,
+            "targets": [self._server_target],
+            "command": "state.get_subtree",
+            "data": {"paths": patterns, "request_id": request_id},
+        }
+        response = self._send_sync(msg)
+        if response is None or response.get("status") != "ok":
+            self._log_warning(f"StateProxy '{self._process_name}': resync не удался: {response}")
+            return
+
+        snapshot = response.get("value", {})
+        revision = response.get("revision")
+        self._apply_resync_snapshot(patterns, snapshot if isinstance(snapshot, dict) else {})
+        if isinstance(revision, int):
+            self._last_revision = revision
+        self._log_debug(f"StateProxy '{self._process_name}': resync выполнен, revision={revision}")
+
+    def _apply_resync_snapshot(self, patterns: list[str], snapshot: dict) -> None:
+        """Сойти кэш с серверным снимком для путей, попадающих под patterns.
+
+        1. Удаляет из кэша все закэшированные пути, матчащие любой из patterns
+           (устаревшие значения — в т.ч. пути, удалённые на сервере и потому
+           отсутствующие в свежем снапшоте, должны исчезнуть из кэша).
+        2. Заполняет кэш листовыми значениями снапшота по каждому pattern.
+
+        Args:
+            patterns: glob-паттерны (те же, что переданы в _resync()).
+            snapshot: dict, полученный от TreeStore.snapshot(paths=patterns).
+        """
+        pattern_segs_list = [split_pattern(p) for p in patterns]
+        stale_keys = [
+            path
+            for path in self._cache
+            if any(match_pattern(segs, tuple(path.split("."))) for segs in pattern_segs_list)
+        ]
+        for key in stale_keys:
+            del self._cache[key]
+
+        for pattern in patterns:
+            for path, value in iter_matches(snapshot, pattern):
+                if not isinstance(value, dict):
+                    self._cache[path] = value
 
     # -------------------------------------------------------------------
     # Lifecycle

@@ -484,6 +484,110 @@ def all_subscriptions(self) -> list[Subscription]: ...
 
 ---
 
+## ADR-SS-014: Монотонная revision дерева — отдельный счётчик, НЕ переиспользование fencing-epoch
+
+**Дата:** 2026-07-11
+**Контекст:** Задача Ф4.9 (etcd-паттерн: revision + watch-from-revision + resync) требует монотонного счётчика мутаций дерева. Ревью 2026-07-11 предложило переиспользовать epoch-счётчик fencing-механизма (`message_module/fencing/`, ADR-MSG-009) вместо нового третьего счётчика — там прямо зарезервирована формулировка «epoch остаётся в штампе для диагностики/Ф4.9».
+
+**Анализ семантики — почему резерв ADR-MSG-009 НЕ подходит:**
+
+| | `epoch` (ADR-MSG-009/ADR-PMM-010) | `revision` (Ф4.9, здесь) |
+|---|---|---|
+| Что считает | Поколение топологии процесса (incarnation-adjacent) | Мутация дерева состояния |
+| Когда растёт | Редко: switch/restart процесса с пересозданием очередей | Часто: КАЖДЫЙ `set`/`merge`-лист/`delete`/`restore` |
+| Область | **Per-sender** (в PSR, свой у каждого процесса) | **Per-tree** (один глобальный счётчик StateStoreManager) |
+| Назначение | Fencing: отличить старый (заменённый) инстанс отправителя от текущего | Consistency: подписчик обнаруживает пропущенное `state.changed` |
+| Уже известная проблема | ADR-PMM-014: epoch-критерий **ложно дропал** легитимные сообщения ТЕКУЩИХ процессов в переходном окне (поэтому fencing переехал на per-sender `incarnation`, epoch остался только диагностикой) | — |
+
+Три структурных несовпадения делают переиспользование technically некорректным, а не просто «не по вкусу»:
+1. **Разная область.** `epoch` живёт в PSR **на процесс**-отправитель; у дерева состояния нет «своего» отправителя — мутации приходят от N разных процессов. Чтобы получить единый монотонный ряд для дерева, пришлось бы либо агрегировать epoch-и всех отправителей (не монотонно и не detectable как gap), либо завести отдельный tree-level epoch — что и есть новый счётчик под другим именем.
+2. **Разная частота.** `epoch` — редкое, дискретное событие (topology switch). `revision` должна расти на **каждую** мутацию (десятки-сотни в секунду в живой системе). Наложение этих кадансов на один счётчик либо испортит грубую семантику fencing (epoch начнёт «шуметь» на каждый `set`), либо не даст нужной гранулярности revision (пропущенные дельты между двумя switch неотличимы).
+3. **Уже задокументированная ненадёжность для СВОЕЙ задачи.** ADR-PMM-014 прямо показал, что даже для fencing epoch как единственный критерий давал ложные срабатывания (заменён per-sender incarnation). Строить НА НЕМ ещё и data-consistency механизм означало бы наследовать эту нестабильность в совершенно другой контур.
+
+**Решение:** Завести отдельный монотонный счётчик `TreeStore._revision: int`, инкремент на каждую успешную мутацию (`set`/`delete`/`restore` — по разу; `merge` — по разу на изменившийся лист, т.к. внутри реализован через `set()`). Идемпотентные операции (значение не изменилось) revision не трогают.
+
+```python
+class TreeStore(IStateStore):
+    def __init__(self, ...):
+        self._revision = 0
+
+    @property
+    def revision(self) -> int:
+        return self._revision
+
+    def _next_revision(self) -> int:
+        self._revision += 1
+        return self._revision
+```
+
+`Delta.revision: int = 0` (default — обратная совместимость: код, создающий `Delta` напрямую, не обязан её задавать). `IStateStore.revision` — новый абстрактный property в контракте (аддитивно, единственный имплементатор — `TreeStore`).
+
+**Последствия:**
+- Никакой связи с fencing/`message_module` — модули остаются независимыми (state_store_module и так не импортирует message_module).
+- `epoch` продолжает служить ТОЛЬКО диагностике/fencing (как и было решено в ADR-MSG-009/ADR-PMM-014), без нагрузки чужой задачи.
+- Обратная совместимость: `Delta.to_dict()/from_dict()` — аддитивное поле, `from_dict` читает `d.get("revision", 0)` (fail-open для дельт от старых отправителей).
+
+**Отвергнуто:** переиспользование `_fence.epoch` из `message_module/fencing/token.py` как источника revision — по причинам выше (разная область/частота/уже известная ненадёжность для собственной задачи).
+
+**Связанные решения:** [ADR-MSG-009](../message_module/DECISIONS.md#adr-msg-009-fencing-token--штамп-конверта--дроп-билета-устаревшего-инстанса-fencing--ф42), [ADR-PMM-014](../process_manager_module/DECISIONS.md) — где epoch зарезервирован (и почему резерв не годится), ADR-SS-015 (watch-from-revision resync).
+
+---
+
+## ADR-SS-015: watch-from-revision + resync — envelope-level gap-detection через существующий канал `state.get_subtree`
+
+**Дата:** 2026-07-11
+**Контекст:** Ф4.9b требует, чтобы подписчик (`StateProxy`), обнаруживший разрыв revision (пропущенное `state.changed`), сам восстановил консистентность кэша. Два вопроса дизайна: (1) как детектить разрыв, (2) каким каналом запрашивать resync.
+
+**Решение — детект разрыва на уровне конверта, не отдельных дельт:**
+
+`DeltaDispatcher._send_state_changed` проставляет `data.revision = max(d.revision for d in deltas)` — это revision **конверта** (единицы доставки `state.changed`), не отдельной Delta. `StateProxy._check_and_handle_revision_gap` сравнивает revision НОВОГО конверта с `_last_revision + 1`:
+
+```python
+if envelope_revision == expected:
+    self._last_revision = envelope_revision  # норма
+else:
+    self._resync(patterns)                   # разрыв → resync
+```
+
+Сравнение именно конвертов (а не первой/последней Delta внутри пакета) осознанно: конверт — атомарная единица доставки IPC, и именно ЕЁ потерю (или потерю предыдущей) нужно обнаруживать. Гонять состояние по отдельным Delta.revision внутри пакета не даёт дополнительной точности (пакет либо доставлен целиком, либо не доставлен вовсе — `send_async` не режет сообщение на части), но усложняет код.
+
+**Решение — resync переиспользует существующий канал `state.get_subtree`, НЕ заводит новую IPC-команду:**
+
+`handle_state_get_subtree` расширен аддитивно: помимо `data.path` (литеральный путь, старое поведение) принимает `data.paths` (список glob-паттернов — тот же формат, что в `state.subscribe`). При наличии `paths` сервер строит объединённый снимок через уже существующий `TreeStore.snapshot(paths=...)` вместо `TreeStore.get_subtree(path)`. Ответ везде получает поле `revision` (текущая revision дерева на момент ответа).
+
+```python
+def handle_state_get_subtree(self, msg: dict) -> dict:
+    data = self._extract_data(msg)
+    paths = data.get("paths")
+    if paths:
+        value = self._store.snapshot(paths=list(paths))
+    else:
+        value = self._store.get_subtree(data.get("path", ""))
+    return {"status": "ok", "value": value, "revision": self._store.revision, ...}
+```
+
+`StateProxy._resync(patterns)` шлёт `state.get_subtree` с `data.paths = список активных подписок этого proxy` (из `self._sub_patterns`, накопленного `subscribe()`/`ensure_subscription()`, 5.9), получает снимок + revision, полностью замещает в кэше все пути, попадающие под `patterns` (включая исчезновение путей, удалённых на сервере), и обновляет `_last_revision`.
+
+**Почему НЕ новая команда `state.resync`:** `register_message_handlers`/`register_commands` регистрируют фиксированный набор из 7 команд — оба существующих теста (`test_initialize_with_router`, `test_register_message_handlers`) жёстко проверяют `len(...) == 7`. Задача прямо требует «зелёный стьют без правок ожиданий» и «механизм запроса — по существующим каналам». Расширение `state.get_subtree` — семантически корректно (resync и get_subtree — оба «дай мне текущее состояние поддерева(ьев)», различие только в one-path vs many-glob-patterns) и не меняет число зарегистрированных команд.
+
+**Известное ограничение — ложные resync под конкурентными несвязанными записями:** `revision` — счётчик **дерева**, не per-pattern. Если подписчик наблюдает `cameras.0.**`, а параллельно кто-то пишет в `renderer.*`, revision дерева всё равно растёт — следующий конверт подписчику придёт с revision, которая не равна `_last_revision + 1` (промежуточные revision «съедены» неотносящимися к его подписке мутациями), хотя реальной потери сообщения не было. Это вызовет resync, которого можно было избежать.
+
+Осознанно принято: resync — идемпотентная, дешёвая операция (переиспользует уже существующий `TreeStore.snapshot`), ложное срабатывание стоит одного лишнего round-trip, но НЕ ломает корректность (кэш всё равно сойдётся с сервером). Точная per-pattern семантика (без ложных срабатываний) потребовала бы либо per-subscriber sequence-номеров на сервере (доп. состояние в `DeltaDispatcher`, привязка к subscriber, а не к revision дерева), либо compaction-протокола как в etcd (revision watermarks). Оставлено кандидатом на будущее при подтверждённой проблеме в проде (в духе ADR-SS-011 — не усложнять раньше времени).
+
+**Что было отвергнуто:**
+- **Per-delta gap-detection** (сравнивать `deltas[0].revision`/`deltas[-1].revision` вместо `envelope_revision`) — сложнее, не даёт точности (см. выше), и текущая реализация IPC-конверта уже атомарна на уровне сообщения.
+- **Отдельная IPC-команда `state.resync`** — ломает пин `len(registered_handlers) == 7` в существующих тестах без необходимости; `state.get_subtree` с `paths` покрывает тот же сценарий.
+- **Per-subscriber sequence-номера** (точный gap-detection без ложных срабатываний) — избыточная сложность для MVP; резерв на будущее, если ложные resync окажутся заметны в проде.
+
+**Последствия:**
+- `GuiStateProxy.on_state_changed` переиспользует тот же `_check_and_handle_revision_gap`/`_resync` (унаследовано из `StateProxy`) — GUI-путь получает watch-from-revision «бесплатно», без дублирования логики.
+- Обратная совместимость: пакеты без `data.revision` (старые отправители/тесты, использующие `{"data": {"deltas": [...]}}` без revision) — fail-open, gap-проверка пропускается целиком, поведение идентично до-Ф4.9.
+- Задача **4.10** (driver watch-from-revision — конец-в-конец проверка в `backend_ctl`) осознанно НЕ входит в объём Ф4.9 — ядро (сервер + `StateProxy`) реализовано и покрыто тестами (`tests/test_watch_from_revision.py`), driver-обвязка — отдельная задача.
+
+**Связанные решения:** ADR-SS-014 (revision-счётчик), ADR-SS-002 (`server_target`), ADR-SS-012 (per-pattern фильтрация — та же карта `_sub_patterns` переиспользована для сборки `patterns` в `_resync`).
+
+---
+
 ## Индекс ADR
 
 | ID | Название | Статус | Фаза |
@@ -501,4 +605,6 @@ def all_subscriptions(self) -> list[Subscription]: ...
 | ADR-SS-011 | PersistenceManager — конфигурируемые маппинг и предикаты | ✅ Готово | 2.1+ |
 | ADR-SS-012 | StateProxy — per-pattern фильтрация callbacks | ✅ Готово | 2.1+ |
 | ADR-SS-013 | SubscriptionManager — публичные snapshot-методы | ✅ Готово | 2.1+ |
+| ADR-SS-014 | revision дерева — отдельный счётчик, НЕ epoch fencing | ✅ Готово | 4.9 |
+| ADR-SS-015 | watch-from-revision + resync через существующий state.get_subtree | ✅ Готово | 4.9 |
 
