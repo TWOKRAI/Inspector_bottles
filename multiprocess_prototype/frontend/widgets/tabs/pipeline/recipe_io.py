@@ -22,6 +22,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from multiprocess_framework.modules.recipe.detect import (
+    has_top_level_blueprint,
+    nested_blueprint_data,
+)
 from multiprocess_prototype.backend.launch import unwrap_recipe
 
 
@@ -42,11 +46,11 @@ def recipe_blueprint(raw: "Mapping[str, Any] | None") -> dict:
     """
     if not isinstance(raw, dict):
         return {}
-    if "blueprint" in raw:
+    if has_top_level_blueprint(raw):
         return unwrap_recipe(raw)
-    data = raw.get("data")
-    if isinstance(data, dict) and "blueprint" in data:
-        return unwrap_recipe(data)
+    nested = nested_blueprint_data(raw)
+    if nested is not None:
+        return unwrap_recipe(nested)
     return {}
 
 
@@ -59,7 +63,7 @@ def launch_topology_source(raw: "Mapping[str, Any]") -> Any:
     было в presenter). Валидность (наличие blueprint) проверяет
     :func:`recipe_blueprint` ДО вызова.
     """
-    if isinstance(raw, dict) and "blueprint" in raw:
+    if has_top_level_blueprint(raw):
         return raw
     return recipe_blueprint(raw)
 

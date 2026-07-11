@@ -67,3 +67,25 @@ def test_migrate_recipe_data_converts_blocks_to_nodes():
     assert "processing_blocks" not in region
     assert region["nodes"]["b0"]["operation_ref"] == "gray"
     assert region["nodes"]["b0"]["enabled"] is True
+
+
+def test_migrate_recipe_data_registered_in_recipe_registry_under_own_doc_type():
+    """migrate_recipe_data зарегистрирован в общем реестре модуля recipe (C2, ADR-RCP-003).
+
+    В проекте есть ДВА одноимённых-по-смыслу v1_to_v2 (эта миграция — regions
+    внутри data.cameras: processing_blocks → nodes; вторая —
+    recipes/migrations/format_v1_to_v2.py::migrate_v1_to_v2 — topology-файл целиком).
+    Реестр различает их по doc_type (namespace в ключе), не сливает.
+    """
+    from multiprocess_framework.modules.recipe.migrations import registered_steps
+    from multiprocess_prototype.backend.state.recipes.migrations.v1_to_v2 import DOC_TYPE
+    from multiprocess_prototype.recipes.migrations.format_v1_to_v2 import (
+        DOC_TYPE as OTHER_DOC_TYPE,
+    )
+
+    assert DOC_TYPE != OTHER_DOC_TYPE
+    steps = registered_steps(DOC_TYPE)
+    assert steps[(1, 2)] is migrate_recipe_data
+    # под doc_type другой миграции — своя, отдельная функция
+    other_steps = registered_steps(OTHER_DOC_TYPE)
+    assert steps[(1, 2)] is not other_steps[(1, 2)]

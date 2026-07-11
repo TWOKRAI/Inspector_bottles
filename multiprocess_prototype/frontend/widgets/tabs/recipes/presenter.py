@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, Callable
 
+from multiprocess_framework.modules.recipe.detect import has_top_level_blueprint
 from multiprocess_prototype.domain.commands import ActivateRecipe
 from multiprocess_prototype.domain.errors import DomainError
 
@@ -403,7 +404,7 @@ class RecipesPresenter:
             # передаём ПОЛНЫЙ raw-dict, backend-овский unwrap_recipe извлечёт
             # display_definitions из top-level «displays». Иначе (v2/plain) —
             # только blueprint dict (backward compat).
-            if "blueprint" in recipe_data and "processes" not in recipe_data:
+            if has_top_level_blueprint(recipe_data) and "processes" not in recipe_data:
                 # v3 рецепт (есть blueprint, нет top-level processes)
                 topology_source: dict = recipe_data
             else:

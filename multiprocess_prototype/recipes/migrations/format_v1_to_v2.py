@@ -25,6 +25,9 @@
 
 Внимание: эта миграция — другая, чем backend/state/recipes/migrations/v1_to_v2.py
 (та мигрирует внутреннюю структуру processing_blocks → nodes внутри camera/region).
+Обе миграции зарегистрированы в общем реестре модуля recipe (C2, ADR-RCP-003) под
+РАЗНЫМИ doc_type (см. DOC_TYPE здесь и backend/state/recipes/migrations/v1_to_v2.py::
+DOC_TYPE) — одноимённая функция migrate_v1_to_v2/migrate_recipe_data не конфликтует.
 
 Данная миграция конвертирует внешний формат файла рецепта:
 topology dict → blueprint + active_services + display_bindings.
@@ -36,6 +39,14 @@ from __future__ import annotations
 
 import copy
 from typing import Any
+
+from multiprocess_framework.modules.recipe.migrations import migration
+
+# doc_type реестра миграций (C2) — отличает эту миграцию (файл рецепта целиком:
+# slot-based topology → blueprint) от одноимённой backend/state/recipes/migrations/
+# v1_to_v2.py::migrate_recipe_data (regions внутри data.cameras: processing_blocks →
+# nodes) — разные doc_type, НЕ конфликтуют в общем реестре.
+DOC_TYPE = "recipe.file_format"
 
 
 def is_v1_recipe(data: Any) -> bool:
@@ -146,6 +157,7 @@ def _extract_active_services(processes: list[Any]) -> list[str]:
     return services
 
 
+@migration(DOC_TYPE, from_=1, to=2)
 def migrate_v1_to_v2(data: dict) -> dict:
     """Мигрирует рецепт v1 (topology-based) в формат v2 (blueprint-based).
 
