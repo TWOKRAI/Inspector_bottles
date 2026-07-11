@@ -26,7 +26,7 @@ from typing import Annotated, Any
 from pydantic import field_validator
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
-from ..plugins.port import Port, are_ports_compatible
+from ..plugins.port import Port, are_ports_compatible, validate_chain
 from ..plugins.registry import PluginRegistry
 from .generic_process_config import GenericProcessConfig, PluginConfig
 
@@ -283,6 +283,28 @@ class SystemBlueprint(SchemaBase):
                 )
             else:
                 wired_inputs.add(wire.target)
+
+        # Ф4.3 (C-4): оживление validate_chain — детальная диагностика ВНУТРИпроцессной
+        # линейной цепочки auto-wiring (какой плагин -> какой плагин, какой dtype
+        # несовместим), точка сборки — этот же check(). Входы, уже покрытые явным
+        # межпроцессным Wire (wired_inputs), исключаем из проверки: они не обязаны
+        # совпадать с ВЫХОДОМ предыдущего по позиции плагина (fan-in — второй вход
+        # приходит извне, а не по цепочке). Дублирует по сути bool-проверку
+        # _is_covered_by_auto_wiring ниже (тот же are_ports_compatible), но с
+        # человекочитаемым сообщением вместо generic «не подключён».
+        for proc in self.processes:
+            chain: list[tuple[str, list[Port], list[Port]]] = []
+            for pdict in proc.plugins:
+                plugin_name = pdict.get("plugin_name", "")
+                plugin_class = pdict.get("plugin_class", "")
+                entry = _find_plugin_entry(plugin_name, plugin_class)
+                if entry is None:
+                    chain.append((plugin_name, [], []))
+                    continue
+                addr_prefix = f"{proc.process_name}.{plugin_name}."
+                chain_inputs = [p for p in entry.inputs if (addr_prefix + p.name) not in wired_inputs]
+                chain.append((plugin_name, chain_inputs, list(entry.outputs)))
+            errors.extend(validate_chain(chain))
 
         # Проверяем обязательные входы
         for addr, port in input_map.items():
