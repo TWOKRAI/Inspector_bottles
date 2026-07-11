@@ -58,12 +58,12 @@ Wait for the user. They will: (a) accept your default, (b) override with their a
 
 If a question can be answered by reading the code, **read the code** instead of
 asking the user. Same for MCP-backed questions:
-- Callers / impact of changing a signature → `codegraph:callers` / `codegraph:impact`
+- Callers / impact of changing a signature → `codegraph_explore`
 - Architectural fit (cycles, layer violations) → `sentrux:dsm` / `sentrux:check_rules`
 - Library API / version-specific behavior → `context7:query-docs`
 - Semantic neighborhood ("where else does this concept live") → `qex:search_code`
 
-Name the tool you used so the user sees the source: «I checked `codegraph:callers`
+Name the tool you used so the user sees the source: «I checked `codegraph_explore`
 on `process_event` — 3 callers, all in same module. My recommendation: …».
 
 If MCP isn't available, fall back to `Grep` / `Read` and say so.

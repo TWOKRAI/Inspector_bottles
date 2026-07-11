@@ -130,7 +130,7 @@ Use this if you want a one-shot setup that also targets other AI tools. The seed
    5. Which handler serves <some_route_in_a_web_framework>?   (skip if not a web project)
    ```
 
-   Watch the tool calls. If the agent goes through `codegraph_callers` / `codegraph_impact` / `codegraph_callees` instead of Grep+Read loops, the wire-up works.
+   Watch the tool calls. If the agent goes through `codegraph_explore` instead of Grep+Read loops, the wire-up works.
 
    If the agent ignores codegraph and falls back to Grep — see § Tool routing below.
 

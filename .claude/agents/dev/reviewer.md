@@ -46,7 +46,7 @@ that module's `CONTEXT.md` and rebuild with `/core:quality:sync-context`
 > **You are read-only least-privilege:** your `tools` exclude `Write`/`Edit` and grant only the core-default MCP servers (`qex`, `sentrux`). The optional servers named below (codegraph, qt-mcp, …) are **not** in your allowlist — for those, always take the documented `Grep`/`Read` (static-analysis) fallback. Before first use of an MCP tool, `Read` its plugin README (`.claude/plugins/<id>/README.md`) for setup / usage / rules.
 
 **Base checklist §4 (Side effects):**
-1. **If codegraph is connected** → `codegraph:impact` on every changed symbol — blast radius.
+1. **If codegraph is connected** → `codegraph_explore` on every changed symbol — blast radius.
 2. Always → `qex:search_code` for semantic dependencies related to the diff topic.
 3. Fallback (codegraph not connected) → `Grep` on symbols in the diff.
 
@@ -142,7 +142,7 @@ REQUESTED with category `quality`.
 1. **If sentrux available** → `sentrux:test_gaps` — verify a contract test
    exists for the new module (if module is there but tests are missing →
    CHANGES REQUESTED, category `tests`).
-2. **If codegraph available** → `codegraph:impact` on each changed symbol in
+2. **If codegraph available** → `codegraph_explore` on each changed symbol in
    `interface.py` — blast-radius warning (alerts when public API changes and
    callers haven't been updated).
 3. Always → `qex:search_code` for imports of other modules' `_impl/` (Grep as

@@ -30,7 +30,7 @@ Your goal — **find root cause and fix it** (if in scope).
 
 **Gathering evidence for hypotheses:**
 1. Always → `qex:search_code` for semantic context (related code, callers by topic).
-2. **If codegraph is connected** → `codegraph:callers` / `callees` on the problematic symbol — exact call chain (faster than `git log` + Grep).
+2. **If codegraph is connected** → `codegraph_explore` on the problematic symbol — exact call chain / callers-callees (faster than `git log` + Grep).
 3. **If working with a library + context7 is connected** → `context7:query-docs` if you suspect a library bug or version-specific behaviour.
 4. Fallback (MCP not connected) → `Grep` + `git log` + `git blame`.
 

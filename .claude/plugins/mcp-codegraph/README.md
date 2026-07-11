@@ -1,9 +1,9 @@
 # codegraph — pre-indexed call graph + symbol navigation
 
-Optional MCP module. Builds a local SQLite-backed semantic code graph (nodes = functions/classes, edges = calls/imports/inheritance) via tree-sitter, exposes 8 MCP tools for callers/callees/impact analysis, and keeps itself in sync via a native OS file-watcher.
+Optional MCP module. Builds a local SQLite-backed semantic code graph (nodes = functions/classes, edges = calls/imports/inheritance) via tree-sitter, exposes a **single** `codegraph_explore` MCP tool (verbatim source + call path + blast-radius in one call), and keeps itself in sync via a native OS file-watcher.
 
 > Upstream: <https://github.com/colbymchenry/codegraph>
-> **License:** MIT · **Status as of 2026-05:** active, v0.7.x, ~7k★
+> **License:** MIT · **Package:** `@colbymchenry/codegraph` v0.4.x — single-tool API (`codegraph_explore`).
 
 ## When to enable
 
@@ -24,9 +24,9 @@ Optional MCP module. Builds a local SQLite-backed semantic code graph (nodes = f
 
 | Question | Best tool | Why |
 |----------|-----------|-----|
-| "Who calls `Manifest.load()`?" | **codegraph** (`codegraph_callers`) | exact call graph, function-level |
-| "If I rename `parse_args`, what breaks?" | **codegraph** (`codegraph_impact`) | impact set across files |
-| "What tests are affected by changes in `runner.py`?" | **codegraph** (`codegraph_affected`) | reverse dependencies into `tests/` |
+| "Who calls `Manifest.load()`?" | **codegraph** (`codegraph_explore`) | call path in the response, function-level |
+| "If I rename `parse_args`, what breaks?" | **codegraph** (`codegraph_explore`) | blast-radius section across files |
+| "What tests are affected by changes in `runner.py`?" | **codegraph** (`codegraph_explore`) | covering tests listed in blast-radius |
 | "Which handler serves `POST /api/seed/apply`?" | **codegraph** (framework routing) | URL → handler mapping |
 | "Find code that parses YAML manifests" (fuzzy intent) | **qex** | dense embeddings, semantic |
 | "Are there import cycles? Layer violations?" | **sentrux** | DSM, architectural rules |
@@ -41,18 +41,15 @@ Optional MCP module. Builds a local SQLite-backed semantic code graph (nodes = f
 
 Framework-aware routing: Django, Flask, FastAPI, Express, Laravel, Rails, Spring, Gin, Axum, ASP.NET, Vapor, React Router, SvelteKit.
 
-## MCP tools exposed (8)
+## MCP tool exposed (1)
+
+The installed package exposes a **single** tool — one call replaces the whole search/Read/Grep loop:
 
 | Tool | Purpose |
 |------|---------|
-| `codegraph_search` | Symbol lookup (exact + FTS5) |
-| `codegraph_context` | Task-aware context bundle for the agent |
-| `codegraph_callers` | "Who calls this symbol?" |
-| `codegraph_callees` | "What does this symbol call?" |
-| `codegraph_impact` | Blast radius of a change |
-| `codegraph_node` | Full info on one symbol |
-| `codegraph_files` | File / module structure |
-| `codegraph_status` | Index health, last sync, node count |
+| `codegraph_explore(query, maxFiles?, projectPath?)` | `query` = NL question **or** bag of symbol/file names. Returns: verbatim line-numbered source grouped by file (Read-equivalent) + call path (callers/callees) + blast-radius (what depends on it + covering tests) + relationships (extends/instantiates/calls). |
+
+> Earlier docs listed 8 separate tools (`codegraph_search` / `callers` / `callees` / `impact` / `context` / `node` / `files` / `status`). The current `@colbymchenry/codegraph` collapses all of that into the one `codegraph_explore` call above.
 
 ## Storage and footprint
 
@@ -64,7 +61,7 @@ Framework-aware routing: Django, Flask, FastAPI, Express, Laravel, Rails, Spring
 ## Tool routing snippet (paste into project `CLAUDE.md`)
 
 > When codegraph is enabled in this project:
-> - Function-level **callers / callees / impact / rename safety** → **codegraph**
+> - Function-level **callers / callees / impact / rename safety** → **codegraph** (`codegraph_explore`)
 > - **Fuzzy intent search** ("code that does X") → **qex**
 > - **Architectural health** (cycles, layers, metrics) → **sentrux**
 > - **Visual overview** (hubs, shortest path) → **graphify**

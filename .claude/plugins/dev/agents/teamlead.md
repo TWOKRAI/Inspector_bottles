@@ -58,7 +58,7 @@ that module's `CONTEXT.md` and rebuild with `/core:quality:sync-context`
 
 **Mode: Implementation (Senior+):**
 1. Always → `qex:search_code` for semantic reconnaissance of usages/callers.
-2. **If codegraph is connected** → `codegraph:callers` / `impact` on key symbols before refactoring.
+2. **If codegraph is connected** → `codegraph_explore` on key symbols before refactoring — callers + blast-radius.
 3. **If sentrux is connected + architectural task** → `sentrux:dsm` for dependency matrix before starting work.
 4. **If working with a library + context7 is connected** → `context7:query-docs` for current API.
 5. **If bulk-codemod across N files + ast-grep is connected** → `ast-grep:scan` for AST-safe pattern (instead of risky Grep+Edit).
@@ -72,7 +72,7 @@ that module's `CONTEXT.md` and rebuild with `/core:quality:sync-context`
 3. **If PR touches GUI + qt-mcp is connected** → `qt_snapshot` after applying diff + `qt_thread_check` for quick runtime sanity.
 
 **Mode: Escalation (3rd iteration):**
-1. **If codegraph is connected** → `codegraph:impact` to understand blast radius of alternative solutions.
+1. **If codegraph is connected** → `codegraph_explore` to understand blast radius of alternative solutions.
 2. **If sentrux is connected** → `sentrux:dsm` for architectural context when writing an ADR.
 3. **If sequential-thinking is connected + dispute with >3 solution branches** → `sequentialthinking` for externalization of the reasoning chain (audit trail + revision).
 

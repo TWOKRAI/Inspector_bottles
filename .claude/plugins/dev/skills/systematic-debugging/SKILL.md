@@ -39,7 +39,7 @@ If you cannot yet reproduce it, your first job is to make it reproducible — se
 2. **Gather evidence.** Stack trace (which line, which error type), variable values
    at the failure point (`pytest -s`, `print`, `--pdb`), recent history
    (`git log -5`, `git diff HEAD~1`), and `git blame <file> <line>`. Use the
-   project's MCP routing for context (`qex:search_code`; `codegraph:callers/callees`
+   project's MCP routing for context (`qex:search_code`; `codegraph_explore`
    for the exact call chain; `context7:query-docs` for suspected library behaviour)
    and fall back to `Grep`/`git log` when those are not connected.
 3. **Form at least two hypotheses.** Hypothesis A (most likely) and Hypothesis B

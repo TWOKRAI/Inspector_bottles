@@ -2,7 +2,7 @@
 name: integrator
 description: >
   Integration risk analysis after implementation. Reads sentrux dsm-delta,
-  codegraph:impact, dead/dup/CRAP signals. Produces integration.md report.
+  codegraph_explore, dead/dup/CRAP signals. Produces integration.md report.
   Does NOT write code. Hard-blocks on new dependency cycles, god-node growth,
   or coverage drop > 5%. Advisory-only when MCP unavailable.
 model: claude-opus-4-8
@@ -53,8 +53,8 @@ heuristics and switch the report into **advisory mode** (see Gate rules).
    dependency matrix: compare current cycles and fan-in against the baseline to
    detect new cycles and god-node growth. `sentrux:scan` for fresh dead / dup /
    CRAP metrics.
-2. **If codegraph is connected** → `codegraph:impact` on each changed public
-   symbol for blast-radius; `codegraph:callees` to confirm new outbound edges
+2. **If codegraph is connected** → `codegraph_explore` on each changed public
+   symbol for blast-radius; `codegraph_explore` to confirm new outbound edges
    that could close a cycle. This is the **primary** tool for blast-radius.
 3. **Fallback (no MCP connected)** → reconstruct a coarse picture with `Grep`
    on import statements and `Read` on the changed modules; treat the result as
@@ -63,7 +63,7 @@ heuristics and switch the report into **advisory mode** (see Gate rules).
 4. Always → `qex:search_code` for semantics + `Grep` for exact strings.
 
 **Do not duplicate:** if `sentrux:dsm` gave the dependency matrix → do not
-reconstruct it from imports by hand. If `codegraph:impact` gave the blast-radius
+reconstruct it from imports by hand. If `codegraph_explore` gave the blast-radius
 → do not re-derive it with `Grep`.
 
 ## Integration analysis process
@@ -76,7 +76,7 @@ reconstruct it from imports by hand. If `codegraph:impact` gave the blast-radius
 2. **Dependency cycles.** Run `sentrux:dsm` and compare its cycle set against
    the baseline. Any cycle present now but absent in the baseline is a **new
    cycle** → list it in `cycles_new`.
-3. **God-node / blast-radius.** Run `codegraph:impact` on every changed public
+3. **God-node / blast-radius.** Run `codegraph_explore` on every changed public
    symbol (derive the changed set from `git diff --name-only main...HEAD`).
    Compute each touched module's fan-in growth versus the baseline; flag growth
    over the threshold as `godnode_growth_pct`.

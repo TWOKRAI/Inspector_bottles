@@ -27,9 +27,9 @@
 | Архитектурные метрики, DSM, циклы | `sentrux:dsm` / `sentrux:health` | **core** | руками через `pydeps` |
 | Проверка архитектурных правил | `sentrux:check_rules` | **core** | руками + чек-лист |
 | Документация библиотек (актуальная) | `context7:query-docs` | **core** (user-level) | `WebFetch` для официальных docs |
-| Callers / callees функции | `codegraph:callers` / `codegraph:callees` | optional | `Grep` + чтение |
-| Blast radius изменения | `codegraph:impact` | optional | руками через git diff + Grep |
-| Структура файлов / модулей | `codegraph:files` / `codegraph:context` | optional | `Glob` + `Read` |
+| Callers / callees / call path | `codegraph:codegraph_explore` | optional | `Grep` + чтение |
+| Blast radius изменения | `codegraph:codegraph_explore` | optional | руками через git diff + Grep |
+| Verbatim source + структура символов | `codegraph:codegraph_explore` | optional | `Glob` + `Read` |
 | Symbol-level refs / rename across files | `serena:find_referencing_symbols` / `serena:rename_symbol` | optional (experimental) | `ast-grep` или ручной Grep+Edit |
 | Structural codemod на N файлов | `ast-grep:scan` / `ast-grep:rewrite` | optional | `Grep` + ручные Edits (опасно) |
 | Architectural overview / hubs | `graphify:query_graph` | optional | `sentrux:dsm` + руками |
@@ -90,23 +90,21 @@
 
 **Canonical refs:** `mcp:context7:resolve-library-id`, `mcp:context7:query-docs`.
 
-### codegraph — function-level call graph (optional)
+### codegraph — code intelligence по индексированному графу (optional)
 
-**Когда подключён:** проекты ≥5k LOC с веб-фреймворком (FastAPI/Django/Express/Rails) или активным рефакторингом.
+**Когда подключён:** проекты ≥5k LOC с активным рефакторингом. Pre-indexed граф символов (`@colbymchenry/codegraph` — SQLite + tree-sitter).
 
-**Ключевые tools:**
-- `codegraph_callers` — кто вызывает символ.
-- `codegraph_callees` — кого вызывает символ.
-- `codegraph_impact` — blast radius изменения.
-- `codegraph_context` — task-aware bundle.
-- `codegraph_files` — file/module иерархия.
-- `codegraph_search` — exact + FTS5 symbol lookup.
-- `codegraph_node` — полная инфа об одном символе.
-- `codegraph_status` — здоровье индекса.
+**Один tool — `codegraph_explore(query, maxFiles?, projectPath?)`:** `query` — это natural-language вопрос ИЛИ bag имён символов/файлов (`"RouterManager send_message channel"`). Отдельных `callers`/`callees`/`impact`/`context`/`files`/`search`/`node`/`status` **нет** — всё это один вызов. Один `codegraph_explore` возвращает:
+- **verbatim** line-numbered исходник релевантных символов, сгруппированный по файлам (Read-эквивалент — не перечитывай эти файлы `Read`'ом);
+- **call path** среди них (кто кого вызывает — заменяет callers/callees);
+- **blast radius** — что зависит от символа + покрывающие тесты (для оценки последствий правки; заменяет impact);
+- **relationships** (extends / instantiates / calls).
 
-**Не дублируй:** codegraph дал callers → не Grep'ай те же символы.
+**Read-first привычка:** зови `codegraph_explore` ПЕРЕД `Read`/`Grep`-петлёй при «как работает X» и перед правкой символа — один вызов вместо десятков round-trip'ов.
 
-**Canonical refs:** `mcp:codegraph:callers`, `mcp:codegraph:callees`, `mcp:codegraph:impact`, `mcp:codegraph:context`, `mcp:codegraph:files`, `mcp:codegraph:search`, `mcp:codegraph:node`, `mcp:codegraph:status`.
+**Не дублируй:** codegraph дал источник + callers → не Grep'ай и не Read'ай те же символы.
+
+**Canonical refs:** `mcp:codegraph:codegraph_explore`.
 
 ### serena — LSP symbol retrieval (optional, experimental) **[BUNDLED — upstream-caveat]**
 

@@ -9,7 +9,7 @@ I don't know this area of code well. Go up a layer of abstraction. Give me a map
 Используй доступные инструменты в порядке предпочтения:
 - если **graphify** подключён → `graphify:query_graph` для overview "что с чем связано" (hubs, god-nodes одной квери);
 - если **sentrux** подключён → `sentrux:dsm` для матрицы зависимостей;
-- если **codegraph** подключён → `codegraph:files` для иерархии модулей + `codegraph:context` для cross-cutting;
+- если **codegraph** подключён → `codegraph_explore` для иерархии модулей + cross-cutting (перечисли модули/файлы в query);
 - всегда → `qex:search_code` для семантической карты по теме;
 - если MCP не подключены → `Glob` + `Read` README модулей.
 

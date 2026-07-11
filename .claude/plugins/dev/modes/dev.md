@@ -94,11 +94,11 @@ semantics here (that would create a second source to keep in sync).
 | Flow stage | Primary MCP | Fallback (no MCP) |
 |-----------|-------------|-------------------|
 | **plan** (manager) | `mcp:qex:search_code` (recon) + `mcp:sentrux:health` / `mcp:sentrux:dsm` (architecture) | `Grep` + read module READMEs |
-| **INTERFACE** | `mcp:codegraph:impact` — blast radius of the new/changed API | `git diff` + `Grep` for call sites |
+| **INTERFACE** | `mcp:codegraph:codegraph_explore` — blast radius of the new/changed API | `git diff` + `Grep` for call sites |
 | **RED** (tester) | `mcp:qex:search_code` — edge cases in related code | `Grep` by symbol + read neighbors |
 | **GREEN** (developer/teamlead) | `mcp:serena:rename_symbol` / `find_referencing_symbols` (symbol ops) + `mcp:context7:query-docs` (library API) + `mcp:ast-grep:scan` (codemod) | `WebFetch` for docs + `Grep` / `Edit` |
 | **regression** (tester) | `mcp:sentrux:test_gaps` — uncovered zones | `pytest --cov` read by hand |
-| **review** (reviewer) | `mcp:sentrux:check_rules` (invariants) + `mcp:codegraph:impact` | manual checklist + `git diff` |
+| **review** (reviewer) | `mcp:sentrux:check_rules` (invariants) + `mcp:codegraph:codegraph_explore` | manual checklist + `git diff` |
 | **verify** (done) | `verify-done` skill (see Skills routing below) — adds `mcp:qt-mcp:qt_snapshot` / `mcp:playwright:browser_navigate` for GUI/web | `pytest` / `pytest-qt` / `curl` + HTML check |
 | **graph** (architecture map) | `/graphify` skill (primary) — reads `graphify-out/graph.json`; optional live layer `mcp:graphify:query_graph` | read `GRAPH_REPORT.md` / `graph.json` by hand |
 
