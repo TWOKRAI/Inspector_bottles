@@ -94,14 +94,14 @@ def test_inspector_lock_buttons_emit_signal(qtbot):
     panel.node_lock_set_requested.connect(lambda nid, locked: received.append((nid, locked)))
 
     panel._current_node_id = "proc.plug"
-    panel._lock_btn.click()
-    panel._unlock_btn.click()
+    panel._selector_section._lock_btn.click()
+    panel._selector_section._unlock_btn.click()
     assert received == [("proc.plug", True), ("proc.plug", False)]
 
     # без выбранной ноды — сигнал не эмитится
     received.clear()
     panel._current_node_id = ""
-    panel._lock_btn.click()
+    panel._selector_section._lock_btn.click()
     assert received == []
 
 

@@ -42,7 +42,7 @@ def test_worker_combo_populated_from_topology(qtbot) -> None:
     qtbot.addWidget(panel)
     panel.set_services(make_pipeline_services(topology=_TOPO))
     _show(panel)
-    combo = panel._move_worker_combo
+    combo = panel._selector_section._move_worker_combo
     names = [combo.itemText(i) for i in range(combo.count())]
     assert "message_processor" in names  # синтетический системный воркер
     assert "grabber" in names  # воркер процесса из топологии
@@ -54,8 +54,9 @@ def test_worker_row_visible_in_plugin_mode(qtbot) -> None:
     panel.set_services(make_pipeline_services(topology=_TOPO))
     _show(panel)
     # Строка «Процесс / Воркер» видима в plugin-режиме (независимо от наличия др. процессов)
-    assert panel._move_process_form.isVisible() or panel._move_process_form.isVisibleTo(panel)
-    assert panel._move_worker_combo.count() >= 1
+    move_form = panel._selector_section._move_process_form
+    assert move_form.isVisible() or move_form.isVisibleTo(panel)
+    assert panel._selector_section._move_worker_combo.count() >= 1
 
 
 def test_worker_selection_emits_field_changed(qtbot) -> None:
@@ -65,7 +66,7 @@ def test_worker_selection_emits_field_changed(qtbot) -> None:
     _show(panel)
     captured: list[tuple] = []
     panel.field_changed.connect(lambda p, f, v: captured.append((p, f, v)))
-    combo = panel._move_worker_combo
+    combo = panel._selector_section._move_worker_combo
     idx = combo.findData("grabber")
     assert idx >= 0
     combo.setCurrentIndex(idx)
@@ -77,7 +78,7 @@ def test_worker_combo_preselects_assigned_worker(qtbot) -> None:
     qtbot.addWidget(panel)
     panel.set_services(make_pipeline_services(topology=_TOPO))
     _show(panel, params={"assigned_worker": "grabber"})
-    combo = panel._move_worker_combo
+    combo = panel._selector_section._move_worker_combo
     assert combo.currentData() == "grabber"
 
 

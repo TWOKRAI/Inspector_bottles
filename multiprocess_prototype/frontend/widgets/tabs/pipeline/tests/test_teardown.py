@@ -213,12 +213,12 @@ class TestInspectorDispose:
         """show camera → dispose() → все bind сняты (баланс 0), хэндлы пусты."""
         panel, binds = self._make_camera_panel(qtbot)
         assert binds.bind_count > 0
-        assert len(panel._cam_actual_handles) == binds.bind_count
+        assert len(panel._cam_section._handles) == binds.bind_count
 
         panel.dispose()
 
         assert binds.unbind_count == binds.bind_count
-        assert panel._cam_actual_handles == []
+        assert panel._cam_section._handles == []
 
     def test_dispose_idempotent(self, qtbot):
         """Повторный dispose() — no-op (хэндлы уже сняты, лишних unbind нет)."""
@@ -237,7 +237,7 @@ class TestInspectorDispose:
 
         panel.dispose()
 
-        assert panel._cam_actual_handles == []
+        assert panel._cam_section._handles == []
 
 
 # ===========================================================================

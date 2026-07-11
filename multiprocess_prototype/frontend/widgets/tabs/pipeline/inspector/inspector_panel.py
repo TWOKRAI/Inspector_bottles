@@ -12,18 +12,14 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
-    QFormLayout,
     QFrame,
     QLabel,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 if TYPE_CHECKING:
     from multiprocess_prototype.domain.app_services import AppServices
-    from multiprocess_prototype.frontend.forms.field_editor import FieldEditor
 
 from ..graph.constants import CATEGORY_COLORS
 from .cam_actual_section import CamActualSection
@@ -35,7 +31,6 @@ from .selectors_data import (
     display_entries,
     process_names_from_recipe,
     workers_for_process,
-    worker_label,
 )
 
 logger = logging.getLogger(__name__)
@@ -329,7 +324,7 @@ class NodeInspectorPanel(QWidget):
             self._category_badge.setStyleSheet(f"background-color: {color}; color: #fff;")
 
             # Блок «Исполнение»: процесс + воркер/порядок по плагинам (Phase A)
-            self._exec_info_form.setVisible(True)
+            self._exec_section.setVisible(True)
             self._populate_exec_info(node_id, category, plugins)
 
             # Селекторы (IPC-таргет + перенос процесса + воркер + фиксация + bypass):
@@ -355,9 +350,7 @@ class NodeInspectorPanel(QWidget):
             # Контролы камеры Hikvision (поиск/захват/параметры/SDK App) — дублируют
             # секцию Services прямо в карточке ноды. Только для плагина hikvision.
             if (plugin_name or node_id) == "hikvision":
-                self._params_section.embed_hikvision(
-                    self._services, self._command_sender, self._topology_bridge
-                )
+                self._params_section.embed_hikvision(self._services, self._command_sender, self._topology_bridge)
 
             # io-debug: привязать секцию к io_peek текущего плагина (process+plugin).
             self._io_debug.set_target(self._current_process, plugin_name or node_id)
@@ -368,16 +361,6 @@ class NodeInspectorPanel(QWidget):
     # ------------------------------------------------------------------ #
     #  Камера: actual-телеметрия (делегаты CamActualSection, F.6)          #
     # ------------------------------------------------------------------ #
-
-    @property
-    def _cam_actual_form(self) -> QWidget:
-        """Compat-шов: виджет actual-секции (тесты проверяют isHidden())."""
-        return self._cam_section
-
-    @property
-    def _cam_actual_handles(self) -> list[Any]:
-        """Compat-шов: активные bind-хэндлы actual-секции (тесты проверяют баланс)."""
-        return self._cam_section._handles
 
     def _hide_camera_actual(self) -> None:
         """Скрыть блок actual и снять подписки (делегат секции)."""
@@ -435,7 +418,7 @@ class NodeInspectorPanel(QWidget):
 
             # Блок «Исполнение» не относится к display-узлам — очистить и спрятать.
             self._clear_exec_info()
-            self._exec_info_form.setVisible(False)
+            self._exec_section.setVisible(False)
             self._hide_camera_actual()
             self._io_debug.clear_target()  # у display-узла нет плагина → io-debug спит
 
@@ -474,20 +457,6 @@ class NodeInspectorPanel(QWidget):
     #  Блок «Исполнение» (Phase A, read-only)                              #
     # ------------------------------------------------------------------ #
 
-    # Тонкий делегат на чистую функцию selectors_data.worker_label (F.6).
-    # Оставлен как staticmethod для совместимости со стабильными швами тестов.
-    _worker_for_plugin = staticmethod(worker_label)
-
-    @property
-    def _exec_info_form(self) -> QWidget:
-        """Compat-шов: виджет секции «Исполнение» (тесты проверяют isHidden())."""
-        return self._exec_section
-
-    @property
-    def _exec_info_layout(self) -> "QFormLayout":
-        """Compat-шов: раскладка секции «Исполнение» (тесты читают строки/count)."""
-        return self._exec_section._layout
-
     def _populate_exec_info(self, process_name: str, node_category: str, plugins: list | None) -> None:
         """Заполнить блок «Исполнение» (делегат ExecInfoSection, F.6)."""
         self._exec_section.populate(process_name, node_category, plugins)
@@ -497,48 +466,8 @@ class NodeInspectorPanel(QWidget):
         self._exec_section.clear()
 
     # ------------------------------------------------------------------ #
-    #  Селекторы: провайдеры данных + compat-швы + refresh (F.6)           #
+    #  Селекторы: провайдеры данных + refresh (F.6)                        #
     # ------------------------------------------------------------------ #
-
-    @property
-    def _target_process_combo(self) -> QComboBox:
-        """Compat-шов: combo IPC-таргета (тесты читают items/currentText)."""
-        return self._selector_section._target_process_combo
-
-    @property
-    def _display_id_combo(self) -> QComboBox:
-        """Compat-шов: combo Display (тесты читают itemData/currentIndex)."""
-        return self._selector_section._display_id_combo
-
-    @property
-    def _move_worker_combo(self) -> QComboBox:
-        """Compat-шов: combo воркера (тесты читают/выбирают воркеров)."""
-        return self._selector_section._move_worker_combo
-
-    @property
-    def _move_process_form(self) -> QWidget:
-        """Compat-шов: форма «Процесс / Воркер» (тесты проверяют видимость)."""
-        return self._selector_section._move_process_form
-
-    @property
-    def _target_process_form(self) -> QWidget:
-        """Compat-шов: форма IPC-таргета (тесты проверяют видимость)."""
-        return self._selector_section._target_process_form
-
-    @property
-    def _display_id_form(self) -> QWidget:
-        """Compat-шов: форма Display (тесты проверяют видимость)."""
-        return self._selector_section._display_id_form
-
-    @property
-    def _lock_btn(self) -> QPushButton:
-        """Compat-шов: кнопка «Закрепить» (тесты кликают → node_lock_set_requested)."""
-        return self._selector_section._lock_btn
-
-    @property
-    def _unlock_btn(self) -> QPushButton:
-        """Compat-шов: кнопка «Открепить»."""
-        return self._selector_section._unlock_btn
 
     def refresh_display_combo(self) -> None:
         """Обновить combo «Display» при изменении DisplayRegistry (no-op вне display-режима)."""
@@ -568,21 +497,6 @@ class NodeInspectorPanel(QWidget):
     # ------------------------------------------------------------------ #
     #  Форма параметров: делегаты ParamsFormSection (F.6)                  #
     # ------------------------------------------------------------------ #
-
-    @property
-    def _field_editors(self) -> dict[str, Any]:
-        """Compat-шов: редакторы полей формы параметров (тесты читают dict)."""
-        return self._params_section._field_editors
-
-    @property
-    def _use_cards(self) -> bool:
-        """Compat-шов: флаг cards-режима формы параметров."""
-        return self._params_section._use_cards
-
-    @property
-    def _params_layout(self) -> "QFormLayout":
-        """Compat-шов: раскладка формы параметров (тесты читают count/строки)."""
-        return self._params_section._layout
 
     def _on_params_field_changed(self, field_name: str, value: Any) -> None:
         """Переизлучить field_changed секции с адресом процесса (гейт _suppress_changes)."""
@@ -619,14 +533,3 @@ class NodeInspectorPanel(QWidget):
         SetPluginConfig адресовал ИМЕННО выбранный плагин (не хардкод index 0).
         """
         return self._current_plugin_index
-
-    def _on_field_editor_changed(self, field_name: str, editor: "FieldEditor") -> None:
-        """Compat-шов для прямого вызова из тестов (cards-режим).
-
-        Штатный путь редактирования полей идёт через ParamsFormSection.field_changed →
-        _on_params_field_changed. Метод оставлен для тестов, дёргающих его напрямую.
-        """
-        if self._suppress_changes:
-            return
-        value = editor.getter()
-        self.field_changed.emit(self._current_process, field_name, value)

@@ -231,7 +231,9 @@ class TestPlacedBoxSurvivesReload:
 
         p._on_topology_replaced(TopologyReplaced(reason="mutation-reload"))
 
-        assert "main" in p._layout.placed_display_ids, "_placed_display_ids не должен очищаться при _on_topology_replaced"
+        assert "main" in p._layout.placed_display_ids, (
+            "placed_display_ids не должен очищаться при _on_topology_replaced"
+        )
 
 
 # ===========================================================================
@@ -300,7 +302,9 @@ class TestRemoveUnboundDisplay:
 
         p.remove_selected(["main"])
 
-        assert "main" not in p._layout.placed_display_ids, "display_id должен быть убран из _placed_display_ids после remove"
+        assert "main" not in p._layout.placed_display_ids, (
+            "display_id должен быть убран из _placed_display_ids после remove"
+        )
 
 
 # ===========================================================================
