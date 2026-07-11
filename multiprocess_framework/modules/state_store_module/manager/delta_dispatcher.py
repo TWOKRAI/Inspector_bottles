@@ -108,7 +108,21 @@ class DeltaDispatcher:
         # дельт этого пакета, т.е. "дерево не старше этой revision, насколько
         # известно этому пакету". Аддитивное поле: старые получатели (без
         # watch-from-revision) его игнорируют, обратная совместимость сохранена.
-        envelope_revision = max((d.revision for d in deltas), default=0)
+        #
+        # first_revision (Ф4.9-фикс, HIGH-1, ревью 2026-07-11) — МИНИМАЛЬНАЯ
+        # revision среди дельт пакета. Одной мутации (set/delete) соответствует
+        # одна дельта — first_revision == revision. Но merge() инкрементирует
+        # revision НА КАЖДЫЙ изменившийся лист (см. TreeStore._merge_recursive),
+        # поэтому пакет из merge на N≥2 листьев несётревизии
+        # [last+1 .. last+N] ОДНИМ конвертом. Раньше клиент сравнивал только
+        # max(revision) с last+1 — пакет из 2+ листьев (envelope=last+2)
+        # ложно распознавался как разрыв (пропущенный пакет), хотя на деле все
+        # промежуточные revision содержатся В ЭТОМ ЖЕ пакете. first_revision
+        # позволяет StateProxy проверить непрерывность ПО ВСЕМУ диапазону
+        # пакета, а не только по его верхней границе.
+        revisions = [d.revision for d in deltas]
+        first_revision = min(revisions) if revisions else 0
+        envelope_revision = max(revisions) if revisions else 0
 
         message = {
             "type": "event",
@@ -123,6 +137,7 @@ class DeltaDispatcher:
             "data": {
                 "deltas": [d.to_dict() for d in deltas],
                 "revision": envelope_revision,
+                "first_revision": first_revision,
             },
         }
 

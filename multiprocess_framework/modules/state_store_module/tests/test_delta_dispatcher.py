@@ -111,3 +111,64 @@ def test_envelope_revision_is_max_of_batch() -> None:
 
     assert len(router.sent) == 1
     assert router.sent[0]["data"]["revision"] == 7
+
+
+def test_envelope_carries_first_revision_min_of_batch() -> None:
+    """Ф4.9-фикс (HIGH-1): data.first_revision == min(revision дельт пакета).
+
+    Нужен StateProxy, чтобы отличить пакет из merge() на N≥2 листьев
+    (revisions идут ПОДРЯД внутри ОДНОГО конверта, first_revision == last+1 —
+    не разрыв) от реально пропущенного пакета (first_revision > last+1).
+    """
+    disp, router, subs = _make_dispatcher()
+    subs.subscribe("processes.**", "gui")
+
+    deltas = [
+        Delta(path="processes.a", old_value=MISSING, new_value=1, source="s", revision=3),
+        Delta(path="processes.b", old_value=MISSING, new_value=2, source="s", revision=7),
+        Delta(path="processes.c", old_value=MISSING, new_value=3, source="s", revision=5),
+    ]
+    disp.dispatch(deltas)
+
+    assert len(router.sent) == 1
+    assert router.sent[0]["data"]["first_revision"] == 3
+    assert router.sent[0]["data"]["revision"] == 7
+
+
+def test_envelope_first_revision_equals_revision_for_single_delta() -> None:
+    """Одна дельта в пакете — first_revision == revision (тривиальный диапазон)."""
+    disp, router, subs = _make_dispatcher()
+    subs.subscribe("processes.**", "gui")
+
+    delta = Delta(path="processes.cam.state.status", old_value=MISSING, new_value="running", source="s", revision=5)
+    disp.dispatch_single(delta)
+
+    assert router.sent[0]["data"]["first_revision"] == 5
+    assert router.sent[0]["data"]["revision"] == 5
+
+
+def test_multi_leaf_merge_envelope_first_revision_is_contiguous_with_previous() -> None:
+    """Ф4.9-фикс (HIGH-1) сквозной сценарий: merge на 2 листа даёт revisions [N+1, N+2]
+    ОДНИМ конвертом — first_revision=N+1 стыкуется с предыдущим envelope (revision=N),
+    подтверждая, что это НЕ разрыв (в отличие от старой проверки только по max)."""
+    disp, router, subs = _make_dispatcher()
+    subs.subscribe("cameras.0.**", "gui")
+
+    # Первый пакет: одна дельта, revision=1 (имитирует предыдущее состояние клиента).
+    disp.dispatch_single(
+        Delta(path="cameras.0.state.status", old_value=MISSING, new_value="idle", source="s", revision=1)
+    )
+
+    # Второй пакет: merge на 2 листа → revisions 2 и 3 в ОДНОМ конверте.
+    merge_deltas = [
+        Delta(path="cameras.0.config.fps", old_value=MISSING, new_value=30, source="s", revision=2),
+        Delta(path="cameras.0.config.type", old_value=MISSING, new_value="usb", source="s", revision=3),
+    ]
+    disp.dispatch(merge_deltas)
+
+    assert len(router.sent) == 2
+    first_envelope, second_envelope = router.sent[0]["data"], router.sent[1]["data"]
+    assert first_envelope["revision"] == 1
+    # first_revision второго пакета (2) == revision первого (1) + 1 — непрерывно.
+    assert second_envelope["first_revision"] == first_envelope["revision"] + 1
+    assert second_envelope["revision"] == 3
