@@ -17,6 +17,13 @@ processes:
     commands:
     - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
       name: config.reload
+      params_schema:
+      - name: observability
+        required: false
+        type: Dict
+      - name: path
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -33,6 +40,16 @@ processes:
       - stats
     - description: 'Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости'
       name: health.report
+      params_schema:
+      - name: context
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      - name: status
+        required: false
+        type: str
       tags:
       - health
       - system
@@ -73,18 +90,61 @@ processes:
       - system
     - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
       name: log.tail.subscribe
+      params_schema:
+      - name: command
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: Снять подписку на tail логов процесса
       name: log.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      - name: tap
+        required: false
+        type: str
       tags:
       - system
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
+      name: observability.tail.subscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на live-хвост наблюдаемости процесса
+      name: observability.tail.unsubscribe
       tags:
       - system
     - description: 'Router endpoint: вложенная команда PM'
@@ -133,6 +193,10 @@ processes:
       - stats
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      params_schema:
+      - name: ticket
+        required: false
+        type: Dict
       tags:
       - system
     - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
@@ -148,6 +212,22 @@ processes:
       - system
     - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
       name: routing.refresh
+      params_schema:
+      - name: epoch
+        required: false
+        type: int
+      - name: hub
+        required: false
+        type: str
+      - name: processes
+        required: false
+        type: Dict
+      - name: reason
+        required: false
+        type: str
+      - name: ts
+        required: false
+        type: float
       tags:
       - system
     - description: Прочитать значение из дерева
@@ -245,6 +325,34 @@ processes:
       - system
     - description: Создать воркер в процессе
       name: worker.create
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -253,10 +361,18 @@ processes:
       - system
     - description: Удалить воркер из процесса
       name: worker.remove
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перезапустить воркер
       name: worker.restart
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Возобновить все прикладные воркеры процесса
@@ -265,14 +381,50 @@ processes:
       - system
     - description: Запустить остановленный воркер
       name: worker.start
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Остановить воркер (без удаления)
       name: worker.stop
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перенастроить воркер (приоритет/интервал)
       name: worker.update
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     registers: {}
@@ -282,6 +434,13 @@ processes:
     commands:
     - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
       name: config.reload
+      params_schema:
+      - name: observability
+        required: false
+        type: Dict
+      - name: path
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -301,6 +460,16 @@ processes:
       - stats
     - description: 'Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости'
       name: health.report
+      params_schema:
+      - name: context
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      - name: status
+        required: false
+        type: str
       tags:
       - health
       - system
@@ -341,18 +510,61 @@ processes:
       - system
     - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
       name: log.tail.subscribe
+      params_schema:
+      - name: command
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: Снять подписку на tail логов процесса
       name: log.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      - name: tap
+        required: false
+        type: str
       tags:
       - system
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
+      name: observability.tail.subscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на live-хвост наблюдаемости процесса
+      name: observability.tail.unsubscribe
       tags:
       - system
     - description: ''
@@ -367,6 +579,10 @@ processes:
       tags: []
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      params_schema:
+      - name: ticket
+        required: false
+        type: Dict
       tags:
       - system
     - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
@@ -382,6 +598,22 @@ processes:
       - system
     - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
       name: routing.refresh
+      params_schema:
+      - name: epoch
+        required: false
+        type: int
+      - name: hub
+        required: false
+        type: str
+      - name: processes
+        required: false
+        type: Dict
+      - name: reason
+        required: false
+        type: str
+      - name: ts
+        required: false
+        type: float
       tags:
       - system
     - description: Включить/выключить ноду (bypass)
@@ -432,6 +664,34 @@ processes:
       - system
     - description: Создать воркер в процессе
       name: worker.create
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -440,10 +700,18 @@ processes:
       - system
     - description: Удалить воркер из процесса
       name: worker.remove
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перезапустить воркер
       name: worker.restart
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Возобновить все прикладные воркеры процесса
@@ -452,14 +720,50 @@ processes:
       - system
     - description: Запустить остановленный воркер
       name: worker.start
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Остановить воркер (без удаления)
       name: worker.stop
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перенастроить воркер (приоритет/интервал)
       name: worker.update
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     registers: {}
@@ -469,6 +773,13 @@ processes:
     commands:
     - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
       name: config.reload
+      params_schema:
+      - name: observability
+        required: false
+        type: Dict
+      - name: path
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -518,6 +829,16 @@ processes:
       - stats
     - description: 'Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости'
       name: health.report
+      params_schema:
+      - name: context
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      - name: status
+        required: false
+        type: str
       tags:
       - health
       - system
@@ -576,18 +897,61 @@ processes:
       - system
     - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
       name: log.tail.subscribe
+      params_schema:
+      - name: command
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: Снять подписку на tail логов процесса
       name: log.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      - name: tap
+        required: false
+        type: str
       tags:
       - system
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
+      name: observability.tail.subscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на live-хвост наблюдаемости процесса
+      name: observability.tail.unsubscribe
       tags:
       - system
     - description: GUI/процесс обновляет значение регистра
@@ -681,6 +1045,10 @@ processes:
       tags: []
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      params_schema:
+      - name: ticket
+        required: false
+        type: Dict
       tags:
       - system
     - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
@@ -696,6 +1064,22 @@ processes:
       - system
     - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
       name: routing.refresh
+      params_schema:
+      - name: epoch
+        required: false
+        type: int
+      - name: hub
+        required: false
+        type: str
+      - name: processes
+        required: false
+        type: Dict
+      - name: reason
+        required: false
+        type: str
+      - name: ts
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -755,6 +1139,34 @@ processes:
       - system
     - description: Создать воркер в процессе
       name: worker.create
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -763,10 +1175,18 @@ processes:
       - system
     - description: Удалить воркер из процесса
       name: worker.remove
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перезапустить воркер
       name: worker.restart
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Возобновить все прикладные воркеры процесса
@@ -775,14 +1195,50 @@ processes:
       - system
     - description: Запустить остановленный воркер
       name: worker.start
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Остановить воркер (без удаления)
       name: worker.stop
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перенастроить воркер (приоритет/интервал)
       name: worker.update
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     registers:
@@ -800,6 +1256,13 @@ processes:
     commands:
     - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
       name: config.reload
+      params_schema:
+      - name: observability
+        required: false
+        type: Dict
+      - name: path
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -816,6 +1279,16 @@ processes:
       - stats
     - description: 'Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости'
       name: health.report
+      params_schema:
+      - name: context
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      - name: status
+        required: false
+        type: str
       tags:
       - health
       - system
@@ -856,18 +1329,61 @@ processes:
       - system
     - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
       name: log.tail.subscribe
+      params_schema:
+      - name: command
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: Снять подписку на tail логов процесса
       name: log.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      - name: tap
+        required: false
+        type: str
       tags:
       - system
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
+      name: observability.tail.subscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на live-хвост наблюдаемости процесса
+      name: observability.tail.unsubscribe
       tags:
       - system
     - description: GUI/процесс обновляет значение регистра
@@ -880,6 +1396,10 @@ processes:
       - stats
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      params_schema:
+      - name: ticket
+        required: false
+        type: Dict
       tags:
       - system
     - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
@@ -895,6 +1415,22 @@ processes:
       - system
     - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
       name: routing.refresh
+      params_schema:
+      - name: epoch
+        required: false
+        type: int
+      - name: hub
+        required: false
+        type: str
+      - name: processes
+        required: false
+        type: Dict
+      - name: reason
+        required: false
+        type: str
+      - name: ts
+        required: false
+        type: float
       tags:
       - system
     - description: ''
@@ -939,6 +1475,34 @@ processes:
       - system
     - description: Создать воркер в процессе
       name: worker.create
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -947,10 +1511,18 @@ processes:
       - system
     - description: Удалить воркер из процесса
       name: worker.remove
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перезапустить воркер
       name: worker.restart
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Возобновить все прикладные воркеры процесса
@@ -959,14 +1531,50 @@ processes:
       - system
     - description: Запустить остановленный воркер
       name: worker.start
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Остановить воркер (без удаления)
       name: worker.stop
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перенастроить воркер (приоритет/интервал)
       name: worker.update
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     registers:
@@ -980,6 +1588,13 @@ processes:
     commands:
     - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
       name: config.reload
+      params_schema:
+      - name: observability
+        required: false
+        type: Dict
+      - name: path
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -996,6 +1611,16 @@ processes:
       - stats
     - description: 'Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости'
       name: health.report
+      params_schema:
+      - name: context
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      - name: status
+        required: false
+        type: str
       tags:
       - health
       - system
@@ -1036,18 +1661,61 @@ processes:
       - system
     - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
       name: log.tail.subscribe
+      params_schema:
+      - name: command
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: Снять подписку на tail логов процесса
       name: log.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      - name: tap
+        required: false
+        type: str
       tags:
       - system
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
+      name: observability.tail.subscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на live-хвост наблюдаемости процесса
+      name: observability.tail.unsubscribe
       tags:
       - system
     - description: ''
@@ -1056,6 +1724,10 @@ processes:
       - stats
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      params_schema:
+      - name: ticket
+        required: false
+        type: Dict
       tags:
       - system
     - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
@@ -1071,6 +1743,22 @@ processes:
       - system
     - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
       name: routing.refresh
+      params_schema:
+      - name: epoch
+        required: false
+        type: int
+      - name: hub
+        required: false
+        type: str
+      - name: processes
+        required: false
+        type: Dict
+      - name: reason
+        required: false
+        type: str
+      - name: ts
+        required: false
+        type: float
       tags:
       - system
     - description: Включить/выключить ноду (bypass)
@@ -1112,6 +1800,34 @@ processes:
       - system
     - description: Создать воркер в процессе
       name: worker.create
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -1120,10 +1836,18 @@ processes:
       - system
     - description: Удалить воркер из процесса
       name: worker.remove
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перезапустить воркер
       name: worker.restart
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Возобновить все прикладные воркеры процесса
@@ -1132,14 +1856,50 @@ processes:
       - system
     - description: Запустить остановленный воркер
       name: worker.start
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Остановить воркер (без удаления)
       name: worker.stop
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перенастроить воркер (приоритет/интервал)
       name: worker.update
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     registers: {}
@@ -1149,6 +1909,13 @@ processes:
     commands:
     - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
       name: config.reload
+      params_schema:
+      - name: observability
+        required: false
+        type: Dict
+      - name: path
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -1165,6 +1932,16 @@ processes:
       - stats
     - description: 'Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости'
       name: health.report
+      params_schema:
+      - name: context
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      - name: status
+        required: false
+        type: str
       tags:
       - health
       - system
@@ -1205,18 +1982,61 @@ processes:
       - system
     - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
       name: log.tail.subscribe
+      params_schema:
+      - name: command
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: Снять подписку на tail логов процесса
       name: log.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      - name: tap
+        required: false
+        type: str
       tags:
       - system
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
+      name: observability.tail.subscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на live-хвост наблюдаемости процесса
+      name: observability.tail.unsubscribe
       tags:
       - system
     - description: ''
@@ -1225,6 +2045,10 @@ processes:
       - stats
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      params_schema:
+      - name: ticket
+        required: false
+        type: Dict
       tags:
       - system
     - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
@@ -1240,6 +2064,22 @@ processes:
       - system
     - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
       name: routing.refresh
+      params_schema:
+      - name: epoch
+        required: false
+        type: int
+      - name: hub
+        required: false
+        type: str
+      - name: processes
+        required: false
+        type: Dict
+      - name: reason
+        required: false
+        type: str
+      - name: ts
+        required: false
+        type: float
       tags:
       - system
     - description: Включить/выключить ноду (bypass)
@@ -1281,6 +2121,34 @@ processes:
       - system
     - description: Создать воркер в процессе
       name: worker.create
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -1289,10 +2157,18 @@ processes:
       - system
     - description: Удалить воркер из процесса
       name: worker.remove
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перезапустить воркер
       name: worker.restart
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Возобновить все прикладные воркеры процесса
@@ -1301,14 +2177,50 @@ processes:
       - system
     - description: Запустить остановленный воркер
       name: worker.start
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Остановить воркер (без удаления)
       name: worker.stop
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перенастроить воркер (приоритет/интервал)
       name: worker.update
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     registers: {}
@@ -1318,6 +2230,13 @@ processes:
     commands:
     - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
       name: config.reload
+      params_schema:
+      - name: observability
+        required: false
+        type: Dict
+      - name: path
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -1334,6 +2253,16 @@ processes:
       - stats
     - description: 'Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости'
       name: health.report
+      params_schema:
+      - name: context
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      - name: status
+        required: false
+        type: str
       tags:
       - health
       - system
@@ -1374,18 +2303,61 @@ processes:
       - system
     - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
       name: log.tail.subscribe
+      params_schema:
+      - name: command
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: Снять подписку на tail логов процесса
       name: log.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      - name: tap
+        required: false
+        type: str
       tags:
       - system
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
+      name: observability.tail.subscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на live-хвост наблюдаемости процесса
+      name: observability.tail.unsubscribe
       tags:
       - system
     - description: ''
@@ -1394,6 +2366,10 @@ processes:
       - stats
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      params_schema:
+      - name: ticket
+        required: false
+        type: Dict
       tags:
       - system
     - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
@@ -1409,6 +2385,22 @@ processes:
       - system
     - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
       name: routing.refresh
+      params_schema:
+      - name: epoch
+        required: false
+        type: int
+      - name: hub
+        required: false
+        type: str
+      - name: processes
+        required: false
+        type: Dict
+      - name: reason
+        required: false
+        type: str
+      - name: ts
+        required: false
+        type: float
       tags:
       - system
     - description: Включить/выключить ноду (bypass)
@@ -1450,6 +2442,34 @@ processes:
       - system
     - description: Создать воркер в процессе
       name: worker.create
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -1458,10 +2478,18 @@ processes:
       - system
     - description: Удалить воркер из процесса
       name: worker.remove
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перезапустить воркер
       name: worker.restart
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Возобновить все прикладные воркеры процесса
@@ -1470,14 +2498,50 @@ processes:
       - system
     - description: Запустить остановленный воркер
       name: worker.start
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Остановить воркер (без удаления)
       name: worker.stop
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перенастроить воркер (приоритет/интервал)
       name: worker.update
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     registers: {}
@@ -1487,6 +2551,13 @@ processes:
     commands:
     - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
       name: config.reload
+      params_schema:
+      - name: observability
+        required: false
+        type: Dict
+      - name: path
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -1503,6 +2574,16 @@ processes:
       - stats
     - description: 'Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости'
       name: health.report
+      params_schema:
+      - name: context
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      - name: status
+        required: false
+        type: str
       tags:
       - health
       - system
@@ -1543,18 +2624,61 @@ processes:
       - system
     - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
       name: log.tail.subscribe
+      params_schema:
+      - name: command
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: Снять подписку на tail логов процесса
       name: log.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      - name: tap
+        required: false
+        type: str
       tags:
       - system
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
+      name: observability.tail.subscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на live-хвост наблюдаемости процесса
+      name: observability.tail.unsubscribe
       tags:
       - system
     - description: ''
@@ -1563,6 +2687,10 @@ processes:
       - stats
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      params_schema:
+      - name: ticket
+        required: false
+        type: Dict
       tags:
       - system
     - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
@@ -1578,6 +2706,22 @@ processes:
       - system
     - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
       name: routing.refresh
+      params_schema:
+      - name: epoch
+        required: false
+        type: int
+      - name: hub
+        required: false
+        type: str
+      - name: processes
+        required: false
+        type: Dict
+      - name: reason
+        required: false
+        type: str
+      - name: ts
+        required: false
+        type: float
       tags:
       - system
     - description: Включить/выключить ноду (bypass)
@@ -1619,6 +2763,34 @@ processes:
       - system
     - description: Создать воркер в процессе
       name: worker.create
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -1627,10 +2799,18 @@ processes:
       - system
     - description: Удалить воркер из процесса
       name: worker.remove
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перезапустить воркер
       name: worker.restart
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Возобновить все прикладные воркеры процесса
@@ -1639,14 +2819,50 @@ processes:
       - system
     - description: Запустить остановленный воркер
       name: worker.start
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Остановить воркер (без удаления)
       name: worker.stop
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перенастроить воркер (приоритет/интервал)
       name: worker.update
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     registers: {}
@@ -1656,6 +2872,13 @@ processes:
     commands:
     - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
       name: config.reload
+      params_schema:
+      - name: observability
+        required: false
+        type: Dict
+      - name: path
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -1672,6 +2895,16 @@ processes:
       - stats
     - description: 'Диагностика: впрыснуть health-событие (report_error) — проверка канала наблюдаемости'
       name: health.report
+      params_schema:
+      - name: context
+        required: false
+        type: str
+      - name: message
+        required: false
+        type: str
+      - name: status
+        required: false
+        type: str
       tags:
       - health
       - system
@@ -1712,18 +2945,61 @@ processes:
       - system
     - description: Подписать адрес на LogRecord'ы процесса с level ≥ порога (router-push)
       name: log.tail.subscribe
+      params_schema:
+      - name: command
+        required: false
+        type: str
+      - name: level
+        required: false
+        type: str
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: Снять подписку на tail логов процесса
       name: log.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      - name: tap
+        required: false
+        type: str
       tags:
       - system
     - description: Выключить sink логгера по имени (unregister_channel)
       name: logger.sink.disable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
       tags:
       - system
     - description: Включить sink логгера по имени (register_channel)
       name: logger.sink.enable
+      params_schema:
+      - name: name
+        required: false
+        type: str
+      - name: sink
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Подписать GUI-адрес на live-хвост наблюдаемости (log/stats/error → observability.record)
+      name: observability.tail.subscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
+      tags:
+      - system
+    - description: Снять подписку на live-хвост наблюдаемости процесса
+      name: observability.tail.unsubscribe
       tags:
       - system
     - description: ''
@@ -1732,6 +3008,10 @@ processes:
       - stats
     - description: Переслать недоставляемый push-билет своим router'ом (хаб-релей к внешним подписчикам)
       name: router.relay
+      params_schema:
+      - name: ticket
+        required: false
+        type: Dict
       tags:
       - system
     - description: 'Диагностика: отправить inner-билет соседу (peer→peer доставка после switch)'
@@ -1747,6 +3027,22 @@ processes:
       - system
     - description: 'Сверка снимка routing-epoch: сброс стейл-очередей соседей (Ф3.1)'
       name: routing.refresh
+      params_schema:
+      - name: epoch
+        required: false
+        type: int
+      - name: hub
+        required: false
+        type: str
+      - name: processes
+        required: false
+        type: Dict
+      - name: reason
+        required: false
+        type: str
+      - name: ts
+        required: false
+        type: float
       tags:
       - system
     - description: Включить/выключить ноду (bypass)
@@ -1788,6 +3084,34 @@ processes:
       - system
     - description: Создать воркер в процессе
       name: worker.create
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -1796,10 +3120,18 @@ processes:
       - system
     - description: Удалить воркер из процесса
       name: worker.remove
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перезапустить воркер
       name: worker.restart
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Возобновить все прикладные воркеры процесса
@@ -1808,14 +3140,50 @@ processes:
       - system
     - description: Запустить остановленный воркер
       name: worker.start
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Остановить воркер (без удаления)
       name: worker.stop
+      params_schema:
+      - name: worker_name
+        required: false
+        type: str
       tags:
       - system
     - description: Перенастроить воркер (приоритет/интервал)
       name: worker.update
+      params_schema:
+      - name: config
+        required: false
+        type: Dict
+      - name: execution_mode
+        required: false
+        type: str
+      - name: max_restarts
+        required: false
+        type: int
+      - name: priority
+        required: false
+        type: str
+      - name: restart_on_failure
+        required: false
+        type: bool
+      - name: target_interval_ms
+        required: false
+        type: int
+      - name: worker_class
+        required: false
+        type: str
+      - name: worker_name
+        required: false
+        type: str
+      - name: worker_type
+        required: false
+        type: str
       tags:
       - system
     registers: {}
