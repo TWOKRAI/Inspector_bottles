@@ -33,7 +33,7 @@ app_module «рыба» ([app-template-idea.md](2026-07-06_constructor-master/ap
 ### Рецепты / recipe-orchestrator
 | План | Статус | Осталось |
 |------|--------|----------|
-| [recipe-orchestrator-unify](2026-06-06_recipe-orchestrator-unify.md) | Phase 1-4 **DONE** | **Phase 5** — carve-out `RecipeManager`/трансформер во framework (блокер: `duplicate()` reverse-import) |
+| [recipe-orchestrator-unify](2026-06-06_recipe-orchestrator-unify.md) | Phase 1-4 **DONE** | **Phase 5 фактически поглощена задачей C3** ([`2026-07-06_constructor-master/plan.md`](2026-07-06_constructor-master/plan.md), Ф5-добор — `yaml_io`+assembler/planner+RecipeManager → модуль `recipe`); reverse-import блокер снят C1 (модуль recipe через Protocol, 0 reverse-import); C3 сейчас блокирован порядком C2→4.8→C3 (ждёт вердикта владельца по mini-GATE 4.8) |
 
 ### Pipeline / live-control
 | План | Статус | Осталось |
