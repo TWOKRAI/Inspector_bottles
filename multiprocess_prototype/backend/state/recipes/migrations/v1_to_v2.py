@@ -21,10 +21,18 @@ import copy
 import logging
 from typing import Any
 
+from multiprocess_framework.modules.recipe.migrations import migration
+
 logger = logging.getLogger(__name__)
 
 RECIPE_VERSION_V1 = 1  # legacy: regions содержат processing_blocks
 RECIPE_VERSION_V2 = 2  # current: regions содержат nodes
+
+# doc_type реестра миграций (C2, ADR-RCP-003) — различает эту миграцию (regions
+# внутри data.cameras: processing_blocks → nodes) от одноимённой
+# recipes/migrations/format_v1_to_v2.py::migrate_v1_to_v2 (topology-файл целиком:
+# slot-based → blueprint) — разные doc_type, НЕ конфликтуют в общем реестре.
+DOC_TYPE = "recipe.config_snapshot"
 
 
 def needs_migration(recipe_data: dict) -> bool:
@@ -176,6 +184,7 @@ def _convert_region(region_data: dict) -> dict:
     return result
 
 
+@migration(DOC_TYPE, from_=RECIPE_VERSION_V1, to=RECIPE_VERSION_V2)
 def migrate_recipe_data(recipe_data: dict) -> dict:
     """Принимает recipe['data'] (cameras-ветку и др.), возвращает новый dict.
 
