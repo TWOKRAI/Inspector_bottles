@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from multiprocess_framework.modules.process_module.generic.plugin_runner import PluginRunner
+from multiprocess_framework.modules.process_module.plugins.port import Port, PortValidationError
 
 
 class _FakePlugin:
@@ -190,3 +193,101 @@ def test_disabled_plugin_still_runs_hooks():
     items = [{"frame": 1}]
     runner.call_process(plugin, items)
     assert seen == [("process", items, items)]
+
+
+# ---------------------------------------------------------------------------
+#  FW_PORT_VALIDATE (Ф4.3): dev-mode payload-валидатор по Port-декларациям.
+#  OFF по умолчанию — прод-путь бит-в-бит прежний (см. test_off_by_default_*).
+# ---------------------------------------------------------------------------
+
+
+def test_port_validate_off_by_default_ignores_missing_output_field():
+    """Без флага/аргумента поведение прежнее — даже если items не совпадают с outputs."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"no_mask_here": True}])
+    plugin.outputs = [Port(name="mask", dtype="image/gray")]
+    result = runner.call_process(plugin, [{"frame": 1}])
+    assert result == [{"no_mask_here": True}]  # не бросило, прежнее поведение
+
+
+def test_port_validate_on_raises_for_missing_output_field():
+    """validate_ports=True (DI, минуя env) -> отсутствующий обязательный output-порт бросает."""
+    runner = PluginRunner(validate_ports=True)
+    plugin = _FakePlugin(process_fn=lambda items: [{"no_mask_here": True}])
+    plugin.name = "color_mask"
+    plugin.outputs = [Port(name="mask", dtype="image/gray")]
+
+    with pytest.raises(PortValidationError) as exc_info:
+        runner.call_process(plugin, [{"frame": 1}])
+    msg = str(exc_info.value)
+    assert "color_mask" in msg and "mask" in msg
+
+
+def test_port_validate_on_raises_for_missing_input_field():
+    """validate_ports=True -> отсутствующий обязательный input-порт бросает ДО вызова process()."""
+    runner = PluginRunner(validate_ports=True)
+    called: list[bool] = []
+
+    def _proc(items):
+        called.append(True)
+        return items
+
+    plugin = _FakePlugin(process_fn=_proc)
+    plugin.name = "needs_frame"
+    plugin.inputs = [Port(name="frame", dtype="image/bgr")]
+
+    with pytest.raises(PortValidationError):
+        runner.call_process(plugin, [{"not_frame": 1}])
+    assert called == []  # process() не вызван — упало на входной границе
+
+
+def test_port_validate_on_passes_when_fields_present():
+    """validate_ports=True -> корректные items не мешают обычному вызову."""
+    runner = PluginRunner(validate_ports=True)
+    plugin = _FakePlugin(process_fn=lambda items: [{"mask": object()}])
+    plugin.inputs = [Port(name="frame", dtype="image/bgr")]
+    plugin.outputs = [Port(name="mask", dtype="image/gray")]
+    result = runner.call_process(plugin, [{"frame": 1}])
+    assert result == [{"mask": result[0]["mask"]}]
+
+
+def test_port_validate_on_skips_optional_output():
+    runner = PluginRunner(validate_ports=True)
+    plugin = _FakePlugin(process_fn=lambda items: [{"frame": 1}])  # без "stats"
+    plugin.outputs = [Port(name="stats", dtype="dict", optional=True)]
+    result = runner.call_process(plugin, [{"frame": 1}])
+    assert result == [{"frame": 1}]  # не бросило — порт optional
+
+
+def test_port_validate_env_flag_enables_validation(monkeypatch):
+    """FW_PORT_VALIDATE=1 в окружении включает валидацию без явного validate_ports=True."""
+    monkeypatch.setenv("FW_PORT_VALIDATE", "1")
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"no_mask_here": True}])
+    plugin.outputs = [Port(name="mask", dtype="image/gray")]
+
+    with pytest.raises(PortValidationError):
+        runner.call_process(plugin, [{"frame": 1}])
+
+
+def test_port_validate_produce_checks_output_only():
+    """call_produce: нет inputs (источник), проверяются только outputs."""
+    runner = PluginRunner(validate_ports=True)
+    plugin = _FakePlugin(produce_fn=lambda: [{"no_frame_here": True}])
+    plugin.name = "camera"
+    plugin.outputs = [Port(name="frame", dtype="image/bgr")]
+
+    with pytest.raises(PortValidationError) as exc_info:
+        runner.call_produce(plugin)
+    assert "camera" in str(exc_info.value)
+
+
+def test_port_validate_bypass_skips_port_check():
+    """Bypass (enabled=False): items идут насквозь, свои output-порты плагина не проверяются."""
+    runner = PluginRunner(validate_ports=True)
+    plugin = _FakePlugin(process_fn=lambda items: [{"mutated": True}])
+    plugin.enabled = False
+    plugin.outputs = [Port(name="mask", dtype="image/gray")]  # не будет в проходном item
+    items = [{"frame": 1}]
+    result = runner.call_process(plugin, items)
+    assert result is items  # прошло насквозь, без ошибки валидации
