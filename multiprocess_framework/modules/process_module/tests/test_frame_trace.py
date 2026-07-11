@@ -107,3 +107,55 @@ class TestEnabled:
             ("process", "hsv_mask"),
             ("transport", "detector->painter"),
         ]
+
+
+class TestInstallTracing:
+    """C6 рычаг 2: обёртка process/produce на бутe (не в __init_subclass__)."""
+
+    def test_wraps_process_and_produce(self) -> None:
+        class _Plug:
+            name = "blur"
+            _trace_node = "detector"
+
+            def process(self, items):
+                return [{**it} for it in items]
+
+            def produce(self):
+                return [{"src": 1}]
+
+        assert not getattr(_Plug.process, "_traced", False)
+        frame_trace.install_tracing(_Plug)
+        assert getattr(_Plug.process, "_traced", False) is True
+        assert getattr(_Plug.produce, "_traced", False) is True
+
+    def test_idempotent(self) -> None:
+        class _Plug:
+            name = "blur"
+            _trace_node = "detector"
+
+            def process(self, items):
+                return items
+
+        frame_trace.install_tracing(_Plug)
+        wrapped = _Plug.process
+        frame_trace.install_tracing(_Plug)  # повторный бут того же класса
+        assert _Plug.process is wrapped  # не обёрнут дважды
+
+    def test_traces_after_install(self, trace_on) -> None:
+        class _Plug:
+            name = "blur"
+            _trace_node = "detector"
+
+            def process(self, items):
+                return [{**it} for it in items]
+
+        frame_trace.install_tracing(_Plug)
+        out = _Plug().process([{"id": 1}])
+        assert out[0]["trace"][-1]["plugin"] == "blur"
+        assert out[0]["trace"][-1]["node"] == "detector"
+
+    def test_no_method_no_error(self) -> None:
+        class _Plug:
+            name = "empty"
+
+        frame_trace.install_tracing(_Plug)  # нет process/produce — no-op

@@ -227,3 +227,27 @@ B. **Mixin-наследование** (ProcessModule + CameraMixin + PluginMixin
 - Таксономия категорий канонична и валидируется на регистрации; легаси-значения (`rendering`/`output`) прозрачно маппятся без правки плагинов.
 - Недостающая зависимость плагина (`manager:`/`service:`/`shm`) ловится на boot с именем плагина и точным описанием нехватки — вместо позднего немого `AttributeError`.
 - Reversible: yes — все три поля манифеста и boot-проверки чисто аддитивны (дефолты не меняют поведение немаркированных плагинов); канонизация category — единственное изменение с наблюдаемым эффектом (текст в `introspect.plugins`/GUI-каталоге для 6 плагинов), обратимо удалением `CATEGORY_LEGACY_ALIASES`-записей. Risk: low — REQUIRES объявлены только на 2 пилотах с заведомо удовлетворёнными зависимостями, hot-path (`process()`/`produce()`) не тронут, boot-проверки — O(len(REQUIRES)) на плагин при старте процесса, не на кадр.
+
+## ADR-PM-014: frame_trace вынесен из `ProcessModulePlugin.__init_subclass__` в `PluginOrchestrator.boot()` (C6 рычаг 2)
+
+**Статус:** принято
+**Дата:** 2026-07-11
+**Refs:** plans/2026-07-06_constructor-master/c6-pipeline-engine-design.md §4, plans/current-path/review-2026-07-11.md (находка C-6)
+
+**Контекст:** `ProcessModulePlugin.__init_subclass__` оборачивал `process`/`produce` в `frame_trace.traced` на этапе ОБЪЯВЛЕНИЯ класса, импортируя `..generic.frame_trace`. Это создавало жёсткую связь фундамент-плагина (`plugins/base.py`) → inspection-домен (`generic/`) для КАЖДОГО плагина любого будущего приложения — ещё до того, как плагин выбрал категорию. Проблема архитектурная (домен в фундаменте), не производительность (`traced` дёшев при выключенном флаге).
+
+**Разведка (Variant A vs B, §7 Q2):** grep тестов на `.process._traced`/`.produce._traced` без бута — единственные потребители `_traced` это `frame_trace.py` (сеттер) и `plugins/base.py` (снятый чек); тесты (`test_frame_trace.py`) используют `@frame_trace.traced` на функции НАПРЯМУЮ, ни один не полагается на авто-обёртку в момент объявления подкласса `ProcessModulePlugin`. → нулевой риск регресса поведения при переходе на boot-время.
+
+**Решение (Variant A):**
+1. `plugins/base.py`: `__init_subclass__` УДАЛЁН целиком (единственное, что он делал — frame_trace-обёртка). База плагина больше НЕ импортирует `generic.frame_trace` — связь фундамент→домен снята.
+2. `frame_trace.install_tracing(cls)` — новый публичный хелпер: тот же loop (`process`/`produce`, guard `_traced` idempotency), что был в `__init_subclass__`.
+3. `PluginOrchestrator.boot()` вызывает `frame_trace.install_tracing(type(plugin))` рядом с установкой `plugin._trace_node` — оркестратор уже владеет lifecycle-моментом бута и уже трогает trace-related атрибут (`plugin_orchestrator.py:132`), это легитимный дом инструментовки (в отличие от `plugins/base.py`).
+
+**Отклонения от дизайна:** нет. Дизайн рекомендовал Variant A, разведка подтвердила безопасность.
+
+**Rejected:** Variant B (opt-in hook-реестр в `__init_subclass__`) — отвергнут: оставлял бы обёртку на class-время (неявная инвариант «`generic` импортирован до объявления плагина»), при том что разведка показала — class-время vs boot-время не наблюдается ни одним тестом, значит более простой Variant A без нового реестра предпочтителен.
+
+**Последствия:**
+- `plugins/base.py` — чистая механика (state machine, PluginContext, порты), не знает про `generic`.
+- Обёртка ставится на бутe (idempotent-guard `_traced` защищает от двойной обёртки при бутe одного класса в двух процессах) — даже точнее по времени: плагин, импортированный но не забученный, не оборачивается зря.
+- Reversible: yes — вернуть `__init_subclass__` тривиально. Risk: low — поведение (обёртка process/produce при `INSPECTOR_FRAME_TRACE`) идентично, сдвинут только МОМЕНТ установки (class-декл → boot), не наблюдаемый тестами; hot-path не тронут.

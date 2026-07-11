@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+from . import frame_trace
 from ..plugins.base import PluginContext, ProcessModulePlugin
 from ..plugins.interfaces import IProcessServices
 from ..plugins.manifest import PLUGIN_API_VERSION, api_version_major_mismatch, check_requires
@@ -130,6 +131,10 @@ class PluginOrchestrator:
                     ctx.registers = registers_manager
                 # frame-trace: имя процесса-узла для process-спанов плагина.
                 plugin._trace_node = self._services.name
+                # C6 рычаг 2: обёртка process/produce в traced (idempotent) — раньше
+                # стояла в ProcessModulePlugin.__init_subclass__ (домен в фундаменте),
+                # теперь на бутe инстанса, оркестратор — легитимный дом инструментовки.
+                frame_trace.install_tracing(type(plugin))
                 # health (Ф2 Task 2.1): имя плагина — дефолтный context для ctx.health.
                 ctx._plugin_name = plugin.name
 
