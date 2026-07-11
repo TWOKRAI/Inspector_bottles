@@ -49,6 +49,12 @@ class RobotIoPlugin(ProcessModulePlugin):
     category = "io"
     thread_safe = False
 
+    # Манифест (Ф4 Task 4.4, пилот): job_forwarder — воркер, создаваемый в
+    # start() через ctx.worker_manager.create_worker(...) — без него плагин
+    # принимает job в deque, но никогда их не форвардит (тихий deadlock).
+    VERSION = "2.0.0"  # v2 — тонкий форвардер (см. модульный docstring)
+    REQUIRES: tuple[str, ...] = ("manager:worker_manager",)
+
     inputs = [
         Port(name="robot_job", dtype="dict", optional=True, description="Задание {x_mm, y_mm} в forward-deque"),
         Port(

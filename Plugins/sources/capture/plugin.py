@@ -36,6 +36,12 @@ class CapturePlugin(ProcessModulePlugin):
     name = "capture"
     category = "source"
 
+    # Манифест (Ф4 Task 4.4, пилот): commands (start/stop/...) регистрируются
+    # только через ctx.command_manager (_auto_register_commands) — без него
+    # source остаётся без пультового управления (тихая деградация, не падение).
+    VERSION = "1.0.0"
+    REQUIRES: tuple[str, ...] = ("manager:command_manager",)
+
     inputs = []
     outputs = [
         Port(name="frame", dtype="image/bgr", shape="(H, W, 3)", description="BGR-кадр с камеры"),
