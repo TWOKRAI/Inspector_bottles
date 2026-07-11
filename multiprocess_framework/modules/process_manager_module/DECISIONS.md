@@ -385,3 +385,25 @@ is_alive-liveness.
   наблюдаемость важнее приглушения). Смена дефолта `RestartPolicy.enabled` на уровне
   dataclass — отвергнута (сломала бы юниты с явным `RestartPolicy()`); флип на уровне
   композиции PM изолирован и env-откатен.
+
+## ADR-PMM-016: SystemBlueprint/ProcessConfig/Wire переехали в topology/ (C6 c)
+
+**Статус:** принято
+**Дата:** 2026-07-11
+**Refs:** plans/2026-07-06_constructor-master/c6-pipeline-engine-design.md §1.4/§5(c), docs/audits/2026-07-10_module-responsibility-duplication-map.md (реверс PM→generic.blueprint)
+
+**Контекст:** `SystemBlueprint`/`ProcessConfig`/`Wire` — чертёж ВСЕЙ системы (много процессов + wires), но физически жил в `process_module/generic/blueprint.py` — модуле ОДНОГО процесса. Систему собирает `process_manager_module` (оркестратор), и он уже импортировал `generic.blueprint` напрямую (`process_manager_process.py:835`, `tests/conftest.py`) — ФАКТИЧЕСКИЙ реверс-паттерн «PM лезет во внутренности чужого модуля за системным артефактом», отмеченный аудитом. Предусловие снято C6 рычагом 1: `ProcessConfig.extras` развязал перенос топологии от переноса домена.
+
+**Решение:**
+1. `blueprint.py` → новый подпакет `process_manager_module/topology/blueprint.py` (git mv, история сохранена). Дом — оркестратор системы. Отдельный подпакет (не слияние с `process/topology_manager.py`): topology_manager — runtime-логика ПРИМЕНЕНИЯ топологии, blueprint — schema-модель (SchemaBase), разные ответственности.
+2. Импорты перенесённого файла: `port`/`registry`/`generic_process_config` → `...process_module.*` (framework-internal L9→L8: process_manager_module → process_module разрешено, это НЕ реверс правила №9, которое про framework→Services/Plugins/prototype). `GenericProcessConfig`/`PluginConfig` (per-process конфиг) ОСТАЛИСЬ в `process_module`.
+3. `process_manager_process.py:835` — реверс-импорт `generic.blueprint` заменён на `topology.blueprint` (причина переноса устранена).
+4. Back-compat: `process_module/generic/blueprint.py` — переходный ре-экспорт-шим. Пакетный re-export в `generic/__init__.py` СНЯТ (создавал runtime-цикл generic→topology→plugins→generic; 0 импортёров символов из пакета generic, только из `.blueprint`-подмодуля). Все call sites (framework + prototype, ~13 файлов) мигрированы отдельными follow-up коммитами на `topology.blueprint`; `grep generic.blueprint` в коде вне шима = 0.
+
+**Отклонения от дизайна:** нет (дизайн-дефолт Q3 — `topology/blueprint.py` — принят).
+
+**Последствия:**
+- Системный артефакт живёт у своего владельца (оркестратора); реверс-паттерн PM→внутренности process_module снят.
+- `process_manager_module` импортирует `process_module` (L9→L8) для per-process конфига — прямой разрешённый framework-internal путь, а не «лазание внутрь».
+- sentrux: quality 7086→7089, dsm above_diagonal=0 (clean layering), check_rules 0 нарушений — шим-ребро process_module.generic.blueprint→process_manager не флагается как цикл/реверс.
+- Reversible: yes — git mv обратим; шим снимается, когда владелец подтвердит, что переходный период закрыт. Risk: medium — широко трогает порядок импортов, runtime-цикл разрешён декаплингом generic/__init__ (оба порядка импорта проверены, framework 3909 + prototype зелёные).
