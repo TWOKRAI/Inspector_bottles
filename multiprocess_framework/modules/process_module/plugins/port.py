@@ -150,6 +150,51 @@ def _parse_shape(shape: str) -> list[str]:
     return [part.strip() for part in s.split(",")]
 
 
+class PortValidationError(ValueError):
+    """items на границе плагина не соответствуют Port-декларации (FW_PORT_VALIDATE=1).
+
+    Dev-only sanity-check (Ф4.3): плагин объявил обязательный порт (inputs/
+    outputs), а фактические items не несут его поле. Не проверяет dtype/shape
+    во время выполнения — это статическая декларация контракта, а не
+    runtime-типизация данных (углублять — вне объёма 4.3).
+    """
+
+
+def validate_items_against_ports(
+    plugin_name: str,
+    direction: str,
+    ports: list[Port],
+    items: list[dict],
+) -> None:
+    """Проверить, что items содержат поля всех обязательных портов плагина.
+
+    Вызывается ТОЛЬКО за флагом ``FW_PORT_VALIDATE`` (см. ``PluginRunner``) —
+    это dev-mode граница data-плоскости, не хочет оверхеда на hot path в prod.
+    Optional-порты (``Port.optional=True``) пропускаются. Пустой ``items`` не
+    считается ошибкой — плагин мог легитимно ничего не выдать (например,
+    детектор без находок).
+
+    Args:
+        plugin_name: имя плагина (для текста ошибки).
+        direction: "input" | "output" — какая граница проверяется.
+        ports: декларация портов плагина (``plugin.inputs`` / ``plugin.outputs``).
+        items: items на границе (входные — для "input", выходные — для "output").
+
+    Raises:
+        PortValidationError: обязательный порт '{name}' отсутствует хотя бы в
+            одном item.
+    """
+    for port in ports:
+        if port.optional:
+            continue
+        for idx, item in enumerate(items):
+            if port.name not in item:
+                raise PortValidationError(
+                    f"{plugin_name}: {direction}-порт '{port.name}' ({port.dtype}) "
+                    f"отсутствует в item[{idx}] (ключи: {sorted(item)})"
+                )
+
+
 def validate_chain(plugins_with_ports: list[tuple[str, list[Port], list[Port]]]) -> list[str]:
     """Валидировать цепочку плагинов внутри процесса.
 

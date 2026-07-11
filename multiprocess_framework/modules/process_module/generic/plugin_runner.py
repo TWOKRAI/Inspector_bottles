@@ -23,11 +23,21 @@ io-debug (Этап 5: summary входа/выхода в карточку нод
 ``method`` — "process" | "produce". Для produce ``inputs`` = None (источник без входа).
 io-debug снимает summary входа в pre-hook (плагины часто мутируют item in-place),
 выхода — в post-hook.
+
+FW_PORT_VALIDATE (Ф4.3): dev-only sanity-check items на границе плагина против его
+Port-деклараций (``plugin.inputs``/``plugin.outputs``, см. ``..plugins.port``).
+OFF по умолчанию (``os.environ`` не читается на hot path, если явно не запрошено) —
+прод-путь бит-в-бит прежний. Включается env-флагом или явным ``validate_ports=True``
+(DI для тестов). Несоответствие -> ``PortValidationError`` (та же error-policy, что и
+исключение самого плагина — пробрасывается вызывающему, не глотается раннером).
 """
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Callable
+
+from ..plugins.port import validate_items_against_ports
 
 if TYPE_CHECKING:
     from ..plugins.base import ProcessModulePlugin
@@ -43,12 +53,25 @@ class PluginRunner:
 
     Args:
         log_error: callback для изоляции ошибок хуков (хук не роняет data-плоскость).
+        validate_ports: явно включить/выключить FW_PORT_VALIDATE (см. модульный
+            docstring). None (default) — читать env ``FW_PORT_VALIDATE``
+            (значения "1"/"true"/"True" включают). Явное значение перекрывает env
+            (используется тестами/DI).
     """
 
-    def __init__(self, log_error: Callable[[str], None] | None = None) -> None:
+    def __init__(
+        self,
+        log_error: Callable[[str], None] | None = None,
+        validate_ports: bool | None = None,
+    ) -> None:
         self._pre_hooks: list[PreHook] = []
         self._post_hooks: list[PostHook] = []
         self._log_error = log_error or (lambda msg: None)
+        self._validate_ports = (
+            validate_ports
+            if validate_ports is not None
+            else os.environ.get("FW_PORT_VALIDATE", "") in ("1", "true", "True")
+        )
 
     # ------------------------------------------------------------------ #
     #  Регистрация наблюдателей (Этап 5: io-debug publisher)              #
@@ -76,9 +99,13 @@ class PluginRunner:
         """
         self._run_pre(plugin, "process", items)
         if getattr(plugin, "enabled", True):
+            if self._validate_ports:
+                validate_items_against_ports(plugin.name, "input", getattr(plugin, "inputs", []), items)
             outputs = plugin.process(items)
+            if self._validate_ports:
+                validate_items_against_ports(plugin.name, "output", getattr(plugin, "outputs", []), outputs)
         else:
-            outputs = items  # bypass: кадр без обработки
+            outputs = items  # bypass: кадр без обработки (свои Port-декларации не проверяем)
         self._run_post(plugin, "process", items, outputs)
         return outputs
 
@@ -86,6 +113,8 @@ class PluginRunner:
         """Вызвать plugin.produce() с хуками. Исключение плагина пробрасывается."""
         self._run_pre(plugin, "produce", None)
         outputs = plugin.produce()
+        if self._validate_ports:
+            validate_items_against_ports(plugin.name, "output", getattr(plugin, "outputs", []), outputs)
         self._run_post(plugin, "produce", None, outputs)
         return outputs
 
