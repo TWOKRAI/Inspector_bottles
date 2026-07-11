@@ -155,3 +155,59 @@ D1) нашёл нормализатор config-shape (`None | dict | Schema | bu
 
 **Refs:** `docs/audits/2026-07-10_module-responsibility-duplication-map.md` (D1),
 `plans/2026-07-06_constructor-master/plan.md` (Ф5-добор, задача C4).
+
+## ADR-CRM-009: Граница observability-hub (транспорт+персистентность) ↔ statistics_module (агрегация) — D8
+
+**Статус:** принято (2026-07-11)
+
+**Контекст:** аудит дублирования 2026-07-10 (`docs/audits/2026-07-10_module-responsibility-duplication-map.md`,
+D8) отметил пересечение по оси «наблюдаемость метрик»: `channel_routing_module/observability/`
+(`ObservabilityHub` — ADR-CRM-007, `ObservabilityStore` — `observability_store.py`) и
+`statistics_module` (`StatsManager`/`AggregationWindow`, ADR-SM-002/006) оба «трогают метрики».
+`ObservabilityStore` (Ф5.20a) персистит dict-записи трёх kind — log/error/**stats** —
+одной SQLite-таблицей `records` (WAL, конкурентная запись из N процессов, читает GUI пагинацией).
+Каждая запись — это **сырой снапшот** `{kind:'stats', module, ts, metric, value, metric_type, tags}`
+из `ObservabilityHub.drain_stats()`, НЕ агрегат: hub не считает `counter sum`/`gauge last`/`timing p95`
+— это делает исключительно `AggregationWindow` в `statistics_module` (ADR-SM-002/006) на своей
+стороне, до попадания в hub.
+
+**Решение владельца (2026-07-10, decision-log Ф5-добора):** «статистика уже на месте, hub —
+персистентность записей, не агрегация — в statistics не тащить». Граница:
+
+- **`statistics_module`** владеет **агрегацией**: `counter`/`gauge`/`timing`, rollup через
+  `AggregationWindow` (dual-layer storage — `_metrics` live-запрос + окно на flush, ADR-SM-002).
+  Он НЕ владеет тем, как снапшот доставляется наружу процесса и хранится между рестартами —
+  это происходит уже ПОСЛЕ flush, в чужом модуле.
+- **`channel_routing_module/observability/`** (hub + store) владеет **транспортом и
+  персистентностью записей**: `ObservabilityHub.drain_stats()` вычитывает то, что уже
+  агрегировал `StatsManager`, кладёт в `BoundedChannel` (эфемерно, ADR-CRM-007) и — через
+  drain-петлю `process_module` (Ф5.16) — в `ObservabilityStore` (переживает рестарт,
+  `observability_store.py:1-24`). Hub/store НЕ пересчитывают counter/gauge/timing и не хранят
+  скользящие агрегаты — только последовательность уже готовых снапшотов.
+- Не сливать счётчики: рост числа записей `kind='stats'` в `ObservabilityStore` — это история
+  снапшотов агрегации, а не альтернативный источник агрегации. Любая будущая фича «посчитать
+  метрику по истории» строится ПОВЕРХ `ObservabilityStore.list_records()` как read-side query,
+  не как новый counter-движок внутри hub.
+
+**Причина:** разделение по фазам конвейера — статистика решает *что* агрегировать и *как*
+(семантика метрики), hub/store решают *куда это уйдёт и как долго проживёт* (доставка +
+персистентность). Смешение (например, перенос `AggregationWindow` в hub) сделало бы hub
+метрико-осведомлённым (нарушение generic-first — hub одинаково обслуживает log/error/stats),
+а перенос персистентности в `statistics_module` задублировал бы SQLite-стор для одного из трёх
+kind, которые уже одинаково обрабатывает `ObservabilityStore`.
+
+**Отклонённые альтернативы:**
+- **Слить `AggregationWindow` в `ObservabilityHub`** — отклонено: hub обслуживает 3 разнородных
+  kind (log/error/stats) одним контуром; протаскивание метрико-специфичной агрегации в generic
+  hub нарушает симметрию с log/error (у них нет аналога агрегации).
+- **Дать `statistics_module` собственную персистентность** (второй SQLite-стор) — отклонено:
+  дублирует `ObservabilityStore` (WAL, конкурентная запись, схема `records`), которая уже
+  обслуживает kind=stats наравне с log/error.
+
+**Следствие:** правки только в docs — код не меняется этим ADR. `MODULES_RESPONSIBILITY_MAP.md`
+(§1) обновлён: `channel_routing_module` явно владеет observability-стором (транспорт+персистентность
+трёх kind), `statistics_module` явно НЕ владеет транспортом/хранением записей.
+
+**Refs:** `docs/audits/2026-07-10_module-responsibility-duplication-map.md` (D8),
+`plans/2026-07-06_constructor-master/plan.md` (decision-log Ф5-добора, задача C7),
+ADR-CRM-007 (ObservabilityHub), зеркало — [`statistics_module/DECISIONS.md`](../statistics_module/DECISIONS.md) ADR-SM-007.
