@@ -1,315 +1,42 @@
-"""manager.py — RecipeManager: тонкая application-обёртка над RecipeEngine.
+"""manager.py — доменный шим над generic-RecipeManager из модуля `recipe`.
 
-RecipeManager предоставляет CRUD-операции над рецептами и интегрируется
-с StateProxy для синхронизации state.recipes.active.
+Generic-реализация — `multiprocess_framework.modules.recipe.manager`
+(консолидация C1, ADR-RCP-001/002). Здесь — тонкий шим, сохраняющий путь импорта
+`multiprocess_prototype.recipes.manager` и инжектирующий прикладной
+comment-preserving writer (`yaml_io.update_yaml_preserving`, ruamel round-trip) в
+duplicate(). Без инъекции generic-менеджер использует plain-PyYAML (без комментариев);
+прототип комментарии сохраняет.
 
-Паттерн логирования: if self._logger: self._logger.log_info(...)
-(аналогично RecipeAdapter из Phase 0 — silent fallback при logger=None).
-
-Dict at Boundary: RecipeManager работает с dict (YAML-данные),
-не с Pydantic-моделями на границе компонентов.
+Consolidation `yaml_io`/duplicate во фреймворк — задача C3.
 """
 
 from __future__ import annotations
 
-import shutil
+from typing import Any, Callable
 from pathlib import Path
-from typing import Any
 
-import yaml
+from multiprocess_framework.modules.recipe.manager import RecipeManager as _RecipeManager
+from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
 
 
-class RecipeManager:
-    """Тонкая application-обёртка над RecipeEngine.
-
-    Добавляет к базовому RecipeEngine:
-    - обновление state.recipes.active через StateProxy при load/set_active
-    - метод duplicate (не реализован в RecipeEngine)
-    - единое место логирования мутирующих операций
-
-    Args:
-        engine: экземпляр RecipeEngine (generic из framework или доменный wrapper).
-        state_proxy: опциональный StateProxy для синхронизации state.recipes.active.
-                     Если None — state не обновляется.
-        logger: опциональный менеджер логирования (LoggerManager или совместимый).
-                Если None — логирование отключено (silent fallback).
-    """
+class RecipeManager(_RecipeManager):
+    """Доменный шим: инжектирует comment-preserving yaml_updater по умолчанию."""
 
     def __init__(
         self,
         engine: Any,
         state_proxy: Any | None = None,
         logger: Any | None = None,
+        yaml_updater: Callable[[str | Path, dict], None] | None = None,
     ) -> None:
-        self._engine = engine
-        self._state_proxy = state_proxy
-        self._logger = logger
-
-    # ------------------------------------------------------------------
-    # Вспомогательные методы логирования (silent fallback)
-    # ------------------------------------------------------------------
-
-    def _log_info(self, msg: str) -> None:
-        """Логировать info. Если logger=None — молча."""
-        if self._logger is not None:
-            self._logger.log_info(msg)
-
-    def _log_warning(self, msg: str) -> None:
-        """Логировать warning. Если logger=None — молча."""
-        if self._logger is not None:
-            self._logger.log_warning(msg)
-
-    def _log_error(self, msg: str) -> None:
-        """Логировать error. Если logger=None — молча."""
-        if self._logger is not None:
-            self._logger.log_error(msg)
-
-    # ------------------------------------------------------------------
-    # Вспомогательные методы для state_proxy
-    # ------------------------------------------------------------------
-
-    def _update_active_in_state(self, slug: str | None) -> None:
-        """Обновить state.recipes.active через StateProxy если доступен."""
-        if self._state_proxy is not None:
-            self._state_proxy.set("recipes.active", slug)
-
-    # ------------------------------------------------------------------
-    # Публичный API
-    # ------------------------------------------------------------------
-
-    def list(self) -> list[str]:
-        """Список имён доступных рецептов (файлов без .yaml).
-
-        Делегирует в engine.list().
-
-        Returns:
-            Сортированный список slug'ов.
-        """
-        return self._engine.list()
-
-    def load(
-        self,
-        slug: str,
-        remap: dict[str, str] | None = None,
-    ) -> list:
-        """Загрузить рецепт и обновить state.recipes.active.
-
-        Делегирует в engine.load(slug, remap).
-        После успешной загрузки обновляет state_proxy если доступен.
-
-        Args:
-            slug: имя рецепта (без .yaml).
-            remap: опциональный remap путей.
-
-        Returns:
-            Список Delta из engine.load().
-
-        Raises:
-            FileNotFoundError: если рецепт не найден.
-        """
-        deltas = self._engine.load(slug, remap)
-        self._update_active_in_state(slug)
-        self._log_info(f"RecipeManager: загружен рецепт '{slug}'")
-        return deltas
-
-    def save(
-        self,
-        slug: str,
-        paths: list[str] | None = None,
-    ) -> None:
-        """Сохранить рецепт.
-
-        Делегирует в engine.save(slug, paths).
-
-        Args:
-            slug: имя рецепта (без .yaml).
-            paths: список config-путей для snapshot. None → DEFAULT_CONFIG_PATHS.
-        """
-        self._engine.save(slug, paths)
-        self._log_info(f"RecipeManager: сохранён рецепт '{slug}'")
-
-    def delete(self, slug: str) -> bool:
-        """Удалить рецепт.
-
-        Делегирует в engine.delete(slug).
-        Если удалён активный рецепт — сбрасывает state.recipes.active = None.
-
-        Args:
-            slug: имя рецепта (без .yaml).
-
-        Returns:
-            True если рецепт удалён, False если не существовал.
-        """
-        was_active = self._engine.get_active() == slug
-        result = self._engine.delete(slug)
-
-        if result:
-            self._log_info(f"RecipeManager: удалён рецепт '{slug}'")
-            if was_active:
-                self._update_active_in_state(None)
-
-        return result
-
-    def duplicate(self, source_slug: str, new_slug: str) -> bool:
-        """Дублировать рецепт под новым именем.
-
-        Читает YAML source_slug, записывает под new_slug с обновлённым meta.name.
-
-        Edge cases:
-        - source_slug пустой → False без исключений
-        - source_slug не существует → False
-        - new_slug уже занят → False
-
-        Args:
-            source_slug: имя исходного рецепта.
-            new_slug: имя нового рецепта.
-
-        Returns:
-            True если дублирование выполнено успешно, False при ошибке.
-        """
-        # Проверяем пустые аргументы
-        if not source_slug or not new_slug:
-            self._log_warning(f"RecipeManager.duplicate: пустой slug (source='{source_slug}', new='{new_slug}')")
-            return False
-
-        recipes_dir: Path = self._engine.recipes_dir
-        source_path = recipes_dir / f"{source_slug}.yaml"
-        target_path = recipes_dir / f"{new_slug}.yaml"
-
-        # Проверяем что source существует
-        if not source_path.exists():
-            self._log_warning(f"RecipeManager.duplicate: source '{source_slug}' не найден")
-            return False
-
-        # Проверяем что target не занят
-        if target_path.exists():
-            self._log_warning(f"RecipeManager.duplicate: target '{new_slug}' уже существует")
-            return False
-
-        # Читаем source
-        try:
-            with open(source_path, "r", encoding="utf-8") as f:
-                recipe_data = yaml.safe_load(f)
-        except (yaml.YAMLError, OSError) as exc:
-            self._log_error(f"RecipeManager.duplicate: ошибка чтения '{source_slug}': {exc}")
-            return False
-
-        if not isinstance(recipe_data, dict):
-            self._log_error(f"RecipeManager.duplicate: некорректный формат рецепта '{source_slug}'")
-            return False
-
-        # Копируем файл байт-в-байт (сохраняем комментарии), затем обновляем имя через
-        # ruamel round-trip — комментарии не теряются (тот же класс бага, что чинил
-        # save_raw; раньше yaml.dump стирал комментарии при дублировании).
-        from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
-
-        try:
-            shutil.copy2(source_path, target_path)
-            if isinstance(recipe_data.get("meta"), dict):
-                # legacy-формат: имя в meta.name
-                meta = dict(recipe_data["meta"])
-                meta["name"] = new_slug
-                update_yaml_preserving(target_path, {"meta": meta})
-            else:
-                # v3-формат: top-level name
-                update_yaml_preserving(target_path, {"name": new_slug})
-        except OSError as exc:
-            self._log_error(f"RecipeManager.duplicate: ошибка записи '{new_slug}': {exc}")
-            target_path.unlink(missing_ok=True)
-            return False
-
-        self._log_info(f"RecipeManager: дублирован рецепт '{source_slug}' → '{new_slug}'")
-        return True
-
-    def deactivate(self) -> None:
-        """Сбросить активный рецепт (публичный API вместо прямого доступа к engine).
-
-        Вызывает engine.deactivate() (public) и обновляет state.recipes.active.
-        Idempotent: если рецепт уже не активен — no-op (state обновляется на None).
-        """
-        self._engine.deactivate()
-        self._update_active_in_state(None)
-        self._log_info("RecipeManager: активный рецепт сброшен")
-
-    def set_active(self, slug: str) -> bool:
-        """Установить рецепт активным — чистый указатель, БЕЗ config/topology side-effect.
-
-        Делегирует в engine.set_active(slug) (проверка существования + указатель)
-        и обновляет state.recipes.active через StateProxy.
-
-        НЕ вызывает load() — никакого TreeStore-replay, миграций или перезаписи
-        файлов. Применение топологии (рестарт процессов) — отдельная операция
-        через apply_topology.
-
-        Args:
-            slug: имя рецепта для активации.
-
-        Returns:
-            True если успешно, False если рецепт не найден.
-        """
-        result = self._engine.set_active(slug)
-        if not result:
-            self._log_warning(f"RecipeManager.set_active: рецепт '{slug}' не найден")
-            return False
-
-        self._update_active_in_state(slug)
-        self._log_info(f"RecipeManager: активирован рецепт '{slug}'")
-        return True
-
-    def get_active(self) -> str | None:
-        """Имя текущего активного рецепта (или None).
-
-        Делегирует в engine.get_active().
-
-        Returns:
-            slug активного рецепта или None.
-        """
-        return self._engine.get_active()
-
-    def is_dirty(self) -> bool:
-        """True если config изменился после загрузки рецепта.
-
-        Делегирует в engine.is_dirty().
-
-        Returns:
-            True если есть несохранённые изменения.
-        """
-        return self._engine.is_dirty()
-
-    @property
-    def recipes_dir(self) -> Path:
-        """Директория с YAML-файлами рецептов.
-
-        Делегирует в engine.recipes_dir.
-
-        Returns:
-            Path к директории рецептов.
-        """
-        return self._engine.recipes_dir
-
-    def read_recipe(self, slug: str) -> dict | None:
-        """Прочитать YAML рецепта по slug.
-
-        Инкапсулирует чтение файла — presenter не работает с путями напрямую.
-
-        Args:
-            slug: имя рецепта (без .yaml).
-
-        Returns:
-            dict с данными рецепта или None если файл не найден / невалиден.
-        """
-        import yaml  # noqa: PLC0415
-
-        recipe_path = self._engine.recipes_dir / f"{slug}.yaml"
-        if not recipe_path.exists():
-            return None
-        try:
-            with open(recipe_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            return data if isinstance(data, dict) else None
-        except (yaml.YAMLError, OSError) as exc:
-            self._log_error(f"RecipeManager.read_recipe: ошибка чтения '{slug}': {exc}")
-            return None
+        if yaml_updater is None:
+            yaml_updater = update_yaml_preserving
+        super().__init__(
+            engine,
+            state_proxy=state_proxy,
+            logger=logger,
+            yaml_updater=yaml_updater,
+        )
 
 
 __all__ = ["RecipeManager"]
