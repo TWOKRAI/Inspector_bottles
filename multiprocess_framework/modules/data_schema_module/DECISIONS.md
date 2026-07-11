@@ -94,3 +94,51 @@
   - **Запретить вообще все прямые импорты подпакетов** (включая extensions/storage) — нарушает ADR-DS-004, делает зависимость от `process_module` неявной.
   - **Не вводить правило, оставить как есть** — те же файлы при следующем рефакторинге снова разбредутся по прямым путям; cleanup без правила = временная мера.
   - **Lint-rule на CI** — преждевременно; рекомендация в DECISIONS + grep в `validate.py` достаточны на этом этапе.
+
+---
+
+## ADR-DS-007: Канонический `deep_merge` — единственная реализация deep-merge словарей
+
+- Дата: 2026-07-11
+- Статус: принято
+- Контекст (C5 / дубль D3 аудита дублирования): в проекте жили три независимые
+  реализации глубокого слияния словарей:
+  1. `data_schema_module.merge_with_defaults` — shallow-copy defaults, overlay по ссылке;
+  2. `config_module.tools.deep_merge` — самопровозглашённый «канон» с deepcopy,
+     `copy_base` и `list_strategy` (самый generic);
+  3. `multiprocess_prototype…schemas._deep_merge` — `dict(base)` shallow, без опций.
+
+  Наблюдаемый `==`-контракт у всех трёх совпадает (приоритет overlay, рекурсия
+  вложенных dict, замена списков и скаляр↔dict, None перезаписывает). Отличались
+  только семантикой копирования (shallow vs deepcopy → aliasing вложенных ссылок).
+
+- Решение: единственный источник истины — **`deep_merge`** в
+  `core/helpers.py` (сигнатура перенесена без изменений из config-версии:
+  `deep_merge(base, overlay, *, copy_base=True, list_strategy="replace")`).
+  Остальные — тонкие делегаты с сохранёнными сигнатурами и импорт-путями:
+  `merge_with_defaults` (deep=True → `deep_merge(defaults, data)`; deep=False
+  shallow-путь оставлен как есть), `config_module.tools.deep_merge`,
+  `schemas._deep_merge`.
+
+- Причина выбора data_schema (а не более generic config-версии): `config_module`
+  уже импортирует из `data_schema_module` (`config.py` → `merge_with_defaults`).
+  Канон в config заставил бы `data_schema` импортировать config → **цикл модулей**.
+  Слой диктует: примитив живёт в нижнем модуле, верхние делегируют вниз.
+
+- Поглощённые различия: shallow→deepcopy. Раньше `merge_with_defaults(proc_dict,
+  DEFAULT_PROCESS_SCHEMA)` разделял вложенные ссылки с модульной константой
+  `DEFAULT_PROCESS_SCHEMA` (латентный aliasing-риск). Канон делает deepcopy —
+  результат полностью изолирован; `==`-контракт не изменён, все тесты зелёные
+  без правок ожиданий (1100 passed). `list_strategy="append"` теперь доступен
+  всем потребителям.
+
+- Отклонённые альтернативы:
+  - **Канон = `config_module.tools.deep_merge`** (по «самый generic») — создаёт
+    цикл config↔data_schema, отклонено.
+  - **Новый нейтральный модуль под merge** — избыточно для одной функции;
+    задача требовала выбрать одну из трёх существующих.
+  - **Удалить старые пути импорта** — нарушает обратную совместимость (20+
+    call-sites), отклонено в пользу тонких делегатов.
+  - **Оставить `state_store` `_deep_merge_inplace`** вне scope — сознательно: это
+    path-based tree-merge с генерацией Delta (граница жизненного цикла, N2
+    аудита), не общий примитив-словарь.
