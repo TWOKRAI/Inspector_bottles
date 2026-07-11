@@ -73,3 +73,41 @@ def test_worker_telemetry_path_matches_subscription() -> None:
     assert len(router.sent) == 1
     assert router.sent[0]["targets"] == ["gui"]
     assert router.sent[0]["queue_type"] == "system"
+
+
+# ---------------------------------------------------------------------------
+# Тесты revision в envelope (Ф4.9a, ADR-SS-014)
+# ---------------------------------------------------------------------------
+
+
+def test_envelope_carries_delta_revision() -> None:
+    """state.changed несёт data.revision == revision единственной дельты."""
+    disp, router, subs = _make_dispatcher()
+    subs.subscribe("processes.**", "gui")
+
+    delta = Delta(
+        path="processes.cam.state.status",
+        old_value=MISSING,
+        new_value="running",
+        source="ProcessMonitor",
+        revision=5,
+    )
+    disp.dispatch_single(delta)
+
+    assert router.sent[0]["data"]["revision"] == 5
+
+
+def test_envelope_revision_is_max_of_batch() -> None:
+    """Пакет из нескольких дельт → data.revision == max(revision дельт пакета)."""
+    disp, router, subs = _make_dispatcher()
+    subs.subscribe("processes.**", "gui")
+
+    deltas = [
+        Delta(path="processes.a", old_value=MISSING, new_value=1, source="s", revision=3),
+        Delta(path="processes.b", old_value=MISSING, new_value=2, source="s", revision=7),
+        Delta(path="processes.c", old_value=MISSING, new_value=3, source="s", revision=5),
+    ]
+    disp.dispatch(deltas)
+
+    assert len(router.sent) == 1
+    assert router.sent[0]["data"]["revision"] == 7

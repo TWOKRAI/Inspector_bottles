@@ -31,6 +31,14 @@ class MockStore:
 
     def __init__(self) -> None:
         self._data: dict[str, object] = {}
+        # Монотонный счётчик revision (Ф4.9) — как у настоящего TreeStore,
+        # чтобы тесты Transaction._rebind/coalesce могли проверять, что
+        # revision не переиздаётся, а сохраняется от исходной мутации.
+        self._revision = 0
+
+    def _next_revision(self) -> int:
+        self._revision += 1
+        return self._revision
 
     def set(self, path: str, value: object, source: str = "") -> Delta | None:
         """Установить значение. Возвращает Delta или None если значение не изменилось."""
@@ -38,7 +46,7 @@ class MockStore:
         if old == value:
             return None
         self._data[path] = value
-        return Delta(path=path, old_value=old, new_value=value, source=source)
+        return Delta(path=path, old_value=old, new_value=value, source=source, revision=self._next_revision())
 
     def merge(self, path: str, data: dict, source: str = "") -> list[Delta]:
         """Слить dict в хранилище по префиксу пути."""
@@ -55,7 +63,7 @@ class MockStore:
         if path not in self._data:
             return None
         old = self._data.pop(path)
-        return Delta(path=path, old_value=old, new_value=MISSING, source=source)
+        return Delta(path=path, old_value=old, new_value=MISSING, source=source, revision=self._next_revision())
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +149,16 @@ class TestDeltaProperties:
         d1 = Delta(path="x", old_value=1, new_value=2, source="gui")
         d2 = Delta(path="x", old_value=2, new_value=3, source="gui")
         assert d1.transaction_id != d2.transaction_id
+
+    def test_default_revision_is_zero(self) -> None:
+        """Delta(...) без явной revision — 0 (Ф4.9, ADR-SS-014, обратная совместимость)."""
+        d = Delta(path="x", old_value=1, new_value=2, source="gui")
+        assert d.revision == 0
+
+    def test_explicit_revision_preserved(self) -> None:
+        """Явно переданная revision сохраняется как есть."""
+        d = Delta(path="x", old_value=1, new_value=2, source="gui", revision=7)
+        assert d.revision == 7
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +248,39 @@ class TestDeltaSerialization:
         assert d.old_value == "usb"
         assert d.new_value == "gige"
 
+    def test_roundtrip_revision(self) -> None:
+        """Ф4.9, ADR-SS-014: revision участвует в to_dict/from_dict roundtrip."""
+        original = Delta(
+            path="cameras.0.fps",
+            old_value=25,
+            new_value=30,
+            source="gui",
+            timestamp=1234.5,
+            transaction_id="test-tx-id",
+            revision=42,
+        )
+        d = Delta.from_dict(original.to_dict())
+        assert d.revision == 42
+
+    def test_to_dict_includes_revision_key(self) -> None:
+        """to_dict() всегда несёт ключ 'revision' (аддитивное поле IPC-конверта)."""
+        d = Delta(path="x", old_value=1, new_value=2, source="gui", revision=3)
+        assert d.to_dict()["revision"] == 3
+
+    def test_from_dict_missing_revision_defaults_to_zero(self) -> None:
+        """Fail-open (Ф4.9a): dict от старого отправителя без 'revision' → revision=0, не KeyError."""
+        legacy_dict = {
+            "path": "x",
+            "old_value": 1,
+            "new_value": 2,
+            "source": "gui",
+            "timestamp": 1.0,
+            "transaction_id": "tx-legacy",
+            # намеренно без "revision"
+        }
+        d = Delta.from_dict(legacy_dict)
+        assert d.revision == 0
+
 
 # ---------------------------------------------------------------------------
 # Тесты Transaction — сбор дельт
@@ -288,6 +339,17 @@ class TestTransactionDeltas:
         assert result is tx
         tx.__exit__()
 
+    def test_rebind_preserves_revision(self) -> None:
+        """Ф4.9, ADR-SS-014: _rebind() не переиздаёт revision — сохраняет от store."""
+        store = MockStore()
+        with Transaction(store) as tx:
+            d1 = tx.set("a", 1)
+            d2 = tx.set("b", 2)
+
+        # MockStore инкрементирует revision на каждый set() — 1, затем 2.
+        assert d1.revision == 1
+        assert d2.revision == 2
+
 
 # ---------------------------------------------------------------------------
 # Тесты Transaction.coalesce()
@@ -327,6 +389,23 @@ class TestTransactionCoalesce:
 
         coalesced = tx.coalesce()
         assert coalesced == []
+
+    def test_coalesce_revision_is_last(self) -> None:
+        """Ф4.9, ADR-SS-014: сжатая дельта несёт revision ПОСЛЕДНЕЙ исходной мутации.
+
+        [25→30 (rev=2), 30→28 (rev=3)] → [25→28 (rev=3)]: сжатая дельта
+        описывает переход дерева к состоянию revision=3, не revision=2.
+        """
+        store = MockStore()
+        store.set("fps", 25, source="init")  # rev=1 (не входит в транзакцию)
+
+        tx = Transaction(store)
+        tx.set("fps", 30)  # rev=2
+        tx.set("fps", 28)  # rev=3
+
+        coalesced = tx.coalesce()
+        assert len(coalesced) == 1
+        assert coalesced[0].revision == 3
 
     def test_coalesce_single_delta_preserved(self) -> None:
         """Одиночная дельта без повторений не изменяется."""

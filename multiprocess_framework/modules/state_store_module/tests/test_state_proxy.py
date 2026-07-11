@@ -937,4 +937,138 @@ class TestEnsureSubscription:
         proxy.ensure_subscription("a.**")
         proxy.shutdown()
         assert proxy._pattern_sub_id == {}
+
+
+# ===========================================================================
+# Тесты watch-from-revision + resync (Ф4.9b, ADR-SS-014/015)
+# ===========================================================================
+
+
+def _make_state_changed_msg_rev(deltas: list[Delta], revision: int) -> dict:
+    """Как _make_state_changed_msg, но с data.revision (Ф4.9a envelope)."""
+    return {
+        "command": "state.changed",
+        "data": {
+            "deltas": [d.to_dict() for d in deltas],
+            "revision": revision,
+        },
+    }
+
+
+class TestStateProxyRevisionGapDetection:
+    """_check_and_handle_revision_gap — детект разрыва без реального router."""
+
+    def test_fail_open_when_revision_absent(self):
+        """Пакет без data.revision (старый отправитель) — gap-проверка пропущена."""
+        proxy = StateProxy("cam", router=None)
+        delta = _make_delta(new=30)
+        proxy.on_state_changed(_make_state_changed_msg([delta]))  # без revision
+        assert proxy._last_revision is None
+        assert proxy.get("cameras.0.config.fps") == 30  # обычная обработка прошла
+
+    def test_first_message_sets_baseline_without_gap(self):
+        """Первый пакет с revision — база отсчёта, не считается разрывом."""
+        proxy = StateProxy("cam", router=None)
+        delta = _make_delta(new=30)
+        proxy.on_state_changed(_make_state_changed_msg_rev([delta], revision=5))
+        assert proxy._last_revision == 5
+        assert proxy.get("cameras.0.config.fps") == 30
+
+    def test_sequential_revisions_no_gap(self):
+        """revision N, затем N+1 — нормальная последовательность, без resync."""
+        router = MockRouter()
+        proxy = StateProxy("cam", router=router)
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=1))
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=20)], revision=2))
+        assert proxy._last_revision == 2
+        assert proxy.get("cameras.0.config.fps") == 20
+        # Разрыва не было → resync (state.get_subtree с 'paths') не вызывался.
+        assert router.last_sent("state.get_subtree") is None
+
+    def test_gap_triggers_resync_no_router_is_safe(self):
+        """Разрыв без router — _resync() no-op, не бросает исключение."""
+        proxy = StateProxy("cam", router=None)
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=1))
+        # Прыжок с 1 на 5 — разрыв. Без router просто нет ресинка.
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=50)], revision=5))
+        # revision не обновилась ресинком (router=None) — но и не упало.
+        assert proxy._last_revision == 1
+
+
+class TestStateProxyResync:
+    """_resync() — конвергенция кэша через существующий канал state.get_subtree."""
+
+    def test_gap_triggers_resync_via_get_subtree_paths(self):
+        """Разрыв revision → StateProxy шлёт state.get_subtree с data.paths=подписки."""
+        router = MockRouter()
+        router.set_sync_response(
+            "state.get_subtree",
+            {"status": "ok", "value": {"cameras": {"0": {"config": {"fps": 99}}}}, "revision": 5},
+        )
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda _d: None, exclude_self=False)
+
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=1))
+        # Разрыв: пришла revision=5 при ожидаемой revision=2.
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=99)], revision=5))
+
+        resync_req = router.last_sent("state.get_subtree")
+        assert resync_req is not None
+        assert resync_req["data"]["paths"] == ["cameras.0.**"]
+
+    def test_gap_resync_converges_cache_to_server_value(self):
+        """После resync кэш содержит значение ИЗ СНАПШОТА сервера (не из пропущенного пакета)."""
+        router = MockRouter()
+        router.set_sync_response(
+            "state.get_subtree",
+            {"status": "ok", "value": {"cameras": {"0": {"config": {"fps": 77}}}}, "revision": 9},
+        )
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda _d: None, exclude_self=False)
+
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=1))
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=999)], revision=9))
+
+        # Кэш взял значение из resync-снапшота (77), а не из "разорванного" пакета (999).
+        assert proxy.get("cameras.0.config.fps") == 77
+        assert proxy._last_revision == 9
+
+    def test_gap_resync_removes_stale_deleted_path(self):
+        """Resync убирает из кэша путь, отсутствующий в свежем снапшоте (был удалён на сервере)."""
+        router = MockRouter()
+        router.set_sync_response(
+            "state.get_subtree",
+            {"status": "ok", "value": {"cameras": {"0": {}}}, "revision": 4},
+        )
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda _d: None, exclude_self=False)
+
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=1))
+        assert proxy.get("cameras.0.config.fps") == 10
+
+        # Разрыв → resync; в свежем снапшоте fps уже нет (удалён на сервере).
+        other_delta = _make_delta(path="cameras.0.state.status", new="idle")
+        proxy.on_state_changed(_make_state_changed_msg_rev([other_delta], revision=4))
+
+        # Путь удалён именно из КЭША (а не просто недоступен из-за IPC fallback).
+        assert "cameras.0.config.fps" not in proxy.cache
+
+    def test_resync_failure_leaves_last_revision_unchanged(self):
+        """Ошибка resync (status != ok) — _last_revision не обновляется (retry на следующем разрыве)."""
+        router = MockRouter()
+        router.set_sync_response("state.get_subtree", {"status": "error", "error": "boom"})
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda _d: None, exclude_self=False)
+
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=1))
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=999)], revision=9))
+
+        assert proxy._last_revision == 1  # не сдвинулась — resync не удался
+
+    def test_resync_no_op_without_patterns(self):
+        """_resync([]) — нет активных подписок, нечего ресинкать, no-op."""
+        router = MockRouter()
+        proxy = StateProxy("cam", router=router)
+        proxy._resync([])
+        assert router.last_sent("state.get_subtree") is None
         assert proxy._pattern_refcount == {}
