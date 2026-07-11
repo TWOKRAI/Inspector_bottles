@@ -8,6 +8,7 @@
 - Извлечения полей из моделей
 """
 
+import copy
 from typing import Any, Dict, List, Optional, Set
 
 from pydantic import BaseModel
@@ -79,6 +80,60 @@ def set_nested_value(
     current[keys[-1]] = value
 
 
+def deep_merge(
+    base: Dict[str, Any],
+    overlay: Optional[Dict[str, Any]],
+    *,
+    copy_base: bool = True,
+    list_strategy: str = "replace",
+) -> Dict[str, Any]:
+    """
+    Канонический рекурсивный merge *overlay* поверх *base* (дубль D3, C5).
+
+    Единая реализация deep-merge словарей для всего проекта. Тонкие делегаты:
+    ``merge_with_defaults`` (ниже), ``config_module.tools.deep_merge``,
+    ``multiprocess_prototype...schemas._deep_merge``.
+
+    Overlay побеждает при конфликте. В отличие от исторических копий делает
+    полную изоляцию (``deepcopy`` base и overlay-значений) — результат не
+    разделяет вложенных ссылок с аргументами.
+
+    Args:
+        base: Базовый dict (дефолты).
+        overlay: Dict для наложения. ``None``/пустой → возвращает копию base.
+        copy_base: ``True`` — deepcopy base (безопасно). ``False`` — мутация на месте.
+        list_strategy: Стратегия для list-значений:
+            - ``"replace"`` — overlay полностью заменяет base (по умолчанию)
+            - ``"append"`` — overlay элементы добавляются к base
+
+    Returns:
+        Объединённый dict.
+    """
+    if copy_base:
+        result = copy.deepcopy(base)
+    else:
+        result = base
+
+    if not overlay:
+        return result
+
+    for key, value in overlay.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            # Рекурсия для вложенных dict'ов — base уже скопирован сверху.
+            result[key] = deep_merge(
+                result[key],
+                value,
+                copy_base=False,
+                list_strategy=list_strategy,
+            )
+        elif list_strategy == "append" and key in result and isinstance(result[key], list) and isinstance(value, list):
+            result[key] = result[key] + copy.deepcopy(value)
+        else:
+            result[key] = copy.deepcopy(value)
+
+    return result
+
+
 def merge_with_defaults(
     data: Dict[str, Any],
     defaults: Dict[str, Any],
@@ -89,21 +144,19 @@ def merge_with_defaults(
 
     Значения из data перезаписывают значения из defaults.
     Вложенные словари объединяются рекурсивно если deep=True.
+
+    Тонкий делегат канонического :func:`deep_merge` (дубль D3, C5). При
+    ``deep=True`` эквивалентен ``deep_merge(defaults, data)`` — data побеждает.
+    Историческая реализация делала shallow-copy defaults; канон делает deepcopy,
+    поэтому результат больше не разделяет вложенных ссылок с аргументами
+    (наблюдаемый ``==``-контракт сохранён).
     """
     if not deep:
         result = defaults.copy()
         result.update(data)
         return result
 
-    result = defaults.copy()
-
-    for key, value in data.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = merge_with_defaults(value, result[key], deep=True)
-        else:
-            result[key] = value
-
-    return result
+    return deep_merge(defaults, data)
 
 
 def extract_fields(

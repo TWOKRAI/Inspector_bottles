@@ -99,6 +99,7 @@ from .core.field_types import (
     register_field_type,
 )
 from .core.helpers import (
+    deep_merge,
     extract_fields,
     get_model_schema,
     get_nested_value,
@@ -221,6 +222,7 @@ __all__ = [
     "get_nested_value",
     "set_nested_value",
     "merge_with_defaults",
+    "deep_merge",
     "extract_fields",
     "get_model_schema",
     "DataReference",
