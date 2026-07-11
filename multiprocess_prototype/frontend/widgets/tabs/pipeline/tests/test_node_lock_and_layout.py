@@ -39,13 +39,13 @@ def test_toggle_lock_sets_state_and_disables_move(qtbot):
     assert _is_movable(node) is True
 
     p.toggle_node_lock("camera.capture")
-    assert "camera.capture" in p._locked_nodes
+    assert "camera.capture" in p._layout.locked_nodes
     assert node.locked is True
     assert _is_movable(node) is False
 
     # повторный вызов — освобождает
     p.toggle_node_lock("camera.capture")
-    assert "camera.capture" not in p._locked_nodes
+    assert "camera.capture" not in p._layout.locked_nodes
     assert node.locked is False
     assert _is_movable(node) is True
 
@@ -94,14 +94,14 @@ def test_inspector_lock_buttons_emit_signal(qtbot):
     panel.node_lock_set_requested.connect(lambda nid, locked: received.append((nid, locked)))
 
     panel._current_node_id = "proc.plug"
-    panel._lock_btn.click()
-    panel._unlock_btn.click()
+    panel._selector_section._lock_btn.click()
+    panel._selector_section._unlock_btn.click()
     assert received == [("proc.plug", True), ("proc.plug", False)]
 
     # без выбранной ноды — сигнал не эмитится
     received.clear()
     panel._current_node_id = ""
-    panel._lock_btn.click()
+    panel._selector_section._lock_btn.click()
     assert received == []
 
 
@@ -126,8 +126,8 @@ def test_locked_and_positions_restored_from_metadata(qtbot):
     p = PipelinePresenter(services)
     nodes, _edges = p.load_topology_from_config()
 
-    assert p._gui_positions["camera.capture"] == (111.0, 222.0)
-    assert "camera.capture" in p._locked_nodes
+    assert p._layout.gui_positions["camera.capture"] == (111.0, 222.0)
+    assert "camera.capture" in p._layout.locked_nodes
     by_id = {n.node_id: n for n in nodes}
     assert by_id["camera.capture"].locked is True
     assert (by_id["camera.capture"].x, by_id["camera.capture"].y) == (111.0, 222.0)
@@ -140,16 +140,16 @@ def test_sync_positions_drops_stale_keys(qtbot):
     """
     p, _scene = _presenter_with_scene()
     # Подсунуть мусор: legacy-ключ чужого процесса + ключ ноды другого рецепта.
-    p._gui_positions["camera_0.frame_saver"] = (560.0, 223.0)
-    p._gui_positions["line.line_filter"] = (620.0, 123.0)
+    p._layout.gui_positions["camera_0.frame_saver"] = (560.0, 223.0)
+    p._layout.gui_positions["line.line_filter"] = (620.0, 123.0)
 
     p._sync_positions_from_scene()
 
-    assert "camera_0.frame_saver" not in p._gui_positions
-    assert "line.line_filter" not in p._gui_positions
+    assert "camera_0.frame_saver" not in p._layout.gui_positions
+    assert "line.line_filter" not in p._layout.gui_positions
     # Реальные ноды сцены сохранены.
-    assert "camera.capture" in p._gui_positions
-    assert "processor.color_mask" in p._gui_positions
+    assert "camera.capture" in p._layout.gui_positions
+    assert "processor.color_mask" in p._layout.gui_positions
 
 
 def test_presenter_set_node_lock(qtbot):
@@ -157,12 +157,12 @@ def test_presenter_set_node_lock(qtbot):
     node = scene.get_node("camera.capture")
 
     p.set_node_lock("camera.capture", True)
-    assert "camera.capture" in p._locked_nodes
+    assert "camera.capture" in p._layout.locked_nodes
     assert node.locked is True
 
     p.set_node_lock("camera.capture", False)
-    assert "camera.capture" not in p._locked_nodes
+    assert "camera.capture" not in p._layout.locked_nodes
     assert node.locked is False
 
     p.set_node_lock("", True)  # пустой id — no-op, без падения
-    assert "" not in p._locked_nodes
+    assert "" not in p._layout.locked_nodes

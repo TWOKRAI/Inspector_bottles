@@ -79,7 +79,7 @@ class TestCameraActualReadout:
             plugin_name="camera_service",
             process_name="camera_0",
         )
-        assert not panel._cam_actual_form.isHidden()
+        assert not panel._cam_section.isHidden()
         base = "processes.camera_0.state.cam.actual"
         assert f"{base}.fps" in binds.bound
         assert f"{base}.width" in binds.bound
@@ -97,7 +97,7 @@ class TestCameraActualReadout:
             plugin_name="color_mask",
             process_name="proc",
         )
-        assert panel._cam_actual_form.isHidden()
+        assert panel._cam_section.isHidden()
 
     def test_clear_unbinds_actual(self, qtbot):
         panel = NodeInspectorPanel()
@@ -112,7 +112,7 @@ class TestCameraActualReadout:
         )
         panel.clear()
         assert binds.unbound > 0
-        assert panel._cam_actual_form.isHidden()
+        assert panel._cam_section.isHidden()
 
 
 def _make_presenter_services(bus=None):
@@ -154,16 +154,16 @@ class TestNodeInspectorPanel:
         qtbot.addWidget(panel)
         plugins = [{"plugin_name": "capture"}, {"plugin_name": "filter"}]
         panel.show_node("camera", "source", plugins=plugins)
-        assert panel._params_layout.count() >= 2
+        assert panel._params_section._layout.count() >= 2
 
     def test_show_node_with_params(self, qtbot):
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
         panel.show_node("camera", "source", params={"fps": "30", "resolution": "1080"})
-        assert "fps" in panel._field_editors
-        assert "resolution" in panel._field_editors
-        assert isinstance(panel._field_editors["fps"], QLineEdit)
-        assert panel._field_editors["fps"].text() == "30"
+        assert "fps" in panel._params_section._field_editors
+        assert "resolution" in panel._params_section._field_editors
+        assert isinstance(panel._params_section._field_editors["fps"], QLineEdit)
+        assert panel._params_section._field_editors["fps"].text() == "30"
 
     def test_clear(self, qtbot):
         panel = NodeInspectorPanel()
@@ -183,8 +183,8 @@ class TestNodeInspectorPanel:
         signals_received = []
         panel.field_changed.connect(lambda *args: signals_received.append(args))
 
-        panel._field_editors["fps"].setText("60")
-        panel._field_editors["fps"].editingFinished.emit()
+        panel._params_section._field_editors["fps"].setText("60")
+        panel._params_section._field_editors["fps"].editingFinished.emit()
         assert len(signals_received) == 1
         assert signals_received[0] == ("camera", "fps", "60")
 
@@ -194,8 +194,8 @@ class TestNodeInspectorPanel:
         panel.show_node("camera", "source", params={"fps": "30"})
         panel.show_node("processor", "processing", params={"threshold": "128"})
         assert panel.current_process == "processor"
-        assert "threshold" in panel._field_editors
-        assert "fps" not in panel._field_editors
+        assert "threshold" in panel._params_section._field_editors
+        assert "fps" not in panel._params_section._field_editors
 
 
 # ------------------------------------------------------------------ #
@@ -214,9 +214,9 @@ class TestCardsFieldFactoryBranch:
         panel.set_services(_make_services_no_rm(), registers_manager=rm)
         panel.show_node("camera", "source")
 
-        assert panel._use_cards is True
-        assert "threshold" in panel._field_editors
-        assert not isinstance(panel._field_editors["threshold"], QLineEdit)
+        assert panel._params_section._use_cards is True
+        assert "threshold" in panel._params_section._field_editors
+        assert not isinstance(panel._params_section._field_editors["threshold"], QLineEdit)
 
     def test_lineedit_fallback_when_rm_none(self, qtbot):
         """Fallback на QLineEdit если RegistersManager недоступен."""
@@ -225,8 +225,8 @@ class TestCardsFieldFactoryBranch:
 
         panel.show_node("camera", "source", params={"fps": "30"})
 
-        assert panel._use_cards is False
-        assert isinstance(panel._field_editors["fps"], QLineEdit)
+        assert panel._params_section._use_cards is False
+        assert isinstance(panel._params_section._field_editors["fps"], QLineEdit)
 
     def test_lineedit_fallback_when_rm_empty_fields(self, qtbot):
         """Fallback на QLineEdit если rm.get_fields() возвращает пустой список."""
@@ -237,8 +237,8 @@ class TestCardsFieldFactoryBranch:
 
         panel.show_node("camera", "source", params={"fps": "30"})
 
-        assert panel._use_cards is False
-        assert isinstance(panel._field_editors["fps"], QLineEdit)
+        assert panel._params_section._use_cards is False
+        assert isinstance(panel._params_section._field_editors["fps"], QLineEdit)
 
     def test_cards_field_changed_signal_emitted(self, qtbot):
         """Изменение значения через FieldEditor эмитит field_changed."""
@@ -253,8 +253,8 @@ class TestCardsFieldFactoryBranch:
         signals_received = []
         panel.field_changed.connect(lambda *args: signals_received.append(args))
 
-        editor = panel._field_editors["threshold"]
-        panel._on_field_editor_changed("threshold", editor)
+        editor = panel._params_section._field_editors["threshold"]
+        panel._params_section._on_field_editor_changed("threshold", editor)
 
         assert len(signals_received) == 1
         process_name, field_name, value = signals_received[0]
@@ -282,8 +282,8 @@ class TestCardsFieldFactoryBranch:
         rm.get_fields.return_value = [fi_b]
         panel.show_node("node_b", "source")
 
-        assert "fps" not in panel._field_editors
-        assert "threshold" in panel._field_editors
+        assert "fps" not in panel._params_section._field_editors
+        assert "threshold" in panel._params_section._field_editors
 
     def test_set_services_stores(self, qtbot):
         """set_services корректно сохраняет AppServices."""
@@ -540,10 +540,10 @@ class TestTargetProcessCombo:
 
         panel.show_plugin_node("camera", "source", target_process="camera")
 
-        assert panel._target_process_form.isVisible()
-        assert not panel._display_id_form.isVisible()
+        assert panel._selector_section._target_process_form.isVisible()
+        assert not panel._selector_section._display_id_form.isVisible()
 
-        combo = panel._target_process_combo
+        combo = panel._selector_section._target_process_combo
         assert combo is not None
         assert combo.isEnabled()
         items = [combo.itemText(i) for i in range(combo.count())]
@@ -560,7 +560,7 @@ class TestTargetProcessCombo:
 
         panel.show_plugin_node("camera", "source", target_process="processor")
 
-        combo = panel._target_process_combo
+        combo = panel._selector_section._target_process_combo
         assert combo.currentText() == "processor"
 
     def test_target_process_change_emits_signal(self, qtbot):
@@ -574,7 +574,7 @@ class TestTargetProcessCombo:
         received = []
         panel.target_process_changed.connect(lambda nid, proc: received.append((nid, proc)))
 
-        combo = panel._target_process_combo
+        combo = panel._selector_section._target_process_combo
         idx = combo.findText("processor")
         assert idx >= 0
         combo.setCurrentIndex(idx)
@@ -591,7 +591,7 @@ class TestTargetProcessCombo:
 
         panel.show_plugin_node("node1", "utility", target_process="")
 
-        combo = panel._target_process_combo
+        combo = panel._selector_section._target_process_combo
         assert not combo.isEnabled() or combo.count() == 0
 
     def test_show_with_no_services_doesnt_crash(self, qtbot):
@@ -600,7 +600,7 @@ class TestTargetProcessCombo:
 
         panel.show_plugin_node("node1", "utility", target_process="proc1")
 
-        combo = panel._target_process_combo
+        combo = panel._selector_section._target_process_combo
         assert combo is not None
         assert not combo.isEnabled() or combo.count() == 0
 
@@ -634,7 +634,7 @@ class TestExecInfo:
     def _exec_texts(self, panel) -> str:
         from PySide6.QtWidgets import QLabel
 
-        lay = panel._exec_info_layout
+        lay = panel._exec_section._layout
         parts = []
         for i in range(lay.count()):
             w = lay.itemAt(i).widget()
@@ -694,7 +694,7 @@ class TestExecInfo:
             plugins=[{"plugin_name": "resize", "category": "processing"}],
         )
         panel.show_display_node("main", "main", "Основной дисплей")
-        assert panel._exec_info_layout.count() == 0
+        assert panel._exec_section._layout.count() == 0
 
 
 class TestPluginNameFieldResolution:
@@ -712,7 +712,7 @@ class TestPluginNameFieldResolution:
         panel.show_plugin_node("preprocessor", "processing", plugin_name="resize")
 
         rm.get_fields.assert_called_with("resize")
-        assert panel._use_cards is True
+        assert panel._params_section._use_cards is True
         # _current_process остаётся process_name — туда уйдёт SetPluginConfig
         assert panel.current_process == "preprocessor"
 
@@ -741,7 +741,7 @@ class TestPluginNameFieldResolution:
             params={"scale_factor": 2.5},
         )
 
-        assert "scale_factor" in panel._field_editors
+        assert "scale_factor" in panel._params_section._field_editors
 
 
 class TestDisplayIdCombo:
@@ -774,10 +774,10 @@ class TestDisplayIdCombo:
 
         panel.show_display_node("disp1", "main_output", "Основной дисплей")
 
-        assert panel._display_id_form.isVisible()
-        assert not panel._target_process_form.isVisible()
+        assert panel._selector_section._display_id_form.isVisible()
+        assert not panel._selector_section._target_process_form.isVisible()
 
-        combo = panel._display_id_combo
+        combo = panel._selector_section._display_id_combo
         assert combo is not None
         assert combo.isEnabled()
         ids = [combo.itemData(i) for i in range(combo.count())]
@@ -797,7 +797,7 @@ class TestDisplayIdCombo:
 
         panel.show_display_node("disp1", "debug", "Отладка")
 
-        combo = panel._display_id_combo
+        combo = panel._selector_section._display_id_combo
         assert combo.itemData(combo.currentIndex()) == "debug"
 
     def test_display_id_change_emits_signal(self, qtbot):
@@ -815,7 +815,7 @@ class TestDisplayIdCombo:
         received = []
         panel.display_id_changed.connect(lambda nid, did: received.append((nid, did)))
 
-        combo = panel._display_id_combo
+        combo = panel._selector_section._display_id_combo
         target_idx = -1
         for i in range(combo.count()):
             if combo.itemData(i) == "debug":
@@ -833,7 +833,7 @@ class TestDisplayIdCombo:
 
         panel.show_display_node("disp1", "some_id", "")
 
-        combo = panel._display_id_combo
+        combo = panel._selector_section._display_id_combo
         assert not combo.isEnabled() or combo.count() == 0
 
     def test_signal_suppression_during_show_display_node(self, qtbot):
@@ -871,6 +871,6 @@ class TestDisplayIdCombo:
 
         panel.refresh_display_combo()
 
-        combo = panel._display_id_combo
+        combo = panel._selector_section._display_id_combo
         ids = [combo.itemData(i) for i in range(combo.count())]
         assert "secondary" in ids

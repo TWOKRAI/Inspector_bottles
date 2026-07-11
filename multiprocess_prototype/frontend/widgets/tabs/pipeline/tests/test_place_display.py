@@ -167,9 +167,9 @@ class TestPlaceDisplayCreatesBox:
         services = _make_orchestrator_services()
         p, scene = _build_presenter_with_scene(services, qtbot)
 
-        assert "main" not in p._placed_display_ids
+        assert "main" not in p._layout.placed_display_ids
         p.place_display("main", 600.0, 50.0)
-        assert "main" in p._placed_display_ids
+        assert "main" in p._layout.placed_display_ids
 
     def test_idempotent_repeated_place(self, qtbot):
         """Повторный place_display того же id → ровно один бокс, нет дубля."""
@@ -227,11 +227,13 @@ class TestPlacedBoxSurvivesReload:
         p, scene = _build_presenter_with_scene(services, qtbot)
 
         p.place_display("main", 600.0, 50.0)
-        assert "main" in p._placed_display_ids
+        assert "main" in p._layout.placed_display_ids
 
         p._on_topology_replaced(TopologyReplaced(reason="mutation-reload"))
 
-        assert "main" in p._placed_display_ids, "_placed_display_ids не должен очищаться при _on_topology_replaced"
+        assert "main" in p._layout.placed_display_ids, (
+            "placed_display_ids не должен очищаться при _on_topology_replaced"
+        )
 
 
 # ===========================================================================
@@ -296,11 +298,13 @@ class TestRemoveUnboundDisplay:
         p.load_topology_from_config()
 
         p.place_display("main", 600.0, 50.0)
-        assert "main" in p._placed_display_ids
+        assert "main" in p._layout.placed_display_ids
 
         p.remove_selected(["main"])
 
-        assert "main" not in p._placed_display_ids, "display_id должен быть убран из _placed_display_ids после remove"
+        assert "main" not in p._layout.placed_display_ids, (
+            "display_id должен быть убран из _placed_display_ids после remove"
+        )
 
 
 # ===========================================================================
@@ -350,12 +354,12 @@ class TestPlaceDisplayThenBind:
         p, scene = _build_presenter_with_scene(services, qtbot)
 
         p.place_display("main", 600.0, 50.0)
-        assert "main" in p._placed_display_ids
+        assert "main" in p._layout.placed_display_ids
 
         p.add_wire("cam.capture.frame", "display.main.frame")
 
         # ФИКС #1: после bind display_id НАМЕРЕННО остаётся в set (живучесть при undo)
-        assert "main" in p._placed_display_ids, (
+        assert "main" in p._layout.placed_display_ids, (
             "display_id должен ОСТАВАТЬСЯ в _placed_display_ids после BindDisplay (ФИКС #1: держит бокс живым при undo)"
         )
 
@@ -461,11 +465,11 @@ class TestResetOnRecipeActivated:
 
         p.place_display("main", 600.0, 50.0)
         p.place_display("preview", 750.0, 50.0)
-        assert len(p._placed_display_ids) == 2
+        assert len(p._layout.placed_display_ids) == 2
 
         p._on_recipe_activated(RecipeActivated(slug="new-recipe"))
 
-        assert len(p._placed_display_ids) == 0, "_placed_display_ids должен быть пустым после смены рецепта"
+        assert len(p._layout.placed_display_ids) == 0, "_placed_display_ids должен быть пустым после смены рецепта"
 
     def test_unbound_box_disappears_on_recipe_activated(self, qtbot):
         """Непривязанный бокс исчезает с холста после смены рецепта."""
@@ -525,7 +529,7 @@ class TestResetOnRecipeActivated:
         # Обычная мутация — TopologyReplaced, а НЕ RecipeActivated
         p._on_topology_replaced(TopologyReplaced(reason="add-process"))
 
-        assert "main" in p._placed_display_ids, (
+        assert "main" in p._layout.placed_display_ids, (
             "_placed_display_ids не должен очищаться от TopologyReplaced (только RecipeActivated)"
         )
 
@@ -573,7 +577,7 @@ class TestUndoAfterBindKeepsBox:
             "(остаётся в _placed_display_ids → дорисовывается как unbound)"
         )
         assert isinstance(node, DisplayNodeItem)
-        assert "main" in p._placed_display_ids
+        assert "main" in p._layout.placed_display_ids
 
 
 # ===========================================================================
@@ -649,8 +653,8 @@ class TestMixedRemoveSelected:
             f"найдено {[it.node_id for it in display_items]}"
         )
         # main больше не в set
-        assert "main" not in p._placed_display_ids
-        assert "preview" not in p._placed_display_ids
+        assert "main" not in p._layout.placed_display_ids
+        assert "preview" not in p._layout.placed_display_ids
 
     def test_mixed_remove_unbound_first(self, qtbot):
         """Порядок [unbound, bound, process] — другой порядок, тот же результат."""
@@ -693,8 +697,8 @@ class TestPlaceDisplayPositionUpdate:
         p.place_display("main", 650.0, 80.0)
 
         # _gui_positions обновлён на последнюю позицию
-        assert p._gui_positions["main"] == (650.0, 80.0), (
-            f"Позиция в _gui_positions должна обновиться на (650,80), получено {p._gui_positions.get('main')}"
+        assert p._layout.gui_positions["main"] == (650.0, 80.0), (
+            f"Позиция в _gui_positions должна обновиться на (650,80), получено {p._layout.gui_positions.get('main')}"
         )
 
         # И сам бокс на scene стоит в новой позиции

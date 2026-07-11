@@ -30,7 +30,7 @@ decision space**, not write code. Do not jump to implementation.
    - **Cost** — concrete (files touched, dependencies added, person-hours)
    - **Risk** — the specific failure mode, not "may have issues"
    - **Reversibility** — easy / medium / hard to undo
-   - **Ground truth check** (если применимо) — какой MCP подтвердит/опровергнет жизнеспособность опции: `sentrux:dsm` для архитектурного выбора, `codegraph:impact` для оценки blast radius альтернативы, `context7:query-docs` для library-выбора. Если MCP не подключён — пометь "checked manually" в Cost.
+   - **Ground truth check** (если применимо) — какой MCP подтвердит/опровергнет жизнеспособность опции: `sentrux:dsm` для архитектурного выбора, `codegraph_explore` для оценки blast radius альтернативы, `context7:query-docs` для library-выбора. Если MCP не подключён — пометь "checked manually" в Cost.
 
 4. **Recommend one** and say why in one line. The recommendation can be
    "none of these — we need more information about X first."

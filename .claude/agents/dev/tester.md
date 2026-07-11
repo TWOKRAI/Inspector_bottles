@@ -64,7 +64,7 @@ Rules:
 ### `MODE: regression` workflow
 
 1. Read what changed: `git diff` + list of affected files from orchestrator.
-2. Determine scope of regression: same module + immediate callers (via `codegraph:callers` if MCP available).
+2. Determine scope of regression: same module + immediate callers (via `codegraph_explore` if MCP available).
 3. Run `pytest <scope> -v`.
 4. If green → report PASS with summary (N tests, X seconds).
 5. If red → report FAIL with the exact failing test + error. **Do not fix.** Hand back to debugger/developer.
@@ -101,7 +101,7 @@ def test_sorting_is_idempotent(xs):
 
 **Finding edge cases and context for tests:**
 1. Always → `qex:search_code` for semantic search of edge cases in related code.
-2. **If codegraph is connected** → `codegraph:callers` on the symbol under test — exact list of callers → suggests real usage scenarios and edge inputs.
+2. **If codegraph is connected** → `codegraph_explore` on the symbol under test — exact list of callers → suggests real usage scenarios and edge inputs.
 3. **If the function uses a library and context7 is connected** → `context7:query-docs` for known edge cases and documented limitations.
 4. Fallback (MCP not connected) → Grep by symbol + read related code.
 

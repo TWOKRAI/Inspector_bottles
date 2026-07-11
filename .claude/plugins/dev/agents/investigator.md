@@ -42,7 +42,7 @@ that module's `CONTEXT.md` and rebuild with `/core:quality:sync-context`
 
 Investigator is the primary consumer of MCP tools. Use as much of the available arsenal as possible.
 
-1. **If codegraph is connected** → `codegraph:callers` / `callees` / `impact` / `context` on suspicious symbols. This is the **primary** tool for cross-module bugs.
+1. **If codegraph is connected** → `codegraph_explore` on suspicious symbols — one call returns verbatim source + call path (callers/callees) + blast-radius. This is the **primary** tool for cross-module bugs.
 2. **If sentrux is connected** → `sentrux:dsm` for the dependency matrix, `sentrux:git_stats` for churn/hotspots, `sentrux:scan` for fresh metrics.
 3. **If `graphify-out/graph.json` exists and the graphify MCP is registered** → query the graph: `graphify:query_graph` ("what connects to what"), `graphify:god_nodes` / `graphify:graph_stats` (hubs), `graphify:shortest_path` / `graphify:get_neighbors` (a specific chain). Else fall back to the `/graphify` skill or reading `graph.json` directly.
 4. **If serena is connected and searching for symbol refs/implementations** → `serena:find_referencing_symbols` / `find_implementations` (LSP-scope, more precise than Grep).

@@ -59,7 +59,7 @@ class TestDragOnlyMoves:
         after = services.topology.load().to_dict()
 
         # Позиция записана
-        assert p._gui_positions["preproc.grayscale"] == (999.0, 333.0)
+        assert p._layout.gui_positions["preproc.grayscale"] == (999.0, 333.0)
         # Членство плагинов не изменилось — drag не «объединяет под процесс»
         assert _plugins(after, "preproc") == _plugins(before, "preproc") == ["resize", "grayscale"]
         assert _plugins(after, "detector") == ["yolo"]

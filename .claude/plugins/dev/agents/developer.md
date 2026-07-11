@@ -38,8 +38,8 @@ You are the Developer. You receive a specific task (Task X.Y) and implement it s
 
 **When implementing a task:**
 1. Always → `qex:search_code` to find usages/callers before modifying a symbol.
-2. **If codegraph is connected** → `codegraph:callers` / `callees` on the symbol being changed — exact call graph (replaces Grep when searching for call sites).
-3. **If codegraph is connected + changing a public API** → `codegraph:impact` — blast radius (will warn about unexpected side effects).
+2. **If codegraph is connected** → `codegraph_explore` on the symbol being changed — exact call graph + call sites (replaces Grep when searching for call sites).
+3. **If codegraph is connected + changing a public API** → `codegraph_explore` — blast radius (will warn about unexpected side effects).
 4. **If working with an external library + context7 is connected** → `context7:resolve-library-id` → `context7:query-docs` for the current API (do not rely on LLM memory for unfamiliar/version-specific APIs).
 5. **If cross-file rename/refactor of a single symbol + serena is connected** → `serena:rename_symbol` (LSP-atomic, won't miss any usage) instead of Grep+Edit. `serena:find_referencing_symbols` is more precise than Grep for symbols (no false positives on string literals).
 6. Fallback (MCP not connected) → `Grep` for usages, `WebFetch` for library docs.

@@ -48,11 +48,11 @@ If task is on the border — choose `tech-writer`.
 **For ARCHITECTURE.md:**
 1. **If `graphify-out/graph.json` exists and the graphify MCP is registered** → query the graph: `graphify:query_graph` ("what relates to what"), `graphify:god_nodes` / `graphify:graph_stats` (hubs), `graphify:get_community` / `graphify:shortest_path` (structure). Else fall back to the `/graphify` skill or reading `graph.json` directly.
 2. **If sentrux is connected** → `sentrux:dsm` for the dependency matrix and invariants.
-3. **If codegraph is connected** → `codegraph:files` for module hierarchy, `codegraph:context` for cross-cutting concerns.
+3. **If codegraph is connected** → `codegraph_explore` for module hierarchy + cross-cutting concerns (name the modules/files in the query).
 4. Fallback (no MCP connected) → Glob `**/*.py` + Read module READMEs + manual review.
 
 **For Migration Guide:**
-1. **If codegraph is connected** → `codegraph:context` on affected symbols — assess scope of changes.
+1. **If codegraph is connected** → `codegraph_explore` on affected symbols — assess scope of changes.
 2. Always → `git diff` and `git log` for before/after.
 
 **Do not duplicate:** if sentrux dsm provided relationships, do not rebuild them manually. If graphify provided hubs, do not recalculate them.

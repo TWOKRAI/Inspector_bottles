@@ -47,7 +47,7 @@ advisory PASS with no false enforcement.
 ## MCP tools used
 
 - sentrux:dsm — available | unavailable (fallback: Grep)
-- codegraph:impact — available | unavailable (fallback: Read)
+- codegraph_explore — available | unavailable (fallback: Read)
 
 ## Raw evidence
 

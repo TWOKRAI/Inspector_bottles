@@ -19,6 +19,9 @@ from typing import Any
 from multiprocess_prototype.frontend.widgets.tabs.pipeline.inspector import (
     NodeInspectorPanel,
 )
+from multiprocess_prototype.frontend.widgets.tabs.pipeline.inspector.selectors_data import (
+    worker_label,
+)
 
 from ._helpers import make_pipeline_services
 
@@ -92,7 +95,7 @@ class TestShowPluginNodeCharacterization:
         assert panel._title.text() == "preprocessor"
         assert panel._category_badge.text() == "processing"
         assert not panel._content.isHidden()
-        assert not panel._exec_info_form.isHidden()
+        assert not panel._exec_section.isHidden()
 
     def test_plugin_index_propagated(self, qtbot):
         panel = NodeInspectorPanel()
@@ -114,7 +117,7 @@ class TestShowPluginNodeCharacterization:
         panel.set_services(make_pipeline_services(topology=_TOPO_WORKERS))
         _show_processing(panel)
         # Рецепт (FakeRecipeStore) пуст → combo disabled → форма скрыта.
-        assert not panel._target_process_form.isVisibleTo(panel)
+        assert not panel._selector_section._target_process_form.isVisibleTo(panel)
 
     def test_move_process_form_visible_in_plugin_mode(self, qtbot):
         panel = NodeInspectorPanel()
@@ -128,7 +131,7 @@ class TestShowPluginNodeCharacterization:
             plugins=[{"plugin_name": "blur"}],
         )
         # Строка «Процесс / Воркер» видима всегда в plugin-режиме.
-        assert panel._move_process_form.isVisibleTo(panel)
+        assert panel._selector_section._move_process_form.isVisibleTo(panel)
 
 
 # ------------------------------------------------------------------ #
@@ -150,12 +153,12 @@ class TestShowDisplayNodeCharacterization:
         panel.show_display_node("main", "main", "Основной дисплей")
 
         assert panel._mode == "display"
-        assert panel._display_id_form.isVisibleTo(panel)
-        assert not panel._target_process_form.isVisibleTo(panel)
-        assert not panel._move_process_form.isVisibleTo(panel)
+        assert panel._selector_section._display_id_form.isVisibleTo(panel)
+        assert not panel._selector_section._target_process_form.isVisibleTo(panel)
+        assert not panel._selector_section._move_process_form.isVisibleTo(panel)
         # Блок «Исполнение» очищен и скрыт.
-        assert panel._exec_info_layout.count() == 0
-        assert panel._exec_info_form.isHidden()
+        assert panel._exec_section._layout.count() == 0
+        assert panel._exec_section.isHidden()
 
 
 # ------------------------------------------------------------------ #
@@ -178,8 +181,8 @@ class TestCameraActualBindBalance:
         # Все actual-хэндлы сняты при переходе на не-camera ноду.
         assert binds.unbind_count == binds.bind_count
         assert binds.live == 0
-        assert panel._cam_actual_handles == []
-        assert panel._cam_actual_form.isHidden()
+        assert panel._cam_section._handles == []
+        assert panel._cam_section.isHidden()
 
     def test_clear_balances(self, qtbot):
         panel = NodeInspectorPanel()
@@ -190,7 +193,7 @@ class TestCameraActualBindBalance:
         _show_camera(panel)
         panel.clear()
         assert binds.live == 0
-        assert panel._cam_actual_handles == []
+        assert panel._cam_section._handles == []
 
     def test_dispose_balances(self, qtbot):
         panel = NodeInspectorPanel()
@@ -201,7 +204,7 @@ class TestCameraActualBindBalance:
         _show_camera(panel)
         panel.dispose()
         assert binds.live == 0
-        assert panel._cam_actual_handles == []
+        assert panel._cam_section._handles == []
 
 
 # ------------------------------------------------------------------ #
@@ -225,7 +228,7 @@ class TestWorkerComboCharacterization:
         qtbot.addWidget(panel)
         panel.set_services(make_pipeline_services(topology=_TOPO_WORKERS))
         self._show_blur(panel, params={"assigned_worker": "grabber"})
-        assert panel._move_worker_combo.currentData() == "grabber"
+        assert panel._selector_section._move_worker_combo.currentData() == "grabber"
 
     def test_no_field_changed_during_populate(self, qtbot):
         panel = NodeInspectorPanel()
@@ -243,7 +246,7 @@ class TestWorkerComboCharacterization:
         self._show_blur(panel)
         captured: list[tuple] = []
         panel.field_changed.connect(lambda p, f, v: captured.append((p, f, v)))
-        combo = panel._move_worker_combo
+        combo = panel._selector_section._move_worker_combo
         idx = combo.findData("grabber")
         assert idx >= 0
         combo.setCurrentIndex(idx)
@@ -260,12 +263,12 @@ class TestClearAndRefreshCharacterization:
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
         panel.show_node("camera", "source", params={"fps": "30", "gain": "1"})
-        first_editors = set(panel._field_editors.keys())
+        first_editors = set(panel._params_section._field_editors.keys())
 
         panel.show_node("camera", "source", params={"fps": "30", "gain": "1"})
         # Повторный show не накапливает редакторы (clear отработал).
-        assert set(panel._field_editors.keys()) == first_editors
-        assert len(panel._field_editors) == 2
+        assert set(panel._params_section._field_editors.keys()) == first_editors
+        assert len(panel._params_section._field_editors) == 2
 
     def test_refresh_display_combo_noop_in_plugin_mode(self, qtbot):
         panel = NodeInspectorPanel()
@@ -288,23 +291,19 @@ class TestPureLogicCharacterization:
     def test_worker_label_source(self, qtbot):
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-        assert panel._worker_for_plugin("source", "capture", 0, 0) == (
-            "source_producer_capture · свой поток (параллельно)"
-        )
+        assert worker_label("source", "capture", 0, 0) == ("source_producer_capture · свой поток (параллельно)")
 
     def test_worker_label_processing_multi_step(self, qtbot):
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-        label = panel._worker_for_plugin("processing", "resize", 2, 3)
+        label = worker_label("processing", "resize", 2, 3)
         assert "pipeline_executor" in label
         assert "шаг 2/3" in label
 
     def test_worker_label_processing_single(self, qtbot):
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)
-        assert panel._worker_for_plugin("processing", "resize", 1, 1) == (
-            "pipeline_executor · последовательно"
-        )
+        assert worker_label("processing", "resize", 1, 1) == ("pipeline_executor · последовательно")
 
     def test_process_names_empty_without_recipe(self, qtbot):
         panel = NodeInspectorPanel()
@@ -317,9 +316,7 @@ class TestPureLogicCharacterization:
         from multiprocess_prototype.domain.tests._fakes import FakeRecipeStore
         from multiprocess_prototype.domain.tests.conftest import make_test_app_services
 
-        raw = {
-            "r": {"blueprint": {"processes": [{"process_name": "a"}, {"process_name": "b"}], "wires": []}}
-        }
+        raw = {"r": {"blueprint": {"processes": [{"process_name": "a"}, {"process_name": "b"}], "wires": []}}}
         services = make_test_app_services(recipes=FakeRecipeStore(raw=raw, active="r"))
         panel = NodeInspectorPanel()
         qtbot.addWidget(panel)

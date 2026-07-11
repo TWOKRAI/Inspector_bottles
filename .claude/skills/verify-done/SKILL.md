@@ -61,7 +61,7 @@ Pick 2–3 concrete ones, not "various edge cases".
 ### 5. Architectural sanity (если MCP подключены)
 
 - **Если sentrux подключён** → `sentrux:check_rules` на свежие правки. Цель: нет новых нарушений архитектурных правил (cycles, layer violations). Если ругается — verdict не "done".
-- **Если codegraph подключён** → `codegraph:impact` на изменённые символы. Цель: blast radius не пропущен (нет ли неучтённых callers).
+- **Если codegraph подключён** → `codegraph_explore` на изменённые символы. Цель: blast radius не пропущен (нет ли неучтённых callers).
 - **Если playwright подключён И проект веб** → `browser_navigate` к golden-path URL + `screenshot`. Проверка визуально, не только HTTP-status.
 - **Если qt-mcp подключён И проект PyQt/PySide** → поднять приложение (`/core:infra:run-proto` или эквивалент), затем:
   - `qt_snapshot` — структура дерева валидна, новый/изменённый виджет на месте.
