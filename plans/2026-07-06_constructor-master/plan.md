@@ -146,7 +146,7 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 
 ## Трек F — God-split (worktree, старт после Ф0, MERGE-GATE до Ф4, ~4 дня ∥ Ф1-Ф3)
 
-По готовому дизайну [`plans/2026-07-03_god-split-design.md`](../2026-07-03_god-split-design.md) (характеризационные тесты перечислены там; предусловие dispose — уже DONE волной B).
+По готовому дизайну [`plans/2026-07-03_god-split-design.md`](../_archive/2026-07-03_god-split-design.md) (характеризационные тесты перечислены там; предусловие dispose — уже DONE волной B).
 
 | Task | Статус | Суть | Acceptance |
 |---|---|---|---|

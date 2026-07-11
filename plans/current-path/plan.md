@@ -133,6 +133,6 @@
 | [`review-2026-07-11.md`](review-2026-07-11.md) | доказательная база (находки A/B/C/D/E/F с file:line) |
 | [`../2026-07-06_constructor-master/plan.md`](../2026-07-06_constructor-master/plan.md) | **исполнительный план** — фазы, задачи, статусы, gates |
 | [`../../docs/audits/2026-07-10_module-responsibility-duplication-map.md`](../../docs/audits/2026-07-10_module-responsibility-duplication-map.md) | карта ответственности + дубли D/N/V |
-| `QUEUE.md` | указывает на constructor-master (governing) |
+| [`../QUEUE.md`](../QUEUE.md) | **единый файл порядка** — строгая последовательность всех оставшихся задач (без статусов) |
 
 **Правило против дрейфа:** новые задачи из §4 после одобрения владельца ВНОСЯТСЯ в constructor-master (соответствующие фазы/доборы) обычным порядком; этот план обновляется только на уровне волн. Два источника статусов не заводим.

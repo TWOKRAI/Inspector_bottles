@@ -4,8 +4,8 @@
 - **Дата:** 2026-06-03 (статус обновлён 2026-06-05)
 - **Статус:** DEFERRED (Option D). Видимый баг «—» РЕШЁН иначе — через [`_archive/telemetry-self-publish-redesign.md`](_archive/telemetry-self-publish-redesign.md) (процесс сам публикует fps/latency в дерево; FPS зелёный, qt-smoke подтвердил). Option A (reuse bridge) стал moot. **Option D (snapshot-канал + TelemetryViewModel + вырезание реактивных биндингов) отложен** до gate реального масштаба (2-й реактивный потребитель ИЛИ замер показал боль двойного glob) — решение #1/#2 [`comm-system-execution-order.md`](comm-system-execution-order.md). Документ держим как запись D-цели.
 - **Ветка:** feat/comm-system-target-architecture (часть comm-system, НЕ новый branch)
-- **Родительский план:** [`comm-system-target-architecture.md`](comm-system-target-architecture.md) §7 (а), §12 P0 «разблокировать телеметрию»
-- **Доказательная база:** memory `project_telemetry_subscription_bug`, рантайм-probe сессии 2026-06-03, аудиты [`comm-system-communication-audit.md`](comm-system-communication-audit.md)
+- **Родительский план:** [`comm-system-target-architecture.md`](_archive/comm-system-target-architecture.md) §7 (а), §12 P0 «разблокировать телеметрию»
+- **Доказательная база:** memory `project_telemetry_subscription_bug`, рантайм-probe сессии 2026-06-03, аудиты [`comm-system-communication-audit.md`](_archive/comm-system-communication-audit.md)
 
 ---
 

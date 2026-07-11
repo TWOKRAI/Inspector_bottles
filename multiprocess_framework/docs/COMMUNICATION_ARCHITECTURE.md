@@ -2,7 +2,7 @@
 
 > **Назначение:** единый источник правды по коммуникациям проекта. Кто за что отвечает, какой ОДИН канонический механизм на каждый сценарий, какие правила нельзя нарушать. Цель — чтобы разработчик и агент следовали схеме **без повторного анализа**.
 > **Это ЦЕЛЕВАЯ схема (канон), которой придерживаемся.** Где сегодняшняя реальность отличается от канона — §11 «Текущие отклонения» (со ссылками на план).
-> **Companion-документы:** [`plans/comm-system-target-architecture.md`](../../plans/comm-system-target-architecture.md) — «почему так» + миграция P0→P3 (верифицированный аудит); [`ROUTING_GLOSSARY.md`](ROUTING_GLOSSARY.md) — термины (канал ≠ имя процесса).
+> **Companion-документы:** [`plans/_archive/comm-system-target-architecture.md`](../../plans/_archive/comm-system-target-architecture.md) — «почему так» + миграция P0→P3 (верифицированный аудит); [`ROUTING_GLOSSARY.md`](ROUTING_GLOSSARY.md) — термины (канал ≠ имя процесса).
 > Дата: 2026-06-02.
 
 ---
@@ -184,7 +184,7 @@ GUI / домен (in-proc)   EventBus · QtEventBus · CommandDispatcherOrchestr
 
 Чтобы агент не принял канон за уже-реализованное. Каждое — в плане миграции.
 
-> **Полный список багов/мелких правок — НЕ здесь** (S4). Эта таблица = крупные отклонения. 24 quick-wins (мёртвый relay, битый `MessageAdapter.create_message`, broken console help, потеря/контракты пп.20-22, heartbeat-порядок, EventBus-инвариант внутри bucket и т.д.) + этап **P1.5** — в [`plans/comm-system-target-architecture.md`](../../plans/comm-system-target-architecture.md) §11/§12.
+> **Полный список багов/мелких правок — НЕ здесь** (S4). Эта таблица = крупные отклонения. 24 quick-wins (мёртвый relay, битый `MessageAdapter.create_message`, broken console help, потеря/контракты пп.20-22, heartbeat-порядок, EventBus-инвариант внутри bucket и т.д.) + этап **P1.5** — в [`plans/_archive/comm-system-target-architecture.md`](../../plans/_archive/comm-system-target-architecture.md) §11/§12.
 
 | Отклонение сегодня | Канон | Где чинится |
 |---|---|---|
@@ -205,8 +205,8 @@ GUI / домен (in-proc)   EventBus · QtEventBus · CommandDispatcherOrchestr
 
 - **`local_channel`** — фигурировал в первом аудите, в v2 не переисследован → доразобрать (что это, нужен ли).
 
-> Все развилки Q1–Q9 согласованы — см. решения в [`plans/comm-system-target-architecture.md`](../../plans/comm-system-target-architecture.md) §13. `DataReceiverBridge` (Q6) → вынести в опц. `frontend`-слой framework (P3).
+> Все развилки Q1–Q9 согласованы — см. решения в [`plans/_archive/comm-system-target-architecture.md`](../../plans/_archive/comm-system-target-architecture.md) §13. `DataReceiverBridge` (Q6) → вынести в опц. `frontend`-слой framework (P3).
 
 ---
 
-*Полный верифицированный аудит, матрица сохранности функционала и план миграции — [`plans/comm-system-target-architecture.md`](../../plans/comm-system-target-architecture.md). Термины и различие «канал ≠ имя процесса» — [`ROUTING_GLOSSARY.md`](ROUTING_GLOSSARY.md).*
+*Полный верифицированный аудит, матрица сохранности функционала и план миграции — [`plans/_archive/comm-system-target-architecture.md`](../../plans/_archive/comm-system-target-architecture.md). Термины и различие «канал ≠ имя процесса» — [`ROUTING_GLOSSARY.md`](ROUTING_GLOSSARY.md).*

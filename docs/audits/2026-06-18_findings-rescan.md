@@ -1,6 +1,6 @@
 # Re-scan находок аудита — актуализация на 2026-06-18
 
-> **Зачем.** Аудит [`2026-06-13_prototype-services-plugins-audit.md`](2026-06-13_prototype-services-plugins-audit.md) написан 5 дней назад (ветка `feat/camera-robot-calibration`); его `file:line` дрейфнули, часть находок уже починена. Это **W0-артефакт** мастер-роадмапа ([`../../plans/master-rework-roadmap.md`](../../plans/master-rework-roadmap.md)): волны чистки W1+ берут координаты ОТСЮДА, не из аудита (риск R3 — re-fix по устаревшим координатам).
+> **Зачем.** Аудит [`2026-06-13_prototype-services-plugins-audit.md`](2026-06-13_prototype-services-plugins-audit.md) написан 5 дней назад (ветка `feat/camera-robot-calibration`); его `file:line` дрейфнули, часть находок уже починена. Это **W0-артефакт** мастер-роадмапа ([`../../plans/_archive/master-rework-roadmap.md`](../../plans/_archive/master-rework-roadmap.md)): волны чистки W1+ берут координаты ОТСЮДА, не из аудита (риск R3 — re-fix по устаревшим координатам).
 >
 > **Метод.** 3 read-only investigator-агента по зонам, верификация против ЖИВОГО кода (qex/serena/grep/read), ветка `feat/draw-mode-rework`. Принцип: код = истина.
 >

@@ -2264,7 +2264,7 @@
 
 ## Коммуникационная архитектура (ADR-COMM)
 
-> Кросс-секущая серия решений о шине сообщений (план [`transport-router-hub`](../../plans/2026-05-31_transport-router-hub/plan.md)).
+> Кросс-секущая серия решений о шине сообщений (план [`transport-router-hub`](../../plans/_archive/2026-05-31_transport-router-hub/plan.md)).
 > Намеренно вне числовой нумерации ADR-NNN — это архитектурный пласт «как процессы/воркеры общаются»,
 > охватывающий несколько модулей (`router_module`, `message_module`, `shared_resources_module`, `state_store_module`).
 
@@ -2278,7 +2278,7 @@
   - **§5.1/§5.4 первой редакции `COMMUNICATION_MAP.md`** («named-queue + `RouterManager.receive` — единственный канон; channel-routing депрекейтить») — отвергнута владельцем как «асфальтировать тропу»: узаконивает обход вместо достройки хаба. Эта редакция ADR-COMM-001 её **заменяет** (§5.1 помечена superseded).
   - **Новый `kind`-field / новый Channel-Protocol / новое поле `address`** — отвергнуты: reuse `Message.type`/`targets`/`IMessageChannel` (правило плана «reuse-first»).
 - Связанные ADR: ADR-COMM-004 (иерархическая адресация), ADR-COMM-003 (frame-middleware, P3), ADR-COMM-002 (ActionBus→domain — делегировано в `constructor-maturity` P1), ADR-RTR-001/002 (CRM-наследование, name-returning handler), ADR-RTR-007 (контракт routing-таблицы), ADR-005 (correlation_id — P4), ADR-008 (Dict at Boundary), ADR-024 (channel_types system/data).
-- Refs: [plans/2026-05-31_transport-router-hub/plan.md](../../plans/2026-05-31_transport-router-hub/plan.md), [docs/COMMUNICATION_MAP.md](docs/COMMUNICATION_MAP.md) §5 (superseded §5.1)
+- Refs: [plans/_archive/2026-05-31_transport-router-hub/plan.md](../../plans/_archive/2026-05-31_transport-router-hub/plan.md), [docs/COMMUNICATION_MAP.md](docs/COMMUNICATION_MAP.md) §5 (superseded §5.1)
 
 ## ADR-COMM-002: Единый GUI-движок команд/undo/RBAC/audit — domain CommandDispatcher; ActionBus удаляется *(делегировано)*
 - Дата: 2026-05-31
@@ -2296,7 +2296,7 @@
 - Решение: слить в **одну** middleware (во `framework`) и один ring-buffer; узаконить SHM-bypass как намеренный (не дефект) внутри `DataChannel`. **Критично (recon #4):** при слиянии сохранить **оба** ключа SHM-handle — `shm_name` (slot) и `shm_actual_name` (вкл. PID на Windows): GUI-fallback открывает SHM по `shm_actual_name` из другого OS-процесса. Реализация — P3.1 этого плана.
 - Причина: устранение дубля без регресса перфа (Claim Check, нулевая копия).
 - Связанные ADR: ADR-COMM-001, ADR-019/030 (SHM по именам, PID на Windows), ADR-026/027 (SHM pipeline, rendered_frame_ready).
-- Refs: [plans/2026-05-31_transport-router-hub/plan.md](../../plans/2026-05-31_transport-router-hub/plan.md) P3.1
+- Refs: [plans/_archive/2026-05-31_transport-router-hub/plan.md](../../plans/_archive/2026-05-31_transport-router-hub/plan.md) P3.1
 
 ## ADR-COMM-004: Иерархическая адресация `address = [process, worker, …]`, prefix-routing
 - Дата: 2026-05-31
@@ -2308,7 +2308,7 @@
   - **Новое поле `address: list`** — отвергнуто: дублирует `targets`, ломает мультикаст.
   - **Отдельная IPC-очередь на воркера** — отвергнуто: плодит очереди, больше звеньев; воркер резолвится in-process.
 - Связанные ADR: ADR-COMM-001, ADR-RTR-007, ADR-MSG-007 (addressing-хелперы), ADR-024 (channel_types), ADR-008 (Dict at Boundary).
-- Refs: [plans/2026-05-31_transport-router-hub/plan.md](../../plans/2026-05-31_transport-router-hub/plan.md) (P0.2, P2), [multiprocess_prototype/plans/processes-workers-runtime-debts.md](../multiprocess_prototype/plans/processes-workers-runtime-debts.md)
+- Refs: [plans/_archive/2026-05-31_transport-router-hub/plan.md](../../plans/_archive/2026-05-31_transport-router-hub/plan.md) (P0.2, P2), [multiprocess_prototype/plans/processes-workers-runtime-debts.md](../multiprocess_prototype/plans/processes-workers-runtime-debts.md)
 
 ## ADR-COMM-005: Command Bus — kind-router по `type`, CommandManager владеет командами, авто-reply транспортом
 - Дата: 2026-06-05
@@ -2326,8 +2326,8 @@
   - **B1 (один диспетчер, CommandManager-фасад регистрирует прямо в `message_dispatcher`)** — отвергнуто: команды физически не в CommandManager, полый слой, имя врёт.
   - **Вариант A (kind-router + fallback в `message_dispatcher` для обходных)** — отвергнуто: fallback не нужен, обходные стали командами.
   - **Вынос наблюдаемости в транспортный шов (исходный P4.4.2)** — отвергнуто: конфликт с comm-system §4/§9.1 (CommandManager = фасад с timing, preserved) + ломает паритет (handle_command зовут не только из транспорта).
-- Связанные ADR: ADR-COMM-001 (router.send — канон транспорта), ADR-DSP-001…004 (стратегии/expects_full_message), ADR-005 (correlation_id / request-reply), ADR-008 (Dict at Boundary). Соотнесено с `plans/comm-system-target-architecture.md` §4/§9.4 (B2 убирает «documented workarounds»: double-call, auto_register_ipc, first-wins).
-- Refs: [plans/2026-05-31_transport-router-hub/p4.4_command-bus.md](../../plans/2026-05-31_transport-router-hub/p4.4_command-bus.md), [plans/comm-system-target-architecture.md](../../plans/comm-system-target-architecture.md)
+- Связанные ADR: ADR-COMM-001 (router.send — канон транспорта), ADR-DSP-001…004 (стратегии/expects_full_message), ADR-005 (correlation_id / request-reply), ADR-008 (Dict at Boundary). Соотнесено с `plans/_archive/comm-system-target-architecture.md` §4/§9.4 (B2 убирает «documented workarounds»: double-call, auto_register_ipc, first-wins).
+- Refs: [plans/_archive/2026-05-31_transport-router-hub/p4.4_command-bus.md](../../plans/_archive/2026-05-31_transport-router-hub/p4.4_command-bus.md), [plans/_archive/comm-system-target-architecture.md](../../plans/_archive/comm-system-target-architecture.md)
 
 ## ADR-COMM-006: Целевая модель — три ортогональные оси контрактной плоскости (вектор, не реализация)
 

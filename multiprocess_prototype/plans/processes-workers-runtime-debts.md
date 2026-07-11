@@ -314,7 +314,7 @@ cross-process транспорт — **адресация по имени про
 
 ### Реконсиляция с transport-router-hub P2 (2026-05-31, решение владельца: ГИБРИД)
 
-План [`transport-router-hub`](../../plans/2026-05-31_transport-router-hub/plan.md) (P2) ввёл
+План [`transport-router-hub`](../../plans/_archive/2026-05-31_transport-router-hub/plan.md) (P2) ввёл
 иерархическую адресацию `proc.worker`. Чтобы **не было двух транспортов для воркера**, оси
 разведены (решение владельца «кадры—трубы, команды—почта»):
 

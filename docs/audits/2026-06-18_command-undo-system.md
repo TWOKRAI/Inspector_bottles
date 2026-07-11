@@ -1,7 +1,7 @@
 # Command / Undo система: правило, сравнение, решение — 2026-06-18
 
 > **Статус:** РЕШЕНО (правило принято владельцем). Прошло адверсариальное Opus-ревью (APPROVE-WITH-CHANGES, 8 MUST-FIX внесены).
-> Связано: [`../../plans/master-rework-roadmap.md`](../../plans/master-rework-roadmap.md), memory `feedback_framework_first`, `feedback_constructor_modularity`.
+> Связано: [`../../plans/_archive/master-rework-roadmap.md`](../../plans/_archive/master-rework-roadmap.md), memory `feedback_framework_first`, `feedback_constructor_modularity`.
 > Заменяет (supersede) ADR-COMM-002 («ActionBus удаляется») — см. §4.
 
 ## §1. Правило проекта (как решать каждый раз)
