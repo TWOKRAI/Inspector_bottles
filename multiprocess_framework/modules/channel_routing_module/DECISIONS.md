@@ -112,3 +112,46 @@ watcher'а в PM (forward-compatible, без выбрасываемого код
 каналов `log/error/stats` + merge-батч) — wiring задачи Ф5.16, не входит в 5.15.
 
 **Refs:** `plans/2026-07-06_constructor-master/plan.md` (Ф5.15), `.../observability-hub-idea.md`.
+
+## ADR-CRM-008: resolve_build_result — единый примитив разбора build() (D1)
+
+**Статус:** принято (2026-07-11)
+
+**Контекст:** аудит дублирования (`docs/audits/2026-07-10_module-responsibility-duplication-map.md`,
+D1) нашёл нормализатор config-shape (`None | dict | Schema | build()`) продублированным ×3:
+`ChannelRoutingManager` (`normalize_config`), `LoggerCore._resolve_log_config`,
+`ErrorManager._normalize_error_config`. Все три копии заново реализовывали один и тот же разбор
+конвенции `RegisterBase.build() -> (name, config_dict)` (и её вариант `build() -> config_dict`),
+расходясь в мелочах случайно, а не по архитектурной причине.
+
+**Решение:** выделен общий примитив `resolve_build_result(config) -> Optional[Tuple[Optional[str], dict]]`
+в `core/config_normalizer.py`, экспортирован в публичный API модуля. `normalize_config()` (CRM)
+переписан поверх него (обёртка с `try/except`, глушит исключения `build()` → fallback на `default`).
+`LoggerCore._resolve_log_config` и `ErrorManager._normalize_error_config` тоже вызывают
+`resolve_build_result` напрямую (БЕЗ try/except — исключения `build()` по-прежнему пробрасываются,
+как и раньше) и надстраивают свою типизированную обвязку (Pydantic `model_validate`, извлечение
+`manager_name`/`include_stacktrace`, `expand_error_manager_config`). Наследники **не переопределяют**
+разбор tuple/dict-конвенции — только типизацию результата.
+
+**Что осталось нетронутым (не часть дубля D1):**
+- `LoggerCore` / `ErrorManager` isinstance-шорткаты для уже готового `LoggerManagerConfig` /
+  `ErrorManagerConfig` (identity passthrough, минуя `build()`/`model_validate` — оптимизация и
+  защита от лишнего round-trip при передаче конфига между братьями через `LoggerCore.__init__`).
+- `ErrorManager` — явный `TypeError` для неподдерживаемых типов config (валидационная политика
+  наследника, а не общая форма).
+- `expand_error_manager_config` — доменное расширение severity-каналов, не форма конфига.
+
+**Побочный эффект (не покрыт тестами, документируется намеренно):** в `ErrorManager` для
+вырожденных build()-объектов (`build()` возвращает tuple с не-dict payload, или голый dict без
+имени) `manager_name` теперь падает на `"ErrorManager"` вместо непредсказуемого поведения при
+голом `name, config_dict = config.build()` unpack. Ужесточение поведения к общей семантике CRM —
+не регрессия для существующих вызывающих (все реальные `RegisterBase.build()` возвращают
+`(name, dict)`).
+
+**Следствие:** logger/error/stats конфиг-нормализация проходит через одну функцию-примитив;
+106+ существующих тестов трёх менеджеров зелёные без правки ожиданий (характеризационные тесты —
+`tests/test_config_normalizer.py` (CRM), `logger_module/tests/test_config_normalization.py`,
+`error_module/tests/test_config_normalization.py`).
+
+**Refs:** `docs/audits/2026-07-10_module-responsibility-duplication-map.md` (D1),
+`plans/2026-07-06_constructor-master/plan.md` (Ф5-добор, задача C4).
