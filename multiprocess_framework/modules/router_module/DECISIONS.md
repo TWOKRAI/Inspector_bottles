@@ -65,13 +65,13 @@
 - `resolve_route(s)` → `RouteDecision(process, kind, channel, subpath)` — чистое ядро `send` будущего address-aware канала.
 **Ключевое:** STATE — это **channel-kind**, выводимый из `command="state.*"`, а **НЕ** член enum `MessageType` (его не вводим — план запрещает новый `kind`). Новый Channel-Protocol тоже не вводится — address-aware канал будет подклассом существующего `MessageChannel` (P1.1).  
 **Последствия:** Резолв канала работает на текущих (несогласованных по `type`) билетах без их немедленной миграции. `_resolve_channels` подключит `resolve_channel_kind` в P1.2. Контракт address-aware канала и решения по recon #2/#3/#4/#6 — в docstring `routing/address_aware_channel.py`.  
-**Refs:** [ADR-COMM-001](../../DECISIONS.md), [ADR-COMM-004](../../DECISIONS.md), [plans/2026-05-31_transport-router-hub/plan.md](../../../plans/2026-05-31_transport-router-hub/plan.md)
+**Refs:** [ADR-COMM-001](../../DECISIONS.md), [ADR-COMM-004](../../DECISIONS.md), [plans/_archive/2026-05-31_transport-router-hub/plan.md](../../../plans/_archive/2026-05-31_transport-router-hub/plan.md)
 
 ## ADR-RTR-008: SocketChannel — внешний driver-доступ как обычный IMessageChannel
 
 **Статус:** принято
 **Дата:** 2026-06-01
-**Контекст:** Нужен headless-доступ к бэкенду извне (driver под MCP — отлаживать backend без GUI/qt-mcp). Инвариант владельца: ВСЁ общение с бэкендом строго через `RouterManager`, без сайд-каналов. ProcessManager — отдельный OS-процесс; внешний процесс не подключить к shared `queue_registry` процессов. План `backend-control-mcp` P2 ([plan](../../../plans/2026-05-31_backend-control-mcp/plan.md), [дизайн](../../../plans/2026-05-31_backend-control-mcp/P2_socket_design.md)).
+**Контекст:** Нужен headless-доступ к бэкенду извне (driver под MCP — отлаживать backend без GUI/qt-mcp). Инвариант владельца: ВСЁ общение с бэкендом строго через `RouterManager`, без сайд-каналов. ProcessManager — отдельный OS-процесс; внешний процесс не подключить к shared `queue_registry` процессов. План `backend-control-mcp` P2 ([plan](../../../plans/_archive/2026-05-31_backend-control-mcp/plan.md), [дизайн](../../../plans/_archive/2026-05-31_backend-control-mcp/P2_socket_design.md)).
 **Решение:** `SocketChannel(MessageChannel)` — серверный TCP-эндпоинт, **обычный** `IMessageChannel` (сиблинг `QueueChannel`), хостится в ProcessManager (`register_channel` — by-design extension). Делает ТОЛЬКО байтовый I/O (newline-JSON). Связь с router'ом — `SocketBridgeAdapter.on_inbound`: `router.request(msg)` (P0.5 request-response) → `router.send({type:response, channel:"backend_ctl", request_id, result})` → `_resolve_channels(channel=)` → `SocketChannel.send`. Внешний driver (`backend_ctl/`) шлёт те же router-сообщения, что GUI (общий билдер `message_module/builders/command_envelopes.py` — один источник правды GUI+driver), плюс reply-поля. Гейт `BACKEND_CTL=1` + bind 127.0.0.1.
 **Ключевое:**
 - `poll()` намеренно no-op: inbound — push через read-loop (`on_inbound`), не pull. Имя канала без префикса `{process}_` → `receive`-цикл его не опрашивает (и это верно).
@@ -79,4 +79,4 @@
 - Сокет = граница ровно Claude↔driver; кадры/SHM через сокет НЕ гоняем (Dict at Boundary).
 - Совпадает с `transport-router-hub` P3 («ещё один IMessageChannel»), второй транспорт не плодим.
 **Последствия:** Внешний доступ без нарушения инварианта «всё через router». В проде endpoint не существует (env-гейт). GUI-форма команд вынесена в билдер — `CommandSender` переведён на него (вывод байт-в-байт, регрессия зелёная). Остановка PID-specific (`teardown` закрывает канал + unregister), без глобального kill.
-**Refs:** [plans/2026-05-31_backend-control-mcp/](../../../plans/2026-05-31_backend-control-mcp/plan.md), ADR-RTR-005 (IMessageChannel), [ADR-COMM-001](../../DECISIONS.md) (Dict at Boundary)
+**Refs:** [plans/_archive/2026-05-31_backend-control-mcp/](../../../plans/_archive/2026-05-31_backend-control-mcp/plan.md), ADR-RTR-005 (IMessageChannel), [ADR-COMM-001](../../DECISIONS.md) (Dict at Boundary)

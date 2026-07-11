@@ -243,7 +243,7 @@ Heartbeat-msg несёт избыточную типизацию: `type='system'
 
 ### 5.1 Один универсальный способ коммуникации
 
-> ⚠️ **SUPERSEDED (2026-05-31) планом [`transport-router-hub`](../../../plans/2026-05-31_transport-router-hub/plan.md) / [ADR-COMM-001](../DECISIONS.md).**
+> ⚠️ **SUPERSEDED (2026-05-31) планом [`transport-router-hub`](../../../plans/_archive/2026-05-31_transport-router-hub/plan.md) / [ADR-COMM-001](../DECISIONS.md).**
 > Эта рекомендация («оставить process-name + named-queue, channel-routing депрекейтить») была минимальной
 > «асфальтировать тропу». Владелец выбрал **противоположное** направление: достроить хаб правильно —
 > **`router.send(message)` как единственный вход, каналы по `kind` как канонический транспорт**, обходы убрать.

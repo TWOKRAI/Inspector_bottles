@@ -1,6 +1,6 @@
 ---
 name: project-transport-router-hub
-description: Решение — модернизировать существующий хаб фреймворка (RouterManager+каналы) в ЕДИНЫЙ механизм общения для прототипа и будущих систем. План plans/2026-05-31_transport-router-hub/.
+description: Решение — модернизировать существующий хаб фреймворка (RouterManager+каналы) в ЕДИНЫЙ механизм общения для прототипа и будущих систем. План plans/_archive/2026-05-31_transport-router-hub/.
 metadata:
   node_type: memory
   type: project
@@ -35,6 +35,6 @@ metadata:
 - **P5 удаление — только после обсуждения** каждого модуля; дефолт — изоляция, не `rm` (многое — намеренный конструктор-задел).
 - Аудит §5.1 (`COMMUNICATION_MAP.md`) ОТМЕНЁН: там было «депрекейтить каналы», владелец выбрал «достроить хаб».
 
-**Артефакты:** план [`plans/2026-05-31_transport-router-hub/plan.md`](../../../plans/2026-05-31_transport-router-hub/plan.md); карта [`multiprocess_framework/docs/COMMUNICATION_MAP.md`](../../../multiprocess_framework/docs/COMMUNICATION_MAP.md) + `COMMUNICATION_MAP_raw.json` (call-sites обходов в `router_audit.bypasses`). Ветка реализации: `refactor/transport-router-hub`.
+**Артефакты:** план [`plans/_archive/2026-05-31_transport-router-hub/plan.md`](../../../plans/_archive/2026-05-31_transport-router-hub/plan.md); карта [`multiprocess_framework/docs/COMMUNICATION_MAP.md`](../../../multiprocess_framework/docs/COMMUNICATION_MAP.md) + `COMMUNICATION_MAP_raw.json` (call-sites обходов в `router_audit.bypasses`). Ветка реализации: `refactor/transport-router-hub`.
 
 Связано: [[project-hierarchical-addressing]], [[processes-workers-runtime-feature]], [[project_command_engine_audit]], [[feedback_logger_error_stats_managers]], [[feedback_dict_at_boundary_gui]].

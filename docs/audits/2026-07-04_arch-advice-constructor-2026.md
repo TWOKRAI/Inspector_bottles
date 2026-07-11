@@ -2,8 +2,8 @@
 
 > Синтез multi-agent анализа 2026-07-04 (10 read-only ридеров: 8 подсистем + адвокат дьявола +
 > сверка с ландшафтом 2025–2026). Каждое утверждение проверено ридером по живому коду с file:line.
-> Контекст: продолжение [master-rework-roadmap](../../plans/master-rework-roadmap.md) и
-> [review-and-constructor-plan](../../plans/2026-07-03_review-and-constructor-plan.md) (волны A–G).
+> Контекст: продолжение [master-rework-roadmap](../../plans/_archive/master-rework-roadmap.md) и
+> [review-and-constructor-plan](../../plans/_archive/2026-07-03_review-and-constructor-plan.md) (волны A–G).
 > Здесь — то, чего в волнах НЕТ или что их усиливает.
 
 ---
