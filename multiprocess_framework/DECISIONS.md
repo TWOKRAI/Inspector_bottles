@@ -2356,7 +2356,7 @@
 | Модуль | Файл | Слой | Статус |
 |--------|------|------|--------|
 | `base_manager` | [`modules/base_manager/DECISIONS.md`](modules/base_manager/DECISIONS.md) | Foundation | ADR-BM-001…004 (Удаление PluginRegistry/ObservablePlugin из base_manager, ..., Удаление BaseManager.on_event/emit_event (дублирует dispatch_module)) |
-| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…007 (Удаление `_compat.py`, ..., Канонический `deep_merge` — единственная реализация deep-merge словарей) |
+| `data_schema_module` | [`modules/data_schema_module/DECISIONS.md`](modules/data_schema_module/DECISIONS.md) | Foundation | ADR-DS-001…008 (Удаление `_compat.py`, ..., UI-hints каталог FieldMeta (`ui_group`/`ui_order`/`ui_hidden`) — без отдельного `ui_widget`) |
 | `dispatch_module` | [`modules/dispatch_module/DECISIONS.md`](modules/dispatch_module/DECISIONS.md) | Routing primitives | ADR-DSP-001…004 (Извлечение ScenarioManager из Dispatcher, ..., Асимметрия дефолта `expects_full_message` (Dispatcher vs RouterManager)) |
 | `channel_routing_module` | [`modules/channel_routing_module/DECISIONS.md`](modules/channel_routing_module/DECISIONS.md) | Routing primitives | ADR-CRM-001…009 (Паттерн CRM (ChannelRoutingManager), ..., Граница observability-hub (транспорт+персистентность) ↔ statistics_module (агрегация) — D8) |
 | `logger_module` | [`modules/logger_module/DECISIONS.md`](modules/logger_module/DECISIONS.md) | Observability | ADR-LOG-001…003 (Удаление LogDispatcher, ..., LogRecord как отдельный тип) |

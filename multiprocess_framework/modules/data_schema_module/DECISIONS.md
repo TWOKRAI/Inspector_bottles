@@ -142,3 +142,69 @@
   - **Оставить `state_store` `_deep_merge_inplace`** вне scope — сознательно: это
     path-based tree-merge с генерацией Delta (граница жизненного цикла, N2
     аудита), не общий примитив-словарь.
+
+---
+
+## ADR-DS-008: UI-hints каталог FieldMeta (`ui_group`/`ui_order`/`ui_hidden`) — без отдельного `ui_widget`
+
+- Дата: 2026-07-11
+- Статус: принято
+- Контекст (D-6 / NEW-5, `plans/current-path/review-2026-07-11.md`): для декларативной
+  генерации форм из схемы (`build_form_for_schema`,
+  `multiprocess_prototype/frontend/forms/form_builder.py`) не хватало трёх presentation-hints
+  на уровне поля: группировка (`ui_group`), порядок (`ui_order`) и «не показывать в
+  конкретной форме» (`ui_hidden`). Спецификация задачи также называла четвёртый
+  hint — `ui_widget` (widget-подсказка для резолвера kind в
+  `forms/factory/kinds.py`). Однако `FieldMeta` уже содержит атрибут `widget`
+  (`core/field_meta.py`), который решает ровно эту задачу и был выделен как
+  «единственный источник widget→kind» отдельным более ранним рефакторингом
+  (коммит `09191e37`: «дублирование widget→kind маппинга в FieldMeta и factory —
+  единый источник обязателен»; до этого поле называлось `ui_hint`, переименовано
+  в `widget` коммитом `f959b505`).
+- Решение:
+  1. Добавлены три новых **аддитивных** слота `FieldMeta`: `ui_group: str | None
+     = None`, `ui_order: int | None = None`, `ui_hidden: bool = False`.
+     Прокинуты в `to_dict()`. Дефолты не меняют поведение существующих схем.
+  2. `FieldInfo` (`registers_module/core/field_info.py`) получил
+     convenience-свойства `ui_group`/`ui_order`/`ui_hidden`/`ui_widget`,
+     зеркалящие существующий паттерн `title`/`min_value`/`max_value`/`unit`.
+     `ui_widget` — **не новый атрибут FieldMeta**, а свойство-алиас, читающее
+     `meta.widget`.
+  3. `_resolve_kind` (`forms/factory/kinds.py`) уже читал `meta.widget` как
+     приоритетную подсказку (шаг 0 резолва) — усилен: неизвестное значение
+     теперь логирует `WARNING` перед graceful fallback на type-dispatch (было —
+     молчаливый fallback).
+  4. Новый публичный хелпер `build_form_for_schema(schema_cls, parent=None,
+     **kwargs)` (`multiprocess_prototype/frontend/forms/form_builder.py`)
+     использует все четыре hints и делегирует построение существующему
+     `build_form_for_register` — `CardsFieldFactory`/builders (7a) не
+     переписываются и не дублируются (freeze-tier 7b/7c/7d по вердикту G2,
+     `plans/2026-07-06_constructor-master/e4-forms-mechanism-diff.md`, не
+     затронут).
+- Причина: заводить отдельный `FieldMeta.ui_widget` означало бы воспроизвести
+  ровно тот дубль widget→kind-подсказки, который проект уже устранял ранее
+  (см. контекст выше) — два параллельных поля с одинаковым назначением рано
+  или поздно разойдутся (один задан, другой — нет; который выигрывает?).
+  `widget` уже покрыт тестами (`TestFieldMetaWidgetAliases`,
+  `TestResolveKind`) и живёт на прод-пути. `ui_widget` как свойство-алиас на
+  `FieldInfo` даёт нужное имя для документации/`build_form_for_schema` без
+  второго источника истины.
+- Отклонённые альтернативы:
+  - **Завести `FieldMeta.ui_widget` как отдельный атрибут, `widget` —
+    deprecated-алиас** — отклонено: `widget` используется в проде
+    (`pilot_widgets`, характеризационные тесты F.5), миграция всех сайтов
+    ради переименования не входит в объём NEW-5 и не даёт функциональной
+    ценности.
+  - **`ui_hidden` = алиас `FieldMeta.hidden`** — отклонено: `hidden` управляет
+    видимостью на уровне модели вместе с `access_level`
+    (`is_visible(access_level)` — доступ к данным), а `ui_hidden` — чисто
+    presentation-фильтр конкретной сгенерированной формы (поле может быть
+    видимым/редактируемым в модели, но не нужным в ЭТОЙ форме). Смешение
+    привело бы к тому, что скрытие поля в одной форме случайно скрывало бы
+    его в другой.
+  - **Группировка через новый API вместо переиспользования `category`** —
+    отклонено: `build_form_for_register` уже умеет группировать по
+    `FieldInfo.category` в `QGroupBox`; `build_form_for_schema` подменяет
+    `category` на `ui_group` (`dataclasses.replace`) только для рендера —
+    ноль нового кода группировки, ноль риска рассинхронизации двух
+    параллельных реализаций.
