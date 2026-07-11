@@ -42,9 +42,10 @@
 → В3 GUI-конструктор → В4 hot-path Ф7 → В5 supervision-tree + Ф8 → В6 Конструктор v1.0
 ```
 
-### В0 — Гигиена (сейчас, дни)
-- Merge `fix/codegraph-routing-single-tool` → main (--no-ff) — владелец.
-- **Быстрые победы вне фаз** (NEW-8, дешёвые, не трогают hot-path): README → UTF-8 + реальный quickstart; CI-шаблон `.github/workflows` (ruff+pyright+pytest+sentrux-check); убрать `d:/PROJECT_INNOTECH/...` из backend_ctl/AGENTS.md.
+### В0 — Гигиена ✅ ИСПОЛНЕНА 2026-07-11
+- Merge `fix/codegraph-routing-single-tool` → main (--no-ff). ✅
+- **Быстрые победы вне фаз** (NEW-8): README → UTF-8 + реальный quickstart; CI-шаблон `.github/workflows`; убрать `d:/PROJECT_INNOTECH/...` из backend_ctl/AGENTS.md. ✅ (ветка `chore/dx-quick-wins-new8`, merge в main): README переписан (старые заметки сохранены в `docs/notes/2026_shared-resources-pickle-notes.md`), CI: validate+tests blocking (fw 3817 passed headless локально), ruff advisory (19 нарушений — накопленный долг, TODO снять `continue-on-error` после разбора), pyright отложен; AGENTS.md очищен.
+- **Старт В1 — 2026-07-11:** C4/C5/C1 закрыты параллельными агентами (статусы в constructor-master; объединённый гейт 1701 passed, sentrux 9/9, quality 7081); далее C2 → 4.8 → C3.
 
 ### В1 — Фундамент модулей (= C-волна + Ф4-хвосты, ~2 нед)
 Как в constructor-master: C4/C5 → C1→C2 (+4.8 mini-GATE) →C3 → C6 → C7 → C8. Уточнения из ревью:
