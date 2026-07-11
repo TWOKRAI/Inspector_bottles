@@ -180,6 +180,7 @@ class SandboxPresenter:
         config_overrides: dict[str, Any],
     ) -> np.ndarray | None:
         """Внутренняя реализация run_once без перехвата исключений."""
+        from multiprocess_framework.modules.process_module.generic import frame_trace
         from multiprocess_framework.modules.process_module.plugins import SubPluginContext
 
         # Получаем entry из registry
@@ -195,6 +196,9 @@ class SandboxPresenter:
 
         # Инстанцируем плагин
         plugin_cls = entry.plugin_class
+        # Fable MED-2: sandbox исполняет плагин мимо PluginOrchestrator.boot() —
+        # ставим frame-trace обёртку здесь (раньше её давал __init_subclass__).
+        frame_trace.install_tracing(plugin_cls)
         plugin = plugin_cls()
 
         # Создаём изолированный контекст для sandbox

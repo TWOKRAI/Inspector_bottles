@@ -26,6 +26,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 from multiprocess_framework.modules.process_module.plugins import Port
 from multiprocess_framework.modules.process_module.plugins import register_plugin
+from multiprocess_framework.modules.process_module.generic import frame_trace
 
 from .registers import ChainExecutorRegisters
 
@@ -98,10 +99,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
         """Запуск: создать ThreadPoolExecutor если параллельный режим."""
         if self._reg.parallel and self._reg.max_workers > 1:
             self._pool = ThreadPoolExecutor(max_workers=self._reg.max_workers)
-            ctx.log_info(
-                f"ChainExecutorPlugin: ThreadPoolExecutor запущен, "
-                f"max_workers={self._reg.max_workers}"
-            )
+            ctx.log_info(f"ChainExecutorPlugin: ThreadPoolExecutor запущен, max_workers={self._reg.max_workers}")
 
     def shutdown(self, ctx: PluginContext) -> None:
         """Остановка: закрыть пул + завершить все sub-plugins."""
@@ -136,9 +134,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
             True если шаг успешно добавлен, False при ошибке.
         """
         plugin_class_path = step_cfg.get("plugin_class", "")
-        step_name = step_cfg.get(
-            "plugin_name", plugin_class_path.split(".")[-1] if plugin_class_path else "unknown"
-        )
+        step_name = step_cfg.get("plugin_name", plugin_class_path.split(".")[-1] if plugin_class_path else "unknown")
         sub_config = step_cfg.get("config", {})
 
         if not plugin_class_path:
@@ -150,6 +146,9 @@ class ChainExecutorPlugin(ProcessModulePlugin):
             module_path, class_name = plugin_class_path.rsplit(".", 1)
             module = importlib.import_module(module_path)
             plugin_cls = getattr(module, class_name)
+            # Fable MED-2: sub-плагины исполняются мимо PluginOrchestrator.boot() —
+            # ставим frame-trace обёртку здесь (раньше её давал __init_subclass__).
+            frame_trace.install_tracing(plugin_cls)
 
             # Создать экземпляр и сконфигурировать с sub-контекстом
             plugin_instance = plugin_cls()
@@ -162,19 +161,19 @@ class ChainExecutorPlugin(ProcessModulePlugin):
             )
             plugin_instance.configure(sub_ctx)
 
-            self._steps.append({
-                "name": step_name,
-                "plugin": plugin_instance,
-                "config": sub_config,
-            })
+            self._steps.append(
+                {
+                    "name": step_name,
+                    "plugin": plugin_instance,
+                    "config": sub_config,
+                }
+            )
             logger.info(f"ChainExecutorPlugin: шаг '{step_name}' добавлен")
             return True
 
         except Exception as e:
             self._ctx.health.report_error(e, context="chain_executor.init_step")
-            logger.error(
-                f"ChainExecutorPlugin: ошибка инициализации шага '{step_name}': {e}"
-            )
+            logger.error(f"ChainExecutorPlugin: ошибка инициализации шага '{step_name}': {e}")
             return False
 
     # --- Обработка ---
@@ -206,9 +205,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
                 # result is None → оставляем current без изменений (skip step)
             except Exception as e:
                 self._ctx.health.report_error(e, context="chain_executor.step", throttle=30.0)
-                logger.error(
-                    f"ChainExecutorPlugin: ошибка в шаге '{step['name']}': {e}"
-                )
+                logger.error(f"ChainExecutorPlugin: ошибка в шаге '{step['name']}': {e}")
                 if self._reg.on_error == "fail":
                     # Остановить цепочку, вернуть что есть
                     break
@@ -240,9 +237,7 @@ class ChainExecutorPlugin(ProcessModulePlugin):
                     all_results.append(result)
             except Exception as e:
                 self._ctx.health.report_error(e, context="chain_executor.parallel_step", throttle=30.0)
-                logger.error(
-                    f"ChainExecutorPlugin: ошибка в параллельном шаге '{step_name}': {e}"
-                )
+                logger.error(f"ChainExecutorPlugin: ошибка в параллельном шаге '{step_name}': {e}")
 
         # Если все упали — вернуть исходный items (graceful degradation)
         return all_results if all_results else items
@@ -314,8 +309,5 @@ class ChainExecutorPlugin(ProcessModulePlugin):
         """
         return {
             "status": "ok",
-            "steps": [
-                {"name": s["name"], "config": s["config"]}
-                for s in self._steps
-            ],
+            "steps": [{"name": s["name"], "config": s["config"]} for s in self._steps],
         }
