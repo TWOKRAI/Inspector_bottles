@@ -236,8 +236,8 @@ def traced(fn):
     имя — из ``self.name``. No-op при выключенной трассировке (нулевой overhead,
     кроме одного bool-чека).
 
-    Применяется автоматически в ``ProcessModulePlugin.__init_subclass__`` ко всем
-    плагинам — отдельно вешать на каждый плагин не нужно.
+    Применяется автоматически в ``PluginOrchestrator.boot()`` ко всем забученным
+    плагинам (C6 рычаг 2 — см. ``install_tracing``) — отдельно вешать не нужно.
     """
 
     @functools.wraps(fn)
@@ -257,3 +257,33 @@ def traced(fn):
 
     wrapper._traced = True  # type: ignore[attr-defined]
     return wrapper
+
+
+def install_tracing(cls) -> None:
+    """Обернуть ``process``/``produce`` класса плагина в ``traced`` (idempotent).
+
+    C6 рычаг 2: раньше обёртка стояла в ``ProcessModulePlugin.__init_subclass__`` (база
+    плагина импортировала ``generic.frame_trace`` на этапе ОБЪЯВЛЕНИЯ класса — жёсткая
+    связь фундамент-плагина → inspection-домен). Теперь установку делает
+    ``PluginOrchestrator.boot()`` (и sub-plugin-исполнители chain/worker_pool) на бутe —
+    база плагина больше не знает про ``generic``.
+
+    Fable MED-3: обход ``__mro__`` до ``ProcessModulePlugin`` — метод оборачивается на
+    классе-ВЛАДЕЛЬЦЕ (том, что его определил в ``__dict__``), а не только на ``cls``.
+    Наследник плагина, не переопределивший ``process()``, всё равно получает трассировку
+    (обёрнут метод родителя). Дефолтные ``process``/``produce`` самого ``ProcessModulePlugin``
+    НЕ оборачиваются (граница обхода). Guard ``_traced`` — idempotency при повторном бутe.
+    """
+    # Lazy: plugins.base больше не импортирует generic (C6 рычаг 2), цикла нет.
+    from ..plugins.base import ProcessModulePlugin
+
+    for _method in ("process", "produce"):
+        for owner in cls.__mro__:
+            if owner is ProcessModulePlugin or owner is object:
+                break  # дошли до базы — метод не переопределён пользователем, дефолт не трогаем
+            fn = owner.__dict__.get(_method)
+            if fn is None:
+                continue
+            if callable(fn) and not getattr(fn, "_traced", False):
+                setattr(owner, _method, traced(fn))
+            break  # нашли класс-владелец — дальше по mro не идём

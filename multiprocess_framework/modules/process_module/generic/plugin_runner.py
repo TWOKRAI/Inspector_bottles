@@ -9,8 +9,9 @@ io-debug (Этап 5: summary входа/выхода в карточку нод
 - НЕ ловит исключения plugin.process/produce — error policy остаётся у вызывающего
   (circuit breaker в PipelineExecutor; обработка NotImplementedError в SourceProducer).
   Раннер прозрачен: исключение плагина пробрасывается как раньше.
-- НЕ дублирует frame_trace — process/produce уже обёрнуты в ProcessModulePlugin
-  .__init_subclass__ (frame_trace.traced). Раннер добавляет только hook-семантику.
+- НЕ дублирует frame_trace — process/produce уже обёрнуты на бутe плагина
+  (PluginOrchestrator.boot → frame_trace.install_tracing). Раннер добавляет только
+  hook-семантику.
 
 Хуки опциональны. Пустой набор → overhead = два прохода по пустым спискам (наносекунды,
 требование Этапа 4: < 0.1 мс на hot path). Хук, бросивший исключение, изолируется

@@ -445,3 +445,15 @@ class TestShutdown:
 
         # sub-plugin.shutdown вызван
         mock_sub.shutdown.assert_called_once()
+
+
+class TestSubPluginTracing:
+    """Fable MED-2: _init_step ставит frame-trace на sub-плагин (исполняется мимо
+    PluginOrchestrator.boot(), раньше обёртку давал __init_subclass__ базы)."""
+
+    def test_step_plugin_process_is_traced(self):
+        plugin = ChainExecutorPlugin()
+        ctx = _make_mock_ctx({"steps": [_grayscale_step("g")]})
+        plugin.configure(ctx)
+        step_plugin = plugin._steps[0]["plugin"]
+        assert getattr(type(step_plugin).process, "_traced", False) is True

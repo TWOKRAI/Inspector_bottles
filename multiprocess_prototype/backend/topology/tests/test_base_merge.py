@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from multiprocess_framework.modules.process_module.generic.blueprint import SystemBlueprint
+from multiprocess_framework.modules.process_manager_module.topology.blueprint import SystemBlueprint
 from multiprocess_prototype.backend.launch import merge_topologies, unwrap_recipe
 
 TOPOLOGY_DIR = Path(__file__).resolve().parents[1]

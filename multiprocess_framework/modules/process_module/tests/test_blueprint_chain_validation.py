@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from ..generic.blueprint import SystemBlueprint
+from ...process_manager_module.topology.blueprint import SystemBlueprint
 from ..plugins.base import ProcessModulePlugin
 from ..plugins.port import Port
 from ..plugins.registry import PluginRegistry

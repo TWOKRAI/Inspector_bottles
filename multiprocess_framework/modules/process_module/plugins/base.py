@@ -264,19 +264,10 @@ class ProcessModulePlugin(ABC):
     # True — разрешает параллельный вызов process() (для stateless плагинов).
     thread_safe: ClassVar[bool] = False
 
-    def __init_subclass__(cls, **kwargs) -> None:
-        """Авто-обернуть process/produce в frame-trace таймер (универсально).
-
-        Любой плагин получает пер-сегментный замер обработки без явного декоратора.
-        No-op при выключенной трассировке (INSPECTOR_FRAME_TRACE). См. frame_trace.
-        """
-        super().__init_subclass__(**kwargs)
-        from ..generic import frame_trace
-
-        for _method in ("process", "produce"):
-            fn = cls.__dict__.get(_method)
-            if callable(fn) and not getattr(fn, "_traced", False):
-                setattr(cls, _method, frame_trace.traced(fn))
+    # C6 рычаг 2: frame-trace обёртка process/produce больше НЕ ставится в
+    # __init_subclass__ (база плагина не импортирует generic.frame_trace на этапе
+    # объявления класса — снята связь фундамент-плагина → inspection-домен). Установку
+    # делает PluginOrchestrator.boot() через frame_trace.install_tracing() на бутe.
 
     def __init__(self) -> None:
         self.state: PluginState = PluginState.IDLE

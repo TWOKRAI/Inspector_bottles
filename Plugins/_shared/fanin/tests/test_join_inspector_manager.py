@@ -8,7 +8,7 @@
 
 import time
 
-from multiprocess_framework.modules.process_module.generic.join_inspector_manager import (
+from Plugins._shared.fanin.join_inspector_manager import (
     JoinInspectorManager,
 )
 

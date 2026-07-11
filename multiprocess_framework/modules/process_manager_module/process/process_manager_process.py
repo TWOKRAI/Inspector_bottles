@@ -832,7 +832,7 @@ class ProcessManagerProcess(ProcessModule):
         elif desired_blueprint:
             # Fallback: вычислить «новые» из desired blueprint
             try:
-                from multiprocess_framework.modules.process_module.generic.blueprint import (
+                from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
                     SystemBlueprint,
                 )
                 from multiprocess_framework.modules.data_schema_module import process

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from multiprocess_framework.modules.process_module.generic.blueprint import (
+from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
     ProcessConfig,
     SystemBlueprint,
     Wire,

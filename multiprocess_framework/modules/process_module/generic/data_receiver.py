@@ -17,7 +17,7 @@ from typing import Callable
 from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
-from .inspector_manager import InspectorManager
+from .inspector_registry import ItemInspector
 
 
 class DataReceiver:
@@ -26,7 +26,7 @@ class DataReceiver:
     Args:
         receive_fn: callable для получения IPC сообщений (process.receive_message)
         shm_middleware: FrameShmMiddleware для восстановления frame из SHM
-        inspector_manager: InspectorManager для буферизации fan-in
+        inspector_manager: ItemInspector (буфер fan-in/join, DI из Plugins/_shared/fanin)
         chain_queue: очередь для готовых коллекций items → PipelineExecutor
         lag_alert_threshold_sec: порог для backpressure alert (Q6)
         log_info: callback для логирования
@@ -37,7 +37,7 @@ class DataReceiver:
         self,
         receive_fn: Callable,
         shm_middleware: FrameShmMiddleware | None,
-        inspector_manager: InspectorManager,
+        inspector_manager: ItemInspector,
         chain_queue: queue.Queue,
         lag_alert_threshold_sec: float = 2.0,
         log_info: Callable[[str], None] | None = None,

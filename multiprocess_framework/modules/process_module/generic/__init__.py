@@ -4,12 +4,13 @@
 - GenericProcess — ProcessModule, загружающий плагины из конфига
 - GenericProcessConfig — ProcessLaunchConfig с plugins[]
 - PluginConfig — SchemaBase-конфиг одного плагина
-- SystemBlueprint — SchemaBase-чертёж системы
-- ProcessConfig — SchemaBase-конфиг одного процесса
-- Wire — SchemaBase-связь между портами
+
+SystemBlueprint/ProcessConfig/Wire (системная топология) переехали в
+``process_manager_module/topology/blueprint.py`` (C6 c). Из пакета ``generic`` больше НЕ
+экспортируются (пакетный re-export создавал бы runtime-цикл generic→topology→plugins→
+generic); импортёры используют новый дом напрямую (переходный шим — ``generic/blueprint.py``).
 """
 
-from .blueprint import ProcessConfig, SystemBlueprint, Wire
 from .data_receiver import DataReceiver
 
 # FrameShmMiddleware — транспорт SHM-кадров живёт в router_module (P3.1.1, ADR-COMM-003);
@@ -18,7 +19,10 @@ from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .generic_process import GenericProcess
 from .generic_process_config import GenericProcessConfig, PluginConfig
 from .plugin_orchestrator import PluginOrchestrator
-from .inspector_manager import InspectorManager
+
+# InspectorManager/JoinInspectorManager переехали в Plugins/_shared/fanin (C6 b) —
+# домен fan-in/join не живёт в framework. Здесь больше не экспортируются; DataReceiver
+# типизируется структурным ItemInspector (inspector_registry), буфер приходит через DI.
 from .pipeline_executor import PipelineExecutor
 from .source_producer import SourceProducer
 
@@ -28,11 +32,7 @@ __all__ = [
     "GenericProcess",
     "GenericProcessConfig",
     "PluginOrchestrator",
-    "InspectorManager",
     "PipelineExecutor",
     "PluginConfig",
     "SourceProducer",
-    "SystemBlueprint",
-    "ProcessConfig",
-    "Wire",
 ]

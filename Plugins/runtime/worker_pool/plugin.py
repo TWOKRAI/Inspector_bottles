@@ -23,6 +23,7 @@ from multiprocess_framework.modules.process_module.plugins import (
 )
 from multiprocess_framework.modules.process_module.plugins import Port
 from multiprocess_framework.modules.process_module.plugins import register_plugin
+from multiprocess_framework.modules.process_module.generic import frame_trace
 
 from .registers import WorkerPoolRegisters
 
@@ -180,6 +181,9 @@ class WorkerPoolPlugin(ProcessModulePlugin):
             module_path, class_name = self._reg.worker_plugin_class.rsplit(".", 1)
             module = importlib.import_module(module_path)
             plugin_cls = getattr(module, class_name)
+            # Fable MED-2: sub-плагины исполняются мимо PluginOrchestrator.boot() —
+            # ставим frame-trace обёртку здесь (раньше её давал __init_subclass__).
+            frame_trace.install_tracing(plugin_cls)
             instance: ProcessModulePlugin = plugin_cls()
 
             # Создать sub-контекст для worker plugin
