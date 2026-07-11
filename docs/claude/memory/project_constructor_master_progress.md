@@ -8,7 +8,14 @@ metadata:
 ---
 
 Мастер-план `plans/2026-07-06_constructor-master/` в исполнении с 2026-07-06.
-**Актуальный handoff: docs/handoffs/2026-07-10_f5-observability-merged.md** — читать первым.
+**Актуальный handoff: [docs/handoffs/2026-07-11_constructor-waves-handoff.md](../handoffs/2026-07-11_constructor-waves-handoff.md)** — читать ПЕРВЫМ (волны В0–В1+, что в полёте, решения владельца, оставшиеся фазы, merge-процедура, ловушки stash/worktree).
+
+**LATEST 2026-07-11 (поздний вечер) — волна 3 + Fable-ревью + handoff:**
+- Влиты в main: 4.4 (манифест плагина ADR-PM-013), 4.8-prep (canonicalize-шаг + diff-отчёт `f4.8-canonicalization-diff.md` НА ВЕРДИКТ), C6(a)-дизайн (`c6-pipeline-engine-design.md`, 5 вопросов владельцу), NEW-2 (AppIdentity ADR frontend de-brand), NEW-5 (UI-hints FieldMeta + build_form_for_schema, ADR-DS-008; ui_widget НЕ дублировался — переиспользован meta.widget).
+- **Fable-ревью всей дельты: 7/8 зон OK, подгонки тестов НЕТ; 4.9 CHANGES REQUESTED (2 HIGH+3 MED+1 PLAUSIBLE)** — континуальность revision ломается мульти-лист merge; gap глотает callbacks. Фикс-агент запущен (`fix/statestore-revision-continuity`) — проверить/влить в новом чате. Урок: 2152 зелёных юнитов не увидели дыру (все сценарии — одиночные set), поймало только ревью.
+- Полный fw-сьют на main: 3866 passed / 29 skipped. Честная оценка прогресса: ~6,2/10 (детали в handoff §Оценка).
+- Инциденты дня (все разрулены): агент исполнил чужую задачу (LOC-count вместо C4) ×1; чужой stash f2.2-wip всплывал в общий checkout ×2 (виновники — агенты, делавшие `git stash` в main-checkout/worktree; stash общий на все worktree!). `git stash` агентам теперь ЗАПРЕЩЁН в промптах. stash@{0} f2.2-wip ЦЕЛ — не трогать.
+- main НЕ запушен (~65 коммитов).
 
 **LATEST 2026-07-11 (ночь) — волна 2: C2/C7/4.3/4.9 закрыты 4 параллельными Sonnet-агентами, ВСЁ в main:**
 - **C2 ✅** (ADR-RCP-003): `recipe/migrations.py` — прозрачный `@migration(doc_type,from_,to)` + `run_chain`; два v1_to_v2 разведены doc_type (`recipe.config_snapshot`/`recipe.file_format`); единый detect (`has_top_level_blueprint`) — 4 call-sites, grep формат-веток вне модуля = 0; 26 property-style тестов без hypothesis. Остаток→C3: wiring run_chain в RecipeEngine default + yaml_io seam.
