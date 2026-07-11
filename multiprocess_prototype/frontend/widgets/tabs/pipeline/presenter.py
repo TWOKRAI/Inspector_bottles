@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, ContextManager, Iterator
 
 from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.domain.events import RecipeActivated, TopologyReplaced
@@ -86,22 +86,13 @@ class PipelinePresenter:
         # presenter не знает про Qt — tab передаёт реализацию. None → только лог.
         self._notify = notify
         self._model = PipelineModel()
-        # F.2: чистый (Qt-free) codec топология→граф. presenter владеет GUI-
-        # состоянием (позиции/локи/placed-боксы) и передаёт его снимком
-        # GraphViewState; кэши портов/боксов codec возвращает, presenter кладёт
-        # их в свои поля _port_schemas_cache/_display_nodes_cache.
+        # F.2: чистый (Qt-free) codec топология→граф. GUI-состоянием
+        # (позиции/локи/placed-боксы) владеет LayoutController (F.7); presenter
+        # берёт его снимком у контроллера и передаёт GraphViewState; кэши
+        # портов/боксов codec возвращает, presenter кладёт их в свои поля.
         self._codec = TopologyGraphCodec(services.plugins, services.displays)
         self._scene: GraphScene | None = None
         self._suppress = False
-        self._gui_positions: dict[str, tuple[float, float]] = {}
-        # Зафиксированные ноды: не двигаются drag'ом и пропускаются авто-раскладкой.
-        # Применяется в _topology_to_graph (NodeData.locked); персист в рецепт
-        # (metadata.locked_nodes) переживает перезапуск (free-layout Task 3).
-        self._locked_nodes: set[str] = set()
-        # free-layout Task 2: debounce-таймер авто-сохранения layout (позиции+фиксация)
-        # в активный рецепт. Ленивая инициализация (нужен QApplication) — в headless
-        # тестах без event loop авто-сохранение пропускается. См. _schedule_layout_persist.
-        self._persist_timer: Any = None
         # G.4.2: кэш port_schemas (node_id → схемы), заполняется _topology_to_graph,
         # читается load_scene_with_ports. Инициализируем здесь, чтобы метод рендера
         # не падал AttributeError при вызове до первого _topology_to_graph.
@@ -109,12 +100,6 @@ class PipelinePresenter:
         # G.4.2b: кэш display-боксов (по одному на display_id), заполняется
         # _topology_to_graph из topo["displays"], читается load_scene_with_ports.
         self._display_nodes_cache: list[DisplayNodeData] = []
-        # Task 1.1: GUI-состояние «размещённые, но непривязанные» display-боксы.
-        # Модель хранит дисплеи только как binding в topo["displays"]; пустой бокс
-        # там не живёт. _build_display_nodes дорисовывает боксы для этих display_id,
-        # чтобы они переживали full scene reload в рамках сессии. Полный жизненный
-        # цикл (сброс/удаление) — Task 2.1. См. plans/pipeline-place-display-node.md.
-        self._placed_display_ids: set[str] = set()
 
         # Модель телеметрии wire-соединений (Task 7b.3)
         self._wire_metrics_model = WireMetricsModel()
@@ -134,13 +119,21 @@ class PipelinePresenter:
 
         self._topo = TopologyPresenter()
 
-        # F.4: контроллеры layout-состояния и graph-мутаций. Владельцем GUI-
-        # состояния (_gui_positions/_locked_nodes/_placed_display_ids/_persist_timer)
-        # остаётся presenter-core (характеризационные тесты мутируют его напрямую);
-        # контроллеры инкапсулируют ОПЕРАЦИИ и обращаются к presenter через
-        # back-reference (host). Публичные методы presenter — тонкие делегаты сюда.
-        self._layout = LayoutController(self)
-        self._mutations = PipelineMutations(self)
+        # F.4/F.7: контроллеры layout-состояния и graph-мутаций. ВЛАДЕЛЕЦ GUI-
+        # состояния (gui_positions/locked_nodes/placed_display_ids/persist_timer) —
+        # LayoutController (F.7); presenter и PipelineMutations читают/пишут его
+        # ТОЛЬКО через публичный API контроллера. Стабильные зависимости
+        # (services/model/topo) инжектятся снимком (по образцу RuntimeController,
+        # F.3); Qt-реакции presenter отдаёт через host-контракт PipelineHost (self).
+        # Публичные методы presenter — тонкие делегаты в контроллеры.
+        self._layout = LayoutController(self, services=services, model=self._model, topo=self._topo)
+        self._mutations = PipelineMutations(
+            self,
+            services=services,
+            model=self._model,
+            layout=self._layout,
+            report=self._report,
+        )
 
         # Scene reload через typed EventBus (G.1): store публикует TopologyReplaced
         # при каждом save/set_topology (G.3). dispatch() внутри себя вызывает
@@ -179,15 +172,11 @@ class PipelinePresenter:
         if self._recipe_activated_sub is not None:
             self._recipe_activated_sub.unsubscribe()
             self._recipe_activated_sub = None
-        # Н-3: дебаунс-таймер авто-персиста — singleShot QTimer БЕЗ parent; без stop()
-        # отложенный timeout после разрушения вкладки дёрнул бы _persist_layout_to_recipe
-        # на мёртвом окружении (scene уже удалена).
-        if self._persist_timer is not None:
-            try:
-                self._persist_timer.stop()
-            except RuntimeError:
-                pass  # C++-объект таймера уже удалён Qt — останавливать нечего
-            self._persist_timer = None
+        # Н-3: дебаунс-таймер авто-персиста — владелец LayoutController (F.7).
+        # stop_persist_timer идемпотентен и безопасен в destroyed-пути (singleShot
+        # QTimer БЕЗ parent; без stop() отложенный timeout дёрнул бы персист на
+        # мёртвом окружении, scene уже удалена).
+        self._layout.stop_persist_timer()
         # Разорвать ссылки на Qt-объекты: presenter после dispose scene/inspector не трогает.
         self._scene = None
         self._inspector = None
@@ -265,6 +254,53 @@ class PipelinePresenter:
         """
         if self._notify is not None:
             self._notify(message)
+
+    # ------------------------------------------------------------------ #
+    #  Host-контракт для контроллеров (PipelineHost, F.7)                  #
+    # ------------------------------------------------------------------ #
+    # Узкий публичный GUI-реакционный интерфейс: контроллеры (LayoutController,
+    # PipelineMutations) обращаются к presenter ТОЛЬКО через эти члены, без
+    # доступа к приватным полям. Приватные методы/поля (_scene/_block_signals/…)
+    # сохранены дословно — их дёргают напрямую характеризационные тесты presenter.
+
+    @property
+    def scene(self) -> "GraphScene | None":
+        """Текущая GraphScene (host-контракт)."""
+        return self._scene
+
+    @property
+    def inspector(self) -> Any:
+        """Привязанная NodeInspectorPanel или None (host-контракт)."""
+        return getattr(self, "_inspector", None)
+
+    def block_signals(self) -> ContextManager[None]:
+        """Контекст подавления сигналов (host-контракт, делегат _block_signals)."""
+        return self._block_signals()
+
+    def topology_to_graph(self, topo_dict: dict) -> tuple[list[NodeData], list[EdgeData]]:
+        """Конвертация topology dict → граф (host-контракт, делегат _topology_to_graph)."""
+        return self._topology_to_graph(topo_dict)
+
+    def capture_selection(self) -> list[str]:
+        """Снять выделение до reload (host-контракт, делегат _capture_selection)."""
+        return self._capture_selection()
+
+    def restore_selection(self, node_ids: list[str]) -> None:
+        """Восстановить выделение после reload (host-контракт, делегат _restore_selection)."""
+        self._restore_selection(node_ids)
+
+    def validate_wire_ports(
+        self,
+        source: str,
+        target: str,
+        parent: "QWidget | None" = None,
+    ) -> bool:
+        """Проверка портов + QMessageBox (host-контракт, делегат _validate_wire_ports)."""
+        return self._validate_wire_ports(source, target, parent)
+
+    def report(self, message: str) -> None:
+        """Notify-статус пользователю (host-контракт, делегат _report)."""
+        self._report(message)
 
     # ------------------------------------------------------------------ #
     #  Загрузка                                                            #
@@ -382,11 +418,11 @@ class PipelinePresenter:
         if self._suppress:
             return
         # Сохранить ТЕКУЩИЕ позиции нод из scene перед перестройкой: ручной drag
-        # пишет позицию только в scene, а reload берёт позиции из _gui_positions.
-        # Без этого sync любая мутация (TopologyReplaced) сбрасывала бы вручную
-        # передвинутые ноды на дефолт/предыдущую позицию («ноды сами сдвигаются»).
+        # пишет позицию только в scene, а reload берёт позиции из gui_positions
+        # (владелец — LayoutController, F.7). Без этого sync любая мутация
+        # (TopologyReplaced) сбрасывала бы вручную передвинутые ноды на дефолт.
         if self._scene:
-            self._gui_positions.update(self._scene.get_all_node_positions())
+            self._layout.gui_positions.update(self._scene.get_all_node_positions())
         new_topology = self._services.topology.load().to_dict()
         # G.6.3: сохранить выделение через reload — load_from_data делает clear_all,
         # иначе после undo/redo (и любой мутации) выделение сбрасывается, inspector
@@ -420,9 +456,9 @@ class PipelinePresenter:
         перезатрутся при повторном place_display, а bound-позиции нового рецепта придут
         из его metadata через load_topology_from_config (если рецепт грузится этим путём).
         """
-        if not self._placed_display_ids:
+        if not self._layout.placed_display_ids:
             return
-        self._placed_display_ids.clear()
+        self._layout.placed_display_ids.clear()
         if not self._scene:
             return
         with self._block_signals():
@@ -540,9 +576,9 @@ class PipelinePresenter:
         ``(nodes, edges)`` и наполняет кэши как побочный эффект.
         """
         view = GraphViewState(
-            gui_positions=self._gui_positions,
-            locked_nodes=self._locked_nodes,
-            placed_display_ids=self._placed_display_ids,
+            gui_positions=self._layout.gui_positions,
+            locked_nodes=self._layout.locked_nodes,
+            placed_display_ids=self._layout.placed_display_ids,
         )
         result = self._codec.topology_to_graph(topo_dict, view)
         self._port_schemas_cache = result.port_schemas

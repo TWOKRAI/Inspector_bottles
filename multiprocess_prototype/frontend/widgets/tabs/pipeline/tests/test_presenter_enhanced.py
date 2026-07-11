@@ -310,7 +310,7 @@ class TestGuiPositions:
         p.load_topology_from_config()
 
         p.add_process_from_plugin("test_plugin", x=150.0, y=250.0)
-        assert p._gui_positions["test-plugin"] == (150.0, 250.0)
+        assert p._layout.gui_positions["test-plugin"] == (150.0, 250.0)
 
     def test_on_node_moved(self):
         """on_node_moved обновляет позицию."""
@@ -320,7 +320,7 @@ class TestGuiPositions:
 
         p.add_process_from_plugin("test_plugin")
         p.on_node_moved("test-plugin", 300.0, 400.0)
-        assert p._gui_positions["test-plugin"] == (300.0, 400.0)
+        assert p._layout.gui_positions["test-plugin"] == (300.0, 400.0)
 
     def test_on_node_moved_suppressed(self):
         """on_node_moved не обновляет при suppression."""
@@ -333,7 +333,7 @@ class TestGuiPositions:
             p.on_node_moved("test-plugin", 999.0, 999.0)
 
         # Позиция не должна обновиться до (999, 999)
-        assert p._gui_positions["test-plugin"] == (0.0, 0.0)
+        assert p._layout.gui_positions["test-plugin"] == (0.0, 0.0)
 
 
 # ------------------------------------------------------------------ #

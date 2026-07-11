@@ -167,14 +167,14 @@ class TestPresenterDispose:
         # on_node_moved → _schedule_layout_persist создаёт и стартует таймер
         # (QApplication уже создан pytest-qt).
         presenter.on_node_moved("camera.capture", 10.0, 20.0)
-        timer = presenter._persist_timer
+        timer = presenter._layout.persist_timer
         assert timer is not None
         assert timer.isActive()
 
         presenter.dispose()
 
         assert not timer.isActive()
-        assert presenter._persist_timer is None
+        assert presenter._layout.persist_timer is None
 
     def test_dispose_clears_scene_and_inspector_refs(self):
         """dispose() разрывает ссылки на Qt-объекты (scene/inspector)."""

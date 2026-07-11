@@ -13,8 +13,8 @@ class TestYamlPositions:
         p.load_topology_from_config()
 
         # Установить позиции
-        p._gui_positions["camera"] = (100.0, 200.0)
-        p._gui_positions["processor"] = (300.0, 200.0)
+        p._layout.gui_positions["camera"] = (100.0, 200.0)
+        p._layout.gui_positions["processor"] = (300.0, 200.0)
 
         topo = p.export_topology_with_positions()
         assert "metadata" in topo
@@ -27,8 +27,8 @@ class TestYamlPositions:
         services1 = make_pipeline_services()
         p1 = PipelinePresenter(services1)
         p1.load_topology_from_config()
-        p1._gui_positions["camera"] = (150.0, 250.0)
-        p1._gui_positions["processor"] = (400.0, 250.0)
+        p1._layout.gui_positions["camera"] = (150.0, 250.0)
+        p1._layout.gui_positions["processor"] = (400.0, 250.0)
 
         exported = p1.export_topology_with_positions()
 
@@ -37,8 +37,8 @@ class TestYamlPositions:
         p2 = PipelinePresenter(services2)
         p2.load_topology_from_config()
 
-        assert p2._gui_positions["camera"] == (150.0, 250.0)
-        assert p2._gui_positions["processor"] == (400.0, 250.0)
+        assert p2._layout.gui_positions["camera"] == (150.0, 250.0)
+        assert p2._layout.gui_positions["processor"] == (400.0, 250.0)
 
     def test_export_without_positions(self):
         """Экспорт без позиций — пустой gui_positions."""
@@ -65,7 +65,7 @@ class TestYamlPositions:
         """Позиции передаются в NodeData при конвертации."""
         services = make_pipeline_services()
         p = PipelinePresenter(services)
-        p._gui_positions["camera"] = (100.0, 200.0)
+        p._layout.gui_positions["camera"] = (100.0, 200.0)
 
         topology = services.topology.load().to_dict()
         nodes, edges = p._topology_to_graph(topology)

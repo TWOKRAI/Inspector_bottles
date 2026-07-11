@@ -100,7 +100,7 @@ class TestSaveToActiveRecipeWritesBlueprint:
         presenter = PipelinePresenter(services)
 
         presenter._model.add_process("node_a", plugin_name="PA", category="source")
-        presenter._gui_positions["node_a"] = (100.0, 200.0)
+        presenter._layout.gui_positions["node_a"] = (100.0, 200.0)
 
         from PySide6.QtWidgets import QMessageBox
 
@@ -126,8 +126,8 @@ class TestSaveToActiveRecipeWritesBlueprint:
         presenter = PipelinePresenter(services)
 
         presenter._model.add_process("node_a", plugin_name="PA", category="source")
-        presenter._gui_positions["node_a"] = (100.0, 200.0)
-        presenter._locked_nodes.add("node_a")
+        presenter._layout.gui_positions["node_a"] = (100.0, 200.0)
+        presenter._layout.locked_nodes.add("node_a")
 
         from PySide6.QtWidgets import QMessageBox
 
@@ -165,8 +165,8 @@ class TestPersistLayoutDebounce:
         object.__setattr__(services, "recipes", store)
         presenter = PipelinePresenter(services)
 
-        presenter._gui_positions["cam.capture"] = (321.0, 654.0)
-        presenter._locked_nodes.add("cam.capture")
+        presenter._layout.gui_positions["cam.capture"] = (321.0, 654.0)
+        presenter._layout.locked_nodes.add("cam.capture")
 
         presenter._persist_layout_to_recipe()
 
@@ -187,7 +187,7 @@ class TestPersistLayoutDebounce:
         object.__setattr__(services, "recipes", store)
         presenter = PipelinePresenter(services)
 
-        presenter._gui_positions["x"] = (1.0, 2.0)
+        presenter._layout.gui_positions["x"] = (1.0, 2.0)
         presenter._persist_layout_to_recipe()  # не должно бросить
 
 

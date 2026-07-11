@@ -282,7 +282,7 @@ class TestDisplays:
         p = _presenter(topo, plugin_specs={"p1": _spec("p1")})
         # D_bound есть и в topo, и среди размещённых (проверяем дедуп);
         # D_placed — только размещён, но не привязан (проверяем дорисовку).
-        p._placed_display_ids = {"D_bound", "D_placed"}
+        p._layout.placed_display_ids = {"D_bound", "D_placed"}
 
         _nodes, _edges = p._topology_to_graph(topo)
 
@@ -300,8 +300,8 @@ class TestNodePositions:
         """Позиция node_id в gui_positions приоритетнее anchor'а процесса."""
         topo = {"processes": [{"process_name": "proc", "plugins": [{"plugin_name": "pl"}]}], "wires": []}
         p = _presenter(topo, plugin_specs={"pl": _spec("pl")})
-        p._gui_positions["proc"] = (100.0, 200.0)  # anchor
-        p._gui_positions["proc.pl"] = (11.0, 22.0)  # node_id — победитель
+        p._layout.gui_positions["proc"] = (100.0, 200.0)  # anchor
+        p._layout.gui_positions["proc.pl"] = (11.0, 22.0)  # node_id — победитель
 
         nodes, _edges = p._topology_to_graph(topo)
 
@@ -312,7 +312,7 @@ class TestNodePositions:
         """Без позиции node_id плагин 0 встаёт в anchor процесса."""
         topo = {"processes": [{"process_name": "proc", "plugins": [{"plugin_name": "pl"}]}], "wires": []}
         p = _presenter(topo, plugin_specs={"pl": _spec("pl")})
-        p._gui_positions["proc"] = (100.0, 200.0)
+        p._layout.gui_positions["proc"] = (100.0, 200.0)
 
         nodes, _edges = p._topology_to_graph(topo)
 
@@ -345,7 +345,7 @@ class TestLock:
         """node_id в _locked_nodes → NodeData.locked=True."""
         topo = {"processes": [{"process_name": "proc", "plugins": [{"plugin_name": "pl"}]}], "wires": []}
         p = _presenter(topo, plugin_specs={"pl": _spec("pl")})
-        p._locked_nodes = {"proc.pl"}
+        p._layout.locked_nodes = {"proc.pl"}
 
         nodes, _edges = p._topology_to_graph(topo)
 
@@ -355,7 +355,7 @@ class TestLock:
         """Имя процесса без плагинов в _locked_nodes → fallback-нода locked=True."""
         topo = {"processes": [{"process_name": "empty", "plugins": []}], "wires": []}
         p = _presenter(topo)
-        p._locked_nodes = {"empty"}
+        p._layout.locked_nodes = {"empty"}
 
         nodes, _edges = p._topology_to_graph(topo)
 
