@@ -56,12 +56,15 @@ is_v3_recipe({"meta": {"version": 2}, "data": {}})  # False → config-snapshot
 
 ```python
 from multiprocess_framework.modules.recipe import RecipeManager
-from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
 
-manager = RecipeManager(engine, state_proxy=proxy, yaml_updater=update_yaml_preserving)
-manager.duplicate("prod", "prod_copy")       # комментарии сохранены (ruamel)
+manager = RecipeManager(engine, state_proxy=proxy)  # comment-preserving writer по умолчанию
+manager.duplicate("prod", "prod_copy")       # комментарии сохранены (ruamel round-trip)
 manager.set_active("prod_copy")              # state.recipes.active обновлён
 ```
+
+`duplicate()` по умолчанию использует `recipe.yaml_io.update_yaml_preserving`
+(C3/ADR-RCP-005) — writer generic и живёт в модуле; инъекция `yaml_updater=`
+нужна лишь для подмены (напр. plain-PyYAML в окружении без ruamel).
 
 4. Реестр step-миграций (ADR-RCP-003) — декоратор регистрирует шаг, раннер
    прогоняет цепочку in-memory (READ-путь, файлы не переписывает):
@@ -84,8 +87,9 @@ migrated = run_chain("recipe.config_snapshot", data, from_version=1, to_version=
 ## Boundaries
 
 - **НЕ знает доменных схем**: ветви (`cameras`/`robot`/…) и миграции инжектируются.
-- **НЕ пишет comment-preserving YAML сам**: `yaml_updater` инжектируется (fallback —
-  plain PyYAML без комментариев). Consolidation `yaml_io` → задача C3.
+- **Comment-preserving YAML — свой** (`recipe.yaml_io`, ruamel round-trip, C3): writer
+  доменно-нейтрален, RecipeManager использует его по умолчанию; `yaml_updater=` —
+  опциональная подмена.
 - **Реестр миграций (`@migration`/`run_chain`) — generic, doc_type-namespaced**:
   сами шаги (domain dict-трансформации) живут в прикладном слое, модуль их не
   знает — только каталогизирует и прогоняет цепочкой (ADR-RCP-003, C2).

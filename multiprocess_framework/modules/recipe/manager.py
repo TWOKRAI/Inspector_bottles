@@ -9,10 +9,11 @@ RecipeManager предоставляет CRUD-операции над рецеп
 Dict at Boundary: RecipeManager работает с dict (YAML-данные), не с Pydantic на
 границе компонентов.
 
-Comment-preserving запись (duplicate) — через инжектируемый ``yaml_updater``
-(ADR-RCP-001): движок не тянет прикладной ruamel-writer. Без инъекции duplicate()
-использует plain-PyYAML fallback (комментарии не сохраняются). Прикладной слой
-инжектирует comment-preserving writer (напр. yaml_io.update_yaml_preserving).
+Comment-preserving запись (duplicate) — по умолчанию через generic-writer модуля
+``recipe.yaml_io.update_yaml_preserving`` (ruamel round-trip, C3/ADR-RCP-005): writer
+доменно-нейтрален и живёт в самом модуле, поэтому прототипу больше НЕ нужен
+субкласс-шим с инъекцией (seam снят). Вызывающий может подменить writer через
+параметр ``yaml_updater`` (напр. на plain-PyYAML в окружении без ruamel).
 """
 
 from __future__ import annotations
@@ -23,24 +24,7 @@ from typing import Any, Callable
 
 import yaml
 
-
-def _plain_yaml_update(path: str | Path, updates: dict[str, Any]) -> None:
-    """Fallback-writer: обновить top-level ключи YAML через plain PyYAML.
-
-    Комментарии НЕ сохраняются (для этого инжектируйте ruamel-writer). Используется
-    когда yaml_updater не задан.
-    """
-    path = Path(path)
-    data: dict[str, Any] = {}
-    if path.exists():
-        with open(path, "r", encoding="utf-8") as f:
-            loaded = yaml.safe_load(f)
-        if isinstance(loaded, dict):
-            data = loaded
-    data.update(updates)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+from .yaml_io import update_yaml_preserving
 
 
 class RecipeManager:
@@ -57,9 +41,10 @@ class RecipeManager:
                      Если None — state не обновляется.
         logger: опциональный менеджер логирования (LoggerManager или совместимый).
                 Если None — логирование отключено (silent fallback).
-        yaml_updater: инжектируемый comment-preserving writer вида
-                     ``(path, updates: dict) -> None`` (ADR-RCP-001). Если None —
-                     duplicate() использует plain-PyYAML fallback (без комментариев).
+        yaml_updater: comment-preserving writer вида ``(path, updates: dict) -> None``.
+                     Если None — по умолчанию ``recipe.yaml_io.update_yaml_preserving``
+                     (ruamel round-trip, сохраняет комментарии; C3/ADR-RCP-005).
+                     Подмена нужна лишь в окружении без ruamel (напр. plain-PyYAML).
     """
 
     def __init__(
@@ -72,7 +57,7 @@ class RecipeManager:
         self._engine = engine
         self._state_proxy = state_proxy
         self._logger = logger
-        self._yaml_updater = yaml_updater if yaml_updater is not None else _plain_yaml_update
+        self._yaml_updater = yaml_updater if yaml_updater is not None else update_yaml_preserving
 
     # ------------------------------------------------------------------
     # Вспомогательные методы логирования (silent fallback)
