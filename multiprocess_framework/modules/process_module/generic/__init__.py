@@ -4,12 +4,13 @@
 - GenericProcess — ProcessModule, загружающий плагины из конфига
 - GenericProcessConfig — ProcessLaunchConfig с plugins[]
 - PluginConfig — SchemaBase-конфиг одного плагина
-- SystemBlueprint — SchemaBase-чертёж системы
-- ProcessConfig — SchemaBase-конфиг одного процесса
-- Wire — SchemaBase-связь между портами
+
+SystemBlueprint/ProcessConfig/Wire (системная топология) переехали в
+``process_manager_module/topology/blueprint.py`` (C6 c). Из пакета ``generic`` больше НЕ
+экспортируются (пакетный re-export создавал бы runtime-цикл generic→topology→plugins→
+generic); импортёры используют новый дом напрямую (переходный шим — ``generic/blueprint.py``).
 """
 
-from .blueprint import ProcessConfig, SystemBlueprint, Wire
 from .data_receiver import DataReceiver
 
 # FrameShmMiddleware — транспорт SHM-кадров живёт в router_module (P3.1.1, ADR-COMM-003);
@@ -34,7 +35,4 @@ __all__ = [
     "PipelineExecutor",
     "PluginConfig",
     "SourceProducer",
-    "SystemBlueprint",
-    "ProcessConfig",
-    "Wire",
 ]

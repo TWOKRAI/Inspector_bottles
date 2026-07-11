@@ -119,7 +119,11 @@ class ProcessManagerProcess(ProcessModule):
             restart_policy = RestartPolicy(**restart_cfg)
         else:
             _autorestart_on = os.environ.get("FW_AUTORESTART", "1").strip().lower() not in (
-                "0", "false", "no", "off", "",
+                "0",
+                "false",
+                "no",
+                "off",
+                "",
             )
             restart_policy = RestartPolicy(enabled=_autorestart_on)
 
@@ -319,8 +323,7 @@ class ProcessManagerProcess(ProcessModule):
             backend_ctl, SHM-каналы и т.п.).
         """
         processes = {
-            name: {"class": str((cfg or {}).get("class") or "")}
-            for name, cfg in sorted(self._process_configs.items())
+            name: {"class": str((cfg or {}).get("class") or "")} for name, cfg in sorted(self._process_configs.items())
         }
         channels = []
         if self.router_manager is not None and hasattr(self.router_manager, "get_all_channels"):
@@ -735,9 +738,7 @@ class ProcessManagerProcess(ProcessModule):
                 self.send_message(process_name, configure_cmd)
                 info["status"] = "active"
                 reissued += 1
-                self._log_info(
-                    f"wire re-issue: '{wire_key}' переигран в '{process_name}' (role={role})"
-                )
+                self._log_info(f"wire re-issue: '{wire_key}' переигран в '{process_name}' (role={role})")
             except Exception as exc:  # noqa: BLE001 — провод остаётся broken, lifecycle не роняем
                 self._log_error(f"wire re-issue '{wire_key}' в '{process_name}' не удался: {exc}")
         return reissued
@@ -832,7 +833,7 @@ class ProcessManagerProcess(ProcessModule):
         elif desired_blueprint:
             # Fallback: вычислить «новые» из desired blueprint
             try:
-                from multiprocess_framework.modules.process_module.generic.blueprint import (
+                from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
                     SystemBlueprint,
                 )
                 from multiprocess_framework.modules.data_schema_module import process
@@ -976,9 +977,7 @@ class ProcessManagerProcess(ProcessModule):
         with self._routing_lock:
             return {"epoch": self._routing_epoch, "incarnations": dict(self._incarnations)}
 
-    def _mirror_routing_to_psr(
-        self, name: str, *, epoch: int | None = None, incarnation: int | None = None
-    ) -> None:
+    def _mirror_routing_to_psr(self, name: str, *, epoch: int | None = None, incarnation: int | None = None) -> None:
         """Best-effort зеркалирование epoch/incarnation в metadata PM-PSR.
 
         Диагностика/консистентность: PM хранит истину в ``_incarnations``/
@@ -1073,10 +1072,7 @@ class ProcessManagerProcess(ProcessModule):
         }
         try:
             comm.broadcast(msg, exclude_self=True)
-            self._log_info(
-                f"routing.refresh разослан (reason={reason}, epoch={epoch}, "
-                f"процессов={len(processes)})"
-            )
+            self._log_info(f"routing.refresh разослан (reason={reason}, epoch={epoch}, процессов={len(processes)})")
             return True
         except Exception as exc:  # noqa: BLE001 — рассылка не должна ронять lifecycle
             self._log_error(f"_broadcast_routing_refresh({reason}) упал: {exc}")
@@ -1635,8 +1631,7 @@ class ProcessManagerProcess(ProcessModule):
                         # Прежний код здесь пересоздавал ЖИВЫЕ процессы
                         # поверх самих себя (дубли + зомби).
                         self._log_info(
-                            "apply_topology: провал до исполнения команд — "
-                            "топология не тронута, откат не требуется"
+                            "apply_topology: провал до исполнения команд — топология не тронута, откат не требуется"
                         )
                     resp = {
                         "success": False,
