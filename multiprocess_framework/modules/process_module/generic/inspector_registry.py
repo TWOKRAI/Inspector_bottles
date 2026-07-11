@@ -89,9 +89,30 @@ def build_inspector(
 ) -> ItemInspector:
     """Построить корреляционный буфер по конфигу процесса.
 
-    Делегирует зарегистрированной доменной фабрике (``Plugins/_shared/fanin``). Без
-    фабрики — безопасный ``PassThroughInspector`` (без fan-in).
+    Делегирует зарегистрированной доменной фабрике (``Plugins/_shared/fanin``).
+
+    Fail-loud (Fable HIGH-1): если фабрика НЕ зарегистрирована, но inspector-конфиг ЗАДАН
+    (``mode``/параметры) — это молчаливая потеря корреляции (плагины загружены не из
+    ``Plugins.*``, self-register не сработал). Отказываем громко, а не отдаём PassThrough,
+    который бы тихо пропускал items без fan-in/join. При ПУСТОМ конфиге корреляция не нужна
+    → PassThrough-fallback с явной записью в лог (не тихо).
     """
     if _factory is None:
+        insp_cfg = app_cfg.get("inspector") or {}
+        if insp_cfg:
+            raise RuntimeError(
+                "build_inspector: задан inspector-конфиг "
+                f"(mode={insp_cfg.get('mode', 'fanin')!r}), но фабрика fan-in/join НЕ "
+                "зарегистрирована — плагины загружены не из пакета Plugins.* (напр. "
+                "Services.*), self-register Plugins._shared.fanin не сработал. Импортируй "
+                "Plugins._shared.fanin в composition root или зарегистрируй фабрику через "
+                "register_inspector_factory. Отказ вместо молчаливого PassThrough (иначе "
+                "items летят без корреляции — потеря fan-in/join)."
+            )
+        if log_info is not None:
+            log_info(
+                "build_inspector: фабрика inspector не зарегистрирована и конфиг пуст — "
+                "PassThrough-fallback (без fan-in; корреляция не требуется)."
+            )
         return PassThroughInspector()
     return _factory(app_cfg, log_info=log_info, log_error=log_error, log_debug=log_debug)
