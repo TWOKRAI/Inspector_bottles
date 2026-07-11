@@ -6,12 +6,16 @@ import yaml
 import pytest
 from pathlib import Path
 
-from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
-from multiprocess_framework.modules.state_store_module.recipes.recipe_engine import (
+from multiprocess_framework.modules.recipe.recipe_engine import (
     RecipeEngine,
     _flatten,
     _remap_path,
 )
+from multiprocess_framework.modules.state_store_module.core.tree_store import TreeStore
+
+# Доменные ветви инжектируются в движок (ADR-RCP-001) — раньше это была зашитая
+# framework-константа DEFAULT_CONFIG_PATHS; теперь фикстура передаёт их явно.
+_DEFAULT_CONFIG_PATHS = ["cameras", "renderer", "robot", "database"]
 
 
 @pytest.fixture
@@ -74,8 +78,12 @@ def recipes_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def engine(store: TreeStore, recipes_dir: Path) -> RecipeEngine:
-    """RecipeEngine с готовым store и временной директорией."""
-    return RecipeEngine(store=store, recipes_dir=recipes_dir)
+    """RecipeEngine с готовым store и временной директорией (доменные пути инжектированы)."""
+    return RecipeEngine(
+        store=store,
+        recipes_dir=recipes_dir,
+        default_paths=_DEFAULT_CONFIG_PATHS,
+    )
 
 
 # =====================================================================

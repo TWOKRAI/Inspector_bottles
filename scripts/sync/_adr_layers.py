@@ -32,6 +32,7 @@ MODULE_LAYERS: list[tuple[str, str]] = [
     ("registers_module", "Infrastructure / registers"),
     ("console_module", "UI / Console"),
     ("state_store_module", "Resources & Config"),
+    ("recipe", "Resources & Config"),
     ("chain_module", "Command & Work"),
     ("actions_module", "Command & Work"),
     ("service_module", "Services & Lifecycle"),
