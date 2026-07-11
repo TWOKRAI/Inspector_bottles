@@ -420,11 +420,19 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             router.register_message_handler("state.changed", proxy.on_state_changed)
 
         1. Десериализует дельты из msg["data"]["deltas"].
-        2. Проверяет непрерывность revision (Ф4.9b) — при разрыве ресинкается
-           и ЗАВЕРШАЕТ обработку (кэш уже актуализирован свежим снапшотом,
-           дельты устаревшего пакета не применяются и коллбеки не зовутся).
-        3. Обновляет кэш.
-        4. Вызывает все зарегистрированные callbacks.
+        2. Устаревший пакет ("в полёте" во время предыдущего resync, MED-3,
+           ревью 2026-07-11) — игнорируется целиком: revision конверта не
+           продвигает состояние клиента дальше уже известного, применение
+           таких дельт поверх более свежего resync-снимка регрессировало бы
+           кэш. Без обновления кэша, без callbacks, без нового resync.
+        3. Иначе — дельты пакета ВСЕГДА применяются к кэшу и доставляются в
+           callbacks (инвариант (б), ревью 2026-07-11: пакет никогда не
+           проглатывается из-за решения о запуске resync — раньше при
+           обнаруженном разрыве дельты этого же пакета терялись целиком).
+        4. Проверяется непрерывность revision по диапазону [first_revision,
+           revision] пакета — при обнаруженном разрыве ДОПОЛНИТЕЛЬНО (не
+           взамен шага 3) запускается resync как подстраховка для путей,
+           которые мог задеть действительно потерянный пакет.
 
         Args:
             msg: IPC-сообщение с полем data.deltas.
@@ -433,69 +441,103 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         if not deltas:
             return
 
-        envelope_revision = msg.get("data", {}).get("revision")
-        if self._check_and_handle_revision_gap(envelope_revision):
+        data = msg.get("data", {})
+        envelope_revision = data.get("revision")
+
+        if envelope_revision is not None and self._is_stale_envelope(envelope_revision):
+            self._log_debug(
+                f"StateProxy '{self._process_name}': устаревший пакет revision={envelope_revision} "
+                f"(last={self._last_revision}) — игнорирую (в полёте до предыдущего resync)"
+            )
             return
 
         self._update_cache(deltas)
         self._invoke_callbacks(deltas)
 
+        if envelope_revision is not None:
+            first_revision = data.get("first_revision", envelope_revision)
+            self._advance_revision_and_maybe_resync(first_revision, envelope_revision)
+
     # -------------------------------------------------------------------
-    # Watch-from-revision + resync (Ф4.9b, ADR-SS-014/015)
+    # Watch-from-revision + resync (Ф4.9b, ADR-SS-014/015, пересмотрено 2026-07-11)
     # -------------------------------------------------------------------
 
-    def _check_and_handle_revision_gap(self, envelope_revision: Any) -> bool:
-        """Проверить непрерывность revision пакета, при разрыве — ресинк.
+    def _is_stale_envelope(self, envelope_revision: int) -> bool:
+        """MED-3 (ревью 2026-07-11): пакет "в полёте" во время предыдущего resync.
 
-        Модель: клиент ожидает, что revision КОНВЕРТА (msg["data"]["revision"],
-        проставленная DeltaDispatcher как max revision дельт пакета) растёт
-        строго на 1 от пакета к пакету. Разрыв (пришла revision N+k при
-        ожидаемой N+1) означает, что клиент пропустил хотя бы один пакет
-        state.changed — вызывается resync(). Сверяемся именно с revision
-        конверта, а не отдельных дельт: конверт — единица доставки, и именно
-        её потерю нужно детектить (см. DeltaDispatcher._send_state_changed).
-
-        Fail-open (Ф4.9a): envelope_revision is None → отправитель не
-        поддерживает revision (старый формат) — проверка пропускается,
-        _last_revision не трогается, обработка идёт по старому пути.
-
-        Известное ограничение (ADR-SS-015): revision — глобальный счётчик
-        дерева, а не per-pattern. Если этот процесс подписан на несколько
-        паттернов и где-то ВНЕ его подписок происходят мутации, revision
-        всё равно растёт — это может вызвать ложный resync (разрыв, которого
-        реально не было для ЭТОГО подписчика). Ресинк идемпотентен и дёшев
-        (просто досрочно сверяет кэш с сервером), поэтому ложные срабатывания
-        безопасны, лишь не бесплатны.
+        Сценарий: сервер отправил пакет P (revision=6), затем клиент по
+        ДРУГОЙ причине обнаружил разрыв и ресинкнулся (снимок сервера уже на
+        revision=9, _last_revision=9). Пакет P доставляется ПОСЛЕ ресинка
+        (переупорядочение на IPC-уровне — очереди с приоритетами не
+        гарантируют строгий порядок). Его revision=6 <= уже известного 9 —
+        применение P поверх свежего снимка откатило бы кэш к устаревшим
+        значениям.
 
         Args:
-            envelope_revision: msg["data"]["revision"] (int) или None.
+            envelope_revision: msg["data"]["revision"] (int).
 
         Returns:
-            True — обнаружен разрыв, resync запущен, кэш уже актуализирован
-            (дельты ЭТОГО пакета применять/коллбеки звать не нужно).
-            False — либо revision отсутствует (fail-open), либо разрыва нет
-            (нормальная обработка пакета продолжается как раньше).
+            True — пакет устарел, применять/доставлять нельзя.
         """
-        if envelope_revision is None:
-            return False
+        return self._last_revision is not None and envelope_revision <= self._last_revision
 
+    def _advance_revision_and_maybe_resync(self, first_revision: int, envelope_revision: int) -> None:
+        """Продвинуть _last_revision и, при обнаруженном разрыве, ДОПОЛНИТЕЛЬНО ресинкнуться.
+
+        ВАЖНО: к моменту вызова этого метода дельты ТЕКУЩЕГО пакета уже
+        применены к кэшу и доставлены в callbacks (см. on_state_changed,
+        инвариант (б)) — resync здесь ТОЛЬКО подстраховка для путей, которые
+        мог задеть действительно потерянный пакет, а не источник истины для
+        уже обработанного пакета.
+
+        Модель диапазона (HIGH-1, ревью 2026-07-11): пакет описывает
+        revisions [first_revision .. envelope_revision]. Непрерывность —
+        first_revision не больше _last_revision+1 (между тем, что мы уже
+        видели, и тем, что несёт этот пакет, нет пропущенных revision).
+        merge() на N листьев (TreeStore._merge_recursive) даёт ОДИН пакет
+        с диапазоном [last+1 .. last+N] — воспринимается как непрерывный
+        ЦЕЛИКОМ. Раньше сравнивался только max(revision) конверта, поэтому
+        пакет из 2+ листьев (envelope=last+2) ложно распознавался как
+        разрыв — хотя все промежуточные revision содержались В ЭТОМ ЖЕ
+        пакете, и дельты (тогда) терялись целиком.
+
+        Известное ограничение (ADR-SS-015, не устранено этим фиксом):
+        revision — счётчик ВСЕГО дерева, не per-pattern. Мутации вне
+        подписок этого proxy тоже двигают revision невидимо для него — это
+        может вызывать resync, которого объективно не требовалось (лишний
+        round-trip). Но (в отличие от старого поведения) это больше НЕ
+        стоит потери текущего пакета — gap используется ТОЛЬКО как
+        опциональный бэкстоп надёжности, никогда не ценой данных.
+
+        _last_revision продвигается до envelope_revision НЕЗАВИСИМО от
+        исхода resync (MED-4, ревью 2026-07-11): раньше неудачный resync
+        навсегда замораживал _last_revision — каждый следующий пакет снова
+        считался разрывом, callbacks блокировались перманентно. Теперь
+        прогресс отслеживается по реально доставленным (и уже применённым)
+        пакетам; resync — только попытка подтянуть то, что могло потеряться.
+
+        Args:
+            first_revision: msg["data"]["first_revision"] (fallback — envelope_revision
+                для пакетов от отправителей без этого поля, обратная совместимость).
+            envelope_revision: msg["data"]["revision"].
+        """
         if self._last_revision is None:
-            # Первый пакет с revision — база отсчёта, разрыв не проверяем.
+            # Первый пакет с revision — база отсчёта, разрыва не бывает по определению.
             self._last_revision = envelope_revision
-            return False
+            return
 
         expected = self._last_revision + 1
-        if envelope_revision == expected:
-            self._last_revision = envelope_revision
-            return False
+        gap = first_revision > expected
+        self._last_revision = envelope_revision
 
-        self._log_warning(
-            f"StateProxy '{self._process_name}': разрыв revision "
-            f"(ожидалось {expected}, пришло {envelope_revision}) — запускаю resync"
-        )
-        patterns = list(dict.fromkeys(self._sub_patterns.values()))
-        self._resync(patterns)
-        return True
+        if gap:
+            self._log_warning(
+                f"StateProxy '{self._process_name}': разрыв revision "
+                f"(ожидалось {expected}, пакет начинается с {first_revision}) — "
+                "запускаю resync (подстраховка; текущий пакет уже применён)"
+            )
+            patterns = list(dict.fromkeys(self._sub_patterns.values()))
+            self._resync(patterns)
 
     def _resync(self, patterns: list[str]) -> None:
         """Ресинк кэша: запросить свежий снапшот поддеревьев по patterns.
@@ -529,7 +571,11 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         revision = response.get("revision")
         self._apply_resync_snapshot(patterns, snapshot if isinstance(snapshot, dict) else {})
         if isinstance(revision, int):
-            self._last_revision = revision
+            # max(...) — resync никогда не должен ОТКАТЫВАТЬ _last_revision назад
+            # (ревью 2026-07-11): к моменту ответа resync'а _last_revision мог
+            # уже уйти вперёд за счёт пакетов, доставленных и применённых, пока
+            # resync-запрос был в полёте (инвариант (б) — они не ждут resync).
+            self._last_revision = max(self._last_revision, revision) if self._last_revision is not None else revision
         self._log_debug(f"StateProxy '{self._process_name}': resync выполнен, revision={revision}")
 
     def _apply_resync_snapshot(self, patterns: list[str], snapshot: dict) -> None:
@@ -695,19 +741,58 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 f"StateProxy '{self._process_name}': router=None, команда '{msg.get('command')}' не отправлена"
             )
 
-    def _send_sync(self, msg: dict) -> dict | None:
-        """Отправить IPC-сообщение синхронно и вернуть ответ.
+    # Таймаут ожидания ответа для router.request() (ADR-SS-016) — совпадает
+    # с дефолтом RouterManager.request(), чтобы поведение не расходилось.
+    _SYNC_REQUEST_TIMEOUT = 5.0
 
-        При router=None или ошибке — возвращает None.
+    def _send_sync(self, msg: dict) -> dict | None:
+        """Отправить IPC-сообщение синхронно и вернуть ОТВЕТ ОБРАБОТЧИКА.
+
+        ADR-SS-016 (ревью Ф4.9, PLAUSIBLE-6, 2026-07-11): у реального
+        RouterManager `send()` — fire-and-forget поверх канала (кладёт
+        сообщение в очередь и сразу возвращает статус ДОСТАВКИ в очередь,
+        например `{"status": "success", "channel": "ctrl"}`), а НЕ ответ
+        обработчика на другом конце. Настоящий request/response с ожиданием
+        ответа — отдельный метод `router.request()` (блокирует по
+        correlation_id до прихода `type=="response"` или таймаута).
+
+        Поэтому:
+          - Если router поддерживает `request()` (реальный RouterManager) —
+            используем его и разворачиваем `envelope["result"]` (конверт
+            reply_to_request: `{"success": bool, "result": <ответ handler'а>}`).
+          - Иначе (router — тестовый дубль, реализующий `send()` КАК
+            request-reply напрямую: `InMemoryRouter`/`MockRouter`/
+            `_RelayRouter`) — используем `send()` как раньше, обратная
+            совместимость всего существующего test suite сохранена.
+
+        Fail-open: таймаут/ошибка транспорта/некорректный ответ → None.
+        Вызывающий код (`get`, `get_subtree`, `subscribe`, `_resync`) уже
+        трактует None как "ответа нет" и не падает.
 
         Args:
             msg: IPC-сообщение для отправки.
 
         Returns:
-            dict с ответом или None.
+            dict с ответом обработчика или None.
         """
         if self._router is None:
             return None
+
+        request_fn = getattr(self._router, "request", None)
+        if callable(request_fn):
+            try:
+                envelope = request_fn(msg, timeout=self._SYNC_REQUEST_TIMEOUT)
+            except Exception as exc:
+                self._log_error(f"StateProxy '{self._process_name}': ошибка request() '{msg.get('command')}': {exc}")
+                return None
+            if not isinstance(envelope, dict) or envelope.get("success") is False:
+                self._log_warning(
+                    f"StateProxy '{self._process_name}': request() '{msg.get('command')}' не получил ответа: {envelope}"
+                )
+                return None
+            result = envelope.get("result")
+            return result if isinstance(result, dict) else envelope
+
         try:
             return self._router.send(msg)
         except Exception as exc:

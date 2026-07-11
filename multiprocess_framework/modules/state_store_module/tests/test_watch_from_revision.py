@@ -141,3 +141,66 @@ def test_dropped_delta_on_unrelated_sibling_path_also_converges():
     assert proxy.get("cameras.0.type") == "usb"
     assert proxy.get("cameras.0.state.status") == "running"
     assert proxy._last_revision == mgr.store.revision == 3
+
+
+def test_multi_leaf_merge_does_not_trigger_false_resync():
+    """HIGH-1 (ревью 2026-07-11): merge на 2+ листа инкрементирует revision по
+    разу на лист (TreeStore._merge_recursive) — ОДИН пакет state.changed несёт
+    ДИАПАЗОН revision. Раньше клиент сравнивал только max(revision) конверта
+    с last+1: пакет из 2 листьев (envelope=last+2) ложно распознавался как
+    разрыв — резолвился resync'ом, а РЕАЛЬНЫЕ дельты этого пакета целиком
+    ТЕРЯЛИСЬ (return до _invoke_callbacks). first_revision закрывает это:
+    диапазон пакета стыкуется с last+1 → это НЕ разрыв, resync не нужен,
+    дельты доставлены штатно одним пакетом в callback.
+    """
+    mgr, proxy, router = _wire_manager_and_proxy()
+    received: list = []
+    proxy.subscribe("cameras.0.**", lambda deltas: received.append(deltas), exclude_self=False)
+
+    # Мутация №1 — база отсчёта revision=1.
+    mgr.handle_state_set({"data": {"path": "cameras.0.state.status", "value": "idle", "source": "camera_0"}})
+    assert proxy._last_revision == 1
+    received.clear()
+
+    # Мутация №2 — merge на 2 листа: revision разом становится 2 и 3, ОДИН пакет.
+    mgr.handle_state_merge(
+        {"data": {"path": "cameras.0.config", "data": {"fps": 30, "type": "usb"}, "source": "camera_0"}}
+    )
+
+    assert proxy.get("cameras.0.config.fps") == 30
+    assert proxy.get("cameras.0.config.type") == "usb"
+    assert proxy._last_revision == mgr.store.revision == 3
+    assert router.resync_requests() == []  # НЕ было ложного resync
+    assert len(received) == 1  # дельты дошли ОДНИМ пакетом до callback
+    assert len(received[0]) == 2
+
+
+def test_unrelated_mutation_outside_pattern_does_not_swallow_relevant_delivery():
+    """HIGH-2 (ревью 2026-07-11): мутация ВНЕ паттерна подписчика двигает
+    revision дерева невидимо для него — следующий релевантный пакет получает
+    envelope, не равный last+1 ("разрыв" по глобальному счётчику, хотя
+    реальной потери не было). Раньше это тоже приводило к проглатыванию
+    дельт ЭТОГО пакета (тот же баг, что и HIGH-1, другой триггер). Теперь —
+    дельта ВСЕГДА доставляется в callback (инвариант (б)), даже если попутно
+    (best-effort) запускается лишний resync.
+    """
+    mgr, proxy, router = _wire_manager_and_proxy()
+    received: list = []
+    proxy.subscribe("cameras.0.**", lambda deltas: received.append(deltas), exclude_self=False)
+
+    mgr.handle_state_set({"data": {"path": "cameras.0.fps", "value": 10, "source": "camera_0"}})
+    assert proxy._last_revision == 1
+    received.clear()
+
+    # Мутация ВНЕ подписки ("renderer.theme" не матчит "cameras.0.**") — двигает
+    # revision дерева, proxy её никогда не увидит.
+    mgr.handle_state_set({"data": {"path": "renderer.theme", "value": "dark", "source": "gui_writer"}})
+
+    # Следующая релевантная мутация: envelope revision=3, proxy ждал 2 —
+    # "разрыв" по счётчику (на деле невидимая мутация, не потеря) — дельта
+    # ВСЁ РАВНО доставлена в callback, не проглочена.
+    mgr.handle_state_set({"data": {"path": "cameras.0.fps", "value": 99, "source": "camera_0"}})
+
+    assert proxy.get("cameras.0.fps") == 99
+    assert len(received) == 1
+    assert received[0][0].new_value == 99

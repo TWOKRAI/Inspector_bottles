@@ -986,13 +986,22 @@ class TestStateProxyRevisionGapDetection:
         assert router.last_sent("state.get_subtree") is None
 
     def test_gap_triggers_resync_no_router_is_safe(self):
-        """Разрыв без router — _resync() no-op, не бросает исключение."""
+        """Разрыв без router — _resync() no-op, не бросает исключение.
+
+        Изменено ревью Ф4.9 (MED-4, 2026-07-11): раньше _last_revision
+        обновлялась ТОЛЬКО при УСПЕШНОМ resync — при router=None (resync
+        физически невозможен) revision навсегда замирала на 1, и КАЖДЫЙ
+        следующий пакет считался бы новым разрывом (перманентная блокировка
+        детекции). Теперь _last_revision продвигается по факту доставленного
+        пакета НЕЗАВИСИМО от исхода resync (пакет уже применён — инвариант
+        (б)); resync — best-effort подстраховка, а не условие прогресса.
+        """
         proxy = StateProxy("cam", router=None)
         proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=1))
-        # Прыжок с 1 на 5 — разрыв. Без router просто нет ресинка.
+        # Прыжок с 1 на 5 — разрыв. Без router просто нет ресинка, но пакет применён.
         proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=50)], revision=5))
-        # revision не обновилась ресинком (router=None) — но и не упало.
-        assert proxy._last_revision == 1
+        assert proxy.get("cameras.0.config.fps") == 50  # пакет применён несмотря на разрыв
+        assert proxy._last_revision == 5  # продвинулась — нет перманентной блокировки
 
 
 class TestStateProxyResync:
@@ -1053,17 +1062,40 @@ class TestStateProxyResync:
         # Путь удалён именно из КЭША (а не просто недоступен из-за IPC fallback).
         assert "cameras.0.config.fps" not in proxy.cache
 
-    def test_resync_failure_leaves_last_revision_unchanged(self):
-        """Ошибка resync (status != ok) — _last_revision не обновляется (retry на следующем разрыве)."""
+    def test_resync_failure_still_advances_revision_no_permanent_lockout(self):
+        """MED-4 (ревью 2026-07-11, было признано багом): неудачный resync
+        БОЛЬШЕ НЕ замораживает _last_revision навсегда.
+
+        Раньше (test_resync_failure_leaves_last_revision_unchanged) —
+        _last_revision оставалась на 1 при неудаче resync, из-за чего
+        КАЖДЫЙ следующий пакет снова считался разрывом и порождал ещё один
+        (тоже неудачный) resync — перманентная блокировка progress'а. Теперь:
+        пакет применяется к кэшу и доставляется в callback НЕЗАВИСИМО от
+        исхода resync (fail-open, инвариант (б)), _last_revision продвигается
+        до revision пришедшего пакета — блокировки нет, а следующий пакет с
+        нормальным продолжением revision не считается новым разрывом.
+        """
         router = MockRouter()
         router.set_sync_response("state.get_subtree", {"status": "error", "error": "boom"})
+        received: list[list[Delta]] = []
         proxy = StateProxy("cam", router=router)
-        proxy.subscribe("cameras.0.**", lambda _d: None, exclude_self=False)
+        proxy.subscribe("cameras.0.**", lambda deltas: received.append(deltas), exclude_self=False)
 
         proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=1))
         proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=999)], revision=9))
 
-        assert proxy._last_revision == 1  # не сдвинулась — resync не удался
+        assert proxy._last_revision == 9  # продвинулась несмотря на неудачный resync
+        assert proxy.get("cameras.0.config.fps") == 999  # пакет применён (fail-open)
+        assert received and received[-1][0].new_value == 999  # callback вызван, не проглочен
+
+        # Следующий пакет — нормальное продолжение (revision=10 после 9) — НЕ разрыв,
+        # доказывает отсутствие перманентной блокировки detection'а.
+        received.clear()
+        sent_before = len(router.sent)
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=1000)], revision=10))
+        assert proxy._last_revision == 10
+        assert received and received[-1][0].new_value == 1000
+        assert len(router.sent) == sent_before  # никакого нового resync
 
     def test_resync_no_op_without_patterns(self):
         """_resync([]) — нет активных подписок, нечего ресинкать, no-op."""
@@ -1072,3 +1104,259 @@ class TestStateProxyResync:
         proxy._resync([])
         assert router.last_sent("state.get_subtree") is None
         assert proxy._pattern_refcount == {}
+
+
+# ===========================================================================
+# Ревью Ф4.9 2026-07-11: HIGH-1 (multi-leaf merge ложный разрыв), HIGH-2 +
+# инвариант (б) (дельты доставленного пакета никогда не проглатываются из-за
+# resync), MED-3 (устаревший в-полёте пакет). Модель диапазона
+# [first_revision, revision] — см. _advance_revision_and_maybe_resync.
+# ===========================================================================
+
+
+class TestStateProxyMultiLeafMergeContinuity:
+    """HIGH-1: envelope с first_revision, стыкующимся с last+1, — НЕ разрыв,
+    даже если max(revision) пакета > last+1 (merge на 2+ листа)."""
+
+    def test_multi_leaf_merge_envelope_not_treated_as_gap(self):
+        router = MockRouter()
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda _d: None, exclude_self=False)
+
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=1)], revision=4))
+
+        # Эмулируем пакет из merge() на 2 листа: first_revision=5, revision=6.
+        merge_deltas = [
+            Delta(
+                path="cameras.0.config.fps",
+                old_value=MISSING,
+                new_value=5,
+                source="camera_0",
+                revision=5,
+            ),
+            Delta(
+                path="cameras.0.config.type",
+                old_value=MISSING,
+                new_value="usb",
+                source="camera_0",
+                revision=6,
+            ),
+        ]
+        msg = {
+            "command": "state.changed",
+            "data": {
+                "deltas": [d.to_dict() for d in merge_deltas],
+                "revision": 6,
+                "first_revision": 5,
+            },
+        }
+        proxy.on_state_changed(msg)
+
+        assert router.last_sent("state.get_subtree") is None  # НЕ было resync
+        assert proxy._last_revision == 6
+        assert proxy.get("cameras.0.config.fps") == 5
+        assert proxy.get("cameras.0.config.type") == "usb"
+
+    def test_multi_leaf_merge_missing_first_revision_falls_back_to_old_behavior(self):
+        """Обратная совместимость: пакет без first_revision (старый отправитель) —
+        деградирует к сравнению только по envelope revision (как до фикса)."""
+        router = MockRouter()
+        router.set_sync_response("state.get_subtree", {"status": "ok", "value": {}, "revision": 6})
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda _d: None, exclude_self=False)
+
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=1)], revision=4))
+        # Без first_revision в конверте — used envelope_revision как fallback.
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=6)], revision=6))
+
+        # first_revision по умолчанию == envelope_revision(6) > expected(5) → разрыв.
+        assert router.last_sent("state.get_subtree") is not None
+
+
+class TestStateProxyInvariantBDeltasAlwaysDelivered:
+    """Инвариант (б), ревью 2026-07-11: дельты ДОСТАВЛЕННОГО пакета ВСЕГДА
+    доходят до callbacks/delta_sink — resync ДОПОЛНЯЕТ, а не ЗАМЕНЯЕТ доставку."""
+
+    def test_gap_packet_deltas_still_delivered_to_callbacks(self):
+        router = MockRouter()
+        router.set_sync_response(
+            "state.get_subtree",
+            {"status": "ok", "value": {"cameras": {"0": {"config": {"fps": 77}}}}, "revision": 9},
+        )
+        received: list[list[Delta]] = []
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda deltas: received.append(deltas), exclude_self=False)
+
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=1))
+        received.clear()
+
+        # Разрыв: revision=9 при ожидаемой 2 — старое поведение проглотило бы
+        # эту дельту целиком (return до _invoke_callbacks). Теперь — доставлена.
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=999)], revision=9))
+
+        assert len(received) == 1
+        assert received[0][0].new_value == 999
+
+    # HIGH-2 сквозной сценарий (мутация вне паттерна подписчика + реальный
+    # StateStoreManager/DeltaDispatcher) — см.
+    # test_watch_from_revision.py::test_unrelated_mutation_outside_pattern_does_not_swallow_relevant_delivery
+    # (нужен router, реально РЕЛЕЙЯЩИЙ state.changed между mgr и proxy — этот
+    # файл использует упрощённый MockRouter без такого релея).
+
+
+class TestStateProxyStaleEnvelope:
+    """MED-3: пакет "в полёте" во время предыдущего resync (revision <= last) —
+    игнорируется целиком, без resync-шторма и без регрессии кэша."""
+
+    def test_stale_packet_after_resync_is_ignored_without_resync_storm(self):
+        router = MockRouter()
+        router.set_sync_response(
+            "state.get_subtree",
+            {"status": "ok", "value": {"cameras": {"0": {"config": {"fps": 77}}}}, "revision": 9},
+        )
+        received: list[list[Delta]] = []
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda deltas: received.append(deltas), exclude_self=False)
+
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=1))
+        # Разрыв → resync → last_revision=9, кэш=77 (см. TestStateProxyResync).
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=999)], revision=9))
+        assert proxy._last_revision == 9
+        assert proxy.get("cameras.0.config.fps") == 77
+
+        sent_before = len(router.sent)
+        received.clear()
+
+        # Пакет "в полёте", отправленный сервером ДО resync'а (revision=6 <= last=9).
+        stale_delta = _make_delta(new=6666)
+        proxy.on_state_changed(_make_state_changed_msg_rev([stale_delta], revision=6))
+
+        assert proxy.get("cameras.0.config.fps") == 77  # кэш НЕ регрессировал
+        assert proxy._last_revision == 9  # last_revision не откатилась назад
+        assert received == []  # устаревший пакет не доставлен в callback
+        assert len(router.sent) == sent_before  # НЕ вызвал новый resync (без шторма)
+
+    def test_exact_duplicate_envelope_is_stale(self):
+        """envelope_revision == last_revision (точный дубликат) — тоже устарел."""
+        router = MockRouter()
+        received: list[list[Delta]] = []
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda deltas: received.append(deltas), exclude_self=False)
+
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=10)], revision=5))
+        received.clear()
+
+        proxy.on_state_changed(_make_state_changed_msg_rev([_make_delta(new=999)], revision=5))
+
+        assert proxy.get("cameras.0.config.fps") == 10  # дубликат не применился
+        assert received == []
+
+
+# ===========================================================================
+# ADR-SS-016 (PLAUSIBLE-6, ревью 2026-07-11): _send_sync должен звать
+# router.request(), а не router.send(), когда router умеет request/response.
+#
+# У реального RouterManager send() — fire-and-forget поверх канала (кладёт
+# в очередь и возвращает статус ДОСТАВКИ, например {"status":"success",
+# "channel": "ctrl"}), НЕ ответ обработчика на другом конце. Настоящий
+# синхронный request/response — router.request() (correlation_id + blocking
+# wait). Все тестовые дублёры в этом файле (MockRouter/InMemoryRouter)
+# реализуют send() КАК request-reply напрямую — маскируя баг в тестах.
+# Ниже — дублёр, мимикрирующий РЕАЛЬНОЕ разделение send()/request().
+# ===========================================================================
+
+
+class _RealisticRouter:
+    """Дублёр, воспроизводящий реальное разделение RouterManager.send()/request().
+
+    send()    — чистый transport-ack (как QueueChannel.send()), НЕ ответ handler'а.
+    request() — блокирующий request/response, возвращает конверт
+                {"success": bool, "result": <ответ handler'а>} (как
+                RouterManager.request()/reply_to_request()).
+    """
+
+    def __init__(self, request_result: dict | None = None, request_success: bool = True) -> None:
+        self.send_calls: list[dict] = []
+        self.request_calls: list[tuple[dict, float]] = []
+        self._request_result = request_result if request_result is not None else {"status": "ok"}
+        self._request_success = request_success
+
+    def register_message_handler(self, key, handler, **kwargs) -> None:
+        pass
+
+    def send_async(self, msg, priority: str = "normal") -> None:
+        pass
+
+    def send(self, msg) -> dict:
+        # РЕАЛЬНЫЙ router: чистый ack доставки в очередь, НЕ ответ обработчика.
+        self.send_calls.append(msg)
+        return {"status": "success", "channel": "ctrl"}
+
+    def request(self, msg, timeout: float = 5.0) -> dict:
+        self.request_calls.append((msg, timeout))
+        if not self._request_success:
+            return {"success": False, "error": "timeout", "correlation_id": "cid"}
+        result = dict(self._request_result)
+        request_id = msg.get("data", {}).get("request_id")
+        if request_id is not None:
+            result.setdefault("request_id", request_id)
+        return {"success": True, "result": result, "correlation_id": "cid"}
+
+
+class TestSendSyncPrefersRequestOverSend:
+    """_send_sync должен использовать router.request(), когда он доступен."""
+
+    def test_get_uses_request_and_unwraps_handler_result(self):
+        """proxy.get() через реалистичный router читает ЗНАЧЕНИЕ ИЗ result, а не ack."""
+        router = _RealisticRouter(request_result={"status": "ok", "value": 42})
+        proxy = StateProxy("cam", router=router)
+
+        value = proxy.get("some.path")
+
+        assert value == 42
+        assert len(router.request_calls) == 1
+        assert router.send_calls == []  # send() не используется для получения ответа
+
+    def test_get_subtree_uses_request(self):
+        """proxy.get_subtree() тоже обязан идти через request(), не send()."""
+        router = _RealisticRouter(request_result={"status": "ok", "value": {"fps": 30}})
+        proxy = StateProxy("cam", router=router)
+
+        assert proxy.get_subtree("cameras.0") == {"fps": 30}
+        assert len(router.request_calls) == 1
+
+    def test_request_timeout_is_fail_open(self):
+        """Таймаут/неуспех request() — fail-open (default), не исключение."""
+        router = _RealisticRouter(request_success=False)
+        proxy = StateProxy("cam", router=router)
+
+        assert proxy.get("some.path", default="fallback") == "fallback"
+
+    def test_resync_uses_request_and_converges_cache(self):
+        """_resync() (ядро watch-from-revision) обязан работать по РЕАЛЬНОМУ
+        каналу — через request(), а не send(), иначе в проде получал бы
+        transport-ack вместо снапшота и никогда не сходился с сервером."""
+        router = _RealisticRouter(
+            request_result={
+                "status": "ok",
+                "value": {"cameras": {"0": {"config": {"fps": 55}}}},
+                "revision": 3,
+            }
+        )
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda _d: None, exclude_self=False)
+
+        proxy._resync(["cameras.0.**"])
+
+        assert proxy.get("cameras.0.config.fps") == 55
+        assert proxy._last_revision == 3
+        assert len(router.request_calls) >= 1
+
+    def test_falls_back_to_send_when_router_has_no_request(self):
+        """Обратная совместимость: тестовые роутеры без request() (InMemoryRouter,
+        MockRouter, _RelayRouter) продолжают работать через send() как раньше."""
+        router = MockRouter()
+        router.set_sync_response("state.get", {"status": "ok", "value": 7, "request_id": "x"})
+        proxy = StateProxy("cam", router=router)
+
+        assert proxy.get("some.path") == 7

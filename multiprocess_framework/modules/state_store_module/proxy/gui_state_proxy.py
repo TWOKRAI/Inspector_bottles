@@ -77,12 +77,14 @@ class GuiStateProxy(StateProxy):
         """Обработка state.changed с доставкой дельт в delta_sink.
 
         1. Десериализует дельты (текущий поток — безопасно).
-        2. Проверяет непрерывность revision (Ф4.9b, унаследовано из
-           StateProxy) — при разрыве ресинкается и завершает обработку.
-        3. Обновляет кэш (только dict-операция — безопасно).
-        4. Если delta_sink задан — передаёт дельты ему (маршалинг в Qt — на
-           стороне sink через bridge).
-        5. Иначе — прямой вызов локальных callbacks (fallback для тестов без Qt).
+        2. Устаревший пакет (MED-3, унаследовано из StateProxy) — игнорируется
+           целиком, без обновления кэша и без доставки в sink/callbacks.
+        3. Иначе — дельты пакета ВСЕГДА обновляют кэш и доставляются в
+           delta_sink/callbacks (инвариант (б), унаследовано из StateProxy —
+           решение о resync никогда не стоит потери текущего пакета).
+        4. Проверяется непрерывность revision (диапазон [first_revision,
+           revision], унаследовано из StateProxy) — при разрыве resync
+           запускается ДОПОЛНИТЕЛЬНО, как подстраховка.
 
         Args:
             msg: IPC-сообщение state.changed.
@@ -91,8 +93,14 @@ class GuiStateProxy(StateProxy):
         if not deltas:
             return
 
-        envelope_revision = msg.get("data", {}).get("revision")
-        if self._check_and_handle_revision_gap(envelope_revision):
+        data = msg.get("data", {})
+        envelope_revision = data.get("revision")
+
+        if envelope_revision is not None and self._is_stale_envelope(envelope_revision):
+            self._log_debug(
+                f"StateProxy '{self._process_name}': устаревший пакет revision={envelope_revision} "
+                f"(last={self._last_revision}) — игнорирую (в полёте до предыдущего resync)"
+            )
             return
 
         # Обновление кэша безопасно из любого потока (только dict-операции)
@@ -104,3 +112,7 @@ class GuiStateProxy(StateProxy):
         else:
             # Fallback: прямой вызов локальных callbacks (тесты без Qt)
             self._invoke_callbacks(deltas)
+
+        if envelope_revision is not None:
+            first_revision = data.get("first_revision", envelope_revision)
+            self._advance_revision_and_maybe_resync(first_revision, envelope_revision)
