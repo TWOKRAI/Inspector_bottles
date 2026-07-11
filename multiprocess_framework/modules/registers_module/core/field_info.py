@@ -46,6 +46,26 @@ class FieldInfo:
         """Единица измерения."""
         return getattr(self.meta, "unit", "") or "" if self.meta else ""
 
+    @property
+    def ui_group(self) -> str | None:
+        """Группа для визуальной компоновки формы (build_form_for_schema)."""
+        return self.meta.ui_group if self.meta else None
+
+    @property
+    def ui_order(self) -> int | None:
+        """Порядок поля внутри формы (build_form_for_schema)."""
+        return self.meta.ui_order if self.meta else None
+
+    @property
+    def ui_hidden(self) -> bool:
+        """True — поле не должно показываться в сгенерированной форме."""
+        return bool(self.meta.ui_hidden) if self.meta else False
+
+    @property
+    def ui_widget(self) -> str:
+        """Widget-hint для резолвера kinds — алиас FieldMeta.widget (единый источник)."""
+        return getattr(self.meta, "widget", "") or "" if self.meta else ""
+
 
 def extract_fields(plugin_name: str, register_cls: type, category: str = "") -> list[FieldInfo]:
     """Извлечь FieldInfo из register-класса (Pydantic model).

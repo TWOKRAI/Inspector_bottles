@@ -95,6 +95,18 @@ class FieldMeta:
         hidden          — скрыть в UI (can_modify() → False при hidden UI)
         description_i18n / info_i18n — локализованные тексты {"ru":..., "en":...}
         examples        — примеры значений для документации
+        ui_group        — группа для визуальной компоновки формы (build_form_for_schema);
+                          None — поле не входит ни в одну именованную группу
+        ui_order        — порядок поля внутри формы (меньше — раньше); None — не задан,
+                          такие поля идут после упорядоченных, в исходном порядке модели
+        ui_hidden       — не показывать поле в сгенерированной форме (build_form_for_schema),
+                          НЕЗАВИСИМО от access_level/hidden — это чисто presentation-фильтр
+                          для конкретной формы, а не контроль доступа к данным
+
+    Примечание про widget:
+        Отдельного "ui_widget" нет — widget уже служит единственным источником
+        widget-подсказки для резолвера kind (см. DECISIONS.md ADR-DS-008 и более
+        раннее решение "FieldMeta.widget — единственный источник").
     """
 
     __slots__ = (
@@ -113,6 +125,9 @@ class FieldMeta:
         "transfer_k",
         "round_k",
         "widget",
+        "ui_group",
+        "ui_order",
+        "ui_hidden",
     )
 
     def __init__(
@@ -139,6 +154,11 @@ class FieldMeta:
         # "" (default) — автовыбор по Python-типу.
         # Явные значения: см. WidgetType (Literal); IDE подсказывает варианты.
         widget: WidgetType = "",
+        # UI-hints для build_form_for_schema (аддитивно, дефолты не меняют
+        # поведение существующих схем).
+        ui_group: str | None = None,
+        ui_order: int | None = None,
+        ui_hidden: bool = False,
     ) -> None:
         self.description = description
         self.info = info
@@ -163,6 +183,9 @@ class FieldMeta:
         # Нормализация алиасов: combo→literal, spinbox→int, numeric→float.
         # Канонические значения и "" проходят без изменений.
         self.widget = _WIDGET_ALIASES.get(widget, widget)  # type: ignore[assignment]
+        self.ui_group = ui_group
+        self.ui_order = ui_order
+        self.ui_hidden = ui_hidden
 
     # =========================================================================
     # Интеграция с Pydantic v2
@@ -282,4 +305,7 @@ class FieldMeta:
             "hidden": self.hidden,
             "examples": self.examples,
             "widget": self.widget,
+            "ui_group": self.ui_group,
+            "ui_order": self.ui_order,
+            "ui_hidden": self.ui_hidden,
         }
