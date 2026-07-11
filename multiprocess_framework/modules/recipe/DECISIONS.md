@@ -53,6 +53,7 @@ ADR-SS-011 (инъекция доменных путей/предикатов), 
 ## ADR-RCP-002: Инъекция comment-preserving writer в RecipeManager (yaml_updater)
 
 **Дата:** 2026-07-11
+**Статус:** Superseded ADR-RCP-005 (2026-07-12) — seam снят, comment-preserving writer стал generic-дефолтом модуля (`recipe.yaml_io.update_yaml_preserving`)
 **Контекст:** `RecipeManager.duplicate()` сохраняет комментарии YAML через
 `multiprocess_prototype.recipes.yaml_io.update_yaml_preserving` (ruamel round-trip).
 Прямой перенос менеджера во фреймворк дал бы reverse-import `framework → prototype`
