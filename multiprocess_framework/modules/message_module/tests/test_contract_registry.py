@@ -4,6 +4,7 @@
 
 Дизайн: plans/2026-07-06_constructor-master/f4.2-fencing-contracts.md
 """
+
 from __future__ import annotations
 
 import pytest
@@ -38,6 +39,7 @@ def _reg() -> MessageContractRegistry:
 # --------------------------------------------------------------------------- #
 # Регистрация / доступ
 # --------------------------------------------------------------------------- #
+
 
 class TestRegistration:
     def test_register_and_get(self):
@@ -82,6 +84,7 @@ class TestRegistration:
 # --------------------------------------------------------------------------- #
 # Сверка (validate)
 # --------------------------------------------------------------------------- #
+
 
 class TestValidate:
     def test_unknown_key_returns_none(self):
@@ -133,6 +136,19 @@ class TestValidate:
         assert check.unexpected == []
         assert check.ok
 
+    def test_transport_correlation_id_not_flagged_unexpected(self):
+        """NEW-3: `correlation_id` — транспортная метка `RouterManager.request()`
+        (зеркалится в `data` ЛЮБОГО request-response вызова), не поле команды.
+        Без исключения strict-раскатка built-in контрактов дропала бы КАЖДУЮ команду,
+        отправленную через request-response (найдено live-прогоном capabilities-дампа)."""
+        check = _reg().validate(
+            "ping",
+            {"id": "1", "command": "p", "correlation_id": "abc-123"},
+        )
+        assert check is not None
+        assert check.unexpected == []
+        assert check.ok
+
     def test_command_schema_realistic(self):
         r = MessageContractRegistry()
         r.register("process.restart", CommandMessageSchema)
@@ -149,6 +165,7 @@ class TestValidate:
 # --------------------------------------------------------------------------- #
 # Ключ маршрутизации + middleware
 # --------------------------------------------------------------------------- #
+
 
 class TestContractKeyOf:
     def test_command_priority(self):
@@ -240,6 +257,16 @@ class TestParamsInData:
         check = self._reg().validate("wire.configure", msg)
         assert check is not None and not check.ok
         assert check.errors and "buffer_slots" in check.errors[0]
+
+    def test_transport_correlation_id_in_data_not_flagged(self):
+        """NEW-3: `correlation_id` в `message["data"]` (params_in_data=True) — та же
+        транспортная метка, тот же исключающий путь `_TRANSPORT_KEYS`."""
+        msg = {
+            "command": "wire.configure",
+            "data": {"wire_key": "a→b", "buffer_slots": 8, "correlation_id": "abc-123"},
+        }
+        check = self._reg().validate("wire.configure", msg)
+        assert check is not None and check.ok
 
     def test_missing_required_in_data_caught(self):
         msg = {"command": "wire.configure", "data": {"buffer_slots": 4}}  # нет wire_key

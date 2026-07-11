@@ -24,12 +24,22 @@
 Пустой реестр = ноль оверхеда: `validate` по неизвестному ключу возвращает `None`
 до любой валидации.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel, ValidationError
+
+#: Служебные ключи транспорта, не part payload-контракта команды (NEW-3, 2026-07-11).
+#: `correlation_id` зеркалится в `data` ЛЮБОГО request-response вызова
+#: (`RouterManager.request` → `data.setdefault("correlation_id", cid)`, PM-обёртка
+#: `process.command`) — не поле конкретной команды, а транспортная метка сопоставления
+#: ответа. Без исключения strict-раскатка built-in контрактов (NEW-3) дропала бы КАЖДУЮ
+#: команду, отправленную через request-response (обнаружено live-прогоном
+#: backend_ctl/tests/test_capabilities.py::test_dump_matches_committed).
+_TRANSPORT_KEYS = frozenset({"correlation_id"})
 
 
 @dataclass(frozen=True)
@@ -167,10 +177,11 @@ class MessageContractRegistry:
 
         missing = [name for name, info in fields.items() if info.is_required() and name not in payload]
         # `_`-префиксные ключи — служебные transport-поля (`_address`, `_receive_info`,
-        # `_source_channel`, `_relayed`, `_fence` fencing-токена Ф4.2). Они не часть
+        # `_source_channel`, `_relayed`, `_fence` fencing-токена Ф4.2), плюс именованные
+        # transport-ключи из `_TRANSPORT_KEYS` (`correlation_id` — NEW-3). Они не часть
         # payload-контракта и не должны попадать в diff «лишних» полей.
         unexpected = (
-            [k for k in payload if k not in fields and not k.startswith("_")]
+            [k for k in payload if k not in fields and not k.startswith("_") and k not in _TRANSPORT_KEYS]
             if forbid_extra
             else []
         )
