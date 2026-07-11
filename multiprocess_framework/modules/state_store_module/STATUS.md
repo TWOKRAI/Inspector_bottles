@@ -11,8 +11,8 @@
 | Компонент | Файл | Статус | Описание |
 |-----------|------|--------|----------|
 | **core/** | | | |
-| TreeStore | core/tree_store.py | Готов | Иерархическое дерево (`get`, `get_subtree`, `set`, `merge`, `delete`, `transaction`, `snapshot`, `restore`) |
-| Delta | core/delta.py | Готов | Иммутабельная единица изменения (path, old/new, source, timestamp, transaction_id) |
+| TreeStore | core/tree_store.py | Готов | Иерархическое дерево (`get`, `get_subtree`, `set`, `merge`, `delete`, `transaction`, `snapshot`, `restore`); монотонная `revision` (Ф4.9, ADR-SS-014) |
+| Delta | core/delta.py | Готов | Иммутабельная единица изменения (path, old/new, source, timestamp, transaction_id, **revision** — Ф4.9) |
 | Transaction | core/delta.py | Готов | Batch с единым transaction_id + `coalesce()` для сжатия |
 | MISSING | core/delta.py | Готов | Singleton-sentinel для «значения нет» |
 | SubscriptionManager | core/subscription_manager.py | Готов | Подписки с glob-style matching + lru_cache на разборе паттернов |
@@ -21,8 +21,8 @@
 | StateStoreManager | manager/state_store_manager.py | Готов | Server-фасад: TreeStore + SubscriptionManager + DeltaDispatcher + 7 IPC-handlers |
 | DeltaDispatcher | manager/delta_dispatcher.py | Готов | Адресная рассылка дельт подписчикам через `targets`, дедупликация по subscriber |
 | **proxy/** | | | |
-| StateProxy | proxy/state_proxy.py | Готов | Client-прокси: локальный кэш + IPC + per-pattern фильтрация callbacks (ADR-SS-012) |
-| GuiStateProxy | proxy/gui_state_proxy.py | Готов | Qt-safe: callbacks через `QMetaObject.invokeMethod(QueuedConnection)`, ленивый PySide6 |
+| StateProxy | proxy/state_proxy.py | Готов | Client-прокси: локальный кэш + IPC + per-pattern фильтрация callbacks (ADR-SS-012); watch-from-revision + resync (Ф4.9, ADR-SS-015) |
+| GuiStateProxy | proxy/gui_state_proxy.py | Готов | Qt-safe: callbacks через `QMetaObject.invokeMethod(QueuedConnection)`, ленивый PySide6; наследует watch-from-revision из StateProxy |
 | **middleware/** | | | |
 | StateMiddleware (ABC) | middleware/base.py | Готов | Базовый класс middleware |
 | MiddlewarePipeline | middleware/base.py | Готов | Цепочка middleware (нулевой overhead на пустом pipeline) |
@@ -47,7 +47,7 @@
 | **testing/** | | | |
 | InMemoryRouter | testing/in_memory_router.py | Готов | Mock IRouter для unit-тестов прикладного кода (ADR-SS-010) |
 
-**Тестов:** **421 unit-тест в `tests/`** (после рефакторинга 2026-05-07: было 415, добавлено 4 теста на per-pattern фильтрацию + 2 на конфигурируемый PersistenceManager).
+**Тестов:** **496 unit-тестов в `tests/`** (Ф4.9, 2026-07-11: добавлены тесты revision-счётчика, envelope-revision в DeltaDispatcher, resync-канала `state.get_subtree`, watch-from-revision gap-detection и сквозной приёмочный `tests/test_watch_from_revision.py`).
 
 ---
 
@@ -68,6 +68,8 @@
 | **exclude_self логика** | Subscription.exclude_sources в DeltaDispatcher | Готов (ADR-SS-007) |
 | **Per-pattern фильтрация callbacks** | StateProxy._sub_patterns + _filter_deltas_by_pattern | Готов (ADR-SS-012) |
 | **Авто-регистрация state.changed** | TODO Фаза 4 (ADR-SS-006) | ❌ Не реализовано (изменение в ProcessModule) |
+| **revision дерева (etcd-паттерн)** | TreeStore._revision, Delta.revision, envelope state.changed | Готов (ADR-SS-014) |
+| **watch-from-revision + resync** | StateProxy._check_and_handle_revision_gap/_resync через state.get_subtree(paths=) | Готов (ADR-SS-015) |
 
 ---
 
@@ -95,6 +97,8 @@ router.register_message_handler("state.changed", proxy.on_state_changed)
 - **`TreeStore.merge`** при глубоких структурах работает за O(N²) (каждый лист проходит навигацию от корня). Для типичных конфигов (десятки ключей) — pernebrejmo. Кандидат на оптимизацию (Этап 2 рефакторинга).
 - **Glob-walker** для дерева повторён в трёх местах (`tree_store._collect_matching`, `selector._walk`, `subscription_manager._match_pattern`). Можно унифицировать в `core/glob_walker.py`. Кандидат на Этап 2.
 - **`StateStoreManager.shutdown` и `StateInspector.subscriptions`** обращаются к приватным атрибутам `SubscriptionManager._lock` / `_subscriptions`. Кандидат на введение публичного `SubscriptionManager.subscribers()` (Этап 2).
+- **watch-from-revision — ложные resync под конкурентными несвязанными записями** (ADR-SS-015): `revision` — счётчик всего дерева, не per-pattern; параллельные мутации вне подписок процесса тоже двигают revision и могут вызвать resync, которого не требовалось. Не влияет на корректность (кэш всё равно сходится), только на частоту resync. Точный per-subscriber gap-detection — кандидат на будущее.
+- **Задача 4.10 (driver watch-from-revision, backend_ctl e2e)** НЕ реализована — вне объёма Ф4.9 (ядро сервер+StateProxy).
 
 ---
 
@@ -109,6 +113,7 @@ router.register_message_handler("state.changed", proxy.on_state_changed)
 | **2026-05-07** | **ADR-SS-011: PersistenceManager — доменно-нейтральный (file_mapping, предикаты)** | **✅ Готово** |
 | **2026-05-07** | **ADR-SS-012: StateProxy — per-pattern фильтрация callbacks** | **✅ Готово** |
 | **2026-05-07** | **README.md / STATUS.md приведены в соответствие с реальным API** | **✅ Готово** |
+| **2026-07-11** | **ADR-SS-014/015: revision дерева + watch-from-revision resync (Ф4.9)** | **✅ Готово** |
 
 ---
 
@@ -116,8 +121,8 @@ router.register_message_handler("state.changed", proxy.on_state_changed)
 
 - **Файлов Python (без тестов):** ~22
 - **Строк кода (без тестов):** ~3300
-- **Файлов тестов:** 16
-- **Строк тестов:** ~4500
-- **Тестов:** 421 (все зелёные, ~3.8 с)
+- **Файлов тестов:** 17
+- **Строк тестов:** ~4900
+- **Тестов:** 496 (все зелёные, ~4.3 с)
 - **Зависимости:** stdlib, `pyyaml`, `multiprocess_framework.modules.base_manager`, опционально `PySide6` (lazy)
-- **Внутренние ADR:** 12
+- **Внутренние ADR:** 15
