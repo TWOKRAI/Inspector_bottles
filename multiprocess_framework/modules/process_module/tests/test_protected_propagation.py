@@ -13,7 +13,7 @@ replace_blueprint рестартил GUI.
 from __future__ import annotations
 
 from ..configs.process_launch_config import ProcessLaunchConfig
-from ..generic.blueprint import ProcessConfig, SystemBlueprint
+from ...process_manager_module.topology.blueprint import ProcessConfig, SystemBlueprint
 
 
 def test_process_launch_config_protected_in_proc_dict() -> None:

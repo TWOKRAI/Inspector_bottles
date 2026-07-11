@@ -103,15 +103,15 @@ def __getattr__(name: str) -> Any:
 
         return register_plugin
     if name == "SystemBlueprint":
-        from .generic.blueprint import SystemBlueprint
+        from ...process_manager_module.topology.blueprint import SystemBlueprint
 
         return SystemBlueprint
     if name == "ProcessConfig":
-        from .generic.blueprint import ProcessConfig
+        from ...process_manager_module.topology.blueprint import ProcessConfig
 
         return ProcessConfig
     if name == "Wire":
-        from .generic.blueprint import Wire
+        from ...process_manager_module.topology.blueprint import Wire
 
         return Wire
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

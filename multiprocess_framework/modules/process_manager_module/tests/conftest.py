@@ -189,7 +189,7 @@ class FakePlanner:
 
     def _build_proc_dicts(self, blueprint: dict) -> dict[str, dict]:
         """Framework-level сборка: SystemBlueprint -> proc_dicts."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             SystemBlueprint,
         )
         from multiprocess_framework.modules.data_schema_module import process

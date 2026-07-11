@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from ..generic.blueprint import ProcessConfig
+from ...process_manager_module.topology.blueprint import ProcessConfig
 
 
 class TestTypedPath:
