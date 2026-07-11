@@ -2308,6 +2308,23 @@
 - Связанные ADR: ADR-COMM-001 (router.send — канон транспорта), ADR-DSP-001…004 (стратегии/expects_full_message), ADR-005 (correlation_id / request-reply), ADR-008 (Dict at Boundary). Соотнесено с `plans/comm-system-target-architecture.md` §4/§9.4 (B2 убирает «documented workarounds»: double-call, auto_register_ipc, first-wins).
 - Refs: [plans/2026-05-31_transport-router-hub/p4.4_command-bus.md](../../plans/2026-05-31_transport-router-hub/p4.4_command-bus.md), [plans/comm-system-target-architecture.md](../../plans/comm-system-target-architecture.md)
 
+## ADR-COMM-006: Целевая модель — три ортогональные оси контрактной плоскости (вектор, не реализация)
+
+- Дата: 2026-07-11
+- Статус: принято к сведению (target-vector; реализация — будущие задачи G.2/G.4/H.3)
+- Контекст: ADR-COMM-001/004/005 закрыли канонический транспорт (`router.send` + kind-router + иерархическая адресация), но контрактная плоскость остаётся размазанной по 5+ осям адресации/строгости (ревью `plans/current-path/review-2026-07-11.md`: B1 два конверта команд `args`/`data`, B5 ось kind тройственная — `channel`/`queue_type`/`resolve_channel_kind`, B6 register-плоскость держит 4 перекрывающихся override адресации, B8 `Message` (targets/channel) и `FieldRouting` — две несвязанные модели маршрутизации). Целевая архитектура `plans/current-path/architecture-10-of-10.md` §4 сворачивает это в три ортогональных концерна и фиксирует их как долгосрочный вектор для ADR-COMM-цепочки.
+- Решение (целевая модель, фиксируется текстом — код не меняется этим ADR):
+  1. **Ось A — Адрес** («кто получит»): `targets` (dotted `process.worker`, ADR-COMM-004) — единственная ось «куда». `FieldRouting.channel` (register-плоскость) остаётся единственным декларатором «поле → (канал, процесс)»; `connection_map`/`register_dispatch` — производные view, не параллельные истины (закрывает B6/B8 текстом — без изменения кода).
+  2. **Ось B — Kind + QoS** («что за груз»): `system | command | data | event | log | state` → из kind ДЕТЕРМИНИРОВАННО выводятся канал (`{proc}_{kind}`, продолжение ADR-COMM-001) и QoS-профиль (reliability, history, drop_policy, deadline) — один резолвер в router, а не три параллельных способа (закрывает B5).
+  3. **Ось C — Схема**: одна Pydantic-схема на ключ (command/data_type), единая декларация `Contract(key=..., schema=..., kind=..., plane=...)` — единый билдер конверта (параметры в `data`, `args` — read-only legacy-alias), снимает двойственность B1.
+  4. Дополнительно: state — revision-нумерованный поток (переиспользует fencing-epoch счётчик, третий счётчик не заводится); манифестная плоскость (`app.yaml`/plugin-манифест/`service.yaml`) — один формат, один движок миграций (модуль `recipe`).
+- Причина: три оси проще пяти — один резолвер вместо параллельных способов сказать «то же самое» снижает вероятность рассинхронизации (B1/B5/B6/B8 — все случаи «два места решают один вопрос»). Формализация ЗАРАНЕЕ (до реализации) даёт последующим задачам G.2 (контрактная плоскость), G.4 (data-plane fencing), H.3 (register-плоскость) общую целевую форму, чтобы не изобретать её заново по частям.
+- Отклонённые альтернативы:
+  - **Чинить B1/B5/B6/B8 точечно, без общей модели** — отклонено: точечные патчи консервируют 5-осевую форму, следующая точечная правка снова придумывает своё разрешение конфликта (ровно то, что уже произошло — 3 способа сказать «kind»).
+  - **Реализовать три оси прямо сейчас в рамках C7** — отклонено: C7 — docs-only задача (Ф5-добор «Границы/именование»), контрактная плоскость — отдельный больший кусок работы (G.2/G.4/H.3); эта запись фиксирует ЦЕЛЬ, не план миграции.
+- Связанные ADR: ADR-COMM-001 (канонический транспорт), ADR-COMM-004 (иерархическая адресация — ось A), ADR-COMM-005 (kind-router — предшественник оси B), EVT-002/ADR-SRM-010 (именование EventBus/EventManager — соседний Q1-вектор в этой же цепочке).
+- Refs: [plans/current-path/architecture-10-of-10.md](../../plans/current-path/architecture-10-of-10.md) §4, [plans/current-path/review-2026-07-11.md](../../plans/current-path/review-2026-07-11.md) (B1/B5/B6/B8), [plans/2026-07-06_constructor-master/plan.md](../../plans/2026-07-06_constructor-master/plan.md) (Ф5-добор, задача C7)
+
 ---
 
 ## Модульные решения
@@ -2328,7 +2345,7 @@
 | `worker_module` | [`modules/worker_module/DECISIONS.md`](modules/worker_module/DECISIONS.md) | Command & Work | ADR-WRK-001…004 (Удаление ложного ребра worker → dispatch, ..., WorkerInfo как TypedDict (документация) + plain dict (runtime)) |
 | `process_module` | [`modules/process_module/DECISIONS.md`](modules/process_module/DECISIONS.md) | Process | ADR-PM-001…011 (Dual Communication API (send_message vs send), ..., честный circuit breaker поверх health (подряд-ошибки → degraded)) |
 | `command_module` | [`modules/command_module/DECISIONS.md`](modules/command_module/DECISIONS.md) | Command & Work | ADR-CMD-001…005 (CommandManager реализует ICommandManager, ..., CommandManager vs ChannelRoutingManager — разные паттерны, синхронный by design) |
-| `shared_resources_module` | [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md) | Infrastructure | ADR-SRM-001…009 (Удалён legacy API v1, ..., unregister_process — единая точка снятия процесса) |
+| `shared_resources_module` | [`modules/shared_resources_module/DECISIONS.md`](modules/shared_resources_module/DECISIONS.md) | Infrastructure | ADR-SRM-001…010 (Удалён legacy API v1, ..., `EventManager` (SRM, cross-proc) vs `event_module.EventBus` (in-proc) — НЕ дубль, только коллизия имён) |
 | `process_manager_module` | [`modules/process_manager_module/DECISIONS.md`](modules/process_manager_module/DECISIONS.md) | Orchestration | ADR-PMM-001…015 (Per-process stop events (2026-04-10), ..., Авто-рестарт ВСЕХ процессов по умолчанию + громкие supervisor-события (Ф4-добор, 2026-07-09)) |
 | `error_module` | [`modules/error_module/DECISIONS.md`](modules/error_module/DECISIONS.md) | Observability | ADR-EM-001…006 (ErrorManager как наследник LoggerManager (не композиция), ..., Ленивый экспорт ErrorManager из `core/__init__.py`) |
 | `statistics_module` | [`modules/statistics_module/DECISIONS.md`](modules/statistics_module/DECISIONS.md) | Observability | ADR-SM-001…006 (StatsManager как прямой наследник ChannelRoutingManager (не LoggerManager), ..., AggregationWindow как IBufferStrategy (не BatchBuffer)) |

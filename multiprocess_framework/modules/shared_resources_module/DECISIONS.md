@@ -55,6 +55,32 @@
 **Решение:** Конфиг расширен с 3 полей (stub) до 8 полей: default_queue_maxsize, event_wait_poll_interval, default_memory_coll, cleanup_stale_shm_on_init, standard_events.  
 **Причина:** Конфиг должен реально управлять поведением модуля (паттерн SchemaBase как во всех модулях), а не быть заглушкой.
 
+## ADR-SRM-010: `EventManager` (SRM, cross-proc) vs `event_module.EventBus` (in-proc) — НЕ дубль, только коллизия имён
+
+**Дата:** 2026-07-11
+**Статус:** Принято (зеркало основной записи)
+**Refs:** `docs/audits/2026-07-10_module-responsibility-duplication-map.md` §1/§4 (N1), decision-log Ф5-добора в `plans/2026-07-06_constructor-master/plan.md` (Q1), `multiprocess_framework/docs/MODULES_RESPONSIBILITY_MAP.md` §2 «Три оси событий», основная запись — [`event_module/DECISIONS.md`](../event_module/DECISIONS.md) EVT-002
+
+**Контекст/Решение:** идентичны EVT-002 (см. полный текст там) — приводится здесь только
+затем, чтобы решение находилось локально при чтении DECISIONS.md обоих модулей, а не
+только одного. Кратко:
+
+- `EventManager` (`events/core/manager.py:22`) — **межпроцессный** примитив: `emit`
+  доставляет и локальным подписчикам, и в роутер (pickle-safe), часть слоя
+  «межпроцессные ресурсы» SRM.
+- `event_module.EventBus` (`event_bus.py:81`) — **in-process** typed pub/sub, отдельный
+  leaf-модуль, другая ось.
+- Имена **НЕ переименовываются** (владелец, 2026-07-10, Принцип №1). Вектор на будущее:
+  консолидация `EventManager` dual-write в единый транспорт `router.send` по
+  [ADR-COMM-001](../../DECISIONS.md#adr-comm-001-routersendmessage--единственный-способ-отправки-каналы-по-kind--канонический-транспорт)
+  (план `transport-router-hub`); переименование `EventManager` (если понадобится) —
+  только в связке с этой консолидацией, не отдельным рефактором.
+
+**Причина/Альтернативы/Последствия:** см. EVT-002 — не дублируются здесь во избежание
+рассинхронизации двух копий текста.
+
+---
+
 ## ADR-SRM-009: unregister_process — единая точка снятия процесса
 
 **Дата:** 2026-07-04  
