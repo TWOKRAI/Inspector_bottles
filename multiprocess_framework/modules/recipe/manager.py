@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 import yaml
 
+from .detect import is_v3_recipe
 from .yaml_io import update_yaml_preserving
 
 
@@ -213,17 +214,18 @@ class RecipeManager:
             return False
 
         # Копируем файл байт-в-байт (сохраняем комментарии), затем обновляем имя через
-        # инжектируемый yaml_updater — comment-preserving round-trip (ADR-RCP-001).
+        # yaml_updater — comment-preserving round-trip. Куда писать имя решает единая
+        # формат-стратегия detect (C3/ADR-RCP-005), а не ad-hoc проверка ключа:
+        #   v3-blueprint (плоский) → top-level ``name``;
+        #   config-snapshot (envelope v1/v2) → ``meta.name``.
         try:
             shutil.copy2(source_path, target_path)
-            if isinstance(recipe_data.get("meta"), dict):
-                # legacy-формат: имя в meta.name
-                meta = dict(recipe_data["meta"])
+            if is_v3_recipe(recipe_data):
+                self._yaml_updater(target_path, {"name": new_slug})
+            else:
+                meta = dict(recipe_data.get("meta") or {})
                 meta["name"] = new_slug
                 self._yaml_updater(target_path, {"meta": meta})
-            else:
-                # v3-формат: top-level name
-                self._yaml_updater(target_path, {"name": new_slug})
         except OSError as exc:
             self._log_error(f"RecipeManager.duplicate: ошибка записи '{new_slug}': {exc}")
             target_path.unlink(missing_ok=True)
