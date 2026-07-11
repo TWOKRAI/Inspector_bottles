@@ -65,6 +65,7 @@
 
 ### В3 — GUI-конструктор (параллельно/после В2, ~1 нед)
 - **5.10 расширить S→M (NEW-D1):** перенести МЕХАНИЗМ (TabFactory/lazy/permission-фильтр) во frontend_module как TabRegistry; прототип = `TABS: list[TabSpec]`; permissions и predefined_roles деривятся из реестра (D-1/D-4/D-5).
+- **NEW-D2 Выделение фронт-части прототипа (hardcoded shell):** `gui` из обязательного фундамента → презентационный overlay; бэкенд headless по умолчанию; отдельная точка входа фронта; sentrux-инвариант `backend → frontend`. Фундамент под конструктор фронта. **Предусловие: после хвоста В1** (recipe-ось C3/4.7). План — [`../proto-frontend-carve.md`](../proto-frontend-carve.md).
 - **NEW-2 AppIdentity (S):** `_ORG`/лого/title — инъекция из composition root; acceptance: grep «Inspector» по frontend_module = 0 (D-2/D-3, F3). **✅ 2026-07-11 досрочно** (ветка `feat/frontend-app-identity`, merge f5deff73): `frontend_module/core/app_identity.py` — `AppIdentity` frozen-dataclass + `set_app_identity()`, дефолт нейтральный (`MultiprocessApp`/env `MPF_APP_NAME`), composition root (`multiprocess_prototype/frontend/app.py`) инжектит явно; `prefs_store`/`window_registry`/`loading_window` читают идентичность вместо хардкода; QSettings прототипа не тронуты (не теряют user prefs). **Уточнение acceptance:** grep «Inspector» по `frontend_module` НЕ строго 0 — остаются generic-имена виджетов (`InspectorPanel`/`SchemaInspectorPanel`, паттерн «инспектор-панель», не бренд) и упоминания в ROADMAP.md; брендовые строки (org/лого/title) вынесены полностью.
 - **NEW-5 Формы из схемы (S):** `build_form_for_schema(SchemaBase)` поверх `FieldInfo.from_schema` + каталог UI-hint полей FieldMeta; 7b/7c/7d остаются frozen (G2), новые фичи только через FieldMeta (D-6). **✅ 2026-07-11 досрочно** (ветка `feat/forms-from-schema`, merge e13b8721, ADR-DS-008): `FieldMeta` +`ui_group`/`ui_order`/`ui_hidden` (data_schema_module) + зеркало в `registers_module/core/field_info.py`; `frontend/forms/form_builder.py::build_form_for_schema` — новый механизм поверх каталога, НЕ трогает 7a/7b/7c/7d (frozen-вердикт G2/5.6 держится). Тесты: field_meta 46 + field_info 77 + build_form_for_schema 129.
 
@@ -99,6 +100,7 @@
 | NEW-10 | Публичный API: 24/24 interfaces.py, Protocol ObservableMixin, «один вход», contract-тест `__all__` | S/M | Ф8 H.1 | F5/F6/F8 |
 | NEW-C6a | `ProcessConfig.extras` (domain-opaque) + вынос frame_trace из базы плагина | — | дизайн C6 | A3/C-6 |
 | NEW-D1 | 5.10: перенос МЕХАНИЗМА табов во frontend_module (расширение скоупа S→M) | M | В3 | D-1/D-4/D-5 |
+| NEW-D2 | Выделение фронт-части прототипа (hardcoded shell): gui→presentation overlay, headless-бэкенд, отдельная точка входа фронта, sentrux-инвариант backend→frontend | M | В3 (после хвоста В1) | владелец 2026-07-11; [proto-frontend-carve](../proto-frontend-carve.md) |
 
 Правки формулировок существующих задач: 4.4 (+Enum категорий, +requires fail-fast, +params_schema статически), 4.3 (+validate_chain), 3.9 (опц → обязательное), G.6 (первым в Ф7), 5.10 (механизм в прототипе — исправить преамбулу задачи), C7 (+контракт коннектора, +текст 3 осей).
 
