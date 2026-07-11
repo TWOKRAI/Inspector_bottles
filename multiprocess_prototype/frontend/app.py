@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
+from multiprocess_framework.modules.frontend_module.core.app_identity import (
+    AppIdentity,
+    set_app_identity,
+)
 from multiprocess_framework.modules.process_module.generic import frame_trace
 from .auth_context import AuthContext
 from .bridge.command_sender import CommandSender
@@ -55,6 +59,13 @@ def _resolve_dev_login_settings() -> tuple[bool, str, str]:
 def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
+
+    # AppIdentity (Task NEW-2, de-brand frontend_module): composition root приложения
+    # инжектирует org/app_name ДО создания любых виджетов, читающих идентичность
+    # (AppHeaderWidget → prefs_store.QSettings, LoadingWindow). org="Inspector" сохранён
+    # 1-в-1 с прежним хардкодом фреймворка — смена namespace потеряла бы сохранённые
+    # пользовательские preferences (QSettings ключуется по org+app).
+    set_app_identity(AppIdentity(org="Inspector", app_name="Inspector Bottles"))
 
     # Глобальный wheel-guard: колесо мыши не меняет значения полей ввода
     # (spin/combo/slider) — частая причина случайных правок. Прокрутка страниц
