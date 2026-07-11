@@ -292,7 +292,7 @@ class TestBlueprintPydanticValidation:
 
     def test_blueprint_pydantic_validation(self) -> None:
         """SystemBlueprint.model_validate(blueprint_dict) не вызывает исключение."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             SystemBlueprint,
         )
 
@@ -306,7 +306,7 @@ class TestBlueprintPydanticValidation:
 
     def test_blueprint_pydantic_validation_with_target_process(self) -> None:
         """target_process в processes не ломает SystemBlueprint.model_validate."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             SystemBlueprint,
         )
 

@@ -28,7 +28,7 @@ from multiprocess_framework.modules.process_manager_module.launcher.schema impor
 from multiprocess_framework.modules.process_module.configs.managers_config import (
     merge_managers,
 )
-from multiprocess_framework.modules.process_module.generic.blueprint import (
+from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
     SystemBlueprint,
 )
 

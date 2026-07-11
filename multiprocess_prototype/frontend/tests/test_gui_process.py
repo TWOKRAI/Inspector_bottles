@@ -299,7 +299,7 @@ class TestTopologyParses:
     def test_topology_parses(self):
         """Загрузить hello_world.yaml и проверить SystemBlueprint.model_validate()."""
         import yaml
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             SystemBlueprint,
         )
 
@@ -333,7 +333,7 @@ class TestTopologyParses:
     def test_topology_check_returns_no_errors(self):
         """blueprint.check() не возвращает ошибок для hello_world."""
         import yaml
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             SystemBlueprint,
         )
 
@@ -357,7 +357,7 @@ class TestProcessClassField:
 
     def test_process_class_field_exists(self):
         """ProcessConfig имеет поле process_class с дефолтом ''."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             ProcessConfig,
         )
 
@@ -367,7 +367,7 @@ class TestProcessClassField:
 
     def test_process_class_stored(self):
         """ProcessConfig сохраняет переданный process_class."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             ProcessConfig,
         )
 
@@ -379,7 +379,7 @@ class TestProcessClassField:
 
     def test_as_generic_config_passes_process_class(self):
         """as_generic_config() передаёт process_class в GenericProcessConfig."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             ProcessConfig,
         )
 
@@ -394,7 +394,7 @@ class TestProcessClassField:
 
     def test_as_generic_config_default_class_when_empty(self):
         """as_generic_config() с пустым process_class сохраняет дефолтный GenericProcess путь."""
-        from multiprocess_framework.modules.process_module.generic.blueprint import (
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
             ProcessConfig,
         )
 
