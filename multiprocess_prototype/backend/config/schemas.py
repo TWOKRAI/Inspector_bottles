@@ -8,7 +8,11 @@ from typing import Annotated, Any, Literal
 import yaml
 from pydantic import BaseModel, Field
 
-from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaBase
+from multiprocess_framework.modules.data_schema_module import (
+    FieldMeta,
+    SchemaBase,
+    deep_merge,
+)
 from multiprocess_framework.modules.process_module.configs import ObservabilityConfig
 
 
@@ -176,10 +180,9 @@ class SystemConfig(SchemaBase):
 def _deep_merge(base: dict, override: dict) -> dict:
     """Рекурсивно слить override поверх base.
 
-    Правила:
-    - Если оба значения — dict, рекурсивно мержить
-    - Иначе значение из override заменяет base
-    - Функция чистая: аргументы не мутируются
+    Тонкий делегат канонического ``deep_merge`` (дубль D3 / задача C5).
+    Правила сохранены: dict+dict мержатся рекурсивно, иначе override заменяет
+    base; аргументы не мутируются. Имя оставлено для обратной совместимости.
 
     Args:
         base:     Базовый словарь (нижний приоритет).
@@ -188,14 +191,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     Returns:
         Новый dict — результат глубокого слияния.
     """
-    result = dict(base)
-    for key, override_value in override.items():
-        base_value = result.get(key)
-        if isinstance(base_value, dict) and isinstance(override_value, dict):
-            result[key] = _deep_merge(base_value, override_value)
-        else:
-            result[key] = override_value
-    return result
+    return deep_merge(base, override)
 
 
 def load_system_config(path: Path | str | None = None) -> SystemConfig:

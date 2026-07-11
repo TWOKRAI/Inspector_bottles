@@ -1,21 +1,23 @@
 """
-Канонический deep merge для конфиг-словарей.
+Deep merge для конфиг-словарей — тонкий делегат канонического ``deep_merge``.
 
-Заменяет ad-hoc реализации:
-- ``merge_with_defaults`` (data_schema_module) — shallow copy, небезопасно для nested mutable
-- ``merge_managers`` (process_module) — deepcopy, но привязан к одному модулю
-
-Использование::
+Канон живёт в ``data_schema_module`` (нижний слой, дубль D3 / задача C5):
+``multiprocess_framework.modules.data_schema_module.deep_merge``. Здесь —
+делегат с сохранённой сигнатурой для обратной совместимости всех импортов::
 
     from multiprocess_framework.modules.config_module.tools import deep_merge, multi_merge
 
     result = deep_merge(defaults, user_overrides)
     result = multi_merge(defaults, env_config, user_config, cli_args)
 """
+
 from __future__ import annotations
 
-import copy
 from typing import Any, Dict, Optional
+
+from multiprocess_framework.modules.data_schema_module import (
+    deep_merge as _canonical_deep_merge,
+)
 
 
 def deep_merge(
@@ -28,6 +30,9 @@ def deep_merge(
     """
     Рекурсивный merge *overlay* поверх *base*. Overlay побеждает при конфликте.
 
+    Тонкий делегат канонического
+    :func:`multiprocess_framework.modules.data_schema_module.deep_merge`.
+
     Args:
         base: Базовый dict (дефолты).
         overlay: Dict для наложения. ``None``/пустой → возвращает копию base.
@@ -39,36 +44,12 @@ def deep_merge(
     Returns:
         Объединённый dict.
     """
-    if copy_base:
-        result = copy.deepcopy(base)
-    else:
-        result = base
-
-    if not overlay:
-        return result
-
-    for key, value in overlay.items():
-        if (
-            key in result
-            and isinstance(result[key], dict)
-            and isinstance(value, dict)
-        ):
-            # Рекурсия для вложенных dict'ов — не копируем повторно,
-            # base уже скопирован на верхнем уровне
-            result[key] = deep_merge(
-                result[key], value, copy_base=False, list_strategy=list_strategy,
-            )
-        elif (
-            list_strategy == "append"
-            and key in result
-            and isinstance(result[key], list)
-            and isinstance(value, list)
-        ):
-            result[key] = result[key] + copy.deepcopy(value)
-        else:
-            result[key] = copy.deepcopy(value)
-
-    return result
+    return _canonical_deep_merge(
+        base,
+        overlay,
+        copy_base=copy_base,
+        list_strategy=list_strategy,
+    )
 
 
 def multi_merge(
