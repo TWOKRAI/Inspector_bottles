@@ -588,6 +588,45 @@ def handle_state_get_subtree(self, msg: dict) -> dict:
 
 ---
 
+## ADR-SS-016: StateProxy._send_sync обязан звать router.request(), а не router.send()
+
+**Дата:** 2026-07-11
+**Контекст:** Ревью Ф4.9 (2026-07-11, находка PLAUSIBLE-6) поставило под сомнение, действительно ли `_send_sync()` (общий helper для `get()`, `get_subtree()`, `subscribe()` и `_resync()`) получает от `router.send(msg)` ОТВЕТ обработчика на другом конце, а не просто статус доставки в очередь. Подозрение подтвердилось трассировкой `RouterManager`:
+
+- `RouterManager.send()` (`router_module/core/router_manager.py`) — `return self._do_send(...)`, который резолвит канал и вызывает `channel.send(processed)`. `QueueChannel.send()` (`router_module/channels/queue_channel.py`) кладёт сообщение в очередь и возвращает `{"status": "success", "channel": name}` — **чистый transport-ack**, не ответ обработчика.
+- Настоящий request/response с ожиданием ответа — отдельный метод `RouterManager.request(message, timeout)`: регистрирует pending-слот по `correlation_id`, шлёт через `send()`, блокируется на `threading.Event` до прихода `type=="response"` (резолвится в `receive()` → `_resolve_pending`) или таймаута. Ответ обработчика приходит через `reply_to_request(request_msg, result)`, вызываемый `_dispatch_command` ПОСЛЕ выполнения `CommandManager.handle_command()` — то есть `result` в конверте `request()` — это ровно то, что вернул handler (`{"status": "ok", "value": ..., "revision": ...}` для `handle_state_get_subtree` и т.п.).
+- `IRouter.Protocol.send()` в `interfaces.py` был документирован как «синхронная отправка **с ожиданием ответа**» — сам контракт описывал желаемое поведение `request()`, а не то, что реально делает `RouterManager.send()`. Расхождение документации и реализации маскировало баг.
+- Все тестовые дублёры модуля (`InMemoryRouter`, `MockRouter` в `test_state_proxy.py`/`test_state_store_manager.py`, `_RelayRouter` в `test_watch_from_revision.py`) реализуют `send()` как **прямой** request-reply (вызывают handler синхронно и возвращают его результат) — то есть воспроизводят семантику `request()`, а не `send()`. Это маскировало баг во всём test suite: юнит-тесты были зелёными, а в проде (реальный `RouterManager` между процессами) `get()`/`get_subtree()`/`subscribe()`/`_resync()` получали бы `{"status": "success", "channel": ...}` вместо ответа сервера.
+
+**Решение:** `_send_sync()` предпочитает `router.request(msg, timeout=_SYNC_REQUEST_TIMEOUT)`, если router его поддерживает (`getattr(router, "request", None)` — утиная типизация, без изменения `IRouter` Protocol, чтобы не ломать существующие дублёры), разворачивает `envelope["result"]` (конверт `request()`: `{"success": bool, "result": <ответ handler'а>}`). Если router **не** поддерживает `request()` (тестовые дублёры) — используется прежний путь `router.send(msg)` без изменений, обратная совместимость всего test suite сохранена без правки самих дублёров.
+
+```python
+request_fn = getattr(self._router, "request", None)
+if callable(request_fn):
+    envelope = request_fn(msg, timeout=self._SYNC_REQUEST_TIMEOUT)
+    if not isinstance(envelope, dict) or envelope.get("success") is False:
+        return None  # fail-open
+    result = envelope.get("result")
+    return result if isinstance(result, dict) else envelope
+return self._router.send(msg)  # legacy-путь для тестовых дублёров
+```
+
+Fail-open (таймаут/ошибка транспорта/некорректный ответ) → `None`, ровно как и раньше при `router=None`; вызывающий код (`get`/`get_subtree`/`subscribe`/`_resync`) уже трактует `None` как «ответа нет» и не падает.
+
+**Последствия:**
+- `_resync()` (ядро watch-from-revision, Ф4.9b) начинает реально работать по РЕАЛЬНОМУ каналу в проде — раньше получала бы `{"status":"success","channel":...}`, `response.get("status") != "ok"` → resync тихо считался бы неудавшимся на КАЖДОМ разрыве (маскировано зелёными тестами с дублёрами-фейками).
+- `get()`/`get_subtree()`/`subscribe()` — та же проблема пред-Ф4.9 закрыта тем же фиксом (общий `_send_sync`), хотя явно не были предметом ревью Ф4.9 — исправлены как побочный эффект общего helper'а, без отдельного изменения их собственной логики.
+- Новые тесты (`TestSendSyncPrefersRequestOverSend`, `test_state_proxy.py`) используют дублёр `_RealisticRouter`, воспроизводящий РЕАЛЬНОЕ разделение `send()`/`request()` — закрывают класс ошибок, который старые дублёры маскировали.
+- `IRouter` Protocol НЕ расширен методом `request()` — намеренно: добавление обязательного метода в `runtime_checkable Protocol` не ломает duck-typing вызовы (изменение не enforced через `isinstance`), но расширение контракта потребовало бы синхронной правки всех существующих тестовых дублёров без функциональной необходимости (`getattr`-детект уже покрывает оба случая).
+
+**Отвергнуто:**
+- **Требовать от всех тестовых дублёров реализовать `request()`** — избыточная переработка широкого test suite ради единообразия; `getattr`-детект решает совместимость без этого.
+- **Расширить `IRouter` Protocol обязательным `request()`** — Protocol используется только как type-hint (нет `isinstance(router, IRouter)` проверок в модуле), формальное расширение не даёт практической пользы, только увеличивает связанность контракта.
+
+**Связанные решения:** ADR-SS-001 (IRouter Protocol), ADR-SS-015 (watch-from-revision resync — потребитель этого фикса).
+
+---
+
 ## Индекс ADR
 
 | ID | Название | Статус | Фаза |
@@ -606,5 +645,6 @@ def handle_state_get_subtree(self, msg: dict) -> dict:
 | ADR-SS-012 | StateProxy — per-pattern фильтрация callbacks | ✅ Готово | 2.1+ |
 | ADR-SS-013 | SubscriptionManager — публичные snapshot-методы | ✅ Готово | 2.1+ |
 | ADR-SS-014 | revision дерева — отдельный счётчик, НЕ epoch fencing | ✅ Готово | 4.9 |
-| ADR-SS-015 | watch-from-revision + resync через существующий state.get_subtree | ✅ Готово | 4.9 |
+| ADR-SS-015 | watch-from-revision + resync через существующий state.get_subtree | ✅ Готово (пересмотрено 2026-07-11) | 4.9 |
+| ADR-SS-016 | _send_sync — router.request(), не router.send() | ✅ Готово | 4.9 |
 

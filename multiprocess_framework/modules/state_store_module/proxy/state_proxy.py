@@ -695,19 +695,58 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 f"StateProxy '{self._process_name}': router=None, команда '{msg.get('command')}' не отправлена"
             )
 
-    def _send_sync(self, msg: dict) -> dict | None:
-        """Отправить IPC-сообщение синхронно и вернуть ответ.
+    # Таймаут ожидания ответа для router.request() (ADR-SS-016) — совпадает
+    # с дефолтом RouterManager.request(), чтобы поведение не расходилось.
+    _SYNC_REQUEST_TIMEOUT = 5.0
 
-        При router=None или ошибке — возвращает None.
+    def _send_sync(self, msg: dict) -> dict | None:
+        """Отправить IPC-сообщение синхронно и вернуть ОТВЕТ ОБРАБОТЧИКА.
+
+        ADR-SS-016 (ревью Ф4.9, PLAUSIBLE-6, 2026-07-11): у реального
+        RouterManager `send()` — fire-and-forget поверх канала (кладёт
+        сообщение в очередь и сразу возвращает статус ДОСТАВКИ в очередь,
+        например `{"status": "success", "channel": "ctrl"}`), а НЕ ответ
+        обработчика на другом конце. Настоящий request/response с ожиданием
+        ответа — отдельный метод `router.request()` (блокирует по
+        correlation_id до прихода `type=="response"` или таймаута).
+
+        Поэтому:
+          - Если router поддерживает `request()` (реальный RouterManager) —
+            используем его и разворачиваем `envelope["result"]` (конверт
+            reply_to_request: `{"success": bool, "result": <ответ handler'а>}`).
+          - Иначе (router — тестовый дубль, реализующий `send()` КАК
+            request-reply напрямую: `InMemoryRouter`/`MockRouter`/
+            `_RelayRouter`) — используем `send()` как раньше, обратная
+            совместимость всего существующего test suite сохранена.
+
+        Fail-open: таймаут/ошибка транспорта/некорректный ответ → None.
+        Вызывающий код (`get`, `get_subtree`, `subscribe`, `_resync`) уже
+        трактует None как "ответа нет" и не падает.
 
         Args:
             msg: IPC-сообщение для отправки.
 
         Returns:
-            dict с ответом или None.
+            dict с ответом обработчика или None.
         """
         if self._router is None:
             return None
+
+        request_fn = getattr(self._router, "request", None)
+        if callable(request_fn):
+            try:
+                envelope = request_fn(msg, timeout=self._SYNC_REQUEST_TIMEOUT)
+            except Exception as exc:
+                self._log_error(f"StateProxy '{self._process_name}': ошибка request() '{msg.get('command')}': {exc}")
+                return None
+            if not isinstance(envelope, dict) or envelope.get("success") is False:
+                self._log_warning(
+                    f"StateProxy '{self._process_name}': request() '{msg.get('command')}' не получил ответа: {envelope}"
+                )
+                return None
+            result = envelope.get("result")
+            return result if isinstance(result, dict) else envelope
+
         try:
             return self._router.send(msg)
         except Exception as exc:

@@ -1072,3 +1072,113 @@ class TestStateProxyResync:
         proxy._resync([])
         assert router.last_sent("state.get_subtree") is None
         assert proxy._pattern_refcount == {}
+
+
+# ===========================================================================
+# ADR-SS-016 (PLAUSIBLE-6, ревью 2026-07-11): _send_sync должен звать
+# router.request(), а не router.send(), когда router умеет request/response.
+#
+# У реального RouterManager send() — fire-and-forget поверх канала (кладёт
+# в очередь и возвращает статус ДОСТАВКИ, например {"status":"success",
+# "channel": "ctrl"}), НЕ ответ обработчика на другом конце. Настоящий
+# синхронный request/response — router.request() (correlation_id + blocking
+# wait). Все тестовые дублёры в этом файле (MockRouter/InMemoryRouter)
+# реализуют send() КАК request-reply напрямую — маскируя баг в тестах.
+# Ниже — дублёр, мимикрирующий РЕАЛЬНОЕ разделение send()/request().
+# ===========================================================================
+
+
+class _RealisticRouter:
+    """Дублёр, воспроизводящий реальное разделение RouterManager.send()/request().
+
+    send()    — чистый transport-ack (как QueueChannel.send()), НЕ ответ handler'а.
+    request() — блокирующий request/response, возвращает конверт
+                {"success": bool, "result": <ответ handler'а>} (как
+                RouterManager.request()/reply_to_request()).
+    """
+
+    def __init__(self, request_result: dict | None = None, request_success: bool = True) -> None:
+        self.send_calls: list[dict] = []
+        self.request_calls: list[tuple[dict, float]] = []
+        self._request_result = request_result if request_result is not None else {"status": "ok"}
+        self._request_success = request_success
+
+    def register_message_handler(self, key, handler, **kwargs) -> None:
+        pass
+
+    def send_async(self, msg, priority: str = "normal") -> None:
+        pass
+
+    def send(self, msg) -> dict:
+        # РЕАЛЬНЫЙ router: чистый ack доставки в очередь, НЕ ответ обработчика.
+        self.send_calls.append(msg)
+        return {"status": "success", "channel": "ctrl"}
+
+    def request(self, msg, timeout: float = 5.0) -> dict:
+        self.request_calls.append((msg, timeout))
+        if not self._request_success:
+            return {"success": False, "error": "timeout", "correlation_id": "cid"}
+        result = dict(self._request_result)
+        request_id = msg.get("data", {}).get("request_id")
+        if request_id is not None:
+            result.setdefault("request_id", request_id)
+        return {"success": True, "result": result, "correlation_id": "cid"}
+
+
+class TestSendSyncPrefersRequestOverSend:
+    """_send_sync должен использовать router.request(), когда он доступен."""
+
+    def test_get_uses_request_and_unwraps_handler_result(self):
+        """proxy.get() через реалистичный router читает ЗНАЧЕНИЕ ИЗ result, а не ack."""
+        router = _RealisticRouter(request_result={"status": "ok", "value": 42})
+        proxy = StateProxy("cam", router=router)
+
+        value = proxy.get("some.path")
+
+        assert value == 42
+        assert len(router.request_calls) == 1
+        assert router.send_calls == []  # send() не используется для получения ответа
+
+    def test_get_subtree_uses_request(self):
+        """proxy.get_subtree() тоже обязан идти через request(), не send()."""
+        router = _RealisticRouter(request_result={"status": "ok", "value": {"fps": 30}})
+        proxy = StateProxy("cam", router=router)
+
+        assert proxy.get_subtree("cameras.0") == {"fps": 30}
+        assert len(router.request_calls) == 1
+
+    def test_request_timeout_is_fail_open(self):
+        """Таймаут/неуспех request() — fail-open (default), не исключение."""
+        router = _RealisticRouter(request_success=False)
+        proxy = StateProxy("cam", router=router)
+
+        assert proxy.get("some.path", default="fallback") == "fallback"
+
+    def test_resync_uses_request_and_converges_cache(self):
+        """_resync() (ядро watch-from-revision) обязан работать по РЕАЛЬНОМУ
+        каналу — через request(), а не send(), иначе в проде получал бы
+        transport-ack вместо снапшота и никогда не сходился с сервером."""
+        router = _RealisticRouter(
+            request_result={
+                "status": "ok",
+                "value": {"cameras": {"0": {"config": {"fps": 55}}}},
+                "revision": 3,
+            }
+        )
+        proxy = StateProxy("cam", router=router)
+        proxy.subscribe("cameras.0.**", lambda _d: None, exclude_self=False)
+
+        proxy._resync(["cameras.0.**"])
+
+        assert proxy.get("cameras.0.config.fps") == 55
+        assert proxy._last_revision == 3
+        assert len(router.request_calls) >= 1
+
+    def test_falls_back_to_send_when_router_has_no_request(self):
+        """Обратная совместимость: тестовые роутеры без request() (InMemoryRouter,
+        MockRouter, _RelayRouter) продолжают работать через send() как раньше."""
+        router = MockRouter()
+        router.set_sync_response("state.get", {"status": "ok", "value": 7, "request_id": "x"})
+        proxy = StateProxy("cam", router=router)
+
+        assert proxy.get("some.path") == 7
