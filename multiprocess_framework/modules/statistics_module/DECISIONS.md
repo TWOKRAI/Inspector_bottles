@@ -47,3 +47,26 @@
 - **Контекст:** CRM предоставляет BatchBuffer (collect + flush). Для метрик нужна агрегация: counter sum, gauge last, timing p95.
 - **Решение:** `AggregationWindow(IBufferStrategy)` — агрегация MetricRecord вместо простого батчинга. Flush отправляет агрегированный снапшот.
 - **Отклонено:** BatchBuffer — не поддерживает агрегацию.
+
+## ADR-SM-007: Граница statistics_module (агрегация) ↔ observability-hub (транспорт+персистентность) — D8
+
+- **Дата:** 2026-07-11
+- **Статус:** принято (зеркало основной записи)
+- **Refs:** основная запись — [`channel_routing_module/DECISIONS.md`](../channel_routing_module/DECISIONS.md) ADR-CRM-009, `docs/audits/2026-07-10_module-responsibility-duplication-map.md` (D8), `plans/2026-07-06_constructor-master/plan.md` (decision-log Ф5-добора, задача C7)
+
+**Контекст/Решение:** идентичны ADR-CRM-009 (полный текст — там). Кратко, зона
+`statistics_module` в этой границе:
+
+- `statistics_module` владеет **агрегацией** (`counter`/`gauge`/`timing`, rollup через
+  `AggregationWindow`, ADR-SM-002/006) — вычисляет, ЧТО за метрика и КАК она сворачивается.
+- `statistics_module` **НЕ владеет** транспортом или хранением записей между рестартами
+  процесса: то, что `ObservabilityHub.drain_stats()` заберёт агрегированный снапшот и положит
+  его в `ObservabilityStore` (SQLite, `channel_routing_module/observability/`), — ответственность
+  hub/store (Ф5.15/Ф5.20a), не этого модуля. Второй SQLite-стор внутри `statistics_module` не
+  заводится — это задублировало бы `ObservabilityStore`, которая уже одинаково обслуживает
+  log/error/stats.
+- Решение владельца (2026-07-10): «статистика уже на месте, hub — персистентность записей,
+  не агрегация — в statistics не тащить».
+
+**Причина/Альтернативы/Следствие:** см. ADR-CRM-009 — не дублируются здесь во избежание
+рассинхронизации двух копий текста.

@@ -19,12 +19,12 @@
 | `base_manager` | lifecycle менеджера + `ObservableMixin` (прокси лог/метрик/ошибок) | конкретной доменной логикой |
 | `data_schema_module` | **чертёж** данных: `SchemaBase`, `FieldMeta`, `FieldRouting` | живыми экземплярами, runtime-значениями |
 | `dispatch_module` | примитив `ключ → handler` (4 стратегии) | сетью, процессами, undo |
-| `channel_routing_module` | общая база каналов/буферов (CRM) | конкретными каналами (лог/ошибки/метрики — у наследников) |
+| `channel_routing_module` | общая база каналов/буферов (CRM) + observability-хаб/стор (`observability/`): транспорт+**персистентность** dict-записей log/error/**stats** (ADR-CRM-007/009) | конкретными каналами (лог/ошибки/метрики — у наследников); **агрегацией метрик** (это `statistics_module`, D8) |
 | `message_module` | value object IPC (`Message`, `MessageAdapter`) | доставкой (это `router_module`) |
 | `router_module` | доставка сообщений **между процессами** | выбором handler внутри процесса (`dispatch`) |
 | `logger_module` | логирование (scope-based routing) | ошибками (наследник `error_module`) и метриками (`statistics`) |
 | `error_module` | ошибки с severity-routing | обычными логами |
-| `statistics_module` | метрики/агрегация (counter/gauge/timing) | логами, ошибками |
+| `statistics_module` | метрики/**агрегация** (counter/gauge/timing, `AggregationWindow`) | логами, ошибками; **транспортом/персистентностью** снапшотов между рестартами (это `channel_routing_module/observability/`, D8 — ADR-SM-007) |
 | `shared_resources_module` | **межпроцессные** ресурсы: очереди, SHM, `EventManager`, `ConfigStore`, PSR | внутрипроцессным состоянием/подписками GUI |
 | `config_module` | runtime-**конфигурация** (dot-notation, env-fallback, subscribe) | доменным состоянием, регистрами |
 | `state_store_module` | **глобальное реактивное дерево** состояния (glob-подписки, дельты) | статической конфигурацией, доменными регистрами |
