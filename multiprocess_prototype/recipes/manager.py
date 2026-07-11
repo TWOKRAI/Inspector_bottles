@@ -1,42 +1,17 @@
-"""manager.py — доменный шим над generic-RecipeManager из модуля `recipe`.
+"""manager.py — шим над `recipe.RecipeManager` (консолидация C3, ADR-RCP-005).
 
-Generic-реализация — `multiprocess_framework.modules.recipe.manager`
-(консолидация C1, ADR-RCP-001/002). Здесь — тонкий шим, сохраняющий путь импорта
-`multiprocess_prototype.recipes.manager` и инжектирующий прикладной
-comment-preserving writer (`yaml_io.update_yaml_preserving`, ruamel round-trip) в
-duplicate(). Без инъекции generic-менеджер использует plain-PyYAML (без комментариев);
-прототип комментарии сохраняет.
+Прежде здесь жил доменный субкласс, инжектировавший comment-preserving writer
+(`yaml_io.update_yaml_preserving`) в duplicate() — seam до переезда yaml_io во
+фреймворк. Теперь writer generic и живёт в самом модуле `recipe`, а базовый
+`RecipeManager` использует его по умолчанию — субкласс-шим больше не нужен.
 
-Consolidation `yaml_io`/duplicate во фреймворк — задача C3.
+Здесь — тонкий реэкспорт для обратной совместимости пути импорта
+`multiprocess_prototype.recipes.manager` (его импортируют recipe_store,
+frontend/app, presenter рецептов).
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable
-from pathlib import Path
-
-from multiprocess_framework.modules.recipe.manager import RecipeManager as _RecipeManager
-from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
-
-
-class RecipeManager(_RecipeManager):
-    """Доменный шим: инжектирует comment-preserving yaml_updater по умолчанию."""
-
-    def __init__(
-        self,
-        engine: Any,
-        state_proxy: Any | None = None,
-        logger: Any | None = None,
-        yaml_updater: Callable[[str | Path, dict], None] | None = None,
-    ) -> None:
-        if yaml_updater is None:
-            yaml_updater = update_yaml_preserving
-        super().__init__(
-            engine,
-            state_proxy=state_proxy,
-            logger=logger,
-            yaml_updater=yaml_updater,
-        )
-
+from multiprocess_framework.modules.recipe.manager import RecipeManager
 
 __all__ = ["RecipeManager"]

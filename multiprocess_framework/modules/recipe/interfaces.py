@@ -99,6 +99,16 @@ class RecipeEngineProtocol(Protocol):
         """Каталог хранения рецептов."""
         ...
 
+    @property
+    def doc_type(self) -> str | None:
+        """Namespace реестра миграций для дефолтного run_chain (или None).
+
+        Если задан и migration_fn не инжектирован — load() мигрирует устаревший
+        рецепт через зарегистрированные шаги (ADR-RCP-003, C3). None → дефолтная
+        миграция из реестра отключена (работает только явная инъекция callbacks).
+        """
+        ...
+
 
 @runtime_checkable
 class RecipeManagerProtocol(Protocol):

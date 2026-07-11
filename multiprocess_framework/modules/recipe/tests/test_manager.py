@@ -76,12 +76,12 @@ def test_read_recipe_returns_dict_or_none(engine: RecipeEngine, recipes_dir: Pat
 
 
 # ------------------------------------------------------------------
-# duplicate — Pre/Post контракта (ADR-RCP-002)
+# duplicate — Pre/Post контракта (ADR-RCP-005: дефолтный comment-preserving writer)
 # ------------------------------------------------------------------
 
 
 def test_duplicate_creates_copy_with_new_name_fallback(engine: RecipeEngine, recipes_dir: Path) -> None:
-    # given v3-рецепт, менеджер БЕЗ инъекции (plain-PyYAML fallback)
+    # given v3-рецепт, менеджер БЕЗ инъекции (дефолтный comment-preserving writer, ruamel)
     _write_v3(recipes_dir, "src")
     manager = RecipeManager(engine=engine)
 

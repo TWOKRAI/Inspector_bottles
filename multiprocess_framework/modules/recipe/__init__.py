@@ -16,6 +16,7 @@ from .interfaces import (
 from .manager import RecipeManager
 from .migrations import migration, registered_steps, run_chain
 from .recipe_engine import RecipeEngine
+from .yaml_io import update_blueprint_metadata_preserving, update_yaml_preserving
 
 __all__ = [
     "RecipeEngine",
@@ -27,6 +28,8 @@ __all__ = [
     "migration",
     "registered_steps",
     "run_chain",
+    "update_yaml_preserving",
+    "update_blueprint_metadata_preserving",
     "StoreProtocol",
     "RecipeEngineProtocol",
     "RecipeManagerProtocol",
