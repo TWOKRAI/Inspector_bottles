@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import threading
+from unittest.mock import patch
 
 import pytest
 
@@ -532,3 +533,79 @@ def test_restore_subtree_increments_revision(camera_store: TreeStore) -> None:
     assert len(deltas) == 1
     assert camera_store.revision == before + 1
     assert deltas[0].revision == camera_store.revision
+
+
+# ===========================================================================
+# Тесты атомарности snapshot+revision (Ф4.9-фикс, MED-5, ревью 2026-07-11)
+# ===========================================================================
+
+
+def test_get_subtree_with_revision_matches_plain_calls(camera_store: TreeStore) -> None:
+    """Без конкуренции — get_subtree_with_revision() эквивалентен раздельным вызовам."""
+    value, revision = camera_store.get_subtree_with_revision("cameras.0")
+    assert value == camera_store.get_subtree("cameras.0")
+    assert revision == camera_store.revision
+
+
+def test_snapshot_with_revision_matches_plain_calls(camera_store: TreeStore) -> None:
+    """Без конкуренции — snapshot_with_revision() эквивалентен раздельным вызовам."""
+    value, revision = camera_store.snapshot_with_revision(paths=["cameras.*.config"])
+    assert value == camera_store.snapshot(paths=["cameras.*.config"])
+    assert revision == camera_store.revision
+
+
+def test_snapshot_with_revision_blocks_concurrent_mutation(empty_store: TreeStore) -> None:
+    """MED-5: конкурентная мутация НЕ может проскочить между чтением снимка и revision.
+
+    Раньше (два отдельных захвата self._lock в вызывающем коде) конкурентный
+    set() из другого потока мог успеть смутировать дерево МЕЖДУ снимком и
+    чтением revision — клиент получал revision новее данных снимка.
+    snapshot_with_revision() держит ОДИН RLock на всё время обеих операций:
+    конкурентный set() из другого потока обязан заблокироваться до выхода из
+    snapshot_with_revision(), поэтому data и revision гарантированно
+    относятся к одному и тому же моменту дерева.
+    """
+    import multiprocess_framework.modules.state_store_module.core.tree_store as tree_store_module
+
+    empty_store.set("x", 1)  # revision=1
+
+    entered_snapshot = threading.Event()
+    release_mutation = threading.Event()
+    mutation_done = threading.Event()
+
+    orig_deep_copy = tree_store_module._deep_copy
+
+    def slow_deep_copy(value):
+        result = orig_deep_copy(value)
+        if not entered_snapshot.is_set():
+            # Первый _deep_copy — внутри snapshot(), под удерживаемым RLock.
+            entered_snapshot.set()
+            # Даём конкурентному потоку шанс попытаться захватить RLock —
+            # если атомарность сломана, set() проскочит здесь и увеличит revision
+            # ДО того, как мы прочитаем self._revision ниже.
+            release_mutation.wait(timeout=2.0)
+        return result
+
+    def mutate():
+        entered_snapshot.wait(timeout=2.0)
+        empty_store.set("x", 2)  # revision=2, если успеет проскочить
+        mutation_done.set()
+
+    thread = threading.Thread(target=mutate)
+    thread.start()
+    try:
+        with patch.object(tree_store_module, "_deep_copy", side_effect=slow_deep_copy):
+            data, revision = empty_store.snapshot_with_revision()
+    finally:
+        release_mutation.set()
+        thread.join(timeout=2.0)
+
+    # Конкурентная мутация НЕ должна была успеть до чтения revision внутри
+    # snapshot_with_revision() — снимок и revision согласованы (оба «до» мутации).
+    assert data == {"x": 1}
+    assert revision == 1
+    # Мутация всё же произошла (после выхода из snapshot_with_revision) — дерево
+    # действительно продолжает жить, просто не просочилась внутрь снимка.
+    assert mutation_done.wait(timeout=2.0)
+    assert empty_store.revision == 2
+    assert empty_store.get("x") == 2

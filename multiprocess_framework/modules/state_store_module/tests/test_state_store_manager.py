@@ -655,3 +655,59 @@ class TestIntegration:
         # set не вызывает рассылку
         mgr.handle_state_set({"data": {"path": "x.y", "value": 42, "source": "test"}})
         assert len(router.sent_messages) == 0
+
+
+class TestHandleStateGetSubtreeAtomicRevision:
+    """Ф4.9-фикс (MED-5, ревью 2026-07-11): value и revision в ответе
+    state.get_subtree read'ятся атомарно — конкурентная мутация НЕ может
+    попасть в revision, не попав при этом в value (и наоборот).
+    """
+
+    def test_atomic_read_blocks_concurrent_mutation(self):
+        """Конкурентный state.set во время handle_state_get_subtree не просачивается
+        в revision раньше, чем в сам snapshot — ответ всегда самосогласован."""
+        import threading
+        from unittest.mock import patch
+
+        from multiprocess_framework.modules.state_store_module.core import tree_store as tree_store_module
+
+        mgr = StateStoreManager(initial_state={"cameras": {"0": {"fps": 30}}})
+
+        entered_snapshot = threading.Event()
+        release_mutation = threading.Event()
+        mutation_done = threading.Event()
+
+        orig_deep_copy = tree_store_module._deep_copy
+
+        def slow_deep_copy(value):
+            result = orig_deep_copy(value)
+            if not entered_snapshot.is_set():
+                entered_snapshot.set()
+                release_mutation.wait(timeout=2.0)
+            return result
+
+        def mutate():
+            entered_snapshot.wait(timeout=2.0)
+            mgr.handle_state_set({"data": {"path": "cameras.0.fps", "value": 999, "source": "camera_0"}})
+            mutation_done.set()
+
+        thread = threading.Thread(target=mutate)
+        thread.start()
+        try:
+            with patch.object(tree_store_module, "_deep_copy", side_effect=slow_deep_copy):
+                result = mgr.handle_state_get_subtree({"data": {"path": "cameras.0", "request_id": "req-atomic"}})
+        finally:
+            release_mutation.set()
+            thread.join(timeout=2.0)
+
+        # value и revision относятся к одному и тому же моменту: revision=0 (до
+        # конкурентной мутации) ⇔ value ещё несёт старое fps=30. Раньше (раздельные
+        # локи) конкурентный set() мог успеть повысить revision до 1, пока value
+        # (снятый чуть раньше) всё ещё показывал fps=30 — рассинхронизация.
+        assert result["status"] == "ok"
+        assert result["value"] == {"fps": 30}
+        assert result["revision"] == 0
+
+        assert mutation_done.wait(timeout=2.0)
+        assert mgr.store.revision == 1
+        assert mgr.store.get("cameras.0.fps") == 999

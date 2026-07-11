@@ -180,6 +180,28 @@ class TreeStore(IStateStore):
             except (KeyError, TypeError):
                 raise
 
+    def get_subtree_with_revision(self, path: str) -> tuple[Dict[str, Any], int]:
+        """Атомарно возвращает (поддерево, revision) — одна блокировка на оба чтения.
+
+        Ф4.9-фикс (MED-5, ревью 2026-07-11): раньше вызывающий код читал
+        ``get_subtree(path)`` и ``revision`` двумя ОТДЕЛЬНЫМИ захватами лока —
+        между ними другой поток мог успеть смутировать дерево, и клиент получал
+        revision НОВЕЕ, чем фактически отражённые в снимке данные (resync
+        помечал кэш «сошедшимся» с revision, которой снимок ещё не достиг).
+
+        RLock реентерабелен: вложенный вызов ``get_subtree()`` не освобождает
+        внешнюю блокировку — значение и revision гарантированно относятся к
+        ОДНОМУ и тому же моменту дерева.
+
+        Args:
+            path: путь к поддереву ("" — всё дерево).
+
+        Returns:
+            (deep-copy поддерева, revision дерева на момент снимка).
+        """
+        with self._lock:
+            return self.get_subtree(path), self._revision
+
     def has(self, path: str) -> bool:
         """Проверяет, существует ли путь в дереве."""
         with self._lock:
@@ -370,6 +392,22 @@ class TreeStore(IStateStore):
                 pattern_keys = _resolve_path(pattern)
                 self._collect_matching(self._root, pattern_keys, 0, result)
             return result
+
+    def snapshot_with_revision(self, paths: Optional[List[str]] = None) -> tuple[Dict[str, Any], int]:
+        """Атомарно возвращает (снимок, revision) — одна блокировка на оба чтения.
+
+        Ф4.9-фикс (MED-5, ревью 2026-07-11): см. get_subtree_with_revision() —
+        та же проблема (раздельные локи → рассинхронизация value/revision) и то
+        же решение (вложенный вызов под уже удерживаемым RLock).
+
+        Args:
+            paths: см. snapshot().
+
+        Returns:
+            (снимок дерева, revision дерева на момент снимка).
+        """
+        with self._lock:
+            return self.snapshot(paths=paths), self._revision
 
     def _collect_matching(
         self,

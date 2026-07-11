@@ -276,6 +276,13 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
             dict с value (поддерево) и request_id, или ошибкой.
             'revision' (Ф4.9a) — текущая revision дерева на момент ответа,
             аддитивное поле, старые клиенты его игнорируют.
+
+        Ф4.9-фикс (MED-5, ревью 2026-07-11): value и revision читаются АТОМАРНО
+        через TreeStore.snapshot_with_revision()/get_subtree_with_revision() —
+        одна блокировка на оба чтения. Раньше это были два отдельных обращения
+        к TreeStore (снимок, потом отдельно revision) — между ними другой поток
+        мог смутировать дерево, и клиент получал revision новее, чем то, что
+        реально попало в snapshot (resync считал кэш "сошедшимся" преждевременно).
         """
         data = self._extract_data(msg)
         path = data.get("path", "")
@@ -286,14 +293,14 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
             if paths:
                 # resync по нескольким glob-паттернам: снимок объединяет все
                 # поддеревья, совпадающие хотя бы с одним паттерном.
-                value = self._store.snapshot(paths=list(paths))
+                value, revision = self._store.snapshot_with_revision(paths=list(paths))
             else:
-                value = self._store.get_subtree(path)
+                value, revision = self._store.get_subtree_with_revision(path)
             return {
                 "status": "ok",
                 "request_id": request_id,
                 "value": value,
-                "revision": self._store.revision,
+                "revision": revision,
             }
         except (KeyError, TypeError) as exc:
             return {
