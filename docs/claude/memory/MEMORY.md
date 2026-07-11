@@ -103,3 +103,4 @@
 - [sentrux depth непрозрачна](feedback_sentrux_depth_opaque.md) — не каталоги и не цепочка (замер опроверг); не гоняться за числом вслепую, нужен Pro root-cause
 - [freeze, не kill](feedback_freeze_over_kill.md) — владелец предпочитает замораживать мёртвый/дремлющий код, не удалять (actions_module, G2 форм)
 - [Тест-параметры прячут окно дефекта](feedback_test_params_hide_defect_window.md) — оба HIGH ревью 2026-07-10 жили под зелёными тестами (backoff=0; INFO+adapter=None); прод-значения параметров хотя бы в одном тесте
+- [Чистка границ/дублей → constructor-master Ф5-добор C1-C8](project_arch_boundaries_plan.md) — разворот 4.5→модуль recipe (не generic doc_migration_module); D1-D9 решения по дублям/границам
