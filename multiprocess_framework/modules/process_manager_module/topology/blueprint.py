@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from loguru import logger
 from pydantic import field_validator
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
@@ -161,14 +162,32 @@ class ProcessConfig(SchemaBase):
             base_kwargs["restart_policy"] = self.restart_policy
 
         # Data Pipeline routing.
-        # C6 рычаг 1: приоритет typed-поля (если непусто), иначе extras[key] —
-        # 100% back-compat для старых рецептов, новые доменные ключи живут в extras
-        # без правки framework-схемы ProcessConfig.
+        # C6 рычаг 1: приоритет typed-поля, ИНАЧЕ extras[key] — 100% back-compat для старых
+        # рецептов, новые доменные ключи живут в extras без правки framework-схемы.
+        #
+        # Fable MED-4: «задано явно» определяем через Pydantic model_fields_set, НЕ через
+        # sentinel-значение. Раньше `!= 25.0` / `or []` считали явный typed=25.0 (или явный
+        # пустой список) «незаданным» → extras молча побеждал явный пин рецепта. Теперь
+        # рецепт, явно указавший поле, всегда имеет приоритет над одноимённым в extras.
         extras = self.extras or {}
-        chain_targets = self.chain_targets or extras.get("chain_targets", [])
-        source_fps = self.source_target_fps if self.source_target_fps != 25.0 else extras.get("source_target_fps", 25.0)
-        inspector = self.inspector or extras.get("inspector", {})
-        io_peek = self.io_peek or extras.get("io_peek", {})
+        fields_set = self.model_fields_set
+
+        def _pick(key: str, default):
+            if key in fields_set:  # рецепт задал typed-поле явно — оно и побеждает
+                # Fable LOW-5: конфликт typed≠extras при обоих заданных — предупреждаем.
+                if key in extras and extras[key] != getattr(self, key):
+                    logger.warning(
+                        f"ProcessConfig[{self.process_name}]: typed-поле '{key}'="
+                        f"{getattr(self, key)!r} перекрывает extras['{key}']={extras[key]!r} "
+                        f"(typed-приоритет)."
+                    )
+                return getattr(self, key)
+            return extras.get(key, default)
+
+        chain_targets = _pick("chain_targets", [])
+        source_fps = _pick("source_target_fps", 25.0)
+        inspector = _pick("inspector", {})
+        io_peek = _pick("io_peek", {})
         if chain_targets:
             base_kwargs["chain_targets"] = chain_targets
         if source_fps != 25.0:
