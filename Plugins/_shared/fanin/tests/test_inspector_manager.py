@@ -4,7 +4,7 @@ import threading
 import time
 
 
-from multiprocess_framework.modules.process_module.generic.inspector_manager import (
+from Plugins._shared.fanin.inspector_manager import (
     InspectorManager,
 )
 

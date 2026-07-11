@@ -8,8 +8,8 @@ import time
 from multiprocess_framework.modules.process_module.generic.data_receiver import (
     DataReceiver,
 )
-from multiprocess_framework.modules.process_module.generic.inspector_manager import (
-    InspectorManager,
+from multiprocess_framework.modules.process_module.generic.inspector_registry import (
+    PassThroughInspector,
 )
 
 
@@ -18,7 +18,7 @@ class TestBuildItem:
 
     def test_flat_msg(self):
         """msg с полями верхнего уровня."""
-        inspector = InspectorManager()
+        inspector = PassThroughInspector()
         receiver = DataReceiver(
             receive_fn=lambda **kw: None,
             shm_middleware=None,
@@ -33,7 +33,7 @@ class TestBuildItem:
 
     def test_nested_data(self):
         """msg с вложенным data dict."""
-        inspector = InspectorManager()
+        inspector = PassThroughInspector()
         receiver = DataReceiver(
             receive_fn=lambda **kw: None,
             shm_middleware=None,
@@ -57,7 +57,7 @@ class TestOnItemsReady:
     def test_items_put_to_queue(self):
         """Items помещаются в chain_queue."""
         chain_q = queue.Queue(maxsize=10)
-        inspector = InspectorManager()
+        inspector = PassThroughInspector()
         receiver = DataReceiver(
             receive_fn=lambda **kw: None,
             shm_middleware=None,
@@ -73,7 +73,7 @@ class TestOnItemsReady:
         chain_q = queue.Queue(maxsize=1)
         chain_q.put([{"blocking": True}])  # Заполняем
 
-        inspector = InspectorManager()
+        inspector = PassThroughInspector()
         errors = []
         receiver = DataReceiver(
             receive_fn=lambda **kw: None,
@@ -111,7 +111,7 @@ class TestOnItemsReady:
         chain_q.put([{"blocking": True}])  # Заполняем
 
         stop_event = threading.Event()
-        inspector = InspectorManager()
+        inspector = PassThroughInspector()
         receiver = DataReceiver(
             receive_fn=lambda **kw: None,
             shm_middleware=None,
@@ -157,7 +157,7 @@ class TestRunLoop:
                 return None
 
         chain_q = queue.Queue()
-        inspector = InspectorManager()
+        inspector = PassThroughInspector()
         receiver = DataReceiver(
             receive_fn=fake_receive,
             shm_middleware=None,
@@ -190,7 +190,7 @@ class TestRunLoop:
             return None
 
         chain_q = queue.Queue()
-        inspector = InspectorManager()
+        inspector = PassThroughInspector()
         receiver = DataReceiver(
             receive_fn=fake_receive,
             shm_middleware=None,
