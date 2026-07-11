@@ -77,16 +77,22 @@ class GuiStateProxy(StateProxy):
         """Обработка state.changed с доставкой дельт в delta_sink.
 
         1. Десериализует дельты (текущий поток — безопасно).
-        2. Обновляет кэш (только dict-операция — безопасно).
-        3. Если delta_sink задан — передаёт дельты ему (маршалинг в Qt — на
+        2. Проверяет непрерывность revision (Ф4.9b, унаследовано из
+           StateProxy) — при разрыве ресинкается и завершает обработку.
+        3. Обновляет кэш (только dict-операция — безопасно).
+        4. Если delta_sink задан — передаёт дельты ему (маршалинг в Qt — на
            стороне sink через bridge).
-        4. Иначе — прямой вызов локальных callbacks (fallback для тестов без Qt).
+        5. Иначе — прямой вызов локальных callbacks (fallback для тестов без Qt).
 
         Args:
             msg: IPC-сообщение state.changed.
         """
         deltas = self._deserialize_deltas(msg)
         if not deltas:
+            return
+
+        envelope_revision = msg.get("data", {}).get("revision")
+        if self._check_and_handle_revision_gap(envelope_revision):
             return
 
         # Обновление кэша безопасно из любого потока (только dict-операции)

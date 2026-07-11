@@ -8,6 +8,7 @@ TreeStore — иерархическое dict-хранилище с путевы
 - Потокобезопасность через RLock
 - Каждое изменение возвращает Delta (или None если значение не изменилось)
 """
+
 from __future__ import annotations
 
 import copy
@@ -18,13 +19,14 @@ from .delta import Delta, MISSING, Transaction
 from ..interfaces import IStateStore
 
 # Приватные сентинелы для внутренних проверок
-_SENTINEL = object()   # для get() default — отличить "default не задан" от None
+_SENTINEL = object()  # для get() default — отличить "default не задан" от None
 _NOT_FOUND = object()  # для _merge_recursive — проверка наличия ключа
 
 
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
+
 
 def _resolve_path(path: str) -> List[str]:
     """Разбивает точечный путь на список ключей.
@@ -57,6 +59,7 @@ def _values_equal(a: Any, b: Any) -> bool:
 # TreeStore
 # ---------------------------------------------------------------------------
 
+
 class TreeStore(IStateStore):
     """Иерархическое dict-хранилище с путевым доступом.
 
@@ -75,6 +78,20 @@ class TreeStore(IStateStore):
         self._root: Dict[str, Any] = _deep_copy(initial) if initial else {}
         # RLock позволяет одному потоку рекурсивно захватывать блокировку
         self._lock = threading.RLock()
+        # Монотонная revision дерева (Ф4.9, ADR-SS-014): растёт на 1 при каждой
+        # успешной мутации (set/delete/restore; merge — по разу на лист).
+        self._revision = 0
+
+    @property
+    def revision(self) -> int:
+        """Текущее значение монотонного счётчика мутаций (Ф4.9, ADR-SS-014)."""
+        with self._lock:
+            return self._revision
+
+    def _next_revision(self) -> int:
+        """Инкрементирует и возвращает revision. Вызывать под self._lock."""
+        self._revision += 1
+        return self._revision
 
     # -----------------------------------------------------------------------
     # Внутренние методы навигации
@@ -108,9 +125,7 @@ class TreeStore(IStateStore):
                     raise KeyError(f"Путь не существует: ключ '{key}' отсутствует")
             child = node[key]
             if not isinstance(child, dict):
-                raise TypeError(
-                    f"Промежуточный узел '{key}' — не dict (тип: {type(child).__name__})"
-                )
+                raise TypeError(f"Промежуточный узел '{key}' — не dict (тип: {type(child).__name__})")
             node = child
         return node, keys[-1]
 
@@ -160,9 +175,7 @@ class TreeStore(IStateStore):
                     raise KeyError(f"Путь не существует: '{path}'")
                 value = parent[last_key]
                 if not isinstance(value, dict):
-                    raise TypeError(
-                        f"Узел '{path}' — не dict (тип: {type(value).__name__})"
-                    )
+                    raise TypeError(f"Узел '{path}' — не dict (тип: {type(value).__name__})")
                 return _deep_copy(value)
             except (KeyError, TypeError):
                 raise
@@ -204,9 +217,7 @@ class TreeStore(IStateStore):
     # Запись
     # -----------------------------------------------------------------------
 
-    def set(
-        self, path: str, value: Any, source: str = ""
-    ) -> Optional[Delta]:
+    def set(self, path: str, value: Any, source: str = "") -> Optional[Delta]:
         """Устанавливает значение по пути.
 
         Автоматически создаёт промежуточные узлы (как mkdir -p).
@@ -242,11 +253,10 @@ class TreeStore(IStateStore):
                 old_value=old_value,  # MISSING если ключа не было
                 new_value=new_value_copy,
                 source=source,
+                revision=self._next_revision(),
             )
 
-    def merge(
-        self, path: str, data: Dict[str, Any], source: str = ""
-    ) -> List[Delta]:
+    def merge(self, path: str, data: Dict[str, Any], source: str = "") -> List[Delta]:
         """Глубокий merge dict в поддерево.
 
         Dict'ы мержатся рекурсивно, скаляры перезаписываются.
@@ -317,6 +327,7 @@ class TreeStore(IStateStore):
                 old_value=old_value,
                 new_value=MISSING,
                 source=source,
+                revision=self._next_revision(),
             )
 
     # -----------------------------------------------------------------------
@@ -432,13 +443,9 @@ class TreeStore(IStateStore):
                     if segment not in result:
                         result[segment] = {}
                     if isinstance(result[segment], dict):
-                        self._collect_matching(
-                            child, pattern_keys, depth + 1, result[segment]
-                        )
+                        self._collect_matching(child, pattern_keys, depth + 1, result[segment])
 
-    def restore(
-        self, data: Dict[str, Any], path: str = "", source: str = ""
-    ) -> List[Delta]:
+    def restore(self, data: Dict[str, Any], path: str = "", source: str = "") -> List[Delta]:
         """Заменяет поддерево целиком.
 
         Текущее содержимое поддерева удаляется, новые данные устанавливаются.
@@ -464,6 +471,7 @@ class TreeStore(IStateStore):
                             old_value=old_root,
                             new_value=new_root,
                             source=source,
+                            revision=self._next_revision(),
                         )
                     )
                     self._root = new_root
@@ -484,6 +492,7 @@ class TreeStore(IStateStore):
                     old_value=MISSING if old_value is _SENTINEL else old_value,
                     new_value=new_value,
                     source=source,
+                    revision=self._next_revision(),
                 )
             )
             return deltas
@@ -492,6 +501,7 @@ class TreeStore(IStateStore):
 # ---------------------------------------------------------------------------
 # Утилита для внутреннего merge dict'ов
 # ---------------------------------------------------------------------------
+
 
 def _deep_merge_inplace(target: Dict[str, Any], source: Dict[str, Any]) -> None:
     """Рекурсивно мержит source в target (in-place)."""

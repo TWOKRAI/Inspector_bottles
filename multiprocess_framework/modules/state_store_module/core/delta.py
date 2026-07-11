@@ -3,6 +3,7 @@
 Delta описывает одно атомарное изменение в дереве состояний.
 Transaction группирует несколько Delta в один batch с единым transaction_id.
 """
+
 from __future__ import annotations
 
 import time
@@ -14,6 +15,7 @@ from typing import Any, Protocol, runtime_checkable
 # ---------------------------------------------------------------------------
 # MISSING — sentinel для обозначения отсутствующего значения
 # ---------------------------------------------------------------------------
+
 
 class _MissingSentinel:
     """Sentinel для обозначения отсутствующего значения.
@@ -48,6 +50,7 @@ _MISSING_MARKER = "__MISSING__"
 # Delta — иммутабельная единица изменения
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class Delta:
     """Одно атомарное изменение в дереве состояний.
@@ -81,6 +84,14 @@ class Delta:
     transaction_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     """UUID транзакции — связывает дельты одного batch."""
 
+    revision: int = 0
+    """Монотонная revision дерева на момент этой мутации (Ф4.9, ADR-SS-014).
+
+    Проставляется TreeStore при создании Delta (глобальный счётчик,
+    инкремент на каждую мутацию). Default=0 — обратная совместимость: код,
+    создающий Delta напрямую (тесты, MockStore), не обязан её задавать.
+    """
+
     # --- Классификация типа изменения ---
 
     @property
@@ -113,6 +124,7 @@ class Delta:
             "source": self.source,
             "timestamp": self.timestamp,
             "transaction_id": self.transaction_id,
+            "revision": self.revision,
         }
 
     @classmethod
@@ -120,6 +132,9 @@ class Delta:
         """Десериализация из dict (обратное to_dict).
 
         Строка '__MISSING__' восстанавливается как MISSING singleton.
+        'revision' — fail-open (Ф4.9, ADR-SS-014): дельта от старого
+        отправителя, не знающего про revision, восстанавливается с revision=0
+        вместо KeyError.
         """
         old_value = MISSING if d["old_value"] == _MISSING_MARKER else d["old_value"]
         new_value = MISSING if d["new_value"] == _MISSING_MARKER else d["new_value"]
@@ -130,12 +145,14 @@ class Delta:
             source=d["source"],
             timestamp=d["timestamp"],
             transaction_id=d["transaction_id"],
+            revision=d.get("revision", 0),
         )
 
 
 # ---------------------------------------------------------------------------
 # StateWriter — Protocol для объекта, умеющего писать в дерево
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class StateWriter(Protocol):
@@ -161,6 +178,7 @@ class StateWriter(Protocol):
 # ---------------------------------------------------------------------------
 # Transaction — группировка дельт в batch
 # ---------------------------------------------------------------------------
+
 
 class Transaction:
     """Группировка нескольких Delta в один batch с единым transaction_id.
@@ -278,7 +296,9 @@ class Transaction:
             if old_val == new_val:
                 continue
 
-            # Создаём сжатую дельту — берём метаданные первой
+            # Создаём сжатую дельту — берём метаданные первой.
+            # revision — от last (Ф4.9, ADR-SS-014): сжатая дельта описывает
+            # переход к состоянию, зафиксированному последней исходной мутацией.
             coalesced = Delta(
                 path=path,
                 old_value=old_val,
@@ -286,6 +306,7 @@ class Transaction:
                 source=first.source,
                 timestamp=first.timestamp,
                 transaction_id=first.transaction_id,
+                revision=last.revision,
             )
             result.append(coalesced)
 
@@ -294,7 +315,12 @@ class Transaction:
     # --- Вспомогательные методы ---
 
     def _rebind(self, delta: Delta) -> Delta:
-        """Переиздать Delta с transaction_id этой транзакции."""
+        """Переиздать Delta с transaction_id этой транзакции.
+
+        revision сохраняется как есть (Ф4.9, ADR-SS-014) — она уже
+        проставлена store.set()/merge()/delete() на момент реальной мутации,
+        rebind её не переиздаёт (это не новая мутация, а перепаковка метаданных).
+        """
         return Delta(
             path=delta.path,
             old_value=delta.old_value,
@@ -302,4 +328,5 @@ class Transaction:
             source=delta.source,
             timestamp=delta.timestamp,
             transaction_id=self._transaction_id,
+            revision=delta.revision,
         )
