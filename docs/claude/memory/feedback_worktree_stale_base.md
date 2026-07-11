@@ -1,0 +1,14 @@
+---
+name: feedback-worktree-stale-base
+description: worktree-изоляция агентов может создаться от стейл-HEAD (76 коммитов позади main) — проверять базу каждого агент-worktree до старта работы
+metadata: 
+  node_type: memory
+  type: feedback
+  originSessionId: 483646d0-eeff-4729-9749-2c26837de7bf
+---
+
+Волна 2026-07-11 (C6/NEW-3/docs-sync): из трёх параллельных агентов с `isolation: worktree` два получили worktree на `a50d1f74` — 76 коммитов ПОЗАДИ локального main (32c54a34). У одного из них в срезе физически отсутствовали и дизайн-док задачи, и свежий код зоны (fencing, params_in_data). Оба агента заметили сами/по сигналу и пересоздали ветку от актуального main (`git checkout -B <branch> <main-sha>` прямо в worktree).
+
+**Why:** ветка со стейл-базы не мержится чисто и агент анализирует устаревший код — выводы и правки уходят в мусор; хуже всего, что тесты на стейл-базе зелёные и проблема невидима до merge.
+
+**How to apply:** сразу после запуска worktree-агентов координатор проверяет базы: `git worktree list` + сравнить SHA каждого agent-worktree с `git log -1 main`. Расхождение → SendMessage агенту с командой пересоздать ветку от актуального SHA до любых правок. В брифе агента писать «ветка от <конкретный SHA main>», а не «от текущего HEAD worktree». См. также [[feedback-agent-resume-ghost]].
