@@ -86,7 +86,7 @@
 | **D3** | deep-merge словарей — **×3** | `data_schema.merge_with_defaults` / `config.tools.deep_merge` (самозван «канон») / `prototype._deep_merge` | один канонический merge на проект |
 | **D4** | движок пайплайна — **×2** | `chain_module` (заявлен в docs, 0 живых) vs `process_module/generic` (живой pipeline_executor) | решить владельца: либо оживить chain как ядро generic, либо docs признают generic; выделить `generic/` в отдельный pipeline-модуль (заодно `SystemBlueprint`) |
 | **D5** | определение версии рецепта «по форме» — **×3** | `RecipeEngine` (meta.version) / `recipe_io.py` (`"blueprint" in raw`) / `unwrap_recipe` | единый detect через движок миграций (задача 4.6) |
-| **D6** | wiring миграций рецепта — **×3** + два одноимённых `v1_to_v2` | инъекция в RecipeEngine / wrapper-обход / standalone-скрипты; `backend/state/.../v1_to_v2` vs `recipes/migrations/format_v1_to_v2` | унифицировать через `doc_migration_module` (регистрация шагов по doc_type) |
+| **D6** | wiring миграций рецепта — **×3** + два одноимённых `v1_to_v2` | инъекция в RecipeEngine / wrapper-обход / standalone-скрипты; `backend/state/.../v1_to_v2` vs `recipes/migrations/format_v1_to_v2` | унифицировать через движок миграций (регистрация шагов по doc_type; → решение 2026-07-10: модуль `recipe`, см. §5) |
 | **D7** | undo/redo — **×2** | `actions_module.ActionBus` (0 прод) vs domain `CommandDispatcherOrchestrator` | владелец решил **сохранить** actions_module (freeze); консолидация отложена |
 | **D8** | tap/агрегация наблюдаемости | `channel_routing/observability/` (store+hub) vs ось «метрики» `statistics_module` | зафиксировать: hub = доставка, stats = агрегация; не сливать счётчики |
 | **D9** | «где живёт плагин» — **×2 дома** | `Services/*/plugin/` (5 толстых) vs `Plugins/` (тонкие обёртки) | зафиксировать ADR-конвенцию «толстый-при-сервисе / тонкий-в-Plugins» |
@@ -114,6 +114,8 @@
 ---
 
 ## 5. Дом движка миграций (4.5) — вывод
+
+> **⚠️ SUPERSEDED (решение владельца 2026-07-10, позже этого анализа):** движок миграций идёт в **модуль `recipe`**, НЕ в отдельный generic `doc_migration_module` — рецепт единственный реальный клиент (config без миграций, манифест 4.4 не построен), generic = YAGNI; раннер строится извлекаемым. См. decision-log Ф5-добора (D5/D6, задача C2) в [`plan.md`](../../plans/2026-07-06_constructor-master/plan.md). Ниже — исходная рекомендация, сохранена как анализ.
 
 **Новый leaf-модуль `doc_migration_module`** (25-й). Обоснование — в [`document-versioning-architecture.md`](../../plans/2026-07-06_constructor-master/document-versioning-architecture.md) §4: клиенты во всех слоях (recipe/config/manifest), любой другой дом тянет баласт или усиливает расщепление «version». Разрешает D5/D6.
 

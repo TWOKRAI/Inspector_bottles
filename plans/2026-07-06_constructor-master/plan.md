@@ -2,7 +2,7 @@
 
 - **Slug:** 2026-07-06_constructor-master
 - **Дата:** 2026-07-06
-- **Статус:** IN PROGRESS с 2026-07-06 — **Ф0 ЗАКРЫТ** (G0 решён владельцем); идут Ф1 + трек F
+- **Статус:** IN PROGRESS с 2026-07-06. **Срез 2026-07-11:** ЗАКРЫТЫ — Ф0, Ф1 (кроме 1.8 опц), Ф2 (кроме 2.6 опц), Ф3 (кроме 3.9/3.10 опц), трек F ЦЕЛИКОМ (F.1–F.7 + MERGE-GATE), Ф4.1/4.2 + Ф4-добор H1–H8, Ф5-ядро (5.1/5.2/5.4–5.9/5.14–5.17/5.19–5.21), post-review R1–R6 (план закрыт). **Фронт:** Ф5-добор C1–C8 + app_module 5.11–5.13 + хвосты Ф4 (4.3/4.4/4.7/4.8/4.9); 5.18 отложен (порог 0.57); Ф7/Ф8 не начаты. ⚠️ F.7 + открытие C1–C8 — в ветке `fix/codegraph-routing-single-tool` (6 коммитов впереди main), ждут merge → main
 - **Ветки:** Ф0 — `fix/constructor-f0` (merged); Ф1 — `feat/constructor-f1`; трек F — worktree `refactor/constructor-godsplit`; далее `<type>/constructor-fN`
 - **Анализ-основание:** [`analysis.md`](analysis.md) (все находки R1-R16, метрики, ландшафт планов — с file:line)
 - **Закрывает triage:** [`docs/audits/2026-07-04_arch-advice-constructor-2026.md`](../../docs/audits/2026-07-04_arch-advice-constructor-2026.md) (52 рекомендации)
@@ -185,7 +185,7 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 | 4.3 | [ ] | Payload-валидатор PluginRunner по Port-декларациям (dev-mode флаг, выключен в prod) | несоответствие порту → ошибка на границе в dev | M |
 | 4.4 | [ ] | **Манифест плагина**: version/api_version/requires (только ярусы core/optional по G0); рецепт хранит version при save; boot mismatch → WARNING | манифест-тест на 2-3 пилотных плагинах | M |
 | 4.5 | [ ] ∥ | **Движок миграций dict-документов**: `@migration("recipe", from_=2, to=3)`, property-тест round-trip. **⚠️ ПЕРЕОСМЫСЛЕНО 2026-07-10** ([анализ](../../docs/audits/2026-07-10_module-responsibility-duplication-map.md) + [document-versioning-architecture](document-versioning-architecture.md)): движок идёт в **модуль `recipe`**, НЕ отдельный generic `doc_migration_module` — рецепт единственный реальный клиент (config без миграций, манифест 4.4 не построен) → generic YAGNI, раннер строим извлекаемым. **Исполняется в задаче C2 (Ф5-добор).** | property-тест round-trip; раннер в модуле recipe | M |
-| 4.6 | [ ] | **Единая READ-точка рецептов**: unwrap_recipe → движок 4.5; `recipes/presenter.py:394` через единый вход (:1225 закрыт F.2). Rank1 аудита ★★★★★ | grep формат-веток вне движка = 0 | S/M |
+| 4.6 | [ ] | **Единая READ-точка рецептов**: unwrap_recipe → движок 4.5; `recipes/presenter.py:394` через единый вход (:1225 закрыт F.2). Rank1 аудита ★★★★★. **⚠️ 2026-07-10: исполняется в C2 (Ф5-добор) вместе с 4.5** — статус вести там | grep формат-веток вне движка = 0 | S/M |
 | 4.7 | [ ] | **join/inspector из wires** при assembly (BlueprintAssembler); снять костыль `_hoist_inspector_from_metadata` (launch.py:40-55) | регресс-тест: join НЕ деградирует в fanin | M |
 | 4.8 | [ ] | **mini-GATE**: канонизация записи рецепта (дубли displays/gui_positions → одна секция) как migration-шаг; байт-diff обоих рецептов на одобрение владельца | оба рецепта грузятся идентично до/после; diff одобрен | M |
 | 4.9 | [ ] | **StateStore ревизии**: (a) revision в дереве + Delta, DeltaDispatcher включает revision; (b) watch-from-revision + resync (etcd-паттерн) | пропущенная дельта → resync, кэш сходится | M+M |

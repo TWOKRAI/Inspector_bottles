@@ -1,6 +1,6 @@
 ---
 name: project-constructor-master-progress
-description: "constructor-master: Ф0-Ф4.2 + Ф5 carve(5.1-5.7) + ObservabilityHub(5.14-5.17) + Ф5.9 + Ф5.20a + Ф5.19 + Ф5.20b — ВСЁ в MAIN (последний merge a1338f37). NEXT свободны: 5.3 recipe-carve→5.11-5.13 app_module, 5.8 RuntimeDeps, 5.18 depth, 5.6a форм-diff, 5.21 добор наблюдаемости. Handoff: docs/handoffs/2026-07-10_f5-observability-merged.md"
+description: "constructor-master: Ф0-Ф3 + трек F ЦЕЛИКОМ (F.1-F.7) + Ф4.1/4.2 + добор H1-H8 + Ф5-ядро (5.1-5.9/5.14-5.17/5.19-5.21) + post-review R1-R6 ЗАКРЫТЫ; main ЗАПУШЕН (origin/main==a50d1f74). F.7 + открытие C1-C8 в ветке fix/codegraph-routing-single-tool ждут merge. NEXT: Ф5-добор C1-C8 (recipe-модуль C1-C3=4.5+4.6+5.3) + app_module 5.11-5.13 + хвосты Ф4 (4.3/4.4/4.7/4.8/4.9)"
 metadata: 
   node_type: memory
   type: project
@@ -9,6 +9,15 @@ metadata:
 
 Мастер-план `plans/2026-07-06_constructor-master/` в исполнении с 2026-07-06.
 **Актуальный handoff: docs/handoffs/2026-07-10_f5-observability-merged.md** — читать первым.
+
+**LATEST 2026-07-11 — срез согласования планов (анализ рефакторинга):**
+- **main ЗАПУШЕН** (origin/main == main @ a50d1f74) → R6 закрыт, план `plans/2026-07-10_post-review-hardening.md` ЗАКРЫТ целиком (R1–R6).
+- **Трек F ПОЛНОСТЬЮ закрыт**: F.7 (владение GUI-состоянием presenter→LayoutController, back-ref `self._p` снят, `PipelineHost` Protocol, −97 LOC compat-швов) ✅ 2026-07-11. Коммиты в ветке `fix/codegraph-routing-single-tool` (6 впереди main: F.7 ×3 + открытие Ф5-добора 48a64f0c + codegraph-фикс + memory) — **ЖДУТ merge → main (владелец)**.
+- Также закрыты с прошлого среза: 5.6 (G2-вердикт владельца: FREEZE 7b/7c/7d, decision-only; формализация frozen-tier → H.1), 5.8 (FrameworkRuntime+RuntimeDeps двухслойный), 5.21 (добор наблюдаемости), Ф4.1 (multi-register REGISTER_NAME).
+- **Фронт работ**: Ф5-добор **C1–C8** (границы/дубли по аудит-карте 2026-07-10 + decision-log D1–D9/Q1/Q2; recipe-модуль C1→C2→C3 = крит.путь, поглощает 4.5+4.6+5.3; порядок C4/C5 → C1–C3 (с 4.8 между C2 и C3) → C6 → C7 → C8) + **app_module 5.11–5.13** (3 вопроса скоупа владельцу в plan.md) + хвосты Ф4 без дома в очереди: 4.3/4.4/4.7/4.9. 5.18 depth отложен (порог 0.57 до sentrux Pro root-cause). Ф7 (GATE G3) / Ф8 не начаты.
+- **Аудит-карта** `docs/audits/2026-07-10_module-responsibility-duplication-map.md` §5 помечена SUPERSEDED (миграции → модуль recipe, не doc_migration_module).
+- Срез sentrux 2026-07-11: quality 7078 (bottleneck modularity 5668), depth 5714 (raw 6), acyclicity 10000, redundancy 9010; check_rules 9/9 pass. Чекпойнты «Метрик приёмки» некалиброваны — вопрос владельцу открыт (R5c → H.5).
+- **Открытые owner-вопросы**: (1) перекалибровка метрик приёмки (H.5); (2) ранний вынос frozen-boundaries из Ф8 H.1; (3) R2-residual — гейт recovered на health.status==ok; (4) скоуп 5.11 — 3 вопроса (дискавери сервисов, GUI-часть рыбы, minimal_app headless-only).
 
 **LATEST 2026-07-10 (вечер) — Ф5.19 + Ф5.20b ВЛИТЫ В MAIN (merge a1338f37, --no-ff; ветка feat/observability-gui-tabs, 14 коммитов):**
 - **5.20b hub→GUI live-хвост**: `RecordForwardChannel` (IChannel: `write` одна error-запись у tap'а + `push_batch` пачка log/stats из drain), `record_display` (единый display-вид `{kind,module,ts,severity,message,extra}` из hub-записи И LogRecord-dict — форма == `store.list_records` без id), `wire_observability_forward` (форвардер + error-tap'ы на logger+error min ERROR — симметрия store-tap 5.20a), `drain_process_observability(+forwarder)`, `ProcessModule.subscribe/unsubscribe_observability_tail` + команды `observability.tail.subscribe/unsubscribe`. GUI: `DataReceiverBridge.observability_received` (ОТДЕЛЬНЫЙ сигнал, НЕ state_updated), `GuiProcess.register_message_handler("observability.record")`, app-активатор подписывает каждый процесс по обнаружению в `processes.*` (дедуп).
