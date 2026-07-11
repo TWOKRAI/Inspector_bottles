@@ -1,6 +1,6 @@
 # Modules Overview — Из чего собирать приложение
 
-**Назначение документа:** короткая карта 24 модулей фреймворка. Помогает разработчику и агенту понять, какой модуль закрывает какую задачу. Подробности — в `modules/<имя>/README.md`.
+**Назначение документа:** короткая карта 25 модулей фреймворка. Помогает разработчику и агенту понять, какой модуль закрывает какую задачу. Подробности — в `modules/<имя>/README.md`.
 
 > **Границы и «где что»:** если сомневаешься, какой модуль отвечает за задачу (особенно config vs state vs registers, или два разных «EventBus») — сначала [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md) (карта ответственности + матрица границ), потом сюда за деталями.
 
@@ -19,7 +19,7 @@ Messaging          L3   message_module  router_module
                                          │
 Observability      L4   logger_module  error_module  statistics_module
                                          │
-Resources & Config L5   shared_resources_module  config_module  state_store_module
+Resources & Config L5   shared_resources_module  config_module  state_store_module  recipe
                                          │
 Events (in-proc)   L6   event_module  ◀── generic typed pub/sub (факты)
                                          │
@@ -153,11 +153,27 @@ UI (опционально)   L12  frontend_module (PySide6)
 - `StateInspector` — devtool: `inspect(pattern)`, `subscriptions()`, `history()`, `stats()`.
 - `HealthMonitor` — watchdog по обновлениям путей.
 - `PersistenceManager` — **доменно-нейтральный** (ADR-SS-011): принимает `file_mapping: dict[str, Path]` и опциональные `path_predicate` / `value_filter`; жёстко зашитых имён файлов больше нет.
-- `RecipeEngine` — снимки (snapshot) и восстановление (restore) с поддержкой миграций через callback-и `migration_fn` / `migration_check_fn` (ADR-SS-003).
+- `RecipeEngine` — **переехал в модуль `recipe`** (C1, ADR-RCP-001); `state_store_module.recipes` держит тонкий шим-реэкспорт для совместимости пути.
 - `InMemoryRouter` — встроенный mock `IRouter` для unit-тестов (ADR-SS-010).
 
 **Зависимости:** stdlib + `pyyaml` + `base_manager`; опционально `PySide6` (lazy). **Не зависит от RouterManager** — использует Protocol `IRouter` (ADR-SS-001).
 **Подробно:** [`modules/state_store_module/README.md`](../modules/state_store_module/README.md)
+
+### `recipe` — управление рецептами (snapshot config-ветвей, detect, миграции, CRUD)
+**Импорт:** `from multiprocess_framework.modules.recipe import RecipeEngine, RecipeManager, is_v3_recipe, normalize_recipe_v3_raw`
+**Когда применять:** нужно сохранять/восстанавливать config-ветви как именованные рецепты (config-snapshot) ИЛИ хранить топологию-blueprint (v3) с CRUD и синхронизацией `state.recipes.active`.
+
+**Ключевое:**
+
+- `RecipeEngine` — snapshot/restore config-ветвей через `StoreProtocol`; миграции через callback-и `migration_fn` / `migration_check_fn` (ADR-SS-003); доменные ветви — через `default_paths` (ADR-RCP-001, паттерн ADR-SS-011).
+- `RecipeManager` — CRUD-обёртка + синхронизация `state.recipes.active`; `duplicate()` пишет comment-preserving через инжектируемый `yaml_updater` (ADR-RCP-002).
+- `is_v3_recipe` — распознавание v3-blueprint vs config-snapshot (единая точка; v3 не реплеится в store).
+- `normalize_recipe_v3_raw` — единая сборка v3-raw на запись (one source of truth).
+- `StoreProtocol` / `RecipeEngineProtocol` / `RecipeManagerProtocol` — публичные контракты (`interfaces.py`).
+
+**Границы:** доменных схем не знает (пути/миграции/yaml-writer инжектируются); реестр `@migration` — задача C2; consolidation `yaml_io` — C3.
+**Зависимости:** stdlib + `pyyaml`. Store — через `StoreProtocol`; модуль **не импортирует** `state_store_module` (нет цикла).
+**Подробно:** [`modules/recipe/README.md`](../modules/recipe/README.md)
 
 ---
 

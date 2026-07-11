@@ -1,10 +1,11 @@
 # Статус модулей — MODULES_STATUS.md
 
-Сводка по 24 модулям фреймворка. Источник истины по одному модулю — `modules/{name}/STATUS.md`.
+Сводка по 25 модулям фреймворка. Источник истины по одному модулю — `modules/{name}/STATUS.md`.
 Прикладные сервисы (`Services/`) — см. [`Services/STATUS.md`](../Services/STATUS.md).
 Карта ответственности и границы (где что, чтобы не дублировать) — [`docs/MODULES_RESPONSIBILITY_MAP.md`](docs/MODULES_RESPONSIBILITY_MAP.md).
 
-**Обновлено:** 2026-07-08 — сверка с фактом: в таблицу добавлены `actions_module` (carve-out из frontend, ADR-124) и `event_module` (carve-out из prototype, in-proc pub/sub); счётчик 20/22 → **24**; удалён cruft-каталог `modules/sql_module/` (пустой, только `.pyc` после Phase 4.1).
+**Обновлено:** 2026-07-11 — добавлен `recipe` (крыша над рецептами: RecipeEngine + RecipeManager + detect + format консолидированы; C1, ADR-RCP-001/002); счётчик 24 → **25**.
+**Ранее** 2026-07-08 — сверка с фактом: в таблицу добавлены `actions_module` (carve-out из frontend, ADR-124) и `event_module` (carve-out из prototype, in-proc pub/sub); счётчик 20/22 → **24**; удалён cruft-каталог `modules/sql_module/` (пустой, только `.pyc` после Phase 4.1).
 **Ранее** 2026-05-27 — добавлены `service_module` (Phase 3, ADR-129) и `display_module` (Phase 4, ADR-130); тесты 2904 passed (verification-report Phase 8).
 Ранее 2026-05-10 — `sql_module` выехал в [`Services/sql/`](../Services/sql/) (Phase 4.1, ADR-121). `hikvision_camera` — в [`Services/hikvision_camera/`](../Services/hikvision_camera/) (Phase 4.2, ADR-122).
 Ранее 2026-05-07 — `state_store_module` допилен (ADR-SS-011..013: доменно-нейтральный PersistenceManager, per-pattern фильтрация callbacks, публичные snapshot-методы SubscriptionManager); `chain_module` допилен (ADR-CHN-006/007: явный `IRemoteExecutable`, общая on_error политика, ObservableMixin для WorkerPoolDispatcher и LatencyTracker; коды ADR-CM-* переименованы в ADR-CHN-*).
@@ -20,6 +21,7 @@
 | `error_module` | production | 1 026 | + | Severity routing, наследник Logger |
 | `config_module` | production | 2 393 | + | Тонкая обёртка над data_schema |
 | `state_store_module` | stable | 3 300 | 421 | Реактивное дерево состояния; StateStoreManager, StateProxy, TreeStore, доменно-нейтральный PersistenceManager |
+| `recipe` | stable | ~750 | 55 | Крыша над рецептами: RecipeEngine (snapshot/restore), RecipeManager (CRUD+state-sync), is_v3_recipe, normalize_recipe_v3_raw; доменные пути/миграции/yaml-writer инжектируются (ADR-RCP-001/002) |
 | `service_module` | stable | ~500 | 91 | ServiceRegistry singleton + lifecycle + scanner; ADR-129, ADR-SVC-001/002/003 |
 | `display_module` | stable | ~300 | 12 | DisplayRegistry singleton + YAML persist; ADR-130, ADR-DM-001/002/003 |
 | `console_module` | production | 2 877 | + | Три уровня: passive/active/God mode |
@@ -36,7 +38,7 @@
 | `actions_module` | stable | ~700 | + | Building-blocks undo/redo (ActionBus PATCH + SnapshotHistory SNAPSHOT); carve-out из frontend (ADR-124). Прод-undo сейчас через domain `CommandDispatcherOrchestrator`; модуль сохраняется (решение владельца 2026-07-08, ADR-COMM-002 не исполняется) |
 | `event_module` | stable | ~150 | + | Generic typed in-proc pub/sub (EventBus по `type(event)`); carve-out из prototype. In-proc факты — не путать с cross-proc `EventManager` (SRM) |
 
-**Итого framework:** 24 пакета, ~75 100 LOC (с тестами).
+**Итого framework:** 25 пакетов, ~75 850 LOC (с тестами).
 **Прикладной слой (Services):** `sql` (~3 775 LOC), `hikvision_camera` — см. [`Services/STATUS.md`](../Services/STATUS.md).
 
 **Тесты:** 2904 passed / 8 skipped / 0 failed (Phase 8 verification-report, 2026-05-27). Полный прогон:

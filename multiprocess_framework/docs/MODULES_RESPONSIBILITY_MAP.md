@@ -1,12 +1,12 @@
 # Карта ответственности модулей — где что живёт
 
-**Назначение:** зафиксировать за каждым из 24 модулей фреймворка **одну зону ответственности** и явно развести оси, которые легко перепутать. Цель — чтобы при переносе кода из `multiprocess_prototype/` во фреймворк не появлялось дублирования: для каждой задачи есть ровно один «правильный» модуль.
+**Назначение:** зафиксировать за каждым из 25 модулей фреймворка **одну зону ответственности** и явно развести оси, которые легко перепутать. Цель — чтобы при переносе кода из `multiprocess_prototype/` во фреймворк не появлялось дублирования: для каждой задачи есть ровно один «правильный» модуль.
 
 - Быстрая карта по слоям и API — [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md).
 - Статусы/LOC/тесты — [`../MODULES_STATUS.md`](../MODULES_STATUS.md).
 - Детали одного модуля — `modules/<имя>/README.md`.
 
-**Обновлено:** 2026-07-08 — первичная сверка с фактическим кодом (24 модуля; `sql_module` в `Services/sql`).
+**Обновлено:** 2026-07-08 — первичная сверка с фактическим кодом (25 модулей; `sql_module` в `Services/sql`).
 
 ---
 
@@ -28,6 +28,7 @@
 | `shared_resources_module` | **межпроцессные** ресурсы: очереди, SHM, `EventManager`, `ConfigStore`, PSR | внутрипроцессным состоянием/подписками GUI |
 | `config_module` | runtime-**конфигурация** (dot-notation, env-fallback, subscribe) | доменным состоянием, регистрами |
 | `state_store_module` | **глобальное реактивное дерево** состояния (glob-подписки, дельты) | статической конфигурацией, доменными регистрами |
+| `recipe` | **рецепты**: snapshot/restore config-ветвей (RecipeEngine), detect формата (v3/snapshot), CRUD + `state.recipes.active` (RecipeManager) | доменными схемами (пути/миграции/yaml-writer инжектируются), реестром `@migration` (C2), consolidation yaml_io (C3) |
 | `registers_module` | runtime **экземпляров регистров** + routing (fan-out полей) | чертежом (`data_schema`), глобальным деревом (`state_store`) |
 | `command_module` | реестр `имя команды → handler` (тонкий фасад над dispatch) | откатом/undo (это `actions_module`) |
 | `actions_module` | building-blocks undo/redo (`ActionBus` PATCH + `SnapshotHistory` SNAPSHOT) | IPC-командами без отката. **NB:** сейчас прод-undo в прототипе идёт через domain `CommandDispatcherOrchestrator`, `ActionBus` как прод-путь не задействован; модуль **сохраняется** как переиспользуемый building-block (решение владельца, 2026-07-08) — ADR-COMM-002 о его удалении **не исполняется** |
