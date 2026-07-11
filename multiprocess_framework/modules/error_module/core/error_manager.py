@@ -24,6 +24,7 @@ import time
 import traceback
 from typing import Optional, Any, Union, Dict
 
+from ...channel_routing_module import resolve_build_result
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
 from ...logger_module.core.log_types import LogRecord
 from ...logger_module.core.logger_core import LoggerCore
@@ -99,9 +100,15 @@ def _normalize_error_config(
         return manager_name, LoggerManagerConfig.model_validate(d), include_stacktrace
 
     if hasattr(config, "build") and callable(config.build):
-        name, config_dict = config.build()
-        manager_name = name
-        d = dict(config_dict) if isinstance(config_dict, dict) else {}
+        # D1 (constructor-master Ф5-добор, ADR-CRM-008): разбор build()-объекта
+        # делегирован общему resolve_build_result из channel_routing_module —
+        # не переопределяем эту логику здесь (как раньше через голый unpack).
+        resolved = resolve_build_result(config)
+        if resolved is not None:
+            resolved_name, d = resolved
+            manager_name = resolved_name if resolved_name is not None else manager_name
+        else:
+            d = {}
         include_stacktrace = d.get("include_stacktrace", True)
         if hasattr(config, "include_stacktrace"):
             include_stacktrace = bool(config.include_stacktrace)
