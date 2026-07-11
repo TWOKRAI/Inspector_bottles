@@ -140,13 +140,21 @@ def test_idempotent(sample: dict):
 
 
 @pytest.mark.parametrize("recipe_name", _REAL_RECIPES)
-def test_real_recipe_has_gui_positions_duplicate(recipe_name: str):
-    """Sanity: дубль реально существует в рецепте (иначе тест эквивалентности тривиален)."""
+def test_real_recipe_has_no_gui_positions_duplicate(recipe_name: str):
+    """Sanity (инверсия 2026-07-11): рецепты канонизированы (Ф4.8 apply,
+    ``run_migration``/``_migrate_recipe_file`` вызваны на реальных файлах,
+    вердикт владельца — одобрено). Top-level дубль ``gui_positions`` больше не
+    существует на диске, канонический остаётся только в
+    ``blueprint.metadata.gui_positions``. До 2026-07-11 этот тест утверждал
+    обратное (дубль есть) — как sanity-проверка для теста эквивалентности
+    ниже; теперь эквивалентность проверяется тривиально (raw уже канонично),
+    но эта проверка остаётся as regression guard против повторного появления
+    дубля."""
     path = _RECIPES_DIR / f"{recipe_name}.yaml"
     with path.open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
 
-    assert "gui_positions" in raw
+    assert "gui_positions" not in raw
     assert "gui_positions" in raw["blueprint"]["metadata"]
 
 
