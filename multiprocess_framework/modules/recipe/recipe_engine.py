@@ -34,6 +34,7 @@ import yaml
 
 from .detect import is_v3_recipe
 from .interfaces import StoreProtocol
+from .migrations import run_chain
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ class RecipeEngine:
         migration_check_fn: Callable[[dict], bool] | None = None,
         recipe_version: int = 2,
         default_paths: list[str] | None = None,
+        doc_type: str | None = None,
     ) -> None:
         """
         Args:
@@ -119,19 +121,25 @@ class RecipeEngine:
             recipes_dir: директория с YAML-файлами рецептов.
             migration_fn: callback миграции legacy-данных (ADR-SS-003).
                 Принимает старый recipe.data, возвращает новый recipe.data.
-                Если None — миграция не выполняется (только проверка версии в meta).
+                Если None — миграция берётся из реестра по doc_type (см. ниже) либо
+                не выполняется (только проверка версии в meta).
             migration_check_fn: callback проверки legacy-формата.
                 Принимает recipe.data, возвращает True если данные требуют миграции.
                 Если None — проверяется только meta.version.
             recipe_version: текущая версия формата рецепта (записывается в meta).
             default_paths: доменные ветви для snapshot при save(paths=None).
                 Если None/пусто — save без paths сохраняет пустой снимок (ADR-RCP-001).
+            doc_type: namespace реестра миграций (C3/ADR-RCP-003). Если migration_fn
+                не задан, а версия рецепта устарела — load() мигрирует через
+                ``run_chain(doc_type, data, version, recipe_version)`` по
+                зарегистрированным шагам. Явный migration_fn имеет приоритет.
         """
         self._store = store
         self._recipes_dir = Path(recipes_dir)
         self._migration_fn = migration_fn
         self._migration_check_fn = migration_check_fn
         self._recipe_version = recipe_version
+        self._doc_type = doc_type
         self._default_paths: list[str] = list(default_paths) if default_paths else []
         # Создаём директорию если не существует
         self._recipes_dir.mkdir(parents=True, exist_ok=True)
@@ -232,7 +240,22 @@ class RecipeEngine:
         version_outdated = version < self._recipe_version
         domain_check = self._migration_check_fn is not None and self._migration_check_fn(data)
 
-        if (version_outdated or domain_check) and self._migration_fn is not None:
+        # Разрешаем функцию миграции. Явная инъекция migration_fn (ADR-SS-003)
+        # приоритетна; иначе — дефолт из реестра run_chain по doc_type (C3, остаток
+        # ADR-RCP-003): прогон version → recipe_version по зарегистрированным шагам.
+        # Реестр становится дефолтным источником, НЕ заменяя инъекцию. Дефолт бьёт
+        # только по version_outdated (run_chain — версия→версия); контентную
+        # legacy-детекцию по-прежнему обслуживает пара migration_check_fn+migration_fn.
+        migrate_fn = self._migration_fn
+        if migrate_fn is None and self._doc_type is not None and version_outdated:
+            doc_type = self._doc_type
+            from_v = version
+            to_v = self._recipe_version
+
+            def migrate_fn(payload: dict) -> dict:
+                return run_chain(doc_type, payload, from_v, to_v)
+
+        if (version_outdated or domain_check) and migrate_fn is not None:
             bak_path = file_path.with_suffix(".yaml.bak")
             shutil.copy2(file_path, bak_path)
             logger.info(
@@ -241,7 +264,7 @@ class RecipeEngine:
                 bak_path,
             )
 
-            migrated_data = self._migration_fn(data)
+            migrated_data = migrate_fn(data)
 
             # Обновляем meta и перезаписываем файл
             recipe["meta"] = dict(meta)
@@ -313,6 +336,15 @@ class RecipeEngine:
     def recipes_dir(self) -> Path:
         """Public accessor — каталог хранения рецептов."""
         return self._recipes_dir
+
+    @property
+    def doc_type(self) -> str | None:
+        """Namespace реестра миграций для дефолтного run_chain (или None).
+
+        Если задан и migration_fn не инжектирован — load() мигрирует устаревший
+        рецепт через реестр step-миграций (ADR-RCP-003, C3).
+        """
+        return self._doc_type
 
     def get_active(self) -> str | None:
         """Имя последнего загруженного рецепта (или None)."""

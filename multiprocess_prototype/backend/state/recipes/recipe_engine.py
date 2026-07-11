@@ -25,6 +25,7 @@ from multiprocess_prototype.backend.state.recipes.migrations import (
     migrate_recipe_data,
     needs_migration,
 )
+from multiprocess_prototype.backend.state.recipes.migrations.v1_to_v2 import DOC_TYPE
 
 # Доменные ветви Inspector, снимаемые save(paths=None). Раньше — зашитая константа
 # фреймворка; теперь домен несёт прикладной слой и инжектирует её в движок.
@@ -48,6 +49,10 @@ class RecipeEngine(_RecipeEngine):
         kwargs.setdefault("migration_check_fn", needs_migration)
         kwargs.setdefault("recipe_version", RECIPE_VERSION_V2)
         kwargs.setdefault("default_paths", DEFAULT_CONFIG_PATHS)
+        # doc_type реестра миграций (C3): здесь migration_fn инжектирован явно и
+        # приоритетен (поведение бит-в-бит), но doc_type документирует связь с
+        # реестром и включает дефолтный run_chain, если инъекцию когда-то уберут.
+        kwargs.setdefault("doc_type", DOC_TYPE)
         super().__init__(store, recipes_dir, **kwargs)
 
 

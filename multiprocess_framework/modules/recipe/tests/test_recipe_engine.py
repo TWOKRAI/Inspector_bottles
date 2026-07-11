@@ -460,3 +460,94 @@ class TestHelpers:
         data = {"x": {"y": {"z": 42}}}
         result = dict(_flatten(data))
         assert result == {"x.y.z": 42}
+
+
+# =====================================================================
+# doc_type — дефолтная миграция через реестр run_chain (C3, ADR-RCP-003)
+# =====================================================================
+
+from multiprocess_framework.modules.recipe.migrations import migration  # noqa: E402
+
+# Синтетический doc_type — изолирован от реальных (recipe.config_snapshot /
+# recipe.file_format), чтобы тест не зависел от глобального реестра.
+_TEST_DOC_TYPE = "test.engine_default_chain"
+
+
+@migration(_TEST_DOC_TYPE, from_=1, to=2)
+def _bump_marker_v1_to_v2(data: dict) -> dict:
+    result = dict(data)
+    result["migrated"] = True
+    return result
+
+
+class TestDocTypeDefaultMigration:
+    """load() без migration_fn мигрирует устаревший рецепт через реестр по doc_type."""
+
+    def test_doc_type_property_exposed(self, recipes_dir: Path) -> None:
+        engine = RecipeEngine(store=TreeStore(), recipes_dir=recipes_dir, doc_type=_TEST_DOC_TYPE)
+        assert engine.doc_type == _TEST_DOC_TYPE
+
+    def test_doc_type_default_none(self, recipes_dir: Path) -> None:
+        engine = RecipeEngine(store=TreeStore(), recipes_dir=recipes_dir)
+        assert engine.doc_type is None
+
+    def test_run_chain_default_migrates_outdated(self, recipes_dir: Path) -> None:
+        # given v1-рецепт (envelope), движок с doc_type и БЕЗ migration_fn
+        store = TreeStore({"cameras": {}})
+        engine = RecipeEngine(
+            store=store,
+            recipes_dir=recipes_dir,
+            recipe_version=2,
+            doc_type=_TEST_DOC_TYPE,
+        )
+        path = recipes_dir / "old.yaml"
+        recipe = {"meta": {"name": "old", "version": 1}, "data": {"cameras": {}}}
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(recipe, f, allow_unicode=True)
+
+        # when грузим
+        engine.load("old")
+
+        # then файл перезаписан: run_chain применён (marker), meta.version bump до 2
+        reloaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert reloaded["data"]["migrated"] is True
+        assert reloaded["meta"]["version"] == 2
+        assert reloaded["meta"]["migrated_from_v1"] is True
+
+    def test_explicit_migration_fn_wins_over_registry(self, recipes_dir: Path) -> None:
+        # given явный migration_fn — он приоритетнее дефолта run_chain по doc_type
+        store = TreeStore({"cameras": {}})
+        engine = RecipeEngine(
+            store=store,
+            recipes_dir=recipes_dir,
+            recipe_version=2,
+            doc_type=_TEST_DOC_TYPE,
+            migration_fn=lambda d: {"explicit": True},
+        )
+        path = recipes_dir / "old.yaml"
+        recipe = {"meta": {"name": "old", "version": 1}, "data": {"cameras": {}}}
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(recipe, f, allow_unicode=True)
+
+        engine.load("old")
+
+        reloaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # применён явный migration_fn (explicit), НЕ реестровый marker
+        assert reloaded["data"] == {"explicit": True}
+        assert "migrated" not in reloaded["data"]
+
+    def test_no_doc_type_no_default_migration(self, recipes_dir: Path) -> None:
+        # given устаревший рецепт, движок без doc_type и без migration_fn
+        store = TreeStore({"cameras": {}})
+        engine = RecipeEngine(store=store, recipes_dir=recipes_dir, recipe_version=2)
+        path = recipes_dir / "old.yaml"
+        recipe = {"meta": {"name": "old", "version": 1}, "data": {"cameras": {"0": {"config": {"fps": 30}}}}}
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(recipe, f, allow_unicode=True)
+
+        engine.load("old")
+
+        # миграция не выполнена — файл не тронут (нет ни migration_fn, ни doc_type)
+        reloaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert reloaded["meta"]["version"] == 1
+        assert "migrated_from_v1" not in reloaded["meta"]
