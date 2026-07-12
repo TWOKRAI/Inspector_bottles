@@ -181,3 +181,56 @@ class TestPredefinedRolesCharacterization:
         from Services.auth.predefined_roles import PREDEFINED_ROLES
 
         assert set(PREDEFINED_ROLES.keys()) == {"dev", "admin", "operator", "viewer"}
+
+
+class TestSingleSourceParity:
+    """Единый источник вкладок ↔ производные наборы (D-4/D-5)."""
+
+    def test_tabs_registry_is_single_source(self):
+        """TABS (единый источник) даёт эталонный состав/порядок вкладок."""
+        from multiprocess_prototype.frontend.tabs_registry import TABS, tab_ids
+
+        assert [spec.id for spec in TABS] == _EXPECTED_TAB_IDS
+        assert tab_ids() == _EXPECTED_TAB_IDS
+
+    def test_permissions_derived_from_tabs_registry(self):
+        """register_all_permissions деривит tabs.* из TABS (D-4)."""
+        from Services.auth.security import PermissionsRegistry
+        from multiprocess_prototype.frontend.permissions import register_all_permissions
+        from multiprocess_prototype.frontend.tabs_registry import tab_ids
+
+        reg = PermissionsRegistry()
+        register_all_permissions(reg)
+        names = {p.name for p in reg.list_all()}
+        for tab_id in tab_ids():
+            assert f"tabs.{tab_id}.view" in names
+            assert f"tabs.{tab_id}.edit" in names
+
+    def test_predefined_roles_tab_parity(self):
+        """D-5: Services DEFAULT_TAB_IDS == prototype TABS (паритет enforced).
+
+        Обратный импорт `Services → prototype` запрещён (правило слоёв №9),
+        поэтому единый источник (prototype TABS) и Services-локальный список
+        сверяются этим тестом на слое prototype — дрейф падает в CI.
+        """
+        from Services.auth.predefined_roles import DEFAULT_TAB_IDS
+        from multiprocess_prototype.frontend.tabs_registry import tab_ids
+
+        assert set(DEFAULT_TAB_IDS) == set(tab_ids()), (
+            "Список вкладок Services.auth.predefined_roles.DEFAULT_TAB_IDS разошёлся "
+            "с единым источником tabs_registry.TABS — синхронизируйте DEFAULT_TAB_IDS."
+        )
+
+    def test_build_predefined_roles_from_tabs_registry_matches(self):
+        """Роли, построенные из TABS-ids, совпадают с каноническими (D-5)."""
+        from Services.auth.predefined_roles import (
+            PREDEFINED_ROLES,
+            build_predefined_roles,
+        )
+        from multiprocess_prototype.frontend.tabs_registry import tab_ids
+
+        derived = build_predefined_roles(tab_ids())
+        for role_name in ("dev", "admin", "operator", "viewer"):
+            assert set(derived[role_name].permissions) == set(PREDEFINED_ROLES[role_name].permissions), (
+                f"Роль {role_name!r}: деривация из TABS-ids разошлась с канонической"
+            )

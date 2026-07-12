@@ -7,11 +7,12 @@
 
 Namespace: `<scope>.<resource>.<action>` (см. metaplan §4).
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .tab_factory import TAB_ORDER
+from .tabs_registry import TABS
 
 if TYPE_CHECKING:
     from Services.auth.security import PermissionsRegistry
@@ -23,21 +24,20 @@ def register_all_permissions(registry: "PermissionsRegistry") -> None:
     Идемпотентна — повторные вызовы не дублируют записи.
 
     Регистрирует:
-    - `tabs.<id>.view` / `tabs.<id>.edit` для каждой вкладки из TAB_ORDER.
+    - `tabs.<id>.view` / `tabs.<id>.edit` для каждой вкладки из единого
+      источника `TABS` (D-4).
     - `users.*` — CRUD пользователей через админ-панель.
     - `roles.*` — операции над ролями (read-only в PR2/PR3, edit в PR4).
     """
-    # Tabs: <id>.view / <id>.edit для каждой вкладки приложения
-    for tab in TAB_ORDER:
-        tab_id = tab["id"]
-        title = tab.get("title", tab_id)
+    # Tabs: <id>.view / <id>.edit для каждой вкладки приложения (derived из TABS)
+    for spec in TABS:
         registry.register(
-            f"tabs.{tab_id}.view",
-            f"Просмотр вкладки «{title}»",
+            f"tabs.{spec.id}.view",
+            f"Просмотр вкладки «{spec.title}»",
         )
         registry.register(
-            f"tabs.{tab_id}.edit",
-            f"Редактирование во вкладке «{title}»",
+            f"tabs.{spec.id}.edit",
+            f"Редактирование во вкладке «{spec.title}»",
         )
 
     # Users CRUD (Administration → Users)
