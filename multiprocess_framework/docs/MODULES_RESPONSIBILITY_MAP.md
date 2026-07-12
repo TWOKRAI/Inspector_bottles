@@ -6,7 +6,8 @@
 - Статусы/LOC/тесты — [`../MODULES_STATUS.md`](../MODULES_STATUS.md).
 - Детали одного модуля — `modules/<имя>/README.md`.
 
-**Обновлено:** 2026-07-08 — первичная сверка с фактическим кодом (25 модулей; `sql_module` в `Services/sql`).
+**Обновлено:** 2026-07-12 — C8 docs-sync (constructor-master Ф5-добор): `recipe` — yaml_io/реестр миграций владеет модуль (C2/C3, ADR-RCP-003/005), assembler/planner явно НЕ в модуле; `process_manager_module` — топология (`SystemBlueprint`/`ProcessConfig`/`Wire`, ADR-PMM-016) и структурный вывод join/inspector (ADR-PMM-017) добавлены в зону ответственности.
+**Ранее** 2026-07-08 — первичная сверка с фактическим кодом (25 модулей; `sql_module` в `Services/sql`).
 
 ---
 
@@ -28,7 +29,7 @@
 | `shared_resources_module` | **межпроцессные** ресурсы: очереди, SHM, `EventManager`, `ConfigStore`, PSR | внутрипроцессным состоянием/подписками GUI |
 | `config_module` | runtime-**конфигурация** (dot-notation, env-fallback, subscribe) | доменным состоянием, регистрами |
 | `state_store_module` | **глобальное реактивное дерево** состояния (glob-подписки, дельты) | статической конфигурацией, доменными регистрами |
-| `recipe` | **рецепты**: snapshot/restore config-ветвей (RecipeEngine), detect формата (v3/snapshot), CRUD + `state.recipes.active` (RecipeManager) | доменными схемами (пути/миграции/yaml-writer инжектируются), реестром `@migration` (C2), consolidation yaml_io (C3) |
+| `recipe` | **рецепты**: snapshot/restore config-ветвей (RecipeEngine), detect формата (v3/snapshot), CRUD + `state.recipes.active` (RecipeManager), реестр step-миграций `@migration`/`run_chain` (C2, ADR-RCP-003), comment-preserving YAML-writer `yaml_io` (C3, ADR-RCP-005, дефолт в `RecipeManager.duplicate()`) | доменными схемами (пути и сами шаги-миграции — dict-трансформации — инжектируются приложением), сборкой топологии (`assembler`/`planner` — НЕ в recipe, дом будущего переноса `process_manager/topology`, ADR-RCP-005) |
 | `registers_module` | runtime **экземпляров регистров** + routing (fan-out полей) | чертежом (`data_schema`), глобальным деревом (`state_store`) |
 | `command_module` | реестр `имя команды → handler` (тонкий фасад над dispatch) | откатом/undo (это `actions_module`) |
 | `actions_module` | building-blocks undo/redo (`ActionBus` PATCH + `SnapshotHistory` SNAPSHOT) | IPC-командами без отката. **NB:** сейчас прод-undo в прототипе идёт через domain `CommandDispatcherOrchestrator`, `ActionBus` как прод-путь не задействован; модуль **сохраняется** как переиспользуемый building-block (решение владельца, 2026-07-08) — ADR-COMM-002 о его удалении **не исполняется** |
@@ -36,7 +37,7 @@
 | `worker_module` | потоки внутри процесса (LOOP/TASK, lifecycle) | процессами, DAG-пайплайнами |
 | `chain_module` | DAG/Chain/Parallel **исполнение** пайплайна + worker-pool | сетевым IPC, потоками общего назначения |
 | `process_module` | база дочернего процесса (собирает подсистемы) | оркестрацией нескольких процессов |
-| `process_manager_module` | оркестратор системы (spawn/monitor/registry) | внутренней логикой конкретного процесса |
+| `process_manager_module` | оркестратор системы (spawn/monitor/registry) + топология (`SystemBlueprint`/`ProcessConfig`/`Wire` в `topology/`, ADR-PMM-016; структурный вывод `join`/`inspector` из wires, ADR-PMM-017) | внутренней логикой конкретного процесса |
 | `console_module` | терминальный I/O процесса (passive/active/God) | бизнес-командами (только транспорт stdin→CommandManager) |
 | `service_module` | реестр **сервисов** с lifecycle (камеры, БД, auth) | реестром регистров/дисплеев/плагинов |
 | `display_module` | реестр **SHM-каналов кадров** (blueprint + YAML) | созданием SHM (это SRM), vision-семантикой |

@@ -2,7 +2,8 @@
 
 **Назначение:** для каждого из 25 модулей указано: цель, публичный контракт (`interfaces.py` + ключевые классы), обязательные инварианты, входы/выходы, зависимости. Документ — параллельная сетка к [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md): тот навигатор «когда применять», этот — «что обязано быть». Границы и разбор путающих осей — [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md).
 
-**Обновлено:** 2026-07-11 — добавлен контракт `recipe` (крыша над рецептами, C1/ADR-RCP-001/002); счётчик 24 → **25**.
+**Обновлено:** 2026-07-12 — C8 docs-sync: `recipe` контракт дозаписан по факту C2/C3 (реестр step-миграций + generic `yaml_io`, ADR-RCP-003/005); `process_manager_module` — контракт топологии (`SystemBlueprint`/`ProcessConfig`/`Wire`, ADR-PMM-016) + `infer_missing_inspectors` (ADR-PMM-017); инварианты `process_manager_module` перекодированы `ADR-PM-*` → `ADR-PMM-*` (коды переименованы ранее, ADR-PMM-001…006, документ не был обновлён).
+**Ранее** 2026-07-11 — добавлен контракт `recipe` (крыша над рецептами, C1/ADR-RCP-001/002); счётчик 24 → **25**.
 **Ранее** 2026-07-08 — добавлены контракты `event_module`, `actions_module`, `service_module`, `display_module` (сверка с фактом); `sql_module` вынесен в `Services/sql` (раздел Storage → заметка).
 **Ранее** 2026-05-07 — `state_store_module` актуализирован под ADR-SS-011/012/013, `chain_module` — под ADR-CHN-006/007 (renamed из ADR-CM-*; код модуля **CHN**, не **CM** — последний за `console_module`).
 
@@ -317,8 +318,9 @@
 - `StoreProtocol` (Protocol) — `has`, `get`, `transaction`; доменно-нейтральный срез `TreeStore`. Движок типизирует store через него и **не импортирует** `state_store_module` (нет цикла).
 - `RecipeEngineProtocol` (Protocol) — `save / load / list / delete / set_active / deactivate / get_active / is_dirty / recipes_dir`.
 - `RecipeManagerProtocol` (Protocol) — то же + `duplicate / read_recipe` + синхронизация `state.recipes.active`.
-- `RecipeEngine` — snapshot/restore; миграции через `migration_fn` / `migration_check_fn` (ADR-SS-003); доменные ветви через `default_paths` (ADR-RCP-001, паттерн ADR-SS-011). v3-blueprint (`is_v3_recipe`) на `load()` помечается active без replay/migrate/write.
-- `RecipeManager` — CRUD + state-sync; `duplicate()` пишет comment-preserving через инжектируемый `yaml_updater` (ADR-RCP-002), fallback — plain-PyYAML.
+- `RecipeEngine` — snapshot/restore; миграции через `migration_fn` / `migration_check_fn` (ADR-SS-003) либо через реестр `run_chain` как дефолт (`doc_type` в `__init__`+Protocol, явный `migration_fn` приоритетен); доменные ветви через `default_paths` (ADR-RCP-001, паттерн ADR-SS-011). v3-blueprint (`is_v3_recipe`) на `load()` помечается active без replay/migrate/write.
+- `RecipeManager` — CRUD + state-sync; `duplicate()` по умолчанию пишет comment-preserving через **generic writer модуля** `recipe.yaml_io.update_yaml_preserving` (C3, ADR-RCP-005); `yaml_updater=` — опциональная инъекция для подмены (напр. plain-PyYAML без ruamel), через detect-стратегию формата (`is_v3_recipe`).
+- `migration(doc_type, from_, to)` / `registered_steps(doc_type)` / `run_chain(doc_type, data, from_version, to_version)` — реестр step-миграций, `doc_type`-namespaced (C2, ADR-RCP-003); сами шаги (доменные dict-трансформации) регистрируются прикладным слоем.
 - `is_v3_recipe` — единая точка распознавания формата.
 - `normalize_recipe_v3_raw` — единая сборка v3-raw на запись.
 
@@ -326,11 +328,12 @@
 1. Фреймворк не знает доменных ветвей рецептов — `default_paths` инжектируется приложением (ADR-RCP-001).
 2. Модуль не импортирует `state_store_module` — store только через `StoreProtocol` (нет цикла recipe ↔ state_store).
 3. v3-blueprint никогда не реплеится в store и не перезаписывается миграцией (generic-ветвь в `load()`).
-4. `duplicate()` без инжектированного `yaml_updater` теряет комментарии (plain-PyYAML) — прикладной шим инжектирует ruamel-writer.
+4. `duplicate()` использует `yaml_io` модуля по умолчанию (writer generic, живёт в модуле) — комментарии сохраняются без прикладной инъекции; `yaml_updater=` нужна только для подмены writer'а (C3, ADR-RCP-005; отменяет прежнюю схему ADR-RCP-002, где инъекция была обязательна).
+5. Модуль НЕ собирает топологию — `assembler`/`planner` в его состав не входят (сейчас в `multiprocess_prototype/backend/assembly/`, будущий дом — `process_manager/topology`, ADR-RCP-005).
 
-**Границы:** реестр `@migration` + property-тесты — задача C2; consolidation `yaml_io`/assembler + переработка `duplicate()` — C3.
+**Границы:** реестр `@migration`/`run_chain` (C2) и generic `yaml_io` + переработка `duplicate()` (C3) — сделано, ADR-RCP-003/005. Доменные схемы (пути, шаги-миграции) — инжектируются приложением. Физический перенос `assembler`/`planner` — отдельная process_manager-задача, вне scope модуля.
 **Зависимости:** `pyyaml`, stdlib. Store — через `StoreProtocol`.
-**Тестов:** 55
+**Тестов:** 98
 
 ---
 
@@ -547,13 +550,18 @@
 - `ProcessSchemaAdapter` — `SchemaBase` → `proc_dict` (Dict at Boundary).
 - `bundle_contract.py` — `build_bundle/validate_bundle` для pickle-safe передачи.
 - `run_process_function` — top-level runner для дочернего процесса (pickle-safe).
+- `topology/blueprint.py` — schema-модель топологии всей системы (не одного процесса): `SystemBlueprint` (`processes: list[ProcessConfig]`, `wires: list[Wire]`), `ProcessConfig` (typed-поля `inspector`/`chain_targets`/`source_target_fps`/`io_peek` — приоритет над одноимёнными в `extras`; `extras`/`metadata` — domain-opaque мешки), `Wire`, `Port`. Переехало из `process_module/generic/blueprint.py` (C6 (c), ADR-PMM-016) — системный артефакт живёт у оркестратора, не у модуля одного процесса; back-compat шим на старом пути.
+- `SystemBlueprint.infer_missing_inspectors()` — структурный вывод `{mode: join, inputs, primary}` для процессов без явного `inspector`: ≥2 процесса-источника REQUIRED-порта → join (опциональные порты не считаются); явный `inspector`/`extras["inspector"]` — escape-hatch, отключает вывод. Заменяет снятый костыль `_hoist_inspector_from_metadata` (Ф4.7, ADR-PMM-017).
+- `TopologyManager` (`process/topology_manager.py`) — runtime-применение топологии (switch/hot-apply); отдельный от `blueprint.py` (runtime-логика применения vs schema-модель).
 
 **Инварианты:**
-1. **Per-process stop events** (ADR-PM-001): остановка одного не затрагивает других.
-2. **Минималистичный ProcessSpawner** (ADR-PM-002): только SRM + signal, без ConfigManager/LoggerManager/ErrorManager.
-3. **Bundle Contract** (ADR-PM-003): pickle-safe формализованный dict для дочернего процесса.
-4. **Heartbeat monitoring** (ADR-PM-004): `process.is_alive()` для обнаружения crashed.
-5. **Signal handler** только устанавливает `stop_event`, **не вызывает `sys.exit()`** (ADR-PM-006).
+1. **Per-process stop events** (ADR-PMM-001): остановка одного не затрагивает других.
+2. **Минималистичный ProcessSpawner** (ADR-PMM-002): только SRM + signal, без ConfigManager/LoggerManager/ErrorManager.
+3. **Bundle Contract** (ADR-PMM-003): pickle-safe формализованный dict для дочернего процесса.
+4. **Heartbeat monitoring** (ADR-PMM-004): `process.is_alive()` для обнаружения crashed.
+5. **Signal handler** только устанавливает `stop_event`, **не вызывает `sys.exit()`** (ADR-PMM-006).
+6. **Топология — артефакт оркестратора** (ADR-PMM-016): `SystemBlueprint`/`ProcessConfig`/`Wire` живут в `topology/`, не в `process_module`.
+7. **join — структурный факт графа wires** (ADR-PMM-017): не зависит от того, куда в рецепте попал `inspector` (прямой ключ vs `metadata`); тег входа = имя source-порта совпадает с `data_type` только по конвенции (не проверяемый инвариант схемы) — см. известные edge-случаи в `modules/process_manager_module/DECISIONS.md`.
 
 **Зависимости:** `process_module`, `command_module`.
 **Тестов:** ~80+
@@ -670,7 +678,7 @@
 | `shared_resources_module` | 5 233 | L5 | base | 50+ |
 | `config_module` | 2 393 | L5 | base, schema | 49 |
 | `state_store_module` | ~3 300 | L5 | base | 421 |
-| `recipe` | ~750 | L5 | pyyaml | 55 |
+| `recipe` | ~1 400 | L5 | pyyaml | 98 |
 | `event_module` | ~150 | L6 | — | + |
 | `command_module` | 1 220 | L7 | dispatch, base | 34 |
 | `actions_module` | ~700 | L7 | schema | + |

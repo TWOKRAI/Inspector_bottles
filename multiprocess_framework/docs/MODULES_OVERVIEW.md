@@ -160,18 +160,19 @@ UI (опционально)   L12  frontend_module (PySide6)
 **Подробно:** [`modules/state_store_module/README.md`](../modules/state_store_module/README.md)
 
 ### `recipe` — управление рецептами (snapshot config-ветвей, detect, миграции, CRUD)
-**Импорт:** `from multiprocess_framework.modules.recipe import RecipeEngine, RecipeManager, is_v3_recipe, normalize_recipe_v3_raw`
+**Импорт:** `from multiprocess_framework.modules.recipe import RecipeEngine, RecipeManager, is_v3_recipe, normalize_recipe_v3_raw, migration, run_chain`
 **Когда применять:** нужно сохранять/восстанавливать config-ветви как именованные рецепты (config-snapshot) ИЛИ хранить топологию-blueprint (v3) с CRUD и синхронизацией `state.recipes.active`.
 
 **Ключевое:**
 
-- `RecipeEngine` — snapshot/restore config-ветвей через `StoreProtocol`; миграции через callback-и `migration_fn` / `migration_check_fn` (ADR-SS-003); доменные ветви — через `default_paths` (ADR-RCP-001, паттерн ADR-SS-011).
-- `RecipeManager` — CRUD-обёртка + синхронизация `state.recipes.active`; `duplicate()` пишет comment-preserving через инжектируемый `yaml_updater` (ADR-RCP-002).
+- `RecipeEngine` — snapshot/restore config-ветвей через `StoreProtocol`; миграции через callback-и `migration_fn` / `migration_check_fn` (ADR-SS-003) или через реестр `run_chain` как дефолт (`doc_type` в `__init__`); доменные ветви — через `default_paths` (ADR-RCP-001, паттерн ADR-SS-011).
+- `RecipeManager` — CRUD-обёртка + синхронизация `state.recipes.active`; `duplicate()` по умолчанию пишет comment-preserving через **generic writer модуля** `recipe.yaml_io.update_yaml_preserving` (C3, ADR-RCP-005); `yaml_updater=` — опциональная инъекция для подмены (напр. plain-PyYAML без ruamel).
+- `migration` / `registered_steps` / `run_chain` — реестр step-миграций, `doc_type`-namespaced (C2, ADR-RCP-003); шаги (доменные dict-трансформации) регистрируются прикладным слоем, модуль их только каталогизирует и прогоняет цепочкой.
 - `is_v3_recipe` — распознавание v3-blueprint vs config-snapshot (единая точка; v3 не реплеится в store).
 - `normalize_recipe_v3_raw` — единая сборка v3-raw на запись (one source of truth).
 - `StoreProtocol` / `RecipeEngineProtocol` / `RecipeManagerProtocol` — публичные контракты (`interfaces.py`).
 
-**Границы:** доменных схем не знает (пути/миграции/yaml-writer инжектируются); реестр `@migration` — задача C2; consolidation `yaml_io` — C3.
+**Границы:** доменных схем не знает (пути и сами шаги-миграции инжектируются приложением); реестр `@migration`/`run_chain` (C2) и generic `yaml_io` (C3) — сделано, ADR-RCP-003/005. **Сборка топологии (`assembler`/`planner`) НЕ в recipe** — сейчас в `multiprocess_prototype/backend/assembly/`, будущий дом — `process_manager/topology` (ADR-RCP-005, физический перенос — отдельная process_manager-задача).
 **Зависимости:** stdlib + `pyyaml`. Store — через `StoreProtocol`; модуль **не импортирует** `state_store_module` (нет цикла).
 **Подробно:** [`modules/recipe/README.md`](../modules/recipe/README.md)
 
@@ -269,6 +270,9 @@ UI (опционально)   L12  frontend_module (PySide6)
 - `ProcessManagerProcess` — оркестратор-процесс (наследник `ProcessModule`), composite из `ProcessRegistry` + `ProcessMonitor` + `ProcessPriority`.
 - `ProcessRegistry` — реестр (per-process `stop_event`, lifecycle).
 - `ProcessMonitor` — heartbeat + state broadcast.
+- `TopologyManager` (`process/topology_manager.py`) — runtime-применение топологии (switch/hot-apply).
+- `topology/blueprint.py` — schema-модель топологии системы: `SystemBlueprint`, `ProcessConfig` (`inspector`/`extras`/`metadata` — typed-поля с приоритетом typed > extras, C6 рычаг 1), `Wire`, `Port` (переехали из `process_module/generic/blueprint.py`, C6 (c), ADR-PMM-016; шим на старом пути — переходный).
+- `SystemBlueprint.infer_missing_inspectors()` — структурный вывод `{mode: join, inputs, primary}` из wires для процессов без явного `inspector` (≥2 required-источника → join; escape-hatch — явный `inspector`/`extras["inspector"]`), заменяет снятый костыль `_hoist_inspector_from_metadata` (Ф4.7, ADR-PMM-017).
 - Built-in commands: `process.list/start/stop/restart/status`, `system.shutdown/stats`.
 
 **Зависимости:** `process_module`, `command_module`.

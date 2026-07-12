@@ -4,7 +4,8 @@
 Прикладные сервисы (`Services/`) — см. [`Services/STATUS.md`](../Services/STATUS.md).
 Карта ответственности и границы (где что, чтобы не дублировать) — [`docs/MODULES_RESPONSIBILITY_MAP.md`](docs/MODULES_RESPONSIBILITY_MAP.md).
 
-**Обновлено:** 2026-07-11 — добавлен `recipe` (крыша над рецептами: RecipeEngine + RecipeManager + detect + format консолидированы; C1, ADR-RCP-001/002); счётчик 24 → **25**.
+**Обновлено:** 2026-07-12 — C8 docs-sync: `recipe` дозаписан по факту C2/C3 (реестр step-миграций + generic `yaml_io`-writer, ADR-RCP-003/005; ~1400 LOC, 98 тестов).
+**Ранее** 2026-07-11 — добавлен `recipe` (крыша над рецептами: RecipeEngine + RecipeManager + detect + format консолидированы; C1, ADR-RCP-001/002); счётчик 24 → **25**.
 **Ранее** 2026-07-08 — сверка с фактом: в таблицу добавлены `actions_module` (carve-out из frontend, ADR-124) и `event_module` (carve-out из prototype, in-proc pub/sub); счётчик 20/22 → **24**; удалён cruft-каталог `modules/sql_module/` (пустой, только `.pyc` после Phase 4.1).
 **Ранее** 2026-05-27 — добавлены `service_module` (Phase 3, ADR-129) и `display_module` (Phase 4, ADR-130); тесты 2904 passed (verification-report Phase 8).
 Ранее 2026-05-10 — `sql_module` выехал в [`Services/sql/`](../Services/sql/) (Phase 4.1, ADR-121). `hikvision_camera` — в [`Services/hikvision_camera/`](../Services/hikvision_camera/) (Phase 4.2, ADR-122).
@@ -21,7 +22,7 @@
 | `error_module` | production | 1 026 | + | Severity routing, наследник Logger |
 | `config_module` | production | 2 393 | + | Тонкая обёртка над data_schema |
 | `state_store_module` | stable | 3 300 | 421 | Реактивное дерево состояния; StateStoreManager, StateProxy, TreeStore, доменно-нейтральный PersistenceManager |
-| `recipe` | stable | ~750 | 55 | Крыша над рецептами: RecipeEngine (snapshot/restore), RecipeManager (CRUD+state-sync), is_v3_recipe, normalize_recipe_v3_raw; доменные пути/миграции/yaml-writer инжектируются (ADR-RCP-001/002) |
+| `recipe` | stable | ~1 400 | 98 | Крыша над рецептами: RecipeEngine (snapshot/restore), RecipeManager (CRUD+state-sync, `yaml_io` writer по умолчанию), is_v3_recipe, normalize_recipe_v3_raw, реестр step-миграций `@migration`/`run_chain`; доменные пути и сами шаги-миграции инжектируются, assembler/planner НЕ в модуле (ADR-RCP-001…005) |
 | `service_module` | stable | ~500 | 91 | ServiceRegistry singleton + lifecycle + scanner; ADR-129, ADR-SVC-001/002/003 |
 | `display_module` | stable | ~300 | 12 | DisplayRegistry singleton + YAML persist; ADR-130, ADR-DM-001/002/003 |
 | `console_module` | production | 2 877 | + | Три уровня: passive/active/God mode |
