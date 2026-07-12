@@ -1,9 +1,9 @@
-"""Табы приложения — реестр всех tab factories для TabFactory.
+"""Табы приложения — реестр tab factories для TabFactory.
 
-Функция register_all_tabs() возвращает dict custom_factories
-для подстановки в TabFactory.
-
-Task F.9: фабрики принимают (AppServices, RuntimeDeps), не AppContext (Q-F1=B).
+NEW-D1 (D-4): состав вкладок больше не хардкодится здесь вторым списком —
+``register_all_tabs()`` деривится из единого источника ``TABS``
+(``multiprocess_prototype.frontend.tabs_registry``). Ключи = tab_id, значения =
+фабрики ``(AppServices, RuntimeDeps) -> QWidget``.
 """
 
 from __future__ import annotations
@@ -12,34 +12,13 @@ from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
+
     from multiprocess_prototype.domain.app_services import AppServices
     from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 
 
 def register_all_tabs() -> dict[str, Callable[["AppServices", "RuntimeDeps"], "QWidget"]]:
-    """Зарегистрировать все табы Phase 10.
+    """Вернуть dict ``{tab_id: factory}`` — derived из единого источника TABS."""
+    from multiprocess_prototype.frontend.tabs_registry import TABS
 
-    Lazy-импорт каждого модуля чтобы избежать circular imports.
-    Ключи соответствуют tab_id из TAB_ORDER в tab_factory.py.
-
-    Task F.9: сигнатура фабрик — ``(AppServices, RuntimeDeps) -> QWidget``.
-    """
-    from .settings import SettingsTab
-    from .processes import ProcessesTab
-    from .plugins import PluginsTab
-    from .services import ServicesTab
-    from .displays import DisplaysTab
-    from .recipes import RecipesTab
-    from .pipeline import PipelineTab
-    from .observability import ObservabilityTabs
-
-    return {
-        "settings": SettingsTab.create,
-        "recipes": RecipesTab.create,
-        "processes": ProcessesTab.create,
-        "services": ServicesTab.create,
-        "plugins": PluginsTab.create,
-        "pipeline": PipelineTab.create,
-        "displays": DisplaysTab.create,
-        "observability": ObservabilityTabs.create,
-    }
+    return {spec.id: spec.factory for spec in TABS if spec.factory is not None}
