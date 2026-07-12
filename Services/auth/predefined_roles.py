@@ -15,10 +15,13 @@
 Причём tab-id нужны Services-слою автономно: bootstrap CLI (`python -m
 Services.auth.bootstrap`) работает ДО и БЕЗ прототипа.
 
-Поэтому Services держит собственный список `DEFAULT_TAB_IDS`, а **паритет
-`DEFAULT_TAB_IDS == tabs_registry.tab_ids()` enforced характеризационным тестом
-на слое prototype** (тест видит оба слоя). Дрейф ловится в CI красным тестом.
-Наборы permissions строятся через `build_predefined_roles(tab_ids)`.
+Поэтому Services держит собственный список `DEFAULT_TAB_IDS`, а **паритет по
+множеству** `set(DEFAULT_TAB_IDS) == set(tabs_registry.tab_ids())` enforced
+характеризационным тестом на слое prototype (тест видит оба слоя). Дрейф
+ловится в CI красным тестом. Порядок вкладок — **отдельный контракт** единого
+источника `TABS` (роли order-независимы), проверяется literal-тестом порядка
+на слое prototype. Наборы permissions строятся через
+`build_predefined_roles(tab_ids)`.
 """
 
 from __future__ import annotations
@@ -69,7 +72,21 @@ def build_predefined_roles(
 
     Returns:
         dict `{role_name: Role}` для dev/admin/operator/viewer.
+
+    Raises:
+        ValueError: если `operator_edit_tabs` содержит id вне `tab_ids` — иначе
+            operator получил бы осиротевший `tabs.<id>.edit` без `tabs.<id>.view`
+            (edit-право на несуществующую вкладку). Проверка громкая — падает уже
+            при импорте модуля (`PREDEFINED_ROLES = build_predefined_roles()`).
     """
+    orphan_edit = set(operator_edit_tabs) - set(tab_ids)
+    if orphan_edit:
+        raise ValueError(
+            "operator_edit_tabs содержит id вне tab_ids: "
+            f"{sorted(orphan_edit)} — edit-право без соответствующей вкладки/view. "
+            "Синхронизируйте _OPERATOR_EDIT_TABS с составом вкладок."
+        )
+
     # admin: все табы view+edit, users CRUD, roles read + edit (PR4).
     admin_permissions = _tabs(tab_ids, edit=True) + [
         "users.view",

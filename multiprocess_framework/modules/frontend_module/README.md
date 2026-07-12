@@ -125,6 +125,7 @@ frontend_module/
 │   ├── base/                # Протоколы (IControlView, INumericView), трейты, инфраструктура
 │   ├── examples/            # Учебные адаптеры и схемы (используются тестами)
 │   └── ...
+├── tabs/                    # NEW-D1: generic-механизм вкладок — TabSpec, TabRegistry, LazyTab, AccessContextSource
 ├── widgets/                 # Высокоуровневые виджеты: BaseWidget, HeaderWidget, TabWidget, ImagePanelWidget
 │   ├── base_widget/         # BaseWidget[TModel] — MVP-паттерн
 │   ├── header/              # HeaderWidget, HeaderConfig

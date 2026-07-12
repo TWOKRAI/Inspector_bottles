@@ -234,6 +234,18 @@ from multiprocess_framework.modules.frontend_module.tabs import (  # noqa: E402
 )
 
 __all__ = [
+    # Протоколы контракта модуля (объявлены выше в этом файле).
+    "SupportsCommandMessage",
+    "IRouterLike",
+    "IRegistersManager",
+    "IRegistersManagerGui",
+    "IConfigurableWidget",
+    "IWidgetFactory",
+    "IWidgetRegistry",
+    "ISignalProvider",
+    "IWindowRegistry",
+    "IFrontendManager",
+    # Механизм вкладок (NEW-D1, реэкспорт из frontend_module.tabs).
     "TabSpec",
     "TabRegistry",
     "LazyTab",
