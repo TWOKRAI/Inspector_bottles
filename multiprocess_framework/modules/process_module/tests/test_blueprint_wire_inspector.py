@@ -44,12 +44,15 @@ def _clean_registry():
     импортированного модуля (кеш ``sys.modules``), поэтому once-cleared реестр не
     самовосстанавливается. Snapshot/restore не оставляет такого следа независимо от
     порядка сборки тестов.
+
+    Публичный ``snapshot()``/``restore()`` (AU-5, follow-up В1) — вместо прямого
+    доступа к приватному ``_plugins``.
     """
-    snapshot = dict(PluginRegistry._plugins)
+    snapshot = PluginRegistry.snapshot()
     PluginRegistry.clear()
     yield
     PluginRegistry.clear()
-    PluginRegistry._plugins.update(snapshot)
+    PluginRegistry.restore(snapshot)
 
 
 class _CircleDetector(ProcessModulePlugin):
@@ -102,6 +105,47 @@ class _CenterCrop(ProcessModulePlugin):
         Port(name="trigger_in", dtype="dict", shape="-"),
     ]
     outputs = [Port(name="frame", dtype="image/bgr", shape="(side, side, 3)")]
+
+    def configure(self, ctx): ...
+    def start(self, ctx): ...
+
+
+class _MultiTagSource(ProcessModulePlugin):
+    """Источник с ДВУМЯ РАЗНЫМИ тегами (frame + depth) — двойник для AU-3."""
+
+    name = "multi_tag_source"
+    category = "source"
+    outputs = [
+        Port(name="frame", dtype="image/bgr", shape="(H, W, 3)"),
+        Port(name="depth", dtype="image/gray", shape="(H, W, 1)"),
+    ]
+
+    def configure(self, ctx): ...
+    def start(self, ctx): ...
+
+
+class _LayoutSource(ProcessModulePlugin):
+    """Второй источник (третий тег "layout") — нужен для триггера join (≥2 источника)."""
+
+    name = "layout_source"
+    category = "processing"
+    outputs = [Port(name="layout", dtype="dict", shape="-")]
+
+    def configure(self, ctx): ...
+    def start(self, ctx): ...
+
+
+class _TripleJoin(ProcessModulePlugin):
+    """join-таргет с 3 required входами: frame+depth (один источник) + layout (другой)."""
+
+    name = "triple_join"
+    category = "processing"
+    inputs = [
+        Port(name="frame", dtype="image/bgr", shape="(H, W, 3)"),
+        Port(name="depth", dtype="image/gray", shape="(H, W, 1)"),
+        Port(name="layout", dtype="dict", shape="-"),
+    ]
+    outputs = []
 
     def configure(self, ctx): ...
     def start(self, ctx): ...
@@ -211,6 +255,100 @@ def test_tag_derived_from_source_port_not_target_port_name():
 
     recog = next(p for p in bp.processes if p.process_name == "recog")
     assert recog.inspector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame"}
+
+
+# ---------------------------------------------------------------------------
+# AU-3 (follow-up В1, ADR-PMM-017 п.6): источник с ДВУМЯ РАЗНЫМИ data_type даёт ОДИН
+# тег на весь источник — задокументированная граница, НЕ баг (см. docstring
+# infer_missing_inspectors, "Известный edge (в)"). Разобрано и отвергнуто чинить:
+# структурно неотличимо от "несколько полей ОДНОГО item на разные параметры соседнего
+# плагина" (живой пример — circle_detector.frame/detections → circle_draw.frame/
+# detections в hikvision_letter_robot.yaml, см. test_build_characterization.py и
+# test_join_inspector_from_wires.py — оба ожидают именно КОЛЛАПС в один тег).
+# ---------------------------------------------------------------------------
+
+
+def test_source_with_two_different_data_types_collapses_to_one_tag():
+    """sensor шлёт И "frame", И "depth" (2 required-wires, РАЗНЫЕ target-порты) +
+    layout_proc шлёт "layout" — тег на "sensor" один ("frame"-приоритет), "depth" не
+    попадает в inputs. Регресс-guard задокументированной границы (не фикс)."""
+    _register(_MultiTagSource, _LayoutSource, _TripleJoin)
+    bp = SystemBlueprint.model_validate(
+        {
+            "name": "multi_tag_join",
+            "processes": [
+                {"process_name": "sensor", "plugins": [_plugin("multi_tag_source")]},
+                {"process_name": "layout_proc", "plugins": [_plugin("layout_source")]},
+                {"process_name": "fusion", "plugins": [_plugin("triple_join")]},
+            ],
+            "wires": [
+                {"source": "sensor.multi_tag_source.frame", "target": "fusion.triple_join.frame"},
+                {"source": "sensor.multi_tag_source.depth", "target": "fusion.triple_join.depth"},
+                {"source": "layout_proc.layout_source.layout", "target": "fusion.triple_join.layout"},
+            ],
+        }
+    )
+    bp.infer_missing_inspectors()
+
+    fusion = next(p for p in bp.processes if p.process_name == "fusion")
+    assert fusion.inspector == {
+        "mode": "join",
+        "inputs": ["frame", "layout"],  # "depth" НЕ попадает — известная граница
+        "primary": "frame",
+    }
+
+
+# ---------------------------------------------------------------------------
+# AU-4 (follow-up В1): lookup плагина симметризован с check() — class-path fallback
+# ---------------------------------------------------------------------------
+
+
+def test_lookup_symmetrized_with_class_path_fallback():
+    """Плагин с нестандартным именем в pdict (не совпадает с registry-ключом),
+    находимый ТОЛЬКО по class-path — раньше infer_missing_inspectors всегда передавал
+    "" вторым аргументом _find_plugin_entry, class-path fallback был для него мёртв."""
+    _register(_CircleDetector, _LineFilter, _CenterCrop)
+    plugin_class_path = f"{_CenterCrop.__module__}.{_CenterCrop.__qualname__}"
+    bp = SystemBlueprint.model_validate(
+        {
+            "name": "classpath_lookup",
+            "processes": [
+                {"process_name": "vision", "plugins": [_plugin("circle_detector")]},
+                {"process_name": "line", "plugins": [_plugin("line_filter")]},
+                {
+                    "process_name": "recog",
+                    "plugins": [{"plugin_name": "custom_alias", "plugin_class": plugin_class_path}],
+                },
+            ],
+            "wires": [
+                {"source": "vision.circle_detector.frame", "target": "recog.custom_alias.frame"},
+                {"source": "line.line_filter.overlay", "target": "recog.custom_alias.trigger_in"},
+            ],
+        }
+    )
+    bp.infer_missing_inspectors()
+
+    recog = next(p for p in bp.processes if p.process_name == "recog")
+    assert recog.inspector == {"mode": "join", "inputs": ["frame", "overlay"], "primary": "frame"}
+
+
+# ---------------------------------------------------------------------------
+# AU-5 (follow-up В1): публичный PluginRegistry.snapshot()/restore()
+# ---------------------------------------------------------------------------
+
+
+def test_plugin_registry_snapshot_restore_round_trip():
+    """snapshot()/restore() — публичная альтернатива прямому доступу к _plugins."""
+    _register(_CircleDetector)
+    before = PluginRegistry.snapshot()
+    assert "circle_detector" in before
+
+    PluginRegistry.clear()
+    assert PluginRegistry.get("circle_detector") is None
+
+    PluginRegistry.restore(before)
+    assert PluginRegistry.get("circle_detector") is not None
+    assert PluginRegistry.get("circle_detector").plugin_class is _CircleDetector
 
 
 # ---------------------------------------------------------------------------
