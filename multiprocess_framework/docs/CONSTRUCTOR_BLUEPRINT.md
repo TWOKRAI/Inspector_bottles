@@ -1,8 +1,8 @@
 # Constructor Blueprint — Конструктор многопроцессных приложений
 
-**Версия:** 2.2 · **Обновлено:** 2026-05-18 · **Статус:** Production · **Аудитория:** разработчики и агенты, которые собирают приложения на фреймворке.
+**Версия:** 2.3 · **Обновлено:** 2026-07-12 (C8 docs-sync: добавлен `recipe`, счётчик 24 → 25) · **Статус:** Production · **Аудитория:** разработчики и агенты, которые собирают приложения на фреймворке.
 
-> **Цель документа.** Дать сквозную интеграционную карту: 24 модуля = 24 «компонента», как у компьютера. Пользуясь этим документом, разработчик или агент должен уметь собрать многопроцессное приложение средней сложности (3–10 процессов, GUI, БД, IPC, регистры) без глубокого погружения в реализации. Границы ответственности (чтобы не дублировать) — [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md).
+> **Цель документа.** Дать сквозную интеграционную карту: 25 модулей = 25 «компонентов», как у компьютера. Пользуясь этим документом, разработчик или агент должен уметь собрать многопроцессное приложение средней сложности (3–10 процессов, GUI, БД, IPC, регистры) без глубокого погружения в реализации. Границы ответственности (чтобы не дублировать) — [`MODULES_RESPONSIBILITY_MAP.md`](MODULES_RESPONSIBILITY_MAP.md).
 >
 > **Что это документ — нет.** Не API-справочник (см. `modules/<X>/README.md`), не реестр ADR (см. `DECISIONS.md` + `docs/ADR_REGISTRY.md`), не tutorial (см. `docs/QUICK_START.md`). Это **схема сборки**.
 
@@ -10,7 +10,7 @@
 
 ## 0. Аналогия с ПК (компьютером)
 
-Фреймворк проектировался как **конструктор электронных компонентов**. Поэтому 24 модуля раскладываются на роли, знакомые любому, кто собирал ПК:
+Фреймворк проектировался как **конструктор электронных компонентов**. Поэтому 25 модулей раскладываются на роли, знакомые любому, кто собирал ПК:
 
 | Роль в ПК | Модуль фреймворка | Что делает |
 |---|---|---|
@@ -23,6 +23,7 @@
 | **Оперативная память (RAM, между процессами)** | `shared_resources_module` (SRM) | `Queue`, `Event`, `SharedMemory`, `ConfigStore`. Pickle-safe для Windows spawn. `ProcessHandle` — chainable доступ: `srm.for_process("cam").queue("data").send(msg)`. |
 | **BIOS / реестр настроек** | `config_module` | Runtime-конфиги: dot-notation, подписки, env-fallback, sync через `ConfigStore`. |
 | **Дерево состояния системы (видимое всем)** | `state_store_module` | Централизованный реактивный стор: server в `ProcessManagerProcess`, клиенты (`StateProxy`) в каждом процессе. Дельта-рассылка по glob-паттернам. |
+| **BIOS-профили (сохранённые настройки)** | `recipe` | Крыша над рецептами: `RecipeEngine` (snapshot/restore config-ветвей), `RecipeManager` (CRUD + `state.recipes.active`), реестр step-миграций (`@migration`/`run_chain`), generic comment-preserving YAML-writer (`yaml_io`). Доменных схем не знает — пути и сами шаги-миграции инжектируются приложением. Leaf (stdlib + pyyaml). |
 | **Шина событий-уведомлений (in-proc)** | `event_module` | `EventBus` — синхронный typed pub/sub «фактов» (`publish(event)` → подписчики по `type(event)`). Внутрипроцессная ось «что произошло». Не путать с межпроцессным `EventManager` (в SRM) и с командами (`command_module`). |
 | **Контроллер прерываний (синхронный)** | `command_module` | Тонкий фасад над dispatch: `register_command("name", handler)` + `handle_command(msg)`. Sync by design — async буфер уже выше через Router. |
 | **Журнал операций с откатом (Undo/Redo)** | `actions_module` | `ActionBus` — отменяемые мутации регистров из GUI: undo/redo-стеки, coalescing, опц. журнал. Ось «действие с откатом» ≠ IPC-команда. Не требует PySide6. |
@@ -30,7 +31,7 @@
 | **Конвейер обработки (DAG)** | `chain_module` | Pipeline-движок: `ChainRunnable` (sequential), `DagRunnable` (graph), `ParallelChainRunnable` (бандлы), `WorkerPoolDispatcher` (cross-process IPC). Не зависит от других модулей. |
 | **CPU (ядро)** | `process_module` | `ProcessModule` — база дочернего процесса. Композиция: `ProcessLifecycle` + `ProcessManagers` + `ProcessCommunication` + `ProcessState` + `SystemThreads`. Здесь живут все воркеры приложения. |
 | **Терминал / клавиатура** | `console_module` | Терминальный I/O: passive (показ окна), active (команды), God Mode (interactive stdin → CommandManager). |
-| **Северный мост + чипсет управления** | `process_manager_module` | `SystemLauncher` (точка входа, Dict at Boundary), `ProcessSpawner` (старт OS-процесса оркестратора + signal handlers), `ProcessManagerProcess` (оркестратор-процесс, наследник `ProcessModule`), `ProcessRegistry` (per-process stop_event), `ProcessMonitor` (heartbeat). |
+| **Северный мост + чипсет управления** | `process_manager_module` | `SystemLauncher` (точка входа, Dict at Boundary), `ProcessSpawner` (старт OS-процесса оркестратора + signal handlers), `ProcessManagerProcess` (оркестратор-процесс, наследник `ProcessModule`), `ProcessRegistry` (per-process stop_event), `ProcessMonitor` (heartbeat), `topology/blueprint.py` (`SystemBlueprint`/`ProcessConfig`/`Wire` — схема топологии всей системы, ADR-PMM-016; `infer_missing_inspectors()` — структурный вывод join/inspector из wires, ADR-PMM-017). |
 | **Диспетчер устройств (Device Manager)** | `service_module` | `ServiceRegistry` — реестр long-running сервисов (камеры, БД, auth) с lifecycle-автоматом `UNREGISTERED→READY→RUNNING→STOPPED→ERROR`. `@register_service`, `discover(*dirs)`. Без hot-reload (в отличие от `PluginRegistry`). |
 | **Реестр видеовыходов (framebuffer-каналы)** | `display_module` | `DisplayRegistry` — декларативный blueprint именованных SHM-каналов кадров (YAML persist). Сами SHM-сегменты создаёт SRM при старте. Generic, без vision-семантики. |
 | **Накопитель (HDD/SSD) + ФС** → вынесен | `Services/sql` | *Не во фреймворке (Phase 4.1):* `from Services.sql import SQLManager` — DDL из `SchemaBase`, `QuerySet`, `UnitOfWork`, экспорт. |
@@ -41,7 +42,7 @@
 
 ---
 
-## 1. Полная карта (24 модуля, 12 слоёв)
+## 1. Полная карта (25 модулей, 12 слоёв)
 
 ```mermaid
 flowchart BT
@@ -73,6 +74,7 @@ flowchart BT
   srm[shared_resources_module]:::l5
   config[config_module]:::l5
   state_store[state_store_module]:::l5
+  recipe[recipe]:::l5
 
   event[event_module]:::l6
 
@@ -127,7 +129,7 @@ flowchart BT
   frontend --> router
 ```
 
-> `event_module` и `display_module` — leaf-узлы (stdlib/pyyaml, без зависимостей от других модулей фреймворка) — на графе стоят обособленно. `sql_module` из графа убран: вынесен в `Services/sql` (Phase 4.1), см. таблицу выше и [`Services/STATUS.md`](../../Services/STATUS.md).
+> `event_module`, `display_module` и `recipe` — leaf-узлы (stdlib/pyyaml, без зависимостей от других модулей фреймворка) — на графе стоят обособленно. `recipe` типизирует store через `StoreProtocol` и **не импортирует** `state_store_module` (нет цикла), поэтому висит в L5 без входящих стрелок. `sql_module` из графа убран: вынесен в `Services/sql` (Phase 4.1), см. таблицу выше и [`Services/STATUS.md`](../../Services/STATUS.md).
 
 **Правило стрелок.** Зависимость идёт **только снизу вверх** по слоям. Циклы запрещены и проверены. Внутри слоя модули независимы или зависят только от модулей более низкого слоя.
 
