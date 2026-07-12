@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+from backend_ctl.driver import _leaf_result
 from backend_ctl.harness import BackendHarness
 
 _SWITCH_PORT = 8782
@@ -48,18 +49,14 @@ _REGION_ONLY = {
 _LINE_PROCS = {"camera_0", "detector", "line", "draw"}
 
 
-def _result(res: dict) -> dict:
-    """Развернуть result-конверт ответа driver'а (см. feedback_live_harness_tests)."""
-    if isinstance(res, dict) and isinstance(res.get("result"), dict):
-        return res["result"]
-    return res if isinstance(res, dict) else {}
-
-
 def _state_subtree(drv, path: str) -> dict:
-    """Прочитать поддерево StateStore через PM (state.get_subtree)."""
+    """Прочитать поддерево StateStore через PM (state.get_subtree).
+
+    Конверт ответа разворачивает ``_leaf_result`` (backend_ctl.driver) — общий
+    хелпер, а не локальный дубль (спускается по вложенным ``result`` до листа).
+    """
     res = drv.send_command("ProcessManager", "state.get_subtree", {"path": path, "request_id": "rs23"}, timeout=8.0)
-    inner = _result(res)
-    value = inner.get("value")
+    value = _leaf_result(res).get("value")
     return value if isinstance(value, dict) else {}
 
 
@@ -104,7 +101,9 @@ def test_switch_state_matches_os(switch_backend) -> None:
     drv.events(timeout=0.2)  # осушить возможный хвост до switch
 
     bp_line = _load_bp(_LINE)
-    applied = _result(drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp_line}, timeout=40.0))
+    applied = _leaf_result(
+        drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp_line}, timeout=40.0)
+    )
     assert applied.get("success") is True, f"switch region→line не success: {applied}"
 
     # Дать монитору/heartbeat'ам осесть после switch.

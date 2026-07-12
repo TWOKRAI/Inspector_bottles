@@ -825,74 +825,81 @@ class ProcessManagerProcess(ProcessModule):
         # точка очистки (симметрия register/unregister): реестр+SHM+монитор+state.
         self._delete_process_state(name)
 
-    def _delete_process_state(self, name: str) -> None:
-        """Удалить поддерево ``processes.<name>`` из StateStore (локально, без IPC).
+    def _state_op(self, handler_name: str, payload: dict, ctx: str) -> None:
+        """Единый локальный путь мутации StateStore из PM (без IPC).
 
-        Идёт напрямую через StateStoreManager ProcessManager (тот же локальный путь,
-        что ``ProcessMonitor._publish_state``). Идемпотентно и не бросает: телеметрия
-        не критична для lifecycle. Тихо no-op, если StateStore недоступен.
+        Идёт напрямую через StateStoreManager ProcessManager (как
+        ``ProcessMonitor._publish_state``). Идемпотентно и НЕ бросает: телеметрия/
+        state-операции не критичны для lifecycle. Тихо no-op, если StateStore
+        недоступен. Обёртки ниже (delete/identity/alert) — тонкие вызовы этого метода.
+
+        Args:
+            handler_name: имя метода StateStoreManager ("handle_state_set" / "..._delete").
+            payload: содержимое ключа "data" IPC-конверта команды.
+            ctx: метка вызова для debug-лога при сбое.
         """
         ssm = getattr(self, "_state_store_manager", None)
         if ssm is None:
             return
+        handler = getattr(ssm, handler_name, None)
+        if handler is None:
+            return
         try:
-            ssm.handle_state_delete({"data": {"path": f"processes.{name}", "source": "ProcessManager"}})
-        except Exception as exc:  # nosec B110 — очистка телеметрии не критична
-            self._log_debug(f"_delete_process_state('{name}') не удалось: {exc}")
+            handler({"data": payload})
+        except Exception as exc:  # nosec B110 — state-операция не критична для lifecycle
+            self._log_debug(f"_state_op[{ctx}] не удался: {exc}")
+
+    def _delete_process_state(self, name: str) -> None:
+        """Удалить поддерево ``processes.<name>`` из StateStore (RS-2/Ж-2/LP-4).
+
+        Без этого снятый switch'ем процесс висит в дереве как ``running/health ok``
+        (монитор перестал публиковать через forget, но старые листья остаются) —
+        наблюдаемость врёт. Единая точка очистки: реестр+SHM+монитор+state.
+        """
+        self._state_op(
+            "handle_state_delete",
+            {"path": f"processes.{name}", "source": "ProcessManager"},
+            f"delete_state:{name}",
+        )
 
     def _publish_process_identity(self, name: str) -> None:
         """Опубликовать ОС-идентичность процесса в StateStore: pid + актуальный config.
 
-        RS-2 (честный state после switch): у КАЖДОГО живого процесса в дереве —
-        реальный ``pid`` (сопоставление state↔ОС) и ``config`` из НОВОГО рецепта
-        (а не из прежней топологии). Публикуется после успешного ``start`` (switch
-        и boot). Локальный путь (без IPC), идемпотентно, не бросает.
+        RS-2 (честный state): у КАЖДОГО живого процесса в дереве — реальный ``pid``
+        (сопоставление state↔ОС) и ``config`` из НОВОГО рецепта. Публикуется после
+        успешного ``start`` (switch, boot, restart).
         """
-        ssm = getattr(self, "_state_store_manager", None)
-        if ssm is None:
-            return
         proc = self._process_registry.get_process_by_name(name)
         pid = proc.pid if proc is not None else None
         config = self._process_configs.get(name)
-        try:
-            ssm.handle_state_set({"data": {"path": f"processes.{name}.pid", "value": pid, "source": "ProcessManager"}})
-            if config is not None:
-                ssm.handle_state_set(
-                    {
-                        "data": {
-                            "path": f"processes.{name}.config",
-                            "value": copy.deepcopy(config),
-                            "source": "ProcessManager",
-                        }
-                    }
-                )
-        except Exception as exc:  # nosec B110 — телеметрия не критична
-            self._log_debug(f"_publish_process_identity('{name}') не удалось: {exc}")
+        self._state_op(
+            "handle_state_set",
+            {"path": f"processes.{name}.pid", "value": pid, "source": "ProcessManager"},
+            f"identity_pid:{name}",
+        )
+        if config is not None:
+            self._state_op(
+                "handle_state_set",
+                {"path": f"processes.{name}.config", "value": copy.deepcopy(config), "source": "ProcessManager"},
+                f"identity_config:{name}",
+            )
 
     def _publish_unstoppable_alert(self, names: list[str]) -> None:
         """Опубликовать alert о неостановимых процессах в StateStore (B-3, RS-3).
 
         Процесс, переживший полную эскалацию (graceful→terminate→kill), исключается
-        из cleanup/пересоздания (защита от дублей), НО не молча: alert в
-        ``system.switch.unstoppable`` виден в GUI/Наблюдаемости, а имя остаётся в
-        реестре/конфигах → СЛЕДУЮЩИЙ switch повторит попытку остановки (retry).
+        из cleanup/пересоздания (защита от дублей), НО не молча. Громкость для оператора
+        даёт ``_log_error`` (→ logger_manager → store-tap → Наблюдаемость); этот
+        state-ключ ``system.switch.unstoppable`` — queryable-поверхность для backend_ctl
+        и retry-триггер (имя остаётся в реестре → следующий switch повторит остановку).
         Пустой список → снять alert (очистка после успешного switch).
         """
-        ssm = getattr(self, "_state_store_manager", None)
-        if ssm is None:
-            return
-        try:
-            ssm.handle_state_set(
-                {
-                    "data": {
-                        "path": "system.switch.unstoppable",
-                        "value": sorted(names),
-                        "source": "ProcessManager",
-                    }
-                }
-            )
-        except Exception as exc:  # nosec B110 — alert не критичен для lifecycle
-            self._log_debug(f"_publish_unstoppable_alert({names}) не удалось: {exc}")
+        self._last_unstoppable = sorted(names)
+        self._state_op(
+            "handle_state_set",
+            {"path": "system.switch.unstoppable", "value": sorted(names), "source": "ProcessManager"},
+            f"unstoppable_alert:{names}",
+        )
 
     def _collect_partial_new(
         self,
@@ -1582,6 +1589,9 @@ class ProcessManagerProcess(ProcessModule):
         # выжившие соседи оставят валидную переиспользованную очередь).
         self._bump_routing_epoch()
         self._broadcast_routing_refresh("process.restart")
+        # RS-2: пересозданный инстанс имеет НОВЫЙ pid — обновить identity в state,
+        # иначе в дереве навсегда остаётся pid мёртвого инстанса (нарушение инварианта).
+        self._publish_process_identity(process_name)
         self._log_info(f"Process '{process_name}' restarted")
         return True
 
@@ -1706,6 +1716,10 @@ class ProcessManagerProcess(ProcessModule):
             return {"success": False, "error": "topology not configured (no commands_fn)"}
 
         self._replace_in_progress = True
+        # B-3 (RS-3): собираем неостановимые имена этого apply — поднимем в ответ
+        # (согласованность с cleanup_failures/protected_conflicts). Обновляется в
+        # _publish_unstoppable_alert (rollback/stop_all-fail) и чистится на успехе.
+        self._last_unstoppable = []
         try:
             # Snapshot (non-protected) для rollback
             snapshot = self._snapshot_processes()
@@ -1750,6 +1764,10 @@ class ProcessManagerProcess(ProcessModule):
                         "rolled_back": True,
                         **{k: v for k, v in result.items() if k != "success"},
                     }
+                    # B-3: неостановимые имена этого rollback — в ответ (согласовано
+                    # с cleanup_failures/protected_conflicts; retry на след. switch).
+                    if self._last_unstoppable:
+                        resp["unstoppable"] = list(self._last_unstoppable)
                     # Ф3.1: rollback тоже пересоздаёт очереди — разослать refresh.
                     epoch = self._refresh_after_topology("rollback", executed)
                     if epoch is not None:
@@ -1819,11 +1837,14 @@ class ProcessManagerProcess(ProcessModule):
                 # разослать refresh, чтобы выжившие сверили снимок.
                 self._bump_routing_epoch()
                 self._broadcast_routing_refresh("rollback")
-                return {
+                exc_resp = {
                     "success": False,
                     "rolled_back": True,
                     "error": str(exc),
                 }
+                if self._last_unstoppable:
+                    exc_resp["unstoppable"] = list(self._last_unstoppable)
+                return exc_resp
 
             finally:
                 self._resume_monitor(monitor_was_running)

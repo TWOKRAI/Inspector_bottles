@@ -276,8 +276,8 @@ class IStateStoreManager(ABC):
 
     StateStoreManager наследует IStateStoreManager явно в задаче 2.1.3.
     Содержит TreeStore + SubscriptionManager + DeltaDispatcher.
-    Обрабатывает IPC-сообщения: state.set, state.merge, state.get,
-    state.subscribe, state.unsubscribe, state.unsubscribe_all, state.get_subtree.
+    Обрабатывает IPC-сообщения: state.set, state.merge, state.delete, state.get,
+    state.get_subtree, state.subscribe, state.unsubscribe, state.unsubscribe_all.
 
     ADR-SS-009: ABC для явного публичного API и тестируемости.
     """
@@ -322,8 +322,8 @@ class IStateStoreManager(ABC):
     def register_message_handlers(self, router: IRouter) -> None:
         """Зарегистрировать IPC message-handlers в Router.
 
-        Регистрирует handlers для 7 команд:
-        state.set, state.merge, state.get, state.get_subtree,
+        Регистрирует handlers для 8 команд:
+        state.set, state.merge, state.delete, state.get, state.get_subtree,
         state.subscribe, state.unsubscribe, state.unsubscribe_all.
 
         Args:

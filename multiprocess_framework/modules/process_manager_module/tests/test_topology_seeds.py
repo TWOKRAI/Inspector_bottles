@@ -384,3 +384,28 @@ class TestHonestStateRS2RS3:
 
         assert pm._topology_stop_all(["stuck"]) is False
         assert ssm.store.get("system.switch.unstoppable") == ["stuck"]
+
+    def test_restart_publishes_fresh_identity(self) -> None:
+        """Блокер#3 (RS-2): restart_process публикует НОВЫЙ pid в state (не остаётся
+        pid мёртвого инстанса)."""
+        pm = _make_pm({"cam0": {"class": "mod.Cam", "priority": "normal"}})
+        ssm = self._attach_real_state_store(
+            pm, initial={"processes": {"cam0": {"pid": 1111}}}
+        )
+        # Заглушки тяжёлых шагов restart_process (проверяем именно publish identity).
+        pm.stop_process = MagicMock(return_value=True)
+        pm._wire_reissue_enabled = MagicMock(return_value=False)
+        pm._process_queue_ids = MagicMock(return_value=set())
+        pm._drain_process_queues = MagicMock()
+        pm._bump_routing_epoch = MagicMock()
+        pm._broadcast_routing_refresh = MagicMock()
+        pm._wait_processes_ready = MagicMock(return_value={})
+
+        fake_proc = MagicMock()
+        fake_proc.pid = 7777
+        pm._process_registry.create_and_register = MagicMock(return_value=fake_proc)
+        pm._process_registry.get_process_by_name = MagicMock(return_value=fake_proc)
+
+        assert pm.restart_process("cam0") is True
+        # pid мёртвого инстанса (1111) заменён на новый (7777).
+        assert ssm.store.get("processes.cam0.pid") == 7777

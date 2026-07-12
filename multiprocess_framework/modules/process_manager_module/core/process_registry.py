@@ -282,8 +282,8 @@ class ProcessRegistry:
         В отличие от ``stop_one`` в цикле (N×timeout ≈ 35с для 7 процессов),
         взводит все ``stop_event`` разом, затем ждёт graceful-выхода с ОБЩИМ
         дедлайном ``time.monotonic()+timeout`` → суммарно ~timeout. Стрэгглеры —
-        ``terminate`` → ``kill`` (тоже параллельно). Паттерн ``stop_all``/``_join_all``,
-        доведённый до hot-swap (``replace_blueprint``).
+        ``terminate`` → ``kill`` (тоже параллельно) с confirmed-death. ``stop_all``
+        делегирует сюда (shutdown-дорога тоже подтверждает смерть).
 
         Args:
             names: имена процессов для остановки.
@@ -400,16 +400,3 @@ class ProcessRegistry:
         elif self.logger:
             self.logger._log_info("All processes stopped (смерть подтверждена)")
         return results
-
-    def _join_all(self, timeout: float = 5.0) -> None:
-        # ОБЩИЙ дедлайн на все процессы: stop_event'ы уже взведены (stop_all +
-        # общий system_stop_event), дети гаснут ПАРАЛЛЕЛЬНО → ждём суммарно ~timeout,
-        # а не N×timeout. Раньше join(timeout) на каждого по очереди давал 7×5с≈35с.
-        deadline = time.monotonic() + timeout
-        for process in self.os_processes:
-            if process.is_alive():
-                if self.logger:
-                    self.logger._log_info(f"Waiting for process '{process.name}' (timeout={timeout}s)...")
-                process.join(timeout=max(0.0, deadline - time.monotonic()))
-                if process.is_alive() and self.logger:
-                    self.logger._log_warning(f"Process '{process.name}' still alive after join")

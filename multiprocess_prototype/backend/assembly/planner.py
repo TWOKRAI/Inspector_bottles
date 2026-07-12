@@ -140,22 +140,24 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
         # 1. Валидация + сборка ДО любой stop-команды
         proc_dicts = self._proc_dicts_fn(desired)
 
-        # 2. Protected = объединение old ∪ new blueprint (B-2, RS-3). Живой protected
-        #    (из провайдера) И помеченный protected в новом рецепте — оба исключаются
-        #    из stop/пересоздания. Раньше бралось только из живого конфига → процесс,
-        #    ставший protected в новом рецепте, мог быть спавнен как non-protected.
+        # 2. Из replace исключаем ТОЛЬКО реальных выживших = live_protected
+        #    (процессы, которых switch физически НЕ трогает). B-2/RS-3:
+        #    - имя, живущее НЕ-protected, но protected:True в новом рецепте: оно ∈ old
+        #      (сносится) и ∈ new (пересоздаётся) → честно пересоздаётся и дальше
+        #      живёт protected по новому конфигу (не «снесён и не создан», регресс a);
+        #    - имя, protected ТОЛЬКО в новом рецепте (не живое): ∉ live_protected →
+        #      ∈ new → создаётся как обычный новый процесс (не «никогда не стартует»,
+        #      регресс b).
         live_protected = self._protected_provider()
-        new_protected = {n for n, d in proc_dicts.items() if isinstance(d, dict) and d.get("protected")}
-        protected = live_protected | new_protected
         old = self._current_provider()  # живые non-protected, не из аргумента
 
-        # B-2: расхождение конфига protected-процесса между живым и новым рецептом.
-        # protected НЕ рестартится (живёт со старым конфигом) → если новый рецепт
-        # задаёт иной конфиг, это «тихий успех» switch'а. Фиксируем громко.
-        self.last_protected_conflicts = self._detect_protected_conflicts(proc_dicts, protected)
+        # B-2: расхождение конфига РЕАЛЬНОГО выжившего (live_protected) с новым
+        # рецептом. Такой процесс НЕ рестартится (живёт со старым конфигом) → если
+        # новый рецепт задаёт иной конфиг, это «тихий успех» switch'а. Фиксируем громко.
+        self.last_protected_conflicts = self._detect_protected_conflicts(proc_dicts, live_protected)
 
-        # Новые = из собранных proc_dicts минус protected
-        new = [n for n in proc_dicts if n not in protected]
+        # Новые = из собранных proc_dicts минус реальные выжившие (live_protected).
+        new = [n for n in proc_dicts if n not in live_protected]
 
         # 3. Собрать команды по 5 фазам
         cmds: list[dict] = []
@@ -194,19 +196,23 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
 
         self._log_info(
             f"full-replace commands: {len(cmds)} (stop_all={'1' if old else '0'}, "
-            f"old={len(old)}, new={len(new)}, protected={len(protected)})"
+            f"old={len(old)}, new={len(new)}, live_protected={len(live_protected)})"
         )
         self._record_metric("planner.commands", len(cmds))
 
         return cmds
 
-    def _detect_protected_conflicts(self, proc_dicts: dict[str, dict], protected: set[str]) -> list[str]:
-        """Имена protected-процессов, чей конфиг в новом рецепте разошёлся с живым.
+    def _detect_protected_conflicts(self, proc_dicts: dict[str, dict], live_protected: set[str]) -> list[str]:
+        """Имена РЕАЛЬНЫХ выживших (live_protected), чей конфиг в новом рецепте разошёлся.
 
-        protected НЕ перезапускается при switch (живёт со старым конфигом). Если
-        новый blueprint задаёт для protected-имени ИНОЙ конфиг, изменения молча не
-        применятся — switch выглядел бы «успешным». Возвращаем такие имена, чтобы
-        PM поднял их в ответ apply и в ObservabilityHub (не тихо).
+        live_protected НЕ перезапускается при switch (switch их физически не трогает —
+        живут со старым конфигом). Если новый blueprint задаёт для такого имени ИНОЙ
+        конфиг, изменения молча не применятся — switch выглядел бы «успешным».
+        Возвращаем такие имена, чтобы PM поднял их в ответ apply и в ObservabilityHub.
+
+        Считаем ТОЛЬКО по live_protected (не по union с new-blueprint protected): имя,
+        впервые ставшее protected в новом рецепте, честно пересоздаётся — расхождения
+        у него нет по определению.
 
         Сравнение apples-to-apples: и живой конфиг (``_process_configs[name]``), и
         ``proc_dicts[name]`` — результат одного ассемблера. Провайдер не задан →
@@ -215,7 +221,7 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
         if self._protected_config_provider is None:
             return []
         conflicts: list[str] = []
-        for name in sorted(set(proc_dicts) & protected):
+        for name in sorted(set(proc_dicts) & live_protected):
             live = self._protected_config_provider(name)
             if live is None:
                 continue  # нет живого (первый boot протектеда) — нечего сравнивать
