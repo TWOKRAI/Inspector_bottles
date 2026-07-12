@@ -336,8 +336,15 @@ class SystemBlueprint(SchemaBase):
             by_source.setdefault(src_process, set()).add(src_port)
 
         for proc in self.processes:
-            if proc.inspector or (proc.extras or {}).get("inspector"):
-                continue  # явный inspector — приоритет, вывод не применяется
+            # Явный inspector-конфиг: typed-поле приоритетнее extras["inspector"].
+            explicit = proc.inspector or (proc.extras or {}).get("inspector") or {}
+            # Escape-hatch (вывод НЕ применяется) — только если конфиг задаёт mode.
+            # Mode-less конфиг (напр. {timeout_sec: 5}) — НЕ escape-hatch, а тонкая
+            # настройка: вывод mode/inputs/primary из wires всё равно срабатывает, а
+            # прочие ключи подмешиваются поверх (иначе mode-less inspector молча
+            # отключал бы join — F2). Симметрично legacy metadata.inspector.
+            if isinstance(explicit, dict) and explicit.get("mode"):
+                continue
 
             sources = required_sources.get(proc.process_name, {})
             if len(sources) < 2:
@@ -349,15 +356,23 @@ class SystemBlueprint(SchemaBase):
 
             derived: dict[str, Any] = {"mode": "join", "inputs": unique_tags, "primary": primary}
 
-            # Legacy-путь: тонкая настройка из metadata.inspector (структурные поля
-            # mode/inputs/primary остаются авторитетны из wires, не из metadata).
+            # Тонкая настройка (структурные mode/inputs/primary остаются из wires):
+            # mode-less явный inspector (typed/extras) + legacy metadata.inspector —
+            # оба подмешивают только НЕ-структурные ключи (timeout_sec/… ) поверх skeleton.
             legacy = proc.metadata.get("inspector") if isinstance(proc.metadata, dict) else None
-            if isinstance(legacy, dict):
-                for key, value in legacy.items():
-                    if key not in ("mode", "inputs", "primary"):
-                        derived[key] = value
+            for tuning in (explicit, legacy):
+                if isinstance(tuning, dict):
+                    for key, value in tuning.items():
+                        if key not in ("mode", "inputs", "primary"):
+                            derived[key] = value
 
             proc.inspector = derived
+            # Снять mode-less shadow из extras: proc.inspector теперь авторитетен (в
+            # model_fields_set через validate_assignment), но extras["inspector"] без mode
+            # иначе провоцировал бы ложный conflict-warning в as_generic_config._pick.
+            extras_insp = (proc.extras or {}).get("inspector")
+            if isinstance(extras_insp, dict) and not extras_insp.get("mode"):
+                proc.extras = {k: v for k, v in proc.extras.items() if k != "inspector"}
 
     def build_configs(self) -> list[GenericProcessConfig]:
         """Собрать список GenericProcessConfig для launcher."""

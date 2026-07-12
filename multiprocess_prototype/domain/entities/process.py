@@ -22,11 +22,17 @@ from .worker import WorkerSpec
 
 # Pipeline-routing shorthand-ключи framework-blueprint ProcessConfig (ADR-PM-014, рычаг
 # C6a), которых НЕТ среди typed-полей домен-entity Process (chain_targets — уже typed-поле,
-# роутинг не нужен). Домен их не типизирует, но ОБЯЗАН складывать в extras, а НЕ в metadata:
+# роутинг не нужен; restart_policy — тоже typed-поле, читается framework как typed, не из
+# extras). Домен их не типизирует, но ОБЯЗАН складывать в extras, а НЕ в metadata:
 # framework читает их из typed-поля/extras (`as_generic_config._pick`,
 # `infer_missing_inspectors`) и НИКОГДА из metadata. Поэтому shorthand-ключ, свёрнутый
 # GUI round-trip'ом в metadata, для бэкенда нем — тихая деградация (явный
 # `inspector: {mode: fanin}` теряет авторитетность → структурный join). См. ADR-PMM-017 п.5, AU-2.
+#
+# ОБЯЗАТЕЛЬСТВО СИНХРОНИЗАЦИИ: набор — зеркало `_pick`-ключей ProcessConfig.as_generic_config
+# (chain_targets/source_target_fps/inspector/io_peek). При добавлении нового `_pick`-ключа
+# в framework — добавить сюда (если он НЕ typed-поле домена) ИЛИ typed-полем в Process (как
+# chain_targets/restart_policy). Drift-guard: test_extras_shorthand_mirrors_pick_set (domain tests).
 _EXTRAS_SHORTHAND_KEYS: frozenset[str] = frozenset({"inspector", "source_target_fps", "io_peek"})
 
 
@@ -76,6 +82,16 @@ class Process(SchemaBase):
         str | None,
         FieldMeta("Категория процесса (для фильтрации в UI)"),
     ] = None
+    restart_policy: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Per-process авто-рестарт (enabled/max_retries/backoff_sec/window_sec); пусто → "
+            "глобальная политика. Typed-поле по симметрии с ProcessConfig.restart_policy "
+            "(ADR-PM-014): framework читает его как typed-поле (as_generic_config), НЕ из "
+            "extras/metadata. Без этого поля плоский restart_policy сворачивался бы в "
+            "metadata и молча отключал авто-рестарт при boot после GUI round-trip (AU-2/F1)."
+        ),
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description=(
@@ -117,13 +133,14 @@ class Process(SchemaBase):
         """
         if not isinstance(data, dict):
             return data
-        # known выводим из самой модели: при добавлении нового typed-поля в Process
-        # его не нужно дублировать здесь (ключи model_fields == ключи YAML, без alias).
-        known = set(cls.model_fields)
-        unknown = {k: v for k, v in data.items() if k not in known}
+        # known — сами typed-поля модели (ключи model_fields == ключи YAML, без alias):
+        # новое поле добавлять сюда не нужно. Проверяем принадлежность напрямую по
+        # model_fields, без аллокации set до раннего return (F4-perf).
+        fields = cls.model_fields
+        unknown = {k: v for k, v in data.items() if k not in fields}
         if not unknown:
             return data
-        result = {k: v for k, v in data.items() if k in known}
+        result = {k: v for k, v in data.items() if k in fields}
         extras = dict(result.get("extras") or {})
         metadata = dict(result.get("metadata") or {})
         for key, value in unknown.items():

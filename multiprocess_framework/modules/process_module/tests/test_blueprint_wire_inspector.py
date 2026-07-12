@@ -323,6 +323,75 @@ def test_explicit_extras_inspector_not_overridden():
     assert draw.inspector == {}  # typed-поле пустое; extras не трогаем — приоритет explicit
 
 
+def test_mode_less_extras_inspector_is_tuning_not_escape_hatch():
+    """F2: mode-less inspector (без mode, только tuning) НЕ отключает вывод.
+
+    Плоский inspector: {timeout_sec: 5} едет в extras (домен-роутинг). Раньше (metadata-
+    путь) он давал «join из wires + подмешанный timeout»; после AU-2 он в extras и мог бы
+    молча гасить join (escape-hatch по наличию ключа). Фикс: escape-hatch — только при
+    наличии mode; mode-less → тонкая настройка поверх выведенного skeleton.
+    """
+    _register(_CircleDetector, _LineFilter, _OverlayDraw)
+    bp = SystemBlueprint.model_validate(
+        {
+            "name": "mode_less_extras",
+            "processes": [
+                {"process_name": "vision", "plugins": [_plugin("circle_detector")]},
+                {"process_name": "line", "plugins": [_plugin("line_filter")]},
+                {
+                    "process_name": "draw",
+                    "plugins": [_plugin("overlay_draw")],
+                    "extras": {"inspector": {"timeout_sec": 5}},  # mode-less
+                },
+            ],
+            "wires": [
+                {"source": "vision.circle_detector.frame", "target": "draw.overlay_draw.frame"},
+                {"source": "line.line_filter.overlay", "target": "draw.overlay_draw.overlay"},
+            ],
+        }
+    )
+    bp.infer_missing_inspectors()
+
+    draw = next(p for p in bp.processes if p.process_name == "draw")
+    # mode/inputs/primary выведены из wires; timeout_sec подмешан из mode-less extras
+    assert draw.inspector == {
+        "mode": "join",
+        "inputs": ["frame", "overlay"],
+        "primary": "frame",
+        "timeout_sec": 5,
+    }
+    # mode-less shadow снят из extras — as_generic_config._pick вернёт typed join без ложного warning
+    assert "inspector" not in (draw.extras or {})
+
+
+def test_mode_less_typed_inspector_is_tuning_not_escape_hatch():
+    """F2 (симметрия): mode-less typed inspector — тоже тонкая настройка, не escape-hatch."""
+    _register(_CircleDetector, _LineFilter, _OverlayDraw)
+    bp = SystemBlueprint.model_validate(
+        {
+            "name": "mode_less_typed",
+            "processes": [
+                {"process_name": "vision", "plugins": [_plugin("circle_detector")]},
+                {"process_name": "line", "plugins": [_plugin("line_filter")]},
+                {
+                    "process_name": "draw",
+                    "plugins": [_plugin("overlay_draw")],
+                    "inspector": {"timeout_sec": 3},  # typed, mode-less
+                },
+            ],
+            "wires": [
+                {"source": "vision.circle_detector.frame", "target": "draw.overlay_draw.frame"},
+                {"source": "line.line_filter.overlay", "target": "draw.overlay_draw.overlay"},
+            ],
+        }
+    )
+    bp.infer_missing_inspectors()
+
+    draw = next(p for p in bp.processes if p.process_name == "draw")
+    assert draw.inspector["mode"] == "join"
+    assert draw.inspector["timeout_sec"] == 3
+
+
 # ---------------------------------------------------------------------------
 # Legacy metadata.inspector — тонкая настройка подмешивается, mode/inputs/primary из wires
 # ---------------------------------------------------------------------------
