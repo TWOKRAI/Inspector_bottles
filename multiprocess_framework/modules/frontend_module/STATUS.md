@@ -14,6 +14,13 @@
 | Связанность (меньше = лучше) | 9 | Примитивы в `components/`, shell в `widgets/`, без shim |
 | Работоспособность | 9 | FrontendManager.run_app/shutdown_app, GuiProcess интеграция |
 
+## Изменения
+
+- **2026-07-12 (NEW-D1):** добавлен generic-механизм вкладок `frontend_module.tabs`
+  (`TabSpec`, `TabRegistry`, `LazyTab`, `AccessContextSource`) — перенос из
+  прототипа (`tab_factory.py`). 0 обратных импортов; публичный API в
+  `interfaces.py`. Тесты: `tests/test_tab_registry.py` (19). ADR-135.
+
 ## Чеклист рефакторинга
 
 - [x] Этап 0: Фундамент — структура, interfaces.py, README, STATUS

@@ -4,6 +4,7 @@
 
 Единственный файл, от которого разрешено зависеть другим модулям.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Protocol, Union, runtime_checkable
@@ -54,9 +55,7 @@ class IRegistersManager(Protocol):
     def get_register(self, name: str) -> Optional[Any]:
         """Получить экземпляр регистра по имени."""
 
-    def get_field_metadata(
-        self, register_name: str, field_name: str, **kwargs: Any
-    ) -> Dict[str, Any]:
+    def get_field_metadata(self, register_name: str, field_name: str, **kwargs: Any) -> Dict[str, Any]:
         """Метаданные поля (min, max, unit, routing, access_level и т.д.)."""
 
     def validate_field_value(
@@ -78,17 +77,13 @@ class IRegistersManagerGui(Protocol):
     Реализации: registers_module.RegistersManager, FrontendRegistersBridge.
     """
 
-    def set_field_value(
-        self, register_name: str, field_name: str, value: Any
-    ) -> tuple[bool, Optional[str]]:
+    def set_field_value(self, register_name: str, field_name: str, value: Any) -> tuple[bool, Optional[str]]:
         """Записать значение поля; (success, error_message)."""
 
     def get_register(self, register_name: str) -> Optional[Any]:
         """Получить экземпляр регистра по имени."""
 
-    def get_field_metadata(
-        self, register_name: str, field_name: str, **kwargs: Any
-    ) -> Dict[str, Any]:
+    def get_field_metadata(self, register_name: str, field_name: str, **kwargs: Any) -> Dict[str, Any]:
         """Метаданные поля (min, max, unit и т.д.)."""
 
 
@@ -219,3 +214,29 @@ class IFrontendManager(Protocol):
 
     def set_connection_map(self, connection_map: Dict[str, str]) -> None:
         """Привязка регистров к backend-каналам."""
+
+
+# ---------------------------------------------------------------------------
+# Механизм вкладок (NEW-D1) — публичный API реестра табов.
+# ---------------------------------------------------------------------------
+#
+# Generic-механизм: приложение описывает вкладки как ``list[TabSpec]`` в своём
+# composition root и строит их через ``TabRegistry``. Реестр не знает
+# конкретных вкладок и не импортирует прикладной слой (0 обратных импортов).
+# Реэкспорт здесь — чтобы контракт модуля был виден из единого interfaces.py;
+# импортировать можно и напрямую из ``frontend_module.tabs``.
+from multiprocess_framework.modules.frontend_module.tabs import (  # noqa: E402
+    AccessContextSource,
+    LazyTab,
+    PlaceholderFactory,
+    TabRegistry,
+    TabSpec,
+)
+
+__all__ = [
+    "TabSpec",
+    "TabRegistry",
+    "LazyTab",
+    "AccessContextSource",
+    "PlaceholderFactory",
+]
