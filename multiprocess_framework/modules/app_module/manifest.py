@@ -30,6 +30,11 @@ class DiscoverySpec(BaseModel):
     одним helper'ом (``discover``). Пути резолвятся от каталога манифеста в
     абсолютные при загрузке. Сервис распознаётся по маркер-файлу ``service.yaml``
     (симметрично ``plugin.py`` / манифесту плагина).
+
+    Тип — ``list[str]`` (а не ``list[Path]``, в отличие от одиночных путей
+    ``pipeline``/``base``): значения потребляются как строки — ``PluginRegistry.discover``
+    принимает ``*str``, ``discover_services`` делает ``Path(str)`` сам. Список путей
+    остаётся log/JSON-дружелюбным (Dict-at-Boundary), без ранней конвертации в Path.
     """
 
     plugin_paths: list[str] = Field(default_factory=lambda: ["plugins"])

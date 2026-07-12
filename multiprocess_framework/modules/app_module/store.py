@@ -32,6 +32,9 @@ except ImportError:  # pragma: no cover - Windows
     _HAVE_FCNTL = False
 
 #: In-process сериализация (flock надёжен между процессами; этот лок — между потоками).
+#: Осознанный компромисс масштаба: ОДИН глобальный лок на ВСЕ сторы/файлы в процессе
+#: (потоковые операции над РАЗНЫМИ app.yaml сериализуются друг с другом без нужды).
+#: Для manifest'а (редкая правка pipeline) это неважно; per-path лок — кандидат 5.12.
 _PROCESS_LOCK = threading.Lock()
 
 
@@ -138,6 +141,10 @@ class ManifestStore:
         try:
             with tmp.open("w", encoding="utf-8") as f:
                 yaml.dump(data, f)
+            # Сохранить права оригинала: os.replace берёт mode temp-файла (0644 из
+            # umask), поэтому копируем режим существующего app.yaml перед подменой.
+            if self._path.exists():
+                os.chmod(tmp, self._path.stat().st_mode)
             os.replace(tmp, self._path)  # атомарная подмена — читатель не видит полу-файл
         finally:
             if tmp.exists():
@@ -161,11 +168,21 @@ class _FileLock:
 
     def __enter__(self) -> "_FileLock":
         _PROCESS_LOCK.acquire()
-        if _HAVE_FCNTL:
-            self._lock_path.parent.mkdir(parents=True, exist_ok=True)
-            self._fd = open(self._lock_path, "a+")
-            flag = fcntl.LOCK_EX if self._exclusive else fcntl.LOCK_SH
-            fcntl.flock(self._fd.fileno(), flag)
+        # Всё после acquire() — под защитой: исключение в mkdir/open/flock (права,
+        # ro-FS) НЕ должно оставить глобальный лок захваченным навсегда (иначе все
+        # последующие операции ManifestStore в процессе виснут). release()+raise.
+        try:
+            if _HAVE_FCNTL:
+                self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+                self._fd = open(self._lock_path, "a+")
+                flag = fcntl.LOCK_EX if self._exclusive else fcntl.LOCK_SH
+                fcntl.flock(self._fd.fileno(), flag)
+        except BaseException:
+            if self._fd is not None:
+                self._fd.close()
+                self._fd = None
+            _PROCESS_LOCK.release()
+            raise
         return self
 
     def __exit__(self, *exc: object) -> None:
