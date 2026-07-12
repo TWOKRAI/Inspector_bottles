@@ -105,6 +105,7 @@ migrated = run_chain("recipe.config_snapshot", data, from_version=1, to_version=
 
 ## Stability
 
-partial — full-scaffold (README + interfaces + contract-тесты + DECISIONS + STATUS)
-присутствует; `yaml_io`/duplicate-consolidation (C3) — запланированный добор.
-Реестр миграций (C2) — сделано (ADR-RCP-003).
+stable — full-scaffold (README + interfaces + contract-тесты + DECISIONS + STATUS)
+присутствует; реестр миграций (C2, ADR-RCP-003) и `yaml_io`/duplicate-consolidation
+(C3, ADR-RCP-005) — сделаны. Смежный хвост вне модуля: физперенос assembler/planner
+в `process_manager/topology` (ADR-RCP-005, отдельная задача).
