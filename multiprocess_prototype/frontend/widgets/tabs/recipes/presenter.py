@@ -525,9 +525,14 @@ class RecipesPresenter:
         """Сохранить текущую живую топологию в выбранный рецепт (Этап 1).
 
         Источник — TopologyRepository (services.topology): он SSOT текущего графа
-        (Pipeline-редактор пишет в него через dispatch). Разворачиваем topology dict
-        обратно в recipe-формат (blueprint + display_bindings) и пишем через store.save_raw.
-        Не дублирует graph_to_blueprint: топология уже плоская, оборачиваем как рецепт.
+        (Pipeline-редактор пишет в него через dispatch). ``load()`` возвращает ``Topology``
+        entity (Protocol-контракт) — берём ``.to_dict()`` (Dict at Boundary), как делает и
+        Pipeline-путь (``LayoutController.save_to_active_recipe``).
+
+        Единый сборщик v3-raw (RS-1): :func:`recipes.save.build_recipe_v3_raw` собирает полный
+        blueprint из raw + topology-dict, СОХРАНЯЯ авторские ``name``/``description`` и layout
+        (``gui_positions``/``locked_nodes``) существующего рецепта — Recipes-Save не стирает
+        позиции узлов (у презентера нет доступа к живой сцене — override не передаём).
 
         Args:
             slug: целевой рецепт. None → _selected_slug.
@@ -544,26 +549,20 @@ class RecipesPresenter:
             self._log_warning("RecipesPresenter.on_save: topology_store=None")
             return False
 
-        topo = self._topology_store.load() or {}
-        # v3-схема: blueprint top-level, displays ВНУТРИ blueprint.displays.
-        blueprint = {
-            "processes": topo.get("processes", []),
-            "wires": topo.get("wires", []),
-            "displays": topo.get("displays", []),
-        }
-
         raw = self._store.read_raw(target_slug)
         if raw is None:
             self._view.show_error(f"Рецепт '{target_slug}' не найден")
             return False
 
         try:
-            # Единый нормализатор v3-raw (one source of truth): top-level blueprint,
-            # без legacy data:/meta:, прочие ключи (name/version/active_services)
-            # сохраняются. save_raw пишет с комментариями (ruamel round-trip).
-            from multiprocess_prototype.recipes.format import normalize_recipe_v3_raw
+            # Сборка blueprint — ВНУТРИ try/except: раньше topo.get(...) на Topology entity
+            # (у неё нет .get()) улетал AttributeError мимо обработки → Save тихо крашился
+            # в Qt-слоте, пользователь видел no-op (RS-1). Теперь entity → dict до сборки.
+            from multiprocess_prototype.recipes.save import build_recipe_v3_raw
 
-            self._store.save_raw(target_slug, normalize_recipe_v3_raw(raw, blueprint))
+            topo = self._topology_store.load().to_dict()
+            new_raw = build_recipe_v3_raw(raw, topo)
+            self._store.save_raw(target_slug, new_raw)
             self._log_info(f"RecipesPresenter.on_save: топология сохранена в '{target_slug}'")
             return True
         except Exception as exc:  # noqa: BLE001

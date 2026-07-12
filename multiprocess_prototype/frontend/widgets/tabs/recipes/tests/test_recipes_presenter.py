@@ -32,8 +32,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from multiprocess_prototype.domain.commands import ActivateRecipe
+from multiprocess_prototype.domain.entities import Topology
 from multiprocess_prototype.domain.errors import DomainError
-from multiprocess_prototype.domain.tests._fakes import FakeCommandDispatcher, FakeRecipeStore
+from multiprocess_prototype.domain.tests._fakes import (
+    FakeCommandDispatcher,
+    FakeRecipeStore,
+    FakeTopologyRepository,
+)
 from multiprocess_prototype.frontend.widgets.tabs.recipes.presenter import (
     RecipesPresenter,
 )
@@ -554,27 +559,35 @@ def test_on_set_active_failure_dispatches_compensating_activate(
 # ---------------------------------------------------------------------------
 
 
+def _make_topology_store(topo_dict: dict) -> FakeTopologyRepository:
+    """FakeTopologyRepository (реальный Protocol: load() -> Topology entity).
+
+    RS-1: раньше тест использовал ad-hoc фейк с ``load() -> dict`` — контракт расходился
+    с Protocol (``TopologyRepository.load() -> Topology``), из-за чего тест зеленел, а прод
+    крашился (``Topology`` не имеет ``.get()``). Теперь фейк соответствует Protocol.
+    """
+    return FakeTopologyRepository(Topology.from_dict(topo_dict))
+
+
 def test_on_save_persists_topology(mock_view: MagicMock) -> None:
     """on_save пишет живую топологию в top-level blueprint рецепта (displays внутри).
 
-    Fix recipe-v3-engine-decouple: раньше писалось в legacy-вложение data.blueprint
-    (его reader не понимал → порча). Теперь — top-level blueprint, displays внутри
-    blueprint.displays (round-trip с editor/backend-launch).
+    RS-1: источник — ``TopologyRepository.load() -> Topology`` (реальная entity), on_save
+    берёт ``.to_dict()``. Проверяет round-trip processes/wires/displays через реальный контракт.
     """
     store = _make_store(slugs=["cup"])
-
-    class _FakeTopologyStore:
-        def load(self) -> dict:
-            return {
-                "processes": [{"process_name": "p1", "plugins": []}],
-                "wires": [{"source": "p1.a.out", "target": "p2.b.in"}],
-                "displays": [{"node_id": "p1.a.out", "display_id": "main"}],
-            }
+    topology_store = _make_topology_store(
+        {
+            "processes": [{"process_name": "p1", "plugins": []}],
+            "wires": [{"source": "p1.a.out", "target": "p2.b.in"}],
+            "displays": [{"node_id": "p1.a.out", "display_id": "main"}],
+        }
+    )
 
     presenter = RecipesPresenter(
         store=store,
         view=mock_view,
-        topology_store=_FakeTopologyStore(),
+        topology_store=topology_store,
     )
     presenter._selected_slug = "cup"
 
@@ -587,6 +600,56 @@ def test_on_save_persists_topology(mock_view: MagicMock) -> None:
     assert saved["blueprint"]["processes"][0]["process_name"] == "p1"
     assert saved["blueprint"]["wires"][0]["source"] == "p1.a.out"
     assert saved["blueprint"]["displays"][0]["display_id"] == "main"
+
+
+def test_on_save_preserves_gui_positions(mock_view: MagicMock) -> None:
+    """RS-1 (c): Save из Recipes-таба НЕ стирает blueprint.metadata.gui_positions.
+
+    У презентера нет доступа к живой сцене (позиции меняет Pipeline-редактор), поэтому
+    Recipes-Save обязан СОХРАНИТЬ уже лежащие в рецепте позиции узлов, а не обнулить их —
+    раньше on_save собирал blueprint без metadata и стирал бы layout.
+    """
+    store = _make_store(slugs=["cup"])
+    # Рецепт уже содержит сохранённые позиции + фиксацию в blueprint.metadata.
+    raw = store.read_raw("cup")
+    raw["blueprint"]["metadata"] = {
+        "gui_positions": {"worker_1": [10.0, 20.0]},
+        "locked_nodes": ["worker_1"],
+    }
+    store.save_raw("cup", raw)
+
+    topology_store = _make_topology_store(
+        {"processes": [{"process_name": "worker_1", "plugins": []}], "wires": [], "displays": []}
+    )
+    presenter = RecipesPresenter(store=store, view=mock_view, topology_store=topology_store)
+    presenter._selected_slug = "cup"
+
+    assert presenter.on_save() is True
+    mock_view.show_error.assert_not_called()
+    saved = store.read_raw("cup")
+    # Позиции и фиксация уцелели (Recipes-Save не стирает layout).
+    assert saved["blueprint"]["metadata"]["gui_positions"] == {"worker_1": [10.0, 20.0]}
+    assert saved["blueprint"]["metadata"]["locked_nodes"] == ["worker_1"]
+
+
+def test_on_save_preserves_blueprint_name_description(mock_view: MagicMock) -> None:
+    """RS-1/LP-1: Recipes-Save сохраняет авторские blueprint.name/description, не затирает."""
+    store = _make_store(slugs=["cup"])
+    raw = store.read_raw("cup")
+    raw["blueprint"]["name"] = "Инспекция чашки"
+    raw["blueprint"]["description"] = "Авторское описание рецепта"
+    store.save_raw("cup", raw)
+
+    topology_store = _make_topology_store(
+        {"processes": [{"process_name": "worker_1", "plugins": []}], "wires": [], "displays": []}
+    )
+    presenter = RecipesPresenter(store=store, view=mock_view, topology_store=topology_store)
+    presenter._selected_slug = "cup"
+
+    assert presenter.on_save() is True
+    saved = store.read_raw("cup")
+    assert saved["blueprint"]["name"] == "Инспекция чашки"
+    assert saved["blueprint"]["description"] == "Авторское описание рецепта"
 
 
 def test_on_save_no_topology_store(mock_view: MagicMock) -> None:
