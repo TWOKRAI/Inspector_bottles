@@ -40,6 +40,22 @@
   (`recipe.file_format` / `recipe.config_snapshot`), инжектируются через callbacks.
 - `recipes/devices_sync.py` — доменная синхронизация устройств.
 
+## Шимы recipe-оси — план снятия (AU-7, follow-up В1, 2026-07-12)
+
+Мёртвые реэкспорты `_flatten`/`_remap_path` в state_store-шиме
+(`state_store_module/recipes/recipe_engine.py`) сняты (0 импортёров). Остальные шимы
+recipe-оси имеют реальных импортёров — снимать рано, план снятия ниже (паттерн
+QUEUE «Открытые решения» №4: снятие шима = 0 импортёров):
+
+| Шим | Импортёров | Кто | Что нужно для 0 |
+|-----|-----------|-----|------------------|
+| `multiprocess_prototype/recipes/yaml_io.py` (→ `recipe.yaml_io`) | 5 | prod: `adapters/stores/recipe_store.py`, `recipes/migrations/displays_to_recipe.py`, `recipes/migrations/drop_display_name.py`; test: `recipes/tests/test_yaml_io.py`, `frontend/widgets/tabs/services/devices_common/tests/test_recipe_devices.py` | Перевести 3 prod call-sites на прямой импорт `multiprocess_framework.modules.recipe.yaml_io`; 2 теста — следом. Тело шима не трогать, только call-sites |
+| `multiprocess_prototype/recipes/manager.py` (→ `recipe.manager.RecipeManager`) | 8 | prod: `frontend/app.py`, `frontend/widgets/tabs/recipes/recipe_io.py`, `adapters/stores/recipe_store.py`; test: `adapters/tests/test_integration_assembly.py`, `adapters/tests/test_recipe_store.py`, `recipes/tests/test_demo_recipe.py`, `recipes/tests/test_recipes_integration.py`, `recipes/tests/test_recipe_manager.py` | Перевести 3 prod call-sites на прямой импорт `multiprocess_framework.modules.recipe.manager.RecipeManager`; 5 тестов — следом |
+| `state_store_module/recipes/recipe_engine.py` (→ `recipe.recipe_engine.RecipeEngine`) | 4 (все тесты, prod-путей нет) | `backend/state/recipes/tests/test_recipe_engine_wrapper.py`, `recipes/tests/test_demo_recipe.py`, `recipes/tests/test_recipe_manager.py`, `recipes/tests/test_recipes_integration.py` | Только тесты → перевести на прямой импорт `multiprocess_framework.modules.recipe.recipe_engine.RecipeEngine`, путь к 0 короче — нет prod-зависимости |
+
+Оба `recipes/*.py`-шима идут через общий узел `adapters/stores/recipe_store.py` (импортирует
+и `yaml_io`, и `manager`) — перевод этого файла закрывает большую часть prod-импортёров сразу.
+
 ## Смежный хвост (не recipe)
 
 - Физперенос `assembler`/`planner` из `backend/assembly/` → `process_manager/topology`
