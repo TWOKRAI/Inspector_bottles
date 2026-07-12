@@ -5,6 +5,8 @@
 2. Чистота: входной dict не мутируется; повтор даёт идентичный результат.
 3. BlueprintInvalid при невалидном blueprint.
 4. Grep-чистота: в assembler.py нет ``multiprocess_prototype`` в import'ах.
+5. Ф4.7: join/inspector из wires — регресс-тест на реальном assemble()-пути
+   (без ЛЮБОЙ inspector-декларации join не деградирует в fanin).
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ from multiprocess_framework.modules.process_module.configs.managers_config impor
 from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
     SystemBlueprint,
 )
+from multiprocess_framework.modules.process_module.plugins.base import ProcessModulePlugin
+from multiprocess_framework.modules.process_module.plugins.port import Port
+from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
 
 from multiprocess_prototype.backend.assembly.assembler import (
     BlueprintAssembler,
@@ -283,3 +288,112 @@ class TestImportPurity:
                 continue
             if "import" in stripped and "SystemConfig" in stripped:
                 pytest.fail(f"assembler.py:{i} содержит SystemConfig-импорт: {stripped!r}")
+
+
+# ---------------------------------------------------------------------------
+# Ф4.7: join/inspector из wires — регресс на реальном assemble()-пути
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=False)
+def _clean_registry():
+    """Изолировать глобальный PluginRegistry вокруг join-тестов — snapshot/restore.
+
+    НЕ ``PluginRegistry.clear()`` (как в test_blueprint_chain_validation.py): этот файл
+    лежит в multiprocess_prototype и в общем pytest-прогоне (``pytest multiprocess_
+    prototype``) собирается/выполняется РАНЬШЕ ``test_build_characterization.py`` и
+    frontend-тестов (sandbox_e2e/control_panel), которым нужна РЕАЛЬНАЯ discovery
+    ``Plugins/*`` — ``clear()`` стирал бы её безвозвратно: ``PluginRegistry.discover()``
+    импортирует plugin-модули через ``importlib.import_module``, а уже импортированный
+    модуль Python не переисполняет ``@register_plugin`` при повторном discover() (кеш
+    ``sys.modules``), поэтому once-cleared реестр НЕ самовосстанавливается — ловили
+    регрессию (25 упавших тестов в full-suite прогоне) именно на этом.
+    """
+    snapshot = dict(PluginRegistry._plugins)
+    PluginRegistry.clear()
+    yield
+    PluginRegistry.clear()
+    PluginRegistry._plugins.update(snapshot)
+
+
+class _CircleDetector(ProcessModulePlugin):
+    """Источник frame+detections одним item (двойник vision.circle_detector)."""
+
+    name = "circle_detector"
+    category = "processing"
+    outputs = [
+        Port(name="frame", dtype="image/bgr", shape="(H, W, 3)"),
+        Port(name="detections", dtype="list[dict]", shape="N"),
+    ]
+
+    def configure(self, ctx): ...
+    def start(self, ctx): ...
+
+
+class _LineFilter(ProcessModulePlugin):
+    """Источник overlay-item (двойник line.line_filter)."""
+
+    name = "line_filter"
+    category = "processing"
+    outputs = [Port(name="overlay", dtype="dict", shape="-")]
+
+    def configure(self, ctx): ...
+    def start(self, ctx): ...
+
+
+class _OverlayDraw(ProcessModulePlugin):
+    """draw-подобный join: frame+overlay REQUIRED (двойник overlay_draw)."""
+
+    name = "overlay_draw"
+    category = "rendering"
+    inputs = [
+        Port(name="frame", dtype="image/bgr", shape="(H, W, 3)"),
+        Port(name="overlay", dtype="dict", shape="-"),
+    ]
+    outputs = [Port(name="frame", dtype="image/bgr", shape="(H, W, 3)")]
+
+    def configure(self, ctx): ...
+    def start(self, ctx): ...
+
+
+_JOIN_BLUEPRINT: dict = {
+    "name": "join_from_wires",
+    "description": "draw-подобный join БЕЗ единой inspector-декларации где-либо",
+    "processes": [
+        {
+            "process_name": "vision",
+            "plugins": [{"plugin_name": "circle_detector", "plugin_class": ""}],
+        },
+        {
+            "process_name": "line",
+            "plugins": [{"plugin_name": "line_filter", "plugin_class": ""}],
+        },
+        {
+            "process_name": "draw",
+            "plugins": [{"plugin_name": "overlay_draw", "plugin_class": ""}],
+        },
+    ],
+    "wires": [
+        {"source": "vision.circle_detector.frame", "target": "draw.overlay_draw.frame"},
+        {"source": "line.line_filter.overlay", "target": "draw.overlay_draw.overlay"},
+    ],
+}
+
+
+class TestJoinFromWires:
+    """Ф4.7: join выводится из wires на реальном assemble()-пути (снят hoist-костыль)."""
+
+    def test_join_not_degraded_to_fanin(self, _clean_registry) -> None:
+        """Регресс-тест (acceptance Ф4.7): без ЛЮБОЙ inspector-декларации join не
+        деградирует в fanin — assembler.assemble() выводит его из wires."""
+        for cls in (_CircleDetector, _LineFilter, _OverlayDraw):
+            PluginRegistry.register(name=cls.name, plugin_class=cls, category=cls.category)
+
+        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY)
+        result = assembler.assemble(copy.deepcopy(_JOIN_BLUEPRINT))
+
+        inspector = result["draw"]["config"]["inspector"]
+        assert inspector["mode"] == "join", inspector
+        assert inspector["mode"] != "fanin"
+        assert sorted(inspector["inputs"]) == ["frame", "overlay"]
+        assert inspector["primary"] == "frame"

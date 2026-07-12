@@ -144,6 +144,19 @@ class ProcessConfig(SchemaBase):
         ),
     ] = {}
 
+    metadata: Annotated[
+        dict[str, Any],
+        FieldMeta(
+            "Metadata",
+            info="Domain-opaque бэг GUI-редактора (домен-entity Process не имеет типизир. "
+            "полей вроде inspector — при сохранении сворачивает их сюда). Раньше молча "
+            "терялся (extra=ignore до model_validate, см. снятый _hoist_inspector_from_"
+            "metadata); теперь обычное typed-поле — не отбрасывается. Единственный "
+            "потребитель — SystemBlueprint.infer_missing_inspectors() (тонкая настройка "
+            "inspector.timeout_sec/... из legacy metadata.inspector, Ф4.7).",
+        ),
+    ] = {}
+
     def as_generic_config(self) -> GenericProcessConfig:
         """Конвертировать в GenericProcessConfig для launcher."""
         # Восстановить PluginConfig-инстансы для агрегации memory
@@ -247,6 +260,104 @@ class SystemBlueprint(SchemaBase):
         list[Wire],
         FieldMeta("Связи", info="Межпроцессные связи между портами"),
     ] = []
+
+    def infer_missing_inspectors(self) -> None:
+        """Вывести inspector(join) из wires для процессов без явного inspector (Ф4.7).
+
+        Заменяет костыль ``_hoist_inspector_from_metadata`` (снят вместе с этим методом):
+        раньше корректность join зависела от того, попал ли ``inspector`` в правильное
+        место рецепта (прямой ключ vs ``metadata`` — GUI-save мог молча уронить его туда,
+        где бэкенд его не видел). Теперь join — СТРУКТУРНЫЙ факт графа wires, не зависит
+        от расположения поля.
+
+        Признак join: процесс получает REQUIRED-порт(ы) (``Port.optional is False``) от
+        ≥2 РАЗНЫХ процессов-источников. Считаем именно процессы, не wires — один источник
+        может слать несколько полей одним item (тот же ``data_type``, см.
+        ``PipelineExecutor``/``SourceProducer``), поэтому N wires от одного процесса — всё
+        ещё ОДИН вход для join. Опциональные порты (``optional=True`` — триггеры/
+        best-effort сигналы, напр. пульт) НЕ считаются: подтверждено на живых рецептах —
+        ``layout``/``points`` получают ≥2 источника, но все входы кроме одного
+        опциональны → остаются fanin (иначе false positive).
+
+        Тег входа берётся из SOURCE-порта wire (не target) — это имя = ``data_type``
+        конвенция продюсера (``item.setdefault("data_type", "frame")``, плагины вроде
+        ``line_filter`` переопределяют на свой output-порт), а НЕ имя порта получателя
+        (может отличаться — см. ``center_crop.trigger_in`` ← источник
+        ``line_filter.overlay``, тег всё равно "overlay"). "frame" — приоритетный
+        тег/primary, если есть среди источников; иначе первый по алфавиту.
+
+        **ИНВАРИАНТ (ADR-PMM-017, process_manager_module/DECISIONS.md):** тег = имя
+        source-порта совпадает с реальным runtime ``data_type`` ТОЛЬКО по конвенции
+        «имя output-порта плагина == emitted data_type» — это конвенция кодовой базы,
+        НЕ проверяемый инвариант схемы. Плагин, чей output-порт назван иначе, чем
+        ``data_type``, который он реально ставит в item, даст расхождение
+        ``inputs`` ↔ реальная корреляция (тихая деградация в passthrough одного
+        primary по таймауту, без крэша). Два источника с ОДИНАКОВЫМ тегом (напр. две
+        камеры, обе с source-портом "frame") коллапсируют в join с ОДНИМ элементом
+        ``inputs`` — ждёт первый прибывший item с этим тегом, а не оба источника
+        (было — plain fanin). Оба случая — задокументированная граница, не баг;
+        рецепт, которому нужно иное поведение, обязан объявить явный ``inspector``
+        (escape-hatch, включая ``{mode: fanin}``) — см. ADR-PMM-017 п.3/4.
+
+        Тонкая настройка (``timeout_sec``/``list_merge_keys``/``inactive_sec``) не
+        выводима из графа — если есть в ``metadata.inspector`` (legacy GUI-save путь),
+        подмешивается поверх структурного skeleton'а; ``metadata`` больше не молча
+        теряется (``extra=ignore`` раньше отбрасывал её до ``model_validate``) — стала
+        обычным typed-полем.
+
+        Явный ``inspector`` (прямой typed-ключ ИЛИ ``extras["inspector"]``) —
+        приоритетнее и НЕ переопределяется: ручная настройка выигрывает у вывода из графа.
+
+        Мутирует ``self.processes`` IN PLACE. Вызывать ПОСЛЕ ``model_validate``
+        (валидация уже сделала копию — мутация внутренней копии, не входа вызывающей
+        стороны), ДО ``build_configs()``/``check()``.
+        """
+        # target_process -> {source_process -> {source_port_names}}, только REQUIRED
+        # входы (optional-порты в join-обязательство не входят).
+        required_sources: dict[str, dict[str, set[str]]] = {}
+
+        for wire in self.wires:
+            src_parts = wire.source.split(".")
+            tgt_parts = wire.target.split(".")
+            if len(src_parts) != 3 or len(tgt_parts) != 3:
+                continue  # не "process.plugin.port" — пропускаем
+
+            src_process, _src_plugin, src_port = src_parts
+            tgt_process, tgt_plugin, tgt_port_name = tgt_parts
+
+            entry = _find_plugin_entry(tgt_plugin, "")
+            if entry is None:
+                continue
+            tgt_port = next((p for p in entry.inputs if p.name == tgt_port_name), None)
+            if tgt_port is None or tgt_port.optional:
+                continue
+
+            by_source = required_sources.setdefault(tgt_process, {})
+            by_source.setdefault(src_process, set()).add(src_port)
+
+        for proc in self.processes:
+            if proc.inspector or (proc.extras or {}).get("inspector"):
+                continue  # явный inspector — приоритет, вывод не применяется
+
+            sources = required_sources.get(proc.process_name, {})
+            if len(sources) < 2:
+                continue  # < 2 required-источников — join не нужен (fanin остаётся дефолтом)
+
+            tags = ["frame" if "frame" in ports else sorted(ports)[0] for _src, ports in sorted(sources.items())]
+            unique_tags = sorted(set(tags), key=lambda t: (t != "frame", t))
+            primary = "frame" if "frame" in unique_tags else unique_tags[0]
+
+            derived: dict[str, Any] = {"mode": "join", "inputs": unique_tags, "primary": primary}
+
+            # Legacy-путь: тонкая настройка из metadata.inspector (структурные поля
+            # mode/inputs/primary остаются авторитетны из wires, не из metadata).
+            legacy = proc.metadata.get("inspector") if isinstance(proc.metadata, dict) else None
+            if isinstance(legacy, dict):
+                for key, value in legacy.items():
+                    if key not in ("mode", "inputs", "primary"):
+                        derived[key] = value
+
+            proc.inspector = derived
 
     def build_configs(self) -> list[GenericProcessConfig]:
         """Собрать список GenericProcessConfig для launcher."""

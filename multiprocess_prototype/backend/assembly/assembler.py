@@ -69,12 +69,15 @@ class BlueprintAssembler:
 
         Цепочка (паритет с дорогой A boot):
         1. ``SystemBlueprint.model_validate(blueprint_dict)`` — копирует, не мутирует вход.
-        2. ``topology.check()`` → при ошибках ``raise BlueprintInvalid``.
-        3. ``topology.build_configs()`` → список ``GenericProcessConfig``.
-        4. Для каждого cfg: если ``cfg.log_dir`` пуст → ``cfg.log_dir = self._log_dir``.
-        5. ``name, proc_dict = process(cfg)`` — framework-конвертер.
-        6. ``merge_managers(proc_dict["managers"], observability_dict)``.
-        7. ``merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)`` — нормализация
+        2. ``topology.infer_missing_inspectors()`` — join/inspector из wires (Ф4.7):
+           процессам без явного ``inspector`` структурно выводится ``{mode: join, ...}``
+           по графу связей, ДО ``check()``/``build_configs()``.
+        3. ``topology.check()`` → при ошибках ``raise BlueprintInvalid``.
+        4. ``topology.build_configs()`` → список ``GenericProcessConfig``.
+        5. Для каждого cfg: если ``cfg.log_dir`` пуст → ``cfg.log_dir = self._log_dir``.
+        6. ``name, proc_dict = process(cfg)`` — framework-конвертер.
+        7. ``merge_managers(proc_dict["managers"], observability_dict)``.
+        8. ``merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)`` — нормализация
            (те же дефолты, что ``SystemLauncher.add_process``; идемпотентно).
 
         Args:
@@ -89,6 +92,10 @@ class BlueprintAssembler:
         """
         # model_validate создаёт КОПИЮ — входной dict не мутируется.
         topology = SystemBlueprint.model_validate(blueprint_dict)
+
+        # Ф4.7: join/inspector из wires — структурный вывод ДО check()/build_configs()
+        # (снимает костыль _hoist_inspector_from_metadata; см. infer_missing_inspectors).
+        topology.infer_missing_inspectors()
 
         errors = topology.check()
         if errors:
