@@ -1,0 +1,21 @@
+# examples/minimal_app — главный конфиг (манифест) «рыбы».
+# Единственный файл, который читает run_app. Пути — от этого каталога.
+# Второй потребитель framework: доказывает самодостаточность яруса 2 без прототипа.
+
+name: Minimal App
+version: 1
+
+# App-специфика pass-through (framework не читает; задел движка миграций).
+extras: {}
+
+# Активный запускаемый pipeline (плоская топология: 1 tick-источник, headless).
+pipeline: pipeline.yaml
+
+# Авто-скан плагинов И сервисов из этих папок (пути — от каталога манифеста).
+# Плагин распознаётся по plugin.py, сервис — по маркер-файлу service.yaml.
+discovery:
+  plugin_paths:
+    - plugins
+  service_paths:
+    - services
+  auto_discover: true

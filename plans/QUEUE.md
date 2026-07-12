@@ -22,7 +22,7 @@
 
 | # | Задача | Где детали |
 |---|---|---|
-| 1 | **5.11** — `app_module` skeleton + каркас `examples/minimal_app` + ManifestStore (NEW-1) + дискавери плагинов И сервисов | constructor-master, Ф5 + current-path В2 |
+| 1 | ~~**5.11** — `app_module` skeleton + каркас `examples/minimal_app` + ManifestStore (NEW-1) + дискавери плагинов И сервисов~~ **✅ 2026-07-12** (ветка `feat/constructor-f5-11-app-module`; блок В2 закрывается после 5.13) | constructor-master, Ф5 + current-path В2 |
 | 2 | **5.12** — `AppOrchestrator` generic + хук-точки двух сортов (state-bootstrap + display-reload) | constructor-master, Ф5 |
 | 3 | **5.13** — minimal_app финализация + CI-smoke (инвариант 8 архитектуры) | constructor-master, Ф5 |
 

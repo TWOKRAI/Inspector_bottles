@@ -102,6 +102,16 @@ from   = "multiprocess_framework/*"
 to     = "Plugins/*"
 reason = "framework не знает про vocabulary плагинов (Phase 5)"
 
+# app_module — верхний композиционный ярус framework («рыба-шаблон», Ф5.11).
+# Его импортирует ТОЛЬКО прикладной слой (прототип / examples); внутри framework
+# никакой другой модуль на него не ссылается (направление: app_module → остальные).
+# Внутренние импорты самого app_module — относительные (sentrux не резолвит relative),
+# поэтому этот boundary ловит только чужие absolute-импорты, не ложно-срабатывая на self.
+[[boundaries]]
+from   = "multiprocess_framework/*"
+to     = "multiprocess_framework/modules/app_module/*"
+reason = "app_module — верхняя крыша: внутри framework его не импортируют (Ф5.11, app-template-idea §3)"
+
 # Services → не знают про вышестоящие слои
 [[boundaries]]
 from   = "Services/*"

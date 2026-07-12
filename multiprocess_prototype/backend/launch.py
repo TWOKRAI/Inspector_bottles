@@ -192,17 +192,13 @@ def persist_pipeline_choice(manifest_path: Path, override: str) -> str:
     """
     value = _manifest_pipeline_value(override)
 
-    # Сравнить с текущим pipeline: не переписывать манифест зря.
-    current: str | None = None
-    if manifest_path.exists():
-        with open(manifest_path, encoding="utf-8") as f:
-            current = (yaml.safe_load(f) or {}).get("pipeline")
+    # NEW-1 (Ф5.11): запись через ManifestStore — единственная точка read/write
+    # app.yaml, сериализованная межпроцессным локом (закрывает гонку backend↔GUI:
+    # тот же store использует GUI ``_persist_active_recipe``). set_pipeline сам
+    # пропускает запись, если значение уже совпадает (не дёргаем mtime/git).
+    from multiprocess_framework.modules.app_module import ManifestStore
 
-    if current != value:
-        from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
-
-        update_yaml_preserving(manifest_path, {"pipeline": value})
-    return value
+    return ManifestStore(manifest_path).set_pipeline(value)
 
 
 # ---------------------------------------------------------------------------
@@ -297,9 +293,6 @@ class SystemBuilder:
             assemble_launcher,
         )
         from multiprocess_framework.modules.process_module.configs import expand_observability
-        from multiprocess_framework.modules.process_module.plugins.registry import (
-            PluginRegistry,
-        )
         from multiprocess_prototype.backend.state.bootstrap import build_initial_state
         from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
 
@@ -313,7 +306,11 @@ class SystemBuilder:
             str(PROJECT_ROOT / p) if not Path(p).is_absolute() else p
             for p in (sys_config.discovery.plugin_paths if sys_config.discovery.auto_discover else [])
         ]
-        discovered = PluginRegistry.discover(*plugin_paths)
+        # A6 (Ф5.11): единый framework-helper discover() вместо прямого вызова
+        # PluginRegistry.discover в двух местах (здесь + orchestrator switch-путь).
+        from multiprocess_framework.modules.app_module import discover as app_discover
+
+        discovered = app_discover(plugin_paths=plugin_paths, service_paths=[]).plugins_discovered
 
         # Нормализация: per-category defaults из SystemConfig → plugin-конфиги.
         # normalize_blueprint используется НАПРЯМУЮ (не build_proc_dicts), чтобы
