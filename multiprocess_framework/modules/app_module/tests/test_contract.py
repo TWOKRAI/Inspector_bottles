@@ -3,6 +3,9 @@
 1. Protocol'ы из interfaces.py — runtime_checkable, публичный API стабилен.
 2. Инвариант яруса: НИ ОДИН другой framework-модуль не импортирует app_module
    (app_module — верхняя крыша; enforce также .sentrux/rules.toml boundary).
+3. Инвариант границы (Ф5.13): examples/* не импортирует multiprocess_prototype/*
+   (второй потребитель framework не зависит от конкретного приложения; enforce
+   также .sentrux/rules.toml boundary).
 """
 
 from __future__ import annotations
@@ -75,3 +78,26 @@ def test_no_other_framework_module_imports_app_module() -> None:
         if pattern.search(text):
             offenders.append(str(py.relative_to(_MODULES_ROOT)))
     assert offenders == [], f"framework-модули импортируют app_module: {offenders}"
+
+
+def test_examples_does_not_import_prototype() -> None:
+    """Инвариант (Ф5.13): ``examples/*`` не импортирует ``multiprocess_prototype``.
+
+    ``examples/minimal_app`` — второй, независимый от прикладного прототипа
+    потребитель ``app_module`` («рыба» уровня 2, forcing function против
+    Inspector-специфики). Импорт прототипа здесь означал бы, что каркас скрыто
+    зависит от конкретного приложения — тот же инвариант enforced
+    ``.sentrux/rules.toml`` boundary (``examples/* → multiprocess_prototype/*``).
+    """
+    # _MODULES_ROOT = .../multiprocess_framework/modules; репо-корень — на 2 уровня выше.
+    repo_root = _MODULES_ROOT.parents[1]
+    examples_dir = repo_root / "examples"
+    assert examples_dir.is_dir(), f"examples/ не найден: {examples_dir}"
+
+    pattern = re.compile(r"^\s*(from|import)\s+multiprocess_prototype\b", re.M)
+    offenders: list[str] = []
+    for py in examples_dir.rglob("*.py"):
+        text = py.read_text(encoding="utf-8", errors="ignore")
+        if pattern.search(text):
+            offenders.append(str(py.relative_to(repo_root)))
+    assert offenders == [], f"examples/* импортирует multiprocess_prototype: {offenders}"

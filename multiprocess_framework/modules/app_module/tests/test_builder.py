@@ -69,6 +69,38 @@ def test_assemble_proc_dicts_invalid_raises() -> None:
         assemble_proc_dicts(bad)
 
 
+def test_state_bootstrap_unpicklable_result_names_hook(tmp_path: Path) -> None:
+    """Косметика Ф5.12→Ф5.13: непиклябельный результат build-time хука → TypeError с его именем.
+
+    Без ранней pickle.dumps-проверки такой объект падал бы глубоко внутри
+    multiprocessing.Process.start() с малопонятной трассировкой (не указывающей
+    на виновника-хук).
+    """
+    import examples.minimal_app.plugins.tick_source.plugin  # noqa: F401 — регистрирует плагин
+
+    (tmp_path / "pipeline.yaml").write_text(
+        "name: p\nprocesses:\n"
+        f"  - process_name: ticker\n"
+        f"    process_class: {_GENERIC_PROCESS}\n"
+        "    plugins:\n"
+        "      - plugin_class: examples.minimal_app.plugins.tick_source.plugin.TickSourcePlugin\n"
+        "        plugin_name: tick_source\n"
+        "        category: utility\n"
+        "wires: []\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "app.yaml"
+    manifest.write_text("name: BadHookApp\npipeline: pipeline.yaml\n", encoding="utf-8")
+
+    def bad_bootstrap(blueprint: dict) -> dict:
+        # Лямбда в значении — классический непиклябельный объект.
+        return {"callback": lambda: None}
+
+    spec = AppSpec(manifest_path=manifest, state_bootstrap=bad_bootstrap)
+    with pytest.raises(TypeError, match="state_bootstrap"):
+        SystemBuilder(spec).build()
+
+
 def test_factory_mode_delegates_to_launcher_factory(tmp_path: Path) -> None:
     """AppSpec.launcher_factory приоритетен: SystemBuilder оборачивает готовый launcher."""
     (tmp_path / "pipeline.yaml").write_text("processes: []\n", encoding="utf-8")
@@ -92,11 +124,16 @@ def test_factory_mode_delegates_to_launcher_factory(tmp_path: Path) -> None:
 
 
 def test_generic_build_produces_launcher() -> None:
-    """build_app на manifest'е minimal_app даёт launcher с процессом ticker (без запуска)."""
+    """build_app на manifest'е minimal_app даёт launcher с 2 процессами (без запуска).
+
+    Ф5.13: minimal_app вырос до 2 процессов (ticker + console_sink) — живой IPC
+    между ними (ревью 5.11 отметило, что 1 процесс не доказывает межпроцессную
+    доставку).
+    """
     from multiprocess_framework.modules.app_module import GENERIC_ORCHESTRATOR_CLASS_PATH
 
     launcher = build_app(_MINIMAL_APP_YAML)
     names = [n for n, _ in launcher._processes]
-    assert names == ["ticker"]
+    assert names == ["ticker", "console_sink"]
     # Ф5.12: generic-путь ставит generic-оркестратор GenericProcessManagerApp.
     assert launcher._orchestrator_class_path == GENERIC_ORCHESTRATOR_CLASS_PATH

@@ -221,7 +221,8 @@ def _shutdown_with_watchdog(
 
 
 class BackendHarness:
-    """Headless-запуск прототипа + подключённый driver с гарантированным teardown.
+    """Headless-запуск прототипа (дефолт) или произвольного launcher'а + driver
+    с гарантированным teardown.
 
     Пример::
 
@@ -229,6 +230,13 @@ class BackendHarness:
             print(drv.worker_status("preprocessor"))
 
     Или через фикстуру ``headless_backend`` (см. ``backend_ctl/tests/conftest.py``).
+
+    Другой потребитель framework (не прототип) передаёт ``launcher_factory`` —
+    escape-hatch (Ф5.13), позволяющий harness'у поднять ЛЮБОЙ ``SystemLauncher``
+    (например ``examples/minimal_app`` через ``app_module.build_app``), не таща
+    прототип-специфичный ``build_headless_launcher`` (импортирует
+    ``multiprocess_prototype.*``). Гарантии start/stop/kill_child/teardown при этом
+    те же самые — они не завязаны на конкретную топологию.
     """
 
     def __init__(
@@ -241,6 +249,7 @@ class BackendHarness:
         warmup: float = 1.0,
         teardown_timeout: float = 15.0,
         log: Optional[Callable[[str], None]] = None,
+        launcher_factory: Optional[Callable[[], "SystemLauncher"]] = None,
     ) -> None:
         self._recipe = recipe
         self._with_base = with_base
@@ -249,6 +258,12 @@ class BackendHarness:
         self._warmup = warmup
         self._teardown_timeout = teardown_timeout
         self._log = log or (lambda m: print(m))
+        #: Escape-hatch (Ф5.13): другой потребитель framework (examples/minimal_app)
+        #: собирает свой launcher сам (app_module.build_app) вместо
+        #: build_headless_launcher (прототип-специфичный: импортирует
+        #: multiprocess_prototype.*). None → прежнее поведение (прототип), полный
+        #: back-compat для всех существующих вызовов.
+        self._launcher_factory = launcher_factory
 
         self._launcher: Optional["SystemLauncher"] = None
         self._driver: Optional[BackendDriver] = None
@@ -278,7 +293,10 @@ class BackendHarness:
             Path(tempfile.gettempdir()) / f"inspector_pids_harness_{os.getpid()}_{self._port}.jsonl"
         )
 
-        self._launcher = build_headless_launcher(recipe=self._recipe, with_base=self._with_base)
+        if self._launcher_factory is not None:
+            self._launcher = self._launcher_factory()
+        else:
+            self._launcher = build_headless_launcher(recipe=self._recipe, with_base=self._with_base)
         self._launcher.start()
         if not self._launcher.wait_until_ready(self._ready_timeout):
             self._log(f"[harness] система не готова за {self._ready_timeout}s — останавливаю")
