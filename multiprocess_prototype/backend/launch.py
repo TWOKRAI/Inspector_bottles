@@ -39,24 +39,6 @@ _ORCHESTRATOR_CLASS_PATH = "multiprocess_prototype.orchestrator.ProcessManagerPr
 # ---------------------------------------------------------------------------
 
 
-def _hoist_inspector_from_metadata(processes: list) -> None:
-    """Поднять ``inspector`` из ``metadata`` в прямой ключ процесса.
-
-    GUI при сохранении рецепта кладёт ``inspector`` под ``metadata`` (домен-entity
-    ``Process`` не имеет поля ``inspector`` → ``_fold_extra_into_metadata`` сворачивает
-    туда). Но бэкенд читает ``ProcessConfig.inspector`` (прямой ключ, см.
-    ``generic_process.py::_build_inspector``). Без подъёма join МОЛЧА выключается
-    (mode=fanin) → multi-input узлы (overlay_draw, center_crop: frame+overlay) не
-    сливают входы: линия не рисуется, триггер crop не срабатывает. Honor-им обе формы.
-    """
-    for proc in processes:
-        if not isinstance(proc, dict):
-            continue
-        meta = proc.get("metadata")
-        if isinstance(meta, dict) and meta.get("inspector") and not proc.get("inspector"):
-            proc["inspector"] = meta["inspector"]
-
-
 def unwrap_recipe(raw: dict) -> dict:
     """Свести GUI-рецепт (editor-слой) к запускаемой топологии.
 
@@ -72,15 +54,16 @@ def unwrap_recipe(raw: dict) -> dict:
         секция ``blueprint.displays`` рецепта.
       - ``display_definitions`` — **определения** дисплеев (list[dict], id/name/width/...),
         top-level секция ``displays`` рецепта. Не путать с привязками.
+
+    ``inspector`` под ``metadata`` (GUI-save quirk — домен-entity ``Process`` не имеет
+    типизир. поля ``inspector``) здесь больше НЕ поднимается в прямой ключ (снят костыль
+    ``_hoist_inspector_from_metadata``, Ф4.7): join теперь выводится структурно из
+    ``wires`` в ``BlueprintAssembler.assemble()`` →
+    ``SystemBlueprint.infer_missing_inspectors()``, независимо от расположения поля.
     """
     if not (has_top_level_blueprint(raw) and "processes" not in raw):
-        # Сырая topology (processes на верхнем уровне) — тоже honor-им inspector в metadata.
-        if isinstance(raw, dict) and isinstance(raw.get("processes"), list):
-            _hoist_inspector_from_metadata(raw["processes"])
         return raw
     bp = dict(raw["blueprint"])
-    if isinstance(bp.get("processes"), list):
-        _hoist_inspector_from_metadata(bp["processes"])
     # display_bindings рецепта (node_id/display_id) == секция displays топологии.
     if raw.get("display_bindings") and not bp.get("displays"):
         bp["displays"] = raw["display_bindings"]
