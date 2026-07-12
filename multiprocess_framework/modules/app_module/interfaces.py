@@ -7,11 +7,15 @@
 Инвариант яруса: ``app_module`` — только композиция, ноль механизмов; внутри
 framework никто его не импортирует (enforce ``.sentrux/rules.toml``).
 
-Сорта хуков (следствие spawn + Dict-at-Boundary; формализация — Ф5.12):
+Сорта хуков (следствие spawn + Dict-at-Boundary; формализованы в Ф5.12):
   - **build-time** (launcher-процесс, до spawn) — обычный callable:
-    :class:`BlueprintLoader`, :class:`ProcDictsBuilder`, :class:`StateBootstrap`;
-  - **runtime** (после spawn) — import-path строка + dict (callable не пиклится) —
-    в Ф5.11 не вводится; ``orchestrator_class_path`` уже работает по этому паттерну.
+    :class:`BlueprintLoader`, :class:`ProcDictsBuilder`, :class:`StateBootstrap`,
+    :class:`ThrottleRules`. Выполняются в родителе; их РЕЗУЛЬТАТ (dict) пиклится
+    в ``orchestrator_config`` → потребляется оркестратором child-side.
+  - **runtime** (после spawn) — callable НЕ пиклится через spawn, поэтому паттерн
+    ``orchestrator_class_path`` (import-path строка + dict, резолв на стороне
+    ребёнка): приложение подставляет подкласс ``GenericProcessManagerApp`` и
+    переопределяет seam'ы (``_configure_runtime`` / ``apply_topology``).
 """
 
 from __future__ import annotations
@@ -57,6 +61,18 @@ class StateBootstrap(Protocol):
 
     Опционален: приложение без реактивного state (minimal_app) его не задаёт →
     ``initial_state = {}``.
+    """
+
+    def __call__(self, blueprint: Dict[str, Any]) -> Dict[str, Any]: ...
+
+
+@runtime_checkable
+class ThrottleRules(Protocol):
+    """Build-time хук: blueprint dict → правила throttle для StateStore (до spawn).
+
+    Опционален: приложение без реактивного state (minimal_app) его не задаёт →
+    ThrottleMiddleware не подключается. Результат пиклится в ``orchestrator_config``
+    (``state_throttle_rules``) и потребляется оркестратором child-side.
     """
 
     def __call__(self, blueprint: Dict[str, Any]) -> Dict[str, Any]: ...

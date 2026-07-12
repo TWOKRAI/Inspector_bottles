@@ -22,7 +22,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from .env import apply_env_aliases
-from .interfaces import BlueprintLoader, LauncherFactory, ProcDictsBuilder, StateBootstrap
+from .interfaces import (
+    BlueprintLoader,
+    LauncherFactory,
+    ProcDictsBuilder,
+    StateBootstrap,
+    ThrottleRules,
+)
+
+#: Дефолтный оркестратор generic-пути (minimal_app). Резолвится child-side по
+#: строке (Dict-at-Boundary) — статического импорта framework→app_module нет.
+GENERIC_ORCHESTRATOR_CLASS_PATH = "multiprocess_framework.modules.app_module.orchestrator.GenericProcessManagerApp"
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
@@ -44,8 +54,14 @@ class BlueprintError(Exception):
 class AppSpec:
     """Декларация приложения для ``run_app`` — DI-контейнер (не hook-фреймворк).
 
-    Минимальный набор точек расширения Ф5.11; формализация двухсортных хуков и
-    generic ``AppOrchestrator`` — Ф5.12.
+    Двухсортные хук-точки (Ф5.12):
+      - **build-time** callable (до spawn): ``blueprint_loader`` / ``proc_dicts_builder``
+        / ``state_bootstrap`` / ``throttle_rules`` — результат пиклится в конфиг;
+      - **runtime** (после spawn): ``orchestrator_class_path`` (import-path строка) +
+        ``orchestrator_config`` (dict) — подкласс резолвится child-side.
+
+    Правило против hook-взрыва (ADR-APP-006): хук здесь появляется, только если
+    прототип нуждается в нём сегодня И minimal_app бутится без него (опционален).
     """
 
     manifest_path: Path
@@ -56,7 +72,8 @@ class AppSpec:
     blueprint_loader: Optional[BlueprintLoader] = None
     proc_dicts_builder: Optional[ProcDictsBuilder] = None
     state_bootstrap: Optional[StateBootstrap] = None
-    #: DI оркестратора. None → базовый ``ProcessManagerProcess`` (headless «рыба»).
+    throttle_rules: Optional[ThrottleRules] = None
+    #: Runtime-хук: DI оркестратора. None → generic ``GenericProcessManagerApp``.
     orchestrator_class_path: Optional[str] = None
     orchestrator_config: dict[str, Any] = field(default_factory=dict)
     stop_timeout: float = 5.0
@@ -189,10 +206,19 @@ class SystemBuilder:
         builder: ProcDictsBuilder = spec.proc_dicts_builder or assemble_proc_dicts
         proc_dicts = builder(blueprint)
 
+        # Build-time хуки: результат (dict) уйдёт в orchestrator_config → пиклится
+        # через spawn → потребляется GenericProcessManagerApp child-side.
         initial_state: dict[str, Any] = {}
         if spec.state_bootstrap is not None:
             bootstrap: StateBootstrap = spec.state_bootstrap
             initial_state = bootstrap(blueprint)
+
+        orchestrator_config: dict[str, Any] = {"initial_state": initial_state}
+        if spec.throttle_rules is not None:
+            throttle: ThrottleRules = spec.throttle_rules
+            orchestrator_config["state_throttle_rules"] = throttle(blueprint)
+        # Явный orchestrator_config приложения — последним (может переопределить).
+        orchestrator_config.update(spec.orchestrator_config)
 
         self._print_banner(
             manifest,
@@ -201,10 +227,10 @@ class SystemBuilder:
             n_processes=len(proc_dicts),
         )
 
-        orchestrator_config = {"initial_state": initial_state, **spec.orchestrator_config}
         return assemble_launcher(
             proc_dicts,
-            orchestrator_class_path=spec.orchestrator_class_path,
+            # None → generic-оркестратор «рыбы» (minimal_app бутится на нём).
+            orchestrator_class_path=spec.orchestrator_class_path or GENERIC_ORCHESTRATOR_CLASS_PATH,
             orchestrator_config=orchestrator_config,
             stop_timeout=spec.stop_timeout,
         )

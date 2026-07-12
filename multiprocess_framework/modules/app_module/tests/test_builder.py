@@ -93,7 +93,10 @@ def test_factory_mode_delegates_to_launcher_factory(tmp_path: Path) -> None:
 
 def test_generic_build_produces_launcher() -> None:
     """build_app на manifest'е minimal_app даёт launcher с процессом ticker (без запуска)."""
+    from multiprocess_framework.modules.app_module import GENERIC_ORCHESTRATOR_CLASS_PATH
+
     launcher = build_app(_MINIMAL_APP_YAML)
     names = [n for n, _ in launcher._processes]
     assert names == ["ticker"]
-    assert launcher._orchestrator_class_path is None  # базовый ProcessManagerProcess
+    # Ф5.12: generic-путь ставит generic-оркестратор GenericProcessManagerApp.
+    assert launcher._orchestrator_class_path == GENERIC_ORCHESTRATOR_CLASS_PATH
