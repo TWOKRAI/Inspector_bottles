@@ -168,3 +168,44 @@ def test_metadata_write_noop_missing_file(tmp_path):
     """Несуществующий файл — no-op без исключения."""
     update_blueprint_metadata_preserving(tmp_path / "ghost.yaml", {"gui_positions": {}, "locked_nodes": []})
     assert not (tmp_path / "ghost.yaml").exists()
+
+
+# ---------------------------------------------------------------------------
+# AU-1 граница: update_yaml_preserving НЕ удаляет отсутствующие ключи
+# ---------------------------------------------------------------------------
+
+
+def test_update_yaml_preserving_keeps_legacy_top_level_gui_positions(tmp_path):
+    """Честная фиксация границы AU-1: writer НЕ удаляет legacy top-level gui_positions.
+
+    normalize_recipe_v3_raw возвращает dict БЕЗ top-level gui_positions, но
+    update_yaml_preserving мержит только присутствующие в updates ключи и НЕ трёт
+    отсутствующие (сохранность комментариев). Значит на диске уже лежащий legacy-дубль
+    ПЕРЕЖИВАЕТ Save — его удаляет только миграция canonicalize_gui_positions, а не Save.
+    """
+    from multiprocess_framework.modules.recipe.format import normalize_recipe_v3_raw
+
+    path = tmp_path / "legacy.yaml"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            name: legacy
+            version: 3
+            blueprint:
+              processes: []
+            gui_positions:
+              stale.node: [1.0, 2.0]
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    normalized = normalize_recipe_v3_raw(raw, {"processes": [], "wires": [], "displays": []})
+    assert "gui_positions" not in normalized  # pure-функция дубль не возвращает
+
+    update_yaml_preserving(path, normalized)
+
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    # Фактическое поведение: top-level дубль на диске ОСТАЛСЯ (writer не удаляет).
+    assert data["gui_positions"] == {"stale.node": [1.0, 2.0]}

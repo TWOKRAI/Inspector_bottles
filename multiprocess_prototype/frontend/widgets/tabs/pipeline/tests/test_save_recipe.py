@@ -93,8 +93,16 @@ class TestSaveToActiveRecipeWritesBlueprint:
 
         assert saved.get("active_services") == ["camera_service"]
 
-    def test_save_updates_gui_positions(self, monkeypatch) -> None:
-        """gui_positions записываются в top-level gui_positions рецепта."""
+    def test_save_does_not_create_top_level_gui_positions(self, monkeypatch) -> None:
+        """AU-1 регресс: Save НЕ создаёт top-level gui_positions (не воссоздаёт 4.8-дубль).
+
+        Рецепт без top-level gui_positions после Save так и не получает его — позиции
+        живут только в blueprint.metadata.gui_positions (см.
+        test_save_writes_layout_into_blueprint_metadata). Это гарантия AU-1: Save не
+        ПИШЕТ новый дубль. Удаление уже лежащего на диске legacy-дубля — задача миграции
+        (см. test_update_yaml_preserving_keeps_legacy_top_level_gui_positions ниже,
+        фиксирующий, что реальный writer его НЕ трёт).
+        """
         slug = "pos_recipe"
         services, store = _make_services_with_recipe(slug)
         presenter = PipelinePresenter(services)
@@ -112,8 +120,10 @@ class TestSaveToActiveRecipeWritesBlueprint:
         assert result is True
 
         saved = store._raw[slug]
-        gui_pos = saved.get("gui_positions", {})
-        assert "node_a" in gui_pos
+        # Save не создал top-level дубль
+        assert "gui_positions" not in saved
+        # позиции — в канонической секции blueprint.metadata
+        assert saved["blueprint"]["metadata"]["gui_positions"]["node_a"] == [100.0, 200.0]
 
     def test_save_writes_layout_into_blueprint_metadata(self, monkeypatch) -> None:
         """free-layout Task 2/3: gui_positions + locked_nodes пишутся в blueprint.metadata.

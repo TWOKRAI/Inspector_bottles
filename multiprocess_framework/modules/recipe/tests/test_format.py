@@ -32,15 +32,24 @@ def test_strips_legacy_envelope() -> None:
     assert "meta" not in out
 
 
-def test_gui_positions_written_only_when_nonempty() -> None:
+def test_top_level_gui_positions_never_written() -> None:
+    # AU-1: top-level gui_positions больше не пишется — позиции живут только
+    # в blueprint.metadata (их кладёт вызывающий).
     raw = {"name": "cup"}
-    bp = {"processes": []}
-    # пустые/None gui_positions не пишутся
-    assert "gui_positions" not in normalize_recipe_v3_raw(raw, bp)
-    assert "gui_positions" not in normalize_recipe_v3_raw(raw, bp, {})
-    # непустые — пишутся
-    out = normalize_recipe_v3_raw(raw, bp, {"n1": [1.0, 2.0]})
-    assert out["gui_positions"] == {"n1": [1.0, 2.0]}
+    bp = {"processes": [], "metadata": {"gui_positions": {"n1": [1.0, 2.0]}}}
+    out = normalize_recipe_v3_raw(raw, bp)
+    assert "gui_positions" not in out
+    # канонические позиции внутри blueprint.metadata не тронуты
+    assert out["blueprint"]["metadata"]["gui_positions"] == {"n1": [1.0, 2.0]}
+
+
+def test_legacy_top_level_gui_positions_absent_from_result() -> None:
+    # AU-1: legacy top-level дубль из raw НЕ попадает в возвращаемый dict (pure-функция).
+    # Это НЕ значит удаление ключа с диска — реальный writer (update_yaml_preserving)
+    # отсутствующие ключи не трёт, см. test_yaml_io. Гарантия — «Save не создаёт дубль».
+    raw = {"name": "cup", "gui_positions": {"n1": [9.0, 9.0]}}
+    out = normalize_recipe_v3_raw(raw, {"processes": []})
+    assert "gui_positions" not in out
 
 
 def test_does_not_mutate_input() -> None:

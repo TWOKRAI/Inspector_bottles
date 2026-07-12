@@ -232,22 +232,171 @@ class TestFrozenBehaviour:
 
 class TestExtraForbid:
     """Политика extra для entities: Wire=forbid; Process/PluginInstance сворачивают
-    плоские runtime-поля runnable-формата в metadata/config (без потери данных)."""
+    плоские runtime-поля runnable-формата в extras/metadata/config (без потери данных)."""
 
     def test_wire_extra_forbid(self) -> None:
         """Wire с unknown полем → ValidationError."""
         with pytest.raises(ValidationError):
             Wire(source="a", target="b", unknown_field="x")  # type: ignore[call-arg]
 
-    def test_process_extra_folds_into_metadata(self) -> None:
-        """Process с плоским runtime-полем (runnable-формат) → сворачивается в metadata."""
+    def test_process_shorthand_folds_into_extras(self) -> None:
+        """Pipeline-routing shorthand (source_target_fps) → в extras, не metadata (AU-2).
+
+        Framework-blueprint читает эти ключи только из typed-поля/extras — в metadata они
+        для бэкенда нем (тихая деградация после GUI round-trip).
+        """
         p = Process(process_name="p", plugins=(), source_target_fps=25)  # type: ignore[call-arg]
-        assert p.metadata.get("source_target_fps") == 25
+        assert p.extras.get("source_target_fps") == 25
+        assert "source_target_fps" not in p.metadata
+
+    def test_process_opaque_flat_field_folds_into_metadata(self) -> None:
+        """Неизвестный НЕ-shorthand ключ (телеметрия) → по-прежнему в metadata."""
+        p = Process(process_name="p", plugins=(), telemetry_tag="cam-A")  # type: ignore[call-arg]
+        assert p.metadata.get("telemetry_tag") == "cam-A"
+        assert "telemetry_tag" not in p.extras
 
     def test_plugin_instance_extra_folds_into_config(self) -> None:
         """PluginInstance с плоским параметром (runnable-формат) → сворачивается в config."""
         pi = PluginInstance(plugin_name="blur", radius=5)  # type: ignore[call-arg]
         assert pi.config.get("radius") == 5
+
+
+class TestInspectorEscapeHatchRoundtrip:
+    """AU-2 / ADR-PMM-017 п.5: явный inspector-escape-hatch переживает GUI round-trip.
+
+    До фикса домен-entity Process сворачивал плоский inspector в metadata, где
+    infer_missing_inspectors его игнорирует (только тонкая настройка, не mode) →
+    ручной {mode: fanin} стирался первым же GUI-save и деградировал в структурный join.
+    Теперь inspector едет через extras и остаётся авторитетным.
+    """
+
+    def test_explicit_inspector_survives_load_save_in_extras(self) -> None:
+        """Плоский inspector: {mode: fanin} → extras, переживает to_dict → from_dict."""
+        proc = Process.from_dict(
+            {
+                "process_name": "draw",
+                "plugins": [{"plugin_name": "overlay_draw"}],
+                "inspector": {"mode": "fanin"},
+            }
+        )
+        # На load — inspector осел в extras, НЕ в metadata
+        assert proc.extras.get("inspector") == {"mode": "fanin"}
+        assert "inspector" not in proc.metadata
+
+        # Round-trip: сериализация → десериализация сохраняет escape-hatch в extras
+        proc2 = Process.from_dict(proc.to_dict())
+        assert proc2.extras.get("inspector") == {"mode": "fanin"}
+        assert "inspector" not in proc2.metadata
+
+    def test_explicit_extras_inspector_survives_roundtrip(self) -> None:
+        """Явный extras: {inspector: ...} в рецепте не теряется (extras — typed-поле)."""
+        proc = Process.from_dict(
+            {
+                "process_name": "draw",
+                "extras": {"inspector": {"mode": "fanin", "timeout_sec": 2.0}},
+            }
+        )
+        proc2 = Process.from_dict(proc.to_dict())
+        assert proc2.extras["inspector"] == {"mode": "fanin", "timeout_sec": 2.0}
+
+    def test_explicit_extras_wins_over_flat_shorthand(self) -> None:
+        """Конфликт: явный extras.inspector имеет приоритет над плоским inspector."""
+        proc = Process.from_dict(
+            {
+                "process_name": "draw",
+                "inspector": {"mode": "join"},
+                "extras": {"inspector": {"mode": "fanin"}},
+            }
+        )
+        assert proc.extras["inspector"] == {"mode": "fanin"}
+
+    def test_inspector_extras_authoritative_in_blueprint(self) -> None:
+        """Домен-сериализованный extras.inspector авторитетен для framework-blueprint.
+
+        Плоский inspector, пройдя через домен-entity, оседает в extras — и framework
+        ProcessConfig читает его как escape-hatch (`as_generic_config._pick` /
+        `infer_missing_inspectors`). Конструируем ProcessConfig из релевантных полей
+        (в реальном пути process_class-нормализацию делает адаптер/unwrap).
+        """
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
+            ProcessConfig,
+        )
+
+        proc_dict = Process.from_dict({"process_name": "draw", "inspector": {"mode": "fanin"}}).to_dict()
+        assert proc_dict["extras"]["inspector"] == {"mode": "fanin"}
+
+        pc = ProcessConfig(process_name=proc_dict["process_name"], extras=proc_dict["extras"])
+        # extras.inspector виден framework как escape-hatch (typed inspector пуст)
+        assert (pc.inspector or pc.extras.get("inspector")) == {"mode": "fanin"}
+
+
+class TestRestartPolicyRoundtrip:
+    """F1: плоский restart_policy — typed-поле домена, переживает round-trip и виден framework.
+
+    До фикса домен сворачивал плоский restart_policy в metadata, откуда framework
+    (as_generic_config берёт только typed-поле) его не читал → per-process авто-рестарт
+    молча отключался при boot после GUI-save (живые camera_0 в phone_sketch/hikvision).
+    """
+
+    def test_flat_restart_policy_folds_into_typed_field(self) -> None:
+        """Плоский restart_policy → typed-поле, НЕ metadata/extras."""
+        proc = Process.from_dict(
+            {
+                "process_name": "camera_0",
+                "restart_policy": {"enabled": True, "max_retries": 3, "backoff_sec": 2.0},
+            }
+        )
+        assert proc.restart_policy == {"enabled": True, "max_retries": 3, "backoff_sec": 2.0}
+        assert "restart_policy" not in proc.metadata
+        assert "restart_policy" not in proc.extras
+
+    def test_restart_policy_survives_roundtrip_and_visible_in_blueprint(self) -> None:
+        """restart_policy переживает to_dict → from_dict и виден ProcessConfig (typed)."""
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
+            ProcessConfig,
+        )
+
+        proc = Process.from_dict({"process_name": "camera_0", "restart_policy": {"enabled": True, "max_retries": 3}})
+        proc2 = Process.from_dict(proc.to_dict())
+        assert proc2.restart_policy == {"enabled": True, "max_retries": 3}
+
+        pc = ProcessConfig(process_name="camera_0", restart_policy=proc2.restart_policy)
+        assert pc.restart_policy == {"enabled": True, "max_retries": 3}
+
+
+class TestExtrasShorthandDriftGuard:
+    """F4: _EXTRAS_SHORTHAND_KEYS — рукописное зеркало `_pick`-набора ProcessConfig.
+
+    Cross-layer contract-тест (импорт framework разрешён слоями): новый `_pick`-ключ во
+    framework, забытый в домене, тихо ушёл бы в metadata при зелёных тестах — здесь ловим.
+    """
+
+    # Pinned зеркало ключей ProcessConfig.as_generic_config._pick (blueprint.py:200-203).
+    # При добавлении нового _pick-ключа во framework — обнови и этот набор, и домен.
+    _PINNED_PICK_SET = frozenset({"chain_targets", "source_target_fps", "inspector", "io_peek"})
+
+    def test_extras_shorthand_mirrors_pick_set(self) -> None:
+        """_EXTRAS_SHORTHAND_KEYS + chain_targets (typed-поле домена) == _pick-набор."""
+        from multiprocess_prototype.domain.entities.process import _EXTRAS_SHORTHAND_KEYS
+
+        assert _EXTRAS_SHORTHAND_KEYS | {"chain_targets"} == self._PINNED_PICK_SET
+
+    def test_shorthand_keys_are_real_process_config_fields(self) -> None:
+        """Каждый shorthand-ключ — реальное поле ProcessConfig (ловит опечатку/ренейм)."""
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
+            ProcessConfig,
+        )
+        from multiprocess_prototype.domain.entities.process import _EXTRAS_SHORTHAND_KEYS
+
+        assert _EXTRAS_SHORTHAND_KEYS <= set(ProcessConfig.model_fields)
+
+    def test_pinned_pick_set_matches_process_config_fields(self) -> None:
+        """Pinned _pick-набор целиком — поля ProcessConfig (детект дрейфа имён во framework)."""
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
+            ProcessConfig,
+        )
+
+        assert self._PINNED_PICK_SET <= set(ProcessConfig.model_fields)
 
 
 # ==============================================================================

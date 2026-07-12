@@ -323,6 +323,75 @@ def test_explicit_extras_inspector_not_overridden():
     assert draw.inspector == {}  # typed-поле пустое; extras не трогаем — приоритет explicit
 
 
+def test_mode_less_extras_inspector_is_tuning_not_escape_hatch():
+    """F2: mode-less inspector (без mode, только tuning) НЕ отключает вывод.
+
+    Плоский inspector: {timeout_sec: 5} едет в extras (домен-роутинг). Раньше (metadata-
+    путь) он давал «join из wires + подмешанный timeout»; после AU-2 он в extras и мог бы
+    молча гасить join (escape-hatch по наличию ключа). Фикс: escape-hatch — только при
+    наличии mode; mode-less → тонкая настройка поверх выведенного skeleton.
+    """
+    _register(_CircleDetector, _LineFilter, _OverlayDraw)
+    bp = SystemBlueprint.model_validate(
+        {
+            "name": "mode_less_extras",
+            "processes": [
+                {"process_name": "vision", "plugins": [_plugin("circle_detector")]},
+                {"process_name": "line", "plugins": [_plugin("line_filter")]},
+                {
+                    "process_name": "draw",
+                    "plugins": [_plugin("overlay_draw")],
+                    "extras": {"inspector": {"timeout_sec": 5}},  # mode-less
+                },
+            ],
+            "wires": [
+                {"source": "vision.circle_detector.frame", "target": "draw.overlay_draw.frame"},
+                {"source": "line.line_filter.overlay", "target": "draw.overlay_draw.overlay"},
+            ],
+        }
+    )
+    bp.infer_missing_inspectors()
+
+    draw = next(p for p in bp.processes if p.process_name == "draw")
+    # mode/inputs/primary выведены из wires; timeout_sec подмешан из mode-less extras
+    assert draw.inspector == {
+        "mode": "join",
+        "inputs": ["frame", "overlay"],
+        "primary": "frame",
+        "timeout_sec": 5,
+    }
+    # mode-less shadow снят из extras — as_generic_config._pick вернёт typed join без ложного warning
+    assert "inspector" not in (draw.extras or {})
+
+
+def test_mode_less_typed_inspector_is_tuning_not_escape_hatch():
+    """F2 (симметрия): mode-less typed inspector — тоже тонкая настройка, не escape-hatch."""
+    _register(_CircleDetector, _LineFilter, _OverlayDraw)
+    bp = SystemBlueprint.model_validate(
+        {
+            "name": "mode_less_typed",
+            "processes": [
+                {"process_name": "vision", "plugins": [_plugin("circle_detector")]},
+                {"process_name": "line", "plugins": [_plugin("line_filter")]},
+                {
+                    "process_name": "draw",
+                    "plugins": [_plugin("overlay_draw")],
+                    "inspector": {"timeout_sec": 3},  # typed, mode-less
+                },
+            ],
+            "wires": [
+                {"source": "vision.circle_detector.frame", "target": "draw.overlay_draw.frame"},
+                {"source": "line.line_filter.overlay", "target": "draw.overlay_draw.overlay"},
+            ],
+        }
+    )
+    bp.infer_missing_inspectors()
+
+    draw = next(p for p in bp.processes if p.process_name == "draw")
+    assert draw.inspector["mode"] == "join"
+    assert draw.inspector["timeout_sec"] == 3
+
+
 # ---------------------------------------------------------------------------
 # Legacy metadata.inspector — тонкая настройка подмешивается, mode/inputs/primary из wires
 # ---------------------------------------------------------------------------
@@ -379,6 +448,73 @@ def test_metadata_field_no_longer_dropped_by_extra_ignore():
     )
     proc = cfg.processes[0]
     assert proc.metadata == {"inspector": {"mode": "join"}}
+
+
+def test_metadata_inspector_mode_not_authoritative_wires_win():
+    """AU-2: metadata.inspector={mode: fanin} НЕ перекрывает структурный join из wires.
+
+    mode/inputs/primary всегда из графа — metadata-mode не авторитетен (только тонкая
+    настройка вроде timeout_sec подмешивается). Escape-hatch — только прямой ключ/extras.
+    """
+    _register(_CircleDetector, _LineFilter, _OverlayDraw)
+    bp = SystemBlueprint.model_validate(
+        {
+            "name": "metadata_mode_conflict",
+            "processes": [
+                {"process_name": "vision", "plugins": [_plugin("circle_detector")]},
+                {"process_name": "line", "plugins": [_plugin("line_filter")]},
+                {
+                    "process_name": "draw",
+                    "plugins": [_plugin("overlay_draw")],
+                    "metadata": {"inspector": {"mode": "fanin"}},
+                },
+            ],
+            "wires": [
+                {"source": "vision.circle_detector.frame", "target": "draw.overlay_draw.frame"},
+                {"source": "line.line_filter.overlay", "target": "draw.overlay_draw.overlay"},
+            ],
+        }
+    )
+    bp.infer_missing_inspectors()
+
+    draw = next(p for p in bp.processes if p.process_name == "draw")
+    assert draw.inspector["mode"] == "join"  # metadata-mode=fanin проигнорирован, wires авторитетны
+
+
+def test_legacy_metadata_inspector_on_optional_ports_degrades_to_fanin():
+    """AU-2 случай (б): legacy metadata.inspector={mode: join} на узле без структурного
+    join (2 физ. источника, но 1 required + optional) тихо остаётся fanin.
+
+    metadata-mode не авторитетен: вывод не срабатывает (<2 required-источников), а тонкая
+    настройка подмешивается только в join-ветку → escape-hatch из metadata теряется.
+    Задокументированная деградация (ADR-PMM-017 п.5); митигация — явный inspector
+    прямым ключом/extras.
+    """
+    _register(_CircleDetector, _LineFilter, _WordLayout)
+    bp = SystemBlueprint.model_validate(
+        {
+            "name": "legacy_optional_degrade",
+            "processes": [
+                {"process_name": "vision", "plugins": [_plugin("circle_detector")]},
+                {"process_name": "line", "plugins": [_plugin("line_filter")]},
+                {
+                    "process_name": "layout",
+                    "plugins": [_plugin("word_layout")],
+                    "metadata": {
+                        "inspector": {"mode": "join", "inputs": ["predictions", "word"], "primary": "predictions"}
+                    },
+                },
+            ],
+            "wires": [
+                {"source": "vision.circle_detector.detections", "target": "layout.word_layout.predictions"},
+                {"source": "line.line_filter.overlay", "target": "layout.word_layout.word"},  # optional
+            ],
+        }
+    )
+    bp.infer_missing_inspectors()
+
+    layout = next(p for p in bp.processes if p.process_name == "layout")
+    assert layout.inspector == {}  # metadata-mode=join проигнорирован → тихо fanin
 
 
 # ---------------------------------------------------------------------------
