@@ -202,9 +202,11 @@ class SystemBuilder:
 
         loader: BlueprintLoader = spec.blueprint_loader or default_blueprint_loader
         blueprint = loader(manifest)
+        _pickle_sanity(blueprint, hook_name="blueprint_loader")
 
         builder: ProcDictsBuilder = spec.proc_dicts_builder or assemble_proc_dicts
         proc_dicts = builder(blueprint)
+        _pickle_sanity(proc_dicts, hook_name="proc_dicts_builder")
 
         # Build-time хуки: результат (dict) уйдёт в orchestrator_config → пиклится
         # через spawn → потребляется GenericProcessManagerApp child-side.
@@ -212,11 +214,13 @@ class SystemBuilder:
         if spec.state_bootstrap is not None:
             bootstrap: StateBootstrap = spec.state_bootstrap
             initial_state = bootstrap(blueprint)
+            _pickle_sanity(initial_state, hook_name="state_bootstrap")
 
         orchestrator_config: dict[str, Any] = {"initial_state": initial_state}
         if spec.throttle_rules is not None:
             throttle: ThrottleRules = spec.throttle_rules
             orchestrator_config["state_throttle_rules"] = throttle(blueprint)
+            _pickle_sanity(orchestrator_config["state_throttle_rules"], hook_name="throttle_rules")
         # Явный orchestrator_config приложения — последним (может переопределить).
         orchestrator_config.update(spec.orchestrator_config)
 
@@ -272,6 +276,31 @@ def _load_yaml_or_json(path: Path) -> dict[str, Any]:
         if Path(path).suffix in (".yaml", ".yml"):
             return yaml.safe_load(f) or {}
         return json.load(f)
+
+
+def _pickle_sanity(value: Any, *, hook_name: str) -> None:
+    """Ранняя проверка пиклябельности результата build-time хука (косметика Ф5.12→Ф5.13).
+
+    Build-time хуки (:class:`BlueprintLoader`/:class:`ProcDictsBuilder`/
+    :class:`StateBootstrap`/:class:`ThrottleRules`) выполняются в launcher-процессе
+    (родитель), а их РЕЗУЛЬТАТ уходит через ``spawn`` дочерним процессам (proc_dicts —
+    напрямую, initial_state/state_throttle_rules — упакованными в ``orchestrator_config``).
+    Без этой проверки непиклябельный объект (например, лямбда/локальная функция/сокет
+    в значении, случайно оставленные приложением) падает ГЛУБОКО в
+    ``multiprocessing.Process.start()`` с малопонятной трассировкой, не указывающей на
+    виновника. Fail fast здесь называет хук по имени.
+
+    Raises:
+        TypeError: значение не проходит ``pickle.dumps`` — сообщение называет хук.
+    """
+    import pickle
+
+    try:
+        pickle.dumps(value)
+    except Exception as exc:
+        raise TypeError(
+            f"build-time хук {hook_name!r} вернул непиклябельный результат (нужен для spawn дочерних процессов): {exc}"
+        ) from exc
 
 
 def _merge_topologies(base: dict[str, Any], pipeline: dict[str, Any]) -> dict[str, Any]:
