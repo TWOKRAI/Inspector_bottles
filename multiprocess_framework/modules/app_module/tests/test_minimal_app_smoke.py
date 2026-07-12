@@ -1,9 +1,10 @@
 """examples/minimal_app бутится headless через run_app/build_app (Ф5.11 acceptance).
 
 Каркас должен бутиться локально: build → start → (heartbeat) → stop без висящих
-процессов. Полный CI-smoke через BackendHarness — Ф5.13; здесь — лёгкая проверка
-самодостаточности «рыбы» (генерик-путь app_module, generic-оркестратор
-``GenericProcessManagerApp`` БЕЗ единого хука — Ф5.12 acceptance).
+процессов. Полный CI-smoke (headless boot + доказанный IPC через BackendHarness) —
+``examples/minimal_app/tests/test_ci_smoke.py`` (Ф5.13, маркер ``harness_smoke``);
+здесь — лёгкая non-live проверка самодостаточности «рыбы» (генерик-путь app_module,
+generic-оркестратор ``GenericProcessManagerApp`` БЕЗ единого хука — Ф5.12 acceptance).
 """
 
 from __future__ import annotations
@@ -43,7 +44,9 @@ def test_minimal_app_boots_headless(tmp_path: Path) -> None:
     os.environ["MULTIPROCESS_LOG_DIR"] = str(log_dir)
 
     launcher = build_app(_APP_YAML)
-    assert [n for n, _ in launcher._processes] == ["ticker"]
+    # Ф5.13: minimal_app — 2 процесса (ticker + console_sink), живой IPC между ними
+    # (доказательство доставки — отдельный live-тест test_ci_smoke.py).
+    assert [n for n, _ in launcher._processes] == ["ticker", "console_sink"]
     # minimal_app бутится на generic-оркестраторе БЕЗ единого хука (Ф5.12).
     assert launcher._orchestrator_class_path == GENERIC_ORCHESTRATOR_CLASS_PATH
     # Хуков не задано → StateStore/throttle не поднимаются (только initial_state={}).
