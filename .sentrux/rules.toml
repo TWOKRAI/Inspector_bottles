@@ -112,6 +112,15 @@ from   = "multiprocess_framework/*"
 to     = "multiprocess_framework/modules/app_module/*"
 reason = "app_module — верхняя крыша: внутри framework его не импортируют (Ф5.11, app-template-idea §3)"
 
+# examples/ — второй независимый потребитель framework уровня 2 («рыба», Ф5.13),
+# forcing function против Inspector-специфики. Не должен зависеть от конкретного
+# приложения (multiprocess_prototype) — иначе не доказывает самодостаточность
+# app_module. Enforce также grep-контракт-тестом (app_module/tests/test_contract.py).
+[[boundaries]]
+from   = "examples/*"
+to     = "multiprocess_prototype/*"
+reason = "examples — второй потребитель framework уровня 2, не зависит от прикладного прототипа (Ф5.13)"
+
 # Services → не знают про вышестоящие слои
 [[boundaries]]
 from   = "Services/*"
