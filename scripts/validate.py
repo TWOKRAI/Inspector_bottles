@@ -32,6 +32,7 @@ for _p in (MODULES_ROOT, BASE):
         sys.path.insert(0, _s)
 
 MODULES = [
+    "app_module",
     "base_manager",
     "channel_routing_module",
     "command_module",

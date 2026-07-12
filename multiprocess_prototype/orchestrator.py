@@ -66,7 +66,6 @@ class ProcessManagerProcessApp(ProcessManagerProcess):
         from pathlib import Path
 
         from multiprocess_framework.modules.process_module.configs import expand_observability
-        from multiprocess_framework.modules.process_module.plugins.registry import PluginRegistry
 
         from multiprocess_prototype.backend.assembly import BlueprintAssembler, FullReplacePlanner
         from multiprocess_prototype.backend.assembly.normalize import normalize_blueprint
@@ -86,8 +85,11 @@ class ProcessManagerProcessApp(ProcessManagerProcess):
             plugin_paths = [
                 str(PROJECT_ROOT / p) if not Path(p).is_absolute() else p for p in sys_config.discovery.plugin_paths
             ]
-            discovered = PluginRegistry.discover(*plugin_paths)
-            self._log_info(f"[topology-engine] PluginRegistry.discover: {discovered} плагинов в PM-процессе")
+            # A6 (Ф5.11): тот же единый helper, что на boot (launch.py) — одна копия.
+            from multiprocess_framework.modules.app_module import discover as app_discover
+
+            discovered = app_discover(plugin_paths=plugin_paths, service_paths=[]).plugins_discovered
+            self._log_info(f"[topology-engine] discover: {discovered} плагинов в PM-процессе")
 
         obs_overlay = expand_observability(sys_config.observability.model_dump())
         log_dir = sys_config.system.log_dir or "logs"

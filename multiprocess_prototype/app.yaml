@@ -2,6 +2,12 @@
 # Единственный файл, который читает точка входа (main). Пути — от этого каталога.
 # Подробности: plans/config-driven-launch.md
 
+# Имя приложения (Ф5.11): app_module читает его в generic-контуре run_app.
+name: Inspector Bottles
+
+# Версия схемы манифеста (задел движка миграций, Ф5.11).
+version: 1
+
 # Системные настройки + defaults для плагинов
 system: backend/config/system.yaml
 

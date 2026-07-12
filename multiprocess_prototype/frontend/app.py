@@ -654,12 +654,14 @@ def run_gui(process: "GuiProcess") -> None:
 
         Закрывает loop: активация в GUI → app.yaml обновлён → следующий старт
         восстанавливает рецепт (restore выше читает _manifest.pipeline.stem). Запись
-        через ruamel round-trip — комментарии app.yaml сохраняются. Формат pipeline
-        совпадает с текущим в app.yaml: ``recipes/<slug>.yaml``.
+        через ManifestStore (NEW-1, Ф5.11) — единственная сериализованная точка
+        read/write app.yaml: тот же store использует backend ``persist_pipeline_choice``,
+        поэтому одновременная запись GUI и backend не теряет обновление (гонка закрыта).
+        Комментарии app.yaml сохраняются (ruamel round-trip внутри store).
         """
-        from multiprocess_prototype.recipes.yaml_io import update_yaml_preserving
+        from multiprocess_framework.modules.app_module import ManifestStore
 
-        update_yaml_preserving(resolve_manifest_path(), {"pipeline": f"recipes/{slug}.yaml"})
+        ManifestStore(resolve_manifest_path()).set_pipeline(f"recipes/{slug}.yaml")
 
     _runtime = RuntimeDeps(
         command_sender=command_sender,

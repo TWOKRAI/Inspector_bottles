@@ -2379,6 +2379,7 @@
 | `service_module` | [`modules/service_module/DECISIONS.md`](modules/service_module/DECISIONS.md) | Services & Lifecycle | ADR-SVC-001…003 (Singleton ServiceRegistry через `__new__` + Lock, ..., `ServiceRegistry` хранит классы, не экземпляры) |
 | `display_module` | [`modules/display_module/DECISIONS.md`](modules/display_module/DECISIONS.md) | Services & Lifecycle | ADR-DM-001…004 (DisplayEntry generic: без vision-полей, ..., `reload` = только метаданные, render-поля игнорируются) |
 | `event_module` | [`modules/event_module/DECISIONS.md`](modules/event_module/DECISIONS.md) | Messaging |  |
+| `app_module` | [`modules/app_module/DECISIONS.md`](modules/app_module/DECISIONS.md) | Composition / App |  |
 <!-- ADR-INDEX:END -->
 
 ---

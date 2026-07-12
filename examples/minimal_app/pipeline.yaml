@@ -1,0 +1,21 @@
+# examples/minimal_app — pipeline (плоская топология).
+#
+# Один процесс `ticker` с плагином tick_source. process_class — БАЗОВЫЙ
+# framework-класс GenericProcess (не прототип): «рыба» бутится на дефолтах
+# фреймворка. Нет wires/дисплеев/state — чистый headless-tick.
+
+name: minimal
+description: "Минимальный headless-пример: один tick-источник"
+
+processes:
+  - process_name: ticker
+    process_class: multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess
+    priority: normal
+    plugins:
+      - plugin_class: examples.minimal_app.plugins.tick_source.plugin.TickSourcePlugin
+        plugin_name: tick_source
+        category: utility
+        interval_sec: 1.0
+        message: hello-from-minimal-app
+
+wires: []

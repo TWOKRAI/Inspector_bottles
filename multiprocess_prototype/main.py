@@ -65,18 +65,31 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
     return SystemBuilder.from_topology_path(CONFIG_PATH, bp_path).build()
 
 
-def main(pipeline_override: str | None = None) -> int:
-    """Запуск приложения: главный конфиг → сборка → run.
+def _prototype_launcher_factory(manifest, pipeline_override: str | None):
+    """``launcher_factory`` для ``app_module.run_app`` (factory-шов Ф5.11).
 
-    CLI-аргумент (`run.py <recipe>`) трактуется как «сделать этот рецепт
-    активным»: он пишется в манифест (``app.yaml: pipeline``) ДО сборки. Тогда и
-    бэкенд, и дочерний GUI-процесс читают ОДИН и тот же активный рецепт из
-    конфига (он же «последний» — для следующего запуска без аргумента). Без записи
-    override доходил только до бэкенда, а GUI читал старый ``app.yaml`` →
-    рассинхрон рецептов (дисплеи не грузились). При ошибке записи — graceful
-    fallback на прежнее поведение (override только в бэкенд).
+    Вход прототипа выражен через ``run_app`` (generic-контур: env-алиасы
+    ``MULTIPROCESS_*``, единая загрузка манифеста через ``ManifestStore``), а
+    сложившийся ``SystemBuilder.build()`` остаётся источником истины сборки —
+    характеризационный снапшот 5.1 не трогаем, back-compat полный. Прототипный
+    манифест (со стилями/темой) грузится по ``manifest.source``.
     """
     from multiprocess_prototype.backend.config.manifest import load_manifest
+
+    app = load_manifest(manifest.source)
+    return build_launcher(app, pipeline_override)
+
+
+def main(pipeline_override: str | None = None) -> int:
+    """Запуск приложения через ``app_module.run_app`` (Ф5.11).
+
+    CLI-аргумент (`run.py <recipe>`) трактуется как «сделать этот рецепт
+    активным»: он пишется в манифест (``app.yaml: pipeline``) через ``ManifestStore``
+    (NEW-1 — единая сериализованная точка, гонка backend↔GUI закрыта) ДО сборки.
+    Тогда и бэкенд, и дочерний GUI-процесс читают ОДИН активный рецепт. При ошибке
+    записи — graceful fallback (override только в бэкенд).
+    """
+    from multiprocess_framework.modules.app_module import AppSpec, run_app
 
     manifest_path = resolve_manifest_path()
     effective_override = pipeline_override
@@ -94,9 +107,12 @@ def main(pipeline_override: str | None = None) -> int:
                 file=sys.stderr,
             )
 
-    app = load_manifest(manifest_path)
-    build_launcher(app, effective_override).run()
-    return 0
+    spec = AppSpec(
+        manifest_path=manifest_path,
+        pipeline_override=effective_override,
+        launcher_factory=_prototype_launcher_factory,
+    )
+    return run_app(spec)
 
 
 if __name__ == "__main__":
