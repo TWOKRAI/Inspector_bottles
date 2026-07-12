@@ -22,6 +22,10 @@ metadata:
 - Task 5.4 запустил **docs(plans)** коммит (`git add plans/...`) — но `git commit` подхватил и **уже изменённые файлы Task 5.5** через session-log hook (`git add docs/sessions/...`). Коммит **315a6b6a** заявлен как docs, по факту 274+252 строк нового framework-кода Task 5.5.
 - Подтверждение race **даже на 2 агентах**. Файлы не потеряны, но git history соврала о содержимом.
 
+**Конкретный случай 2026-07-11 (Ф4.8 apply + план proto-frontend-carve):**
+- 2 параллельных агента (developer + manager) без worktree. Коммиты не склеились, но manager создал свою ветку `docs/plan-proto-frontend-carve` **от вершины чужой ветки** `feat/constructor-f4-8-apply` (3fa6998e), а не от main — HEAD в общем дереве стоял на чужой ветке ([[worktree-stale-base]] в новой форме).
+- Плюс оба могли переключать HEAD друг под другом между шагами. Разрулено SendMessage-координацией: проверять `git branch --show-current` перед каждой git-операцией; грязную базу пересаживать `git rebase --onto main <чужой-SHA>` перед merge.
+
 **How to apply (обновлено 2026-05-26):**
 1. **Для 2+ параллельных агентов** — давай каждому `isolation: "worktree"`. Любая параллель без worktree рискует race'ом из-за session-log hook'а.
 2. **Если worktree не используется** — запускай агентов **строго последовательно** (по одному). «Макс 2» — устаревший компромисс, доказал свою ненадёжность.
