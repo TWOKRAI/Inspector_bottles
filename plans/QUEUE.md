@@ -18,11 +18,14 @@
 
 ## Строгая последовательность (сверху вниз)
 
-### Сейчас — В3 — GUI-конструктор (параллельно/после В2)
+### Сейчас — NEW-D1 (на Fable-ревью) + RS-волна рецептов (аудит 2026-07-12)
 
 | # | Задача | Где детали |
 |---|---|---|
-| 4 | **NEW-D1 (= 5.10 S→M)** — механизм табов → frontend_module (TabRegistry; прототип = `TABS: list[TabSpec]`) | current-path §3-В3 |
+| 4 | **NEW-D1 (= 5.10 S→M)** — механизм табов → frontend_module (TabRegistry; прототип = `TABS: list[TabSpec]`) — реализовано (Opus), на Fable-ревью | current-path §3-В3 |
+| 4a | **RS-1** — единый Save-механизм рецепта (Recipes-Save всегда тихо крашится + LP-1) — в работе (Opus) | constructor-master, RS-волна + [аудит](../docs/audits/2026-07-12_recipe-lifecycle-audit.md) |
+| 4b | **RS-2+RS-3** — честный state после switch + громкий switch (ghost-процессы, protected-ловушка, unstoppable, shutdown-выжившие) — одним заходом | там же |
+| 4c | RS-6+RS-5 (контракт фейков; валидация на записи + Displays-tab) → RS-4 (dirty-контур, синергия В3) → RS-7 (вопрос владельцу) | там же |
 
 ### Хвост C-волны (по дизайну C6 — после 5.13, второй живой смок-детектор)
 
