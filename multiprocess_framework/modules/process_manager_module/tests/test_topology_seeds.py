@@ -328,3 +328,84 @@ class TestTopologyStart:
         pm = _make_pm()
         pm.start_process = MagicMock(return_value=False)
         assert pm._topology_start("nope") is False
+
+
+# ===========================================================================
+# RS-2/RS-3: честный state — очистка ghost, pid+config, unstoppable-alert
+# ===========================================================================
+
+
+class TestHonestStateRS2RS3:
+    """cleanup удаляет поддерево процесса из StateStore; start публикует pid+config;
+    unstoppable → alert в state (RS-2/RS-3)."""
+
+    def _attach_real_state_store(self, pm, initial=None):
+        from multiprocess_framework.modules.state_store_module.manager.state_store_manager import (
+            StateStoreManager,
+        )
+
+        ssm = StateStoreManager(initial_state=initial or {})
+        pm._state_store_manager = ssm
+        return ssm
+
+    def test_cleanup_deletes_process_state_subtree(self) -> None:
+        """Ж-2/LP-4: _topology_cleanup снимает processes.<name> из StateStore."""
+        pm = _make_pm({"preproc": {"class": "mod.P"}})
+        ssm = self._attach_real_state_store(
+            pm, initial={"processes": {"preproc": {"state": {"status": "running"}}}}
+        )
+        assert ssm.store.get("processes.preproc", None) is not None
+
+        pm._topology_cleanup("preproc")
+
+        # Ghost-запись удалена — state сходится с ОС (процесса больше нет)
+        assert ssm.store.get("processes.preproc", None) is None
+
+    def test_start_publishes_pid_and_config(self) -> None:
+        """RS-2: после успешного старта в дереве есть pid и config нового рецепта."""
+        pm = _make_pm({"cam0": {"class": "mod.Cam", "config": {"fps": 30}}})
+        ssm = self._attach_real_state_store(pm)
+        pm.start_process = MagicMock(return_value=True)
+
+        fake_proc = MagicMock()
+        fake_proc.pid = 4242
+        pm._process_registry.get_process_by_name = MagicMock(return_value=fake_proc)
+
+        assert pm._topology_start("cam0") is True
+
+        assert ssm.store.get("processes.cam0.pid") == 4242
+        assert ssm.store.get("processes.cam0.config") == {"class": "mod.Cam", "config": {"fps": 30}}
+
+    def test_unstoppable_alert_published_to_state(self) -> None:
+        """B-3: неостановленное имя → alert в system.switch.unstoppable."""
+        pm = _make_pm({"stuck": {"class": "S"}})
+        ssm = self._attach_real_state_store(pm)
+        pm._process_registry.stop_many = MagicMock(return_value={"stuck": False})
+
+        assert pm._topology_stop_all(["stuck"]) is False
+        assert ssm.store.get("system.switch.unstoppable") == ["stuck"]
+
+    def test_restart_publishes_fresh_identity(self) -> None:
+        """Блокер#3 (RS-2): restart_process публикует НОВЫЙ pid в state (не остаётся
+        pid мёртвого инстанса)."""
+        pm = _make_pm({"cam0": {"class": "mod.Cam", "priority": "normal"}})
+        ssm = self._attach_real_state_store(
+            pm, initial={"processes": {"cam0": {"pid": 1111}}}
+        )
+        # Заглушки тяжёлых шагов restart_process (проверяем именно publish identity).
+        pm.stop_process = MagicMock(return_value=True)
+        pm._wire_reissue_enabled = MagicMock(return_value=False)
+        pm._process_queue_ids = MagicMock(return_value=set())
+        pm._drain_process_queues = MagicMock()
+        pm._bump_routing_epoch = MagicMock()
+        pm._broadcast_routing_refresh = MagicMock()
+        pm._wait_processes_ready = MagicMock(return_value={})
+
+        fake_proc = MagicMock()
+        fake_proc.pid = 7777
+        pm._process_registry.create_and_register = MagicMock(return_value=fake_proc)
+        pm._process_registry.get_process_by_name = MagicMock(return_value=fake_proc)
+
+        assert pm.restart_process("cam0") is True
+        # pid мёртвого инстанса (1111) заменён на новый (7777).
+        assert ssm.store.get("processes.cam0.pid") == 7777

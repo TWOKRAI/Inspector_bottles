@@ -82,6 +82,37 @@ class TestProcessRegistry:
 
         process.join(timeout=0.5)
 
+    def test_stop_all_returns_confirmed_death_map(self) -> None:
+        """Ж-4 (RS-3): stop_all() возвращает карту {name: stopped} с ПОДТВЕРЖДЕНИЕМ
+        смерти (а не None). Штатный процесс → True после подтверждённой остановки."""
+        registry = ProcessRegistry(logger=None)
+        p = Process(target=_dummy_target, name="Confirmed")
+        registry.add_process(p)
+        registry._stop_events["Confirmed"] = Event()
+        p.start()
+        time.sleep(0.1)
+
+        results = registry.stop_all(timeout=2.0)
+
+        assert isinstance(results, dict)
+        assert results.get("Confirmed") is True
+        assert not p.is_alive()
+
+    def test_stop_all_confirms_death_of_sigterm_ignoring_process(self) -> None:
+        """Ж-4: процесс, игнорирующий SIGTERM, добивается kill'ом — stop_all
+        подтверждает смерть (финальный join), а не «сигнал подан»."""
+        registry = ProcessRegistry(logger=None)
+        stuck = Process(target=_stubborn_target, name="stuck")
+        registry.add_process(stuck)
+        registry._stop_events["stuck"] = Event()
+        stuck.start()
+        time.sleep(0.1)
+
+        results = registry.stop_all(timeout=1.0)
+
+        assert results.get("stuck") is True  # kill подтверждён финальным join
+        assert not stuck.is_alive()
+
     def test_stop_one_only_affects_named_process_events(self) -> None:
         """stop_one(name) не трогает stop_event другого процесса."""
         registry = ProcessRegistry(logger=None)

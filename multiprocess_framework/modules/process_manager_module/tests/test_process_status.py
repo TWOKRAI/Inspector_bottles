@@ -81,3 +81,33 @@ class TestProcessStatusMonitor:
 
         process.terminate()
         process.join(timeout=1.0)
+
+
+class TestStatusMonitorRegistryAliasB5:
+    """B-5 (RS-2): ProcessStatusMonitor держит ЖИВУЮ ссылку на список реестра.
+
+    remove_process должен снимать процесс так, чтобы монитор, захвативший
+    os_processes в конструкторе (как PM: ProcessStatusMonitor(registry.os_processes)),
+    видел снятие — иначе он перечисляет давно снесённые процессы (ghost).
+    """
+
+    def test_monitor_reflects_remove_process(self) -> None:
+        from ..core.process_registry import ProcessRegistry
+
+        registry = ProcessRegistry(logger=None)
+        p1 = Process(target=_dummy_target, name="P1")
+        p2 = Process(target=_dummy_target, name="P2")
+        registry.add_process(p1)
+        registry.add_process(p2)
+
+        # Монитор захватывает ссылку на список реестра ОДИН раз (как в PM).
+        monitor = ProcessStatusMonitor(registry.os_processes)
+        assert monitor.get_total_count() == 2
+
+        # Снятие через реестр (ребиндил бы список → стейл-алиас у монитора).
+        registry.remove_process("P1")
+
+        # Монитор ДОЛЖЕН увидеть снятие (живой алиас, slice-assign на месте).
+        assert monitor.get_total_count() == 1
+        assert monitor.get_process_status("P1") is None
+        assert monitor.get_process_status("P2") is not None

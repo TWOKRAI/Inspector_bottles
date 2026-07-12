@@ -91,6 +91,9 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
         proc_dicts_fn=_build_proc_dicts,
         protected_provider=orchestrator._get_protected_names,
         current_provider=orchestrator._topology_current_names,
+        # B-2 (RS-3): живой конфиг protected-процесса для детекции расхождения
+        # с новым рецептом (protected не рестартится — расхождение = не тихий успех).
+        protected_config_provider=orchestrator.live_process_config,
         logger=orchestrator.logger_manager,
         error=orchestrator.error_manager,
         stats=orchestrator.stats_manager,

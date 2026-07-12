@@ -288,14 +288,20 @@ class IProcessRegistry(ABC):
         ...
 
     @abstractmethod
-    def stop_all(self, timeout: float) -> None:
+    def stop_all(self, timeout: float) -> Dict[str, bool]:
         """
-        Graceful остановка всех процессов.
+        Остановка всех процессов с ПОДТВЕРЖДЕНИЕМ смерти (Ж-4, RS-3).
 
-        Каскад: для каждого процесса свой stop_event → join(timeout) → terminate → kill.
+        Каскад: per-process stop_event → join(timeout) → terminate → kill →
+        ФИНАЛЬНЫЙ join → сверка is_alive() (делегирует в stop_many).
 
         Args:
-            timeout: Время ожидания join для каждого процесса (секунды).
+            timeout: общий дедлайн graceful-остановки (секунды).
+
+        Returns:
+            Карта ``{name: stopped}`` — ``True`` смерть подтверждена, ``False``
+            процесс жив после полной эскалации. Caller (PM.shutdown) обязан
+            заявить выживших громко.
         """
         ...
 

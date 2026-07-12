@@ -357,6 +357,9 @@ class TestApplyTopologyRollback:
         assert "ok_w" in recreated
         # stuck остаётся в конфигах для retry на следующем switch
         assert "stuck" in pm._process_configs
+        # B-3 (RS-3, находка#5 ревью): неостановимые имена подняты в ответ apply
+        # (согласовано с cleanup_failures/protected_conflicts).
+        assert result.get("unstoppable") == ["stuck"]
 
     def test_soft_fail_rolls_back(self) -> None:
         """Сид вернул success=False (без exception) -> rollback, topology НЕ закоммичен."""

@@ -28,6 +28,13 @@ class ProcessPriority:
         """
         self.logger = logger
         self.process_priorities: Dict[str, str] = {}
+        # Ж-5 (RS-3): «Failed to set priority» повторяется ×N на КАЖДЫЙ switch
+        # (на macOS/без прав установка приоритета не проходит для каждого процесса).
+        # Дедуп по ПРИЧИНЕ (нормализованный priority_name), НЕ глобальный bool:
+        # первый отказ для КАЖДОГО уровня приоритета — WARNING, повторы того же
+        # уровня — debug. Новая причина (другой priority_name, напр. 'realtime')
+        # снова видна, а не давится навсегда после первого же отказа.
+        self._priority_warn_reasons: set[str] = set()
 
         # Импорт платформенного адаптера
         if platform_adapter:
@@ -56,8 +63,21 @@ class ProcessPriority:
             if self.logger:
                 self.logger._log_info(f"Priority set: {priority_name} for {process.name}")
         else:
+            # Ж-5: дедуп по причине (priority_name) — первый отказ ЭТОГО уровня громко,
+            # повторы того же уровня тихо (debug). Новый уровень снова виден.
             if self.logger:
-                self.logger._log_warning(f"Failed to set priority '{priority_name}' for {process.name}")
+                reason = str(priority_name)
+                if reason not in self._priority_warn_reasons:
+                    self._priority_warn_reasons.add(reason)
+                    self.logger._log_warning(
+                        f"Failed to set priority '{priority_name}' for {process.name} "
+                        f"(нет прав/не поддерживается на этой платформе; дальнейшие отказы "
+                        f"уровня '{priority_name}' подавлены до debug)"
+                    )
+                else:
+                    _dbg = getattr(self.logger, "_log_debug", None)
+                    if callable(_dbg):
+                        _dbg(f"Failed to set priority '{priority_name}' for {process.name} (подавлено)")
 
         return success
 
