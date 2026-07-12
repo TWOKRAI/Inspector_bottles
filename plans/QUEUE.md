@@ -1,6 +1,6 @@
 # Очередь планов — единая последовательность задач
 
-> Обновлено **2026-07-12** (В2 «РЫБА» закрыт целиком — 5.11/5.12/5.13; фронт → Follow-up аудита В1 AU-1/AU-2).
+> Обновлено **2026-07-12** (Follow-up аудита В1 закрыт: AU-1/AU-2 major + миноры AU-3/4/5/7, оба merge через Fable-ревью; AU-6 — попутно с физпереносом assembler/planner; фронт → В3 GUI-конструктор + хвост C6(d)/(e)).
 >
 > **Иерархия документов — 3 уровня, у каждого своя роль:**
 >
@@ -14,19 +14,11 @@
 
 ## Сделано (свёрнуто; детали и merge-хэши — в constructor-master)
 
-Ф0–Ф3 целиком · трек F (god-split F.1–F.7 + MERGE-GATE) · Ф4: 4.1/4.2/4.3/4.4/4.7/4.8/4.9 + добор H1–H8 · Ф5-ядро: 5.1/5.2/5.4–5.9/5.14–5.17/5.19–5.21 · Ф5-добор: C1/C2/C3/C4/C5/C6(a,b,c)/C7/C8 · post-review R1–R6 · NEW-2/NEW-3/NEW-5/NEW-8 · волны В0/В1 current-path целиком (хвост В1 — mini-GATE 4.8 вердикт владельца, C3 carve `recipe`, 4.7 join/inspector ADR-PMM-017, C8 docs-sync карты модулей — закрыт 2026-07-12; chain-статус в картах модулей отражает состояние ДО C6(d)/(e) — финализировать повторно после них) · **В2 «РЫБА» целиком** (5.11 app_module skeleton + ManifestStore/дискавери, 5.12 AppOrchestrator generic + хуки двух сортов, 5.13 minimal_app финализация + CI-smoke — 2-й процесс + живой IPC + sentrux-boundary — закрыт 2026-07-12).
+Ф0–Ф3 целиком · трек F (god-split F.1–F.7 + MERGE-GATE) · Ф4: 4.1/4.2/4.3/4.4/4.7/4.8/4.9 + добор H1–H8 · Ф5-ядро: 5.1/5.2/5.4–5.9/5.14–5.17/5.19–5.21 · Ф5-добор: C1/C2/C3/C4/C5/C6(a,b,c)/C7/C8 · post-review R1–R6 · NEW-2/NEW-3/NEW-5/NEW-8 · волны В0/В1 current-path целиком (хвост В1 — mini-GATE 4.8 вердикт владельца, C3 carve `recipe`, 4.7 join/inspector ADR-PMM-017, C8 docs-sync карты модулей — закрыт 2026-07-12; chain-статус в картах модулей отражает состояние ДО C6(d)/(e) — финализировать повторно после них) · **В2 «РЫБА» целиком** (5.11 app_module skeleton + ManifestStore/дискавери, 5.12 AppOrchestrator generic + хуки двух сортов, 5.13 minimal_app финализация + CI-smoke — 2-й процесс + живой IPC + sentrux-boundary — закрыт 2026-07-12) · **Follow-up аудита В1** (AU-1 Save-канонизатор `gui_positions` + AU-2 escape-hatch `inspector`/`restart_policy` через typed/extras, миноры AU-3/4/5/7 — merges 7526a7bc + a1150d26 через Fable-ревью, закрыт 2026-07-12; **AU-6 остался** — попутно с физпереносом assembler/planner, ADR-RCP-005; хвост AU-5: `test_discovery.py` прямой `_plugins` — попутно с app_module).
 
 ## Строгая последовательность (сверху вниз)
 
-### Сейчас — Follow-up аудита В1 (Fable, 2026-07-12 — до/вместе с новыми рецептами В2+)
-
-| # | Задача | Где детали |
-|---|---|---|
-| 1a | **AU-1** — снять write-путь top-level `gui_positions` в GUI-save (иначе Save воссоздаёт 4.8-дубль) | constructor-master, Follow-up аудита В1 |
-| 1b | **AU-2** — escape-hatch `inspector` должен переживать GUI round-trip (`extras` в домен-entity Process) | там же |
-| 1c | AU-3..AU-7 (миноры: третий edge тегов, lookup-fallback, snapshot/restore API реестра, тесты в своём модуле, гигиена шимов) — попутно ближайшими волнами | там же |
-
-### В3 — GUI-конструктор (параллельно/после В2)
+### Сейчас — В3 — GUI-конструктор (параллельно/после В2)
 
 | # | Задача | Где детали |
 |---|---|---|
