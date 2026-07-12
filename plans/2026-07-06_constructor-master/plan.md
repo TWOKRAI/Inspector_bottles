@@ -306,6 +306,23 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 | LP-4 | После hot-switch state-дерево держит процессы СТАРОЙ топологии как «running» с растущим uptime (preprocessor/region_splitter/… после ухода с region_pipeline) — наблюдаемость врёт | cleanup state при replace_blueprint |
 | LP-5 | `device_hub` при активации рецепта: «Устройство '55': носитель '23' не подключён» — bridge-устройство поднимается раньше носителя; health ok, breaker closed | minor, порядок auto_connect |
 
+### RS-волна — система рецептов (аудит жизненного цикла 2026-07-12; мандат владельца «без костылей, всё под тестами»)
+
+Полный аудит: [`docs/audits/2026-07-12_recipe-lifecycle-audit.md`](../../docs/audits/2026-07-12_recipe-lifecycle-audit.md) (4 code-разведки + живой эксперимент backend-ctl/qt-mcp). Главное: Recipes-tab Save **всегда** тихо крашится (A-1, верифицировано Fable); state после switch врёт (Ж-2 ghost-процессы/старые конфиги/нет PID; кандидаты — B-4 обрыв 5-фазного конвейера, B-5 list-алиас ProcessStatusMonitor, Ж-3 тихий `state.merge failed`); `protected`-ловушка (B-2) и unstoppable-путь (B-3); кадровый конфликт — 4 открытых механизма (B-6..B-9), все адресуются Ф7 G.3/G.4 — RS их сознательно НЕ трогает. Целевая архитектура: единый владелец жизненного цикла рецепта (RecipeSession: SSOT+dirty+секционные записи), switch как транзакция с компенсацией и громкими ошибками, **все ошибки/события switch и save — через ObservabilityHub в вкладку Наблюдаемость** (принцип владельца «ручейки → море»: одна точка сбора, ADR-CRM-009/D8; store-tap на ОБА канала — logger и error, см. memory observability-store-error-routing).
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| RS-1 | [ ] | Единый Save-механизм (A-1 крах on_save + A-2/LP-1 затирание name/description + A-3 расхождение путей); фейк topology-store = Protocol | on_save на реальной Topology-entity зелёный; name/description/metadata переживают ОБА Save-пути; AU-1 регрессы держатся | M |
+| RS-2 | [ ] | Честный state после switch (Ж-2/Ж-3/B-4/B-5): root-cause `state.merge failed`; доисполнение cleanup-хвоста при сбое фазы; фикс list-алиаса ProcessStatusMonitor; PID + актуальный config в state; ошибки switch — в hub/Наблюдаемость (не тихий WARNING) | live-harness (backend_ctl): после switch state==ОС (0 ghost, pid есть, config нового рецепта); unit: инжект сбоя средней фазы → cleanup-хвост исполнен; ошибка switch видна во вкладке Наблюдаемость | M |
+| RS-3 | [ ] | Громкий/честный switch (B-2/B-3/Ж-4/Ж-5): protected из old∪new + предупреждение при расхождении конфига; unstoppable → alert+retry следующим switch; shutdown добивает всех детей; санировать priority-шум и liveness-fallback-окно | unit: protected-конфликт → не «тихо успешен»; live-harness: shutdown → 0 выживших (ps); fake-unstoppable → alert в state/hub | M |
+| RS-4 | [ ] | Dirty-контур редактора (C-1/C-2/C-5): dirty-флаг TopologySession; подтверждение при Activate/закрытии с несохранёнными правками; индикатор «граф ≠ живая система» (undo после apply) | qt-тесты: activate с dirty → диалог; undo после apply → индикатор; характеризация чистого пути | M |
+| RS-5 | [ ] | Валидация на записи (C-4) + устойчивость Displays-tab (A-7): домен-валидация в едином Save; load-from-file через тот же валидатор; ValidationError в displays.load() → мягкая деградация | граф с циклом не сохраняется; легаси-рецепт (data:/meta:) не роняет вкладку Дисплеи | S |
+| RS-6 | [ ] | Контракт фейков (класс A-1 системно): все тестовые дублёры stores/repositories проходят Protocol-contract-тест | параметризованный contract-тест по реестру фейков | S |
+| RS-7 | [ ] | Honest-схема рецепта (A-4/A-5): решение владельца по никогда-не-работающим полям (workers→рантайм или прочь; queue_size/circuit-breaker в extras-whitelist?) и active_services (GUI или удалить) | по решению владельца | S→M |
+| RS→Ф7 | [ ] | Дополнить G.3/G.4 находками B-6..B-9: SHM-имя owner+incarnation; дренаж data-очередей ПОЛУЧАТЕЛЕЙ на switch; refresh SHM-handles protected-процессов; мультикамерные ключи без коллизий; HP-5-репродьюсер | пункты в G-acceptance при старте Ф7 | — |
+
+Порядок: RS-1 (в работе, Opus) → RS-2+RS-3 одним заходом (оба про switch) → RS-6+RS-5 (дёшево) → RS-4 (синергия В3) → RS-7 вопрос владельцу. Все RS — через Fable-ревью до merge.
+
 ## Ф7 — Hot-path G (ОДНИМ вскрытием, строго последним, один агент, ~5 дней)
 
 **GATE G3 перед стартом**: routing-epoch влит (3.1); контракты warn живут (4.2); baseline подтверждён; ответ на HP-5 (`replace_blueprint` × in-flight кадр); откат = feature-flag; решение по 1.8.

@@ -107,3 +107,5 @@
 - [MCP tool-API drift](feedback_mcp_tool_api_drift.md) — routing/агенты могут описывать устаревший API MCP-сервера; проверять реальный tool-set
 - [worktree агентов от стейл-HEAD](feedback_worktree_stale_base.md) — проверять SHA базы каждого agent-worktree против main до старта; брифовать «ветка от <SHA>»
 - [Формальное ревью до merge](feedback_formal_review_before_merge.md) — классификатор блокирует merge без оформленного /code-review в транскрипте; неформальных проверок мало
+- [TECH_STACK 2026 — сверяться при улучшениях](reference_tech_stack_2026.md) — живая стратегия стека владельца; статусы/волны/триггеры в docs/direction/TECH_STACK_2026.md
+- [Модели: реализация vs ревью](feedback_model_split_impl_vs_review.md) — исполнители на Sonnet 5/Opus 4.8 (model override), Fable — план/ревью/merge; Fable-агенты жгут лимит сессии
