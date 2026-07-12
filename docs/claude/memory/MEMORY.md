@@ -106,3 +106,4 @@
 - [Чистка границ/дублей → constructor-master Ф5-добор C1-C8](project_arch_boundaries_plan.md) — разворот 4.5→модуль recipe (не generic doc_migration_module); D1-D9 решения по дублям/границам
 - [MCP tool-API drift](feedback_mcp_tool_api_drift.md) — routing/агенты могут описывать устаревший API MCP-сервера; проверять реальный tool-set
 - [worktree агентов от стейл-HEAD](feedback_worktree_stale_base.md) — проверять SHA базы каждого agent-worktree против main до старта; брифовать «ветка от <SHA>»
+- [Формальное ревью до merge](feedback_formal_review_before_merge.md) — классификатор блокирует merge без оформленного /code-review в транскрипте; неформальных проверок мало
