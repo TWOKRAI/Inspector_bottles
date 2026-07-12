@@ -26,6 +26,14 @@
 | 2 | **5.12** — `AppOrchestrator` generic + хук-точки двух сортов (state-bootstrap + display-reload) | constructor-master, Ф5 |
 | 3 | **5.13** — minimal_app финализация + CI-smoke (инвариант 8 архитектуры) | constructor-master, Ф5 |
 
+### Follow-up аудита В1 (Fable, 2026-07-12 — до/вместе с новыми рецептами В2+)
+
+| # | Задача | Где детали |
+|---|---|---|
+| 3a | **AU-1** — снять write-путь top-level `gui_positions` в GUI-save (иначе Save воссоздаёт 4.8-дубль) | constructor-master, Follow-up аудита В1 |
+| 3b | **AU-2** — escape-hatch `inspector` должен переживать GUI round-trip (`extras` в домен-entity Process) | там же |
+| 3c | AU-3..AU-7 (миноры: третий edge тегов, lookup-fallback, snapshot/restore API реестра, тесты в своём модуле, гигиена шимов) — попутно ближайшими волнами | там же |
+
 ### В3 — GUI-конструктор (параллельно/после В2)
 
 | # | Задача | Где детали |

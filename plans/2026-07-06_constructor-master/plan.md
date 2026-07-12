@@ -276,6 +276,22 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 
 Порядок: C4/C5 (быстро, аддитивно) → C1→C2→C3 (recipe, крит.путь к Конструктору, закрывает 4.5/5.3) → C6 (дизайн сначала, согласовать с 5.11-5.13/Ф7) → C7 → C8 (после правок кода).
 
+### Follow-up аудита В1 (Fable-аудит 7a58c0a1..0cd3084a, 2026-07-12)
+
+Вердикт аудита: откатов не требуется, вектор правильный; но обе задачи Ф4.7/Ф4.8 починили read-путь и данные, НЕ тронув общий корень — GUI-save producer. Два major + миноры:
+
+| Task | Статус | Суть | Acceptance | Усилие |
+|---|---|---|---|---|
+| AU-1 | [ ] | **Снять write-путь top-level `gui_positions` в GUI-save** (`layout_controller.py:438-445` + `recipe/format.py:55-56`): явный Save воссоздаёт удалённый 4.8-дубль → канонизация не durable. Убрать 3-й аргумент `normalize_recipe_v3_raw` из `save_to_active_recipe`, параметр deprecate, комментарий «для обратной совместимости» удалить (опровергнут аудитом 4.8 — read-путей нет) | регресс-тест: после `save_to_active_recipe` top-level `gui_positions` отсутствует | S |
+| AU-2 | [ ] | **Escape-hatch `inspector` гибнет в GUI round-trip** (ADR-PMM-017): домен-entity `Process` (`extra="forbid"`, `_fold_extra_into_metadata`) сворачивает явный `inspector` в metadata, где он авторитетно игнорируется → (а) ручной `{mode: fanin}` стирается первым GUI-save; (б) legacy `metadata.inspector` на optional-портах тихо деградирует join→fanin. Предпочтительный fix: типизированное поле `extras` в домен-entity `Process` (симметрия `ProcessConfig.extras`); минимум — ADR-PMM-017 п.5 + тест metadata-mode-ignored | escape-hatch переживает GUI round-trip (тест); legacy-кейс задокументирован | M |
+| AU-3 | [ ] | Вывод join: источник с двумя РАЗНЫМИ data_type (blueprint.py:346 — берётся один тег) — третий недокументированный edge; брать все теги источника или задокументировать в ADR-PMM-017 + тест | тест/ADR-строка | S |
+| AU-4 | [ ] | `infer_missing_inspectors`: lookup плагина без class-path fallback (blueprint.py:328), слабее `check()` — symmetrize | тест нестандартного имени | S |
+| AU-5 | [ ] | Публичный `PluginRegistry.snapshot()/restore()` (или общая conftest-фикстура) вместо копирования `_plugins`-доступа по тестам (уже 2 файла) | фикстуры не трогают приватные поля | S |
+| AU-6 | [ ] | `test_blueprint_wire_inspector.py` → из `process_module/tests/` в `process_manager_module/tests/` (тестирует чужой модуль); выполнить вместе с физпереносом assembler/planner | тесты в своём модуле | S |
+| AU-7 | [ ] | Гигиена шимов recipe-оси: план снятия `recipes/yaml_io.py`, `recipes/manager.py`, state_store-шим (→ 0 импортёров → снять, паттерн QUEUE «Открытые решения» №4); мёртвые реэкспорты `_flatten`/`_remap_path` (state_store recipes/recipe_engine.py:13-19, 0 импортёров) — убрать | шимы имеют план снятия; мёртвых реэкспортов нет | S |
+
+Порядок: AU-1/AU-2 — до массового создания новых рецептов (В2/5.13+); миноры AU-3..AU-7 — попутно ближайшими волнами (AU-6 — вместе с физпереносом assembler/planner).
+
 ## Ф7 — Hot-path G (ОДНИМ вскрытием, строго последним, один агент, ~5 дней)
 
 **GATE G3 перед стартом**: routing-epoch влит (3.1); контракты warn живут (4.2); baseline подтверждён; ответ на HP-5 (`replace_blueprint` × in-flight кадр); откат = feature-flag; решение по 1.8.
