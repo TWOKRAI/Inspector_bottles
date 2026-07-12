@@ -62,16 +62,27 @@ python examples/minimal_app/run.py
 путь, что документирован в `multiprocess_framework/docs/AGENT_CHEATSHEET.md` (Dict at
 Boundary, ADR-008).
 
-**Почему сообщение с `type="system"`, а не `type="data"` или дефолт:**
-`RouterManager._select_queue_type` кладёт `type in ("command", "system")` в
-"system"-очередь, которую **всегда** опрашивает фоновый `SystemThreads`-поток
-процесса (`message_processor`) — независимо от того, есть ли у процесса
-processing-плагины. Иначе (`type` не "command"/"system") сообщение уходит в
-"data"-очередь, которую опрашивает `DataReceiver`, а он создаётся `GenericProcess`
-только когда у процесса есть хотя бы один processing-плагин (`generic_process.py:
-_init_data_pipeline`) — для чистого consumer-плагина без такого пайплайна сообщение
-осело бы в очереди недоставленным. `type="system"` + `command="tick"` — тот же
-путь, что использует heartbeat ProcessManager.
+**Формат сообщения — `type="event"` + явный `queue_type="system"` + payload под
+`data`** (не `type="system"`/`"command"` — это зарезервированный control-plane kind
+ProcessManager/heartbeat, и не смешивать прикладное событие с ним). Это ТОТ ЖЕ
+конверт-формат, что у двух прод-прецедентов прикладных событий фреймворка:
+`state.changed` (`state_store_module/manager/delta_dispatcher.py`) и
+`observability.record` (`channel_routing_module/observability/record_forward_channel.py`).
+
+**Почему `queue_type="system"` — это выбор физической очереди, а не control-plane
+kind:** `RouterManager._select_queue_type` уважает явный `queue_type` в первую
+очередь; без него `type in ("command", "system")` тоже кладёт сообщение в
+"system"-очередь. "system"-очередь — единственная, которую **всегда** опрашивает
+фоновый `SystemThreads`-поток процесса (`message_processor`), независимо от того,
+есть ли у процесса processing-плагины. Обычная "data"-очередь (куда попало бы
+сообщение без явного `queue_type`, будь его `type` прикладным) опрашивается
+`DataReceiver`, а он создаётся `GenericProcess` только когда у процесса есть хотя бы
+один processing-плагин (`generic_process.py: _init_data_pipeline`) — для чистого
+consumer-плагина без такого пайплайна сообщение осело бы в очереди недоставленным.
+`type="event"` при этом честно метит сообщение как прикладное — важно для будущих
+QoS-профилей по kind (Ф7 G.4: `system`-kind = never-drop, `event`-kind получит
+собственный профиль; смешивать прикладной тик с control-plane kind было бы
+неотличимо для QoS).
 
 **`wires: []` в `pipeline.yaml` остаётся пуст осознанно** — это не пробел: формат
 `wires:` в topology-схеме (`process_manager_module/topology/blueprint.py`) —

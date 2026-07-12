@@ -8,14 +8,19 @@ Inspector-специфики в «универсальном» app_module (Ф5.1
 
 Ф5.13: каждый тик также уходит межпроцессным сообщением получателю (``target``,
 дефолт ``console_sink``) — доказывает реальный IPC между двумя процессами «рыбы»
-(ревью 5.11 отметило, что пустой ``wires: []`` этого не демонстрирует). Сообщение
-намеренно идёт с ``type="system"`` (не ``"command"``, не дефолт-else): согласно
-``RouterManager._select_queue_type`` (router_module/core/router_manager.py) это
-кладёт сообщение в "system"-очередь получателя, которую ВСЕГДА опрашивает его
-``SystemThreads``-поток (``message_processor``, работает независимо от того, есть
-ли у получателя data-pipeline воркеры) — тот же путь, что у heartbeat. "data"-очередь
-опрашивается ``DataReceiver`` только когда у процесса есть processing-плагины и
-здесь не гарантирована.
+(ревью 5.11 отметило, что пустой ``wires: []`` этого не демонстрирует). Сообщение —
+``type="event"`` + явный ``queue_type="system"`` + payload под ``data`` — тот же
+формат, что у прикладных событий фреймворка: ``state.changed``
+(``state_store_module/manager/delta_dispatcher.py``) и ``observability.record``
+(``channel_routing_module/observability/record_forward_channel.py``). ВАЖНО:
+``queue_type="system"`` — это выбор ФИЗИЧЕСКОЙ очереди доставки (её опрашивает
+``SystemThreads`` получателя независимо от того, есть ли у него data-pipeline
+воркеры — обычная "data"-очередь опрашивается ``DataReceiver``, который создаётся
+только при наличии processing-плагинов и здесь не гарантирован). Это НЕ то же
+самое, что ``type="command"``/``type="system"`` (control-plane kind, зарезервирован
+за системными сообщениями ProcessManager/heartbeat) — ``type="event"`` явно метит
+сообщение как прикладное, что важно для будущих QoS-профилей по kind (Ф7 G.4:
+system-kind = never-drop, event-kind получит свой профиль).
 """
 
 from __future__ import annotations
@@ -70,10 +75,10 @@ class TickSourcePlugin(ProcessModulePlugin):
         ok = self._ctx.send_message(
             self._target,
             {
-                "type": "system",
+                "type": "event",
+                "queue_type": "system",
                 "command": "tick",
-                "count": self._count,
-                "payload": self._message,
+                "data": {"count": self._count, "payload": self._message},
             },
         )
         if not ok:

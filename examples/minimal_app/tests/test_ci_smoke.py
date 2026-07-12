@@ -73,20 +73,29 @@ def minimal_app_backend(tmp_path: Path):
 
 @pytest.mark.harness_smoke
 def test_minimal_app_boots_and_ipc_delivers(minimal_app_backend) -> None:
-    """boot headless (2 процесса) → ticker шлёт тик → console_sink принял ≥1 (IPC доказан)."""
+    """boot headless (2 процесса) → ticker шлёт тик → console_sink принял ≥1 (IPC доказан).
+
+    Транзиентный не-``ok`` (процесс ещё не готов принимать команды сразу после
+    boot) — НЕ провал, а сигнал «повторить»: строгие assert'ы живут только после
+    цикла поллинга, внутри цикла не-ok просто удлиняет ожидание.
+    """
     drv = minimal_app_backend
 
     deadline = time.time() + 15.0
     received = 0
     last_payload = None
+    last_res: dict = {}
     while time.time() < deadline:
-        res = _result(drv.send_command("console_sink", "consumer_status", {}, timeout=5.0))
-        assert res.get("status") == "ok", f"consumer_status не ok: {res}"
-        received = res.get("received", 0)
-        last_payload = res.get("last_payload")
+        last_res = _result(drv.send_command("console_sink", "consumer_status", {}, timeout=5.0))
+        if last_res.get("status") != "ok":
+            time.sleep(1.0)
+            continue
+        received = last_res.get("received", 0)
+        last_payload = last_res.get("last_payload")
         if received >= 1:
             break
         time.sleep(1.0)
 
+    assert last_res.get("status") == "ok", f"consumer_status ни разу не ok за 15s: {last_res}"
     assert received >= 1, "console_sink не получил ни одного тика от ticker за 15s — IPC не доказан"
     assert last_payload == "hello-from-minimal-app", last_payload

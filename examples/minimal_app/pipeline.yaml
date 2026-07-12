@@ -2,13 +2,16 @@
 #
 # Два процесса на БАЗОВОМ framework-классе GenericProcess (не прототип): «рыба»
 # бутится на дефолтах фреймворка. `ticker` шлёт тик каждую секунду межпроцессным
-# сообщением (send_message) в `console_sink`, который его считает — живое
-# IPC-доказательство (Ф5.13; ревью 5.11 отметило, что пустой `wires: []` этого
-# не показывает). `wires:` здесь намеренно остаётся пуст — это НЕ ошибка: формат
-# `wires:` в topology-схеме (`process_manager_module/topology/blueprint.py`) —
-# типизированный data-plane граф кадров/изображений (SHM), избыточный для простого
-# dict-сообщения между headless-плагинами; для него framework даёт отдельный
-# канонический путь `ctx.send_message`/`ctx.router_manager.register_message_handler`
+# сообщением (send_message, type="event"+queue_type="system" — тот же конверт-
+# формат, что state.changed/observability.record) в `console_sink`, который его
+# считает — живое IPC-доказательство (Ф5.13; ревью 5.11 отметило, что пустой
+# `wires: []` этого не показывает).
+#
+# `wires:` здесь намеренно остаётся пуст — это НЕ ошибка: формат `wires:` в
+# topology-схеме (`process_manager_module/topology/blueprint.py`) — типизированный
+# data-plane граф кадров/изображений (SHM), избыточный для простого dict-сообщения
+# между headless-плагинами; для него framework даёт отдельный канонический путь
+# `ctx.send_message`/`ctx.router_manager.register_message_handler`
 # (см. `multiprocess_framework/docs/AGENT_CHEATSHEET.md`).
 
 name: minimal
