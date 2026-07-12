@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from loguru import logger
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from typing_extensions import Annotated, Self
 
@@ -18,6 +19,15 @@ from multiprocess_framework.modules.data_schema_module import FieldMeta, SchemaB
 
 from .plugin import PluginInstance
 from .worker import WorkerSpec
+
+# Pipeline-routing shorthand-ключи framework-blueprint ProcessConfig (ADR-PM-014, рычаг
+# C6a), которых НЕТ среди typed-полей домен-entity Process (chain_targets — уже typed-поле,
+# роутинг не нужен). Домен их не типизирует, но ОБЯЗАН складывать в extras, а НЕ в metadata:
+# framework читает их из typed-поля/extras (`as_generic_config._pick`,
+# `infer_missing_inspectors`) и НИКОГДА из metadata. Поэтому shorthand-ключ, свёрнутый
+# GUI round-trip'ом в metadata, для бэкенда нем — тихая деградация (явный
+# `inspector: {mode: fanin}` теряет авторитетность → структурный join). См. ADR-PMM-017 п.5, AU-2.
+_EXTRAS_SHORTHAND_KEYS: frozenset[str] = frozenset({"inspector", "source_target_fps", "io_peek"})
 
 
 class Process(SchemaBase):
@@ -69,8 +79,20 @@ class Process(SchemaBase):
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Passthrough-bag для runtime-полей (source_target_fps, телеметрия и пр.). "
-            "Не интерпретируется domain-слоем — прозрачно передаётся adapter'ами."
+            "Passthrough-bag для runtime-телеметрии и прочих opaque-полей. "
+            "Не интерпретируется domain-слоем — прозрачно передаётся adapter'ами. "
+            "Pipeline-routing shorthand-ключи (inspector/source_target_fps/io_peek) сюда "
+            "НЕ сворачиваются — они едут в extras (framework их из metadata не читает, AU-2)."
+        ),
+    )
+    extras: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Domain-opaque мешок pipeline-routing ключей (inspector/source_target_fps/"
+            "io_peek), которые framework-blueprint читает как typed-shorthand/extras "
+            "(симметрия ProcessConfig.extras, ADR-PM-014). Escape-hatch inspector едет "
+            "здесь и переживает GUI round-trip авторитетно; в metadata его "
+            "infer_missing_inspectors игнорирует (ADR-PMM-017 п.5)."
         ),
     )
 
@@ -81,27 +103,49 @@ class Process(SchemaBase):
     @model_validator(mode="before")
     @classmethod
     def _fold_extra_into_metadata(cls, data: Any) -> Any:
-        """Свернуть плоские runtime-поля процесса в ``metadata``.
+        """Свернуть плоские неизвестные поля процесса в ``extras``/``metadata``.
 
-        Runnable-топологии задают runtime-поля плоско (``source_target_fps`` …).
-        Domain-модель хранит их в ``metadata`` (passthrough). Сворачиваем без
-        потери данных, чтобы редактор открывал любой runnable-pipeline.
-        Явный ``metadata`` имеет приоритет.
+        Runnable-топологии и GUI-рецепты задают часть полей плоско. Domain-модель
+        их не типизирует, но обязана сохранить БЕЗ ПОТЕРИ ДАННЫХ, чтобы редактор
+        открывал любой pipeline, а сериализация переживала round-trip:
+          - pipeline-routing shorthand-ключи (``_EXTRAS_SHORTHAND_KEYS``:
+            inspector/source_target_fps/io_peek) → в ``extras`` (framework читает их
+            только из typed-поля/extras, НЕ из metadata — AU-2, ADR-PMM-017 п.5);
+          - прочие неизвестные ключи (телеметрия и пр.) → в ``metadata`` (passthrough).
+        Явные ``extras``/``metadata`` во входе имеют приоритет над свёрнутыми
+        одноимёнными ключами (симметрия conflict-warning ``ProcessConfig._pick``).
         """
         if not isinstance(data, dict):
             return data
-        # known выводим из самой модели: при добавлении нового поля в Process
-        # его не нужно дублировать здесь, иначе оно молча уходило бы в metadata
-        # (валидаторы без alias-полей — ключи model_fields == ключи YAML).
+        # known выводим из самой модели: при добавлении нового typed-поля в Process
+        # его не нужно дублировать здесь (ключи model_fields == ключи YAML, без alias).
         known = set(cls.model_fields)
-        extras = {k: v for k, v in data.items() if k not in known}
-        if not extras:
+        unknown = {k: v for k, v in data.items() if k not in known}
+        if not unknown:
             return data
         result = {k: v for k, v in data.items() if k in known}
+        extras = dict(result.get("extras") or {})
         metadata = dict(result.get("metadata") or {})
-        for key, value in extras.items():
-            metadata.setdefault(key, value)
-        result["metadata"] = metadata
+        for key, value in unknown.items():
+            bag = extras if key in _EXTRAS_SHORTHAND_KEYS else metadata
+            if key in bag and bag[key] != value:
+                # Явные extras/metadata имеют приоритет — предупреждаем о конфликте
+                # с одноимённым плоским ключом (симметрия Fable LOW-5 в ProcessConfig).
+                logger.warning(
+                    "Process[{}]: плоский '{}'={!r} конфликтует с явным {}['{}']={!r} — "
+                    "сохранено явное значение (приоритет).",
+                    data.get("process_name", "?"),
+                    key,
+                    value,
+                    "extras" if bag is extras else "metadata",
+                    key,
+                    bag[key],
+                )
+            bag.setdefault(key, value)
+        if extras:
+            result["extras"] = extras
+        if metadata:
+            result["metadata"] = metadata
         return result
 
     @field_validator("plugins", mode="before")

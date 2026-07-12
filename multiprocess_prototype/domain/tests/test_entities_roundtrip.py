@@ -232,22 +232,102 @@ class TestFrozenBehaviour:
 
 class TestExtraForbid:
     """Политика extra для entities: Wire=forbid; Process/PluginInstance сворачивают
-    плоские runtime-поля runnable-формата в metadata/config (без потери данных)."""
+    плоские runtime-поля runnable-формата в extras/metadata/config (без потери данных)."""
 
     def test_wire_extra_forbid(self) -> None:
         """Wire с unknown полем → ValidationError."""
         with pytest.raises(ValidationError):
             Wire(source="a", target="b", unknown_field="x")  # type: ignore[call-arg]
 
-    def test_process_extra_folds_into_metadata(self) -> None:
-        """Process с плоским runtime-полем (runnable-формат) → сворачивается в metadata."""
+    def test_process_shorthand_folds_into_extras(self) -> None:
+        """Pipeline-routing shorthand (source_target_fps) → в extras, не metadata (AU-2).
+
+        Framework-blueprint читает эти ключи только из typed-поля/extras — в metadata они
+        для бэкенда нем (тихая деградация после GUI round-trip).
+        """
         p = Process(process_name="p", plugins=(), source_target_fps=25)  # type: ignore[call-arg]
-        assert p.metadata.get("source_target_fps") == 25
+        assert p.extras.get("source_target_fps") == 25
+        assert "source_target_fps" not in p.metadata
+
+    def test_process_opaque_flat_field_folds_into_metadata(self) -> None:
+        """Неизвестный НЕ-shorthand ключ (телеметрия) → по-прежнему в metadata."""
+        p = Process(process_name="p", plugins=(), telemetry_tag="cam-A")  # type: ignore[call-arg]
+        assert p.metadata.get("telemetry_tag") == "cam-A"
+        assert "telemetry_tag" not in p.extras
 
     def test_plugin_instance_extra_folds_into_config(self) -> None:
         """PluginInstance с плоским параметром (runnable-формат) → сворачивается в config."""
         pi = PluginInstance(plugin_name="blur", radius=5)  # type: ignore[call-arg]
         assert pi.config.get("radius") == 5
+
+
+class TestInspectorEscapeHatchRoundtrip:
+    """AU-2 / ADR-PMM-017 п.5: явный inspector-escape-hatch переживает GUI round-trip.
+
+    До фикса домен-entity Process сворачивал плоский inspector в metadata, где
+    infer_missing_inspectors его игнорирует (только тонкая настройка, не mode) →
+    ручной {mode: fanin} стирался первым же GUI-save и деградировал в структурный join.
+    Теперь inspector едет через extras и остаётся авторитетным.
+    """
+
+    def test_explicit_inspector_survives_load_save_in_extras(self) -> None:
+        """Плоский inspector: {mode: fanin} → extras, переживает to_dict → from_dict."""
+        proc = Process.from_dict(
+            {
+                "process_name": "draw",
+                "plugins": [{"plugin_name": "overlay_draw"}],
+                "inspector": {"mode": "fanin"},
+            }
+        )
+        # На load — inspector осел в extras, НЕ в metadata
+        assert proc.extras.get("inspector") == {"mode": "fanin"}
+        assert "inspector" not in proc.metadata
+
+        # Round-trip: сериализация → десериализация сохраняет escape-hatch в extras
+        proc2 = Process.from_dict(proc.to_dict())
+        assert proc2.extras.get("inspector") == {"mode": "fanin"}
+        assert "inspector" not in proc2.metadata
+
+    def test_explicit_extras_inspector_survives_roundtrip(self) -> None:
+        """Явный extras: {inspector: ...} в рецепте не теряется (extras — typed-поле)."""
+        proc = Process.from_dict(
+            {
+                "process_name": "draw",
+                "extras": {"inspector": {"mode": "fanin", "timeout_sec": 2.0}},
+            }
+        )
+        proc2 = Process.from_dict(proc.to_dict())
+        assert proc2.extras["inspector"] == {"mode": "fanin", "timeout_sec": 2.0}
+
+    def test_explicit_extras_wins_over_flat_shorthand(self) -> None:
+        """Конфликт: явный extras.inspector имеет приоритет над плоским inspector."""
+        proc = Process.from_dict(
+            {
+                "process_name": "draw",
+                "inspector": {"mode": "join"},
+                "extras": {"inspector": {"mode": "fanin"}},
+            }
+        )
+        assert proc.extras["inspector"] == {"mode": "fanin"}
+
+    def test_inspector_extras_authoritative_in_blueprint(self) -> None:
+        """Домен-сериализованный extras.inspector авторитетен для framework-blueprint.
+
+        Плоский inspector, пройдя через домен-entity, оседает в extras — и framework
+        ProcessConfig читает его как escape-hatch (`as_generic_config._pick` /
+        `infer_missing_inspectors`). Конструируем ProcessConfig из релевантных полей
+        (в реальном пути process_class-нормализацию делает адаптер/unwrap).
+        """
+        from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
+            ProcessConfig,
+        )
+
+        proc_dict = Process.from_dict({"process_name": "draw", "inspector": {"mode": "fanin"}}).to_dict()
+        assert proc_dict["extras"]["inspector"] == {"mode": "fanin"}
+
+        pc = ProcessConfig(process_name=proc_dict["process_name"], extras=proc_dict["extras"])
+        # extras.inspector виден framework как escape-hatch (typed inspector пуст)
+        assert (pc.inspector or pc.extras.get("inspector")) == {"mode": "fanin"}
 
 
 # ==============================================================================
