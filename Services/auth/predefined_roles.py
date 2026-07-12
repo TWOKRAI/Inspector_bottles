@@ -6,17 +6,34 @@
   в существующие predefined-роли (admin/operator/viewer/dev). Custom
   роли не затрагиваются.
 
-Список permissions подобран под актуальный набор табов приложения
-(см. `multiprocess_prototype/frontend/tab_factory.TAB_ORDER`). При
-добавлении/удалении табов — синхронизировать оба места.
+## Граница слоёв и единый источник вкладок (NEW-D1 / D-5, ADR-135)
+
+Единый источник состава вкладок приложения — `multiprocess_prototype.frontend
+.tabs_registry.TABS`. Этот модуль (`Services/auth`) **не может** импортировать
+его: обратный импорт `Services → prototype` запрещён правилом слоёв №9
+(`framework → Services → Plugins → prototype`) и enforced `.sentrux/rules.toml`.
+Причём tab-id нужны Services-слою автономно: bootstrap CLI (`python -m
+Services.auth.bootstrap`) работает ДО и БЕЗ прототипа.
+
+Поэтому Services держит собственный список `DEFAULT_TAB_IDS`, а **паритет по
+множеству** `set(DEFAULT_TAB_IDS) == set(tabs_registry.tab_ids())` enforced
+характеризационным тестом на слое prototype (тест видит оба слоя). Дрейф
+ловится в CI красным тестом. Порядок вкладок — **отдельный контракт** единого
+источника `TABS` (роли order-независимы), проверяется literal-тестом порядка
+на слое prototype. Наборы permissions строятся через
+`build_predefined_roles(tab_ids)`.
 """
 
 from __future__ import annotations
 
+from typing import Sequence
+
 from .models import Role
 
 
-_TAB_IDS_ALL_VIEW: tuple[str, ...] = (
+# Канонический список tab-id на слое Services (см. docstring о границе слоёв).
+# Паритет с prototype `tabs_registry.tab_ids()` — enforced parity-тестом.
+DEFAULT_TAB_IDS: tuple[str, ...] = (
     "settings",
     "recipes",
     "processes",
@@ -27,8 +44,12 @@ _TAB_IDS_ALL_VIEW: tuple[str, ...] = (
     "observability",
 )
 
+# Табы, на которых у operator есть право редактирования («рабочие» табы);
+# остальные (settings/services/plugins/displays) — view-only (системные).
+_OPERATOR_EDIT_TABS: tuple[str, ...] = ("recipes", "processes", "pipeline")
 
-def _tabs(*tab_ids: str, edit: bool = False) -> list[str]:
+
+def _tabs(tab_ids: Sequence[str], *, edit: bool = False) -> list[str]:
     """Развернуть список tab_id в `tabs.<id>.view` (+`.edit` опционально)."""
     out: list[str] = []
     for tab_id in tab_ids:
@@ -38,63 +59,87 @@ def _tabs(*tab_ids: str, edit: bool = False) -> list[str]:
     return out
 
 
-# admin: все табы view+edit, users CRUD, roles read + edit (PR4).
-_ADMIN_PERMISSIONS: list[str] = _tabs(*_TAB_IDS_ALL_VIEW, edit=True) + [
-    "users.view",
-    "users.create",
-    "users.edit",
-    "users.delete",
-    "users.reset_password",
-    "roles.view",
-    "roles.edit",  # PR4 Group D: admin может редактировать права ролей
-]
+def build_predefined_roles(
+    tab_ids: Sequence[str] = DEFAULT_TAB_IDS,
+    *,
+    operator_edit_tabs: Sequence[str] = _OPERATOR_EDIT_TABS,
+) -> dict[str, "Role"]:
+    """Построить predefined роли из списка tab-id (единый билдер, D-5).
 
-# operator: все табы view, edit на «рабочих» табах (recipes/processes/pipeline).
-# settings/services/plugins/displays — view-only (системные).
-_OPERATOR_PERMISSIONS: list[str] = _tabs(*_TAB_IDS_ALL_VIEW) + [
-    "tabs.recipes.edit",
-    "tabs.processes.edit",
-    "tabs.pipeline.edit",
-]
+    Наборы permissions деривятся из `tab_ids` — единственный источник состава
+    вкладок для ролей. `operator_edit_tabs` задаёт «рабочие» табы, где у
+    operator есть `.edit`.
 
-# viewer: все табы view, никаких edit.
-_VIEWER_PERMISSIONS: list[str] = _tabs(*_TAB_IDS_ALL_VIEW)
+    Returns:
+        dict `{role_name: Role}` для dev/admin/operator/viewer.
+
+    Raises:
+        ValueError: если `operator_edit_tabs` содержит id вне `tab_ids` — иначе
+            operator получил бы осиротевший `tabs.<id>.edit` без `tabs.<id>.view`
+            (edit-право на несуществующую вкладку). Проверка громкая — падает уже
+            при импорте модуля (`PREDEFINED_ROLES = build_predefined_roles()`).
+    """
+    orphan_edit = set(operator_edit_tabs) - set(tab_ids)
+    if orphan_edit:
+        raise ValueError(
+            "operator_edit_tabs содержит id вне tab_ids: "
+            f"{sorted(orphan_edit)} — edit-право без соответствующей вкладки/view. "
+            "Синхронизируйте _OPERATOR_EDIT_TABS с составом вкладок."
+        )
+
+    # admin: все табы view+edit, users CRUD, roles read + edit (PR4).
+    admin_permissions = _tabs(tab_ids, edit=True) + [
+        "users.view",
+        "users.create",
+        "users.edit",
+        "users.delete",
+        "users.reset_password",
+        "roles.view",
+        "roles.edit",  # PR4 Group D: admin может редактировать права ролей
+    ]
+    # operator: все табы view, edit на «рабочих» табах.
+    operator_permissions = _tabs(tab_ids) + [f"tabs.{tab_id}.edit" for tab_id in operator_edit_tabs]
+    # viewer: все табы view, никаких edit.
+    viewer_permissions = _tabs(tab_ids)
+
+    return {
+        "dev": Role(
+            name="dev",
+            level=10,
+            permissions=["*"],
+            hidden_in_ui=True,
+            bypass_readonly=True,
+            show_hidden=True,
+        ),
+        "admin": Role(
+            name="admin",
+            level=9,
+            permissions=admin_permissions,
+            hidden_in_ui=False,
+            bypass_readonly=False,
+            show_hidden=False,
+        ),
+        "operator": Role(
+            name="operator",
+            level=5,
+            permissions=operator_permissions,
+            hidden_in_ui=False,
+            bypass_readonly=False,
+            show_hidden=False,
+        ),
+        "viewer": Role(
+            name="viewer",
+            level=1,
+            permissions=viewer_permissions,
+            hidden_in_ui=False,
+            bypass_readonly=False,
+            show_hidden=False,
+        ),
+    }
 
 
-PREDEFINED_ROLES: dict[str, Role] = {
-    "dev": Role(
-        name="dev",
-        level=10,
-        permissions=["*"],
-        hidden_in_ui=True,
-        bypass_readonly=True,
-        show_hidden=True,
-    ),
-    "admin": Role(
-        name="admin",
-        level=9,
-        permissions=_ADMIN_PERMISSIONS,
-        hidden_in_ui=False,
-        bypass_readonly=False,
-        show_hidden=False,
-    ),
-    "operator": Role(
-        name="operator",
-        level=5,
-        permissions=_OPERATOR_PERMISSIONS,
-        hidden_in_ui=False,
-        bypass_readonly=False,
-        show_hidden=False,
-    ),
-    "viewer": Role(
-        name="viewer",
-        level=1,
-        permissions=_VIEWER_PERMISSIONS,
-        hidden_in_ui=False,
-        bypass_readonly=False,
-        show_hidden=False,
-    ),
-}
+# Канонический словарь predefined ролей — построен из DEFAULT_TAB_IDS.
+PREDEFINED_ROLES: dict[str, Role] = build_predefined_roles()
 
 
 def expected_permissions(role_name: str) -> frozenset[str]:

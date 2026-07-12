@@ -125,6 +125,7 @@ frontend_module/
 │   ├── base/                # Протоколы (IControlView, INumericView), трейты, инфраструктура
 │   ├── examples/            # Учебные адаптеры и схемы (используются тестами)
 │   └── ...
+├── tabs/                    # NEW-D1: generic-механизм вкладок — TabSpec, TabRegistry, LazyTab, AccessContextSource
 ├── widgets/                 # Высокоуровневые виджеты: BaseWidget, HeaderWidget, TabWidget, ImagePanelWidget
 │   ├── base_widget/         # BaseWidget[TModel] — MVP-паттерн
 │   ├── header/              # HeaderWidget, HeaderConfig
@@ -155,3 +156,32 @@ frontend_module/
 
 Остальные символы (BaseWidget, TabWidget, HeaderWidget и т.д.) импортируются из подпакетов напрямую:
 `frontend_module.widgets`, `frontend_module.components`, `frontend_module.core`.
+
+## Механизм вкладок (`frontend_module.tabs`, NEW-D1)
+
+Generic-реестр вкладок приложения (перенос из прототипа, ADR-135). Приложение
+описывает вкладки декларативно и строит их реестром — механизм не знает
+конкретных вкладок и не импортирует прикладной слой.
+
+| Символ | Назначение |
+|--------|-----------|
+| `TabSpec` | Описание вкладки: `id`, `title`, `view_permission`, `factory`, `description`; порядок = позиция в списке |
+| `TabRegistry` | Строит вкладки из `Sequence[TabSpec]`, лениво инстанцирует, фильтрует по правам, подписан на смену `AccessContext` |
+| `LazyTab` | Обёртка ленивой инициализации (содержимое создаётся при первом показе) |
+| `AccessContextSource` | Контракт источника прав (`access_context` + сигнал `access_context_changed`) |
+
+```python
+from multiprocess_framework.modules.frontend_module.tabs import TabRegistry, TabSpec
+
+TABS = [TabSpec(id="settings", title="Settings", view_permission="tabs.settings.view",
+                factory=make_settings)]
+registry = TabRegistry(
+    TABS,
+    factory_context=(app_services, runtime),   # opaque, форвардится фабрике
+    access_source=auth_state,                    # AccessContextSource
+    placeholder_factory=make_placeholder,        # заглушка для вкладок без factory
+)
+registry.create_tabs(window.tab_widget)
+```
+
+Публичный API реэкспортирован в `interfaces.py`.

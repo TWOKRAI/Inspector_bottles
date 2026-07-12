@@ -18,6 +18,11 @@ Frontend Module — модуль UI-фреймворка (конструктор
 - Вынесен в отдельный модуль `multiprocess_framework.modules.actions_module`
   (Action, ActionBuilder, ActionBus, ActionHandler — carve-out 2026-05-11, ADR-124)
 
+**Вкладки (generic-механизм, NEW-D1):**
+- frontend_module.tabs — TabSpec, TabRegistry, LazyTab, AccessContextSource.
+  Приложение описывает вкладки как `list[TabSpec]` в composition root; реестр
+  строит/лениво инстанцирует/фильтрует по правам. 0 обратных импортов.
+
 **Менеджеры:**
 - frontend_module.managers — ThemeManager, ConfigSnapshotManager, YamlPersistenceStore[T],
   AccessContext, RecipeManagerProtocol, SettingsProfileManagerProtocol
