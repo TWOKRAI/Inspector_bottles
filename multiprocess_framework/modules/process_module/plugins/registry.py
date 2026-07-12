@@ -260,6 +260,23 @@ class _PluginRegistry:
         self._plugins.clear()
         self._failed_imports.clear()
 
+    def snapshot(self) -> dict[str, PluginEntry]:
+        """Снимок текущего содержимого каталога (для изоляции тестов).
+
+        Публичная альтернатива прямому чтению приватного ``_plugins`` (AU-5,
+        follow-up В1) — вместе с ``restore()`` образует стандартный fixture-паттерн
+        "снять снимок -> мутировать глобальный singleton -> вернуть снимок".
+        """
+        return dict(self._plugins)
+
+    def restore(self, snapshot: dict[str, PluginEntry]) -> None:
+        """Восстановить каталог из снимка, сделанного ``snapshot()``.
+
+        Полностью заменяет текущее содержимое ``_plugins`` содержимым снимка.
+        """
+        self._plugins.clear()
+        self._plugins.update(snapshot)
+
     def __len__(self) -> int:
         return len(self._plugins)
 

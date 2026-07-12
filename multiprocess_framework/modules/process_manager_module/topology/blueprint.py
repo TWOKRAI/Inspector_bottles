@@ -286,6 +286,20 @@ class SystemBlueprint(SchemaBase):
         ``line_filter.overlay``, тег всё равно "overlay"). "frame" — приоритетный
         тег/primary, если есть среди источников; иначе первый по алфавиту.
 
+        **Известный edge (в): источник с ДВУМЯ РАЗНЫМИ тегами → берётся ОДИН (AU-3,
+        follow-up В1, ADR-PMM-017 п.6).** Если источник шлёт ≥2 РАЗНЫХ source-порта
+        одному target (напр. "frame" и "detections" — двойник живого
+        ``circle_detector`` → ``circle_draw.frame``/``circle_draw.detections`` в
+        ``hikvision_letter_robot.yaml``), тег на этот источник берётся ОДИН
+        ("frame"-приоритет, иначе первый по алфавиту среди ВСЕХ src-портов этого
+        источника, вне зависимости от того, на сколько разных target-портов они
+        распределены) — не задокументированный полный список. Это НЕ доработано в
+        группировку "1 источник = N тегов по числу его target-портов", потому что
+        структурно неотличимо от легитимного "несколько полей ОДНОГО item на разные
+        параметры соседнего плагина" (тот самый ``circle_draw`` — frame+detections из
+        ОДНОГО кадра, не 2 независимых потока с разным timing) — граф wires не хранит
+        "это один runtime item или два". См. ``ADR-PMM-017`` п.6.
+
         **ИНВАРИАНТ (ADR-PMM-017, process_manager_module/DECISIONS.md):** тег = имя
         source-порта совпадает с реальным runtime ``data_type`` ТОЛЬКО по конвенции
         «имя output-порта плагина == emitted data_type» — это конвенция кодовой базы,
@@ -313,8 +327,26 @@ class SystemBlueprint(SchemaBase):
         стороны), ДО ``build_configs()``/``check()``.
         """
         # target_process -> {source_process -> {source_port_names}}, только REQUIRED
-        # входы (optional-порты в join-обязательство не входят).
+        # входы (optional-порты в join-обязательство не входят). Группировка НЕ по
+        # target_port (проверено на живом рецепте, AU-3/follow-up В1 — см. docstring
+        # "Известный edge (в)"): источник, кормящий несколько РАЗНЫХ target-портов
+        # ОДНОГО процесса (frame+detections одного item на 2 параметра плагина), не
+        # отличим структурно от источника с genuinely двумя независимыми потоками —
+        # группировка по source_process (не по source+target_port) сохраняет прежнее
+        # поведение для обоих случаев.
         required_sources: dict[str, dict[str, set[str]]] = {}
+
+        # (process_name, plugin_name) -> plugin_class — симметрия с check() (AU-4,
+        # follow-up В1): там `_find_plugin_entry(plugin_name, plugin_class)` берёт
+        # plugin_class ИЗ pdict, поэтому лукап плагина, находимого ТОЛЬКО по
+        # class-path (нестандартное/переопределённое имя), там резолвится. Здесь
+        # раньше всегда передавался "" вторым аргументом — class-path fallback
+        # в `_find_plugin_entry` был мёртвым кодом для этого вызова.
+        plugin_class_by_addr: dict[tuple[str, str], str] = {
+            (proc.process_name, pdict.get("plugin_name", "")): pdict.get("plugin_class", "")
+            for proc in self.processes
+            for pdict in proc.plugins
+        }
 
         for wire in self.wires:
             src_parts = wire.source.split(".")
@@ -325,7 +357,8 @@ class SystemBlueprint(SchemaBase):
             src_process, _src_plugin, src_port = src_parts
             tgt_process, tgt_plugin, tgt_port_name = tgt_parts
 
-            entry = _find_plugin_entry(tgt_plugin, "")
+            tgt_plugin_class = plugin_class_by_addr.get((tgt_process, tgt_plugin), "")
+            entry = _find_plugin_entry(tgt_plugin, tgt_plugin_class)
             if entry is None:
                 continue
             tgt_port = next((p for p in entry.inputs if p.name == tgt_port_name), None)
@@ -350,6 +383,10 @@ class SystemBlueprint(SchemaBase):
             if len(sources) < 2:
                 continue  # < 2 required-источников — join не нужен (fanin остаётся дефолтом)
 
+            # Известный edge (в) (AU-3, follow-up В1, ADR-PMM-017 п.6, см. docstring):
+            # источник с ≥2 РАЗНЫМИ src-портами даёт ОДИН тег на весь источник
+            # ("frame"-приоритет, иначе первый по алфавиту) — не по числу его
+            # target-портов. Задокументированная граница, не баг (см. docstring).
             tags = ["frame" if "frame" in ports else sorted(ports)[0] for _src, ports in sorted(sources.items())]
             unique_tags = sorted(set(tags), key=lambda t: (t != "frame", t))
             primary = "frame" if "frame" in unique_tags else unique_tags[0]

@@ -308,12 +308,15 @@ def _clean_registry():
     модуль Python не переисполняет ``@register_plugin`` при повторном discover() (кеш
     ``sys.modules``), поэтому once-cleared реестр НЕ самовосстанавливается — ловили
     регрессию (25 упавших тестов в full-suite прогоне) именно на этом.
+
+    Публичный ``snapshot()``/``restore()`` (AU-5, follow-up В1) — вместо прямого
+    доступа к приватному ``_plugins``.
     """
-    snapshot = dict(PluginRegistry._plugins)
+    snapshot = PluginRegistry.snapshot()
     PluginRegistry.clear()
     yield
     PluginRegistry.clear()
-    PluginRegistry._plugins.update(snapshot)
+    PluginRegistry.restore(snapshot)
 
 
 class _CircleDetector(ProcessModulePlugin):
