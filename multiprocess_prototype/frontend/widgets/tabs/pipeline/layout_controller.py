@@ -387,9 +387,13 @@ class LayoutController:
     def save_to_active_recipe(self, parent: "QWidget | None" = None) -> bool:
         """Сохранить текущий граф в активный рецепт.
 
-        Вызывает graph_to_blueprint для сериализации модели,
-        читает текущий YAML рецепта через store.read_raw(), обновляет секции
-        blueprint/display_bindings/gui_positions и записывает через store.save_raw().
+        Сериализует live-модель редактора (``graph_to_blueprint`` → processes/wires/displays),
+        читает текущий YAML рецепта через store.read_raw() и собирает полный v3-raw через
+        единый сборщик :func:`recipes.save.build_recipe_v3_raw` — тот же механизм, что и
+        Recipes-таб (RS-1). Живые позиции сцены и фиксация передаются override-параметрами.
+
+        LP-1: авторские ``blueprint.name``/``blueprint.description`` больше НЕ затираются
+        дефолтами ``graph_to_blueprint`` ("default"/"") — сборщик сохраняет их из рецепта.
 
         Task F.4: использует RecipeStore Protocol (services.recipes) вместо
         legacy bridge через adapter._rm.
@@ -412,40 +416,41 @@ class LayoutController:
             QMessageBox.warning(parent, "Сохранение рецепта", "Не выбран активный рецепт")
             return False
 
-        # Шаг 2: сериализовать модель
-        bp_dict, bindings, gui_positions = graph_to_blueprint(self._model)
-
-        # Обновить gui_positions из scene (если привязана)
-        scene = self._host.scene
-        if scene:
-            self._gui_positions.update(scene.get_all_node_positions())
-        gui_positions = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
-
-        # Шаг 3: прочитать текущий YAML рецепта через RecipeStore Protocol
+        # Шаг 2: прочитать текущий YAML рецепта через RecipeStore Protocol
         raw_recipe = store.read_raw(active_slug)
         if raw_recipe is None:
             QMessageBox.critical(parent, "Сохранение рецепта", "Не удалось прочитать рецепт")
             return False
 
-        # Шаг 4: обновить top-level секции v3-рецепта (displays ВНУТРЬ blueprint) через
-        # единый нормализатор (one source of truth): без legacy data:-вложения, прочие
-        # ключи (name/version/active_services) сохраняются. save_raw — ruamel round-trip.
+        # Шаг 3: собрать и записать v3-raw через единый сборщик (RS-1). Сериализация модели +
+        # сборка blueprint — ВНУТРИ try/except с QMessageBox.critical (surface-not-mask).
+        # name/description сохраняются сборщиком из raw['blueprint'] — дефолты graph_to_blueprint
+        # ("default"/"") игнорируются (LP-1). Layout (gui_positions/locked_nodes) живёт ТОЛЬКО в
+        # blueprint.metadata (оттуда его читает load_topology_from_config и cold-start); top-level
+        # gui_positions не пишется (normalize_recipe_v3_raw его не включает, AU-1).
         try:
-            from multiprocess_prototype.recipes.format import normalize_recipe_v3_raw
+            from multiprocess_prototype.recipes.save import build_recipe_v3_raw
 
-            bp_dict["displays"] = bindings
-            # free-layout Task 2/3: layout живёт ТОЛЬКО в blueprint.metadata — именно
-            # оттуда его читает load_topology_from_config и cold-start (unwrap_recipe
-            # сохраняет blueprint.metadata). Top-level gui_positions больше не пишем: его
-            # не читает ни один live-путь (аудит Ф4.8, AU-1), а normalize_recipe_v3_raw не
-            # включает его в результат — Save больше не ВОССОЗДАЁТ удалённый 4.8-дубль.
-            # (Физически удалить уже лежащий на диске top-level дубль — задача миграции
-            # canonicalize_gui_positions; update_yaml_preserving отсутствующие ключи не трёт.)
-            metadata = dict(bp_dict.get("metadata") or {})
-            metadata["gui_positions"] = gui_positions
-            metadata["locked_nodes"] = sorted(self._locked_nodes)
-            bp_dict["metadata"] = metadata
-            store.save_raw(active_slug, normalize_recipe_v3_raw(raw_recipe, bp_dict))
+            bp_dict, bindings, _gui = graph_to_blueprint(self._model)
+
+            # Живые позиции сцены (если привязана) — авторитетный override.
+            scene = self._host.scene
+            if scene:
+                self._gui_positions.update(scene.get_all_node_positions())
+            gui_positions = {node_id: list(pos) for node_id, pos in self._gui_positions.items()}
+
+            topology = {
+                "processes": bp_dict.get("processes", []),
+                "wires": bp_dict.get("wires", []),
+                "displays": bindings,
+            }
+            new_raw = build_recipe_v3_raw(
+                raw_recipe,
+                topology,
+                gui_positions=gui_positions,
+                locked_nodes=sorted(self._locked_nodes),
+            )
+            store.save_raw(active_slug, new_raw)
 
             logger.info("Pipeline сохранён в рецепт '%s'", active_slug)
         except Exception as exc:

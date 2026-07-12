@@ -125,6 +125,51 @@ class TestSaveToActiveRecipeWritesBlueprint:
         # позиции — в канонической секции blueprint.metadata
         assert saved["blueprint"]["metadata"]["gui_positions"]["node_a"] == [100.0, 200.0]
 
+    def test_save_preserves_blueprint_name_description(self, monkeypatch) -> None:
+        """LP-1 регресс: Save НЕ затирает авторские blueprint.name/description на 'default'/''.
+
+        Раньше save_to_active_recipe брал name/description из graph_to_blueprint (дефолты
+        'default'/'') и клал в blueprint → авторские поля рецепта гибли при каждом Save.
+        Теперь единый сборщик (RS-1) сохраняет их из существующего raw['blueprint'].
+        """
+        slug = "named_recipe"
+        raw = {
+            slug: {
+                "name": slug,
+                "version": 3,
+                "description": "",
+                "blueprint": {
+                    "name": "Авторское имя",
+                    "description": "Авторское описание",
+                    "processes": [],
+                    "wires": [],
+                    "displays": [],
+                },
+                "active_services": [],
+            }
+        }
+        store = FakeRecipeStore(raw=raw, active=slug)
+        services = make_pipeline_services()
+        object.__setattr__(services, "recipes", store)
+        presenter = PipelinePresenter(services)
+
+        presenter._model.add_process("node_a", plugin_name="PA", category="source")
+
+        from PySide6.QtWidgets import QMessageBox
+
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **kw: None))
+        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **kw: None))
+        monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **kw: None))
+
+        assert presenter.save_to_active_recipe(parent=None) is True
+
+        bp = store._raw[slug]["blueprint"]
+        # Авторские поля уцелели (не 'default'/'').
+        assert bp["name"] == "Авторское имя"
+        assert bp["description"] == "Авторское описание"
+        # Граф всё же обновлён.
+        assert any(p["process_name"] == "node_a" for p in bp["processes"])
+
     def test_save_writes_layout_into_blueprint_metadata(self, monkeypatch) -> None:
         """free-layout Task 2/3: gui_positions + locked_nodes пишутся в blueprint.metadata.
 
