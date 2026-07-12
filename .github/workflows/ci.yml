@@ -8,12 +8,19 @@
 #   * tests    — тесты фреймворка через scripts/run_framework_tests.py (blocking, зелёный
 #                headless: ~3800 тестов за ~90 c под QT_QPA_PLATFORM=offscreen).
 #
+#   * examples-smoke — live headless-boot examples/minimal_app + доказанный IPC
+#                (маркер harness_smoke, BackendHarness с launcher_factory — Ф5.13,
+#                см. examples/minimal_app/tests/test_ci_smoke.py). Отдельный job,
+#                не входит в дефолтный сбор pytest (та же причина, что и у
+#                harness_smoke прототипа ниже — живые ОС-процессы).
+#
 # Что СОЗНАТЕЛЬНО исключено (расширить позже, когда появится headless-safe путь):
 #   * pyright  — gradual typing (basic mode) ещё не вычищен; включить отдельным advisory
 #                job'ом после стабилизации типов.
 #   * тесты прототипа/GUI, требующие живого дисплея, камер или GigE-железа.
-#   * harness_smoke — live-тесты, поднимающие headless-бэкенд прототипа (маркер
-#                harness_smoke, запускаются явным путём, не входят в дефолтный сбор).
+#   * harness_smoke прототипа — live-тесты, поднимающие headless-бэкенд прототипа
+#                (маркер harness_smoke, запускаются явным путём, не входят в
+#                дефолтный сбор).
 
 name: CI
 
@@ -102,3 +109,26 @@ jobs:
 
       - name: Тесты фреймворка (headless)
         run: uv run python scripts/run_framework_tests.py -q -p no:cacheprovider
+
+  examples-smoke:
+    name: examples-smoke (minimal_app, live headless boot + IPC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+
+      - name: Синхронизация зависимостей
+        run: uv sync
+
+      # examples/minimal_app — второй, независимый от прототипа потребитель framework
+      # (Ф5.13). Живой boot через BackendHarness (launcher_factory, без импорта
+      # multiprocess_prototype) + проверка, что IPC ticker → console_sink реально
+      # доставляется (не только boot). Маркер harness_smoke — не входит в дефолтный
+      # сбор (см. testpaths в pyproject.toml), запускаем явным путём.
+      - name: minimal_app — headless boot + доказанный IPC
+        run: uv run python -m pytest examples/minimal_app/tests -m harness_smoke -q -p no:cacheprovider
