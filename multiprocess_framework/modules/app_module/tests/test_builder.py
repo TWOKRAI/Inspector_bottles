@@ -15,6 +15,10 @@ from multiprocess_framework.modules.app_module import (
 
 _GENERIC_PROCESS = "multiprocess_framework.modules.process_module.generic.generic_process.GenericProcess"
 
+# .../app_module/tests/<file> → parents[4] = корень репо (для examples/minimal_app).
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_MINIMAL_APP_YAML = _REPO_ROOT / "examples" / "minimal_app" / "app.yaml"
+
 
 def _minimal_blueprint() -> dict:
     return {
@@ -89,7 +93,7 @@ def test_factory_mode_delegates_to_launcher_factory(tmp_path: Path) -> None:
 
 def test_generic_build_produces_launcher() -> None:
     """build_app на manifest'е minimal_app даёт launcher с процессом ticker (без запуска)."""
-    launcher = build_app(Path("examples/minimal_app/app.yaml"))
+    launcher = build_app(_MINIMAL_APP_YAML)
     names = [n for n, _ in launcher._processes]
     assert names == ["ticker"]
     assert launcher._orchestrator_class_path is None  # базовый ProcessManagerProcess

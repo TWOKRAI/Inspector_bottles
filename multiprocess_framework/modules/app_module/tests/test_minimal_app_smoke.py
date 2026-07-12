@@ -8,14 +8,14 @@
 from __future__ import annotations
 
 import os
-import tempfile
 import time
 from pathlib import Path
 
-
 from multiprocess_framework.modules.app_module import build_app, load_manifest
 
-_APP_YAML = Path("examples/minimal_app/app.yaml")
+# .../multiprocess_framework/modules/app_module/tests/<file> → parents[4] = корень репо.
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_APP_YAML = _REPO_ROOT / "examples" / "minimal_app" / "app.yaml"
 
 
 def test_minimal_app_manifest_and_discovery() -> None:
@@ -27,13 +27,15 @@ def test_minimal_app_manifest_and_discovery() -> None:
     assert any(p.endswith("minimal_app/services") for p in m.discovery.service_paths)
 
 
-def test_minimal_app_boots_headless() -> None:
+def test_minimal_app_boots_headless(tmp_path: Path) -> None:
     """build → start → 2s → stop; процесс поднялся и корректно остановлен."""
     # Свой PID-файл/лог-каталог на инстанс — ловушка «два бэкенда» (общий реестр).
     prev_pid = os.environ.get("MULTIPROCESS_PID_FILE")
     prev_log = os.environ.get("MULTIPROCESS_LOG_DIR")
-    os.environ["MULTIPROCESS_PID_FILE"] = tempfile.mktemp(suffix=".minimal.pids")
-    os.environ["MULTIPROCESS_LOG_DIR"] = tempfile.mkdtemp(prefix="minimal_app_log_")
+    os.environ["MULTIPROCESS_PID_FILE"] = str(tmp_path / "minimal.pids")
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    os.environ["MULTIPROCESS_LOG_DIR"] = str(log_dir)
 
     launcher = build_app(_APP_YAML)
     assert [n for n, _ in launcher._processes] == ["ticker"]

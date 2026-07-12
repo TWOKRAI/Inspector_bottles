@@ -89,7 +89,13 @@ def main(pipeline_override: str | None = None) -> int:
     Тогда и бэкенд, и дочерний GUI-процесс читают ОДИН активный рецепт. При ошибке
     записи — graceful fallback (override только в бэкенд).
     """
-    from multiprocess_framework.modules.app_module import AppSpec, run_app
+    from multiprocess_framework.modules.app_module import AppSpec, apply_env_aliases, run_app
+
+    # Env-алиасы ПЕРВЫМ делом (до resolve_manifest_path/persist): resolve_manifest_path
+    # читает только INSPECTOR_MANIFEST, а persist пишет по нему же — при заданном лишь
+    # MULTIPROCESS_MANIFEST без раннего алиаса backend собрал бы дефолтный app.yaml, а
+    # GUI-ребёнок (run_app → apply_env_aliases → spawn с алиасом) — кастомный (split-brain).
+    apply_env_aliases()
 
     manifest_path = resolve_manifest_path()
     effective_override = pipeline_override
