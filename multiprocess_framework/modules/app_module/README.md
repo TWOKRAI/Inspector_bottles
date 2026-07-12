@@ -34,14 +34,20 @@ relative → boundary ловит только чужие absolute-импорты
 | `discover()` / `DiscoveryResult` / `ServiceManifest` | **единый helper** авто-скана плагинов (`plugin.py`) И сервисов (маркер `service.yaml`) |
 | `SystemBuilder` / `AppSpec` | generic-сборка launcher; `AppSpec` — DI-контейнер точек расширения |
 | `assemble_proc_dicts` | universal-шов blueprint → proc_dicts (framework-символы) |
+| `GENERIC_ORCHESTRATOR_CLASS_PATH` | import-path generic-оркестратора (дефолт generic-пути) |
 | `apply_env_aliases` | `MULTIPROCESS_*` ↔ `INSPECTOR_*` back-compat (де-брендинг) |
-| Protocol'ы `BlueprintLoader`/`ProcDictsBuilder`/`StateBootstrap`/`LauncherFactory` | точки расширения (DI вместо наследования) |
+| Protocol'ы `BlueprintLoader`/`ProcDictsBuilder`/`StateBootstrap`/`ThrottleRules`/`LauncherFactory` | точки расширения (DI вместо наследования) |
+
+Generic-оркестратор `GenericProcessManagerApp` (`orchestrator.py`) резолвится
+child-side по строке (`GENERIC_ORCHESTRATOR_CLASS_PATH`), а не импортируется —
+инвариант яруса (внутри framework 0 статических импортов app_module) держится.
 
 ## Два режима сборки
 
 - **generic** (`run_app("app.yaml")` — minimal_app/дефолт): granular build-time хуки с
   framework-defaults (`default_blueprint_loader` + `assemble_proc_dicts`), оркестратор —
-  базовый `ProcessManagerProcess`. «Рыба» доказывает самодостаточность без прототипа.
+  `GenericProcessManagerApp`. «Рыба» доказывает самодостаточность без прототипа (бутится
+  без единого хука).
 - **factory** (`AppSpec.launcher_factory` — прототип): приложение собирает launcher само
   (его сложившийся `SystemBuilder.build()` — источник истины), `run_app` даёт generic-
   контур (env-алиасы, единая загрузка манифеста). Вход прототипа постепенно выражается
@@ -61,15 +67,18 @@ discovery:
   auto_discover: true
 ```
 
-## Хуки — два сорта (формализация — Ф5.12)
+## Хуки — два сорта (формализованы в Ф5.12, ADR-APP-006)
 
-| Сорт | Где | Форма |
-|---|---|---|
-| build-time | launcher-процесс, до spawn | обычный callable (`BlueprintLoader`/`ProcDictsBuilder`/`StateBootstrap`) |
-| runtime | после spawn | import-path строка + dict (callable не пиклится) — в Ф5.11 не вводится |
+| Сорт | Где | Форма | Потребление |
+|---|---|---|---|
+| build-time | launcher-процесс, до spawn | обычный callable (`BlueprintLoader`/`ProcDictsBuilder`/`StateBootstrap`/`ThrottleRules`) | результат (dict) → `orchestrator_config` → пиклится через spawn → оркестратор child-side |
+| runtime | после spawn | import-path строка (`orchestrator_class_path`) + dict `orchestrator_config` — callable не пиклится | подкласс `GenericProcessManagerApp` резолвится child-side, переопределяет seam'ы (`_configure_runtime`/`apply_topology`) |
 
 Правило против hook-взрыва: хук попадает в `AppSpec`, только если прототип нуждается в
-нём сегодня И minimal_app живёт без него (опционален).
+нём сегодня И minimal_app живёт без него (опционален). Первая пара — доказательство обоих
+сортов: **state-bootstrap** (build-time) + **display-reload** (runtime). Пример реализации
+runtime-хуков — прототипный `ProcessManagerProcessApp` (тонкая композиция поверх
+`GenericProcessManagerApp`).
 
 ## См. также
 - Референс-приложение: [`examples/minimal_app/`](../../../../examples/minimal_app/)

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from .builder import (
+    GENERIC_ORCHESTRATOR_CLASS_PATH,
     AppSpec,
     BlueprintError,
     SystemBuilder,
@@ -34,6 +35,7 @@ from .interfaces import (
     ManifestStoreProtocol,
     ProcDictsBuilder,
     StateBootstrap,
+    ThrottleRules,
 )
 from .manifest import AppManifest, DiscoverySpec, load_manifest
 from .store import ManifestStore
@@ -58,6 +60,7 @@ __all__ = [
     "assemble_proc_dicts",
     "default_blueprint_loader",
     "BlueprintError",
+    "GENERIC_ORCHESTRATOR_CLASS_PATH",
     # env
     "apply_env_aliases",
     "ENV_ALIAS_PAIRS",
@@ -65,6 +68,7 @@ __all__ = [
     "BlueprintLoader",
     "ProcDictsBuilder",
     "StateBootstrap",
+    "ThrottleRules",
     "LauncherFactory",
     "ManifestStoreProtocol",
 ]

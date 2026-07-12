@@ -2,7 +2,8 @@
 
 Каркас должен бутиться локально: build → start → (heartbeat) → stop без висящих
 процессов. Полный CI-smoke через BackendHarness — Ф5.13; здесь — лёгкая проверка
-самодостаточности «рыбы» (генерик-путь app_module, base ProcessManagerProcess).
+самодостаточности «рыбы» (генерик-путь app_module, generic-оркестратор
+``GenericProcessManagerApp`` БЕЗ единого хука — Ф5.12 acceptance).
 """
 
 from __future__ import annotations
@@ -11,7 +12,11 @@ import os
 import time
 from pathlib import Path
 
-from multiprocess_framework.modules.app_module import build_app, load_manifest
+from multiprocess_framework.modules.app_module import (
+    GENERIC_ORCHESTRATOR_CLASS_PATH,
+    build_app,
+    load_manifest,
+)
 
 # .../multiprocess_framework/modules/app_module/tests/<file> → parents[4] = корень репо.
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -39,6 +44,10 @@ def test_minimal_app_boots_headless(tmp_path: Path) -> None:
 
     launcher = build_app(_APP_YAML)
     assert [n for n, _ in launcher._processes] == ["ticker"]
+    # minimal_app бутится на generic-оркестраторе БЕЗ единого хука (Ф5.12).
+    assert launcher._orchestrator_class_path == GENERIC_ORCHESTRATOR_CLASS_PATH
+    # Хуков не задано → StateStore/throttle не поднимаются (только initial_state={}).
+    assert launcher._orchestrator_config == {"initial_state": {}}
     try:
         launcher.start()
         time.sleep(2.0)  # дать worker'у стартовать

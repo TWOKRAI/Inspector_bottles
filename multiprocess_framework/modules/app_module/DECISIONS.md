@@ -98,3 +98,68 @@ torn-read; комментарии сохраняются (ruamel round-trip). О
 и конвергенция — отдельные задачи после формализации хуков.
 
 **Reversible:** yes (factory-режим — обёртка; удаление возвращает прямой вызов `build()`).
+
+---
+
+## ADR-APP-006 — `GenericProcessManagerApp` + двухсортные хук-точки (Ф5.12)
+
+**Контекст.** Прототипный оркестратор `ProcessManagerProcessApp` (~250 LOC) смешивал
+generic-плумбинг (StateStore из конфига, observability-watcher, shutdown) с
+Inspector-спецификой (BlueprintAssembler-движок горячей замены, reload DisplayRegistry).
+Нужен generic-оркестратор яруса 2, на котором бутится «рыба» (minimal_app), и
+формализация точек расширения так, чтобы они не разрослись.
+
+**Решение — два сорта хук-точек** (следствие spawn + Dict-at-Boundary):
+
+- **build-time** (launcher-процесс, до spawn) — обычные callable в `AppSpec`:
+  `blueprint_loader` / `proc_dicts_builder` / `state_bootstrap` / `throttle_rules`.
+  Выполняются в родителе, их РЕЗУЛЬТАТ (dict) пиклится в `orchestrator_config`.
+- **runtime** (после spawn) — callable НЕ пиклится через spawn, поэтому паттерн
+  `orchestrator_class_path` (import-path строка + dict `orchestrator_config`,
+  резолв на стороне ребёнка). Приложение подставляет подкласс
+  `GenericProcessManagerApp` и переопределяет seam'ы (`_configure_runtime` /
+  `apply_topology`).
+
+`GenericProcessManagerApp(ProcessManagerProcess)` в app_module даёт три config-gated
+generic-возможности: StateStore из build-time хуков (`_setup_state_store`),
+observability-watcher (`_start_observability_watcher`), runtime-seam `_configure_runtime`
+(no-op). Прототипный `ProcessManagerProcessApp` = тонкая композиция (≤ ~30 LOC, факт
+~11 LOC тела): подключает два runtime-хука (topology-engine + display-reload), тела
+которых вынесены в `multiprocess_prototype/backend/orchestrator_hooks.py`. minimal_app
+бутится на `GenericProcessManagerApp` **без единого хука**.
+
+**Правило против hook-взрыва (enforce этим ADR).** Хук попадает в `AppSpec` ТОЛЬКО
+если: (1) прототип нуждается в нём сегодня И (2) minimal_app бутится без него (хук
+опционален). Первая пара — доказательство обоих сортов: **state-bootstrap** (build-time:
+`state_bootstrap`+`throttle_rules` → `initial_state`/`state_throttle_rules`; прототипу
+нужен реактивный state, minimal_app без него) и **display-reload** (runtime: override
+`apply_topology` в подклассе, резолвится child-side; прототип reload'ит DisplayRegistry,
+minimal_app без дисплеев). Оба опциональны по построению: `_setup_state_store` — no-op
+без `initial_state`/`state_throttle_rules`. Никаких хуков «на вырост».
+
+**Отклонение от плана по имени класса.** План называл generic-оркестратор
+`GenericProcessApp`, но это имя УЖЕ занято load-bearing прототипным WORKER-классом
+`multiprocess_prototype.generic_process_app.GenericProcessApp` (подкласс `GenericProcess`
+с StateProxy, `process_class` в ~10 топология-YAML). Два разных класса-«GenericProcessApp»
+(worker vs orchestrator) — ловушка. Выбрано `GenericProcessManagerApp`: симметрия с
+базой `ProcessManagerProcess` и прототипным `ProcessManagerProcessApp` делает родословную
+явной (`ProcessManagerProcess` → `GenericProcessManagerApp` → `ProcessManagerProcessApp`).
+
+**Rejected:**
+- **runtime-хук как отдельный import-path в конфиге** (`display_reload_class_path`) —
+  отвергнут: подкласс-оркестратор УЖЕ резолвится child-side по `orchestrator_class_path`,
+  так что override метода в нём и ЕСТЬ runtime-хук; отдельная строка-путь дублировала бы
+  механизм.
+- **generic-оркестратор всегда создаёт StateStore** — отвергнут: тогда state-bootstrap не
+  опционален, minimal_app платит за пустой store и класс инвариант «хук опционален»
+  нарушается. Гейтим на наличие build-time данных.
+- **имя `GenericProcessApp` буквально по плану** — отвергнуто из-за коллизии (см. выше).
+
+**Why:** оркестратор прототипа выражен как generic + хуки (250→~40 LOC файл), точки
+расширения формализованы и защищены от разрастания правилом; «рыба» получила свой
+generic-оркестратор.
+
+**Risk:** low (аддитивно; прототипный `orchestrator_class_path` не изменился —
+характеризационный снапшот 5.1 и `test_run_app_prototype` зелёные без правок golden).
+**Reversible:** yes (подкласс можно снова «утолстить», generic-класс аддитивен).
+**Refs:** plans/2026-07-06_constructor-master/plan.md (5.12), ADR-APP-005 (вход).
