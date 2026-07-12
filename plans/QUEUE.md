@@ -1,6 +1,6 @@
 # Очередь планов — единая последовательность задач
 
-> Обновлено **2026-07-11** (консолидация по команде владельца: всё готовое/поглощённое — в [`_archive/`](_archive/)).
+> Обновлено **2026-07-12** (хвост В1 закрыт целиком — C8 docs-sync; фронт → В2; 3 вопроса скоупа 5.11 сняты владельцем).
 >
 > **Иерархия документов — 3 уровня, у каждого своя роль:**
 >
@@ -14,75 +14,66 @@
 
 ## Сделано (свёрнуто; детали и merge-хэши — в constructor-master)
 
-Ф0–Ф3 целиком · трек F (god-split F.1–F.7 + MERGE-GATE) · Ф4: 4.1/4.2/4.3/4.4/4.9 + добор H1–H8 · Ф5-ядро: 5.1/5.2/5.4–5.9/5.14–5.17/5.19–5.21 · Ф5-добор: C1/C2/C4/C5/C6(a,b,c)/C7 · post-review R1–R6 · NEW-2/NEW-3/NEW-5/NEW-8 · волны В0/В1 current-path (В1 — хвост ниже).
+Ф0–Ф3 целиком · трек F (god-split F.1–F.7 + MERGE-GATE) · Ф4: 4.1/4.2/4.3/4.4/4.7/4.8/4.9 + добор H1–H8 · Ф5-ядро: 5.1/5.2/5.4–5.9/5.14–5.17/5.19–5.21 · Ф5-добор: C1/C2/C3/C4/C5/C6(a,b,c)/C7/C8 · post-review R1–R6 · NEW-2/NEW-3/NEW-5/NEW-8 · волны В0/В1 current-path целиком (хвост В1 — mini-GATE 4.8 вердикт владельца, C3 carve `recipe`, 4.7 join/inspector ADR-PMM-017, C8 docs-sync карты модулей — закрыт 2026-07-12; chain-статус в картах модулей отражает состояние ДО C6(d)/(e) — финализировать повторно после них).
 
 ## Строгая последовательность (сверху вниз)
 
-### Сейчас — хвост В1 (блокер всей recipe-оси)
+### Сейчас — В2 «РЫБА» (сердце цели; блокер снят — 3 вопроса скоупа 5.11 решены владельцем 2026-07-11, см. «Открытые решения»)
 
 | # | Задача | Где детали |
 |---|---|---|
-| 1 | ⛔ **Вердикт владельца: mini-GATE 4.8** — байт-diff канонизации рецептов подготовлен и ждёт | [f4.8-canonicalization-diff.md](2026-07-06_constructor-master/f4.8-canonicalization-diff.md) |
-| 2 | **C3** — carve модуля `recipe`: yaml_io + assembler/planner + RecipeManager → framework | constructor-master, Ф5-добор |
-| 3 | **4.7** — join/inspector из wires при assembly; снять `_hoist_inspector_from_metadata` | constructor-master, Ф4 |
-| 4 | **C8** — docs-sync: карта модулей = код (chain-статус финализировать повторно после C6 d/e) | constructor-master, Ф5-добор |
-
-### В2 — «РЫБА» (сердце цели; перед стартом — 3 вопроса скоупа 5.11 владельцу)
-
-| # | Задача | Где детали |
-|---|---|---|
-| 5 | **5.11** — `app_module` skeleton + каркас `examples/minimal_app` + ManifestStore (NEW-1) + дискавери плагинов И сервисов | constructor-master, Ф5 + current-path В2 |
-| 6 | **5.12** — `AppOrchestrator` generic + хук-точки двух сортов (state-bootstrap + display-reload) | constructor-master, Ф5 |
-| 7 | **5.13** — minimal_app финализация + CI-smoke (инвариант 8 архитектуры) | constructor-master, Ф5 |
+| 1 | **5.11** — `app_module` skeleton + каркас `examples/minimal_app` + ManifestStore (NEW-1) + дискавери плагинов И сервисов | constructor-master, Ф5 + current-path В2 |
+| 2 | **5.12** — `AppOrchestrator` generic + хук-точки двух сортов (state-bootstrap + display-reload) | constructor-master, Ф5 |
+| 3 | **5.13** — minimal_app финализация + CI-smoke (инвариант 8 архитектуры) | constructor-master, Ф5 |
 
 ### В3 — GUI-конструктор (параллельно/после В2)
 
 | # | Задача | Где детали |
 |---|---|---|
-| 8 | **NEW-D1 (= 5.10 S→M)** — механизм табов → frontend_module (TabRegistry; прототип = `TABS: list[TabSpec]`) | current-path §3-В3 |
+| 4 | **NEW-D1 (= 5.10 S→M)** — механизм табов → frontend_module (TabRegistry; прототип = `TABS: list[TabSpec]`) | current-path §3-В3 |
 
 ### Хвост C-волны (по дизайну C6 — после 5.13, второй живой смок-детектор)
 
 | # | Задача | Где детали |
 |---|---|---|
-| 9 | **C6(d)** — generic-механика на runnables `chain_module` (DAG/parallel — chain перестаёт дремать) | [c6-pipeline-engine-design.md](2026-07-06_constructor-master/c6-pipeline-engine-design.md) |
-| 10 | **C6(e)** — chain использует пул `worker_module` | там же |
+| 5 | **C6(d)** — generic-механика на runnables `chain_module` (DAG/parallel — chain перестаёт дремать) | [c6-pipeline-engine-design.md](2026-07-06_constructor-master/c6-pipeline-engine-design.md) |
+| 6 | **C6(e)** — chain использует пул `worker_module` | там же |
 
 ### В4 — Ф7 hot-path (строго одним вскрытием, один агент; GATE G3 перед стартом)
 
 | # | Задача | Где детали |
 |---|---|---|
-| 11 | **G.6** — trace-id/OTel-поля (первым: семантика, не hot-path-риск) | constructor-master, Ф7 |
-| 12 | **G.1** — снять TRACE + perf-пробы + повторный baseline | там же |
-| 13 | **G.2** — характеризационные тесты доставки + kind-каналы + единый конверт команд | там же |
-| 14 | **G.3** — FrameShm: одна стратегия записи + seqlock + startup-cleanup SHM | там же |
-| 15 | **G.4** — QoS-профили kind + боевой RingBuffer (поглощает 3.3-остаток и QoS live-tail 5.21d) | там же |
-| 16 | **G.5** — снятие двойной конверсии (строго после seqlock) | там же |
-| 17 | **G.7** — приёмка: flip `use_kind_channels`, soak, FPS/p99 ≥ baseline | там же |
-| 18 | **G.8** — drain→detach→stop воркера (поглощает pipeline-live-control Task 3.3) | там же |
+| 7 | **G.6** — trace-id/OTel-поля (первым: семантика, не hot-path-риск) | constructor-master, Ф7 |
+| 8 | **G.1** — снять TRACE + perf-пробы + повторный baseline | там же |
+| 9 | **G.2** — характеризационные тесты доставки + kind-каналы + единый конверт команд | там же |
+| 10 | **G.3** — FrameShm: одна стратегия записи + seqlock + startup-cleanup SHM | там же |
+| 11 | **G.4** — QoS-профили kind + боевой RingBuffer (поглощает 3.3-остаток и QoS live-tail 5.21d) | там же |
+| 12 | **G.5** — снятие двойной конверсии (строго после seqlock) | там же |
+| 13 | **G.7** — приёмка: flip `use_kind_channels`, soak, FPS/p99 ≥ baseline | там же |
+| 14 | **G.8** — drain→detach→stop воркера (поглощает pipeline-live-control Task 3.3) | там же |
 
 ### В5 — Supervision-tree + Ф8
 
 | # | Задача | Где детали |
 |---|---|---|
-| 19 | **3.9** — depends_on: порядок старта по readiness апстрима (поднято из «опц» в обязательное — предусловие Ф8) | constructor-master, Ф3 + current-path В5 |
-| 20 | **NEW-6** — стратегии супервизора (rest_for_one/one_for_all, группы, backoff+jitter, эскалация give-up) | current-path §4 |
-| 21 | **NEW-7** — alerting поверх supervisor-событий (gave_up/failed/drop-растёт → громко) | current-path §4 |
-| 22 | **H.1** — ярусы core/optional/frozen + enforcement + **NEW-10** (24/24 interfaces.py, Protocol ObservableMixin, «один вход», contract-тест `__all__`) | constructor-master, Ф8 |
-| 23 | **H.2 (GATE G4)** — исполнение kill-вердиктов G0 per-item, отдельными одобренными коммитами | там же |
-| 24 | **H.3** — Registers⇄StateStore merge (с оглядкой на 3 оси ADR-COMM-006) | там же |
-| 25 | **H.4** — один стандарт логирования прототипа | там же |
-| 26 | **H.5** — ужесточение sentrux + разбор complex functions + перекалибровка метрик приёмки (вопрос R5c) | там же |
-| 27 | **H.6** — финальная сверка, закрытие constructor-master | там же |
+| 15 | **3.9** — depends_on: порядок старта по readiness апстрима (поднято из «опц» в обязательное — предусловие Ф8) | constructor-master, Ф3 + current-path В5 |
+| 16 | **NEW-6** — стратегии супервизора (rest_for_one/one_for_all, группы, backoff+jitter, эскалация give-up) | current-path §4 |
+| 17 | **NEW-7** — alerting поверх supervisor-событий (gave_up/failed/drop-растёт → громко) | current-path §4 |
+| 18 | **H.1** — ярусы core/optional/frozen + enforcement + **NEW-10** (24/24 interfaces.py, Protocol ObservableMixin, «один вход», contract-тест `__all__`) | constructor-master, Ф8 |
+| 19 | **H.2 (GATE G4)** — исполнение kill-вердиктов G0 per-item, отдельными одобренными коммитами | там же |
+| 20 | **H.3** — Registers⇄StateStore merge (с оглядкой на 3 оси ADR-COMM-006) | там же |
+| 21 | **H.4** — один стандарт логирования прототипа | там же |
+| 22 | **H.5** — ужесточение sentrux + разбор complex functions + перекалибровка метрик приёмки (вопрос R5c) | там же |
+| 23 | **H.6** — финальная сверка, закрытие constructor-master | там же |
 
 ### В6 — Конструктор v1.0 (финал)
 
 | # | Задача | Где детали |
 |---|---|---|
-| 28 | **NEW-9** — packaging: тяжёлые deps → extras → env-алиасы `MPF_*` → свой pyproject у framework | current-path §4/В6 |
-| 29 | **NEW-4** — симметрия ресурсов плагина (configure↔shutdown контракт-тест, SHM owner-теги) | current-path §4 |
-| 30 | **Туториал «своё приложение за час»** + scaffold-генератор (5.14опц) | current-path В6 |
-| 31 | 🏁 **Финальная приёмка: второе продуктовое приложение из «рыбы» за день** + 6 тестов architecture-10-of-10 §0 | [architecture-10-of-10.md](current-path/architecture-10-of-10.md) |
+| 24 | **NEW-9** — packaging: тяжёлые deps → extras → env-алиасы `MPF_*` → свой pyproject у framework | current-path §4/В6 |
+| 25 | **NEW-4** — симметрия ресурсов плагина (configure↔shutdown контракт-тест, SHM owner-теги) | current-path §4 |
+| 26 | **Туториал «своё приложение за час»** + scaffold-генератор (5.14опц) | current-path В6 |
+| 27 | 🏁 **Финальная приёмка: второе продуктовое приложение из «рыбы» за день** + 6 тестов architecture-10-of-10 §0 | [architecture-10-of-10.md](current-path/architecture-10-of-10.md) |
 
 ### Опциональные (решаются по ходу, вне строгого порядка)
 
@@ -93,7 +84,7 @@
 | # | Решение | Что блокирует |
 |---|---|---|
 | 1 | **Байт-diff канонизации 2 оставшихся рецептов** (`camera_robot_calibration.yaml` −31, `dataset_circle_capture.yaml` — YAML-алиас) — тот же дубль `gui_positions`, что и в 4.8, обнаружен при apply, ещё не одобрен | нет (гигиена; 4.8 применена к 2 одобренным рецептам, C3 разблокирован) |
-| 2 | **3 вопроса скоупа 5.11** (дискавери сервисов: маркер-файл?; GUI-часть рыбы отдельно?; minimal_app headless-only?) | старт В2 (шаг 5) |
+| 2 | ~~3 вопроса скоупа 5.11~~ — **решено владельцем 2026-07-11:** дискавери сервисов — маркер-файл `service.yaml`; GUI-часть «рыбы» — отдельно от headless-ядра; `minimal_app` — headless-only | нет (снято; блокер В2 снят, старт открыт) |
 | 3 | current-path §5: формальное одобрение Master plan; ранний вынос frozen-boundaries из H.1; R2-residual (гейт `recovered` на `health.status==ok`) | формально (В1 де-факто исполнен) |
 | 4 | Снятие blueprint-шима C6(c) — 0 импортёров | нет (гигиена) |
 
