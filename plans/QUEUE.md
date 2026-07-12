@@ -1,6 +1,6 @@
 # Очередь планов — единая последовательность задач
 
-> Обновлено **2026-07-12** (хвост В1 закрыт целиком — C8 docs-sync; фронт → В2; 3 вопроса скоупа 5.11 сняты владельцем).
+> Обновлено **2026-07-12** (В2 «РЫБА» закрыт целиком — 5.11/5.12/5.13; фронт → Follow-up аудита В1 AU-1/AU-2).
 >
 > **Иерархия документов — 3 уровня, у каждого своя роль:**
 >
@@ -14,25 +14,17 @@
 
 ## Сделано (свёрнуто; детали и merge-хэши — в constructor-master)
 
-Ф0–Ф3 целиком · трек F (god-split F.1–F.7 + MERGE-GATE) · Ф4: 4.1/4.2/4.3/4.4/4.7/4.8/4.9 + добор H1–H8 · Ф5-ядро: 5.1/5.2/5.4–5.9/5.14–5.17/5.19–5.21 · Ф5-добор: C1/C2/C3/C4/C5/C6(a,b,c)/C7/C8 · post-review R1–R6 · NEW-2/NEW-3/NEW-5/NEW-8 · волны В0/В1 current-path целиком (хвост В1 — mini-GATE 4.8 вердикт владельца, C3 carve `recipe`, 4.7 join/inspector ADR-PMM-017, C8 docs-sync карты модулей — закрыт 2026-07-12; chain-статус в картах модулей отражает состояние ДО C6(d)/(e) — финализировать повторно после них).
+Ф0–Ф3 целиком · трек F (god-split F.1–F.7 + MERGE-GATE) · Ф4: 4.1/4.2/4.3/4.4/4.7/4.8/4.9 + добор H1–H8 · Ф5-ядро: 5.1/5.2/5.4–5.9/5.14–5.17/5.19–5.21 · Ф5-добор: C1/C2/C3/C4/C5/C6(a,b,c)/C7/C8 · post-review R1–R6 · NEW-2/NEW-3/NEW-5/NEW-8 · волны В0/В1 current-path целиком (хвост В1 — mini-GATE 4.8 вердикт владельца, C3 carve `recipe`, 4.7 join/inspector ADR-PMM-017, C8 docs-sync карты модулей — закрыт 2026-07-12; chain-статус в картах модулей отражает состояние ДО C6(d)/(e) — финализировать повторно после них) · **В2 «РЫБА» целиком** (5.11 app_module skeleton + ManifestStore/дискавери, 5.12 AppOrchestrator generic + хуки двух сортов, 5.13 minimal_app финализация + CI-smoke — 2-й процесс + живой IPC + sentrux-boundary — закрыт 2026-07-12).
 
 ## Строгая последовательность (сверху вниз)
 
-### Сейчас — В2 «РЫБА» (сердце цели; блокер снят — 3 вопроса скоупа 5.11 решены владельцем 2026-07-11, см. «Открытые решения»)
+### Сейчас — Follow-up аудита В1 (Fable, 2026-07-12 — до/вместе с новыми рецептами В2+)
 
 | # | Задача | Где детали |
 |---|---|---|
-| 1 | ~~**5.11** — `app_module` skeleton + каркас `examples/minimal_app` + ManifestStore (NEW-1) + дискавери плагинов И сервисов~~ **✅ 2026-07-12** (ветка `feat/constructor-f5-11-app-module`; блок В2 закрывается после 5.13) | constructor-master, Ф5 + current-path В2 |
-| 2 | **5.12** — `AppOrchestrator` generic + хук-точки двух сортов (state-bootstrap + display-reload) | constructor-master, Ф5 |
-| 3 | **5.13** — minimal_app финализация + CI-smoke (инвариант 8 архитектуры) | constructor-master, Ф5 |
-
-### Follow-up аудита В1 (Fable, 2026-07-12 — до/вместе с новыми рецептами В2+)
-
-| # | Задача | Где детали |
-|---|---|---|
-| 3a | **AU-1** — снять write-путь top-level `gui_positions` в GUI-save (иначе Save воссоздаёт 4.8-дубль) | constructor-master, Follow-up аудита В1 |
-| 3b | **AU-2** — escape-hatch `inspector` должен переживать GUI round-trip (`extras` в домен-entity Process) | там же |
-| 3c | AU-3..AU-7 (миноры: третий edge тегов, lookup-fallback, snapshot/restore API реестра, тесты в своём модуле, гигиена шимов) — попутно ближайшими волнами | там же |
+| 1a | **AU-1** — снять write-путь top-level `gui_positions` в GUI-save (иначе Save воссоздаёт 4.8-дубль) | constructor-master, Follow-up аудита В1 |
+| 1b | **AU-2** — escape-hatch `inspector` должен переживать GUI round-trip (`extras` в домен-entity Process) | там же |
+| 1c | AU-3..AU-7 (миноры: третий edge тегов, lookup-fallback, snapshot/restore API реестра, тесты в своём модуле, гигиена шимов) — попутно ближайшими волнами | там же |
 
 ### В3 — GUI-конструктор (параллельно/после В2)
 
