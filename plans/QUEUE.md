@@ -28,48 +28,53 @@
 
 | # | Задача | Где детали |
 |---|---|---|
-| 5 | **C6(d)** — generic-механика на runnables `chain_module` (DAG/parallel — chain перестаёт дремать) | [c6-pipeline-engine-design.md](2026-07-06_constructor-master/c6-pipeline-engine-design.md) |
+| 5 | **C6(d)** — generic-механика на runnables `chain_module` (DAG/parallel — chain перестаёт дремать). **Перф-ревью 2026-07-12 п.1:** это механизм бюджета «кадр пересекает границу процесса ≤1–2 раза» (сейчас по рецептам 3–9) — CV-цепочка внутри одного воркера, бюджет внести в acceptance | [c6-pipeline-engine-design.md](2026-07-06_constructor-master/c6-pipeline-engine-design.md) + constructor-master Ф7-преамбула |
 | 6 | **C6(e)** — chain использует пул `worker_module` | там же |
 
-### В4 — Ф7 hot-path (строго одним вскрытием, один агент; GATE G3 перед стартом)
+### В4 — Ф7 hot-path (строго одним вскрытием, один агент; GATE G3 перед стартом; преамбула Ф7 — 3 требования перф-ревью 2026-07-12)
 
 | # | Задача | Где детали |
 |---|---|---|
-| 7 | **G.6** — trace-id/OTel-поля (первым: семантика, не hot-path-риск) | constructor-master, Ф7 |
-| 8 | **G.1** — снять TRACE + perf-пробы + повторный baseline | там же |
+| 7 | **G.6** — trace-id/OTel-поля (первым: семантика, не hot-path-риск) + runtime-счётчик границ процесса на кадр | constructor-master, Ф7 |
+| 8 | **G.1** — снять TRACE + perf-пробы + повторный baseline (FPS, p50/p99, **хопы/кадр**) | там же |
 | 9 | **G.2** — характеризационные тесты доставки + kind-каналы + единый конверт команд | там же |
-| 10 | **G.3** — FrameShm: одна стратегия записи + seqlock + startup-cleanup SHM | там же |
+| 10 | **G.3** — FrameShm: одна стратегия записи + seqlock + startup-cleanup SHM + **громкий pickle-fallback (d)** | там же |
 | 11 | **G.4** — QoS-профили kind + боевой RingBuffer (поглощает 3.3-остаток и QoS live-tail 5.21d) | там же |
 | 12 | **G.5** — снятие двойной конверсии (строго после seqlock) | там же |
-| 13 | **G.7** — приёмка: flip `use_kind_channels`, soak, FPS/p99 ≥ baseline | там же |
-| 14 | **G.8** — drain→detach→stop воркера (поглощает pipeline-live-control Task 3.3) | там же |
+| 13 | **G.9** — GC-дисциплина: `gc.freeze()` + сборка по расписанию; per-frame путь без Pydantic (msgspec/dict, стык с TECH_STACK Волна 1); строго после G.5 | там же |
+| 14 | **G.7** — приёмка: flip `use_kind_channels`, soak, FPS/p99 ≥ baseline, p99 без GC-выбросов | там же |
+| 15 | **G.8** — drain→detach→stop воркера (поглощает pipeline-live-control Task 3.3) | там же |
 
 ### В5 — Supervision-tree + Ф8
 
 | # | Задача | Где детали |
 |---|---|---|
-| 15 | **3.9** — depends_on: порядок старта по readiness апстрима (поднято из «опц» в обязательное — предусловие Ф8) | constructor-master, Ф3 + current-path В5 |
-| 16 | **NEW-6** — стратегии супервизора (rest_for_one/one_for_all, группы, backoff+jitter, эскалация give-up) | current-path §4 |
-| 17 | **NEW-7** — alerting поверх supervisor-событий (gave_up/failed/drop-растёт → громко) | current-path §4 |
-| 18 | **H.1** — ярусы core/optional/frozen + enforcement + **NEW-10** (24/24 interfaces.py, Protocol ObservableMixin, «один вход», contract-тест `__all__`) | constructor-master, Ф8 |
-| 19 | **H.2 (GATE G4)** — исполнение kill-вердиктов G0 per-item, отдельными одобренными коммитами | там же |
-| 20 | **H.3** — Registers⇄StateStore merge (с оглядкой на 3 оси ADR-COMM-006) | там же |
-| 21 | **H.4** — один стандарт логирования прототипа | там же |
-| 22 | **H.5** — ужесточение sentrux + разбор complex functions + перекалибровка метрик приёмки (вопрос R5c) | там же |
-| 23 | **H.6** — финальная сверка, закрытие constructor-master | там же |
+| 16 | **3.9** — depends_on: порядок старта по readiness апстрима (поднято из «опц» в обязательное — предусловие Ф8) | constructor-master, Ф3 + current-path В5 |
+| 17 | **NEW-6** — стратегии супервизора (rest_for_one/one_for_all, группы, backoff+jitter, эскалация give-up) | current-path §4 |
+| 18 | **NEW-7** — alerting поверх supervisor-событий (gave_up/failed/drop-растёт/**pickle-fallback G.3(d)** → громко) | current-path §4 |
+| 19 | **H.1** — ярусы core/optional/frozen + enforcement + **NEW-10** (24/24 interfaces.py, Protocol ObservableMixin, «один вход», contract-тест `__all__`) | constructor-master, Ф8 |
+| 20 | **H.2 (GATE G4)** — исполнение kill-вердиктов G0 per-item, отдельными одобренными коммитами | там же |
+| 21 | **H.3** — Registers⇄StateStore merge (с оглядкой на 3 оси ADR-COMM-006) | там же |
+| 22 | **H.4** — один стандарт логирования прототипа | там же |
+| 23 | **H.5** — ужесточение sentrux + разбор complex functions + перекалибровка метрик приёмки (вопрос R5c) | там же |
+| 24 | **H.6** — финальная сверка, закрытие constructor-master | там же |
 
 ### В6 — Конструктор v1.0 (финал)
 
 | # | Задача | Где детали |
 |---|---|---|
-| 24 | **NEW-9** — packaging: тяжёлые deps → extras → env-алиасы `MPF_*` → свой pyproject у framework | current-path §4/В6 |
-| 25 | **NEW-4** — симметрия ресурсов плагина (configure↔shutdown контракт-тест, SHM owner-теги) | current-path §4 |
-| 26 | **Туториал «своё приложение за час»** + scaffold-генератор (5.14опц) | current-path В6 |
-| 27 | 🏁 **Финальная приёмка: второе продуктовое приложение из «рыбы» за день** + 6 тестов architecture-10-of-10 §0 | [architecture-10-of-10.md](current-path/architecture-10-of-10.md) |
+| 25 | **NEW-9** — packaging: тяжёлые deps → extras → env-алиасы `MPF_*` → свой pyproject у framework (стык с TECH_STACK §11 чистка pyproject) | current-path §4/В6 |
+| 26 | **NEW-4** — симметрия ресурсов плагина (configure↔shutdown контракт-тест, SHM owner-теги) | current-path §4 |
+| 27 | **Туториал «своё приложение за час»** + scaffold-генератор (5.14опц) | current-path В6 |
+| 28 | 🏁 **Финальная приёмка: второе продуктовое приложение из «рыбы» за день** + 6 тестов architecture-10-of-10 §0 | [architecture-10-of-10.md](current-path/architecture-10-of-10.md) |
+
+### Параллельный трек — TECH_STACK 2026 (вне строгой последовательности конструктора)
+
+Стратегия нативного стека — [`docs/direction/TECH_STACK_2026.md`](../docs/direction/TECH_STACK_2026.md) (живой документ, 2026-07-12). Волна 1 (2026 H2, каждый пункт — отдельный план): чистка pyproject (10 мёртвых core-deps) → bump Python 3.13 → `Services/analytics` (Polars) → msgspec на границах (стык с G.9/G.2) → ORT автодетект EP → Rerun dev-extra → пилот PySide6 6.11 → ADR лицензий моделей. Пункты, пересекающиеся с hot-path (msgspec на IPC-пути, бенч msgspec-vs-pickle), — исполнять В СОСТАВЕ Ф7 (G.2/G.9), не отдельно (принцип «одним вскрытием»); остальное (deps, analytics, Rerun, лицензии) — независимо, можно между волнами.
 
 ### Опциональные (решаются по ходу, вне строгого порядка)
 
-1.8 record/replay (решение на GATE G3) · 2.6 JSONL-sink · 4.10 driver watch-from-revision · 3.10 stop/start воркера (drain-часть уже в G.8) · 5.18 depth-reduction (**отложено владельцем** до sentrux Pro root-cause; порог 0.57 до H.5).
+1.8 record/replay (решение на GATE G3) · 2.6 JSONL-sink · 4.10 driver watch-from-revision · 3.10 stop/start воркера (drain-часть уже в G.8) · 5.18 depth-reduction (**отложено владельцем** до sentrux Pro root-cause; порог 0.57 до H.5) · LP-1..LP-5 (находки живого прогона 2026-07-12, constructor-master «Живой прогон»; LP-1 name/description — кандидат на быстрый фикс до В3).
 
 ## Открытые решения владельца
 
