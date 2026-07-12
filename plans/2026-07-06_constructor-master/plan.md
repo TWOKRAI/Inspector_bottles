@@ -292,6 +292,20 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 
 Порядок: AU-1/AU-2 — до массового создания новых рецептов (В2/5.13+); миноры AU-3..AU-7 — попутно ближайшими волнами (AU-6 — вместе с физпереносом assembler/planner). **Статус блока 2026-07-12: закрыт, кроме AU-6** (идёт с физпереносом assembler/planner, см. ADR-RCP-005). Оба merge прошли Fable-ревью (итог: 4 находки на AU-1/AU-2 исправлены итерацией 2; AU-3..7 — код APPROVE, merge-блокер нумерации ADR решён rebase). Объединённый регресс main: fw 4281 + proto 3045 passed.
 
+#### Живой прогон после merge (2026-07-12, GUI + backend-ctl + qt-mcp; рецепты region_pipeline → line_filter_inspect)
+
+**AU-фиксы подтверждены на живой системе:** boot (10 процессов, симулятор 24.5 fps, health ok) → hot-switch на `line_filter_inspect` (7 процессов, 0 broken wires, fps держится, message-fence epoch 0→1) → **живой GUI-save из Pipeline**: top-level `gui_positions` НЕ появился; escape-hatch `inspector` пережил save (`extras.inspector`, все 4 поля); `source_target_fps` → `extras`; позиции/locked_nodes в `blueprint.metadata` целы; top-level `displays`/`devices` не тронуты → пересохранённый формат прочитан boot-путём (`unwrap_recipe` → `SystemBlueprint` → `infer_missing_inspectors`: `extras.inspector` авторитетен, fps дошёл до GenericConfig; 4 wire-ошибки `check()` — артефакт пустого plugin-реестра в голом окружении, у оригинала те же). Файл рецепта после прогона восстановлен из HEAD (тест-артефакт; GUI-save-версия — в scratchpad сессии).
+
+**Найдено вживую (pre-existing, НЕ регрессии AU) — кандидаты в задачи:**
+
+| Метка | Суть | Тяжесть |
+|---|---|---|
+| LP-1 | **GUI-save затирает `blueprint.name`/`description`** → `default`/`''`: `save_to_active_recipe` зовёт `graph_to_blueprint(model)` с дефолтами, реальные name/description рецепта не передаются | major-косметика: потеря авторских полей при каждом Pipeline-save |
+| LP-2 | Комментарии ВНУТРИ `blueprint` гибнут при Save (blueprint заменяется целиком; ruamel хранит комментарии только вне заменяемого ключа) — для рукописных рецептов болезненно | документировать границу или научиться переносить |
+| LP-3 | Шум сериализации: пустые `target_process:`/`description:`/`category:`/`restart_policy: {}`/`metadata: {}`/`extras: {}` у каждого процесса (model_dump без exclude-политики) | косметика |
+| LP-4 | После hot-switch state-дерево держит процессы СТАРОЙ топологии как «running» с растущим uptime (preprocessor/region_splitter/… после ухода с region_pipeline) — наблюдаемость врёт | cleanup state при replace_blueprint |
+| LP-5 | `device_hub` при активации рецепта: «Устройство '55': носитель '23' не подключён» — bridge-устройство поднимается раньше носителя; health ok, breaker closed | minor, порядок auto_connect |
+
 ## Ф7 — Hot-path G (ОДНИМ вскрытием, строго последним, один агент, ~5 дней)
 
 **GATE G3 перед стартом**: routing-epoch влит (3.1); контракты warn живут (4.2); baseline подтверждён; ответ на HP-5 (`replace_blueprint` × in-flight кадр); откат = feature-flag; решение по 1.8.
