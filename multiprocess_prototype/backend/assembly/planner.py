@@ -54,6 +54,7 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
         protected_provider: Callable[[], set[str]],
         current_provider: Callable[[], set[str]],
         *,
+        protected_config_provider: Callable[[str], dict | None] | None = None,
         manager_name: str = "full_replace_planner",
         logger: Any = None,
         error: Any = None,
@@ -67,6 +68,13 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
         self._proc_dicts_fn = proc_dicts_fn
         self._protected_provider = protected_provider
         self._current_provider = current_provider
+        # B-2 (RS-3): живой конфиг protected-процесса (для детекции расхождения
+        # с новым blueprint). None → детекция выключена (обратная совместимость).
+        self._protected_config_provider = protected_config_provider
+        # Имена protected-процессов, чей конфиг в новом рецепте отличается от
+        # живого. Заполняется в commands(); PM читает через
+        # ``_collect_protected_conflicts`` и поднимает в ответ apply + hub.
+        self.last_protected_conflicts: list[str] = []
 
     # -------------------------------------------------------------------------
     # Lifecycle (BaseManager контракт)
@@ -132,9 +140,19 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
         # 1. Валидация + сборка ДО любой stop-команды
         proc_dicts = self._proc_dicts_fn(desired)
 
-        # 2. Protected и текущие (non-protected) из провайдеров
-        protected = self._protected_provider()
+        # 2. Protected = объединение old ∪ new blueprint (B-2, RS-3). Живой protected
+        #    (из провайдера) И помеченный protected в новом рецепте — оба исключаются
+        #    из stop/пересоздания. Раньше бралось только из живого конфига → процесс,
+        #    ставший protected в новом рецепте, мог быть спавнен как non-protected.
+        live_protected = self._protected_provider()
+        new_protected = {n for n, d in proc_dicts.items() if isinstance(d, dict) and d.get("protected")}
+        protected = live_protected | new_protected
         old = self._current_provider()  # живые non-protected, не из аргумента
+
+        # B-2: расхождение конфига protected-процесса между живым и новым рецептом.
+        # protected НЕ рестартится (живёт со старым конфигом) → если новый рецепт
+        # задаёт иной конфиг, это «тихий успех» switch'а. Фиксируем громко.
+        self.last_protected_conflicts = self._detect_protected_conflicts(proc_dicts, protected)
 
         # Новые = из собранных proc_dicts минус protected
         new = [n for n in proc_dicts if n not in protected]
@@ -181,3 +199,30 @@ class FullReplacePlanner(BaseManager, ObservableMixin):
         self._record_metric("planner.commands", len(cmds))
 
         return cmds
+
+    def _detect_protected_conflicts(self, proc_dicts: dict[str, dict], protected: set[str]) -> list[str]:
+        """Имена protected-процессов, чей конфиг в новом рецепте разошёлся с живым.
+
+        protected НЕ перезапускается при switch (живёт со старым конфигом). Если
+        новый blueprint задаёт для protected-имени ИНОЙ конфиг, изменения молча не
+        применятся — switch выглядел бы «успешным». Возвращаем такие имена, чтобы
+        PM поднял их в ответ apply и в ObservabilityHub (не тихо).
+
+        Сравнение apples-to-apples: и живой конфиг (``_process_configs[name]``), и
+        ``proc_dicts[name]`` — результат одного ассемблера. Провайдер не задан →
+        детекция выключена (пустой список).
+        """
+        if self._protected_config_provider is None:
+            return []
+        conflicts: list[str] = []
+        for name in sorted(set(proc_dicts) & protected):
+            live = self._protected_config_provider(name)
+            if live is None:
+                continue  # нет живого (первый boot протектеда) — нечего сравнивать
+            if live != proc_dicts[name]:
+                conflicts.append(name)
+                self._log_error(
+                    f"protected '{name}': конфиг нового рецепта отличается от живого — "
+                    f"protected не рестартится, изменения НЕ будут применены (switch не тихо успешен)"
+                )
+        return conflicts

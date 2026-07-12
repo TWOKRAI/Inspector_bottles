@@ -119,7 +119,11 @@ class ProcessManagerProcess(ProcessModule):
             restart_policy = RestartPolicy(**restart_cfg)
         else:
             _autorestart_on = os.environ.get("FW_AUTORESTART", "1").strip().lower() not in (
-                "0", "false", "no", "off", "",
+                "0",
+                "false",
+                "no",
+                "off",
+                "",
             )
             restart_policy = RestartPolicy(enabled=_autorestart_on)
 
@@ -319,8 +323,7 @@ class ProcessManagerProcess(ProcessModule):
             backend_ctl, SHM-каналы и т.п.).
         """
         processes = {
-            name: {"class": str((cfg or {}).get("class") or "")}
-            for name, cfg in sorted(self._process_configs.items())
+            name: {"class": str((cfg or {}).get("class") or "")} for name, cfg in sorted(self._process_configs.items())
         }
         channels = []
         if self.router_manager is not None and hasattr(self.router_manager, "get_all_channels"):
@@ -735,9 +738,7 @@ class ProcessManagerProcess(ProcessModule):
                 self.send_message(process_name, configure_cmd)
                 info["status"] = "active"
                 reissued += 1
-                self._log_info(
-                    f"wire re-issue: '{wire_key}' переигран в '{process_name}' (role={role})"
-                )
+                self._log_info(f"wire re-issue: '{wire_key}' переигран в '{process_name}' (role={role})")
             except Exception as exc:  # noqa: BLE001 — провод остаётся broken, lifecycle не роняем
                 self._log_error(f"wire re-issue '{wire_key}' в '{process_name}' не удался: {exc}")
         return reissued
@@ -757,6 +758,28 @@ class ProcessManagerProcess(ProcessModule):
             if isinstance(cfg, dict) and cfg.get("protected"):
                 protected.add(proc_name)
         return protected
+
+    def live_process_config(self, name: str) -> dict | None:
+        """Живой (применённый) конфиг процесса из ``_process_configs`` или ``None``.
+
+        B-2 (RS-3): сид ``protected_config_provider`` планировщика — источник
+        «что реально работает» для сравнения с новым blueprint (расхождение
+        конфига protected-процесса → предупреждение, а не тихий успех).
+        """
+        cfg = self._process_configs.get(name)
+        return copy.deepcopy(cfg) if isinstance(cfg, dict) else None
+
+    def _collect_protected_conflicts(self) -> list[str]:
+        """Имена protected-процессов, чей конфиг в новом рецепте разошёлся с живым.
+
+        Планировщик (``FullReplacePlanner``, инъекция прототипа) фиксирует
+        расхождения в ``last_protected_conflicts`` при генерации команд. PM читает
+        их через опциональный атрибут (framework не импортирует прототип). Пусто,
+        если планировщик не подключён или расхождений нет.
+        """
+        planner = getattr(self, "_full_replace_planner", None)
+        conflicts = getattr(planner, "last_protected_conflicts", None) if planner is not None else None
+        return list(conflicts) if conflicts else []
 
     def _cleanup_process_resources(self, name: str) -> None:
         """Снять остановленный процесс с реестров и освободить его ресурсы.
@@ -794,6 +817,82 @@ class ProcessManagerProcess(ProcessModule):
                 forget_fn(name)
             except Exception as exc:
                 self._log_warning(f"cleanup_process_resources: monitor.forget '{name}' не удался: {exc}")
+
+        # LP-4/Ж-2 (RS-2): снять поддерево процесса из StateStore. Без этого
+        # снятый switch'ем процесс висит в дереве как ``running/health ok`` с
+        # растущим uptime (монитор перестал публиковать через forget, но старые
+        # листья остаются) — наблюдаемость врёт, state ≠ ОС-реальность. Единая
+        # точка очистки (симметрия register/unregister): реестр+SHM+монитор+state.
+        self._delete_process_state(name)
+
+    def _delete_process_state(self, name: str) -> None:
+        """Удалить поддерево ``processes.<name>`` из StateStore (локально, без IPC).
+
+        Идёт напрямую через StateStoreManager ProcessManager (тот же локальный путь,
+        что ``ProcessMonitor._publish_state``). Идемпотентно и не бросает: телеметрия
+        не критична для lifecycle. Тихо no-op, если StateStore недоступен.
+        """
+        ssm = getattr(self, "_state_store_manager", None)
+        if ssm is None:
+            return
+        try:
+            ssm.handle_state_delete({"data": {"path": f"processes.{name}", "source": "ProcessManager"}})
+        except Exception as exc:  # nosec B110 — очистка телеметрии не критична
+            self._log_debug(f"_delete_process_state('{name}') не удалось: {exc}")
+
+    def _publish_process_identity(self, name: str) -> None:
+        """Опубликовать ОС-идентичность процесса в StateStore: pid + актуальный config.
+
+        RS-2 (честный state после switch): у КАЖДОГО живого процесса в дереве —
+        реальный ``pid`` (сопоставление state↔ОС) и ``config`` из НОВОГО рецепта
+        (а не из прежней топологии). Публикуется после успешного ``start`` (switch
+        и boot). Локальный путь (без IPC), идемпотентно, не бросает.
+        """
+        ssm = getattr(self, "_state_store_manager", None)
+        if ssm is None:
+            return
+        proc = self._process_registry.get_process_by_name(name)
+        pid = proc.pid if proc is not None else None
+        config = self._process_configs.get(name)
+        try:
+            ssm.handle_state_set({"data": {"path": f"processes.{name}.pid", "value": pid, "source": "ProcessManager"}})
+            if config is not None:
+                ssm.handle_state_set(
+                    {
+                        "data": {
+                            "path": f"processes.{name}.config",
+                            "value": copy.deepcopy(config),
+                            "source": "ProcessManager",
+                        }
+                    }
+                )
+        except Exception as exc:  # nosec B110 — телеметрия не критична
+            self._log_debug(f"_publish_process_identity('{name}') не удалось: {exc}")
+
+    def _publish_unstoppable_alert(self, names: list[str]) -> None:
+        """Опубликовать alert о неостановимых процессах в StateStore (B-3, RS-3).
+
+        Процесс, переживший полную эскалацию (graceful→terminate→kill), исключается
+        из cleanup/пересоздания (защита от дублей), НО не молча: alert в
+        ``system.switch.unstoppable`` виден в GUI/Наблюдаемости, а имя остаётся в
+        реестре/конфигах → СЛЕДУЮЩИЙ switch повторит попытку остановки (retry).
+        Пустой список → снять alert (очистка после успешного switch).
+        """
+        ssm = getattr(self, "_state_store_manager", None)
+        if ssm is None:
+            return
+        try:
+            ssm.handle_state_set(
+                {
+                    "data": {
+                        "path": "system.switch.unstoppable",
+                        "value": sorted(names),
+                        "source": "ProcessManager",
+                    }
+                }
+            )
+        except Exception as exc:  # nosec B110 — alert не критичен для lifecycle
+            self._log_debug(f"_publish_unstoppable_alert({names}) не удалось: {exc}")
 
     def _collect_partial_new(
         self,
@@ -904,6 +1003,8 @@ class ProcessManagerProcess(ProcessModule):
                 f"rollback: остановка НЕ подтверждена для {sorted(unstoppable)} — "
                 f"имена исключены из пересоздания (защита от дублей), retry на следующем switch"
             )
+            # B-3 (RS-3): alert в state/hub — GUI видит зависшие имена, retry на след. switch.
+            self._publish_unstoppable_alert(sorted(unstoppable))
 
         # --- Фаза B: cleanup (реестр + SHM + PSR + конфиг) ---
         for name in to_stop:
@@ -976,9 +1077,7 @@ class ProcessManagerProcess(ProcessModule):
         with self._routing_lock:
             return {"epoch": self._routing_epoch, "incarnations": dict(self._incarnations)}
 
-    def _mirror_routing_to_psr(
-        self, name: str, *, epoch: int | None = None, incarnation: int | None = None
-    ) -> None:
+    def _mirror_routing_to_psr(self, name: str, *, epoch: int | None = None, incarnation: int | None = None) -> None:
         """Best-effort зеркалирование epoch/incarnation в metadata PM-PSR.
 
         Диагностика/консистентность: PM хранит истину в ``_incarnations``/
@@ -1073,10 +1172,7 @@ class ProcessManagerProcess(ProcessModule):
         }
         try:
             comm.broadcast(msg, exclude_self=True)
-            self._log_info(
-                f"routing.refresh разослан (reason={reason}, epoch={epoch}, "
-                f"процессов={len(processes)})"
-            )
+            self._log_info(f"routing.refresh разослан (reason={reason}, epoch={epoch}, процессов={len(processes)})")
             return True
         except Exception as exc:  # noqa: BLE001 — рассылка не должна ронять lifecycle
             self._log_error(f"_broadcast_routing_refresh({reason}) упал: {exc}")
@@ -1338,7 +1434,16 @@ class ProcessManagerProcess(ProcessModule):
 
         self._process_monitor.stop()
         shutdown_timeout = self.get_config("shutdown_timeout") or 5.0
-        self._process_registry.stop_all(timeout=shutdown_timeout)
+        # Ж-4 (RS-3): shutdown ОБЯЗАН подтвердить смерть ВСЕХ детей. stop_all теперь
+        # возвращает карту {name: stopped} (confirmed-death путь). Выживших — громко.
+        stop_results = self._process_registry.stop_all(timeout=shutdown_timeout)
+        if isinstance(stop_results, dict):
+            survivors = sorted(n for n, ok in stop_results.items() if not ok)
+            if survivors:
+                self._log_error(
+                    f"shutdown: дети ВЫЖИЛИ после остановки: {survivors} — смерть не подтверждена "
+                    f"(ручное вмешательство/утечка процессов)"
+                )
         if self._console_manager is not None:
             if hasattr(self._console_manager, "close_all"):
                 self._console_manager.close_all()
@@ -1389,6 +1494,9 @@ class ProcessManagerProcess(ProcessModule):
         self._process_registry.start_all()
         for process in self._process_registry.os_processes:
             self._priority.apply_priority(process)
+        # RS-2: boot-путь — опубликовать pid+config всех стартованных процессов.
+        for process in self._process_registry.os_processes:
+            self._publish_process_identity(process.name)
         return True
 
     def stop_process(self, process_name: str | None = None) -> bool:
@@ -1635,8 +1743,7 @@ class ProcessManagerProcess(ProcessModule):
                         # Прежний код здесь пересоздавал ЖИВЫЕ процессы
                         # поверх самих себя (дубли + зомби).
                         self._log_info(
-                            "apply_topology: провал до исполнения команд — "
-                            "топология не тронута, откат не требуется"
+                            "apply_topology: провал до исполнения команд — топология не тронута, откат не требуется"
                         )
                     resp = {
                         "success": False,
@@ -1669,6 +1776,28 @@ class ProcessManagerProcess(ProcessModule):
                         f"apply_topology: процессы умерли на старте (initialize-провал?): {not_ready} "
                         f"— топология применена, но эти процессы НЕ работают"
                     )
+                # B-4 (RS-2): cleanup-хвост доисполнился, но часть старых ресурсов не
+                # освободилась — громко (не тихий WARNING) наверх и в ObservabilityHub
+                # (self._log_error → logger_manager → store-tap → вкладка Наблюдаемость).
+                cleanup_failures = result.get("cleanup_failures") or []
+                if cleanup_failures:
+                    failed_names = sorted(r.get("process_name", "?") for r in cleanup_failures if isinstance(r, dict))
+                    self._log_error(
+                        f"apply_topology: cleanup не подтверждён для {failed_names} — "
+                        f"топология применена, но их ресурсы/state могли остаться (ghost-риск)"
+                    )
+                # B-2 (RS-3): расхождение конфига protected-процесса между живым и
+                # новым blueprint — switch НЕ «тихо успешен»: конфликты в ответе + громко.
+                conflicts = self._collect_protected_conflicts()
+                if conflicts:
+                    response["protected_conflicts"] = conflicts
+                    self._log_error(
+                        f"apply_topology: protected-процессы с изменённым конфигом в новом рецепте "
+                        f"{sorted(conflicts)} — protected не перезапускается, изменения НЕ применены "
+                        f"(switch не тихо успешен)"
+                    )
+                # B-3 (RS-3): успешный switch без зависших — снять stale unstoppable-alert.
+                self._publish_unstoppable_alert([])
                 # Ф3.1: switch пересоздал очереди — bump epoch + broadcast refresh.
                 epoch = self._refresh_after_topology("topology.apply", result.get("results") or [])
                 if epoch is not None:
@@ -1849,6 +1978,8 @@ class ProcessManagerProcess(ProcessModule):
         failed = sorted(n for n in names if not results.get(n, False))
         if failed:
             self._log_error(f"topology stop_all: остановка НЕ подтверждена для {failed}; карта результатов: {results}")
+            # B-3 (RS-3): alert в state/hub — зависшие имена видны, retry на след. switch.
+            self._publish_unstoppable_alert(failed)
             return False
         return True
 
@@ -1915,5 +2046,10 @@ class ProcessManagerProcess(ProcessModule):
         """Сид start: запустить ранее созданный процесс.
 
         Делегирует в ``start_process`` (находит в реестре, зовёт process.start).
+        RS-2: после успешного старта публикует ОС-идентичность (pid + config
+        нового рецепта) в StateStore — state сходится с ОС-реальностью.
         """
-        return self.start_process(name)
+        started = self.start_process(name)
+        if started:
+            self._publish_process_identity(name)
+        return started

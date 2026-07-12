@@ -376,6 +376,70 @@ class TestPlannerConsistency:
 # ===========================================================================
 
 
+class TestPlannerProtectedConflictsB2:
+    """B-2 (RS-3): расхождение конфига protected-процесса → не тихий успех."""
+
+    def _make_planner_with_live(self, proc_dicts, protected, live_configs):
+        """Планировщик с protected_config_provider из словаря живых конфигов."""
+        return FullReplacePlanner(
+            proc_dicts_fn=MagicMock(return_value=proc_dicts),
+            protected_provider=lambda: set(protected),
+            current_provider=lambda: set(),
+            protected_config_provider=lambda name: live_configs.get(name),
+        )
+
+    def test_divergent_protected_config_recorded(self) -> None:
+        """protected 'devices' с ИНЫМ конфигом в новом рецепте → конфликт зафиксирован."""
+        proc_dicts = {
+            "devices": {"class": "DeviceHub", "protected": True, "config": {"port": 9999}},
+            "worker": {"class": "W"},
+        }
+        live = {"devices": {"class": "DeviceHub", "protected": True, "config": {"port": 1234}}}
+        p = self._make_planner_with_live(proc_dicts, {"devices"}, live)
+
+        cmds = p.commands({"has_changes": True}, {})
+
+        # Расхождение зафиксировано (switch не «тихо успешен»)
+        assert p.last_protected_conflicts == ["devices"]
+        # protected НЕ появляется в командах (не рестартится)
+        per_process = {c.get("process_name") for c in cmds}
+        assert "devices" not in per_process
+        # worker (non-protected) применяется штатно
+        assert "worker" in per_process
+
+    def test_identical_protected_config_no_conflict(self) -> None:
+        """protected с ИДЕНТИЧНЫМ конфигом → нет конфликта (штатный switch)."""
+        proc_dicts = {
+            "devices": {"class": "DeviceHub", "protected": True, "config": {"port": 1234}},
+        }
+        live = {"devices": {"class": "DeviceHub", "protected": True, "config": {"port": 1234}}}
+        p = self._make_planner_with_live(proc_dicts, {"devices"}, live)
+
+        p.commands({"has_changes": True}, {})
+        assert p.last_protected_conflicts == []
+
+    def test_no_live_config_no_conflict(self) -> None:
+        """Нет живого конфига (первый boot protected) → нечего сравнивать."""
+        proc_dicts = {"devices": {"class": "D", "protected": True}}
+        p = self._make_planner_with_live(proc_dicts, {"devices"}, {})
+        p.commands({"has_changes": True}, {})
+        assert p.last_protected_conflicts == []
+
+    def test_new_blueprint_protected_added_to_protected_set(self) -> None:
+        """Процесс, protected в НОВОМ рецепте → исключён из new-фаз (old∪new)."""
+        proc_dicts = {"gui": {"class": "GUI", "protected": True}, "w": {"class": "W"}}
+        # provider живых protected пуст — protected берётся из нового blueprint
+        p = FullReplacePlanner(
+            proc_dicts_fn=MagicMock(return_value=proc_dicts),
+            protected_provider=lambda: set(),
+            current_provider=lambda: set(),
+        )
+        cmds = p.commands({"has_changes": True}, {})
+        per_process = {c.get("process_name") for c in cmds}
+        assert "gui" not in per_process  # protected в новом рецепте — не спавнится как non-protected
+        assert "w" in per_process
+
+
 class TestPlannerObservability:
     def test_record_metric_planner_commands(self) -> None:
         """commands → _record_metric("planner.commands", N) доходит до fake stats."""

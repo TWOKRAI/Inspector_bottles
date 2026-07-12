@@ -54,7 +54,13 @@ class ProcessRegistry:
         return None
 
     def remove_process(self, name: str) -> None:
-        self.os_processes = [p for p in self.os_processes if p.name != name]
+        # B-5 (RS-2): мутация СПИСКА НА МЕСТЕ (slice-assign), а НЕ ребиндинг
+        # `self.os_processes = [...]`. ProcessStatusMonitor захватывает ссылку на
+        # ЭТОТ list-объект в конструкторе (PM: ProcessStatusMonitor(registry.os_processes));
+        # ребиндинг оставлял монитору стейл-алиас старого списка → он перечислял
+        # процессы, снесённые давно (ghost в get_all_status). Slice-assign сохраняет
+        # объект → все держатели алиаса (монитор и пр.) видят снятие немедленно.
+        self.os_processes[:] = [p for p in self.os_processes if p.name != name]
         self._stop_events.pop(name, None)
         # Ф3.2: снять ссылку на ready_event. При restart create_and_register
         # создаст СВЕЖИЙ event (новый объект, а не .clear() — у старого ребёнка
@@ -367,36 +373,33 @@ class ProcessRegistry:
 
         return result
 
-    def stop_all(self, timeout: float = 5.0) -> None:
+    def stop_all(self, timeout: float = 5.0) -> Dict[str, bool]:
+        """Остановить ВСЕ процессы с ПОДТВЕРЖДЕНИЕМ смерти (Ж-4, RS-3).
+
+        Прежняя версия после ``kill`` НЕ делала финальный join и НЕ проверяла факт
+        смерти — на shutdown это оставляло живого ребёнка (наблюдалось дважды за
+        сессию). Теперь делегирует в ``stop_many`` (тот же confirmed-death путь,
+        что switch-дорога B-1): graceful → terminate → kill → ФИНАЛЬНЫЙ join →
+        сверка ``is_alive()``. Возвращает карту ``{name: stopped}`` — caller
+        (``PM.shutdown``) обязан проверить выживших и заявить громко.
+        """
         if self.logger:
             self.logger._log_info(f"Stopping all processes (timeout={timeout}s)...")
-        for ev in self._stop_events.values():
-            ev.set()
-        self._join_all(timeout)
-
-        for process in self.os_processes:
-            if process.is_alive():
-                if self.logger:
-                    self.logger._log_warning(f"Process '{process.name}' did not stop in {timeout}s, terminating...")
-                try:
-                    process.terminate()
-                    process.join(timeout=1.0)
-                except Exception as e:
-                    if self.logger:
-                        self.logger._log_warning(f"Error terminating '{process.name}': {e}")
-
-        for process in self.os_processes:
-            if process.is_alive():
-                if self.logger:
-                    self.logger._log_error(f"Force killing process '{process.name}'")
-                try:
-                    process.kill()
-                except Exception as e:
-                    if self.logger:
-                        self.logger._log_error(f"Error killing '{process.name}': {e}")
-
-        if self.logger:
-            self.logger._log_info("All processes stopped")
+        # Делегируем в stop_many (per-process stop_event + confirmed-death). НЕ трогаем
+        # ОБЩИЙ system_stop_event: он system-wide, в PM не сбрасывается, а stop_all
+        # зовётся и вне shutdown (stop_process(None)) — его установка заглушила бы
+        # последующий start. Подтверждения смерти достаточно per-process эскалации.
+        names = [p.name for p in self.os_processes]
+        results = self.stop_many(names, timeout)
+        survivors = sorted(n for n, stopped in results.items() if not stopped)
+        if survivors and self.logger:
+            self.logger._log_error(
+                f"stop_all: процессы ВЫЖИЛИ после полной эскалации (graceful→terminate→kill): "
+                f"{survivors} — смерть НЕ подтверждена"
+            )
+        elif self.logger:
+            self.logger._log_info("All processes stopped (смерть подтверждена)")
+        return results
 
     def _join_all(self, timeout: float = 5.0) -> None:
         # ОБЩИЙ дедлайн на все процессы: stop_event'ы уже взведены (stop_all +

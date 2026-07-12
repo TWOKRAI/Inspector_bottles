@@ -54,3 +54,48 @@ class TestProcessPriority:
         priority.register_priority("TestProcess", "high")
 
         assert priority.get_priority("TestProcess") == "high"
+
+
+class _RecordingLogger:
+    """Логгер-счётчик уровней для проверки one-shot priority-шума (Ж-5)."""
+
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+        self.debugs: list[str] = []
+        self.infos: list[str] = []
+
+    def _log_warning(self, msg, **kw):
+        self.warnings.append(msg)
+
+    def _log_debug(self, msg, **kw):
+        self.debugs.append(msg)
+
+    def _log_info(self, msg, **kw):
+        self.infos.append(msg)
+
+
+class _FailingPlatform:
+    """Платформа, для которой установка приоритета всегда не удаётся."""
+
+    def apply_priority(self, process, priority_name) -> bool:
+        return False
+
+
+class TestPriorityNoiseOneShotZh5:
+    """Ж-5 (RS-3): «Failed to set priority» — WARNING один раз, дальше debug."""
+
+    def test_repeated_failures_warn_once_then_debug(self) -> None:
+        logger = _RecordingLogger()
+        priority = ProcessPriority(logger=logger, platform_adapter=_FailingPlatform())
+
+        class _FakeProc:
+            def __init__(self, name):
+                self.name = name
+
+        # 5 отказов подряд (как N процессов на каждый switch)
+        for i in range(5):
+            assert priority.set_priority(_FakeProc(f"p{i}"), "normal") is False
+
+        # WARNING ровно один; остальные ушли в debug (шум подавлен, факт сохранён)
+        assert len(logger.warnings) == 1
+        assert len(logger.debugs) == 4

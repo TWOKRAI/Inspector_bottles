@@ -80,7 +80,7 @@ class TestStateStoreManagerInit:
         assert "state.set" in router.registered_handlers
         assert "state.get" in router.registered_handlers
         assert "state.subscribe" in router.registered_handlers
-        assert len(router.registered_handlers) == 7
+        assert len(router.registered_handlers) == 8
 
     def test_initialize_auto_register_ipc_false_skips_raw(self):
         """auto_register_ipc=False: initialize() НЕ регистрирует RAW-обработчики.
@@ -102,7 +102,7 @@ class TestStateStoreManagerInit:
         router = MockRouter()
         mgr = StateStoreManager(router=router)  # без явного флага
         mgr.initialize()
-        assert len(router.registered_handlers) == 7
+        assert len(router.registered_handlers) == 8
 
     def test_shutdown_clears_subscriptions(self):
         """shutdown() удаляет все подписки."""
@@ -215,6 +215,72 @@ class TestStateStoreManagerMerge:
         msg = router.sent_messages[0]
         assert msg["targets"] == ["processor"]
         assert len(msg["data"]["deltas"]) == 2
+
+    def test_merge_commandmanager_form_payload_with_source_key(self):
+        """Ж-3 (RS-2): CommandManager-путь (expects_full_message=False) с payload,
+        содержащим ключ 'source' — НЕ должен падать с «Поле 'data' обязательно».
+
+        Регресс тихого `state.merge failed` на switch: камера публикует
+        `processes.<cam>.state.cam.actual` через proxy.merge, а её actual-параметры
+        содержат ключ 'source' (напр. 'camera://0'). CommandManager разворачивает
+        конверт → handler получает {path, data: payload, source}. Прежний фолбэк
+        «нет path и source в payload» пропускал этот payload (в нём есть 'source').
+        """
+        mgr = StateStoreManager()
+        payload = {"source": "camera://0", "resolution": "1080p"}
+        # msg = развёрнутый конверт (top-level path + data), как отдаёт CommandManager
+        result = mgr.handle_state_merge({"path": "processes.cam0.state.cam.actual", "data": payload, "source": "cam0"})
+        assert result["status"] == "ok"
+        assert result["changes_count"] == 2
+        assert mgr.store.get("processes.cam0.state.cam.actual.source") == "camera://0"
+
+    def test_merge_commandmanager_form_payload_with_path_key(self):
+        """Ж-3: тот же путь, но payload содержит ключ 'path' (device-config)."""
+        mgr = StateStoreManager()
+        payload = {"path": "/dev/video0", "fps": 30}
+        result = mgr.handle_state_merge({"path": "processes.dev.state", "data": payload, "source": "dev"})
+        assert result["status"] == "ok"
+        assert mgr.store.get("processes.dev.state.path") == "/dev/video0"
+        assert mgr.store.get("processes.dev.state.fps") == 30
+
+
+class TestStateStoreManagerDelete:
+    """Тесты handle_state_delete (RS-2: очистка ghost-поддерева при cleanup)."""
+
+    def test_delete_existing_subtree(self):
+        """Удаление существующего поддерева процесса."""
+        mgr = StateStoreManager(initial_state={"processes": {"preproc": {"state": {"status": "running"}}}})
+        result = mgr.handle_state_delete({"data": {"path": "processes.preproc", "source": "PM"}})
+        assert result["status"] == "ok"
+        assert result["changed"] is True
+        assert mgr.store.get("processes.preproc", None) is None
+
+    def test_delete_missing_is_idempotent(self):
+        """Удаление отсутствующего узла — не ошибка (changed=False)."""
+        mgr = StateStoreManager()
+        result = mgr.handle_state_delete({"data": {"path": "processes.ghost", "source": "PM"}})
+        assert result["status"] == "ok"
+        assert result["changed"] is False
+
+    def test_delete_missing_path(self):
+        """Отсутствие path — ошибка."""
+        mgr = StateStoreManager()
+        result = mgr.handle_state_delete({"data": {"source": "PM"}})
+        assert result["status"] == "error"
+
+    def test_delete_dispatches_delta(self):
+        """delete с подпиской — дельта рассылается подписчику."""
+        router = MockRouter()
+        mgr = StateStoreManager(router=router)
+        # Значение ставим ДО подписки (set не рассылается — подписчика ещё нет).
+        mgr.handle_state_set({"data": {"path": "processes.p.x", "value": 1, "source": "s"}})
+        mgr.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": "gui"}})
+        router.sent_messages.clear()  # игнорируем возможный initial-snapshot подписки
+        mgr.handle_state_delete({"data": {"path": "processes.p", "source": "PM"}})
+        assert len(router.sent_messages) == 1
+        assert router.sent_messages[0]["targets"] == ["gui"]
+        deltas = router.sent_messages[0]["data"]["deltas"]
+        assert any(d["path"] == "processes.p" for d in deltas)
 
 
 class TestStateStoreManagerGet:
@@ -408,6 +474,7 @@ class TestStateStoreManagerRegister:
         expected = {
             "state.set",
             "state.merge",
+            "state.delete",
             "state.get",
             "state.get_subtree",
             "state.subscribe",
@@ -424,7 +491,7 @@ class TestStateStoreManagerRegister:
         mgr = StateStoreManager()
         router = MockRouter()
         mgr.register_message_handlers(router)
-        assert len(router.registered_handlers) == 7
+        assert len(router.registered_handlers) == 8
         assert "state.set" in router.registered_handlers
 
 

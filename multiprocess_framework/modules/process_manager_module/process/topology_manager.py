@@ -65,6 +65,12 @@ class TopologyManager(BaseManager, ObservableMixin):
         stats: менеджер статистики (ObservableMixin).
     """
 
+    # B-4 (RS-2): команды, чей сбой НЕ обрывает apply (destructive-idempotent).
+    # cleanup снимает уже-остановленный процесс с реестров/SHM/PSR/state — его
+    # неудача на одном имени не должна оставить cleanup-хвост других имён
+    # неисполненным (ghost-процессы Ж-2). Отказы копятся в cleanup_failures.
+    _BEST_EFFORT_CMDS: frozenset[str] = frozenset({"process.cleanup"})
+
     def __init__(
         self,
         *,
@@ -184,16 +190,31 @@ class TopologyManager(BaseManager, ObservableMixin):
                 f"Топология: применение {len(commands)} команд (текущая={'есть' if self._current_topology else 'нет'})"
             )
 
+            # B-4 (RS-2): cleanup — destructive-idempotent фаза. Её сбой НЕ должен
+            # обрывать список: остальные cleanup-команды снимают ДРУГИЕ старые имена
+            # (реестр/SHM/PSR/state), иначе их записи остаются ghost-процессами
+            # (Ж-2). «Никогда оборвали и ушли»: cleanup-хвост доисполняется, отказы
+            # копятся в cleanup_failures (громко, но без отката успешной новой
+            # топологии). Hard-fail конструктивных фаз (stop/provision/create/start)
+            # по-прежнему абортит → откат в PM.
+            cleanup_failures: list[dict] = []
+
             for idx, cmd in enumerate(commands):
                 result = self._execute_command(cmd)
                 results.append(result)
 
                 # Проверить soft-fail: сид вернул success=False без exception
                 if not result.get("success", True):
+                    cmd_type = cmd.get("cmd", "?")
+                    if cmd_type in self._BEST_EFFORT_CMDS:
+                        cleanup_failures.append(result)
+                        self._log_error(
+                            f"Топология: cleanup #{idx} ({cmd_type}) неуспешен — "
+                            f"продолжаем cleanup-хвост (компенсация B-4): {result}"
+                        )
+                        continue
                     elapsed_ms = (time.perf_counter() - t_start) * 1000
-                    self._log_error(
-                        f"Топология: команда #{idx} ({cmd.get('cmd', '?')}) завершилась неуспешно: {result}"
-                    )
+                    self._log_error(f"Топология: команда #{idx} ({cmd_type}) завершилась неуспешно: {result}")
                     self._record_timing("topology.apply_ms", elapsed_ms)
                     return {
                         "success": False,
@@ -201,7 +222,7 @@ class TopologyManager(BaseManager, ObservableMixin):
                         "failed_at": idx,
                     }
 
-            # Все команды успешны — коммитим топологию
+            # Все КОНСТРУКТИВНЫЕ команды успешны — коммитим топологию.
             self._current_topology = topology_dict
 
             elapsed_ms = (time.perf_counter() - t_start) * 1000
@@ -209,12 +230,17 @@ class TopologyManager(BaseManager, ObservableMixin):
             self._record_metric("topology.commands", len(commands))
             self._record_timing("topology.apply_ms", elapsed_ms)
 
-            return {
+            response = {
                 "success": True,
                 "applied": len(commands),
                 "diff": diff,
                 "results": results,
             }
+            if cleanup_failures:
+                # Новая топология применена, но часть старых ресурсов не освободилась —
+                # громко наверх (PM → ObservabilityHub), без отката работающих новых.
+                response["cleanup_failures"] = cleanup_failures
+            return response
         except Exception as e:
             elapsed_ms = (time.perf_counter() - t_start) * 1000
             self._log_error(f"Топология: ошибка apply: {e}")

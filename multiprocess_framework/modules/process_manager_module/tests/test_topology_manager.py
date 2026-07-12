@@ -389,6 +389,85 @@ class TestApplyOrdering:
         ]
 
 
+class TestCleanupTailCompensation:
+    """B-4 (RS-2): сбой cleanup-команды НЕ обрывает cleanup-хвост других имён."""
+
+    def _five_phase_commands(self):
+        return [
+            {"cmd": "process.stop_all", "process_names": ["old_1", "old_2", "old_3"]},
+            {"cmd": "process.cleanup", "process_name": "old_1"},
+            {"cmd": "process.cleanup", "process_name": "old_2"},  # <- инжект сбоя здесь
+            {"cmd": "process.cleanup", "process_name": "old_3"},
+            {"cmd": "process.provision", "process_name": "new_1", "proc_dict": {}},
+            {"cmd": "process.create", "process_name": "new_1", "proc_dict": {}},
+            {"cmd": "process.start", "process_name": "new_1"},
+        ]
+
+    def test_cleanup_soft_fail_middle_phase_tail_still_runs(self) -> None:
+        """Инжект сбоя средней cleanup-команды → остальные cleanup исполнены,
+        switch применён (не оборван), отказ поднят в cleanup_failures."""
+        call_log: list[str] = []
+
+        def make_fn(label):
+            def fn(name, *args):
+                call_log.append(f"{label}:{name}")
+                return True
+
+            return fn
+
+        def cleanup_fn(name):
+            call_log.append(f"cleanup:{name}")
+            return name != "old_2"  # old_2 soft-fail
+
+        tm = TopologyManager(
+            stop_all_process_fn=lambda names: call_log.append("stop_all") or True,
+            cleanup_process_fn=cleanup_fn,
+            provision_process_fn=make_fn("provision"),
+            create_process_fn=make_fn("create"),
+            start_process_fn=make_fn("start"),
+            diff_fn=MagicMock(return_value={"has_changes": True}),
+            commands_fn=MagicMock(return_value=self._five_phase_commands()),
+        )
+
+        result = tm.apply({"desired": True})
+
+        # Switch применён (best-effort cleanup не абортит новую топологию)
+        assert result["success"] is True
+        # cleanup-хвост ДОИСПОЛНЕН: old_3 очищен ПОСЛЕ сбоя old_2
+        assert "cleanup:old_3" in call_log
+        assert call_log.index("cleanup:old_2") < call_log.index("cleanup:old_3")
+        # Конструктивные фазы прошли
+        assert "provision:new_1" in call_log
+        assert "start:new_1" in call_log
+        # Отказ поднят громко наверх
+        assert "cleanup_failures" in result
+        failed = [r.get("process_name") for r in result["cleanup_failures"]]
+        assert failed == ["old_2"]
+        # Топология закоммичена (новая применена)
+        assert tm.current_topology == {"desired": True}
+
+    def test_constructive_fail_still_aborts(self) -> None:
+        """Сбой конструктивной фазы (provision) по-прежнему абортит → success False."""
+        commands = [
+            {"cmd": "process.stop_all", "process_names": ["old_1"]},
+            {"cmd": "process.cleanup", "process_name": "old_1"},
+            {"cmd": "process.provision", "process_name": "new_1", "proc_dict": {}},
+            {"cmd": "process.create", "process_name": "new_1", "proc_dict": {}},
+        ]
+        tm = TopologyManager(
+            stop_all_process_fn=lambda names: True,
+            cleanup_process_fn=lambda n: True,
+            provision_process_fn=lambda n, pd: False,  # hard-fail
+            create_process_fn=lambda n, pd: True,
+            diff_fn=MagicMock(return_value={"has_changes": True}),
+            commands_fn=MagicMock(return_value=commands),
+        )
+        result = tm.apply({"desired": True})
+        assert result["success"] is False
+        assert result["failed_at"] == 2  # provision index
+        assert tm.current_topology is None  # НЕ закоммичено
+
+
 class TestApplyFailPaths:
     """apply() НЕ коммитит _current_topology при неуспехе."""
 

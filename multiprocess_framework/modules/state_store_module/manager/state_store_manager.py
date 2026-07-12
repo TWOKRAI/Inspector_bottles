@@ -197,17 +197,30 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         Returns:
             dict с результатом операции или ошибкой.
         """
-        data = self._extract_data(msg)
-        # Коллизия ключа "data": payload state.merge сам содержит ключ "data"
-        # (merge-словарь). Через CommandManager-диспетчер msg приходит уже развёрнутым
-        # ({path, data, source}), и _extract_data разворачивает ещё раз — возвращает
-        # merge-словарь без path/source. Если развёрнутое не похоже на payload merge
-        # (нет ни path, ни source) — значит msg уже был payload'ом, берём его.
-        if "path" not in data and "source" not in data:
-            data = msg
-        path = data.get("path", "")
-        merge_data = data.get("data")
-        source = data.get("source", "")
+        # Коллизия ключа "data" (Ж-3, RS-2): конверт команды state.merge —
+        # ``{path, data, source}``, где ВЛОЖЕННЫЙ "data" = merge-payload. Обобщённый
+        # ``_extract_data`` (конвенция «data-конверт») разворачивал бы msg по ключу
+        # "data" ещё раз и возвращал сам payload. Прежний фолбэк «нет ни path, ни
+        # source → это payload» ломался, когда payload САМ содержит ключ "source"
+        # или "path" (напр. camera actual: {"source": "camera://0", ...},
+        # device-config с "path") → merge_data=None → тихий «Поле 'data' обязательно».
+        #
+        # Честный контракт: конверт команды — ``{path, <merge>, source}``, где
+        # merge-payload лежит под ключом "data". Отличаем ДВА входа по ТОП-УРОВНЮ
+        # самого msg, НЕ по содержимому payload (прежний фолбэк ломался, когда
+        # payload сам нёс "path"/"source"):
+        #   (B) развёрнутый data (CommandManager, expects_full_message=False):
+        #       msg САМ конверт — имеет top-level "path" И "data" (payload — сиблинг path).
+        #   (A) full message (router, expects_full_message=True):
+        #       top-level "path" нет ("command"/"data"/"sender") → конверт вложен в msg["data"].
+        if "path" in msg and "data" in msg:
+            envelope = msg  # (B): msg уже конверт, payload = msg["data"]
+        else:
+            inner = msg.get("data")
+            envelope = inner if isinstance(inner, dict) else msg  # (A): развернуть один раз
+        path = envelope.get("path", "")
+        merge_data = envelope.get("data")
+        source = envelope.get("source", "")
 
         if merge_data is None or not isinstance(merge_data, dict):
             return {"status": "error", "error": "Поле 'data' обязательно и должно быть dict"}
@@ -234,6 +247,37 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
             }
         except (ValueError, TypeError) as exc:
             self._log_warning(f"state.merge ошибка: {exc}")
+            return {"status": "error", "error": str(exc)}
+
+    def handle_state_delete(self, msg: dict) -> dict | None:
+        """Обработчик state.delete: удалить узел/поддерево по пути.
+
+        msg.data: {path: str, source: str}
+
+        Нужен для честной очистки дерева при cleanup процесса (RS-2/Ж-2/LP-4):
+        после switch снятые процессы не должны висеть как ``running`` — их
+        поддерево ``processes.<name>`` удаляется единой точкой очистки
+        (``PM._cleanup_process_resources``). Идемпотентен: удаление отсутствующего
+        узла — не ошибка (``changed: False``).
+
+        Returns:
+            dict с результатом операции или ошибкой.
+        """
+        data = self._extract_data(msg)
+        path = data.get("path", "")
+        source = data.get("source", "")
+
+        if not path or not isinstance(path, str):
+            return {"status": "error", "error": "Поле 'path' обязательно и должно быть строкой"}
+
+        try:
+            delta = self._store.delete(path, source=source)
+            if delta is not None:
+                self._dispatcher.dispatch_single(delta)
+                return {"status": "ok", "path": path, "changed": True}
+            return {"status": "ok", "path": path, "changed": False}
+        except (ValueError, TypeError) as exc:
+            self._log_warning(f"state.delete ошибка: {exc}")
             return {"status": "error", "error": str(exc)}
 
     def handle_state_get(self, msg: dict) -> dict:
@@ -435,6 +479,7 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         commands = {
             "state.set": (self.handle_state_set, "Установить значение в дереве"),
             "state.merge": (self.handle_state_merge, "Глубокий merge dict в поддерево"),
+            "state.delete": (self.handle_state_delete, "Удалить узел/поддерево по пути"),
             "state.get": (self.handle_state_get, "Прочитать значение из дерева"),
             "state.get_subtree": (self.handle_state_get_subtree, "Прочитать поддерево"),
             "state.subscribe": (self.handle_state_subscribe, "Подписаться на изменения"),
@@ -464,6 +509,7 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         handlers = {
             "state.set": self.handle_state_set,
             "state.merge": self.handle_state_merge,
+            "state.delete": self.handle_state_delete,
             "state.get": self.handle_state_get,
             "state.get_subtree": self.handle_state_get_subtree,
             "state.subscribe": self.handle_state_subscribe,
