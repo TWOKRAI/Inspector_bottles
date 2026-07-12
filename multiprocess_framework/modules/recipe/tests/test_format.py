@@ -43,8 +43,10 @@ def test_top_level_gui_positions_never_written() -> None:
     assert out["blueprint"]["metadata"]["gui_positions"] == {"n1": [1.0, 2.0]}
 
 
-def test_strips_legacy_top_level_gui_positions() -> None:
-    # AU-1: старый top-level дубль на диске вычищается на запись (GUI-save = канонизатор).
+def test_legacy_top_level_gui_positions_absent_from_result() -> None:
+    # AU-1: legacy top-level дубль из raw НЕ попадает в возвращаемый dict (pure-функция).
+    # Это НЕ значит удаление ключа с диска — реальный writer (update_yaml_preserving)
+    # отсутствующие ключи не трёт, см. test_yaml_io. Гарантия — «Save не создаёт дубль».
     raw = {"name": "cup", "gui_positions": {"n1": [9.0, 9.0]}}
     out = normalize_recipe_v3_raw(raw, {"processes": []})
     assert "gui_positions" not in out

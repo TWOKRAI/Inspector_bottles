@@ -32,7 +32,8 @@ def test_strips_legacy_data_and_meta():
 
 
 def test_top_level_gui_positions_never_written():
-    # AU-1: top-level gui_positions не пишется, а legacy-дубль из raw вычищается.
+    # AU-1: top-level gui_positions не попадает в возвращаемый dict (в т.ч. legacy из raw).
+    # Про диск-эффект (writer не удаляет отсутствующие ключи) — см. recipe/tests/test_yaml_io.
     raw = {"name": "demo", "gui_positions": {"old": [9.0, 9.0]}}
     bp = {"processes": [], "wires": [], "displays": []}
 

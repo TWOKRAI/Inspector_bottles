@@ -436,9 +436,11 @@ class LayoutController:
             bp_dict["displays"] = bindings
             # free-layout Task 2/3: layout живёт ТОЛЬКО в blueprint.metadata — именно
             # оттуда его читает load_topology_from_config и cold-start (unwrap_recipe
-            # сохраняет blueprint.metadata). Top-level gui_positions больше не пишем:
-            # его не читает ни один live-путь (аудит Ф4.8, AU-1), а normalize_recipe_v3_raw
-            # вычищает legacy-дубль на запись — канонизация durable.
+            # сохраняет blueprint.metadata). Top-level gui_positions больше не пишем: его
+            # не читает ни один live-путь (аудит Ф4.8, AU-1), а normalize_recipe_v3_raw не
+            # включает его в результат — Save больше не ВОССОЗДАЁТ удалённый 4.8-дубль.
+            # (Физически удалить уже лежащий на диске top-level дубль — задача миграции
+            # canonicalize_gui_positions; update_yaml_preserving отсутствующие ключи не трёт.)
             metadata = dict(bp_dict.get("metadata") or {})
             metadata["gui_positions"] = gui_positions
             metadata["locked_nodes"] = sorted(self._locked_nodes)

@@ -8,10 +8,19 @@ Purpose:
       - top-level ``blueprint`` (displays ВНУТРИ ``blueprint.displays``);
       - прочие top-level ключи (name/version/description/…) не тронуты;
       - остаточный legacy-мусор ``data:``/``meta:`` (от старой порчи движком) убирается;
-      - legacy top-level ``gui_positions`` вычищается: канонические позиции живут в
+      - top-level ``gui_positions`` НЕ пишется в результат: канонические позиции живут в
         ``blueprint.metadata.gui_positions`` (их кладёт вызывающий), а top-level-дубль
-        не читает ни один live-путь (аудит Ф4.8, AU-1). Так GUI-save становится
-        канонизатором — старый дубль не переживает перезапись.
+        не читает ни один live-путь (аудит Ф4.8, AU-1). Значит явный GUI-Save больше не
+        ВОССОЗДАЁТ удалённый 4.8-дубль.
+
+    ВАЖНО (граница AU-1): это pure-функция — она возвращает dict БЕЗ top-level
+    ``gui_positions``. Физически УДАЛИТЬ уже существующий на диске ключ она не может:
+    типичный писатель ``RecipeStore.save_raw`` → ``update_yaml_preserving`` МЕРЖИТ только
+    присутствующие в result ключи и НЕ удаляет отсутствующие (сохранность комментариев).
+    Поэтому на legacy-рецептах, где top-level ``gui_positions`` уже лежит на диске, он
+    останется до прогона миграции ``recipes/migrations/canonicalize_gui_positions.py``
+    (её задача — физическое удаление). Гарантия AU-1 — «Save не создаёт НОВЫЙ дубль», а не
+    «Save чистит старый».
 
     Результат пишется через comment-preserving writer (ruamel round-trip) — комментарии
     целы.
@@ -45,18 +54,20 @@ def normalize_recipe_v3_raw(
     Pre:
       - raw — dict (копируется, не мутируется).
     Post:
-      - результат — копия raw без ключей ``data``/``meta``/``gui_positions``,
-        с ``blueprint`` = переданному.
+      - результат (возвращаемый dict) — копия raw без ключей ``data``/``meta``/
+        ``gui_positions``, с ``blueprint`` = переданному. Диск-эффект зависит от
+        писателя (см. предупреждение в докстринге модуля).
 
     Returns:
         Новый dict (копия raw) с обновлёнными top-level секциями, без ``data``/``meta``
-        и без legacy top-level ``gui_positions``.
+        и без top-level ``gui_positions``.
     """
     result = dict(raw)
     result.pop("data", None)  # legacy-envelope от старой порчи — выкидываем
     result.pop("meta", None)
-    # legacy top-level дубль позиций: канонические лежат в blueprint.metadata,
-    # top-level никто не читает (аудит Ф4.8, AU-1) — вычищаем на запись.
+    # top-level дубль позиций не попадает в результат: канонические лежат в
+    # blueprint.metadata, top-level никто не читает (аудит Ф4.8, AU-1). Это не пишет
+    # НОВЫЙ дубль; удаление уже существующего на диске — задача миграции (см. докстринг).
     result.pop("gui_positions", None)
     result["blueprint"] = blueprint
     return result
