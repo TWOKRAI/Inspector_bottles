@@ -551,7 +551,6 @@ class RecipesPresenter:
             "wires": topo.get("wires", []),
             "displays": topo.get("displays", []),
         }
-        gui_positions = topo.get("gui_positions", {})
 
         raw = self._store.read_raw(target_slug)
         if raw is None:
@@ -564,7 +563,7 @@ class RecipesPresenter:
             # сохраняются. save_raw пишет с комментариями (ruamel round-trip).
             from multiprocess_prototype.recipes.format import normalize_recipe_v3_raw
 
-            self._store.save_raw(target_slug, normalize_recipe_v3_raw(raw, blueprint, gui_positions))
+            self._store.save_raw(target_slug, normalize_recipe_v3_raw(raw, blueprint))
             self._log_info(f"RecipesPresenter.on_save: топология сохранена в '{target_slug}'")
             return True
         except Exception as exc:  # noqa: BLE001

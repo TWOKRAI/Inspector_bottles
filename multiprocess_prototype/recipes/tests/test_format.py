@@ -31,14 +31,13 @@ def test_strips_legacy_data_and_meta():
     assert "meta" not in out
 
 
-def test_gui_positions_written_only_if_present():
-    raw = {"name": "demo"}
+def test_top_level_gui_positions_never_written():
+    # AU-1: top-level gui_positions не пишется, а legacy-дубль из raw вычищается.
+    raw = {"name": "demo", "gui_positions": {"old": [9.0, 9.0]}}
     bp = {"processes": [], "wires": [], "displays": []}
 
-    assert "gui_positions" not in normalize_recipe_v3_raw(raw, bp)
-    assert "gui_positions" not in normalize_recipe_v3_raw(raw, bp, {})
-    out = normalize_recipe_v3_raw(raw, bp, {"n": [1.0, 2.0]})
-    assert out["gui_positions"] == {"n": [1.0, 2.0]}
+    out = normalize_recipe_v3_raw(raw, bp)
+    assert "gui_positions" not in out
 
 
 def test_does_not_mutate_input_raw():
