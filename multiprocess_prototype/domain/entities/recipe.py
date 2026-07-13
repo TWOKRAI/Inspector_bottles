@@ -69,7 +69,12 @@ class Recipe(SchemaBase):
     )
     active_services: Annotated[
         tuple[str, ...],
-        FieldMeta("Список активных сервисов (service_id)"),
+        FieldMeta(
+            "Список активных сервисов (service_id). "
+            "ЗАМОРОЖЕНО (RS-7, решение владельца 2026-07-13): резерв — пишется пустым "
+            "при создании рецепта, GUI-редактирования нет; разморозка при появлении "
+            "реального потребителя per-recipe сервисов"
+        ),
     ] = ()
     displays: Annotated[
         tuple[DisplayDefinition, ...],

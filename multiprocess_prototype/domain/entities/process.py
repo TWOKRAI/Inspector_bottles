@@ -52,7 +52,12 @@ class Process(SchemaBase):
     ] = Field(default=())
     workers: Annotated[
         tuple[WorkerSpec, ...],
-        FieldMeta("Воркеры (потоки) процесса — конфигурируемые сущности"),
+        FieldMeta(
+            "Воркеры (потоки) процесса — конфигурируемые сущности. "
+            "ВНИМАНИЕ (RS-7, решение владельца 2026-07-13): поле сохраняется в рецепт, "
+            "но ПОКА НЕ влияет на рантайм — доводится до worker_module попутно с C6(e) "
+            "(chain использует пул воркеров), см. constructor-master"
+        ),
     ] = Field(default=())
     process_class: Annotated[
         str | None,
