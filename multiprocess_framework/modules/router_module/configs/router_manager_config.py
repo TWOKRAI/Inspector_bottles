@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """RouterManagerConfig — плоская схема RouterManager."""
+
 from __future__ import annotations
 
 from typing import Annotated, Literal
@@ -25,3 +26,14 @@ class RouterManagerConfig(SchemaBase):
             info="Используется ProcessManagers при инициализации.",
         ),
     ] = True
+    use_kind_channels: Annotated[
+        bool,
+        FieldMeta(
+            "Резолвить исходящие через kind-каналы {proc}_{kind} (Ф7 G.2)",
+            info=(
+                "OFF (дефолт) — прежний резолв через dispatcher/targets, бит-в-бит. "
+                "ON — resolve_channel_kind → channel_name(target, kind). "
+                "env-override: MULTIPROCESS_USE_KIND_CHANNELS."
+            ),
+        ),
+    ] = False

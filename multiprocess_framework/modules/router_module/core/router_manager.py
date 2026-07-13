@@ -6,6 +6,7 @@ RouterManager — наследник ChannelRoutingManager.
 channel_dispatcher (outgoing routing) и event_dispatcher (incoming handling).
 """
 
+import os
 import threading
 import time
 import uuid
@@ -15,6 +16,7 @@ from ...channel_routing_module import ChannelRoutingManager
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ...message_module import AddressValidationError, is_broadcast, split_address
 from ..interfaces import IMessageChannel
+from ..routing import UnknownMessageTypeError, channel_name, resolve_channel_kind
 
 from ._sender import AsyncSender
 from ._receiver import AsyncReceiver
@@ -52,6 +54,7 @@ class RouterManager(ChannelRoutingManager):
         send_queue_size: int = 512,
         logger: Optional[Any] = None,
         relay_hub: Optional[str] = "ProcessManager",
+        use_kind_channels: Optional[bool] = None,
         **kwargs: Any,
     ) -> None:
         managers = kwargs.pop("managers", {})
@@ -78,6 +81,9 @@ class RouterManager(ChannelRoutingManager):
         # процессе доставить некому (нет ни очереди, ни канала — внешний подписчик
         # зарегистрирован каналом только в хабе). None/"" = relay выключен.
         self._relay_hub = relay_hub
+        # Ф7 G.2 (kind-каналы за флагом): дефолт OFF → резолв бит-в-бит прежний.
+        # Приоритет: явный аргумент (не None) > env MULTIPROCESS_USE_KIND_CHANNELS > False.
+        self._use_kind_channels = self._resolve_use_kind_channels(use_kind_channels)
         self._sender = AsyncSender(
             name=manager_name,
             send_fn=self._do_send,
@@ -1103,13 +1109,51 @@ class RouterManager(ChannelRoutingManager):
             return message.to_dict()
         return dict(message)
 
+    @staticmethod
+    def _resolve_use_kind_channels(explicit: Optional[bool]) -> bool:
+        """Разрешить флаг use_kind_channels (Ф7 G.2).
+
+        Приоритет: явный аргумент (не None) > env MULTIPROCESS_USE_KIND_CHANNELS
+        (truthy) > False. env — escape-hatch для smoke/CI без правки конфига.
+        """
+        if explicit is not None:
+            return bool(explicit)
+        raw = os.environ.get("MULTIPROCESS_USE_KIND_CHANNELS", "")
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+
+    def _resolve_kind_channels(self, msg_dict: Dict[str, Any]) -> List[IMessageChannel]:
+        """Резолв исходящего в kind-каналы ``{target}_{kind}`` (Ф7 G.2, флаг ON).
+
+        Нормализует kind билета через ``resolve_channel_kind`` (state.* → state,
+        command → system, data → data, …) и для каждого получателя ищет канал
+        ``channel_name(process, kind)`` в реестре. Возвращает только реально
+        зарегистрированные каналы; пустой список → вызывающий падает в прежний
+        путь (dispatcher/targets). Неизвестный kind — не резолвим (пусто).
+        """
+        try:
+            kind = resolve_channel_kind(msg_dict)
+        except UnknownMessageTypeError:
+            return []
+        targets = msg_dict.get("targets") or []
+        if not targets:
+            return []
+        snapshot = self._channel_registry.snapshot()
+        resolved: List[IMessageChannel] = []
+        for target in targets:
+            process = str(target).split(".", 1)[0]  # иерархический адрес → процесс
+            ch = snapshot.get(channel_name(process, kind))
+            if ch is not None:
+                resolved.append(ch)
+        return resolved
+
     def _resolve_channels(self, msg_dict: Dict[str, Any]) -> List[IMessageChannel]:
         """Найти каналы для исходящего сообщения.
 
         Приоритет:
           1. msg["channel"] задан явно → прямой O(1) lookup
-          2. channel_dispatcher.dispatch() → str | List[str] (имена каналов)
-          3. [] → ошибка
+          2. Ф7 G.2 (флаг ON): kind-каналы {target}_{kind}, если зарегистрированы
+          3. channel_dispatcher.dispatch() → str | List[str] (имена каналов)
+          4. [] → ошибка
         """
         ch_name = msg_dict.get("channel")
         # "queue" — легаси-дефолт из MESSAGE_TYPE_DEFAULTS, а НЕ реальный канал Router
@@ -1121,6 +1165,14 @@ class RouterManager(ChannelRoutingManager):
                 return [ch]
             self._log_warning(f"channel '{ch_name}' not registered")
             return []
+
+        # Ф7 G.2: kind-каналы за флагом. Дефолт OFF → блок пропускается, резолв
+        # ниже бит-в-бит прежний. ON → пробуем {target}_{kind}; если такие каналы
+        # зарегистрированы, они выигрывают, иначе аддитивно падаем в dispatcher.
+        if self._use_kind_channels:
+            kind_channels = self._resolve_kind_channels(msg_dict)
+            if kind_channels:
+                return kind_channels
 
         key_field = "command" if msg_dict.get("command") else "type"
         if not msg_dict.get(key_field):
