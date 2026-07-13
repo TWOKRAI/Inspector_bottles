@@ -1,0 +1,21 @@
+/* === text_input.qss — QLineEdit, QPlainTextEdit, QTextEdit === */
+
+/* ===================== LINE EDIT ===================== */
+QLineEdit, QPlainTextEdit, QTextEdit {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
+    border: 1px solid @shadow_4xl;
+    border-bottom: 1px solid @glow_sm;
+    border-radius: @radius_md;
+    padding: @input_padding;
+    color: @text_0;
+    font-family: "@font_family_mono", monospace;
+    selection-background-color: @accent;
+}
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {
+    border: 1px solid @accent;
+}
+QLineEdit:disabled, QPlainTextEdit:disabled, QTextEdit:disabled {
+    color: @text_3;
+    background: @input_disabled_bg;
+}

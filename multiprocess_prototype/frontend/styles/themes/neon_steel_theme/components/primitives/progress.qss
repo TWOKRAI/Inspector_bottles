@@ -1,0 +1,21 @@
+/* === progress.qss — QProgressBar === */
+
+/* ===================== PROGRESS BAR ===================== */
+QProgressBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
+    border: 1px solid @shadow_3xl;
+    border-radius: @radius_6;
+    text-align: center;
+    color: @text_0;
+    min-height: 18px;
+    max-height: 22px;
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_sm;
+}
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 @accent_lo, stop:1 @accent_hi);
+    border-radius: @radius_5;
+    margin: 1px;
+}

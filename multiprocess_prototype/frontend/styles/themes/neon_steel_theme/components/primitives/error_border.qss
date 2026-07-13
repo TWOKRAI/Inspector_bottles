@@ -1,0 +1,8 @@
+/* === error_border.qss — hasError border === */
+
+/* --- Validation error border (dynamic property hasError="true") --- */
+QLineEdit[hasError="true"],
+QPlainTextEdit[hasError="true"],
+QTextEdit[hasError="true"] {
+    border: 1px solid @danger;
+}

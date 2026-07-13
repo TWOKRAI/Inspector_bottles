@@ -1,0 +1,91 @@
+/* === buttons.qss — QPushButton и все role variants (primary, danger, ghost, checked) === */
+
+/* ===================== КНОПКИ (.btn) ===================== */
+QPushButton {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_grad_top, stop:0.5 @btn_grad_mid, stop:1 @btn_grad_bot);
+    border: 1px solid @shadow_3xl;
+    border-top: 1px solid @glow_2xl;
+    border-radius: @radius_10;
+    color: @text_0;
+    font-weight: 600;
+    padding: @btn_padding;
+    min-height: @btn_min_height;
+}
+QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_hover_top, stop:0.5 @btn_hover_mid, stop:1 @btn_hover_bot);
+    color: #ffffff;
+}
+QPushButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_grad_bot, stop:0.5 @btn_grad_mid, stop:1 @btn_grad_top);
+    border-top: 1px solid @shadow_md;
+}
+QPushButton:disabled {
+    color: @text_3;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi, stop:1 @grad_header_bot);
+    border-color: @shadow_xl;
+}
+QPushButton:focus {
+    outline: 0;
+    border: 1px solid @accent;
+}
+
+/* primary — насыщенный синий (CTA, START, ПРИМЕНИТЬ) */
+QPushButton[role="primary"] {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_primary_top, stop:0.5 @accent, stop:1 @accent_lo);
+    border: 1px solid @shadow_2xl;
+    border-top: 1px solid @glow_4xl;
+}
+QPushButton[role="primary"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_primary_hover_top, stop:0.5 @btn_primary_hover_mid, stop:1 @btn_primary_hover_bot);
+}
+QPushButton[role="primary"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_lo, stop:0.5 @btn_primary_pressed_mid, stop:1 @btn_primary_pressed_bot);
+    border-top: 1px solid @shadow_lg;
+}
+
+/* danger — красная (ОЧИСТИТЬ, СТОП) */
+QPushButton[role="danger"] {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_danger_top, stop:0.5 @btn_danger_mid, stop:1 @btn_danger_bot);
+    border: 1px solid @shadow_3xl;
+    border-top: 1px solid @glow_2xl;
+}
+QPushButton[role="danger"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_danger_hover_top, stop:0.5 @btn_danger_hover_mid, stop:1 @btn_danger_hover_bot);
+}
+QPushButton[role="danger"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_danger_bot, stop:0.5 @btn_danger_mid, stop:1 @btn_danger_top);
+}
+
+/* ghost — почти прозрачная для второстепенных действий */
+QPushButton[role="ghost"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @glow_sm, stop:1 @shadow_sm);
+    color: @text_1;
+    border: 1px solid @glow_sm;
+}
+QPushButton[role="ghost"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @glow_xl, stop:1 @shadow_xs);
+    color: @text_0;
+}
+
+/* checkable / toggle */
+QPushButton:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_primary_top, stop:0.5 @accent, stop:1 @accent_lo);
+    color: #ffffff;
+    border: 1px solid @accent_lo;
+    border-top: 1px solid @glow_4xl;
+}

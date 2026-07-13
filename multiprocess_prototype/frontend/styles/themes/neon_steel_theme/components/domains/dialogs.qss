@@ -1,0 +1,14 @@
+/* === dialogs.qss — ConfirmActionLabel, LoginErrorLabel, ConfirmErrorLabel, PasswordErrorLabel === */
+
+/* --- Confirm dialog action label --- */
+QLabel#ConfirmActionLabel { font-weight: bold; }
+
+/* --- Error labels (login, confirm, user_form) --- */
+QLabel#LoginErrorLabel,
+QLabel#ConfirmErrorLabel,
+QLabel#PasswordErrorLabel {
+    color: @danger;
+}
+QLabel#PasswordErrorLabel {
+    font-size: @font_sm;
+}
