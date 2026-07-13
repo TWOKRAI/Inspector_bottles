@@ -95,6 +95,18 @@ class ProcessConfig(SchemaBase):
         FieldMeta("Класс процесса", info="Dotted path к классу (по умолчанию GenericProcess)"),
     ] = ""
 
+    @field_validator("process_class", mode="before")
+    @classmethod
+    def _process_class_not_none(cls, v: Any) -> Any:
+        """Домен-entity ``Process.process_class`` — ``str | None = None`` (см. domain/entities/
+        process.py); ``Process.to_dict()`` (``model_dump(mode="json")``) пишет ``None`` явно для
+        процессов без явного класса. ``ProcessConfig.process_class`` — обязательный ``str`` с
+        дефолтом ``""`` — без этого коэрсера ``SystemBlueprint.model_validate()`` падал бы на
+        КАЖДОМ процессе без явного class (RS-5: обнаружено gate-валидацией ``check_structure()``
+        на Save/load-from-file — см. ``_priority_not_none`` выше, тот же класс дефекта).
+        """
+        return "" if v is None else v
+
     protected: Annotated[
         bool,
         FieldMeta("Protected", info="always-on: replace_blueprint/hot-apply процесс не останавливает."),
@@ -424,30 +436,79 @@ class SystemBlueprint(SchemaBase):
                 names.extend(k for k in mem if k != "coll")
         return names
 
+    def _duplicate_process_names(self) -> list[str]:
+        """Дубли имён процессов — общая проверка для :meth:`check` и :meth:`check_structure`."""
+        errors: list[str] = []
+        process_names: set[str] = set()
+        for proc in self.processes:
+            if proc.process_name in process_names:
+                errors.append(f"Дублирование имени процесса: '{proc.process_name}'")
+            process_names.add(proc.process_name)
+        return errors
+
+    def check_structure(self) -> list[str]:
+        """Публичный gate структурной валидации (RS-5, C-4): дубли имён + циклы.
+
+        НЕ зависит от PluginRegistry — безопасен как gate на запись рецепта
+        (единый Save, load-from-file) даже в разреженном окружении (headless/
+        тесты), где полный :meth:`check` (порты/auto-wiring) даёт ложные wire-
+        ошибки (см. audit 2026-07-12). По той же причине детекция циклов НЕ
+        встроена в :meth:`check` — вынесена сюда, чтобы не расширять контракт
+        pre-launch/boot/switch-валидации (``check()`` вызывается из
+        ``backend/assembly/assembler.py`` на boot/switch — межпроцессная
+        обратная связь p1<->p2, легальная request/response-пара, там не
+        запрещена и не должна становиться внезапно недопустимой).
+
+        Циклы ищутся на PROCESS-level графе (ребро source_proc -> target_proc
+        для каждого wire). Wire ВНУТРИ одного процесса (source_proc ==
+        target_proc — явный внутрипроцессный роутинг между плагинами одного
+        процесса) НЕ считается ребром графа процессов и не может создать
+        ложный self-loop цикл.
+
+        Returns:
+            Список ошибок. Пустой = граф структурно корректен (без циклов/дублей).
+        """
+        errors: list[str] = list(self._duplicate_process_names())
+
+        edges: list[tuple[str, str]] = []
+        for wire in self.wires:
+            src_proc = wire.source.split(".")[0]
+            tgt_proc = wire.target.split(".")[0]
+            if src_proc and tgt_proc and src_proc != tgt_proc:
+                edges.append((src_proc, tgt_proc))
+
+        cycle = _find_cycle(edges)
+        if cycle is not None:
+            errors.append(f"Граф содержит цикл: {' -> '.join(cycle)}")
+
+        return errors
+
     def check(self) -> list[str]:
         """Валидация чертежа до запуска.
 
         Проверяет:
-        1. Цепочки плагинов внутри каждого процесса (auto-wiring)
-        2. Wire-связи между процессами (совместимость портов)
-        3. Все обязательные входы подключены
+        1. Дублирование имён процессов
+        2. Цепочки плагинов внутри каждого процесса (auto-wiring)
+        3. Wire-связи между процессами (совместимость портов)
+        4. Все обязательные входы подключены
+
+        НЕ проверяет циклы графа wires — та проверка живёт только в
+        :meth:`check_structure` (RS-5 Save/load-gate); межпроцессная обратная
+        связь (request/response) — легальный паттерн на boot/switch, и этот
+        метод остаётся именно тем контрактом, что был до RS-5 (не расширяем
+        pre-launch/boot-валидацию бесплатно вместе с gate-валидацией записи).
 
         Returns:
             Список ошибок. Пустой = всё ОК.
         """
-        errors: list[str] = []
+        errors: list[str] = list(self._duplicate_process_names())
 
         # Раздельные карты входов и выходов — плагин может иметь
         # одноимённые input/output порты (e.g. "frame" → "frame")
         input_map: dict[str, Port] = {}  # address → Port
         output_map: dict[str, Port] = {}  # address → Port
-        process_names = set()
 
         for proc in self.processes:
-            if proc.process_name in process_names:
-                errors.append(f"Дублирование имени процесса: '{proc.process_name}'")
-            process_names.add(proc.process_name)
-
             for pdict in proc.plugins:
                 plugin_name = pdict.get("plugin_name", "")
                 plugin_class = pdict.get("plugin_class", "")
@@ -584,6 +645,49 @@ def _restore_plugin_configs(plugins_dicts: list[dict]) -> list[PluginConfig]:
                     pass
 
     return configs
+
+
+def _find_cycle(edges: list[tuple[str, str]]) -> list[str] | None:
+    """DFS-поиск цикла в ориентированном графе process-level рёбер wires (RS-5, C-4).
+
+    Args:
+        edges: список рёбер (source_process, target_process).
+
+    Returns:
+        Список имён процессов вдоль найденного цикла (первый узел повторяется
+        последним, чтобы явно показать замыкание), либо None если циклов нет.
+    """
+    graph: dict[str, list[str]] = {}
+    for src, tgt in edges:
+        graph.setdefault(src, []).append(tgt)
+        graph.setdefault(tgt, [])
+
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[str, int] = dict.fromkeys(graph, WHITE)
+    path: list[str] = []
+
+    def _visit(node: str) -> list[str] | None:
+        color[node] = GRAY
+        path.append(node)
+        for neighbor in graph.get(node, []):
+            neighbor_color = color.get(neighbor, WHITE)
+            if neighbor_color == GRAY:
+                cycle_start = path.index(neighbor)
+                return [*path[cycle_start:], neighbor]
+            if neighbor_color == WHITE:
+                found = _visit(neighbor)
+                if found is not None:
+                    return found
+        path.pop()
+        color[node] = BLACK
+        return None
+
+    for start_node in list(graph):
+        if color[start_node] == WHITE:
+            found = _visit(start_node)
+            if found is not None:
+                return found
+    return None
 
 
 def _find_plugin_entry(plugin_name: str, plugin_class: str):

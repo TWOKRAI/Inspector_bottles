@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 
 from multiprocess_prototype.frontend.widgets.topology.presenter import TopologyPresenter
 
@@ -82,6 +83,41 @@ def test_presenter_load_save_yaml(tmp_path: Path):
     assert presenter2.blueprint.name == "test_topo"
     assert "proc_a" in presenter2.get_process_names()
     assert presenter2.file_path == save_path
+
+
+def test_presenter_load_from_file_rejects_cycle(tmp_path: Path):
+    """RS-5 (C-4): "Загрузить из файла" не обходит домен-валидацию — граф с циклом
+    в YAML обязан бросить ошибку, а не быть тихо принятым (blueprint не подменяется).
+    """
+    import yaml
+
+    from multiprocess_prototype.recipes.save import RecipeValidationError
+
+    cyclic_yaml = {
+        "name": "cyclic_topo",
+        "description": "",
+        "processes": [
+            {"process_name": "p1", "plugins": []},
+            {"process_name": "p2", "plugins": []},
+        ],
+        "wires": [
+            {"source": "p1.a.out", "target": "p2.b.in"},
+            {"source": "p2.c.out", "target": "p1.d.in"},
+        ],
+    }
+    path = tmp_path / "cyclic.yaml"
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(cyclic_yaml, f)
+
+    presenter = TopologyPresenter()
+    presenter.new_topology("keep_me")
+
+    with pytest.raises(RecipeValidationError):
+        presenter.load_from_file(path)
+
+    # Предыдущий blueprint не подменён невалидным.
+    assert presenter.blueprint.name == "keep_me"
+    assert presenter.file_path is None
 
 
 def test_presenter_validate_empty():

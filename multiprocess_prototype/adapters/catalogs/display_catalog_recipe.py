@@ -25,6 +25,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
+from pydantic import ValidationError
+
 from multiprocess_prototype.domain.entities.display import DisplayDefinition
 from multiprocess_prototype.domain.protocols.display_catalog import (
     DisplayCatalog,
@@ -35,6 +37,7 @@ from multiprocess_prototype.domain.protocols.display_catalog import (
 
 if TYPE_CHECKING:
     from multiprocess_prototype.adapters.stores.recipe_store import RecipeStoreFromManager
+    from multiprocess_prototype.domain.entities.recipe import Recipe
 
 logger = logging.getLogger(__name__)
 
@@ -83,16 +86,41 @@ class DisplayCatalogFromRecipe:
     #  Внутренние хелперы                                                  #
     # ------------------------------------------------------------------ #
 
+    def _read_active_recipe_or_none(self, slug: str) -> "Recipe | None":
+        """Прочитать рецепт по slug, деградируя на ``ValidationError`` (RS-5, A-7).
+
+        Единая точка для ВСЕХ read-путей адаптера (list/resolve/has/register/
+        update/unregister/persist). ``Recipe.from_dict()`` (``extra="forbid"``)
+        бросает ``ValidationError`` на легаси-рецепте (старые top-level ключи
+        ``data:``/``meta:``) или на любой иной повреждённой схеме. Раньше это
+        всплывало необработанным до вызывающего Qt-слота (падение вкладки на
+        load, краш на CRUD-операциях). Теперь — предупреждение в лог модуля,
+        вызывающий трактует результат как «рецепта нет» (уже умеет это делать).
+
+        Returns:
+            Recipe | None — None если рецепта нет ИЛИ он не прошёл валидацию.
+        """
+        try:
+            return self._store.read(slug)
+        except ValidationError as exc:
+            logger.warning(
+                "Рецепт '%s' невалиден (легаси data:/meta: или повреждение схемы): %s",
+                slug,
+                exc,
+            )
+            return None
+
     def _get_active_displays(self) -> tuple[DisplayDefinition, ...]:
         """Прочитать displays активного рецепта.
 
         Returns:
-            tuple[DisplayDefinition, ...] — определения дисплеев; () если рецепта нет.
+            tuple[DisplayDefinition, ...] — определения дисплеев; () если рецепта
+            нет или он не прошёл валидацию.
         """
         slug = self._get_active_slug()
         if slug is None:
             return ()
-        recipe = self._store.read(slug)
+        recipe = self._read_active_recipe_or_none(slug)
         if recipe is None:
             return ()
         return recipe.displays
@@ -140,7 +168,9 @@ class DisplayCatalogFromRecipe:
             spec: Domain-спецификация дисплея для регистрации.
 
         Raises:
-            ValueError: если нет активного рецепта или дисплей с таким id уже существует.
+            ValueError: если нет активного рецепта, он не прошёл валидацию
+                (RS-5, A-7 — легаси data:/meta: или повреждение схемы), или
+                дисплей с таким id уже существует.
         """
         slug = self._get_active_slug()
         if slug is None:
@@ -148,9 +178,12 @@ class DisplayCatalogFromRecipe:
                 "Нет активного рецепта — невозможно зарегистрировать дисплей. "
                 "Активируйте рецепт перед добавлением дисплеев."
             )
-        recipe = self._store.read(slug)
+        recipe = self._read_active_recipe_or_none(slug)
         if recipe is None:
-            raise ValueError(f"Активный рецепт '{slug}' не найден в хранилище.")
+            raise ValueError(
+                f"Активный рецепт '{slug}' не найден или невалиден — невозможно "
+                "зарегистрировать дисплей (см. лог для деталей)."
+            )
 
         # Проверка дубликата id
         existing_ids = {d.id for d in recipe.displays}
@@ -177,12 +210,13 @@ class DisplayCatalogFromRecipe:
             spec: новое определение (display_id должен существовать в рецепте).
 
         Returns:
-            True если обновлено, False если рецепта/дисплея нет.
+            True если обновлено, False если рецепта/дисплея нет или рецепт не
+            прошёл валидацию (RS-5, A-7 — см. лог модуля для деталей).
         """
         slug = self._get_active_slug()
         if slug is None:
             return False
-        recipe = self._store.read(slug)
+        recipe = self._read_active_recipe_or_none(slug)
         if recipe is None:
             return False
 
@@ -211,12 +245,13 @@ class DisplayCatalogFromRecipe:
             display_id: Идентификатор дисплея для удаления.
 
         Returns:
-            True если дисплей удалён, False если не найден или нет рецепта.
+            True если дисплей удалён, False если не найден, нет рецепта, или
+            рецепт не прошёл валидацию (RS-5, A-7 — см. лог модуля для деталей).
         """
         slug = self._get_active_slug()
         if slug is None:
             return False
-        recipe = self._store.read(slug)
+        recipe = self._read_active_recipe_or_none(slug)
         if recipe is None:
             return False
 
@@ -257,15 +292,16 @@ class DisplayCatalogFromRecipe:
         Фактически no-op, т.к. register/unregister уже пишут в рецепт.
         Семантика сохранена для совместимости с DisplayCatalog Protocol.
 
-        При отсутствии активного рецепта — no-op с лог-предупреждением.
+        При отсутствии активного рецепта (или если он не прошёл валидацию —
+        RS-5, A-7) — no-op с лог-предупреждением.
         """
         slug = self._get_active_slug()
         if slug is None:
             logger.warning("persist() вызван без активного рецепта — no-op")
             return
-        recipe = self._store.read(slug)
+        recipe = self._read_active_recipe_or_none(slug)
         if recipe is None:
-            logger.warning("persist() — рецепт '%s' не найден — no-op", slug)
+            logger.warning("persist() — рецепт '%s' не найден или невалиден — no-op", slug)
             return
         # Перезаписать (сохранить текущее состояние displays в YAML)
         self._store.write(slug, recipe)

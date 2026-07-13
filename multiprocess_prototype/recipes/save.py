@@ -15,8 +15,18 @@ Purpose:
     Делегирует финальную нормализацию (снятие legacy ``data:``/``meta:``/top-level ``gui_positions``)
     в :func:`normalize_recipe_v3_raw` — единый нормализатор на запись (C1, ADR-RCP-001).
 
+    ``validate_recipe_blueprint`` (RS-5, C-4) — gate на запись: домен-валидация ПЕРЕД
+    ``store.save_raw``. Домен-валидатор не новый — переиспользует
+    ``SystemBlueprint.check_structure()`` (blueprint.py), НЕ пишет второй валидатор.
+    ``build_recipe_v3_raw`` сам НЕ валидирует (contract-тесты test_save.py используют
+    синтетические wire-фикстуры, не проходящие полную доменную проверку) — gate стоит у
+    вызывающих (``RecipesPresenter.on_save``, ``LayoutController.save_to_active_recipe``)
+    и у ``TopologyPresenter.load_from_file`` (тот же валидатор на чтении из файла).
+
 Public API (module-contract: lite):
     - build_recipe_v3_raw — собрать v3-raw рецепта на запись из raw + topology-dict.
+    - validate_recipe_blueprint — структурная gate-валидация blueprint перед записью.
+    - RecipeValidationError — ошибка невалидного blueprint (дубли имён процессов / циклы).
 
 Stability: lite
 """
@@ -27,7 +37,23 @@ from typing import Any
 
 from multiprocess_framework.modules.recipe.format import normalize_recipe_v3_raw
 
-__all__ = ["build_recipe_v3_raw"]
+__all__ = ["build_recipe_v3_raw", "validate_recipe_blueprint", "RecipeValidationError"]
+
+
+class RecipeValidationError(ValueError):
+    """Blueprint не прошёл структурную валидацию (RS-5, C-4).
+
+    ``errors`` — список сообщений из ``SystemBlueprint.check_structure()``
+    (дубли имён процессов, циклы графа wires). Это НЕ полный ``check()``: тот
+    дополнительно проверяет совместимость портов и обязательные входы, что
+    зависит от состояния PluginRegistry — в разреженном окружении (headless/
+    тесты) даёт ложные срабатывания и непригоден как gate на запись (см.
+    docs/audits/2026-07-12_recipe-lifecycle-audit.md, класс C-4).
+    """
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = list(errors)
+        super().__init__("; ".join(errors) or "рецепт не прошёл валидацию")
 
 
 def build_recipe_v3_raw(
@@ -100,3 +126,35 @@ def build_recipe_v3_raw(
         blueprint["metadata"] = metadata
 
     return normalize_recipe_v3_raw(raw, blueprint)
+
+
+def validate_recipe_blueprint(blueprint_raw: dict[str, Any]) -> None:
+    """Gate-валидация blueprint перед записью на диск (RS-5, C-4).
+
+    Прогоняет ``blueprint_raw`` через ``SystemBlueprint.check_structure()`` —
+    единственный переиспользуемый домен-валидатор (blueprint.py), НЕ второй
+    валидатор: та же логика, что используется и при полной pre-launch проверке
+    (``SystemBlueprint.check()``), но без части, зависящей от PluginRegistry.
+
+    Вызывается ОБОИМИ путями Save (``RecipesPresenter.on_save``,
+    ``LayoutController.save_to_active_recipe``) сразу после
+    :func:`build_recipe_v3_raw` и ДО ``store.save_raw`` — при непустых ошибках
+    исключение всплывает в уже существующий ``except Exception`` вызывающего
+    (``show_error``/``QMessageBox.critical``), запись на диск не происходит.
+    Также используется ``TopologyPresenter.load_from_file`` (тот же валидатор
+    на чтении "Загрузить из файла" — C-4 требует не обходить его).
+
+    Args:
+        blueprint_raw: dict секции ``blueprint`` рецепта (``processes``/``wires``/...).
+
+    Raises:
+        RecipeValidationError: если граф содержит дубли имён процессов или циклы.
+    """
+    from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
+        SystemBlueprint,
+    )
+
+    blueprint = SystemBlueprint.model_validate(blueprint_raw or {})
+    errors = blueprint.check_structure()
+    if errors:
+        raise RecipeValidationError(errors)

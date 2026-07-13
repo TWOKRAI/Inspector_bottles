@@ -429,7 +429,7 @@ class LayoutController:
         # blueprint.metadata (оттуда его читает load_topology_from_config и cold-start); top-level
         # gui_positions не пишется (normalize_recipe_v3_raw его не включает, AU-1).
         try:
-            from multiprocess_prototype.recipes.save import build_recipe_v3_raw
+            from multiprocess_prototype.recipes.save import build_recipe_v3_raw, validate_recipe_blueprint
 
             bp_dict, bindings, _gui = graph_to_blueprint(self._model)
 
@@ -450,6 +450,9 @@ class LayoutController:
                 gui_positions=gui_positions,
                 locked_nodes=sorted(self._locked_nodes),
             )
+            # RS-5 (C-4): валидация перед записью — граф с циклом/дублями имён процессов
+            # не пишется. RecipeValidationError ловится тем же except ниже (QMessageBox).
+            validate_recipe_blueprint(new_raw.get("blueprint", {}))
             store.save_raw(active_slug, new_raw)
 
             logger.info("Pipeline сохранён в рецепт '%s'", active_slug)

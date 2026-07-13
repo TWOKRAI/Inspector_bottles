@@ -2,6 +2,7 @@
 
 Центральный MVP-presenter: работает только с данными, никакого GUI.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -51,10 +52,26 @@ class TopologyPresenter:
         self._file_path = None
 
     def load_from_file(self, path: Path) -> None:
-        """Загрузить topology из YAML файла."""
+        """Загрузить topology из YAML файла.
+
+        RS-5 (C-4): "Загрузить из файла" раньше обходил домен-валидацию целиком —
+        ``model_validate`` проверяет только схему (типы/поля), не граф (цикл/дубли
+        имён процессов можно было загрузить и сохранить дальше). Теперь тот же
+        валидатор, что и на Save (``check_structure()`` — дубли имён + циклы),
+        прогоняется и здесь; на невалидном графе бросает ``RecipeValidationError``
+        ДО присвоения ``self._blueprint`` (предыдущий blueprint не подменяется).
+
+        Raises:
+            RecipeValidationError: если загруженный граф содержит дубли имён
+                процессов или циклы.
+        """
+        from multiprocess_prototype.recipes.save import validate_recipe_blueprint
+
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
-        self._blueprint = SystemBlueprint.model_validate(data)
+        blueprint = SystemBlueprint.model_validate(data)
+        validate_recipe_blueprint(blueprint.model_dump())
+        self._blueprint = blueprint
         self._file_path = path
 
     def save_to_file(self, path: Path) -> None:
@@ -92,15 +109,12 @@ class TopologyPresenter:
 
     def remove_process(self, name: str) -> None:
         """Удалить процесс и все связанные wires."""
-        self._blueprint.processes = [
-            p for p in self._blueprint.processes if p.process_name != name
-        ]
+        self._blueprint.processes = [p for p in self._blueprint.processes if p.process_name != name]
         # Каскадно удалить wires с участием удалённого процесса
         self._blueprint.wires = [
             w
             for w in self._blueprint.wires
-            if not w.source.startswith(f"{name}.")
-            and not w.target.startswith(f"{name}.")
+            if not w.source.startswith(f"{name}.") and not w.target.startswith(f"{name}.")
         ]
 
     def get_process_names(self) -> list[str]:
