@@ -111,3 +111,4 @@
 - [Модели: реализация vs ревью](feedback_model_split_impl_vs_review.md) — Sonnet 5 дефолт исполнителя (near-Opus, дешевле), Opus 4.8 — верхний край (конкурентность); брифы под Sonnet 5 — с явным охватом (исполняет буквально)
 - [Конвенции диалогов](feedback_dialog_conventions.md) — Сохранить(default)/Не сохранять/Отмена, стандарт платформы, helper confirm_unsaved_changes
 - [Ревью трёхуровневое](feedback_review_economy_tiers.md) — полное 8-угловое только для рисковых вскрытий; лёгкое/группой для S-задач; финдеры на Sonnet, не Fable
+- [Без всплывающих Qt-окон](feedback_no_qt_popups_offscreen.md) — агентские прогоны тестов/харнесса только с QT_QPA_PLATFORM=offscreen; окна вешают агентов
