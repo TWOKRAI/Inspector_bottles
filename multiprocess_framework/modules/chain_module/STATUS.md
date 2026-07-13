@@ -24,8 +24,9 @@
 ## Зависимости
 
 - `numpy` — ChainResult.masks/contours, ChainThreadPool.submit_bundle (frame.copy()); `ChainResult.frame`/`execute(payload)` теперь `Any` (duck-typed: ndarray-кадр ИЛИ list[dict] items processing-pipeline, C6d)
-- `base_manager` — ChainThreadPool (BaseManager, ObservableMixin)
-- Стандартная библиотека: `concurrent.futures`, `threading`, `dataclasses`, `math`, `uuid`
+- `base_manager` — ChainThreadPool/WorkerPoolExecutor (BaseManager, ObservableMixin)
+- `worker_module` — WorkerPoolExecutor стоит на `WorkerManager` (create_worker/remove_worker/ExecutionMode.LOOP), C6e; свой `ThreadPoolExecutor` убран (D2)
+- Стандартная библиотека: `queue`, `threading`, `dataclasses`, `math`, `uuid`
 - Нет зависимостей от прототипа (`multiprocess_prototype.*`)
 
 ## Тесты
@@ -38,11 +39,18 @@
 | `test_dag_runnable.py` | DagRunnable: branching, merge, port routing |
 | `test_parallel_runnable.py` | ParallelChainRunnable: cross-process ветка, параллельные бандлы, on_error |
 | `test_latency_tracker.py` | LatencyTracker: linear-interpolation percentiles, maybe_log |
-| `test_thread_pool.py` | ChainThreadPool: submit_bundle, collect_results, timeout, resize |
+| `test_thread_pool.py` | ChainThreadPool: submit_bundle, collect_results, timeout, resize (контракт-тест, C6e без правки ожиданий) |
+| `test_worker_pool_executor.py` | WorkerPoolExecutor (C6e): использование worker_module, стоп-механика (cancel истёкших/H1, BaseException-паритет/H2, изоляция экземпляров на общем manager/H3, submit-after-shutdown/M1, timeout-маскировка/M2), submit/collect/resize |
 | `test_topology.py` | topological_sort, detect_parallel_bundles, is_nonlinear_graph |
 
 ## История изменений
 
+- **2026-07-13** — C6e: пул параллельных бандлов на `worker_module` (ADR-CHN-009).
+  - `thread_pool/worker_pool_executor.py` (новый, ~321 LOC): `WorkerPoolExecutor` — N персистентных LOOP-воркеров через `WorkerManager`, общая `queue.Queue`, Event-based handle `_PoolTask`.
+  - `thread_pool/pool.py` (116 → 44 LOC): `ChainThreadPool` — тонкий фасад-наследник; свой `ThreadPoolExecutor` убран (в исходниках chain_module его больше нет, D2 закрыт).
+  - Стоп-механика на сентинелах: cancel истёкших задач (H1), BaseException-паритет (H2), уникальные имена воркеров на экземпляр + fail-loud create_worker (H3), submit-after-shutdown → RuntimeError (M1), внутренний `_PoolTimeout` не маскирует бизнес-TimeoutError (M2).
+  - `IWorkerManager.remove_worker` — выравнивание контракта под существующий публичный метод (M3).
+  - `test_worker_pool_executor.py` (новый, ~230 LOC, 13 тестов). Контракт-тест `test_thread_pool.py` — без правки ожиданий.
 - **2026-05-07** — точечная полировка:
   - 🐛 Fix: `ParallelChainRunnable` теперь корректно вызывает `execute_remote` для cross-process шагов (раньше пропускалось → AttributeError на `step.operation.execute`).
   - ♻️ Refactor: общая on_error логика вынесена в `core/error_policy.apply_on_error_policy` (DRY: chain.py + dag.py + parallel.py).

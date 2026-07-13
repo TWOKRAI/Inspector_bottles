@@ -235,33 +235,73 @@ from multiprocess_framework.modules.chain_module import topological_sort, is_non
 
 **Решение:**
 1. Новый `WorkerPoolExecutor` (`thread_pool/worker_pool_executor.py`): N
-   персистентных LOOP-воркеров через `WorkerManager.create_worker("chain_pool_i",
-   …)`, общая `queue.Queue`, handle `_PoolTask` — Event-based (паттерн
-   `PendingTask` из `worker_pool/dispatcher.py`) с `result(timeout)`,
-   интерфейсно совместимым с `Future.result(timeout)`.
+   персистентных LOOP-воркеров через `WorkerManager.create_worker(...)`, общая
+   `queue.Queue`, handle `_PoolTask` — Event-based (паттерн `PendingTask` из
+   `worker_pool/dispatcher.py`) с `result(timeout)`, интерфейсно совместимым с
+   `Future.result(timeout)`.
 2. `ChainThreadPool` — тонкий фасад-наследник `WorkerPoolExecutor`: публичное имя
    и контракт (`submit_bundle`/`collect_results`/`resize`/`step_timeout`/
    `max_workers`) не изменились. `ParallelChainRunnable` и `test_thread_pool.py`
    (контрактный тест) работают без правок.
-3. `resize()` = `remove_worker` N старых + `create_worker` N новых.
-   `remove_worker` (не `stop_worker`) — снимает имя с учёта в реестре, иначе
-   `chain_pool_i` осталось бы занятым STOPPED-воркером и пересоздание
-   коллизировало бы. resize не hot-path — деградация приемлема.
-4. Пул создаётся в `__init__` (как прежний executor — готов сразу), собственный
-   `WorkerManager` локален экземпляру; опционально инжектится извне (тесты).
+3. Пул создаётся в `__init__` (как прежний executor — готов сразу), собственный
+   `WorkerManager` локален экземпляру; опционально инжектится извне (DI-шов).
+
+**Стоп-механика (ревью Fable, 2026-07-13) — редизайн, а не заплатки:**
+- **Сентинелы вместо poll:** воркеры блокируются в `get()` без timeout (нет N×idle-
+  пробуждений — embedded-бюджет). Останов кладёт по одному `None`-сентинелу на
+  воркер. `shutdown(wait=True)` = честный дренаж (сентинелы ПОСЛЕ хвоста задач);
+  `wait=False` — отменить оставшиеся задачи, затем сентинелы. `stop_event`
+  WorkerManager остаётся backstop'ом на верхе цикла (снимает зомби после join-
+  таймаута — доисполнил задачу, увидел stop_event, вышел без чужого сентинела).
+- **H1 cancel истёкших:** `collect_results` при timeout зовёт `_PoolTask.cancel()`;
+  `_run()` первым делом no-op'ится на отменённой. Иначе истёкшая задача исполнялась
+  бы позже и её side-state (`_collect_side_results` снимает `last_detections` с
+  shared-объекта) контаминировал бы СЛЕДУЮЩИЙ бандл (кросс-кадровые дефекты + backlog).
+- **H2 BaseException-паритет:** `_run` ловит `BaseException` (как `_WorkItem.run`
+  стандартного пула), кладёт в `_exc`. Иначе `except Exception` пропускал бы
+  BaseException → воркер умер бы навсегда, а `result()` вернул бы `None` как «успех».
+- **H3 изоляция экземпляров:** уникальный префикс имён на экземпляр
+  (`f"{manager_name}_{uuid}"`) — несколько пулов на общем (инжектированном)
+  WorkerManager не коллизируют и `shutdown` одного не сносит воркеров другого.
+  `create_worker` вернул False → RuntimeError (не тихий пустой пул).
+- **M1 submit-after-shutdown:** флаг `_shutdown` (под `self._lock`, симметрия с
+  `resize`) → `submit` после shutdown кидает RuntimeError (паритет со старым пулом).
+- **M2 маскировка timeout:** внутренний `_PoolTimeout(Exception)` (не встроенный
+  `TimeoutError`) — `collect_results` ловит его, а бизнес-`TimeoutError` шага
+  проходит как результат, не подменяясь на «превысила timeout пула».
+- **resize/shutdown:** `remove_worker` (не `stop_worker`) снимает имя с учёта —
+  иначе занятое STOPPED-воркером имя коллизировало бы при пересоздании. resize не
+  hot-path — пересоздание потоков приемлемо.
+
+**M3 — контракт DI-шва:** `remove_worker` добавлен в `IWorkerManager`
+(`worker_module/interfaces.py`) как **выравнивание интерфейса под уже существующий
+публичный метод WorkerManager** (GUI-delete), не новая возможность — дизайн-запрет
+был про `submit()`/`Future`. Единственный ABC-наследник `IWorkerManager` —
+`WorkerManager` (уже реализует метод), поэтому добавление `@abstractmethod`
+безрисково; DI-шов типизирован `IWorkerManager` честно.
 
 **Отвергнуто:**
 - ❌ Расширять `IWorkerManager` методом `submit()`/`Future`. Единственный
   потребитель submit-паттерна — chain-пул. Расширять публичный контракт
   worker_module (LOOP-воркеры почти в каждом процессе) ради одного узкого кейса —
   риск для стабильного API. Обёртка-адаптер локальна к chain_module.
+- ❌ Дельта-resize (менять живые потоки без пересоздания) — принятая деградация.
+- ❌ Убрать DI-параметр `worker_manager` — нужен для проводки процессного менеджера.
 
 **Последствия:**
 - Свой поток-пул из stdlib исчез (D2 закрыт); один механизм потоков в фреймворке.
 - Worst-case latency очереди покрывается контрактом `step_timeout`; замер
   submit→collect на 640×480×3-бандле из 3 шагов ≈ 714 µs (доминирует `frame.copy`,
   накладные пула планирования пренебрежимы: idle-воркер в `queue.get` забирает
-  задачу сразу, poll 0.05с ограничивает только отзывчивость к `stop_event`).
+  задачу сразу; poll убран — блокирующий `get()`).
 - `ChainThreadPool` без живых рантайм-потребителей до подключения
   `ParallelChainRunnable` в generic (C6d инкремент 2, вне скоупа) — тесты
   единственный потребитель.
+
+**Отложено (временные состояния до подключения живого потребителя):**
+- Второй `WorkerManager` на процесс — временно: при проводке `ParallelChainRunnable`
+  к живому пути DI-шов примет процессный менеджер (один механизм потоков де-факто).
+- Судьба фасада `ChainThreadPool` — свернуть в `WorkerPoolExecutor` при появлении
+  живого потребителя (сейчас имя держит контракт-тест).
+- `_PoolTask`/`PendingTask` — кандидаты на общий Event-based handle; выделять при
+  3-м потребителе (анти-карго-культ).
