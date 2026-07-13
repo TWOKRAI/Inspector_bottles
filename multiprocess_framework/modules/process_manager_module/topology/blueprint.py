@@ -95,6 +95,18 @@ class ProcessConfig(SchemaBase):
         FieldMeta("Класс процесса", info="Dotted path к классу (по умолчанию GenericProcess)"),
     ] = ""
 
+    @field_validator("process_class", mode="before")
+    @classmethod
+    def _process_class_not_none(cls, v: Any) -> Any:
+        """Домен-entity ``Process.process_class`` — ``str | None = None`` (см. domain/entities/
+        process.py); ``Process.to_dict()`` (``model_dump(mode="json")``) пишет ``None`` явно для
+        процессов без явного класса. ``ProcessConfig.process_class`` — обязательный ``str`` с
+        дефолтом ``""`` — без этого коэрсера ``SystemBlueprint.model_validate()`` падал бы на
+        КАЖДОМ процессе без явного class (RS-5: обнаружено gate-валидацией ``check_structure()``
+        на Save/load-from-file — см. ``_priority_not_none`` выше, тот же класс дефекта).
+        """
+        return "" if v is None else v
+
     protected: Annotated[
         bool,
         FieldMeta("Protected", info="always-on: replace_blueprint/hot-apply процесс не останавливает."),
@@ -424,30 +436,75 @@ class SystemBlueprint(SchemaBase):
                 names.extend(k for k in mem if k != "coll")
         return names
 
-    def check(self) -> list[str]:
-        """Валидация чертежа до запуска.
+    def _check_structure(self) -> list[str]:
+        """Структурная валидация графа — НЕ зависит от PluginRegistry (RS-5, C-4).
 
         Проверяет:
-        1. Цепочки плагинов внутри каждого процесса (auto-wiring)
-        2. Wire-связи между процессами (совместимость портов)
-        3. Все обязательные входы подключены
+        1. Дублирование имён процессов.
+        2. Циклы в графе wires (process-level рёбра source_proc -> target_proc).
+
+        В отличие от полного :meth:`check`, не смотрит на порты/плагины — безопасна
+        как gate на запись рецепта (Save/load-from-file) даже в разреженном
+        окружении (headless/тесты), где PluginRegistry может не знать часть плагинов
+        и полный ``check()`` даёт ложные wire-ошибки (см. audit 2026-07-12).
 
         Returns:
-            Список ошибок. Пустой = всё ОК.
+            Список ошибок. Пустой = структура графа корректна.
         """
         errors: list[str] = []
 
-        # Раздельные карты входов и выходов — плагин может иметь
-        # одноимённые input/output порты (e.g. "frame" → "frame")
-        input_map: dict[str, Port] = {}  # address → Port
-        output_map: dict[str, Port] = {}  # address → Port
-        process_names = set()
-
+        process_names: set[str] = set()
         for proc in self.processes:
             if proc.process_name in process_names:
                 errors.append(f"Дублирование имени процесса: '{proc.process_name}'")
             process_names.add(proc.process_name)
 
+        edges: list[tuple[str, str]] = []
+        for wire in self.wires:
+            src_proc = wire.source.split(".")[0]
+            tgt_proc = wire.target.split(".")[0]
+            if src_proc and tgt_proc:
+                edges.append((src_proc, tgt_proc))
+
+        cycle = _find_cycle(edges)
+        if cycle is not None:
+            errors.append(f"Граф содержит цикл: {' -> '.join(cycle)}")
+
+        return errors
+
+    def check_structure(self) -> list[str]:
+        """Публичный gate структурной валидации (RS-5, C-4): дубли имён + циклы.
+
+        Используется на запись рецепта (единый Save, load-from-file) — вместо
+        полного :meth:`check`, который дополнительно требует совместимости портов
+        и потому зависит от состояния PluginRegistry (ложные срабатывания в
+        разреженном окружении неприемлемы как gate записи).
+
+        Returns:
+            Список ошибок. Пустой = граф структурно корректен (без циклов/дублей).
+        """
+        return self._check_structure()
+
+    def check(self) -> list[str]:
+        """Валидация чертежа до запуска.
+
+        Проверяет:
+        1. Структуру графа (дубли имён процессов, циклы) — см. :meth:`check_structure`
+        2. Цепочки плагинов внутри каждого процесса (auto-wiring)
+        3. Wire-связи между процессами (совместимость портов)
+        4. Все обязательные входы подключены
+
+        Returns:
+            Список ошибок. Пустой = всё ОК.
+        """
+        errors: list[str] = list(self._check_structure())
+
+        # Раздельные карты входов и выходов — плагин может иметь
+        # одноимённые input/output порты (e.g. "frame" → "frame")
+        input_map: dict[str, Port] = {}  # address → Port
+        output_map: dict[str, Port] = {}  # address → Port
+
+        for proc in self.processes:
             for pdict in proc.plugins:
                 plugin_name = pdict.get("plugin_name", "")
                 plugin_class = pdict.get("plugin_class", "")
@@ -584,6 +641,49 @@ def _restore_plugin_configs(plugins_dicts: list[dict]) -> list[PluginConfig]:
                     pass
 
     return configs
+
+
+def _find_cycle(edges: list[tuple[str, str]]) -> list[str] | None:
+    """DFS-поиск цикла в ориентированном графе process-level рёбер wires (RS-5, C-4).
+
+    Args:
+        edges: список рёбер (source_process, target_process).
+
+    Returns:
+        Список имён процессов вдоль найденного цикла (первый узел повторяется
+        последним, чтобы явно показать замыкание), либо None если циклов нет.
+    """
+    graph: dict[str, list[str]] = {}
+    for src, tgt in edges:
+        graph.setdefault(src, []).append(tgt)
+        graph.setdefault(tgt, [])
+
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[str, int] = dict.fromkeys(graph, WHITE)
+    path: list[str] = []
+
+    def _visit(node: str) -> list[str] | None:
+        color[node] = GRAY
+        path.append(node)
+        for neighbor in graph.get(node, []):
+            neighbor_color = color.get(neighbor, WHITE)
+            if neighbor_color == GRAY:
+                cycle_start = path.index(neighbor)
+                return [*path[cycle_start:], neighbor]
+            if neighbor_color == WHITE:
+                found = _visit(neighbor)
+                if found is not None:
+                    return found
+        path.pop()
+        color[node] = BLACK
+        return None
+
+    for start_node in list(graph):
+        if color[start_node] == WHITE:
+            found = _visit(start_node)
+            if found is not None:
+                return found
+    return None
 
 
 def _find_plugin_entry(plugin_name: str, plugin_class: str):

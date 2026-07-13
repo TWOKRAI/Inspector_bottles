@@ -25,6 +25,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
+from pydantic import ValidationError
+
 from multiprocess_prototype.domain.entities.display import DisplayDefinition
 from multiprocess_prototype.domain.protocols.display_catalog import (
     DisplayCatalog,
@@ -86,13 +88,30 @@ class DisplayCatalogFromRecipe:
     def _get_active_displays(self) -> tuple[DisplayDefinition, ...]:
         """Прочитать displays активного рецепта.
 
+        RS-5 (A-7): мягкая деградация — легаси-рецепт со старыми top-level ключами
+        (``data:``/``meta:``, не входящими в схему ``Recipe``/``RecipeMeta``,
+        ``extra="forbid"``) роняет ``Recipe.from_dict()`` в ``ValidationError``.
+        Раньше это всплывало необработанным до Qt-слота ``DisplaysPresenter.load()``
+        и ронял вкладку Дисплеи. Теперь — предупреждение в лог модуля, displays
+        считаются отсутствующими (как и при отсутствии активного рецепта/секции
+        displays), остальная вкладка продолжает работать.
+
         Returns:
-            tuple[DisplayDefinition, ...] — определения дисплеев; () если рецепта нет.
+            tuple[DisplayDefinition, ...] — определения дисплеев; () если рецепта
+            нет или он не прошёл валидацию.
         """
         slug = self._get_active_slug()
         if slug is None:
             return ()
-        recipe = self._store.read(slug)
+        try:
+            recipe = self._store.read(slug)
+        except ValidationError as exc:
+            logger.warning(
+                "Активный рецепт '%s' не прошёл валидацию (легаси data:/meta:?) — дисплеи не показаны: %s",
+                slug,
+                exc,
+            )
+            return ()
         if recipe is None:
             return ()
         return recipe.displays

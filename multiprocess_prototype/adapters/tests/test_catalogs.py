@@ -14,6 +14,8 @@ adapters/tests/test_catalogs.py — тесты для catalog адаптеров
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from multiprocess_prototype.domain.protocols.plugin_catalog import PluginCatalog, PluginSpec
@@ -990,6 +992,38 @@ class _FakeRecipeStoreForCatalog:
         return True
 
 
+class _FakeRecipeStoreLazyValidate:
+    """Fake RecipeStore, валидирующий ``Recipe.from_dict()`` ЛЕНИВО внутри ``read()``.
+
+    В отличие от ``_FakeRecipeStoreForCatalog`` (валидирует на конструкции fixture),
+    этот фейк хранит raw dict и парсит его в ``Recipe`` только при вызове ``read()`` —
+    как реальный ``RecipeStoreFromManager.read()``. Нужен, чтобы смоделировать
+    легаси-рецепт, падающий ``ValidationError`` именно на ``read()`` (RS-5, A-7).
+    """
+
+    def __init__(self, raw_by_slug: dict[str, dict], active_slug: str | None = None) -> None:
+        self._raw = dict(raw_by_slug)
+        self._active = active_slug
+
+    def read(self, slug: str):
+        from multiprocess_prototype.domain.entities.recipe import Recipe
+
+        raw = self._raw.get(slug)
+        if raw is None:
+            return None
+        return Recipe.from_dict(raw)
+
+    def write(self, slug: str, recipe) -> None:
+        self._raw[slug] = recipe.to_dict()
+
+    def get_active(self) -> str | None:
+        return self._active
+
+    def set_active(self, slug: str | None) -> bool:
+        self._active = slug
+        return True
+
+
 class TestDisplayCatalogFromRecipe:
     """Тесты для DisplayCatalogFromRecipe (Task 5.1 — recipe-scoped persist)."""
 
@@ -1051,6 +1085,51 @@ class TestDisplayCatalogFromRecipe:
         data = self._make_recipe_data(displays=[{"id": "x", "name": "X"}])
         catalog, _ = self._make_catalog(data, active=False)
         assert catalog.list_displays() == ()
+
+    def test_list_displays_legacy_recipe_degrades_gracefully(self, caplog):
+        """RS-5 (A-7): легаси-рецепт (top-level data:/meta:) не роняет list_displays().
+
+        ``Recipe.from_dict()`` (extra='forbid') бросает ``ValidationError`` на
+        рецепте со старыми ключами. Раньше это всплывало необработанным до
+        Qt-слота ``DisplaysPresenter.load()`` и ронял вкладку Дисплеи. Теперь —
+        мягкая деградация: пустой список + предупреждение в лог модуля.
+        """
+        from multiprocess_prototype.adapters.catalogs.display_catalog_recipe import (
+            DisplayCatalogFromRecipe,
+        )
+
+        legacy_raw = {
+            "name": "legacy_recipe",
+            "version": 2,
+            "data": {"legacy": True},
+            "meta": {"legacy_field": "x"},
+            "blueprint": {"processes": [], "wires": [], "displays": []},
+        }
+        store = _FakeRecipeStoreLazyValidate({"legacy_recipe": legacy_raw}, active_slug="legacy_recipe")
+        catalog = DisplayCatalogFromRecipe(recipe_store=store, get_active_slug=store.get_active)  # type: ignore[arg-type]
+
+        with caplog.at_level(logging.WARNING):
+            result = catalog.list_displays()
+
+        assert result == ()
+        assert any("легаси" in rec.message.lower() for rec in caplog.records)
+
+    def test_resolve_legacy_recipe_degrades_gracefully(self):
+        """resolve() тоже деградирует (общий _get_active_displays), не падает."""
+        from multiprocess_prototype.adapters.catalogs.display_catalog_recipe import (
+            DisplayCatalogFromRecipe,
+        )
+
+        legacy_raw = {
+            "name": "legacy_recipe",
+            "version": 2,
+            "data": {"legacy": True},
+            "blueprint": {"processes": [], "wires": [], "displays": []},
+        }
+        store = _FakeRecipeStoreLazyValidate({"legacy_recipe": legacy_raw}, active_slug="legacy_recipe")
+        catalog = DisplayCatalogFromRecipe(recipe_store=store, get_active_slug=store.get_active)  # type: ignore[arg-type]
+
+        assert catalog.resolve("main") is None
 
     def test_list_displays_recipe_without_displays_section(self):
         """Рецепт без displays → пустой tuple."""

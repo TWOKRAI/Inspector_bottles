@@ -652,6 +652,37 @@ def test_on_save_preserves_blueprint_name_description(mock_view: MagicMock) -> N
     assert saved["blueprint"]["description"] == "Авторское описание рецепта"
 
 
+def test_on_save_rejects_cycle(mock_view: MagicMock) -> None:
+    """RS-5 (C-4): граф с циклом не пишется на диск — on_save() возвращает False,
+    show_error вызван, store НЕ изменён (запись невалидного графа заблокирована).
+    """
+    store = _make_store(slugs=["cup"])
+    before = store.read_raw("cup")
+
+    # p1 -> p2 -> p1 — цикл на уровне процессов.
+    topology_store = _make_topology_store(
+        {
+            "processes": [
+                {"process_name": "p1", "plugins": []},
+                {"process_name": "p2", "plugins": []},
+            ],
+            "wires": [
+                {"source": "p1.a.out", "target": "p2.b.in"},
+                {"source": "p2.c.out", "target": "p1.d.in"},
+            ],
+            "displays": [],
+        }
+    )
+    presenter = RecipesPresenter(store=store, view=mock_view, topology_store=topology_store)
+    presenter._selected_slug = "cup"
+
+    ok = presenter.on_save()
+
+    assert ok is False
+    mock_view.show_error.assert_called_once()
+    assert store.read_raw("cup") == before  # запись не произошла
+
+
 def test_on_save_no_topology_store(mock_view: MagicMock) -> None:
     """on_save без topology_store -> show_error, False (graceful)."""
     store = _make_store(slugs=["cup"])

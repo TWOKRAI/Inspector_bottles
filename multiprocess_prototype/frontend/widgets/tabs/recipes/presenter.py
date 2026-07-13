@@ -558,10 +558,13 @@ class RecipesPresenter:
             # Сборка blueprint — ВНУТРИ try/except: раньше topo.get(...) на Topology entity
             # (у неё нет .get()) улетал AttributeError мимо обработки → Save тихо крашился
             # в Qt-слоте, пользователь видел no-op (RS-1). Теперь entity → dict до сборки.
-            from multiprocess_prototype.recipes.save import build_recipe_v3_raw
+            from multiprocess_prototype.recipes.save import build_recipe_v3_raw, validate_recipe_blueprint
 
             topo = self._topology_store.load().to_dict()
             new_raw = build_recipe_v3_raw(raw, topo)
+            # RS-5 (C-4): валидация перед записью — граф с циклом/дублями имён процессов
+            # не пишется. RecipeValidationError ловится тем же except ниже (громкая ошибка).
+            validate_recipe_blueprint(new_raw.get("blueprint", {}))
             self._store.save_raw(target_slug, new_raw)
             self._log_info(f"RecipesPresenter.on_save: топология сохранена в '{target_slug}'")
             return True
