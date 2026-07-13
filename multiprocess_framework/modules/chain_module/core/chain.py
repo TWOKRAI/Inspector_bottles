@@ -1,10 +1,10 @@
 """ChainRunnable — последовательный исполнитель цепочки шагов обработки."""
+
 from __future__ import annotations
 
 import time
 from typing import Any, Protocol
 
-import numpy as np
 
 from .context import ChainContext
 from .error_policy import apply_on_error_policy
@@ -19,7 +19,7 @@ class IRunnableChain(Protocol):
 
     def execute(
         self,
-        frame: np.ndarray,
+        payload: Any,
         metadata: dict[str, Any] | None = None,
     ) -> ChainResult: ...
 
@@ -40,17 +40,19 @@ class ChainRunnable:
 
     def execute(
         self,
-        frame: np.ndarray,
+        payload: Any,
         metadata: dict[str, Any] | None = None,
     ) -> ChainResult:
         """Исполнить цепочку последовательно.
 
         Args:
-            frame: Входной кадр (numpy array).
+            payload: Входные данные шага (duck-typed): кадр ``np.ndarray`` для
+                CV-цепочки ИЛИ ``list[dict]`` items для processing-pipeline —
+                исполнитель их не интерпретирует, только прогоняет через шаги.
             metadata: Метаданные — camera_id, region_id, seq_id и т.д.
 
         Returns:
-            ChainResult с финальным кадром, детекциями и диагностикой.
+            ChainResult с финальным payload, детекциями и диагностикой.
         """
         metadata = metadata or {}
 
@@ -60,8 +62,8 @@ class ChainRunnable:
             seq_id=metadata.get("seq_id", 0),
         )
 
-        result = ChainResult(frame=frame, context=context)
-        current_frame = frame
+        result = ChainResult(frame=payload, context=context)
+        current_frame = payload
         t_start = time.perf_counter()
 
         for step in self._steps:

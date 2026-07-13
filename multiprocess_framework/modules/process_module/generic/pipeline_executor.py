@@ -17,7 +17,9 @@ from typing import Callable
 from ..plugins.base import ProcessModulePlugin
 from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
+from .plugin_operation_step import PipelineStepNode, PluginOperationStep, SuspectTagStep
 from .plugin_runner import PluginRunner
+from ...chain_module import ChainRunnable, RunnableStep
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 
 
@@ -72,6 +74,38 @@ class PipelineExecutor:
         self._consecutive_fails: dict[str, int] = {}
         self._bypassed: dict[str, bool] = {}
         self._bypassed_since: dict[str, float] = {}
+
+        # Мост к chain_module (C6d): один PluginOperationStep на плагин —
+        # stateless-обёртка, переиспользуется между батчами (на батч аллоцируются
+        # только ChainRunnable + ChainContext из живых шагов). Порядок = порядок
+        # плагинов; breaker-семантика остаётся здесь (см. _execute_chain).
+        self._runnable_steps: list[RunnableStep] = [
+            RunnableStep(
+                node=PipelineStepNode(node_id=p.name, operation_ref=p.name),
+                operation=PluginOperationStep(
+                    plugin=p,
+                    runner=self._runner,
+                    on_success=self._on_plugin_success,
+                    on_fail=self._on_plugin_fail,
+                ),
+                on_error="skip",
+            )
+            for p in self._plugins
+        ]
+        # Шаг-заглушка на позицию критического bypassed-плагина: тегирует текущие
+        # items "suspect" (см. SuspectTagStep). Stateless — один инстанс на все
+        # позиции/батчи; переиспользуется в _build_active_steps.
+        self._suspect_step = RunnableStep(
+            node=PipelineStepNode(node_id="suspect", operation_ref="suspect"),
+            operation=SuspectTagStep(),
+            on_error="skip",
+        )
+        # Мемоизация активных шагов: пересборка ТОЛЬКО при смене breaker-состояния
+        # (две точки мутации: _on_plugin_fail открывает bypass, _check_auto_reset
+        # сбрасывает). В стабильном окне (сотни батчей) переиспользуем один
+        # ChainRunnable — happy-path (нет bypass) = частный случай кэша.
+        self._active_runnable: ChainRunnable = ChainRunnable(self._build_active_steps())
+        self._steps_dirty: bool = False
 
         # Тайминг цикла обработки для телеметрии GUI. Воркер queue-driven:
         # меряем только итерации с реальной работой (получен batch), а не
@@ -174,46 +208,70 @@ class PipelineExecutor:
             self._cycle_metrics.record(time.perf_counter() - t_start)
 
     def _execute_chain(self, items: list[dict]) -> list[dict]:
-        """Последовательный прогон items через все processing-плагины."""
-        for plugin in self._plugins:
-            if not items:
-                break
+        """Прогон items через processing-плагины поверх ``ChainRunnable`` (C6d).
 
-            # Circuit breaker — пропуск bypassed плагина
-            if self._bypassed.get(plugin.name, False):
-                # Критический плагин bypassed → пометить suspect
-                if plugin.name in self._critical_plugins:
-                    for item in items:
-                        item["inspection_status"] = "suspect"
-                continue
+        Механика (дизайн §5(d) инкремент 1):
+          - breaker-семантика (consecutive_fails/bypass/auto_reset/critical→suspect)
+            остаётся ЗДЕСЬ, вне chain_module;
+          - шаги строятся по breaker-состоянию (``_build_active_steps``): живые
+            плагины + ``SuspectTagStep`` на позициях критических bypassed;
+          - ошибку плагина ловит ``PluginOperationStep`` (тег not_inspected +
+            ``_on_plugin_fail``-репорт), ``on_error`` шага всегда ``skip`` —
+            ``apply_on_error_policy`` chain_module не задействуется.
 
-            try:
-                # Замер времени плагина — в декораторе frame_trace.traced
-                # (авто на process() всех плагинов), здесь не дублируем.
-                # Вызов через PluginRunner — единый шов с pre/post-хуками (io-debug).
-                items = self._runner.call_process(plugin, items)
-                # Успех — сбросить счётчик fails
-                self._consecutive_fails[plugin.name] = 0
-            except Exception as e:
-                self._log_error(f"PipelineExecutor: {plugin.name}.process() error: {e}")
-                # Error policy (Q7): pass-through + mark
-                for item in items:
-                    item["inspection_status"] = "not_inspected"
+        Единый вызов ``ChainRunnable.execute`` прогоняет ВСЮ цепочку живых плагинов
+        внутри одного воркера, без IPC между звеньями (бюджет границ процесса,
+        перф-ревью 2026-07-12): ``_send_results`` вызывается вызывающим ПОСЛЕ, один раз.
+        """
+        # ChainRunnable — sequential-движок: current_frame стартует как items,
+        # каждый шаг возвращает новые items (замена выхода). Пустой батч на входе
+        # или после шага → следующие шаги no-op (см. PluginOperationStep).
+        if self._steps_dirty:
+            self._active_runnable = ChainRunnable(self._build_active_steps())
+            self._steps_dirty = False
+        result = self._active_runnable.execute(items, None)
+        return result.frame
 
-                # Circuit breaker
-                fails = self._consecutive_fails.get(plugin.name, 0) + 1
-                self._consecutive_fails[plugin.name] = fails
+    def _build_active_steps(self) -> list[RunnableStep]:
+        """Шаги chain на текущем breaker-состоянии, в порядке плагинов.
 
-                if fails >= self._max_fails:
-                    self._bypassed[plugin.name] = True
-                    self._bypassed_since[plugin.name] = time.monotonic()
-                    level = "CRITICAL" if plugin.name in self._critical_plugins else "WARNING"
-                    self._log_error(
-                        f"PipelineExecutor [{level}]: circuit breaker OPEN for "
-                        f"'{plugin.name}' ({fails} consecutive fails)"
-                    )
+        Позиционная семантика suspect (breaker остаётся вне chain_module):
+          - живой (не bypassed) плагин → его ``PluginOperationStep``;
+          - критический bypassed → ``SuspectTagStep`` НА ЕГО ПОЗИЦИИ (тегирует items,
+            существующие в этот момент прохода, — не выбрасывается из цепочки, иначе
+            downstream-плагин или замена списка потеряли бы тег);
+          - некритический bypassed → пропуск (просто нет шага).
+        """
+        steps: list[RunnableStep] = []
+        for plugin, step in zip(self._plugins, self._runnable_steps):
+            if not self._bypassed.get(plugin.name, False):
+                steps.append(step)
+            elif plugin.name in self._critical_plugins:
+                steps.append(self._suspect_step)
+        return steps
 
-        return items
+    def _on_plugin_success(self, plugin_name: str) -> None:
+        """Успешный вызов плагина — сбросить счётчик consecutive fails (breaker)."""
+        self._consecutive_fails[plugin_name] = 0
+
+    def _on_plugin_fail(self, plugin_name: str, exc: Exception) -> None:
+        """Фейл плагина — инкремент счётчика, открыть breaker при достижении порога.
+
+        Тег ``inspection_status="not_inspected"`` ставит сам ``PluginOperationStep``
+        (адаптер); лог фейла — здесь, единым каналом (см. LOW-фикс ревью).
+        """
+        self._log_error(f"PipelineExecutor: {plugin_name}.process() error: {exc}")
+        fails = self._consecutive_fails.get(plugin_name, 0) + 1
+        self._consecutive_fails[plugin_name] = fails
+
+        if fails >= self._max_fails:
+            self._bypassed[plugin_name] = True
+            self._bypassed_since[plugin_name] = time.monotonic()
+            self._steps_dirty = True  # breaker открылся → пересобрать шаги
+            level = "CRITICAL" if plugin_name in self._critical_plugins else "WARNING"
+            self._log_error(
+                f"PipelineExecutor [{level}]: circuit breaker OPEN for '{plugin_name}' ({fails} consecutive fails)"
+            )
 
     def _send_results(self, items: list[dict]) -> None:
         """Отправить items по IPC. Routing: item['target'] → per-item, else chain_targets."""
@@ -254,6 +312,7 @@ class PipelineExecutor:
             if now - since >= self._auto_reset_sec:
                 self._bypassed[name] = False
                 self._consecutive_fails[name] = 0
+                self._steps_dirty = True  # breaker сброшен → пересобрать шаги
                 self._log_info(f"PipelineExecutor: circuit breaker RESET for '{name}'")
 
     def is_bypassed(self, plugin_name: str) -> bool:
