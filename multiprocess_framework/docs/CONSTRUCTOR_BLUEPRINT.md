@@ -290,7 +290,7 @@ sequenceDiagram
     RB->>RB: recv_middleware (опционально)
     RB->>RB: message_dispatcher: type/command → handler
     RB->>CMB: handle_command(msg)
-    CMB->>H: handler(msg.data["args"])
+    CMB->>H: handler(msg.data)
     H-->>CMB: result
     Note right of CMB: опционально:<br/>adapter.response(request_id=...)
 ```

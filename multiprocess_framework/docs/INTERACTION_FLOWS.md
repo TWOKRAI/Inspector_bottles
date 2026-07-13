@@ -84,7 +84,7 @@ sequenceDiagram
     RB->>RB: message_dispatcher.dispatch(msg, key="type")
     RB->>CM: handle_command(msg)
     CM->>CM: dispatcher.dispatch(msg, key="command")
-    CM->>H: handler(msg.data["args"])
+    CM->>H: handler(msg.data)
     H-->>CM: result
     Note over CM: опционально — adapter.response(...)
 ```
