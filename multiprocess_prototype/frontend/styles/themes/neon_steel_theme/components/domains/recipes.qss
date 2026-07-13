@@ -1,0 +1,9 @@
+/* === recipes.qss — навигационные списки рецептов === */
+
+/* --- Навигационные списки --- */
+QListWidget#NavList { font-size: @font_lg; }
+QListWidget#NavList::item { padding: 10px 12px; }
+
+QListWidget#RecipeSlotList { font-size: @font_lg; }
+QListWidget#RecipeSlotList::item { padding: 10px 12px; }
+QListWidget#RecipeSlotList::item:selected { background-color: @recipe_selected_bg; color: #000; font-weight: bold; }

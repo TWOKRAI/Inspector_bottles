@@ -1,0 +1,39 @@
+/* === combobox.qss — QComboBox === */
+
+/* ===================== COMBOBOX ===================== */
+QComboBox {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @input_combo_top, stop:1 @input_combo_bot);
+    border: 1px solid @shadow_4xl;
+    border-top: 1px solid @glow_lg;
+    border-radius: @radius_md;
+    padding: 6px 28px 6px 12px;
+    min-height: @input_min_height;
+    color: @text_0;
+}
+QComboBox:hover { border: 1px solid @accent_glass_xl; }
+QComboBox:focus { border: 1px solid @accent; }
+QComboBox:disabled { color: @text_3; }
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 22px;
+    border: none;
+    background: transparent;
+}
+/* Стандартная стрелка Qt — без CSS-border-трюка (он не работает в QSS).
+   Если нужна кастомная — задай image: url(:/icons/chevron-down.svg)
+   и зарегистрируй ресурс через rcc. */
+QComboBox::down-arrow {
+    width: 10px;
+    height: 10px;
+}
+QComboBox QAbstractItemView {
+    background: @input_combo_bot;
+    color: @text_0;
+    border: 1px solid @shadow_5xl;
+    selection-background-color: @accent;
+    selection-color: #ffffff;
+    outline: 0;
+    padding: 4px;
+}

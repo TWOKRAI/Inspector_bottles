@@ -1,0 +1,6 @@
+/* === settings.qss — ThemeDivider === */
+
+/* --- Theme divider line --- */
+QFrame#ThemeDivider {
+    color: @bg_deep;
+}

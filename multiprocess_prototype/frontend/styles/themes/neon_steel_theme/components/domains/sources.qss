@@ -1,0 +1,4 @@
+/* === sources.qss — доменные стили источников === */
+/* Зарезервировано для доменных стилей источников.
+   DisplayImageLabel, CameraStatus — в primitives/displays.qss,
+   т.к. это универсальные display-виджеты. */

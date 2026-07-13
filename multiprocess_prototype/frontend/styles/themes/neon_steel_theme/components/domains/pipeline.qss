@@ -1,0 +1,6 @@
+/* === pipeline.qss — PipelineGraphView === */
+
+/* --- Pipeline graph view background --- */
+QWidget#PipelineGraphView {
+    background-color: @pipeline_graph_bg;
+}

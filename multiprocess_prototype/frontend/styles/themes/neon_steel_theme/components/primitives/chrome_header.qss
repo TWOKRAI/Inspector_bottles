@@ -1,0 +1,62 @@
+/* === chrome_header.qss — AppHeader, статусные пилюли, инфо-тикер === */
+
+/* ===================== ШАПКА (AppHeaderWidget) ===================== */
+/* objectName="AppHeader" корневому виджету шапки.
+   Для срабатывания фона у кастомного QWidget нужен Qt.WA_StyledBackground. */
+QWidget#AppHeader {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi2, stop:0.55 @grad_header_mid, stop:1 @grad_header_bot);
+    border-top: 1px solid @glow_2xl;
+    border-bottom: 4px solid @accent;
+    min-height: @header_height;
+    max-height: @header_height;
+}
+
+QLabel#BrandLabel {
+    color: @brand_color;
+    font-family: "Bank Gothic(RUS BY LYAJKA)", "Square721 BdEx BT";
+    font-size: @font_brand;
+    font-weight: 900;
+    padding-left: 8px;
+}
+
+QLabel#BrandSub {
+    color: @text_2;
+    font-size: @font_xs;
+}
+
+/* разделитель в шапке (objectName="HeaderDiv") */
+QFrame#HeaderDiv {
+    background: @shadow_3xl;
+    max-width: 1px;
+    min-width: 1px;
+    margin: 8px 4px;
+}
+
+/* ===================== СТАТУСНЫЕ ПИЛЮЛИ ===================== */
+QLabel[role="status-pill"],
+QFrame[role="status-pill"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @glow_sm, stop:1 @shadow_sm);
+    border: 1px solid @shadow_lg;
+    border-top: 1px solid @glow_lg;
+    border-radius: @radius_14;
+    padding: 4px 14px;
+    color: @text_0;
+    font-size: @font_base;
+}
+
+/* ===================== ИНФО-ТИКЕР / СТРОКА СООБЩЕНИЙ ===================== */
+QLabel#InfoTicker,
+QFrame#InfoTicker {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_deep, stop:0.55 @grad_ticker_mid, stop:1 @grad_ticker_bot);
+    border: 1px solid @shadow_6xl;
+    border-top: 1px solid @shadow_6xl;
+    border-bottom: 1px solid @glow_xs;
+    border-radius: @radius_10;
+    padding: 6px 18px;
+    color: @text_1;
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_base;
+}

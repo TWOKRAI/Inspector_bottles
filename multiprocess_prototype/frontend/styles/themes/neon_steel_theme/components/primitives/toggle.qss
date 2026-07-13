@@ -1,0 +1,22 @@
+/* === toggle.qss — ViewModeSwitch (iOS-switch) === */
+
+/* --- ViewModeToggle (iOS-switch) --- */
+QCheckBox#ViewModeSwitch {
+    spacing: 0px;
+}
+QCheckBox#ViewModeSwitch::indicator {
+    width: 56px;
+    height: 30px;
+    border-radius: @radius_pill_sm;
+    border: 1px solid @shadow_xl;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi, stop:1 @surf_0);
+}
+QCheckBox#ViewModeSwitch::indicator:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_hi, stop:1 @accent);
+    border: 1px solid rgba(0, 0, 0, 0.3);
+}
+QCheckBox#ViewModeSwitch::indicator:hover {
+    border: 1px solid @glow_3xl;
+}

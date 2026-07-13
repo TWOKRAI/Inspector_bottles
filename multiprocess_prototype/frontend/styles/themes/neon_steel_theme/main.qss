@@ -1,0 +1,1085 @@
+/* =============================================================
+   INNOTECH · Silver Industrial Theme · v3.1 (PySide6-safe)
+   Глобальная QSS-тема для PySide6 / PyQt5.
+
+   Подключение:
+       from pathlib import Path
+       qss = (Path(__file__).parent / "styles" / "innotech_theme.qss").read_text(encoding="utf-8")
+       app.setStyleSheet(qss)
+
+   ВАЖНО — ограничения Qt QSS (НЕ как в HTML/CSS):
+     - text-transform НЕ поддерживается. Используй str.upper() в коде
+       или QFont.setCapitalization(QFont.AllUppercase).
+     - letter-spacing НЕ поддерживается. Используй
+       QFont.setLetterSpacing(QFont.AbsoluteSpacing, px).
+     - Псевдо-стрелки через border-трюк (width:0; border-left/right/top)
+       НЕ работают. Стрелки QComboBox/QSpinBox оставляем дефолтные Qt
+       либо назначаем image: url(...) на реальный SVG/PNG.
+     - Для корректного фона у кастомных QWidget включай атрибут
+       Qt.WA_StyledBackground (иначе background не применяется).
+
+   Палитра (см. THEME_SPEC.md):
+     bg-deep   #1a1f28   bg-mid   #2d3440   bg-hi    #4a5362   bg-hi2  #5c6573
+     surf-0    #3a414e   surf-1   #5a6370   surf-2   #6e7886   surf-deep #252a33
+     silver-hi #c8ccd4   silver   #9ea6b2   silver-lo #6a7280
+     text-0    #f2f5fa   text-1   #c0c7d2   text-2   #8a93a1   text-3  #5e6674
+     accent    #2b7fff   accent-hi #4a95ff  accent-lo #1f5fcc  accent-deep #153f8a
+     danger    #e54863   success  #2ecc8f   warn     #f0a23a
+   ============================================================= */
+
+/* !!!! DEPRECATED !!!!
+   Этот файл — fallback для обратной совместимости.
+   Актуальные стили: base.qss + components/primitives/ + components/domains/
+   Сборка: style_manifest.py → STYLE_MANIFEST → assemble_qss_by_manifest()
+   Не редактировать — изменения вносить в компонентные файлы.
+*/
+
+/* ===================== БАЗА ===================== */
+/* НЕ ставим background: transparent для QWidget — каскадирует на
+   все дочерние виджеты и ломает фон. Прозрачность задаём точечно. */
+QWidget {
+    color: @text_0;
+    font-family: "@font_family", "Segoe UI", sans-serif;
+    font-size: @font_md;
+    selection-background-color: @accent;
+    selection-color: #ffffff;
+}
+
+QLabel {
+    background: transparent;
+}
+
+QMainWindow,
+QDialog {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi2, stop:0.45 @grad_main_mid, stop:1 @grad_main_bot);
+}
+
+QToolTip {
+    color: @text_0;
+    background-color: @bg_deep;
+    border: 1px solid @accent;
+    border-radius: @radius_sm;
+    padding: 6px 10px;
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_sm;
+}
+
+/* ===================== ШАПКА (AppHeaderWidget) ===================== */
+/* objectName="AppHeader" корневому виджету шапки.
+   Для срабатывания фона у кастомного QWidget нужен Qt.WA_StyledBackground. */
+QWidget#AppHeader {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi2, stop:0.55 @grad_header_mid, stop:1 @grad_header_bot);
+    border-top: 1px solid @glow_2xl;
+    border-bottom: 4px solid @accent;
+    min-height: @header_height;
+    max-height: @header_height;
+}
+
+QLabel#BrandLabel {
+    color: @brand_color;
+    font-family: "Bank Gothic(RUS BY LYAJKA)", "Square721 BdEx BT";
+    font-size: @font_brand;
+    font-weight: 900;
+    padding-left: 8px;
+}
+
+QLabel#BrandSub {
+    color: @text_2;
+    font-size: @font_xs;
+}
+
+/* разделитель в шапке (objectName="HeaderDiv") */
+QFrame#HeaderDiv {
+    background: @shadow_3xl;
+    max-width: 1px;
+    min-width: 1px;
+    margin: 8px 4px;
+}
+
+/* ===================== СТАТУСНЫЕ ПИЛЮЛИ ===================== */
+QLabel[role="status-pill"],
+QFrame[role="status-pill"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @glow_sm, stop:1 @shadow_sm);
+    border: 1px solid @shadow_lg;
+    border-top: 1px solid @glow_lg;
+    border-radius: @radius_14;
+    padding: 4px 14px;
+    color: @text_0;
+    font-size: @font_base;
+}
+
+/* ===================== ИНФО-ТИКЕР / СТРОКА СООБЩЕНИЙ ===================== */
+QLabel#InfoTicker,
+QFrame#InfoTicker {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_deep, stop:0.55 @grad_ticker_mid, stop:1 @grad_ticker_bot);
+    border: 1px solid @shadow_6xl;
+    border-top: 1px solid @shadow_6xl;
+    border-bottom: 1px solid @glow_xs;
+    border-radius: @radius_10;
+    padding: 6px 18px;
+    color: @text_1;
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_base;
+}
+
+/* ===================== КНОПКИ (.btn) ===================== */
+QPushButton {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_grad_top, stop:0.5 @btn_grad_mid, stop:1 @btn_grad_bot);
+    border: 1px solid @shadow_3xl;
+    border-top: 1px solid @glow_2xl;
+    border-radius: @radius_10;
+    color: @text_0;
+    font-weight: 600;
+    padding: @btn_padding;
+    min-height: @btn_min_height;
+}
+QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_hover_top, stop:0.5 @btn_hover_mid, stop:1 @btn_hover_bot);
+    color: #ffffff;
+}
+QPushButton:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_grad_bot, stop:0.5 @btn_grad_mid, stop:1 @btn_grad_top);
+    border-top: 1px solid @shadow_md;
+}
+QPushButton:disabled {
+    color: @text_3;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi, stop:1 @grad_header_bot);
+    border-color: @shadow_xl;
+}
+QPushButton:focus {
+    outline: 0;
+    border: 1px solid @accent;
+}
+
+/* primary — насыщенный синий (CTA, START, ПРИМЕНИТЬ) */
+QPushButton[role="primary"] {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_primary_top, stop:0.5 @accent, stop:1 @accent_lo);
+    border: 1px solid @shadow_2xl;
+    border-top: 1px solid @glow_4xl;
+}
+QPushButton[role="primary"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_primary_hover_top, stop:0.5 @btn_primary_hover_mid, stop:1 @btn_primary_hover_bot);
+}
+QPushButton[role="primary"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_lo, stop:0.5 @btn_primary_pressed_mid, stop:1 @btn_primary_pressed_bot);
+    border-top: 1px solid @shadow_lg;
+}
+
+/* danger — красная (ОЧИСТИТЬ, СТОП) */
+QPushButton[role="danger"] {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_danger_top, stop:0.5 @btn_danger_mid, stop:1 @btn_danger_bot);
+    border: 1px solid @shadow_3xl;
+    border-top: 1px solid @glow_2xl;
+}
+QPushButton[role="danger"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_danger_hover_top, stop:0.5 @btn_danger_hover_mid, stop:1 @btn_danger_hover_bot);
+}
+QPushButton[role="danger"]:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_danger_bot, stop:0.5 @btn_danger_mid, stop:1 @btn_danger_top);
+}
+
+/* ghost — почти прозрачная для второстепенных действий */
+QPushButton[role="ghost"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @glow_sm, stop:1 @shadow_sm);
+    color: @text_1;
+    border: 1px solid @glow_sm;
+}
+QPushButton[role="ghost"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @glow_xl, stop:1 @shadow_xs);
+    color: @text_0;
+}
+
+/* checkable / toggle */
+QPushButton:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @btn_primary_top, stop:0.5 @accent, stop:1 @accent_lo);
+    color: #ffffff;
+    border: 1px solid @accent_lo;
+    border-top: 1px solid @glow_4xl;
+}
+
+/* ===================== GROUPBOX ===================== */
+QGroupBox {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @surf_1, stop:0.48 @grad_header_mid, stop:1 @grad_groupbox_bot);
+    border: 1px solid @shadow_2xl;
+    border-top: 1px solid @glow_2xl;
+    border-radius: @radius_lg;
+    margin-top: 16px;
+    padding: 18px 16px 14px 16px;
+    font-weight: 600;
+    color: @text_0;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 14px;
+    top: -2px;
+    padding: 3px 12px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @surf_1, stop:1 @grad_header_mid);
+    border: 1px solid @shadow_2xl;
+    border-top: 1px solid @glow_3xl;
+    border-radius: @radius_sm;
+    color: @text_0;
+    font-size: @font_sm;
+    font-weight: 600;
+}
+
+/* ===================== TABS ===================== */
+QTabWidget::pane {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_pane_top, stop:1 @tab_pane_bot);
+    border: 1px solid @shadow_3xl;
+    border-top: 1px solid @glow_sm;
+    border-radius: 0 0 @radius_10 @radius_10;
+    top: -1px;
+}
+
+/* Контент внутри вкладок: viewport QScrollArea и прямые дочерние QWidget
+   получают тёмный градиент вместо системного белого фона. */
+QAbstractScrollArea {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_pane_top, stop:1 @tab_pane_bot);
+    border: none;
+}
+QAbstractScrollArea > QWidget > QWidget {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_pane_top, stop:1 @tab_pane_bot);
+}
+QTabBar {
+    background: transparent;
+    qproperty-drawBase: 0;
+    /* Прижимаем заголовки вкладок к левому краю окна. */
+    margin-left: 0;
+    padding-left: 0;
+}
+QTabBar::tab {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_bg_top, stop:1 @tab_bg_bot);
+    color: @text_1;
+    border: 1px solid @shadow_xl;
+    border-top: 1px solid @glow_xl;
+    border-bottom: none;
+    border-top-left-radius: @radius_lg;
+    border-top-right-radius: @radius_lg;
+    padding: 10px 24px;
+    margin-right: 4px;
+    font-weight: 500;
+    min-width: 90px;
+}
+QTabBar::tab:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_hover_top, stop:1 @tab_hover_bot);
+    color: @text_0;
+}
+QTabBar::tab:selected {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_selected_top, stop:1 @tab_selected_bot);
+    color: @text_0;
+    border: 1px solid @shadow_3xl;
+    border-top: 1px solid @glow_4xl;
+    border-bottom: 3px solid @accent_hi;
+    margin-bottom: -1px;
+}
+QTabBar::tab:!selected {
+    margin-top: 3px;
+}
+
+/* ===================== COMBOBOX ===================== */
+QComboBox {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @input_combo_top, stop:1 @input_combo_bot);
+    border: 1px solid @shadow_4xl;
+    border-top: 1px solid @glow_lg;
+    border-radius: @radius_md;
+    padding: 6px 28px 6px 12px;
+    min-height: @input_min_height;
+    color: @text_0;
+}
+QComboBox:hover { border: 1px solid @accent_glass_xl; }
+QComboBox:focus { border: 1px solid @accent; }
+QComboBox:disabled { color: @text_3; }
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 22px;
+    border: none;
+    background: transparent;
+}
+/* Стандартная стрелка Qt — без CSS-border-трюка (он не работает в QSS).
+   Если нужна кастомная — задай image: url(:/icons/chevron-down.svg)
+   и зарегистрируй ресурс через rcc. */
+QComboBox::down-arrow {
+    width: 10px;
+    height: 10px;
+}
+QComboBox QAbstractItemView {
+    background: @input_combo_bot;
+    color: @text_0;
+    border: 1px solid @shadow_5xl;
+    selection-background-color: @accent;
+    selection-color: #ffffff;
+    outline: 0;
+    padding: 4px;
+}
+
+/* ===================== LINE EDIT ===================== */
+QLineEdit, QPlainTextEdit, QTextEdit {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
+    border: 1px solid @shadow_4xl;
+    border-bottom: 1px solid @glow_sm;
+    border-radius: @radius_md;
+    padding: @input_padding;
+    color: @text_0;
+    font-family: "@font_family_mono", monospace;
+    selection-background-color: @accent;
+}
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {
+    border: 1px solid @accent;
+}
+QLineEdit:disabled, QPlainTextEdit:disabled, QTextEdit:disabled {
+    color: @text_3;
+    background: @input_disabled_bg;
+}
+
+/* ===================== SPIN BOX ===================== */
+QSpinBox, QDoubleSpinBox {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
+    border: 1px solid @shadow_4xl;
+    border-bottom: 1px solid @glow_sm;
+    border-radius: @radius_md;
+    padding: 4px 22px 4px 8px;
+    color: @text_0;
+    font-family: "@font_family_mono", monospace;
+    min-height: 22px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid @accent; }
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 18px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_bg_top, stop:1 @tab_bg_bot);
+    border: none;
+    border-left: 1px solid @shadow_3xl;
+    border-top-right-radius: 7px;
+}
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 18px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_bg_top, stop:1 @tab_bg_bot);
+    border: none;
+    border-left: 1px solid @shadow_3xl;
+    border-top: 1px solid @shadow_3xl;
+    border-bottom-right-radius: 7px;
+}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_hover_top, stop:1 @tab_hover_bot);
+}
+/* Стандартные стрелки Qt — кастомизация через border-трюк не работает.
+   Для кастомной иконки — image: url(:/icons/spin-up.svg) и т.п. */
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow,
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    width: 8px;
+    height: 8px;
+}
+
+/* ===================== CHECKBOX ===================== */
+QCheckBox {
+    spacing: 10px;
+    color: @text_0;
+    background: transparent;
+}
+QCheckBox::indicator {
+    width: 16px; height: 16px;
+    border-radius: @radius_xs;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
+    border: 1px solid @shadow_4xl;
+    border-bottom: 1px solid @glow_md;
+}
+QCheckBox::indicator:hover { border: 1px solid @accent; }
+/* image: url(:/icons/check.svg) требует зарегистрированный qrc-ресурс.
+   Без него галка НЕ отрисуется. Чтобы избежать «пустого» индикатора,
+   используем сплошной акцентный фон + двойную рамку как индикацию.
+   Когда добавишь иконку галки — раскомментируй image:. */
+QCheckBox::indicator:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_hi, stop:1 @accent_lo);
+    border: 2px solid @accent_light;
+    /* image: url(:/icons/check.svg); */
+}
+QCheckBox::indicator:disabled {
+    background: @input_disabled_bg;
+    border-color: @surf_0;
+}
+
+/* ===================== RADIO ===================== */
+QRadioButton {
+    spacing: 10px;
+    color: @text_0;
+    background: transparent;
+}
+QRadioButton::indicator {
+    width: 16px; height: 16px;
+    border-radius: @radius_md;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
+    border: 1px solid @shadow_4xl;
+}
+QRadioButton::indicator:hover { border: 1px solid @accent; }
+QRadioButton::indicator:checked {
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5,
+        stop:0 @accent_hi, stop:0.45 @accent_hi, stop:0.5 @accent_lo, stop:1 @accent_lo);
+    border: 1px solid @accent_lo;
+}
+
+/* ===================== SLIDER ===================== */
+QSlider::groove:horizontal {
+    height: 8px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
+    border: 1px solid @shadow_3xl;
+    border-bottom: 1px solid @glow_sm;
+    border-radius: @radius_sm;
+}
+QSlider::sub-page:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 @accent_lo, stop:1 @accent_hi);
+    border-radius: @radius_sm;
+    margin: 1px;
+}
+QSlider::add-page:horizontal {
+    background: transparent;
+}
+QSlider::handle:horizontal {
+    width: 24px;
+    height: 24px;
+    margin: -9px 0;
+    border-radius: @radius_lg;
+    background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
+        stop:0 #ffffff, stop:0.3 @slider_knob_hi, stop:1 @slider_knob_lo);
+    border: 1px solid @shadow_4xl;
+}
+QSlider::handle:horizontal:hover {
+    background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
+        stop:0 #ffffff, stop:0.3 @slider_knob_hover_hi, stop:1 @slider_knob_hover_lo);
+}
+QSlider::handle:horizontal:pressed {
+    background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
+        stop:0 @slider_knob_pressed_top, stop:0.3 @slider_knob_pressed_hi, stop:1 @slider_knob_pressed_lo);
+}
+
+QSlider::groove:vertical {
+    width: 8px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
+    border: 1px solid @shadow_3xl;
+    border-radius: @radius_sm;
+}
+QSlider::sub-page:vertical {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_hi, stop:1 @accent_lo);
+    border-radius: @radius_sm;
+    margin: 1px;
+}
+QSlider::handle:vertical {
+    width: 24px;
+    height: 24px;
+    margin: 0 -9px;
+    border-radius: @radius_lg;
+    background: qradialgradient(cx:0.35, cy:0.28, radius:0.8,
+        stop:0 #ffffff, stop:0.3 @slider_knob_hi, stop:1 @slider_knob_lo);
+    border: 1px solid @shadow_4xl;
+}
+
+/* ===================== PROGRESS BAR ===================== */
+QProgressBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
+    border: 1px solid @shadow_3xl;
+    border-radius: @radius_6;
+    text-align: center;
+    color: @text_0;
+    min-height: 18px;
+    max-height: 22px;
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_sm;
+}
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 @accent_lo, stop:1 @accent_hi);
+    border-radius: @radius_5;
+    margin: 1px;
+}
+
+/* ===================== SCROLLBARS =====================
+ * Толщина увеличена до 42px (×3 от стандартных 14px) — для удобства управления
+ * пальцем на сенсорных экранах. См. plan: lauout-cozy-sphinx.md.
+ */
+QScrollBar:vertical {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
+    width: @scrollbar_width;
+    border: 1px solid @shadow_2xl;
+    border-radius: @radius_pill;
+    margin: 4px;
+}
+QScrollBar::handle:vertical {
+    background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
+        stop:0 @scroll_handle_a, stop:1 @scroll_handle_b);
+    border-radius: @radius_pill_sm;
+    min-height: 60px;
+    margin: 4px;
+}
+QScrollBar::handle:vertical:hover {
+    background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
+        stop:0 @scroll_handle_hover_a, stop:1 @scroll_handle_hover_b);
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+    background: transparent;
+    border: none;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+
+QScrollBar:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
+    height: @scrollbar_h_height;
+    border: 1px solid @shadow_2xl;
+    border-radius: @radius_pill;
+    margin: 4px;
+}
+QScrollBar::handle:horizontal {
+    background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
+        stop:0 @scroll_handle_a, stop:1 @scroll_handle_b);
+    border-radius: @radius_pill_sm;
+    min-width: 60px;
+    margin: 4px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
+        stop:0 @scroll_handle_hover_a, stop:1 @scroll_handle_hover_b);
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+    background: transparent;
+    border: none;
+}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
+
+/* ===================== MENU / MENUBAR ===================== */
+QMenuBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi2, stop:1 @grad_header_bot);
+    color: @text_0;
+    border-bottom: 1px solid @shadow_3xl;
+}
+QMenuBar::item {
+    background: transparent;
+    padding: 6px 12px;
+    border-radius: @radius_sm;
+}
+QMenuBar::item:selected {
+    background: @accent_glass_md;
+    color: #ffffff;
+}
+QMenu {
+    background: @bg_mid;
+    color: @text_0;
+    border: 1px solid @shadow_5xl;
+    padding: 4px;
+}
+QMenu::item {
+    padding: 6px 24px;
+    border-radius: @radius_sm;
+}
+QMenu::item:selected {
+    background: @accent;
+    color: #ffffff;
+}
+QMenu::separator {
+    height: 1px;
+    background: @glow_sm;
+    margin: 4px 8px;
+}
+
+/* ===================== STATUS BAR ===================== */
+QStatusBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @grad_header_bot, stop:1 @grad_main_bot);
+    color: @text_1;
+    border-top: 1px solid @shadow_4xl;
+}
+QStatusBar::item {
+    border: none;
+}
+
+/* ===================== TABLE / LIST / TREE ===================== */
+QTableView, QListView, QTreeView {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
+    alternate-background-color: @input_alt_row;
+    color: @text_0;
+    border: 1px solid @shadow_4xl;
+    border-radius: @radius_6;
+    gridline-color: @glow_xs;
+    selection-background-color: @accent;
+    selection-color: #ffffff;
+    outline: 0;
+}
+QTableView::item:selected,
+QListView::item:selected,
+QTreeView::item:selected {
+    background: @accent;
+    color: #ffffff;
+}
+QHeaderView {
+    background: transparent;
+    border: none;
+}
+QHeaderView::section {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @surf_1, stop:1 @grad_groupbox_bot);
+    color: @text_0;
+    padding: 6px 10px;
+    border: none;
+    border-right: 1px solid @shadow_xl;
+    border-bottom: 1px solid @shadow_3xl;
+    border-top: 1px solid @glow_2xl;
+    font-weight: 600;
+    font-size: @font_sm;
+}
+
+/* ===================== SPLITTER ===================== */
+QSplitter::handle {
+    background: @shadow_xl;
+}
+QSplitter::handle:horizontal { width: 3px; }
+QSplitter::handle:vertical { height: 3px; }
+QSplitter::handle:hover { background: @accent; }
+
+/* ===================== FRAME / IMAGE SLOT ===================== */
+QFrame#ImageSlot, QWidget#ImageSlot {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @slot_bg_top, stop:1 @slot_bg_bot);
+    border: 1px solid @shadow_4xl;
+    border-radius: @radius_lg;
+}
+
+QFrame#ImageSlot[role="accent-edges"],
+QWidget#ImageSlot[role="accent-edges"] {
+    border-left: 2px solid @accent_glass_2xl;
+    border-bottom: 2px solid @accent_glass_2xl;
+    border-top: 1px solid @shadow_4xl;
+    border-right: 1px solid @shadow_4xl;
+}
+
+/* ===================== ds-card / панель дизайн-системы ===================== */
+QFrame[role="ds-card"], QWidget[role="ds-card"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @grad_card_top, stop:1 @grad_groupbox_bot);
+    border: 1px solid @shadow_xl;
+    border-top: 1px solid @glow_2xl;
+    border-radius: @radius_xl;
+}
+
+/* ===================== Note-блок (info/подсказка) ===================== */
+QFrame[role="note"], QLabel[role="note"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_glass_sm, stop:1 @accent_glass_xs);
+    border: 1px solid @accent_glass_lg;
+    border-radius: @radius_10;
+    padding: 10px 14px;
+    color: @accent_light;
+}
+
+/* ===================== ОБЩИЕ КЛАССЫ-ОБЪЕКТНЫЕ ИМЕНА ===================== */
+QLabel#Mono {
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_base;
+    color: @text_1;
+}
+QLabel#Caption {
+    font-size: @font_sm;
+    color: @text_1;
+    font-weight: 500;
+}
+QLabel#MetricValue {
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_xl;
+    color: @accent_hi;
+    font-weight: 500;
+}
+QLabel#MetricKey {
+    font-size: @font_2xs;
+    color: @text_2;
+}
+
+/* Метки каналов R/G/B для слайдеров */
+QLabel[role="ch-r"] { color: @ch_red; font-family: "@font_family_mono", monospace; font-weight: 600; }
+QLabel[role="ch-g"] { color: @ch_green; font-family: "@font_family_mono", monospace; font-weight: 600; }
+QLabel[role="ch-b"] { color: @ch_blue; font-family: "@font_family_mono", monospace; font-weight: 600; }
+
+QLabel[role="ch-value"] {
+    color: @accent_hi;
+    font-family: "@font_family_mono", monospace;
+    font-size: @font_md;
+    font-weight: 500;
+}
+
+/* ===================== INLINE → QSS: централизованные виджетные стили ===================== */
+
+/* --- Навигационные списки --- */
+QListWidget#NavList { font-size: @font_lg; }
+QListWidget#NavList::item { padding: 10px 12px; }
+
+QListWidget#RecipeSlotList { font-size: @font_lg; }
+QListWidget#RecipeSlotList::item { padding: 10px 12px; }
+QListWidget#RecipeSlotList::item:selected { background-color: @recipe_selected_bg; color: #000; font-weight: bold; }
+
+/* --- Chrome --- */
+QLabel#InfoTickerLabel { color: @text_1; padding: 0 4px; background: transparent; }
+QLabel#StatusIndicator { color: @text_2; }
+QWidget#WatchdogOverlay { background-color: @watchdog_overlay_bg; border-radius: @radius_md; }
+QLabel#WatchdogOverlayLabel { font-size: @font_xxl_sm; font-weight: bold; color: @watchdog_text; background: transparent; }
+QLabel#RecDot { background-color: red; border-radius: @radius_6; }
+
+/* --- Общие утилитарные стили --- */
+QLabel#MutedLabel { color: @text_2; }
+QLabel#HintLabel { font-size: @font_2xs; color: @text_2; }
+QLabel#HintLabelLg { font-size: @font_sm; color: @text_2; }
+QLabel#PlaceholderLabel { color: @text_2; font-size: @font_md; }
+QLabel#SectionTitle { font-weight: bold; font-size: @font_lg_sm; }
+QLabel#PanelTitle { font-weight: bold; font-size: @font_base; }
+QLabel#PanelTitleLg { font-weight: bold; font-size: @font_md; }
+QLabel#WarningBar { background-color: @warning_bar_bg; color: @warning_bar_text; border: 1px solid @warning_bar_border; border-radius: @radius_xs; padding: 4px; }
+
+/* --- DiffScrollTabLayout --- */
+QGroupBox#DiffScrollNavGroup {
+    margin-top: 10px;
+    padding: 6px 4px 4px 4px;
+    border-radius: @radius_md;
+}
+QGroupBox#DiffScrollNavGroup::title {
+    left: 10px;
+    top: -1px;
+}
+
+/* --- Источники --- */
+QLabel#DisplayImageLabel { background-color: black; }
+QLabel#CameraStatus { font-weight: bold; color: @text_2; }
+
+/* --- Пагинация (стрелки ← →) --- */
+QPushButton#PaginationArrow {
+    font-size: @font_xxl;
+    padding: 4px 4px;
+    min-width: 50px;
+    max-width: 50px;
+}
+
+/* --- Tab headers (общий objectName для всех заголовков вкладок) --- */
+QLabel#TabHeader {
+    font-size: @font_xl_sm;
+    font-weight: bold;
+}
+
+/* --- Panel headers (admin panels: audit, sessions, users) --- */
+QLabel#PanelHeader { font-weight: bold; font-size: @font_lg; }
+
+/* --- Large tab header (services tab) --- */
+QLabel#TabHeaderLg { font-weight: bold; font-size: @font_xl; }
+
+/* --- Confirm dialog action label --- */
+QLabel#ConfirmActionLabel { font-weight: bold; }
+
+/* --- Dirty indicator (statusbar) --- */
+QLabel#DirtyLabel {
+    color: @warn;
+    font-weight: bold;
+}
+
+/* --- Topology hints --- */
+QLabel#StatusHint {
+    color: @text_3;
+    font-size: @font_sm;
+}
+
+/* --- Pipeline graph view background --- */
+QWidget#PipelineGraphView {
+    background-color: @pipeline_graph_bg;
+}
+
+/* --- Theme divider line --- */
+QFrame#ThemeDivider {
+    color: @bg_deep;
+}
+
+/* --- Readonly hint (roles panel, etc.) --- */
+QLabel[role="readonly-hint"] {
+    color: @text_3;
+    font-size: @font_base;
+}
+
+/* --- Placeholder italic (services tab, etc.) --- */
+QLabel[role="placeholder-italic"] {
+    color: @text_3;
+    font-size: @font_lg_sm;
+    font-style: italic;
+}
+
+/* --- Permissions hint (admin dashboard) --- */
+QLabel#PermissionsHint {
+    color: @silver;
+    font-size: @font_sm;
+}
+
+/* --- DiffScroll transparent ScrollArea --- */
+QScrollArea#DiffScrollLeft,
+QScrollArea#DiffScrollRight {
+    background: transparent;
+    border: none;
+}
+
+/* --- EntityCard --- */
+QFrame#EntityCard {
+    border: 1px solid @surf_1;
+    border-radius: @radius_sm;
+    padding: 8px;
+    margin: 2px;
+}
+QLabel#EntityCardTitle {
+    font-weight: bold;
+}
+QLabel#EntityCardKey {
+    color: @text_2;
+}
+
+/* ===================== ProcessCard (насыщенная ds-card) ===================== */
+QFrame[role="process-card"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @grad_card_top, stop:1 @grad_groupbox_bot);
+    border: 1px solid @shadow_xl;
+    border-top: 1px solid @glow_2xl;
+    border-left: 4px solid @surf_2;   /* дефолт; переопределяется по категории */
+    border-radius: @radius_md;
+    margin: 2px;
+}
+/* Цветная полоса категории слева */
+QFrame[role="process-card"][category="source"]     { border-left: 4px solid @accent; }
+QFrame[role="process-card"][category="processing"] { border-left: 4px solid @warn; }
+QFrame[role="process-card"][category="rendering"]  { border-left: 4px solid @success; }
+QFrame[role="process-card"][category="output"]     { border-left: 4px solid @accent_hi; }
+QFrame[role="process-card"][category="control"]    { border-left: 4px solid @accent_lo; }
+QFrame[role="process-card"][category="service"]    { border-left: 4px solid @text_2; }
+QFrame[role="process-card"][category="utility"]    { border-left: 4px solid @text_3; }
+
+QLabel#ProcessCardTitle {
+    font-size: @font_lg;
+    font-weight: bold;
+    color: @text_0;
+}
+QLabel#ProcessCardMetric {
+    color: @text_2;
+    font-size: @font_sm;
+}
+
+/* Статус-пилюля */
+QLabel#ProcessCardPill {
+    padding: 1px 8px;
+    border-radius: @radius_sm;
+    font-size: @font_sm;
+    color: @text_0;
+    background: @surf_1;
+}
+QLabel#ProcessCardPill[status="running"] { background: @success; color: @bg_deep; }
+QLabel#ProcessCardPill[status="ready"]   { background: @success; color: @bg_deep; }
+QLabel#ProcessCardPill[status="error"]   { background: @danger;  color: @bg_deep; }
+QLabel#ProcessCardPill[status="starting"]{ background: @warn;    color: @bg_deep; }
+QLabel#ProcessCardPill[status="stopped"] { background: @surf_2;  color: @text_1; }
+QLabel#ProcessCardPill[status="created"] { background: @surf_2;  color: @text_1; }
+
+/* Кнопки-иконки действий */
+QPushButton#ProcessCardIconButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: @radius_sm;
+    font-size: @font_md;
+    color: @text_1;
+    padding: 0;
+}
+QPushButton#ProcessCardIconButton:hover {
+    background: @accent_glass_md;
+    border: 1px solid @accent_glass_lg;
+    color: @text_0;
+}
+QPushButton#ProcessCardIconButton:pressed {
+    background: @accent_glass_lg;
+}
+
+/* ===================== WorkerTable ===================== */
+QTableWidget#WorkerTable {
+    background: @surf_deep;
+    border: 1px solid @surf_1;
+    border-radius: @radius_sm;
+    gridline-color: @surf_1;
+}
+QTableWidget#WorkerTable::item:selected {
+    background: @accent_glass_lg;
+}
+
+/* --- Display slot / Camera view label --- */
+QLabel#DisplaySlotLabel,
+QLabel#CameraViewLabel {
+    background-color: @display_slot_bg;
+    color: @text_2;
+    font-size: @font_xl_sm;
+}
+
+/* --- ViewModeToggle (iOS-switch) --- */
+QCheckBox#ViewModeSwitch {
+    spacing: 0px;
+}
+QCheckBox#ViewModeSwitch::indicator {
+    width: 56px;
+    height: 30px;
+    border-radius: @radius_pill_sm;
+    border: 1px solid @shadow_xl;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi, stop:1 @surf_0);
+}
+QCheckBox#ViewModeSwitch::indicator:checked {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @accent_hi, stop:1 @accent);
+    border: 1px solid rgba(0, 0, 0, 0.3);
+}
+QCheckBox#ViewModeSwitch::indicator:hover {
+    border: 1px solid @glow_3xl;
+}
+
+/* --- Error banner rows (dynamic property level="error"|"warning") --- */
+QWidget#ErrorBannerRow[level="error"] {
+    background: @danger_glass;
+    border-left: 3px solid @error_banner_border;
+    padding: 4px 8px;
+}
+QWidget#ErrorBannerRow[level="warning"] {
+    background: @warn_glass;
+    border-left: 3px solid @warning_banner_border;
+    padding: 4px 8px;
+}
+
+/* --- Validation panel output (dynamic property validation="ok"|"error"|"") --- */
+QTextEdit#ValidationOutput[validation="ok"] {
+    color: @success;
+}
+QTextEdit#ValidationOutput[validation="error"] {
+    color: @danger;
+}
+
+/* --- Error labels (login, confirm, user_form) --- */
+QLabel#LoginErrorLabel,
+QLabel#ConfirmErrorLabel,
+QLabel#PasswordErrorLabel {
+    color: @danger;
+}
+QLabel#PasswordErrorLabel {
+    font-size: @font_sm;
+}
+
+/* --- Validation error border (dynamic property hasError="true") --- */
+QLineEdit[hasError="true"],
+QPlainTextEdit[hasError="true"],
+QTextEdit[hasError="true"] {
+    border: 1px solid @danger;
+}
+
+/* --- Slot selector states (dynamic property slotState) --- */
+QPushButton#SlotButton[slotState="empty"] {
+    background: @surf_0;
+    color: @text_3;
+    border: 1px solid @surf_1;
+}
+QPushButton#SlotButton[slotState="occupied"] {
+    background: @slot_occupied_bg;
+    color: @text_1;
+    border: 1px solid @success;
+}
+QPushButton#SlotButton[slotState="selected"] {
+    background: @slot_selected_bg;
+    color: @text_0;
+    border: 2px solid @accent;
+}
+
+/* --- Inspector panel --- */
+QLabel#InspectorPlaceholder {
+    color: @text_3;
+    font-style: italic;
+    padding: 20px;
+}
+QLabel#InspectorTitle {
+    font-size: @font_lg_sm;
+    font-weight: bold;
+    color: @text_0;
+}
+QLabel#InspectorCategoryBadge {
+    font-size: @font_sm;
+    padding: 2px 6px;
+    border-radius: @radius_xs;
+}
+QFrame#InspectorDivider {
+    color: @surf_1;
+}
+QLabel[role="plugin-name"] {
+    font-weight: bold;
+    color: @text_1;
+    margin-top: 4px;
+}
+
+/* ===== Auth RBAC: readOnly state (PR2/PR3) ===== */
+/* Виджеты с property readOnly="true" — приглушённый вид (можно видеть, нельзя менять).
+   Qt QSS не поддерживает opacity, поэтому используем цветовое затенение и
+   контрастный фон у кнопок. */
+*[readOnly="true"] {
+    color: @text_3;
+}
+*[readOnly="true"] QLabel {
+    color: @text_3;
+}
+QPushButton[readOnly="true"] {
+    color: @text_3;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi, stop:1 @grad_header_bot);
+    border-color: @shadow_xl;
+}
+QPushButton[readOnly="true"]:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @bg_hi, stop:1 @grad_header_bot);
+    border-color: @shadow_xl;
+}

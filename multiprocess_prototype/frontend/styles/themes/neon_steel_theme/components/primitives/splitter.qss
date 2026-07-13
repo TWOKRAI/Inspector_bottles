@@ -1,0 +1,9 @@
+/* === splitter.qss — QSplitter === */
+
+/* ===================== SPLITTER ===================== */
+QSplitter::handle {
+    background: @shadow_xl;
+}
+QSplitter::handle:horizontal { width: 3px; }
+QSplitter::handle:vertical { height: 3px; }
+QSplitter::handle:hover { background: @accent; }

@@ -1,0 +1,18 @@
+/* === slot_button.qss — SlotButton states === */
+
+/* --- Slot selector states (dynamic property slotState) --- */
+QPushButton#SlotButton[slotState="empty"] {
+    background: @surf_0;
+    color: @text_3;
+    border: 1px solid @surf_1;
+}
+QPushButton#SlotButton[slotState="occupied"] {
+    background: @slot_occupied_bg;
+    color: @text_1;
+    border: 1px solid @success;
+}
+QPushButton#SlotButton[slotState="selected"] {
+    background: @slot_selected_bg;
+    color: @text_0;
+    border: 2px solid @accent;
+}

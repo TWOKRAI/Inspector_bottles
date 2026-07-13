@@ -1,0 +1,61 @@
+/* === tabs.qss — QTabWidget, QTabBar, QAbstractScrollArea === */
+
+/* ===================== TABS ===================== */
+QTabWidget::pane {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_pane_top, stop:1 @tab_pane_bot);
+    border: 1px solid @shadow_3xl;
+    border-top: 1px solid @glow_sm;
+    border-radius: 0 0 @radius_10 @radius_10;
+    top: -1px;
+}
+
+/* Контент внутри вкладок: viewport QScrollArea и прямые дочерние QWidget
+   получают тёмный градиент вместо системного белого фона. */
+QAbstractScrollArea {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_pane_top, stop:1 @tab_pane_bot);
+    border: none;
+}
+QAbstractScrollArea > QWidget > QWidget {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_pane_top, stop:1 @tab_pane_bot);
+}
+QTabBar {
+    background: transparent;
+    qproperty-drawBase: 0;
+    /* Прижимаем заголовки вкладок к левому краю окна. */
+    margin-left: 0;
+    padding-left: 0;
+}
+QTabBar::tab {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_bg_top, stop:1 @tab_bg_bot);
+    color: @text_1;
+    border: 1px solid @shadow_xl;
+    border-top: 1px solid @glow_xl;
+    border-bottom: none;
+    border-top-left-radius: @radius_lg;
+    border-top-right-radius: @radius_lg;
+    padding: 10px 24px;
+    margin-right: 4px;
+    font-weight: 500;
+    min-width: 90px;
+}
+QTabBar::tab:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_hover_top, stop:1 @tab_hover_bot);
+    color: @text_0;
+}
+QTabBar::tab:selected {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @tab_selected_top, stop:1 @tab_selected_bot);
+    color: @text_0;
+    border: 1px solid @shadow_3xl;
+    border-top: 1px solid @glow_4xl;
+    border-bottom: 3px solid @accent_hi;
+    margin-bottom: -1px;
+}
+QTabBar::tab:!selected {
+    margin-top: 3px;
+}

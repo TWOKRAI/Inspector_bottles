@@ -1,0 +1,37 @@
+/* === tables.qss — QTableView, QListView, QTreeView, QHeaderView === */
+
+/* ===================== TABLE / LIST / TREE ===================== */
+QTableView, QListView, QTreeView {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @input_bg_top, stop:1 @input_bg_bot);
+    alternate-background-color: @input_alt_row;
+    color: @text_0;
+    border: 1px solid @shadow_4xl;
+    border-radius: @radius_6;
+    gridline-color: @glow_xs;
+    selection-background-color: @accent;
+    selection-color: #ffffff;
+    outline: 0;
+}
+QTableView::item:selected,
+QListView::item:selected,
+QTreeView::item:selected {
+    background: @accent;
+    color: #ffffff;
+}
+QHeaderView {
+    background: transparent;
+    border: none;
+}
+QHeaderView::section {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @surf_1, stop:1 @grad_groupbox_bot);
+    color: @text_0;
+    padding: 6px 10px;
+    border: none;
+    border-right: 1px solid @shadow_xl;
+    border-bottom: 1px solid @shadow_3xl;
+    border-top: 1px solid @glow_2xl;
+    font-weight: 600;
+    font-size: @font_sm;
+}

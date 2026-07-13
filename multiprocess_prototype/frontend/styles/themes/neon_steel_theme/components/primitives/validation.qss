@@ -1,0 +1,9 @@
+/* === validation.qss — ValidationOutput === */
+
+/* --- Validation panel output (dynamic property validation="ok"|"error"|"") --- */
+QTextEdit#ValidationOutput[validation="ok"] {
+    color: @success;
+}
+QTextEdit#ValidationOutput[validation="error"] {
+    color: @danger;
+}

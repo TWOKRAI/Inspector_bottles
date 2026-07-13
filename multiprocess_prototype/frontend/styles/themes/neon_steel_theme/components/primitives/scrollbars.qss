@@ -1,0 +1,57 @@
+/* === scrollbars.qss — QScrollBar (vertical и horizontal) === */
+
+/* ===================== SCROLLBARS =====================
+ * Толщина увеличена до 42px (×3 от стандартных 14px) — для удобства управления
+ * пальцем на сенсорных экранах. См. plan: lauout-cozy-sphinx.md.
+ */
+QScrollBar:vertical {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
+    width: @scrollbar_width;
+    border: 1px solid @shadow_2xl;
+    border-radius: @radius_pill;
+    margin: 4px;
+}
+QScrollBar::handle:vertical {
+    background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
+        stop:0 @scroll_handle_a, stop:1 @scroll_handle_b);
+    border-radius: @radius_pill_sm;
+    min-height: 60px;
+    margin: 4px;
+}
+QScrollBar::handle:vertical:hover {
+    background: qlineargradient(x1:1, y1:0, x2:0, y2:0,
+        stop:0 @scroll_handle_hover_a, stop:1 @scroll_handle_hover_b);
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+    background: transparent;
+    border: none;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+
+QScrollBar:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 @scroll_groove_top, stop:1 @scroll_groove_bot);
+    height: @scrollbar_h_height;
+    border: 1px solid @shadow_2xl;
+    border-radius: @radius_pill;
+    margin: 4px;
+}
+QScrollBar::handle:horizontal {
+    background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
+        stop:0 @scroll_handle_a, stop:1 @scroll_handle_b);
+    border-radius: @radius_pill_sm;
+    min-width: 60px;
+    margin: 4px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: qlineargradient(x1:0, y1:1, x2:0, y2:0,
+        stop:0 @scroll_handle_hover_a, stop:1 @scroll_handle_hover_b);
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+    background: transparent;
+    border: none;
+}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }

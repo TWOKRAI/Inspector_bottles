@@ -14,7 +14,7 @@ system: backend/config/system.yaml
 # Стили: каталог тем (стилевых рецептов) + активная тема
 styles:
   dir: frontend/styles/themes
-  active: innotech_theme
+  active: neon_steel_theme
 
 # Фундамент (приватная топология): презентация + always-on. Суммируется с pipeline.
 base: backend/topology/base.yaml

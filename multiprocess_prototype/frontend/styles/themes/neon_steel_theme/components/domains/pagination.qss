@@ -1,0 +1,9 @@
+/* === pagination.qss — PaginationArrow === */
+
+/* --- Пагинация (стрелки ← →) --- */
+QPushButton#PaginationArrow {
+    font-size: @font_xxl;
+    padding: 4px 4px;
+    min-width: 50px;
+    max-width: 50px;
+}
