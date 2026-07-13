@@ -42,6 +42,8 @@ from ...worker_module import ExecutionMode, IWorkerManager, ThreadConfig, Worker
 
 # Сентинел остановки воркера: воркер, забравший ``None``, выходит из цикла.
 _STOP_SENTINEL = None
+# Шаг ожидания опустошения очереди при shutdown(wait=True).
+_DRAIN_POLL_SEC = 0.005
 
 
 class _PoolTimeout(Exception):
@@ -172,18 +174,55 @@ class WorkerPoolExecutor(BaseManager, ObservableMixin):
                 )
             self._worker_names.append(name)
 
-    def _stop_workers(self) -> None:
+    def _stop_workers(self, drain: bool = False) -> None:
         """Остановить и снять с учёта все воркеры пула. Вызывается под ``self._lock``.
 
         По одному сентинелу на воркер (будит блокирующий ``get()`` → выход из
         цикла), затем ``remove_worker`` (stop_event backstop + join + снятие с
         учёта в реестре — иначе имя осталось бы занятым STOPPED-воркером).
+
+        ``drain=True`` (shutdown(wait=True)): ДОЖДАТЬСЯ опустошения очереди ДО
+        ``remove_worker``. Из-за дисциплины ``get→run→get`` воркер доходит до
+        своего сентинела только исполнив все реальные задачи перед ним, поэтому
+        «очередь пуста» ⟺ «весь хвост доисполнен, все воркеры вышли по сентинелу».
+        Иначе ``stop_worker`` ставит ``stop_event`` немедленно
+        (``worker_lifecycle.py``) и воркер бросает хвост >N задач после текущей.
+        Ожидание неограниченное — паритет ``ThreadPoolExecutor.shutdown(wait=True)``
+        (честно висит на зависшей операции; H2 не даёт воркеру умереть внезапно).
+
+        В конце — вычистить осиротевшие сентинелы (зомби, доисполнивший зависшую
+        задачу после join-таймаута, выходит по ``stop_event`` НЕ потребив свой
+        сентинел; иначе тот переживёт resize и убьёт воркера нового поколения).
         """
         for _ in self._worker_names:
             self._in_queue.put(_STOP_SENTINEL)
+        if drain:
+            while not self._in_queue.empty():
+                time.sleep(_DRAIN_POLL_SEC)
         for name in self._worker_names:
             self._worker_manager.remove_worker(name)
+        self._reclaim_orphan_sentinels()
         self._worker_names.clear()
+
+    def _reclaim_orphan_sentinels(self) -> None:
+        """Убрать недопотреблённые сентинелы из очереди. Под ``self._lock``.
+
+        Вызывается ПОСЛЕ ``remove_worker`` (все старые воркеры сняты/выходят,
+        занятый зомби после задачи выйдет по ``stop_event``, не трогая очередь) и
+        ДО ``_start_workers`` — новое поколение не должно наткнуться на чужой
+        сентинел. Реальные задачи возвращаются в очередь в порядке изъятия (при
+        resize с непустой очередью работа не теряется).
+        """
+        survivors: list[_PoolTask] = []
+        while True:
+            try:
+                item = self._in_queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is not None:
+                survivors.append(item)
+        for task in survivors:
+            self._in_queue.put(task)
 
     def _drain_and_cancel(self) -> None:
         """Отменить все задачи в очереди (shutdown(wait=False)). Под ``self._lock``."""
@@ -230,7 +269,7 @@ class WorkerPoolExecutor(BaseManager, ObservableMixin):
             self._shutdown = True
             if not wait:
                 self._drain_and_cancel()
-            self._stop_workers()
+            self._stop_workers(drain=wait)
             owns = self._owns_manager
         if owns:
             self._worker_manager.shutdown()
