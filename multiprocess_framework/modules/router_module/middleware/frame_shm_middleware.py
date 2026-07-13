@@ -351,6 +351,12 @@ class FrameShmMiddleware:
         """
         frame = msg.get("frame")
         if frame is None:
+            # Дизъюнктность путей (пост-фикс ревью 2026-07-13): data-сообщения —
+            # зона ответственности strip_data_frame_on_send (он их уже считает);
+            # если оба middleware зарегистрированы на одном роутере, replay-ветка
+            # без этого guard'а посчитала бы ту же отправку ВТОРОЙ раз.
+            if msg.get("type") == "data":
+                return msg
             existing_data = msg.get("data")
             if isinstance(existing_data, dict) and existing_data.get("shm_name"):
                 self._bump_boundary_only()
