@@ -986,14 +986,15 @@ class BuiltinCommands:
             memory_manager=mm,
             owner=shm_owner,
             slot=shm_name,
-            # Ф7 G.6: тот же runtime-счётчик границ, что и в generic-пути (см.
-            # generic_process.py) — router_manager здесь уже проверен truthy выше.
-            on_boundary_cross=self._services.router_manager.record_frame_boundary_crossing,
         )
 
         # Подключить middleware к router
         if role == "sender":
             self._services.router_manager.add_send_middleware(mw.on_send)
+            # Ф7 G.6 (F5): счётчик границ агрегируется в RouterManager.get_stats()
+            # (introspect.router_stats) — только на send-стороне, receiver границу
+            # не пересекает повторно (см. класс-докстринг FrameShmMiddleware).
+            self._services.router_manager.register_frame_middleware(mw)
         else:
             self._services.router_manager.add_receive_middleware(mw.on_receive)
 

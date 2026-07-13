@@ -121,14 +121,18 @@ class RouterManager(ChannelRoutingManager):
             # через system-очередь PM (диагностика: стейл-очередь сброшена refresh'ем
             # → send упал в relay). Попадает в introspect.router_stats автоматически.
             "relayed_to_hub": 0,
-            # Ф7 G.6: сколько раз кадр реально пересёк границу процесса через ЭТОТ
-            # router (инкремент из FrameShmMiddleware в момент send — SHM-успех ИЛИ
-            # pickle-fallback, оба пути кладут кадр на исходящий транспорт). Метрика
-            # для baseline «границ/кадр» (G.1/G.7) — доступна runtime без grep по
-            # логам. Попадает в introspect.router_stats автоматически (как relayed_to_hub).
-            "frame_boundary_crossings": 0,
         }
         self._stats_lock = threading.Lock()
+
+        # Ф7 G.6 (ревью 2026-07-13, F5 — «статистика через штатный механизм», без
+        # колбэка и без лишнего lock на горячем пути): зарегистрированные
+        # frame-middleware (FrameShmMiddleware), каждый копит СВОЙ счётчик границ
+        # локально (plain int, без lock — диагностическая метрика, best-effort под
+        # GIL). RouterManager ничего не инкрементит сам — только суммирует счётчики
+        # зарегистрированных middleware в get_stats() (frame_boundary_crossings),
+        # см. register_frame_middleware(). Список короткий (обычно 1 middleware на
+        # процесс) — суммирование раз в introspect-запрос, не на send-пути.
+        self._frame_middlewares: List[Any] = []
 
         # P2.2 (Гибрид, control-plane): реестр обработчиков воркеров по имени.
         # Билет с иерархическим адресом `proc.worker[.…]` на приёме уходит в
@@ -148,15 +152,19 @@ class RouterManager(ChannelRoutingManager):
         with self._stats_lock:
             self._stats[key] += value
 
-    def record_frame_boundary_crossing(self) -> None:
-        """Учесть одно пересечение границы процесса кадром (Ф7 G.6).
+    def register_frame_middleware(self, middleware: Any) -> None:
+        """Зарегистрировать FrameShmMiddleware для агрегации счётчика границ (Ф7 G.6).
 
-        Публичный метод — ``FrameShmMiddleware`` (router_module) не имеет доступа
-        к приватному ``_stats``/``_inc_stat`` напрямую, связь идёт через опциональный
-        callback ``on_boundary_cross``, которым middleware конфигурируется на
-        send-стороне (см. ``FrameShmMiddleware.strip_and_write``/``on_send``).
+        Middleware сам копит ``frame_boundary_crossings`` (plain int-атрибут, без
+        lock — см. его докстринг); ``get_stats()`` суммирует по всем
+        зарегистрированным middleware. Без колбэка/reference-cycle между
+        FrameShmMiddleware и RouterManager (ревью 2026-07-13, F5) — middleware не
+        держит ссылку на router вообще, а router держит middleware, только пока тот
+        зарегистрирован (идемпотентно не проверяем — на процесс обычно один
+        middleware, повторная регистрация того же объекта задвоила бы счёт, поэтому
+        вызывающие регистрируют один раз при создании).
         """
-        self._inc_stat("frame_boundary_crossings")
+        self._frame_middlewares.append(middleware)
 
     # ================================================================
     # LIFECYCLE
@@ -1051,6 +1059,11 @@ class RouterManager(ChannelRoutingManager):
             **stats_snap,
             "errors": stats_snap["errors"] + self._receiver.errors,
             "channels": self._channel_registry.get_info(),
+            # Ф7 G.6 (F5): сумма счётчиков всех зарегистрированных frame-middleware —
+            # не аккумулируется в _stats на send-пути (см. register_frame_middleware).
+            "frame_boundary_crossings": sum(
+                getattr(mw, "frame_boundary_crossings", 0) for mw in self._frame_middlewares
+            ),
         }
 
         if isinstance(base, dict):

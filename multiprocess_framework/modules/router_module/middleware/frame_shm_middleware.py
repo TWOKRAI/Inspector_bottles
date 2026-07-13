@@ -28,11 +28,27 @@ class FrameShmMiddleware:
 
     Args:
         memory_manager: MemoryManager из shared_resources_module (API write_images/
-            read_images/find_free_index/create_memory_dict).
+            read_images/find_free_index/create_memory_dict). Может быть ``None`` —
+            запись деградирует в pickle-fallback (кадр остаётся в сообщении), но
+            middleware всё равно должен быть зарегистрирован (Ф7 G.6 ревью, F3):
+            иначе счётчик границ на этом пути не считает вовсе.
         owner: имя процесса-владельца SHM-региона (для write).
         slot: имя SHM-слота (для write).
         coll: количество SHM-слотов (размер ring buffer) — generic-путь.
         log_error: callback логирования ошибок — generic-путь.
+
+    Attributes:
+        frame_boundary_crossings: Ф7 G.6 — сколько раз кадр реально пересёк границу
+            процесса через ЭТОТ middleware (send-сторона, SHM-успех ИЛИ
+            pickle-fallback — оба пути кладут кадр на исходящий транспорт; F1 —
+            считается на КАЖДЫЙ send, включая повторные при fan-out на несколько
+            targets, не только на первый «настоящий» стрип). Plain int, БЕЗ lock
+            (ревью 2026-07-13, F5): диагностическая метрика на hot path, не
+            требующая линеаризуемости — under GIL инкремент `+= 1` практически
+            атомарен для одного потока-писателя (send всегда идёт из одного
+            воркера на middleware); при регистрации через
+            ``RouterManager.register_frame_middleware`` агрегируется в
+            ``introspect.router_stats`` на чтении (без lock на самом send-пути).
     """
 
     def __init__(
@@ -42,18 +58,17 @@ class FrameShmMiddleware:
         slot: str = "output_frames",
         coll: int = 3,
         log_error: Callable[[str], None] | None = None,
-        on_boundary_cross: Callable[[], None] | None = None,
     ) -> None:
         self._mm = memory_manager
         self._owner = owner
         self._slot = slot
         self._coll = coll
         self._log_error = log_error or (lambda msg: None)
-        # Ф7 G.6: коллбек в RouterManager._inc_stat (счётчик "frame_boundary_crossings",
-        # виден в introspect.router_stats) — middleware сам приватного _stats не видит
-        # (router_module не должен тянуть RouterManager как обязательную зависимость),
-        # связь через опциональный callback, None → no-op (обратная совместимость).
-        self._on_boundary_cross = on_boundary_cross or (lambda: None)
+        # Ф7 G.6 (F5 ревью 2026-07-13): собственный счётчик, БЕЗ колбэка в
+        # RouterManager (тот давал reference-cycle middleware↔router + третий lock
+        # на send-пути). RouterManager сам суммирует этот атрибут у всех
+        # зарегистрированных middleware в get_stats() — см. класс-докстринг.
+        self.frame_boundary_crossings = 0
         self._allocated = False
         self._write_index = 0
         # Текущая ВЫДЕЛЕННАЯ ёмкость слота (h, w, c). None — ещё не выделяли.
@@ -61,6 +76,24 @@ class FrameShmMiddleware:
         # не влезает → write_images падает → вечный pickle-fallback (медленно).
         self._alloc_shape: tuple[int, int, int] | None = None
         self._alloc_dtype: str | None = None
+
+    def _bump_frame_hops(self, container: dict) -> None:
+        """Инкремент per-item поля frame_hops + агрегатного счётчика (Ф7 G.6).
+
+        Общий хелпер для strip_and_write/on_send (F6a ревью 2026-07-13 — не
+        дублировать инкремент в двух местах). ``container`` — тот dict, что
+        реально уезжает по IPC (item для generic-пути, data для on_send-пути).
+        """
+        container["frame_hops"] = int(container.get("frame_hops") or 0) + 1
+        self.frame_boundary_crossings += 1
+
+    def _bump_boundary_only(self) -> None:
+        """Учесть границу БЕЗ инкремента per-item поля (F1 — повторный send того
+        же item на fan-out: поле уже несёт значение первого стрипа, задваивать
+        его для второго/третьего target не нужно — item ОДИН и тот же объект,
+        см. strip_data_frame_on_send; агрегатный счётчик, наоборот, обязан расти
+        на каждый РЕАЛЬНЫЙ IPC-send, иначе недосчитывает границы при fan-out)."""
+        self.frame_boundary_crossings += 1
 
     # ------------------------------------------------------------------
     # Общий SHM-read-fallback (§5.2 дедуп: был скопирован в restore_frame и on_receive)
@@ -166,11 +199,22 @@ class FrameShmMiddleware:
         Fallback: если SHM write не удался (другая форма кадра, нет памяти), frame
         остаётся в item и пойдёт через pickle в IPC.
 
+        Fan-out (F1, ревью 2026-07-13): producer переиспользует ОДИН item-dict для
+        нескольких targets — первый вызов стрипает frame (пиксели → SHM), второй и
+        далее видят уже стрипнутый item (frame=None, shm_name уже проставлен). Это
+        ВСЁ РАВНО реальный отдельный IPC-send (другому target) — агрегатный
+        счётчик границ считает его, per-item поле ``frame_hops`` НЕ задваивает
+        (общий mutable item — граница «вдоль линейной цепочки», при fan-out это
+        документированное приближение, см. класс-докстринг ``frame_boundary_crossings``).
+
         Returns:
             item без "frame" (+ shm_ref) или item с "frame" (fallback).
         """
         frame = item.get("frame")
         if frame is None:
+            if item.get("shm_name"):
+                # Fan-out replay — тот же item уже стрипнут для другого target.
+                self._bump_boundary_only()
             return item
 
         # Lazy allocation при первом кадре + ПЕРЕАЛЛОКАЦИЯ при росте кадра (resize).
@@ -203,12 +247,10 @@ class FrameShmMiddleware:
             pass
 
         # Ф7 G.6: item реально уходит через IPC в другой процесс (SHM-успех ИЛИ
-        # pickle-fallback — оба пути кладут item на исходящий транспорт). Счётчик
-        # границ/кадр — plain dict-поле в метаданных самого кадра (переживает
-        # pickle/SHM round-trip сам по себе, Dict at Boundary), без новых объектов
-        # на per-frame пути (правило G.9). Runtime-агрегат — через callback в router.
-        item["frame_hops"] = int(item.get("frame_hops") or 0) + 1
-        self._on_boundary_cross()
+        # pickle-fallback — оба пути кладут item на исходящий транспорт). Dict at
+        # Boundary — поле переживает round-trip само по себе, без новых объектов
+        # на per-frame пути (правило G.9).
+        self._bump_frame_hops(item)
 
         return item
 
@@ -276,19 +318,22 @@ class FrameShmMiddleware:
         :meth:`strip_and_write` (lazy-alloc, round-robin ring, pickle-fallback) поверх
         ``msg["data"]`` (item остаётся тем же dict — мутируется на месте).
 
-        Срабатывает ТОЛЬКО на data-кадрах (``type=="data"`` и frame в ``data``) —
-        команды/heartbeat/state проходят без изменений (быстрый guard, ноль накладных
-        на не-кадровых сообщениях). Путь top-level-frame (`wire.configure` → on_send)
-        не затрагивается: там frame в ``msg["frame"]``, а не в ``msg["data"]``.
+        Срабатывает ТОЛЬКО на data-сообщениях (``type=="data"``) — команды/heartbeat/
+        state проходят без изменений (быстрый guard, ноль накладных на не-кадровых
+        сообщениях). Путь top-level-frame (`wire.configure` → on_send) не
+        затрагивается: там frame в ``msg["frame"]``, а не в ``msg["data"]``.
 
-        Мультикаст: producer переиспользует один item для нескольких targets; первый
-        ``router.send`` стрипает его (frame → SHM, координаты в data), последующие
-        видят item уже без frame → no-op. Паритет с прежним «strip один раз до цикла».
+        Fan-out (F1, ревью 2026-07-13): producer переиспользует один item для
+        нескольких targets; первый ``router.send`` стрипает его (frame → SHM,
+        координаты в data), последующие видят item уже без frame. ``strip_and_write``
+        зовётся на КАЖДЫЙ send (не только пока в data есть "frame") — сам решает,
+        первый это стрип (пишет в SHM) или fan-out-повтор (только считает границу,
+        см. его докстринг); граница/кадр НЕ теряется на втором и далее target.
         """
         if msg.get("type") != "data":
             return msg
         data = msg.get("data")
-        if isinstance(data, dict) and data.get("frame") is not None:
+        if isinstance(data, dict):
             self.strip_and_write(data)
         return msg
 
@@ -299,24 +344,35 @@ class FrameShmMiddleware:
     def on_send(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Перехватить исходящее сообщение: записать frame в SHM, заменить на координаты.
 
-        Если в msg нет ключа "frame" или frame не numpy ndarray — пропускает без изменений.
+        Если в msg нет ключа "frame" — либо это вообще не кадровое сообщение (нет
+        "data" или в нём нет shm-маркера — не трогаем, ноль накладных), либо frame
+        уже стрипнут раньше для другого send этого же msg (fan-out replay, F1
+        ревью 2026-07-13: считаем границу ЕЩЁ РАЗ — это реальный отдельный IPC-send).
         """
         frame = msg.get("frame")
         if frame is None:
+            existing_data = msg.get("data")
+            if isinstance(existing_data, dict) and existing_data.get("shm_name"):
+                self._bump_boundary_only()
             return msg
 
         # Проверка что это numpy ndarray (без жёсткого импорта numpy на уровне модуля)
         if not hasattr(frame, "shape"):
             return msg
 
+        # F4 (ревью 2026-07-13): msg["data"] мог существовать, но быть НЕ dict
+        # (например None) — setdefault тогда вернул бы этот None, и .get()/[] ниже
+        # упали бы AttributeError'ом (кадр молча тихо ехал бы pickle — тихая
+        # деградация, чего это поле как раз должно избегать).
+        data = msg.get("data")
+        if not isinstance(data, dict):
+            data = {}
+            msg["data"] = data
+
         # Ф7 G.6: с этой точки кадр гарантированно уходит через IPC — либо SHM-ref
         # (успех записи ниже), либо pickle (msg["frame"] остаётся, если mm недоступен
-        # или запись не удалась). Считаем границу ДО ветвления по исходу — один раз
-        # на send, счётчик в data (переживает round-trip как обычное поле,
-        # без новых объектов на per-frame пути).
-        data = msg.setdefault("data", {})
-        data["frame_hops"] = int(data.get("frame_hops") or 0) + 1
-        self._on_boundary_cross()
+        # или запись не удалась). Считаем границу ДО ветвления по исходу.
+        self._bump_frame_hops(data)
 
         if not self._mm:
             return msg
@@ -335,8 +391,7 @@ class FrameShmMiddleware:
         # Убрать frame из сообщения (не передавать numpy через IPC)
         msg.pop("frame", None)
 
-        # Добавить SHM-координаты в data
-        data = msg.setdefault("data", {})
+        # Добавить SHM-координаты в data (тот же локал — F6b, без повторного setdefault)
         data["shm_name"] = self._slot
         data["shm_index"] = free_idx
         data["shm_actual_name"] = shm_actual_name

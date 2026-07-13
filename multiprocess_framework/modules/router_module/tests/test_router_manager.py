@@ -1627,19 +1627,44 @@ class TestRelayCounter(unittest.TestCase):
 
 class TestFrameBoundaryCrossingCounter(unittest.TestCase):
     """Ф7 G.6: frame_boundary_crossings — виден в get_stats()/introspect.router_stats,
-    в том же стиле, что и relayed_to_hub (Ф3.1)."""
+    в том же стиле, что и relayed_to_hub (Ф3.1). Ревью 2026-07-13 (F5): без
+    колбэка/reference-cycle — RouterManager суммирует счётчики зарегистрированных
+    frame-middleware при get_stats(), сам ничего не инкрементит."""
 
-    def test_record_frame_boundary_crossing_increments_stat(self):
+    def test_get_stats_sums_registered_middleware_counters(self):
+        class _FakeFrameMiddleware:
+            frame_boundary_crossings = 5
+
         router = RouterManager(manager_name="r_frame_boundary")
-        before = router.get_stats()["router"]["frame_boundary_crossings"]
-        router.record_frame_boundary_crossing()
-        router.record_frame_boundary_crossing()
-        after = router.get_stats()["router"]["frame_boundary_crossings"]
-        self.assertEqual(after, before + 2)
+        router.register_frame_middleware(_FakeFrameMiddleware())
+        self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 5)
 
-    def test_frame_boundary_crossings_starts_at_zero(self):
+    def test_get_stats_sums_multiple_registered_middlewares(self):
+        class _FakeFrameMiddleware:
+            def __init__(self, n):
+                self.frame_boundary_crossings = n
+
+        router = RouterManager(manager_name="r_frame_boundary_multi")
+        router.register_frame_middleware(_FakeFrameMiddleware(3))
+        router.register_frame_middleware(_FakeFrameMiddleware(4))
+        self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 7)
+
+    def test_frame_boundary_crossings_starts_at_zero_without_registration(self):
         router = RouterManager(manager_name="r_frame_boundary_zero")
         self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 0)
+
+    def test_get_stats_reflects_live_counter_mutation(self):
+        """Счётчик читается в момент get_stats() (не снапшот при регистрации)."""
+
+        class _FakeFrameMiddleware:
+            frame_boundary_crossings = 0
+
+        mw = _FakeFrameMiddleware()
+        router = RouterManager(manager_name="r_frame_boundary_live")
+        router.register_frame_middleware(mw)
+        self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 0)
+        mw.frame_boundary_crossings = 10
+        self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 10)
 
 
 if __name__ == "__main__":
