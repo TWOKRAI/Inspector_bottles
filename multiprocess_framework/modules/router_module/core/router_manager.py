@@ -13,8 +13,14 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from ...channel_routing_module import ChannelRoutingManager
+from ...config_module.tools import env_flag
 from ...dispatch_module import Dispatcher, DispatchStrategy
-from ...message_module import AddressValidationError, is_broadcast, split_address
+from ...message_module import (
+    AddressValidationError,
+    is_broadcast,
+    process_of,
+    split_address,
+)
 from ..interfaces import IMessageChannel
 from ..routing import UnknownMessageTypeError, channel_name, resolve_channel_kind
 
@@ -55,6 +61,7 @@ class RouterManager(ChannelRoutingManager):
         logger: Optional[Any] = None,
         relay_hub: Optional[str] = "ProcessManager",
         use_kind_channels: Optional[bool] = None,
+        use_kind_channels_config: bool = False,
         **kwargs: Any,
     ) -> None:
         managers = kwargs.pop("managers", {})
@@ -82,8 +89,12 @@ class RouterManager(ChannelRoutingManager):
         # зарегистрирован каналом только в хабе). None/"" = relay выключен.
         self._relay_hub = relay_hub
         # Ф7 G.2 (kind-каналы за флагом): дефолт OFF → резолв бит-в-бит прежний.
-        # Приоритет: явный аргумент (не None) > env MULTIPROCESS_USE_KIND_CHANNELS > False.
-        self._use_kind_channels = self._resolve_use_kind_channels(use_kind_channels)
+        # Приоритет (F3): явный ctor-аргумент > env MULTIPROCESS_USE_KIND_CHANNELS >
+        # значение из конфига (use_kind_channels_config, проводится в
+        # _create_router_manager) > False.
+        self._use_kind_channels = self._resolve_use_kind_channels(
+            use_kind_channels, config_default=use_kind_channels_config
+        )
         self._sender = AsyncSender(
             name=manager_name,
             send_fn=self._do_send,
@@ -1110,25 +1121,36 @@ class RouterManager(ChannelRoutingManager):
         return dict(message)
 
     @staticmethod
-    def _resolve_use_kind_channels(explicit: Optional[bool]) -> bool:
+    def _resolve_use_kind_channels(explicit: Optional[bool], config_default: bool = False) -> bool:
         """Разрешить флаг use_kind_channels (Ф7 G.2).
 
-        Приоритет: явный аргумент (не None) > env MULTIPROCESS_USE_KIND_CHANNELS
-        (truthy) > False. env — escape-hatch для smoke/CI без правки конфига.
+        Приоритет (ревью F3): явный ctor-аргумент (не None) > env
+        MULTIPROCESS_USE_KIND_CHANNELS (если ЗАДАН — в т.ч. явное ``=0``
+        перекрывает конфиг) > значение из конфига RouterManagerConfig > False.
+        env — escape-hatch для smoke/CI без правки конфига; конфиг — декларативный
+        дефолт (проводится из ``router_config`` в ``_create_router_manager``, F3).
         """
         if explicit is not None:
             return bool(explicit)
-        raw = os.environ.get("MULTIPROCESS_USE_KIND_CHANNELS", "")
-        return raw.strip().lower() in ("1", "true", "yes", "on")
+        raw = os.environ.get("MULTIPROCESS_USE_KIND_CHANNELS")
+        if raw is not None and raw.strip() != "":
+            return env_flag("MULTIPROCESS_USE_KIND_CHANNELS")
+        return bool(config_default)
 
     def _resolve_kind_channels(self, msg_dict: Dict[str, Any]) -> List[IMessageChannel]:
-        """Резолв исходящего в kind-каналы ``{target}_{kind}`` (Ф7 G.2, флаг ON).
+        """Резолв исходящего в kind-каналы ``{process}_{kind}`` (Ф7 G.2, флаг ON).
 
         Нормализует kind билета через ``resolve_channel_kind`` (state.* → state,
-        command → system, data → data, …) и для каждого получателя ищет канал
-        ``channel_name(process, kind)`` в реестре. Возвращает только реально
-        зарегистрированные каналы; пустой список → вызывающий падает в прежний
-        путь (dispatcher/targets). Неизвестный kind — не резолвим (пусто).
+        command → system, data → data, …) и для КАЖДОГО получателя ищет канал
+        ``channel_name(process_of(target), kind)`` точечным lookup (F8: без
+        snapshot на каждое сообщение; ``process_of`` вместо ручного split —
+        валидация адреса + broadcast).
+
+        F4 (частичный fan-out недопустим): kind-путь применяется ТОЛЬКО если
+        разрезолвились ВСЕ получатели. Если хоть один не найден (нет kind-канала,
+        broadcast или невалидный адрес) → WARNING со списком нерезолвленных и
+        пустой результат → вызывающий делает полный fallback в прежний путь
+        (получатель не теряется молча). Неизвестный kind — тоже пусто.
         """
         try:
             kind = resolve_channel_kind(msg_dict)
@@ -1137,23 +1159,37 @@ class RouterManager(ChannelRoutingManager):
         targets = msg_dict.get("targets") or []
         if not targets:
             return []
-        snapshot = self._channel_registry.snapshot()
         resolved: List[IMessageChannel] = []
+        unresolved: List[str] = []
         for target in targets:
-            process = str(target).split(".", 1)[0]  # иерархический адрес → процесс
-            ch = snapshot.get(channel_name(process, kind))
+            try:
+                process = process_of(target)
+            except AddressValidationError:
+                unresolved.append(target)
+                continue
+            ch = self._channel_registry.get(channel_name(process, kind))
             if ch is not None:
                 resolved.append(ch)
+            else:
+                unresolved.append(target)
+        if unresolved:
+            self._log_warning(
+                f"kind-каналы: не разрезолвлены получатели {unresolved} (kind={kind!r}) "
+                f"— полный fallback в прежний путь, получатели не теряются"
+            )
+            return []
         return resolved
 
     def _resolve_channels(self, msg_dict: Dict[str, Any]) -> List[IMessageChannel]:
         """Найти каналы для исходящего сообщения.
 
-        Приоритет:
+        Приоритет (F5 — специфичное выигрывает у generic):
           1. msg["channel"] задан явно → прямой O(1) lookup
-          2. Ф7 G.2 (флаг ON): kind-каналы {target}_{kind}, если зарегистрированы
-          3. channel_dispatcher.dispatch() → str | List[str] (имена каналов)
-          4. [] → ошибка
+          2. channel_dispatcher.dispatch() → зарегистрированный маршрут
+             (register_route) — специфичный, выигрывает у kind-каналов
+          3. Ф7 G.2 (флаг ON): при промахе dispatcher — kind-каналы
+             {process}_{kind} (generic по типу груза), all-or-fallback (F4)
+          4. [] → ошибка / target-aware fallback в _do_send
         """
         ch_name = msg_dict.get("channel")
         # "queue" — легаси-дефолт из MESSAGE_TYPE_DEFAULTS, а НЕ реальный канал Router
@@ -1165,14 +1201,6 @@ class RouterManager(ChannelRoutingManager):
                 return [ch]
             self._log_warning(f"channel '{ch_name}' not registered")
             return []
-
-        # Ф7 G.2: kind-каналы за флагом. Дефолт OFF → блок пропускается, резолв
-        # ниже бит-в-бит прежний. ON → пробуем {target}_{kind}; если такие каналы
-        # зарегистрированы, они выигрывают, иначе аддитивно падаем в dispatcher.
-        if self._use_kind_channels:
-            kind_channels = self._resolve_kind_channels(msg_dict)
-            if kind_channels:
-                return kind_channels
 
         key_field = "command" if msg_dict.get("command") else "type"
         if not msg_dict.get(key_field):
@@ -1195,6 +1223,16 @@ class RouterManager(ChannelRoutingManager):
             if missing:
                 self._log_warning(f"broadcast: channels not found: {missing}")
             return resolved
+
+        # F5: dispatcher-маршрут не найден. Теперь — Ф7 G.2 kind-каналы за флагом
+        # (generic по типу груза). OFF → пропускаем, поведение бит-в-бит прежнее.
+        # ON → {process}_{kind} с all-or-fallback (F4). Специфичный register_route
+        # уже проверен выше и выиграл бы — kind только как fallback для маршрутов
+        # без явной регистрации.
+        if self._use_kind_channels:
+            kind_channels = self._resolve_kind_channels(msg_dict)
+            if kind_channels:
+                return kind_channels
 
         self._log_debug(
             f"channel_dispatcher returned no route for key_field={key_field!r} value={msg_dict.get(key_field)!r}"

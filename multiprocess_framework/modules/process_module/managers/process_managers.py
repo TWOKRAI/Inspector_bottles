@@ -204,6 +204,10 @@ class ProcessManagers:
             process=self.process,
             queue_registry=self.process.queue_registry,
             logger=logger,
+            # F3 (ревью G.2): проводим декларативный флаг из router_config —
+            # конфиг-путь use_kind_channels был мёртв (env/ctor только). Приоритет
+            # ctor > env > конфиг разрешается в RouterManager._resolve_use_kind_channels.
+            use_kind_channels_config=bool(router_config.get("use_kind_channels", False)),
         )
         router.initialize()
 
