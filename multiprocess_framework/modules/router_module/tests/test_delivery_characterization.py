@@ -29,6 +29,7 @@ from multiprocess_framework.modules.message_module import (
     build_command_message,
     build_system_command_message,
 )
+from multiprocess_framework.modules.state_store_module.core.delta import STATE_ENVELOPE_MARKER
 from multiprocess_framework.modules.state_store_module.manager.state_store_manager import (
     StateStoreManager,
 )
@@ -238,28 +239,74 @@ class TestStateMergeBehaviorBefore(unittest.TestCase):
         self.assertEqual(result["path"], "cameras.0")
         self.assertEqual(mgr.store.get("cameras.0.fps"), 30)
 
-    def test_merge_form_b_unwrapped_envelope(self):
+    def test_merge_form_b_marked_envelope(self):
+        """Форма B (развёрнутый конверт): дискриминатор — явный маркер (шаг 4)."""
         mgr = StateStoreManager()
-        result = mgr.handle_state_merge({"path": "cameras.1", "data": {"fps": 25, "type": "hik"}, "source": "gui"})
+        result = mgr.handle_state_merge(
+            {
+                "path": "cameras.1",
+                "data": {"fps": 25, "type": "hik"},
+                "source": "gui",
+                STATE_ENVELOPE_MARKER: True,
+            }
+        )
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["path"], "cameras.1")
         self.assertEqual(mgr.store.get("cameras.1.fps"), 25)
 
     def test_merge_payload_carrying_source_key(self):
-        """Payload сам содержит ключ 'source' (camera actual) — не должен теряться."""
+        """Payload сам содержит ключ 'source' (camera actual) — маркер снимает риск."""
         mgr = StateStoreManager()
         payload = {"source": "camera://0", "fps": 30}
-        result = mgr.handle_state_merge({"path": "processes.cam0.state.cam.actual", "data": payload, "source": "cam0"})
+        result = mgr.handle_state_merge(
+            {
+                "path": "processes.cam0.state.cam.actual",
+                "data": payload,
+                "source": "cam0",
+                STATE_ENVELOPE_MARKER: True,
+            }
+        )
         self.assertEqual(result["status"], "ok")
         self.assertEqual(mgr.store.get("processes.cam0.state.cam.actual.source"), "camera://0")
 
     def test_merge_payload_carrying_path_key(self):
-        """Payload сам содержит ключ 'path' (device-config) — не должен теряться."""
+        """Payload сам содержит ключ 'path' (device-config) — маркер снимает риск."""
         mgr = StateStoreManager()
         payload = {"path": "/dev/video0", "fps": 30}
-        result = mgr.handle_state_merge({"path": "processes.dev.state", "data": payload, "source": "dev"})
+        result = mgr.handle_state_merge(
+            {
+                "path": "processes.dev.state",
+                "data": payload,
+                "source": "dev",
+                STATE_ENVELOPE_MARKER: True,
+            }
+        )
         self.assertEqual(result["status"], "ok")
         self.assertEqual(mgr.store.get("processes.dev.state.path"), "/dev/video0")
+
+    def test_merge_form_a_works_without_marker(self):
+        """Форма A (вложенный конверт) не требует маркера — разворот msg['data']."""
+        mgr = StateStoreManager()
+        result = mgr.handle_state_merge(
+            {"command": "state.merge", "data": {"path": "cameras.9", "data": {"fps": 10}, "source": "gui"}}
+        )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(mgr.store.get("cameras.9.fps"), 10)
+
+    def test_merge_future_toplevel_path_without_marker_not_envelope(self):
+        """RS-ревью: full message с посторонним top-level 'path' БЕЗ маркера НЕ
+        принимается за конверт формы B — разворачивается msg['data'] (форма A)."""
+        mgr = StateStoreManager()
+        result = mgr.handle_state_merge(
+            {
+                "command": "state.merge",
+                "path": "some.future.field",  # НЕ маркер — не должен спутать
+                "data": {"path": "cameras.7", "data": {"fps": 15}, "source": "gui"},
+            }
+        )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["path"], "cameras.7")
+        self.assertEqual(mgr.store.get("cameras.7.fps"), 15)
 
     def test_merge_missing_data_is_error(self):
         mgr = StateStoreManager()
