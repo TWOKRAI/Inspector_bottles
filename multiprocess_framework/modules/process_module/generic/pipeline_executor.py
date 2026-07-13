@@ -101,6 +101,12 @@ class PipelineExecutor:
             operation=SuspectTagStep(),
             on_error="skip",
         )
+        # Мемоизация активных шагов: пересборка ТОЛЬКО при смене breaker-состояния
+        # (две точки мутации: _on_plugin_fail открывает bypass, _check_auto_reset
+        # сбрасывает). В стабильном окне (сотни батчей) переиспользуем один
+        # ChainRunnable — happy-path (нет bypass) = частный случай кэша.
+        self._active_runnable: ChainRunnable = ChainRunnable(self._build_active_steps())
+        self._steps_dirty: bool = False
 
         # Тайминг цикла обработки для телеметрии GUI. Воркер queue-driven:
         # меряем только итерации с реальной работой (получен batch), а не
@@ -221,7 +227,10 @@ class PipelineExecutor:
         # ChainRunnable — sequential-движок: current_frame стартует как items,
         # каждый шаг возвращает новые items (замена выхода). Пустой батч на входе
         # или после шага → следующие шаги no-op (см. PluginOperationStep).
-        result = ChainRunnable(self._build_active_steps()).execute(items, None)
+        if self._steps_dirty:
+            self._active_runnable = ChainRunnable(self._build_active_steps())
+            self._steps_dirty = False
+        result = self._active_runnable.execute(items, None)
         return result.frame
 
     def _build_active_steps(self) -> list[RunnableStep]:
@@ -259,6 +268,7 @@ class PipelineExecutor:
         if fails >= self._max_fails:
             self._bypassed[plugin_name] = True
             self._bypassed_since[plugin_name] = time.monotonic()
+            self._steps_dirty = True  # breaker открылся → пересобрать шаги
             level = "CRITICAL" if plugin_name in self._critical_plugins else "WARNING"
             self._log_error(
                 f"PipelineExecutor [{level}]: circuit breaker OPEN for '{plugin_name}' ({fails} consecutive fails)"
@@ -303,6 +313,7 @@ class PipelineExecutor:
             if now - since >= self._auto_reset_sec:
                 self._bypassed[name] = False
                 self._consecutive_fails[name] = 0
+                self._steps_dirty = True  # breaker сброшен → пересобрать шаги
                 self._log_info(f"PipelineExecutor: circuit breaker RESET for '{name}'")
 
     def is_bypassed(self, plugin_name: str) -> bool:
