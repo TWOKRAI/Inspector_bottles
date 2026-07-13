@@ -261,21 +261,26 @@ class SQLManager(BaseManager, ObservableMixin):
             raise ValueError(f"Invalid SQL identifier: {name!r}")
         return name
 
-    def _normalize_command(self, cmd: Dict[str, Any]) -> Dict[str, Any]:
-        """Свести команду к плоскому dict для Pydantic-валидации.
+    @staticmethod
+    def _flatten_command(cmd: Dict[str, Any]) -> Dict[str, Any]:
+        """Свести конверт команды к плоскому dict для Pydantic-валидации.
 
-        Поддерживает:
-        - Прямой: {"command": "db.query", "sql": "...", "params": {}}
-        - MessageAdapter: {"command": "db.query", "args": {"sql": "...", "params": {}}}
+        Единый конверт (Ф7 G.2): payload лежит под ключом ``data``
+        (``{"command": "db.query", "data": {"sql": "...", "params": {}}}``).
+        Плоская форма ``{"command": "db.query", "sql": "..."}`` (payload на
+        верхнем уровне) поддержана для прямых внутрипроцессных вызовов — при
+        отсутствии вложенного ``data``-dict сам ``cmd`` уже плоский. Shape-sniffing
+        по ``args`` снят: MessageAdapter теперь кладёт payload под ``data``.
         """
-        args = cmd.get("args", {})
-        data = cmd.get("data", {})
-        return {**cmd, **args, **data}
+        payload = cmd.get("data")
+        if isinstance(payload, dict):
+            return {"command": cmd.get("command"), **payload}
+        return cmd
 
     def execute_command(self, cmd: Dict[str, Any]) -> Dict[str, Any]:
         """Обработать команду от CommandManager. Dict at Boundary."""
         try:
-            cmd_flat = self._normalize_command(cmd)
+            cmd_flat = self._flatten_command(cmd)
             command = cmd_flat.get("command")
             if command == "db.query":
                 from Services.sql.commands import DBQueryCommand

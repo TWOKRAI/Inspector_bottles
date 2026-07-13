@@ -32,6 +32,7 @@ MessageAdapter — контекстно-зависимая фабрика соо
         def on_error(self, err):
             self.router.send(self.msg.log("error", str(err)))
 """
+
 from typing import Any, Dict, List, Optional, Union
 
 from ..core.message import Message
@@ -97,21 +98,28 @@ class MessageAdapter:
     ) -> Message:
         """Создать COMMAND сообщение — команда для выполнения действия.
 
+        Единый конверт команд (Ф7 G.2, решение владельца 2026-07-09): payload
+        кладётся под ключ ``data`` (как ``command_envelopes.build_command_message``),
+        а НЕ под отдельный ``args`` — исторические два формата (args vs data)
+        сведены к одному. Получатели читают payload из ``data`` (диспетчер
+        ``data_field="data"``); ``sql_manager._normalize_command`` больше не нужен.
+
         Args:
             targets:  Получатели команды.
             command:  Имя команды (например, 'start', 'stop', 'ping').
-            args:     Аргументы команды.
+            args:     Аргументы команды (едут под ``data``).
             need_ack: True если требуется подтверждение исполнения.
             priority: Приоритет доставки.
 
         Returns:
-            Message с type='command'.
+            Message с type='command' и payload под ``data``.
         """
         return self.create(
             MessageType.COMMAND,
             targets=targets,
             command=command,
-            args=args or {},
+            data_type=command,
+            data=args or {},
             need_ack=need_ack,
             priority=priority,
             **kwargs,

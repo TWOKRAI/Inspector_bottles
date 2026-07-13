@@ -170,12 +170,12 @@ class TestFenceFieldsTravelOnDefault(unittest.TestCase):
 # ===========================================================================
 
 
-class TestCommandEnvelopeFormatBefore(unittest.TestCase):
-    """Слепок ДВУХ исторических форм конверта команд (до унификации, шаг 3).
+class TestCommandEnvelopeFormatUnified(unittest.TestCase):
+    """Единый конверт команд (после шага 3): ОБА пути кладут payload под ``data``.
 
-    Путь A — ``command_envelopes.build_command_message``: payload под ключом
-    ``data`` (канонический). Путь B — ``MessageAdapter.command``: payload под
-    ключом ``args``. Расхождение этих двух форм — то, что снимает шаг 3."""
+    Путь A — ``command_envelopes.build_command_message`` и путь B —
+    ``MessageAdapter.command`` — сведены к одной форме: payload под ``data``,
+    без отдельного ``args``. Расхождение двух исторических форматов снято."""
 
     def test_envelopes_builder_puts_payload_under_data(self):
         msg = build_command_message("camera_0", "set_fps", {"fps": 30}, sender="gui")
@@ -185,16 +185,25 @@ class TestCommandEnvelopeFormatBefore(unittest.TestCase):
         self.assertEqual(msg["sender"], "gui")
         self.assertEqual(msg["targets"], ["camera_0"])
         self.assertEqual(msg["data"], {"fps": 30})
-        # исторически конверт-путь НЕ несёт отдельного args
         self.assertNotIn("args", msg)
 
-    def test_message_adapter_puts_payload_under_args(self):
+    def test_message_adapter_puts_payload_under_data(self):
         adapter = MessageAdapter(sender="gui")
         msg = adapter.command(targets="camera_0", command="set_fps", args={"fps": 30}).to_dict()
         self.assertEqual(msg["type"], "command")
         self.assertEqual(msg["command"], "set_fps")
-        # исторически MessageAdapter кладёт payload в args (расхождение с путём A)
-        self.assertEqual(msg["args"], {"fps": 30})
+        self.assertEqual(msg["data_type"], "set_fps")
+        # единый конверт: payload под data (как build_command_message), не под args
+        self.assertEqual(msg["data"], {"fps": 30})
+        self.assertNotIn("args", msg)
+
+    def test_both_paths_produce_same_payload_key(self):
+        adapter = MessageAdapter(sender="gui")
+        via_adapter = adapter.command(targets="camera_0", command="set_fps", args={"fps": 30}).to_dict()
+        via_builder = build_command_message("camera_0", "set_fps", {"fps": 30}, sender="gui")
+        self.assertEqual(via_adapter["data"], via_builder["data"])
+        self.assertEqual(via_adapter["command"], via_builder["command"])
+        self.assertEqual(via_adapter["data_type"], via_builder["data_type"])
 
     def test_system_command_wraps_under_data(self):
         inner = {"cmd": "process.stop", "process_name": "cam0"}

@@ -87,8 +87,10 @@ class TestCommand:
         assert msg.command == "start"
 
     def test_with_args(self, adapter):
+        # Единый конверт (Ф7 G.2): payload едет под data, не под args.
         msg = adapter.command("proc_2", "configure", args={"key": "val"})
-        assert msg.args == {"key": "val"}
+        assert msg.data == {"key": "val"}
+        assert msg.data_type == "configure"
 
     def test_default_priority_normal(self, adapter):
         msg = adapter.command("proc_2", "ping")

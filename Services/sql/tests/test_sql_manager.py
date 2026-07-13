@@ -49,20 +49,28 @@ class TestSQLManager:
         assert result["status"] == "error"
         assert "unknown" in result["reason"]
 
-    def test_normalize_command_direct(self, sql_manager):
-        """Прямой формат: sql, params на верхнем уровне."""
+    def test_flatten_command_flat_form(self, sql_manager):
+        """Прямой (плоский) формат: sql, params на верхнем уровне — без data-конверта."""
         cmd = {"command": "db.query", "sql": "SELECT 1", "params": {}}
-        flat = sql_manager._normalize_command(cmd)
+        flat = sql_manager._flatten_command(cmd)
         assert flat["command"] == "db.query"
         assert flat["sql"] == "SELECT 1"
 
-    def test_normalize_command_message_adapter(self, sql_manager):
-        """MessageAdapter: sql, params в args."""
-        cmd = {"command": "db.query", "args": {"sql": "SELECT * FROM t", "params": {"id": 1}}}
-        flat = sql_manager._normalize_command(cmd)
+    def test_flatten_command_data_envelope(self, sql_manager):
+        """Единый конверт (Ф7 G.2): payload под data — разворачивается в плоский dict."""
+        cmd = {"command": "db.query", "data": {"sql": "SELECT * FROM t", "params": {"id": 1}}}
+        flat = sql_manager._flatten_command(cmd)
         assert flat["command"] == "db.query"
         assert flat["sql"] == "SELECT * FROM t"
         assert flat["params"] == {"id": 1}
+
+    def test_execute_command_data_envelope(self, sql_manager):
+        """execute_command принимает единый конверт {command, data:{...}}."""
+        sql_manager.execute("CREATE TABLE t (x INT)")
+        sql_manager.execute("INSERT INTO t VALUES (7)")
+        result = sql_manager.execute_command({"command": "db.query", "data": {"sql": "SELECT * FROM t"}})
+        assert result["status"] == "success"
+        assert result["data"] == [{"x": 7}]
 
     def test_uow_connection(self, sql_manager):
         uow = sql_manager.uow()
