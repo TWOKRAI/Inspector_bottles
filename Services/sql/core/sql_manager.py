@@ -261,21 +261,43 @@ class SQLManager(BaseManager, ObservableMixin):
             raise ValueError(f"Invalid SQL identifier: {name!r}")
         return name
 
-    def _normalize_command(self, cmd: Dict[str, Any]) -> Dict[str, Any]:
-        """Свести команду к плоскому dict для Pydantic-валидации.
+    @staticmethod
+    def _flatten_command(cmd: Dict[str, Any]) -> Dict[str, Any]:
+        """Свести конверт команды к плоскому dict для Pydantic-валидации.
 
-        Поддерживает:
-        - Прямой: {"command": "db.query", "sql": "...", "params": {}}
-        - MessageAdapter: {"command": "db.query", "args": {"sql": "...", "params": {}}}
+        Единый конверт (Ф7 G.2): payload под ключом ``data``, а сам билет несёт
+        ПРИЗНАК конверта — ``data_type`` или ``type == "command"`` (так строит
+        ``build_command_message`` / ``MessageAdapter.command``). Детекция идёт по
+        этому признаку, НЕ по простому наличию dict в ``data`` — иначе плоская
+        прямая команда ``db.insert`` с легитимным полем-соседом ``data`` (строка
+        вставки) ложно принималась бы за конверт и теряла ``table``.
+
+        Три поддержанных формы:
+          • конверт (единый): ``{"type": "command", "command": "db.query",
+            "data_type": "db.query", "data": {"sql": ...}}`` → разворот ``data``;
+          • конверт (legacy args, rolling-switch): тот же признак, но payload под
+            ``args`` → разворот ``args`` (совместимость с in-flight билетами до
+            перехода на data-конверт);
+          • плоская прямая команда: ``{"command": "db.query", "sql": ...}`` без
+            признака конверта → уже плоская, отдаётся как есть.
+
+        Ключ ``command`` конверта не перезаписывается одноимённым ключом из
+        payload (envelope-command выигрывает).
         """
-        args = cmd.get("args", {})
-        data = cmd.get("data", {})
-        return {**cmd, **args, **data}
+        is_envelope = cmd.get("data_type") is not None or cmd.get("type") == "command"
+        if is_envelope:
+            payload = cmd.get("data")
+            if not isinstance(payload, dict):
+                payload = cmd.get("args")  # legacy args-конверт (rolling-switch)
+            if isinstance(payload, dict):
+                # envelope-command выигрывает у одноимённого ключа payload
+                return {**payload, "command": cmd.get("command")}
+        return cmd
 
     def execute_command(self, cmd: Dict[str, Any]) -> Dict[str, Any]:
         """Обработать команду от CommandManager. Dict at Boundary."""
         try:
-            cmd_flat = self._normalize_command(cmd)
+            cmd_flat = self._flatten_command(cmd)
             command = cmd_flat.get("command")
             if command == "db.query":
                 from Services.sql.commands import DBQueryCommand

@@ -21,9 +21,9 @@ class TestDBCommands:
         assert cmd.table == "users"
         assert cmd.data == {"name": "Alice"}
 
-    def test_db_query_command_after_merge_from_message_adapter(self):
-        """Формат из MessageAdapter.command: args содержат sql, params. execute_command мержит их."""
-        msg = {"command": "db.query", "args": {"sql": "SELECT 1", "params": {}}}
-        cmd_flat = {**msg.get("args", {}), "command": msg.get("command")}
+    def test_db_query_command_from_unified_envelope(self):
+        """Единый конверт (Ф7 G.2): payload под data. execute_command разворачивает его."""
+        msg = {"command": "db.query", "data": {"sql": "SELECT 1", "params": {}}}
+        cmd_flat = {"command": msg.get("command"), **msg.get("data", {})}
         validated = DBQueryCommand.model_validate(cmd_flat)
         assert validated.sql == "SELECT 1"

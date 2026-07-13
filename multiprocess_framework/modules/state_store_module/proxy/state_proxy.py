@@ -19,7 +19,7 @@ from typing import Any, Callable
 
 from ...base_manager import BaseManager, ObservableMixin
 from ..core import iter_matches, match_pattern, split_pattern
-from ..core.delta import MISSING, Delta
+from ..core.delta import MISSING, STATE_ENVELOPE_MARKER, Delta
 from ..interfaces import IRouter, IStateProxy
 
 # Sentinel для отличия "default не передан" от None
@@ -148,6 +148,9 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 "path": path,
                 "data": data,
                 "source": self._process_name,
+                # Ф7 G.2 шаг 4: явный маркер конверта — получатель не гадает по
+                # наличию top-level path/data (см. STATE_ENVELOPE_MARKER).
+                STATE_ENVELOPE_MARKER: True,
             },
         }
         self._send(msg)

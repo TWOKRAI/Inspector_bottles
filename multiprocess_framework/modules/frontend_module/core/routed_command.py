@@ -6,6 +6,7 @@
 
 Расположение в ``core/`` (а не ``application/``), чтобы импорт sender не подтягивал Qt через ``FrontendManager``.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
@@ -25,9 +26,7 @@ class RoutedCommandSender:
         router: IRouterLike,
         message_factory: SupportsCommandMessage,
         resolve_targets: Callable[[str], List[str]],
-        get_args_builder: Optional[
-            Callable[[str], Optional[Callable[..., Dict[str, Any]]]]
-        ] = None,
+        get_args_builder: Optional[Callable[[str], Optional[Callable[..., Dict[str, Any]]]]] = None,
     ) -> None:
         self._router = router
         self._message_factory = message_factory
@@ -60,11 +59,12 @@ class RoutedCommandSender:
             final_args = dict(args or {})
 
         targets = self._resolve_targets(command_id)
-        payload = data if data is not None else final_args
+        # Единый конверт (Ф7 G.2, F6): приоритет payload (data > args) живёт в
+        # MessageAdapter.command — здесь просто прокидываем оба.
         msg = self._message_factory.command(
             targets=targets,
             command=command_id,
             args=final_args,
-            data=payload,
+            data=data,
         )
         return self._router.send_message(targets[0], msg.to_dict())

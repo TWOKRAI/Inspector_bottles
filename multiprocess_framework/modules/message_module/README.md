@@ -104,13 +104,13 @@ message_module/
 |---|---|---|
 | `content` | `Any` | GENERAL |
 | `command` | `str` | COMMAND |
-| `args` | `dict` | COMMAND |
+| `args` | `dict` | COMMAND (legacy, см. ниже) |
 | `need_ack` | `bool` | COMMAND |
 | `level` | `str` | LOG |
 | `message` | `str` | LOG |
 | `module` | `str` | LOG |
 | `action` | `str` | SYSTEM |
-| `data` | `Any` | SYSTEM, DATA |
+| `data` | `Any` | SYSTEM, DATA, **COMMAND** (payload команды, ADR-MSG-010) |
 | `exclude` | `List[str]` | BROADCAST |
 | `data_type` | `str` | DATA |
 | `use_shared_memory` | `bool` | DATA |
@@ -124,6 +124,11 @@ message_module/
 | `error` | `str` | RESPONSE |
 | `event_type` | `str` | EVENT |
 | `event_data` | `Any` | EVENT |
+
+**Единый конверт команд (ADR-MSG-010, Ф7 G.2):** payload команды едет под ключ
+`data` (+ `data_type` = имя команды) — единственная форма, которую строит билдер
+`build_command_message`. Поле `args` сохранено как legacy: `Message` его объявляет,
+но команды его больше не заполняют (`data` — единственный источник payload).
 
 ---
 
@@ -175,7 +180,7 @@ class MyProcess:
 | Метод | Аргументы | Создаёт тип |
 |---|---|---|
 | `create(msg_type, targets, **kw)` | любой тип | любой |
-| `command(targets, command, args, need_ack, priority)` | — | COMMAND |
+| `command(targets, command, args, data, need_ack, priority)` | payload → `data` (явный `data` приоритетнее `args`, ADR-MSG-010) | COMMAND |
 | `log(level, message, module)` | — | LOG |
 | `system(targets, action, data, priority)` | — | SYSTEM |
 | `broadcast(content, exclude, priority)` | — | BROADCAST |

@@ -161,12 +161,27 @@ class TestFluentAPI:
         assert msg.metadata["key"] == "value"
 
     def test_set_command(self):
-        """Тест установки команды."""
+        """set_command устарел и кладёт payload под data (единый конверт, Ф7 G.2)."""
+        import warnings
+
         msg = Message.create(MessageType.COMMAND, sender="Test", targets=["Target"])
-        msg.set_command("test_command", {"arg": "value"})
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            msg.set_command("test_command", {"arg": "value"})
 
         assert msg.command == "test_command"
-        assert msg.args == {"arg": "value"}
+        assert msg.data_type == "test_command"
+        assert msg.data == {"arg": "value"}
+
+    def test_set_command_warns_deprecated(self):
+        """set_command эмитит DeprecationWarning (единый билдер — предпочтителен)."""
+        import warnings
+
+        msg = Message.create(MessageType.COMMAND, sender="Test", targets=["Target"])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            msg.set_command("c")
+        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
 
 
 class TestDictInterface:

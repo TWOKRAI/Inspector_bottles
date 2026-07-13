@@ -445,6 +445,40 @@ resolve_routes({"type": "data", "target": "display"})  # → [RouteDecision(proc
 
 ---
 
+## Флаг `use_kind_channels` (Ф7 G.2)
+
+Проводка kind-каналов (`{process}_{kind}`, см. выше) в `_resolve_channels` — **за флагом**,
+выключена по умолчанию.
+
+- **Дефолт OFF** — поведение бит-в-бит прежнее (характеризационные тесты доставки —
+  gate перед включением, `plans/2026-07-06_constructor-master/plan.md` G.2).
+- **Приоритет источников флага** (`RouterManager._resolve_use_kind_channels`,
+  `router_manager.py:1124`): ctor-аргумент `use_kind_channels` **>** env
+  `MULTIPROCESS_USE_KIND_CHANNELS` (если ЗАДАН — учитывается и явное `=0`) **>**
+  конфиг `RouterManagerConfig.use_kind_channels` **>** `False`.
+
+```python
+router = RouterManager("proc", use_kind_channels=True)   # ctor — высший приоритет
+# или через конфиг:
+router = RouterManager("proc", config={"use_kind_channels": True})
+# или через env (если ctor-аргумент не передан):
+# MULTIPROCESS_USE_KIND_CHANNELS=1
+```
+
+**Семантика композиции с `register_route` (F5):** специфичный маршрут, зарегистрированный
+через `register_route`/`register_channel_handler`, **всегда выигрывает** у generic
+kind-канала — резолв kind идёт ТОЛЬКО после промаха `channel_dispatcher` (kind-путь
+не переопределяет явные маршруты, только дополняет их для непокрытых ключей).
+
+**Fallback при частичном fan-out (F4):** для multi-target сообщения kind-путь
+применяется, только если разрезолвились **ВСЕ** получатели (`_resolve_kind_channels`,
+`router_manager.py:1140`). Если хотя бы один получатель не резолвится в kind-канал
+(нет канала, broadcast-адрес, невалидный адрес) — WARNING со списком нерезолвленных
+целей и **полный fallback** в прежний путь (без kind-каналов): частичная доставка
+недопустима, получатель не должен теряться молча.
+
+---
+
 ## Roadmap / Что не хватает
 
 | Задача | Приоритет | Этап |

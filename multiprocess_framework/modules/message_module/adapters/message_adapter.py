@@ -32,8 +32,10 @@ MessageAdapter — контекстно-зависимая фабрика соо
         def on_error(self, err):
             self.router.send(self.msg.log("error", str(err)))
 """
+
 from typing import Any, Dict, List, Optional, Union
 
+from ..builders import build_command_message
 from ..core.message import Message
 from ..types.message_types import MessageType, Priority, LogLevel
 
@@ -91,27 +93,48 @@ class MessageAdapter:
         targets: Union[List[str], str],
         command: str,
         args: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
         need_ack: bool = False,
         priority: Union[Priority, str] = "normal",
         **kwargs: Any,
     ) -> Message:
         """Создать COMMAND сообщение — команда для выполнения действия.
 
+        Единый конверт команд (Ф7 G.2, решение владельца 2026-07-09): ФОРМА
+        конверта делегируется единому билдеру ``build_command_message`` (одна
+        реализация shape'а — command/data_type/data). Payload кладётся под ключ
+        ``data``, а НЕ под legacy ``args``. Приоритет payload (F6): явный ``data``
+        > ``args`` > ``{}`` — эта логика теперь живёт ТОЛЬКО здесь (сняты дубли из
+        routed_command / process_io).
+
         Args:
-            targets:  Получатели команды.
+            targets:  Получатели команды (str или список; поддержан fan-out).
             command:  Имя команды (например, 'start', 'stop', 'ping').
-            args:     Аргументы команды.
+            args:     Аргументы команды (едут под ``data``, если не задан ``data``).
+            data:     Явный payload (приоритетнее ``args``).
             need_ack: True если требуется подтверждение исполнения.
             priority: Приоритет доставки.
 
         Returns:
-            Message с type='command'.
+            Message с type='command' и payload под ``data``.
         """
+        targets_list = [targets] if isinstance(targets, str) else list(targets)
+        payload = data if data is not None else (args or {})
+        # Делегируем форму конверта единому билдеру (F7): command/data_type/data.
+        wire = build_command_message(
+            targets_list[0] if targets_list else "",
+            command,
+            payload,
+            sender=self._sender,
+        )
+        if targets_list:
+            wire["targets"] = targets_list
         return self.create(
             MessageType.COMMAND,
-            targets=targets,
-            command=command,
-            args=args or {},
+            targets=wire["targets"],
+            command=wire["command"],
+            data_type=wire["data_type"],
+            data=wire["data"],
             need_ack=need_ack,
             priority=priority,
             **kwargs,

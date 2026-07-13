@@ -19,6 +19,7 @@
         def write_frame_to_shm(self, frame) -> dict | None:
             return self._io.write_frames_to_shm("camera", "camera_frame", [frame])
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -58,17 +59,17 @@ class ProcessIO:
         args: dict,
         data: Optional[dict] = None,
     ) -> bool:
-        """Отправить COMMAND-сообщение целевому процессу."""
-        msg = self._msg.command(
-            targets=[target], command=command, args=args, data=data or {}
-        )
+        """Отправить COMMAND-сообщение целевому процессу.
+
+        Единый конверт (Ф7 G.2, F6): приоритет payload (data > args) — в
+        MessageAdapter.command; здесь прокидываем оба параметра.
+        """
+        msg = self._msg.command(targets=[target], command=command, args=args, data=data)
         return self._p.send_message(target, msg.to_dict())
 
     def send_event(self, target: str, event_type: str, event_data: dict) -> bool:
         """Отправить EVENT-сообщение целевому процессу."""
-        msg = self._msg.event(
-            event_type=event_type, targets=[target], event_data=event_data
-        )
+        msg = self._msg.event(event_type=event_type, targets=[target], event_data=event_data)
         return self._p.send_message(target, msg.to_dict())
 
     # ---- SHM: запись кадров ----

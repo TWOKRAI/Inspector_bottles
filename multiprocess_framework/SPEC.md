@@ -213,15 +213,15 @@ ProcessModule
 Поток сообщения между процессами:
 
 ```
-Process A: msg = adapter.command(targets=["B"], command="x", args={...})
-           ↓ msg.to_dict()
+Process A: msg = adapter.command(targets=["B"], command="x", data={...})
+           ↓ msg.to_dict()   # payload — под "data" (единый конверт, ADR-MSG-010)
            RouterManager.send() → AsyncSender → middleware → channel.send() → Queue
            ↓
 Process B: AsyncReceiver.poll() → middleware → message_dispatcher
            ↓
            Message.from_dict() → CommandManager.handle_command(msg)
            ↓
-           handler(msg["args"]) → optional response
+           handler(msg["data"]) → optional response
 ```
 
 ### 5.3 Graceful shutdown
@@ -252,7 +252,8 @@ ProcessManagerProcess.shutdown()
 self.msg.command(
     targets=["detector"],
     command="detect",
-    args={"frame_id": 42},
+    data={"frame_id": 42},   # payload — единый конверт (ADR-MSG-010); args=... тоже
+                              # принимается, но data приоритетнее, если задано оба
 )
 # → внутренне: Message-объект (Pydantic SchemaBase)
 # → на границе: msg.to_dict() — plain dict с ключами

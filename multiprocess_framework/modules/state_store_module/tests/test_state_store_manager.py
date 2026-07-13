@@ -5,7 +5,11 @@
 
 from __future__ import annotations
 
-from multiprocess_framework.modules.state_store_module.core.delta import MISSING, Delta
+from multiprocess_framework.modules.state_store_module.core.delta import (
+    MISSING,
+    STATE_ENVELOPE_MARKER,
+    Delta,
+)
 from multiprocess_framework.modules.state_store_module.core.subscription_manager import SubscriptionManager
 from multiprocess_framework.modules.state_store_module.manager.delta_dispatcher import DeltaDispatcher
 from multiprocess_framework.modules.state_store_module.manager.state_store_manager import StateStoreManager
@@ -217,28 +221,64 @@ class TestStateStoreManagerMerge:
         assert len(msg["data"]["deltas"]) == 2
 
     def test_merge_commandmanager_form_payload_with_source_key(self):
-        """Ж-3 (RS-2): CommandManager-путь (expects_full_message=False) с payload,
+        """Ж-3 (RS-2): развёрнутый конверт (expects_full_message=False) с payload,
         содержащим ключ 'source' — НЕ должен падать с «Поле 'data' обязательно».
 
         Регресс тихого `state.merge failed` на switch: камера публикует
         `processes.<cam>.state.cam.actual` через proxy.merge, а её actual-параметры
-        содержат ключ 'source' (напр. 'camera://0'). CommandManager разворачивает
-        конверт → handler получает {path, data: payload, source}. Прежний фолбэк
-        «нет path и source в payload» пропускал этот payload (в нём есть 'source').
+        содержат ключ 'source' (напр. 'camera://0'). Форма B: конверт передан
+        напрямую с явным маркером (Ф7 G.2 шаг 4) — payload под 'data', маркер
+        снимает неоднозначность независимо от содержимого payload.
         """
         mgr = StateStoreManager()
         payload = {"source": "camera://0", "resolution": "1080p"}
-        # msg = развёрнутый конверт (top-level path + data), как отдаёт CommandManager
-        result = mgr.handle_state_merge({"path": "processes.cam0.state.cam.actual", "data": payload, "source": "cam0"})
+        # msg = помеченный конверт (форма B): маркер + path + data
+        result = mgr.handle_state_merge(
+            {
+                "path": "processes.cam0.state.cam.actual",
+                "data": payload,
+                "source": "cam0",
+                STATE_ENVELOPE_MARKER: True,
+            }
+        )
         assert result["status"] == "ok"
         assert result["changes_count"] == 2
         assert mgr.store.get("processes.cam0.state.cam.actual.source") == "camera://0"
 
+    def test_merge_missing_path_is_error(self):
+        """F2 (ревью G.2): маркированный конверт без path → громкая ошибка, не merge в корень."""
+        mgr = StateStoreManager()
+        mgr.handle_state_set({"data": {"path": "keep.me", "value": 1, "source": "s"}})
+        result = mgr.handle_state_merge({"data": {"fps": 30}, "source": "s", STATE_ENVELOPE_MARKER: True})
+        assert result["status"] == "error"
+        assert "path" in result["error"]
+        # дерево не тронуто
+        assert mgr.store.get("keep.me") == 1
+        assert mgr.store.get("fps", MISSING) is MISSING
+
+    def test_merge_empty_path_is_error(self):
+        """F2: path='' → ошибка (симметрично handle_state_set), корень не затёрт."""
+        mgr = StateStoreManager()
+        mgr.handle_state_set({"data": {"path": "keep.me", "value": 1, "source": "s"}})
+        result = mgr.handle_state_merge({"path": "", "data": {"fps": 30}, "source": "s", STATE_ENVELOPE_MARKER: True})
+        assert result["status"] == "error"
+        assert mgr.store.get("keep.me") == 1
+
     def test_merge_commandmanager_form_payload_with_path_key(self):
-        """Ж-3: тот же путь, но payload содержит ключ 'path' (device-config)."""
+        """Ж-3: тот же путь, но payload содержит ключ 'path' (device-config).
+
+        Явный маркер снимает прежний shape-sniffing: top-level 'path' в самом
+        конверте больше не путается с 'path' внутри payload."""
         mgr = StateStoreManager()
         payload = {"path": "/dev/video0", "fps": 30}
-        result = mgr.handle_state_merge({"path": "processes.dev.state", "data": payload, "source": "dev"})
+        result = mgr.handle_state_merge(
+            {
+                "path": "processes.dev.state",
+                "data": payload,
+                "source": "dev",
+                STATE_ENVELOPE_MARKER: True,
+            }
+        )
         assert result["status"] == "ok"
         assert mgr.store.get("processes.dev.state.path") == "/dev/video0"
         assert mgr.store.get("processes.dev.state.fps") == 30

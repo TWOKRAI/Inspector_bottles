@@ -87,8 +87,31 @@ class TestCommand:
         assert msg.command == "start"
 
     def test_with_args(self, adapter):
+        # Единый конверт (Ф7 G.2): payload едет под data, не под args.
         msg = adapter.command("proc_2", "configure", args={"key": "val"})
-        assert msg.args == {"key": "val"}
+        assert msg.data == {"key": "val"}
+        assert msg.data_type == "configure"
+
+    def test_explicit_data_param_no_typeerror(self, adapter):
+        """F6: явный data-параметр принимается (раньше → TypeError 'multiple values')."""
+        msg = adapter.command("proc_2", "configure", data={"x": 1})
+        assert msg.data == {"x": 1}
+
+    def test_data_beats_args(self, adapter):
+        """F6: явный data приоритетнее args (логика в адаптере, единственное место)."""
+        msg = adapter.command("proc_2", "configure", args={"from": "args"}, data={"from": "data"})
+        assert msg.data == {"from": "data"}
+
+    def test_args_used_when_no_data(self, adapter):
+        msg = adapter.command("proc_2", "configure", args={"from": "args"})
+        assert msg.data == {"from": "args"}
+
+    def test_fanout_multi_target_delegates_shape(self, adapter):
+        """F7: делегирование build_command_message сохраняет fan-out targets."""
+        msg = adapter.command(["a", "b"], "cmd", args={"k": 1})
+        assert msg.targets == ["a", "b"]
+        assert msg.data == {"k": 1}
+        assert msg.data_type == "cmd"
 
     def test_default_priority_normal(self, adapter):
         msg = adapter.command("proc_2", "ping")

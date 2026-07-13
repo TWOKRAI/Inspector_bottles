@@ -12,6 +12,7 @@ from typing import Any
 
 from ...base_manager import BaseManager, ObservableMixin
 
+from ..core.delta import STATE_ENVELOPE_MARKER
 from ..core.subscription_manager import SubscriptionManager
 from ..core.tree_store import TreeStore
 from ..interfaces import IRouter, IStateStoreManager
@@ -197,30 +198,31 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         Returns:
             dict с результатом операции или ошибкой.
         """
-        # Коллизия ключа "data" (Ж-3, RS-2): конверт команды state.merge —
-        # ``{path, data, source}``, где ВЛОЖЕННЫЙ "data" = merge-payload. Обобщённый
-        # ``_extract_data`` (конвенция «data-конверт») разворачивал бы msg по ключу
-        # "data" ещё раз и возвращал сам payload. Прежний фолбэк «нет ни path, ни
-        # source → это payload» ломался, когда payload САМ содержит ключ "source"
-        # или "path" (напр. camera actual: {"source": "camera://0", ...},
-        # device-config с "path") → merge_data=None → тихий «Поле 'data' обязательно».
-        #
-        # Честный контракт: конверт команды — ``{path, <merge>, source}``, где
-        # merge-payload лежит под ключом "data". Отличаем ДВА входа по ТОП-УРОВНЮ
-        # самого msg, НЕ по содержимому payload (прежний фолбэк ломался, когда
-        # payload сам нёс "path"/"source"):
-        #   (B) развёрнутый data (CommandManager, expects_full_message=False):
-        #       msg САМ конверт — имеет top-level "path" И "data" (payload — сиблинг path).
-        #   (A) full message (router, expects_full_message=True):
-        #       top-level "path" нет ("command"/"data"/"sender") → конверт вложен в msg["data"].
-        if "path" in msg and "data" in msg:
-            envelope = msg  # (B): msg уже конверт, payload = msg["data"]
+        # Явный маркер конверта (Ф7 G.2 шаг 4, RS-ревью 2026-07-13) — вместо
+        # shape-sniffing по наличию top-level "path"/"data". Конверт команды —
+        # ``{path, data, source, STATE_ENVELOPE_MARKER: True}``, где ВЛОЖЕННЫЙ
+        # "data" = merge-payload. Билдер (``StateProxy.merge``) ставит маркер;
+        # получатель НЕ гадает по содержимому. Два входа:
+        #   (B) развёрнутый конверт (expects_full_message=False): маркер на верхнем
+        #       уровне самого msg → msg И есть конверт.
+        #   (A) full message (router, expects_full_message=True): конверт вложен в
+        #       msg["data"] → разворачиваем один раз (маркер сиблингом внутри).
+        # Прежний риск снят: будущий отправитель с top-level "path" без маркера
+        # НЕ будет принят за конверт (тихого merge конверта как payload не будет).
+        if msg.get(STATE_ENVELOPE_MARKER):
+            envelope = msg  # (B): msg — помеченный конверт, payload = msg["data"]
         else:
             inner = msg.get("data")
             envelope = inner if isinstance(inner, dict) else msg  # (A): развернуть один раз
         path = envelope.get("path", "")
         merge_data = envelope.get("data")
         source = envelope.get("source", "")
+
+        # F2 (ревью G.2): path обязателен и непустой (симметрично handle_state_set) —
+        # маркированный конверт с пустым/отсутствующим path НЕ мёржим в корень, а
+        # громко отклоняем (иначе тихий merge в root затирает всё дерево).
+        if not path or not isinstance(path, str):
+            return {"status": "error", "error": "Поле 'path' обязательно и должно быть строкой"}
 
         if merge_data is None or not isinstance(merge_data, dict):
             return {"status": "error", "error": "Поле 'data' обязательно и должно быть dict"}

@@ -71,7 +71,12 @@ class Message(SchemaBase):
 
     # === COMMAND ===
     command: Annotated[Optional[str], FieldMeta("Имя команды")] = None
-    args: Annotated[Dict[str, Any], FieldMeta("Аргументы команды")] = Field(default_factory=dict)
+    # legacy: единый конверт команд (Ф7 G.2) кладёт payload под `data`, НЕ под
+    # `args`. Поле сохранено для обратной совместимости (G0/G4-дисциплина —
+    # не удаляем), но исходящими командами не заполняется.
+    args: Annotated[Dict[str, Any], FieldMeta("Аргументы команды (legacy; payload → data)")] = Field(
+        default_factory=dict
+    )
     need_ack: Annotated[bool, FieldMeta("Требуется подтверждение")] = False
 
     # === LOG ===
@@ -199,10 +204,26 @@ class Message(SchemaBase):
         return self
 
     def set_command(self, command: str, args: Optional[Dict[str, Any]] = None) -> "Message":
-        """Устанавливает команду и аргументы (COMMAND)."""
+        """Устанавливает команду; payload кладётся под ``data`` (единый конверт, Ф7 G.2).
+
+        .. deprecated::
+            Собирай COMMAND через ``MessageAdapter.command`` /
+            ``command_envelopes.build_command_message`` — единый билдер конверта.
+            Метод оставлен для совместимости и приведён к data-конверту (payload
+            под ``data``, НЕ под legacy ``args``).
+        """
+        import warnings
+
+        warnings.warn(
+            "Message.set_command устарел: используй MessageAdapter.command / "
+            "build_command_message (единый конверт, payload под data)",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.command = command
+        self.data_type = command
         if args:
-            self.args = args
+            self.data = args
         return self
 
     def set_log(

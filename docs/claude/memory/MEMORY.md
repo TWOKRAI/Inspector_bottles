@@ -112,3 +112,4 @@
 - [Конвенции диалогов](feedback_dialog_conventions.md) — Сохранить(default)/Не сохранять/Отмена, стандарт платформы, helper confirm_unsaved_changes
 - [Ревью трёхуровневое](feedback_review_economy_tiers.md) — полное 8-угловое только для рисковых вскрытий; лёгкое/группой для S-задач; финдеры на Sonnet, не Fable
 - [Без всплывающих Qt-окон](feedback_no_qt_popups_offscreen.md) — агентские прогоны тестов/харнесса только с QT_QPA_PLATFORM=offscreen; окна вешают агентов
+- [Неиспользуемые пути = контракты](feedback_unused_paths_are_contracts.md) — конструктор универсален: API без живых вызывающих в ревью чинить/отклонять громко, не отмахиваться «мёртвый путь»

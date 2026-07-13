@@ -11,7 +11,8 @@
     split_pattern       — публичный алиас для кэшированного split паттерна (ADR-SS-004)
     iter_matches        — обход дерева по glob-паттерну (генератор пар path/value)
 """
-from .delta import Delta, MISSING, Transaction
+
+from .delta import STATE_ENVELOPE_MARKER, Delta, MISSING, Transaction
 from .tree_store import TreeStore
 from .subscription_manager import SubscriptionManager, Subscription, match_pattern, split_pattern
 from .glob_walker import iter_matches
@@ -21,6 +22,7 @@ __all__ = [
     "Delta",
     "Transaction",
     "MISSING",
+    "STATE_ENVELOPE_MARKER",
     "SubscriptionManager",
     "Subscription",
     "match_pattern",

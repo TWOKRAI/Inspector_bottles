@@ -69,12 +69,15 @@ class TestSendCommand:
         assert target == "database"
         assert msg_dict["type"] == "command"
         assert msg_dict["command"] == "db.save_detections"
-        assert msg_dict["args"] == {"detections": [{"id": 1}]}
+        # Единый конверт (Ф7 G.2): payload под data, не под args.
+        assert msg_dict["data"] == {"detections": [{"id": 1}]}
+        assert "args" not in msg_dict
 
     def test_send_command_with_explicit_data(self):
         proc = make_mock_process()
         io = ProcessIO(proc)
 
+        # Явный data приоритетнее args (оба сводятся к единому payload под data).
         io.send_command("robot", "reject_item", {"frame_id": 5}, data={"x": 1})
 
         _, msg_dict = proc.send_message.call_args.args

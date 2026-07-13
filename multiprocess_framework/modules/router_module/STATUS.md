@@ -78,3 +78,4 @@ register_route("order", "queue_channel")
 | 2026-03-12 | CRM Фаза 4: RouterManager(ChannelRoutingManager), IMessageChannel(IChannel) | 3–4 |
 | 2026-03-12 | CRM Фаза 5: STATUS.md обновлён | 5 |
 | 2026-04-09 | План 10: dead code, Lock для _stats, тесты адаптеров, DECISIONS + ARCH §6.9 | 5 |
+| 2026-07-13 | Ф7 G.2: kind-каналы `{process}_{kind}` за флагом `use_kind_channels` (дефолт OFF, приоритет ctor > env > конфиг > False); всё-или-fallback при частичном fan-out (F4), специфичный `register_route` выигрывает у kind (F5). Не в проде до G.7 | 5 |
