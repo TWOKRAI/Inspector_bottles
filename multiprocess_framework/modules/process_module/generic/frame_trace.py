@@ -48,6 +48,7 @@ from __future__ import annotations
 import functools
 import os
 import time
+import uuid
 
 # Читается один раз при импорте. Дочерние spawn-процессы наследуют env.
 # Тесты могут переопределить: frame_trace._ENABLED = True.
@@ -57,6 +58,42 @@ _ENABLED = os.environ.get("INSPECTOR_FRAME_TRACE", "").strip().lower() in ("1", 
 def enabled() -> bool:
     """Включена ли трассировка кадра (по env INSPECTOR_FRAME_TRACE)."""
     return _ENABLED
+
+
+# ----------------------------------------------------------------------
+# trace_id — Ф7 G.6 (корреляция лог↔кадр, семантика, НЕ perf-профиль)
+# ----------------------------------------------------------------------
+#
+# В отличие от span-трассировки выше (item["trace"], enabled()/traced()/...) —
+# ВСЕГДА активно, не за INSPECTOR_FRAME_TRACE: назначение нужно для корреляции
+# ПРОДОВЫХ логов (по какому кадру какая запись), а не только для perf-дебага,
+# который в проде по умолчанию выключен. Стоимость — один hex(uuid4()) на кадр
+# У ИСТОЧНИКА (не на каждой границе процесса) + dict-присвоение; дальше поле
+# просто едет вместе с item/data как любое другое метаданное (camera_id,
+# capture_ts) — Dict at Boundary, без нового кода на промежуточных узлах.
+
+
+def new_trace_id() -> str:
+    """Сгенерировать trace_id: 32 hex-символа, формат W3C trace-context trace-id
+    (128 бит), БЕЗ зависимости от OTel SDK — просто ``uuid4().hex``."""
+    return uuid.uuid4().hex
+
+
+def ensure_trace_id(item: dict) -> str:
+    """Назначить ``item["trace_id"]``, если его ещё нет, иначе вернуть существующий.
+
+    Идемпотентно — вызов на промежуточном узле (не у источника) не переписывает
+    уже назначенный trace_id, а просто возвращает его (проброс, не переназначение).
+    Единственное реальное место вызова — ``SourceProducer`` (рождение кадра);
+    другие узлы получают trace_id уже готовым в item/data.
+    """
+    if not isinstance(item, dict):
+        return ""
+    trace_id = item.get("trace_id")
+    if not trace_id:
+        trace_id = new_trace_id()
+        item["trace_id"] = trace_id
+    return trace_id
 
 
 def stamp_send(item: dict, node: str) -> None:

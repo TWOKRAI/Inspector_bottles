@@ -199,3 +199,55 @@ class TestInstallTracingInheritance:
         frame_trace.install_tracing(_Plain)
         assert not getattr(ProcessModulePlugin.__dict__["process"], "_traced", False)
         assert not getattr(ProcessModulePlugin.__dict__["produce"], "_traced", False)
+
+
+class TestTraceId:
+    """Ф7 G.6: trace_id — семантическое поле корреляции лог↔кадр, ВСЕГДА активно
+    (в отличие от span-трассировки выше — не гейтится INSPECTOR_FRAME_TRACE)."""
+
+    def test_new_trace_id_format(self) -> None:
+        """32 hex-символа — формат W3C trace-context trace-id (128 бит)."""
+        trace_id = frame_trace.new_trace_id()
+        assert len(trace_id) == 32
+        assert all(c in "0123456789abcdef" for c in trace_id)
+
+    def test_new_trace_id_unique(self) -> None:
+        assert frame_trace.new_trace_id() != frame_trace.new_trace_id()
+
+    def test_ensure_trace_id_assigns_when_missing(self) -> None:
+        item: dict = {"frame": "stub", "camera_id": "camera_0"}
+        trace_id = frame_trace.ensure_trace_id(item)
+        assert item["trace_id"] == trace_id
+        assert len(trace_id) == 32
+
+    def test_ensure_trace_id_idempotent_does_not_overwrite(self) -> None:
+        """Промежуточный узел не переназначает trace_id — только источник."""
+        item: dict = {"trace_id": "a" * 32}
+        trace_id = frame_trace.ensure_trace_id(item)
+        assert trace_id == "a" * 32
+        assert item["trace_id"] == "a" * 32
+
+    def test_ensure_trace_id_active_without_frame_trace_flag(self, trace_off) -> None:
+        """В отличие от stamp_send/record_*, trace_id работает и при выключенном
+        INSPECTOR_FRAME_TRACE — нужен в проде для корреляции логов, не только
+        для perf-дебага."""
+        item: dict = {}
+        trace_id = frame_trace.ensure_trace_id(item)
+        assert item["trace_id"] == trace_id
+        assert trace_id != ""
+
+    def test_ensure_trace_id_non_dict_returns_empty(self) -> None:
+        assert frame_trace.ensure_trace_id(None) == ""  # type: ignore[arg-type]
+
+    def test_trace_id_survives_full_chain_alongside_spans(self, trace_on) -> None:
+        """trace_id не конфликтует с item["trace"] (span-список) — разные поля,
+        оба переживают проброс через несколько узлов (source→detector→painter)."""
+        item: dict = {}
+        trace_id = frame_trace.ensure_trace_id(item)
+        frame_trace.record_process(item, "camera_0", "webcam", 2.0)
+        frame_trace.stamp_send(item, "camera_0")
+        frame_trace.record_transport(item, "detector")
+        # trace_id не тронут спан-механизмом — единственный по кадру.
+        assert item["trace_id"] == trace_id
+        assert frame_trace.ensure_trace_id(item) == trace_id  # проброс, не пересоздание
+        assert len(item["trace"]) == 2
