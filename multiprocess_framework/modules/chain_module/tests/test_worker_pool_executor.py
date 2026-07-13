@@ -180,6 +180,65 @@ class TestStopMechanics:
         with pytest.raises(RuntimeError):
             ex.submit(BrightenOperation(1), frame, None)
 
+    def test_shutdown_wait_drains_full_tail(self):
+        """Edge-1: shutdown(wait=True) доисполняет ВЕСЬ хвост, не N задач.
+
+        stop_worker ставит stop_event немедленно (worker_lifecycle.py:135) → без
+        ожидания опустошения очереди воркер выходит после ТЕКУЩЕЙ задачи, бросая
+        хвост >N. Паритет ThreadPoolExecutor.shutdown(wait=True) — доработать всё.
+        """
+
+        class Return:
+            def __init__(self, delay: float, val: int):
+                self.delay = delay
+                self.val = val
+
+            def execute(self, d, c):
+                time.sleep(self.delay)
+                return self.val
+
+            def configure(self, p):
+                pass
+
+        ex = WorkerPoolExecutor(max_workers=2, step_timeout=5.0)
+        handles = [ex.submit(Return(0.05, i), None, None) for i in range(6)]  # 6 > 2N
+        ex.shutdown(wait=True)
+        for i, h in enumerate(handles):
+            assert h._event.is_set(), f"handle {i} не завершён (хвост брошен)"
+            assert h.result(timeout=0) == i
+
+    def test_orphan_sentinel_reclaimed_on_resize(self, frame):
+        """Edge-2: осиротевший сентинел не должен пережить resize и убить нового воркера.
+
+        Зомби после join-таймаута выходит по stop_event, не потребив свой сентинел →
+        сентинел остаётся в общей очереди → новый воркер хватает его и умирает.
+        """
+        ex = WorkerPoolExecutor(max_workers=2, step_timeout=5.0)
+        try:
+            ex._in_queue.put(None)  # симулируем осиротевший сентинел
+            ex.resize(2)
+
+            # Барьер на 2 → проходит ТОЛЬКО если оба воркера нового поколения живы
+            barrier = threading.Barrier(2, timeout=3)
+            done: list[int] = []
+
+            class BarrierOp:
+                def execute(self, d, c):
+                    barrier.wait()
+                    done.append(1)
+                    return d
+
+                def configure(self, p):
+                    pass
+
+            steps = [make_step(f"n{i}", BarrierOp()) for i in range(2)]
+            handles = ex.submit_bundle(steps, frame, None)
+            results = ex.collect_results(handles, steps, timeout=4.0)
+            assert all(not isinstance(v, Exception) for _, v in results)
+            assert len(done) == 2  # оба воркера дошли до барьера
+        finally:
+            ex.shutdown()
+
 
 class TestSubmitCollect:
     def test_submit_single_result(self, executor, frame):
