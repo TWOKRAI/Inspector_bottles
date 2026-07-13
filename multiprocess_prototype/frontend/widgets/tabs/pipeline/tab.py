@@ -79,6 +79,7 @@ class PipelineTab(QWidget):
         bindings: object | None = None,
         command_sender: object | None = None,
         topology_bridge: object | None = None,
+        topology_session: object | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -93,6 +94,7 @@ class PipelineTab(QWidget):
             bindings=bindings,
             command_sender=command_sender,
             topology_bridge=topology_bridge,
+            topology_session=topology_session,
         )
 
         self._tab_layout = DiffScrollTabLayout(
@@ -221,6 +223,7 @@ class PipelineTab(QWidget):
             bindings=runtime.bindings,
             command_sender=runtime.command_sender,
             topology_bridge=runtime.topology_bridge,
+            topology_session=runtime.topology_session,
         )
 
     # ------------------------------------------------------------------ #

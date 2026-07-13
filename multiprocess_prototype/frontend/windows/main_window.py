@@ -22,6 +22,8 @@ from ..widgets.chrome.error_banner import ErrorBannerWidget
 from .config import MainWindowConfig
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from multiprocess_framework.modules.frontend_module.widgets.tabs.tab_layout_protocol import (
         UndoRedoController,
     )
@@ -202,6 +204,27 @@ class MainWindow(QMainWindow):
         self._dirty_label.setVisible(False)
         self.statusBar().addWidget(self._dirty_label)
 
+        # RS-4 dirty-контур редактора топологии: два независимых индикатора.
+        # «Несохранённые правки графа» (dirty, не в файле) и «граф ≠ живая система»
+        # (diverged, не применён к backend). Отдельны от _dirty_label (тот — Settings).
+        self._topo_dirty_label = QLabel("")
+        self._topo_dirty_label.setObjectName("TopologyDirtyLabel")
+        self._topo_dirty_label.setToolTip("В редакторе топологии есть несохранённые в рецепт правки")
+        self._topo_dirty_label.setVisible(False)
+        self.statusBar().addWidget(self._topo_dirty_label)
+
+        self._topo_diverged_label = QLabel("")
+        self._topo_diverged_label.setObjectName("TopologyDivergedLabel")
+        self._topo_diverged_label.setToolTip("Граф в редакторе расходится с работающей системой — примените изменения")
+        self._topo_diverged_label.setVisible(False)
+        self.statusBar().addWidget(self._topo_diverged_label)
+
+        # RS-4: сессия dirty-контура + callback сохранения (для closeEvent-подтверждения).
+        # Устанавливаются composition root'ом через set_topology_session(). None → без
+        # подтверждения при закрытии (поведение до RS-4).
+        self._topology_session: object | None = None
+        self._save_topology_fn: "Callable[[], bool] | None" = None
+
         self._fps_label = QLabel("FPS: —")
         self._latency_label = QLabel("Latency: —")
         self._frames_label = QLabel("Frames: —")
@@ -262,9 +285,67 @@ class MainWindow(QMainWindow):
         self._settings.setValue("mainwindow/geometry", self.saveGeometry())
 
     def closeEvent(self, event) -> None:
-        """Сохранить геометрию при закрытии окна."""
+        """Подтвердить несохранённые правки графа (RS-4) и сохранить геометрию.
+
+        C-2/C-5: закрытие приложения при dirty-редакторе МОЛЧА теряло применённые-но-
+        несохранённые правки топологии. Теперь при dirty спрашиваем: Сохранить /
+        Не сохранять / Отмена. «Отмена» → окно не закрывается (event.ignore()).
+        """
+        if not self._confirm_close_with_dirty():
+            event.ignore()
+            return
         self._save_geometry()
         super().closeEvent(event)
+
+    def _confirm_close_with_dirty(self) -> bool:
+        """Диалог подтверждения при закрытии с несохранёнными правками графа (RS-4).
+
+        Returns:
+            True — можно закрывать (нет dirty, либо пользователь сохранил/отказался
+            от сохранения); False — закрытие отменено пользователем.
+        """
+        session = self._topology_session
+        if session is None or not getattr(session, "dirty", False):
+            return True
+
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Несохранённые правки графа")
+        box.setText("В редакторе топологии есть несохранённые правки.\nСохранить их перед выходом?")
+        buttons = QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
+        if self._save_topology_fn is not None:
+            buttons |= QMessageBox.StandardButton.Save
+        box.setStandardButtons(buttons)
+        box.button(QMessageBox.StandardButton.Discard).setText("Продолжить без сохранения")
+        # Требование владельца: «Сохранить» — кнопка по умолчанию (безопасный исход).
+        # Без save_fn (Save недоступна) дефолт — Отмена (не потерять правки случайно).
+        if self._save_topology_fn is not None:
+            box.setDefaultButton(QMessageBox.StandardButton.Save)
+        else:
+            box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        choice = box.exec()
+
+        if choice == QMessageBox.StandardButton.Cancel:
+            return False
+        if choice == QMessageBox.StandardButton.Save and self._save_topology_fn is not None:
+            # Save с домен-валидацией (RS-5): провал (в т.ч. RecipeValidationError) →
+            # НЕ закрываем окно, показываем ошибку, состояние/правки сохраняются.
+            try:
+                ok = self._save_topology_fn()
+            except Exception as exc:  # noqa: BLE001 — surface, не роняем на ошибке сохранения
+                QMessageBox.critical(self, "Сохранение графа", f"Не удалось сохранить: {exc}")
+                return False
+            if not ok:
+                QMessageBox.critical(
+                    self,
+                    "Сохранение графа",
+                    "Не удалось сохранить граф в активный рецепт — выход отменён.",
+                )
+                return False
+        # «Продолжить без сохранения» или успешный Save → разрешаем закрытие.
+        return True
 
     # -- Properties --
 
@@ -556,6 +637,33 @@ class MainWindow(QMainWindow):
         """Показать/скрыть индикатор несохранённых изменений в StatusBar."""
         self._dirty_label.setVisible(dirty)
         self._dirty_label.setText("Изменения не сохранены" if dirty else "")
+
+    def set_topology_indicators(self, dirty: bool, diverged: bool) -> None:
+        """RS-4: обновить индикаторы dirty-контура редактора топологии.
+
+        Args:
+            dirty: в редакторе есть несохранённые в рецепт правки графа.
+            diverged: граф редактора расходится с работающей системой (нужен Apply).
+        """
+        self._topo_dirty_label.setVisible(dirty)
+        self._topo_dirty_label.setText("● Граф: несохранённые правки" if dirty else "")
+        self._topo_diverged_label.setVisible(diverged)
+        self._topo_diverged_label.setText("⚠ Граф ≠ живая система" if diverged else "")
+
+    def set_topology_session(self, session: object, save_fn: "Callable[[], bool] | None" = None) -> None:
+        """RS-4: подключить сессию dirty-контура + callback сохранения (для closeEvent).
+
+        Индикаторы обновляются подпиской ``session.add_change_callback`` на стороне
+        composition root (app.py), здесь сессия нужна для подтверждения при закрытии
+        приложения с несохранёнными правками (C-2/C-5).
+
+        Args:
+            session: TopologySession (structural: имеет ``.dirty``).
+            save_fn: сохранить текущий граф в активный рецепт → bool успеха. None →
+                в диалоге закрытия вариант «Сохранить» недоступен (только продолжить/отмена).
+        """
+        self._topology_session = session
+        self._save_topology_fn = save_fn
 
     def update_status(self, fps: float, latency_ms: float = 0.0) -> None:
         """Обновить StatusBar и header: fps и latency."""

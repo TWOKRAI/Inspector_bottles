@@ -545,6 +545,25 @@ def run_gui(process: "GuiProcess") -> None:
 
     event_bus.subscribe(TopologyReplaced, lambda _e: topology_bridge.on_topology_changed())
 
+    # 3h.1a. RS-4 dirty-контур редактора топологии. Сессия — единый источник знания
+    # «есть несохранённые правки графа» (dirty) и «граф ≠ живая система» (diverged).
+    # Проводка edit-детекции здесь (composition root): ЛЮБАЯ мутация графа идёт через
+    # dispatch → topology_repo.save → store публикует TopologyReplaced (структурные
+    # правки, конфиг ноды, undo/redo) → mark_edited (dirty+diverged). Активация рецепта
+    # эмитит RecipeActivated ПОСЛЕ своих TopologyReplaced (project.py _apply_activate_recipe)
+    # → mark_activated снимает оба (новый baseline). Порядок публикации доменных событий
+    # фиксирован — RecipeActivated всегда последний, поэтому активация оставляет сессию
+    # чистой. Save/Apply/Load помечают презентеры (mark_saved/applied/loaded). Загрузка
+    # из файла и стартовая load_topology_from_config идут МИМО store (не публикуют
+    # TopologyReplaced) — поэтому старт остаётся чистым, а load-from-file презентер
+    # помечает сам. [[project_topology_fencing_token]] сюда не относится (это редактор, не IPC).
+    from multiprocess_prototype.domain import TopologySession
+    from multiprocess_prototype.domain.events import RecipeActivated as _RecipeActivated
+
+    topology_session = TopologySession()
+    event_bus.subscribe(TopologyReplaced, lambda _e: topology_session.mark_edited())
+    event_bus.subscribe(_RecipeActivated, lambda _e: topology_session.mark_activated())
+
     # 3h.2. G.4.3 (Y1) + Этап 2 pipeline-live-control: live field-write listener.
     # При dispatch(SetPluginConfig) или undo/redo field-config orchestrator публикует
     # PluginConfigChanged → listener (а) синхронизирует GUI-side RegistersManager
@@ -625,6 +644,32 @@ def run_gui(process: "GuiProcess") -> None:
     # удовлетворяет UndoRedoController (undo/redo/can_undo/can_redo/add_change_callback).
     window.set_undo_controller(app_services.commands)
 
+    # 4a0. RS-4: подключить dirty-контур к MainWindow. Индикаторы («несохранённые
+    # правки графа» / «граф ≠ живая система») обновляются по change-callback сессии.
+    # save_fn закрывает вариант «Сохранить» в диалоге закрытия окна: пишет текущий
+    # граф (services.topology) в активный рецепт через тот же сборщик, что и Recipes-
+    # Save (RS-1), с домен-валидацией (RS-5). Провал → False → окно не закрывается.
+    def _save_active_topology() -> bool:
+        slug = app_services.recipes.get_active()
+        if slug is None:
+            return False
+        raw = app_services.recipes.read_raw(slug)
+        if raw is None:
+            return False
+        from multiprocess_prototype.recipes.save import build_recipe_v3_raw, validate_recipe_blueprint
+
+        topo = app_services.topology.load().to_dict()
+        new_raw = build_recipe_v3_raw(raw, topo)
+        validate_recipe_blueprint(new_raw.get("blueprint", {}))
+        app_services.recipes.save_raw(slug, new_raw)
+        topology_session.mark_saved()
+        return True
+
+    window.set_topology_session(topology_session, _save_active_topology)
+    topology_session.add_change_callback(
+        lambda: window.set_topology_indicators(topology_session.dirty, topology_session.diverged)
+    )
+
     # 4a1. Кнопка входа в header (зависит от auth_state и auth_manager)
     from .widgets.chrome.login_button import LoginButton
 
@@ -675,6 +720,7 @@ def run_gui(process: "GuiProcess") -> None:
         persist_active_recipe=_persist_active_recipe,
         image_panel=image_panel,
         data_bridge=process._bridge,
+        topology_session=topology_session,  # RS-4: dirty-контур редактора топологии
     )
 
     tab_factory = TabFactory(
@@ -716,6 +762,12 @@ def run_gui(process: "GuiProcess") -> None:
 
     # 8. Сохранить ссылку на окно в process
     process._window = window
+
+    # RS-4: гарантировать чистый baseline dirty-контура после инициализации табов.
+    # Стартовая загрузка топологии в редактор идёт мимо store (не публикует
+    # TopologyReplaced), но reset() снимает случайный dirty, если какой-то подписчик
+    # его выставил при сборке, и синхронизирует индикаторы (оба скрыты на старте).
+    topology_session.reset()
 
     window.show()
     app.exec()

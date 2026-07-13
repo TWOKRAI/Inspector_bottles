@@ -64,6 +64,7 @@ class RecipesTab(BaseListNavTab):
         process_manager_proxy: object | None = None,
         persist_active_fn: object | None = None,
         command_sender: object | None = None,
+        topology_session: object | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Инициализировать таб рецептов.
@@ -82,6 +83,8 @@ class RecipesTab(BaseListNavTab):
         self._pm_proxy = process_manager_proxy
         self._persist_active_fn = persist_active_fn
         self._command_sender = command_sender
+        # RS-4: сессия dirty-контура (для confirm-перед-активацией). None → без guard.
+        self._topology_session = topology_session
         self._selected_slug: str | None = None
         self._form_stack_index: int = 0
 
@@ -136,6 +139,7 @@ class RecipesTab(BaseListNavTab):
                 topology_store=services.topology,  # Этап 1: «Сохранить» (живой граф → рецепт)
                 persist_active_fn=self._persist_active_fn,  # persist #1: активный slug → app.yaml
                 upsert_devices_fn=_upsert_fn,  # Фаза 3 device-hub: upsert устройств рецепта
+                topology_session=self._topology_session,  # RS-4: confirm-перед-активацией
             )
             self._presenter.load()
 
@@ -160,6 +164,7 @@ class RecipesTab(BaseListNavTab):
             process_manager_proxy=runtime.process_manager_proxy,
             persist_active_fn=runtime.persist_active_recipe,
             command_sender=runtime.command_sender,
+            topology_session=runtime.topology_session,
         )
 
     # ------------------------------------------------------------------ #
@@ -283,6 +288,33 @@ class RecipesTab(BaseListNavTab):
             QMessageBox.StandardButton.No,
         )
         return reply == QMessageBox.StandardButton.Yes
+
+    def confirm_discard_changes(self) -> str:
+        """Диалог «несохранённые правки графа» перед активацией (RS-4, C-2).
+
+        Три исхода: Сохранить (в текущий рецепт и продолжить) / Не сохранять
+        (продолжить, потеряв правки) / Отмена (не активировать).
+
+        Returns:
+            "save" | "discard" | "cancel".
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Несохранённые правки графа")
+        box.setText("В редакторе есть несохранённые правки топологии.\nАктивация другого рецепта их потеряет.")
+        save_btn = box.addButton("Сохранить", QMessageBox.ButtonRole.AcceptRole)
+        discard_btn = box.addButton("Продолжить без сохранения", QMessageBox.ButtonRole.DestructiveRole)
+        _cancel_btn = box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+        # Требование владельца: «Сохранить» — кнопка по умолчанию (безопасный исход:
+        # правки не теряются). Двухкнопочный «потерять/отмена» отвергнут.
+        box.setDefaultButton(save_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is save_btn:
+            return "save"
+        if clicked is discard_btn:
+            return "discard"
+        return "cancel"
 
     def show_error(self, message: str) -> None:
         """Показать диалог с сообщением об ошибке.

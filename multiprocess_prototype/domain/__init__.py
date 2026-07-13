@@ -42,6 +42,7 @@ from .entities.project import ApplyContext
 from .errors import DomainError, EntityValidationError
 from .event_bus import EventBus
 from .app_services import AppServices
+from .topology_session import TopologySession
 from .protocols import (
     AuthFacade,
     CommandDispatcher,
@@ -161,6 +162,8 @@ __all__ = [
     # EventBus + AppServices (Task B.6)
     "EventBus",
     "AppServices",
+    # Dirty-контур редактора топологии (RS-4)
+    "TopologySession",
     # Entities
     "PluginInstance",
     "WorkerSpec",

@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.bridge.process_manager_proxy import ProcessManagerProxy
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
+    from multiprocess_prototype.domain.topology_session import TopologySession
 
 
 @dataclass(frozen=True)
@@ -118,3 +119,9 @@ class RuntimeDeps(FrameworkRuntime):
     auth_ctx: "AuthContext | None" = None
     image_panel: Any = None
     persist_active_recipe: "Callable[[str], None] | None" = None
+    # RS-4 dirty-контур: сессия редактора топологии (dirty/diverged + уведомления).
+    # Runtime-объект (mutable, callbacks, живёт с работающим приложением) → место в
+    # runtime-layer, не в AppServices (editor-state catalogs). Презентеры Pipeline/
+    # Recipes читают его для confirm-перед-активацией и mark_saved/applied/loaded.
+    # None → dirty-контур выключен (graceful: активация/сохранение как раньше).
+    topology_session: "TopologySession | None" = None

@@ -90,6 +90,7 @@ class RecipesPresenter:
         topology_store: Any | None = None,
         persist_active_fn: Callable[[str], None] | None = None,
         upsert_devices_fn: Callable[[list[dict], str], None] | None = None,
+        topology_session: Any | None = None,
     ) -> None:
         """Инициализировать presenter.
 
@@ -125,6 +126,9 @@ class RecipesPresenter:
         self._persist_active_fn = persist_active_fn
         # Фаза 3 device-hub: upsert устройств рецепта ДО apply_topology.
         self._upsert_devices_fn = upsert_devices_fn
+        # RS-4 dirty-контур: сессия редактора топологии. None → dirty-guard выключен
+        # (активация без подтверждения, как до RS-4 — характеризация чистого пути).
+        self._topology_session = topology_session
         self._selected_slug: str | None = None
         # Task 2.1 topology-switch-hardening: guard от повторного apply, пока
         # результат предыдущего не пришёл (backend дебаунсит МОЛЧА — здесь честно).
@@ -335,6 +339,27 @@ class RecipesPresenter:
             self._view.show_error("Переключение рецепта уже выполняется — дождитесь завершения")
             self._log_warning("RecipesPresenter.on_set_active: apply в полёте — повторный запрос отклонён")
             return
+
+        # RS-4 (C-2): активация другого рецепта МОЛЧА выбрасывала несохранённые правки
+        # графа. Теперь при dirty-редакторе спрашиваем пользователя ДО любых side-effects
+        # (set_active / dispatch / apply). Guard активен только при наличии сессии —
+        # без неё (старые тесты / minimal-режим) поведение прежнее (характеризация).
+        if self._topology_session is not None and self._topology_session.dirty:
+            choice = self._view.confirm_discard_changes()
+            if choice == "cancel":
+                self._log_info("RecipesPresenter.on_set_active: активация отменена (dirty-подтверждение)")
+                return
+            if choice == "save":
+                # Сохраняем текущий граф в ПОКИДАЕМЫЙ (сейчас активный) рецепт: правки
+                # относятся к нему. Провал сохранения → не теряем правки молча, прерываем
+                # переключение (on_save уже показал ошибку). Успех → on_save снял dirty.
+                # Явный target: on_save(None) упал бы на _selected_slug (= рецепт, В который
+                # переключаемся) — сохранил бы правки не в тот файл. Если активного рецепта
+                # нет, сохранять некуда — продолжаем как «discard».
+                prev_active_for_save = self._store.get_active()
+                if prev_active_for_save is not None and not self.on_save(prev_active_for_save):
+                    return
+            # choice == "discard" (или успешный "save") → продолжаем активацию.
 
         # FIX (load-display-rebind): store.set_active ОБЯЗАН выполниться ДО
         # dispatch(ActivateRecipe). dispatch синхронно публикует RecipeActivated, на
@@ -566,6 +591,10 @@ class RecipesPresenter:
             # не пишется. RecipeValidationError ловится тем же except ниже (громкая ошибка).
             validate_recipe_blueprint(new_raw.get("blueprint", {}))
             self._store.save_raw(target_slug, new_raw)
+            # RS-4: граф записан в рецепт-файл → снять dirty (diverged держится, если был:
+            # запись в файл живую систему не тронула).
+            if self._topology_session is not None:
+                self._topology_session.mark_saved()
             self._log_info(f"RecipesPresenter.on_save: топология сохранена в '{target_slug}'")
             return True
         except Exception as exc:  # noqa: BLE001
