@@ -19,8 +19,7 @@ from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
 from .plugin_operation_step import PipelineStepNode, PluginOperationStep, SuspectTagStep
 from .plugin_runner import PluginRunner
-from ...chain_module.core.chain import ChainRunnable
-from ...chain_module.core.result import RunnableStep
+from ...chain_module import ChainRunnable, RunnableStep
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 
 
