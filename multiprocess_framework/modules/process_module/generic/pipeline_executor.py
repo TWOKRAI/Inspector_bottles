@@ -213,8 +213,8 @@ class PipelineExecutor:
         Механика (дизайн §5(d) инкремент 1):
           - breaker-семантика (consecutive_fails/bypass/auto_reset/critical→suspect)
             остаётся ЗДЕСЬ, вне chain_module;
-          - bypassed-плагины отфильтрованы ДО построения шагов — ``ChainRunnable``
-            исполняет ТОЛЬКО живые плагины как последовательные шаги;
+          - шаги строятся по breaker-состоянию (``_build_active_steps``): живые
+            плагины + ``SuspectTagStep`` на позициях критических bypassed;
           - ошибку плагина ловит ``PluginOperationStep`` (тег not_inspected +
             ``_on_plugin_fail``-репорт), ``on_error`` шага всегда ``skip`` —
             ``apply_on_error_policy`` chain_module не задействуется.
