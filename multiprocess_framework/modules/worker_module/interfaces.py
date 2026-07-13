@@ -122,6 +122,16 @@ class IWorkerManager(ABC):
     def restart_worker(self, worker_name: str, timeout: float = 5.0) -> bool: ...
 
     @abstractmethod
+    def remove_worker(self, worker_name: str, timeout: float = 5.0) -> bool:
+        """Остановить воркер И убрать из реестра (в отличие от stop_worker).
+
+        Выравнивание контракта под уже существующий публичный метод WorkerManager
+        (GUI-delete); не новая возможность. Потребитель — WorkerPoolExecutor
+        (chain-пул), пересоздающий воркеров при resize/shutdown без коллизии имён.
+        """
+        ...
+
+    @abstractmethod
     def pause_worker(self, worker_name: str) -> bool: ...
 
     @abstractmethod
