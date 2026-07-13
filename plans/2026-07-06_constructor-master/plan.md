@@ -325,7 +325,7 @@ CRM-семейство (logger/error/stats/command/dispatch-ядро) и data_sc
 
 ## Ф7 — Hot-path G (ОДНИМ вскрытием, строго последним, один агент, ~5 дней)
 
-**GATE G3 перед стартом**: routing-epoch влит (3.1); контракты warn живут (4.2); baseline подтверждён; ответ на HP-5 (`replace_blueprint` × in-flight кадр); откат = feature-flag; решение по 1.8.
+**GATE G3 перед стартом**: routing-epoch влит (3.1); контракты warn живут (4.2); baseline подтверждён; ответ на HP-5 (`replace_blueprint` × in-flight кадр); откат = feature-flag; решение по 1.8. **ЗАКРЫТ 2026-07-13** (вердикты — таблица Gates ниже). **План исполнения фазы** (порядок, модели Opus/Sonnet per задача, брифы, честная оценка «что было → что будет») — [f7-execution-plan.md](f7-execution-plan.md); sentrux-baseline фазы: quality 7088 (2026-07-13).
 
 **Перф-ревью владельца 2026-07-12 — три требования, приземлены в G-задачи (замер, не предположение):**
 
