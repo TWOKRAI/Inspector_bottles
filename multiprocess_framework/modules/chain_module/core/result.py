@@ -1,4 +1,5 @@
 """ChainResult и RunnableStep — основные типы данных цепочки обработки."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,7 +15,10 @@ from .context import ChainContext
 class ChainResult:
     """Результат выполнения цепочки обработки."""
 
-    frame: np.ndarray
+    # Финальный payload цепочки (duck-typed): np.ndarray для CV-цепочки ИЛИ
+    # list[dict] items для processing-pipeline. Имя ``frame`` сохранено для
+    # обратной совместимости существующих CV-потребителей.
+    frame: Any
     detections: list[dict] = field(default_factory=list)
     masks: list[np.ndarray] = field(default_factory=list)
     contours: list[np.ndarray] = field(default_factory=list)
