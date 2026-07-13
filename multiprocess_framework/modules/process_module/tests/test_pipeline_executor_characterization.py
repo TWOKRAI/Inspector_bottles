@@ -271,3 +271,85 @@ class TestSendRoutingCharacterization:
         assert [t for t, _ in sent] == ["special"]
         # target удаляется из item (pop) при роутинге.
         assert "target" not in sent[0][1]["data"]
+
+
+# --------------------------------------------------------------------------- #
+#  suspect-тег критического bypassed — ПОЗИЦИОННАЯ семантика (Fable HIGH)       #
+# --------------------------------------------------------------------------- #
+#  Старое поведение: тег "suspect" ставился НА ПОЗИЦИИ bypassed-critical
+#  плагина — на items, существующие В ТОТ момент цепочки. Значит:
+#    - живой плагин ПОСЛЕ этой позиции перезаписывает статус своим значением;
+#    - живой плагин ДО позиции, вернувший НОВЫЕ dict'ы, не мешает тегу
+#      (тег ставится на его выход).
+
+
+class StatusWriterPlugin(ProcessModulePlugin):
+    """Пишет inspection_status (работа inspection-плагина) — in-place."""
+
+    def __init__(self, status="ok"):
+        super().__init__()
+        self.name = "writer"
+        self.category = "processing"
+        self._status = status
+
+    def configure(self, ctx): ...
+    def start(self, ctx): ...
+
+    def process(self, items):
+        for it in items:
+            it["inspection_status"] = self._status
+        return items
+
+
+class ReplaceListStatusPlugin(ProcessModulePlugin):
+    """Возвращает СВЕЖИЕ dict'ы без inspection_status (замена списка — контракт)."""
+
+    name = "replacer"
+    category = "processing"
+
+    def configure(self, ctx): ...
+    def start(self, ctx): ...
+
+    def process(self, items):
+        return [{"fresh": True, "v": it.get("v")} for it in items]
+
+
+class TestSuspectPositionSemantics:
+    def _bypass_critical(self, executor):
+        """Открыть breaker критического always_fail (max_fails=1 → 1 фейл)."""
+        executor._execute_chain([{"v": 0}])
+        assert executor.is_bypassed("always_fail")
+
+    def test_downstream_critical_suspect_beats_upstream_status(self):
+        """[writer('ok') → critical bypassed]: suspect на позиции critical побеждает 'ok'."""
+        executor = _make(
+            [StatusWriterPlugin("ok"), AlwaysFailPlugin()],
+            max_consecutive_fails=1,
+            critical_plugins=["always_fail"],
+        )
+        self._bypass_critical(executor)
+        result = executor._execute_chain([{"v": 1}])
+        assert result[0]["inspection_status"] == "suspect"
+
+    def test_upstream_critical_then_writer_status_wins(self):
+        """[critical bypassed → writer('ok')]: статус плагина ниже по цепочке побеждает."""
+        executor = _make(
+            [AlwaysFailPlugin(), StatusWriterPlugin("ok")],
+            max_consecutive_fails=1,
+            critical_plugins=["always_fail"],
+        )
+        self._bypass_critical(executor)
+        result = executor._execute_chain([{"v": 1}])
+        assert result[0]["inspection_status"] == "ok"
+
+    def test_suspect_survives_list_replacement_before_critical(self):
+        """[replacer(новые dict'ы) → critical bypassed]: suspect ставится на СВЕЖИЙ выход."""
+        executor = _make(
+            [ReplaceListStatusPlugin(), AlwaysFailPlugin()],
+            max_consecutive_fails=1,
+            critical_plugins=["always_fail"],
+        )
+        self._bypass_critical(executor)
+        result = executor._execute_chain([{"v": 1}])
+        assert result[0].get("fresh") is True  # выход именно replacer'а
+        assert result[0]["inspection_status"] == "suspect"

@@ -17,7 +17,7 @@ from typing import Callable
 from ..plugins.base import ProcessModulePlugin
 from . import frame_trace
 from .cycle_metrics import CycleMetricsRecorder
-from .plugin_operation_step import PipelineStepNode, PluginOperationStep
+from .plugin_operation_step import PipelineStepNode, PluginOperationStep, SuspectTagStep
 from .plugin_runner import PluginRunner
 from ...chain_module.core.chain import ChainRunnable
 from ...chain_module.core.result import RunnableStep
@@ -88,16 +88,19 @@ class PipelineExecutor:
                     runner=self._runner,
                     on_success=self._on_plugin_success,
                     on_fail=self._on_plugin_fail,
-                    log_error=self._log_error,
                 ),
                 on_error="skip",
             )
             for p in self._plugins
         ]
-        # Кэш happy-path: ChainRunnable всех шагов (ни один плагин не bypassed —
-        # типичный случай). Переиспользуется между батчами, чтобы не пересобирать
-        # список шагов и не гонять suspect-пре-цикл на каждом батче.
-        self._all_runnable = ChainRunnable(self._runnable_steps)
+        # Шаг-заглушка на позицию критического bypassed-плагина: тегирует текущие
+        # items "suspect" (см. SuspectTagStep). Stateless — один инстанс на все
+        # позиции/батчи; переиспользуется в _build_active_steps.
+        self._suspect_step = RunnableStep(
+            node=PipelineStepNode(node_id="suspect", operation_ref="suspect"),
+            operation=SuspectTagStep(),
+            on_error="skip",
+        )
 
         # Тайминг цикла обработки для телеметрии GUI. Воркер queue-driven:
         # меряем только итерации с реальной работой (получен batch), а не
@@ -215,35 +218,29 @@ class PipelineExecutor:
         внутри одного воркера, без IPC между звеньями (бюджет границ процесса,
         перф-ревью 2026-07-12): ``_send_results`` вызывается вызывающим ПОСЛЕ, один раз.
         """
-        # Fast-path (типичный случай): ни один плагин не bypassed → переиспользуем
-        # кэшированный ChainRunnable всех шагов, без suspect-пре-цикла и пересборки
-        # списка. Bypass — редкое error-recovery состояние, не платим за него на
-        # каждом батче.
-        if not any(self._bypassed.values()):
-            return self._all_runnable.execute(items, None).frame
-
-        # Slow-path: есть bypassed-плагины.
-        # Критический bypassed плагин → пометить items "suspect" (breaker-семантика,
-        # вне chain). Наблюдаемо только на ВЫЖИВШИХ items, а они проходят цепочку
-        # одинаково независимо от момента тегирования — эквивалентно старому
-        # per-plugin проходу (тег на позиции bypassed-плагина).
-        for plugin in self._plugins:
-            if self._bypassed.get(plugin.name, False) and plugin.name in self._critical_plugins:
-                for item in items:
-                    item["inspection_status"] = "suspect"
-
-        # Живые (не bypassed) плагины → шаги chain, порядок плагинов сохранён.
-        live_steps = [
-            step
-            for plugin, step in zip(self._plugins, self._runnable_steps)
-            if not self._bypassed.get(plugin.name, False)
-        ]
-
         # ChainRunnable — sequential-движок: current_frame стартует как items,
         # каждый шаг возвращает новые items (замена выхода). Пустой батч на входе
         # или после шага → следующие шаги no-op (см. PluginOperationStep).
-        result = ChainRunnable(live_steps).execute(items, None)
+        result = ChainRunnable(self._build_active_steps()).execute(items, None)
         return result.frame
+
+    def _build_active_steps(self) -> list[RunnableStep]:
+        """Шаги chain на текущем breaker-состоянии, в порядке плагинов.
+
+        Позиционная семантика suspect (breaker остаётся вне chain_module):
+          - живой (не bypassed) плагин → его ``PluginOperationStep``;
+          - критический bypassed → ``SuspectTagStep`` НА ЕГО ПОЗИЦИИ (тегирует items,
+            существующие в этот момент прохода, — не выбрасывается из цепочки, иначе
+            downstream-плагин или замена списка потеряли бы тег);
+          - некритический bypassed → пропуск (просто нет шага).
+        """
+        steps: list[RunnableStep] = []
+        for plugin, step in zip(self._plugins, self._runnable_steps):
+            if not self._bypassed.get(plugin.name, False):
+                steps.append(step)
+            elif plugin.name in self._critical_plugins:
+                steps.append(self._suspect_step)
+        return steps
 
     def _on_plugin_success(self, plugin_name: str) -> None:
         """Успешный вызов плагина — сбросить счётчик consecutive fails (breaker)."""
@@ -253,8 +250,9 @@ class PipelineExecutor:
         """Фейл плагина — инкремент счётчика, открыть breaker при достижении порога.
 
         Тег ``inspection_status="not_inspected"`` ставит сам ``PluginOperationStep``
-        (адаптер) — здесь только межбатчевое breaker-состояние.
+        (адаптер); лог фейла — здесь, единым каналом (см. LOW-фикс ревью).
         """
+        self._log_error(f"PipelineExecutor: {plugin_name}.process() error: {exc}")
         fails = self._consecutive_fails.get(plugin_name, 0) + 1
         self._consecutive_fails[plugin_name] = fails
 

@@ -57,13 +57,11 @@ class PluginOperationStep:
         runner: PluginRunner,
         on_success: Callable[[str], None],
         on_fail: Callable[[str, Exception], None],
-        log_error: Callable[[str], None] | None = None,
     ) -> None:
         self._plugin = plugin
         self._runner = runner
         self._on_success = on_success
         self._on_fail = on_fail
-        self._log_error = log_error or (lambda msg: None)
 
     def execute(self, data: Any, context: Any) -> Any:
         """Прогнать items через плагин. ``data`` — ``list[dict]`` items; ``context`` игнор.
@@ -78,7 +76,8 @@ class PluginOperationStep:
         try:
             outputs = self._runner.call_process(self._plugin, items)
         except Exception as exc:  # noqa: BLE001 — error-policy pass-through (Q7), как в старом цикле
-            self._log_error(f"PipelineExecutor: {self._plugin.name}.process() error: {exc}")
+            # Лог фейла — единым каналом в PipelineExecutor._on_plugin_fail (там же
+            # межбатчевый breaker); адаптер только тегирует и репортит.
             for item in items:
                 item["inspection_status"] = "not_inspected"
             self._on_fail(self._plugin.name, exc)
@@ -91,4 +90,31 @@ class PluginOperationStep:
         return None
 
 
-__all__ = ["PluginOperationStep", "PipelineStepNode"]
+class SuspectTagStep:
+    """``IExecutionStep``-шаг: тег ``inspection_status="suspect"`` на ТЕКУЩИХ items.
+
+    Ставится на ПОЗИЦИЮ критического bypassed-плагина в цепочке (вместо
+    исключения его из шагов). Тегирует items, существующие в этот момент прохода —
+    поэтому:
+      - живой плагин ПОСЛЕ этой позиции перезаписывает статус своим значением
+        (downstream-плагин побеждает — как в старом per-plugin цикле);
+      - живой плагин ДО позиции, вернувший НОВЫЕ dict'ы (замена списка — контракт),
+        не теряет тег: он ставится на его свежий выход.
+
+    Stateless — один инстанс переиспользуется на всех позициях всех батчей.
+    Пустой батч НЕ тегируется (эквивалент ``if not items: break``).
+    """
+
+    def execute(self, data: Any, context: Any) -> Any:
+        items = data
+        if not items:
+            return items
+        for item in items:
+            item["inspection_status"] = "suspect"
+        return items
+
+    def configure(self, params: dict) -> None:
+        return None
+
+
+__all__ = ["PluginOperationStep", "SuspectTagStep", "PipelineStepNode"]
