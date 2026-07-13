@@ -265,16 +265,33 @@ class SQLManager(BaseManager, ObservableMixin):
     def _flatten_command(cmd: Dict[str, Any]) -> Dict[str, Any]:
         """Свести конверт команды к плоскому dict для Pydantic-валидации.
 
-        Единый конверт (Ф7 G.2): payload лежит под ключом ``data``
-        (``{"command": "db.query", "data": {"sql": "...", "params": {}}}``).
-        Плоская форма ``{"command": "db.query", "sql": "..."}`` (payload на
-        верхнем уровне) поддержана для прямых внутрипроцессных вызовов — при
-        отсутствии вложенного ``data``-dict сам ``cmd`` уже плоский. Shape-sniffing
-        по ``args`` снят: MessageAdapter теперь кладёт payload под ``data``.
+        Единый конверт (Ф7 G.2): payload под ключом ``data``, а сам билет несёт
+        ПРИЗНАК конверта — ``data_type`` или ``type == "command"`` (так строит
+        ``build_command_message`` / ``MessageAdapter.command``). Детекция идёт по
+        этому признаку, НЕ по простому наличию dict в ``data`` — иначе плоская
+        прямая команда ``db.insert`` с легитимным полем-соседом ``data`` (строка
+        вставки) ложно принималась бы за конверт и теряла ``table``.
+
+        Три поддержанных формы:
+          • конверт (единый): ``{"type": "command", "command": "db.query",
+            "data_type": "db.query", "data": {"sql": ...}}`` → разворот ``data``;
+          • конверт (legacy args, rolling-switch): тот же признак, но payload под
+            ``args`` → разворот ``args`` (совместимость с in-flight билетами до
+            перехода на data-конверт);
+          • плоская прямая команда: ``{"command": "db.query", "sql": ...}`` без
+            признака конверта → уже плоская, отдаётся как есть.
+
+        Ключ ``command`` конверта не перезаписывается одноимённым ключом из
+        payload (envelope-command выигрывает).
         """
-        payload = cmd.get("data")
-        if isinstance(payload, dict):
-            return {"command": cmd.get("command"), **payload}
+        is_envelope = cmd.get("data_type") is not None or cmd.get("type") == "command"
+        if is_envelope:
+            payload = cmd.get("data")
+            if not isinstance(payload, dict):
+                payload = cmd.get("args")  # legacy args-конверт (rolling-switch)
+            if isinstance(payload, dict):
+                # envelope-command выигрывает у одноимённого ключа payload
+                return {**payload, "command": cmd.get("command")}
         return cmd
 
     def execute_command(self, cmd: Dict[str, Any]) -> Dict[str, Any]:

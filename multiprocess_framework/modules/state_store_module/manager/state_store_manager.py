@@ -218,6 +218,12 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         merge_data = envelope.get("data")
         source = envelope.get("source", "")
 
+        # F2 (ревью G.2): path обязателен и непустой (симметрично handle_state_set) —
+        # маркированный конверт с пустым/отсутствующим path НЕ мёржим в корень, а
+        # громко отклоняем (иначе тихий merge в root затирает всё дерево).
+        if not path or not isinstance(path, str):
+            return {"status": "error", "error": "Поле 'path' обязательно и должно быть строкой"}
+
         if merge_data is None or not isinstance(merge_data, dict):
             return {"status": "error", "error": "Поле 'data' обязательно и должно быть dict"}
 

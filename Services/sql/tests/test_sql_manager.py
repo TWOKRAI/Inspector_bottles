@@ -50,27 +50,72 @@ class TestSQLManager:
         assert "unknown" in result["reason"]
 
     def test_flatten_command_flat_form(self, sql_manager):
-        """Прямой (плоский) формат: sql, params на верхнем уровне — без data-конверта."""
+        """Прямой (плоский) формат: sql, params на верхнем уровне — без признака конверта."""
         cmd = {"command": "db.query", "sql": "SELECT 1", "params": {}}
         flat = sql_manager._flatten_command(cmd)
         assert flat["command"] == "db.query"
         assert flat["sql"] == "SELECT 1"
 
     def test_flatten_command_data_envelope(self, sql_manager):
-        """Единый конверт (Ф7 G.2): payload под data — разворачивается в плоский dict."""
-        cmd = {"command": "db.query", "data": {"sql": "SELECT * FROM t", "params": {"id": 1}}}
+        """Единый конверт (Ф7 G.2): признак конверта (data_type/type) + payload под data."""
+        cmd = {
+            "type": "command",
+            "command": "db.query",
+            "data_type": "db.query",
+            "data": {"sql": "SELECT * FROM t", "params": {"id": 1}},
+        }
         flat = sql_manager._flatten_command(cmd)
         assert flat["command"] == "db.query"
         assert flat["sql"] == "SELECT * FROM t"
         assert flat["params"] == {"id": 1}
 
+    def test_flatten_command_flat_insert_with_data_field(self, sql_manager):
+        """F1-репро: плоская db.insert с легитимным полем-соседом data (строка вставки)
+        — НЕ конверт (нет признака), table не теряется."""
+        cmd = {"command": "db.insert", "table": "users", "data": {"name": "Alice"}}
+        flat = sql_manager._flatten_command(cmd)
+        assert flat["command"] == "db.insert"
+        assert flat["table"] == "users"
+        assert flat["data"] == {"name": "Alice"}
+
+    def test_flatten_command_legacy_args_envelope(self, sql_manager):
+        """Rolling-switch: старый конверт с payload под args — разворачивается."""
+        cmd = {"type": "command", "command": "db.query", "args": {"sql": "SELECT 2"}}
+        flat = sql_manager._flatten_command(cmd)
+        assert flat["command"] == "db.query"
+        assert flat["sql"] == "SELECT 2"
+
+    def test_flatten_command_envelope_command_wins(self, sql_manager):
+        """Ключ command из payload НЕ перезаписывает команду конверта."""
+        cmd = {
+            "type": "command",
+            "command": "db.query",
+            "data_type": "db.query",
+            "data": {"command": "db.evil", "sql": "SELECT 3"},
+        }
+        flat = sql_manager._flatten_command(cmd)
+        assert flat["command"] == "db.query"
+
     def test_execute_command_data_envelope(self, sql_manager):
-        """execute_command принимает единый конверт {command, data:{...}}."""
+        """execute_command принимает единый конверт с признаком {type,command,data_type,data}."""
         sql_manager.execute("CREATE TABLE t (x INT)")
         sql_manager.execute("INSERT INTO t VALUES (7)")
-        result = sql_manager.execute_command({"command": "db.query", "data": {"sql": "SELECT * FROM t"}})
+        result = sql_manager.execute_command(
+            {
+                "type": "command",
+                "command": "db.query",
+                "data_type": "db.query",
+                "data": {"sql": "SELECT * FROM t"},
+            }
+        )
         assert result["status"] == "success"
         assert result["data"] == [{"x": 7}]
+
+    def test_execute_command_flat_insert(self, sql_manager):
+        """execute_command: плоская db.insert (поле-сосед data) не теряет table."""
+        sql_manager.execute("CREATE TABLE users (name TEXT)")
+        result = sql_manager.execute_command({"command": "db.insert", "table": "users", "data": {"name": "Bob"}})
+        assert result["status"] == "success"
 
     def test_uow_connection(self, sql_manager):
         uow = sql_manager.uow()

@@ -245,6 +245,25 @@ class TestStateStoreManagerMerge:
         assert result["changes_count"] == 2
         assert mgr.store.get("processes.cam0.state.cam.actual.source") == "camera://0"
 
+    def test_merge_missing_path_is_error(self):
+        """F2 (ревью G.2): маркированный конверт без path → громкая ошибка, не merge в корень."""
+        mgr = StateStoreManager()
+        mgr.handle_state_set({"data": {"path": "keep.me", "value": 1, "source": "s"}})
+        result = mgr.handle_state_merge({"data": {"fps": 30}, "source": "s", STATE_ENVELOPE_MARKER: True})
+        assert result["status"] == "error"
+        assert "path" in result["error"]
+        # дерево не тронуто
+        assert mgr.store.get("keep.me") == 1
+        assert mgr.store.get("fps", MISSING) is MISSING
+
+    def test_merge_empty_path_is_error(self):
+        """F2: path='' → ошибка (симметрично handle_state_set), корень не затёрт."""
+        mgr = StateStoreManager()
+        mgr.handle_state_set({"data": {"path": "keep.me", "value": 1, "source": "s"}})
+        result = mgr.handle_state_merge({"path": "", "data": {"fps": 30}, "source": "s", STATE_ENVELOPE_MARKER: True})
+        assert result["status"] == "error"
+        assert mgr.store.get("keep.me") == 1
+
     def test_merge_commandmanager_form_payload_with_path_key(self):
         """Ж-3: тот же путь, но payload содержит ключ 'path' (device-config).
 
