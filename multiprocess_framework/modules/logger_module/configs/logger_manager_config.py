@@ -198,9 +198,10 @@ class LoggerManagerConfig(ChannelRoutingConfig):
             channels=["system_file"],
         ),
         # DEBUG-scope по умолчанию ВЫКЛЮЧЕН: на DEBUG в system_file лился пер-кадровый
-        # firehose ([TRACE] PipelineExecutor, channel_dispatcher "no route" на каждый
-        # кадр) → ~100 МБ/мин, постоянная ротация затирала историю. INFO+ продолжают
-        # писаться в файлы через SYSTEM/BUSINESS. Для отладки временно enabled=True.
+        # firehose (периодический TRACE-лог PipelineExecutor — снят в Ф7 G.1,
+        # channel_dispatcher "no route" на каждый кадр) → ~100 МБ/мин, постоянная
+        # ротация затирала историю. INFO+ продолжают писаться в файлы через
+        # SYSTEM/BUSINESS. Для отладки временно enabled=True.
         "DEBUG": LoggerScopeSchema(
             enabled=False,
             min_level="DEBUG",

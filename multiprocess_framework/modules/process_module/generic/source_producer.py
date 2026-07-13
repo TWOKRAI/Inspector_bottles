@@ -15,6 +15,7 @@ from typing import Callable
 from ..plugins.base import ProcessModulePlugin
 from ..health import IHealthReporter
 from . import frame_trace
+from . import perf_probes
 from .cycle_metrics import CycleMetricsRecorder
 from .plugin_runner import PluginRunner
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
@@ -69,10 +70,10 @@ class SourceProducer:
         self._target_interval = 1.0 / max(target_fps, 1.0)
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
-        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль). Дефолт —
-        # общий kwargs-safe no-op (F6d, ревью 2026-07-13): вызов ниже несёт
-        # trace_id=... как extra для LogRecord (Ф7 G.6) — реальные
-        # ProcessModule._log_debug тоже kwargs-safe.
+        # Kwargs-safe no-op по умолчанию (F6d, ревью 2026-07-13): реальный
+        # ProcessModule._log_debug тоже kwargs-safe (несёт trace_id=... как extra
+        # для LogRecord, Ф7 G.6). Периодический per-frame TRACE снят в Ф7 G.1 —
+        # latency этапов теперь через perf_probes (см. self._perf ниже).
         self._log_debug = log_debug or frame_trace.noop_log
         # Honest produce-breaker (Task 2.2). context-тег фиксируем на источнике,
         # чтобы last_error показывал, ЧЕЙ produce() падает.
@@ -83,14 +84,22 @@ class SourceProducer:
         # Тайминг цикла (produce + send + smart-sleep) для телеметрии GUI.
         # target_interval = 1/target_fps, поэтому effective_hz ≈ фактический FPS.
         self._cycle_metrics = CycleMetricsRecorder(target_interval_s=self._target_interval)
+        # HP-1 (Ф7 G.1): per-stage latency (capture/send), за флагом FW_PERF_PROBES,
+        # дефолт OFF — см. perf_probes.py.
+        self._perf = perf_probes.LatencyProbes()
 
     def get_cycle_metrics(self) -> dict:
         """Снимок тайминга цикла (потокобезопасно).
 
         WorkerManager.get_worker_status подмешивает результат в статус воркера →
-        heartbeat → ProcessMonitor.state.fps/latency_ms → GUI.
+        heartbeat → ProcessMonitor.state.fps/latency_ms → GUI. При включённых
+        perf-пробах (FW_PERF_PROBES=1) дополнительно несёт ``perf_probes``:
+        p50/p99/count по этапам capture/send (HP-1, Ф7 G.1).
         """
-        return self._cycle_metrics.get_cycle_metrics()
+        metrics = self._cycle_metrics.get_cycle_metrics()
+        if perf_probes.enabled():
+            metrics["perf_probes"] = self._perf.get_stats()
+        return metrics
 
     def run_loop(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """LOOP worker: produce() → SHM write → IPC send.
@@ -121,7 +130,10 @@ class SourceProducer:
             produce_failed = False
             try:
                 # Вызов через PluginRunner — единый шов с pre/post-хуками (io-debug).
-                items = self._runner.call_produce(self._plugin)
+                # HP-1: perf-проба этапа "capture" — за флагом FW_PERF_PROBES, дефолт
+                # OFF (см. perf_probes.py), при off — ноль вызовов perf_counter.
+                with self._perf.measure("capture"):
+                    items = self._runner.call_produce(self._plugin)
             except NotImplementedError:
                 self._log_error(f"SourceProducer: {self._plugin.name} не реализует produce()")
                 stop_event.set()
@@ -158,28 +170,11 @@ class SourceProducer:
                     item.setdefault("capture_ts", capture_ts)
                     frame_trace.ensure_trace_id(item)
 
-            # [TRACE] Логируем каждый 30-й кадр (чтобы не спамить)
-            if items and hasattr(self, "_trace_cnt"):
-                self._trace_cnt += 1
-            elif items:
-                self._trace_cnt = 1
-            if items and self._trace_cnt % 30 == 1:
-                frame = items[0].get("frame")
-                shape = frame.shape if frame is not None and hasattr(frame, "shape") else None
-                self._log_debug(
-                    f"[TRACE] SourceProducer({self._plugin.name}): "
-                    f"produce() → {len(items)} item(s), frame shape={shape}, "
-                    f"targets={self._chain_targets}",
-                    # F6c (ревью 2026-07-13): без повторного isinstance — единственный
-                    # guard живёт в ensure_trace_id (вызван строкой выше); items[0]
-                    # здесь читается тем же способом, что и frame=items[0].get("frame")
-                    # строкой выше (существующая конвенция файла).
-                    trace_id=items[0].get("trace_id"),
-                )
-
-            # Отправить каждый item
-            for item in items:
-                self._send_item(item)
+            # Отправить каждый item (HP-1: perf-проба этапа "send" — за флагом
+            # FW_PERF_PROBES, дефолт OFF, см. perf_probes.py).
+            with self._perf.measure("send"):
+                for item in items:
+                    self._send_item(item)
 
             # Backoff при открытом produce-breaker (Task 2.2): не жечь CPU в горячем
             # цикле ошибок на мёртвом источнике — спим breaker_backoff (обычно >>

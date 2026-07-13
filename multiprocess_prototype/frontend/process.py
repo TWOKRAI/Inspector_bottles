@@ -158,7 +158,6 @@ class GuiProcess(ProcessModule):
 
     def _data_receiver_loop(self, stop_event, pause_event) -> None:
         """Цикл получения IPC data-сообщений и передачи в Qt через bridge."""
-        _trace_cnt = 0
         _consecutive_errors = 0
         _backoff = 0.1  # начальный backoff (секунды)
         _MAX_BACKOFF = 5.0
@@ -172,16 +171,6 @@ class GuiProcess(ProcessModule):
                 # return_messages=False → получаем сырые dict (после middleware)
                 msgs = self.router_manager.receive(timeout=0.1, channel_types=["data"], return_messages=False)
                 for msg_dict in msgs:
-                    _trace_cnt += 1
-                    if _trace_cnt % 30 == 1:
-                        data = msg_dict.get("data", {})
-                        self._log_info(
-                            f"[TRACE] GuiProcess.data_receiver: msg #{_trace_cnt}, "
-                            f"data_type={msg_dict.get('data_type', '?')}, "
-                            f"has_frame={'frame' in msg_dict}, "
-                            f"has_data_shm={bool(data.get('shm_name') if isinstance(data, dict) else False)}",
-                            module="gui",
-                        )
                     self._bridge.dispatch(msg_dict)
 
                 # При успешном получении — сбрасываем счётчик ошибок

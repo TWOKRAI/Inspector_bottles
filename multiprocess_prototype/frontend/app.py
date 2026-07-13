@@ -874,17 +874,6 @@ def _setup_bridge_callbacks(
 
         frame = msg_dict.get("frame")
 
-        if _frame_trace_cnt % 30 == 1:
-            process._log_info(
-                f"[TRACE] _on_frame_received #{_frame_trace_cnt}: "
-                f"has_frame={frame is not None}, "
-                f"sender={msg_dict.get('sender', '?')}, "
-                f"frame_shape={frame.shape if frame is not None and hasattr(frame, 'shape') else None}, "
-                f"data_type={msg_dict.get('data_type', '?')}, "
-                f"keys={list(msg_dict.keys())[:10]}",
-                module="gui",
-            )
-
         if frame is not None:
             # Маршрутизация по sender → слот дисплея (fallback "main").
             slot_id = resolve_display_id(msg_dict, _routing, default="main")

@@ -70,3 +70,55 @@ Headless-probe (BACKEND_CTL=1, boot phone_sketch + 10с сэмпл):
 **Вывод:** FPS-baseline обоих живых рецептов снимается только с железом — повторить
 при подключённой камере (или на Ф7 G.1, где повторный baseline обязателен).
 Boot/CPU-числа выше — отправная точка для сравнения.
+
+## Ф7 G.1 — baseline (tier: синтетика, 2026-07-13)
+
+**Условия:** headless-прогон через `BackendHarness` (`backend_ctl/g1_perf_probe.py`,
+`BACKEND_CTL=1 FW_PERF_PROBES=1 python -m backend_ctl.g1_perf_probe 10`), рецепт
+`multiprocess_prototype/recipes/g1_perf_probe.yaml` — минимальный синтетический
+тракт **без реального железа** (новый плагин
+`Plugins.sources.synthetic_frame_source.plugin.SyntheticFrameSourcePlugin`,
+не прод-плагин, используется только в этом perf-рецепте):
+
+```
+synthetic_source[synthetic_frame_source, target_fps=30] → consumer[frame_counter]
+```
+
+Ровно 2 процесса, ровно 1 граница IPC на кадр (без chain-цепочки внутри
+процесса — C6d здесь неприменим, тракт заведомо минимальный). Кадр
+640×480×3 uint8 (~0.92 МБ, generic-путь `strip_data_frame_on_send`/SHM
+round-robin ring, 3 слота). Прогон 10с, машина — macOS (та же, что Ф0.4).
+
+**Grep-acceptance:** `grep -rn "\[TRACE\]" multiprocess_framework/ multiprocess_prototype/ --include="*.py"`
+(вне `tests/`) → **0 совпадений** (снято 6 периодических TRACE-логов в
+`FrameShmMiddleware.on_receive` + по одному аналогичному блоку в
+`PipelineExecutor.run_loop`, `SourceProducer.run_loop`, `DataReceiver.run_loop`,
+`GuiProcess._data_receiver_loop`, `app._on_frame_received` — итого 6 файлов).
+
+**Perf-пробы (HP-1):** `FW_PERF_PROBES=1` (env, дефолт OFF — при OFF ноль
+вызовов `time.perf_counter()` на кадр, см. `perf_probes.py` +
+`test_perf_probes.py::TestDisabled::test_no_perf_counter_calls_when_disabled`).
+Результаты — через штатный `get_cycle_metrics()` (тот же факад, что несёт
+FPS/`cycle_duration_ms` в heartbeat → GUI), ключ `perf_probes`, окно — последние
+200 замеров на этап.
+
+| Метрика | Значение |
+|---|---|
+| **FPS источник** (`source_producer_synthetic_frame_source.effective_hz`) | **28.03** (цель 30 — накладные capture+send+throttle) |
+| **FPS потребитель** (`data_receiver.effective_hz`) | **28.03** (паритет с источником — дропов нет) |
+| **Границ процесса на кадр** (`frame_boundary_crossings` / `frames_produced`) | **1.006** (326/324 — единственный IPC-хоп source→consumer, счётчик G.6 подтверждён рабочим) |
+| Кадров произведено / принято (за 10с) | 324 / 325 |
+| capture p50 / p99 (мс) | 0.171 / 0.509 |
+| send p50 / p99 (мс) — SHM write + IPC send | 0.441 / 0.819 |
+| receive p50 / p99 (мс) — to_dict-десериализация (без ожидания очереди) | 0.097 / 0.180 |
+| restore p50 / p99 (мс) — SHM read (`.copy()`) | 0.559 / 1.255 |
+
+**Наблюдение:** send+restore (SHM write+read, ~1мс суммарно на кадр) —
+основной вклад тракта, согласуется с оценкой плана «SHM-налог ~1.5-4мс на
+кадр» (здесь кадр меньше прод-full-HD, поэтому меньше). capture/receive —
+доли миллисекунды (генерация синтетики дешёвая, к.-л. вывод про реальную
+камеру отсюда делать нельзя — только про IPC/SHM-тракт).
+
+**Не вошло в этот прогон (дозамер по мере готовности железа, G.7 сравнивает
+только same-tier):** tier «вебкамера» и tier «Hikvision» — оба
+hardware-gated (см. Ф0.4).
