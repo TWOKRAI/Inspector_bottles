@@ -69,8 +69,11 @@ class SourceProducer:
         self._target_interval = 1.0 / max(target_fps, 1.0)
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
-        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль).
-        self._log_debug = log_debug or (lambda msg: None)
+        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль). Дефолт —
+        # общий kwargs-safe no-op (F6d, ревью 2026-07-13): вызов ниже несёт
+        # trace_id=... как extra для LogRecord (Ф7 G.6) — реальные
+        # ProcessModule._log_debug тоже kwargs-safe.
+        self._log_debug = log_debug or frame_trace.noop_log
         # Honest produce-breaker (Task 2.2). context-тег фиксируем на источнике,
         # чтобы last_error показывал, ЧЕЙ produce() падает.
         self._health = health
@@ -142,6 +145,19 @@ class SourceProducer:
                 if self._health.error_count == errors_before:
                     self._health.record_success()
 
+            # Штамп времени захвата → метаданные кадра (едут через всю цепочку как
+            # item["capture_ts"]). На выходе пайплайна (дисплей) считается
+            # сквозная задержка now - capture_ts. time.time() (wall) —
+            # кросс-процессно сравнимо на одной машине.
+            # produce-спан пишет декоратор frame_trace.traced (авто на produce()).
+            # Ф7 G.6: trace_id назначается ЗДЕСЬ — единственное место рождения кадра
+            # (звено 1) — до TRACE-лога ниже, чтобы он тоже мог нести trace_id.
+            capture_ts = time.time()
+            for item in items:
+                if isinstance(item, dict):
+                    item.setdefault("capture_ts", capture_ts)
+                    frame_trace.ensure_trace_id(item)
+
             # [TRACE] Логируем каждый 30-й кадр (чтобы не спамить)
             if items and hasattr(self, "_trace_cnt"):
                 self._trace_cnt += 1
@@ -153,18 +169,13 @@ class SourceProducer:
                 self._log_debug(
                     f"[TRACE] SourceProducer({self._plugin.name}): "
                     f"produce() → {len(items)} item(s), frame shape={shape}, "
-                    f"targets={self._chain_targets}"
+                    f"targets={self._chain_targets}",
+                    # F6c (ревью 2026-07-13): без повторного isinstance — единственный
+                    # guard живёт в ensure_trace_id (вызван строкой выше); items[0]
+                    # здесь читается тем же способом, что и frame=items[0].get("frame")
+                    # строкой выше (существующая конвенция файла).
+                    trace_id=items[0].get("trace_id"),
                 )
-
-            # Штамп времени захвата → метаданные кадра (едут через всю цепочку как
-            # item["capture_ts"]). На выходе пайплайна (дисплей) считается
-            # сквозная задержка now - capture_ts. time.time() (wall) —
-            # кросс-процессно сравнимо на одной машине.
-            # produce-спан пишет декоратор frame_trace.traced (авто на produce()).
-            capture_ts = time.time()
-            for item in items:
-                if isinstance(item, dict):
-                    item.setdefault("capture_ts", capture_ts)
 
             # Отправить каждый item
             for item in items:

@@ -54,8 +54,11 @@ class DataReceiver:
         self._lag_threshold = lag_alert_threshold_sec
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
-        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль).
-        self._log_debug = log_debug or (lambda msg: None)
+        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль). Дефолт —
+        # общий kwargs-safe no-op (F6d, ревью 2026-07-13): вызов ниже несёт
+        # trace_id=... как extra для LogRecord (Ф7 G.6) — реальные
+        # ProcessModule._log_debug тоже kwargs-safe.
+        self._log_debug = log_debug or frame_trace.noop_log
 
         # Метрики
         self._overload_events = 0
@@ -183,11 +186,16 @@ class DataReceiver:
             if do_trace:
                 frame = item.get("frame")
                 shape = frame.shape if frame is not None and hasattr(frame, "shape") else None
+                # Ф7 G.6: trace_id проброшен из источника вместе с item (Dict at
+                # Boundary, поле пережило SHM/pickle round-trip само по себе) —
+                # звено 2 (приёмный узел), позволяет коррелировать лог с логом
+                # источника по одному trace_id.
                 self._log_debug(
                     f"[TRACE] DataReceiver: item built, "
                     f"has_frame={'frame' in item}, shape={shape}, "
                     f"total_regions={item.get('total_regions', 0)}, "
-                    f"seq_id={item.get('seq_id')}"
+                    f"seq_id={item.get('seq_id')}",
+                    trace_id=item.get("trace_id"),
                 )
 
             # Передать в InspectorManager

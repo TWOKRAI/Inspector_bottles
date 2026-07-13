@@ -234,3 +234,56 @@ class TestLoggerReconfigure:
         # Пустой dict → дефолтный LoggerManagerConfig, процесс не падает.
         assert mgr.reconfigure({}) is True
         mgr.shutdown()
+
+
+class _FakeTapChannel:
+    """Минимальный IChannel-совместимый tap: только write(dict) (Task 1.5 API)."""
+
+    def __init__(self):
+        self.records: list = []
+
+    def write(self, record: dict) -> None:
+        self.records.append(record)
+
+    def close(self) -> None:
+        pass
+
+
+class TestTraceIdExtraField:
+    """Ф7 G.6: trace_id, переданный как extra-kwarg (**extra в info/debug/error),
+    попадает в LogRecord.extra — реальная LoggerManager-цепочка, не заглушка."""
+
+    def test_trace_id_lands_in_log_record_extra(self):
+        mgr = LoggerManager(manager_name="TestLoggerTraceId")
+        mgr.initialize()
+        tap = _FakeTapChannel()
+        mgr.add_log_tap(tap, min_level=LogLevel.DEBUG)
+
+        trace_id = "0123456789abcdef0123456789abcdef"
+        mgr.info("frame processed", module="detector", trace_id=trace_id, frame_hops=2)
+
+        assert tap.records, "tap должен был получить запись"
+        record = tap.records[-1]
+        assert record["extra"]["trace_id"] == trace_id
+        assert record["extra"]["frame_hops"] == 2
+        mgr.shutdown()
+
+    def test_two_nodes_same_trace_id_correlate_via_tap(self):
+        """Симуляция «≥2 звена»: два debug-вызова с одним trace_id — оба видны
+        через один tap, идентичны по extra["trace_id"] (суть acceptance G.6)."""
+        mgr = LoggerManager(manager_name="TestLoggerTraceIdCorrelate")
+        mgr.initialize()
+        tap = _FakeTapChannel()
+        mgr.add_log_tap(tap, min_level=LogLevel.DEBUG)
+
+        # info() (BUSINESS/INFO) — включён в дефолтном конфиге (в отличие от DEBUG,
+        # см. test_reconfigure_invalidates_decision_cache); суть теста — корреляция
+        # по trace_id, а не конкретный уровень.
+        trace_id = "abcdef0123456789abcdef0123456789"
+        mgr.info("[TRACE] SourceProducer(camera_0): produce()", module="camera_0", trace_id=trace_id)
+        mgr.info("[TRACE] DataReceiver: item built", module="detector", trace_id=trace_id)
+
+        trace_records = [r for r in tap.records if r["extra"].get("trace_id") == trace_id]
+        assert len(trace_records) == 2
+        assert {r["module"] for r in trace_records} == {"camera_0", "detector"}
+        mgr.shutdown()

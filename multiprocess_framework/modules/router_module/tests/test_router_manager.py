@@ -1064,9 +1064,7 @@ class TestChannelBridgeFallback(unittest.TestCase):
         ch, q = _make_channel("worker_a")
         router.register_channel(ch)
 
-        result = router.send(
-            {"type": "command", "command": "do.thing", "targets": ["worker_a"]}
-        )
+        result = router.send({"type": "command", "command": "do.thing", "targets": ["worker_a"]})
         self.assertEqual(result.get("status"), "success")
         # доставлено в очередь, канал НЕ тронут
         self.assertEqual(len(qr.sent), 1)
@@ -1123,8 +1121,13 @@ class TestRelayFallback(unittest.TestCase):
         qr = _NoQueueRegistry(present=("ProcessManager",))
         router = RouterManager(manager_name="r_rel2", queue_registry=qr)
         result = router.send(
-            {"type": "event", "command": "log.record", "targets": ["backend_ctl"],
-             "queue_type": "system", "_relayed": True}
+            {
+                "type": "event",
+                "command": "log.record",
+                "targets": ["backend_ctl"],
+                "queue_type": "system",
+                "_relayed": True,
+            }
         )
         self.assertEqual(result.get("status"), "error")
         self.assertEqual(len(qr.sent), 0)
@@ -1133,9 +1136,7 @@ class TestRelayFallback(unittest.TestCase):
         # Очереди хаба нет (минимальные конфигурации) → прежнее поведение (error).
         qr = _NoQueueRegistry()
         router = RouterManager(manager_name="r_rel3", queue_registry=qr)
-        result = router.send(
-            {"type": "event", "command": "log.record", "targets": ["ghost"], "queue_type": "system"}
-        )
+        result = router.send({"type": "event", "command": "log.record", "targets": ["ghost"], "queue_type": "system"})
         self.assertEqual(result.get("status"), "error")
         self.assertEqual(len(qr.sent), 0)
 
@@ -1149,16 +1150,14 @@ class TestRelayFallback(unittest.TestCase):
             {"type": "event", "command": "log.record", "targets": ["backend_ctl"], "queue_type": "system"}
         )
         self.assertEqual(result.get("status"), "success")
-        self.assertFalse(q.empty())      # доставлено в канал
+        self.assertFalse(q.empty())  # доставлено в канал
         self.assertEqual(len(qr.sent), 0)  # relay не использовался
 
     def test_hub_as_target_never_relayed(self):
         # Недоставляемый билет самому хабу не заворачивается в relay (нет смысла).
         qr = _NoQueueRegistry()  # даже у хаба нет очереди
         router = RouterManager(manager_name="r_rel5", queue_registry=qr)
-        result = router.send(
-            {"type": "command", "command": "x", "targets": ["ProcessManager"], "queue_type": "system"}
-        )
+        result = router.send({"type": "command", "command": "x", "targets": ["ProcessManager"], "queue_type": "system"})
         self.assertEqual(result.get("status"), "error")
         self.assertEqual(len(qr.sent), 0)
 
@@ -1613,9 +1612,7 @@ class TestRelayCounter(unittest.TestCase):
         called: list = []
         router._relay_via_hub = lambda t: called.append(t) or True
         # Таргет без очереди/канала, но _relayed=True → hub-relay пропущен.
-        router._deliver_by_targets(
-            {"targets": ["vision"], "type": "command", "command": "x", "_relayed": True}
-        )
+        router._deliver_by_targets({"targets": ["vision"], "type": "command", "command": "x", "_relayed": True})
         self.assertEqual(called, [])
 
     def test_no_relayed_flag_triggers_relay(self):
@@ -1624,10 +1621,50 @@ class TestRelayCounter(unittest.TestCase):
         called: list = []
         router._relay_via_hub = lambda t: called.append(t) or True
         # Тот же билет без _relayed → relay срабатывает (позитивный контроль).
-        router._deliver_by_targets(
-            {"targets": ["vision"], "type": "command", "command": "x"}
-        )
+        router._deliver_by_targets({"targets": ["vision"], "type": "command", "command": "x"})
         self.assertEqual(len(called), 1)
+
+
+class TestFrameBoundaryCrossingCounter(unittest.TestCase):
+    """Ф7 G.6: frame_boundary_crossings — виден в get_stats()/introspect.router_stats,
+    в том же стиле, что и relayed_to_hub (Ф3.1). Ревью 2026-07-13 (F5): без
+    колбэка/reference-cycle — RouterManager суммирует счётчики зарегистрированных
+    frame-middleware при get_stats(), сам ничего не инкрементит."""
+
+    def test_get_stats_sums_registered_middleware_counters(self):
+        class _FakeFrameMiddleware:
+            frame_boundary_crossings = 5
+
+        router = RouterManager(manager_name="r_frame_boundary")
+        router.register_frame_middleware(_FakeFrameMiddleware())
+        self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 5)
+
+    def test_get_stats_sums_multiple_registered_middlewares(self):
+        class _FakeFrameMiddleware:
+            def __init__(self, n):
+                self.frame_boundary_crossings = n
+
+        router = RouterManager(manager_name="r_frame_boundary_multi")
+        router.register_frame_middleware(_FakeFrameMiddleware(3))
+        router.register_frame_middleware(_FakeFrameMiddleware(4))
+        self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 7)
+
+    def test_frame_boundary_crossings_starts_at_zero_without_registration(self):
+        router = RouterManager(manager_name="r_frame_boundary_zero")
+        self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 0)
+
+    def test_get_stats_reflects_live_counter_mutation(self):
+        """Счётчик читается в момент get_stats() (не снапшот при регистрации)."""
+
+        class _FakeFrameMiddleware:
+            frame_boundary_crossings = 0
+
+        mw = _FakeFrameMiddleware()
+        router = RouterManager(manager_name="r_frame_boundary_live")
+        router.register_frame_middleware(mw)
+        self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 0)
+        mw.frame_boundary_crossings = 10
+        self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 10)
 
 
 if __name__ == "__main__":

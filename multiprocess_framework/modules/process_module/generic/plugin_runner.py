@@ -48,6 +48,49 @@ PreHook = Callable[["ProcessModulePlugin", str, "list[dict] | None"], None]
 # post-hook: (plugin, method, inputs, outputs) -> None
 PostHook = Callable[["ProcessModulePlugin", str, "list[dict] | None", "list[dict]"], None]
 
+# Ф7 G.6 ревью 2026-07-13, F2 (HIGH, CONFIRMED, решение владельца — «универсальный
+# конверт кадра»): системные поля, которые ДОЛЖНЫ пережить plugin.process(), даже
+# если плагин строит СВЕЖИЙ выходной dict вместо мутации входного (stitcher,
+# renderer_compositor, line_filter, center_crop и т.п.). Плагин может их
+# переопределить (setdefault-семантика — плагин выигрывает), но не может потерять.
+_CARRIED_SYSTEM_FIELDS = ("trace_id", "capture_ts", "frame_hops")
+
+
+def _carry_system_fields(inputs: "list[dict] | None", outputs: "list[dict]") -> None:
+    """Перенести системные поля кадра из входа в каждый выход, если плагин их не поставил.
+
+    Единое место в движке (не по одному фиксу в каждом плагине — решение
+    владельца, ADR «универсальный конверт кадра», 2026-07-13): раньше плагины,
+    пересобирающие item как свежий dict, молча теряли ``trace_id``/``capture_ts``/
+    ``frame_hops`` — по trace_id перестаёт восстанавливаться путь кадра ровно на
+    той ноде, что решила собрать новый dict.
+
+    Соответствие вход → выход:
+      - 1:1 (``len(inputs) == len(outputs)``, самый частый случай — трансформация
+        батча независимых items) — донор для ``outputs[i]`` это ``inputs[i]``
+        (позиционное соответствие, каждый item несёт СВОИ поля, не соседские);
+      - иначе (fan-in N:1, fan-out 1:N, пустой выход) — донор для ВСЕХ выходов —
+        ``inputs[0]`` («первичная»/«победившая» ветка; тот же fallback, что уже
+        использует ``stitcher`` для ``capture_ts``, когда trace-трассировка
+        выключена — см. ``StitcherPlugin.process``: ``next(..., items[0])``).
+
+    ``call_produce`` (нет входа) сюда не попадает — trace_id уже назначается в
+    ``SourceProducer`` явно (``frame_trace.ensure_trace_id``), донора для produce нет.
+    """
+    if not inputs or not outputs:
+        return
+    same_length = len(inputs) == len(outputs)
+    primary = inputs[0] if isinstance(inputs[0], dict) else None
+    for idx, output in enumerate(outputs):
+        if not isinstance(output, dict):
+            continue
+        donor = inputs[idx] if same_length and isinstance(inputs[idx], dict) else primary
+        if donor is None or donor is output:
+            continue  # плагин вернул тот же объект (мутация на месте) — поля уже там
+        for key in _CARRIED_SYSTEM_FIELDS:
+            if key not in output and key in donor:
+                output[key] = donor[key]
+
 
 class PluginRunner:
     """Единый вызыватель плагинов с pre/post-хуками наблюдения.
@@ -97,6 +140,11 @@ class PluginRunner:
         насквозь (outputs = входные items). Хуки наблюдения всё равно срабатывают
         (io-debug видит ноду как pass-through). Нужно, чтобы выключить «тяжёлую»/
         зависающую ноду (напр. circle_detector) и спокойно тюнить остальную цепочку.
+
+        F2 (ревью 2026-07-13): после получения outputs системные поля кадра
+        (trace_id/capture_ts/frame_hops) переносятся из items в каждый output, если
+        плагин их не поставил сам — см. модульную ``_carry_system_fields``. Плагины
+        НЕ трогаем по одному — перенос в этом единственном месте покрывает всех.
         """
         self._run_pre(plugin, "process", items)
         if getattr(plugin, "enabled", True):
@@ -107,6 +155,7 @@ class PluginRunner:
                 validate_items_against_ports(plugin.name, "output", getattr(plugin, "outputs", []), outputs)
         else:
             outputs = items  # bypass: кадр без обработки (свои Port-декларации не проверяем)
+        _carry_system_fields(items, outputs)
         self._run_post(plugin, "process", items, outputs)
         return outputs
 

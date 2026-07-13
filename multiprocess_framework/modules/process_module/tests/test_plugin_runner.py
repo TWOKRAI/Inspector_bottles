@@ -291,3 +291,95 @@ def test_port_validate_bypass_skips_port_check():
     items = [{"frame": 1}]
     result = runner.call_process(plugin, items)
     assert result is items  # прошло насквозь, без ошибки валидации
+
+
+# ---------------------------------------------------------------------------
+#  Ф7 G.6 ревью 2026-07-13, F2 — универсальный конверт кадра: системные поля
+#  (trace_id/capture_ts/frame_hops) переживают plugin.process(), ДАЖЕ если
+#  плагин строит свежий dict вместо мутации входного (stitcher/renderer_compositor/
+#  line_filter/center_crop-паттерн). Контракт — в движке (PluginRunner), не в
+#  плагинах по одному.
+# ---------------------------------------------------------------------------
+
+
+def test_fresh_dict_output_inherits_trace_id_and_capture_ts():
+    """Плагин-заглушка возвращает СВЕЖИЙ dict (не мутирует item) → trace_id/
+    capture_ts всё равно выживают."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"mask": "computed"}])  # свежий dict
+    result = runner.call_process(plugin, [{"trace_id": "abc123", "capture_ts": 111.5, "frame": 1}])
+    assert result == [{"mask": "computed", "trace_id": "abc123", "capture_ts": 111.5}]
+
+
+def test_fresh_dict_output_inherits_frame_hops_when_present():
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"mask": "x"}])
+    result = runner.call_process(plugin, [{"trace_id": "t1", "frame_hops": 2}])
+    assert result[0]["frame_hops"] == 2
+
+
+def test_plugin_own_value_wins_not_overwritten():
+    """Плагин явно поставил своё значение trace_id — движок его НЕ перетирает."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"trace_id": "plugin_set_this"}])
+    result = runner.call_process(plugin, [{"trace_id": "original"}])
+    assert result[0]["trace_id"] == "plugin_set_this"
+
+
+def test_mutated_item_unaffected_no_double_work():
+    """Плагин мутирует item на месте (частый случай) — carry no-op (поля уже там),
+    identity выхода не ломается."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{**it, "seen": True} for it in items])
+    result = runner.call_process(plugin, [{"trace_id": "abc", "val": 1}])
+    assert result == [{"trace_id": "abc", "val": 1, "seen": True}]
+
+
+def test_fan_in_two_branches_inherits_from_first_winner():
+    """Fan-in N:1 (stitcher-паттерн): 2 входа → 1 выход, донор — inputs[0]
+    («первичная»/«победившая» ветка — тот же fallback, что уже использует stitcher
+    для capture_ts, когда trace-трассировка выключена)."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"frame": "stitched"}])  # N:1, свежий dict
+    inputs = [
+        {"trace_id": "winner_trace", "region_name": "default", "capture_ts": 1.0},
+        {"trace_id": "loser_trace", "region_name": "left", "capture_ts": 2.0},
+    ]
+    result = runner.call_process(plugin, inputs)
+    assert result == [{"frame": "stitched", "trace_id": "winner_trace", "capture_ts": 1.0}]
+
+
+def test_fan_out_one_to_many_all_outputs_inherit_from_single_input():
+    """Fan-out 1:N (region_split-паттерн): 1 вход → N выходов, ВСЕ наследуют
+    от единственного входа (другого источника донора и быть не может)."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"crop": "a"}, {"crop": "b"}, {"crop": "c"}])
+    result = runner.call_process(plugin, [{"trace_id": "shared_trace"}])
+    assert [r["trace_id"] for r in result] == ["shared_trace"] * 3
+
+
+def test_positional_one_to_one_each_output_keeps_own_donor():
+    """1:1 батч (N независимых items, самый частый случай — line_filter/center_crop-
+    паттерн): каждый output наследует ИМЕННО СВОЙ вход по позиции, не соседский."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"cropped": True} for _ in items])
+    inputs = [{"trace_id": "trace_a"}, {"trace_id": "trace_b"}]
+    result = runner.call_process(plugin, inputs)
+    assert result[0]["trace_id"] == "trace_a"
+    assert result[1]["trace_id"] == "trace_b"
+
+
+def test_empty_output_no_error():
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [])
+    result = runner.call_process(plugin, [{"trace_id": "x"}])
+    assert result == []
+
+
+def test_no_carry_when_input_lacks_system_fields():
+    """Донор без системных полей — carry no-op (не добавляет мусорные None-ключи)."""
+    runner = PluginRunner()
+    plugin = _FakePlugin(process_fn=lambda items: [{"mask": "x"}])
+    result = runner.call_process(plugin, [{"val": 1}])
+    assert result == [{"mask": "x"}]
+    assert "trace_id" not in result[0]
