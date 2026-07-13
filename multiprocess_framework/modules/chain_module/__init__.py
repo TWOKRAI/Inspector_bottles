@@ -23,7 +23,8 @@
         IRunnableChain      — Protocol для всех исполнителей
 
     Thread pool:
-        ChainThreadPool     — ThreadPoolExecutor с timeout и graceful shutdown
+        ChainThreadPool     — пул параллельных бандлов (фасад над worker_module)
+        WorkerPoolExecutor  — примитив пула поверх worker_module (N LOOP-воркеров)
 
     Graph utilities:
         topological_sort    — алгоритм Кана (Kahn's)
@@ -38,6 +39,7 @@
     Metrics:
         LatencyTracker      — p50/p95/p99 latency с периодическим логированием
 """
+
 from .interfaces import (
     IStepNode,
     IStepNodeWithWorker,
@@ -57,7 +59,7 @@ from .core import (
     DagRunnable,
     ParallelChainRunnable,
 )
-from .thread_pool import ChainThreadPool
+from .thread_pool import ChainThreadPool, WorkerPoolExecutor
 from .graph import topological_sort, is_nonlinear_graph, detect_parallel_bundles
 from .worker_pool import WorkerTaskRequest, WorkerTaskResponse, WorkerPoolDispatcher
 from .metrics import LatencyTracker
@@ -83,6 +85,7 @@ __all__ = [
     "ParallelChainRunnable",
     # Thread pool
     "ChainThreadPool",
+    "WorkerPoolExecutor",
     # Graph
     "topological_sort",
     "is_nonlinear_graph",

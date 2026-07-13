@@ -214,3 +214,54 @@ from multiprocess_framework.modules.chain_module import topological_sort, is_non
 - `auto_proxy=True` режим продолжает работать без изменений: динамические
   замыкания в `__dict__` имеют приоритет в lookup, методы класса остаются
   как fallback для `auto_proxy=False`.
+
+---
+
+## ADR-CHN-009: Пул параллельных бандлов на worker_module (C6e), а не свой ThreadPoolExecutor
+
+**Статус:** Принято (2026-07-13)
+
+**Контекст:**
+- `ChainThreadPool` держал собственный `concurrent.futures.ThreadPoolExecutor` —
+  второй, дублирующий механизм потоков в фреймворке (D2 аудита
+  2026-07-10_module-responsibility-duplication-map): рядом с `worker_module`
+  (`WorkerManager` — реестр именованных `threading.Thread` с LOOP/TASK-режимами),
+  который уже несёт почти все потоки процессов.
+- Дизайн C6 (`plans/2026-07-06_constructor-master/c6-pipeline-engine-design.md`
+  §5(e)) требует: chain-параллелизм исполняется через пул `worker_module`, свой
+  поток-пул физически исчезает (`grep ThreadPoolExecutor chain_module/ = 0`).
+- `worker_module` НЕ даёт `submit()`/`Future`-API — это не drop-in замена
+  `ThreadPoolExecutor`. Нужен новый примитив поверх публичного контракта.
+
+**Решение:**
+1. Новый `WorkerPoolExecutor` (`thread_pool/worker_pool_executor.py`): N
+   персистентных LOOP-воркеров через `WorkerManager.create_worker("chain_pool_i",
+   …)`, общая `queue.Queue`, handle `_PoolTask` — Event-based (паттерн
+   `PendingTask` из `worker_pool/dispatcher.py`) с `result(timeout)`,
+   интерфейсно совместимым с `Future.result(timeout)`.
+2. `ChainThreadPool` — тонкий фасад-наследник `WorkerPoolExecutor`: публичное имя
+   и контракт (`submit_bundle`/`collect_results`/`resize`/`step_timeout`/
+   `max_workers`) не изменились. `ParallelChainRunnable` и `test_thread_pool.py`
+   (контрактный тест) работают без правок.
+3. `resize()` = `remove_worker` N старых + `create_worker` N новых.
+   `remove_worker` (не `stop_worker`) — снимает имя с учёта в реестре, иначе
+   `chain_pool_i` осталось бы занятым STOPPED-воркером и пересоздание
+   коллизировало бы. resize не hot-path — деградация приемлема.
+4. Пул создаётся в `__init__` (как прежний executor — готов сразу), собственный
+   `WorkerManager` локален экземпляру; опционально инжектится извне (тесты).
+
+**Отвергнуто:**
+- ❌ Расширять `IWorkerManager` методом `submit()`/`Future`. Единственный
+  потребитель submit-паттерна — chain-пул. Расширять публичный контракт
+  worker_module (LOOP-воркеры почти в каждом процессе) ради одного узкого кейса —
+  риск для стабильного API. Обёртка-адаптер локальна к chain_module.
+
+**Последствия:**
+- Свой поток-пул из stdlib исчез (D2 закрыт); один механизм потоков в фреймворке.
+- Worst-case latency очереди покрывается контрактом `step_timeout`; замер
+  submit→collect на 640×480×3-бандле из 3 шагов ≈ 714 µs (доминирует `frame.copy`,
+  накладные пула планирования пренебрежимы: idle-воркер в `queue.get` забирает
+  задачу сразу, poll 0.05с ограничивает только отзывчивость к `stop_event`).
+- `ChainThreadPool` без живых рантайм-потребителей до подключения
+  `ParallelChainRunnable` в generic (C6d инкремент 2, вне скоупа) — тесты
+  единственный потребитель.
