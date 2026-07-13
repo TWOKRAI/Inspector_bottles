@@ -436,34 +436,45 @@ class SystemBlueprint(SchemaBase):
                 names.extend(k for k in mem if k != "coll")
         return names
 
-    def _check_structure(self) -> list[str]:
-        """Структурная валидация графа — НЕ зависит от PluginRegistry (RS-5, C-4).
-
-        Проверяет:
-        1. Дублирование имён процессов.
-        2. Циклы в графе wires (process-level рёбра source_proc -> target_proc).
-
-        В отличие от полного :meth:`check`, не смотрит на порты/плагины — безопасна
-        как gate на запись рецепта (Save/load-from-file) даже в разреженном
-        окружении (headless/тесты), где PluginRegistry может не знать часть плагинов
-        и полный ``check()`` даёт ложные wire-ошибки (см. audit 2026-07-12).
-
-        Returns:
-            Список ошибок. Пустой = структура графа корректна.
-        """
+    def _duplicate_process_names(self) -> list[str]:
+        """Дубли имён процессов — общая проверка для :meth:`check` и :meth:`check_structure`."""
         errors: list[str] = []
-
         process_names: set[str] = set()
         for proc in self.processes:
             if proc.process_name in process_names:
                 errors.append(f"Дублирование имени процесса: '{proc.process_name}'")
             process_names.add(proc.process_name)
+        return errors
+
+    def check_structure(self) -> list[str]:
+        """Публичный gate структурной валидации (RS-5, C-4): дубли имён + циклы.
+
+        НЕ зависит от PluginRegistry — безопасен как gate на запись рецепта
+        (единый Save, load-from-file) даже в разреженном окружении (headless/
+        тесты), где полный :meth:`check` (порты/auto-wiring) даёт ложные wire-
+        ошибки (см. audit 2026-07-12). По той же причине детекция циклов НЕ
+        встроена в :meth:`check` — вынесена сюда, чтобы не расширять контракт
+        pre-launch/boot/switch-валидации (``check()`` вызывается из
+        ``backend/assembly/assembler.py`` на boot/switch — межпроцессная
+        обратная связь p1<->p2, легальная request/response-пара, там не
+        запрещена и не должна становиться внезапно недопустимой).
+
+        Циклы ищутся на PROCESS-level графе (ребро source_proc -> target_proc
+        для каждого wire). Wire ВНУТРИ одного процесса (source_proc ==
+        target_proc — явный внутрипроцессный роутинг между плагинами одного
+        процесса) НЕ считается ребром графа процессов и не может создать
+        ложный self-loop цикл.
+
+        Returns:
+            Список ошибок. Пустой = граф структурно корректен (без циклов/дублей).
+        """
+        errors: list[str] = list(self._duplicate_process_names())
 
         edges: list[tuple[str, str]] = []
         for wire in self.wires:
             src_proc = wire.source.split(".")[0]
             tgt_proc = wire.target.split(".")[0]
-            if src_proc and tgt_proc:
+            if src_proc and tgt_proc and src_proc != tgt_proc:
                 edges.append((src_proc, tgt_proc))
 
         cycle = _find_cycle(edges)
@@ -472,32 +483,25 @@ class SystemBlueprint(SchemaBase):
 
         return errors
 
-    def check_structure(self) -> list[str]:
-        """Публичный gate структурной валидации (RS-5, C-4): дубли имён + циклы.
-
-        Используется на запись рецепта (единый Save, load-from-file) — вместо
-        полного :meth:`check`, который дополнительно требует совместимости портов
-        и потому зависит от состояния PluginRegistry (ложные срабатывания в
-        разреженном окружении неприемлемы как gate записи).
-
-        Returns:
-            Список ошибок. Пустой = граф структурно корректен (без циклов/дублей).
-        """
-        return self._check_structure()
-
     def check(self) -> list[str]:
         """Валидация чертежа до запуска.
 
         Проверяет:
-        1. Структуру графа (дубли имён процессов, циклы) — см. :meth:`check_structure`
+        1. Дублирование имён процессов
         2. Цепочки плагинов внутри каждого процесса (auto-wiring)
         3. Wire-связи между процессами (совместимость портов)
         4. Все обязательные входы подключены
 
+        НЕ проверяет циклы графа wires — та проверка живёт только в
+        :meth:`check_structure` (RS-5 Save/load-gate); межпроцессная обратная
+        связь (request/response) — легальный паттерн на boot/switch, и этот
+        метод остаётся именно тем контрактом, что был до RS-5 (не расширяем
+        pre-launch/boot-валидацию бесплатно вместе с gate-валидацией записи).
+
         Returns:
             Список ошибок. Пустой = всё ОК.
         """
-        errors: list[str] = list(self._check_structure())
+        errors: list[str] = list(self._duplicate_process_names())
 
         # Раздельные карты входов и выходов — плагин может иметь
         # одноимённые input/output порты (e.g. "frame" → "frame")

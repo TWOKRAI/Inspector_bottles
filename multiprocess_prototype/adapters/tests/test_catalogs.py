@@ -1284,6 +1284,83 @@ class TestDisplayCatalogFromRecipe:
         with pytest.raises(ValueError, match="Нет активного рецепта"):
             catalog.register(DisplaySpec(display_id="x", display_name="X"))
 
+    def test_register_legacy_recipe_raises_controlled_error(self):
+        """RS-5 (A-7, ревью-находка 3): register() на легаси-рецепте не крашит
+        необработанным ValidationError — контролируемый ValueError, presenter
+        (on_create/on_duplicate) уже ловит ValueError и показывает show_error.
+        """
+        from multiprocess_prototype.adapters.catalogs.display_catalog_recipe import (
+            DisplayCatalogFromRecipe,
+        )
+        from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
+
+        legacy_raw = {
+            "name": "legacy_recipe",
+            "version": 2,
+            "data": {"legacy": True},
+            "blueprint": {"processes": [], "wires": [], "displays": []},
+        }
+        store = _FakeRecipeStoreLazyValidate({"legacy_recipe": legacy_raw}, active_slug="legacy_recipe")
+        catalog = DisplayCatalogFromRecipe(recipe_store=store, get_active_slug=store.get_active)  # type: ignore[arg-type]
+
+        with pytest.raises(ValueError, match="не найден или невалиден"):
+            catalog.register(DisplaySpec(display_id="x", display_name="X"))
+
+    def test_update_legacy_recipe_returns_false(self):
+        """RS-5 (A-7): update() на легаси-рецепте деградирует до False, не падает."""
+        from multiprocess_prototype.adapters.catalogs.display_catalog_recipe import (
+            DisplayCatalogFromRecipe,
+        )
+        from multiprocess_prototype.domain.protocols.display_catalog import DisplaySpec
+
+        legacy_raw = {
+            "name": "legacy_recipe",
+            "version": 2,
+            "data": {"legacy": True},
+            "blueprint": {"processes": [], "wires": [], "displays": []},
+        }
+        store = _FakeRecipeStoreLazyValidate({"legacy_recipe": legacy_raw}, active_slug="legacy_recipe")
+        catalog = DisplayCatalogFromRecipe(recipe_store=store, get_active_slug=store.get_active)  # type: ignore[arg-type]
+
+        assert catalog.update(DisplaySpec(display_id="x", display_name="X")) is False
+
+    def test_unregister_legacy_recipe_returns_false(self):
+        """RS-5 (A-7): unregister() на легаси-рецепте деградирует до False, не падает."""
+        from multiprocess_prototype.adapters.catalogs.display_catalog_recipe import (
+            DisplayCatalogFromRecipe,
+        )
+
+        legacy_raw = {
+            "name": "legacy_recipe",
+            "version": 2,
+            "data": {"legacy": True},
+            "blueprint": {"processes": [], "wires": [], "displays": []},
+        }
+        store = _FakeRecipeStoreLazyValidate({"legacy_recipe": legacy_raw}, active_slug="legacy_recipe")
+        catalog = DisplayCatalogFromRecipe(recipe_store=store, get_active_slug=store.get_active)  # type: ignore[arg-type]
+
+        assert catalog.unregister("x") is False
+
+    def test_persist_legacy_recipe_logs_and_noops(self, caplog):
+        """RS-5 (A-7): persist() на легаси-рецепте — no-op с warning, не падает."""
+        from multiprocess_prototype.adapters.catalogs.display_catalog_recipe import (
+            DisplayCatalogFromRecipe,
+        )
+
+        legacy_raw = {
+            "name": "legacy_recipe",
+            "version": 2,
+            "data": {"legacy": True},
+            "blueprint": {"processes": [], "wires": [], "displays": []},
+        }
+        store = _FakeRecipeStoreLazyValidate({"legacy_recipe": legacy_raw}, active_slug="legacy_recipe")
+        catalog = DisplayCatalogFromRecipe(recipe_store=store, get_active_slug=store.get_active)  # type: ignore[arg-type]
+
+        with caplog.at_level(logging.WARNING):
+            catalog.persist()  # не должно бросить исключение
+
+        assert any("невалиден" in rec.message.lower() for rec in caplog.records)
+
     # ------------------------------------------------------------------ #
     #  unregister: удаляет из рецепта                                     #
     # ------------------------------------------------------------------ #

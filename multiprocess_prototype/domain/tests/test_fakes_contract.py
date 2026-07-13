@@ -35,7 +35,7 @@ from __future__ import annotations
 import inspect
 import types
 from pathlib import Path
-from typing import Any, Protocol, Union, get_args, get_origin
+from typing import Any, Callable, Protocol, Union, get_args, get_origin
 
 import pytest
 
@@ -94,25 +94,35 @@ class _RecipeDevicesBackingStore(Protocol):
 # Реестр (fake, Protocol) — единое место
 # ==============================================================================
 
-_SAMPLE_TOPOLOGY = Topology(
-    processes=(Process(process_name="p1", plugins=(PluginInstance(plugin_name="blur", config={}),)),)
-)
-_SAMPLE_RECIPE = Recipe(meta=RecipeMeta(name="demo", created_at="2026-01-01T00:00:00"), blueprint=Topology())
 
-FAKE_PROTOCOL_REGISTRY: list[tuple[str, Any, type]] = [
-    ("topology_repository", FakeTopologyRepository(_SAMPLE_TOPOLOGY), TopologyRepository),
-    ("recipe_store", FakeRecipeStore(recipes={"demo": _SAMPLE_RECIPE}, active="demo"), RecipeStore),
-    ("display_catalog", FakeDisplayCatalog(known={"main"}), DisplayCatalog),
-    ("plugin_catalog", FakePluginCatalog(known={"blur"}), PluginCatalog),
-    ("service_manager", FakeServiceManager(known={"cam"}), ServiceManager),
-    ("registers_backend", FakeRegistersBackend(), RegistersBackend),
-    ("command_dispatcher", FakeCommandDispatcher(), CommandDispatcher),
-    ("event_bus", FakeEventBus(), EventBusProtocol),
-    ("auth_facade", FakeAuthFacade(access_level=2, authenticated=True), AuthFacade),
-    ("config_store", FakeConfigStore({"a.b": 1}), ConfigStore),
+def _sample_topology() -> Topology:
+    return Topology(processes=(Process(process_name="p1", plugins=(PluginInstance(plugin_name="blur", config={}),)),))
+
+
+def _sample_recipe() -> Recipe:
+    return Recipe(meta=RecipeMeta(name="demo", created_at="2026-01-01T00:00:00"), blueprint=Topology())
+
+
+# Фабрики (не готовые инстансы) — RS-6/Fable-ревью находка 4: поведенческая
+# проверка _assert_fake_matches_protocol ВЫЗЫВАЕТ zero-arg методы, включая
+# мутаторы (deactivate/undo/redo/clear_history/persist/save). Общий module-level
+# инстанс мутировался бы контрактной проверкой ОДНОГО фейка и мог повлиять на
+# остальные тесты, использующие тот же объект. Каждый вызов фабрики — свежий
+# инстанс; мутация внутри проверки безвредна, т.к. никто другой его не видит.
+FAKE_PROTOCOL_REGISTRY: list[tuple[str, Callable[[], Any], type]] = [
+    ("topology_repository", lambda: FakeTopologyRepository(_sample_topology()), TopologyRepository),
+    ("recipe_store", lambda: FakeRecipeStore(recipes={"demo": _sample_recipe()}, active="demo"), RecipeStore),
+    ("display_catalog", lambda: FakeDisplayCatalog(known={"main"}), DisplayCatalog),
+    ("plugin_catalog", lambda: FakePluginCatalog(known={"blur"}), PluginCatalog),
+    ("service_manager", lambda: FakeServiceManager(known={"cam"}), ServiceManager),
+    ("registers_backend", FakeRegistersBackend, RegistersBackend),
+    ("command_dispatcher", FakeCommandDispatcher, CommandDispatcher),
+    ("event_bus", FakeEventBus, EventBusProtocol),
+    ("auth_facade", lambda: FakeAuthFacade(access_level=2, authenticated=True), AuthFacade),
+    ("config_store", lambda: FakeConfigStore({"a.b": 1}), ConfigStore),
     (
         "recipe_devices_backing_store",
-        _DevicesFakeRecipeStore(Path("unused"), active="demo"),
+        lambda: _DevicesFakeRecipeStore(Path("unused"), active="demo"),
         _RecipeDevicesBackingStore,
     ),
 ]
@@ -142,7 +152,21 @@ def _iter_protocol_members(protocol: type) -> list[tuple[str, str, Any]]:
 
 
 def _type_matches(value: Any, annotation: Any) -> bool:
-    """Сверить фактическое значение с Protocol return-аннотацией (best-effort)."""
+    """Сверить фактическое значение с Protocol return-аннотацией (best-effort).
+
+    Явно обрабатывается: пустая/``Any`` аннотация (пропуск), ``None``/``NoneType``,
+    ``X | Y`` / ``Union[X, Y]`` (рекурсивно по веткам), ``tuple[T, ...]``/``tuple[T]``
+    (по элементам для гомогенного ``tuple[T, ...]``), ``list[T]`` (по элементам),
+    ``dict[K, V]`` (ключи и значения по одному уровню), простой класс (``isinstance``).
+
+    ЧЕСТНО НЕ проверяется (документированная дыра, не тихая — RS-6/Fable-ревью
+    находка 5): ``Literal[...]`` (значения-константы), вложенные generic на глубину
+    >1 (напр. ``dict[str, list[int]]`` — значения `dict` НЕ рекурсируются по своему
+    `list[int]`), `TypedDict`, `Callable[...]` (сигнатура не сверяется), кастомные
+    generic-классы без isinstance-совместимого origin. Для таких форм — best-effort
+    `isinstance(value, origin)` (если origin — реальный класс) либо `True`
+    (не блокируем tests на неразрешимой форме аннотации).
+    """
     if annotation is inspect.Signature.empty or annotation is Any:
         return True
     if annotation is None:
@@ -166,11 +190,19 @@ def _type_matches(value: Any, annotation: Any) -> bool:
         if args:
             return all(_type_matches(item, args[0]) for item in value)
         return True
+    if origin is dict:
+        if not isinstance(value, dict):
+            return False
+        args = get_args(annotation)
+        if len(args) == 2:
+            key_t, val_t = args
+            return all(_type_matches(k, key_t) and _type_matches(v, val_t) for k, v in value.items())
+        return True
     if origin is not None:
         try:
             return isinstance(value, origin)
         except TypeError:
-            return True  # неразрешимый generic-origin — не блокируем
+            return True  # неразрешимый generic-origin (Literal/Callable/...) — не блокируем
     if isinstance(annotation, type):
         return isinstance(value, annotation)
     return True  # неизвестная форма аннотации — best effort, не блокируем
@@ -234,13 +266,19 @@ def _assert_fake_matches_protocol(label: str, fake: Any, protocol: type) -> None
 
 
 @pytest.mark.parametrize(
-    "label,fake,protocol",
+    "label,make_fake,protocol",
     FAKE_PROTOCOL_REGISTRY,
     ids=[entry[0] for entry in FAKE_PROTOCOL_REGISTRY],
 )
-def test_fake_matches_protocol(label: str, fake: Any, protocol: type) -> None:
-    """Каждый зарегистрированный фейк реализует свой Protocol (класс A-1 системно)."""
-    _assert_fake_matches_protocol(label, fake, protocol)
+def test_fake_matches_protocol(label: str, make_fake: Callable[[], Any], protocol: type) -> None:
+    """Каждый зарегистрированный фейк реализует свой Protocol (класс A-1 системно).
+
+    ``make_fake()`` — свежий инстанс на КАЖДЫЙ запуск теста (не общий module-level
+    объект): поведенческая проверка вызывает zero-arg методы, включая мутаторы
+    (deactivate/undo/redo/clear_history/persist/save) — на свежем инстансе это
+    безвредно (Fable-ревью находка 4).
+    """
+    _assert_fake_matches_protocol(label, make_fake(), protocol)
 
 
 # ==============================================================================
