@@ -26,7 +26,9 @@ Purpose:
 Public API (module-contract: lite):
     - build_recipe_v3_raw — собрать v3-raw рецепта на запись из raw + topology-dict.
     - validate_recipe_blueprint — структурная gate-валидация blueprint перед записью.
+    - save_editor_topology_to_recipe — единая последовательность read→build→validate→save (RS-4 #5).
     - RecipeValidationError — ошибка невалидного blueprint (дубли имён процессов / циклы).
+    - RecipeNotFoundError — рецепт не читается через RecipeStore.
 
 Stability: lite
 """
@@ -37,7 +39,17 @@ from typing import Any
 
 from multiprocess_framework.modules.recipe.format import normalize_recipe_v3_raw
 
-__all__ = ["build_recipe_v3_raw", "validate_recipe_blueprint", "RecipeValidationError"]
+__all__ = [
+    "build_recipe_v3_raw",
+    "validate_recipe_blueprint",
+    "save_editor_topology_to_recipe",
+    "RecipeValidationError",
+    "RecipeNotFoundError",
+]
+
+
+class RecipeNotFoundError(LookupError):
+    """Рецепт с данным slug не читается через RecipeStore (нет файла / битый)."""
 
 
 class RecipeValidationError(ValueError):
@@ -158,3 +170,42 @@ def validate_recipe_blueprint(blueprint_raw: dict[str, Any]) -> None:
     errors = blueprint.check_structure()
     if errors:
         raise RecipeValidationError(errors)
+
+
+def save_editor_topology_to_recipe(
+    recipes: Any,
+    slug: str,
+    topology: dict[str, Any],
+    *,
+    gui_positions: dict[str, Any] | None = None,
+    locked_nodes: list[str] | None = None,
+) -> None:
+    """Единая последовательность записи графа редактора в рецепт: read → build → validate → save.
+
+    Один вызываемый для ВСЕХ Save-путей (RS-4 #5, класс A-3): ``RecipesPresenter.on_save``,
+    ``LayoutController.save_to_active_recipe`` (с layout-override) и closeEvent-сохранение в
+    ``app.py``. Раньше app.py дублировал всю последовательность отдельно — расхождение Save-путей
+    (A-3), которое чинил RS-1. Теперь place — один.
+
+    Порядок: ``read_raw`` (raise :class:`RecipeNotFoundError` если None) → :func:`build_recipe_v3_raw`
+    (сохраняет name/description/layout) → :func:`validate_recipe_blueprint` (RS-5 gate) → ``save_raw``.
+    Исключения (RecipeNotFoundError/RecipeValidationError и пр.) НЕ глотает — вызывающий сам решает,
+    как показать пользователю (show_error / QMessageBox.critical) и НЕ помечает сессию сохранённой.
+
+    Args:
+        recipes: RecipeStore (read_raw/save_raw).
+        slug: целевой рецепт.
+        topology: плоский topology-dict (processes/wires/displays).
+        gui_positions: override позиций узлов (Pipeline-путь; None → сохранить из рецепта).
+        locked_nodes: override фиксации узлов (Pipeline-путь; None → сохранить из рецепта).
+
+    Raises:
+        RecipeNotFoundError: рецепт ``slug`` не читается.
+        RecipeValidationError: граф не прошёл структурную валидацию (дубли имён / циклы).
+    """
+    raw = recipes.read_raw(slug)
+    if raw is None:
+        raise RecipeNotFoundError(slug)
+    new_raw = build_recipe_v3_raw(raw, topology, gui_positions=gui_positions, locked_nodes=locked_nodes)
+    validate_recipe_blueprint(new_raw.get("blueprint", {}))
+    recipes.save_raw(slug, new_raw)

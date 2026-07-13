@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
 from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
+from multiprocess_prototype.frontend.widgets.dialogs import confirm_unsaved_changes
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import DiffScrollTabLayout
 
 from .presenter import RecipesPresenter
@@ -64,6 +65,7 @@ class RecipesTab(BaseListNavTab):
         process_manager_proxy: object | None = None,
         persist_active_fn: object | None = None,
         command_sender: object | None = None,
+        topology_session: object | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Инициализировать таб рецептов.
@@ -82,6 +84,8 @@ class RecipesTab(BaseListNavTab):
         self._pm_proxy = process_manager_proxy
         self._persist_active_fn = persist_active_fn
         self._command_sender = command_sender
+        # RS-4: сессия dirty-контура (для confirm-перед-активацией). None → без guard.
+        self._topology_session = topology_session
         self._selected_slug: str | None = None
         self._form_stack_index: int = 0
 
@@ -136,6 +140,7 @@ class RecipesTab(BaseListNavTab):
                 topology_store=services.topology,  # Этап 1: «Сохранить» (живой граф → рецепт)
                 persist_active_fn=self._persist_active_fn,  # persist #1: активный slug → app.yaml
                 upsert_devices_fn=_upsert_fn,  # Фаза 3 device-hub: upsert устройств рецепта
+                topology_session=self._topology_session,  # RS-4: confirm-перед-активацией
             )
             self._presenter.load()
 
@@ -160,6 +165,7 @@ class RecipesTab(BaseListNavTab):
             process_manager_proxy=runtime.process_manager_proxy,
             persist_active_fn=runtime.persist_active_recipe,
             command_sender=runtime.command_sender,
+            topology_session=runtime.topology_session,
         )
 
     # ------------------------------------------------------------------ #
@@ -283,6 +289,21 @@ class RecipesTab(BaseListNavTab):
             QMessageBox.StandardButton.No,
         )
         return reply == QMessageBox.StandardButton.Yes
+
+    def confirm_discard_changes(self) -> str:
+        """Диалог «несохранённые правки графа» перед активацией (RS-4, C-2).
+
+        Тонкая обёртка над общим :func:`confirm_unsaved_changes` (RS-4 #6) — те же
+        формулировки/порядок кнопок, что при закрытии окна и рестарте UI.
+
+        Returns:
+            "save" | "discard" | "cancel".
+        """
+        return confirm_unsaved_changes(
+            self,
+            allow_save=True,
+            text="В редакторе есть несохранённые правки топологии.\nАктивация другого рецепта их потеряет.",
+        )
 
     def show_error(self, message: str) -> None:
         """Показать диалог с сообщением об ошибке.

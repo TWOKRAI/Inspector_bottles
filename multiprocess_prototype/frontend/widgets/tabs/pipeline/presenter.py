@@ -66,8 +66,14 @@ class PipelinePresenter:
         bindings: Any = None,
         command_sender: Any = None,
         topology_bridge: Any = None,
+        topology_session: Any = None,
     ) -> None:
         self._services = services
+        # RS-4 dirty-контур: сессия редактора топологии. mark_saved (сохранение в
+        # рецепт), mark_applied («Перезапустить» = граф→backend), mark_loaded (загрузка
+        # из файла). Правки/undo помечает dirty сам EventBus-мост в app.py (TopologyReplaced).
+        # None → без dirty-контура (характеризация: поведение до RS-4).
+        self._topology_session = topology_session
         # GuiStateBindings — для actual-телеметрии камеры в инспекторе (Phase 3).
         self._bindings = bindings
         # command_sender + topology_bridge — для встраиваемых контролов камеры
@@ -112,6 +118,9 @@ class PipelinePresenter:
             recipes=services.recipes,
             model=self._model,
             notify=notify,
+            # RS-4 (Fable #3): diverged снимается ТОЛЬКО при подтверждённом success apply
+            # (в _on_restart_result), не по факту отправки fire-and-forget.
+            on_applied=(self._topology_session.mark_applied if self._topology_session is not None else None),
         )
 
         # Ленивый импорт TopologyPresenter (для load/save YAML)
@@ -312,7 +321,14 @@ class PipelinePresenter:
 
     def load_topology_from_file(self, path: Path) -> tuple[list[NodeData], list[EdgeData]]:
         """Загрузить topology из YAML файла (делегат LayoutController, F.4)."""
-        return self._layout.load_topology_from_file(path)
+        result = self._layout.load_topology_from_file(path)
+        # RS-4 (Fable #4): загруженный из внешнего файла граф не существует ни в одном
+        # рецепте → это НЕсохранённое содержимое (dirty=True) и не применённое к живой
+        # системе (diverged=True) — mark_edited. Иначе класс C-2/C-5 вернулся бы, как
+        # только появится import-кнопка.
+        if self._topology_session is not None:
+            self._topology_session.mark_edited()
+        return result
 
     def export_topology_with_positions(self) -> dict:
         """Экспортировать topology dict с gui_positions (делегат LayoutController, F.4)."""
@@ -600,7 +616,11 @@ class PipelinePresenter:
 
     def save_to_active_recipe(self, parent: "QWidget | None" = None) -> bool:
         """Сохранить текущий граф в активный рецепт (делегат LayoutController, F.4)."""
-        return self._layout.save_to_active_recipe(parent)
+        ok = self._layout.save_to_active_recipe(parent)
+        # RS-4: граф записан в рецепт → снять dirty (diverged держится: файл ≠ live).
+        if ok and self._topology_session is not None:
+            self._topology_session.mark_saved()
+        return ok
 
     # ------------------------------------------------------------------ #
     #  Runtime-контроль живого backend (делегаты RuntimeController, F.3)   #
@@ -614,7 +634,12 @@ class PipelinePresenter:
         return self._runtime.launch_active_recipe(parent)
 
     def restart_topology(self, parent: "QWidget | None" = None) -> bool:
-        """Применить текущий граф редактора к живому backend (делегат F.3)."""
+        """Применить текущий граф редактора к живому backend (делегат F.3).
+
+        RS-4 (Fable #3): diverged снимается НЕ здесь (по факту отправки), а в
+        RuntimeController._on_restart_result при ПОДТВЕРЖДЁННОМ success apply —
+        через on_applied=session.mark_applied (async request/response).
+        """
         return self._runtime.restart_topology(parent)
 
     def control_process(self, action: str, process_name: str, parent: "QWidget | None" = None) -> bool:
