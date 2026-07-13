@@ -97,6 +97,18 @@ def test_indicators_hidden_initially(qtbot) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _patch_dialog(monkeypatch, choice: str) -> dict:
+    """Подменить общий confirm_unsaved_changes → фиксированный выбор. Возвращает счётчик вызовов."""
+    calls = {"n": 0}
+
+    def _fake(parent, *, allow_save=True, text=""):
+        calls["n"] += 1
+        return choice
+
+    monkeypatch.setattr("multiprocess_prototype.frontend.widgets.dialogs.confirm_unsaved_changes", _fake)
+    return calls
+
+
 def test_close_with_dirty_cancel_ignores_event(qtbot, monkeypatch) -> None:
     """dirty + «Отмена» в диалоге закрытия → окно НЕ закрывается (event.ignore())."""
     window = MainWindow()
@@ -104,8 +116,7 @@ def test_close_with_dirty_cancel_ignores_event(qtbot, monkeypatch) -> None:
     session = TopologySession()
     session.mark_edited()
     window.set_topology_session(session, None)
-
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Cancel)
+    _patch_dialog(monkeypatch, "cancel")
 
     event = QCloseEvent()
     event.accept()
@@ -120,8 +131,7 @@ def test_close_with_dirty_discard_accepts_event(qtbot, monkeypatch) -> None:
     session = TopologySession()
     session.mark_edited()
     window.set_topology_session(session, None)
-
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Discard)
+    _patch_dialog(monkeypatch, "discard")
 
     event = QCloseEvent()
     event.accept()
@@ -142,7 +152,7 @@ def test_close_with_dirty_save_invokes_save_fn(qtbot, monkeypatch) -> None:
         return True
 
     window.set_topology_session(session, _save)
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Save)
+    _patch_dialog(monkeypatch, "save")
 
     event = QCloseEvent()
     event.accept()
@@ -162,7 +172,7 @@ def test_close_with_dirty_save_failure_keeps_window(qtbot, monkeypatch) -> None:
         raise RuntimeError("дубли имён процессов")
 
     window.set_topology_session(session, _save_fail)
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Save)
+    _patch_dialog(monkeypatch, "save")
     crit: list[str] = []
     monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: crit.append(a[2] if len(a) > 2 else ""))
 
@@ -173,25 +183,31 @@ def test_close_with_dirty_save_failure_keeps_window(qtbot, monkeypatch) -> None:
     assert crit, "ошибка сохранения должна быть показана"
 
 
+def test_ui_restart_with_dirty_cancel_aborts(qtbot, monkeypatch) -> None:
+    """RS-4 #2: рестарт UI при dirty → «Отмена» → confirm возвращает False (рестарт не выполнится)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    session = TopologySession()
+    session.mark_edited()
+    window.set_topology_session(session, None)
+    _patch_dialog(monkeypatch, "cancel")
+
+    proceed = window.confirm_discard_topology_changes(reason="перед рестартом?")
+    assert proceed is False
+
+
 def test_close_when_clean_no_dialog(qtbot, monkeypatch) -> None:
     """Без dirty диалог закрытия не показывается — окно закрывается сразу."""
     window = MainWindow()
     qtbot.addWidget(window)
     session = TopologySession()  # clean
     window.set_topology_session(session, None)
-
-    called = {"exec": False}
-
-    def _boom(self):
-        called["exec"] = True
-        return QMessageBox.StandardButton.Cancel
-
-    monkeypatch.setattr(QMessageBox, "exec", _boom)
+    calls = _patch_dialog(monkeypatch, "cancel")
 
     event = QCloseEvent()
     event.accept()
     window.closeEvent(event)
-    assert called["exec"] is False
+    assert calls["n"] == 0, "чистая сессия не должна показывать диалог"
     assert event.isAccepted() is True
 
 

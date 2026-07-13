@@ -118,6 +118,9 @@ class PipelinePresenter:
             recipes=services.recipes,
             model=self._model,
             notify=notify,
+            # RS-4 (Fable #3): diverged снимается ТОЛЬКО при подтверждённом success apply
+            # (в _on_restart_result), не по факту отправки fire-and-forget.
+            on_applied=(self._topology_session.mark_applied if self._topology_session is not None else None),
         )
 
         # Ленивый импорт TopologyPresenter (для load/save YAML)
@@ -319,10 +322,12 @@ class PipelinePresenter:
     def load_topology_from_file(self, path: Path) -> tuple[list[NodeData], list[EdgeData]]:
         """Загрузить topology из YAML файла (делегат LayoutController, F.4)."""
         result = self._layout.load_topology_from_file(path)
-        # RS-4: загрузка из файла — новый baseline редактора (dirty=False), но граф
-        # НЕ применён к живой системе → diverged=True (нужен Apply, чтобы совпало).
+        # RS-4 (Fable #4): загруженный из внешнего файла граф не существует ни в одном
+        # рецепте → это НЕсохранённое содержимое (dirty=True) и не применённое к живой
+        # системе (diverged=True) — mark_edited. Иначе класс C-2/C-5 вернулся бы, как
+        # только появится import-кнопка.
         if self._topology_session is not None:
-            self._topology_session.mark_loaded()
+            self._topology_session.mark_edited()
         return result
 
     def export_topology_with_positions(self) -> dict:
@@ -629,13 +634,13 @@ class PipelinePresenter:
         return self._runtime.launch_active_recipe(parent)
 
     def restart_topology(self, parent: "QWidget | None" = None) -> bool:
-        """Применить текущий граф редактора к живому backend (делегат F.3)."""
-        ok = self._runtime.restart_topology(parent)
-        # RS-4 (C-3-индикатор): граф редактора применён к живой системе → editor == live,
-        # снять diverged. dirty держится (в рецепт-файл ничего не записано).
-        if ok and self._topology_session is not None:
-            self._topology_session.mark_applied()
-        return ok
+        """Применить текущий граф редактора к живому backend (делегат F.3).
+
+        RS-4 (Fable #3): diverged снимается НЕ здесь (по факту отправки), а в
+        RuntimeController._on_restart_result при ПОДТВЕРЖДЁННОМ success apply —
+        через on_applied=session.mark_applied (async request/response).
+        """
+        return self._runtime.restart_topology(parent)
 
     def control_process(self, action: str, process_name: str, parent: "QWidget | None" = None) -> bool:
         """Start / stop / restart процесса по имени (делегат F.3)."""

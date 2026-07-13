@@ -416,20 +416,14 @@ class LayoutController:
             QMessageBox.warning(parent, "Сохранение рецепта", "Не выбран активный рецепт")
             return False
 
-        # Шаг 2: прочитать текущий YAML рецепта через RecipeStore Protocol
-        raw_recipe = store.read_raw(active_slug)
-        if raw_recipe is None:
-            QMessageBox.critical(parent, "Сохранение рецепта", "Не удалось прочитать рецепт")
-            return False
-
-        # Шаг 3: собрать и записать v3-raw через единый сборщик (RS-1). Сериализация модели +
+        # Шаг 2: собрать и записать v3-raw через единый сборщик (RS-1). Сериализация модели +
         # сборка blueprint — ВНУТРИ try/except с QMessageBox.critical (surface-not-mask).
         # name/description сохраняются сборщиком из raw['blueprint'] — дефолты graph_to_blueprint
         # ("default"/"") игнорируются (LP-1). Layout (gui_positions/locked_nodes) живёт ТОЛЬКО в
         # blueprint.metadata (оттуда его читает load_topology_from_config и cold-start); top-level
         # gui_positions не пишется (normalize_recipe_v3_raw его не включает, AU-1).
         try:
-            from multiprocess_prototype.recipes.save import build_recipe_v3_raw, validate_recipe_blueprint
+            from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
 
             bp_dict, bindings, _gui = graph_to_blueprint(self._model)
 
@@ -444,16 +438,17 @@ class LayoutController:
                 "wires": bp_dict.get("wires", []),
                 "displays": bindings,
             }
-            new_raw = build_recipe_v3_raw(
-                raw_recipe,
+            # Единая последовательность Save (RS-4 #5): read→build→validate→save в одном
+            # вызываемом — общий с Recipes-Save и closeEvent (класс A-3). RS-5-валидация
+            # ВНУТРИ helper; RecipeValidationError ловится тем же except ниже (QMessageBox).
+            # Живые позиции/фиксация — авторитетный override (Pipeline-путь).
+            save_editor_topology_to_recipe(
+                store,
+                active_slug,
                 topology,
                 gui_positions=gui_positions,
                 locked_nodes=sorted(self._locked_nodes),
             )
-            # RS-5 (C-4): валидация перед записью — граф с циклом/дублями имён процессов
-            # не пишется. RecipeValidationError ловится тем же except ниже (QMessageBox).
-            validate_recipe_blueprint(new_raw.get("blueprint", {}))
-            store.save_raw(active_slug, new_raw)
 
             logger.info("Pipeline сохранён в рецепт '%s'", active_slug)
         except Exception as exc:

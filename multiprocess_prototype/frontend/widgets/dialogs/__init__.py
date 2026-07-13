@@ -8,12 +8,16 @@
         ConfirmWithPasswordDialog,
     )
 """
+
 from .startup_blocking_dialog import StartupBlockingDialog
 from .login_dialog import LoginDialog
 from .confirm_with_password import ConfirmWithPasswordDialog
+from .unsaved_changes import confirm_unsaved_changes, UnsavedChoice
 
 __all__ = [
     "StartupBlockingDialog",
     "LoginDialog",
     "ConfirmWithPasswordDialog",
+    "confirm_unsaved_changes",
+    "UnsavedChoice",
 ]

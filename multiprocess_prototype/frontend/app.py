@@ -650,18 +650,15 @@ def run_gui(process: "GuiProcess") -> None:
     # граф (services.topology) в активный рецепт через тот же сборщик, что и Recipes-
     # Save (RS-1), с домен-валидацией (RS-5). Провал → False → окно не закрывается.
     def _save_active_topology() -> bool:
+        # RS-4 #5: тонкая обёртка над общим Save-helper (тот же путь, что Recipes-Save и
+        # Pipeline-Save) — не дублируем read→build→validate→save (класс A-3, чинил RS-1).
         slug = app_services.recipes.get_active()
         if slug is None:
             return False
-        raw = app_services.recipes.read_raw(slug)
-        if raw is None:
-            return False
-        from multiprocess_prototype.recipes.save import build_recipe_v3_raw, validate_recipe_blueprint
+        from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
 
         topo = app_services.topology.load().to_dict()
-        new_raw = build_recipe_v3_raw(raw, topo)
-        validate_recipe_blueprint(new_raw.get("blueprint", {}))
-        app_services.recipes.save_raw(slug, new_raw)
+        save_editor_topology_to_recipe(app_services.recipes, slug, topo)  # raise → покажет MainWindow
         topology_session.mark_saved()
         return True
 
@@ -690,7 +687,14 @@ def run_gui(process: "GuiProcess") -> None:
     from .runtime_deps import RuntimeDeps
 
     def _request_ui_restart() -> None:
-        """Узкий callback для InterfaceSection — перезапуск UI без перезапуска процесса."""
+        """Узкий callback для InterfaceSection — перезапуск UI без перезапуска процесса.
+
+        RS-4 (Fable #2): рестарт UI — тот же app.quit(), что обходит closeEvent → при
+        dirty-редакторе МОЛЧА терял правки. Спрашиваем подтверждение (тот же механизм,
+        что при закрытии); «Отмена» → рестарт НЕ выполняется.
+        """
+        if not window.confirm_discard_topology_changes(reason="Сохранить их перед перезапуском интерфейса?"):
+            return
         process._restart_ui = True
         app.quit()
 
@@ -972,6 +976,12 @@ def _setup_timers(
 
     def _check_stop() -> None:
         if process.should_stop():
+            # RS-4 (Fable #2): здесь НЕ показываем dirty-подтверждение сознательно.
+            # Это backend-driven teardown (PM/дерево уже останавливается: process.should_stop
+            # взведён извне — shutdown/смерть backend). Модальный диалог заблокировал бы
+            # safety-таймер во время каскадного teardown (SHM cleanup, PID-реестр) и рискует
+            # зомби/подвисанием. Пользовательский выход (закрытие окна) и рестарт UI —
+            # закрыты confirm'ом в closeEvent/_request_ui_restart, пока GUI жив и владеет циклом.
             app.quit()
 
     safety_timer.timeout.connect(_check_stop)

@@ -171,6 +171,33 @@ def test_activate_dirty_save_failure_aborts() -> None:
     assert session.dirty is True
 
 
+def test_activate_dirty_save_without_active_recipe_aborts() -> None:
+    """Fable #1: dirty + «Сохранить», но активного рецепта нет → громкая ошибка,
+    активация НЕ происходит, правки не потеряны (раньше молча продолжалась активация)."""
+    # active=None: свежий старт / после деактивации.
+    store = FakeRecipeStore(raw={"cup": _recipe_raw("cup")}, active=None)
+    dispatcher = FakeCommandDispatcher()
+    view = _view("save")
+    session = _dirty_session()
+    topology_store = FakeTopologyRepository(
+        Topology.from_dict({"processes": [{"process_name": "p", "plugins": []}], "wires": [], "displays": []})
+    )
+
+    presenter = RecipesPresenter(
+        store=store,
+        view=view,
+        commands=dispatcher,
+        topology_store=topology_store,
+        topology_session=session,
+    )
+    presenter._selected_slug = "cup"
+    presenter.on_set_active()
+
+    view.show_error.assert_called()  # громкая ошибка «нет активного рецепта»
+    assert dispatcher.dispatched == [], "без активного рецепта активация не должна происходить"
+    assert session.dirty is True, "правки не потеряны"
+
+
 def test_activate_dirty_save_validation_error_aborts() -> None:
     """dirty + «Сохранить», граф невалиден (дубли имён) → RS-5-валидация валит Save,
     активация НЕ происходит, ошибка показана, состояние сохранено (требование владельца)."""

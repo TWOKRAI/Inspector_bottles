@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from multiprocess_framework.modules.frontend_module.widgets.tabs import BaseListNavTab
 from multiprocess_prototype.domain.app_services import AppServices
 from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
+from multiprocess_prototype.frontend.widgets.dialogs import confirm_unsaved_changes
 from multiprocess_prototype.frontend.widgets.primitives.diff_scroll_tab_layout import DiffScrollTabLayout
 
 from .presenter import RecipesPresenter
@@ -292,29 +293,17 @@ class RecipesTab(BaseListNavTab):
     def confirm_discard_changes(self) -> str:
         """Диалог «несохранённые правки графа» перед активацией (RS-4, C-2).
 
-        Три исхода: Сохранить (в текущий рецепт и продолжить) / Не сохранять
-        (продолжить, потеряв правки) / Отмена (не активировать).
+        Тонкая обёртка над общим :func:`confirm_unsaved_changes` (RS-4 #6) — те же
+        формулировки/порядок кнопок, что при закрытии окна и рестарте UI.
 
         Returns:
             "save" | "discard" | "cancel".
         """
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("Несохранённые правки графа")
-        box.setText("В редакторе есть несохранённые правки топологии.\nАктивация другого рецепта их потеряет.")
-        save_btn = box.addButton("Сохранить", QMessageBox.ButtonRole.AcceptRole)
-        discard_btn = box.addButton("Продолжить без сохранения", QMessageBox.ButtonRole.DestructiveRole)
-        _cancel_btn = box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
-        # Требование владельца: «Сохранить» — кнопка по умолчанию (безопасный исход:
-        # правки не теряются). Двухкнопочный «потерять/отмена» отвергнут.
-        box.setDefaultButton(save_btn)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is save_btn:
-            return "save"
-        if clicked is discard_btn:
-            return "discard"
-        return "cancel"
+        return confirm_unsaved_changes(
+            self,
+            allow_save=True,
+            text="В редакторе есть несохранённые правки топологии.\nАктивация другого рецепта их потеряет.",
+        )
 
     def show_error(self, message: str) -> None:
         """Показать диалог с сообщением об ошибке.

@@ -351,13 +351,21 @@ class RecipesPresenter:
                 return
             if choice == "save":
                 # Сохраняем текущий граф в ПОКИДАЕМЫЙ (сейчас активный) рецепт: правки
-                # относятся к нему. Провал сохранения → не теряем правки молча, прерываем
-                # переключение (on_save уже показал ошибку). Успех → on_save снял dirty.
-                # Явный target: on_save(None) упал бы на _selected_slug (= рецепт, В который
-                # переключаемся) — сохранил бы правки не в тот файл. Если активного рецепта
-                # нет, сохранять некуда — продолжаем как «discard».
+                # относятся к нему. Явный target: on_save(None) упал бы на _selected_slug
+                # (= рецепт, В который переключаемся) — сохранил бы правки не в тот файл.
                 prev_active_for_save = self._store.get_active()
-                if prev_active_for_save is not None and not self.on_save(prev_active_for_save):
+                if prev_active_for_save is None:
+                    # Нет активного рецепта — сохранять правки некуда. НЕ теряем их молча
+                    # (Fable #1): громкая ошибка + прерывание активации.
+                    self._view.show_error(
+                        "Нет активного рецепта для сохранения правок — активация отменена. "
+                        "Сначала сохраните граф в рецепт."
+                    )
+                    self._log_warning("RecipesPresenter.on_set_active: «Сохранить» без активного рецепта — прервано")
+                    return
+                # Провал сохранения → не теряем правки молча, прерываем переключение
+                # (on_save уже показал ошибку). Успех → on_save снял dirty.
+                if not self.on_save(prev_active_for_save):
                     return
             # choice == "discard" (или успешный "save") → продолжаем активацию.
 
@@ -574,23 +582,16 @@ class RecipesPresenter:
             self._log_warning("RecipesPresenter.on_save: topology_store=None")
             return False
 
-        raw = self._store.read_raw(target_slug)
-        if raw is None:
-            self._view.show_error(f"Рецепт '{target_slug}' не найден")
-            return False
-
         try:
-            # Сборка blueprint — ВНУТРИ try/except: раньше topo.get(...) на Topology entity
-            # (у неё нет .get()) улетал AttributeError мимо обработки → Save тихо крашился
-            # в Qt-слоте, пользователь видел no-op (RS-1). Теперь entity → dict до сборки.
-            from multiprocess_prototype.recipes.save import build_recipe_v3_raw, validate_recipe_blueprint
+            # Единая последовательность Save (RS-4 #5): read→build→validate→save в одном
+            # вызываемом (recipes.save.save_editor_topology_to_recipe) — общий с Pipeline-Save
+            # и closeEvent-сохранением, чтобы Save-пути не расходились (класс A-3, чинил RS-1).
+            # RS-5 (C-4): валидация ВНУТРИ helper — граф с циклом/дублями не пишется (RecipeValidationError
+            # ловится ниже). ``.to_dict()`` до вызова: raw Topology entity не имеет .get() (RS-1).
+            from multiprocess_prototype.recipes.save import save_editor_topology_to_recipe
 
             topo = self._topology_store.load().to_dict()
-            new_raw = build_recipe_v3_raw(raw, topo)
-            # RS-5 (C-4): валидация перед записью — граф с циклом/дублями имён процессов
-            # не пишется. RecipeValidationError ловится тем же except ниже (громкая ошибка).
-            validate_recipe_blueprint(new_raw.get("blueprint", {}))
-            self._store.save_raw(target_slug, new_raw)
+            save_editor_topology_to_recipe(self._store, target_slug, topo)
             # RS-4: граф записан в рецепт-файл → снять dirty (diverged держится, если был:
             # запись в файл живую систему не тронула).
             if self._topology_session is not None:

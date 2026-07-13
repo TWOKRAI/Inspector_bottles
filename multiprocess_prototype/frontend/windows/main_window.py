@@ -289,20 +289,28 @@ class MainWindow(QMainWindow):
 
         C-2/C-5: закрытие приложения при dirty-редакторе МОЛЧА теряло применённые-но-
         несохранённые правки топологии. Теперь при dirty спрашиваем: Сохранить /
-        Не сохранять / Отмена. «Отмена» → окно не закрывается (event.ignore()).
+        Не сохранять / Отмена. «Отмена» → окно не закрывается.
         """
-        if not self._confirm_close_with_dirty():
+        if not self.confirm_discard_topology_changes(reason="Сохранить их перед выходом?"):
             event.ignore()
             return
         self._save_geometry()
         super().closeEvent(event)
 
-    def _confirm_close_with_dirty(self) -> bool:
-        """Диалог подтверждения при закрытии с несохранёнными правками графа (RS-4).
+    def confirm_discard_topology_changes(self, *, reason: str = "Сохранить их перед продолжением?") -> bool:
+        """Подтверждение при опасном действии с несохранёнными правками графа (RS-4 #2/#6).
+
+        Общая точка для closeEvent И перезапуска UI (app.py _request_ui_restart) — оба
+        завершают приложение и МОЛЧА теряли правки. Использует единый диалог
+        :func:`confirm_unsaved_changes`. «Сохранить» пишет граф в активный рецепт с
+        RS-5-валидацией; провал → НЕ продолжаем, показываем ошибку, правки целы.
+
+        Args:
+            reason: строка-вопрос под текстом (контекст: «перед выходом» / «перед рестартом UI»).
 
         Returns:
-            True — можно закрывать (нет dirty, либо пользователь сохранил/отказался
-            от сохранения); False — закрытие отменено пользователем.
+            True — можно продолжать (нет dirty / сохранено / «без сохранения»);
+            False — действие отменено пользователем (или провал Save).
         """
         session = self._topology_session
         if session is None or not getattr(session, "dirty", False):
@@ -310,28 +318,18 @@ class MainWindow(QMainWindow):
 
         from PySide6.QtWidgets import QMessageBox
 
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("Несохранённые правки графа")
-        box.setText("В редакторе топологии есть несохранённые правки.\nСохранить их перед выходом?")
-        buttons = QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
-        if self._save_topology_fn is not None:
-            buttons |= QMessageBox.StandardButton.Save
-        box.setStandardButtons(buttons)
-        box.button(QMessageBox.StandardButton.Discard).setText("Продолжить без сохранения")
-        # Требование владельца: «Сохранить» — кнопка по умолчанию (безопасный исход).
-        # Без save_fn (Save недоступна) дефолт — Отмена (не потерять правки случайно).
-        if self._save_topology_fn is not None:
-            box.setDefaultButton(QMessageBox.StandardButton.Save)
-        else:
-            box.setDefaultButton(QMessageBox.StandardButton.Cancel)
-        choice = box.exec()
+        from ..widgets.dialogs import confirm_unsaved_changes
 
-        if choice == QMessageBox.StandardButton.Cancel:
+        choice = confirm_unsaved_changes(
+            self,
+            allow_save=self._save_topology_fn is not None,
+            text=f"В редакторе топологии есть несохранённые правки.\n{reason}",
+        )
+        if choice == "cancel":
             return False
-        if choice == QMessageBox.StandardButton.Save and self._save_topology_fn is not None:
+        if choice == "save" and self._save_topology_fn is not None:
             # Save с домен-валидацией (RS-5): провал (в т.ч. RecipeValidationError) →
-            # НЕ закрываем окно, показываем ошибку, состояние/правки сохраняются.
+            # НЕ продолжаем, показываем ошибку, состояние/правки сохраняются.
             try:
                 ok = self._save_topology_fn()
             except Exception as exc:  # noqa: BLE001 — surface, не роняем на ошибке сохранения
@@ -341,10 +339,10 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(
                     self,
                     "Сохранение графа",
-                    "Не удалось сохранить граф в активный рецепт — выход отменён.",
+                    "Не удалось сохранить граф в активный рецепт — действие отменено.",
                 )
                 return False
-        # «Продолжить без сохранения» или успешный Save → разрешаем закрытие.
+        # «Не сохранять» или успешный Save → разрешаем действие.
         return True
 
     # -- Properties --

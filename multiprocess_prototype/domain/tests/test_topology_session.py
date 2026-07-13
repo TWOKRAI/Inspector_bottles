@@ -53,14 +53,6 @@ def test_mark_activated_clears_both() -> None:
     assert s.diverged is False
 
 
-def test_mark_loaded_clears_dirty_sets_diverged() -> None:
-    """Загрузка из файла: редактор == файл (dirty=False), но не применён (diverged=True)."""
-    s = TopologySession()
-    s.mark_loaded()
-    assert s.dirty is False
-    assert s.diverged is True
-
-
 def test_save_then_apply_clears_both() -> None:
     """Полный цикл правка → save → apply снимает оба флага."""
     s = TopologySession()
