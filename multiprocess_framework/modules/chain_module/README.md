@@ -50,7 +50,7 @@ Tag `operation` / `worker` добавляется где есть контекс
 | `IStepNodeWithWorker` | Нода с worker-affinity: + worker_id |
 | `INodeConnection` | Соединение: source, input_port, output_port |
 | `IExecutionStep` | Операция: execute(data, context), configure(params) |
-| `IChainRunnable` | Цепочка: execute(frame, metadata) → ChainResult |
+| `IChainRunnable` | Цепочка: execute(payload, metadata) → ChainResult (payload duck-typed: ndarray-кадр ИЛИ list[dict] items) |
 | `IRemoteExecutable` | Cross-process шаг: dispatcher + execute_remote(frame, ctx, shm_name, shm_index) |
 
 Доменные классы прототипа (`ProcessingNode`, `ProcessingOperation`, `CrossProcessStep`) реализуют эти протоколы структурно (duck-typing). `_is_cross_process(step)` определяет cross-process шаги через `hasattr` и поддерживается всеми тремя исполнителями (`ChainRunnable`, `DagRunnable`, `ParallelChainRunnable`).

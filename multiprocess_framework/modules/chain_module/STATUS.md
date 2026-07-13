@@ -23,7 +23,7 @@
 
 ## Зависимости
 
-- `numpy` — ChainResult.frame, ChainThreadPool.submit_bundle
+- `numpy` — ChainResult.masks/contours, ChainThreadPool.submit_bundle (frame.copy()); `ChainResult.frame`/`execute(payload)` теперь `Any` (duck-typed: ndarray-кадр ИЛИ list[dict] items processing-pipeline, C6d)
 - `base_manager` — ChainThreadPool (BaseManager, ObservableMixin)
 - Стандартная библиотека: `concurrent.futures`, `threading`, `dataclasses`, `math`, `uuid`
 - Нет зависимостей от прототипа (`multiprocess_prototype.*`)
