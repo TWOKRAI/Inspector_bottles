@@ -251,3 +251,27 @@ B. **Mixin-наследование** (ProcessModule + CameraMixin + PluginMixin
 - `plugins/base.py` — чистая механика (state machine, PluginContext, порты), не знает про `generic`.
 - Обёртка ставится на бутe (idempotent-guard `_traced` защищает от двойной обёртки при бутe одного класса в двух процессах) — даже точнее по времени: плагин, импортированный но не забученный, не оборачивается зря.
 - Reversible: yes — вернуть `__init_subclass__` тривиально. Risk: low — поведение (обёртка process/produce при `INSPECTOR_FRAME_TRACE`) идентично, сдвинут только МОМЕНТ установки (class-декл → boot), не наблюдаемый тестами; hot-path не тронут.
+
+## ADR-PM-015: PipelineExecutor исполняет processing-цепочку через ChainRunnable (C6d инкремент 1)
+
+**Статус:** принято
+**Дата:** 2026-07-13
+**Refs:** plans/2026-07-06_constructor-master/c6-pipeline-engine-design.md §5(d) инкремент 1, plans/2026-07-06_constructor-master/plan.md (C6d)
+
+**Контекст:** `PipelineExecutor._execute_chain` был плоским собственным sequential-loop по `list[ProcessModulePlugin]` — дублировал роль исполнителя, при том что `chain_module` (`ChainRunnable`) — механизм последовательного прохода шагов — «дремал» с 0 живых потребителей (аудит D4/D2, дизайн §1.5). C6d делает `chain_module` живым исполнителем processing-цепочки одного процесса, не размазывая по нему breaker/IPC.
+
+**Решение:**
+1. Типизация `chain_module` обобщена `frame: np.ndarray` → `payload: Any` (`ChainRunnable.execute`, `IRunnableChain`, `ChainResult.frame`) — тело duck-typed, не тронуто; contract processing-pipeline (`list[dict]` items) прогоняется тем же исполнителем.
+2. Новый мост `PluginOperationStep` (`IExecutionStep`, дом — `process_module/generic/`) делегирует СТРОГО через `PluginRunner.call_process` (io-debug/FW_PORT_VALIDATE не отключаются — риск №2 дизайна §6, контракт-тест); сам ловит исключение → тег `not_inspected` + `on_fail`-репорт; `on_error` шага всегда `skip`.
+3. Вся breaker-семантика (consecutive_fails/bypass/auto_reset/critical→suspect) остаётся в `PipelineExecutor`, `chain_module/core/error_policy.py` НЕ тронут (0 изменений). Критический bypassed плагин ПОДМЕНЯЕТСЯ на позиции лёгким `SuspectTagStep` (точная per-position семантика — тег на items, существующих в момент прохода), некритический — выбрасывается из шагов.
+4. Активные шаги мемоизируются (dirty-флаг, инвалидация в `_on_plugin_fail`/`_check_auto_reset`) — 0 пересборок в стабильном breaker-окне.
+5. Скоуп — строго Инкремент 1. Инкремент 2 (`DagRunnable`/`ParallelChainRunnable` для intra-process ветвления) — ВНЕ скоупа (нет живого потребителя, анти-карго-культ, дизайн §5(d)).
+
+**Перф (микробенч old list-loop vs chain-based):** фиксированный overhead `ChainRunnable.execute` ~2µs/батч (ChainContext+ChainResult+per-step hasattr, тело chain.py менять нельзя). Пустые синтетические плагины: −45…−67% throughput (worst case машинерии); реальная работа звена: 50µs/звено −1.25%, 200µs −0.36%, 1ms −0.03%. Кроссовер под 5% — уже при мизерной работе; на настоящих CV-плагинах регресс FPS <1.3%. Дизайн §6 предвидел (мерить на рецептах, откат к list-loop только при реальном регрессе). Прод-рецепты headless не бутятся — реалистичный synthetic-work бенч = прокси recipe-FPS.
+
+**Rejected:** держать все плагины шагами и фильтровать bypass ВНУТРИ шага (чтение `is_bypassed` в шаге) — отвергнуто: breaker-семантика утекла бы в chain-слой. Ранняя реализация «фильтр bypassed до сборки + suspect-тег upfront» — отвергнута ревью (Fable HIGH): upfront-тег терял позицию (downstream-плагин перезаписывал статус; замена списка теряла тег) — доказано 2 RED-тестами, исправлено `SuspectTagStep`-на-позиции.
+
+**Последствия:**
+- `chain_module` — живой исполнитель processing-цепочки (acceptance C6 «живой пайплайн через chain»); DAG/parallel доступны, НЕ подключены.
+- `run_loop`/`_send_results`/`bind_queue`/метрики/IPC НЕ переехали в chain_module; `SourceProducer` не тронут; hot-path (SHM/seqlock/per-frame Message) не тронут.
+- Reversible: yes — откат к прямому list-loop локален в `_execute_chain`. Risk: medium (перф, см. выше; смягчён — реальный регресс FPS <1.3%).
