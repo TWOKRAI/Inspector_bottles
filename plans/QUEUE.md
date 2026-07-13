@@ -1,6 +1,6 @@
 # Очередь планов — единая последовательность задач
 
-> Обновлено **2026-07-13** (RS-2+RS-3 merge 71d3b479 и RS-6+RS-5 merge 7e77e9aa — оба через Fable-ревью; NEW-D1 закрыт ещё merge bcabd296 (стейл-строка снята); из RS-волны остались RS-4 и RS-7-вопрос; ранее 2026-07-12 — RS-1 и Follow-up аудита В1: AU-1/AU-2 major + миноры AU-3/4/5/7; AU-6 — попутно с физпереносом assembler/planner; фронт → В3 GUI-конструктор + хвост C6(d)/(e)).
+> Обновлено **2026-07-13** (**RS-волна закрыта целиком**: RS-2+RS-3 merge 71d3b479, RS-6+RS-5 merge 7e77e9aa, RS-4 merge a42747be, RS-7 — решение владельца (workers→C6(e), active_services→freeze); NEW-D1 закрыт ещё merge bcabd296; фронт → C6(d)/(e), затем В3 GUI-конструктор; ранее 2026-07-12 — RS-1 и Follow-up аудита В1).
 >
 > **Иерархия документов — 3 уровня, у каждого своя роль:**
 >
@@ -14,22 +14,18 @@
 
 ## Сделано (свёрнуто; детали и merge-хэши — в constructor-master)
 
-Ф0–Ф3 целиком · трек F (god-split F.1–F.7 + MERGE-GATE) · Ф4: 4.1/4.2/4.3/4.4/4.7/4.8/4.9 + добор H1–H8 · Ф5-ядро: 5.1/5.2/5.4–5.9/5.14–5.17/5.19–5.21 · Ф5-добор: C1/C2/C3/C4/C5/C6(a,b,c)/C7/C8 · post-review R1–R6 · NEW-2/NEW-3/NEW-5/NEW-8 · волны В0/В1 current-path целиком (хвост В1 — mini-GATE 4.8 вердикт владельца, C3 carve `recipe`, 4.7 join/inspector ADR-PMM-017, C8 docs-sync карты модулей — закрыт 2026-07-12; chain-статус в картах модулей отражает состояние ДО C6(d)/(e) — финализировать повторно после них) · **В2 «РЫБА» целиком** (5.11 app_module skeleton + ManifestStore/дискавери, 5.12 AppOrchestrator generic + хуки двух сортов, 5.13 minimal_app финализация + CI-smoke — 2-й процесс + живой IPC + sentrux-boundary — закрыт 2026-07-12) · **Follow-up аудита В1** (AU-1 Save-канонизатор `gui_positions` + AU-2 escape-hatch `inspector`/`restart_policy` через typed/extras, миноры AU-3/4/5/7 — merges 7526a7bc + a1150d26 через Fable-ревью, закрыт 2026-07-12; **AU-6 остался** — попутно с физпереносом assembler/planner, ADR-RCP-005; хвост AU-5: `test_discovery.py` прямой `_plugins` — попутно с app_module) · **RS-1** единый Save-механизм (merge ad3c03ca, 2026-07-12) · **RS-2+RS-3** честный state после switch + громкий switch (merge 71d3b479, 2026-07-13: Ж-3 конверт state.merge, B-4 cleanup-хвост, B-5 list-алиас, pid+config в state на boot/switch/restart, B-2 protected=реальные выжившие, B-3 unstoppable alert+retry, Ж-4 confirmed-death shutdown, Ж-5 priority-дедуп) · **NEW-D1** TabRegistry во frontend_module (merge bcabd296) · **RS-6+RS-5** контракт фейков + валидация на записи + Displays-устойчивость (merge 7e77e9aa, 2026-07-13: реестр 11 фейков, Save/load-gate циклы/дубли, boot-контракт check() не расширен, легаси-рецепт не роняет Дисплеи read+write).
+Ф0–Ф3 целиком · трек F (god-split F.1–F.7 + MERGE-GATE) · Ф4: 4.1/4.2/4.3/4.4/4.7/4.8/4.9 + добор H1–H8 · Ф5-ядро: 5.1/5.2/5.4–5.9/5.14–5.17/5.19–5.21 · Ф5-добор: C1/C2/C3/C4/C5/C6(a,b,c)/C7/C8 · post-review R1–R6 · NEW-2/NEW-3/NEW-5/NEW-8 · волны В0/В1 current-path целиком (хвост В1 — mini-GATE 4.8 вердикт владельца, C3 carve `recipe`, 4.7 join/inspector ADR-PMM-017, C8 docs-sync карты модулей — закрыт 2026-07-12; chain-статус в картах модулей отражает состояние ДО C6(d)/(e) — финализировать повторно после них) · **В2 «РЫБА» целиком** (5.11 app_module skeleton + ManifestStore/дискавери, 5.12 AppOrchestrator generic + хуки двух сортов, 5.13 minimal_app финализация + CI-smoke — 2-й процесс + живой IPC + sentrux-boundary — закрыт 2026-07-12) · **Follow-up аудита В1** (AU-1 Save-канонизатор `gui_positions` + AU-2 escape-hatch `inspector`/`restart_policy` через typed/extras, миноры AU-3/4/5/7 — merges 7526a7bc + a1150d26 через Fable-ревью, закрыт 2026-07-12; **AU-6 остался** — попутно с физпереносом assembler/planner, ADR-RCP-005; хвост AU-5: `test_discovery.py` прямой `_plugins` — попутно с app_module) · **RS-1** единый Save-механизм (merge ad3c03ca, 2026-07-12) · **RS-2+RS-3** честный state после switch + громкий switch (merge 71d3b479, 2026-07-13: Ж-3 конверт state.merge, B-4 cleanup-хвост, B-5 list-алиас, pid+config в state на boot/switch/restart, B-2 protected=реальные выжившие, B-3 unstoppable alert+retry, Ж-4 confirmed-death shutdown, Ж-5 priority-дедуп) · **NEW-D1** TabRegistry во frontend_module (merge bcabd296) · **RS-6+RS-5** контракт фейков + валидация на записи + Displays-устойчивость (merge 7e77e9aa, 2026-07-13: реестр 11 фейков, Save/load-gate циклы/дубли, boot-контракт check() не расширен, легаси-рецепт не роняет Дисплеи read+write) · **RS-4** dirty-контур редактора (merge a42747be, 2026-07-13: TopologySession dirty+diverged, диалог Сохранить/Не сохранять/Отмена на активации+закрытии+UI-рестарте, diverged по подтверждённому apply, единый Save-путь ×3) · **RS-7** решение владельца 2026-07-13 (workers→рантайм с C6(e), active_services→freeze; пометки в схеме) — **RS-волна закрыта**.
 
 ## Строгая последовательность (сверху вниз)
 
-### Сейчас — хвост RS-волны рецептов (аудит 2026-07-12)
+### Сейчас — хвост C-волны (по дизайну C6 — после 5.13, второй живой смок-детектор)
 
-| # | Задача | Где детали |
-|---|---|---|
-| 4c | **RS-4** — dirty-контур редактора (синергия В3) → **RS-7** (вопрос владельцу: honest-поля схемы) | constructor-master, RS-волна + [аудит](../docs/audits/2026-07-12_recipe-lifecycle-audit.md) |
-
-### Хвост C-волны (по дизайну C6 — после 5.13, второй живой смок-детектор)
+**RS-волна ЗАКРЫТА 2026-07-13** (RS-1..RS-7, все через Fable-ревью; остаток RS→Ф7 — при старте Ф7).
 
 | # | Задача | Где детали |
 |---|---|---|
 | 5 | **C6(d)** — generic-механика на runnables `chain_module` (DAG/parallel — chain перестаёт дремать). **Перф-ревью 2026-07-12 п.1:** это механизм бюджета «кадр пересекает границу процесса ≤1–2 раза» (сейчас по рецептам 3–9) — CV-цепочка внутри одного воркера, бюджет внести в acceptance | [c6-pipeline-engine-design.md](2026-07-06_constructor-master/c6-pipeline-engine-design.md) + constructor-master Ф7-преамбула |
-| 6 | **C6(e)** — chain использует пул `worker_module` | там же |
+| 6 | **C6(e)** — chain использует пул `worker_module` + **RS-7: довести `Process.workers` из рецепта до рантайма** (решение владельца 2026-07-13) | там же |
 
 ### В4 — Ф7 hot-path (строго одним вскрытием, один агент; GATE G3 перед стартом; преамбула Ф7 — 3 требования перф-ревью 2026-07-12)
 
