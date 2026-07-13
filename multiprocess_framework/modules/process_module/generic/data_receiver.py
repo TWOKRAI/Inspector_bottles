@@ -54,10 +54,11 @@ class DataReceiver:
         self._lag_threshold = lag_alert_threshold_sec
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
-        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль). Сигнатура
-        # no-op принимает **kwargs (Ф7 G.6: вызов ниже несёт trace_id=... как extra
-        # для LogRecord) — реальные ProcessModule._log_debug тоже kwargs-safe.
-        self._log_debug = log_debug or (lambda msg, **_: None)
+        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль). Дефолт —
+        # общий kwargs-safe no-op (F6d, ревью 2026-07-13): вызов ниже несёт
+        # trace_id=... как extra для LogRecord (Ф7 G.6) — реальные
+        # ProcessModule._log_debug тоже kwargs-safe.
+        self._log_debug = log_debug or frame_trace.noop_log
 
         # Метрики
         self._overload_events = 0
