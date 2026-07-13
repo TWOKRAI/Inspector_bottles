@@ -75,6 +75,22 @@ class DetectionOperation:
         pass
 
 
+class SlowOp:
+    """Операция, зависающая на ``delay`` секунд (для timeout-тестов)."""
+
+    def __init__(self, delay: float = 10.0):
+        self.delay = delay
+
+    def execute(self, data: Any, context: Any) -> Any:
+        import time as _time
+
+        _time.sleep(self.delay)
+        return data
+
+    def configure(self, params: dict) -> None:
+        pass
+
+
 def make_step(
     node_id: str,
     operation=None,
