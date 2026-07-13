@@ -67,7 +67,8 @@ class PipelineExecutor:
         self._critical_plugins = set(critical_plugins or [])
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
-        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль).
+        # Kwargs-safe no-op по умолчанию. Периодический per-frame TRACE-лог снят
+        # в Ф7 G.1 (был спамом каждый 30-й batch на hot path).
         self._log_debug = log_debug or (lambda msg: None)
 
         # Circuit breaker state per plugin
@@ -173,33 +174,13 @@ class PipelineExecutor:
             # subмиллисекундная, а monotonic на Windows имеет ~15мс гранулярность.
             t_start = time.perf_counter()
 
-            # [TRACE] Логируем каждый 30-й batch
-            if not hasattr(self, "_trace_exec_cnt"):
-                self._trace_exec_cnt = 0
-            self._trace_exec_cnt += 1
-            do_trace = self._trace_exec_cnt % 30 == 1
-
-            if do_trace:
-                self._log_debug(
-                    f"[TRACE] PipelineExecutor: got {len(items)} item(s) from queue, "
-                    f"plugins={[p.name for p in self._plugins]}, "
-                    f"targets={self._chain_targets}"
-                )
-
             # Прогнать items через chain плагинов
             items = self._execute_chain(items)
 
             # Если items пустой после chain — ничего не отправляем
             if not items:
-                if do_trace:
-                    self._log_debug("[TRACE] PipelineExecutor: chain вернул пустой список!")
                 self._cycle_metrics.record(time.perf_counter() - t_start)
                 continue
-
-            if do_trace:
-                self._log_debug(
-                    f"[TRACE] PipelineExecutor: chain → {len(items)} item(s), sending to {self._chain_targets}"
-                )
 
             # Отправить результаты по IPC
             self._send_results(items)

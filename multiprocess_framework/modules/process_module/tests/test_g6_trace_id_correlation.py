@@ -5,11 +5,23 @@
 Сценарий: source-процесс camera_0 (SourceProducer, звено 1) рождает кадр,
 назначает trace_id, шлёт через IPC (FrameShmMiddleware.strip_data_frame_on_send —
 тот же send-middleware, что регистрирует GenericProcess в проде); detector-процесс
-(DataReceiver, звено 2) принимает, восстанавливает frame из SHM (restore_frame) и
-логирует. Обе TRACE-записи (звено 1 и звено 2) должны нести ОДИН trace_id.
+(DataReceiver, звено 2) принимает, восстанавливает frame из SHM (restore_frame).
+Проверяется, что ОДИН trace_id доезжает без искажений через оба звена реального
+hot-path (Dict at Boundary — поле пережило SHM/pickle round-trip само по себе),
+а ЕСЛИ узел логирует через LoggerManager (штатный факад), trace_id корректно
+коррелируется между записями двух разных модулей через LogRecord.extra.
 
 Заодно проверяется runtime-счётчик границ (frame_hops): ровно 1 после единственного
 send-middleware прохода.
+
+Ф7 G.1 (перф-ревью 2026-07-13): периодический per-frame TRACE-лог (каждый 30-й
+кадр) снят с hot path SourceProducer/DataReceiver — раньше корреляция
+проверялась через него (do_trace=True на первом кадре). Теперь: (1) сама
+трасса кадра (trace_id/frame_hops) проверяется по полям item/msg — они
+переживают round-trip БЕЗ логирования, это и есть суть Dict at Boundary; (2)
+механизм «лог↔кадр коррелируются» проверяется отдельно через реальный
+LoggerManager + tap-sink (см. test_logger_manager.TestTraceIdExtraField —
+тот же приём), а не через ad-hoc callback на hot path.
 """
 
 import queue
@@ -18,6 +30,8 @@ import time
 
 import numpy as np
 
+from multiprocess_framework.modules.logger_module.core.log_config import LogLevel
+from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.process_module.generic.data_receiver import (
     DataReceiver,
 )
@@ -51,14 +65,26 @@ class _CameraSource(ProcessModulePlugin):
         return [{"frame": np.full((600, 800, 3), 50, dtype=np.uint8), "camera_id": 0}]
 
 
-def test_trace_id_correlates_logs_across_two_nodes():
-    """G.6 acceptance: кадр проходит ≥2 звена, лог-записи обоих несут один trace_id."""
-    node1_logs: list[dict] = []
+class _FakeTapChannel:
+    """Минимальный IChannel-совместимый tap: только write(dict) (Task 1.5 API).
 
-    def log_debug_node1(msg, **extra):
-        if extra.get("trace_id"):
-            node1_logs.append(extra)
+    Дублирует ``test_logger_manager._FakeTapChannel`` — небольшой тестовый
+    хелпер, локальная копия дешевле кросс-модульного импорта тестового кода.
+    """
 
+    def __init__(self):
+        self.records: list = []
+
+    def write(self, record: dict) -> None:
+        self.records.append(record)
+
+    def close(self) -> None:
+        pass
+
+
+def test_trace_id_survives_two_hot_path_nodes():
+    """G.6 acceptance (часть 1): кадр проходит ≥2 звена hot-path, trace_id и
+    frame_hops не искажаются (Dict at Boundary, без единого лога)."""
     shm = FrameShmMiddleware(MemoryManager(), owner="camera_0", slot="output_frames", coll=3)
     sent: list = []
     producer = SourceProducer(
@@ -67,7 +93,6 @@ def test_trace_id_correlates_logs_across_two_nodes():
         send_fn=lambda t, m: sent.append((t, m)),
         chain_targets=["detector"],
         target_fps=100.0,
-        log_debug=log_debug_node1,
         node_name="camera_0",
     )
 
@@ -80,26 +105,20 @@ def test_trace_id_correlates_logs_across_two_nodes():
     t.join(timeout=1)
 
     assert sent, "SourceProducer должен был отправить хотя бы один item"
-    assert node1_logs, "звено 1 (source) должно было залогировать trace_id — первый кадр всегда do_trace=True"
-    trace_id = node1_logs[0]["trace_id"]
-    assert trace_id and len(trace_id) == 32
+    _, first_msg = sent[0]
+    trace_id_before_send = first_msg["data"]["trace_id"]
+    assert trace_id_before_send and len(trace_id_before_send) == 32
 
     # Router send-middleware (в проде — GenericProcess регистрирует его через
     # router.add_send_middleware) выносит frame в SHM ДО фактической IPC-отправки.
     # SourceProducer сам middleware не зовёт (P3.1.2) — применяем явно, как это
     # реально делает router на границе процесса.
-    _, first_msg = sent[0]
     shm.strip_data_frame_on_send(first_msg)
-    assert first_msg["data"]["trace_id"] == trace_id
+    trace_id = first_msg["data"]["trace_id"]
+    assert trace_id == trace_id_before_send  # звено 1 не исказило trace_id
     assert first_msg["data"]["frame_hops"] == 1  # ровно одна граница пройдена
 
     # --- звено 2: DataReceiver ("detector") принимает то же сообщение ---
-    node2_logs: list[dict] = []
-
-    def log_debug_node2(msg, **extra):
-        if extra.get("trace_id"):
-            node2_logs.append(extra)
-
     chain_q: queue.Queue = queue.Queue()
     inspector = PassThroughInspector()
     receiver = DataReceiver(
@@ -107,7 +126,6 @@ def test_trace_id_correlates_logs_across_two_nodes():
         shm_middleware=shm,
         inspector_manager=inspector,
         chain_queue=chain_q,
-        log_debug=log_debug_node2,
         node_name="detector",
     )
     inspector._on_ready = receiver.on_items_ready
@@ -125,12 +143,42 @@ def test_trace_id_correlates_logs_across_two_nodes():
 
     assert not chain_q.empty()
     delivered = chain_q.get_nowait()
+    # Звено 2 получило ТОТ ЖЕ trace_id, что был назначен у источника — путь кадра
+    # восстановим по этому полю без единого лога (Dict at Boundary).
     assert delivered[0]["trace_id"] == trace_id
     assert delivered[0]["frame_hops"] == 1
 
-    # Оба звена залогировали ОДИН trace_id — суть acceptance G.6.
-    assert node2_logs, "звено 2 (detector) должно было залогировать trace_id"
-    assert node2_logs[0]["trace_id"] == trace_id
+
+def test_trace_id_correlates_across_nodes_via_logger_tap():
+    """G.6 acceptance (часть 2): ЕСЛИ узел логирует (LoggerManager — штатный
+    факад проекта, не print/ad-hoc), запись несёт trace_id в LogRecord.extra —
+    и по нему коррелируются записи двух РАЗНЫХ модулей (source/detector).
+
+    trace_id здесь — тот же, что реально назначается у источника
+    (``frame_trace.new_trace_id()``, формат подтверждён предыдущим тестом),
+    не строка-заглушка: доказывает, что механизм переноса trace_id в extra
+    (``mgr.info(msg, trace_id=..., module=...)``) работает для настоящего
+    производственного trace_id, а не только для примера из test_logger_manager.
+    """
+    from multiprocess_framework.modules.process_module.generic import frame_trace
+
+    trace_id = frame_trace.new_trace_id()
+    assert len(trace_id) == 32
+
+    mgr = LoggerManager(manager_name="TestG6TraceCorrelate")
+    mgr.initialize()
+    tap = _FakeTapChannel()
+    mgr.add_log_tap(tap, min_level=LogLevel.DEBUG)
+
+    # Звено 1 (source) и звено 2 (detector) логируют через ОДИН и тот же факад —
+    # ровно так, как это делают реальные ctx.log_info/_log_debug в проде.
+    mgr.info("SourceProducer(camera_0): produce()", module="camera_0", trace_id=trace_id)
+    mgr.info("DataReceiver: item built", module="detector", trace_id=trace_id)
+
+    correlated = [r for r in tap.records if r["extra"].get("trace_id") == trace_id]
+    assert len(correlated) == 2, "оба звена должны были залогировать один trace_id"
+    assert {r["module"] for r in correlated} == {"camera_0", "detector"}
+    mgr.shutdown()
 
 
 if __name__ == "__main__":

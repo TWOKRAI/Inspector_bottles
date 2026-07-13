@@ -1,0 +1,50 @@
+# Рецепт g1_perf_probe — минимальный синтетический тракт для Ф7 G.1 baseline.
+#
+# Назначение: измерить FPS/latency p50-p99/границы-процесса на кадр БЕЗ
+# реального железа (tier: синтетика) — воспроизводимо на любой машине CI.
+# НЕ прод-рецепт: не выставлен в GUI-каталоге как основной сценарий, только
+# для headless-прогона через BackendHarness/backend_ctl.g1_perf_probe.
+#
+# Тракт (2 процесса, ровно 1 граница IPC на кадр):
+#   synthetic_source[synthetic_frame_source] → consumer[frame_counter]
+#
+# Запуск headless:
+#   BACKEND_CTL=1 FW_PERF_PROBES=1 python -m backend_ctl.g1_perf_probe
+name: g1_perf_probe
+version: 1
+description: "Synthetic source → frame_counter — Ф7 G.1 perf-baseline (tier: синтетика)"
+
+blueprint:
+  name: g1_perf_probe
+  description: "Синтетический источник кадров → счётчик/FPS-консьюмер (без камеры)"
+
+  processes:
+    # --- Источник: синтетические кадры, без камеры ---
+    - process_name: synthetic_source
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - consumer
+      source_target_fps: 30
+      plugins:
+        - plugin_class: Plugins.sources.synthetic_frame_source.plugin.SyntheticFrameSourcePlugin
+          plugin_name: synthetic_frame_source
+          category: source
+          camera_id: 0
+          resolution_width: 640
+          resolution_height: 480
+
+    # --- Потребитель: счётчик кадров + FPS-лог (pass-through) ---
+    - process_name: consumer
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets: []
+      plugins:
+        - plugin_class: Plugins.sources.frame_counter.plugin.FrameCounterPlugin
+          plugin_name: frame_counter
+          category: processing
+          log_interval_sec: 5.0
+
+  wires:
+    - source: synthetic_source.synthetic_frame_source.frame
+      target: consumer.frame_counter.frame

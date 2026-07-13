@@ -15,6 +15,7 @@ import time
 from typing import Callable
 
 from . import frame_trace
+from . import perf_probes
 from .cycle_metrics import CycleMetricsRecorder
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 from .inspector_registry import ItemInspector
@@ -54,10 +55,10 @@ class DataReceiver:
         self._lag_threshold = lag_alert_threshold_sec
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
-        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль). Дефолт —
-        # общий kwargs-safe no-op (F6d, ревью 2026-07-13): вызов ниже несёт
-        # trace_id=... как extra для LogRecord (Ф7 G.6) — реальные
-        # ProcessModule._log_debug тоже kwargs-safe.
+        # Kwargs-safe no-op по умолчанию (F6d, ревью 2026-07-13): реальный
+        # ProcessModule._log_debug тоже kwargs-safe (несёт trace_id=... как extra
+        # для LogRecord, Ф7 G.6). Периодический per-frame TRACE снят в Ф7 G.1 —
+        # latency этапов теперь через perf_probes (см. self._perf ниже).
         self._log_debug = log_debug or frame_trace.noop_log
 
         # Метрики
@@ -69,6 +70,9 @@ class DataReceiver:
         # холостые spin'ы при пустом receive (иначе effective_hz отражал бы
         # частоту опроса, а не реальный поток данных).
         self._cycle_metrics = CycleMetricsRecorder(target_interval_s=0.0)
+        # HP-1 (Ф7 G.1): per-stage latency (receive/restore), за флагом
+        # FW_PERF_PROBES, дефолт OFF — см. perf_probes.py.
+        self._perf = perf_probes.LatencyProbes()
 
         # stop_event текущего run_loop — сохраняется при запуске воркера,
         # используется в on_items_ready для stop-aware backpressure.
@@ -78,9 +82,14 @@ class DataReceiver:
         """Снимок тайминга цикла приёма (потокобезопасно).
 
         WorkerManager.get_worker_status подмешивает результат в статус воркера →
-        heartbeat → ProcessMonitor.state.fps/latency_ms → GUI.
+        heartbeat → ProcessMonitor.state.fps/latency_ms → GUI. При включённых
+        perf-пробах (FW_PERF_PROBES=1) дополнительно несёт ``perf_probes``:
+        p50/p99/count по этапам receive/restore (HP-1, Ф7 G.1).
         """
-        return self._cycle_metrics.get_cycle_metrics()
+        metrics = self._cycle_metrics.get_cycle_metrics()
+        if perf_probes.enabled():
+            metrics["perf_probes"] = self._perf.get_stats()
+        return metrics
 
     def on_items_ready(self, items: list[dict]) -> None:
         """Callback от InspectorManager — коллекция готова, кладём в chain_queue.
@@ -147,56 +156,24 @@ class DataReceiver:
             # subмиллисекундная, а monotonic на Windows имеет ~15мс гранулярность.
             t_start = time.perf_counter()
 
-            # Message → dict: middleware и pipeline работают с plain dict
-            if hasattr(msg, "to_dict"):
-                msg = msg.to_dict()
+            # Message → dict: middleware и pipeline работают с plain dict.
+            # HP-1 (Ф7 G.1): perf-проба этапа "receive" (десериализация, БЕЗ
+            # учёта времени блокирующего ожидания в self._receive() выше) — за
+            # флагом FW_PERF_PROBES, дефолт OFF, см. perf_probes.py.
+            with self._perf.measure("receive"):
+                if hasattr(msg, "to_dict"):
+                    msg = msg.to_dict()
 
-            # [TRACE] Логируем каждый 30-й приём
-            if not hasattr(self, "_trace_recv_cnt"):
-                self._trace_recv_cnt = 0
-            self._trace_recv_cnt += 1
-            do_trace = self._trace_recv_cnt % 30 == 1
-
-            if do_trace:
-                data = msg.get("data", {})
-                self._log_debug(
-                    f"[TRACE] DataReceiver: msg received, "
-                    f"data_type={msg.get('data_type', '?')}, "
-                    f"sender={msg.get('sender', '?')}, "
-                    f"has_shm_name={bool(data.get('shm_name') if isinstance(data, dict) else False)}, "
-                    f"has_frame={'frame' in msg}"
-                )
-
-            # Восстановить frame из SHM
+            # Восстановить frame из SHM. HP-1: perf-проба этапа "restore".
             if self._shm:
-                msg = self._shm.restore_frame(msg)
-
-            if do_trace:
-                self._log_debug(
-                    f"[TRACE] DataReceiver: after restore_frame, has_frame={'frame' in msg}, "
-                    f"frame_is_none={msg.get('frame') is None if 'frame' in msg else 'N/A'}"
-                )
+                with self._perf.measure("restore"):
+                    msg = self._shm.restore_frame(msg)
 
             # Построить item из msg
             item = self._build_item(msg)
 
             # frame-trace: время передачи от предыдущего узла к этому.
             frame_trace.record_transport(item, self._node)
-
-            if do_trace:
-                frame = item.get("frame")
-                shape = frame.shape if frame is not None and hasattr(frame, "shape") else None
-                # Ф7 G.6: trace_id проброшен из источника вместе с item (Dict at
-                # Boundary, поле пережило SHM/pickle round-trip само по себе) —
-                # звено 2 (приёмный узел), позволяет коррелировать лог с логом
-                # источника по одному trace_id.
-                self._log_debug(
-                    f"[TRACE] DataReceiver: item built, "
-                    f"has_frame={'frame' in item}, shape={shape}, "
-                    f"total_regions={item.get('total_regions', 0)}, "
-                    f"seq_id={item.get('seq_id')}",
-                    trace_id=item.get("trace_id"),
-                )
 
             # Передать в InspectorManager
             self._inspector.on_item(item)
