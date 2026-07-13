@@ -61,11 +61,10 @@ class ProcessIO:
     ) -> bool:
         """Отправить COMMAND-сообщение целевому процессу.
 
-        Единый конверт (Ф7 G.2): payload едет под ``data``. Явный ``data``
-        приоритетнее ``args``; при отсутствии обоих — пустой dict.
+        Единый конверт (Ф7 G.2, F6): приоритет payload (data > args) — в
+        MessageAdapter.command; здесь прокидываем оба параметра.
         """
-        payload = data if data is not None else (args or {})
-        msg = self._msg.command(targets=[target], command=command, args=payload)
+        msg = self._msg.command(targets=[target], command=command, args=args, data=data)
         return self._p.send_message(target, msg.to_dict())
 
     def send_event(self, target: str, event_type: str, event_data: dict) -> bool:

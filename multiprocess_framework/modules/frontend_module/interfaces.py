@@ -23,11 +23,15 @@ class SupportsCommandMessage(Protocol):
         targets: Union[List[str], str],
         command: str,
         args: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
         need_ack: bool = False,
         priority: Any = "normal",
         **kwargs: Any,
     ) -> Any:
-        """Собрать сообщение типа command; результат — объект с методом to_dict()."""
+        """Собрать сообщение типа command; результат — объект с методом to_dict().
+
+        Единый конверт (Ф7 G.2): payload под ``data``; явный ``data`` приоритетнее ``args``.
+        """
 
 
 @runtime_checkable

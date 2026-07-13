@@ -59,12 +59,12 @@ class RoutedCommandSender:
             final_args = dict(args or {})
 
         targets = self._resolve_targets(command_id)
-        # Единый конверт (Ф7 G.2): payload едет под data (через args-параметр
-        # фабрики). Явный data имеет приоритет над собранными args (как раньше).
-        payload = data if data is not None else final_args
+        # Единый конверт (Ф7 G.2, F6): приоритет payload (data > args) живёт в
+        # MessageAdapter.command — здесь просто прокидываем оба.
         msg = self._message_factory.command(
             targets=targets,
             command=command_id,
-            args=payload,
+            args=final_args,
+            data=data,
         )
         return self._router.send_message(targets[0], msg.to_dict())
