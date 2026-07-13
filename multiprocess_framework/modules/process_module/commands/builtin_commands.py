@@ -982,7 +982,14 @@ class BuiltinCommands:
             FrameShmMiddleware,
         )
 
-        mw = FrameShmMiddleware(memory_manager=mm, owner=shm_owner, slot=shm_name)
+        mw = FrameShmMiddleware(
+            memory_manager=mm,
+            owner=shm_owner,
+            slot=shm_name,
+            # Ф7 G.6: тот же runtime-счётчик границ, что и в generic-пути (см.
+            # generic_process.py) — router_manager здесь уже проверен truthy выше.
+            on_boundary_cross=self._services.router_manager.record_frame_boundary_crossing,
+        )
 
         # Подключить middleware к router
         if role == "sender":

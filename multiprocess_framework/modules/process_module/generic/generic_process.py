@@ -66,17 +66,21 @@ class GenericProcess(ProcessModule):
         # FrameShmMiddleware (если есть memory_manager)
         shm_middleware = None
         if self.memory_manager:
+            router = getattr(self, "router_manager", None)
             shm_middleware = FrameShmMiddleware(
                 memory_manager=self.memory_manager,
                 owner=self.name,
                 slot="output_frames",
                 log_error=self._log_error,
+                # Ф7 G.6: runtime-счётчик границ процесса на кадр — виден в
+                # introspect.router_stats (frame_boundary_crossings), тот же стиль,
+                # что и relayed_to_hub/routing_epoch.
+                on_boundary_cross=(router.record_frame_boundary_crossing if router is not None else None),
             )
             # P3.1.2: Claim Check кадров — забота хаба, а не producer'ов. Регистрируем
             # send-middleware: SourceProducer/PipelineExecutor шлют msg с frame в data,
             # router сам выносит его в SHM (strip_and_write по generic-семантике). Guard
             # внутри метода (type=="data") — no-op для команд/heartbeat/state.
-            router = getattr(self, "router_manager", None)
             if router is not None:
                 router.add_send_middleware(shm_middleware.strip_data_frame_on_send)
 

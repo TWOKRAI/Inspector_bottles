@@ -121,6 +121,12 @@ class RouterManager(ChannelRoutingManager):
             # через system-очередь PM (диагностика: стейл-очередь сброшена refresh'ем
             # → send упал в relay). Попадает в introspect.router_stats автоматически.
             "relayed_to_hub": 0,
+            # Ф7 G.6: сколько раз кадр реально пересёк границу процесса через ЭТОТ
+            # router (инкремент из FrameShmMiddleware в момент send — SHM-успех ИЛИ
+            # pickle-fallback, оба пути кладут кадр на исходящий транспорт). Метрика
+            # для baseline «границ/кадр» (G.1/G.7) — доступна runtime без grep по
+            # логам. Попадает в introspect.router_stats автоматически (как relayed_to_hub).
+            "frame_boundary_crossings": 0,
         }
         self._stats_lock = threading.Lock()
 
@@ -141,6 +147,16 @@ class RouterManager(ChannelRoutingManager):
     def _inc_stat(self, key: str, value: int = 1) -> None:
         with self._stats_lock:
             self._stats[key] += value
+
+    def record_frame_boundary_crossing(self) -> None:
+        """Учесть одно пересечение границы процесса кадром (Ф7 G.6).
+
+        Публичный метод — ``FrameShmMiddleware`` (router_module) не имеет доступа
+        к приватному ``_stats``/``_inc_stat`` напрямую, связь идёт через опциональный
+        callback ``on_boundary_cross``, которым middleware конфигурируется на
+        send-стороне (см. ``FrameShmMiddleware.strip_and_write``/``on_send``).
+        """
+        self._inc_stat("frame_boundary_crossings")
 
     # ================================================================
     # LIFECYCLE
@@ -436,9 +452,7 @@ class RouterManager(ChannelRoutingManager):
             self._log_debug(f"_deliver_by_targets: relay хабу '{self._relay_hub}' не удался: {exc}")
         return False
 
-    def _deliver_via_channel(
-        self, channel: IMessageChannel, process: str, ticket: Dict[str, Any]
-    ) -> bool:
+    def _deliver_via_channel(self, channel: IMessageChannel, process: str, ticket: Dict[str, Any]) -> bool:
         """Доставить билет через зарегистрированный канал (мост push→канал, Ф1.1b).
 
         Возвращает True при успехе. `channel.send` сам решает, есть ли получатель:
@@ -452,13 +466,9 @@ class RouterManager(ChannelRoutingManager):
             self._log_debug(f"_deliver_by_targets: канал '{process}'.send бросил {exc!r}")
             return False
         if isinstance(result, dict) and result.get("status") == "error":
-            self._log_debug(
-                f"_deliver_by_targets: канал '{process}' не доставил: {result.get('reason')!r}"
-            )
+            self._log_debug(f"_deliver_by_targets: канал '{process}' не доставил: {result.get('reason')!r}")
             return False
-        self._log_debug(
-            f"_deliver_by_targets: доставлено через канал '{process}' (мост push→канал, Ф1.1b)"
-        )
+        self._log_debug(f"_deliver_by_targets: доставлено через канал '{process}' (мост push→канал, Ф1.1b)")
         return True
 
     # ================================================================

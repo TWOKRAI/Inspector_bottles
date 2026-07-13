@@ -42,12 +42,18 @@ class FrameShmMiddleware:
         slot: str = "output_frames",
         coll: int = 3,
         log_error: Callable[[str], None] | None = None,
+        on_boundary_cross: Callable[[], None] | None = None,
     ) -> None:
         self._mm = memory_manager
         self._owner = owner
         self._slot = slot
         self._coll = coll
         self._log_error = log_error or (lambda msg: None)
+        # Ф7 G.6: коллбек в RouterManager._inc_stat (счётчик "frame_boundary_crossings",
+        # виден в introspect.router_stats) — middleware сам приватного _stats не видит
+        # (router_module не должен тянуть RouterManager как обязательную зависимость),
+        # связь через опциональный callback, None → no-op (обратная совместимость).
+        self._on_boundary_cross = on_boundary_cross or (lambda: None)
         self._allocated = False
         self._write_index = 0
         # Текущая ВЫДЕЛЕННАЯ ёмкость слота (h, w, c). None — ещё не выделяли.
@@ -196,6 +202,14 @@ class FrameShmMiddleware:
             # frame остаётся в item (pickle fallback)
             pass
 
+        # Ф7 G.6: item реально уходит через IPC в другой процесс (SHM-успех ИЛИ
+        # pickle-fallback — оба пути кладут item на исходящий транспорт). Счётчик
+        # границ/кадр — plain dict-поле в метаданных самого кадра (переживает
+        # pickle/SHM round-trip сам по себе, Dict at Boundary), без новых объектов
+        # на per-frame пути (правило G.9). Runtime-агрегат — через callback в router.
+        item["frame_hops"] = int(item.get("frame_hops") or 0) + 1
+        self._on_boundary_cross()
+
         return item
 
     @staticmethod
@@ -294,6 +308,15 @@ class FrameShmMiddleware:
         # Проверка что это numpy ndarray (без жёсткого импорта numpy на уровне модуля)
         if not hasattr(frame, "shape"):
             return msg
+
+        # Ф7 G.6: с этой точки кадр гарантированно уходит через IPC — либо SHM-ref
+        # (успех записи ниже), либо pickle (msg["frame"] остаётся, если mm недоступен
+        # или запись не удалась). Считаем границу ДО ветвления по исходу — один раз
+        # на send, счётчик в data (переживает round-trip как обычное поле,
+        # без новых объектов на per-frame пути).
+        data = msg.setdefault("data", {})
+        data["frame_hops"] = int(data.get("frame_hops") or 0) + 1
+        self._on_boundary_cross()
 
         if not self._mm:
             return msg

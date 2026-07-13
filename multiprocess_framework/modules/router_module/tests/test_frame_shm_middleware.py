@@ -106,5 +106,75 @@ class TestFrameFitsHelper:
         assert mw._frame_fits(other) is False
 
 
+class TestFrameBoundaryCounter:
+    """Ф7 G.6: счётчик границ процесса на кадр (frame_hops) + callback в router."""
+
+    def test_strip_and_write_increments_frame_hops(self):
+        mw = _mw()
+        item = {"frame": _frame(600, 800)}
+        out = mw.strip_and_write(item)
+        assert out["frame_hops"] == 1
+        # Повторный "hop" того же item (симуляция второго звена pipeline'а) —
+        # счётчик накапливается, а не сбрасывается.
+        out["frame"] = _frame(600, 800)  # следующий узел снова кладёт кадр в SHM
+        out2 = mw.strip_and_write(out)
+        assert out2["frame_hops"] == 2
+
+    def test_strip_and_write_increments_on_pickle_fallback(self):
+        """Кадр без SHM (memory_manager=None) всё равно уходит через IPC (pickle) —
+        граница должна считаться, а не только на «честном» SHM-пути."""
+        mw = FrameShmMiddleware(memory_manager=None, owner="test_owner", slot="output_frames")
+        item = {"frame": _frame(600, 800)}
+        out = mw.strip_and_write(item)
+        assert "shm_actual_name" not in out  # ушёл через pickle-fallback
+        assert out["frame"] is not None  # frame не вырезан (pickle-путь)
+        assert out["frame_hops"] == 1
+
+    def test_strip_and_write_no_frame_does_not_increment(self):
+        mw = _mw()
+        item = {"seq_id": 1}  # нет frame — не боундари
+        out = mw.strip_and_write(item)
+        assert "frame_hops" not in out
+
+    def test_strip_and_write_calls_on_boundary_cross(self):
+        calls: list = []
+        mw = FrameShmMiddleware(
+            MemoryManager(),
+            owner="test_owner",
+            slot="output_frames",
+            coll=3,
+            on_boundary_cross=lambda: calls.append(1),
+        )
+        mw.strip_and_write({"frame": _frame(600, 800)})
+        mw.strip_and_write({"frame": _frame(600, 800)})
+        assert len(calls) == 2
+
+    def test_on_send_increments_frame_hops_in_data(self):
+        mw = _mw()
+        msg = {"frame": _frame(600, 800)}
+        out = mw.on_send(msg)
+        assert out["data"]["frame_hops"] == 1
+
+    def test_on_send_without_memory_manager_still_increments(self):
+        """Без memory_manager frame остаётся в msg (pickle) — граница всё равно
+        реальна (кадр уйдёт через IPC как есть), счётчик должен расти."""
+        mw = FrameShmMiddleware(memory_manager=None, owner="test_owner", slot="output_frames")
+        msg = {"frame": _frame(600, 800)}
+        out = mw.on_send(msg)
+        assert out["frame"] is not None
+        assert out["data"]["frame_hops"] == 1
+
+    def test_on_send_no_frame_does_not_increment(self):
+        mw = _mw()
+        out = mw.on_send({"command": "noop"})
+        assert "data" not in out
+
+    def test_on_boundary_cross_default_is_noop(self):
+        """Без callback (обратная совместимость) — не падает."""
+        mw = FrameShmMiddleware(MemoryManager(), owner="test_owner", slot="output_frames")
+        out = mw.strip_and_write({"frame": _frame(600, 800)})
+        assert out["frame_hops"] == 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
