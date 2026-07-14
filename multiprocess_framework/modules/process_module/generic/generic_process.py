@@ -99,6 +99,12 @@ class GenericProcess(ProcessModule):
             # само no-op без loan-протокола). Регистрируем всегда (срабатывает только на
             # shm_release-сообщениях, которых нет без флага).
             router.register_message_handler("shm_release", lambda msg: self._handle_shm_release(msg, shm_middleware))
+            # Ф7 G.5.e (В3): owner-handler reclaim'а займов мёртвого читателя. Supervisor
+            # (confirmed-death соседа) шлёт {type:"shm_reclaim", data:{dead_reader}} →
+            # сюда → reclaim_reader освобождает зависшие займы. Без авто-триггера мёртвый
+            # держатель В1-безопасен (исчербание→drop, не corruption), но кадры теряются;
+            # reclaim — штатное восстановление free-list.
+            router.register_message_handler("shm_reclaim", lambda msg: self._handle_shm_reclaim(msg, shm_middleware))
 
         # Единый PluginRunner на процесс — общий шов вызова process()/produce() для
         # PipelineExecutor И SourceProducer. io-debug post-хук регистрируется ОДИН
@@ -217,6 +223,18 @@ class GenericProcess(ProcessModule):
                 shm_middleware.release_slots(releases)
         except Exception as exc:  # noqa: BLE001 — release не критичен для такта
             self._log_error(f"GenericProcess[{self.name}]: shm_release handler error: {exc}")
+
+    def _handle_shm_reclaim(self, msg: dict, shm_middleware) -> None:
+        """Ф7 G.5.e (В3): owner-handler reclaim'а. Supervisor по confirmed-death соседа
+        шлёт ``{data:{dead_reader}}`` → освобождаем зависшие займы мёртвого читателя.
+        Битый конверт не роняет процесс."""
+        try:
+            data = msg.get("data", {}) if isinstance(msg, dict) else {}
+            dead_reader = data.get("dead_reader", "") if isinstance(data, dict) else ""
+            if dead_reader:
+                shm_middleware.reclaim_reader(dead_reader)
+        except Exception as exc:  # noqa: BLE001 — reclaim не критичен для такта
+            self._log_error(f"GenericProcess[{self.name}]: shm_reclaim handler error: {exc}")
 
     def _attach_io_peek(self, app_cfg: dict) -> None:
         """Подключить io-debug publisher к PluginRunner (opt-in, по умолчанию вкл).

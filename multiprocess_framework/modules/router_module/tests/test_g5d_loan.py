@@ -165,6 +165,80 @@ class TestReleaseSlots:
         assert mw.frame_slots_released == 0
 
 
+def _loan_mw(monkeypatch, coll=2, num_consumers=1):
+    monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
+    monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
+    return FrameShmMiddleware(
+        MemoryManager(), owner="cam", slot="output_frames", coll=coll, num_consumers=num_consumers
+    )
+
+
+class TestReclaimOnDeath:
+    """G.5.e: reclaim займов мёртвого читателя (kill-9 без release) — симуляция смерти
+    (держатель занял слоты и НЕ отпустил). При fan-out мёртвый держал все занятые слоты."""
+
+    def test_reclaim_frees_dead_holder_and_recovers(self, monkeypatch):
+        """Держатель занял все слоты, «умер» (не отпустил) → исчерпание; reclaim → free."""
+        mw = _loan_mw(monkeypatch, coll=2, num_consumers=1)
+        try:
+            mw.strip_and_write({"frame": _frame(0)})
+            mw.strip_and_write({"frame": _frame(1)})
+            assert mw.strip_and_write({"frame": _frame(2)}).get("frame") is not None  # исчерпан
+            # Мёртвый читатель c0 держал оба слота (не отпустил) → reclaim освобождает.
+            assert mw.reclaim_reader("c0") == 2
+            assert mw._slot_refcount == [0, 0]
+            assert mw.frame_slots_reclaimed == 2
+            # free-list восстановлен → loan снова проходит.
+            assert "frame" not in mw.strip_and_write({"frame": _frame(3)})
+        finally:
+            mw.release_owned_memory()
+
+    def test_reclaim_idempotent(self, monkeypatch):
+        """Повторный reclaim после освобождения → 0 (не уходит в минус)."""
+        mw = _loan_mw(monkeypatch, coll=2, num_consumers=1)
+        try:
+            mw.strip_and_write({"frame": _frame(0)})  # занят slot0
+            assert mw.reclaim_reader("c0") == 1
+            assert mw.reclaim_reader("c0") == 0
+        finally:
+            mw.release_owned_memory()
+
+    def test_reclaim_multi_consumer_partial(self, monkeypatch):
+        """num_consumers=2: смерть c0 не освобождает слот, пока жив c1."""
+        mw = _loan_mw(monkeypatch, coll=1, num_consumers=2)
+        try:
+            mw.strip_and_write({"frame": _frame(0)})
+            assert mw._slot_refcount[0] == 2
+            assert mw.reclaim_reader("c0") == 1  # c0 умер → -1
+            assert mw._slot_refcount[0] == 1  # c1 ещё держит
+            assert mw.reclaim_reader("c1") == 1  # c1 умер → освобождён
+            assert mw._slot_refcount[0] == 0
+        finally:
+            mw.release_owned_memory()
+
+    def test_reclaim_skips_already_released(self, monkeypatch):
+        """Читатель, успевший отпустить до смерти, не декрементится повторно reclaim'ом."""
+        mw = _loan_mw(monkeypatch, coll=1, num_consumers=2)
+        try:
+            item = mw.strip_and_write({"frame": _frame(0)})
+            idx = item["shm_index"]
+            gen = mw._read_own_slot_generation(idx)
+            mw.release_slots([{"index": idx, "generation": gen, "reader": "c0"}])  # c0 отпустил
+            assert mw._slot_refcount[idx] == 1
+            assert mw.reclaim_reader("c0") == 0  # c0 уже в released → пропуск
+            assert mw._slot_refcount[idx] == 1
+            assert mw.reclaim_reader("c1") == 1  # c1 умер держа → освобождён
+            assert mw._slot_refcount[idx] == 0
+        finally:
+            mw.release_owned_memory()
+
+    def test_reclaim_noop_without_flag(self, monkeypatch):
+        monkeypatch.delenv("FW_SHM_LOAN_PROTOCOL", raising=False)
+        mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="s", coll=2)
+        assert mw.reclaim_reader("c0") == 0
+        assert mw.frame_slots_reclaimed == 0
+
+
 class TestAcquireLoanSlot:
     def test_rotates_and_returns_none_when_full(self, monkeypatch):
         """_acquire_loan_slot: ротация курсора; None когда все заняты."""

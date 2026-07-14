@@ -201,6 +201,8 @@ class FrameShmMiddleware:
         self.frame_loan_exhausted = 0
         # Ф7 G.5.d-2: сколько слотов реально освобождено release'ами (наблюдаемость).
         self.frame_slots_released = 0
+        # Ф7 G.5.e: сколько займов реклеймлено после смерти читателя (не отпустил сам).
+        self.frame_slots_reclaimed = 0
         # Per-write сигнал «drop-на-источнике по исчерпанию» (отличить от write-fail →
         # pickle-fallback): send-middleware по нему возвращает None (дроп send).
         self._last_loan_exhausted = False
@@ -533,6 +535,39 @@ class FrameShmMiddleware:
                 self._slot_refcount[idx] = 0
                 self._slot_released[idx].clear()
             self.frame_slots_released += 1
+
+    def reclaim_reader(self, dead_reader: str) -> int:
+        """Ф7 G.5.e (В3): реклейм займов МЁРТВОГО читателя (kill-9 без release).
+
+        При fan-out КАЖДЫЙ consumer держит КАЖДЫЙ занятый слот до своего release,
+        поэтому мёртвый reader держал все слоты, которые он ещё НЕ отпустил → декремент
+        за него (тот же учёт, что штатный release, но инициирует владелец по смерти).
+        Слот, где dead_reader уже в released-множестве (успел отпустить до смерти), —
+        пропуск. Без этого займ мёртвого читателя завис бы навсегда → free-list
+        деградирует → drop-на-источнике (В1-безопасно, но кадры теряются). Возвращает
+        число реклеймленных займов. Идемпотентно (повторный вызов после реклейма — 0).
+
+        Вызывается владельцем по confirmed-death соседа (supervisor/incarnation). Вторая
+        линия — startup-cleanup осиротевших сегментов G.3(c); В1 re-check ловит любую
+        ошибку учёта (преждевременное освобождение → drift → drop, не corruption)."""
+        if not self._loan_protocol or not dead_reader:
+            return 0
+        reclaimed = 0
+        for idx in range(self._coll):
+            if self._slot_refcount[idx] > 0 and dead_reader not in self._slot_released[idx]:
+                self._slot_released[idx].add(dead_reader)
+                self._slot_refcount[idx] -= 1
+                reclaimed += 1
+                if self._slot_refcount[idx] <= 0:
+                    self._slot_refcount[idx] = 0
+                    self._slot_released[idx].clear()
+        if reclaimed:
+            self.frame_slots_reclaimed += reclaimed
+            self._log_error(
+                f"FrameShmMiddleware: реклейм {reclaimed} займов мёртвого читателя "
+                f"'{dead_reader}' [owner={self._owner}/{self._slot}]"
+            )
+        return reclaimed
 
     # ------------------------------------------------------------------
     # Generic data-pipeline API (канон): strip_and_write / restore_frame
