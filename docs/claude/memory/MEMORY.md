@@ -115,3 +115,4 @@
 - [Неиспользуемые пути = контракты](feedback_unused_paths_are_contracts.md) — конструктор универсален: API без живых вызывающих в ревью чинить/отклонять громко, не отмахиваться «мёртвый путь»
 - [Model economy scheme](feedback_model_economy_scheme.md) — главный чат Opus 4.8, Fable точечно на вердикты, финдеры Sonnet, исполнители Sonnet/Opus по таблице фазы
 - [Ф7 G.3 done](project_f7_g3_handoff.md) — G.3 seqlock ЗАКРЫТ 2026-07-14 (merge b54b4689): torn→0 + видимость деградаций + SHM-cleanup + единый header под пул G.4, всё за dark-launch флагами; урок «перед merge ВСЕГДА полный suite» + liveness-тесты флачат под нагрузкой; G.4 следующая (Opus)
+- [app_module Windows test debt](project_app_module_windows_test_debt.md) — 2 теста красны ТОЛЬКО на Windows (os.replace WinError 5 + endswith прямой слэш); pre-existing, не seqlock; эталон Ф7-suite = «N passed, 2 pre-existing fail»; чинить отдельной мелкой задачей
