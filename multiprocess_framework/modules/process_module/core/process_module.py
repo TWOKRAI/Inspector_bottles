@@ -551,13 +551,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             return self.communication.broadcast_message(message, exclude_self)
         return False
 
-    def receive_message(self, timeout: float = None, channel_types=None):
+    def receive_message(self, timeout: float = None, channel_types=None, return_messages: bool = True):
         """Получить сообщение из очереди.
         channel_types=['data'] — для воркеров, получающих DATA/EVENT (по умолчанию).
         channel_types=['system'] — для воркеров, получающих COMMAND (например Robot).
+        return_messages=False — plain dict без пересборки Message (Ф7 G.5.a,
+        флаг FW_DATA_PLANE_DICTS у DataReceiver).
         """
         if self.communication:
-            return self.communication.receive_message(timeout, channel_types)
+            return self.communication.receive_message(timeout, channel_types, return_messages)
         return None
 
     # ========================================================================
@@ -592,19 +594,20 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             return self.communication.send(message)
         return {"status": "error", "reason": "Communication not initialized"}
 
-    def receive(self, timeout: float = 0.01, channel_types=None) -> list:
+    def receive(self, timeout: float = 0.01, channel_types=None, return_messages: bool = True) -> list:
         """
         Получение входящих сообщений из каналов.
 
         Args:
             timeout: Таймаут опроса
             channel_types: Фильтр каналов (['data'] или ['system']). None — все каналы.
+            return_messages: False — plain dict без пересборки Message (Ф7 G.5.a).
 
         Returns:
-            List[Dict]: Список полученных сообщений
+            List[Message | Dict]: Список полученных сообщений
         """
         if self.communication:
-            return self.communication.receive(timeout, channel_types)
+            return self.communication.receive(timeout, channel_types, return_messages)
         return []
 
     def send_to_process(self, target: str, message: dict) -> bool:
