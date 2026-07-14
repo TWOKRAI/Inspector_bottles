@@ -59,3 +59,17 @@ def test_reclaim_handler_ignores_malformed():
     gp._handle_shm_reclaim({}, mw)  # нет data
     gp._handle_shm_reclaim("garbage", mw)  # не dict
     assert mw.reclaimed == []
+
+
+def test_shm_release_routes_to_system_queue():
+    """Ревью-фикс 16: shm_release с queue_type=system → system-очередь (её поллит
+    SystemThreads→event_dispatcher→handler). БЕЗ queue_type type=shm_release ушёл бы в
+    data-очередь (DataReceiver), release не доставился бы никогда."""
+    from multiprocess_framework.modules.router_module.core.router_manager import (
+        RouterManager,
+    )
+
+    # Как формирует конверт _flush_releases (ревью-фикс 16).
+    assert RouterManager._select_queue_type({"type": "shm_release", "queue_type": "system"}) == "system"
+    # Доказательство исходного бага: без queue_type — data-очередь (недоставка).
+    assert RouterManager._select_queue_type({"type": "shm_release"}) == "data"

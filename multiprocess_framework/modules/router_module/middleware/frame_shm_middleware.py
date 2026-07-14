@@ -39,6 +39,7 @@ Claim Check: пиксели (numpy) едут в OS SHM, по очереди — 
 from __future__ import annotations
 
 import logging
+import threading  # noqa: F401 — используется в _cache_lock (ревью-фикс 1)
 from typing import Any, Callable, Dict, Optional
 
 # Размер LRU-кэша SHM-handles читателя (обычно 1–3 живых имени; запас на realloc/switch).
@@ -165,6 +166,11 @@ class FrameShmMiddleware:
         self._handle_cache_cap = max(1, int(handle_cache_cap))  # L4: конфигурируемый кэп
         # Ф7 G.3: кэш SHM-handles читателя (dict сохраняет порядок вставки → LRU).
         self._shm_handle_cache: "dict[str, Any]" = {}
+        # Ф7 G.5 ревью-фикс 1: кэш читается ДВУМЯ потоками одного процесса —
+        # DataReceiver (_open_shm_cached при restore) и PipelineExecutor
+        # (frame_view_valid post-use re-check, G.5.c). Lock сериализует доступ к dict
+        # + close, чтобы close() не срабатывал под чтением поколения на другом потоке.
+        self._cache_lock = threading.Lock()
         # Ф7 G.5.b: zero-copy чтение (restore_frame отдаёт VIEW в слот, без .copy()).
         # ЖЁСТКАЯ связка с handle-кэшем: без него сегмент закрывается сразу после
         # чтения (`shm.close()` в finally) → view повис бы (use-after-free/BufferError).
@@ -206,6 +212,32 @@ class FrameShmMiddleware:
         # Per-write сигнал «drop-на-источнике по исчерпанию» (отличить от write-fail →
         # pickle-fallback): send-middleware по нему возвращает None (дроп send).
         self._last_loan_exhausted = False
+        # Ф7 G.5 ревью-фикс 17 (резидуал): num_consumers пока НЕ проведён из топологии
+        # (дизайн §8.2.1) — дефолт 1. При fan-out на >1 loan-aware потребителя refcount
+        # занижен → слот освободится рано → В1 re-check дропнет (безопасно, но кадры
+        # теряются). ВАЖНО: copy-out терминалы (GUI, zero_copy=False) release НЕ шлют —
+        # их НЕЛЬЗЯ считать в num_consumers (иначе слот завис навсегда). Полная проводка
+        # (подсчёт loan-aware целей) — H-задача/G.7. Пока — громкий warn при активации.
+        if self._loan_protocol:
+            self._log_error(
+                f"FrameShmMiddleware[{self._owner}]: loan-протокол АКТИВЕН, num_consumers="
+                f"{self._num_consumers} (дефолт при отсутствии проводки из топологии). "
+                f"Для fan-out >1 loan-aware читателя задать num_consumers ЯВНО; copy-out "
+                f"терминалы (GUI) в счёт НЕ включать (release не шлют). Резидуал G.5."
+            )
+
+    @property
+    def loan_protocol_enabled(self) -> bool:
+        """Ф7 G.5 ревью-фикс 13: публичный контракт активности loan-протокола (В3) для
+        executor'а/тестов — вместо приватного ``_loan_protocol`` чужого модуля."""
+        return self._loan_protocol
+
+    @property
+    def ring_depth(self) -> int:
+        """Ф7 G.5 ревью-фикс 6: глубина кольца owner'а (для расчёта порога флаша release
+        у consumer'а — порог не должен превышать реальную глубину, иначе тикеты не
+        набираются и free-list голодает)."""
+        return self._coll
 
     @staticmethod
     def _resolve_bool_flag(explicit: Optional[bool], env_name: str) -> bool:
@@ -278,29 +310,36 @@ class FrameShmMiddleware:
         обычный случай, а open/mmap/close на кадр снимается. При переполнении кэпа
         закрываем самый старый handle (FIFO ~ LRU для стабильного потока имён).
         """
-        shm = self._shm_handle_cache.pop(shm_actual_name, None)
-        if shm is not None:
-            self._shm_handle_cache[shm_actual_name] = shm  # move-to-end (LRU)
+        with self._cache_lock:
+            shm = self._shm_handle_cache.pop(shm_actual_name, None)
+            if shm is not None:
+                self._shm_handle_cache[shm_actual_name] = shm  # move-to-end (LRU)
+                return shm
+            shm = shm_mod.SharedMemory(name=shm_actual_name, create=False)
+            self._shm_handle_cache[shm_actual_name] = shm
+            # Ф7 G.5 ревью-фикс 1: эвикция с close() — ТОЛЬКО когда zero-copy ВЫКЛЮЧЕН.
+            # Под zero-copy view в слот живёт ПОСЛЕ чтения (до конца обработки цепочки) и
+            # re-check читает его на другом потоке → close() эвиктнутого handle =
+            # dangling/BufferError. Держим сегменты открытыми до teardown (их немного —
+            # per-camera). Консолидация памяти (H-задача) заменит это refcount'ом view'ов.
+            if not self._zero_copy and len(self._shm_handle_cache) > self._handle_cache_cap:
+                old_name = next(iter(self._shm_handle_cache))
+                old_shm = self._shm_handle_cache.pop(old_name)
+                try:
+                    old_shm.close()
+                except Exception:
+                    pass
             return shm
-        shm = shm_mod.SharedMemory(name=shm_actual_name, create=False)
-        self._shm_handle_cache[shm_actual_name] = shm
-        if len(self._shm_handle_cache) > self._handle_cache_cap:
-            old_name = next(iter(self._shm_handle_cache))
-            old_shm = self._shm_handle_cache.pop(old_name)
-            try:
-                old_shm.close()
-            except Exception:
-                pass
-        return shm
 
     def close_handle_cache(self) -> None:
         """Закрыть все кэшированные SHM-handles (teardown wire/процесса)."""
-        for shm in self._shm_handle_cache.values():
-            try:
-                shm.close()
-            except Exception:
-                pass
-        self._shm_handle_cache.clear()
+        with self._cache_lock:
+            for shm in self._shm_handle_cache.values():
+                try:
+                    shm.close()
+                except Exception:
+                    pass
+            self._shm_handle_cache.clear()
 
     def release_owned_memory(self) -> None:
         """H5b: освободить SHM-блоки, СОЗДАННЫЕ этим middleware (owner-side), на teardown.
@@ -391,15 +430,20 @@ class FrameShmMiddleware:
         if gen_at_read < 0:
             self.frame_stale_drops += 1
             return False
-        shm = self._shm_handle_cache.get(shm_view_name)
-        if shm is None:
-            # handle эвиктнут/сменился → сегмент мог быть закрыт/переоткрыт: не можем
-            # гарантировать целостность view → консервативный drop.
-            self.frame_stale_drops += 1
-            return False
         from ...shared_resources_module.memory.format import read_generation
 
-        if read_generation(shm.buf) == gen_at_read:
+        # Ф7 G.5 ревью-фикс 1: get + read_generation под тем же lock, что и
+        # _open_shm_cached/close_handle_cache — иначе close() на потоке DataReceiver мог
+        # бы порвать backing-mmap под read_generation здесь (поток PipelineExecutor).
+        with self._cache_lock:
+            shm = self._shm_handle_cache.get(shm_view_name)
+            if shm is None:
+                # handle эвиктнут/сменился → сегмент мог быть закрыт/переоткрыт: не можем
+                # гарантировать целостность view → консервативный drop.
+                self.frame_stale_drops += 1
+                return False
+            valid = read_generation(shm.buf) == gen_at_read
+        if valid:
             return True
         self.frame_stale_drops += 1
         return False

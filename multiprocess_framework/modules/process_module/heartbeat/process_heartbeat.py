@@ -208,6 +208,11 @@ class ProcessHeartbeat:
             # Ф7 G.5.d (В3): исчерпание free-list → drop-на-источнике (back-pressure,
             # читатели отстали). Тот же сигнальный набор потери кадра.
             loan_exhausted = int(rs.get("frame_loan_exhausted", 0) or 0)
+            # Ф7 G.5 ревью-фикс 15: здоровье loan-цикла (released/reclaimed) — не потери,
+            # но обязательный сигнал: если exhausted растёт, а released стоит на нуле —
+            # release-контур не замкнут (ревью поймало именно это через отсутствие сигнала).
+            slots_released = int(rs.get("frame_slots_released", 0) or 0)
+            slots_reclaimed = int(rs.get("frame_slots_reclaimed", 0) or 0)
             if (
                 pickle_fallbacks == 0
                 and torn == 0
@@ -216,6 +221,8 @@ class ProcessHeartbeat:
                 and sys_blocked == 0
                 and stale_drops == 0
                 and loan_exhausted == 0
+                and slots_released == 0
+                and slots_reclaimed == 0
             ):
                 return  # нет кадрового пути / всё чисто — не публикуем
             proxy.merge(
@@ -228,6 +235,8 @@ class ProcessHeartbeat:
                     "queue_system_evict_blocked": sys_blocked,
                     "stale_drops": stale_drops,
                     "loan_exhausted": loan_exhausted,
+                    "slots_released": slots_released,
+                    "slots_reclaimed": slots_reclaimed,
                 },
             )
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB

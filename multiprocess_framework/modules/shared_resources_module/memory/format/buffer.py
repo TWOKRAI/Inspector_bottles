@@ -382,7 +382,15 @@ def _read_image_block(
         offset += 1
         arr = np.frombuffer(buffer, dtype=dtype, count=h * w * c, offset=offset)
         reshaped = arr.reshape((h, w, c))
-        images.append(reshaped.copy() if copy else reshaped)
+        if copy:
+            images.append(reshaped.copy())
+        else:
+            # Ф7 G.5 ревью-фикс 8: zero-copy view — READ-ONLY. In-place мутация плагином
+            # (cv2.circle/frame[...]=x) писала бы в чужой SHM-слот ТИХО, мимо seqlock
+            # (generation бампит только writer) → порча. writeable=False = громкий отказ
+            # (ValueError на записи), не тихая порча — принцип фазы.
+            reshaped.flags.writeable = False
+            images.append(reshaped)
         offset += slot_size
 
     return images
@@ -450,4 +458,9 @@ def _read_one_frame(buffer: memoryview, base: int, *, copy: bool = True) -> Opti
     offset += 1
     arr = np.frombuffer(buffer, dtype=dtype, count=h * w * c, offset=offset)
     reshaped = arr.reshape((h, w, c))
-    return reshaped.copy() if copy else reshaped
+    if copy:
+        return reshaped.copy()
+    # Ф7 G.5 ревью-фикс 8: zero-copy view READ-ONLY (мутация плагином мимо seqlock =
+    # тихая порча чужого слота; writeable=False → громкий отказ, не порча).
+    reshaped.flags.writeable = False
+    return reshaped

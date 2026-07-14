@@ -167,6 +167,8 @@ class TestH8RouterShmStatsPublish:
             "queue_system_evict_blocked": 0,
             "stale_drops": 0,
             "loan_exhausted": 0,
+            "slots_released": 0,
+            "slots_reclaimed": 0,
         }
 
     def test_publishes_when_only_queue_evicted_nonzero(self) -> None:

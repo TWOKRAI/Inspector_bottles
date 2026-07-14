@@ -174,6 +174,11 @@ class PipelineExecutor:
             try:
                 items = chain_queue.get(timeout=0.05)
             except queue.Empty:
+                # Ф7 G.5 ревью-фикс 6: idle-флаш — не копить release-тикеты, когда работы
+                # нет (иначе при малом трафике/глубоком кольце тикеты голодают, а
+                # владелец не освобождает слоты). Дёшево: no-op, если копить нечего.
+                if self._pending_release_count:
+                    self._flush_releases()
                 continue
 
             # Тайминг полезной итерации (chain-обработка + send), без учёта
@@ -268,11 +273,22 @@ class PipelineExecutor:
         Любой drift → False (middleware уже учёл frame_stale_drops) → батч дропается."""
         return all(self._shm.frame_view_valid(t["view_name"], t["generation"]) for t in view_tickets)
 
+    def _loan_active(self) -> bool:
+        """Ф7 G.5 ревью-фикс 13: активен ли loan-протокол (публичный контракт middleware)."""
+        return self._shm is not None and getattr(self._shm, "loan_protocol_enabled", False)
+
+    def _release_threshold(self) -> int:
+        """Ф7 G.5 ревью-фикс 6: порог флаша НЕ выше реальной глубины кольца owner'а —
+        иначе тикеты не набираются (в кольце max coll занятых слотов) и free-list
+        голодает перманентно. Плюс idle-флаш на пустой очереди страхует от голодания."""
+        depth = getattr(self._shm, "ring_depth", self._release_batch_threshold)
+        return max(1, min(self._release_batch_threshold, depth))
+
     def _accumulate_releases(self, view_tickets: list[dict]) -> None:
         """Ф7 G.5.d-2 (В3): накопить release-тикеты по владельцам; флаш пачкой по порогу
         (амортизация границы — release НЕ на per-frame критическом пути). Активно только
         под loan-протоколом (иначе ноль оверхеда)."""
-        if not view_tickets or self._shm is None or not getattr(self._shm, "_loan_protocol", False):
+        if not view_tickets or not self._loan_active():
             return
         for t in view_tickets:
             owner = t.get("owner")
@@ -282,18 +298,21 @@ class PipelineExecutor:
                 {"slot": t["shm_name"], "index": t["index"], "generation": t["generation"], "reader": self._node}
             )
             self._pending_release_count += 1
-        if self._pending_release_count >= self._release_batch_threshold:
+        if self._pending_release_count >= self._release_threshold():
             self._flush_releases()
 
     def _flush_releases(self) -> None:
         """Ф7 G.5.d-2: отправить накопленные release пачкой каждому владельцу через
-        system-канал (надёжный never-drop QoS G.4.a). Один конверт со списком тикетов."""
+        SYSTEM-очередь (надёжная, её поллит SystemThreads → event_dispatcher → handler).
+        Ф7 G.5 ревью-фикс 16: ``queue_type="system"`` ОБЯЗАТЕЛЕН — иначе type="shm_release"
+        падает в data-очередь (её поллит DataReceiver как кадр), release НЕ доставляется.
+        Один конверт со списком тикетов на владельца."""
         if not self._pending_releases:
             return
         for owner, releases in self._pending_releases.items():
             if not releases:
                 continue
-            msg = {"target": owner, "type": "shm_release", "channel": "system", "data": {"releases": releases}}
+            msg = {"target": owner, "type": "shm_release", "queue_type": "system", "data": {"releases": releases}}
             try:
                 self._send(owner, msg)
             except Exception as exc:  # noqa: BLE001 — потеря release не критична (В1-страховка + reclaim)

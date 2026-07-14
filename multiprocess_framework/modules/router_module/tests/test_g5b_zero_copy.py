@@ -126,3 +126,21 @@ class TestZeroCopyView:
         finally:
             reader.close_handle_cache()
             writer.release_owned_memory()
+
+    def test_view_is_readonly(self, monkeypatch):
+        """Ревью-фикс 8: zero-copy view READ-ONLY — in-place мутация плагином мимо
+        seqlock (тихая порча чужого слота) невозможна; попытка записи → ValueError."""
+        import pytest
+
+        _enable_zero_copy(monkeypatch)
+        writer, reader = _writer_reader()
+        try:
+            out = writer.strip_and_write({"frame": np.full((16, 16, 3), 7, np.uint8)})
+            frame = reader.restore_frame({"data": out})["frame"]
+            assert frame.flags.writeable is False  # view защищён от записи
+            with pytest.raises(ValueError):
+                frame[0, 0, 0] = 99  # in-place мутация → громкий отказ, не порча
+            del frame
+        finally:
+            reader.close_handle_cache()
+            writer.release_owned_memory()

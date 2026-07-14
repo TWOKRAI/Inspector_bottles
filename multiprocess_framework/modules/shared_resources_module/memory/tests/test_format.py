@@ -58,10 +58,7 @@ class TestPackUnpackRoundtrip:
         buf = bytearray(size)
         mv = memoryview(buf)
 
-        imgs = [
-            np.full(shape, i, dtype=dtype)
-            for i in (10, 20, 30)
-        ]
+        imgs = [np.full(shape, i, dtype=dtype) for i in (10, 20, 30)]
         pack_images(mv, imgs, shape, np.dtype(dtype))
 
         result = unpack_images(mv, shape, np.dtype(dtype))
@@ -147,6 +144,11 @@ class TestPackFormatsInterchangeable:
 
         result = unpack_images(memoryview(buf), shape, np.uint8, copy=False)
         assert np.array_equal(result[0], img)
-        result[0][0, 0, 0] = 99
-        # view — изменение отражается в буфере
-        assert buf[4 + 12 + 1] == 99
+        # Ф7 G.5 ревью-фикс 8: copy=False view теперь READ-ONLY (мутация читателем в
+        # общий буфер мимо seqlock = тихая порча). Запись → громкий отказ.
+        assert result[0].flags.writeable is False
+        with pytest.raises(ValueError):
+            result[0][0, 0, 0] = 99
+        # Это ВСЁ ЕЩЁ view: правка БУФЕРА видна во view (чтение отражает буфер).
+        buf[4 + 12 + 1] = 77
+        assert result[0][0, 0, 0] == 77

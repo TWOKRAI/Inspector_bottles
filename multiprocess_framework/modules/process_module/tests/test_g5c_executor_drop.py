@@ -132,7 +132,8 @@ class TestReleaseAccumulation:
     @staticmethod
     def _executor(sent):
         shm = _FakeShm(valid=True)
-        shm._loan_protocol = True  # включить накопление release
+        shm.loan_protocol_enabled = True  # публичный контракт (ревью-фикс 13)
+        shm.ring_depth = 10  # ревью-фикс 6: порог = min(threshold, ring_depth)
         return PipelineExecutor(
             plugins=[],
             chain_targets=["out"],
@@ -150,13 +151,23 @@ class TestReleaseAccumulation:
         assert len(sent) == 1  # порог 3 достигнут → флаш
         target, msg = sent[0]
         assert target == "cam0"
-        assert msg["type"] == "shm_release" and msg["channel"] == "system"
+        # ревью-фикс 16: queue_type="system" (не channel) — иначе уходит в data-очередь.
+        assert msg["type"] == "shm_release" and msg["queue_type"] == "system"
         assert len(msg["data"]["releases"]) == 3
         assert msg["data"]["releases"][0]["reader"] == ex._node
 
+    def test_threshold_capped_by_ring_depth(self):
+        """Ревью-фикс 6: порог не выше глубины кольца (иначе тикеты голодают)."""
+        sent: list = []
+        ex = self._executor(sent)
+        ex._shm.ring_depth = 3  # мелкое кольцо
+        ex._release_batch_threshold = 8  # хотели 8, но кольцо 3
+        ex._accumulate_releases([_ticket("cam0", i, 2) for i in range(3)])
+        assert len(sent) == 1  # флаш на 3 (=ring_depth), не ждём 8
+
     def test_no_accumulate_without_loan_protocol(self):
         sent: list = []
-        shm = _FakeShm(valid=True)  # _loan_protocol не выставлен → getattr False
+        shm = _FakeShm(valid=True)  # loan_protocol_enabled не выставлен → getattr False
         ex = PipelineExecutor(
             plugins=[], chain_targets=["out"], shm_middleware=shm, send_fn=lambda t, m: sent.append((t, m))
         )
