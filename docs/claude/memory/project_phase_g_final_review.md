@@ -26,5 +26,29 @@ Fable **честную оценку**. Требования к ревью:
 **Порядок:** доделать код фазы (G.H ✅, G.9 ✅, G.8) → qex-reindex → 8-угловое (риск-задачи) →
 **этот Fable-ревью на всю фазу** → G.7 flip/soak/приёмка → merge.
 
+## Итог ревью + ремедиация (2026-07-14→15)
+
+Ревью проведено (4 Sonnet-финдера + Fable-свод): **before 4.8 → after 7.4/10**. Оси:
+архитектура 7.5 · паттерны 9 · модульность 7 · эффективность 7 (перф pending-G.7) ·
+**безопасность 6.5** · стиль 8 · согласованность 9. Низкая безопасность — единственная
+причина: модель **single-writer была ЗАЯВЛЕНА, но не ЗАКРЕПЛЕНА кодом**.
+
+Владелец: «исправить без костылей, как полагается» → выбрал **Option 1 (single-writer
+enforced, lock-free)**. Ремедиация сделана и закоммичена (`b3576c12`), 4696 passed, 0 регрессий:
+- LoanLedger: acquire резервирует слот (WRITING) + single-writer thread-guard; commit
+  публикует; `abort` (loan без publish → free); state-машина free→writing→ready→free.
+- Настоящий DI (injectable `pool=`/`reader=` в middleware); read_frame под lock; тихие
+  except→`close_errors`; collect_scheduled проведён в heartbeat (HIGH gc-trap закрыт);
+  worker.drain `removed`=факт. ADR-SRM-013 амендмент.
+
+**Директива на ФИНАЛЬНОЕ Fable-ревью (владелец 2026-07-15):** искать КЛАСС «стале-ссылки»
+— переименованные/несуществующие символы, мёртвые импорты, сломанный сбор тестов, дрейф
+«переименовали, вызовы не обновили». Готовые улики: 7 collection-errors + 8 `base_manager`
+isinstance-падений (предсуществующие, `ProcessManagerCore`→`ProcessManagerProcess`).
+Нейминг: владелец предпочитает `ProcessManagerCore` — отдельный рефактор, не в скоупе фазы G.
+
+**Порядок (владелец склоняется):** G.7 flip/soak (числа FPS/p99) → финальное Fable-ревью
+(с числами + hunt стале-ссылок) → merge.
+
 Связано: [[project_memory_module_consolidation]] (директивы память-один-модуль на G.5),
 [[project_feature_flags_registry]], [[feedback_formal_review_before_merge]].
