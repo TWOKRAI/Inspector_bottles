@@ -105,6 +105,8 @@ class FrameShmMiddleware:
         zero_copy: Optional[bool] = None,
         loan_protocol: Optional[bool] = None,
         num_consumers: int = 1,
+        pool: Optional[Any] = None,
+        reader: Optional[Any] = None,
     ) -> None:
         self._mm = memory_manager
         self._owner = owner
@@ -184,13 +186,20 @@ class FrameShmMiddleware:
         # reader через DI и делегирует; синхронизация кэша — внутреннее дело reader'а
         # (гонка close↔read_generation закрыта: executor больше не лезет в приватный кэш).
         # Флаги уже согласованы выше (zero_copy ⊃ cache ⊃ owner_incarnation).
-        from ...shared_resources_module.memory.reader import ShmFrameReader
+        # DI (H-ревью 2026-07-14): инжектированный ``reader`` выигрывает — подмена
+        # реализации (напр. Rust/iceoryx2 под тем же ``FrameReader``) не трогает транспорт;
+        # None → дефолт-фабрика ``ShmFrameReader`` (обычный путь).
+        if reader is not None:
+            self._reader: Any = reader
+        else:
+            from ...shared_resources_module.memory.reader import ShmFrameReader
 
-        self._reader: Any = ShmFrameReader(
-            cache_enabled=self._cache_shm_handles,
-            zero_copy=self._zero_copy,
-            cap=self._handle_cache_cap,
-        )
+            self._reader = ShmFrameReader(
+                cache_enabled=self._cache_shm_handles,
+                zero_copy=self._zero_copy,
+                cap=self._handle_cache_cap,
+                log=self._log_error,
+            )
         # Ф7 H-задача (консолидация памяти): семантика владения слотом кольца
         # (free-list/refcount/release/reclaim) вынесена за фасад ``FramePool`` в модуль
         # памяти (`shared_resources_module.memory.pool`). Транспорт держит пул через DI и
@@ -205,9 +214,15 @@ class FrameShmMiddleware:
         # Per-write сигнал «drop-на-источнике по исчерпанию» (отличить от write-fail →
         # pickle-fallback): send-middleware по нему возвращает None (дроп send).
         self._last_loan_exhausted = False
+        # H-ревью (E2): транзитный кэш handles на время ОДНОГО release(): все тикеты пачки
+        # одного owner/slot → memory-data dict строим раз, а не на каждый тикет.
+        self._release_handles_cache: Optional[Any] = None
         # Пул владения слотами (тип: FramePool). None при выключенном loan-протоколе.
-        self._pool: Optional[Any] = None
-        if self._loan_protocol:
+        # DI (H-ревью 2026-07-14): инжектированный ``pool`` выигрывает (подмена на
+        # Rust/iceoryx2 под тем же ``FramePool`` не трогает транспорт); None + флаг →
+        # дефолт-фабрика ``LoanLedger``; None + флаг off → пул=None (слепой round-robin).
+        self._pool: Optional[Any] = pool
+        if self._pool is None and self._loan_protocol:
             # Import runtime-local (как format-хелперы) — coupling router→shared_resources
             # остаётся runtime, не top-level. gen_reader = чтение поколения СВОЕГО слота
             # (seqlock) → пул SHM-агностичен (не знает про формат слота).
@@ -414,6 +429,10 @@ class FrameShmMiddleware:
             self._last_write_error = "write_images вернул None (нет слота/валидация)"
         except Exception as exc:  # noqa: BLE001 — причина едет в громкий лог (M2d)
             self._last_write_error = repr(exc)
+        # Ф7 H-ревью: write не удался (None/исключение) → ОТМЕНИТЬ loan (WRITING→FREE),
+        # иначе зарезервированный acquire'ом слот утёк бы навсегда (ёмкость кольца тает).
+        if self._pool is not None:
+            self._pool.abort(idx)
         return False
 
     def _note_loan_exhausted(self) -> None:
@@ -434,10 +453,15 @@ class FrameShmMiddleware:
     def _read_own_slot_generation(self, idx: int) -> int:
         """Ф7 G.5.d-2: прочитать ТЕКУЩЕЕ поколение СВОЕГО слота (owner-side) — для
         generation-guard на release. Под займом (refcount>0) writer слот не трогает,
-        поэтому поколение стабильно = то, что прочитал consumer. -1 при недоступности."""
+        поэтому поколение стабильно = то, что прочитал consumer. -1 при недоступности.
+
+        H-ревью (E2): при release пачки handles уже сняты ОДИН раз (release_slots →
+        ``_release_handles_cache``) — не пересобираем memory-data dict на КАЖДЫЙ тикет."""
         try:
-            md = self._mm.get_memory_data(self._owner, self._slot) if self._mm else None
-            handles = md.get("handles") if md else None
+            handles = self._release_handles_cache
+            if handles is None:
+                md = self._mm.get_memory_data(self._owner, self._slot) if self._mm else None
+                handles = md.get("handles") if md else None
             if handles and 0 <= idx < len(handles) and handles[idx] is not None:
                 from ...shared_resources_module.memory.format import read_generation
 
@@ -458,7 +482,14 @@ class FrameShmMiddleware:
         """
         if self._pool is None or not releases:
             return
-        self._pool.release(releases)
+        # H-ревью (E2): снять handles ОДИН раз на пачку — gen_reader читает из кэша, не
+        # пересобирает memory-data dict на каждый тикет. finally гарантирует сброс кэша.
+        try:
+            md = self._mm.get_memory_data(self._owner, self._slot) if self._mm else None
+            self._release_handles_cache = md.get("handles") if md else None
+            self._pool.release(releases)
+        finally:
+            self._release_handles_cache = None
 
     def reclaim_reader(self, dead_reader: str) -> int:
         """Ф7 G.5.e (В3): реклейм займов МЁРТВОГО читателя (kill-9 без release) — адаптер.

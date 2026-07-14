@@ -13,12 +13,26 @@ reclaim) жила в транспортном `router_module/FrameShmMiddleware`
   - ``release`` = release (потребитель дочитал → декремент; refcount→0 = слот свободен);
   - ``reclaim`` = reclaim займов мёртвого потребителя (kill-9 без release).
 
-**Модель конкурентности (важно):** refcount мутирует ТОЛЬКО процесс-владелец (owner-side) —
-кросс-процессного atomic RMW в CPython нет по построению (см. §8 g5-плана, отклонение В2).
-`acquire`/`commit` зовёт writer-поток источника; `release`/`reclaim` — тот же owner по IPC-
-тикетам/смерти соседа. Безопасность от torn-кадра даёт seqlock (G.3) + post-use re-check (В1),
-НЕ этот учёт: любая ошибка учёта здесь безопасна (преждевременное освобождение → writer
-перезапишет → generation drift → drop, НЕ порча).
+**Модель конкурентности (важно, закреплена кодом — ревью фазы G 2026-07-14):** refcount
+мутирует ТОЛЬКО процесс-владелец (owner-side) — кросс-процессного atomic RMW в CPython нет по
+построению (см. §8 g5-плана, отклонение В2). Внутри процесса — **single-writer enforced**:
+
+- ``acquire``/``commit``/``abort`` зовёт РОВНО ОДИН поток-писатель источника. Реализация
+  связывает поток на первом ``acquire`` и бросает ``RuntimeError`` на втором ином потоке
+  (нарушение single-writer = громкий отказ, не тихая write-write порча). Кольцо —
+  single-writer-multi-reader (seqlock, ADR-SRM-011); два писателя в один слот seqlock НЕ ловит.
+- ``release``/``reclaim`` зовёт другой поток того же owner (message_processor, по IPC-тикетам/
+  смерти соседа). Он трогает ТОЛЬКО опубликованные (READY, refcount>0) слоты и с WRITING-слотом
+  писателя не пересекается ПО ПОСТРОЕНИЮ (state-машина ниже) — синхронизации не требуется.
+
+**State-машина слота (lock-free disjointness писатель ↔ message_processor):**
+``acquire`` → WRITING (reserved, refcount==0) → ``commit`` → READY (refcount=N) →
+``release``×N → FREE. ``abort`` возвращает WRITING→FREE (loan без publish). loan ОБЯЗАН
+завершиться ``commit`` ЛИБО ``abort`` (контракт iceoryx2 loan/publish; иначе слот утечёт).
+
+Безопасность от torn-кадра даёт seqlock (G.3) + post-use re-check (В1), НЕ этот учёт: любая
+ошибка учёта здесь безопасна (преждевременное освобождение → writer перезапишет → generation
+drift → drop, НЕ порча).
 """
 
 from __future__ import annotations
@@ -68,20 +82,30 @@ class FramePool(Protocol):
         ...
 
     def acquire(self) -> int | None:
-        """Взять СВОБОДНЫЙ слот (refcount==0) от ротационного курсора (справедливость).
+        """Loan: взять СВОБОДНЫЙ слот (refcount==0, не reserved) и пометить WRITING.
 
-        ``None`` → все слоты заняты (потребители отстали больше глубины) → инкремент
+        Резервирует слот (``_reserved``) → release/reclaim его не трогают до commit/abort.
+        ``None`` → все слоты заняты/в записи (потребители отстали больше глубины) → инкремент
         счётчика ``loan_exhausted``; вызывающий делает ГРОМКИЙ drop-на-источнике
         (back-pressure, кадр не уходит — НЕ pickle-fallback). Успех — общий путь, счётчики
-        не трогает.
+        не трогает. Зовёт ТОЛЬКО поток-писатель (single-writer, см. класс-докстринг).
         """
         ...
 
     def commit(self, idx: int, num_consumers: int) -> None:
-        """Опубликовать записанный слот: refcount = число loan-aware потребителей (fan-out).
+        """Publish: опубликовать записанный слот (WRITING→READY), снять резерв.
 
-        copy-out терминалы (GUI, zero_copy off) release НЕ шлют → в ``num_consumers`` их
-        НЕ включать (иначе слот завис бы навсегда). Зовётся сразу после успешной записи.
+        refcount = число loan-aware потребителей (fan-out). copy-out терминалы (GUI,
+        zero_copy off) release НЕ шлют → в ``num_consumers`` их НЕ включать (иначе слот
+        завис бы навсегда). Зовётся сразу после успешной записи. Поток-писатель.
+        """
+        ...
+
+    def abort(self, idx: int) -> None:
+        """Отменить loan без publish (write не удался): WRITING→FREE (снять резерв).
+
+        loan ОБЯЗАН завершиться ``commit`` ЛИБО ``abort`` — иначе слот утечёт (останется
+        WRITING навсегда, ёмкость кольца тает до исчерпания). Зовёт поток-писатель.
         """
         ...
 

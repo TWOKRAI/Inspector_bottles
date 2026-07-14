@@ -243,6 +243,15 @@ class TestWorkerCrudCommands:
         res = cm.dispatch("worker.drain", {})
         assert res["success"] is False
 
+    def test_drain_remove_missing_worker_reports_not_removed(self) -> None:
+        """H-ревью: воркера нет + remove=True → success=False И removed=False (не ложь).
+
+        Раньше ``removed`` эхо-ил запрошенный флаг → removed=True при success=False."""
+        _wm, cm = _make_crud()
+        res = cm.dispatch("worker.drain", {"worker_name": "ghost", "remove": True})
+        assert res["success"] is False
+        assert res["removed"] is False
+
     def test_start_worker_via_command(self) -> None:
         """worker.start запускает остановленный воркер (без пересоздания)."""
         wm, cm = _make_crud()

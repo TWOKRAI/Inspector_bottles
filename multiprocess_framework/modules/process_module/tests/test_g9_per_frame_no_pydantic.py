@@ -18,16 +18,22 @@ import pathlib
 import re
 
 # Модули на per-frame пути (получение → цепочка-исполнитель → отправка кадра).
+# H-ревье 2026-07-14: список расширен файлами H-задачи — те же кадры на send/receive
+# теперь проходят через транспорт + фасады памяти (reader/pool), которые H вынесла «за
+# фасад» той же горячей дорожки. Пути module-qualified (корень = .../modules).
 _HOT_PATH = [
-    "generic/data_receiver.py",
-    "generic/pipeline_executor.py",
-    "io/process_io.py",
+    "process_module/generic/data_receiver.py",
+    "process_module/generic/pipeline_executor.py",
+    "process_module/io/process_io.py",
+    "router_module/middleware/frame_shm_middleware.py",
+    "shared_resources_module/memory/reader/shm_frame_reader.py",
+    "shared_resources_module/memory/pool/loan_ledger.py",
 ]
 
 # Признаки Pydantic-валидации/пересборки НА КАЖДЫЙ вызов (не конфиг-границы).
 _PYDANTIC_PER_FRAME = re.compile(r"\.model_validate\(|\bBaseModel\(|\.model_dump\(|SchemaBase\(")
 
-_MODULE_ROOT = pathlib.Path(__file__).resolve().parents[1]
+_MODULE_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def test_hot_path_modules_free_of_pydantic_validation():

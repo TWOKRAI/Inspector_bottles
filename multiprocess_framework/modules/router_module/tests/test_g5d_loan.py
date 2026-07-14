@@ -240,14 +240,14 @@ class TestReclaimOnDeath:
 
 
 class TestAcquireLoanSlot:
-    def test_rotates_and_returns_none_when_full(self, monkeypatch):
-        """H-задача: acquire делегирован в пул — ротация курсора; None когда все заняты."""
+    def test_reserves_and_returns_none_when_full(self, monkeypatch):
+        """H-задача: acquire делегирован в пул. H-ревью: acquire РЕЗЕРВИРУЕТ слот
+        (WRITING) — повторный acquire его не выдаёт; все зарезервированы → None."""
         monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
         mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="s", coll=3)
         assert mw._pool.acquire() == 0
         assert mw._pool.acquire() == 1
         assert mw._pool.acquire() == 2
-        assert mw._pool.acquire() == 0  # курсор обернулся, слоты ещё «свободны» (refcount 0)
-        # Занять все вручную → None.
-        mw._pool._refcount = [1, 1, 1]
+        # все три WRITING (зарезервированы) → исчерпание (не повтор 0), публичный счётчик растёт.
         assert mw._pool.acquire() is None
+        assert mw.frame_loan_exhausted == 1

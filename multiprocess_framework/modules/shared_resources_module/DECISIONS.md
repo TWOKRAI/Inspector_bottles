@@ -273,3 +273,20 @@ writer перезапишет → generation drift → drop, не порча).
 `FrameReader`). Замена на Rust/iceoryx2 (Этап 3, триггер TECH_STACK §7) = новая реализация под тем
 же Protocol, middleware/executor не трогаются. Всё за `FW_SHM_LOAN_PROTOCOL` (дефолт off = слепой
 round-robin, бит-в-бит); пул создаётся только под флагом. PSR-бандл стал легче на один мёртвый массив.
+
+**Донастройка (H-ревью фазы G, 2026-07-14).** Ревью выявило: модель single-writer была *заявлена*,
+но не *закреплена* кодом, а «DI» был self-construction в транспорте. Исправлено «как полагается»:
+
+- **Single-writer enforced (lock-free).** `LoanLedger.acquire` связывает поток-писатель на первом
+  вызове и бросает `RuntimeError` на втором ином потоке (write-write в один слот, который seqlock НЕ
+  ловит, → громкий отказ, а не тихая порча). Топология source+processing в одном процессе кодом не
+  используется (29 рецептов), но теперь и не допускается молча.
+- **State-машина слота.** `acquire` РЕЗЕРВИРУЕТ слот (WRITING), `commit` публикует (READY), новый
+  `abort` возвращает loan без publish (WRITING→FREE; неудачная запись иначе утекла бы). release/reclaim
+  (поток message_processor) трогают только READY → с WRITING-слотом писателя не пересекаются ПО
+  ПОСТРОЕНИЮ, без lock (iceoryx2 loan/publish/abort).
+- **Настоящий DI.** `FrameShmMiddleware.__init__` принимает `pool=`/`reader=` (инжект выигрывает,
+  None → дефолт-фабрика) → подмена реализации (Rust/iceoryx2) действительно не трогает транспорт.
+- **reader-side:** `ShmFrameReader.read_frame` читает буфер под тем же lock, что close (гонка
+  close↔read закрыта и для read, не только re-check); ошибки close() считаются (`close_errors`), не
+  глотаются молча. Reader получил изолированный contract-тест (симметрия с `FramePool`).

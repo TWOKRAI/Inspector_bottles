@@ -106,11 +106,32 @@ class ProcessHeartbeat:
                 # → реальные менеджеры адаптером. error/critical идут мимо буфера
                 # (write-through), здесь их нет. Прецедент — health self-publish 2.1.
                 self._drain_observability()
+
+                # Ф7 G.9(a) H-ревью: pump scheduled-GC. Heartbeat — периодический
+                # BACKGROUND-тик вне hot-path кадра → законная «пауза» для явной сборки.
+                # Без этого pump FW_GC_SCHEDULED отключил бы авто-GC НАВСЕГДА (сборки
+                # не происходило бы → утечка). No-op при флаге off (бит-в-бит).
+                self._pump_scheduled_gc()
             except Exception as exc:
                 _log = getattr(self._services, "log_debug", self._services.log_info)
                 _log(f"Не удалось отправить heartbeat: {exc}", module="heartbeat")
             # Ожидание с проверкой stop_event для быстрого завершения
             stop_event.wait(timeout=self._interval)
+
+    def _pump_scheduled_gc(self) -> None:
+        """Ф7 G.9(a) H-ревью: дать GcDiscipline тик для scheduled-сборки (FW_GC_SCHEDULED).
+
+        Heartbeat создаётся ДО gc_discipline (см. ProcessModule.run) → на первых тиках
+        атрибута может не быть: getattr-guard. ``collect_scheduled`` сам no-op при
+        выключенном расписании (флаг off = бит-в-бит). Ошибки не критичны для такта HB.
+        """
+        gc_disc = getattr(self._services, "_gc_discipline", None)
+        if gc_disc is None:
+            return
+        try:
+            gc_disc.collect_scheduled(time.monotonic())
+        except Exception:  # noqa: BLE001 — сборка мусора не критична для такта HB
+            pass
 
     def _drain_observability(self) -> None:
         """Ф5.16: слить log/stats-буфер ObservabilityHub процесса в реальные

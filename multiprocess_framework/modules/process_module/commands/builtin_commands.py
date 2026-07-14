@@ -271,7 +271,9 @@ class BuiltinCommands:
             ok = wm.drain_and_remove(name, timeout=timeout)
         else:
             ok = wm.drain_worker(name, timeout=timeout)
-        return {"success": bool(ok), "worker_name": name, "removed": remove}
+        # H-ревью: ``removed`` — ФАКТ удаления, а не запрошенный флаг (иначе missing worker
+        # + remove=True давал removed=True при success=False — ложный сигнал вызывающему).
+        return {"success": bool(ok), "worker_name": name, "removed": bool(ok) and remove}
 
     def _cmd_worker_start(self, data=None, **kwargs) -> dict:
         """Запустить остановленный воркер (поток), не пересоздавая его.

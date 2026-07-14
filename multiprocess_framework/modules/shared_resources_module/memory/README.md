@@ -41,8 +41,9 @@ mm.initialize()
 memory_names = {"camera_frame": (2, (480, 640, 3), np.uint8)}
 mm.create_memory_dict("camera", memory_names, coll=2)
 
-# Записать
-idx = mm.find_free_index("camera", "camera_frame")
+# Записать (индекс слота — round-robin у писателя; при loan-протоколе слот выдаёт
+# FramePool.acquire(), см. pool/README.md. Мёртвый find_free_index удалён, ADR-SRM-013)
+idx = 0
 img = np.zeros((480, 640, 3), dtype=np.uint8)
 mm.write_images("camera", "camera_frame", [img], index=idx)
 

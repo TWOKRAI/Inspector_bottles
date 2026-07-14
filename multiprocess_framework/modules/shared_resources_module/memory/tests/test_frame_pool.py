@@ -9,6 +9,10 @@ reader). Интеграция транспорта с пулом — `router_mod
 
 from __future__ import annotations
 
+import threading
+
+import pytest
+
 from multiprocess_framework.modules.shared_resources_module.memory.pool import (
     FramePool,
     LoanLedger,
@@ -26,20 +30,24 @@ class TestProtocolConformance:
 
 
 class TestAcquireCommit:
-    def test_rotates_and_exhausts(self):
-        """acquire ротирует курсор; когда все заняты → None + счётчик исчерпания."""
+    def test_reserves_on_acquire_then_exhausts(self):
+        """acquire РЕЗЕРВИРУЕТ слот (WRITING) — повторный acquire его НЕ выдаёт.
+
+        Резервирование (а не слепой round-robin, как было до H-ревью) — основа
+        single-writer: два acquire не могут получить один слот. Все зарезервированы
+        (даже без commit) → исчерпание.
+        """
         p = LoanLedger(3)
         assert p.acquire() == 0
         assert p.acquire() == 1
         assert p.acquire() == 2
-        # курсор обернулся, слоты ещё свободны (commit не звали) → снова 0.
-        assert p.acquire() == 0
-        assert p.snapshot_stats()["loan_exhausted"] == 0
-        # Занять все через commit → исчерпание.
-        for i in range(3):
-            p.commit(i, 1)
+        # все три WRITING (зарезервированы), commit не звали → исчерпание, НЕ повтор 0.
         assert p.acquire() is None
         assert p.snapshot_stats()["loan_exhausted"] == 1
+        # commit публикует — семантика занятости та же (слот остаётся busy).
+        p.commit(0, 1)
+        assert p.acquire() is None
+        assert p.snapshot_stats()["loan_exhausted"] == 2
 
     def test_commit_sets_refcount_fanout(self):
         """commit ставит refcount = num_consumers (fan-out)."""
@@ -158,3 +166,107 @@ class TestReset:
         assert p.acquire() == 0
         # счётчики наблюдаемости НЕ обнулены (realloc не теряет историю).
         assert p.snapshot_stats()["loan_exhausted"] == 1
+
+    def test_reset_clears_reservation(self):
+        """reset снимает WRITING-резервы (realloc кольца): зарезервированные acquire'ом
+        слоты снова свободны (H-ревью: без сброса reserved они утекли бы после realloc)."""
+        p = LoanLedger(2)
+        p.acquire()  # reserve 0 (без commit)
+        p.acquire()  # reserve 1
+        assert p.acquire() is None  # оба WRITING → исчерпан
+        p.reset()
+        assert p.acquire() == 0  # резервы сняты
+
+
+class TestLoanLifecycle:
+    """H-ревью 2026-07-14: loan ОБЯЗАН завершиться commit ЛИБО abort (iceoryx2-контракт)."""
+
+    def test_abort_returns_slot_to_free(self):
+        """abort отменяет loan (write не удался) → слот снова свободен (не утёк WRITING)."""
+        p = LoanLedger(1)
+        idx = p.acquire()
+        assert p.acquire() is None  # зарезервирован (WRITING)
+        p.abort(idx)
+        assert p.acquire() == idx  # вернулся в free
+
+    def test_abort_out_of_range_noop(self):
+        p = LoanLedger(1)
+        p.abort(9)  # не падает
+        p.abort(-1)
+        assert p.acquire() == 0
+
+    def test_commit_clears_reservation(self):
+        """commit публикует (WRITING→READY) и снимает резерв."""
+        p = LoanLedger(2)
+        idx = p.acquire()
+        assert p._reserved[idx] is True
+        p.commit(idx, 1)
+        assert p._reserved[idx] is False
+        assert p._refcount[idx] == 1
+
+    def test_abort_does_not_touch_committed_slot(self):
+        """abort снимает только резерв; на уже опубликованном (READY) слоте refcount цел."""
+        p = LoanLedger(2, gen_reader=lambda _i: 0)
+        idx = p.acquire()
+        p.commit(idx, 1)
+        p.abort(idx)  # резерв уже снят commit'ом → refcount не трогается
+        assert p._refcount[idx] == 1
+
+
+class TestSingleWriterGuard:
+    """H-ревью 2026-07-14: single-writer enforced кодом, а не соглашением."""
+
+    def test_same_thread_many_acquire_ok(self):
+        """Тот же поток-писатель зовёт acquire многократно — без ошибки."""
+        p = LoanLedger(3)
+        assert p.acquire() == 0
+        assert p.acquire() == 1  # тот же поток → ok
+
+    def test_second_writer_thread_raises(self):
+        """Второй ИНОЙ поток, зовущий acquire → RuntimeError (write-write не допускается)."""
+        p = LoanLedger(3)
+        p.acquire()  # связывает поток-писатель (main)
+        captured: dict = {}
+
+        def intruder():
+            try:
+                p.acquire()
+            except RuntimeError as exc:
+                captured["exc"] = exc
+
+        t = threading.Thread(target=intruder)
+        t.start()
+        t.join()
+        assert isinstance(captured.get("exc"), RuntimeError)
+
+    def test_release_and_reclaim_from_other_thread_ok(self):
+        """release/reclaim на другом потоке (message_processor владельца) — легитимны:
+        это НЕ второй писатель (guard только на acquire), они трогают READY-слоты."""
+        p = LoanLedger(2, gen_reader=lambda _i: 0)
+        idx = p.acquire()  # main = писатель
+        p.commit(idx, 2)
+        out: dict = {}
+
+        def owner_msg_thread():
+            try:
+                out["freed"] = p.release([{"index": idx, "generation": 0, "reader": "c0"}])
+                out["reclaimed"] = p.reclaim("cX")  # cX держал второй займ fan-out
+            except Exception as exc:  # noqa: BLE001
+                out["exc"] = exc
+
+        t = threading.Thread(target=owner_msg_thread)
+        t.start()
+        t.join()
+        assert "exc" not in out
+        assert out["freed"] == 1
+        assert out["reclaimed"] == 1
+
+    def test_guard_message_names_both_threads(self):
+        """Сообщение RuntimeError содержит оба ident (диагностируемость нарушения)."""
+        p = LoanLedger(2)
+        p.acquire()
+        with pytest.raises(RuntimeError, match="ВТОРОЙ писатель"):
+            # эмулируем второй поток простым перебиндом ident-проверки нельзя —
+            # зовём из этого же потока после ручного сброса на «чужой» ident.
+            p._writer_ident = p._writer_ident + 1 if p._writer_ident else 1
+            p.acquire()

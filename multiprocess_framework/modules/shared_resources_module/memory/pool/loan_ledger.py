@@ -5,11 +5,24 @@
 Чистая структура данных — БЕЗ логирования и БЕЗ знания про формат SHM (generation читается
 через инжектированный ``gen_reader``). Логирование/троттлинг — дело транспорта-владельца.
 
-Модель конкурентности — см. `interfaces.FramePool`: refcount мутирует ТОЛЬКО owner-процесс,
-кросс-процессного atomic RMW нет; безопасность от torn даёт seqlock+В1, не этот учёт.
+Модель конкурентности — см. `interfaces.FramePool`. Кратко (закреплено кодом, а не
+соглашением, ревью фазы G 2026-07-14):
+
+- **Single-writer enforced.** ``acquire``/``commit``/``abort`` зовёт РОВНО ОДИН поток-
+  писатель. Первый ``acquire`` связывает поток; второй иной поток → ``RuntimeError`` (не
+  тихая порча). Кадровое кольцо — single-writer-multi-reader (seqlock, ADR-SRM-011).
+- **State-машина слота (lock-free disjointness).** ``acquire`` РЕЗЕРВИРУЕТ слот
+  (``_reserved[idx]=True``, состояние WRITING, refcount==0); ``commit`` публикует
+  (refcount=N, reserved→False, READY); ``abort`` отменяет loan без publish (reserved→False).
+  ``release``/``reclaim`` (поток message_processor владельца) трогают ТОЛЬКО слоты с
+  refcount>0 (READY) → с WRITING-слотом писателя не пересекаются ПО ПОСТРОЕНИЮ, без lock.
+- Безопасность от torn-кадра даёт seqlock + post-use re-check (В1), НЕ этот учёт; любая
+  ошибка учёта безопасна (преждевременное освобождение → writer перезапишет → drift → drop).
 """
 
 from __future__ import annotations
+
+import threading
 
 from .interfaces import GenerationReader, LoanTicket, PoolStats
 
@@ -34,10 +47,16 @@ class LoanLedger:
         self._gen_reader = gen_reader or _null_gen_reader
         # refcount мутирует ТОЛЬКО owner-процесс (см. класс-докстринг interfaces).
         self._refcount: list[int] = [0] * self._depth
+        # State-машина слота: reserved=True → WRITING (acquire выдал loan, commit ещё
+        # не опубликовал). release/reclaim (refcount==0 → skip) WRITING-слот не трогают.
+        self._reserved: list[bool] = [False] * self._depth
         # Множество читателей, уже отпустивших ТЕКУЩИЙ займ слота (dedup release;
         # чистится при refcount→0).
         self._released: list[set] = [set() for _ in range(self._depth)]
         self._cursor = 0
+        # Single-writer guard: ident потока-писателя (первый acquire связывает; второй
+        # иной поток → RuntimeError). release/reclaim (другой поток) сюда не заходят.
+        self._writer_ident: int | None = None
         # Счётчики наблюдаемости (пул — единственный источник).
         self._released_count = 0
         self._reclaimed_count = 0
@@ -47,21 +66,60 @@ class LoanLedger:
     def depth(self) -> int:
         return self._depth
 
+    def _bind_writer(self) -> None:
+        """Single-writer guard: первый ``acquire`` связывает поток-писатель; любой второй
+        иной поток → ``RuntimeError`` (нарушение single-writer, а не тихая write-write порча).
+
+        release/reclaim идут на потоке message_processor владельца — они СЮДА не заходят
+        (их поток легитимно другой; они трогают только READY-слоты). Проверка — один
+        ``get_ident`` + сравнение int (наносекунды против memcpy кадра).
+        """
+        ident = threading.get_ident()
+        if self._writer_ident is None:
+            self._writer_ident = ident
+        elif self._writer_ident != ident:
+            raise RuntimeError(
+                "LoanLedger: обнаружен ВТОРОЙ писатель кадрового кольца "
+                f"(owner-thread={self._writer_ident}, нарушитель={ident}) — кольцо "
+                "рассчитано на ОДНОГО писателя (single-writer-multi-reader, seqlock). "
+                "Разнесите source и processing по разным процессам."
+            )
+
     def acquire(self) -> int | None:
-        """Взять свободный слот (refcount==0) от ротационного курсора. None → исчерпание."""
+        """Loan: зарезервировать СВОБОДНЫЙ слот (refcount==0 и не reserved) от курсора.
+
+        Помечает слот WRITING (``_reserved[idx]=True``) — release/reclaim его не трогают
+        (refcount==0 → skip), пока ``commit`` не опубликует или ``abort`` не отменит loan.
+        None → все слоты заняты/в записи (исчерпание, счётчик). Single-writer enforced.
+        """
+        self._bind_writer()
         n = self._depth
         for i in range(n):
             idx = (self._cursor + i) % n
-            if self._refcount[idx] == 0:
+            if self._refcount[idx] == 0 and not self._reserved[idx]:
+                self._reserved[idx] = True
                 self._cursor = (idx + 1) % n
                 return idx
         self._exhausted_count += 1
         return None
 
     def commit(self, idx: int, num_consumers: int) -> None:
-        """Опубликовать слот: refcount = число loan-aware потребителей (fan-out)."""
+        """Publish: опубликовать слот — refcount = число loan-aware потребителей (fan-out).
+
+        Снимает резерв (WRITING→READY): теперь release/reclaim могут декрементить слот.
+        """
         if 0 <= idx < self._depth:
             self._refcount[idx] = max(1, int(num_consumers))
+            self._reserved[idx] = False
+
+    def abort(self, idx: int) -> None:
+        """Отменить loan без publish (write не удался): вернуть слот в free (reserved→False).
+
+        Без этого неудачная запись оставила бы слот WRITING навсегда → утечка ёмкости
+        кольца до исчерпания. loan ОБЯЗАН завершиться commit'ом ИЛИ abort'ом (iceoryx2).
+        """
+        if 0 <= idx < self._depth:
+            self._reserved[idx] = False
 
     def release(self, tickets: list[LoanTicket]) -> int:
         """Owner-side release пачки тикетов. Возвращает число освобождённых займов."""
@@ -107,8 +165,13 @@ class LoanLedger:
         return reclaimed
 
     def reset(self) -> None:
-        """Сброс в «всё свободно» (realloc кольца). Счётчики наблюдаемости НЕ обнуляются."""
+        """Сброс в «всё свободно» (realloc кольца). Счётчики наблюдаемости НЕ обнуляются.
+
+        ``_writer_ident`` НЕ сбрасывается: realloc идёт на том же потоке-писателе (owner),
+        связка писателя сохраняется через цикл realloc.
+        """
         self._refcount = [0] * self._depth
+        self._reserved = [False] * self._depth
         self._released = [set() for _ in range(self._depth)]
         self._cursor = 0
 
