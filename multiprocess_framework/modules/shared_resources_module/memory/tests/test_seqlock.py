@@ -139,13 +139,35 @@ def test_seqlock_delivers_valid_frames_under_light_contention():
     """Seqlock НЕ чёрная дыра: при read << write_period reader стабильно отдаёт кадры.
 
     Малый кадр (быстрое чтение) + пауза writer 3мс (реальный межкадровый интервал) →
-    reader попадает в чистые окна: valid > 0, при этом torn == 0.
-    """
-    torn, _drops, valid = _run_contention(
-        _seqlock_read, shape=(128, 128, 3), iters=2000, seqlock=True, writer_gap=0.003
-    )
-    assert torn == 0, f"seqlock не должен отдавать torn, поймано {torn}"
-    assert valid > 0, "seqlock обязан отдавать валидные кадры при read << write_period"
+    reader попадает в чистые окна: valid > 0, при этом torn == 0. M6a: retry-until-
+    success (valid==0 иногда ловится 1/~50 на нагруженной машине — не флак-падение)."""
+    for _ in range(6):
+        torn, _drops, valid = _run_contention(
+            _seqlock_read, shape=(128, 128, 3), iters=2000, seqlock=True, writer_gap=0.003
+        )
+        assert torn == 0, f"seqlock не должен отдавать torn, поймано {torn}"
+        if valid > 0:
+            return
+    raise AssertionError("seqlock не отдал ни одного валидного кадра за 6 раундов")
+
+
+def test_seqlock_full_hd_under_contention_never_torn():
+    """M6b: прод-размер кадра (1920x1080x3, ~6.2 МБ) при межкадровом интервале 30 FPS
+    (writer_gap=0.033) под конкуренцией — seqlock reader НИКОГДА не отдаёт torn, и
+    поток не превращается в чёрную дыру (valid > 0). Малое число итераций (reader
+    копирует ~6 МБ на кадр — дороже, чем маленький 128×128 в light-contention тесте
+    выше), чтобы прогон укладывался в единицы секунд.
+
+    Retry-until-success по образцу M6a (valid==0 иногда на загруженной машине —
+    не флак-падение), torn проверяется КАЖДЫЙ раунд (безопасность неотменяема)."""
+    for _ in range(3):
+        torn, _drops, valid = _run_contention(
+            _seqlock_read, shape=(1080, 1920, 3), iters=300, seqlock=True, writer_gap=0.033
+        )
+        assert torn == 0, f"full-HD seqlock не должен отдавать torn, поймано {torn}"
+        if valid > 0:
+            return
+    raise AssertionError("full-HD seqlock не отдал ни одного валидного кадра за 3 раунда")
 
 
 # --- Детерминированные unit-тесты формата seqlock (без гонки) --------------------

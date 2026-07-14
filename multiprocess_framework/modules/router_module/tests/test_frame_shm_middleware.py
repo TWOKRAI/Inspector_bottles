@@ -374,6 +374,45 @@ class TestH4CacheRealloc:
         consumer.close_handle_cache()
         prod._mm.close_all()
 
+    def test_seqlock_plus_incarnation_plus_cache_combo(self):
+        """M7a: seqlock + owner_incarnation + cache_shm_handles ОДНОВРЕМЕННО.
+
+        Сценарий: write→read корректен под seqlock; после realloc слота (рост кадра —
+        новая инкарнация имени) кэш consumer'а НЕ отдаёт стейл-handle (H4) — читает
+        СВЕЖИЙ кадр №2, а не замороженный №1. Комбинация всех трёх флагов ранее не
+        покрывалась ни одним тестом по отдельности (H4-тест выше — без seqlock)."""
+        mm_producer = MemoryManager(seqlock_frames=True, owner_incarnation=True)
+        prod = FrameShmMiddleware(mm_producer, owner="p_combo", slot="s_combo")
+        item1 = prod.strip_and_write({"frame": _frame(100, 100, 11)})
+        assert item1["shm_seqlock"] is True, "producer обязан стамповать seqlock-формат"
+
+        consumer = FrameShmMiddleware(
+            MemoryManager(),
+            owner="c_combo",
+            slot="s_combo",
+            cache_shm_handles=True,
+            owner_incarnation=True,
+        )
+        assert consumer._cache_shm_handles is True
+
+        # Write→read через seqlock корректен (кадр №1, дважды — handle кэшируется).
+        r1a = consumer.restore_frame({"data": dict(item1)}).get("frame")
+        r1b = consumer.restore_frame({"data": dict(item1)}).get("frame")
+        assert r1a is not None and int(r1a.min()) == 11
+        assert r1b is not None and int(r1b.min()) == 11
+        assert len(consumer._shm_handle_cache) == 1, "один и тот же shm_actual_name — 1 handle"
+
+        # Realloc (рост кадра) — свежая инкарнация имени; кэш обязан подхватить новое имя,
+        # а не отдать замороженный кадр №1 (H4).
+        item2 = prod.strip_and_write({"frame": _frame(300, 300, 22)})
+        assert item2["shm_seqlock"] is True
+        assert item2["shm_actual_name"] != item1["shm_actual_name"], "имя обязано смениться (realloc)"
+        r2 = consumer.restore_frame({"data": dict(item2)}).get("frame")
+        assert r2 is not None and int(r2.min()) == 22, "кадр №2 (seqlock+incarnation+cache), не замороженный №1"
+
+        consumer.close_handle_cache()
+        mm_producer.close_all()
+
 
 class TestH5WireLifecycle:
     """H5: двойное создание (adopt) + deconfigure освобождает память/unregister."""
