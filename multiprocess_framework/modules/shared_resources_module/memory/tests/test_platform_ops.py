@@ -12,6 +12,7 @@ from ..platform import (
     create_shm_block,
     create_shm_blocks,
     close_shm,
+    extract_memory_region_names,
     is_posix,
     is_windows,
     open_shm_block,
@@ -89,3 +90,43 @@ class TestOpenShmBlock:
 class TestCleanupStaleShm:
     def test_cleanup_nonexistent_no_raise(self):
         cleanup_stale_shm("nonexistent_stale_xyz")
+
+
+class TestExtractMemoryRegionNames:
+    """Ф7 G.3 M8a: базовые имена memory-регионов из processes_config — источник
+    ПРЕФИКСОВ для cleanup_orphaned_by_prefix (вместо хардкода ["output_frames"])."""
+
+    def test_extracts_names_from_nested_names_format(self):
+        cfg = {
+            "camera": {"memory": {"names": {"camera_frame": (1, (600, 800, 3), "uint8")}, "coll": 2}},
+        }
+        assert extract_memory_region_names(cfg) == ["camera_frame"]
+
+    def test_extracts_names_from_flat_format(self):
+        cfg = {
+            "camera": {"memory": {"camera_frame": (1, (600, 800, 3), "uint8"), "coll": 2}},
+        }
+        assert extract_memory_region_names(cfg) == ["camera_frame"]
+
+    def test_extracts_from_multiple_processes_without_duplicates(self):
+        cfg = {
+            "camera_a": {"memory": {"names": {"camera_frame": (1, (600, 800, 3), "uint8")}, "coll": 2}},
+            "camera_b": {"memory": {"names": {"camera_frame": (1, (600, 800, 3), "uint8")}}},
+            "worker": {"memory": {"names": {"worker_scratch": (1, (32, 32, 3), "uint8")}}},
+        }
+        result = extract_memory_region_names(cfg)
+        assert result.count("camera_frame") == 1
+        assert "worker_scratch" in result
+        assert len(result) == 2
+
+    def test_process_without_memory_section_ignored(self):
+        cfg = {"gui": {"class": "GuiProcess"}}
+        assert extract_memory_region_names(cfg) == []
+
+    def test_empty_or_none_config_returns_empty(self):
+        assert extract_memory_region_names({}) == []
+        assert extract_memory_region_names(None) == []
+
+    def test_malformed_memory_section_is_safe(self):
+        cfg = {"camera": {"memory": "not-a-dict"}, "other": "not-a-dict-either"}
+        assert extract_memory_region_names(cfg) == []

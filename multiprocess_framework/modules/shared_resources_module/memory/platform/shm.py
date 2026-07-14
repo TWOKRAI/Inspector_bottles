@@ -67,6 +67,27 @@ def cleanup_stale_shm(name: str) -> None:
         pass
 
 
+def _extract_memory_region_names(proc_dict: dict[str, Any]) -> list[str]:
+    """Извлечь БАЗОВЫЕ имена frame/data-регионов, объявленных в ``proc_dict["memory"]``.
+
+    Общая логика для ``cleanup_known_shm_at_startup`` (точный cleanup ``{name}_{i}``) И
+    ``extract_memory_region_names`` (M8a: базовые имена как ПРЕФИКСЫ для
+    ``cleanup_orphaned_by_prefix`` — owner_incarnation суффиксует ДАЖЕ объявленные в
+    конфиге имена, точный cleanup их тогда не поймает, только префиксный).
+
+    Поддерживает форматы: плоский {"x": (h,w,c), "coll": 2} и вложенный {"names": {...}}.
+    """
+    if not isinstance(proc_dict, dict):
+        return []
+    mem = proc_dict.get("memory")
+    if not isinstance(mem, dict):
+        return []
+    names_raw = mem.get("names")
+    if names_raw is None:
+        names_raw = {k: v for k, v in mem.items() if k != "coll" and isinstance(v, (tuple, list))}
+    return list(names_raw.keys()) if isinstance(names_raw, dict) else []
+
+
 def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
     """
     Очистить известные SharedMemory блоки перед стартом приложения.
@@ -87,16 +108,39 @@ def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
         if not isinstance(mem, dict):
             continue
         coll = mem.get("coll", 2)
-        names_raw = mem.get("names")
-        if names_raw is None:
-            names_raw = {k: v for k, v in mem.items() if k != "coll" and isinstance(v, (tuple, list))}
-        names = list(names_raw.keys()) if isinstance(names_raw, dict) else []
+        names = _extract_memory_region_names(proc_dict)
         for name in names:
             for i in range(coll):
                 key = f"{name}_{i}"
                 if key not in seen:
                     seen.add(key)
                     cleanup_stale_shm(key)
+
+
+def extract_memory_region_names(processes_config: dict[str, Any] | None) -> list[str]:
+    """Ф7 G.3 M8a: извлечь БАЗОВЫЕ имена ВСЕХ объявленных в конфиге memory-регионов
+    (без дублей, порядок первого появления) — источник ПРЕФИКСОВ для
+    ``cleanup_orphaned_by_prefix`` (вместо хардкода одного имени).
+
+    Переиспользует ``_extract_memory_region_names`` (та же логика, что и точный
+    cleanup в ``cleanup_known_shm_at_startup``), не изобретает отдельный парсер
+    processes_config. Значения, приходящие в ``FrameShmMiddleware`` (напр.
+    ``output_frames`` — универсальный лениво выделяемый слот generic-пайплайна) в
+    processes_config НЕ объявлены — вызывающая сторона обязана добавить их к
+    результату сама (см. ``SystemLauncher._cleanup_shm_at_startup``).
+
+    Returns:
+        Список базовых имён без дублей. Пустой список, если processes_config пуст,
+        не содержит memory-секций, либо имеет неожиданную форму.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for proc_dict in (processes_config or {}).values():
+        for name in _extract_memory_region_names(proc_dict):
+            if name not in seen:
+                seen.add(name)
+                ordered.append(name)
+    return ordered
 
 
 def _unique_base_name(

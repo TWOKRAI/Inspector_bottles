@@ -19,6 +19,15 @@ from .spawner import ProcessSpawner
 
 _logger = FallbackLogger(__name__)
 
+# Ф7 G.3 M8a (ADR-SRM-011): "output_frames" — универсальный slot generic-процессов
+# (FrameShmMiddleware, GenericProcess._init_data_pipeline), выделяемый ЛЕНИВО и НЕ
+# объявленный в processes_config ни в каком виде — его невозможно извлечь парсингом
+# конфига без инвазивных изменений (пришлось бы знать о GenericProcess/FrameShmMiddleware
+# на уровне SystemLauncher, что нарушает границы модулей). Именованная константа вместо
+# магической строки; используется как БЕЗУСЛОВНЫЙ fallback-префикс (и добавка к
+# префиксам, извлечённым из config-регионов — см. _cleanup_shm_at_startup).
+_DEFAULT_FRAME_SLOT_PREFIX = "output_frames"
+
 
 class SystemLauncher:
     """
@@ -147,8 +156,20 @@ class SystemLauncher:
             if env_flag("FW_SHM_PREFIX_CLEANUP", default=False):
                 from ...shared_resources_module.buffers import cleanup_orphaned_by_prefix
 
-                # "output_frames" — универсальный slot generic-процессов (лениво выделяемый).
-                cleanup_orphaned_by_prefix(["output_frames"])
+                # M8a: базовые имена config-объявленных memory-регионов ТОЖЕ годятся как
+                # префиксы (owner_incarnation суффиксует их так же, как output_frames —
+                # точный cleanup выше их не поймает). "output_frames" всегда в списке —
+                # это лениво выделяемый слот пайплайна, в processes_config не объявлен
+                # ни в каком виде (см. _DEFAULT_FRAME_SLOT_PREFIX).
+                try:
+                    from ...shared_resources_module.memory.platform import extract_memory_region_names
+
+                    prefixes = extract_memory_region_names(processes_config)
+                except Exception:
+                    prefixes = []
+                if _DEFAULT_FRAME_SLOT_PREFIX not in prefixes:
+                    prefixes.append(_DEFAULT_FRAME_SLOT_PREFIX)
+                cleanup_orphaned_by_prefix(prefixes)
         except Exception:
             pass
 
