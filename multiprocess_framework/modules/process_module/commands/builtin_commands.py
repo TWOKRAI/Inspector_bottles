@@ -119,11 +119,16 @@ class BuiltinCommands:
             ("worker.restart", self._cmd_worker_restart, "Перезапустить воркер"),
             ("worker.start", self._cmd_worker_start, "Запустить остановленный воркер"),
             ("worker.stop", self._cmd_worker_stop, "Остановить воркер (без удаления)"),
+            (
+                "worker.drain",
+                self._cmd_worker_drain,
+                "Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop",
+            ),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
         self._services._log_debug(
-            "Встроенные команды worker.create/remove/update/restart/start/stop зарегистрированы",
+            "Встроенные команды worker.create/remove/update/restart/start/stop/drain зарегистрированы",
             module="lifecycle",
         )
 
@@ -241,6 +246,32 @@ class BuiltinCommands:
 
         ok = wm.stop_worker(name)
         return {"success": bool(ok), "worker_name": name}
+
+    def _cmd_worker_drain(self, data=None, **kwargs) -> dict:
+        """Ф7 G.8: дренаж воркера (пауза + дождаться текущего кадра) перед detach/stop.
+
+        ``remove=True`` → полная последовательность drain→detach→stop (``drain_and_remove``,
+        protected-проверка как у remove/stop). Без ``remove`` — только дренаж (пауза+idle),
+        воркер остаётся в реестре (например, safe-точка перед hot-swap рецепта)."""
+        args = self._merge_args(data, kwargs)
+        wm = self._services.worker_manager
+        if not wm:
+            return {"success": False, "reason": "worker_manager недоступен"}
+
+        name = str(args.get("worker_name", "")).strip()
+        if not name:
+            return {"success": False, "reason": "worker_name обязателен"}
+
+        raw_timeout = args.get("timeout", 5.0)
+        timeout = float(raw_timeout) if isinstance(raw_timeout, (int, float)) else 5.0
+        remove = bool(args.get("remove", False))
+        if remove:
+            if wm.is_worker_protected(name):
+                return {"success": False, "reason": "protected", "worker_name": name}
+            ok = wm.drain_and_remove(name, timeout=timeout)
+        else:
+            ok = wm.drain_worker(name, timeout=timeout)
+        return {"success": bool(ok), "worker_name": name, "removed": remove}
 
     def _cmd_worker_start(self, data=None, **kwargs) -> dict:
         """Запустить остановленный воркер (поток), не пересоздавая его.

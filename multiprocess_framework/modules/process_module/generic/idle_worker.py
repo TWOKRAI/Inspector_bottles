@@ -58,6 +58,12 @@ class IdleWorker:
         # SourceProducer/PipelineExecutor/DataReceiver).
         self._cycle_metrics = CycleMetricsRecorder(target_interval_s=self._target_interval)
 
+        # Ф7 G.8: busy-маркер на время полезной нагрузки цикла (кадра). Пишет ТОЛЬКО
+        # поток воркера, читает drain-поток (WorkerManager.drain_worker) — bool-read под
+        # GIL атомарен. Нужен, чтобы drain дождался ЗАВЕРШЕНИЯ текущего кадра перед
+        # detach/stop (иначе снятие с routing/SHM посреди кадра = полукадр downstream).
+        self._busy = False
+
     # ------------------------------------------------------------------
     # Публичный API
     # ------------------------------------------------------------------
@@ -68,6 +74,15 @@ class IdleWorker:
         WorkerManager.get_worker_status подмешивает результат в статус воркера.
         """
         return self._cycle_metrics.get_cycle_metrics()
+
+    @property
+    def is_busy(self) -> bool:
+        """Ф7 G.8: выполняет ли воркер СЕЙЧАС полезную нагрузку цикла (кадр).
+
+        True только на время ``_do_work`` (не в smart-sleep/паузе). Drain-контур
+        (``WorkerManager.drain_worker``) ждёт ``is_busy is False`` после паузы —
+        гарантия, что текущий кадр завершён до detach/stop (нет полукадра)."""
+        return self._busy
 
     def run(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """Точка входа воркера (target для WorkerManager.create_worker).
@@ -93,7 +108,12 @@ class IdleWorker:
         """Один цикл: работа + smart-sleep + запись тайминга."""
         t_start = time.monotonic()
 
-        self._do_work()
+        # Ф7 G.8: busy на время кадра — drain дожидается его завершения перед stop.
+        self._busy = True
+        try:
+            self._do_work()
+        finally:
+            self._busy = False
 
         elapsed = time.monotonic() - t_start
         sleep_time = self._target_interval - elapsed

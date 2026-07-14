@@ -149,6 +149,57 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
         self._log_info(f"Worker '{worker_name}' resumed")
         return True
 
+    def drain_worker(self, worker_name: str, *, timeout: float = 5.0, poll: float = 0.005) -> bool:
+        """Ф7 G.8: дренаж воркера — пауза + дождаться завершения ТЕКУЩЕГО кадра.
+
+        Первый шаг последовательности **drain→detach→stop** (pipeline-live-control):
+        снять воркер с конвейера БЕЗ полукадра. ``pause_event`` паркует петлю на
+        pause-проверке — новый ``_run_once`` (кадр) НЕ стартует; текущий кадр
+        доходит до конца (``is_busy`` спадает). Только ПОСЛЕ этого вызывающий делает
+        detach (снять с routing) и ``stop_worker``/``remove_worker``.
+
+        Воркер, сообщающий ``is_busy`` (IdleWorker и потомки), дренируется точно —
+        ждём ``is_busy is False``. Воркер без ``is_busy`` — best-effort короткая
+        grace-пауза (нечего дожидаться детерминированно). Возвращает True, если
+        достигнут idle (или grace); False — таймаут (кадр не завершился за ``timeout``)
+        или нет воркера. Идемпотентно: повторный drain уже-idle воркера → True сразу.
+        """
+        worker_info = self._worker_registry.get(worker_name)
+        if not worker_info:
+            return False
+        # 1. Пауза: петля паркуется на pause-проверке → новых кадров не будет.
+        worker_info["pause_event"].set()
+        # 2. Дождаться завершения текущего кадра. is_busy сообщает бизи-фазу (_do_work).
+        target = worker_info.get("target")
+        inst = getattr(target, "__self__", None)
+        if inst is None or not hasattr(inst, "is_busy"):
+            # Воркер не сообщает busy → детерминированно ждать нечего; короткая пауза.
+            time.sleep(min(poll * 10, timeout))
+            self._log_info(f"Worker '{worker_name}' drained (grace — воркер без is_busy)")
+            return True
+        deadline = time.monotonic() + max(0.0, timeout)
+        while getattr(inst, "is_busy", False):
+            if time.monotonic() >= deadline:
+                self._log_warning(f"Worker '{worker_name}' drain timeout — кадр ещё выполняется")
+                return False
+            time.sleep(poll)
+        self._log_info(f"Worker '{worker_name}' drained (idle — текущий кадр завершён)")
+        return True
+
+    def drain_and_remove(self, worker_name: str, *, timeout: float = 5.0) -> bool:
+        """Ф7 G.8: полная последовательность drain→(detach)→stop для снятия воркера.
+
+        drain (пауза + дождаться кадра) → ``remove_worker`` (stop_event+join+unregister).
+        «detach от routing» для thread-воркера = снятие с реестра внутри remove_worker;
+        wire/SHM-detach на switch дренируется отдельно (B-7, G.4). Возвращает True, если
+        и дренаж, и удаление успешны. Защищённые воркеры не трогаются (remove_worker
+        отфильтрует). Дренаж-таймаут НЕ блокирует stop (безопасность важнее полукадра —
+        логируется), но сигналит False.
+        """
+        drained = self.drain_worker(worker_name, timeout=timeout)
+        removed = self.remove_worker(worker_name, timeout=timeout)
+        return drained and removed
+
     # ========================================================================
     # Групповые операции
     # ========================================================================

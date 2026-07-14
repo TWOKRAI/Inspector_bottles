@@ -137,6 +137,16 @@ class IWorkerManager(ABC):
     @abstractmethod
     def resume_worker(self, worker_name: str) -> bool: ...
 
+    @abstractmethod
+    def drain_worker(self, worker_name: str, *, timeout: float = 5.0, poll: float = 0.005) -> bool:
+        """Ф7 G.8: пауза + дождаться завершения текущего кадра (drain перед detach/stop)."""
+        ...
+
+    @abstractmethod
+    def drain_and_remove(self, worker_name: str, *, timeout: float = 5.0) -> bool:
+        """Ф7 G.8: полная последовательность drain→(detach)→stop снятия воркера."""
+        ...
+
     # ---- Групповые операции ----
 
     @abstractmethod
