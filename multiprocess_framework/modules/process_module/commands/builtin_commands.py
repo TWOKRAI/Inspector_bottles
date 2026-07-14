@@ -1040,6 +1040,15 @@ class BuiltinCommands:
             else:
                 self._services.router_manager.remove_receive_middleware(mw.on_receive)
 
+        # Ф7 G.3: закрыть кэш SHM-handles читателя (если включён) — на switch старые
+        # сегменты освобождаются, новые имена owner+incarnation откроются заново.
+        close_cache = getattr(mw, "close_handle_cache", None)
+        if callable(close_cache):
+            try:
+                close_cache()
+            except Exception:  # noqa: BLE001 — teardown не критичен
+                pass
+
         self._services._log_info(
             f"wire.deconfigure: middleware удалён — wire_key={wire_key}, role={role}",
             module="wire",
