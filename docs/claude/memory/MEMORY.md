@@ -42,7 +42,7 @@
 - [Cross-tab Phase E per-tab migration](project_cross_tab_phase_e.md) — Phase E IN PROGRESS (2026-05-28): E.1 Pipeline DONE (8566f994+e7bd3d97, APPROVED), E.2 Processes next. Bridge pattern с TODO Phase F допустим, sentrux -20 принято.
 - [Cross-tab Phase F legacy removal](project_cross_tab_phase_f.md) — DONE 2026-05-28 (ретро-ревью Opus, без блокеров); F.7 переосмыслен (peek bridge-readers, no-op фильтр найден); F.1+ActionBus→G; Phase G handoff-долг зафиксирован
 - [Cross-tab Phase G final](project_cross_tab_phase_g.md) — ЗАВЕРШЕНА 2026-05-29: все G.0–G.6 DONE. G.6 UX (auto-reveal/validation/selection/diff + RecipeActivated prod вариант A + cross-tab Services-highlight); reviewer APPROVED; 2035 passed/sentrux 9-9/quality 7136; boot-smoke — долг перед merge
-- [Commit message format](feedback_commit_msg_format.md) — каждый trailer (Why/Layer/...) одной строкой (перенос ломает парсер); pre-commit ruff-format → re-stage + re-commit
+- [Commit message format](feedback_commit_msg_format.md) — trailer предпочтительно одной строкой, но хук с 2026-07-14 ТЕРПИТ перенос (git-стиль фолдинг, корень починен); pre-commit ruff-format → re-stage + re-commit
 - [ruff убирает свежий импорт](feedback_ruff_strips_unused_import.md) — PostToolUse ruff --fix вырезает импорт, добавленный Edit'ом раньше его использования → добавлять импорт+использование одним Edit
 - [Priority: product over engine](project_priority_product_over_engine.md) — 2026-05-29 владелец: запускать прототип/функции/цепочки важнее красоты движка; constructor-maturity отложен
 - [Command-engine P1.1 audit](project_command_engine_audit.md) — ActionBus в проде мёртв (0 потребителей), domain-dispatch единственный живой; «двух движков» нет; RBAC field-edit дыра
@@ -115,3 +115,4 @@
 - [Неиспользуемые пути = контракты](feedback_unused_paths_are_contracts.md) — конструктор универсален: API без живых вызывающих в ревью чинить/отклонять громко, не отмахиваться «мёртвый путь»
 - [Model economy scheme](feedback_model_economy_scheme.md) — главный чат Opus 4.8, Fable точечно на вердикты, финдеры Sonnet, исполнители Sonnet/Opus по таблице фазы
 - [Ф7 G.3 done](project_f7_g3_handoff.md) — G.3 seqlock ЗАКРЫТ 2026-07-14 (merge b54b4689): torn→0 + видимость деградаций + SHM-cleanup + единый header под пул G.4, всё за dark-launch флагами; урок «перед merge ВСЕГДА полный suite» + liveness-тесты флачат под нагрузкой; G.4 следующая (Opus)
+- [app_module Windows test debt](project_app_module_windows_test_debt.md) — 2 теста красны ТОЛЬКО на Windows (os.replace WinError 5 + endswith прямой слэш); pre-existing, не seqlock; эталон Ф7-suite = «N passed, 2 pre-existing fail»; чинить отдельной мелкой задачей

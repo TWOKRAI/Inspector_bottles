@@ -126,12 +126,22 @@ def parse_message(text: str) -> tuple[str, list[str], dict[str, list[str]]]:
     trailers: dict[str, list[str]] = {}
     while paragraphs:
         last = paragraphs[-1]
-        if all(TRAILER_RE.match(line) for line in last):
+        # Git-стиль: абзац — трейлер-блок, если НАЧИНАЕТСЯ с трейлер-строки.
+        # Не-матчащие строки внутри блока фолдятся как продолжение значения
+        # предыдущего трейлера. Это терпит ПЕРЕНОС значения `Why:`/`Layer:` на
+        # вторую строку — частый трап (раньше `all(...)` ронял весь блок в body →
+        # ложное «Missing required trailers»). Требование single-line остаётся
+        # рекомендацией, но опечатка-перенос больше не блокирует коммит.
+        if TRAILER_RE.match(last[0]):
+            current_key: str | None = None
             for line in last:
                 m = TRAILER_RE.match(line)
                 if m:
-                    key, val = m.group(1), m.group(2).strip()
-                    trailers.setdefault(key, []).append(val)
+                    current_key, val = m.group(1), m.group(2).strip()
+                    trailers.setdefault(current_key, []).append(val)
+                elif current_key is not None:
+                    # продолжение значения предыдущего трейлера (перенос строки)
+                    trailers[current_key][-1] = f"{trailers[current_key][-1]} {line.strip()}"
             paragraphs.pop()
         else:
             break

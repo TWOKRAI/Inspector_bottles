@@ -956,7 +956,8 @@ class BuiltinCommands:
             role: "sender" или "receiver"
             shm_name: имя SHM-слота
             shm_owner: имя процесса-владельца SHM
-            buffer_slots: кол-во буферных слотов (информативно)
+            buffer_slots: глубина кольца SHM-слотов per-camera (Ф7 G.4.b; None → авто:
+                QoS-профиль при FW_QOS_PROFILES, иначе 3). Раньше игнорировался.
         """
         if isinstance(data, dict):
             kwargs.update(data)
@@ -965,6 +966,15 @@ class BuiltinCommands:
         role = kwargs.get("role", "")
         shm_name = kwargs.get("shm_name", "")
         shm_owner = kwargs.get("shm_owner", "")
+        # Ф7 G.4.b: buffer_slots ЗАДАёт глубину кольца per-camera (раньше «информативно»,
+        # игнорировался → кольцо всегда дефолтные 3, B-8). **Гейт FW_QOS_PROFILES**
+        # (ревью 2026-07-14): buffer_slots дефолтит в 4 в _cmd_wire_setup/_reissue ещё до
+        # Ф7 — честить его БЕЗУСЛОВНО = менять глубину 3→4 на merge (не откат бит-в-бит).
+        # Поэтому config-глубину применяем ТОЛЬКО при флаге; off → None → middleware даёт
+        # 3 (прежнее поведение, buffer_slots игнорируется как до Ф7).
+        from multiprocess_framework.modules.config_module.tools.env import env_flag
+
+        buffer_slots = kwargs.get("buffer_slots") if env_flag("FW_QOS_PROFILES") else None
 
         if not wire_key or not role:
             return {"success": False, "reason": "wire_key и role обязательны"}
@@ -972,6 +982,20 @@ class BuiltinCommands:
             return {"success": False, "reason": f"неизвестная role: {role}"}
         if not self._services.router_manager:
             return {"success": False, "reason": "router_manager недоступен"}
+
+        # Ф7 G.4.d (B-7): re-issue на switch/restart шлёт wire.configure с ТЕМ ЖЕ
+        # wire_key (_reissue_wires_for). Чисто ЗАМЕНЯЕМ: снять старый middleware с
+        # router + освободить его ресурсы ДО создания нового — иначе старый остаётся
+        # зарегистрирован (двойная обработка кадров) и держит стейл handle-cache
+        # (замороженные handles на старый регион = «перепутанные»/зависшие кадры после
+        # switch). Это и есть безопасный refresh handles получателя на switch, без
+        # кросс-процессного дренажа живой очереди (тот роняет и валидные кадры).
+        if wire_key in self._wire_middlewares:
+            self._teardown_wire_middleware(wire_key)
+            self._services._log_info(
+                f"wire.configure: заменяю существующий wire '{wire_key}' (re-issue/switch)",
+                module="wire",
+            )
 
         # Получить memory_manager
         mm = self._services.memory_manager
@@ -986,6 +1010,7 @@ class BuiltinCommands:
             memory_manager=mm,
             owner=shm_owner,
             slot=shm_name,
+            coll=buffer_slots,  # Ф7 G.4.b: глубина кольца per-camera из рецепта (None → авто)
             # M2b: без log_error громкий pickle-fallback (G.3d) на wire-пути был мёртв.
             log_error=lambda m: self._services._log_error(m, module="wire"),
         )
@@ -1009,30 +1034,21 @@ class BuiltinCommands:
         )
         return {"success": True, "wire_key": wire_key, "role": role}
 
-    def _cmd_wire_deconfigure(self, data=None, **kwargs) -> dict:
-        """Удалить wire middleware из router.
+    def _teardown_wire_middleware(self, wire_key: str) -> bool:
+        """Снять wire-middleware с router + освободить его ресурсы (SHM, handle-cache).
 
-        Параметры в data:
-            wire_key: ключ wire для удаления
+        Общий cleanup для ``wire.deconfigure`` И для чистой ЗАМЕНЫ на ``wire.configure``
+        с уже существующим ``wire_key`` (re-issue на switch/restart, Ф7 G.4.d / B-7):
+        иначе старый middleware остаётся зарегистрирован в router'е (его ``on_receive``/
+        ``on_send`` продолжает обрабатывать кадры = двойная обработка + замороженный
+        стейл handle-cache) и течёт при каждом цикле.
+
+        Returns:
+            True — middleware был и снят; False — ``wire_key`` неизвестен.
         """
-        if isinstance(data, dict):
-            kwargs.update(data)
-
-        wire_key = kwargs.get("wire_key", "")
-        if not wire_key:
-            return {"success": False, "reason": "wire_key обязателен"}
-
         entry = self._wire_middlewares.pop(wire_key, None)
         if entry is None:
-            self._services._log_warning(
-                f"wire.deconfigure: wire_key '{wire_key}' не найден в _wire_middlewares",
-                module="wire",
-            )
-            return {
-                "success": True,
-                "wire_key": wire_key,
-                "note": "уже удалён или не существовал",
-            }
+            return False
 
         mw, role = entry
         router = self._services.router_manager
@@ -1065,9 +1081,34 @@ class BuiltinCommands:
                 close_cache()
             except Exception:  # noqa: BLE001 — teardown не критичен
                 pass
+        return True
+
+    def _cmd_wire_deconfigure(self, data=None, **kwargs) -> dict:
+        """Удалить wire middleware из router.
+
+        Параметры в data:
+            wire_key: ключ wire для удаления
+        """
+        if isinstance(data, dict):
+            kwargs.update(data)
+
+        wire_key = kwargs.get("wire_key", "")
+        if not wire_key:
+            return {"success": False, "reason": "wire_key обязателен"}
+
+        if not self._teardown_wire_middleware(wire_key):
+            self._services._log_warning(
+                f"wire.deconfigure: wire_key '{wire_key}' не найден в _wire_middlewares",
+                module="wire",
+            )
+            return {
+                "success": True,
+                "wire_key": wire_key,
+                "note": "уже удалён или не существовал",
+            }
 
         self._services._log_info(
-            f"wire.deconfigure: middleware удалён — wire_key={wire_key}, role={role}",
+            f"wire.deconfigure: middleware удалён — wire_key={wire_key}",
             module="wire",
         )
         return {"success": True, "wire_key": wire_key}

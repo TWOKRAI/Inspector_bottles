@@ -177,11 +177,14 @@ class ProcessHeartbeat:
             _log(f"Не удалось self-publish метрик процесса: {exc}", module="heartbeat")
 
     def _publish_router_shm_stats_to_tree(self) -> None:
-        """Ф7 G.3 H8: SHM-счётчики router'а → дерево StateStore (тот же self-publish
-        канал, что телеметрия/health). Публикует ``processes.{name}.state.shm.{...}``:
-        pickle_fallbacks (громкий slow-path), torn_reads (гонка seqlock),
-        boundary_crossings (границ/кадр). Публикует только при НЕнулевых счётчиках
-        (иначе no-op — не засоряем дерево у процессов без кадрового пути).
+        """Ф7 G.3 H8 / G.4.a: счётчики кадрового транспорта router'а → дерево StateStore
+        (тот же self-publish канал, что телеметрия/health). Публикует
+        ``processes.{name}.state.shm.{...}``: pickle_fallbacks (громкий slow-path),
+        torn_reads (гонка seqlock), boundary_crossings (границ/кадр), а также
+        queue_data_evicted (Ф7 G.4.a — дроп из полных data-очередей, drop_oldest) —
+        все сигналы потери кадра в одном месте для вкладки Pipeline. Публикует только
+        при НЕнулевых счётчиках (иначе no-op — не засоряем дерево у процессов без
+        кадрового пути).
         """
         proxy = getattr(self._services, "_state_proxy", None)
         router = getattr(self._services, "router_manager", None)
@@ -193,7 +196,12 @@ class ProcessHeartbeat:
             pickle_fallbacks = int(rs.get("frame_pickle_fallbacks", 0) or 0)
             torn = int(rs.get("frame_torn_reads", 0) or 0)
             crossings = int(rs.get("frame_boundary_crossings", 0) or 0)
-            if pickle_fallbacks == 0 and torn == 0 and crossings == 0:
+            queue_evicted = int(rs.get("queue_data_evicted", 0) or 0)
+            # Ф7 G.4.a: system-backpressure тоже виден (блокировки вытеснения из полной
+            # system-очереди — control-plane терять нельзя; ревью 2026-07-14: раньше
+            # surface был, но публикации не было — асимметрия с data_evicted).
+            sys_blocked = int(rs.get("queue_system_evict_blocked", 0) or 0)
+            if pickle_fallbacks == 0 and torn == 0 and crossings == 0 and queue_evicted == 0 and sys_blocked == 0:
                 return  # нет кадрового пути / всё чисто — не публикуем
             proxy.merge(
                 f"processes.{self._services.name}.state.shm",
@@ -201,6 +209,8 @@ class ProcessHeartbeat:
                     "pickle_fallbacks": pickle_fallbacks,
                     "torn_reads": torn,
                     "boundary_crossings": crossings,
+                    "queue_data_evicted": queue_evicted,
+                    "queue_system_evict_blocked": sys_blocked,
                 },
             )
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB

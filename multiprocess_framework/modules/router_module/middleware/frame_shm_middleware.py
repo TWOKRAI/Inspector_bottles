@@ -25,6 +25,14 @@ realloc-on-grow + round-robin — канон generic). Прежний `find_free
 (open/mmap/close + resource_tracker). При `cache_shm_handles` — инстанс-кэш
 `shm_actual_name → SharedMemory` (LRU-кэп), инвалидация по смене имени.
 
+**Ф7 G.4.b — глубина кольца per-camera (B-8).** `coll` (число SHM-слотов round-robin)
+теперь настраивается на КОНКРЕТНУЮ камеру: явный `coll` из рецепта/wire (`buffer_slots`,
+раньше игнорировался) > QoS-профиль data при `FW_QOS_PROFILES` (history_depth) > 3.
+Каждый source-процесс = свой `owner` = своё независимое кольцо (изоляция цепочек камер:
+замедление/дроп одной камеры не трогает слоты другой). Владение слотом до release
+последним читателем (fan-out refcount, reclaim-on-death) — G.5 (нагружено только с
+zero-copy; header G.3 уже несёт state/refcount).
+
 Claim Check: пиксели (numpy) едут в OS SHM, по очереди — только координаты (shm_ref).
 """
 
@@ -88,7 +96,7 @@ class FrameShmMiddleware:
         memory_manager: Any,
         owner: str,
         slot: str = "output_frames",
-        coll: int = 3,
+        coll: Optional[int] = None,
         log_error: Callable[[str], None] | None = None,
         cache_shm_handles: Optional[bool] = None,
         owner_incarnation: Optional[bool] = None,
@@ -97,7 +105,13 @@ class FrameShmMiddleware:
         self._mm = memory_manager
         self._owner = owner
         self._slot = slot
-        self._coll = coll
+        # Ф7 G.4.b: глубина кольца per-camera (число SHM-слотов round-robin). Явный
+        # coll (не None, >0) выигрывает — приходит из рецепта/wire (buffer_slots) на
+        # конкретную камеру; иначе при FW_QOS_PROFILES — боевая глубина из QoS-профиля
+        # data (history_depth=4, «несколько кадров на джиттер»); иначе прежний дефолт 3
+        # (откат бит-в-бит). Каждый источник = свой owner = своё независимое кольцо
+        # (изоляция per-camera по построению; общего слота нет).
+        self._coll = self._resolve_ring_depth(coll)
         self._log_error = log_error or (lambda msg: None)
         # Ф7 G.6 (F5 ревью 2026-07-13): собственный счётчик, БЕЗ колбэка в
         # RouterManager (тот давал reference-cycle middleware↔router + третий lock
@@ -153,6 +167,24 @@ class FrameShmMiddleware:
         from ...config_module.tools.env import env_flag
 
         return env_flag(env_name, default=False)
+
+    @classmethod
+    def _resolve_ring_depth(cls, explicit: Optional[int]) -> int:
+        """Глубина кольца SHM-слотов (Ф7 G.4.b, B-8).
+
+        Приоритет: явный ``coll`` (не None, >0 — из рецепта/wire per-camera) > при
+        ``FW_QOS_PROFILES`` боевая глубина из QoS-профиля data (``history_depth``,
+        «несколько кадров на джиттер») > прежний дефолт 3 (откат бит-в-бит). Раньше
+        глубина была ЖЁСТКО 3 везде, а ``buffer_slots`` из wire-команды игнорировался
+        («информативно») — кольцо не настраивалось per-camera (B-8).
+        """
+        if explicit is not None and explicit > 0:
+            return int(explicit)
+        if cls._resolve_bool_flag(None, "FW_QOS_PROFILES"):
+            from ...shared_resources_module.qos import qos_for
+
+            return max(1, qos_for("data").history_depth)
+        return 3
 
     def _bump_frame_hops(self, container: dict) -> None:
         """Инкремент per-item поля frame_hops + агрегатного счётчика (Ф7 G.6).

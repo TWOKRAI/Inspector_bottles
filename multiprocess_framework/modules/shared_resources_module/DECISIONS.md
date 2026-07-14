@@ -185,3 +185,47 @@ multi-backend-риск, задокументированный в `cleanup_orpha
 Формат готов к пулу G.4 без переделки. Три ортогональных флага (seqlock / owner-incarnation /
 prefix-cleanup) — независимый откат каждого. Per-frame путь без Pydantic (голый struct на
 memoryview). Дефолты OFF — в прод включаются на G.7 (flip флага + soak).
+
+## ADR-SRM-012: QoS-профили класса груза — единый источник политики переполнения (Ф7 G.4.a)
+
+**Дата:** 2026-07-14
+**Статус:** Принято
+**Refs:** [plans/2026-07-06_constructor-master/plan.md](../../../plans/2026-07-06_constructor-master/plan.md) (Ф7 G.4), [g4-execution-plan.md](../../../plans/2026-07-06_constructor-master/g4-execution-plan.md) §3
+
+**Контекст.** Политика переполнения гнёзд доставки была раздублирована в ТРЁХ местах разной
+формы: (1) наблюдаемость — `BoundedChannel` (drop_oldest/drop_newest + `dropped`); (2) очереди
+— `QueueRegistry.remove_old_if_full` хардкод `queue_type == "system"` (never-drop) vs else
+(тихое drop_oldest БЕЗ счётчика); (3) кадровые кольца SHM — round-robin без политики. Data-дроп
+из очереди был **тихим** (комментарий «Полная QoS-модель — Ф7 G.4»), нарушая правило Ф3.3
+«терять можно, молчать — нельзя».
+
+**Решение.** `shared_resources_module/qos.py` — `QoSProfile{reliability, history_depth,
+drop_policy, deadline_ms}` (frozen dataclass, чистые данные) + реестр `QOS_PROFILES`, ключи
+которого СОВПАДАЮТ с kind (`resolve_channel_kind`) и `queue_type`. Инвариант профиля: `reliable
+⟺ never-drop`. Единый вердикт `qos_for(kind).never_drop` для всех трёх поверхностей вместо
+трёх хардкодов. Профили-дефолты: system/command=reliable/never; data=best_effort/drop_oldest/
+depth 4/33мс; state=drop_oldest/depth 1 (coalesce); observability/log=drop_oldest/depth 1024.
+
+Проводка G.4.a (за флагом `FW_QOS_PROFILES`, дефолт off = бит-в-бит): `remove_old_if_full`
+берёт вердикт never-drop из профиля вместо хардкода (для system/data идентично → флип
+безопасен); **новый всегда-on счётчик `data_evicted`** (+ throttled WARNING) делает data-дроп
+ВИДИМЫМ; surface в `RouterManager.get_stats` → heartbeat → `state.shm.queue_data_evicted`
+(тот же путь, что SHM-счётчики G.3). Структура профиля совместима с DDS/iceoryx2 QoS
+(reliability/history/deadline) — миграция транспорта = замена бэкенда под тем же контрактом.
+
+**Альтернативы (отвергнуты).** *Оставить 3 хардкода* — дрейф политик, тихий data-дроп.
+*Профиль в router/channel_routing* — новое ребро импорта в `shared_resources` (очередь — там);
+qos.py в shared_resources, router дотянется по существующему ребру. *Всегда-on проводка без
+флага* — правило фазы (feature-flag, откат = флаг off); счётчик `data_evicted` — телеметрия,
+поведение drop не меняет, потому всегда-on (образец G.3-счётчиков).
+
+**Последствия.** Один источник правды QoS под 3 поверхности; data-дроп виден в state (вкладка
+Pipeline); задел под G.4.b (глубина кольца = `history_depth`) и G.5. Дефолт OFF — flip на G.7.
+
+**Нота о конкурентности счётчиков (ревью 2026-07-14).** `data_evicted`/`system_evict_blocked` —
+plain-int `+= 1` без lock (по образцу G.6 `frame_boundary_crossings`). В отличие от per-camera
+`FrameShmMiddleware`, `QueueRegistry` — ОДИН инстанс на процесс, `send_to_queue`→`remove_old_if_full`
+может зваться из нескольких воркер-тредов → под GIL инкремент почти-атомарен, но при плотном fan-in
+возможен редкий недосчёт. Это **advisory-телеметрия** (сигнал «теряем/блокируем», не точный учёт для
+логики) — недосчёт приемлем; вводить lock на hot-path send ради точности счётчика — нет (правило фазы
+«без локов на горячем пути»). Точный per-drop учёт не требуется ни одним потребителем.
