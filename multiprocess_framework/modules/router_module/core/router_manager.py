@@ -183,6 +183,18 @@ class RouterManager(ChannelRoutingManager):
         """
         self._frame_middlewares.append(middleware)
 
+    def unregister_frame_middleware(self, middleware: Any) -> None:
+        """Снять frame-middleware из агрегации счётчиков (Ф7 G.3 H5b).
+
+        wire.deconfigure обязан удалять middleware из ``_frame_middlewares`` — иначе
+        каждый цикл configure/deconfigure копит объекты (утечка) и задваивает счётчики
+        границ. Идемпотентно (по identity; тихо игнорирует отсутствующий).
+        """
+        try:
+            self._frame_middlewares.remove(middleware)
+        except ValueError:
+            pass
+
     # ================================================================
     # LIFECYCLE
     # ================================================================
@@ -1081,6 +1093,11 @@ class RouterManager(ChannelRoutingManager):
             "frame_boundary_crossings": sum(
                 getattr(mw, "frame_boundary_crossings", 0) for mw in self._frame_middlewares
             ),
+            # Ф7 G.3(d): громкий pickle-fallback — сколько кадров ушло медленным путём
+            # (сбой SHM-write). Тот же безлоковый суммируемый-на-чтении механизм.
+            "frame_pickle_fallbacks": sum(getattr(mw, "frame_pickle_fallbacks", 0) for mw in self._frame_middlewares),
+            # M2c: torn/дропнутые cross-process seqlock-чтения (raw-путь middleware).
+            "frame_torn_reads": sum(getattr(mw, "frame_torn_reads", 0) for mw in self._frame_middlewares),
         }
 
         if isinstance(base, dict):

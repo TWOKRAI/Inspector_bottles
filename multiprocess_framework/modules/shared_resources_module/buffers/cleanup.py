@@ -5,12 +5,19 @@
 - Windows: объекты живут пока есть хотя бы один handle; при аварийном завершении
   теряются все handles и mapping освобождается ОС, но следующий старт
   с тем же именем получит FileExistsError если PID-суффикс совпадёт
+- macOS (M8b, ADR-SRM-011): POSIX shared memory НЕ материализуется файлами в
+  /dev/shm (в отличие от Linux) — enumeration недоступен вообще, ни известных
+  имён, ни prefix-scan. Осиротевшие сегменты чистит сама ОС при завершении
+  последнего процесса-держателя (как на Windows, механизм другой). Имена SHM
+  на macOS дополнительно ограничены ~31 символом (PSHMNAMLEN) — см. H3 в
+  memory/platform/shm.py.
 
 Подход:
 - Linux: сканировать /dev/shm/ по списку известных базовых имён
 - Windows: попытаться open+close по базовым именам (без PID-суффикса)
   через реестр имён из ShmRegistry
-- В обоих случаях cleanup не трогает сегменты с действующими handles (try/except)
+- macOS: no-op (см. выше) — best-effort функции безопасно возвращают пустой список
+- Во всех случаях cleanup не трогает сегменты с действующими handles (try/except)
 """
 
 from __future__ import annotations
@@ -64,7 +71,7 @@ def _scan_linux_devshm(known_names: list[str]) -> list[str]:
         Список очищенных имён.
     """
     cleaned: list[str] = []
-    dev_shm = Path("/dev/shm")
+    dev_shm = Path("/dev/shm")  # nosec B108 — штатный POSIX-путь shared memory, не temp-файл
 
     if not dev_shm.exists():
         return cleaned
@@ -153,4 +160,72 @@ def cleanup_stale_shm(known_names: list[str] | None = None) -> list[str]:
     else:
         logger.debug("cleanup_stale_shm: осиротевших SHM-сегментов не найдено")
 
+    return cleaned
+
+
+def _matches_any_prefix(name: str, prefixes: list[str]) -> bool:
+    """Начинается ли ``name`` с одного из непустых ``prefixes``."""
+    return any(name.startswith(p) for p in prefixes if p)
+
+
+def cleanup_orphaned_by_prefix(prefixes: list[str] | None) -> list[str]:
+    """Ф7 G.3(c) (ADR-SRM-011): удалить осиротевшие SHM-сегменты по ПРЕФИКСУ имени.
+
+    Проблема: рантайм-слоты кадров (``output_frames``) выделяются ЛЕНИВО и НЕ попадают
+    в config-cleanup (`cleanup_known_shm_at_startup` знает только объявленные в конфиге
+    имена). После ``kill -9`` их сегменты висят (POSIX ``/dev/shm``). Имя несёт
+    owner/pid/incarnation-суффикс (B-6) — точное имя заранее неизвестно, поэтому
+    сканируем по префиксу базового slot-имени.
+
+    - **Linux**: сканирует ``/dev/shm``, unlink'ает файлы, чьё имя начинается с любого
+      из ``prefixes`` (напр. ``["output_frames"]`` ловит ``output_frames_cam_123_4_0``).
+    - **Windows**: enumeration недоступен → best-effort no-op. ОС сама освобождает
+      mapping при гибели последнего handle (``kill -9`` закрывает все handles процесса)
+      → осиротевших почти нет — no-op здесь не деградация, а корректный дефолт.
+    - **macOS**: enumeration ТОЖЕ недоступен, но по ДРУГОЙ причине, чем Windows — POSIX
+      shared memory на macOS НЕ материализуется файлами в ``/dev/shm`` (в отличие от
+      Linux), поэтому директории для сканирования просто не существует (M8b, ADR-SRM-011).
+      Осиротевшие сегменты после ``kill -9`` чистит сама ОС при завершении процесса
+      (аналогично Windows-логике выше, механизм другой — ядро освобождает POSIX shm
+      объект, когда закрыт последний referencing процесс). Имена SHM на macOS
+      дополнительно ограничены ``PSHMNAMLEN ≈ 31`` символом (см. H3 / ``_bounded_name``
+      в ``memory/platform/shm.py`` — компактный hash-суффикс при переполнении лимита).
+
+    ⚠️ Предполагает ОДИН активный backend: prefix-scan не отличает осиротевший сегмент
+    от сегмента ПАРАЛЛЕЛЬНО работающего второго backend'а с тем же slot-именем. Функция
+    вызывается на СТАРТЕ (до создания собственных сегментов) и за флагом
+    ``FW_SHM_PREFIX_CLEANUP`` (дефолт off) — включать при одиночном backend.
+
+    Returns:
+        Список очищенных имён.
+    """
+    if not prefixes:
+        return []
+    if not _is_linux():
+        # Windows: перечислить объекты SHM нельзя; ОС освобождает mapping при гибели
+        # последнего handle (kill -9 закрывает handles) → осиротевших почти нет.
+        return []
+
+    dev_shm = Path("/dev/shm")  # nosec B108 — штатный POSIX-путь shared memory, не temp-файл
+    if not dev_shm.exists():
+        return []
+    try:
+        names = [f.name for f in dev_shm.iterdir() if f.is_file()]
+    except PermissionError:
+        logger.warning("cleanup_orphaned_by_prefix: нет прав на чтение /dev/shm/")
+        return []
+
+    cleaned: list[str] = []
+    for name in names:
+        if _matches_any_prefix(name, prefixes) and _try_cleanup_shm_name(name):
+            cleaned.append(name)
+            logger.debug("prefix-cleanup: очищен осиротевший SHM '%s'", name)
+
+    if cleaned:
+        logger.info(
+            "cleanup_orphaned_by_prefix: очищено %d осиротевших SHM по префиксам %s: %s",
+            len(cleaned),
+            prefixes,
+            cleaned,
+        )
     return cleaned

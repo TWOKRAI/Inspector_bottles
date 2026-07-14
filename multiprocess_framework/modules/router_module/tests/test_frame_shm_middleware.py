@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from multiprocess_framework.modules.router_module.core.router_manager import RouterManager
 from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import (
     FrameShmMiddleware,
 )
@@ -204,14 +205,12 @@ class TestFanOutBoundaryCounting:
     def test_on_send_fan_out_two_targets_counts_boundary_twice(self):
         """Симметрично для top-level-frame пути (wire.configure): один и тот же
         msg-объект отправляется дважды (напр. sender/receiver-пара переиспользует
-        билет) — оба send'а должны быть учтены. Память под слот выделяем заранее
-        (on_send, в отличие от strip_and_write, не делает lazy-allocation) — иначе
-        первый write_images тоже уходил бы в pickle-fallback и не демонстрировал
-        бы «настоящий» shm_name-маркер для replay-ветки."""
+        билет) — оба send'а должны быть учтены. H5c: on_send ТЕПЕРЬ делает lazy-alloc
+        через общее ядро (G.3a) — предаллокация больше не нужна (первый send сам
+        выделит SHM и проставит настоящий shm_name-маркер для replay-ветки)."""
         mw = _mw()
-        mw._mm.create_memory_dict("test_owner", {"output_frames": (1, (600, 800, 3), "uint8")}, 3)
         msg = {"frame": _frame(600, 800)}
-        mw.on_send(msg)  # первый send: SHM write успешен, frame стрипнут
+        mw.on_send(msg)  # первый send: lazy-alloc + SHM write успешен, frame стрипнут
         assert "shm_actual_name" in msg["data"]
         mw.on_send(msg)  # второй send того же msg: frame уже None, data несёт shm_name
         assert mw.frame_boundary_crossings == 2
@@ -231,6 +230,269 @@ class TestOnSendDefensiveDataField:
         assert isinstance(out["data"], dict)
         assert out["data"]["frame_hops"] == 1
         assert "shm_actual_name" in out["data"]  # SHM-запись всё же прошла, несмотря на data=None
+
+
+class _WriteFailsMM:
+    """Фейк mm: аллокация ОК, но write_images всегда None (сбой SHM-write)."""
+
+    def create_memory_dict(self, *a, **k) -> bool:
+        return True
+
+    def close_memory(self, *a, **k) -> None:
+        pass
+
+    def write_images(self, *a, **k):
+        return None
+
+
+class TestG3WriteUnificationAndLoudFallback:
+    """Ф7 G.3(a) — одно ядро записи (round-robin в обоих путях); G.3(d) — громкий fallback."""
+
+    def test_on_send_uses_round_robin_slots(self):
+        """G.3a: on_send теперь round-robin (снят find_free_index, всегда 0)."""
+        mw = FrameShmMiddleware(MemoryManager(), owner="o", slot="s", coll=3)
+        indices = []
+        for _ in range(5):
+            out = mw.on_send({"frame": _frame(8, 8), "data": {}})
+            indices.append(out["data"]["shm_index"])
+        assert indices == [0, 1, 2, 0, 1], f"ожидался round-robin, получено {indices}"
+        mw._mm.close_all()
+
+    def test_loud_pickle_fallback_counts_on_write_failure(self):
+        """G.3d: сбой SHM-write (mm есть) → frame остаётся + счётчик fallback растёт."""
+        mw = FrameShmMiddleware(_WriteFailsMM(), owner="o", slot="s")
+        item = mw.strip_and_write({"frame": _frame(10, 10)})
+        assert "frame" in item, "frame обязан остаться в item (pickle-fallback)"
+        assert mw.frame_pickle_fallbacks == 1
+        assert mw.frame_boundary_crossings == 1  # граница всё равно посчитана (G.6)
+
+    def test_no_fallback_count_when_mm_none(self):
+        """G.3d: mm=None — pickle-by-design (SHM не сконфигурирован), НЕ деградация."""
+        mw = FrameShmMiddleware(None, owner="o", slot="s")
+        item = mw.strip_and_write({"frame": _frame(10, 10)})
+        assert "frame" in item
+        assert mw.frame_pickle_fallbacks == 0, "mm=None не должен считаться деградацией"
+        assert mw.frame_boundary_crossings == 1
+
+
+class TestG3SeqlockCrossProcess:
+    """Ф7 G.3(b) — seqlock-флаг едет в сообщении, cross-process reader сверяет generation."""
+
+    def test_seqlock_flag_stamped_in_message(self):
+        mw_on = FrameShmMiddleware(MemoryManager(seqlock_frames=True), owner="o", slot="s")
+        item = mw_on.strip_and_write({"frame": _frame(8, 8)})
+        assert item.get("shm_seqlock") is True
+        mw_on._mm.close_all()
+
+        mw_off = FrameShmMiddleware(MemoryManager(), owner="o", slot="s")
+        item2 = mw_off.strip_and_write({"frame": _frame(8, 8)})
+        assert item2.get("shm_seqlock") is False
+        mw_off._mm.close_all()
+
+    def test_seqlock_cross_process_raw_read_roundtrip(self):
+        """Producer пишет seqlock-слот; consumer БЕЗ handle читает через raw-путь
+        (read_single_frame(verify_seqlock=True)) — кадр восстанавливается корректно."""
+        prod = FrameShmMiddleware(MemoryManager(seqlock_frames=True), owner="p", slot="s")
+        frame = _frame(20, 30, 77)
+        item = prod.strip_and_write({"frame": frame.copy()})
+        assert item["shm_seqlock"] is True and "shm_actual_name" in item
+
+        # Consumer — своя (пустая) mm: read_images промахнётся → raw seqlock-путь.
+        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")
+        restored = consumer.restore_frame({"data": dict(item)}).get("frame")
+        assert restored is not None and np.array_equal(restored, frame)
+        prod._mm.close_all()
+
+
+class TestG3HandleCache:
+    """Ф7 G.3 — кэш SHM-handles читателя (open/mmap/close снимается с per-frame пути)."""
+
+    def test_handle_cache_populated_and_closed(self):
+        prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s")
+        item = prod.strip_and_write({"frame": _frame(16, 16)})
+
+        # H4: кэш активен только в связке с owner_incarnation.
+        consumer = FrameShmMiddleware(
+            MemoryManager(), owner="c", slot="s", cache_shm_handles=True, owner_incarnation=True
+        )
+        r1 = consumer.restore_frame({"data": dict(item)}).get("frame")
+        r2 = consumer.restore_frame({"data": dict(item)}).get("frame")
+        assert r1 is not None and r2 is not None
+        # Один и тот же shm_actual_name → ровно 1 закэшированный handle (не переоткрыт).
+        assert len(consumer._shm_handle_cache) == 1
+        consumer.close_handle_cache()
+        assert len(consumer._shm_handle_cache) == 0
+        prod._mm.close_all()
+
+    def test_no_cache_by_default(self):
+        prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s")
+        item = prod.strip_and_write({"frame": _frame(16, 16)})
+        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")  # cache off
+        consumer.restore_frame({"data": dict(item)})
+        assert len(consumer._shm_handle_cache) == 0  # без кэша handle не хранится
+        prod._mm.close_all()
+
+
+class TestH4CacheRealloc:
+    """H4: кэш handles × переиспользование имени → жёсткая связка с owner_incarnation."""
+
+    def test_cache_disabled_without_incarnation(self):
+        """H4: cache запрошен БЕЗ incarnation → кэш ОТКЛЮЧЁН + WARNING (риск frozen frame)."""
+        logs: list[str] = []
+        mw = FrameShmMiddleware(
+            MemoryManager(),
+            owner="c",
+            slot="s",
+            cache_shm_handles=True,
+            owner_incarnation=False,
+            log_error=logs.append,
+        )
+        assert mw._cache_shm_handles is False, "кэш обязан быть отключён без incarnation"
+        assert any("owner_incarnation" in m for m in logs), "ожидался WARNING про связку"
+
+    def test_cache_with_incarnation_realloc_delivers_new_frame(self):
+        """H4: cache+incarnation, realloc (resize) → имя меняется → кадр №2 доставлен
+        (НЕ замороженный №1 из осиротевшего сегмента)."""
+        prod = FrameShmMiddleware(MemoryManager(owner_incarnation=True), owner="p", slot="s")
+        item1 = prod.strip_and_write({"frame": _frame(100, 100, 11)})
+        consumer = FrameShmMiddleware(
+            MemoryManager(),
+            owner="c",
+            slot="s",
+            cache_shm_handles=True,
+            owner_incarnation=True,
+        )
+        assert consumer._cache_shm_handles is True
+        r1 = consumer.restore_frame({"data": dict(item1)}).get("frame")
+        assert r1 is not None and int(r1.min()) == 11
+
+        # Realloc: кадр больше блока → пересоздание со СВЕЖЕЙ инкарнацией (новое имя).
+        item2 = prod.strip_and_write({"frame": _frame(300, 300, 22)})
+        assert item2["shm_actual_name"] != item1["shm_actual_name"], "имя обязано смениться"
+        r2 = consumer.restore_frame({"data": dict(item2)}).get("frame")
+        assert r2 is not None and int(r2.min()) == 22, "кадр №2, не замороженный №1"
+        consumer.close_handle_cache()
+        prod._mm.close_all()
+
+    def test_seqlock_plus_incarnation_plus_cache_combo(self):
+        """M7a: seqlock + owner_incarnation + cache_shm_handles ОДНОВРЕМЕННО.
+
+        Сценарий: write→read корректен под seqlock; после realloc слота (рост кадра —
+        новая инкарнация имени) кэш consumer'а НЕ отдаёт стейл-handle (H4) — читает
+        СВЕЖИЙ кадр №2, а не замороженный №1. Комбинация всех трёх флагов ранее не
+        покрывалась ни одним тестом по отдельности (H4-тест выше — без seqlock)."""
+        mm_producer = MemoryManager(seqlock_frames=True, owner_incarnation=True)
+        prod = FrameShmMiddleware(mm_producer, owner="p_combo", slot="s_combo")
+        item1 = prod.strip_and_write({"frame": _frame(100, 100, 11)})
+        assert item1["shm_seqlock"] is True, "producer обязан стамповать seqlock-формат"
+
+        consumer = FrameShmMiddleware(
+            MemoryManager(),
+            owner="c_combo",
+            slot="s_combo",
+            cache_shm_handles=True,
+            owner_incarnation=True,
+        )
+        assert consumer._cache_shm_handles is True
+
+        # Write→read через seqlock корректен (кадр №1, дважды — handle кэшируется).
+        r1a = consumer.restore_frame({"data": dict(item1)}).get("frame")
+        r1b = consumer.restore_frame({"data": dict(item1)}).get("frame")
+        assert r1a is not None and int(r1a.min()) == 11
+        assert r1b is not None and int(r1b.min()) == 11
+        assert len(consumer._shm_handle_cache) == 1, "один и тот же shm_actual_name — 1 handle"
+
+        # Realloc (рост кадра) — свежая инкарнация имени; кэш обязан подхватить новое имя,
+        # а не отдать замороженный кадр №1 (H4).
+        item2 = prod.strip_and_write({"frame": _frame(300, 300, 22)})
+        assert item2["shm_seqlock"] is True
+        assert item2["shm_actual_name"] != item1["shm_actual_name"], "имя обязано смениться (realloc)"
+        r2 = consumer.restore_frame({"data": dict(item2)}).get("frame")
+        assert r2 is not None and int(r2.min()) == 22, "кадр №2 (seqlock+incarnation+cache), не замороженный №1"
+
+        consumer.close_handle_cache()
+        mm_producer.close_all()
+
+
+class TestH5WireLifecycle:
+    """H5: двойное создание (adopt) + deconfigure освобождает память/unregister."""
+
+    def test_h5a_adopt_existing_no_double_create(self):
+        """H5a: PM уже создал (owner, slot) → свежий middleware ПРИНИМАЕТ, не создаёт второй раз."""
+        mm = MemoryManager()
+        mm.create_memory_dict("o", {"s": (1, (100, 100, 3), "uint8")}, 3)  # PM wire_setup
+        assert mm._stats["created"] == 1
+        mw = FrameShmMiddleware(mm, owner="o", slot="s")  # wire.configure
+        mw.strip_and_write({"frame": _frame(100, 100)})  # первый кадр → _allocate_shm
+        assert mm._stats["created"] == 1, "adopt, НЕ второе создание"
+        assert mw._allocated and mw._created_slot is False
+        mm.close_all()
+
+    def test_h5b_configure_deconfigure_cycles_no_leak(self):
+        """H5b: PM-память + configure/кадр/deconfigure ×3 → created==1, middlewares не копятся."""
+        router = RouterManager(manager_name="r_h5b")
+        mm = MemoryManager()
+        mm.create_memory_dict("o", {"s": (1, (64, 64, 3), "uint8")}, 3)  # PM создал ОДИН раз
+        for _ in range(3):
+            mw = FrameShmMiddleware(mm, owner="o", slot="s")
+            router.register_frame_middleware(mw)
+            mw.strip_and_write({"frame": _frame(64, 64)})  # adopt PM-память
+            # deconfigure teardown:
+            router.unregister_frame_middleware(mw)
+            mw.release_owned_memory()  # no-op: слот adopted (не created)
+        assert mm._stats["created"] == 1, "PM-память переиспользована, не пересоздана"
+        assert len(router._frame_middlewares) == 0, "middlewares не копятся"
+        mm.close_all()
+
+    def test_h5b_created_slot_released_on_deconfigure(self):
+        """H5b: слот, СОЗДАННЫЙ middleware (не PM), освобождается на deconfigure."""
+        mm = MemoryManager()
+        mw = FrameShmMiddleware(mm, owner="o2", slot="s2")
+        mw.strip_and_write({"frame": _frame(32, 32)})  # middleware сам создал
+        assert mm._stats["created"] == 1 and mw._created_slot is True
+        mw.release_owned_memory()
+        assert not mw._allocated  # освобождён (свой слот)
+        mm.close_all()
+
+
+class TestM2M3Observability:
+    """M2c torn-счётчик raw-read, M2d причина в fallback-логе, M3 без нового dict/кадр."""
+
+    def test_m3_writes_coords_into_same_dict_no_new_object(self):
+        """M3: координаты вписываются В переданный item (не новый dict на кадр)."""
+        mw = _mw()
+        item = {"frame": _frame(20, 20)}
+        out = mw.strip_and_write(item)
+        assert out is item, "должен вернуться ТОТ ЖЕ объект (без аллокации coords-dict)"
+        assert "shm_actual_name" in item
+
+    def test_m2d_fallback_log_includes_reason(self):
+        """M2d: первый throttled fallback-лог несёт причину (repr сбоя записи)."""
+        logs: list[str] = []
+        mw = FrameShmMiddleware(_WriteFailsMM(), owner="o", slot="s", log_error=logs.append)
+        mw.strip_and_write({"frame": _frame(10, 10)})
+        assert mw.frame_pickle_fallbacks == 1
+        assert any("причина=" in m for m in logs), "в логе fallback должна быть причина"
+
+    def test_m2c_torn_raw_read_increments_counter(self):
+        """M2c: cross-process seqlock-чтение поймало torn → счётчик frame_torn_reads."""
+        from multiprocess_framework.modules.shared_resources_module.memory.format import (
+            buffer as buf_mod,
+        )
+
+        prod = FrameShmMiddleware(MemoryManager(seqlock_frames=True), owner="p", slot="s")
+        item = prod.strip_and_write({"frame": _frame(20, 20, 33)})
+        assert item["shm_seqlock"] is True
+        # Отравить generation слота продюсера в нечёт (writer «в процессе записи»).
+        idx = item["shm_index"]
+        handle = prod._mm.get_memory_data("p", "s")["handles"][idx]
+        buf_mod._write_generation(handle.buf, buf_mod.read_generation(handle.buf) + 1)
+
+        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")
+        out = consumer.restore_frame({"data": dict(item)})
+        assert out.get("frame") is None, "torn → drop"
+        assert consumer.frame_torn_reads == 1
+        prod._mm.close_all()
 
 
 if __name__ == "__main__":

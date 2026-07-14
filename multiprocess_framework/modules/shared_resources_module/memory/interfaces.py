@@ -3,6 +3,13 @@
 
 IMemoryManager — управление SharedMemory: owner/consumer паттерн, pickle-safe через имена.
 Использует Any вместо numpy для отсутствия тяжёлых зависимостей в интерфейсном слое.
+
+Seqlock-режим (Ф7 G.3(b), ADR-SRM-011): реализация может быть сконструирована с
+``seqlock_frames=True`` (либо env ``FW_SHM_SEQLOCK``) — тогда каждый слот получает
+дополнительный SLOT-header (generation-счётчик) и torn-frame (гонка writer/reader на
+одном слоте без блокировок) исключается ПО ПОСТРОЕНИЮ: ``read_images`` при обнаруженной
+гонке (write-in-progress ИЛИ перезапись во время копии) возвращает ``None`` — честный
+drop, не порченные данные. Дефолт формата — прежний (без SLOT-header), откат = флаг off.
 """
 
 from abc import ABC, abstractmethod
@@ -19,7 +26,11 @@ class IMemoryManager(ABC):
         memory_names: Dict[str, tuple],
         coll: int,
     ) -> bool:
-        """Создать блоки SharedMemory для процесса (owner)."""
+        """Создать блоки SharedMemory для процесса (owner).
+
+        Формат слота (seqlock вкл/выкл, ADR-SRM-011) стампуется ЗДЕСЬ — единожды
+        на создание — и далее самосогласован с ``write_images``/``read_images``.
+        """
 
     @abstractmethod
     def get_memory_data(
@@ -42,6 +53,10 @@ class IMemoryManager(ABC):
         Записать изображения в SharedMemory.
 
         pack_fast: True — np.copyto (быстрее). False — tobytes (legacy, совместимость).
+
+        Seqlock-слот (ADR-SRM-011): запись оборачивается протоколом generation
+        (нечёт во время записи, чёт после) прозрачно для вызывающего — формат слота
+        читается из его меты, не передаётся аргументом.
         """
 
     @abstractmethod
@@ -57,6 +72,11 @@ class IMemoryManager(ABC):
         Прочитать изображения из SharedMemory.
 
         copy: True — копии (безопасно). False — view (быстрее, использовать до следующей записи).
+
+        Seqlock-слот (ADR-SRM-011): при обнаруженной гонке writer/reader (write-in-progress
+        ИЛИ перезапись слота во время копии) возвращает ``None`` — честный drop торн-кадра,
+        НЕ порченные данные. ``None`` в этом режиме — штатный, ожидаемый исход под
+        конкуренцией, не обязательно ошибка доступа (см. также ``validate_memory_access``).
         """
 
     @abstractmethod

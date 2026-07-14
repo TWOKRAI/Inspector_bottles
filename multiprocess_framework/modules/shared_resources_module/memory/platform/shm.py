@@ -9,6 +9,7 @@ POSIX (Linux/macOS): unlink() освобождает сегмент; cleanup_sta
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import os
 import platform
@@ -18,6 +19,10 @@ from typing import Any, List, Optional
 from ....logger_module.utils import FallbackLogger
 
 _logger = FallbackLogger(__name__)
+
+# H3 (ADR-SRM-011): предельная длина базового SHM-имени ДО суффикса ``_{idx}``.
+# macOS PSHMNAMLEN ≈ 31; держим базу ≤ 26 (запас на ``_63`` при coll до 64).
+_MAX_BASE_NAME_LEN = 26
 
 # Счётчик инкарнаций имени SHM в рамках процесса. Нужен для hot-swap: при пересоздании
 # сегмента (новый рецепт) старый на Windows освобождается АСИНХРОННО (unlink — no-op,
@@ -62,6 +67,27 @@ def cleanup_stale_shm(name: str) -> None:
         pass
 
 
+def _extract_memory_region_names(proc_dict: dict[str, Any]) -> list[str]:
+    """Извлечь БАЗОВЫЕ имена frame/data-регионов, объявленных в ``proc_dict["memory"]``.
+
+    Общая логика для ``cleanup_known_shm_at_startup`` (точный cleanup ``{name}_{i}``) И
+    ``extract_memory_region_names`` (M8a: базовые имена как ПРЕФИКСЫ для
+    ``cleanup_orphaned_by_prefix`` — owner_incarnation суффиксует ДАЖЕ объявленные в
+    конфиге имена, точный cleanup их тогда не поймает, только префиксный).
+
+    Поддерживает форматы: плоский {"x": (h,w,c), "coll": 2} и вложенный {"names": {...}}.
+    """
+    if not isinstance(proc_dict, dict):
+        return []
+    mem = proc_dict.get("memory")
+    if not isinstance(mem, dict):
+        return []
+    names_raw = mem.get("names")
+    if names_raw is None:
+        names_raw = {k: v for k, v in mem.items() if k != "coll" and isinstance(v, (tuple, list))}
+    return list(names_raw.keys()) if isinstance(names_raw, dict) else []
+
+
 def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
     """
     Очистить известные SharedMemory блоки перед стартом приложения.
@@ -82,10 +108,7 @@ def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
         if not isinstance(mem, dict):
             continue
         coll = mem.get("coll", 2)
-        names_raw = mem.get("names")
-        if names_raw is None:
-            names_raw = {k: v for k, v in mem.items() if k != "coll" and isinstance(v, (tuple, list))}
-        names = list(names_raw.keys()) if isinstance(names_raw, dict) else []
+        names = _extract_memory_region_names(proc_dict)
         for name in names:
             for i in range(coll):
                 key = f"{name}_{i}"
@@ -94,18 +117,82 @@ def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
                     cleanup_stale_shm(key)
 
 
-def _unique_base_name(base_name: str, *, fresh: bool = False) -> str:
+def extract_memory_region_names(processes_config: dict[str, Any] | None) -> list[str]:
+    """Ф7 G.3 M8a: извлечь БАЗОВЫЕ имена ВСЕХ объявленных в конфиге memory-регионов
+    (без дублей, порядок первого появления) — источник ПРЕФИКСОВ для
+    ``cleanup_orphaned_by_prefix`` (вместо хардкода одного имени).
+
+    Переиспользует ``_extract_memory_region_names`` (та же логика, что и точный
+    cleanup в ``cleanup_known_shm_at_startup``), не изобретает отдельный парсер
+    processes_config. Значения, приходящие в ``FrameShmMiddleware`` (напр.
+    ``output_frames`` — универсальный лениво выделяемый слот generic-пайплайна) в
+    processes_config НЕ объявлены — вызывающая сторона обязана добавить их к
+    результату сама (см. ``SystemLauncher._cleanup_shm_at_startup``).
+
+    Returns:
+        Список базовых имён без дублей. Пустой список, если processes_config пуст,
+        не содержит memory-секций, либо имеет неожиданную форму.
+    """
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for proc_dict in (processes_config or {}).values():
+        for name in _extract_memory_region_names(proc_dict):
+            if name not in seen:
+                seen.add(name)
+                ordered.append(name)
+    return ordered
+
+
+def _unique_base_name(
+    base_name: str,
+    *,
+    fresh: bool = False,
+    owner: str | None = None,
+    owner_incarnation: bool = False,
+) -> str:
     """Уникальное имя SHM.
 
     На Windows дополняется PID (избежать FileExistsError от предыдущих ЗАПУСКОВ).
     ``fresh=True`` дополнительно добавляет инкарнацию — для пересоздания внутри одного
     процесса (hot-swap), когда старый сегмент с тем же PID-именем ещё не освобождён.
+
+    Ф7 G.3(b) / B-6/B-7 (ADR-SRM-011), ``owner_incarnation=True``: имя ВСЕГДА несёт
+    owner + pid (H2: на ВСЕХ платформах, не только Windows — иначе на POSIX
+    ``_incarnation`` сбрасывается в каждом процессе → два интерпретатора дают ОДНО
+    имя и один unlink'ает сегмент другого) + свежую инкарнацию на КАЖДОЕ создание.
+    Два живых источника с одинаковым slot-именем в разных процессах больше не
+    коллидируют; stale-процесс после switch не переиспользует чужое имя. Consumer
+    читает ФАКТИЧЕСКОЕ имя (PSR memory_names / shm_actual_name) — суффикс прозрачен.
+
+    H3 (macOS PSHMNAMLEN ~31): при переполнении ``_MAX_BASE_NAME_LEN`` имя
+    детерминированно схлопывается в ``{base[:10]}_{blake2s8}`` (хеш кодирует
+    owner+pid+inc → уникальность сохранена, длина ≤ лимита).
     """
+    if owner_incarnation:
+        parts = [base_name]
+        if owner:
+            parts.append(str(owner))
+        parts.append(str(os.getpid()))  # H2: pid на ВСЕХ платформах
+        parts.append(str(next(_incarnation)))
+        return _bounded_name(base_name, "_".join(parts))
     if is_windows():
         suffix = f"_{next(_incarnation)}" if fresh else ""
         return f"{base_name}_{os.getpid()}{suffix}"
     # POSIX: unlink освобождает сразу; fresh нужен лишь если живой holder держит сегмент.
     return f"{base_name}_{next(_incarnation)}" if fresh else base_name
+
+
+def _bounded_name(base_name: str, full: str) -> str:
+    """H3: если ``full`` (без ``_{idx}``-суффикса от create_shm_blocks) длиннее лимита —
+    детерминированно схлопнуть в ``{base[:10]}_{blake2s8}`` (≤ 19 симв., + ``_{idx}`` ≤ 30).
+
+    Хеш от ПОЛНОГО имени (owner+pid+inc) сохраняет уникальность; человекочитаемый
+    префикс base — для отладки. macOS PSHMNAMLEN ≈ 31 → держим базу ≤ 26.
+    """
+    if len(full) <= _MAX_BASE_NAME_LEN:
+        return full
+    digest = hashlib.blake2s(full.encode("utf-8"), digest_size=4).hexdigest()  # 8 hex
+    return f"{base_name[:10]}_{digest}"
 
 
 def create_shm_block(name: str, size: int) -> ShmType:
@@ -170,12 +257,22 @@ def close_shm(shm: Optional[ShmType], unlink: bool = False) -> None:
             raise
 
 
-def create_shm_blocks(base_name: str, size: int, coll: int) -> Optional[List[ShmType]]:
+def create_shm_blocks(
+    base_name: str,
+    size: int,
+    coll: int,
+    *,
+    owner: str | None = None,
+    owner_incarnation: bool = False,
+) -> Optional[List[ShmType]]:
     """
     Создать coll блоков SharedMemory с именами {base_name}_0, {base_name}_1, ...
 
     На Windows base_name дополняется PID для избежания FileExistsError от предыдущих запусков.
     Фактические имена (shm.name) сохраняются в memory_names для consumer-процессов.
+
+    Ф7 G.3(b): ``owner_incarnation=True`` → имя несёт owner+инкарнацию всегда (B-6/B-7,
+    ADR-SRM-011), см. ``_unique_base_name``.
 
     При ошибке создания любого блока — закрывает и удаляет уже созданные,
     возвращает None.
@@ -186,7 +283,7 @@ def create_shm_blocks(base_name: str, size: int, coll: int) -> Optional[List[Shm
     # не ждёт этого окна. Consumer'ы читают фактические имена → суффикс прозрачен.
     last_exc: Exception | None = None
     for attempt in range(3):
-        base = _unique_base_name(base_name, fresh=(attempt > 0))
+        base = _unique_base_name(base_name, fresh=(attempt > 0), owner=owner, owner_incarnation=owner_incarnation)
         shm_list: List[ShmType] = []
         try:
             for i in range(coll):

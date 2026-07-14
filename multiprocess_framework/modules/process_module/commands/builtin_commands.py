@@ -986,6 +986,8 @@ class BuiltinCommands:
             memory_manager=mm,
             owner=shm_owner,
             slot=shm_name,
+            # M2b: без log_error громкий pickle-fallback (G.3d) на wire-пути был мёртв.
+            log_error=lambda m: self._services._log_error(m, module="wire"),
         )
 
         # Подключить middleware к router
@@ -1033,12 +1035,36 @@ class BuiltinCommands:
             }
 
         mw, role = entry
+        router = self._services.router_manager
 
-        if self._services.router_manager:
+        if router:
             if role == "sender":
-                self._services.router_manager.remove_send_middleware(mw.on_send)
+                router.remove_send_middleware(mw.on_send)
+                # H5b: снять из агрегации счётчиков (иначе утечка объектов + задвоение).
+                unreg = getattr(router, "unregister_frame_middleware", None)
+                if callable(unreg):
+                    unreg(mw)
             else:
-                self._services.router_manager.remove_receive_middleware(mw.on_receive)
+                router.remove_receive_middleware(mw.on_receive)
+
+        # H5b: sender-middleware владеет SHM-блоками — освободить (иначе каждый цикл
+        # configure/deconfigure копит сегменты на POSIX).
+        if role == "sender":
+            release_mem = getattr(mw, "release_owned_memory", None)
+            if callable(release_mem):
+                try:
+                    release_mem()
+                except Exception:  # noqa: BLE001 — teardown не критичен
+                    pass
+
+        # Ф7 G.3: закрыть кэш SHM-handles читателя (если включён) — на switch старые
+        # сегменты освобождаются, новые имена owner+incarnation откроются заново.
+        close_cache = getattr(mw, "close_handle_cache", None)
+        if callable(close_cache):
+            try:
+                close_cache()
+            except Exception:  # noqa: BLE001 — teardown не критичен
+                pass
 
         self._services._log_info(
             f"wire.deconfigure: middleware удалён — wire_key={wire_key}, role={role}",

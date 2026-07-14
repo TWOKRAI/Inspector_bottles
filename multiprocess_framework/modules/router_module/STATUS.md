@@ -79,3 +79,4 @@ register_route("order", "queue_channel")
 | 2026-03-12 | CRM Фаза 5: STATUS.md обновлён | 5 |
 | 2026-04-09 | План 10: dead code, Lock для _stats, тесты адаптеров, DECISIONS + ARCH §6.9 | 5 |
 | 2026-07-13 | Ф7 G.2: kind-каналы `{process}_{kind}` за флагом `use_kind_channels` (дефолт OFF, приоритет ctor > env > конфиг > False); всё-или-fallback при частичном fan-out (F4), специфичный `register_route` выигрывает у kind (F5). Не в проде до G.7 | 5 |
+| 2026-07-14 | Ф7 G.3 (ADR-RTR-009): FrameShmMiddleware — одно ядро записи `_write_frame_into_slot` (round-robin, снят сломанный find_free_index в on_send); кэш SHM-handles читателя за флагом `FW_SHM_HANDLE_CACHE`; громкий pickle-fallback `frame_pickle_fallbacks` (→ `get_stats().router`); cross-process seqlock через `shm_seqlock` в сообщении + `read_single_frame`. Дефолты OFF, не в проде до G.7 | 5 |

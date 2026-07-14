@@ -194,3 +194,61 @@ class TestSystemLauncher:
             launcher._create_spawner({})
             call_kwargs = mock_cls.call_args[1]
             assert "orchestrator_class_path" not in call_kwargs
+
+
+class TestCleanupShmAtStartup:
+    """M8a (Ф7 G.3): _cleanup_shm_at_startup — префиксы из config-регионов + fallback.
+
+    Склейка (extract_memory_region_names + безусловный output_frames + вызов
+    cleanup_orphaned_by_prefix) раньше покрывалась только unit'ами хелпера —
+    integration-тест на самом методе (ревью M8a, MED).
+    """
+
+    _BUFFERS = "multiprocess_framework.modules.shared_resources_module.buffers"
+    _PLATFORM = "multiprocess_framework.modules.shared_resources_module.memory.platform"
+
+    def test_prefixes_from_config_plus_output_frames_when_flag_on(self, monkeypatch) -> None:
+        """Флаг ON: cleanup_orphaned_by_prefix зовётся с config-регионами + output_frames."""
+        from unittest.mock import patch
+
+        monkeypatch.setenv("FW_SHM_PREFIX_CLEANUP", "1")
+        captured: list[list[str]] = []
+        cfg = {"cam": {"memory": {"camera_frame": (8, 8, 3), "coll": 2}}}
+
+        with (
+            patch(f"{self._PLATFORM}.cleanup_known_shm_at_startup"),
+            patch(f"{self._BUFFERS}.cleanup_orphaned_by_prefix", side_effect=lambda p: captured.append(p)),
+        ):
+            SystemLauncher()._cleanup_shm_at_startup(cfg)
+
+        assert captured, "prefix-cleanup обязан вызваться при флаге ON"
+        assert "camera_frame" in captured[0], "config-регион обязан войти в префиксы"
+        assert "output_frames" in captured[0], "fallback output_frames обязан быть безусловно"
+
+    def test_prefix_cleanup_skipped_when_flag_off(self, monkeypatch) -> None:
+        """Флаг OFF (дефолт): prefix-cleanup НЕ зовётся, точный cleanup — да."""
+        from unittest.mock import patch
+
+        monkeypatch.delenv("FW_SHM_PREFIX_CLEANUP", raising=False)
+        with (
+            patch(f"{self._PLATFORM}.cleanup_known_shm_at_startup") as known,
+            patch(f"{self._BUFFERS}.cleanup_orphaned_by_prefix") as prefix,
+        ):
+            SystemLauncher()._cleanup_shm_at_startup({"cam": {"memory": {"f": (4, 4, 3)}}})
+
+        known.assert_called_once()
+        prefix.assert_not_called()
+
+    def test_fallback_output_frames_when_config_empty(self, monkeypatch) -> None:
+        """Пустой config (нет memory-регионов): output_frames всё равно в префиксах."""
+        from unittest.mock import patch
+
+        monkeypatch.setenv("FW_SHM_PREFIX_CLEANUP", "1")
+        captured: list[list[str]] = []
+        with (
+            patch(f"{self._PLATFORM}.cleanup_known_shm_at_startup"),
+            patch(f"{self._BUFFERS}.cleanup_orphaned_by_prefix", side_effect=lambda p: captured.append(p)),
+        ):
+            SystemLauncher()._cleanup_shm_at_startup({})
+
+        assert captured and captured[0] == ["output_frames"], "fallback обязан быть даже без config-регионов"

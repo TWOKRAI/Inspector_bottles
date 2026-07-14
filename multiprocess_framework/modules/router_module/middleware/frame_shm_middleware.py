@@ -1,18 +1,29 @@
 # -*- coding: utf-8 -*-
 """FrameShmMiddleware — единый middleware «frame ↔ SHM ref» (P3.1.1, ADR-COMM-003).
 
-Слияние двух ранее дублировавшихся реализаций (§5.2 аудита):
+Слияние двух ранее дублировавшихся реализаций (§5.2 аудита) + Ф7 G.3 (ADR-RTR-009):
 - generic data-pipeline (`process_module/generic`): `strip_and_write`/`restore_frame`
-  — lazy-allocation, round-robin ring (`% coll`), pickle-fallback при сбое SHM-write;
+  — lazy-allocation, round-robin ring, pickle-fallback при сбое SHM-write;
 - router middleware (`router_module/middleware`): `on_send`/`on_receive`
-  — middleware-протокол RouterManager (`add_send_middleware`/`add_receive_middleware`),
-  запись по `find_free_index`, координаты в `msg["data"]` + width/height.
+  — middleware-протокол RouterManager (`add_send_middleware`/`add_receive_middleware`).
 
-Канон поведения — generic (живой data-path камеры). Обе пары методов сосуществуют
-(каждый вызывающий пользуется своей), общий ~30-строчный SHM-read-fallback (прямое
-открытие `SharedMemory` по `shm_actual_name`) вынесен в `_read_shm_from_actual_name` —
-именно он был дублём. `process_module/generic/frame_shm_middleware.py` ре-экспортирует
-этот класс (direction process_module → router_module уже существует, цикла нет).
+**Ф7 G.3 (a) — одно ядро записи.** `strip_and_write` и `on_send` больше не имеют
+раздельной логики выбора слота: обе делегируют в `_write_frame_into_slot` (lazy-alloc +
+realloc-on-grow + round-robin — канон generic). Прежний `find_free_index`-путь `on_send`
+снят (он всегда возвращал 0 — `index_usage` никем не инкрементился). Различие путей —
+только адаптер: откуда берётся frame и куда кладутся координаты.
+
+**Ф7 G.3 (b) — seqlock.** Слот SHM может быть в seqlock-формате (ADR-SRM-011). Флаг
+формата едет в сообщении полем `shm_seqlock` (Dict at Boundary) — cross-process reader
+(`_read_shm_from_actual_name`) сверяет generation и дропает torn/in-progress кадр.
+
+**Ф7 G.3 (d) — громкий pickle-fallback.** Сбой SHM-write (mm есть, но запись не удалась)
+→ кадр уходит pickle-через-Queue (×3 латентность). Раньше — молча. Теперь: счётчик
+`frame_pickle_fallbacks` (агрегируется в `RouterManager.get_stats`) + throttled WARNING.
+
+**Ф7 G.3 (кэш handles).** Cross-process raw-чтение открывало SharedMemory на каждый кадр
+(open/mmap/close + resource_tracker). При `cache_shm_handles` — инстанс-кэш
+`shm_actual_name → SharedMemory` (LRU-кэп), инвалидация по смене имени.
 
 Claim Check: пиксели (numpy) едут в OS SHM, по очереди — только координаты (shm_ref).
 """
@@ -21,6 +32,13 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Callable, Dict, Optional
+
+# Размер LRU-кэша SHM-handles читателя (обычно 1–3 живых имени; запас на realloc/switch).
+_HANDLE_CACHE_CAP = 8
+# Throttle громкого WARNING про pickle-fallback (счётчик — всегда, лог — раз в N кадров).
+_PICKLE_WARN_EVERY = 300
+# Throttle лога «frame не восстановлен» (штатный drop после G.7 — не ERROR на каждый кадр).
+_RESTORE_FAIL_WARN_EVERY = 300
 
 
 class FrameShmMiddleware:
@@ -36,6 +54,15 @@ class FrameShmMiddleware:
         slot: имя SHM-слота (для write).
         coll: количество SHM-слотов (размер ring buffer) — generic-путь.
         log_error: callback логирования ошибок — generic-путь.
+        cache_shm_handles: кэшировать SHM-handles читателя (Ф7 G.3). None → env
+            ``FW_SHM_HANDLE_CACHE`` → False (прежний open/close на кадр).
+
+    Формат слота seqlock (Ф7 G.3b) middleware НЕ решает сам, а СЧИТЫВАЕТ у слота
+    после аллокации (``MemoryManager.get_memory_data(...)["seqlock"]``) и кладёт
+    авторитетно в сообщение как ``shm_seqlock`` — иначе флаг в сообщении мог бы
+    разойтись с реальным форматом слота (writer в seqlock, сообщение говорит нет →
+    reader читает не с того offset). Флаг слота задаёт сам MemoryManager
+    (``seqlock_frames`` ctor > env ``FW_SHM_SEQLOCK``, ADR-SRM-011).
 
     Attributes:
         frame_boundary_crossings: Ф7 G.6 — сколько раз кадр реально пересёк границу
@@ -49,6 +76,11 @@ class FrameShmMiddleware:
             воркера на middleware); при регистрации через
             ``RouterManager.register_frame_middleware`` агрегируется в
             ``introspect.router_stats`` на чтении (без lock на самом send-пути).
+        frame_pickle_fallbacks: Ф7 G.3(d) — сколько кадров ушло pickle-fallback'ом
+            при СБОЕ SHM-write (mm есть, но write не удался — реальная деградация
+            ×3 латентность). Plain int по образцу frame_boundary_crossings;
+            агрегируется в get_stats. Случай mm=None (SHM не сконфигурирован в
+            процессе) НЕ считается — это pickle-by-design, не деградация.
     """
 
     def __init__(
@@ -58,6 +90,9 @@ class FrameShmMiddleware:
         slot: str = "output_frames",
         coll: int = 3,
         log_error: Callable[[str], None] | None = None,
+        cache_shm_handles: Optional[bool] = None,
+        owner_incarnation: Optional[bool] = None,
+        handle_cache_cap: int = _HANDLE_CACHE_CAP,
     ) -> None:
         self._mm = memory_manager
         self._owner = owner
@@ -69,13 +104,55 @@ class FrameShmMiddleware:
         # на send-пути). RouterManager сам суммирует этот атрибут у всех
         # зарегистрированных middleware в get_stats() — см. класс-докстринг.
         self.frame_boundary_crossings = 0
+        # Ф7 G.3(d): громкий pickle-fallback (счётчик всегда, WARNING throttled).
+        self.frame_pickle_fallbacks = 0
+        # M2c: torn/дропнутые cross-process seqlock-чтения (raw-путь middleware —
+        # manager считает свои, но raw-путь его не проходит). Агрегируется в get_stats.
+        self.frame_torn_reads = 0
+        # M2d: причина последнего сбоя записи — для громкого fallback-лога.
+        self._last_write_error = ""
+        # M2a: троттлинг «frame не восстановлен» (штатный drop после G.7, не ERROR-спам).
+        self._restore_fail_count = 0
         self._allocated = False
+        # H5b: создал ли слот САМ этот middleware (create_memory_dict) или ПРИНЯЛ чужой
+        # (adopt PM-памяти). release_owned_memory освобождает только СВОЁ — иначе
+        # deconfigure снёс бы PM-память (created==1 через configure/deconfigure-циклы).
+        self._created_slot = False
         self._write_index = 0
         # Текущая ВЫДЕЛЕННАЯ ёмкость слота (h, w, c). None — ещё не выделяли.
         # Нужна для переаллокации при росте кадра (resize): иначе кадр больше блока
         # не влезает → write_images падает → вечный pickle-fallback (медленно).
         self._alloc_shape: tuple[int, int, int] | None = None
         self._alloc_dtype: str | None = None
+        # Ф7 G.3(b): формат seqlock ФАКТИЧЕСКОГО слота (считывается у mm после
+        # аллокации, НЕ решается middleware) → авторитетно едет в shm_seqlock.
+        self._slot_seqlock = False
+        # H4: кэш handles БЕЗОПАСЕН только когда имя меняется на КАЖДЫЙ realloc
+        # (owner_incarnation). Иначе realloc = unlink+create ТОГО ЖЕ имени (POSIX,
+        # incarnation off) → cache hit на осиротевшие страницы → замороженный кадр №1
+        # навсегда, тихо. Жёсткая связка: кэш активен ТОЛЬКО при owner_incarnation.
+        self._owner_incarnation = self._resolve_bool_flag(owner_incarnation, "FW_SHM_OWNER_INCARNATION")
+        cache_requested = self._resolve_bool_flag(cache_shm_handles, "FW_SHM_HANDLE_CACHE")
+        if cache_requested and not self._owner_incarnation:
+            self._log_error(
+                "FrameShmMiddleware: cache_shm_handles запрошен БЕЗ owner_incarnation — "
+                "кэш ОТКЛЮЧЁН (H4: риск замороженного кадра при realloc с переиспользованием имени)"
+            )
+            self._cache_shm_handles = False
+        else:
+            self._cache_shm_handles = cache_requested
+        self._handle_cache_cap = max(1, int(handle_cache_cap))  # L4: конфигурируемый кэп
+        # Ф7 G.3: кэш SHM-handles читателя (dict сохраняет порядок вставки → LRU).
+        self._shm_handle_cache: "dict[str, Any]" = {}
+
+    @staticmethod
+    def _resolve_bool_flag(explicit: Optional[bool], env_name: str) -> bool:
+        """Разрешить булев флаг: ctor (не None) > env ``env_name`` (в т.ч. ``=0``) > False."""
+        if explicit is not None:
+            return bool(explicit)
+        from ...config_module.tools.env import env_flag
+
+        return env_flag(env_name, default=False)
 
     def _bump_frame_hops(self, container: dict) -> None:
         """Инкремент per-item поля frame_hops + агрегатного счётчика (Ф7 G.6).
@@ -95,41 +172,142 @@ class FrameShmMiddleware:
         на каждый РЕАЛЬНЫЙ IPC-send, иначе недосчитывает границы при fan-out)."""
         self.frame_boundary_crossings += 1
 
+    def _note_pickle_fallback(self, where: str) -> None:
+        """Ф7 G.3(d): учесть громкий pickle-fallback (сбой SHM-write, не mm=None).
+
+        Счётчик растёт всегда (наблюдаемость → get_stats → state); WARNING —
+        throttled (первый + каждый N-й), чтобы не спамить hot-path лог. Латентность
+        ×3 больше не невидима.
+        """
+        self.frame_pickle_fallbacks += 1
+        if self.frame_pickle_fallbacks == 1 or self.frame_pickle_fallbacks % _PICKLE_WARN_EVERY == 0:
+            self._log_error(
+                f"FrameShmMiddleware: кадр ушёл pickle-fallback (медленно, ×3 латентность) "
+                f"[{where}; owner={self._owner}/{self._slot}; причина={self._last_write_error}; "
+                f"всего={self.frame_pickle_fallbacks}]"
+            )
+
     # ------------------------------------------------------------------
-    # Общий SHM-read-fallback (§5.2 дедуп: был скопирован в restore_frame и on_receive)
+    # Кэш SHM-handles читателя (Ф7 G.3) + общий SHM-read-fallback
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _read_shm_from_actual_name(shm_actual_name: str) -> Optional[Any]:
+    def _open_shm_cached(self, shm_actual_name: str, shm_mod: Any) -> Any:
+        """Открыть SharedMemory с LRU-кэшем (инвалидация по смене имени).
+
+        Имя меняется редко (grow-realloc/incarnation), поэтому попадание в кэш —
+        обычный случай, а open/mmap/close на кадр снимается. При переполнении кэпа
+        закрываем самый старый handle (FIFO ~ LRU для стабильного потока имён).
+        """
+        shm = self._shm_handle_cache.pop(shm_actual_name, None)
+        if shm is not None:
+            self._shm_handle_cache[shm_actual_name] = shm  # move-to-end (LRU)
+            return shm
+        shm = shm_mod.SharedMemory(name=shm_actual_name, create=False)
+        self._shm_handle_cache[shm_actual_name] = shm
+        if len(self._shm_handle_cache) > self._handle_cache_cap:
+            old_name = next(iter(self._shm_handle_cache))
+            old_shm = self._shm_handle_cache.pop(old_name)
+            try:
+                old_shm.close()
+            except Exception:
+                pass
+        return shm
+
+    def close_handle_cache(self) -> None:
+        """Закрыть все кэшированные SHM-handles (teardown wire/процесса)."""
+        for shm in self._shm_handle_cache.values():
+            try:
+                shm.close()
+            except Exception:
+                pass
+        self._shm_handle_cache.clear()
+
+    def release_owned_memory(self) -> None:
+        """H5b: освободить SHM-блоки, СОЗДАННЫЕ этим middleware (owner-side), на teardown.
+
+        wire.deconfigure раньше освобождал только reader-кэш, но НЕ память владельца →
+        каждый цикл configure/deconfigure копил сегменты (POSIX). Здесь owner закрывает+
+        unlink'ает СВОЙ слот; сброс _allocated → следующий configure выделит заново.
+        ПРИНЯТУЮ (adopt) PM-память НЕ трогает (``_created_slot`` False).
+        """
+        if self._mm is None or not self._allocated or not self._created_slot:
+            return
+        try:
+            self._mm.close_memory(self._owner, self._slot)
+        except Exception as exc:  # noqa: BLE001 — teardown не критичен
+            self._log_error(f"FrameShmMiddleware: release_owned_memory failed: {exc}")
+        self._allocated = False
+        self._created_slot = False
+        self._alloc_shape = None
+        self._alloc_dtype = None
+
+    def _read_shm_from_actual_name(self, shm_actual_name: str, seqlock: bool = False) -> Optional[Any]:
         """Прочитать кадр напрямую из SharedMemory по фактическому имени (cross-process).
 
         shm_actual_name приходит от owner через IPC (на Windows включает PID).
-        Возвращает ndarray (копию) или None, если изображений нет. Бросает при
-        ошибке открытия/распаковки — вызывающий ловит и логирует в своём стиле.
+        Читает ОДИН кадр через format.read_single_frame (знает про SLOT-header при
+        seqlock, сверяет generation → None при torn/in-progress). При
+        cache_shm_handles handle переиспользуется; иначе открывается/закрывается на
+        кадр (прежнее поведение). Бросает при ошибке открытия — вызывающий ловит.
         """
         from multiprocessing import shared_memory as _shm_mod
-        import struct as _struct
-        import numpy as _np
+
+        # Локальный импорт (как struct/numpy раньше): не тащим top-level dep
+        # router → shared_resources, coupling остаётся runtime-local.
+        from ...shared_resources_module.memory.format import read_single_frame
+
+        if self._cache_shm_handles:
+            shm = self._open_shm_cached(shm_actual_name, _shm_mod)
+            return read_single_frame(shm.buf, verify_seqlock=seqlock)
 
         shm = _shm_mod.SharedMemory(name=shm_actual_name, create=False)
         try:
-            buf = shm.buf
-            # Заголовок: num_images (uint32)
-            num_images = _struct.unpack("I", buf[0:4])[0]
-            if num_images > 0:
-                # Заголовок изображения: h, w, c (3x uint32) + dtype char (1 byte)
-                h, w, c = _struct.unpack("III", buf[4:16])
-                dtype_char = chr(buf[16])
-                dtype = _np.dtype(dtype_char)
-                offset = 17
-                pixel_count = h * w * c
-                arr = _np.frombuffer(buf, dtype=dtype, count=pixel_count, offset=offset)
-                frame = arr.reshape((h, w, c)).copy()
-                del arr, buf  # Освободить ссылки на SHM до close()
-                return frame
-            return None
+            return read_single_frame(shm.buf, verify_seqlock=seqlock)
         finally:
             shm.close()
+
+    # ------------------------------------------------------------------
+    # Единое ядро записи кадра в SHM (Ф7 G.3a — канон generic)
+    # ------------------------------------------------------------------
+
+    def _write_frame_into_slot(self, frame: Any, dest: Dict[str, Any]) -> bool:
+        """Записать кадр в SHM-слот и вписать координаты В ``dest`` (тот же dict, что
+        уезжает по IPC). M3: НЕ создаём новый dict на кадр (per-frame путь без лишних
+        аллокаций — правило G.9).
+
+        Единое ядро для strip_and_write И on_send (Ф7 G.3a): lazy-alloc + realloc при
+        росте кадра + round-robin по слотам. Формат слота (seqlock) применяет
+        MemoryManager по стампу; в ``dest`` едет только флаг ``shm_seqlock`` (для
+        cross-process reader).
+
+        Returns:
+            True — записано в SHM, координаты в ``dest``; False — mm отсутствует или
+            write не удался (причина в ``self._last_write_error`` для громкого лога).
+        """
+        if self._mm is None:
+            self._last_write_error = "memory_manager=None"
+            return False
+
+        # Lazy allocation при первом кадре + ПЕРЕАЛЛОКАЦИЯ при росте кадра (resize).
+        if not self._allocated or not self._frame_fits(frame):
+            self._allocate_shm(frame)
+
+        try:
+            idx = self._write_index % self._coll
+            self._write_index += 1
+            shm_name = self._mm.write_images(self._owner, self._slot, [frame], idx)
+            if shm_name:
+                dest["owner"] = self._owner
+                dest["shm_owner"] = self._owner
+                dest["shm_name"] = self._slot
+                dest["shm_index"] = idx
+                dest["shm_actual_name"] = shm_name
+                dest["shm_seqlock"] = self._slot_seqlock
+                return True
+            self._last_write_error = "write_images вернул None (нет слота/валидация)"
+        except Exception as exc:  # noqa: BLE001 — причина едет в громкий лог (M2d)
+            self._last_write_error = repr(exc)
+        return False
 
     # ------------------------------------------------------------------
     # Generic data-pipeline API (канон): strip_and_write / restore_frame
@@ -161,7 +339,8 @@ class FrameShmMiddleware:
         if not shm_owner or not shm_name:
             return msg
 
-        # Попытка 1: через MemoryManager (работает в пределах одного процесса)
+        # Попытка 1: через MemoryManager (работает в пределах одного процесса; знает
+        # seqlock-формат из своей меты слота, сам дропает torn → None).
         try:
             images = self._mm.read_images(shm_owner, shm_name, shm_index, n=1)
             if images:
@@ -170,42 +349,49 @@ class FrameShmMiddleware:
         except Exception:
             pass
 
-        # Попытка 2: прямое открытие SharedMemory по shm_actual_name (cross-process)
+        # Попытка 2: прямое открытие SharedMemory по shm_actual_name (cross-process).
+        # Флаг seqlock едет в сообщении (Dict at Boundary) — reader сверяет generation.
         shm_actual_name = data.get("shm_actual_name")
         if shm_actual_name:
+            seqlock = bool(data.get("shm_seqlock", False))
             try:
-                frame = self._read_shm_from_actual_name(shm_actual_name)
+                frame = self._read_shm_from_actual_name(shm_actual_name, seqlock=seqlock)
                 if frame is not None:
                     msg["frame"] = frame
+                    return msg
+                # M2c: None при seqlock = torn/in-progress → ШТАТНЫЙ drop (счётчик, не лог).
+                if seqlock:
+                    self.frame_torn_reads += 1
+                    msg["frame"] = None
                     return msg
             except Exception as e:
                 self._log_error(f"FrameShmMiddleware(generic): SHM fallback failed: {e} (shm={shm_actual_name})")
 
-        # Обе попытки не сработали
+        # Обе попытки не сработали (не seqlock-torn) — M2a: throttled (после G.7 иначе
+        # ERROR на каждый дропнутый кадр), это штатный drop, не критичная ошибка.
         msg["frame"] = None
-        self._log_error(
-            f"FrameShmMiddleware(generic): frame не восстановлен "
-            f"({shm_owner}/{shm_name}[{shm_index}], "
-            f"actual={data.get('shm_actual_name', 'N/A')})"
-        )
+        self._restore_fail_count += 1
+        if self._restore_fail_count == 1 or self._restore_fail_count % _RESTORE_FAIL_WARN_EVERY == 0:
+            self._log_error(
+                f"FrameShmMiddleware(generic): frame не восстановлен (drop) "
+                f"({shm_owner}/{shm_name}[{shm_index}], "
+                f"actual={data.get('shm_actual_name', 'N/A')}; всего={self._restore_fail_count})"
+            )
         return msg
 
     def strip_and_write(self, item: dict) -> dict:
         """Записать frame в SHM, убрать из item, добавить shm_ref.
 
-        Lazy allocation: SHM создаётся при первом кадре (не нужна предварительная
-        конфигурация формы кадра).
-
-        Fallback: если SHM write не удался (другая форма кадра, нет памяти), frame
-        остаётся в item и пойдёт через pickle в IPC.
+        Делегирует запись в единое ядро `_write_frame_into_slot` (Ф7 G.3a). Fallback:
+        если SHM write не удался (mm есть, но write failed) — frame остаётся в item и
+        пойдёт через pickle в IPC; это ГРОМКО (счётчик frame_pickle_fallbacks, G.3d).
+        mm=None (SHM не сконфигурирован) — pickle-by-design, не считается деградацией.
 
         Fan-out (F1, ревью 2026-07-13): producer переиспользует ОДИН item-dict для
         нескольких targets — первый вызов стрипает frame (пиксели → SHM), второй и
         далее видят уже стрипнутый item (frame=None, shm_name уже проставлен). Это
         ВСЁ РАВНО реальный отдельный IPC-send (другому target) — агрегатный
-        счётчик границ считает его, per-item поле ``frame_hops`` НЕ задваивает
-        (общий mutable item — граница «вдоль линейной цепочки», при fan-out это
-        документированное приближение, см. класс-докстринг ``frame_boundary_crossings``).
+        счётчик границ считает его, per-item поле ``frame_hops`` НЕ задваивает.
 
         Returns:
             item без "frame" (+ shm_ref) или item с "frame" (fallback).
@@ -217,39 +403,17 @@ class FrameShmMiddleware:
                 self._bump_boundary_only()
             return item
 
-        # Lazy allocation при первом кадре + ПЕРЕАЛЛОКАЦИЯ при росте кадра (resize).
-        # Блок выделяется под форму первого кадра; если позже кадр становится больше
-        # (увеличили ROI / сменили разрешение) — пересоздаём блок под новый размер и
-        # переключаем ссылку (новый shm_actual_name едет в каждом сообщении, читатели
-        # следуют за ним). Иначе крупный кадр не влезал бы и шёл через медленный pickle.
-        if not self._allocated or not self._frame_fits(frame):
-            self._allocate_shm(frame)
-
-        try:
-            # Round-robin запись по слотам
-            idx = self._write_index % self._coll
-            self._write_index += 1
-
-            shm_name = self._mm.write_images(self._owner, self._slot, [frame], idx)
-            if shm_name:
-                # SHM write OK — убрать frame, добавить координаты
+        if self._mm is not None:
+            if self._write_frame_into_slot(frame, item):
+                # SHM write OK — координаты уже в item, убрать frame.
                 item.pop("frame", None)
-                item["owner"] = self._owner
-                item["shm_owner"] = self._owner
-                item["shm_name"] = self._slot
-                item["shm_index"] = idx
-                item["shm_actual_name"] = shm_name
             else:
-                # SHM write не удался — frame остаётся в item (pickle fallback)
-                pass
-        except Exception:
-            # frame остаётся в item (pickle fallback)
-            pass
+                # mm есть, но write не удался → громкий pickle-fallback (G.3d).
+                self._note_pickle_fallback("strip_and_write")
+        # mm=None → pickle-by-design (frame остаётся в item), не деградация.
 
         # Ф7 G.6: item реально уходит через IPC в другой процесс (SHM-успех ИЛИ
-        # pickle-fallback — оба пути кладут item на исходящий транспорт). Dict at
-        # Boundary — поле переживает round-trip само по себе, без новых объектов
-        # на per-frame пути (правило G.9).
+        # pickle-fallback — оба пути кладут item на исходящий транспорт).
         self._bump_frame_hops(item)
 
         return item
@@ -282,6 +446,12 @@ class FrameShmMiddleware:
         try:
             fh, fw, fc = self._shape_hwc(frame)
             dtype = str(frame.dtype)
+            # H5a: adopt-if-exists — PM в wire_setup мог УЖЕ создать (owner, slot).
+            # Свежий middleware (wire.configure, _allocated=False) создал бы ВТОРОЙ раз,
+            # осиротив первый handle. Если mm уже держит слот — принять как выделенный
+            # (grow-only ниже пересоздаст лишь при росте кадра).
+            if not self._allocated:
+                self._adopt_existing_slot_if_any()
             # Grow-only: не уменьшаем ёмкость (избегаем «качелей» при чередовании размеров).
             if self._alloc_shape is not None and dtype == self._alloc_dtype:
                 ah, aw, ac = self._alloc_shape
@@ -303,11 +473,37 @@ class FrameShmMiddleware:
             memory_names = {self._slot: (1, target, dtype)}
             self._mm.create_memory_dict(self._owner, memory_names, self._coll)
             self._allocated = True
+            self._created_slot = True  # H5b: слот создан ЭТИМ middleware → он его и освободит
             self._alloc_shape = target
             self._alloc_dtype = dtype
             self._write_index = 0  # свежие слоты — пишем с начала кольца
+            # Ф7 G.3(b): считать ФАКТИЧЕСКИЙ формат слота (seqlock задаёт mm) —
+            # авторитетный источник для shm_seqlock в сообщении.
+            try:
+                md = self._mm.get_memory_data(self._owner, self._slot)
+                self._slot_seqlock = bool(md.get("seqlock", False)) if md else False
+            except Exception:
+                self._slot_seqlock = False
         except Exception as e:
             self._log_error(f"FrameShmMiddleware: allocate SHM error: {e}")
+
+    def _adopt_existing_slot_if_any(self) -> None:
+        """H5a: если mm уже держит (owner, slot) — принять как выделенный, не создавать
+        второй раз. Grow-only realloc в _allocate_shm пересоздаст лишь при росте кадра.
+        """
+        try:
+            md = self._mm.get_memory_data(self._owner, self._slot)
+        except Exception:
+            return
+        params = md.get("params", {}).get(self._slot) if md else None
+        if not params:
+            return
+        _, existing_shape, existing_dtype = params
+        self._allocated = True
+        self._created_slot = False  # H5b: принят чужой слот (PM) — release его не трогает
+        self._alloc_shape = tuple(existing_shape)  # type: ignore[assignment]
+        self._alloc_dtype = str(existing_dtype)
+        self._slot_seqlock = bool(md.get("seqlock", False))
 
     def strip_data_frame_on_send(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """Send-middleware для data-pipeline (P3.1.2): вынести frame из msg["data"] в SHM.
@@ -327,8 +523,7 @@ class FrameShmMiddleware:
         нескольких targets; первый ``router.send`` стрипает его (frame → SHM,
         координаты в data), последующие видят item уже без frame. ``strip_and_write``
         зовётся на КАЖДЫЙ send (не только пока в data есть "frame") — сам решает,
-        первый это стрип (пишет в SHM) или fan-out-повтор (только считает границу,
-        см. его докстринг); граница/кадр НЕ теряется на втором и далее target.
+        первый это стрип (пишет в SHM) или fan-out-повтор (только считает границу).
         """
         if msg.get("type") != "data":
             return msg
@@ -343,6 +538,11 @@ class FrameShmMiddleware:
 
     def on_send(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Перехватить исходящее сообщение: записать frame в SHM, заменить на координаты.
+
+        Ф7 G.3a: запись делегирована в единое ядро `_write_frame_into_slot`
+        (round-robin вместо снятого find_free_index). Сбой write (mm есть) →
+        громкий pickle-fallback (G.3d). frame берётся из top-level ``msg["frame"]``,
+        координаты кладутся в ``msg["data"]`` (+ width/height для back-compat).
 
         Если в msg нет ключа "frame" — либо это вообще не кадровое сообщение (нет
         "data" или в нём нет shm-маркера — не трогаем, ноль накладных), либо frame
@@ -380,28 +580,17 @@ class FrameShmMiddleware:
         # или запись не удалась). Считаем границу ДО ветвления по исходу.
         self._bump_frame_hops(data)
 
-        if not self._mm:
+        if self._mm is None:
+            return msg  # pickle-by-design (SHM не сконфигурирован)
+
+        if not self._write_frame_into_slot(frame, data):
+            # mm есть, но write не удался → громкий pickle-fallback (G.3d).
+            self._note_pickle_fallback("on_send")
             return msg
 
-        # Найти свободный индекс и записать кадр
-        free_idx = self._mm.find_free_index(self._owner, self._slot)
-        if free_idx is None:
-            free_idx = 0
-
-        shm_actual_name = self._mm.write_images(self._owner, self._slot, [frame], free_idx)
-
-        if shm_actual_name is None:
-            # Запись не удалась — пропускаем без изменений
-            return msg
-
-        # Убрать frame из сообщения (не передавать numpy через IPC)
+        # Убрать frame из сообщения (не передавать numpy через IPC). Координаты слота
+        # уже в data (M3). width/height — back-compat поля для старых читателей.
         msg.pop("frame", None)
-
-        # Добавить SHM-координаты в data (тот же локал — F6b, без повторного setdefault)
-        data["shm_name"] = self._slot
-        data["shm_index"] = free_idx
-        data["shm_actual_name"] = shm_actual_name
-        # Сохранить размеры кадра для fallback-чтения
         data["width"] = frame.shape[1]
         data["height"] = frame.shape[0]
 
@@ -414,7 +603,8 @@ class FrameShmMiddleware:
 
         Стратегия чтения (приоритет):
           1. MemoryManager.read_images() с координатами из сообщения
-          2. Прямое открытие SharedMemory по shm_actual_name (другой OS-процесс)
+          2. Прямое открытие SharedMemory по shm_actual_name (другой OS-процесс),
+             seqlock-флаг из сообщения (Ф7 G.3b) → reader дропает torn.
         """
         data = msg.get("data")
         if not isinstance(data, dict):
@@ -440,10 +630,14 @@ class FrameShmMiddleware:
         # Попытка 2: прямое открытие SharedMemory по фактическому имени.
         shm_actual_name = data.get("shm_actual_name")
         if shm_actual_name:
+            seqlock = bool(data.get("shm_seqlock", False))
             try:
-                frame = self._read_shm_from_actual_name(shm_actual_name)
+                frame = self._read_shm_from_actual_name(shm_actual_name, seqlock=seqlock)
                 if frame is not None:
                     msg["frame"] = frame
+                elif seqlock:
+                    # M2c: torn/in-progress → штатный drop (счётчик, агрегируется в get_stats).
+                    self.frame_torn_reads += 1
             except Exception as exc:
                 logging.getLogger("FrameShmMiddleware").warning(
                     "SHM fallback read failed: %s (shm=%s)", exc, shm_actual_name
