@@ -113,3 +113,5 @@
 - [Ревью трёхуровневое](feedback_review_economy_tiers.md) — полное 8-угловое только для рисковых вскрытий; лёгкое/группой для S-задач; финдеры на Sonnet, не Fable
 - [Без всплывающих Qt-окон](feedback_no_qt_popups_offscreen.md) — агентские прогоны тестов/харнесса только с QT_QPA_PLATFORM=offscreen; окна вешают агентов
 - [Неиспользуемые пути = контракты](feedback_unused_paths_are_contracts.md) — конструктор универсален: API без живых вызывающих в ревью чинить/отклонять громко, не отмахиваться «мёртвый путь»
+- [Model economy scheme](feedback_model_economy_scheme.md) — главный чат Opus 4.8, Fable точечно на вердикты, финдеры Sonnet, исполнители Sonnet/Opus по таблице фазы
+- [Ф7 G.3 handoff](project_f7_g3_handoff.md) — ревью 8 углов DONE, H1-H8+M1-M4 закоммичены на feat/constructor-f7; осталось M5-M8+LOW+верификация+merge+баллы; правда в plans/.../g3-review-2026-07-14.md
