@@ -1098,6 +1098,11 @@ class RouterManager(ChannelRoutingManager):
             "frame_pickle_fallbacks": sum(getattr(mw, "frame_pickle_fallbacks", 0) for mw in self._frame_middlewares),
             # M2c: torn/дропнутые cross-process seqlock-чтения (raw-путь middleware).
             "frame_torn_reads": sum(getattr(mw, "frame_torn_reads", 0) for mw in self._frame_middlewares),
+            # Ф7 G.4.a: дроп из полных data-очередей (drop_oldest) — surface из
+            # queue_registry (дешёвый property, не полный get_stats), чтобы heartbeat
+            # довёл его до state.shm.* тем же путём, что и SHM-счётчики. «Дроп data виден».
+            "queue_data_evicted": int(getattr(self.queue_registry, "data_evicted", 0) or 0),
+            "queue_system_evict_blocked": int(getattr(self.queue_registry, "system_evict_blocked", 0) or 0),
         }
 
         if isinstance(base, dict):

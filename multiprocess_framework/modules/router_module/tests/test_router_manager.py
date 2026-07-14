@@ -664,6 +664,25 @@ class TestStats(unittest.TestCase):
         stats = self.router.get_stats()["router"]
         self.assertIn("send_queue_size", stats)
 
+    def test_stats_queue_data_evicted_zero_without_registry(self):
+        """Ф7 G.4.a: без queue_registry surface-счётчик = 0 (безопасный дефолт)."""
+        stats = self.router.get_stats()["router"]
+        self.assertEqual(stats["queue_data_evicted"], 0)
+        self.assertEqual(stats["queue_system_evict_blocked"], 0)
+
+    def test_stats_surfaces_queue_data_evicted(self):
+        """Ф7 G.4.a: дроп data-очереди из queue_registry доезжает в router-статы
+        (тот же путь, что heartbeat → state.shm.queue_data_evicted)."""
+
+        class _QRStub:
+            data_evicted = 7
+            system_evict_blocked = 2
+
+        self.router.queue_registry = _QRStub()
+        stats = self.router.get_stats()["router"]
+        self.assertEqual(stats["queue_data_evicted"], 7)
+        self.assertEqual(stats["queue_system_evict_blocked"], 2)
+
 
 # ---------------------------------------------------------------------------
 # Тесты async listener

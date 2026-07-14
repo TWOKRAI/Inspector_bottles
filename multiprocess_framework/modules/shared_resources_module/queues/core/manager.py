@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from ....base_manager import BaseManager, ObservableMixin
 from ..interfaces import IQueueRegistry
 from ...mixins import ManagerStatsMixin
+from ...qos import qos_for
 
 try:
     from multiprocessing.queues import Empty
@@ -35,6 +36,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         process: Optional[Any] = None,
         process_state_registry: Optional[Any] = None,
         logger: Optional[Any] = None,
+        qos_profiles: Optional[bool] = None,
         **kwargs: Any,
     ) -> None:
         BaseManager.__init__(self, manager_name=manager_name, process=process)
@@ -52,19 +54,42 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         self._process_state_registry = process_state_registry
         # Queue refs хранятся в PSR (ProcessData._queues_dict) — единственный source of truth
 
+        # Ф7 G.4.a: решение never-drop берётся из ЕДИНОГО QoS-профиля (qos.py), а не из
+        # хардкода `queue_type == "system"`. Флаг ON = источник профиль; OFF = прежний
+        # хардкод (бит-в-бит). Для system/data профиль даёт тот же вердикт, поэтому флип
+        # безопасен; ценность флага материализуется в G.4.b (глубина кольца = history_depth)
+        # и на будущих kind. Дефолт False = откат.
+        self._qos_profiles: bool = self._resolve_env_flag(qos_profiles, "FW_QOS_PROFILES")
+
         self._stats = {
             "created": 0,
             "registered": 0,
             "removed": 0,
             "errors": 0,
             # Ф3.3: сколько раз вытеснение из полной system-очереди было заблокировано.
-            # System-команды (process.stop/heartbeat) терять нельзя. Полная QoS-модель — Ф7 G.4.
+            # System-команды (process.stop/heartbeat) терять нельзя. QoS-модель — Ф7 G.4.a.
             "system_evict_blocked": 0,
+            # Ф7 G.4.a: сколько сообщений вытеснено из полной data-очереди (drop_oldest).
+            # Всегда-on телеметрия (по образцу G.3-счётчиков): «дроп data виден в state»
+            # (heartbeat → state.*). Раньше data-вытеснение было ТИХИМ (счётчика не было).
+            "data_evicted": 0,
         }
         # Throttle для ERROR-лога переполнения system-очереди: логируем раз на окно,
         # а не на каждый put (send_to_queue — hot-path). Счётчик инкрементируется всегда.
         self._system_evict_log_window: float = 5.0
         self._system_evict_last_log: float = 0.0
+        # Throttle громкого WARNING про drop_oldest из data-очереди (тот же приём).
+        self._data_evict_log_window: float = 5.0
+        self._data_evict_last_log: float = 0.0
+
+    @staticmethod
+    def _resolve_env_flag(explicit: Optional[bool], env_name: str) -> bool:
+        """Разрешить булев флаг Ф7 G.4 (ADR-SRM-012): ctor (не None) > env > False."""
+        if explicit is not None:
+            return bool(explicit)
+        from ....config_module.tools.env import env_flag
+
+        return env_flag(env_name, default=False)
 
     # =========================================================================
     # Жизненный цикл
@@ -276,20 +301,28 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             self._stats["errors"] += 1
 
     def remove_old_if_full(self, queue: Queue, queue_type: Optional[str] = None) -> None:
-        """Освободить место в полной очереди перед put.
+        """Освободить место в полной очереди перед put (QoS-профиль, Ф7 G.4.a).
 
-        - ``queue_type is None`` или data-очередь: старое поведение — вытеснить
-          самый старый элемент (by design до полной QoS-модели Ф7 G.4).
-        - ``queue_type == "system"``: НЕ вытеснять. System-команды
+        Решение «ронять или нет» берётся из ЕДИНОГО QoS-профиля класса груза
+        (``qos.py``: system→never-drop, data→drop_oldest) вместо трёх хардкодов:
+
+        - **never-drop** (system/command): НЕ вытеснять. Control-plane
           (process.stop/heartbeat) терять нельзя, иначе процесс не остановится.
-          При переполнении — throttled ERROR-лог + счётчик ``system_evict_blocked``;
-          put затем упадёт штатно (put_nowait → Full → обработка в send_to_queue),
-          то есть потеря system-команды становится ВИДИМОЙ, а не тихой.
+          Throttled ERROR + счётчик ``system_evict_blocked``; put затем упадёт штатно
+          (put_nowait → Full → send_to_queue), потеря становится ВИДИМОЙ, не тихой.
+        - **drop_oldest** (data/прочее): вытеснить самый старый элемент + счётчик
+          ``data_evicted`` (всегда-on) + throttled WARNING. Раньше data-вытеснение
+          было ТИХИМ (без счётчика) — «дроп data виден в state» (G.4.a acceptance).
+
+        Флаг ``FW_QOS_PROFILES`` OFF → источник вердикта = прежний хардкод
+        ``queue_type == "system"`` (бит-в-бит откат); счётчик ``data_evicted`` и его
+        throttled-WARNING — всегда-on телеметрия (по образцу G.3, поведение drop не
+        меняют). Для system/data вердикт профиля идентичен хардкоду — флип безопасен.
         """
         if not queue.full():
             return
         # process_data.QUEUE_SYSTEM == "system" — каноническое имя system-очереди.
-        if queue_type == "system":
+        if self._is_never_drop(queue_type):
             self._stats["system_evict_blocked"] += 1
             now = time.monotonic()
             if now - self._system_evict_last_log >= self._system_evict_log_window:
@@ -303,11 +336,44 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         try:
             queue.get_nowait()
         except Empty:
-            pass
+            return
+        # drop_oldest сработал — громкий счётчик (раньше молчал) + throttled WARNING.
+        self._stats["data_evicted"] += 1
+        now = time.monotonic()
+        if now - self._data_evict_last_log >= self._data_evict_log_window:
+            self._data_evict_last_log = now
+            self._log_warning(
+                f"data-очередь '{queue_type}' переполнена — вытеснен старый элемент "
+                f"(drop_oldest; data_evicted={self._stats['data_evicted']}); "
+                "устойчивая перегрузка = теряем кадры, чинить пропускную способность"
+            )
+
+    def _is_never_drop(self, queue_type: Optional[str]) -> bool:
+        """Ронять ли груз данного ``queue_type`` при переполнении (Ф7 G.4.a).
+
+        Флаг ON → вердикт из QoS-профиля (``qos_for(queue_type).never_drop``); OFF →
+        прежний хардкод ``queue_type == "system"``. Для system/data результат совпадает.
+        ``queue_type is None`` → droppable (прежнее поведение data-ветки).
+        """
+        if self._qos_profiles and queue_type is not None:
+            return qos_for(queue_type).never_drop
+        return queue_type == "system"
 
     # =========================================================================
     # Статистика
     # =========================================================================
+
+    @property
+    def data_evicted(self) -> int:
+        """Ф7 G.4.a: сколько сообщений вытеснено из полных data-очередей (drop_oldest).
+        Дешёвый plain-int аксессор для surface в ``RouterManager.get_stats`` → heartbeat
+        → ``state.shm.*`` (без обхода процессов, как в полном get_stats)."""
+        return self._stats["data_evicted"]
+
+    @property
+    def system_evict_blocked(self) -> int:
+        """Ф7 G.4.a: сколько раз заблокировано вытеснение из полной system-очереди."""
+        return self._stats["system_evict_blocked"]
 
     def get_stats(self) -> Dict[str, Any]:
         process_names = self.get_registered_processes()
