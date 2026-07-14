@@ -57,12 +57,24 @@ def validate_write_operation(
 def clear_memory_slot(
     handles: Optional[List[Any]],
     index: int,
+    *,
+    seqlock: bool = False,
 ) -> None:
-    """Обнулить буфер слота памяти."""
+    """Обнулить буфер слота памяти.
+
+    H1c (ADR-SRM-011): для seqlock-слота чистить ПО ПРОТОКОЛУ (generation нечёт →
+    обнуление → чёт), иначе raw ``buf[:]=0`` затирает header мимо протокола и создаёт
+    окно «gen 0==0 при недообнулённом payload», которое reader читает как валидный.
+    """
     if not handles or index >= len(handles) or handles[index] is None:
         return
     shm = handles[index]
     try:
-        shm.buf[:] = b"\x00" * shm.size
+        if seqlock:
+            from ..format import clear_slot_seqlock
+
+            clear_slot_seqlock(shm.buf)
+        else:
+            shm.buf[:] = b"\x00" * shm.size
     except Exception:
         pass

@@ -88,7 +88,14 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         # Ф7 G.3(b) / B-6/B-7: имя SHM с owner+incarnation (ADR-SRM-011) — stale-процесс
         # не пишет в чужой сегмент, мультикамера без коллизий. Дефолт False = прежнее имя.
         self._owner_incarnation: bool = self._resolve_env_flag(owner_incarnation, "FW_SHM_OWNER_INCARNATION")
-        self._stats = {"created": 0, "written": 0, "read": 0, "errors": 0, "torn": 0}
+        self._stats = {
+            "created": 0,
+            "written": 0,
+            "read": 0,
+            "errors": 0,
+            "torn": 0,
+            "seqlock_recovered": 0,
+        }
 
     @staticmethod
     def _resolve_env_flag(explicit: Optional[bool], env_name: str) -> bool:
@@ -315,6 +322,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
                 f"Write validation failed for '{process_name}'/'{shm_name}'[{index}]: {write_status.value}"
             )
             return None
+        seqlock = bool(memory_data.get("seqlock", False))
         try:
             handles = memory_data["handles"]
             shm = handles[index]
@@ -325,15 +333,28 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
                 max_shape,
                 np.dtype(expected_dtype),
                 fast=pack_fast,
-                seqlock=bool(memory_data.get("seqlock", False)),
+                seqlock=seqlock,
+                on_recover=self._on_seqlock_recover if seqlock else None,
             )
             self._stats["written"] += 1
             return shm.name
         except Exception as e:
             self._log_error(f"write_images error: {e}")
             self._stats["errors"] += 1
-            val.clear_memory_slot(memory_data.get("handles"), index)
+            # H1c: seqlock-слот чистим по протоколу (не raw buf[:]=0 мимо generation).
+            val.clear_memory_slot(memory_data.get("handles"), index, seqlock=seqlock)
             return None
+
+    def _on_seqlock_recover(self, gen: int) -> None:
+        """H1b: writer нашёл слот с НЕЧЁТНЫМ generation (прошлая запись не довелась —
+        исключение без finally в старом коде / kill -9). Throttled WARNING через фасад."""
+        self._stats["seqlock_recovered"] += 1
+        n = self._stats["seqlock_recovered"]
+        if n == 1 or n % 200 == 0:
+            self._log_warning(
+                f"seqlock: восстановлен отравленный слот (нечёт generation={gen}); "
+                f"прошлый writer не довёл запись [всего {n}]"
+            )
 
     def read_images(
         self,
@@ -372,7 +393,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         memory_data = self.get_memory_data(process_name, shm_name)
         if not memory_data:
             return
-        val.clear_memory_slot(memory_data.get("handles"), index)
+        val.clear_memory_slot(memory_data.get("handles"), index, seqlock=bool(memory_data.get("seqlock", False)))
         index_usage = memory_data["index_usage"]
         if shm_name in index_usage and 0 <= index < len(index_usage[shm_name]):
             index_usage[shm_name][index] = 0

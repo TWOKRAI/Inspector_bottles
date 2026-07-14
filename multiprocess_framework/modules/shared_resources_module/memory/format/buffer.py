@@ -32,7 +32,7 @@ Seqlock (verify_seqlock=True при чтении): reader сверяет generat
 """
 
 import struct
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 import numpy as np
 
@@ -211,6 +211,7 @@ def pack_images(
     *,
     fast: bool = True,
     seqlock: bool = False,
+    on_recover: Optional[Callable[[int], None]] = None,
 ) -> None:
     """
     Записать изображения в буфер.
@@ -220,25 +221,79 @@ def pack_images(
         seqlock: True — обернуть запись seqlock-протоколом (generation ++ до и после,
             state writing→ready). Требует, чтобы буфер был выделен с seqlock=True
             (calculate_buffer_size). См. ADR-SRM-011.
+        on_recover: колбэк(gen) при обнаружении НЕЧЁТНОГО generation на входе —
+            прошлый writer не довёл запись (исключение / kill -9). Запись всё равно
+            выполняется, generation восстанавливается; колбэк — для throttled WARNING
+            через фасад (примитив сам не логирует).
+
+    **Инвариант single-writer-per-slot (M4, ADR-SRM-011):** seqlock защищает reader
+    от writer'а, НО НЕ двух writer'ов одного слота (оба стартуют с gen=N, оба
+    финишируют gen=N+2 → reader увидит g1==g2 на смешанном кадре). Один слот пишет
+    РОВНО один поток/процесс (round-robin в FrameShmMiddleware это обеспечивает).
+    Жёсткий enforcement (state-машина владения) — G.4 (frame-pool).
+
+    Exception-safety (H1a): при исключении внутри записи (dtype/shape mismatch)
+    generation ВСЕГДА возвращается к чётному через finally (иначе слот отравлен —
+    нечёт навсегда), а num_images=0 (пустой слот по протоколу) — reader получит [].
     """
     base = _image_block_base(seqlock)
 
-    if seqlock:
-        # Начало записи: generation → нечётное (writing). Reader, увидев нечётное или
-        # изменение generation после копии, дропает кадр (не порванный).
-        gen = read_generation(buffer)
-        _write_generation(buffer, gen + 1)
-        buffer[_STATE_OFFSET] = SLOT_STATE_WRITING
+    if not seqlock:
+        if fast:
+            pack_images_fast(buffer, images, max_shape, expected_dtype, base=base)
+        else:
+            pack_images_legacy(buffer, images, max_shape, expected_dtype, base=base)
+        return
 
-    if fast:
-        pack_images_fast(buffer, images, max_shape, expected_dtype, base=base)
+    # H1b: на входе generation может быть НЕЧЁТНЫМ (прошлый writer не довёл запись —
+    # исключение выше по стеку без finally в старой версии, либо kill -9). writing_gen
+    # обязан быть нечётным независимо от чётности входа: чёт → +1, нечёт → +2.
+    gen = read_generation(buffer)
+    if gen & 1:
+        if on_recover is not None:
+            on_recover(gen)
+        writing_gen = gen + 2
     else:
-        pack_images_legacy(buffer, images, max_shape, expected_dtype, base=base)
+        writing_gen = gen + 1
+    _write_generation(buffer, writing_gen)  # нечёт — «идёт запись»
+    buffer[_STATE_OFFSET] = SLOT_STATE_WRITING
 
-    if seqlock:
-        # Конец записи: generation → чётное (стабильно), state = ready.
+    try:
+        if fast:
+            pack_images_fast(buffer, images, max_shape, expected_dtype, base=base)
+        else:
+            pack_images_legacy(buffer, images, max_shape, expected_dtype, base=base)
         buffer[_STATE_OFFSET] = SLOT_STATE_READY
-        _write_generation(buffer, gen + 2)
+    except Exception:
+        # H1a: запись сорвалась — слот пуст по протоколу (num_images=0), не отравлен.
+        struct.pack_into("I", buffer, base, 0)
+        buffer[_STATE_OFFSET] = SLOT_STATE_FREE
+        raise  # контракт: caller (write_images) ловит, логирует, возвращает None (pickle)
+    finally:
+        # generation ВСЕГДА → чётное (стабильно), даже при исключении.
+        _write_generation(buffer, writing_gen + 1)
+
+
+def clear_slot_seqlock(buffer: memoryview) -> None:
+    """H1c: обнулить seqlock-слот ПО ПРОТОКОЛУ (не raw buf[:]=0 мимо generation).
+
+    Raw-обнуление всего буфера (включая header) создаёт окно «gen 0==0 при
+    недообнулённом payload» — reader проходит проверку и читает мусор. Здесь:
+    generation → нечёт (writing) → num_images=0 + payload=0 → generation → чёт.
+    Reader во время очистки видит нечёт → drop.
+    """
+    gen = read_generation(buffer)
+    writing_gen = gen + 2 if (gen & 1) else gen + 1
+    _write_generation(buffer, writing_gen)  # нечёт
+    buffer[_STATE_OFFSET] = SLOT_STATE_WRITING
+    # Обнулить всё ПОСЛЕ SLOT-header (num_images + per-image + payload); generation
+    # (offset 0..4) не трогаем — им управляет протокол.
+    tail = len(buffer) - SLOT_HEADER_SIZE
+    if tail > 0:
+        buffer[SLOT_HEADER_SIZE:] = b"\x00" * tail
+    buffer[_STATE_OFFSET] = SLOT_STATE_FREE
+    buffer[_REFCOUNT_OFFSET] = 0
+    _write_generation(buffer, writing_gen + 1)  # чёт
 
 
 def unpack_images(
@@ -261,27 +316,56 @@ def unpack_images(
         copy: True — вернуть копии (безопасно, данные живут после записи).
               False — вернуть view (быстрее, данные валидны до следующей записи в слот).
         verify_seqlock: True — сверить generation до/после чтения (Ф7 G.3(b)). При
-              нечётном g1 (запись идёт) или g1 != g2 (перезапись под читателем) —
-              вернуть None (drop, НЕ порванный кадр). Требует seqlock-формат буфера.
+              нечётном g1 (запись идёт), g1 != g2 (перезапись под читателем) ИЛИ
+              рваном per-image-заголовке (h,w,c не атомарная тройка) — вернуть None
+              (drop). Исключение (ValueError/TypeError) НЕ выходит наружу при torn:
+              примитив сам ловит и сверяет generation (M1). Требует seqlock-формат.
 
     Returns:
-        Список numpy массивов; при verify_seqlock и обнаружении torn/in-progress — None.
+        Список numpy массивов; при verify_seqlock и torn/in-progress — None.
+
+    Raises:
+        ValueError/TypeError: только при verify_seqlock и СТАБИЛЬНОМ generation —
+        реальная порча слота (не гонка); caller логирует через фасад.
     """
     base = _image_block_base(verify_seqlock)
 
-    if verify_seqlock:
-        gen_before = read_generation(buffer)
-        if gen_before & 1:
-            # Нечётное — writer в процессе записи. Дроп без копии.
-            return None
+    if not verify_seqlock:
+        return _read_image_block(buffer, base, max_shape, expected_dtype, n, copy)
 
+    gen_before = read_generation(buffer)
+    if gen_before & 1:
+        # Нечётное — writer в процессе записи. Дроп без копии.
+        return None
+    try:
+        images = _read_image_block(buffer, base, max_shape, expected_dtype, n, copy)
+    except (ValueError, TypeError, struct.error):
+        # Рваный заголовок мог быть результатом гонки — сверить generation.
+        if read_generation(buffer) != gen_before:
+            return None  # torn (writer сменил размеры под читателем)
+        raise  # generation стабилен → реальная порча слота (caller логирует)
+
+    # Сверка generation ПОСЛЕ чтения — даже для пустого слота (M1: без шортката).
+    if read_generation(buffer) != gen_before:
+        return None  # перезапись во время копии → torn
+    return images
+
+
+def _read_image_block(
+    buffer: memoryview,
+    base: int,
+    max_shape: tuple,
+    expected_dtype: np.dtype,
+    n: int,
+    copy: bool,
+) -> List[np.ndarray]:
+    """Прочитать блок изображений с ``base`` (num_images + per-image). Без seqlock-логики."""
     max_h, max_w, max_c = max_shape
     itemsize = np.dtype(expected_dtype).itemsize
     slot_size = max_h * max_w * max_c * itemsize
 
     num_images = struct.unpack_from("I", buffer, base)[0]
     if num_images == 0:
-        # Пустой слот. При seqlock сверять generation не нужно (данных нет).
         return []
     if n != -1:
         num_images = min(n, num_images)
@@ -299,12 +383,6 @@ def unpack_images(
         images.append(reshaped.copy() if copy else reshaped)
         offset += slot_size
 
-    if verify_seqlock:
-        gen_after = read_generation(buffer)
-        if gen_after != gen_before:
-            # Writer перезаписал слот во время копии → кадр порван. Дроп.
-            return None
-
     return images
 
 
@@ -318,27 +396,40 @@ def read_single_frame(buffer: memoryview, *, verify_seqlock: bool = False) -> Op
 
     Returns:
         ndarray (копия) или None — пустой слот / torn / write-in-progress.
+
+    Raises:
+        ValueError/TypeError: только при verify_seqlock и СТАБИЛЬНОМ generation —
+        реальная порча слота (не гонка). При torn примитив сам ловит → None (M1).
     """
     base = _image_block_base(verify_seqlock)
 
-    if verify_seqlock:
-        gen_before = read_generation(buffer)
-        if gen_before & 1:
-            return None  # запись идёт
+    if not verify_seqlock:
+        return _read_one_frame(buffer, base)
 
+    gen_before = read_generation(buffer)
+    if gen_before & 1:
+        return None  # запись идёт
+    try:
+        frame = _read_one_frame(buffer, base)
+    except (ValueError, TypeError, struct.error):
+        if read_generation(buffer) != gen_before:
+            return None  # torn (рваный заголовок из-за гонки)
+        raise  # generation стабилен → реальная порча (caller логирует через фасад)
+
+    if read_generation(buffer) != gen_before:
+        return None  # перезапись под читателем → torn, дроп
+    return frame
+
+
+def _read_one_frame(buffer: memoryview, base: int) -> Optional[np.ndarray]:
+    """Прочитать ОДИН кадр с ``base`` (h/w/c из header). None при num_images==0. Без seqlock."""
     num_images = struct.unpack_from("I", buffer, base)[0]
     if num_images == 0:
         return None
-
     offset = base + HEADER_SIZE
     h, w, c = struct.unpack_from("III", buffer, offset)
     offset += 12
     dtype = np.dtype(chr(buffer[offset]))
     offset += 1
     arr = np.frombuffer(buffer, dtype=dtype, count=h * w * c, offset=offset)
-    frame = arr.reshape((h, w, c)).copy()
-
-    if verify_seqlock:
-        if read_generation(buffer) != gen_before:
-            return None  # перезапись под читателем → torn, дроп
-    return frame
+    return arr.reshape((h, w, c)).copy()

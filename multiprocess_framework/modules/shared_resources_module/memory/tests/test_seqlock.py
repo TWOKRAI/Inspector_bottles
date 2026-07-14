@@ -20,6 +20,7 @@ import threading
 import time
 
 import numpy as np
+import pytest
 
 from multiprocess_framework.modules.shared_resources_module.memory import format as fmt
 from multiprocess_framework.modules.shared_resources_module.memory.core.manager import MemoryManager
@@ -257,3 +258,86 @@ def test_memory_manager_seqlock_off_by_default():
         assert mm.get_memory_data("o", "f")["seqlock"] is False
     finally:
         mm.close_all()
+
+
+# --- H1: живучесть слота (отравление/exception/clear по протоколу) ----------------
+
+
+def test_seqlock_poisoned_odd_generation_heals_on_next_write():
+    """H1b: слот с НЕЧЁТНЫМ generation (writer «завис») лечится следующей записью."""
+    mv, shape, dtype = _alloc(seqlock=True)
+    fmt.pack_images(mv, [np.full(shape, 5, dtype=_DTYPE)], shape, dtype, seqlock=True)
+    # Отравить: generation нечёт (прошлый writer не довёл запись).
+    buf_mod._write_generation(mv, fmt.read_generation(mv) + 1)
+    assert fmt.read_generation(mv) & 1, "слот отравлен (нечёт)"
+    # Валидные данные сейчас НЕ читаются (нечёт → drop).
+    assert fmt.unpack_images(mv, shape, dtype, n=1, copy=True, verify_seqlock=True) is None
+
+    recovered: list[int] = []
+    frame = np.full(shape, 9, dtype=_DTYPE)
+    fmt.pack_images(mv, [frame], shape, dtype, seqlock=True, on_recover=recovered.append)
+    assert not (fmt.read_generation(mv) & 1), "после записи generation чёт (слот читаем)"
+    assert recovered, "on_recover обязан сработать при нечётном входе"
+    imgs = fmt.unpack_images(mv, shape, dtype, n=1, copy=True, verify_seqlock=True)
+    assert imgs is not None and np.array_equal(imgs[0], frame)
+
+
+def test_seqlock_pack_exception_leaves_generation_even_and_slot_empty():
+    """H1a: исключение внутри записи → generation ВСЕГДА чёт (не отравлен), слот пуст."""
+    mv, shape, dtype = _alloc(seqlock=True)  # max_shape (4,4,3)
+    gen0 = fmt.read_generation(mv)
+    big = np.full((8, 8, 3), 7, dtype=_DTYPE)  # больше max → ValueError в pack
+    with pytest.raises(ValueError):
+        fmt.pack_images(mv, [big], shape, dtype, seqlock=True)
+    assert not (fmt.read_generation(mv) & 1), "generation вернулся к чёт (не отравлен)"
+    assert fmt.read_generation(mv) == gen0 + 2
+    # Слот пуст (num_images=0) — reader получает [] (не мусор), не падает.
+    assert fmt.unpack_images(mv, shape, dtype, n=1, copy=True, verify_seqlock=True) == []
+
+
+def test_clear_slot_seqlock_follows_protocol():
+    """H1c: clear_slot_seqlock — generation чёт после, state FREE, num_images=0."""
+    mv, shape, dtype = _alloc(seqlock=True)
+    fmt.pack_images(mv, [np.full(shape, 5, dtype=_DTYPE)], shape, dtype, seqlock=True)
+    fmt.clear_slot_seqlock(mv)
+    assert not (fmt.read_generation(mv) & 1)
+    assert fmt.read_slot_state(mv) == fmt.SLOT_STATE_FREE
+    assert fmt.unpack_images(mv, shape, dtype, n=1, copy=True, verify_seqlock=True) == []
+
+
+# --- M1: read-примитивы — torn = None, стабильная порча = исключение ---------------
+
+
+def test_seqlock_malformed_header_stable_gen_raises():
+    """M1: рваный header при СТАБИЛЬНОМ generation = реальная порча → исключение (caller логирует)."""
+    mv, shape, dtype = _alloc(seqlock=True)
+    fmt.pack_images(mv, [np.full(shape, 5, dtype=_DTYPE)], shape, dtype, seqlock=True)
+    # Испортить h на огромное значение при неизменном generation → frombuffer:
+    # "buffer smaller than requested size" (ValueError).
+    h_off = fmt.SLOT_HEADER_SIZE + 4  # base + num_images(4) → поле h (uint32)
+    struct.pack_into("I", mv, h_off, 999_999)
+    with pytest.raises((ValueError, TypeError)):
+        fmt.unpack_images(mv, shape, dtype, n=1, copy=True, verify_seqlock=True)
+
+
+def test_seqlock_malformed_header_with_gen_change_is_torn_none():
+    """M1: рваный header + смена generation (гонка) = torn → None, НЕ исключение."""
+    mv, shape, dtype = _alloc(seqlock=True)
+    fmt.pack_images(mv, [np.full(shape, 5, dtype=_DTYPE)], shape, dtype, seqlock=True)
+    h_off = fmt.SLOT_HEADER_SIZE + 4
+    struct.pack_into("I", mv, h_off, 999_999)  # огромный h → _read_image_block бросит
+
+    gen0 = fmt.read_generation(mv)
+    calls = {"n": 0}
+
+    def fake_read_gen(buf):
+        calls["n"] += 1
+        return gen0 if calls["n"] == 1 else gen0 + 2  # g_before ок, g_after изменился
+
+    real = buf_mod.read_generation
+    buf_mod.read_generation = fake_read_gen
+    try:
+        result = fmt.unpack_images(mv, shape, dtype, n=1, copy=True, verify_seqlock=True)
+    finally:
+        buf_mod.read_generation = real
+    assert result is None, "torn (gen изменился) обязан дать None, не исключение"
