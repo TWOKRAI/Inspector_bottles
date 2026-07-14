@@ -42,21 +42,39 @@ class TestCollectAndValidate:
     def test_collect_only_view_items(self):
         ex = _make_executor(_FakeShm(True), [])
         items = [
-            {"_frame_is_view": True, "_shm_view_name": "seg0", "_shm_view_generation": 4},
+            {
+                "_frame_is_view": True,
+                "_shm_view_name": "seg0",
+                "_shm_view_generation": 4,
+                "shm_owner": "cam0",
+                "shm_name": "output_frames",
+                "shm_index": 0,
+            },
             {"frame": "plain"},  # не view — игнор
-            {"_frame_is_view": True, "_shm_view_name": "seg1", "_shm_view_generation": 6},
+            {
+                "_frame_is_view": True,
+                "_shm_view_name": "seg1",
+                "_shm_view_generation": 6,
+                "owner": "cam1",
+                "shm_name": "output_frames",
+                "shm_index": 1,
+            },
         ]
-        assert ex._collect_view_checks(items) == [("seg0", 4), ("seg1", 6)]
+        tickets = ex._collect_view_tickets(items)
+        assert [(t["view_name"], t["generation"], t["owner"], t["index"]) for t in tickets] == [
+            ("seg0", 4, "cam0", 0),
+            ("seg1", 6, "cam1", 1),
+        ]
 
     def test_no_middleware_no_checks(self):
         ex = _make_executor(None, [])
-        assert ex._collect_view_checks([{"_frame_is_view": True, "_shm_view_name": "x"}]) == []
+        assert ex._collect_view_tickets([{"_frame_is_view": True, "_shm_view_name": "x"}]) == []
 
     def test_all_valid_true_any_stale_false(self):
         ex_ok = _make_executor(_FakeShm(True), [])
-        assert ex_ok._frame_views_valid([("seg0", 4), ("seg1", 6)]) is True
+        assert ex_ok._frame_views_valid([{"view_name": "seg0", "generation": 4}]) is True
         ex_bad = _make_executor(_FakeShm(False), [])
-        assert ex_bad._frame_views_valid([("seg0", 4)]) is False
+        assert ex_bad._frame_views_valid([{"view_name": "seg0", "generation": 4}]) is False
 
 
 class TestRunLoopDrop:
@@ -95,3 +113,65 @@ class TestRunLoopDrop:
         self._run_one_batch(ex, [{"frame": "plain", "camera_id": 1}])
         assert len(sent) == 1  # обычный кадр уходит
         assert shm.calls == []  # re-check НЕ вызывался (ноль оверхеда на не-view пути)
+
+
+def _view_item(owner, idx, gen):
+    return {
+        "_frame_is_view": True,
+        "_shm_view_name": f"v{idx}",
+        "_shm_view_generation": gen,
+        "owner": owner,
+        "shm_name": "output_frames",
+        "shm_index": idx,
+    }
+
+
+class TestReleaseAccumulation:
+    """G.5.d-2: executor копит release-тикеты и флашит пачкой владельцу (не на per-frame)."""
+
+    @staticmethod
+    def _executor(sent):
+        shm = _FakeShm(valid=True)
+        shm._loan_protocol = True  # включить накопление release
+        return PipelineExecutor(
+            plugins=[],
+            chain_targets=["out"],
+            shm_middleware=shm,
+            send_fn=lambda target, msg: sent.append((target, msg)),
+        )
+
+    def test_accumulate_then_flush_on_threshold(self):
+        sent: list = []
+        ex = self._executor(sent)
+        ex._release_batch_threshold = 3
+        ex._accumulate_releases([_ticket("cam0", 0, 2), _ticket("cam0", 1, 2)])
+        assert sent == []  # < порога — не флашим
+        ex._accumulate_releases([_ticket("cam0", 2, 2)])
+        assert len(sent) == 1  # порог 3 достигнут → флаш
+        target, msg = sent[0]
+        assert target == "cam0"
+        assert msg["type"] == "shm_release" and msg["channel"] == "system"
+        assert len(msg["data"]["releases"]) == 3
+        assert msg["data"]["releases"][0]["reader"] == ex._node
+
+    def test_no_accumulate_without_loan_protocol(self):
+        sent: list = []
+        shm = _FakeShm(valid=True)  # _loan_protocol не выставлен → getattr False
+        ex = PipelineExecutor(
+            plugins=[], chain_targets=["out"], shm_middleware=shm, send_fn=lambda t, m: sent.append((t, m))
+        )
+        ex._accumulate_releases([_ticket("cam0", 0, 2)])
+        assert ex._pending_release_count == 0
+
+    def test_run_loop_flushes_residual_on_stop(self):
+        sent: list = []
+        ex = self._executor(sent)
+        ex._release_batch_threshold = 100  # не флашить по порогу — только на стопе
+        TestRunLoopDrop()._run_one_batch(ex, [_view_item("cam0", 0, 5)])
+        releases = [m for _, m in sent if m.get("type") == "shm_release"]
+        assert len(releases) == 1  # хвост флашнут на остановке воркера
+        assert releases[0]["data"]["releases"][0]["index"] == 0
+
+
+def _ticket(owner, idx, gen):
+    return {"view_name": f"v{idx}", "generation": gen, "owner": owner, "shm_name": "output_frames", "index": idx}

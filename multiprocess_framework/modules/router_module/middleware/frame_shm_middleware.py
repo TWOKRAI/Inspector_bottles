@@ -192,9 +192,15 @@ class FrameShmMiddleware:
         self._num_consumers = max(1, int(num_consumers))
         self._slot_refcount: list[int] = [0] * self._coll
         self._loan_cursor = 0
+        # Ф7 G.5.d-2: множество читателей, уже отпустивших ТЕКУЩИЙ займ слота (dedup
+        # release; чистится при refcount→0). generation-guard на release читается
+        # из ЖИВОГО слота (под займом стабилен — writer не трогает refcount>0).
+        self._slot_released: list[set] = [set() for _ in range(self._coll)]
         # Ф7 G.5.d: исчерпание free-list → ГРОМКИЙ drop-на-источнике (кадр не уходит,
         # это back-pressure-сигнал, НЕ pickle-fallback). Plain int → get_stats.
         self.frame_loan_exhausted = 0
+        # Ф7 G.5.d-2: сколько слотов реально освобождено release'ами (наблюдаемость).
+        self.frame_slots_released = 0
         # Per-write сигнал «drop-на-источнике по исчерпанию» (отличить от write-fail →
         # pickle-fallback): send-middleware по нему возвращает None (дроп send).
         self._last_loan_exhausted = False
@@ -477,6 +483,57 @@ class FrameShmMiddleware:
                 f"всего={n}]"
             )
 
+    def _read_own_slot_generation(self, idx: int) -> int:
+        """Ф7 G.5.d-2: прочитать ТЕКУЩЕЕ поколение СВОЕГО слота (owner-side) — для
+        generation-guard на release. Под займом (refcount>0) writer слот не трогает,
+        поэтому поколение стабильно = то, что прочитал consumer. -1 при недоступности."""
+        try:
+            md = self._mm.get_memory_data(self._owner, self._slot) if self._mm else None
+            handles = md.get("handles") if md else None
+            if handles and 0 <= idx < len(handles) and handles[idx] is not None:
+                from ...shared_resources_module.memory.format import read_generation
+
+                return read_generation(handles[idx].buf)
+        except Exception:
+            pass
+        return -1
+
+    def release_slots(self, releases: list) -> None:
+        """Ф7 G.5.d-2 (В3): owner-side release-handler. Consumer, дочитав view, шлёт
+        пачку тикетов ``{slot, index, generation, reader}``; здесь декрементим refcount
+        освобождённых слотов. refcount мутирует ТОЛЬКО этот (owner) процесс.
+
+        Guard'ы (без костылей, §8.2/8.5):
+          - refcount уже 0 → слот свободен (stale/дубликат) → пропуск;
+          - generation тикета ≠ текущему поколению слота → release от ПРОШЛОГО займа
+            (слот с тех пор освобождён и переиспользован) → пропуск;
+          - reader уже в released-множестве ЭТОГО займа → дубликат → пропуск.
+        refcount→0 → слот назад в free-list (released-множество чистится).
+        Любая ошибка учёта безопасна: В1 re-check ловит преждевременное освобождение
+        (writer перезапишет → drift → drop, не corruption).
+        """
+        if not self._loan_protocol or not releases:
+            return
+        for t in releases:
+            try:
+                idx = int(t.get("index", -1))
+                gen = int(t.get("generation", -1))
+            except (TypeError, ValueError):
+                continue
+            reader = t.get("reader", "")
+            if not (0 <= idx < self._coll) or self._slot_refcount[idx] == 0:
+                continue
+            if self._read_own_slot_generation(idx) != gen:
+                continue  # stale release прошлого займа
+            if reader in self._slot_released[idx]:
+                continue  # дубликат
+            self._slot_released[idx].add(reader)
+            self._slot_refcount[idx] -= 1
+            if self._slot_refcount[idx] <= 0:
+                self._slot_refcount[idx] = 0
+                self._slot_released[idx].clear()
+            self.frame_slots_released += 1
+
     # ------------------------------------------------------------------
     # Generic data-pipeline API (канон): strip_and_write / restore_frame
     # ------------------------------------------------------------------
@@ -660,6 +717,7 @@ class FrameShmMiddleware:
             # сбрасывается в «всё свободно»; старые займы void (сегменты ушли, читатели
             # инвалидируют кэш по incarnation, В1 re-check дропнет).
             self._slot_refcount = [0] * self._coll
+            self._slot_released = [set() for _ in range(self._coll)]
             self._loan_cursor = 0
             # Ф7 G.3(b): считать ФАКТИЧЕСКИЙ формат слота (seqlock задаёт mm) —
             # авторитетный источник для shm_seqlock в сообщении.

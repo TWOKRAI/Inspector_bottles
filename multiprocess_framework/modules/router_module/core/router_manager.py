@@ -1104,6 +1104,8 @@ class RouterManager(ChannelRoutingManager):
             # Ф7 G.5.d (В3): исчерпание free-list → громкий drop-на-источнике
             # (back-pressure: читатели отстали, свободных слотов нет).
             "frame_loan_exhausted": sum(getattr(mw, "frame_loan_exhausted", 0) for mw in self._frame_middlewares),
+            # Ф7 G.5.d-2 (В3): слотов освобождено release'ами (здоровье loan-цикла).
+            "frame_slots_released": sum(getattr(mw, "frame_slots_released", 0) for mw in self._frame_middlewares),
             # Ф7 G.4.a: дроп из полных data-очередей (drop_oldest) — surface из
             # queue_registry (дешёвый property, не полный get_stats), чтобы heartbeat
             # довёл его до state.shm.* тем же путём, что и SHM-счётчики. «Дроп data виден».

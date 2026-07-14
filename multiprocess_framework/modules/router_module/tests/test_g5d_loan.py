@@ -98,6 +98,73 @@ class TestLoanOn:
             mw.release_owned_memory()
 
 
+class TestReleaseSlots:
+    """G.5.d-2: owner-side release декрементит refcount (generation-guard + dedup)."""
+
+    def _mw(self, monkeypatch, coll=2, num_consumers=1):
+        monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
+        monkeypatch.setenv("FW_SHM_SEQLOCK", "1")  # generation-guard требует seqlock
+        return FrameShmMiddleware(
+            MemoryManager(), owner="cam", slot="output_frames", coll=coll, num_consumers=num_consumers
+        )
+
+    def test_release_reopens_free_list(self, monkeypatch):
+        """loan все слоты → исчерпание; release одного → снова доступен."""
+        mw = self._mw(monkeypatch, coll=2)
+        try:
+            i0 = mw.strip_and_write({"frame": _frame(0)})["shm_index"]
+            mw.strip_and_write({"frame": _frame(1)})  # i1
+            gen0 = mw._read_own_slot_generation(i0)
+            # исчерпан → drop-на-источнике
+            assert mw.strip_and_write({"frame": _frame(2)}).get("frame") is not None
+            assert mw.frame_loan_exhausted == 1
+            # release i0 → свободен → loan снова проходит на i0.
+            mw.release_slots([{"index": i0, "generation": gen0, "reader": "c0"}])
+            assert mw._slot_refcount[i0] == 0
+            assert mw.frame_slots_released == 1
+            out = mw.strip_and_write({"frame": _frame(3)})
+            assert "frame" not in out and out["shm_index"] == i0
+        finally:
+            mw.release_owned_memory()
+
+    def test_dedup_and_num_consumers(self, monkeypatch):
+        """num_consumers=2: слот свободен только когда ОБА читателя отпустили; дубль игнор."""
+        mw = self._mw(monkeypatch, coll=2, num_consumers=2)
+        try:
+            item = mw.strip_and_write({"frame": _frame(1)})
+            idx = item["shm_index"]
+            gen = mw._read_own_slot_generation(idx)
+            assert mw._slot_refcount[idx] == 2
+            t0 = {"index": idx, "generation": gen, "reader": "c0"}
+            mw.release_slots([t0])
+            assert mw._slot_refcount[idx] == 1
+            mw.release_slots([t0])  # дубликат c0 → игнор
+            assert mw._slot_refcount[idx] == 1
+            mw.release_slots([{"index": idx, "generation": gen, "reader": "c1"}])
+            assert mw._slot_refcount[idx] == 0  # оба отпустили → свободен
+        finally:
+            mw.release_owned_memory()
+
+    def test_stale_generation_ignored(self, monkeypatch):
+        """release с чужим поколением (прошлый займ) → игнор."""
+        mw = self._mw(monkeypatch, coll=2)
+        try:
+            item = mw.strip_and_write({"frame": _frame(1)})
+            idx = item["shm_index"]
+            gen = mw._read_own_slot_generation(idx)
+            mw.release_slots([{"index": idx, "generation": gen + 100, "reader": "c0"}])
+            assert mw._slot_refcount[idx] == 1  # stale gen → не декрементнут
+        finally:
+            mw.release_owned_memory()
+
+    def test_noop_without_flag(self, monkeypatch):
+        """Без loan-протокола release_slots — no-op."""
+        monkeypatch.delenv("FW_SHM_LOAN_PROTOCOL", raising=False)
+        mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="s", coll=2)
+        mw.release_slots([{"index": 0, "generation": 0, "reader": "c0"}])
+        assert mw.frame_slots_released == 0
+
+
 class TestAcquireLoanSlot:
     def test_rotates_and_returns_none_when_full(self, monkeypatch):
         """_acquire_loan_slot: ротация курсора; None когда все заняты."""
