@@ -140,3 +140,27 @@ hardware-gated (см. Ф0.4).
 + аллокаций/кадр из `AllocProfiler`. Числа сюда допишутся при приёмке (правило: цифры по
 замеру, не по вере — как FPS-вердикт). msgspec (TECH_STACK §4) — по бенчу msgspec-vs-pickle
 на known-schema сообщениях; кадры идут SHM claim-check'ом мимо очереди → их msgspec не касается.
+
+## G.7 — ранний peek (macOS, 2026-07-15) — НЕ финальный вердикт
+
+⚠️ **Ориентир, не приёмка.** 10-секундный probe (`python -m backend_ctl.g1_perf_probe 10`),
+tier синтетика, ОДИН прогон на конфигурацию, на **macOS**. Реальные G.7-числа снимаются на
+**Windows** (тест 2026-07-16) и на Linux (позже) — G.7 сравнивает same-tier same-platform.
+Цель этого peek — направление эффекта + smoke живого пути после H-ремедиации (`b3576c12`).
+
+Control (все FW_* off) ↔ Treatment (SEQLOCK+LOAN_PROTOCOL+OWNER_INCARNATION+HANDLE_CACHE+
+ZERO_COPY+QOS_PROFILES+GC_FREEZE on):
+
+| Метрика | off | on | Δ |
+|---|---|---|---|
+| source FPS | 28.73 | 28.53 | ≈ (упор в источник ~28-30; gate «FPS ≥ baseline» ✓) |
+| **restore p50** (чтение кадра) | 0.590 ms | **0.088 ms** | **−85% (6.7×)** — zero-copy убрал memcpy чтения |
+| **restore p99** (хвост чтения) | 4.143 ms | **0.353 ms** | **−91% (≈12×)** — джиттер чтения схлопнут |
+| capture p99 | 2.304 ms | 0.492 ms | −79% (gc-freeze срезал выбросы пауз) |
+| send p50 | 0.459 ms | 0.484 ms | +5% (плата loan acquire/commit/резерв) |
+| границ/кадр | 1.006 | 1.009 | = |
+
+Выигрыш в `restore` структурен (zero-copy физически снимает копию), не шум. Тракт с флагами on
+прогнал 328/330 кадров без сбоя → single-writer guard/резерв/abort (H-ремедиация) работают вживую.
+**Открыто для полной G.7:** длинный soak, оба реальных рецепта, `num_consumers` из топологии,
+E2E release/incarnation-guard/реальный kill-9, регресс backend_ctl, аллокации/кадр (`AllocProfiler`).
