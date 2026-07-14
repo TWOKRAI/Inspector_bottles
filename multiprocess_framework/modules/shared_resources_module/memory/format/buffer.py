@@ -382,13 +382,21 @@ def _read_image_block(
         offset += 1
         arr = np.frombuffer(buffer, dtype=dtype, count=h * w * c, offset=offset)
         reshaped = arr.reshape((h, w, c))
-        images.append(reshaped.copy() if copy else reshaped)
+        if copy:
+            images.append(reshaped.copy())
+        else:
+            # Ф7 G.5 ревью-фикс 8: zero-copy view — READ-ONLY. In-place мутация плагином
+            # (cv2.circle/frame[...]=x) писала бы в чужой SHM-слот ТИХО, мимо seqlock
+            # (generation бампит только writer) → порча. writeable=False = громкий отказ
+            # (ValueError на записи), не тихая порча — принцип фазы.
+            reshaped.flags.writeable = False
+            images.append(reshaped)
         offset += slot_size
 
     return images
 
 
-def read_single_frame(buffer: memoryview, *, verify_seqlock: bool = False) -> Optional[np.ndarray]:
+def read_single_frame(buffer: memoryview, *, verify_seqlock: bool = False, copy: bool = True) -> Optional[np.ndarray]:
     """Прочитать ОДИН кадр из буфера, читая h/w/c из заголовка (без max_shape).
 
     Для cross-process raw-чтения (FrameShmMiddleware): consumer открывает чужой
@@ -396,8 +404,18 @@ def read_single_frame(buffer: memoryview, *, verify_seqlock: bool = False) -> Op
     заголовка. Знает про SLOT-header (base offset при seqlock) и сверяет generation
     при ``verify_seqlock`` (ADR-SRM-011).
 
+    Args:
+        copy: True (дефолт) — вернуть КОПИЮ (безопасно, данные живут вечно). False
+            (Ф7 G.5.b, zero-copy) — вернуть VIEW в ``buffer`` (форма по per-image
+            заголовку h·w·c, переменная форма grayscale/resize/crop сохранена). View
+            жив, ПОКА жив backing-mmap (у вызывающего — только при живом handle-кэше)
+            И слот не перезаписан (post-use re-check поколения — обязанность
+            вызывающего, G.5.c). При ``verify_seqlock`` read-moment torn ловится здесь
+            (→ None); удержание view после возврата НЕ покрыто этой функцией.
+
     Returns:
-        ndarray (копия) или None — пустой слот / torn / write-in-progress.
+        ndarray (копия при copy=True, иначе view) или None — пустой слот / torn /
+        write-in-progress.
 
     Raises:
         ValueError/TypeError: только при verify_seqlock и СТАБИЛЬНОМ generation —
@@ -406,13 +424,13 @@ def read_single_frame(buffer: memoryview, *, verify_seqlock: bool = False) -> Op
     base = _image_block_base(verify_seqlock)
 
     if not verify_seqlock:
-        return _read_one_frame(buffer, base)
+        return _read_one_frame(buffer, base, copy=copy)
 
     gen_before = read_generation(buffer)
     if gen_before & 1:
         return None  # запись идёт
     try:
-        frame = _read_one_frame(buffer, base)
+        frame = _read_one_frame(buffer, base, copy=copy)
     except (ValueError, TypeError, struct.error):
         if read_generation(buffer) != gen_before:
             return None  # torn (рваный заголовок из-за гонки)
@@ -423,8 +441,13 @@ def read_single_frame(buffer: memoryview, *, verify_seqlock: bool = False) -> Op
     return frame
 
 
-def _read_one_frame(buffer: memoryview, base: int) -> Optional[np.ndarray]:
-    """Прочитать ОДИН кадр с ``base`` (h/w/c из header). None при num_images==0. Без seqlock."""
+def _read_one_frame(buffer: memoryview, base: int, *, copy: bool = True) -> Optional[np.ndarray]:
+    """Прочитать ОДИН кадр с ``base`` (h/w/c из header). None при num_images==0. Без seqlock.
+
+    ``copy=False`` → view в ``buffer`` (zero-copy, Ф7 G.5.b): форма (h,w,c) берётся из
+    per-image заголовка, поэтому view сам по себе корректен для меньшего кадра
+    (grayscale/resize/crop) — не тянет padding/хвост слота.
+    """
     num_images = struct.unpack_from("I", buffer, base)[0]
     if num_images == 0:
         return None
@@ -434,4 +457,10 @@ def _read_one_frame(buffer: memoryview, base: int) -> Optional[np.ndarray]:
     dtype = np.dtype(chr(buffer[offset]))
     offset += 1
     arr = np.frombuffer(buffer, dtype=dtype, count=h * w * c, offset=offset)
-    return arr.reshape((h, w, c)).copy()
+    reshaped = arr.reshape((h, w, c))
+    if copy:
+        return reshaped.copy()
+    # Ф7 G.5 ревью-фикс 8: zero-copy view READ-ONLY (мутация плагином мимо seqlock =
+    # тихая порча чужого слота; writeable=False → громкий отказ, не порча).
+    reshaped.flags.writeable = False
+    return reshaped

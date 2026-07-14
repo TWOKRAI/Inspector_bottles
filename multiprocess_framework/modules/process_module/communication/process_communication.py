@@ -6,12 +6,15 @@
 """
 
 from queue import Queue as ThreadQueue
-from typing import Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Optional, Union
 from multiprocessing import Queue
 
 from ...router_module import QueueChannel
 from ..interfaces import IProcessCommunication
 from ...logger_module.utils import FallbackLogger
+
+if TYPE_CHECKING:
+    from ...message_module import Message
 
 _logger = FallbackLogger(__name__)
 
@@ -155,7 +158,8 @@ class ProcessCommunication(IProcessCommunication):
         self,
         timeout: float = 0.01,
         channel_types: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        return_messages: bool = True,
+    ) -> List[Union["Message", Dict[str, Any]]]:
         """
         Получить входящие сообщения из каналов.
 
@@ -163,9 +167,13 @@ class ProcessCommunication(IProcessCommunication):
             timeout: Таймаут опроса
             channel_types: Фильтр каналов (например ['data'] или ['system']).
                 None — опрашивать все каналы процесса (обратная совместимость).
+            return_messages: True (дефолт) — router пересобирает Message.from_dict
+                (обратная совместимость); False — plain dict без пересборки
+                (Ф7 G.5.a, снятие двойной конверсии на data-plane, флаг
+                FW_DATA_PLANE_DICTS у вызывающего DataReceiver).
 
         Returns:
-            List[Dict]: Список полученных сообщений
+            List[Message | Dict]: Список полученных сообщений
         """
         try:
             if not self.router_manager:
@@ -174,6 +182,7 @@ class ProcessCommunication(IProcessCommunication):
             return self.router_manager.receive(
                 timeout=timeout,
                 channel_types=channel_types,
+                return_messages=return_messages,
             )
         except Exception as e:
             self.logger_callback("ERROR", f"Failed to receive messages: {e}", "communication")
@@ -292,13 +301,16 @@ class ProcessCommunication(IProcessCommunication):
         self,
         timeout: Optional[float] = None,
         channel_types: Optional[List[str]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        return_messages: bool = True,
+    ) -> Optional[Union["Message", Dict[str, Any]]]:
         """Получить одно сообщение из очереди.
         channel_types=['data'] — для воркеров, получающих DATA/EVENT.
         channel_types=['system'] — для воркеров, получающих COMMAND (например Robot).
+        return_messages=False — plain dict без пересборки Message (Ф7 G.5.a).
         """
         messages = self.receive(
             timeout=timeout if timeout is not None else 0.01,
             channel_types=channel_types,
+            return_messages=return_messages,
         )
         return messages[0] if messages else None

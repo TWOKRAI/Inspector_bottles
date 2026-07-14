@@ -201,7 +201,29 @@ class ProcessHeartbeat:
             # system-очереди — control-plane терять нельзя; ревью 2026-07-14: раньше
             # surface был, но публикации не было — асимметрия с data_evicted).
             sys_blocked = int(rs.get("queue_system_evict_blocked", 0) or 0)
-            if pickle_fallbacks == 0 and torn == 0 and crossings == 0 and queue_evicted == 0 and sys_blocked == 0:
+            # Ф7 G.5.c: дроп по post-use re-check zero-copy view (слот перезаписан под
+            # живым view — consumer отстал > глубины кольца). Ещё один сигнал потери
+            # кадра в том же месте для вкладки Pipeline.
+            stale_drops = int(rs.get("frame_stale_drops", 0) or 0)
+            # Ф7 G.5.d (В3): исчерпание free-list → drop-на-источнике (back-pressure,
+            # читатели отстали). Тот же сигнальный набор потери кадра.
+            loan_exhausted = int(rs.get("frame_loan_exhausted", 0) or 0)
+            # Ф7 G.5 ревью-фикс 15: здоровье loan-цикла (released/reclaimed) — не потери,
+            # но обязательный сигнал: если exhausted растёт, а released стоит на нуле —
+            # release-контур не замкнут (ревью поймало именно это через отсутствие сигнала).
+            slots_released = int(rs.get("frame_slots_released", 0) or 0)
+            slots_reclaimed = int(rs.get("frame_slots_reclaimed", 0) or 0)
+            if (
+                pickle_fallbacks == 0
+                and torn == 0
+                and crossings == 0
+                and queue_evicted == 0
+                and sys_blocked == 0
+                and stale_drops == 0
+                and loan_exhausted == 0
+                and slots_released == 0
+                and slots_reclaimed == 0
+            ):
                 return  # нет кадрового пути / всё чисто — не публикуем
             proxy.merge(
                 f"processes.{self._services.name}.state.shm",
@@ -211,6 +233,10 @@ class ProcessHeartbeat:
                     "boundary_crossings": crossings,
                     "queue_data_evicted": queue_evicted,
                     "queue_system_evict_blocked": sys_blocked,
+                    "stale_drops": stale_drops,
+                    "loan_exhausted": loan_exhausted,
+                    "slots_released": slots_released,
+                    "slots_reclaimed": slots_reclaimed,
                 },
             )
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB
