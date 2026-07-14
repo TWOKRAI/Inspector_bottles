@@ -9,6 +9,7 @@ POSIX (Linux/macOS): unlink() освобождает сегмент; cleanup_sta
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import os
 import platform
@@ -18,6 +19,10 @@ from typing import Any, List, Optional
 from ....logger_module.utils import FallbackLogger
 
 _logger = FallbackLogger(__name__)
+
+# H3 (ADR-SRM-011): предельная длина базового SHM-имени ДО суффикса ``_{idx}``.
+# macOS PSHMNAMLEN ≈ 31; держим базу ≤ 26 (запас на ``_63`` при coll до 64).
+_MAX_BASE_NAME_LEN = 26
 
 # Счётчик инкарнаций имени SHM в рамках процесса. Нужен для hot-swap: при пересоздании
 # сегмента (новый рецепт) старый на Windows освобождается АСИНХРОННО (unlink — no-op,
@@ -108,25 +113,42 @@ def _unique_base_name(
     процесса (hot-swap), когда старый сегмент с тем же PID-именем ещё не освобождён.
 
     Ф7 G.3(b) / B-6/B-7 (ADR-SRM-011), ``owner_incarnation=True``: имя ВСЕГДА несёт
-    owner + свежую инкарнацию (+ pid на Windows) на КАЖДОЕ создание. Два живых
-    источника с одинаковым slot-именем в разных процессах больше не коллидируют
-    (owner+pid+inc уникальны); stale-процесс после switch не переиспользует чужое имя
-    (in-flight сообщение со старым именем читает пусто, не чужой кадр). Consumer читает
-    ФАКТИЧЕСКОЕ имя (PSR memory_names / shm_actual_name) — суффикс прозрачен.
+    owner + pid (H2: на ВСЕХ платформах, не только Windows — иначе на POSIX
+    ``_incarnation`` сбрасывается в каждом процессе → два интерпретатора дают ОДНО
+    имя и один unlink'ает сегмент другого) + свежую инкарнацию на КАЖДОЕ создание.
+    Два живых источника с одинаковым slot-именем в разных процессах больше не
+    коллидируют; stale-процесс после switch не переиспользует чужое имя. Consumer
+    читает ФАКТИЧЕСКОЕ имя (PSR memory_names / shm_actual_name) — суффикс прозрачен.
+
+    H3 (macOS PSHMNAMLEN ~31): при переполнении ``_MAX_BASE_NAME_LEN`` имя
+    детерминированно схлопывается в ``{base[:10]}_{blake2s8}`` (хеш кодирует
+    owner+pid+inc → уникальность сохранена, длина ≤ лимита).
     """
     if owner_incarnation:
         parts = [base_name]
         if owner:
             parts.append(str(owner))
-        if is_windows():
-            parts.append(str(os.getpid()))
+        parts.append(str(os.getpid()))  # H2: pid на ВСЕХ платформах
         parts.append(str(next(_incarnation)))
-        return "_".join(parts)
+        return _bounded_name(base_name, "_".join(parts))
     if is_windows():
         suffix = f"_{next(_incarnation)}" if fresh else ""
         return f"{base_name}_{os.getpid()}{suffix}"
     # POSIX: unlink освобождает сразу; fresh нужен лишь если живой holder держит сегмент.
     return f"{base_name}_{next(_incarnation)}" if fresh else base_name
+
+
+def _bounded_name(base_name: str, full: str) -> str:
+    """H3: если ``full`` (без ``_{idx}``-суффикса от create_shm_blocks) длиннее лимита —
+    детерминированно схлопнуть в ``{base[:10]}_{blake2s8}`` (≤ 19 симв., + ``_{idx}`` ≤ 30).
+
+    Хеш от ПОЛНОГО имени (owner+pid+inc) сохраняет уникальность; человекочитаемый
+    префикс base — для отладки. macOS PSHMNAMLEN ≈ 31 → держим базу ≤ 26.
+    """
+    if len(full) <= _MAX_BASE_NAME_LEN:
+        return full
+    digest = hashlib.blake2s(full.encode("utf-8"), digest_size=4).hexdigest()  # 8 hex
+    return f"{base_name[:10]}_{digest}"
 
 
 def create_shm_block(name: str, size: int) -> ShmType:
