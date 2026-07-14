@@ -401,18 +401,35 @@ class FrameShmMiddleware:
         if not self._allocated or not self._frame_fits(frame):
             self._allocate_shm(frame)
 
-        # Ф7 G.5.d (В3): выбор слота. loan-протокол — СВОБОДНЫЙ слот из free-list
-        # (refcount==0); нет свободных → громкий drop-на-источнике (не write-fail).
-        # off → прежний слепой round-robin (бит-в-бит).
+        idx = self._acquire_slot()
+        if idx is None:
+            return False  # loan-исчерпание (drop-на-источнике; счётчик — в _acquire_slot)
+        if self._write_and_publish(frame, idx, dest):
+            return True
+        # Ф7 H-ревью: write не удался → ОТМЕНИТЬ loan (WRITING→FREE), иначе зарезервированный
+        # acquire'ом слот утёк бы навсегда (ёмкость кольца тает). loan↔publish/abort (iceoryx2).
+        if self._pool is not None:
+            self._pool.abort(idx)
+        return False
+
+    def _acquire_slot(self) -> Optional[int]:
+        """Ф7 G.5.d (В3): выбор индекса слота. loan-протокол — СВОБОДНЫЙ слот из free-list
+        (``acquire`` резервирует WRITING); нет свободных → None + громкий drop-на-источнике
+        (не write-fail). off → прежний слепой round-robin (бит-в-бит)."""
         if self._pool is not None:
             idx = self._pool.acquire()
             if idx is None:
                 self._note_loan_exhausted()
-                return False
-        else:
-            idx = self._write_index % self._coll
-            self._write_index += 1
+            return idx
+        idx = self._write_index % self._coll
+        self._write_index += 1
+        return idx
 
+    def _write_and_publish(self, frame: Any, idx: int, dest: Dict[str, Any]) -> bool:
+        """Записать кадр в слот ``idx`` и (при loan) опубликовать (commit); координаты → ``dest``.
+
+        True — записано (dest заполнен); False — write не удался (причина в
+        ``_last_write_error``; вызывающий отменит loan через ``abort``)."""
         try:
             shm_name = self._mm.write_images(self._owner, self._slot, [frame], idx)
             if shm_name:
@@ -429,10 +446,6 @@ class FrameShmMiddleware:
             self._last_write_error = "write_images вернул None (нет слота/валидация)"
         except Exception as exc:  # noqa: BLE001 — причина едет в громкий лог (M2d)
             self._last_write_error = repr(exc)
-        # Ф7 H-ревью: write не удался (None/исключение) → ОТМЕНИТЬ loan (WRITING→FREE),
-        # иначе зарезервированный acquire'ом слот утёк бы навсегда (ёмкость кольца тает).
-        if self._pool is not None:
-            self._pool.abort(idx)
         return False
 
     def _note_loan_exhausted(self) -> None:
