@@ -70,10 +70,15 @@ class GenericProcess(ProcessModule):
         # пути вообще не считает, а wire.configure-путь (builtin_commands.py) считает
         # всегда — раньше была асимметрия.
         router = getattr(self, "router_manager", None)
+        # Ф7 G.4.b: глубина кольца per-camera из конфига процесса (рецепт). None →
+        # middleware резолвит сам (QoS-профиль при FW_QOS_PROFILES, иначе 3). Каждый
+        # source-процесс = свой owner = своё независимое кольцо (изоляция per-camera).
+        frame_ring_depth = app_cfg.get("frame_ring_depth")
         shm_middleware = FrameShmMiddleware(
             memory_manager=self.memory_manager,
             owner=self.name,
             slot="output_frames",
+            coll=frame_ring_depth,
             log_error=self._log_error,
         )
         if router is not None:

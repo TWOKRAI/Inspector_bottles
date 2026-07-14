@@ -956,7 +956,8 @@ class BuiltinCommands:
             role: "sender" или "receiver"
             shm_name: имя SHM-слота
             shm_owner: имя процесса-владельца SHM
-            buffer_slots: кол-во буферных слотов (информативно)
+            buffer_slots: глубина кольца SHM-слотов per-camera (Ф7 G.4.b; None → авто:
+                QoS-профиль при FW_QOS_PROFILES, иначе 3). Раньше игнорировался.
         """
         if isinstance(data, dict):
             kwargs.update(data)
@@ -965,6 +966,10 @@ class BuiltinCommands:
         role = kwargs.get("role", "")
         shm_name = kwargs.get("shm_name", "")
         shm_owner = kwargs.get("shm_owner", "")
+        # Ф7 G.4.b: buffer_slots теперь ЗАДАёт глубину кольца per-camera (раньше был
+        # «информативно» и игнорировался → кольцо всегда дефолтные 3, B-8). None →
+        # middleware сам резолвит (QoS-профиль при FW_QOS_PROFILES, иначе 3).
+        buffer_slots = kwargs.get("buffer_slots")
 
         if not wire_key or not role:
             return {"success": False, "reason": "wire_key и role обязательны"}
@@ -986,6 +991,7 @@ class BuiltinCommands:
             memory_manager=mm,
             owner=shm_owner,
             slot=shm_name,
+            coll=buffer_slots,  # Ф7 G.4.b: глубина кольца per-camera из рецепта (None → авто)
             # M2b: без log_error громкий pickle-fallback (G.3d) на wire-пути был мёртв.
             log_error=lambda m: self._services._log_error(m, module="wire"),
         )
