@@ -978,6 +978,20 @@ class BuiltinCommands:
         if not self._services.router_manager:
             return {"success": False, "reason": "router_manager недоступен"}
 
+        # Ф7 G.4.d (B-7): re-issue на switch/restart шлёт wire.configure с ТЕМ ЖЕ
+        # wire_key (_reissue_wires_for). Чисто ЗАМЕНЯЕМ: снять старый middleware с
+        # router + освободить его ресурсы ДО создания нового — иначе старый остаётся
+        # зарегистрирован (двойная обработка кадров) и держит стейл handle-cache
+        # (замороженные handles на старый регион = «перепутанные»/зависшие кадры после
+        # switch). Это и есть безопасный refresh handles получателя на switch, без
+        # кросс-процессного дренажа живой очереди (тот роняет и валидные кадры).
+        if wire_key in self._wire_middlewares:
+            self._teardown_wire_middleware(wire_key)
+            self._services._log_info(
+                f"wire.configure: заменяю существующий wire '{wire_key}' (re-issue/switch)",
+                module="wire",
+            )
+
         # Получить memory_manager
         mm = self._services.memory_manager
         if mm is None and self._services.shared_resources:
@@ -1015,30 +1029,21 @@ class BuiltinCommands:
         )
         return {"success": True, "wire_key": wire_key, "role": role}
 
-    def _cmd_wire_deconfigure(self, data=None, **kwargs) -> dict:
-        """Удалить wire middleware из router.
+    def _teardown_wire_middleware(self, wire_key: str) -> bool:
+        """Снять wire-middleware с router + освободить его ресурсы (SHM, handle-cache).
 
-        Параметры в data:
-            wire_key: ключ wire для удаления
+        Общий cleanup для ``wire.deconfigure`` И для чистой ЗАМЕНЫ на ``wire.configure``
+        с уже существующим ``wire_key`` (re-issue на switch/restart, Ф7 G.4.d / B-7):
+        иначе старый middleware остаётся зарегистрирован в router'е (его ``on_receive``/
+        ``on_send`` продолжает обрабатывать кадры = двойная обработка + замороженный
+        стейл handle-cache) и течёт при каждом цикле.
+
+        Returns:
+            True — middleware был и снят; False — ``wire_key`` неизвестен.
         """
-        if isinstance(data, dict):
-            kwargs.update(data)
-
-        wire_key = kwargs.get("wire_key", "")
-        if not wire_key:
-            return {"success": False, "reason": "wire_key обязателен"}
-
         entry = self._wire_middlewares.pop(wire_key, None)
         if entry is None:
-            self._services._log_warning(
-                f"wire.deconfigure: wire_key '{wire_key}' не найден в _wire_middlewares",
-                module="wire",
-            )
-            return {
-                "success": True,
-                "wire_key": wire_key,
-                "note": "уже удалён или не существовал",
-            }
+            return False
 
         mw, role = entry
         router = self._services.router_manager
@@ -1071,9 +1076,34 @@ class BuiltinCommands:
                 close_cache()
             except Exception:  # noqa: BLE001 — teardown не критичен
                 pass
+        return True
+
+    def _cmd_wire_deconfigure(self, data=None, **kwargs) -> dict:
+        """Удалить wire middleware из router.
+
+        Параметры в data:
+            wire_key: ключ wire для удаления
+        """
+        if isinstance(data, dict):
+            kwargs.update(data)
+
+        wire_key = kwargs.get("wire_key", "")
+        if not wire_key:
+            return {"success": False, "reason": "wire_key обязателен"}
+
+        if not self._teardown_wire_middleware(wire_key):
+            self._services._log_warning(
+                f"wire.deconfigure: wire_key '{wire_key}' не найден в _wire_middlewares",
+                module="wire",
+            )
+            return {
+                "success": True,
+                "wire_key": wire_key,
+                "note": "уже удалён или не существовал",
+            }
 
         self._services._log_info(
-            f"wire.deconfigure: middleware удалён — wire_key={wire_key}, role={role}",
+            f"wire.deconfigure: middleware удалён — wire_key={wire_key}",
             module="wire",
         )
         return {"success": True, "wire_key": wire_key}
