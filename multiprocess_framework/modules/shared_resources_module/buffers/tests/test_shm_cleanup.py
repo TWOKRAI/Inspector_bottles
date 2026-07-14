@@ -10,7 +10,11 @@ import pytest
 
 from multiprocess_framework.modules.shared_resources_module.buffers import (
     ShmRegistry,
+    cleanup_orphaned_by_prefix,
     cleanup_stale_shm,
+)
+from multiprocess_framework.modules.shared_resources_module.buffers.cleanup import (
+    _matches_any_prefix,
 )
 
 
@@ -158,3 +162,46 @@ class TestCleanupStaleShmReal:
                     leftover.unlink()
                 except Exception:
                     pass
+
+
+class TestCleanupOrphanedByPrefix:
+    """Ф7 G.3(c): prefix-scan осиротевших РАНТАЙМ-слотов (output_frames лениво выделяется,
+    в config-cleanup не попадает; имя несёт owner/pid/inc → знаем только префикс)."""
+
+    def test_matches_any_prefix_logic(self):
+        # Кросс-платформенная проверка чистой логики матчинга префикса.
+        assert _matches_any_prefix("output_frames_cam_123_4_0", ["output_frames"])
+        assert not _matches_any_prefix("other_slot_0", ["output_frames"])
+        assert not _matches_any_prefix("anything", [])
+        assert not _matches_any_prefix("x", ["", None])  # пустые/None-префиксы игнор
+
+    def test_empty_prefixes_noop(self):
+        assert cleanup_orphaned_by_prefix(None) == []
+        assert cleanup_orphaned_by_prefix([]) == []
+
+    def test_windows_or_no_devshm_safe(self):
+        # На Windows enumeration недоступен → безопасный no-op (не бросает).
+        result = cleanup_orphaned_by_prefix(["nonexistent_prefix_xyz_"])
+        assert result == []
+
+    def test_prefix_scan_removes_orphan_linux(self):
+        if not sys.platform.startswith("linux"):
+            pytest.skip("Linux-only: реальные осиротевшие сегменты в /dev/shm")
+
+        # Имитируем осиротевший рантайм-слот с owner/pid/inc-суффиксом.
+        orphan = "output_frames_camtest_99999_7_0"
+        shm = shared_memory.SharedMemory(name=orphan, create=True, size=1024)
+        shm.close()  # handle закрыт, но /dev/shm файл остался (осиротел)
+        try:
+            cleaned = cleanup_orphaned_by_prefix(["output_frames"])
+            assert orphan in cleaned
+            with pytest.raises((FileNotFoundError, Exception)):
+                probe = shared_memory.SharedMemory(name=orphan, create=False)
+                probe.close()
+        finally:
+            try:
+                leftover = shared_memory.SharedMemory(name=orphan, create=False)
+                leftover.close()
+                leftover.unlink()
+            except Exception:
+                pass

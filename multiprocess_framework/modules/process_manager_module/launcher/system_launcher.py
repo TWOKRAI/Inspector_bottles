@@ -131,16 +131,32 @@ class SystemLauncher:
         except Exception:  # noqa: BLE001 — реестр не критичен для запуска
             pass
 
-    def run(self) -> None:
-        """Запуск: launch_orchestrator + wait. Ctrl+C → stop."""
-        self._prepare_pid_registry()
-        processes_config = self._get_processes_config()
+    def _cleanup_shm_at_startup(self, processes_config: dict) -> None:
+        """Очистка SHM перед стартом: config-объявленные имена + (Ф7 G.3c, за флагом)
+        осиротевшие рантайм-слоты по префиксу (``output_frames`` выделяется лениво и
+        в config-cleanup не попадает; после ``kill -9`` сегменты висят на POSIX)."""
         try:
             from ...shared_resources_module.memory.platform import cleanup_known_shm_at_startup
 
             cleanup_known_shm_at_startup(processes_config)
         except Exception:
             pass
+        try:
+            from ...config_module.tools.env import env_flag
+
+            if env_flag("FW_SHM_PREFIX_CLEANUP", default=False):
+                from ...shared_resources_module.buffers import cleanup_orphaned_by_prefix
+
+                # "output_frames" — универсальный slot generic-процессов (лениво выделяемый).
+                cleanup_orphaned_by_prefix(["output_frames"])
+        except Exception:
+            pass
+
+    def run(self) -> None:
+        """Запуск: launch_orchestrator + wait. Ctrl+C → stop."""
+        self._prepare_pid_registry()
+        processes_config = self._get_processes_config()
+        self._cleanup_shm_at_startup(processes_config)
         self._spawner = self._create_spawner(processes_config)
         try:
             self._spawner.launch_orchestrator()
@@ -171,12 +187,7 @@ class SystemLauncher:
         processes_config = self._get_processes_config()
         if not processes_config:
             raise RuntimeError("No processes. Use add_process() or pass config.")
-        try:
-            from ...shared_resources_module.memory.platform import cleanup_known_shm_at_startup
-
-            cleanup_known_shm_at_startup(processes_config)
-        except Exception:
-            pass
+        self._cleanup_shm_at_startup(processes_config)
         self._spawner = self._create_spawner(processes_config)
         self._spawner.launch_orchestrator()
 

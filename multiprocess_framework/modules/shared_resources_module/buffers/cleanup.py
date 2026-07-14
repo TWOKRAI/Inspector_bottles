@@ -64,7 +64,7 @@ def _scan_linux_devshm(known_names: list[str]) -> list[str]:
         Список очищенных имён.
     """
     cleaned: list[str] = []
-    dev_shm = Path("/dev/shm")
+    dev_shm = Path("/dev/shm")  # nosec B108 — штатный POSIX-путь shared memory, не temp-файл
 
     if not dev_shm.exists():
         return cleaned
@@ -153,4 +153,64 @@ def cleanup_stale_shm(known_names: list[str] | None = None) -> list[str]:
     else:
         logger.debug("cleanup_stale_shm: осиротевших SHM-сегментов не найдено")
 
+    return cleaned
+
+
+def _matches_any_prefix(name: str, prefixes: list[str]) -> bool:
+    """Начинается ли ``name`` с одного из непустых ``prefixes``."""
+    return any(name.startswith(p) for p in prefixes if p)
+
+
+def cleanup_orphaned_by_prefix(prefixes: list[str] | None) -> list[str]:
+    """Ф7 G.3(c) (ADR-SRM-011): удалить осиротевшие SHM-сегменты по ПРЕФИКСУ имени.
+
+    Проблема: рантайм-слоты кадров (``output_frames``) выделяются ЛЕНИВО и НЕ попадают
+    в config-cleanup (`cleanup_known_shm_at_startup` знает только объявленные в конфиге
+    имена). После ``kill -9`` их сегменты висят (POSIX ``/dev/shm``). Имя несёт
+    owner/pid/incarnation-суффикс (B-6) — точное имя заранее неизвестно, поэтому
+    сканируем по префиксу базового slot-имени.
+
+    - **Linux**: сканирует ``/dev/shm``, unlink'ает файлы, чьё имя начинается с любого
+      из ``prefixes`` (напр. ``["output_frames"]`` ловит ``output_frames_cam_123_4_0``).
+    - **Windows/macOS**: enumeration недоступен → best-effort no-op (Windows сам
+      освобождает mapping при гибели последнего handle → осиротевших почти нет,
+      см. модульный docstring).
+
+    ⚠️ Предполагает ОДИН активный backend: prefix-scan не отличает осиротевший сегмент
+    от сегмента ПАРАЛЛЕЛЬНО работающего второго backend'а с тем же slot-именем. Функция
+    вызывается на СТАРТЕ (до создания собственных сегментов) и за флагом
+    ``FW_SHM_PREFIX_CLEANUP`` (дефолт off) — включать при одиночном backend.
+
+    Returns:
+        Список очищенных имён.
+    """
+    if not prefixes:
+        return []
+    if not _is_linux():
+        # Windows: перечислить объекты SHM нельзя; ОС освобождает mapping при гибели
+        # последнего handle (kill -9 закрывает handles) → осиротевших почти нет.
+        return []
+
+    dev_shm = Path("/dev/shm")  # nosec B108 — штатный POSIX-путь shared memory, не temp-файл
+    if not dev_shm.exists():
+        return []
+    try:
+        names = [f.name for f in dev_shm.iterdir() if f.is_file()]
+    except PermissionError:
+        logger.warning("cleanup_orphaned_by_prefix: нет прав на чтение /dev/shm/")
+        return []
+
+    cleaned: list[str] = []
+    for name in names:
+        if _matches_any_prefix(name, prefixes) and _try_cleanup_shm_name(name):
+            cleaned.append(name)
+            logger.debug("prefix-cleanup: очищен осиротевший SHM '%s'", name)
+
+    if cleaned:
+        logger.info(
+            "cleanup_orphaned_by_prefix: очищено %d осиротевших SHM по префиксам %s: %s",
+            len(cleaned),
+            prefixes,
+            cleaned,
+        )
     return cleaned
