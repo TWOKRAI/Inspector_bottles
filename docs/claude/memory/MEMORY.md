@@ -119,3 +119,4 @@
 - [Ф7 G.4 done](project_f7_g4_done.md) — G.4 QoS-профили + per-camera кольца SHM + чистая замена wire ЗАКРЫТ 2026-07-14 (merge e6b1bcca); Вариант A: владение слотами (refcount/release/reclaim) → G.5; всё за FW_QOS_PROFILES default-off; Fable APPROVE-WITH-NITS
 - [G.5 владение слотами — решение владельца](project_g5_ownership_decision.md) — Ф7 G.5: оба примитива сразу (кольцо+seqlock + owner-mediated loan/release), В2/mp.Lock отклонён, GUI copy-out; критерий фазы «универсально/эффективно/безопасно»
 - [Память одним модулем](project_memory_module_consolidation.md) — владелец: SHM/память ОДНИМ модулем с фасадом/интерфейсом/взаимозаменяемостью (Rust/iceoryx2), не размазана по framework; директивы на ревью Fable G.5 + порядок закрытия (qex-reindex→8углов→Fable)
+- [FW_* флаги — единый реестр](project_feature_flags_registry.md) — свести разбросанные маркеры в feature_flags.py (не ConfigStore), отдельная задача после H-память, до flip G.7
