@@ -87,3 +87,81 @@
 **Решение:** Публичный `SharedResourcesManager.unregister_process(name)` — симметрия к `register_process` (ADR-018): освобождает SHM (`memory_manager.release_process_memory`), удаляет запись PSR (очереди/события/метаданные) и конфиг ConfigStore. Идемпотентен. Контракт `MemoryManager.release_process_memory` СУЖЕН до «только память» — прежний скрытый `psr.unregister_process` внутри него удалён.  
 **Причина:** Снятие процесса с PSR выполнялось побочным эффектом освобождения памяти — скрытая связанность: cleanup-фаза hot-swap чистила очереди мёртвого процесса «случайно», через release SHM. При эволюции memory-слоя очереди/события утекали бы в routing_map новых детей (broadcast наполняет никем не читаемые Queue). Потребитель — `PM._cleanup_process_resources` (switch рецепта, rollback).  
 **Refs:** plans/2026-07-04_topology-switch-hardening.md (Task 1.4).
+
+---
+
+## ADR-SRM-011: Заголовок слота SHM под пул + seqlock + owner/incarnation (Ф7 G.3)
+
+**Дата:** 2026-07-14
+**Статус:** Принято
+**Refs:** [plans/2026-07-06_constructor-master/plan.md](../../../plans/2026-07-06_constructor-master/plan.md) (Ф7 G.3), [frame-pool-idea.md](../../../plans/2026-07-06_constructor-master/frame-pool-idea.md), [observability-messaging-vision.md](../../../plans/2026-07-06_constructor-master/observability-messaging-vision.md) §5.3/5.4/5.7, `docs/audits/2026-07-12_recipe-lifecycle-audit.md` (B-6/B-8/B-9)
+
+**Контекст.** Кадровый ring-of-3 писал слоты round-robin **без синхронизации**: reader
+копирует буфер (`unpack_images(copy=True)`), writer может перезаписать тот же слот во
+время memcpy (numpy отпускает GIL на больших массивах) → **torn frame** (тихая порча
+для инспекции; принятый долг до G.3). Репродьюсер `test_seqlock.py`: на кадре 1024×1024×3
+воспроизводит ~25% порванных кадров. Плюс имя SHM без owner/incarnation (B-6/B-7): на POSIX
+`output_frames_0` двух процессов коллидируют; stale-процесс мог писать в чужой сегмент.
+
+**Решение — ОДИН формат заголовка слота, спроектированный сразу под будущий frame-pool
+(G.4), не два.** Перед существующим блоком изображений (`num_images` + per-image) добавлен
+фиксированный 8-байтовый SLOT-header (little-endian):
+
+```
+offset 0  : generation  uint32  seqlock: нечётное = запись в процессе, чётное = стабильно
+offset 4  : state        uint8   0=free 1=writing 2=ready 3=reading (lifecycle пула, G.4)
+offset 5  : refcount     uint8   fan-out: сколько читателей держат слот (G.4)
+offset 6  : reserved     uint16  выравнивание / будущие флаги (пул/QoS)
+offset 8  : num_images   uint32  СУЩЕСТВУЮЩИЙ заголовок блока (сдвинут +8)
+offset 12 : per-image (h,w,c uint32 + dtype char) + payload + padding  (как было)
+```
+
+`SLOT_HEADER_SIZE = 8`. G.4 (пул/владение) НЕ переопределяет формат — `state`/`refcount`
+уже здесь. Контракт совместим с семантикой iceoryx2 loan/publish (frame-pool-idea): free →
+loan(writing) → publish(ready) → read(reading, refcount) → release(free).
+
+**Seqlock-протокол (только когда формат seqlock-слота включён):**
+- writer (`pack_images`, seqlock=True): `generation += 1` (нечётное) ДО записи payload,
+  `generation += 1` (чётное) ПОСЛЕ; `state` = writing→ready.
+- reader (`unpack_images`, verify_seqlock=True): читает `g1`; если нечётное — запись идёт
+  → `None` (drop). Копирует payload. Читает `g2`; если `g1 != g2` — writer перезаписал под
+  читателем → `None` (drop). Иначе кадр валиден. **Порванный кадр не возвращается
+  никогда** — гонка превращается в честный drop + счётчик, не в тихую порчу.
+
+**Флаг формата — на слот, стамповка при создании (консистентность size↔write↔read).**
+`MemoryManager(seqlock_frames=...)` (ctor > env `FW_SHM_SEQLOCK` > конфиг > **False**).
+При `create_memory_dict` флаг слота пишется в `pd.custom["memory_seqlock"][name]` (PSR,
+pickle-safe — виден consumer-процессам после `reinitialize_handles`) и в `_MemoryMeta.seqlock`
+(standalone). `write_images`/`read_images`/`calculate_buffer_size` читают флаг слота — layout
+самосогласован. Дефолт **False = байт-в-байт прежний 4-байтовый заголовок**; откат = флаг off.
+Cross-process сырой fallback (`FrameShmMiddleware._read_shm_from_actual_name`) узнаёт формат из
+поля `shm_seqlock` в IPC-сообщении (Dict at Boundary — флаг едет с координатами).
+
+**Owner/incarnation в имени SHM (B-6/B-7), флаг `FW_SHM_OWNER_INCARNATION` (дефолт False).**
+При включении имя = `{slot}__{owner}__{pid}__{inc}_{idx}` (свежая инкарнация на КАЖДОЕ
+создание, не только на hot-swap-retry). Два живых источника с одним slot-именем в разных
+процессах больше не коллидируют (owner+pid+inc уникальны); stale-процесс не переиспользует
+чужое имя после switch (HP-5: in-flight сообщение со старым именем читает пусто/своё, не
+чужой кадр). Consumer читает ФАКТИЧЕСКИЕ имена (PSR memory_names / shm_actual_name) — суффикс
+прозрачен, как и раньше.
+
+**Startup-cleanup осиротевших РАНТАЙМ-слотов (§5.4), флаг `FW_SHM_PREFIX_CLEANUP` (дефолт False).**
+`cleanup_known_shm_at_startup` чистил только имена из конфиг-`memory`; живой `output_frames`
+выделяется ЛЕНИВО (нет в конфиге) → после `kill -9` осиротевшие сегменты висят (POSIX
+`/dev/shm`). Добавлен prefix-scan: по базовым префиксам кадровых слотов (owner-имена +
+`output_frames`) на Linux сканируется `/dev/shm`, на Windows — best-effort open+close
+(ОС сама освобождает mapping при гибели последнего handle → на Windows осиротевших почти нет).
+
+**Альтернативы (отвергнуты).**
+- *Отдельный seqlock-заголовок vs. поля пула отдельным форматом* — отвергнут: G.4 переписал бы
+  формат второй раз («одним вскрытием» — один формат сразу под пул).
+- *Мьютекс/atomics на слот* — отвергнут: seqlock без блокировок дешевле на hot-path (writer
+  никогда не ждёт reader — живую камеру тормозить нельзя), под GIL инкремент generation
+  практически атомарен; для будущего true-lock-free refcount поле зарезервировано.
+- *Всегда-on формат seqlock* — отвергнут: правило фазы (feature-flag, дефолт = старое; откат
+  = флаг off, «бит-в-бит прежнее»).
+
+**Последствия.** Torn-frame исключён по построению при seqlock-on (репродьюсер: 25% → 0).
+Формат готов к пулу G.4 без переделки. Три ортогональных флага (seqlock / owner-incarnation /
+prefix-cleanup) — независимый откат каждого. Per-frame путь без Pydantic (голый struct на
+memoryview). Дефолты OFF — в прод включаются на G.7 (flip флага + soak).

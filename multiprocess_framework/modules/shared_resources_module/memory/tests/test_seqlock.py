@@ -1,0 +1,203 @@
+# -*- coding: utf-8 -*-
+"""Ф7 G.3(b): seqlock на слоте SHM — репродьюсер torn-frame + верификация фикса.
+
+GATE (правило фазы): без КРАСНОГО репродьюсера не начинать правку записи.
+
+Сценарий: writer заливает кадр ОДНИМ значением (v), reader копирует и проверяет
+однородность (``min == max``). Порванный кадр = writer перезаписал буфер под
+читателем во время memcpy (numpy отпускает GIL на больших массивах) → в копии
+смесь старого и нового значения → ``min != max``.
+
+- ДО seqlock (сырой ``unpack_images``): reader ловит порванный кадр (torn > 0).
+- ПОСЛЕ seqlock (``unpack_images(verify_seqlock=True)``): reader сверяет
+  generation до/после копии; при расхождении — drop (None), НЕ порча → torn == 0.
+"""
+
+from __future__ import annotations
+
+import struct
+import threading
+
+import numpy as np
+
+from multiprocess_framework.modules.shared_resources_module.memory import format as fmt
+from multiprocess_framework.modules.shared_resources_module.memory.format import buffer as buf_mod
+
+
+# Прод-размер кадра: 1024x1024x3 (~3 МБ) — гарантированное отпускание GIL в memcpy,
+# чтобы гонка reader×writer была наблюдаема (тест-параметры не прячут окно дефекта).
+# На меньшем кадре numpy может не отпустить GIL и tearing не воспроизведётся.
+_SHAPE = (1024, 1024, 3)
+_DTYPE = np.uint8
+
+
+def _run_contention(read_fn, *, shape=_SHAPE, iters: int = 6000, seqlock: bool = False):
+    """Один writer + один reader на ОБЩИЙ буфер (bytearray, shared между threads).
+
+    Буфер приваймлен (валиден до старта reader); threading.Barrier синхронизирует
+    старт reader и writer (иначе reader успевает отработать все итерации до первой
+    записи — гонка не наблюдается).
+
+    Returns: (torn, drops, valid) — порванных кадров, дропов (None), валидных.
+    """
+    size = fmt.calculate_buffer_size(1, shape, _DTYPE, seqlock=seqlock)
+    buf = bytearray(size)
+    mv = memoryview(buf)
+    max_shape = shape
+    dtype = np.dtype(_DTYPE)
+    fmt.pack_images(mv, [np.full(shape, 1, dtype=_DTYPE)], max_shape, dtype, seqlock=seqlock)
+    stop = threading.Event()
+    barrier = threading.Barrier(2)
+    writer_err: list[str] = []
+
+    def writer() -> None:
+        v = 2
+        try:
+            barrier.wait()
+            while not stop.is_set():
+                frame = np.full(shape, v, dtype=_DTYPE)
+                fmt.pack_images(mv, [frame], max_shape, dtype, seqlock=seqlock)
+                v = 1 + (v % 254)
+        except Exception as exc:  # noqa: BLE001 — поднимем в основном потоке
+            writer_err.append(repr(exc))
+
+    torn = drops = valid = 0
+    t = threading.Thread(target=writer, daemon=True)
+    t.start()
+    barrier.wait()
+    try:
+        for _ in range(iters):
+            frame = read_fn(mv, max_shape, dtype)
+            if frame is None:
+                drops += 1
+                continue
+            if int(frame.min()) != int(frame.max()):
+                torn += 1
+            else:
+                valid += 1
+    finally:
+        stop.set()
+        t.join(timeout=3)
+    assert not writer_err, f"writer упал: {writer_err}"
+    return torn, drops, valid
+
+
+def _raw_read(mv, max_shape, dtype):
+    """Сырое чтение БЕЗ синхронизации (текущее поведение до G.3)."""
+    imgs = fmt.unpack_images(mv, max_shape, dtype, n=1, copy=True)
+    return imgs[0] if imgs else None
+
+
+def _seqlock_read(mv, max_shape, dtype):
+    """Чтение с проверкой seqlock: None при torn/in-progress (drop)."""
+    imgs = fmt.unpack_images(mv, max_shape, dtype, n=1, copy=True, verify_seqlock=True)
+    if imgs is None:  # torn / write-in-progress → drop
+        return None
+    return imgs[0] if imgs else None
+
+
+def test_torn_frame_reproduced_without_seqlock():
+    """РЕПРОДЬЮСЕР (GATE): без seqlock конкурентный reader ловит порванный кадр.
+
+    Робастность против ложного зелёного: до 6 раундов, засчитываем первый же
+    раунд с torn > 0 (при сильной гонке — практически всегда первый).
+    """
+    for _ in range(6):
+        torn, _drops, valid = _run_contention(_raw_read, seqlock=False)
+        if torn > 0:
+            assert valid > 0, "reader должен был поймать и валидные кадры тоже"
+            return
+    # Ни одного порванного за 6 раундов — гонка не воспроизвелась (машина слишком
+    # быстрая/GIL не отпущен). Тест-репродьюсер бесполезен → явный сигнал.
+    raise AssertionError("torn-frame не воспроизвёлся за 6 раундов — усилить контеншн")
+
+
+def test_no_torn_frame_with_seqlock():
+    """ФИКС: с seqlock reader НИКОГДА не возвращает порванный кадр (torn == 0)."""
+    torn, drops, valid = _run_contention(_seqlock_read, seqlock=True)
+    assert torn == 0, f"seqlock обязан исключить torn-frame, поймано {torn}"
+    # Дропы (гонка с writer) допустимы, но хоть какие-то валидные кадры прошли.
+    assert valid > 0, f"ни одного валидного кадра (drops={drops}) — seqlock слишком строг"
+
+
+# --- Детерминированные unit-тесты формата seqlock (без гонки) --------------------
+
+
+def _alloc(shape=(4, 4, 3), *, seqlock: bool) -> tuple[memoryview, tuple, np.dtype]:
+    size = fmt.calculate_buffer_size(1, shape, _DTYPE, seqlock=seqlock)
+    return memoryview(bytearray(size)), shape, np.dtype(_DTYPE)
+
+
+def test_seqlock_buffer_size_is_legacy_plus_slot_header():
+    shape = (10, 10, 3)
+    legacy = fmt.calculate_buffer_size(1, shape, _DTYPE, seqlock=False)
+    seq = fmt.calculate_buffer_size(1, shape, _DTYPE, seqlock=True)
+    assert seq - legacy == fmt.SLOT_HEADER_SIZE == 8
+
+
+def test_seqlock_roundtrip():
+    mv, shape, dtype = _alloc(seqlock=True)
+    frame = np.full(shape, 7, dtype=_DTYPE)
+    fmt.pack_images(mv, [frame], shape, dtype, seqlock=True)
+    imgs = fmt.unpack_images(mv, shape, dtype, n=1, copy=True, verify_seqlock=True)
+    assert imgs is not None and len(imgs) == 1
+    assert np.array_equal(imgs[0], frame)
+
+
+def test_seqlock_generation_increments_by_two_per_write():
+    mv, shape, dtype = _alloc(seqlock=True)
+    assert fmt.read_generation(mv) == 0
+    frame = np.zeros(shape, dtype=_DTYPE)
+    for expected in (2, 4, 6):
+        fmt.pack_images(mv, [frame], shape, dtype, seqlock=True)
+        assert fmt.read_generation(mv) == expected
+    # После завершённой записи generation чётный + state = ready.
+    assert fmt.read_slot_state(mv) == fmt.SLOT_STATE_READY
+
+
+def test_seqlock_odd_generation_means_write_in_progress_drops():
+    mv, shape, dtype = _alloc(seqlock=True)
+    fmt.pack_images(mv, [np.full(shape, 3, dtype=_DTYPE)], shape, dtype, seqlock=True)
+    # Симулируем «writer начал запись» — generation нечётный (writing).
+    buf_mod._write_generation(mv, fmt.read_generation(mv) + 1)
+    imgs = fmt.unpack_images(mv, shape, dtype, n=1, copy=True, verify_seqlock=True)
+    assert imgs is None, "нечётный generation обязан дать drop (None)"
+
+
+def test_seqlock_generation_change_during_read_drops():
+    """Детерминированная симуляция torn: generation меняется 'во время' чтения.
+
+    Патчим read_generation так, что g_before != g_after (writer перезаписал слот),
+    и проверяем, что unpack возвращает None (drop), а не порванные данные.
+    """
+    mv, shape, dtype = _alloc(seqlock=True)
+    fmt.pack_images(mv, [np.full(shape, 5, dtype=_DTYPE)], shape, dtype, seqlock=True)
+    gen0 = fmt.read_generation(mv)  # чётный, стабильный
+
+    calls = {"n": 0}
+    real = buf_mod.read_generation
+
+    def fake_read_gen(buf):
+        calls["n"] += 1
+        # Первый вызов (g_before) — истинный чётный; второй (g_after) — уже другой.
+        return gen0 if calls["n"] == 1 else gen0 + 2
+
+    # Патчим в модуле buffer — именно оттуда unpack_images резолвит имя (не из
+    # пакета format, куда символ лишь ре-экспортирован).
+    buf_mod.read_generation = fake_read_gen  # type: ignore[assignment]
+    try:
+        imgs = fmt.unpack_images(mv, shape, dtype, n=1, copy=True, verify_seqlock=True)
+    finally:
+        buf_mod.read_generation = real  # type: ignore[assignment]
+    assert imgs is None, "смена generation во время чтения обязана дать drop"
+
+
+def test_legacy_format_unaffected_by_seqlock_default():
+    """seqlock=False (дефолт) → байт-в-байт прежний формат (base=0, без SLOT-header)."""
+    mv, shape, dtype = _alloc(seqlock=False)
+    frame = np.full(shape, 9, dtype=_DTYPE)
+    fmt.pack_images(mv, [frame], shape, dtype)  # seqlock не передан → False
+    # num_images в самом начале буфера (offset 0), не сдвинут.
+    assert struct.unpack_from("I", mv, 0)[0] == 1
+    imgs = fmt.unpack_images(mv, shape, dtype, n=1, copy=True)  # verify_seqlock=False
+    assert imgs is not None and np.array_equal(imgs[0], frame)

@@ -80,3 +80,50 @@
 - Совпадает с `transport-router-hub` P3 («ещё один IMessageChannel»), второй транспорт не плодим.
 **Последствия:** Внешний доступ без нарушения инварианта «всё через router». В проде endpoint не существует (env-гейт). GUI-форма команд вынесена в билдер — `CommandSender` переведён на него (вывод байт-в-байт, регрессия зелёная). Остановка PID-specific (`teardown` закрывает канал + unregister), без глобального kill.
 **Refs:** [plans/_archive/2026-05-31_backend-control-mcp/](../../../plans/_archive/2026-05-31_backend-control-mcp/plan.md), ADR-RTR-005 (IMessageChannel), [ADR-COMM-001](../../DECISIONS.md) (Dict at Boundary)
+
+## ADR-RTR-009: FrameShm — одна стратегия записи + кэш handles + громкий pickle-fallback (Ф7 G.3)
+
+**Статус:** принято
+**Дата:** 2026-07-14
+**Refs:** [plans/2026-07-06_constructor-master/plan.md](../../../plans/2026-07-06_constructor-master/plan.md) (Ф7 G.3 a/d), [frame-pool-idea.md](../../../plans/2026-07-06_constructor-master/frame-pool-idea.md) (спутники: кэш handles), ADR-COMM-003 (слияние двух реализаций), [ADR-SRM-011](../shared_resources_module/DECISIONS.md) (формат слота/seqlock)
+
+**Контекст.** `FrameShmMiddleware` после ADR-COMM-003 — один класс, но с ДВУМЯ путями записи
+кадра в SHM:
+- `strip_and_write` (generic data-pipeline, КАНОН): lazy-alloc + realloc-on-grow, round-robin
+  `_write_index % _coll`; живой путь камеры (`generic_process.py` → `strip_data_frame_on_send`).
+- `on_send` (wire/frontend): `find_free_index` + `write_images`, БЕЗ lazy-alloc. `find_free_index`
+  всегда возвращает 0 (`index_usage` никем не инкрементится — де-факто одно-слотовый), т.е.
+  вторая стратегия выбирала слот сломанным механизмом и полагалась на внешнюю пред-аллокацию.
+
+**Решение (a) — одно ядро записи, канон = generic.** Выделен приватный `_write_frame_into_slot(frame)
+→ dict | None` (lazy-alloc + realloc-on-grow + round-robin + `write_images`, возвращает
+координаты слота или None при неудаче). Оба публичных пути делегируют в него, различаясь ТОЛЬКО
+адаптером: `strip_and_write` берёт frame из item-dict и кладёт координаты туда же; `on_send`
+берёт `msg["frame"]` и кладёт координаты в `msg["data"]` (+ back-compat `width`/`height`).
+`find_free_index`-выбор слота из send-пути снят (сломанный, всегда 0). Round-robin — тот же
+слот-механизм, что теперь под seqlock (ADR-SRM-011): перезапись слота под читателем безопасна
+(reader дропает по generation).
+
+**Решение — кэш SHM-handles читателя, флаг `FW_SHM_HANDLE_CACHE` (дефолт False).** Основной
+cross-process путь `_read_shm_from_actual_name` открывал `SharedMemory(name=...)` и закрывал
+на КАЖДЫЙ кадр (open/mmap/close + resource_tracker — десятки µs, «спутник №1» frame-pool-idea).
+При включении — инстанс-кэш `shm_actual_name → SharedMemory` с LRU-кэпом (8); инвалидация по
+смене имени (grow-realloc/incarnation меняют имя → новая запись, старая вытесняется + close);
+teardown закрывает все. Дефолт False = прежний open/close на кадр.
+
+**Решение (d) — громкий pickle-fallback (перф-ревью п.3).** При неудаче SHM-write кадр молча
+оставался в сообщении и уезжал pickle-через-Queue (латентность ×3, метрик ноль). Добавлен
+plain-int `frame_pickle_fallbacks` (по образцу `frame_boundary_crossings`, БЕЗ lock/колбэка на
+hot-path — ревью G.6 F5) + throttled WARNING через `log_error` (фасад ErrorManager). Счётчик
+агрегируется в `RouterManager.get_stats()` (`introspect.router_stats`) на ЧТЕНИИ → heartbeat →
+state-дерево → вкладка Pipeline; поле state = сигнал для будущего alerting NEW-7 (В5). Всегда-on
+(чистая наблюдаемость, не смена поведения — прецедент G.6).
+
+**Альтернативы (отвергнуты).** *Удалить on_send/on_receive целиком* — отвергнут: wire.configure
+и frontend-приём живут на них; унифицируется ЯДРО записи, а не входные адаптеры. *Счётчик
+fallback с колбэком в router* — отвергнут (reference-cycle + lock на send, урок G.6 F5).
+
+**Последствия.** Одно ядро записи (проще seqlock-интеграция: begin/end поколения в одном месте).
+Кэш handles снимает основной syscall-налог cross-process (замер — G.5/soak). Тихий slow-path
+исчез: pickle-fallback виден в state. Три пути (`strip_and_write`/`on_send`/`restore_frame`) под
+общим seqlock- и handle-cache-контрактом. Флаги дефолт-OFF, откат = флаг off.
