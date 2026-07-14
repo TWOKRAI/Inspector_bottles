@@ -94,13 +94,34 @@ def cleanup_known_shm_at_startup(processes_config: dict[str, Any]) -> None:
                     cleanup_stale_shm(key)
 
 
-def _unique_base_name(base_name: str, *, fresh: bool = False) -> str:
+def _unique_base_name(
+    base_name: str,
+    *,
+    fresh: bool = False,
+    owner: str | None = None,
+    owner_incarnation: bool = False,
+) -> str:
     """Уникальное имя SHM.
 
     На Windows дополняется PID (избежать FileExistsError от предыдущих ЗАПУСКОВ).
     ``fresh=True`` дополнительно добавляет инкарнацию — для пересоздания внутри одного
     процесса (hot-swap), когда старый сегмент с тем же PID-именем ещё не освобождён.
+
+    Ф7 G.3(b) / B-6/B-7 (ADR-SRM-011), ``owner_incarnation=True``: имя ВСЕГДА несёт
+    owner + свежую инкарнацию (+ pid на Windows) на КАЖДОЕ создание. Два живых
+    источника с одинаковым slot-именем в разных процессах больше не коллидируют
+    (owner+pid+inc уникальны); stale-процесс после switch не переиспользует чужое имя
+    (in-flight сообщение со старым именем читает пусто, не чужой кадр). Consumer читает
+    ФАКТИЧЕСКОЕ имя (PSR memory_names / shm_actual_name) — суффикс прозрачен.
     """
+    if owner_incarnation:
+        parts = [base_name]
+        if owner:
+            parts.append(str(owner))
+        if is_windows():
+            parts.append(str(os.getpid()))
+        parts.append(str(next(_incarnation)))
+        return "_".join(parts)
     if is_windows():
         suffix = f"_{next(_incarnation)}" if fresh else ""
         return f"{base_name}_{os.getpid()}{suffix}"
@@ -170,12 +191,22 @@ def close_shm(shm: Optional[ShmType], unlink: bool = False) -> None:
             raise
 
 
-def create_shm_blocks(base_name: str, size: int, coll: int) -> Optional[List[ShmType]]:
+def create_shm_blocks(
+    base_name: str,
+    size: int,
+    coll: int,
+    *,
+    owner: str | None = None,
+    owner_incarnation: bool = False,
+) -> Optional[List[ShmType]]:
     """
     Создать coll блоков SharedMemory с именами {base_name}_0, {base_name}_1, ...
 
     На Windows base_name дополняется PID для избежания FileExistsError от предыдущих запусков.
     Фактические имена (shm.name) сохраняются в memory_names для consumer-процессов.
+
+    Ф7 G.3(b): ``owner_incarnation=True`` → имя несёт owner+инкарнацию всегда (B-6/B-7,
+    ADR-SRM-011), см. ``_unique_base_name``.
 
     При ошибке создания любого блока — закрывает и удаляет уже созданные,
     возвращает None.
@@ -186,7 +217,7 @@ def create_shm_blocks(base_name: str, size: int, coll: int) -> Optional[List[Shm
     # не ждёт этого окна. Consumer'ы читают фактические имена → суффикс прозрачен.
     last_exc: Exception | None = None
     for attempt in range(3):
-        base = _unique_base_name(base_name, fresh=(attempt > 0))
+        base = _unique_base_name(base_name, fresh=(attempt > 0), owner=owner, owner_incarnation=owner_incarnation)
         shm_list: List[ShmType] = []
         try:
             for i in range(coll):
