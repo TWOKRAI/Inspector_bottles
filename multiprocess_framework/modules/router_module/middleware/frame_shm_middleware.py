@@ -89,6 +89,8 @@ class FrameShmMiddleware:
         coll: int = 3,
         log_error: Callable[[str], None] | None = None,
         cache_shm_handles: Optional[bool] = None,
+        owner_incarnation: Optional[bool] = None,
+        handle_cache_cap: int = _HANDLE_CACHE_CAP,
     ) -> None:
         self._mm = memory_manager
         self._owner = owner
@@ -103,6 +105,10 @@ class FrameShmMiddleware:
         # Ф7 G.3(d): громкий pickle-fallback (счётчик всегда, WARNING throttled).
         self.frame_pickle_fallbacks = 0
         self._allocated = False
+        # H5b: создал ли слот САМ этот middleware (create_memory_dict) или ПРИНЯЛ чужой
+        # (adopt PM-памяти). release_owned_memory освобождает только СВОЁ — иначе
+        # deconfigure снёс бы PM-память (created==1 через configure/deconfigure-циклы).
+        self._created_slot = False
         self._write_index = 0
         # Текущая ВЫДЕЛЕННАЯ ёмкость слота (h, w, c). None — ещё не выделяли.
         # Нужна для переаллокации при росте кадра (resize): иначе кадр больше блока
@@ -112,8 +118,22 @@ class FrameShmMiddleware:
         # Ф7 G.3(b): формат seqlock ФАКТИЧЕСКОГО слота (считывается у mm после
         # аллокации, НЕ решается middleware) → авторитетно едет в shm_seqlock.
         self._slot_seqlock = False
+        # H4: кэш handles БЕЗОПАСЕН только когда имя меняется на КАЖДЫЙ realloc
+        # (owner_incarnation). Иначе realloc = unlink+create ТОГО ЖЕ имени (POSIX,
+        # incarnation off) → cache hit на осиротевшие страницы → замороженный кадр №1
+        # навсегда, тихо. Жёсткая связка: кэш активен ТОЛЬКО при owner_incarnation.
+        self._owner_incarnation = self._resolve_bool_flag(owner_incarnation, "FW_SHM_OWNER_INCARNATION")
+        cache_requested = self._resolve_bool_flag(cache_shm_handles, "FW_SHM_HANDLE_CACHE")
+        if cache_requested and not self._owner_incarnation:
+            self._log_error(
+                "FrameShmMiddleware: cache_shm_handles запрошен БЕЗ owner_incarnation — "
+                "кэш ОТКЛЮЧЁН (H4: риск замороженного кадра при realloc с переиспользованием имени)"
+            )
+            self._cache_shm_handles = False
+        else:
+            self._cache_shm_handles = cache_requested
+        self._handle_cache_cap = max(1, int(handle_cache_cap))  # L4: конфигурируемый кэп
         # Ф7 G.3: кэш SHM-handles читателя (dict сохраняет порядок вставки → LRU).
-        self._cache_shm_handles = self._resolve_bool_flag(cache_shm_handles, "FW_SHM_HANDLE_CACHE")
         self._shm_handle_cache: "dict[str, Any]" = {}
 
     @staticmethod
@@ -174,7 +194,7 @@ class FrameShmMiddleware:
             return shm
         shm = shm_mod.SharedMemory(name=shm_actual_name, create=False)
         self._shm_handle_cache[shm_actual_name] = shm
-        if len(self._shm_handle_cache) > _HANDLE_CACHE_CAP:
+        if len(self._shm_handle_cache) > self._handle_cache_cap:
             old_name = next(iter(self._shm_handle_cache))
             old_shm = self._shm_handle_cache.pop(old_name)
             try:
@@ -191,6 +211,25 @@ class FrameShmMiddleware:
             except Exception:
                 pass
         self._shm_handle_cache.clear()
+
+    def release_owned_memory(self) -> None:
+        """H5b: освободить SHM-блоки, СОЗДАННЫЕ этим middleware (owner-side), на teardown.
+
+        wire.deconfigure раньше освобождал только reader-кэш, но НЕ память владельца →
+        каждый цикл configure/deconfigure копил сегменты (POSIX). Здесь owner закрывает+
+        unlink'ает СВОЙ слот; сброс _allocated → следующий configure выделит заново.
+        ПРИНЯТУЮ (adopt) PM-память НЕ трогает (``_created_slot`` False).
+        """
+        if self._mm is None or not self._allocated or not self._created_slot:
+            return
+        try:
+            self._mm.close_memory(self._owner, self._slot)
+        except Exception as exc:  # noqa: BLE001 — teardown не критичен
+            self._log_error(f"FrameShmMiddleware: release_owned_memory failed: {exc}")
+        self._allocated = False
+        self._created_slot = False
+        self._alloc_shape = None
+        self._alloc_dtype = None
 
     def _read_shm_from_actual_name(self, shm_actual_name: str, seqlock: bool = False) -> Optional[Any]:
         """Прочитать кадр напрямую из SharedMemory по фактическому имени (cross-process).
@@ -389,6 +428,12 @@ class FrameShmMiddleware:
         try:
             fh, fw, fc = self._shape_hwc(frame)
             dtype = str(frame.dtype)
+            # H5a: adopt-if-exists — PM в wire_setup мог УЖЕ создать (owner, slot).
+            # Свежий middleware (wire.configure, _allocated=False) создал бы ВТОРОЙ раз,
+            # осиротив первый handle. Если mm уже держит слот — принять как выделенный
+            # (grow-only ниже пересоздаст лишь при росте кадра).
+            if not self._allocated:
+                self._adopt_existing_slot_if_any()
             # Grow-only: не уменьшаем ёмкость (избегаем «качелей» при чередовании размеров).
             if self._alloc_shape is not None and dtype == self._alloc_dtype:
                 ah, aw, ac = self._alloc_shape
@@ -410,6 +455,7 @@ class FrameShmMiddleware:
             memory_names = {self._slot: (1, target, dtype)}
             self._mm.create_memory_dict(self._owner, memory_names, self._coll)
             self._allocated = True
+            self._created_slot = True  # H5b: слот создан ЭТИМ middleware → он его и освободит
             self._alloc_shape = target
             self._alloc_dtype = dtype
             self._write_index = 0  # свежие слоты — пишем с начала кольца
@@ -422,6 +468,24 @@ class FrameShmMiddleware:
                 self._slot_seqlock = False
         except Exception as e:
             self._log_error(f"FrameShmMiddleware: allocate SHM error: {e}")
+
+    def _adopt_existing_slot_if_any(self) -> None:
+        """H5a: если mm уже держит (owner, slot) — принять как выделенный, не создавать
+        второй раз. Grow-only realloc в _allocate_shm пересоздаст лишь при росте кадра.
+        """
+        try:
+            md = self._mm.get_memory_data(self._owner, self._slot)
+        except Exception:
+            return
+        params = md.get("params", {}).get(self._slot) if md else None
+        if not params:
+            return
+        _, existing_shape, existing_dtype = params
+        self._allocated = True
+        self._created_slot = False  # H5b: принят чужой слот (PM) — release его не трогает
+        self._alloc_shape = tuple(existing_shape)  # type: ignore[assignment]
+        self._alloc_dtype = str(existing_dtype)
+        self._slot_seqlock = bool(md.get("seqlock", False))
 
     def strip_data_frame_on_send(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """Send-middleware для data-pipeline (P3.1.2): вынести frame из msg["data"] в SHM.

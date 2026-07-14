@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from multiprocess_framework.modules.router_module.core.router_manager import RouterManager
 from multiprocess_framework.modules.router_module.middleware.frame_shm_middleware import (
     FrameShmMiddleware,
 )
@@ -204,14 +205,12 @@ class TestFanOutBoundaryCounting:
     def test_on_send_fan_out_two_targets_counts_boundary_twice(self):
         """Симметрично для top-level-frame пути (wire.configure): один и тот же
         msg-объект отправляется дважды (напр. sender/receiver-пара переиспользует
-        билет) — оба send'а должны быть учтены. Память под слот выделяем заранее
-        (on_send, в отличие от strip_and_write, не делает lazy-allocation) — иначе
-        первый write_images тоже уходил бы в pickle-fallback и не демонстрировал
-        бы «настоящий» shm_name-маркер для replay-ветки."""
+        билет) — оба send'а должны быть учтены. H5c: on_send ТЕПЕРЬ делает lazy-alloc
+        через общее ядро (G.3a) — предаллокация больше не нужна (первый send сам
+        выделит SHM и проставит настоящий shm_name-маркер для replay-ветки)."""
         mw = _mw()
-        mw._mm.create_memory_dict("test_owner", {"output_frames": (1, (600, 800, 3), "uint8")}, 3)
         msg = {"frame": _frame(600, 800)}
-        mw.on_send(msg)  # первый send: SHM write успешен, frame стрипнут
+        mw.on_send(msg)  # первый send: lazy-alloc + SHM write успешен, frame стрипнут
         assert "shm_actual_name" in msg["data"]
         mw.on_send(msg)  # второй send того же msg: frame уже None, data несёт shm_name
         assert mw.frame_boundary_crossings == 2
@@ -312,7 +311,10 @@ class TestG3HandleCache:
         prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s")
         item = prod.strip_and_write({"frame": _frame(16, 16)})
 
-        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s", cache_shm_handles=True)
+        # H4: кэш активен только в связке с owner_incarnation.
+        consumer = FrameShmMiddleware(
+            MemoryManager(), owner="c", slot="s", cache_shm_handles=True, owner_incarnation=True
+        )
         r1 = consumer.restore_frame({"data": dict(item)}).get("frame")
         r2 = consumer.restore_frame({"data": dict(item)}).get("frame")
         assert r1 is not None and r2 is not None
@@ -329,6 +331,89 @@ class TestG3HandleCache:
         consumer.restore_frame({"data": dict(item)})
         assert len(consumer._shm_handle_cache) == 0  # без кэша handle не хранится
         prod._mm.close_all()
+
+
+class TestH4CacheRealloc:
+    """H4: кэш handles × переиспользование имени → жёсткая связка с owner_incarnation."""
+
+    def test_cache_disabled_without_incarnation(self):
+        """H4: cache запрошен БЕЗ incarnation → кэш ОТКЛЮЧЁН + WARNING (риск frozen frame)."""
+        logs: list[str] = []
+        mw = FrameShmMiddleware(
+            MemoryManager(),
+            owner="c",
+            slot="s",
+            cache_shm_handles=True,
+            owner_incarnation=False,
+            log_error=logs.append,
+        )
+        assert mw._cache_shm_handles is False, "кэш обязан быть отключён без incarnation"
+        assert any("owner_incarnation" in m for m in logs), "ожидался WARNING про связку"
+
+    def test_cache_with_incarnation_realloc_delivers_new_frame(self):
+        """H4: cache+incarnation, realloc (resize) → имя меняется → кадр №2 доставлен
+        (НЕ замороженный №1 из осиротевшего сегмента)."""
+        prod = FrameShmMiddleware(MemoryManager(owner_incarnation=True), owner="p", slot="s")
+        item1 = prod.strip_and_write({"frame": _frame(100, 100, 11)})
+        consumer = FrameShmMiddleware(
+            MemoryManager(),
+            owner="c",
+            slot="s",
+            cache_shm_handles=True,
+            owner_incarnation=True,
+        )
+        assert consumer._cache_shm_handles is True
+        r1 = consumer.restore_frame({"data": dict(item1)}).get("frame")
+        assert r1 is not None and int(r1.min()) == 11
+
+        # Realloc: кадр больше блока → пересоздание со СВЕЖЕЙ инкарнацией (новое имя).
+        item2 = prod.strip_and_write({"frame": _frame(300, 300, 22)})
+        assert item2["shm_actual_name"] != item1["shm_actual_name"], "имя обязано смениться"
+        r2 = consumer.restore_frame({"data": dict(item2)}).get("frame")
+        assert r2 is not None and int(r2.min()) == 22, "кадр №2, не замороженный №1"
+        consumer.close_handle_cache()
+        prod._mm.close_all()
+
+
+class TestH5WireLifecycle:
+    """H5: двойное создание (adopt) + deconfigure освобождает память/unregister."""
+
+    def test_h5a_adopt_existing_no_double_create(self):
+        """H5a: PM уже создал (owner, slot) → свежий middleware ПРИНИМАЕТ, не создаёт второй раз."""
+        mm = MemoryManager()
+        mm.create_memory_dict("o", {"s": (1, (100, 100, 3), "uint8")}, 3)  # PM wire_setup
+        assert mm._stats["created"] == 1
+        mw = FrameShmMiddleware(mm, owner="o", slot="s")  # wire.configure
+        mw.strip_and_write({"frame": _frame(100, 100)})  # первый кадр → _allocate_shm
+        assert mm._stats["created"] == 1, "adopt, НЕ второе создание"
+        assert mw._allocated and mw._created_slot is False
+        mm.close_all()
+
+    def test_h5b_configure_deconfigure_cycles_no_leak(self):
+        """H5b: PM-память + configure/кадр/deconfigure ×3 → created==1, middlewares не копятся."""
+        router = RouterManager(manager_name="r_h5b")
+        mm = MemoryManager()
+        mm.create_memory_dict("o", {"s": (1, (64, 64, 3), "uint8")}, 3)  # PM создал ОДИН раз
+        for _ in range(3):
+            mw = FrameShmMiddleware(mm, owner="o", slot="s")
+            router.register_frame_middleware(mw)
+            mw.strip_and_write({"frame": _frame(64, 64)})  # adopt PM-память
+            # deconfigure teardown:
+            router.unregister_frame_middleware(mw)
+            mw.release_owned_memory()  # no-op: слот adopted (не created)
+        assert mm._stats["created"] == 1, "PM-память переиспользована, не пересоздана"
+        assert len(router._frame_middlewares) == 0, "middlewares не копятся"
+        mm.close_all()
+
+    def test_h5b_created_slot_released_on_deconfigure(self):
+        """H5b: слот, СОЗДАННЫЙ middleware (не PM), освобождается на deconfigure."""
+        mm = MemoryManager()
+        mw = FrameShmMiddleware(mm, owner="o2", slot="s2")
+        mw.strip_and_write({"frame": _frame(32, 32)})  # middleware сам создал
+        assert mm._stats["created"] == 1 and mw._created_slot is True
+        mw.release_owned_memory()
+        assert not mw._allocated  # освобождён (свой слот)
+        mm.close_all()
 
 
 if __name__ == "__main__":

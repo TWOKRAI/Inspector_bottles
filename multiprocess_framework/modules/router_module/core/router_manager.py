@@ -183,6 +183,18 @@ class RouterManager(ChannelRoutingManager):
         """
         self._frame_middlewares.append(middleware)
 
+    def unregister_frame_middleware(self, middleware: Any) -> None:
+        """Снять frame-middleware из агрегации счётчиков (Ф7 G.3 H5b).
+
+        wire.deconfigure обязан удалять middleware из ``_frame_middlewares`` — иначе
+        каждый цикл configure/deconfigure копит объекты (утечка) и задваивает счётчики
+        границ. Идемпотентно (по identity; тихо игнорирует отсутствующий).
+        """
+        try:
+            self._frame_middlewares.remove(middleware)
+        except ValueError:
+            pass
+
     # ================================================================
     # LIFECYCLE
     # ================================================================
