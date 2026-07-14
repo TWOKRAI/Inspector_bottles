@@ -101,6 +101,7 @@ class FrameShmMiddleware:
         cache_shm_handles: Optional[bool] = None,
         owner_incarnation: Optional[bool] = None,
         handle_cache_cap: int = _HANDLE_CACHE_CAP,
+        zero_copy: Optional[bool] = None,
     ) -> None:
         self._mm = memory_manager
         self._owner = owner
@@ -158,6 +159,22 @@ class FrameShmMiddleware:
         self._handle_cache_cap = max(1, int(handle_cache_cap))  # L4: конфигурируемый кэп
         # Ф7 G.3: кэш SHM-handles читателя (dict сохраняет порядок вставки → LRU).
         self._shm_handle_cache: "dict[str, Any]" = {}
+        # Ф7 G.5.b: zero-copy чтение (restore_frame отдаёт VIEW в слот, без .copy()).
+        # ЖЁСТКАЯ связка с handle-кэшем: без него сегмент закрывается сразу после
+        # чтения (`shm.close()` в finally) → view повис бы (use-after-free/BufferError).
+        # Поэтому zero-copy активен ТОЛЬКО при живом кэше (который сам требует
+        # owner_incarnation, H4). Безопасность удержания view после возврата (слот не
+        # перезаписан) — seqlock read-moment (здесь) + post-use re-check (G.5.c).
+        zero_copy_requested = self._resolve_bool_flag(zero_copy, "FW_SHM_ZERO_COPY")
+        if zero_copy_requested and not self._cache_shm_handles:
+            self._log_error(
+                "FrameShmMiddleware: zero_copy запрошен БЕЗ активного handle-кэша — "
+                "ОТКЛЮЧЁН (view повис бы на закрытом сегменте; кэш требует "
+                "FW_SHM_HANDLE_CACHE + FW_SHM_OWNER_INCARNATION)"
+            )
+            self._zero_copy = False
+        else:
+            self._zero_copy = zero_copy_requested
 
     @staticmethod
     def _resolve_bool_flag(explicit: Optional[bool], env_name: str) -> bool:
@@ -273,7 +290,14 @@ class FrameShmMiddleware:
         self._alloc_shape = None
         self._alloc_dtype = None
 
-    def _read_shm_from_actual_name(self, shm_actual_name: str, seqlock: bool = False) -> Optional[Any]:
+    def _read_shm_from_actual_name(
+        self,
+        shm_actual_name: str,
+        seqlock: bool = False,
+        *,
+        copy: bool = True,
+        view_meta: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Any]:
         """Прочитать кадр напрямую из SharedMemory по фактическому имени (cross-process).
 
         shm_actual_name приходит от owner через IPC (на Windows включает PID).
@@ -281,20 +305,34 @@ class FrameShmMiddleware:
         seqlock, сверяет generation → None при torn/in-progress). При
         cache_shm_handles handle переиспользуется; иначе открывается/закрывается на
         кадр (прежнее поведение). Бросает при ошибке открытия — вызывающий ловит.
+
+        Ф7 G.5.b (zero-copy): ``copy=False`` возвращает VIEW в слот. Требует живого
+        handle-кэша — БЕЗ него сегмент закрывается в finally сразу после чтения, view
+        повис бы, поэтому в некэшируемой ветке копия форсируется независимо от ``copy``.
+        При успешном view в ``view_meta`` кладётся мета для post-use re-check (G.5.c):
+        имя сегмента + поколение слота на момент чтения (seqlock) + маркер.
         """
         from multiprocessing import shared_memory as _shm_mod
 
         # Локальный импорт (как struct/numpy раньше): не тащим top-level dep
         # router → shared_resources, coupling остаётся runtime-local.
-        from ...shared_resources_module.memory.format import read_single_frame
+        from ...shared_resources_module.memory.format import read_generation, read_single_frame
 
         if self._cache_shm_handles:
             shm = self._open_shm_cached(shm_actual_name, _shm_mod)
-            return read_single_frame(shm.buf, verify_seqlock=seqlock)
+            frame = read_single_frame(shm.buf, verify_seqlock=seqlock, copy=copy)
+            if frame is not None and not copy and view_meta is not None:
+                # Мета для G.5.c: поколение на момент чтения (для сверки ПОСЛЕ
+                # использования view). Без seqlock поколения нет → -1 (re-check неактивен).
+                view_meta["_frame_is_view"] = True
+                view_meta["_shm_view_name"] = shm_actual_name
+                view_meta["_shm_view_generation"] = read_generation(shm.buf) if seqlock else -1
+            return frame
 
+        # Без кэша сегмент закрывается сразу → view повис бы: копия обязательна.
         shm = _shm_mod.SharedMemory(name=shm_actual_name, create=False)
         try:
-            return read_single_frame(shm.buf, verify_seqlock=seqlock)
+            return read_single_frame(shm.buf, verify_seqlock=seqlock, copy=True)
         finally:
             shm.close()
 
@@ -386,8 +424,17 @@ class FrameShmMiddleware:
         shm_actual_name = data.get("shm_actual_name")
         if shm_actual_name:
             seqlock = bool(data.get("shm_seqlock", False))
+            # Ф7 G.5.b: zero-copy view вместо .copy() — только при активном zero_copy
+            # (уже гейтнут на handle-кэш в ctor) И seqlock (read-moment torn-защита +
+            # generation для post-use re-check G.5.c). Без seqlock — копия (нет защиты).
+            view = self._zero_copy and seqlock
             try:
-                frame = self._read_shm_from_actual_name(shm_actual_name, seqlock=seqlock)
+                frame = self._read_shm_from_actual_name(
+                    shm_actual_name,
+                    seqlock=seqlock,
+                    copy=not view,
+                    view_meta=data if view else None,
+                )
                 if frame is not None:
                     msg["frame"] = frame
                     return msg
