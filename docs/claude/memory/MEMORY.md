@@ -121,3 +121,4 @@
 - [Память одним модулем](project_memory_module_consolidation.md) — владелец: SHM/память ОДНИМ модулем с фасадом/интерфейсом/взаимозаменяемостью (Rust/iceoryx2), не размазана по framework; директивы на ревью Fable G.5 + порядок закрытия (qex-reindex→8углов→Fable)
 - [FW_* флаги — единый реестр](project_feature_flags_registry.md) — свести разбросанные маркеры в feature_flags.py (не ConfigStore), отдельная задача после H-память, до flip G.7
 - [Финальное Fable-ревью фазы G](project_phase_g_final_review.md) — честная балльная оценка before/after всей фазы, vs коммерч. best practices; оси: архитектура/паттерны/модульность/эффективность/безопасность/стиль/согласованность; qex-reindex перед ревью
+- [sentrux gate сужен](feedback_sentrux_gate_narrowed.md) — блок только на quality↓/циклы↑/god↑; complex-fn/coupling/depth → warning, не блок
