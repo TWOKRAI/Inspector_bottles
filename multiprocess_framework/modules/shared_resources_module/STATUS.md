@@ -75,3 +75,17 @@
 - **README.md**: секция о разделении ответственностей с data_schema_module
 - **DataSchemaAdapter**: уточнён docstring — делегирует в data_schema_module, без дублирования логики
 - **INTERFACES_GUIDE.md**: исправлены пути (memory/core/manager.py, state/process_state_registry.py)
+
+## Ф7 G.3 — hot-path SHM (2026-07-14, ADR-SRM-011)
+
+Кадровый транспорт SHM, всё за флагами (дефолт OFF = прежнее поведение, откат = флаг off):
+
+- **seqlock** (`FW_SHM_SEQLOCK`): 8-байтовый SLOT-header (generation/state/refcount) сразу под
+  будущий frame-pool G.4; writer инкрементит generation до/после записи, reader сверяет →
+  torn-frame = честный drop (`format/buffer.py`, `MemoryManager` стампует слот, torn-счётчик в stats).
+- **owner+incarnation в имени** (`FW_SHM_OWNER_INCARNATION`, B-6/B-7): имя
+  `{slot}_{owner}_{pid}_{inc}` — stale-процесс не пишет в чужой сегмент, мультикамера без коллизий.
+- **startup prefix-cleanup** (`FW_SHM_PREFIX_CLEANUP`, §5.4): осиротевшие рантайм-слоты
+  (`output_frames_*`) чистятся на буте (Linux /dev/shm; Windows — ОС сама).
+- Репродьюсеры: torn-frame (25%→0) `memory/tests/test_seqlock.py`; HP-5 перепутанных кадров
+  (before/after) `memory/tests/test_owner_incarnation_hp5.py`.
