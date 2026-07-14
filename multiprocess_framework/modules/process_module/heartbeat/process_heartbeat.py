@@ -205,6 +205,9 @@ class ProcessHeartbeat:
             # живым view — consumer отстал > глубины кольца). Ещё один сигнал потери
             # кадра в том же месте для вкладки Pipeline.
             stale_drops = int(rs.get("frame_stale_drops", 0) or 0)
+            # Ф7 G.5.d (В3): исчерпание free-list → drop-на-источнике (back-pressure,
+            # читатели отстали). Тот же сигнальный набор потери кадра.
+            loan_exhausted = int(rs.get("frame_loan_exhausted", 0) or 0)
             if (
                 pickle_fallbacks == 0
                 and torn == 0
@@ -212,6 +215,7 @@ class ProcessHeartbeat:
                 and queue_evicted == 0
                 and sys_blocked == 0
                 and stale_drops == 0
+                and loan_exhausted == 0
             ):
                 return  # нет кадрового пути / всё чисто — не публикуем
             proxy.merge(
@@ -223,6 +227,7 @@ class ProcessHeartbeat:
                     "queue_data_evicted": queue_evicted,
                     "queue_system_evict_blocked": sys_blocked,
                     "stale_drops": stale_drops,
+                    "loan_exhausted": loan_exhausted,
                 },
             )
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB

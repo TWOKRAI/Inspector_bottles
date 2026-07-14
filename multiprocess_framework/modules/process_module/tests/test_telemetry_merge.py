@@ -158,6 +158,7 @@ class TestH8RouterShmStatsPublish:
         assert path == "processes.proc.state.shm"
         # Ф7 G.4.a: queue_data_evicted добавлен в тот же publish (0, т.к. в статах нет).
         # Ф7 G.5.c: stale_drops (post-use re-check zero-copy view) в том же наборе.
+        # Ф7 G.5.d: loan_exhausted (исчерпание free-list В3) — там же.
         assert data == {
             "pickle_fallbacks": 2,
             "torn_reads": 5,
@@ -165,6 +166,7 @@ class TestH8RouterShmStatsPublish:
             "queue_data_evicted": 0,
             "queue_system_evict_blocked": 0,
             "stale_drops": 0,
+            "loan_exhausted": 0,
         }
 
     def test_publishes_when_only_queue_evicted_nonzero(self) -> None:
@@ -218,6 +220,27 @@ class TestH8RouterShmStatsPublish:
         assert proxy.merge_calls == 1
         _, data = proxy.merged[0]
         assert data["stale_drops"] == 7
+
+    def test_publishes_when_only_loan_exhausted_nonzero(self) -> None:
+        """Ф7 G.5.d: исчерпание free-list (В3 back-pressure) публикуется даже при нулевых
+        прочих счётчиках (gate включает loan_exhausted)."""
+        proxy = _CountingProxy()
+        router = _FakeRouter(
+            {
+                "frame_pickle_fallbacks": 0,
+                "frame_torn_reads": 0,
+                "frame_boundary_crossings": 0,
+                "queue_data_evicted": 0,
+                "queue_system_evict_blocked": 0,
+                "frame_stale_drops": 0,
+                "frame_loan_exhausted": 3,
+            }
+        )
+        hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
+        hb._publish_router_shm_stats_to_tree()
+        assert proxy.merge_calls == 1
+        _, data = proxy.merged[0]
+        assert data["loan_exhausted"] == 3
 
     def test_noop_when_all_zero(self) -> None:
         proxy = _CountingProxy()

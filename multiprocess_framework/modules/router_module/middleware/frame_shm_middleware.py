@@ -102,6 +102,8 @@ class FrameShmMiddleware:
         owner_incarnation: Optional[bool] = None,
         handle_cache_cap: int = _HANDLE_CACHE_CAP,
         zero_copy: Optional[bool] = None,
+        loan_protocol: Optional[bool] = None,
+        num_consumers: int = 1,
     ) -> None:
         self._mm = memory_manager
         self._owner = owner
@@ -179,6 +181,23 @@ class FrameShmMiddleware:
             self._zero_copy = False
         else:
             self._zero_copy = zero_copy_requested
+        # Ф7 G.5.d (В3 — owner-mediated loan/release): free-list слотов кольца.
+        # refcount мутирует ТОЛЬКО этот (owner) процесс — кросс-процессного atomic RMW
+        # нет по построению (см. §8 плана). loan-on-write берёт СВОБОДНЫЙ слот
+        # (refcount==0) вместо слепого round-robin; на записи ставит refcount =
+        # num_consumers (fan-out). release (G.5.d-2) декрементит → 0 = свободен. Пока
+        # release нет — под флагом кольцо исчерпается за coll кадров (ожидаемо, d-2
+        # замыкает). Дефолт off → слепой round-robin бит-в-бит.
+        self._loan_protocol = self._resolve_bool_flag(loan_protocol, "FW_SHM_LOAN_PROTOCOL")
+        self._num_consumers = max(1, int(num_consumers))
+        self._slot_refcount: list[int] = [0] * self._coll
+        self._loan_cursor = 0
+        # Ф7 G.5.d: исчерпание free-list → ГРОМКИЙ drop-на-источнике (кадр не уходит,
+        # это back-pressure-сигнал, НЕ pickle-fallback). Plain int → get_stats.
+        self.frame_loan_exhausted = 0
+        # Per-write сигнал «drop-на-источнике по исчерпанию» (отличить от write-fail →
+        # pickle-fallback): send-middleware по нему возвращает None (дроп send).
+        self._last_loan_exhausted = False
 
     @staticmethod
     def _resolve_bool_flag(explicit: Optional[bool], env_name: str) -> bool:
@@ -395,6 +414,7 @@ class FrameShmMiddleware:
             True — записано в SHM, координаты в ``dest``; False — mm отсутствует или
             write не удался (причина в ``self._last_write_error`` для громкого лога).
         """
+        self._last_loan_exhausted = False
         if self._mm is None:
             self._last_write_error = "memory_manager=None"
             return False
@@ -403,11 +423,24 @@ class FrameShmMiddleware:
         if not self._allocated or not self._frame_fits(frame):
             self._allocate_shm(frame)
 
-        try:
+        # Ф7 G.5.d (В3): выбор слота. loan-протокол — СВОБОДНЫЙ слот из free-list
+        # (refcount==0); нет свободных → громкий drop-на-источнике (не write-fail).
+        # off → прежний слепой round-robin (бит-в-бит).
+        if self._loan_protocol:
+            idx = self._acquire_loan_slot()
+            if idx is None:
+                self._note_loan_exhausted()
+                return False
+        else:
             idx = self._write_index % self._coll
             self._write_index += 1
+
+        try:
             shm_name = self._mm.write_images(self._owner, self._slot, [frame], idx)
             if shm_name:
+                if self._loan_protocol:
+                    # loan: слот занят num_consumers читателями; release (d-2) вернёт в 0.
+                    self._slot_refcount[idx] = self._num_consumers
                 dest["owner"] = self._owner
                 dest["shm_owner"] = self._owner
                 dest["shm_name"] = self._slot
@@ -419,6 +452,30 @@ class FrameShmMiddleware:
         except Exception as exc:  # noqa: BLE001 — причина едет в громкий лог (M2d)
             self._last_write_error = repr(exc)
         return False
+
+    def _acquire_loan_slot(self) -> Optional[int]:
+        """Ф7 G.5.d (В3): взять СВОБОДНЫЙ слот кольца (refcount==0) от ротационного
+        курсора (справедливость). None → все слоты заняты (читатели отстали)."""
+        n = self._coll
+        for i in range(n):
+            idx = (self._loan_cursor + i) % n
+            if self._slot_refcount[idx] == 0:
+                self._loan_cursor = (idx + 1) % n
+                return idx
+        return None
+
+    def _note_loan_exhausted(self) -> None:
+        """Ф7 G.5.d (В3): free-list исчерпан → back-pressure = ГРОМКИЙ drop-на-источнике
+        (кадр не уходит; счётчик всегда, WARNING throttled). Живую камеру НЕ блокируем."""
+        self._last_loan_exhausted = True
+        self.frame_loan_exhausted += 1
+        n = self.frame_loan_exhausted
+        if n == 1 or n % _PICKLE_WARN_EVERY == 0:
+            self._log_error(
+                f"FrameShmMiddleware: free-list исчерпан (читатели отстали), кадр дропнут "
+                f"на источнике [owner={self._owner}/{self._slot}; глубина={self._coll}; "
+                f"всего={n}]"
+            )
 
     # ------------------------------------------------------------------
     # Generic data-pipeline API (канон): strip_and_write / restore_frame
@@ -527,8 +584,10 @@ class FrameShmMiddleware:
             if self._write_frame_into_slot(frame, item):
                 # SHM write OK — координаты уже в item, убрать frame.
                 item.pop("frame", None)
-            else:
-                # mm есть, но write не удался → громкий pickle-fallback (G.3d).
+            elif not self._last_loan_exhausted:
+                # mm есть, write не удался (НЕ исчерпание loan) → громкий pickle-fallback
+                # (G.3d). При исчерпании loan (В3) — это DROP, а не fallback: кадр не
+                # уходит; drop выполняет send-middleware (strip_data_frame_on_send → None).
                 self._note_pickle_fallback("strip_and_write")
         # mm=None → pickle-by-design (frame остаётся в item), не деградация.
 
@@ -597,6 +656,11 @@ class FrameShmMiddleware:
             self._alloc_shape = target
             self._alloc_dtype = dtype
             self._write_index = 0  # свежие слоты — пишем с начала кольца
+            # Ф7 G.5.d (В3): свежее кольцо (старые сегменты unlink'нуты) → free-list
+            # сбрасывается в «всё свободно»; старые займы void (сегменты ушли, читатели
+            # инвалидируют кэш по incarnation, В1 re-check дропнет).
+            self._slot_refcount = [0] * self._coll
+            self._loan_cursor = 0
             # Ф7 G.3(b): считать ФАКТИЧЕСКИЙ формат слота (seqlock задаёт mm) —
             # авторитетный источник для shm_seqlock в сообщении.
             try:
@@ -625,7 +689,7 @@ class FrameShmMiddleware:
         self._alloc_dtype = str(existing_dtype)
         self._slot_seqlock = bool(md.get("seqlock", False))
 
-    def strip_data_frame_on_send(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+    def strip_data_frame_on_send(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send-middleware для data-pipeline (P3.1.2): вынести frame из msg["data"] в SHM.
 
         Регистрируется через ``RouterManager.add_send_middleware`` в GenericProcess —
@@ -650,6 +714,10 @@ class FrameShmMiddleware:
         data = msg.get("data")
         if isinstance(data, dict):
             self.strip_and_write(data)
+            # Ф7 G.5.d (В3): исчерпание free-list → DROP-на-источнике (send не уходит).
+            # None из send-middleware = router дропает отправку (middleware_dropped).
+            if self._last_loan_exhausted:
+                return None
         return msg
 
     # ------------------------------------------------------------------
@@ -704,6 +772,10 @@ class FrameShmMiddleware:
             return msg  # pickle-by-design (SHM не сконфигурирован)
 
         if not self._write_frame_into_slot(frame, data):
+            # Ф7 G.5.d (В3): исчерпание free-list → DROP-на-источнике (None = дроп send),
+            # НЕ pickle-fallback.
+            if self._last_loan_exhausted:
+                return None
             # mm есть, но write не удался → громкий pickle-fallback (G.3d).
             self._note_pickle_fallback("on_send")
             return msg
