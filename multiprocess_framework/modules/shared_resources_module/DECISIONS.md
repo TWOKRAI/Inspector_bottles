@@ -229,3 +229,47 @@ plain-int `+= 1` без lock (по образцу G.6 `frame_boundary_crossings`
 возможен редкий недосчёт. Это **advisory-телеметрия** (сигнал «теряем/блокируем», не точный учёт для
 логики) — недосчёт приемлем; вводить lock на hot-path send ради точности счётчика — нет (правило фазы
 «без локов на горячем пути»). Точный per-drop учёт не требуется ни одним потребителем.
+
+## ADR-SRM-013: Владение слотом за фасадом `FramePool` + снос мёртвого `index_usage` (Ф7 G.H)
+
+**Дата:** 2026-07-14
+**Статус:** Принято
+**Refs:** [plans/2026-07-06_constructor-master/plan.md](../../../plans/2026-07-06_constructor-master/plan.md) (Ф7 G.H), [h-memory-consolidation-plan.md](../../../plans/2026-07-06_constructor-master/h-memory-consolidation-plan.md), ADR-SRM-011 (заголовок слота), ADR-SRM-012 (QoS)
+
+**Контекст.** G.5.d/e построили loan-протокол владения слотом (free-list + refcount +
+released-множества + reclaim) прямо в транспортном `router_module/FrameShmMiddleware` — ~200
+строк семантики владения ПАМЯТЬЮ вне модуля памяти. Директива владельца (2026-07-14): память —
+ОДИН модуль с фасадом/интерфейсом/взаимозаменяемостью (в пределе — подмена на Rust/iceoryx2), без
+костылей. Вдобавок в `MemoryManager` жил **мёртвый первый учёт занятости**: `index_usage`
+(`memory_index_usage` в PSR + `_MemoryMeta.index_usage`) писался только в `0`, «used=1» никто не
+ставил → `find_free_index` всегда возвращал слот 0. G.5 построил ВТОРОЙ (настоящий) учёт рядом с
+недоделанным первым.
+
+**Решение.** (1) **Фасад `memory.pool.FramePool`** (Protocol) + реализация `LoanLedger` в
+`shared_resources_module/memory/pool/`: `acquire`/`commit(idx,n)`/`release(tickets)`/
+`reclaim(reader)`/`reset`/`snapshot_stats` — сигнатуры 1:1 с прежней логикой middleware и с
+контрактом iceoryx2/DDS `loan/publish/release`. `gen_reader` (чтение поколения своего слота под
+seqlock) **инжектируется** в реализацию → пул SHM-агностичен. Транспорт держит пул через DI и
+делегирует; счётчики `frame_loan_exhausted`/`slots_released`/`slots_reclaimed` стали read-only
+property транспорта, читающими `pool.snapshot_stats()` (единственный источник). (2) **Снос мёртвого
+`index_usage`/`find_free_index`** во всех локусах: `_MemoryMeta`, `create_memory_dict`,
+`get_memory_data` (ключ `index_usage` убран из возврата), `release_memory` (осталась только
+очистка слота), `close_memory` (ключ), PSR-бандл (`process_registry` producer +
+`bundle_builder` child-reconstruct), `MemoryHandle.find_free_index`. Реальный free-list с
+владением по цепочке — теперь только у пула (owner-side).
+
+**Модель конкурентности.** refcount мутирует ТОЛЬКО процесс-владелец (кросс-процессного atomic RMW
+в CPython нет — отклонение В2 mp.Lock, g5-план §8). Безопасность от torn даёт seqlock (ADR-SRM-011)
++ post-use re-check (В1), НЕ этот учёт: любая ошибка учёта безопасна (преждевременное освобождение →
+writer перезапишет → generation drift → drop, не порча).
+
+**Альтернативы (отвергнуты).** *Оставить владение в middleware* — размазанность памяти по 2 модулям,
+дорогая замена транспорта. *`index_usage` как backing пула* — пул owner-process-local (не в PSR),
+а `index_usage` был per-PSR-массив; смешивать per-process и per-PSR учёт — костыль; снос чище.
+*ABC вместо Protocol* — Protocol (runtime_checkable) даёт взаимозаменяемость без наследования
+(критерий подмены на Rust-реализацию под тем же контрактом).
+
+**Последствия.** Транспорт → чистый адаптер (Этап 2 добьёт reader-side handle-кэш за фасад
+`FrameReader`). Замена на Rust/iceoryx2 (Этап 3, триггер TECH_STACK §7) = новая реализация под тем
+же Protocol, middleware/executor не трогаются. Всё за `FW_SHM_LOAN_PROTOCOL` (дефолт off = слепой
+round-robin, бит-в-бит); пул создаётся только под флагом. PSR-бандл стал легче на один мёртвый массив.

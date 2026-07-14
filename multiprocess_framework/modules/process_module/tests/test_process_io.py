@@ -16,7 +16,6 @@ def make_mock_process(name: str = "test_proc", with_memory: bool = True):
     proc._log_error = Mock()
     if with_memory:
         mm = Mock()
-        mm.find_free_index = Mock(return_value=3)
         mm.write_images = Mock(return_value="actual_shm_name_007")
         proc.memory_manager = mm
     else:

@@ -31,11 +31,7 @@ def _normalize_memory_config(mem_cfg: Dict[str, Any]) -> Tuple[Dict[str, tuple],
     coll = mem_cfg.get("coll", 2)
     names_raw = mem_cfg.get("names")
     if names_raw is None:
-        names_raw = {
-            k: v
-            for k, v in mem_cfg.items()
-            if k != "coll" and isinstance(v, tuple)
-        }
+        names_raw = {k: v for k, v in mem_cfg.items() if k != "coll" and isinstance(v, tuple)}
     normalized: Dict[str, tuple] = {}
     for name, spec in (names_raw or {}).items():
         ns = _normalize_memory_spec(spec)
@@ -95,23 +91,15 @@ def _build_shared_resources_from_bundle(
         if isinstance(mem_cfg, dict):
             names, coll = _normalize_memory_config(mem_cfg)
             if names:
-                ok = shared_resources.memory_manager.create_memory_dict(
-                    process_name, names, coll
-                )
+                ok = shared_resources.memory_manager.create_memory_dict(process_name, names, coll)
                 pd = shared_resources.get_process_data(process_name)
                 mm = shared_resources.memory_manager
                 if ok and pd and mm and hasattr(mm, "_local_handles"):
                     for shm_base_name, shm_list in mm._local_handles.get(process_name, {}).items():
                         if shm_list and shm_base_name in names:
-                            pd.custom.setdefault("memory_names", {})[shm_base_name] = [
-                                s.name for s in shm_list
-                            ]
-                            pd.custom.setdefault("memory_params", {})[shm_base_name] = names[
-                                shm_base_name
-                            ]
-                            pd.custom.setdefault("memory_index_usage", {})[shm_base_name] = [
-                                0
-                            ] * coll
+                            pd.custom.setdefault("memory_names", {})[shm_base_name] = [s.name for s in shm_list]
+                            pd.custom.setdefault("memory_params", {})[shm_base_name] = names[shm_base_name]
+                            # Ф7 G.H: memory_index_usage снят (мёртвый учёт; free-list у FramePool).
                             pd.custom.setdefault("memory_coll", {})[shm_base_name] = coll
                     custom.update(pd.custom)
     for qtype, q in queues.items():
@@ -131,9 +119,7 @@ def _build_shared_resources_from_bundle(
                 }
             },
         )
-        shared_resources.config_store.store(
-            target_name, {"process": {}, "managers": {}}
-        )
+        shared_resources.config_store.store(target_name, {"process": {}, "managers": {}})
         for qtype, q in (target_queues or {}).items():
             shared_resources.process_state_registry.add_queue(target_name, qtype, q)
 
