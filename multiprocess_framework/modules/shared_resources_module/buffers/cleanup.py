@@ -5,12 +5,19 @@
 - Windows: объекты живут пока есть хотя бы один handle; при аварийном завершении
   теряются все handles и mapping освобождается ОС, но следующий старт
   с тем же именем получит FileExistsError если PID-суффикс совпадёт
+- macOS (M8b, ADR-SRM-011): POSIX shared memory НЕ материализуется файлами в
+  /dev/shm (в отличие от Linux) — enumeration недоступен вообще, ни известных
+  имён, ни prefix-scan. Осиротевшие сегменты чистит сама ОС при завершении
+  последнего процесса-держателя (как на Windows, механизм другой). Имена SHM
+  на macOS дополнительно ограничены ~31 символом (PSHMNAMLEN) — см. H3 в
+  memory/platform/shm.py.
 
 Подход:
 - Linux: сканировать /dev/shm/ по списку известных базовых имён
 - Windows: попытаться open+close по базовым именам (без PID-суффикса)
   через реестр имён из ShmRegistry
-- В обоих случаях cleanup не трогает сегменты с действующими handles (try/except)
+- macOS: no-op (см. выше) — best-effort функции безопасно возвращают пустой список
+- Во всех случаях cleanup не трогает сегменты с действующими handles (try/except)
 """
 
 from __future__ import annotations
@@ -172,9 +179,17 @@ def cleanup_orphaned_by_prefix(prefixes: list[str] | None) -> list[str]:
 
     - **Linux**: сканирует ``/dev/shm``, unlink'ает файлы, чьё имя начинается с любого
       из ``prefixes`` (напр. ``["output_frames"]`` ловит ``output_frames_cam_123_4_0``).
-    - **Windows/macOS**: enumeration недоступен → best-effort no-op (Windows сам
-      освобождает mapping при гибели последнего handle → осиротевших почти нет,
-      см. модульный docstring).
+    - **Windows**: enumeration недоступен → best-effort no-op. ОС сама освобождает
+      mapping при гибели последнего handle (``kill -9`` закрывает все handles процесса)
+      → осиротевших почти нет — no-op здесь не деградация, а корректный дефолт.
+    - **macOS**: enumeration ТОЖЕ недоступен, но по ДРУГОЙ причине, чем Windows — POSIX
+      shared memory на macOS НЕ материализуется файлами в ``/dev/shm`` (в отличие от
+      Linux), поэтому директории для сканирования просто не существует (M8b, ADR-SRM-011).
+      Осиротевшие сегменты после ``kill -9`` чистит сама ОС при завершении процесса
+      (аналогично Windows-логике выше, механизм другой — ядро освобождает POSIX shm
+      объект, когда закрыт последний referencing процесс). Имена SHM на macOS
+      дополнительно ограничены ``PSHMNAMLEN ≈ 31`` символом (см. H3 / ``_bounded_name``
+      в ``memory/platform/shm.py`` — компактный hash-суффикс при переполнении лимита).
 
     ⚠️ Предполагает ОДИН активный backend: prefix-scan не отличает осиротевший сегмент
     от сегмента ПАРАЛЛЕЛЬНО работающего второго backend'а с тем же slot-именем. Функция

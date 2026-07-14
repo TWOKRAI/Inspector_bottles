@@ -48,3 +48,34 @@
 1. **По умолчанию:** `pack_fast=True`, `copy=True` — быстрая запись, безопасное чтение.
 2. **Максимальная скорость:** `pack_fast=True`, `copy=False` — если данные используются сразу и не сохраняются.
 3. **Совместимость:** `pack_fast=False` — если нужна полная совместимость со старым форматом (включая padding).
+
+## SLOT-header (seqlock, Ф7 G.3(b), ADR-SRM-011)
+
+Когда слот выделен с `seqlock=True` (`calculate_buffer_size(..., seqlock=True)`), перед
+блоком изображений (`num_images` + per-image) добавлен фиксированный **8-байтовый**
+заголовок (little-endian, `format/buffer.py`: `SLOT_HEADER_SIZE = 8`):
+
+| Offset | Поле | Тип | Значение |
+|--------|------|-----|----------|
+| 0 | `generation` | uint32 | seqlock-счётчик: **нечётное** = запись идёт (writer в процессе), **чётное** = стабильно. `+2` на каждую завершённую запись (`pack_images(seqlock=True)`: `+1` до payload, `+1` после). |
+| 4 | `state` | uint8 | 0=`FREE`, 1=`WRITING`, 2=`READY`, 3=`READING` — lifecycle будущего frame-pool (G.4); сейчас используются `WRITING`/`READY` (`pack_images`) и `FREE` (`clear_slot_seqlock`). |
+| 5 | `refcount` | uint8 | Fan-out: сколько читателей держат слот (задел под G.4, пока не используется). |
+| 6 | `reserved` | uint16 | Выравнивание / будущие флаги пула-QoS. |
+| 8 | `num_images` | uint32 | СУЩЕСТВУЮЩИЙ заголовок блока изображений (в legacy-формате лежал на offset 0, здесь сдвинут на `+8`). |
+| 12+ | per-image | — | `(h,w,c uint32) + dtype (1 байт) + payload + padding` — как в legacy, без изменений. |
+
+**Базовый сдвиг блока изображений** (`_image_block_base(seqlock)` в `format/buffer.py`):
+`base = SLOT_HEADER_SIZE (8)` при `seqlock=True`, `base = 0` при `seqlock=False` (дефолт,
+байт-в-байт прежний 4-байтовый заголовок `num_images` на offset 0 — откат = флаг off).
+
+**Seqlock-протокол чтения/записи** (`pack_images`/`unpack_images(verify_seqlock=True)`):
+writer инкрементит `generation` в нечёт ДО записи payload и в чёт ПОСЛЕ; reader читает
+`g1` (нечёт → drop без копии), копирует payload, читает `g2` (`g1 != g2` → writer
+перезаписал под читателем → drop). Порванный кадр никогда не возвращается — гонка
+превращается в честный `None` (drop), не в тихую порчу. Подробности и мотивация решения —
+`multiprocess_framework/modules/shared_resources_module/DECISIONS.md` (ADR-SRM-011).
+
+Формат слота (seqlock вкл/выкл) стампуется **на слот при создании**
+(`MemoryManager.create_memory_dict`) и читается из меты слота на write/read — размер,
+запись и чтение всегда самосогласованы, разные слоты в одном процессе могут быть в
+разных форматах.
