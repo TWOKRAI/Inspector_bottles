@@ -25,4 +25,8 @@ metadata:
 - фикс пре-существующего G.4 ring-теста (c26d4d62) — env-утечка маскировала красный.
 - G.5.b ✅ (41b0895c) — zero-copy чтение view, `FW_SHM_ZERO_COPY`; гейт на handle-кэш; GUI явно copy-out; переменная форма кадра by-design.
 - G.5.c ✅ (a45a782c) — **В1-пол by-construction**: post-use re-check поколения в PipelineExecutor (между _execute_chain и _send_results) → drift → drop батча + `frame_stale_drops`→heartbeat. Zero-copy тракт теперь БЕЗОПАСЕН (read-moment seqlock + hold-duration re-check); kill-9 читателя безвреден.
-- **G.5.d/e — ОСТАЛОСЬ**: В3 owner-mediated loan/release/refcount + back-pressure (release батч/async, не на per-frame пути) + kill-9 fault-injection обоих уровней. Самый крупный/рисковый блок — делать отдельным сфокусированным заходом «как полагается», без костылей.
+- В3 дизайн ✅ (§8 g5-execution-plan, коммит e31340f7) — протокол end-to-end, решённые развилки.
+- G.5.d-1 ✅ (6a0ce35f) — owner-side free-list + loan-on-write + refcount(owner-only) + громкий drop-на-источнике при исчерпании (`frame_loan_exhausted`→heartbeat); drop проведён через 3 write-входа (send-mw→None); off=слепой round-robin бит-в-бит. БЕЗ release → под флагом кольцо исчерпается за coll кадров (ожидаемо).
+- **G.5.d-2 — ОСТАЛОСЬ (release-loop, кросс-процессный):** consumer копит release-тикеты в точке re-check (executor) → батч/async флаш через system-канал → owner-handler декрементит refcount (generation/incarnation-guard). Механизм подтверждён: `router_manager.register_message_handler(key, handler)` → event_dispatcher. Middleware `release_slots(tickets)` + loan_gen-трекинг.
+- **G.5.e — ОСТАЛОСЬ:** reclaim-on-death (holder-трекинг по reader+incarnation) + kill-9 fault-injection обоих уровней.
+- Всё за `FW_SHM_LOAN_PROTOCOL` default-off. G.5 не мержится до полного 8-углового ревью (a→e).
