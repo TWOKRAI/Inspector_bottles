@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import struct
 import threading
+import time
 
 import numpy as np
 
 from multiprocess_framework.modules.shared_resources_module.memory import format as fmt
+from multiprocess_framework.modules.shared_resources_module.memory.core.manager import MemoryManager
 from multiprocess_framework.modules.shared_resources_module.memory.format import buffer as buf_mod
 
 
@@ -31,12 +33,16 @@ _SHAPE = (1024, 1024, 3)
 _DTYPE = np.uint8
 
 
-def _run_contention(read_fn, *, shape=_SHAPE, iters: int = 6000, seqlock: bool = False):
+def _run_contention(read_fn, *, shape=_SHAPE, iters: int = 6000, seqlock: bool = False, writer_gap: float = 0.0):
     """Один writer + один reader на ОБЩИЙ буфер (bytearray, shared между threads).
 
     Буфер приваймлен (валиден до старта reader); threading.Barrier синхронизирует
     старт reader и writer (иначе reader успевает отработать все итерации до первой
     записи — гонка не наблюдается).
+
+    ``writer_gap`` — пауза writer между кадрами. gap=0 (дефолт) = пат-контеншн
+    (writer занимает почти всё время; для торн-репродьюсера). gap>0 моделирует
+    реальную камеру с межкадровым интервалом (reader получает чистые окна).
 
     Returns: (torn, drops, valid) — порванных кадров, дропов (None), валидных.
     """
@@ -58,6 +64,8 @@ def _run_contention(read_fn, *, shape=_SHAPE, iters: int = 6000, seqlock: bool =
                 frame = np.full(shape, v, dtype=_DTYPE)
                 fmt.pack_images(mv, [frame], max_shape, dtype, seqlock=seqlock)
                 v = 1 + (v % 254)
+                if writer_gap:
+                    time.sleep(writer_gap)
         except Exception as exc:  # noqa: BLE001 — поднимем в основном потоке
             writer_err.append(repr(exc))
 
@@ -113,11 +121,30 @@ def test_torn_frame_reproduced_without_seqlock():
 
 
 def test_no_torn_frame_with_seqlock():
-    """ФИКС: с seqlock reader НИКОГДА не возвращает порванный кадр (torn == 0)."""
-    torn, drops, valid = _run_contention(_seqlock_read, seqlock=True)
+    """ФИКС (безопасность): под ПАТ-контеншеном (writer без пауз) seqlock reader
+    НИКОГДА не возвращает порванный кадр — torn == 0.
+
+    valid здесь может быть ~0 (writer занимает почти всё время → каждое окно чтения
+    перекрывается записью → честный drop). Это КОРРЕКТНО: seqlock превращает гонку
+    в drop, не в порчу. Что seqlock реально ОТДАЁТ кадры при read<<write — проверяют
+    ``test_seqlock_delivers_valid_frames_under_light_contention`` и детерминированные
+    roundtrip-тесты ниже.
+    """
+    torn, _drops, _valid = _run_contention(_seqlock_read, seqlock=True)
     assert torn == 0, f"seqlock обязан исключить torn-frame, поймано {torn}"
-    # Дропы (гонка с writer) допустимы, но хоть какие-то валидные кадры прошли.
-    assert valid > 0, f"ни одного валидного кадра (drops={drops}) — seqlock слишком строг"
+
+
+def test_seqlock_delivers_valid_frames_under_light_contention():
+    """Seqlock НЕ чёрная дыра: при read << write_period reader стабильно отдаёт кадры.
+
+    Малый кадр (быстрое чтение) + пауза writer 3мс (реальный межкадровый интервал) →
+    reader попадает в чистые окна: valid > 0, при этом torn == 0.
+    """
+    torn, _drops, valid = _run_contention(
+        _seqlock_read, shape=(128, 128, 3), iters=2000, seqlock=True, writer_gap=0.003
+    )
+    assert torn == 0, f"seqlock не должен отдавать torn, поймано {torn}"
+    assert valid > 0, "seqlock обязан отдавать валидные кадры при read << write_period"
 
 
 # --- Детерминированные unit-тесты формата seqlock (без гонки) --------------------
@@ -201,3 +228,32 @@ def test_legacy_format_unaffected_by_seqlock_default():
     assert struct.unpack_from("I", mv, 0)[0] == 1
     imgs = fmt.unpack_images(mv, shape, dtype, n=1, copy=True)  # verify_seqlock=False
     assert imgs is not None and np.array_equal(imgs[0], frame)
+
+
+# --- MemoryManager: сквозная проводка seqlock (standalone-режим) -----------------
+
+
+def test_memory_manager_seqlock_roundtrip():
+    """MemoryManager(seqlock_frames=True): слот стампуется seqlock, write→read корректно."""
+    mm = MemoryManager(seqlock_frames=True)
+    try:
+        assert mm.create_memory_dict("owner", {"frames": (1, (8, 8, 3), "uint8")}, coll=2)
+        md = mm.get_memory_data("owner", "frames")
+        assert md["seqlock"] is True
+        frame = np.full((8, 8, 3), 42, dtype=np.uint8)
+        name = mm.write_images("owner", "frames", [frame], 0)
+        assert name, "write_images должен вернуть имя слота"
+        imgs = mm.read_images("owner", "frames", 0, n=1)
+        assert imgs is not None and np.array_equal(imgs[0], frame)
+    finally:
+        mm.close_all()
+
+
+def test_memory_manager_seqlock_off_by_default():
+    """Без ctor-флага и без env FW_SHM_SEQLOCK → seqlock=False (прежний формат)."""
+    mm = MemoryManager()
+    try:
+        assert mm.create_memory_dict("o", {"f": (1, (4, 4, 3), "uint8")}, coll=1)
+        assert mm.get_memory_data("o", "f")["seqlock"] is False
+    finally:
+        mm.close_all()

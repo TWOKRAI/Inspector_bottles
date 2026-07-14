@@ -57,6 +57,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         process: Optional[Any] = None,
         process_state_registry: Optional[Any] = None,
         logger: Optional[Any] = None,
+        seqlock_frames: Optional[bool] = None,
         **kwargs: Any,
     ) -> None:
         BaseManager.__init__(self, manager_name=manager_name, process=process)
@@ -79,7 +80,24 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         self._local_meta: Dict[str, Dict[str, _MemoryMeta]] = {}
         # Owner создаёт (create=True) и unlink при shutdown
         self._is_owner: bool = True
-        self._stats = {"created": 0, "written": 0, "read": 0, "errors": 0}
+        # Ф7 G.3(b): формат слота seqlock (ADR-SRM-011). Стампуется на слот при
+        # создании → write/read/size самосогласованы. torn — счётчик дропов гонки
+        # (reader поймал перезапись под собой; наблюдаемость через get_stats).
+        self._seqlock_frames: bool = self._resolve_seqlock_frames(seqlock_frames)
+        self._stats = {"created": 0, "written": 0, "read": 0, "errors": 0, "torn": 0}
+
+    @staticmethod
+    def _resolve_seqlock_frames(explicit: Optional[bool]) -> bool:
+        """Разрешить флаг seqlock-формата слотов (Ф7 G.3(b), ADR-SRM-011).
+
+        Приоритет: явный ctor-аргумент (не None) > env ``FW_SHM_SEQLOCK`` (в т.ч.
+        явное ``=0``) > **False** (прежний 4-байтовый формат, откат = флаг off).
+        """
+        if explicit is not None:
+            return bool(explicit)
+        from ....config_module.tools.env import env_flag
+
+        return env_flag("FW_SHM_SEQLOCK", default=False)
 
     def initialize(self) -> bool:
         try:
@@ -179,10 +197,11 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         pd.custom.setdefault("memory_params", {})
         pd.custom.setdefault("memory_index_usage", {})
         pd.custom.setdefault("memory_coll", {})
+        pd.custom.setdefault("memory_seqlock", {})
 
         for name, params in memory_names.items():
             num_images, image_shape, dtype = params
-            size = fmt.calculate_buffer_size(num_images, image_shape, dtype)
+            size = fmt.calculate_buffer_size(num_images, image_shape, dtype, seqlock=self._seqlock_frames)
             shm_list = po.create_shm_blocks(name, size, coll)
             if shm_list is None:
                 self._log_warning(f"Failed to create memory for '{name}'")
@@ -192,6 +211,8 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             pd.custom["memory_params"][name] = params
             pd.custom["memory_index_usage"][name] = [0] * coll
             pd.custom["memory_coll"][name] = coll
+            # Ф7 G.3(b): формат слота (seqlock) — pickle-safe в PSR, виден consumer-процессам.
+            pd.custom["memory_seqlock"][name] = self._seqlock_frames
             self._local_handles.setdefault(process_name, {})[name] = shm_list
             self._stats["created"] += 1
 
@@ -207,14 +228,16 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         """Создание без PSR: метаданные в _local_meta."""
         for name, params in memory_names.items():
             num_images, image_shape, dtype = params
-            size = fmt.calculate_buffer_size(num_images, image_shape, dtype)
+            size = fmt.calculate_buffer_size(num_images, image_shape, dtype, seqlock=self._seqlock_frames)
             shm_list = po.create_shm_blocks(name, size, coll)
             if shm_list is None:
                 self._log_warning(f"Failed to create memory for '{name}'")
                 continue
 
             self._local_handles.setdefault(process_name, {})[name] = shm_list
-            self._local_meta.setdefault(process_name, {})[name] = _MemoryMeta(params, coll)
+            self._local_meta.setdefault(process_name, {})[name] = _MemoryMeta(
+                params, coll, seqlock=self._seqlock_frames
+            )
             self._stats["created"] += 1
 
         self._log_info(f"Created {len(memory_names)} memory blocks for '{process_name}' (standalone)")
@@ -248,6 +271,8 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
                 "index_usage": pd.custom["memory_index_usage"],
                 "coll": pd.custom["memory_coll"],
                 "names": pd.custom["memory_names"],
+                # Ф7 G.3(b): формат слота seqlock (по имени; дефолт False для старых слотов).
+                "seqlock": pd.custom.get("memory_seqlock", {}).get(memory_name, False),
             }
         else:
             meta = self._local_meta.get(process_name, {}).get(memory_name)
@@ -259,6 +284,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
                 "index_usage": {memory_name: meta.index_usage},
                 "coll": {memory_name: meta.coll},
                 "names": {},
+                "seqlock": meta.seqlock,
             }
 
     def write_images(
@@ -285,7 +311,14 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             handles = memory_data["handles"]
             shm = handles[index]
             max_images, max_shape, expected_dtype = memory_data["params"][shm_name]
-            fmt.pack_images(shm.buf, images, max_shape, np.dtype(expected_dtype), fast=pack_fast)
+            fmt.pack_images(
+                shm.buf,
+                images,
+                max_shape,
+                np.dtype(expected_dtype),
+                fast=pack_fast,
+                seqlock=bool(memory_data.get("seqlock", False)),
+            )
             self._stats["written"] += 1
             return shm.name
         except Exception as e:
@@ -312,7 +345,14 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             handles = memory_data["handles"]
             shm = handles[index]
             _, max_shape, expected_dtype = memory_data["params"][shm_name]
-            images = fmt.unpack_images(shm.buf, max_shape, np.dtype(expected_dtype), n=n, copy=copy)
+            seqlock = bool(memory_data.get("seqlock", False))
+            images = fmt.unpack_images(
+                shm.buf, max_shape, np.dtype(expected_dtype), n=n, copy=copy, verify_seqlock=seqlock
+            )
+            if images is None:
+                # Ф7 G.3(b): seqlock поймал torn/in-progress → честный drop (не порча).
+                self._stats["torn"] += 1
+                return None
             self._stats["read"] += 1
             return images
         except Exception as e:
@@ -339,7 +379,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         if self._process_state_registry:
             pd = self._process_state_registry.get_process_data(process_name)
             if pd:
-                for key in ("memory_names", "memory_params", "memory_index_usage", "memory_coll"):
+                for key in ("memory_names", "memory_params", "memory_index_usage", "memory_coll", "memory_seqlock"):
                     pd.custom.get(key, {}).pop(shm_name, None)
         else:
             self._local_meta.get(process_name, {}).pop(shm_name, None)
