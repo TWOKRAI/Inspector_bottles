@@ -70,21 +70,7 @@ class ShmFrameReader:
         from multiprocessing import shared_memory as _shm_mod
 
         if self._cache_enabled:
-            # Ф7 H-ревью (S2): open + чтение буфера под ОДНИМ lock — иначе close() на
-            # потоке message_processor (wire.deconfigure) порвал бы shm.buf под чтением
-            # здесь (поток DataReceiver). Под zero-copy view остаётся валиден после lock:
-            # эвикция с close() под zero-copy отключена (сегмент жив до teardown), а
-            # teardown-close() сам берёт этот lock → сериализован с чтением.
-            with self._lock:
-                shm = self._open_cached_locked(shm_actual_name, _shm_mod)
-                frame = read_single_frame(shm.buf, verify_seqlock=seqlock, copy=copy)
-                if frame is not None and not copy and view_meta is not None:
-                    # Мета для G.5.c: поколение на момент чтения (сверка ПОСЛЕ использования
-                    # view). Без seqlock поколения нет → -1 (re-check неактивен).
-                    view_meta["_frame_is_view"] = True
-                    view_meta["_shm_view_name"] = shm_actual_name
-                    view_meta["_shm_view_generation"] = read_generation(shm.buf) if seqlock else -1
-            return frame
+            return self._read_cached(shm_actual_name, seqlock, copy, view_meta, _shm_mod)
 
         # Без кэша сегмент закрывается сразу → view повис бы: копия обязательна.
         shm = _shm_mod.SharedMemory(name=shm_actual_name, create=False)
@@ -92,6 +78,30 @@ class ShmFrameReader:
             return read_single_frame(shm.buf, verify_seqlock=seqlock, copy=True)
         finally:
             shm.close()
+
+    def _read_cached(
+        self,
+        shm_actual_name: str,
+        seqlock: bool,
+        copy: bool,
+        view_meta: Optional[Dict[str, Any]],
+        shm_mod: Any,
+    ) -> Optional[Any]:
+        """Ф7 H-ревью (S2): open + чтение буфера под ОДНИМ lock — иначе close() на потоке
+        message_processor (wire.deconfigure) порвал бы shm.buf под чтением здесь (поток
+        DataReceiver). Под zero-copy view остаётся валиден после lock: эвикция с close() под
+        zero-copy отключена (сегмент жив до teardown), а teardown-close() сам берёт этот
+        lock → сериализован с чтением."""
+        with self._lock:
+            shm = self._open_cached_locked(shm_actual_name, shm_mod)
+            frame = read_single_frame(shm.buf, verify_seqlock=seqlock, copy=copy)
+            if frame is not None and not copy and view_meta is not None:
+                # Мета для G.5.c: поколение на момент чтения (сверка ПОСЛЕ использования
+                # view). Без seqlock поколения нет → -1 (re-check неактивен).
+                view_meta["_frame_is_view"] = True
+                view_meta["_shm_view_name"] = shm_actual_name
+                view_meta["_shm_view_generation"] = read_generation(shm.buf) if seqlock else -1
+        return frame
 
     def _open_cached_locked(self, shm_actual_name: str, shm_mod: Any) -> Any:
         """Открыть SharedMemory с LRU-кэшем. ВЫЗЫВАТЬ под ``self._lock`` (read_frame его
