@@ -662,6 +662,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
         self._heartbeat = ProcessHeartbeat(self)
         self._heartbeat.start()
 
+        # Ф7 G.9(a): GC-дисциплина — заморозить startup-объекты в permanent-поколение
+        # ПОСЛЕ старта воркеров/heartbeat (все долгоживущие объекты созданы), чтобы
+        # сборщик не сканировал их на каждом цикле → меньше per-collection пауз (p99).
+        # За FW_GC_FREEZE, дефолт off = штатный GC бит-в-бит.
+        from ..lifecycle.gc_discipline import GcDiscipline
+
+        self._gc_discipline = GcDiscipline(log=lambda m: self._log_info(m, module="lifecycle"))
+        self._gc_discipline.freeze_after_startup()
+
         self._log_info(f"Process '{self.name}' started", module="lifecycle")
 
     def stop(self):

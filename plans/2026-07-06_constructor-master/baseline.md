@@ -122,3 +122,21 @@ FPS/`cycle_duration_ms` в heartbeat → GUI), ключ `perf_probes`, окно 
 **Не вошло в этот прогон (дозамер по мере готовности железа, G.7 сравнивает
 только same-tier):** tier «вебкамера» и tier «Hikvision» — оба
 hardware-gated (см. Ф0.4).
+
+## G.9 — GC-дисциплина + аллокации (инструментарий готов, числа — на соаке G.7)
+
+Ф7 G.9 добавил инструментарий и дисциплину (всё за флагами, дефолт off = штатное поведение):
+
+- **`GcDiscipline`** (`process_module/lifecycle/gc_discipline.py`): `gc.freeze()` после старта
+  воркеров (`FW_GC_FREEZE`) — startup-объекты в permanent-поколение, сборщик их не сканирует
+  → короче каждая пауза GC; опц. сборка по расписанию в паузах (`FW_GC_SCHEDULED`,
+  measurement-gated — включать после доказанного снижения p99).
+- **`AllocProfiler`** (`process_module/generic/alloc_profile.py`): tracemalloc snapshot-diff →
+  **байт/блоков аллокаций на кадр** + топ-источники. Soak-диагностика (не hot-path).
+- **per-frame без Pydantic** — инвариант зафиксирован тестом `test_g9_per_frame_no_pydantic`
+  (двойная конверсия снята G.5 `FW_DATA_PLANE_DICTS`; `TestDataPlaneDictsFlag` — поведение).
+
+**Замер до/после — на соаке G.7** (той же лесенкой tier'ов): FPS/p99 с `FW_GC_FREEZE` on↔off
++ аллокаций/кадр из `AllocProfiler`. Числа сюда допишутся при приёмке (правило: цифры по
+замеру, не по вере — как FPS-вердикт). msgspec (TECH_STACK §4) — по бенчу msgspec-vs-pickle
+на known-schema сообщениях; кадры идут SHM claim-check'ом мимо очереди → их msgspec не касается.
