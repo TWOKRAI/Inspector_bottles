@@ -230,7 +230,9 @@ def pack_images(
     от writer'а, НО НЕ двух writer'ов одного слота (оба стартуют с gen=N, оба
     финишируют gen=N+2 → reader увидит g1==g2 на смешанном кадре). Один слот пишет
     РОВНО один поток/процесс (round-robin в FrameShmMiddleware это обеспечивает).
-    Жёсткий enforcement (state-машина владения) — G.4 (frame-pool).
+    Жёсткий enforcement (state-машина владения слотом: refcount/release) — G.5
+    (frame-pool; нагружен только с zero-copy, решение владельца 2026-07-14). G.4 —
+    только глубина кольца per-camera + QoS, БЕЗ протокола владения.
 
     Exception-safety (H1a): при исключении внутри записи (dtype/shape mismatch)
     generation ВСЕГДА возвращается к чётному через finally (иначе слот отравлен —

@@ -117,3 +117,26 @@ def test_deconfigure_unknown_wire_ok():
     res = bc._cmd_wire_deconfigure(data={"wire_key": "nope"})
     assert res["success"] is True
     assert "note" in res
+
+
+def test_buffer_slots_gated_off_by_default(monkeypatch):
+    """Ф7 G.4.b (ревью 2026-07-14): БЕЗ FW_QOS_PROFILES buffer_slots игнорируется →
+    глубина кольца прежние 3 (откат бит-в-бит; buffer_slots дефолтит в 4 ещё до Ф7)."""
+    monkeypatch.delenv("FW_QOS_PROFILES", raising=False)
+    router = _RecordingRouter()
+    bc = BuiltinCommands(_Svc(router))
+    bc._cmd_wire_configure(
+        data={"wire_key": "w", "role": "receiver", "shm_name": "of", "shm_owner": "cam0", "buffer_slots": 8}
+    )
+    assert bc._wire_middlewares["w"][0]._coll == 3  # buffer_slots=8 проигнорирован
+
+
+def test_buffer_slots_honored_with_flag(monkeypatch):
+    """С FW_QOS_PROFILES buffer_slots задаёт глубину кольца per-camera."""
+    monkeypatch.setenv("FW_QOS_PROFILES", "1")
+    router = _RecordingRouter()
+    bc = BuiltinCommands(_Svc(router))
+    bc._cmd_wire_configure(
+        data={"wire_key": "w", "role": "receiver", "shm_name": "of", "shm_owner": "cam0", "buffer_slots": 8}
+    )
+    assert bc._wire_middlewares["w"][0]._coll == 8

@@ -162,6 +162,7 @@ class TestH8RouterShmStatsPublish:
             "torn_reads": 5,
             "boundary_crossings": 100,
             "queue_data_evicted": 0,
+            "queue_system_evict_blocked": 0,
         }
 
     def test_publishes_when_only_queue_evicted_nonzero(self) -> None:
@@ -176,6 +177,25 @@ class TestH8RouterShmStatsPublish:
         assert proxy.merge_calls == 1
         _, data = proxy.merged[0]
         assert data["queue_data_evicted"] == 9
+
+    def test_publishes_when_only_system_blocked_nonzero(self) -> None:
+        """Ф7 G.4.a: блокировка вытеснения system-очереди публикуется (control-plane
+        backpressure виден в state, симметрично data_evicted)."""
+        proxy = _CountingProxy()
+        router = _FakeRouter(
+            {
+                "frame_pickle_fallbacks": 0,
+                "frame_torn_reads": 0,
+                "frame_boundary_crossings": 0,
+                "queue_data_evicted": 0,
+                "queue_system_evict_blocked": 4,
+            }
+        )
+        hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
+        hb._publish_router_shm_stats_to_tree()
+        assert proxy.merge_calls == 1
+        _, data = proxy.merged[0]
+        assert data["queue_system_evict_blocked"] == 4
 
     def test_noop_when_all_zero(self) -> None:
         proxy = _CountingProxy()

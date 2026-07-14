@@ -197,7 +197,11 @@ class ProcessHeartbeat:
             torn = int(rs.get("frame_torn_reads", 0) or 0)
             crossings = int(rs.get("frame_boundary_crossings", 0) or 0)
             queue_evicted = int(rs.get("queue_data_evicted", 0) or 0)
-            if pickle_fallbacks == 0 and torn == 0 and crossings == 0 and queue_evicted == 0:
+            # Ф7 G.4.a: system-backpressure тоже виден (блокировки вытеснения из полной
+            # system-очереди — control-plane терять нельзя; ревью 2026-07-14: раньше
+            # surface был, но публикации не было — асимметрия с data_evicted).
+            sys_blocked = int(rs.get("queue_system_evict_blocked", 0) or 0)
+            if pickle_fallbacks == 0 and torn == 0 and crossings == 0 and queue_evicted == 0 and sys_blocked == 0:
                 return  # нет кадрового пути / всё чисто — не публикуем
             proxy.merge(
                 f"processes.{self._services.name}.state.shm",
@@ -206,6 +210,7 @@ class ProcessHeartbeat:
                     "torn_reads": torn,
                     "boundary_crossings": crossings,
                     "queue_data_evicted": queue_evicted,
+                    "queue_system_evict_blocked": sys_blocked,
                 },
             )
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB

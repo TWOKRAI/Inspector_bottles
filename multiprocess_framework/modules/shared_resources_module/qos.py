@@ -5,8 +5,12 @@
 
   1. **Очереди** (`QueueRegistry.remove_old_if_full`) — system=never-drop (reliable),
      data=drop_oldest + счётчик потерь.
-  2. **Кадровые кольца SHM** (`FrameShmMiddleware` / `MemoryManager`, G.4.b) — глубина
-     кольца = `history_depth` профиля data; drop_oldest на wrap + громкий счётчик.
+  2. **Кадровые кольца SHM** (`FrameShmMiddleware`, G.4.b) — глубина кольца настраивается
+     per-camera (дефолт = `history_depth` профиля data). Под copy-out (до G.5): гонка
+     reader↔writer при перезаписи слота на wrap ловится **seqlock**'ом → drop, виден в
+     `frame_torn_reads` (G.3); глубже кольцо → реже. Occupancy-детект «writer перезаписал
+     НЕпрочитанный слот» (громкий drop-на-источнике по исчерпанию пула) требует владения
+     слотом (refcount/release) → **G.5**, здесь его НЕТ.
   3. **Наблюдаемость** (`channel_routing_module/observability/BoundedChannel`) —
      drop_oldest + `dropped` (уже так исторически; профиль документирует и унифицирует
      семантику).

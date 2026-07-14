@@ -966,10 +966,15 @@ class BuiltinCommands:
         role = kwargs.get("role", "")
         shm_name = kwargs.get("shm_name", "")
         shm_owner = kwargs.get("shm_owner", "")
-        # Ф7 G.4.b: buffer_slots теперь ЗАДАёт глубину кольца per-camera (раньше был
-        # «информативно» и игнорировался → кольцо всегда дефолтные 3, B-8). None →
-        # middleware сам резолвит (QoS-профиль при FW_QOS_PROFILES, иначе 3).
-        buffer_slots = kwargs.get("buffer_slots")
+        # Ф7 G.4.b: buffer_slots ЗАДАёт глубину кольца per-camera (раньше «информативно»,
+        # игнорировался → кольцо всегда дефолтные 3, B-8). **Гейт FW_QOS_PROFILES**
+        # (ревью 2026-07-14): buffer_slots дефолтит в 4 в _cmd_wire_setup/_reissue ещё до
+        # Ф7 — честить его БЕЗУСЛОВНО = менять глубину 3→4 на merge (не откат бит-в-бит).
+        # Поэтому config-глубину применяем ТОЛЬКО при флаге; off → None → middleware даёт
+        # 3 (прежнее поведение, buffer_slots игнорируется как до Ф7).
+        from multiprocess_framework.modules.config_module.tools.env import env_flag
+
+        buffer_slots = kwargs.get("buffer_slots") if env_flag("FW_QOS_PROFILES") else None
 
         if not wire_key or not role:
             return {"success": False, "reason": "wire_key и role обязательны"}
