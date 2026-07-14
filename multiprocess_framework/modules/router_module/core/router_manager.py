@@ -1081,6 +1081,9 @@ class RouterManager(ChannelRoutingManager):
             "frame_boundary_crossings": sum(
                 getattr(mw, "frame_boundary_crossings", 0) for mw in self._frame_middlewares
             ),
+            # Ф7 G.3(d): громкий pickle-fallback — сколько кадров ушло медленным путём
+            # (сбой SHM-write). Тот же безлоковый суммируемый-на-чтении механизм.
+            "frame_pickle_fallbacks": sum(getattr(mw, "frame_pickle_fallbacks", 0) for mw in self._frame_middlewares),
         }
 
         if isinstance(base, dict):

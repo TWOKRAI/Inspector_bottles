@@ -306,3 +306,39 @@ def unpack_images(
             return None
 
     return images
+
+
+def read_single_frame(buffer: memoryview, *, verify_seqlock: bool = False) -> Optional[np.ndarray]:
+    """Прочитать ОДИН кадр из буфера, читая h/w/c из заголовка (без max_shape).
+
+    Для cross-process raw-чтения (FrameShmMiddleware): consumer открывает чужой
+    сегмент и не знает max_shape слота — берёт фактические размеры из per-image
+    заголовка. Знает про SLOT-header (base offset при seqlock) и сверяет generation
+    при ``verify_seqlock`` (ADR-SRM-011).
+
+    Returns:
+        ndarray (копия) или None — пустой слот / torn / write-in-progress.
+    """
+    base = _image_block_base(verify_seqlock)
+
+    if verify_seqlock:
+        gen_before = read_generation(buffer)
+        if gen_before & 1:
+            return None  # запись идёт
+
+    num_images = struct.unpack_from("I", buffer, base)[0]
+    if num_images == 0:
+        return None
+
+    offset = base + HEADER_SIZE
+    h, w, c = struct.unpack_from("III", buffer, offset)
+    offset += 12
+    dtype = np.dtype(chr(buffer[offset]))
+    offset += 1
+    arr = np.frombuffer(buffer, dtype=dtype, count=h * w * c, offset=offset)
+    frame = arr.reshape((h, w, c)).copy()
+
+    if verify_seqlock:
+        if read_generation(buffer) != gen_before:
+            return None  # перезапись под читателем → torn, дроп
+    return frame

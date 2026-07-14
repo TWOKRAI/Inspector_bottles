@@ -1667,5 +1667,34 @@ class TestFrameBoundaryCrossingCounter(unittest.TestCase):
         self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 10)
 
 
+class TestFramePickleFallbackCounter(unittest.TestCase):
+    """Ф7 G.3(d): frame_pickle_fallbacks — виден в get_stats()/introspect.router_stats
+    (громкий slow-path). Тот же безлоковый суммируемый-на-чтении механизм, что и
+    frame_boundary_crossings."""
+
+    def test_get_stats_sums_pickle_fallbacks(self):
+        class _FakeFrameMiddleware:
+            frame_pickle_fallbacks = 4
+
+        router = RouterManager(manager_name="r_pickle_fallback")
+        router.register_frame_middleware(_FakeFrameMiddleware())
+        self.assertEqual(router.get_stats()["router"]["frame_pickle_fallbacks"], 4)
+
+    def test_pickle_fallbacks_zero_without_registration(self):
+        router = RouterManager(manager_name="r_pickle_fallback_zero")
+        self.assertEqual(router.get_stats()["router"]["frame_pickle_fallbacks"], 0)
+
+    def test_get_stats_reflects_live_fallback_mutation(self):
+        class _FakeFrameMiddleware:
+            frame_pickle_fallbacks = 0
+
+        mw = _FakeFrameMiddleware()
+        router = RouterManager(manager_name="r_pickle_fallback_live")
+        router.register_frame_middleware(mw)
+        self.assertEqual(router.get_stats()["router"]["frame_pickle_fallbacks"], 0)
+        mw.frame_pickle_fallbacks = 7
+        self.assertEqual(router.get_stats()["router"]["frame_pickle_fallbacks"], 7)
+
+
 if __name__ == "__main__":
     unittest.main()

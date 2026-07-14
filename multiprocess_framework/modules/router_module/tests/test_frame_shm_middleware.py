@@ -233,5 +233,103 @@ class TestOnSendDefensiveDataField:
         assert "shm_actual_name" in out["data"]  # SHM-запись всё же прошла, несмотря на data=None
 
 
+class _WriteFailsMM:
+    """Фейк mm: аллокация ОК, но write_images всегда None (сбой SHM-write)."""
+
+    def create_memory_dict(self, *a, **k) -> bool:
+        return True
+
+    def close_memory(self, *a, **k) -> None:
+        pass
+
+    def write_images(self, *a, **k):
+        return None
+
+
+class TestG3WriteUnificationAndLoudFallback:
+    """Ф7 G.3(a) — одно ядро записи (round-robin в обоих путях); G.3(d) — громкий fallback."""
+
+    def test_on_send_uses_round_robin_slots(self):
+        """G.3a: on_send теперь round-robin (снят find_free_index, всегда 0)."""
+        mw = FrameShmMiddleware(MemoryManager(), owner="o", slot="s", coll=3)
+        indices = []
+        for _ in range(5):
+            out = mw.on_send({"frame": _frame(8, 8), "data": {}})
+            indices.append(out["data"]["shm_index"])
+        assert indices == [0, 1, 2, 0, 1], f"ожидался round-robin, получено {indices}"
+        mw._mm.close_all()
+
+    def test_loud_pickle_fallback_counts_on_write_failure(self):
+        """G.3d: сбой SHM-write (mm есть) → frame остаётся + счётчик fallback растёт."""
+        mw = FrameShmMiddleware(_WriteFailsMM(), owner="o", slot="s")
+        item = mw.strip_and_write({"frame": _frame(10, 10)})
+        assert "frame" in item, "frame обязан остаться в item (pickle-fallback)"
+        assert mw.frame_pickle_fallbacks == 1
+        assert mw.frame_boundary_crossings == 1  # граница всё равно посчитана (G.6)
+
+    def test_no_fallback_count_when_mm_none(self):
+        """G.3d: mm=None — pickle-by-design (SHM не сконфигурирован), НЕ деградация."""
+        mw = FrameShmMiddleware(None, owner="o", slot="s")
+        item = mw.strip_and_write({"frame": _frame(10, 10)})
+        assert "frame" in item
+        assert mw.frame_pickle_fallbacks == 0, "mm=None не должен считаться деградацией"
+        assert mw.frame_boundary_crossings == 1
+
+
+class TestG3SeqlockCrossProcess:
+    """Ф7 G.3(b) — seqlock-флаг едет в сообщении, cross-process reader сверяет generation."""
+
+    def test_seqlock_flag_stamped_in_message(self):
+        mw_on = FrameShmMiddleware(MemoryManager(seqlock_frames=True), owner="o", slot="s")
+        item = mw_on.strip_and_write({"frame": _frame(8, 8)})
+        assert item.get("shm_seqlock") is True
+        mw_on._mm.close_all()
+
+        mw_off = FrameShmMiddleware(MemoryManager(), owner="o", slot="s")
+        item2 = mw_off.strip_and_write({"frame": _frame(8, 8)})
+        assert item2.get("shm_seqlock") is False
+        mw_off._mm.close_all()
+
+    def test_seqlock_cross_process_raw_read_roundtrip(self):
+        """Producer пишет seqlock-слот; consumer БЕЗ handle читает через raw-путь
+        (read_single_frame(verify_seqlock=True)) — кадр восстанавливается корректно."""
+        prod = FrameShmMiddleware(MemoryManager(seqlock_frames=True), owner="p", slot="s")
+        frame = _frame(20, 30, 77)
+        item = prod.strip_and_write({"frame": frame.copy()})
+        assert item["shm_seqlock"] is True and "shm_actual_name" in item
+
+        # Consumer — своя (пустая) mm: read_images промахнётся → raw seqlock-путь.
+        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")
+        restored = consumer.restore_frame({"data": dict(item)}).get("frame")
+        assert restored is not None and np.array_equal(restored, frame)
+        prod._mm.close_all()
+
+
+class TestG3HandleCache:
+    """Ф7 G.3 — кэш SHM-handles читателя (open/mmap/close снимается с per-frame пути)."""
+
+    def test_handle_cache_populated_and_closed(self):
+        prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s")
+        item = prod.strip_and_write({"frame": _frame(16, 16)})
+
+        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s", cache_shm_handles=True)
+        r1 = consumer.restore_frame({"data": dict(item)}).get("frame")
+        r2 = consumer.restore_frame({"data": dict(item)}).get("frame")
+        assert r1 is not None and r2 is not None
+        # Один и тот же shm_actual_name → ровно 1 закэшированный handle (не переоткрыт).
+        assert len(consumer._shm_handle_cache) == 1
+        consumer.close_handle_cache()
+        assert len(consumer._shm_handle_cache) == 0
+        prod._mm.close_all()
+
+    def test_no_cache_by_default(self):
+        prod = FrameShmMiddleware(MemoryManager(), owner="p", slot="s")
+        item = prod.strip_and_write({"frame": _frame(16, 16)})
+        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")  # cache off
+        consumer.restore_frame({"data": dict(item)})
+        assert len(consumer._shm_handle_cache) == 0  # без кэша handle не хранится
+        prod._mm.close_all()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
