@@ -68,3 +68,16 @@ def test_write_frames_none_when_slot_not_created():
         assert io.write_frames_to_shm("r", "missing", [np.zeros((4, 4, 3), np.uint8)]) is None
     finally:
         mm.close_all()
+
+
+def test_write_frames_none_when_write_fails():
+    """H7-контракт: слот создан (get_memory_data валиден), но write_images вернул
+    None (запись сорвалась) → метод отдаёт None, не мусорный dict."""
+    mm = MemoryManager()
+    try:
+        mm.create_memory_dict("r", {"s": (1, (4, 4, 3), "uint8")}, coll=1)
+        mm.write_images = lambda *a, **k: None  # type: ignore[assignment]
+        io = ProcessIO(_FakeProc(mm))
+        assert io.write_frames_to_shm("r", "s", [np.zeros((4, 4, 3), np.uint8)]) is None
+    finally:
+        mm.close_all()

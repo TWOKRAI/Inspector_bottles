@@ -103,43 +103,10 @@ class TestSendEvent:
 # ============================================================================
 
 
-class TestWriteFramesToShm:
-    def test_returns_shm_info_dict(self):
-        proc = make_mock_process()
-        io = ProcessIO(proc)
-
-        result = io.write_frames_to_shm("camera", "camera_frame", ["<frame>"])
-
-        assert result == {
-            "shm_name": "camera_frame",
-            "shm_index": 3,
-            "shm_actual_name": "actual_shm_name_007",
-        }
-        proc.memory_manager.find_free_index.assert_called_once_with("camera", "camera_frame")
-        proc.memory_manager.write_images.assert_called_once_with("camera", "camera_frame", ["<frame>"], 3)
-
-    def test_free_index_none_falls_back_to_zero(self):
-        proc = make_mock_process()
-        proc.memory_manager.find_free_index = Mock(return_value=None)
-        io = ProcessIO(proc)
-
-        result = io.write_frames_to_shm("x", "slot", ["f"])
-
-        assert result["shm_index"] == 0
-        proc.memory_manager.write_images.assert_called_once_with("x", "slot", ["f"], 0)
-
-    def test_returns_none_when_no_memory_manager(self):
-        proc = make_mock_process(with_memory=False)
-        io = ProcessIO(proc)
-
-        assert io.write_frames_to_shm("x", "slot", ["f"]) is None
-
-    def test_returns_none_when_write_fails(self):
-        proc = make_mock_process()
-        proc.memory_manager.write_images = Mock(return_value=None)
-        io = ProcessIO(proc)
-
-        assert io.write_frames_to_shm("x", "slot", ["f"]) is None
+# NB: write_frames_to_shm покрыт test_process_io_shm_contract.py на ЖИВОМ
+# MemoryManager (H7, Ф7 G.3: снят find_free_index, добавлен seqlock-штамп +
+# round-robin). Старые Mock-тесты этого метода удалены как obsolete — они
+# сверяли удалённый контракт (find_free_index) и не переживали новый код.
 
 
 # ============================================================================
