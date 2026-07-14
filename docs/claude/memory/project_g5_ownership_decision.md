@@ -19,3 +19,10 @@ metadata:
 **Размер SHM-слота при переменной форме кадра** (grayscale/resize/crop внутри pipeline) — «вроде бы работало», подтверждено кодом (buffer.py): слот под max_shape, per-image заголовок с фактическими h/w/c; меньший кадр влезает и читается по факту; превышение max/смена dtype → громкий pickle-fallback (G.3d), не порча. Внесено инвариантом+тестами в g5-execution-plan §1/§6.
 
 Критерий владельца для фазы: **«лучшая архитектура — универсальная, эффективная, безопасная»** (та же линза, что в вердикте Fable G.4). Детали — [[project_arch_boundaries_plan]], план `plans/2026-07-06_constructor-master/g5-execution-plan.md`.
+
+**Прогресс исполнения (ветка feat/constructor-f7, всё за флагами default-off):**
+- G.5.a ✅ (4c0616f1) — снятие двойной конверсии data-plane, `FW_DATA_PLANE_DICTS`.
+- фикс пре-существующего G.4 ring-теста (c26d4d62) — env-утечка маскировала красный.
+- G.5.b ✅ (41b0895c) — zero-copy чтение view, `FW_SHM_ZERO_COPY`; гейт на handle-кэш; GUI явно copy-out; переменная форма кадра by-design.
+- G.5.c ✅ (a45a782c) — **В1-пол by-construction**: post-use re-check поколения в PipelineExecutor (между _execute_chain и _send_results) → drift → drop батча + `frame_stale_drops`→heartbeat. Zero-copy тракт теперь БЕЗОПАСЕН (read-moment seqlock + hold-duration re-check); kill-9 читателя безвреден.
+- **G.5.d/e — ОСТАЛОСЬ**: В3 owner-mediated loan/release/refcount + back-pressure (release батч/async, не на per-frame пути) + kill-9 fault-injection обоих уровней. Самый крупный/рисковый блок — делать отдельным сфокусированным заходом «как полагается», без костылей.
