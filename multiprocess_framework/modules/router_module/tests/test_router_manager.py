@@ -1695,6 +1695,40 @@ class TestFramePickleFallbackCounter(unittest.TestCase):
         mw.frame_pickle_fallbacks = 7
         self.assertEqual(router.get_stats()["router"]["frame_pickle_fallbacks"], 7)
 
+    def test_get_stats_sums_torn_reads(self):
+        """M2c: frame_torn_reads (raw-read seqlock-дропы) агрегируется как и остальные."""
+
+        class _FakeFrameMiddleware:
+            frame_torn_reads = 3
+
+        router = RouterManager(manager_name="r_torn_reads")
+        router.register_frame_middleware(_FakeFrameMiddleware())
+        self.assertEqual(router.get_stats()["router"]["frame_torn_reads"], 3)
+
+    def test_torn_reads_zero_without_registration(self):
+        router = RouterManager(manager_name="r_torn_zero")
+        self.assertEqual(router.get_stats()["router"]["frame_torn_reads"], 0)
+
+
+class TestUnregisterFrameMiddleware(unittest.TestCase):
+    """H5b: unregister_frame_middleware снимает middleware из агрегации (без утечки)."""
+
+    def test_unregister_removes_from_aggregation(self):
+        class _FakeFrameMiddleware:
+            frame_boundary_crossings = 5
+
+        mw = _FakeFrameMiddleware()
+        router = RouterManager(manager_name="r_unreg")
+        router.register_frame_middleware(mw)
+        self.assertEqual(len(router._frame_middlewares), 1)
+        router.unregister_frame_middleware(mw)
+        self.assertEqual(len(router._frame_middlewares), 0)
+        self.assertEqual(router.get_stats()["router"]["frame_boundary_crossings"], 0)
+
+    def test_unregister_idempotent_for_absent(self):
+        router = RouterManager(manager_name="r_unreg_absent")
+        router.unregister_frame_middleware(object())  # не бросает
+
 
 if __name__ == "__main__":
     unittest.main()

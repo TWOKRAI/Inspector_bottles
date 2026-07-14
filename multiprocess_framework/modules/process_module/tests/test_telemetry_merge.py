@@ -124,3 +124,49 @@ class TestMergeBatching:
         hb._publish_metrics_to_tree({})
         assert proxy.merge_calls == 0
         assert proxy.set_calls == 0
+
+
+class _FakeRouter:
+    def __init__(self, stats: dict) -> None:
+        self._stats = stats
+
+    def get_stats(self) -> dict:
+        return {"router": self._stats}
+
+
+class _FakeServicesRouter:
+    def __init__(self, proxy: object, router: object, name: str = "proc") -> None:
+        self._state_proxy = proxy
+        self.router_manager = router
+        self.name = name
+
+    def log_info(self, *a, **k) -> None: ...
+    def log_debug(self, *a, **k) -> None: ...
+
+
+class TestH8RouterShmStatsPublish:
+    """H8 (Ф7 G.3): SHM-счётчики router'а публикуются в дерево (state/heartbeat),
+    не только через pull-introspect (иначе вкладка Pipeline их не видит)."""
+
+    def test_publishes_shm_counters_when_nonzero(self) -> None:
+        proxy = _CountingProxy()
+        router = _FakeRouter({"frame_pickle_fallbacks": 2, "frame_torn_reads": 5, "frame_boundary_crossings": 100})
+        hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
+        hb._publish_router_shm_stats_to_tree()
+        assert proxy.merge_calls == 1
+        path, data = proxy.merged[0]
+        assert path == "processes.proc.state.shm"
+        assert data == {"pickle_fallbacks": 2, "torn_reads": 5, "boundary_crossings": 100}
+
+    def test_noop_when_all_zero(self) -> None:
+        proxy = _CountingProxy()
+        router = _FakeRouter({"frame_pickle_fallbacks": 0, "frame_torn_reads": 0, "frame_boundary_crossings": 0})
+        hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
+        hb._publish_router_shm_stats_to_tree()
+        assert proxy.merge_calls == 0  # чисто → не засоряем дерево
+
+    def test_noop_without_router(self) -> None:
+        proxy = _CountingProxy()
+        hb = ProcessHeartbeat(_FakeServicesRouter(proxy, None))
+        hb._publish_router_shm_stats_to_tree()
+        assert proxy.merge_calls == 0

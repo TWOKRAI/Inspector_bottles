@@ -1096,6 +1096,8 @@ class RouterManager(ChannelRoutingManager):
             # Ф7 G.3(d): громкий pickle-fallback — сколько кадров ушло медленным путём
             # (сбой SHM-write). Тот же безлоковый суммируемый-на-чтении механизм.
             "frame_pickle_fallbacks": sum(getattr(mw, "frame_pickle_fallbacks", 0) for mw in self._frame_middlewares),
+            # M2c: torn/дропнутые cross-process seqlock-чтения (raw-путь middleware).
+            "frame_torn_reads": sum(getattr(mw, "frame_torn_reads", 0) for mw in self._frame_middlewares),
         }
 
         if isinstance(base, dict):

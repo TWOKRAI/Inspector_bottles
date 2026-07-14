@@ -416,5 +416,45 @@ class TestH5WireLifecycle:
         mm.close_all()
 
 
+class TestM2M3Observability:
+    """M2c torn-счётчик raw-read, M2d причина в fallback-логе, M3 без нового dict/кадр."""
+
+    def test_m3_writes_coords_into_same_dict_no_new_object(self):
+        """M3: координаты вписываются В переданный item (не новый dict на кадр)."""
+        mw = _mw()
+        item = {"frame": _frame(20, 20)}
+        out = mw.strip_and_write(item)
+        assert out is item, "должен вернуться ТОТ ЖЕ объект (без аллокации coords-dict)"
+        assert "shm_actual_name" in item
+
+    def test_m2d_fallback_log_includes_reason(self):
+        """M2d: первый throttled fallback-лог несёт причину (repr сбоя записи)."""
+        logs: list[str] = []
+        mw = FrameShmMiddleware(_WriteFailsMM(), owner="o", slot="s", log_error=logs.append)
+        mw.strip_and_write({"frame": _frame(10, 10)})
+        assert mw.frame_pickle_fallbacks == 1
+        assert any("причина=" in m for m in logs), "в логе fallback должна быть причина"
+
+    def test_m2c_torn_raw_read_increments_counter(self):
+        """M2c: cross-process seqlock-чтение поймало torn → счётчик frame_torn_reads."""
+        from multiprocess_framework.modules.shared_resources_module.memory.format import (
+            buffer as buf_mod,
+        )
+
+        prod = FrameShmMiddleware(MemoryManager(seqlock_frames=True), owner="p", slot="s")
+        item = prod.strip_and_write({"frame": _frame(20, 20, 33)})
+        assert item["shm_seqlock"] is True
+        # Отравить generation слота продюсера в нечёт (writer «в процессе записи»).
+        idx = item["shm_index"]
+        handle = prod._mm.get_memory_data("p", "s")["handles"][idx]
+        buf_mod._write_generation(handle.buf, buf_mod.read_generation(handle.buf) + 1)
+
+        consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")
+        out = consumer.restore_frame({"data": dict(item)})
+        assert out.get("frame") is None, "torn → drop"
+        assert consumer.frame_torn_reads == 1
+        prod._mm.close_all()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
