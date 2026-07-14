@@ -187,38 +187,34 @@ class FrameShmMiddleware:
             self._zero_copy = False
         else:
             self._zero_copy = zero_copy_requested
-        # Ф7 G.5.d (В3 — owner-mediated loan/release): free-list слотов кольца.
-        # refcount мутирует ТОЛЬКО этот (owner) процесс — кросс-процессного atomic RMW
-        # нет по построению (см. §8 плана). loan-on-write берёт СВОБОДНЫЙ слот
-        # (refcount==0) вместо слепого round-robin; на записи ставит refcount =
-        # num_consumers (fan-out). release (G.5.d-2) декрементит → 0 = свободен. Пока
-        # release нет — под флагом кольцо исчерпается за coll кадров (ожидаемо, d-2
-        # замыкает). Дефолт off → слепой round-robin бит-в-бит.
+        # Ф7 H-задача (консолидация памяти): семантика владения слотом кольца
+        # (free-list/refcount/release/reclaim) вынесена за фасад ``FramePool`` в модуль
+        # памяти (`shared_resources_module.memory.pool`). Транспорт держит пул через DI и
+        # делегирует — раньше ~200 строк владения жили ЗДЕСЬ, в транспортном модуле.
+        # refcount мутирует ТОЛЬКО этот (owner) процесс (кросс-процессного atomic RMW нет,
+        # §8 плана). loan-on-write берёт СВОБОДНЫЙ слот (acquire) вместо слепого
+        # round-robin, ставит refcount=num_consumers (commit); release (d-2) декрементит.
+        # Пул создаётся ТОЛЬКО под флагом; off → пул=None, слепой round-robin
+        # (``self._write_index``), бит-в-бит прежнее поведение.
         self._loan_protocol = self._resolve_bool_flag(loan_protocol, "FW_SHM_LOAN_PROTOCOL")
         self._num_consumers = max(1, int(num_consumers))
-        self._slot_refcount: list[int] = [0] * self._coll
-        self._loan_cursor = 0
-        # Ф7 G.5.d-2: множество читателей, уже отпустивших ТЕКУЩИЙ займ слота (dedup
-        # release; чистится при refcount→0). generation-guard на release читается
-        # из ЖИВОГО слота (под займом стабилен — writer не трогает refcount>0).
-        self._slot_released: list[set] = [set() for _ in range(self._coll)]
-        # Ф7 G.5.d: исчерпание free-list → ГРОМКИЙ drop-на-источнике (кадр не уходит,
-        # это back-pressure-сигнал, НЕ pickle-fallback). Plain int → get_stats.
-        self.frame_loan_exhausted = 0
-        # Ф7 G.5.d-2: сколько слотов реально освобождено release'ами (наблюдаемость).
-        self.frame_slots_released = 0
-        # Ф7 G.5.e: сколько займов реклеймлено после смерти читателя (не отпустил сам).
-        self.frame_slots_reclaimed = 0
         # Per-write сигнал «drop-на-источнике по исчерпанию» (отличить от write-fail →
         # pickle-fallback): send-middleware по нему возвращает None (дроп send).
         self._last_loan_exhausted = False
-        # Ф7 G.5 ревью-фикс 17 (резидуал): num_consumers пока НЕ проведён из топологии
-        # (дизайн §8.2.1) — дефолт 1. При fan-out на >1 loan-aware потребителя refcount
-        # занижен → слот освободится рано → В1 re-check дропнет (безопасно, но кадры
-        # теряются). ВАЖНО: copy-out терминалы (GUI, zero_copy=False) release НЕ шлют —
-        # их НЕЛЬЗЯ считать в num_consumers (иначе слот завис навсегда). Полная проводка
-        # (подсчёт loan-aware целей) — H-задача/G.7. Пока — громкий warn при активации.
+        # Пул владения слотами (тип: FramePool). None при выключенном loan-протоколе.
+        self._pool: Optional[Any] = None
         if self._loan_protocol:
+            # Import runtime-local (как format-хелперы) — coupling router→shared_resources
+            # остаётся runtime, не top-level. gen_reader = чтение поколения СВОЕГО слота
+            # (seqlock) → пул SHM-агностичен (не знает про формат слота).
+            from ...shared_resources_module.memory.pool import LoanLedger
+
+            self._pool = LoanLedger(self._coll, gen_reader=self._read_own_slot_generation)
+            # Ф7 G.5 ревью-фикс 17 (резидуал): num_consumers пока НЕ проведён из топологии
+            # (дизайн §8.2.1) — дефолт 1. При fan-out на >1 loan-aware потребителя refcount
+            # занижен → слот освободится рано → В1 re-check дропнет (безопасно, но кадры
+            # теряются). copy-out терминалы (GUI, zero_copy=False) release НЕ шлют — в счёт
+            # НЕ включать. Полная проводка (подсчёт loan-aware целей) — Этап 2 H-задачи/G.7.
             self._log_error(
                 f"FrameShmMiddleware[{self._owner}]: loan-протокол АКТИВЕН, num_consumers="
                 f"{self._num_consumers} (дефолт при отсутствии проводки из топологии). "
@@ -238,6 +234,24 @@ class FrameShmMiddleware:
         у consumer'а — порог не должен превышать реальную глубину, иначе тикеты не
         набираются и free-list голодает)."""
         return self._coll
+
+    # Ф7 H-задача: счётчики loan-цикла — read-only проекция статов пула (единственный
+    # источник). RouterManager.get_stats суммирует их через getattr у всех middleware
+    # (property прозрачна для getattr). Пул=None (флаг off) → 0 (бит-в-бит: раньше тоже 0).
+    @property
+    def frame_loan_exhausted(self) -> int:
+        """Исчерпаний free-list (громкий drop-на-источнике: читатели отстали)."""
+        return self._pool.snapshot_stats()["loan_exhausted"] if self._pool else 0
+
+    @property
+    def frame_slots_released(self) -> int:
+        """Слотов освобождено release'ами (здоровье loan-цикла)."""
+        return self._pool.snapshot_stats()["slots_released"] if self._pool else 0
+
+    @property
+    def frame_slots_reclaimed(self) -> int:
+        """Займов реклеймлено после смерти читателя (kill-9 без release)."""
+        return self._pool.snapshot_stats()["slots_reclaimed"] if self._pool else 0
 
     @staticmethod
     def _resolve_bool_flag(explicit: Optional[bool], env_name: str) -> bool:
@@ -478,8 +492,8 @@ class FrameShmMiddleware:
         # Ф7 G.5.d (В3): выбор слота. loan-протокол — СВОБОДНЫЙ слот из free-list
         # (refcount==0); нет свободных → громкий drop-на-источнике (не write-fail).
         # off → прежний слепой round-robin (бит-в-бит).
-        if self._loan_protocol:
-            idx = self._acquire_loan_slot()
+        if self._pool is not None:
+            idx = self._pool.acquire()
             if idx is None:
                 self._note_loan_exhausted()
                 return False
@@ -490,9 +504,9 @@ class FrameShmMiddleware:
         try:
             shm_name = self._mm.write_images(self._owner, self._slot, [frame], idx)
             if shm_name:
-                if self._loan_protocol:
-                    # loan: слот занят num_consumers читателями; release (d-2) вернёт в 0.
-                    self._slot_refcount[idx] = self._num_consumers
+                if self._pool is not None:
+                    # loan/publish: слот занят num_consumers читателями; release (d-2) → 0.
+                    self._pool.commit(idx, self._num_consumers)
                 dest["owner"] = self._owner
                 dest["shm_owner"] = self._owner
                 dest["shm_name"] = self._slot
@@ -505,22 +519,13 @@ class FrameShmMiddleware:
             self._last_write_error = repr(exc)
         return False
 
-    def _acquire_loan_slot(self) -> Optional[int]:
-        """Ф7 G.5.d (В3): взять СВОБОДНЫЙ слот кольца (refcount==0) от ротационного
-        курсора (справедливость). None → все слоты заняты (читатели отстали)."""
-        n = self._coll
-        for i in range(n):
-            idx = (self._loan_cursor + i) % n
-            if self._slot_refcount[idx] == 0:
-                self._loan_cursor = (idx + 1) % n
-                return idx
-        return None
-
     def _note_loan_exhausted(self) -> None:
         """Ф7 G.5.d (В3): free-list исчерпан → back-pressure = ГРОМКИЙ drop-на-источнике
-        (кадр не уходит; счётчик всегда, WARNING throttled). Живую камеру НЕ блокируем."""
+        (кадр не уходит; счётчик всегда, WARNING throttled). Живую камеру НЕ блокируем.
+
+        Ф7 H-задача: счётчик инкрементит пул внутри ``acquire()`` (при None); здесь —
+        только per-write сигнал + throttled лог (читаем актуальное число из пула)."""
         self._last_loan_exhausted = True
-        self.frame_loan_exhausted += 1
         n = self.frame_loan_exhausted
         if n == 1 or n % _PICKLE_WARN_EVERY == 0:
             self._log_error(
@@ -545,68 +550,33 @@ class FrameShmMiddleware:
         return -1
 
     def release_slots(self, releases: list) -> None:
-        """Ф7 G.5.d-2 (В3): owner-side release-handler. Consumer, дочитав view, шлёт
-        пачку тикетов ``{slot, index, generation, reader}``; здесь декрементим refcount
-        освобождённых слотов. refcount мутирует ТОЛЬКО этот (owner) процесс.
+        """Ф7 G.5.d-2 (В3): owner-side release-handler — тонкий адаптер к пулу (H-задача).
 
-        Guard'ы (без костылей, §8.2/8.5):
-          - refcount уже 0 → слот свободен (stale/дубликат) → пропуск;
-          - generation тикета ≠ текущему поколению слота → release от ПРОШЛОГО займа
-            (слот с тех пор освобождён и переиспользован) → пропуск;
-          - reader уже в released-множестве ЭТОГО займа → дубликат → пропуск.
-        refcount→0 → слот назад в free-list (released-множество чистится).
-        Любая ошибка учёта безопасна: В1 re-check ловит преждевременное освобождение
-        (writer перезапишет → drift → drop, не corruption).
+        Consumer, дочитав view, шлёт пачку тикетов ``{index, generation, reader}``;
+        транспорт делегирует декремент refcount в ``FramePool.release`` (guard'ы —
+        refcount==0/stale generation/dup reader — внутри пула; generation читается
+        инжектированным ``gen_reader`` = ``_read_own_slot_generation``). refcount мутирует
+        ТОЛЬКО этот (owner) процесс. Любая ошибка учёта безопасна: В1 re-check ловит
+        преждевременное освобождение (writer перезапишет → drift → drop, не corruption).
         """
-        if not self._loan_protocol or not releases:
+        if self._pool is None or not releases:
             return
-        for t in releases:
-            try:
-                idx = int(t.get("index", -1))
-                gen = int(t.get("generation", -1))
-            except (TypeError, ValueError):
-                continue
-            reader = t.get("reader", "")
-            if not (0 <= idx < self._coll) or self._slot_refcount[idx] == 0:
-                continue
-            if self._read_own_slot_generation(idx) != gen:
-                continue  # stale release прошлого займа
-            if reader in self._slot_released[idx]:
-                continue  # дубликат
-            self._slot_released[idx].add(reader)
-            self._slot_refcount[idx] -= 1
-            if self._slot_refcount[idx] <= 0:
-                self._slot_refcount[idx] = 0
-                self._slot_released[idx].clear()
-            self.frame_slots_released += 1
+        self._pool.release(releases)
 
     def reclaim_reader(self, dead_reader: str) -> int:
-        """Ф7 G.5.e (В3): реклейм займов МЁРТВОГО читателя (kill-9 без release).
+        """Ф7 G.5.e (В3): реклейм займов МЁРТВОГО читателя (kill-9 без release) — адаптер.
 
-        При fan-out КАЖДЫЙ consumer держит КАЖДЫЙ занятый слот до своего release,
-        поэтому мёртвый reader держал все слоты, которые он ещё НЕ отпустил → декремент
-        за него (тот же учёт, что штатный release, но инициирует владелец по смерти).
-        Слот, где dead_reader уже в released-множестве (успел отпустить до смерти), —
-        пропуск. Без этого займ мёртвого читателя завис бы навсегда → free-list
-        деградирует → drop-на-источнике (В1-безопасно, но кадры теряются). Возвращает
-        число реклеймленных займов. Идемпотентно (повторный вызов после реклейма — 0).
-
-        Вызывается владельцем по confirmed-death соседа (supervisor/incarnation). Вторая
-        линия — startup-cleanup осиротевших сегментов G.3(c); В1 re-check ловит любую
-        ошибку учёта (преждевременное освобождение → drift → drop, не corruption)."""
-        if not self._loan_protocol or not dead_reader:
+        При fan-out мёртвый reader держал все слоты, которые ещё НЕ отпустил → пул
+        декрементит за него (тот же учёт, инициатор — владелец по confirmed-death
+        соседа: supervisor/incarnation). Идемпотентно (повторный вызов после реклейма →
+        0). Транспорт делегирует в ``FramePool.reclaim`` и лишь ГРОМКО логирует результат
+        (логирование — дело транспорта-владельца, у пула логгера нет). Вторая линия —
+        startup-cleanup осиротевших сегментов G.3(c); В1 re-check ловит любую ошибку
+        учёта. Возвращает число реклеймленных займов."""
+        if self._pool is None or not dead_reader:
             return 0
-        reclaimed = 0
-        for idx in range(self._coll):
-            if self._slot_refcount[idx] > 0 and dead_reader not in self._slot_released[idx]:
-                self._slot_released[idx].add(dead_reader)
-                self._slot_refcount[idx] -= 1
-                reclaimed += 1
-                if self._slot_refcount[idx] <= 0:
-                    self._slot_refcount[idx] = 0
-                    self._slot_released[idx].clear()
+        reclaimed = self._pool.reclaim(dead_reader)
         if reclaimed:
-            self.frame_slots_reclaimed += reclaimed
             self._log_error(
                 f"FrameShmMiddleware: реклейм {reclaimed} займов мёртвого читателя "
                 f"'{dead_reader}' [owner={self._owner}/{self._slot}]"
@@ -794,10 +764,9 @@ class FrameShmMiddleware:
             self._write_index = 0  # свежие слоты — пишем с начала кольца
             # Ф7 G.5.d (В3): свежее кольцо (старые сегменты unlink'нуты) → free-list
             # сбрасывается в «всё свободно»; старые займы void (сегменты ушли, читатели
-            # инвалидируют кэш по incarnation, В1 re-check дропнет).
-            self._slot_refcount = [0] * self._coll
-            self._slot_released = [set() for _ in range(self._coll)]
-            self._loan_cursor = 0
+            # инвалидируют кэш по incarnation, В1 re-check дропнет). H-задача: reset у пула.
+            if self._pool is not None:
+                self._pool.reset()
             # Ф7 G.3(b): считать ФАКТИЧЕСКИЙ формат слота (seqlock задаёт mm) —
             # авторитетный источник для shm_seqlock в сообщении.
             try:

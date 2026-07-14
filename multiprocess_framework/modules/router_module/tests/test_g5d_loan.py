@@ -47,7 +47,7 @@ class TestLoanOn:
             for i in range(3):
                 item = mw.strip_and_write({"frame": _frame(i)})
                 assert "frame" not in item  # записан в SHM (loan занял слот)
-            assert mw._slot_refcount == [1, 1, 1]  # все слоты выданы
+            assert mw._pool._refcount == [1, 1, 1]  # все слоты выданы
             assert mw.frame_loan_exhausted == 0
 
             # 4-й кадр: свободных слотов нет → drop-на-источнике (кадр остался в item).
@@ -64,7 +64,7 @@ class TestLoanOn:
         mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="s", coll=3, num_consumers=2)
         try:
             mw.strip_and_write({"frame": _frame(1)})
-            assert mw._slot_refcount[0] == 2
+            assert mw._pool._refcount[0] == 2
         finally:
             mw.release_owned_memory()
 
@@ -89,11 +89,11 @@ class TestLoanOn:
         mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="s", coll=3)
         try:
             mw.strip_and_write({"frame": _frame(1, 16, 16)})
-            assert mw._slot_refcount == [1, 0, 0]
+            assert mw._pool._refcount == [1, 0, 0]
             # Больший кадр → realloc → refcount/cursor сброшены, затем этот write занял slot 0.
             mw.strip_and_write({"frame": _frame(2, 32, 32)})
-            assert mw._slot_refcount == [1, 0, 0]
-            assert mw._loan_cursor == 1
+            assert mw._pool._refcount == [1, 0, 0]
+            assert mw._pool._cursor == 1
         finally:
             mw.release_owned_memory()
 
@@ -120,7 +120,7 @@ class TestReleaseSlots:
             assert mw.frame_loan_exhausted == 1
             # release i0 → свободен → loan снова проходит на i0.
             mw.release_slots([{"index": i0, "generation": gen0, "reader": "c0"}])
-            assert mw._slot_refcount[i0] == 0
+            assert mw._pool._refcount[i0] == 0
             assert mw.frame_slots_released == 1
             out = mw.strip_and_write({"frame": _frame(3)})
             assert "frame" not in out and out["shm_index"] == i0
@@ -134,14 +134,14 @@ class TestReleaseSlots:
             item = mw.strip_and_write({"frame": _frame(1)})
             idx = item["shm_index"]
             gen = mw._read_own_slot_generation(idx)
-            assert mw._slot_refcount[idx] == 2
+            assert mw._pool._refcount[idx] == 2
             t0 = {"index": idx, "generation": gen, "reader": "c0"}
             mw.release_slots([t0])
-            assert mw._slot_refcount[idx] == 1
+            assert mw._pool._refcount[idx] == 1
             mw.release_slots([t0])  # дубликат c0 → игнор
-            assert mw._slot_refcount[idx] == 1
+            assert mw._pool._refcount[idx] == 1
             mw.release_slots([{"index": idx, "generation": gen, "reader": "c1"}])
-            assert mw._slot_refcount[idx] == 0  # оба отпустили → свободен
+            assert mw._pool._refcount[idx] == 0  # оба отпустили → свободен
         finally:
             mw.release_owned_memory()
 
@@ -153,7 +153,7 @@ class TestReleaseSlots:
             idx = item["shm_index"]
             gen = mw._read_own_slot_generation(idx)
             mw.release_slots([{"index": idx, "generation": gen + 100, "reader": "c0"}])
-            assert mw._slot_refcount[idx] == 1  # stale gen → не декрементнут
+            assert mw._pool._refcount[idx] == 1  # stale gen → не декрементнут
         finally:
             mw.release_owned_memory()
 
@@ -186,7 +186,7 @@ class TestReclaimOnDeath:
             assert mw.strip_and_write({"frame": _frame(2)}).get("frame") is not None  # исчерпан
             # Мёртвый читатель c0 держал оба слота (не отпустил) → reclaim освобождает.
             assert mw.reclaim_reader("c0") == 2
-            assert mw._slot_refcount == [0, 0]
+            assert mw._pool._refcount == [0, 0]
             assert mw.frame_slots_reclaimed == 2
             # free-list восстановлен → loan снова проходит.
             assert "frame" not in mw.strip_and_write({"frame": _frame(3)})
@@ -208,11 +208,11 @@ class TestReclaimOnDeath:
         mw = _loan_mw(monkeypatch, coll=1, num_consumers=2)
         try:
             mw.strip_and_write({"frame": _frame(0)})
-            assert mw._slot_refcount[0] == 2
+            assert mw._pool._refcount[0] == 2
             assert mw.reclaim_reader("c0") == 1  # c0 умер → -1
-            assert mw._slot_refcount[0] == 1  # c1 ещё держит
+            assert mw._pool._refcount[0] == 1  # c1 ещё держит
             assert mw.reclaim_reader("c1") == 1  # c1 умер → освобождён
-            assert mw._slot_refcount[0] == 0
+            assert mw._pool._refcount[0] == 0
         finally:
             mw.release_owned_memory()
 
@@ -224,11 +224,11 @@ class TestReclaimOnDeath:
             idx = item["shm_index"]
             gen = mw._read_own_slot_generation(idx)
             mw.release_slots([{"index": idx, "generation": gen, "reader": "c0"}])  # c0 отпустил
-            assert mw._slot_refcount[idx] == 1
+            assert mw._pool._refcount[idx] == 1
             assert mw.reclaim_reader("c0") == 0  # c0 уже в released → пропуск
-            assert mw._slot_refcount[idx] == 1
+            assert mw._pool._refcount[idx] == 1
             assert mw.reclaim_reader("c1") == 1  # c1 умер держа → освобождён
-            assert mw._slot_refcount[idx] == 0
+            assert mw._pool._refcount[idx] == 0
         finally:
             mw.release_owned_memory()
 
@@ -241,13 +241,13 @@ class TestReclaimOnDeath:
 
 class TestAcquireLoanSlot:
     def test_rotates_and_returns_none_when_full(self, monkeypatch):
-        """_acquire_loan_slot: ротация курсора; None когда все заняты."""
+        """H-задача: acquire делегирован в пул — ротация курсора; None когда все заняты."""
         monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
         mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="s", coll=3)
-        assert mw._acquire_loan_slot() == 0
-        assert mw._acquire_loan_slot() == 1
-        assert mw._acquire_loan_slot() == 2
-        assert mw._acquire_loan_slot() == 0  # курсор обернулся, слоты ещё «свободны» (refcount 0)
+        assert mw._pool.acquire() == 0
+        assert mw._pool.acquire() == 1
+        assert mw._pool.acquire() == 2
+        assert mw._pool.acquire() == 0  # курсор обернулся, слоты ещё «свободны» (refcount 0)
         # Занять все вручную → None.
-        mw._slot_refcount = [1, 1, 1]
-        assert mw._acquire_loan_slot() is None
+        mw._pool._refcount = [1, 1, 1]
+        assert mw._pool.acquire() is None
