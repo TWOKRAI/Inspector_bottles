@@ -319,9 +319,9 @@ class TestG3HandleCache:
         r2 = consumer.restore_frame({"data": dict(item)}).get("frame")
         assert r1 is not None and r2 is not None
         # Один и тот же shm_actual_name → ровно 1 закэшированный handle (не переоткрыт).
-        assert len(consumer._shm_handle_cache) == 1
+        assert len(consumer._reader._cache) == 1
         consumer.close_handle_cache()
-        assert len(consumer._shm_handle_cache) == 0
+        assert len(consumer._reader._cache) == 0
         prod._mm.close_all()
 
     def test_no_cache_by_default(self):
@@ -329,7 +329,7 @@ class TestG3HandleCache:
         item = prod.strip_and_write({"frame": _frame(16, 16)})
         consumer = FrameShmMiddleware(MemoryManager(), owner="c", slot="s")  # cache off
         consumer.restore_frame({"data": dict(item)})
-        assert len(consumer._shm_handle_cache) == 0  # без кэша handle не хранится
+        assert len(consumer._reader._cache) == 0  # без кэша handle не хранится
         prod._mm.close_all()
 
 
@@ -400,7 +400,7 @@ class TestH4CacheRealloc:
         r1b = consumer.restore_frame({"data": dict(item1)}).get("frame")
         assert r1a is not None and int(r1a.min()) == 11
         assert r1b is not None and int(r1b.min()) == 11
-        assert len(consumer._shm_handle_cache) == 1, "один и тот же shm_actual_name — 1 handle"
+        assert len(consumer._reader._cache) == 1, "один и тот же shm_actual_name — 1 handle"
 
         # Realloc (рост кадра) — свежая инкарнация имени; кэш обязан подхватить новое имя,
         # а не отдать замороженный кадр №1 (H4).
