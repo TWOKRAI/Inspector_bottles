@@ -171,14 +171,28 @@ class PipelineExecutor:
 
             # Тайминг полезной итерации (chain-обработка + send), без учёта
             # ожидания на пустой очереди. perf_counter (не monotonic): работа
-            # subмиллисекундная, а monotonic на Windows имеет ~15мс гранулярность.
+            # субмиллисекундная, а monotonic на Windows имеет ~15мс гранулярность.
             t_start = time.perf_counter()
+
+            # Ф7 G.5.c: снять view-мету ВХОДНЫХ items ДО прогона — цепочка может
+            # заменить item/frame, а re-check относится к ВХОДНОМУ кадру (пока плагины
+            # его читали, writer мог обернуть кольцо и перезаписать слот).
+            view_checks = self._collect_view_checks(items)
 
             # Прогнать items через chain плагинов
             items = self._execute_chain(items)
 
             # Если items пустой после chain — ничего не отправляем
             if not items:
+                self._cycle_metrics.record(time.perf_counter() - t_start)
+                continue
+
+            # Ф7 G.5.c (В1-пол by-construction): post-use re-check zero-copy view.
+            # Если входной слот перезаписан под живым view за время обработки —
+            # результат построен на порванных пикселях → ДРОП батча (не шлём),
+            # счётчик frame_stale_drops (в middleware) → heartbeat. Безопасность
+            # УДЕРЖАНИЯ view, которой не даёт read-moment seqlock (G.5.b).
+            if view_checks and not self._frame_views_valid(view_checks):
                 self._cycle_metrics.record(time.perf_counter() - t_start)
                 continue
 
@@ -212,6 +226,25 @@ class PipelineExecutor:
             self._steps_dirty = False
         result = self._active_runnable.execute(items, None)
         return result.frame
+
+    def _collect_view_checks(self, items: list[dict]) -> list[tuple[str, int]]:
+        """Ф7 G.5.c: снять (имя_сегмента, поколение_на_чтении) с входных zero-copy
+        view-items. Пусто, если zero-copy не использовался (нет middleware / нет
+        маркера ``_frame_is_view``) — ноль оверхеда на не-view пути."""
+        if self._shm is None:
+            return []
+        checks: list[tuple[str, int]] = []
+        for it in items:
+            if it.get("_frame_is_view"):
+                name = it.get("_shm_view_name")
+                if name:
+                    checks.append((name, int(it.get("_shm_view_generation", -1))))
+        return checks
+
+    def _frame_views_valid(self, view_checks: list[tuple[str, int]]) -> bool:
+        """Ф7 G.5.c: все ли входные view пережили обработку (слот не перезаписан).
+        Любой drift → False (middleware уже учёл frame_stale_drops) → батч дропается."""
+        return all(self._shm.frame_view_valid(name, gen) for name, gen in view_checks)
 
     def _build_active_steps(self) -> list[RunnableStep]:
         """Шаги chain на текущем breaker-состоянии, в порядке плагинов.

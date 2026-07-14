@@ -124,6 +124,10 @@ class FrameShmMiddleware:
         # M2c: torn/дропнутые cross-process seqlock-чтения (raw-путь middleware —
         # manager считает свои, но raw-путь его не проходит). Агрегируется в get_stats.
         self.frame_torn_reads = 0
+        # Ф7 G.5.c: post-use re-check zero-copy view — слот перезаписан под живым view
+        # (consumer отстал > глубины кольца), результат дропнут. Plain int по образцу
+        # frame_torn_reads; агрегируется в get_stats → heartbeat → state.shm.
+        self.frame_stale_drops = 0
         # M2d: причина последнего сбоя записи — для громкого fallback-лога.
         self._last_write_error = ""
         # M2a: троттлинг «frame не восстановлен» (штатный drop после G.7, не ERROR-спам).
@@ -335,6 +339,43 @@ class FrameShmMiddleware:
             return read_single_frame(shm.buf, verify_seqlock=seqlock, copy=True)
         finally:
             shm.close()
+
+    def frame_view_valid(self, shm_view_name: str, gen_at_read: int) -> bool:
+        """Ф7 G.5.c — post-use re-check: жив ли ещё zero-copy view (слот не перезаписан).
+
+        В1-пол by-construction. После того как consumer ДОЧИТАЛ view (плагины
+        отработали над кадром), сверяем ТЕКУЩЕЕ поколение слота с поколением на момент
+        чтения. Совпало → writer НЕ обёрнул кольцо на этот слот за время обработки, view
+        валиден. Разошлось (в т.ч. writer в процессе записи = нечётное поколение) →
+        слот перезаписан под живым view (consumer отстал больше глубины кольца) → drop
+        результата (счётчик ``frame_stale_drops``), НЕ порча. Поколение монотонно
+        растёт на каждую запись слота (seqlock), поэтому любой wrap кольца обратно на
+        этот слот обнаруживается надёжно (даже полный оборот даёт gen+2·depth ≠ gen).
+
+        Использует ТОТ ЖЕ кэшированный handle, что и чтение (executor и DataReceiver
+        делят один middleware) — без нового open. Эвикция/смена handle между чтением и
+        re-check → сегмент мог уехать → консервативно невалиден (drop, не порча).
+
+        Args:
+            shm_view_name: фактическое OS-имя сегмента (мета ``_shm_view_name``).
+            gen_at_read: поколение слота на момент чтения (мета ``_shm_view_generation``);
+                < 0 = view выдан без seqlock (не должно происходить) → невалиден.
+        """
+        if gen_at_read < 0:
+            self.frame_stale_drops += 1
+            return False
+        shm = self._shm_handle_cache.get(shm_view_name)
+        if shm is None:
+            # handle эвиктнут/сменился → сегмент мог быть закрыт/переоткрыт: не можем
+            # гарантировать целостность view → консервативный drop.
+            self.frame_stale_drops += 1
+            return False
+        from ...shared_resources_module.memory.format import read_generation
+
+        if read_generation(shm.buf) == gen_at_read:
+            return True
+        self.frame_stale_drops += 1
+        return False
 
     # ------------------------------------------------------------------
     # Единое ядро записи кадра в SHM (Ф7 G.3a — канон generic)

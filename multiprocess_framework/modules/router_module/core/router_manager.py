@@ -1098,6 +1098,9 @@ class RouterManager(ChannelRoutingManager):
             "frame_pickle_fallbacks": sum(getattr(mw, "frame_pickle_fallbacks", 0) for mw in self._frame_middlewares),
             # M2c: torn/дропнутые cross-process seqlock-чтения (raw-путь middleware).
             "frame_torn_reads": sum(getattr(mw, "frame_torn_reads", 0) for mw in self._frame_middlewares),
+            # Ф7 G.5.c: post-use re-check zero-copy view — слот перезаписан под живым
+            # view (consumer отстал > глубины кольца), результат дропнут (не порча).
+            "frame_stale_drops": sum(getattr(mw, "frame_stale_drops", 0) for mw in self._frame_middlewares),
             # Ф7 G.4.a: дроп из полных data-очередей (drop_oldest) — surface из
             # queue_registry (дешёвый property, не полный get_stats), чтобы heartbeat
             # довёл его до state.shm.* тем же путём, что и SHM-счётчики. «Дроп data виден».
