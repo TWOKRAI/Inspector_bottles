@@ -1,8 +1,10 @@
 ---
 name: project_g5_ownership_decision
-description: Ф7 G.5 — владелец решил делать ОБА примитива владения слотами сразу (кольцо+seqlock + owner-mediated loan/release), GUI остаётся copy-out
-metadata:
+description: "Ф7 G.5 — владелец решил делать ОБА примитива владения слотами сразу (кольцо+seqlock + owner-mediated loan/release), GUI остаётся copy-out"
+metadata: 
+  node_type: memory
   type: project
+  originSessionId: 1684d728-d6e8-40c2-b56d-58c3bce41aa7
 ---
 
 Ф7 G.5 (hot-path, «главный риск фазы» — вобрал протокол владения из G.4 по Варианту A) — решения владельца 2026-07-14:
@@ -27,6 +29,6 @@ metadata:
 - G.5.c ✅ (a45a782c) — **В1-пол by-construction**: post-use re-check поколения в PipelineExecutor (между _execute_chain и _send_results) → drift → drop батча + `frame_stale_drops`→heartbeat. Zero-copy тракт теперь БЕЗОПАСЕН (read-moment seqlock + hold-duration re-check); kill-9 читателя безвреден.
 - В3 дизайн ✅ (§8 g5-execution-plan, коммит e31340f7) — протокол end-to-end, решённые развилки.
 - G.5.d-1 ✅ (6a0ce35f) — owner-side free-list + loan-on-write + refcount(owner-only) + громкий drop-на-источнике при исчерпании (`frame_loan_exhausted`→heartbeat); drop проведён через 3 write-входа (send-mw→None); off=слепой round-robin бит-в-бит. БЕЗ release → под флагом кольцо исчерпается за coll кадров (ожидаемо).
-- **G.5.d-2 — ОСТАЛОСЬ (release-loop, кросс-процессный):** consumer копит release-тикеты в точке re-check (executor) → батч/async флаш через system-канал → owner-handler декрементит refcount (generation/incarnation-guard). Механизм подтверждён: `router_manager.register_message_handler(key, handler)` → event_dispatcher. Middleware `release_slots(tickets)` + loan_gen-трекинг.
-- **G.5.e — ОСТАЛОСЬ:** reclaim-on-death (holder-трекинг по reader+incarnation) + kill-9 fault-injection обоих уровней.
-- Всё за `FW_SHM_LOAN_PROTOCOL` default-off. G.5 не мержится до полного 8-углового ревью (a→e).
+- G.5.d-2 ✅ (37a41096) — release-loop: executor копит тикеты в точке re-check → батч/async флаш (порог K=8 + на стопе) через system-канал `type=shm_release` → `register_message_handler`→`_handle_shm_release`→`release_slots` (generation-guard = чтение своего поколения под займом + dedup по reader). Замыкает кольцо.
+- G.5.e ✅ (c8975c36) — `reclaim_reader(dead)`: при fan-out мёртвый держал все занятые слоты → декремент за него (пропуск уже отпустивших); handler `shm_reclaim`. **Авто-триггер (ProcessMonitor confirmed-death → broadcast shm_reclaim) — финальный провод, НЕ доделан; В1 бэкстопит** (мёртвый держатель = исчерпание→drop, не corruption).
+- **G.5 КОД ЗАВЕРШЁН (a→e)**, framework 4594 passed, всё за `FW_SHM_LOAN_PROTOCOL`/`FW_SHM_ZERO_COPY`/`FW_DATA_PLANE_DICTS` default-off. Осталось до merge: **qex-reindex → 8-угловое ревью → ревью Fable** (директивы: архитектура+эффективность, [[project_memory_module_consolidation]]). Резидуалы: авто-триггер reclaim; `num_consumers` из топологии (дефолт 1); реальный кросс-процессный kill-9 E2E → G.7 flip+soak.
