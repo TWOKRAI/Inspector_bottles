@@ -74,13 +74,49 @@ def test_hp5_without_owner_incarnation_reuses_name_and_confuses_frames():
 
 
 def test_hp5_owner_incarnation_prevents_frame_confusion():
-    """ФИКС (after): owner+incarnation → имена различны; старое in-flight имя НЕ
-    возвращает новый кадр (сегмент ушёл → drop, либо держит старый контент)."""
+    """ФИКС (after): owner+incarnation → имена различны; FRESH-open старого имени после
+    switch НЕ возвращает новый кадр. H6: ассерты БЕЗУСЛОВНЫ по обеим веткам."""
     name_a, name_b, frame_old = _switch_and_probe(owner_incarnation=True)
     assert name_a != name_b, "с флагом каждое создание — свежая инкарнация (нет reuse)"
-    # Старое имя никогда не отдаёт НОВЫЙ кадр (222): либо None (ушёл), либо старый (111).
-    if frame_old is not None:
+    # H6: branch-ассерты явные — а не «if frame_old is not None» (который скипался 15/15).
+    if frame_old is None:
+        # Ожидаемо и УТВЕРЖДАЕТСЯ: сегмент name_a ушёл (unlink) → in-flight честно дропнется.
+        assert frame_old is None
+    else:
+        # Если сегмент ещё жив (держится где-то) — обязан отдать СТАРЫЙ кадр (111), не 222.
         assert int(frame_old.max()) != 222, "старое имя не должно читать новый кадр"
+
+
+def test_hp5_inflight_held_handle_reads_old_frame_not_new():
+    """H6 (контентная безопасность): реальный in-flight держатель открыл сегмент ДО
+    switch и держит handle. После release+recreate чтение через ЭТОТ handle обязано
+    вернуть СТАРЫЙ кадр (111), НИКОГДА новый (222) — с owner_incarnation по построению."""
+    mm = MemoryManager(owner_incarnation=True)
+    inflight = None
+    try:
+        mm.create_memory_dict("cam", {"of": (1, _SHAPE, "uint8")}, coll=2)
+        mm.write_images("cam", "of", [np.full(_SHAPE, 111, _DTYPE)], 0)
+        name_a = mm.get_actual_shm_name("cam", "of", 0)
+
+        # In-flight держатель открывает сегмент ДО switch (реальная гонка «кадр в полёте»).
+        inflight = shared_memory.SharedMemory(name=name_a, create=False)
+        before = fmt.read_single_frame(inflight.buf, verify_seqlock=False)
+        assert before is not None and int(before.max()) == 111
+
+        # Switch: release + recreate + записать НОВЫЙ кадр (222) в свежую инкарнацию.
+        mm.release_process_memory("cam")
+        mm.create_memory_dict("cam", {"of": (1, _SHAPE, "uint8")}, coll=2)
+        mm.write_images("cam", "of", [np.full(_SHAPE, 222, _DTYPE)], 0)
+        name_b = mm.get_actual_shm_name("cam", "of", 0)
+        assert name_a != name_b
+
+        # Чтение через УДЕРЖАННЫЙ handle: старый сегмент (111), не перепутанный новый (222).
+        after = fmt.read_single_frame(inflight.buf, verify_seqlock=False)
+        assert after is not None and int(after.max()) == 111, "in-flight держатель прочитал НОВЫЙ кадр (confusion)"
+    finally:
+        if inflight is not None:
+            inflight.close()
+        mm.close_all()
 
 
 def test_owner_incarnation_names_distinct_per_owner():

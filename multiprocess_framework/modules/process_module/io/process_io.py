@@ -44,6 +44,9 @@ class ProcessIO:
     def __init__(self, process: IProcessModule) -> None:
         self._p = process
         self._msg = MessageAdapter(sender=process.name)
+        # H7 (Ф7 G.3): round-robin индекс записи per (region, slot) — тот же контракт,
+        # что в FrameShmMiddleware (снят сломанный find_free_index, всегда 0).
+        self._shm_write_index: dict[tuple, int] = {}
 
     # ---- IPC: исходящие сообщения ----
 
@@ -80,19 +83,25 @@ class ProcessIO:
         slot: str,
         frames: list,
     ) -> Optional[dict]:
-        """Записать кадры в SHM-слот с автоматическим подбором индекса.
+        """Записать кадры в SHM-слот (round-robin по слотам, тот же контракт, что
+        FrameShmMiddleware — H7, Ф7 G.3).
 
         Returns:
-            dict {"shm_name": slot, "shm_index": idx, "shm_actual_name": actual}
-            если запись успешна; None если memory_manager недоступен или
-            запись не удалась.
+            dict {"shm_name", "shm_index", "shm_actual_name", "shm_seqlock"} при
+            успехе; None если memory_manager недоступен, слот не создан или запись
+            не удалась. ``shm_seqlock`` — АВТОРИТЕТНО из get_memory_data (иначе
+            cross-process reader читал бы не с того offset).
         """
         mm = getattr(self._p, "memory_manager", None)
         if not mm:
             return None
-        idx = mm.find_free_index(region, slot)
-        if idx is None:
-            idx = 0
+        md = mm.get_memory_data(region, slot)
+        if not md:
+            return None
+        coll = md.get("coll", {}).get(slot, 1) or 1
+        key = (region, slot)
+        idx = self._shm_write_index.get(key, 0) % coll
+        self._shm_write_index[key] = idx + 1
         actual = mm.write_images(region, slot, frames, idx)
         if not actual:
             return None
@@ -100,6 +109,7 @@ class ProcessIO:
             "shm_name": slot,
             "shm_index": idx,
             "shm_actual_name": actual,
+            "shm_seqlock": bool(md.get("seqlock", False)),  # H7: контракт как в middleware
         }
 
     # ---- Logs ----
