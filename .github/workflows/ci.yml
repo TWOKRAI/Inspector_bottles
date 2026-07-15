@@ -110,6 +110,13 @@ jobs:
       - name: Тесты фреймворка (headless)
         run: uv run python scripts/run_framework_tests.py -q -p no:cacheprovider
 
+      # Ф7 G.7 (0.4): характеризация сборки прод-рецептов прототипа. run_framework_tests
+      # гоняет только modules/ (свой pytest.ini, cwd=modules) → backend/tests прототипа
+      # в CI не попадали и RED мог гнить молча (был красным на main после merge G.3/G.4).
+      # Headless, без железа; Qt-offscreen уже настроен в env этого job.
+      - name: Характеризация прод-рецептов прототипа (backend/tests)
+        run: uv run python -m pytest multiprocess_prototype/backend/tests -q -p no:cacheprovider
+
   examples-smoke:
     name: examples-smoke (minimal_app, live headless boot + IPC)
     runs-on: ubuntu-latest

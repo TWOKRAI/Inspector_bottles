@@ -112,6 +112,10 @@ testpaths = [
     "multiprocess_framework/modules/state_store_module/tests",
     "multiprocess_prototype/tests",
     "multiprocess_prototype/state_store/tests",
+    # Ф7 G.7 (0.4): характеризация сборки прод-рецептов (build_characterization +
+    # run_app_prototype). Headless, без железа. В дефолтном гейте — чтобы RED на
+    # прод-рецептах больше НЕ гнил молча (был красным на main после merge G.3/G.4).
+    "multiprocess_prototype/backend/tests",
 ]
 norecursedirs = [".git", "__pycache__", ".venv"]
 python_files = ["test_*.py"]
