@@ -63,6 +63,40 @@ class TestExtrasPath:
         assert gc.process_name == "p"  # build прошёл без ошибок
 
 
+class TestShmKeysFromExtras:
+    """Ф7 финальное ревью фазы G: SHM-ключи владельца проводятся из extras рецепта.
+
+    Раньше «заявлено, но не проведено»: frame_ring_depth/copy_out_targets в рецепте
+    молча отбрасывались (extra=ignore) и не долетали до GenericProcess._init_data_pipeline.
+    """
+
+    def test_frame_ring_depth_extras_to_config(self):
+        cfg = ProcessConfig(process_name="cam0", extras={"frame_ring_depth": 6})
+        gc = cfg.as_generic_config()
+        assert gc.frame_ring_depth == 6
+        # last mile: ключ доезжает до proc_dict["config"] — то, что читает app_cfg.
+        _, proc_dict = gc.build()
+        assert proc_dict["config"]["frame_ring_depth"] == 6
+
+    def test_copy_out_targets_extras_to_config(self):
+        cfg = ProcessConfig(process_name="seg", extras={"copy_out_targets": ["display_0", "hmi"]})
+        gc = cfg.as_generic_config()
+        assert gc.copy_out_targets == ["display_0", "hmi"]
+        _, proc_dict = gc.build()
+        assert proc_dict["config"]["copy_out_targets"] == ["display_0", "hmi"]
+
+    def test_shm_keys_absent_keep_defaults(self):
+        """Без ключей в рецепте — дефолты (0/[]): middleware трактует как «не задано»."""
+        gc = ProcessConfig(process_name="p").as_generic_config()
+        assert gc.frame_ring_depth == 0
+        assert gc.copy_out_targets == []
+
+    def test_zero_ring_depth_not_propagated(self):
+        """Явный 0 = «не задано» — в base_kwargs не пробрасывается (дефолт схемы тот же)."""
+        cfg = ProcessConfig(process_name="p", extras={"frame_ring_depth": 0})
+        assert cfg.as_generic_config().frame_ring_depth == 0
+
+
 class TestTypedPriorityOverExtras:
     """При обоих заданных typed-поле побеждает extras (shorthand-приоритет)."""
 

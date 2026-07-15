@@ -221,6 +221,16 @@ class ProcessConfig(SchemaBase):
             base_kwargs["inspector"] = inspector
         if io_peek:
             base_kwargs["io_peek"] = io_peek
+        # Ф7 G.4.b/G.7 (финальное ревью фазы G): SHM-ключи процесса-владельца из рецепта.
+        # Живут ТОЛЬКО в extras (typed-поля ProcessConfig не плодим — рычаг C6 №1);
+        # раньше объявленные в доках ключи молча отбрасывались Pydantic'ом (extra=ignore)
+        # и НЕ долетали до GenericProcess — «заявлено, но не проведено».
+        frame_ring_depth = _pick("frame_ring_depth", 0)
+        copy_out_targets = _pick("copy_out_targets", [])
+        if frame_ring_depth:
+            base_kwargs["frame_ring_depth"] = int(frame_ring_depth)
+        if copy_out_targets:
+            base_kwargs["copy_out_targets"] = list(copy_out_targets)
 
         if plugin_configs:
             return GenericProcessConfig.from_plugins(

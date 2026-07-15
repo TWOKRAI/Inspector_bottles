@@ -107,9 +107,11 @@ class GenericProcess(ProcessModule):
         # Ф7 G.7: num_consumers loan-протокола (В3) = число loan-aware потребителей кадра
         # этого owner'а из топологии (chain_targets минус copy-out/GUI). 0 → middleware
         # не создаёт пул (round-robin В1), исключая исчерпание free-list на GUI-only fan-out.
-        # ``copy_out_targets`` из конфига процесса (рецепт) перекрывает дефолт {"gui"} —
-        # мульти-дисплей (display_0/hmi) объявляет своих copy-out читателей сам.
-        copy_out_targets = app_cfg.get("copy_out_targets")
+        # ``copy_out_targets`` из конфига процесса (рецепт: extras.copy_out_targets)
+        # перекрывает дефолт {"gui"} — мульти-дисплей (display_0/hmi) объявляет своих
+        # copy-out читателей сам. Пусто/отсутствует = «не задано» → дефолт (typed-поле
+        # конфига даёт [] всем процессам — иначе дефолт {"gui"} молча отключился бы).
+        copy_out_targets = app_cfg.get("copy_out_targets") or None
         num_consumers = _count_loan_aware_consumers(chain_targets, copy_out_targets)
         copy_out_view = sorted(_COPY_OUT_TARGETS if copy_out_targets is None else set(copy_out_targets))
         self._log_debug(
