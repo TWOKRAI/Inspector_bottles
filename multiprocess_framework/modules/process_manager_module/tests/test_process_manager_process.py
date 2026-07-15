@@ -465,3 +465,57 @@ class TestProcessRelay:
 
         assert result["success"] is False
         assert "queue dead" in result["error"]
+
+
+class TestLogActiveFeatureFlags:
+    """Boot-лог FW_*-маркеров в оркестраторе (наблюдаемость, 0.2/G.F)."""
+
+    def _bare_pmp(self) -> ProcessManagerProcess:
+        pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
+        pmp._log_info = MagicMock()
+        pmp._log_warning = MagicMock()
+        pmp._log_error = MagicMock()
+        return pmp
+
+    def test_all_default_logs_neutral_line(self, monkeypatch) -> None:
+        # given чистое окружение (все флаги на дефолте)
+        from ...config_module import feature_flags as ff
+
+        for name, spec in ff.FLAGS.items():
+            monkeypatch.delenv(name, raising=False)
+            for alias in spec.aliases:
+                monkeypatch.delenv(alias, raising=False)
+
+        pmp = self._bare_pmp()
+        pmp._log_active_feature_flags()
+
+        # then одна info-строка «все на дефолте», без warning/error
+        pmp._log_info.assert_called_once()
+        assert "дефолт" in pmp._log_info.call_args[0][0]
+        pmp._log_warning.assert_not_called()
+        pmp._log_error.assert_not_called()
+
+    def test_active_flag_is_reported_with_source(self, monkeypatch) -> None:
+        # given один флаг включён через env
+        monkeypatch.setenv("FW_SHM_SEQLOCK", "1")
+
+        pmp = self._bare_pmp()
+        pmp._log_active_feature_flags()
+
+        # then info-строка называет флаг и источник env
+        msg = pmp._log_info.call_args[0][0]
+        assert "FW_SHM_SEQLOCK" in msg and "env" in msg
+
+    def test_requires_violation_emits_warning(self, monkeypatch) -> None:
+        # given zero-copy включён без своих зависимостей
+        for name in ("FW_SHM_HANDLE_CACHE", "FW_SHM_OWNER_INCARNATION"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("FW_SHM_ZERO_COPY", "1")
+
+        pmp = self._bare_pmp()
+        pmp._log_active_feature_flags()
+
+        # then advisory-нарушение уходит в warning
+        assert pmp._log_warning.called
+        warned = " ".join(c[0][0] for c in pmp._log_warning.call_args_list)
+        assert "FW_SHM_ZERO_COPY" in warned
