@@ -25,18 +25,27 @@ from .source_producer import SourceProducer
 # и release loan-протокола (В3) НЕ шлют, поэтому в num_consumers (refcount владельца) НЕ
 # входят. Владелец, чей fan-out состоит ТОЛЬКО из них, работает по В1 (round-robin) без
 # loan (иначе refcount застревает → free-list исчерпание → drop-на-источнике).
+# Ф7 ревью фазы G: ДЕФОЛТ, а не истина — имя процесса-дисплея принадлежит приложению,
+# не framework'у. Рецепт/конфиг процесса перекрывает списком ``copy_out_targets``
+# (мульти-дисплей: display_0/display_1/hmi — иначе они считались бы loan-aware, release
+# от них не пришёл бы → free-list исчерпание). Полный вынос в топологию (роль
+# потребителя на wire, не имя) — G.7/G.F.
 _COPY_OUT_TARGETS: frozenset[str] = frozenset({"gui"})
 
 
-def _count_loan_aware_consumers(chain_targets) -> int:
+def _count_loan_aware_consumers(chain_targets, copy_out_targets=None) -> int:
     """Число loan-aware потребителей кадра (шлют release) среди ``chain_targets``.
 
-    copy-out терминалы (:data:`_COPY_OUT_TARGETS`) исключаются — они кадр копируют и
-    release НЕ шлют. Результат = ``num_consumers`` (refcount владельца, дизайн §8.2 G.5):
-    занижение безопасно (В1 re-check дропнет), завышение → loan-exhaustion, поэтому
-    считаем ТОЛЬКО реально релизящих потребителей.
+    copy-out терминалы исключаются — они кадр копируют и release НЕ шлют.
+    ``copy_out_targets`` — из конфига процесса (``app_cfg["copy_out_targets"]``,
+    рецепт-перекрытие для мульти-дисплеев); None → дефолт :data:`_COPY_OUT_TARGETS`.
+    Цели дедуплицируются: дубль-target шлёт release ОДИН раз (dedup по reader в пуле),
+    а завышенный refcount застрял бы навсегда. Результат = ``num_consumers``
+    (refcount владельца, дизайн §8.2 G.5): занижение безопасно (В1 re-check дропнет),
+    завышение → loan-exhaustion, поэтому считаем ТОЛЬКО реально релизящих потребителей.
     """
-    return sum(1 for t in (chain_targets or []) if t not in _COPY_OUT_TARGETS)
+    copy_out = _COPY_OUT_TARGETS if copy_out_targets is None else frozenset(copy_out_targets)
+    return len({t for t in (chain_targets or []) if t not in copy_out})
 
 
 class GenericProcess(ProcessModule):
@@ -98,10 +107,14 @@ class GenericProcess(ProcessModule):
         # Ф7 G.7: num_consumers loan-протокола (В3) = число loan-aware потребителей кадра
         # этого owner'а из топологии (chain_targets минус copy-out/GUI). 0 → middleware
         # не создаёт пул (round-robin В1), исключая исчерпание free-list на GUI-only fan-out.
-        num_consumers = _count_loan_aware_consumers(chain_targets)
+        # ``copy_out_targets`` из конфига процесса (рецепт) перекрывает дефолт {"gui"} —
+        # мульти-дисплей (display_0/hmi) объявляет своих copy-out читателей сам.
+        copy_out_targets = app_cfg.get("copy_out_targets")
+        num_consumers = _count_loan_aware_consumers(chain_targets, copy_out_targets)
+        copy_out_view = sorted(_COPY_OUT_TARGETS if copy_out_targets is None else set(copy_out_targets))
         self._log_debug(
             f"GenericProcess[{self.name}]: loan num_consumers={num_consumers} "
-            f"(chain_targets={list(chain_targets)}, copy-out {sorted(_COPY_OUT_TARGETS)} исключены)"
+            f"(chain_targets={list(chain_targets)}, copy-out {copy_out_view} исключены)"
         )
         shm_middleware = FrameShmMiddleware(
             memory_manager=self.memory_manager,

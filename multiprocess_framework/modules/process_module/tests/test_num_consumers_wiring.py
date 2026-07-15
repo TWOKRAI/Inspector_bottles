@@ -41,3 +41,22 @@ def test_empty_targets_is_zero():
 def test_multiple_real_targets():
     assert _count_loan_aware_consumers(["a", "b", "gui"]) == 2
     assert _count_loan_aware_consumers(["a", "b", "c"]) == 3
+
+
+def test_copy_out_override_from_config():
+    """Ф7 ревью фазы G: рецепт/конфиг перекрывает дефолт {"gui"} — мульти-дисплей
+    (display_0/display_1) объявляет своих copy-out читателей сам, иначе они считались
+    бы loan-aware → release не пришёл бы → free-list исчерпание."""
+    targets = ["seg", "display_0", "display_1"]
+    # Без перекрытия display_* считаются loan-aware (дефолт знает только "gui").
+    assert _count_loan_aware_consumers(targets) == 3
+    # С перекрытием — только seg шлёт release.
+    assert _count_loan_aware_consumers(targets, ["display_0", "display_1"]) == 1
+    # Явный пустой список = все цели loan-aware (даже gui).
+    assert _count_loan_aware_consumers(["gui"], []) == 1
+
+
+def test_duplicate_targets_deduplicated():
+    """Дубль-target не завышает refcount: release от него придёт ОДИН раз (dedup по
+    reader в пуле), завышенный refcount застрял бы навсегда."""
+    assert _count_loan_aware_consumers(["seg", "seg", "gui"]) == 1

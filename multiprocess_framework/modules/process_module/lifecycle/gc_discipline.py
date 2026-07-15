@@ -49,7 +49,19 @@ class GcDiscipline:
         permanent (иначе он никогда не соберётся). Затем ``gc.freeze()`` — живые объекты
         в permanent-поколение. Возвращает True, если заморозка применена.
         """
-        if self._frozen or not self._flag("FW_GC_FREEZE"):
+        if self._frozen:
+            return False
+        if not self._flag("FW_GC_FREEZE"):
+            # Ф7 ревью фазы G: FW_GC_SCHEDULED без FW_GC_FREEZE — расписание НЕ
+            # применяется (сборка по расписанию имеет смысл только после заморозки
+            # стартовых объектов). Раньше это был ТИХИЙ no-op — оператор включал
+            # расписание и не получал ничего без единого лога («терять можно,
+            # молчать нельзя», ADR-SRM-012).
+            if self._flag("FW_GC_SCHEDULED"):
+                self._log(
+                    "GcDiscipline: FW_GC_SCHEDULED запрошен БЕЗ FW_GC_FREEZE — "
+                    "расписание НЕ применено (авто-GC остаётся); включите оба флага"
+                )
             return False
         gc.collect()
         gc.freeze()

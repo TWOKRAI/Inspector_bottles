@@ -17,9 +17,11 @@ reclaim) жила в транспортном `router_module/FrameShmMiddleware`
 мутирует ТОЛЬКО процесс-владелец (owner-side) — кросс-процессного atomic RMW в CPython нет по
 построению (см. §8 g5-плана, отклонение В2). Внутри процесса — **single-writer enforced**:
 
-- ``acquire``/``commit``/``abort`` зовёт РОВНО ОДИН поток-писатель источника. Реализация
-  связывает поток на первом ``acquire`` и бросает ``RuntimeError`` на втором ином потоке
-  (нарушение single-writer = громкий отказ, не тихая write-write порча). Кольцо —
+- ``acquire``/``commit``/``abort`` зовёт РОВНО ОДИН поток-писатель источника В КАЖДЫЙ
+  МОМЕНТ. Реализация связывает поток на первом ``acquire`` и бросает ``RuntimeError``
+  на втором ЖИВОМ потоке (нарушение single-writer = громкий отказ, не тихая write-write
+  порча); если связанный поток умер (G.8 drain→detach→stop воркера, затем create нового —
+  middleware/пул переживают воркера) — перепривязка к новому. Кольцо —
   single-writer-multi-reader (seqlock, ADR-SRM-011); два писателя в один слот seqlock НЕ ловит.
 - ``release``/``reclaim`` зовёт другой поток того же owner (message_processor, по IPC-тикетам/
   смерти соседа). Он трогает ТОЛЬКО опубликованные (READY, refcount>0) слоты и с WRITING-слотом

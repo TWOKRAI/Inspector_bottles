@@ -55,7 +55,7 @@ class FrameShmMiddleware:
 
     Args:
         memory_manager: MemoryManager из shared_resources_module (API write_images/
-            read_images/find_free_index/create_memory_dict). Может быть ``None`` —
+            read_images/create_memory_dict). Может быть ``None`` —
             запись деградирует в pickle-fallback (кадр остаётся в сообщении), но
             middleware всё равно должен быть зарегистрирован (Ф7 G.6 ревью, F3):
             иначе счётчик границ на этом пути не считает вовсе.

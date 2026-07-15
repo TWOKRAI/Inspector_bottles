@@ -52,6 +52,19 @@ class TestFreeze:
             gc.unfreeze()
             gc.enable()
 
+    def test_scheduled_without_freeze_warns_loudly(self, monkeypatch):
+        """Ф7 ревью фазы G: FW_GC_SCHEDULED без FW_GC_FREEZE — расписание НЕ применяется,
+        и это ГРОМКО (раньше — тихий no-op: оператор включал расписание и не получал
+        ничего без единого лога)."""
+        monkeypatch.delenv("FW_GC_FREEZE", raising=False)
+        monkeypatch.setenv("FW_GC_SCHEDULED", "1")
+        logs: list[str] = []
+        d = GcDiscipline(log=logs.append)
+        assert d.freeze_after_startup() is False
+        assert gc.isenabled() is True  # авто-GC не тронут
+        assert d.collect_scheduled(now=100.0) is False  # расписание не активно
+        assert any("БЕЗ FW_GC_FREEZE" in m for m in logs)  # тихого no-op больше нет
+
 
 class TestScheduledCollect:
     def test_noop_when_not_scheduled(self, monkeypatch):

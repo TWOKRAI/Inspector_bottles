@@ -9,8 +9,9 @@
 соглашением, ревью фазы G 2026-07-14):
 
 - **Single-writer enforced.** ``acquire``/``commit``/``abort`` зовёт РОВНО ОДИН поток-
-  писатель. Первый ``acquire`` связывает поток; второй иной поток → ``RuntimeError`` (не
-  тихая порча). Кадровое кольцо — single-writer-multi-reader (seqlock, ADR-SRM-011).
+  писатель В КАЖДЫЙ МОМЕНТ. Первый ``acquire`` связывает поток; второй ЖИВОЙ поток →
+  ``RuntimeError`` (не тихая порча); мёртвый связанный поток (G.8 drain→replace воркера)
+  → перепривязка. Кадровое кольцо — single-writer-multi-reader (seqlock, ADR-SRM-011).
 - **State-машина слота (lock-free disjointness).** ``acquire`` РЕЗЕРВИРУЕТ слот
   (``_reserved[idx]=True``, состояние WRITING, refcount==0); ``commit`` публикует
   (refcount=N, reserved→False, READY); ``abort`` отменяет loan без publish (reserved→False).
@@ -67,8 +68,15 @@ class LoanLedger:
         return self._depth
 
     def _bind_writer(self) -> None:
-        """Single-writer guard: первый ``acquire`` связывает поток-писатель; любой второй
-        иной поток → ``RuntimeError`` (нарушение single-writer, а не тихая write-write порча).
+        """Single-writer guard: первый ``acquire`` связывает поток-писатель; ВТОРОЙ
+        ЖИВОЙ поток → ``RuntimeError`` (нарушение single-writer, а не тихая
+        write-write порча).
+
+        Последовательная СМЕНА писателя легитимна (G.8 drain→detach→stop воркера,
+        затем create нового: middleware/пул переживают воркера) — «один писатель
+        В КАЖДЫЙ МОМЕНТ», а не «один навсегда». При несовпадении ident проверяем,
+        жив ли связанный поток (скан ``threading.enumerate`` — только на холодном
+        пути смены, не на hot-path): мёртв → перепривязка; жив → RuntimeError.
 
         release/reclaim идут на потоке message_processor владельца — они СЮДА не заходят
         (их поток легитимно другой; они трогают только READY-слоты). Проверка — один
@@ -77,13 +85,19 @@ class LoanLedger:
         ident = threading.get_ident()
         if self._writer_ident is None:
             self._writer_ident = ident
-        elif self._writer_ident != ident:
+            return
+        if self._writer_ident == ident:
+            return
+        # Холодный путь: ident сменился. Прежний писатель мёртв (G.8 drain→replace)
+        # → перепривязка; жив → два одновременных писателя, громкий отказ.
+        if any(t.ident == self._writer_ident for t in threading.enumerate()):
             raise RuntimeError(
                 "LoanLedger: обнаружен ВТОРОЙ писатель кадрового кольца "
                 f"(owner-thread={self._writer_ident}, нарушитель={ident}) — кольцо "
                 "рассчитано на ОДНОГО писателя (single-writer-multi-reader, seqlock). "
                 "Разнесите source и processing по разным процессам."
             )
+        self._writer_ident = ident
 
     def acquire(self) -> int | None:
         """Loan: зарезервировать СВОБОДНЫЙ слот (refcount==0 и не reserved) от курсора.

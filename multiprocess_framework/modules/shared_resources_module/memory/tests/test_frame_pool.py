@@ -262,11 +262,45 @@ class TestSingleWriterGuard:
         assert out["reclaimed"] == 1
 
     def test_guard_message_names_both_threads(self):
-        """Сообщение RuntimeError содержит оба ident (диагностируемость нарушения)."""
+        """Сообщение RuntimeError содержит оба ident (диагностируемость нарушения).
+
+        Писатель — ЖИВОЙ запаркованный поток (guard различает живого и мёртвого:
+        мёртвый → легитимная перепривязка G.8, живой → нарушение single-writer)."""
         p = LoanLedger(2)
-        p.acquire()
-        with pytest.raises(RuntimeError, match="ВТОРОЙ писатель"):
-            # эмулируем второй поток простым перебиндом ident-проверки нельзя —
-            # зовём из этого же потока после ручного сброса на «чужой» ident.
-            p._writer_ident = p._writer_ident + 1 if p._writer_ident else 1
-            p.acquire()
+        bound = threading.Event()
+        release = threading.Event()
+
+        def parked_writer():
+            p.acquire()  # связывает writer_ident на этот (живой) поток
+            bound.set()
+            release.wait(timeout=5.0)
+
+        t = threading.Thread(target=parked_writer)
+        t.start()
+        try:
+            assert bound.wait(timeout=5.0)
+            with pytest.raises(RuntimeError, match="ВТОРОЙ писатель"):
+                p.acquire()  # main — второй ЖИВОЙ поток
+        finally:
+            release.set()
+            t.join()
+
+    def test_dead_writer_thread_rebinds(self):
+        """Ф7 ревью фазы G: последовательная СМЕНА писателя легитимна (G.8
+        drain→detach→stop воркера, затем create нового — middleware/пул переживают
+        воркера). Связанный поток МЁРТВ → новый поток перепривязывается без ошибки;
+        guard ловит только двух ОДНОВРЕМЕННЫХ писателей."""
+        p = LoanLedger(3)
+        out: dict = {}
+
+        def first_writer():
+            out["idx"] = p.acquire()
+
+        t = threading.Thread(target=first_writer)
+        t.start()
+        t.join()  # первый писатель завершился (эквивалент drain→stop)
+        assert out["idx"] == 0
+        # main — НОВЫЙ писатель после смерти первого: перепривязка, не RuntimeError.
+        assert p.acquire() == 1
+        # После перепривязки main — полноправный писатель (повторный acquire ok).
+        assert p.acquire() == 2
