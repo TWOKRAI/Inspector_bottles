@@ -1,7 +1,7 @@
 ---
 name: project_memory_module_consolidation
 description: "Владелец хочет память ОДНИМ модулем (фасад/интерфейс/взаимозаменяемость, напр. Rust/iceoryx2), не размазанной по framework; директива на ревью Fable G.5"
-metadata: 
+metadata:
   node_type: memory
   type: feedback
   originSessionId: 1684d728-d6e8-40c2-b56d-58c3bce41aa7

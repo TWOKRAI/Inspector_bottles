@@ -1,7 +1,7 @@
 ---
 name: project_g5_ownership_decision
 description: "Ф7 G.5 — владелец решил делать ОБА примитива владения слотами сразу (кольцо+seqlock + owner-mediated loan/release), GUI остаётся copy-out"
-metadata: 
+metadata:
   node_type: memory
   type: project
   originSessionId: 1684d728-d6e8-40c2-b56d-58c3bce41aa7

@@ -1,7 +1,7 @@
 ---
 name: project_feature_flags_registry
 description: "Владелец: FW_* флаги разбросаны литералами — свести в единый реестр-модуль feature_flags.py (не ConfigStore); задача после H-память, до flip G.7"
-metadata: 
+metadata:
   node_type: memory
   type: project
   originSessionId: 2bbae9f7-11c0-4154-8369-2fd9c8dfa9bb
