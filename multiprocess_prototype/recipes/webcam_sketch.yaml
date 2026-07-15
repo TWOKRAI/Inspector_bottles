@@ -1,21 +1,21 @@
-# Рецепт webcam_sketch — рисование портрета роботом (3 дисплея + заморозка кадра).
+# Рецепт webcam_sketch — как phone_sketch, но источник кадров — ВЕБКАМЕРА.
 #
 # Тракт (линейный pipeline, 4 процесса — каждый питает свой дисплей):
-#   camera_0[capture] → seg[segmentation] → lines[edge_detection→blob_filter→strokes_to_points]
-#                                          → points[points_render→robot_draw]
+#   camera_0[capture] → seg[segmentation] → lines[crop→edge_detection→blob_filter→strokes_to_points→text_main→text_name(px)]
+#                                          → points[robot_scale(px→мм)→drawing_io→points_render→robot_draw]
+#
+# Масштаб под лист робота: strokes_to_points отдаёт путь в ПИКСЕЛЯХ (identity),
+# узел robot_scale вписывает кадр 640x480 в прямоугольник листа по углам ЛВ/ПН (мм).
+# Углы листа — live-tunable register-поля (x0/y0/x1/y1) → цель для пульта-дашборда.
+# Ориентация точек — как в phone_sketch (robot_scale/points_render swap_axes: true).
 #
 # Дисплеи (маршрутизация по процессу-отправителю):
-#   seg    → «Оригинал»  (человек на белом фоне, mediapipe)
+#   seg    → «Оригинал»  (кадр с вебкамеры после сегментации/коррекции)
 #   lines  → «Line-art»  (TEED-линии)
-#   points → «Карта точек» (точки + путь робота, что реально поедет)
+#   points → «Карта точек» (точки + путь робота)
 #
-# Рабочий процесс:
-#   1) живое превью всех трёх дисплеев;
-#   2) кнопка «Стоп камеры» (Services → Робот Delta) — заморозка кадра;
-#   3) подстройка параметров обработки/прореживания на статичном кадре (config-панели
-#      плагинов во вкладке Pipeline — все параметры live);
-#   4) кнопка «Отправить роботу» — текущие точки уходят роботу одной пачкой
-#      (RobotClient.draw чанкует по 100, робот рисует и останавливается).
+# Источник — нода capture (cv2.VideoCapture, device_id=0):
+#   камера стартует автоматически (auto_start), кадры идут через seg → TEED → точки → робот.
 #
 # === Сегментация (человек на белом) требует mediapipe ===
 #   uv pip install mediapipe   (модель selfie_segmenter.tflite уже в ~/.cache/sketch_robot)
@@ -26,128 +26,387 @@
 #   затем в devices ниже host/port → 127.0.0.1/5021.
 #   python multiprocess_prototype/run.py webcam_sketch
 name: webcam_sketch
-version: 4
+version: 2
 description: "Портрет с вебкамеры → сегментация → TEED → точки → рисование роботом"
 
 devices:
   - id: robot_main
-    name: "Робот Delta"
+    name: Робот Delta
     kind: robot
     protocol: delta_universal3
-    transport: {type: tcp, host: 192.168.1.7, port: 502, unit_id: 2}
-    params: {word_order: little, feed_poll_s: 0.05, telemetry_interval_s: 0.5}
-
+    transport:
+      type: tcp
+      host: 192.168.1.7
+      port: 502
+      unit_id: 2
+    params:
+      word_order: little
+      feed_poll_s: 0.05
+      telemetry_interval_s: 0.5
+      # Дефолты рисования (применяются перед каждым проходом, даже без правки пульта):
+      draw_speed_pct: 4         # скорость рисования (перо по бумаге), % — медленно, контакт пера
+      draw_travel_pct: 100      # скорость переезда (перо вверх: между штрихами/домой), % — быстро
+      draw_accel: 25000         # ускорение рисования, мм/с² — выше = резче на изгибах (быстрее линии)
+      pen_down_mm: -108.0       # перо опущено к плоскости листа (рисование)
+      pen_up_mm: -102.0         # перо поднято при перемещении/между проходами (перенос)
+      # Точность точек: мельче пачки + проверка обратной связи (draw_done_n). 30 точек на
+      # проход = больше пакетов, каждый сверяется с реально выполненным — потеря ловится и
+      # повторяется, а не уходит молча. draw_verify=true обязателен для доверия «экран=робот».
+      draw_pass_size: 30
+      draw_verify: true
+      draw_retry: 1
 blueprint:
-  name: webcam_sketch
-  description: "Камера → seg → TEED/blob/strokes → points_render/robot_draw"
-
+  name: default
+  description: ''
   processes:
-    # --- Камера: захват кадров (+ заморозка для тюнинга) ---
+    - process_name: gui
+      plugins: []
+      workers: []
+      process_class: multiprocess_prototype.frontend.process.GuiProcess
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
+    - process_name: devices
+      plugins:
+        - plugin_name: device_hub
+          plugin_class: Plugins.hub.device_hub.plugin.DeviceHubPlugin
+          category: hub
+          config:
+            registry_path: data/devices.yaml
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority:
+      target_process:
+      chain_targets: []
+      description:
+      protected: true
+      category:
+      metadata: {}
     - process_name: camera_0
+      plugins:
+        - plugin_name: capture
+          plugin_class: Plugins.sources.capture.plugin.CapturePlugin
+          category: source
+          config:
+            camera_id: 0
+            device_id: 0
+            resolution_width: 640
+            resolution_height: 480
+            # fps=30 — просим у камеры её нативный темп (хинт cv2)
+            fps: 30
+            auto_start: true
+      workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: high
+      target_process:
       chain_targets:
         - seg
-      source_target_fps: 15
-      plugins:
-        - plugin_class: Plugins.sources.capture.plugin.CapturePlugin
-          plugin_name: capture
-          category: source
-          camera_id: 0
-          device_id: 0
-          resolution_width: 640
-          resolution_height: 480
-          fps: 15
-          auto_start: true
-
-    # --- Сегментация + коррекция: человек на белом + яркость/контраст (дисплей «Оригинал») ---
+      description:
+      protected: false
+      # Ф3.8/GATE G1 (владелец: ДА): авто-рестарт source-камеры. Смерть плагина
+      # (краш phone_gateway) → монитор пересоздаёт процесс (окно 3/60с), поток
+      # кадров возобновляется. gui/devices — protected (skip), их не трогаем.
+      restart_policy: {enabled: true, max_retries: 3, window_sec: 60}
+      category:
+      metadata:
+        # TEED — узкое место (~15-20 fps на 4GB GPU). Ставить выше бессмысленно: источник
+        # заливает очередь процесса lines → "pipeline overload". 25 = потолок камеры с
+        # запасом под TEED(every_n=2), без перегруза. Хочешь быстрее — только легче TEED
+        # (every_n=3 / ниже разрешение) или GPU помощнее.
+        source_target_fps: 25
     - process_name: seg
+      plugins:
+        - plugin_name: segmentation
+          plugin_class: Plugins.processing.segmentation.plugin.SegmentationPlugin
+          category: processing
+          config:
+            threshold: 0.5
+            bg_white: true
+        - plugin_name: image_adjust
+          plugin_class: Plugins.processing.image_adjust.plugin.ImageAdjustPlugin
+          category: processing
+          config:
+            brightness: 0.0
+            contrast: 1.2
+            saturation: 1.0
+            gamma: 1.0
+      workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
+      target_process:
       chain_targets:
         - lines
         - gui
-      plugins:
-        - plugin_class: Plugins.processing.segmentation.plugin.SegmentationPlugin
-          plugin_name: segmentation
-          category: processing
-          threshold: 0.5
-          bg_white: true
-        # Коррекция кадра ДО TEED; дисплей «Оригинал» показывает её результат
-        - plugin_class: Plugins.processing.image_adjust.plugin.ImageAdjustPlugin
-          plugin_name: image_adjust
-          category: processing
-          brightness: 0.0
-          contrast: 1.2
-          saturation: 1.0
-          gamma: 1.0
-
-    # --- Линии: TEED → очистка → линия→точки (дисплей «Line-art») ---
+      description:
+      protected: false
+      category:
+      metadata: {}
     - process_name: lines
+      plugins:
+        - plugin_name: crop
+          plugin_class: Plugins.processing.crop.plugin.CropPlugin
+          category: processing
+          config:
+            # Обрезка лишних краёв источника. Всё 0 = без обрезки (clip = тождество).
+            # mode=clip: вырезанный регион кладётся на холст 640x480 в НАТИВНОМ масштабе
+            # (без растяжения), сдвиг paste_x/y, выход за край отсекается. mode=resize —
+            # старое поведение (вырезать+растянуть). Меняется вживую из пульта.
+            mode: clip
+            crop_x: 0
+            crop_y: 0
+            crop_w: 0
+            crop_h: 0
+            paste_x: 0
+            paste_y: 0
+        - plugin_name: edge_detection
+          plugin_class: Plugins.processing.edge_detection.plugin.EdgeDetectionPlugin
+          category: processing
+          config:
+            method: teed
+            invert: false
+            threshold: 0.5
+            device: cuda
+            # TEED на КАЖДОМ кадре душит 4GB-GPU. every_n=2 → инференс раз в 2 кадра
+            # (результат переиспользуется), латентность/нагрузка ↓ вдвое, дисплей плавнее.
+            inference_every_n: 2
+        - plugin_name: blob_filter
+          plugin_class: Plugins.processing.blob_filter.plugin.BlobFilterPlugin
+          category: processing
+          config:
+            min_area: 10
+            max_area: 0
+        - plugin_name: strokes_to_points
+          plugin_class: Plugins.processing.strokes_to_points.plugin.StrokesToPointsPlugin
+          category: processing
+          config:
+            centerline: true
+            # dp (Douglas-Peucker) = убрать МЕЛКИЕ изгибы на прямых (пиксельный «зигзаг»
+            # скелета < epsilon), сохранив реальные углы/кривые → меньше точек, ровные линии.
+            # Превью «Карта точек» (points_render) стоит ПОСЛЕ прореживания → зелёные точки =
+            # РОВНО то, что уходит роботу (доверие сохранено). Режим/epsilon — live из пульта.
+            reduce_mode: dp
+            simplify_epsilon: 1.0
+            step_px: 5.0
+            angle_threshold_deg: 15.0
+            min_stroke_len: 8.0
+            max_stroke_len: 0.0
+            # identity: путь остаётся в ПИКСЕЛЯХ, масштаб под лист робота делает узел robot_scale
+            scale_x: 1.0
+            scale_y: 1.0
+            offset_x: 0.0
+            offset_y: 0.0
+            flip_y: false
+            max_points: 0
+        # Векторные элементы (текст/имя/сердце), Hershey-однолинейный → draw_points в px.
+        # merge=true дописывает к точкам фото (портрет + текст + имя). enabled=true с пустым
+        # текстом — no-op (ничего не добавляет), пока не введёшь текст/не переключишь на heart.
+        # Два экземпляра = два независимых элемента (напр. слово + имя; любой → heart из пульта).
+        - plugin_name: text_main
+          plugin_class: Plugins.processing.text_vector.plugin.TextVectorPlugin
+          category: processing
+          config:
+            enabled: true
+            element: text
+            text: ""
+            size_px: 90.0
+            pos_x: 320.0
+            pos_y: 180.0
+            rotation_deg: 0.0
+            scale: 1.0
+            merge: true
+        - plugin_name: text_name
+          plugin_class: Plugins.processing.text_vector.plugin.TextVectorPlugin
+          category: processing
+          config:
+            enabled: true
+            element: text
+            text: ""
+            size_px: 60.0
+            pos_x: 320.0
+            pos_y: 330.0
+            rotation_deg: 0.0
+            scale: 1.0
+            merge: true
+      workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
+      target_process:
       chain_targets:
         - points
         - gui
-      plugins:
-        - plugin_class: Plugins.processing.edge_detection.plugin.EdgeDetectionPlugin
-          plugin_name: edge_detection
-          category: processing
-          method: teed          # teed (рекомендуется). u2net_portrait в кэше = saliency, не линии
-          invert: false
-          threshold: 0.5        # 0.5 = чистый портрет; ниже 0.5 пересыщает (всё бело)
-          device: cuda
-          inference_every_n: 1
-        - plugin_class: Plugins.processing.blob_filter.plugin.BlobFilterPlugin
-          plugin_name: blob_filter
-          category: processing
-          min_area: 10
-          max_area: 0
-        - plugin_class: Plugins.processing.strokes_to_points.plugin.StrokesToPointsPlugin
-          plugin_name: strokes_to_points
-          category: processing
-          centerline: true
-          reduce_mode: dp
-          simplify_epsilon: 1.5
-          step_px: 5.0
-          angle_threshold_deg: 15.0
-          min_stroke_len: 8.0
-          max_stroke_len: 0.0
-          scale_x: 0.3
-          scale_y: 0.3
-          offset_x: 0.0
-          offset_y: 0.0
-          flip_y: true
-          max_points: 0
-
-    # --- Точки: карта точек (дисплей «Карта точек») + отправка роботу ---
+      description:
+      protected: false
+      category:
+      metadata: {}
     - process_name: points
+      plugins:
+        - plugin_name: robot_scale
+          plugin_class: Plugins.processing.robot_scale.plugin.RobotScalePlugin
+          category: processing
+          config:
+            # Статичная рабочая зона A4 в координатах робота (мм) — где робот может рисовать.
+            # ЛВ (верхний левый) = (340, -174), ПН (правый нижний) = (545, 24). Зона 205x198 мм.
+            # Пиксельный кадр 640x480 вписывается в эту зону; рисунок размещается внутри
+            # через draw_scale/offset_x/offset_y (пульт).
+            src_width: 640
+            src_height: 480
+            x0: 340.0
+            y0: -174.0
+            x1: 545.0
+            y1: 24.0
+            # Лист повёрнут 90° на столе: робот-X по вертикали кадра, робот-Y по горизонтали.
+            swap_axes: true
+            # Прижим к листу: точка за рабочей зоной ложится на её границу (не вылетает за лист).
+            clamp_to_zone: true
+        # Сохранение/загрузка рисунка. ПОСЛЕ robot_scale (точки в мм), ДО points_render/robot_draw:
+        # «Сохранить» снимает текущие точки (+границы +кадр-референс) в drawings/<ts>.json(+png);
+        # «Загрузить» подменяет точки → превью и робот рисуют загруженное (пока load_active).
+        - plugin_name: drawing_io
+          plugin_class: Plugins.io.drawing_io.plugin.DrawingIoPlugin
+          category: io
+          config:
+            drawings_dir: drawings
+            save_image: true
+        - plugin_name: points_render
+          plugin_class: Plugins.processing.points_render.plugin.PointsRenderPlugin
+          category: processing
+          config:
+            canvas_width: 640
+            canvas_height: 480
+            bg_white: true
+            dot_radius: 2
+            show_travel: true
+            # Лист повёрнут 90° → показать портрет РОВНО (swap обратно). flip_y не нужен.
+            swap_axes: true
+            flip_y: false
+        - plugin_name: robot_draw
+          plugin_class: Plugins.io.robot_draw.plugin.RobotDrawPlugin
+          category: io
+          config:
+            device_id: robot_main
+            # Pipeline-триггер: сигнал пульта (порт out_1) взводит рисование.
+            trigger_source: out_1
+            # Пробный прогон ВЫКЛ: «Рисовать» сразу шлёт точки роботу. Включить
+            # тумблером «Пробный прогон» в пульте, если надо сначала проверить
+            # точки в текст (dump_path), не трогая робот.
+            dry_run: false
+            dump_path: data/robot_points_preview.txt
+      workers: []
       process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
       priority: normal
+      target_process:
       chain_targets:
         - gui
+      description:
+      protected: false
+      category:
+      metadata: {}
+    - process_name: pult
       plugins:
-        - plugin_class: Plugins.processing.points_render.plugin.PointsRenderPlugin
-          plugin_name: points_render
-          category: processing
-          canvas_width: 640
-          canvas_height: 480
-          bg_white: true
-          dot_radius: 2
-          show_travel: true
-        - plugin_class: Plugins.io.robot_draw.plugin.RobotDrawPlugin
-          plugin_name: robot_draw
-          category: io
-          device_id: robot_main
-
+        - plugin_name: control_panel
+          plugin_class: Services.control_panel.plugin.plugin.ControlPanelPlugin
+          category: source
+          config:
+            panel_id: pult
+            controls:
+              # Режим робота (выпадающий список) — первым. action → device_hub
+              # robot_set_mode. cvt/draw управляются автоматически (драйвер сам
+              # переключает при рисовании/конвейере); manual и toolchange — явные.
+              - {id: robot_mode, type: select, label: "Режим робота", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_set_mode, value_arg: mode, command_args: {device_id: robot_main}, value: draw, options: [{label: "Рисование", value: draw}, {label: "Ручной (jog)", value: manual}, {label: "Смена инструмента", value: toolchange}, {label: "Конвейер (CVT)", value: cvt}]}
+              - {id: draw, type: button, label: "Рисовать", port: out_1, trigger_value: true}
+              # Стоп: прерывает рисование немедленно (action → device_hub robot_draw_abort).
+              # Останавливает и текущий проход (REG_DRAW_ABORT), и оставшиеся (should_abort в client.draw).
+              - {id: stop, type: button, label: "Стоп", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_abort, command_args: {device_id: robot_main}}
+              # Пробный прогон: ВКЛ = «Рисовать» пишет точки в текст (data/robot_points_preview.txt),
+              # роботу не шлёт. Проверил точки → выключи → «Рисовать» уйдёт на робота.
+              - {id: param_robot_draw_dry_run, type: toggle, label: "Пробный прогон (без робота) [robot_draw]", source: param, target_process: points, target_plugin_index: 3, target_field: dry_run, value: false}
+              # Дашборд: углы рабочей зоны A4 (robot_scale в процессе points, plugin_index 0).
+              # Статичная зона в координатах робота: ЛВ (340,-174), ПН (545,24). Задаётся один раз.
+              - {id: param_robot_scale_x0, type: number, label: "Угол ЛВ X (мм) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: x0, min: -2000.0, max: 2000.0, value: 340.0}
+              - {id: param_robot_scale_y0, type: number, label: "Угол ЛВ Y (мм) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: y0, min: -2000.0, max: 2000.0, value: -174.0}
+              - {id: param_robot_scale_x1, type: number, label: "Угол ПН X (мм) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: x1, min: -2000.0, max: 2000.0, value: 545.0}
+              - {id: param_robot_scale_y1, type: number, label: "Угол ПН Y (мм) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: y1, min: -2000.0, max: 2000.0, value: 24.0}
+              # Параметры рисования робота (action → команды device_hub robot_main).
+              # number (срабатывает по подтверждению ввода) — не флудит робот командами.
+              - {id: act_robot_speed, type: number, label: "Скорость рисования (%) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_speed, value_arg: pct, command_args: {device_id: robot_main}, min: 1.0, max: 100.0, value: 4.0}
+              - {id: act_robot_travel, type: number, label: "Скорость переезда (%) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_travel, value_arg: pct, command_args: {device_id: robot_main}, min: 1.0, max: 100.0, value: 100.0}
+              - {id: act_robot_accel, type: number, label: "Ускорение рисования (мм/с²) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_accel, value_arg: accel, command_args: {device_id: robot_main}, min: 1000.0, max: 32000.0, value: 25000.0}
+              - {id: act_robot_pass_size, type: number, label: "Точек в пачке (проход) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_pass_size, value_arg: n, command_args: {device_id: robot_main}, min: 10.0, max: 100.0, value: 30.0}
+              - {id: act_robot_pen_down, type: number, label: "Перо: низ к плоскости (мм) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_pen, value_arg: down, command_args: {device_id: robot_main}, min: -500.0, max: 500.0, value: -108.0}
+              - {id: act_robot_pen_up, type: number, label: "Перо: подъём при перемещении (мм) [робот]", source: action, target_process: devices, target_plugin_index: 0, target_command: robot_draw_set_pen, value_arg: up, command_args: {device_id: robot_main}, min: -500.0, max: 500.0, value: -102.0}
+              # Размещение рисунка на листе A4 (robot_scale в points): масштаб + сдвиг (мм).
+              - {id: param_robot_scale_draw_scale, type: number, label: "Масштаб рисунка (доля листа) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: draw_scale, min: 0.01, max: 10.0, value: 1.0}
+              - {id: param_robot_scale_offset_x, type: number, label: "Сдвиг рисунка X (мм) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: offset_x, min: -2000.0, max: 2000.0, value: 0.0}
+              - {id: param_robot_scale_offset_y, type: number, label: "Сдвиг рисунка Y (мм) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: offset_y, min: -2000.0, max: 2000.0, value: 0.0}
+              # Обрезка краёв источника (crop в lines, plugin_index 0). 0 = без обрезки.
+              # Режим: clip = обрезать по краям БЕЗ масштаба (двигать paste_x/y); resize = вырезать+растянуть.
+              - {id: param_crop_mode, type: select, label: "Crop: режим [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: mode, value: clip, options: [{label: "Обрезать (без масштаба)", value: clip}, {label: "Вписать (растянуть)", value: resize}]}
+              - {id: param_crop_x, type: number, label: "Обрезка X (px) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: crop_x, min: 0.0, max: 2000.0, value: 0.0}
+              - {id: param_crop_y, type: number, label: "Обрезка Y (px) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: crop_y, min: 0.0, max: 2000.0, value: 0.0}
+              - {id: param_crop_w, type: number, label: "Обрезка ширина (px, 0=край) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: crop_w, min: 0.0, max: 2000.0, value: 0.0}
+              - {id: param_crop_h, type: number, label: "Обрезка высота (px, 0=край) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: crop_h, min: 0.0, max: 2000.0, value: 0.0}
+              # clip-режим: сдвиг вырезанного региона на холсте (px) — двигать по X/Y без масштаба.
+              - {id: param_crop_paste_x, type: number, label: "Crop сдвиг X (px) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: paste_x, min: -2000.0, max: 2000.0, value: 0.0}
+              - {id: param_crop_paste_y, type: number, label: "Crop сдвиг Y (px) [crop]", source: param, target_process: lines, target_plugin_index: 0, target_field: paste_y, min: -2000.0, max: 2000.0, value: 0.0}
+              # Прореживание линий (strokes_to_points в lines, plugin_index 3): убрать мелкие
+              # изгибы на прямых, меньше точек. dp = по отклонению от прямой (epsilon, px).
+              - {id: param_strokes_reduce, type: select, label: "Прореживание линий [strokes]", source: param, target_process: lines, target_plugin_index: 3, target_field: reduce_mode, value: dp, options: [{label: "DP (убрать мелкие изгибы)", value: dp}, {label: "Шаг по длине", value: step}, {label: "По углу", value: angle}, {label: "Без прореживания", value: none}]}
+              - {id: param_strokes_epsilon, type: number, label: "Сглаживание DP (px) — больше=ровнее [strokes]", source: param, target_process: lines, target_plugin_index: 3, target_field: simplify_epsilon, min: 0.0, max: 20.0, value: 1.0}
+              - {id: param_strokes_min_len, type: number, label: "Min длина штриха (px) — убрать крапины [strokes]", source: param, target_process: lines, target_plugin_index: 3, target_field: min_stroke_len, min: 0.0, max: 2000.0, value: 8.0}
+              # Прижим точек к рабочей зоне листа (robot_scale в points, plugin_index 0).
+              - {id: param_robot_scale_clamp, type: toggle, label: "Прижать к листу (точка на краю) [robot_scale]", source: param, target_process: points, target_plugin_index: 0, target_field: clamp_to_zone, value: true}
+              # === Векторный элемент 1: основной текст (text_main в lines, plugin_index 4) ===
+              - {id: tv_main_enabled, type: toggle, label: "Текст 1: включён [text_main]", source: param, target_process: lines, target_plugin_index: 4, target_field: enabled, value: true}
+              - {id: tv_main_element, type: select, label: "Текст 1: тип [text_main]", source: param, target_process: lines, target_plugin_index: 4, target_field: element, value: text, options: [{label: "Текст", value: text}, {label: "Сердце", value: heart}]}
+              - {id: tv_main_text, type: text, label: "Текст 1: строка [text_main]", source: param, target_process: lines, target_plugin_index: 4, target_field: text, value: ""}
+              - {id: tv_main_size, type: number, label: "Текст 1: размер (px) [text_main]", source: param, target_process: lines, target_plugin_index: 4, target_field: size_px, min: 4.0, max: 1000.0, value: 90.0}
+              - {id: tv_main_pos_x, type: number, label: "Текст 1: позиция X (px) [text_main]", source: param, target_process: lines, target_plugin_index: 4, target_field: pos_x, min: -2000.0, max: 2000.0, value: 320.0}
+              - {id: tv_main_pos_y, type: number, label: "Текст 1: позиция Y (px) [text_main]", source: param, target_process: lines, target_plugin_index: 4, target_field: pos_y, min: -2000.0, max: 2000.0, value: 180.0}
+              - {id: tv_main_rot, type: number, label: "Текст 1: поворот (°) [text_main]", source: param, target_process: lines, target_plugin_index: 4, target_field: rotation_deg, min: -360.0, max: 360.0, value: 0.0}
+              - {id: tv_main_scale, type: number, label: "Текст 1: масштаб [text_main]", source: param, target_process: lines, target_plugin_index: 4, target_field: scale, min: 0.05, max: 20.0, value: 1.0}
+              # === Векторный элемент 2: имя/сердце (text_name в lines, plugin_index 5) ===
+              - {id: tv_name_enabled, type: toggle, label: "Текст 2: включён [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: enabled, value: true}
+              - {id: tv_name_element, type: select, label: "Текст 2: тип [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: element, value: text, options: [{label: "Текст", value: text}, {label: "Сердце", value: heart}]}
+              - {id: tv_name_text, type: text, label: "Текст 2: строка (имя) [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: text, value: ""}
+              - {id: tv_name_size, type: number, label: "Текст 2: размер (px) [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: size_px, min: 4.0, max: 1000.0, value: 60.0}
+              - {id: tv_name_pos_x, type: number, label: "Текст 2: позиция X (px) [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: pos_x, min: -2000.0, max: 2000.0, value: 320.0}
+              - {id: tv_name_pos_y, type: number, label: "Текст 2: позиция Y (px) [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: pos_y, min: -2000.0, max: 2000.0, value: 330.0}
+              - {id: tv_name_rot, type: number, label: "Текст 2: поворот (°) [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: rotation_deg, min: -360.0, max: 360.0, value: 0.0}
+              - {id: tv_name_scale, type: number, label: "Текст 2: масштаб [text_name]", source: param, target_process: lines, target_plugin_index: 5, target_field: scale, min: 0.05, max: 20.0, value: 1.0}
+              # === Сохранение/загрузка рисунка (drawing_io в points, plugin_index 1) ===
+              # «Сохранить» — снять текущий рисунок в drawings/<ts>.json(+png).
+              - {id: drawing_save, type: button, label: "Сохранить рисунок", source: action, target_process: points, target_plugin_index: 1, target_command: drawing_save}
+              # «Загрузить» — ввести имя файла (json в drawings/ или полный путь) и подменить точки.
+              - {id: drawing_load, type: text, label: "Загрузить рисунок (имя файла)", source: action, target_process: points, target_plugin_index: 1, target_command: drawing_load, value_arg: path, value: ""}
+              # Переключатель: рисовать загруженное (вкл) или живые точки с камеры (выкл).
+              - {id: param_drawing_load_active, type: toggle, label: "Рисовать загруженное [drawing_io]", source: param, target_process: points, target_plugin_index: 1, target_field: load_active, value: false}
+      workers: []
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      target_process:
+      chain_targets:
+        - points
+      description:
+      protected: false
+      category:
+      metadata: {}
   wires:
     - source: camera_0.capture.frame
       target: seg.segmentation.frame
+      description: ''
     - source: seg.image_adjust.frame
-      target: lines.edge_detection.frame
-    - source: lines.strokes_to_points.draw_points
-      target: points.points_render.draw_points
-
+      target: lines.crop.frame
+      description: 'кадр → обрезка краёв → edge'
+    - source: lines.text_name.draw_points
+      target: points.robot_scale.draw_points
+      description: 'px-путь (фото + текст/имя/сердце) → масштаб под лист робота (мм)'
+    - source: pult.control_panel.out_1
+      target: points.robot_draw.trigger
+      description: 'Кнопка «Рисовать» → взводит отправку точек роботу'
   displays:
     - node_id: seg.image_adjust.frame
       display_id: orig
@@ -155,18 +414,20 @@ blueprint:
       display_id: lineart
     - node_id: points.points_render.frame
       display_id: points
-
   metadata:
     gui_positions:
       camera_0.capture:
-        - 60.0
-        - 100.0
+        - 16.0
+        - 40.0
       seg.segmentation:
         - 16.0
         - 760.0
       seg.image_adjust:
         - 216.0
         - 760.0
+      lines.crop:
+        - 16.0
+        - 280.0
       lines.edge_detection:
         - 216.0
         - 280.0
@@ -176,31 +437,40 @@ blueprint:
       lines.strokes_to_points:
         - 616.0
         - 280.0
+      points.robot_scale:
+        - 16.0
+        - 520.0
       points.points_render:
         - 217.08217851052075
         - 520.0
       points.robot_draw:
         - 417.24450528709883
         - 520.1494907419896
+      pult.control_panel:
+        - 16.0
+        - 640.0
       orig:
         - 0.0
         - 360.0
       lineart:
-        - 1099.4912534930395
-        - 237.80263430282562
+        - 0.0
+        - 120.0
       points:
         - 641.1227833997888
         - 437.1762774308222
     locked_nodes: []
+
 displays:
   - id: orig
-    name: Оригинал (человек на белом)
+    name: Оригинал (вебкамера)
     width: 640
     height: 480
     format: BGR
     fps_limit: 30.0
     ring_buffer_blocks: 3
-    position: {x: 0, y: 0}
+    position:
+      x: 0
+      y: 0
     fit: contain
     scale: 100
     rotate: 0
@@ -212,7 +482,9 @@ displays:
     format: BGR
     fps_limit: 30.0
     ring_buffer_blocks: 3
-    position: {x: 640, y: 0}
+    position:
+      x: 640
+      y: 0
     fit: contain
     scale: 100
     rotate: 0
@@ -224,7 +496,9 @@ displays:
     format: BGR
     fps_limit: 30.0
     ring_buffer_blocks: 3
-    position: {x: 1280, y: 0}
+    position:
+      x: 1280
+      y: 0
     fit: contain
     scale: 100
     rotate: 0

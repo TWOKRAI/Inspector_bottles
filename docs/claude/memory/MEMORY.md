@@ -123,3 +123,4 @@
 - [Финальное Fable-ревью фазы G](project_phase_g_final_review.md) — честная балльная оценка before/after всей фазы, vs коммерч. best practices; оси: архитектура/паттерны/модульность/эффективность/безопасность/стиль/согласованность; qex-reindex перед ревью
 - [sentrux gate сужен](feedback_sentrux_gate_narrowed.md) — блок только на quality↓/циклы↑/god↑; complex-fn/coupling/depth → warning, не блок
 - [Ф7 G.7 num_consumers](project_f7_g7_num_consumers.md) — резидуал ЗАКРЫТ (fix fe0f4d41): num_consumers из топологии (chain_targets минус copy-out GUI) + УРОК loan-протокол=две роли (консьюмер/владелец); live webcam GUI-only процесс не голодает (1200+→0 дропов)
+- [webcam_sketch Processes-фриз](project_webcam_sketch_freeze.md) — вкладка Процессы вешает GUI намертво; доказано Qt-C++ стойл (не Python, stall-дамп); topology.load() кэш + перф-фиксы применены; отдано Фабле

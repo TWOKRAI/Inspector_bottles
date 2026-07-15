@@ -51,6 +51,13 @@ class TopologyRepositoryStore:
         """
         self._topology: dict[str, Any] = initial or {}
         self._events = events
+        # Мемоизация разобранной domain-Topology: load() дёргается ДЕСЯТКИ раз на
+        # открытии вкладки (presenter: get_processes/is_protected/get_workers на
+        # каждую панель/кнопку), а Topology.from_dict() — полный Pydantic-разбор
+        # (8 процессов × плагины/воркеры). Кэш парсится один раз и живёт, пока dict
+        # не сменится (set_topology инвалидирует). Topology — frozen (immutable),
+        # общий инстанс безопасно отдавать read-only потребителям.
+        self._cached: Topology | None = None
 
     @property
     def topology(self) -> dict[str, Any]:
@@ -58,8 +65,15 @@ class TopologyRepositoryStore:
         return self._topology
 
     def load(self) -> Topology:
-        """Загрузить текущую топологию как domain entity (пустой dict → пустая Topology)."""
-        return Topology.from_dict(self._topology)
+        """Загрузить текущую топологию как domain entity (пустой dict → пустая Topology).
+
+        Мемоизировано: разбор ``from_dict`` выполняется один раз на версию dict'а
+        (инвалидация — в ``set_topology``). Снимает O(N вызовов) Pydantic-разборов
+        при построении вкладок (например Processes).
+        """
+        if self._cached is None:
+            self._cached = Topology.from_dict(self._topology)
+        return self._cached
 
     def save(self, topology: Topology) -> None:
         """Сохранить domain Topology. Публикует TopologyReplaced (через set_topology)."""
@@ -72,6 +86,7 @@ class TopologyRepositoryStore:
         принимает raw dict, возвращает None. Публикация синхронна на main thread.
         """
         self._topology = new_topology
+        self._cached = None  # инвалидация мемо: следующий load() пересоберёт Topology
         self._events.publish(TopologyReplaced(reason="topology_changed"))
 
 

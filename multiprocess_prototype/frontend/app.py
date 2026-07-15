@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -60,6 +61,19 @@ def run_gui(process: "GuiProcess") -> None:
     """Создать QApplication и запустить Qt event loop."""
     app = QApplication.instance() or QApplication(sys.argv)
 
+    # Диагностика зависаний GUI (env INSPECTOR_STALL_DUMP=1): faulthandler в отдельном
+    # C-потоке пишет стеки ВСЕХ потоков каждые 5 сек — ловит место фриза даже когда
+    # main thread заблокирован намертво (штатный логгер тогда молчит). Off по умолчанию.
+    if os.environ.get("INSPECTOR_STALL_DUMP") == "1":
+        import faulthandler
+
+        _dump_dir = Path(os.environ.get("INSPECTOR_LOG_DIR") or os.environ.get("MULTIPROCESS_LOG_DIR") or "logs")
+        _dump_dir.mkdir(parents=True, exist_ok=True)
+        _stall_fp = open(_dump_dir / "gui_stall_dump.log", "a", buffering=1)  # noqa: SIM115
+        faulthandler.enable(_stall_fp)
+        faulthandler.dump_traceback_later(5, repeat=True, file=_stall_fp)
+        process._stall_dump_fp = _stall_fp  # держим ссылку от GC
+
     # AppIdentity (Task NEW-2, de-brand frontend_module): composition root приложения
     # инжектирует org/app_name ДО создания любых виджетов, читающих идентичность
     # (AppHeaderWidget → prefs_store.QSettings, LoadingWindow). org="Inspector" сохранён
@@ -97,8 +111,6 @@ def run_gui(process: "GuiProcess") -> None:
     # qt-mcp probe — активируется только при QT_MCP_PROBE=1.
     # Слушает localhost:9142, видимо MCP-сервером qt-mcp для UI-интроспекции.
     # Прод-поведение не меняется без env-флага.
-    import os
-
     if os.environ.get("QT_MCP_PROBE") == "1":
         try:
             from qt_mcp.probe import install
@@ -420,7 +432,6 @@ def run_gui(process: "GuiProcess") -> None:
         process._log_warning(f"RecipeManager: не удалось создать: {e}", module="startup")
 
     # 3e. Auth: инициализация AuthManager + AuthState (PR2 auth-rbac)
-    import os
     from Services.auth import AuthManager, AuthConfig, YamlUserStorage
     from multiprocess_prototype.frontend.state.auth_state import AuthState
 
