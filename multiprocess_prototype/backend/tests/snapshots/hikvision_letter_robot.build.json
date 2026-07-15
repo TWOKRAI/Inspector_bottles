@@ -607,9 +607,11 @@
         "chain_targets": [
           "vision"
         ],
+        "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -829,7 +831,8 @@
           "dispatcher_key_field": "command",
           "duplicate_messages_to_logger": true,
           "manager_name": "RouterManager",
-          "send_queue_size": 512
+          "send_queue_size": 512,
+          "use_kind_channels": false
         },
         "stats": {
           "aggregation_interval": 5.0,
@@ -871,9 +874,11 @@
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
         "chain_targets": [],
+        "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -1113,7 +1118,8 @@
           "dispatcher_key_field": "command",
           "duplicate_messages_to_logger": true,
           "manager_name": "RouterManager",
-          "send_queue_size": 512
+          "send_queue_size": 512,
+          "use_kind_channels": false
         },
         "stats": {
           "aggregation_interval": 5.0,
@@ -1144,9 +1150,11 @@
         "chain_targets": [
           "gui"
         ],
+        "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "inspector": {
           "inputs": [
             "frame",
@@ -1372,7 +1380,8 @@
           "dispatcher_key_field": "command",
           "duplicate_messages_to_logger": true,
           "manager_name": "RouterManager",
-          "send_queue_size": 512
+          "send_queue_size": 512,
+          "use_kind_channels": false
         },
         "stats": {
           "aggregation_interval": 5.0,
@@ -1401,9 +1410,11 @@
       "class": "multiprocess_prototype.frontend.process.GuiProcess",
       "config": {
         "chain_targets": [],
+        "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -1600,7 +1611,8 @@
           "dispatcher_key_field": "command",
           "duplicate_messages_to_logger": true,
           "manager_name": "RouterManager",
-          "send_queue_size": 512
+          "send_queue_size": 512,
+          "use_kind_channels": false
         },
         "stats": {
           "aggregation_interval": 5.0,
@@ -1629,9 +1641,11 @@
       "class": "multiprocess_prototype.generic_process_app.GenericProcessApp",
       "config": {
         "chain_targets": [],
+        "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -1869,7 +1883,8 @@
           "dispatcher_key_field": "command",
           "duplicate_messages_to_logger": true,
           "manager_name": "RouterManager",
-          "send_queue_size": 512
+          "send_queue_size": 512,
+          "use_kind_channels": false
         },
         "stats": {
           "aggregation_interval": 5.0,
@@ -1901,9 +1916,11 @@
           "recog",
           "draw"
         ],
+        "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -2114,7 +2131,8 @@
           "dispatcher_key_field": "command",
           "duplicate_messages_to_logger": true,
           "manager_name": "RouterManager",
-          "send_queue_size": 512
+          "send_queue_size": 512,
+          "use_kind_channels": false
         },
         "stats": {
           "aggregation_interval": 5.0,
@@ -2145,9 +2163,11 @@
         "chain_targets": [
           "gui"
         ],
+        "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -2354,7 +2374,8 @@
           "dispatcher_key_field": "command",
           "duplicate_messages_to_logger": true,
           "manager_name": "RouterManager",
-          "send_queue_size": 512
+          "send_queue_size": 512,
+          "use_kind_channels": false
         },
         "stats": {
           "aggregation_interval": 5.0,
@@ -2386,9 +2407,11 @@
           "gui",
           "layout"
         ],
+        "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -2612,7 +2635,8 @@
           "dispatcher_key_field": "command",
           "duplicate_messages_to_logger": true,
           "manager_name": "RouterManager",
-          "send_queue_size": 512
+          "send_queue_size": 512,
+          "use_kind_channels": false
         },
         "stats": {
           "aggregation_interval": 5.0,
@@ -2652,9 +2676,11 @@
           "gui",
           "layout"
         ],
+        "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "inspector": {
           "inputs": [
             "frame",
@@ -2918,7 +2944,8 @@
           "dispatcher_key_field": "command",
           "duplicate_messages_to_logger": true,
           "manager_name": "RouterManager",
-          "send_queue_size": 512
+          "send_queue_size": 512,
+          "use_kind_channels": false
         },
         "stats": {
           "aggregation_interval": 5.0,
@@ -2952,9 +2979,11 @@
           "draw",
           "maskview"
         ],
+        "copy_out_targets": [],
         "error_auto_reset_sec": 60.0,
         "error_critical_plugins": [],
         "error_max_consecutive_fails": 5,
+        "frame_ring_depth": 0,
         "inspector": {},
         "io_peek": {},
         "lag_alert_threshold_sec": 2.0,
@@ -3220,7 +3249,8 @@
           "dispatcher_key_field": "command",
           "duplicate_messages_to_logger": true,
           "manager_name": "RouterManager",
-          "send_queue_size": 512
+          "send_queue_size": 512,
+          "use_kind_channels": false
         },
         "stats": {
           "aggregation_interval": 5.0,

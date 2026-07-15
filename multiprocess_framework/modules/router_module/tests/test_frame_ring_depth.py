@@ -68,8 +68,16 @@ class TestRingWraps:
 
 
 class TestPerCameraIsolation:
-    def test_two_cameras_independent_rings(self):
-        """Два owner'а на одном MemoryManager → независимые регионы/кольца, без коллизий."""
+    def test_two_cameras_independent_rings(self, monkeypatch):
+        """Два owner'а на одном MemoryManager → независимые регионы/кольца, без коллизий.
+
+        Изоляция OS-имён SHM-сегментов (assert shm_actual_name) держится под флагом
+        FW_SHM_OWNER_INCARNATION (owner+incarnation в имени, фундамент G.3) — иначе оба
+        owner'а получают `{slot}_{index}` и OS-имена совпадают. Ставим флаг явно: без
+        него тест проходил лишь из-за утечки env по порядку прогона (детерминированно
+        падал в изоляции). Данные-изоляция (регионы по (owner,slot)) держится и без флага.
+        """
+        monkeypatch.setenv("FW_SHM_OWNER_INCARNATION", "1")
         mm = MemoryManager()
         cam0 = FrameShmMiddleware(mm, owner="cam0", slot="output_frames", coll=3)
         cam1 = FrameShmMiddleware(mm, owner="cam1", slot="output_frames", coll=3)

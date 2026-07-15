@@ -106,11 +106,32 @@ class ProcessHeartbeat:
                 # → реальные менеджеры адаптером. error/critical идут мимо буфера
                 # (write-through), здесь их нет. Прецедент — health self-publish 2.1.
                 self._drain_observability()
+
+                # Ф7 G.9(a) H-ревью: pump scheduled-GC. Heartbeat — периодический
+                # BACKGROUND-тик вне hot-path кадра → законная «пауза» для явной сборки.
+                # Без этого pump FW_GC_SCHEDULED отключил бы авто-GC НАВСЕГДА (сборки
+                # не происходило бы → утечка). No-op при флаге off (бит-в-бит).
+                self._pump_scheduled_gc()
             except Exception as exc:
                 _log = getattr(self._services, "log_debug", self._services.log_info)
                 _log(f"Не удалось отправить heartbeat: {exc}", module="heartbeat")
             # Ожидание с проверкой stop_event для быстрого завершения
             stop_event.wait(timeout=self._interval)
+
+    def _pump_scheduled_gc(self) -> None:
+        """Ф7 G.9(a) H-ревью: дать GcDiscipline тик для scheduled-сборки (FW_GC_SCHEDULED).
+
+        Heartbeat создаётся ДО gc_discipline (см. ProcessModule.run) → на первых тиках
+        атрибута может не быть: getattr-guard. ``collect_scheduled`` сам no-op при
+        выключенном расписании (флаг off = бит-в-бит). Ошибки не критичны для такта HB.
+        """
+        gc_disc = getattr(self._services, "_gc_discipline", None)
+        if gc_disc is None:
+            return
+        try:
+            gc_disc.collect_scheduled(time.monotonic())
+        except Exception:  # noqa: BLE001 — сборка мусора не критична для такта HB
+            pass
 
     def _drain_observability(self) -> None:
         """Ф5.16: слить log/stats-буфер ObservabilityHub процесса в реальные
@@ -201,7 +222,29 @@ class ProcessHeartbeat:
             # system-очереди — control-plane терять нельзя; ревью 2026-07-14: раньше
             # surface был, но публикации не было — асимметрия с data_evicted).
             sys_blocked = int(rs.get("queue_system_evict_blocked", 0) or 0)
-            if pickle_fallbacks == 0 and torn == 0 and crossings == 0 and queue_evicted == 0 and sys_blocked == 0:
+            # Ф7 G.5.c: дроп по post-use re-check zero-copy view (слот перезаписан под
+            # живым view — consumer отстал > глубины кольца). Ещё один сигнал потери
+            # кадра в том же месте для вкладки Pipeline.
+            stale_drops = int(rs.get("frame_stale_drops", 0) or 0)
+            # Ф7 G.5.d (В3): исчерпание free-list → drop-на-источнике (back-pressure,
+            # читатели отстали). Тот же сигнальный набор потери кадра.
+            loan_exhausted = int(rs.get("frame_loan_exhausted", 0) or 0)
+            # Ф7 G.5 ревью-фикс 15: здоровье loan-цикла (released/reclaimed) — не потери,
+            # но обязательный сигнал: если exhausted растёт, а released стоит на нуле —
+            # release-контур не замкнут (ревью поймало именно это через отсутствие сигнала).
+            slots_released = int(rs.get("frame_slots_released", 0) or 0)
+            slots_reclaimed = int(rs.get("frame_slots_reclaimed", 0) or 0)
+            if (
+                pickle_fallbacks == 0
+                and torn == 0
+                and crossings == 0
+                and queue_evicted == 0
+                and sys_blocked == 0
+                and stale_drops == 0
+                and loan_exhausted == 0
+                and slots_released == 0
+                and slots_reclaimed == 0
+            ):
                 return  # нет кадрового пути / всё чисто — не публикуем
             proxy.merge(
                 f"processes.{self._services.name}.state.shm",
@@ -211,6 +254,10 @@ class ProcessHeartbeat:
                     "boundary_crossings": crossings,
                     "queue_data_evicted": queue_evicted,
                     "queue_system_evict_blocked": sys_blocked,
+                    "stale_drops": stale_drops,
+                    "loan_exhausted": loan_exhausted,
+                    "slots_released": slots_released,
+                    "slots_reclaimed": slots_reclaimed,
                 },
             )
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB

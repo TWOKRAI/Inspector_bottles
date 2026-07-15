@@ -138,7 +138,6 @@ class ProcessRegistry:
                             in (
                                 "memory_names",
                                 "memory_params",
-                                "memory_index_usage",
                                 "memory_coll",
                             )
                         }

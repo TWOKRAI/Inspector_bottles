@@ -15,7 +15,7 @@ Consumer process (дочерние): create=False, close() при shutdown.
               └── shm_base_name
                       └── [shm_0, shm_1, ...]
 
-  Метаданные (params, index_usage, coll):
+  Метаданные (params, coll, seqlock):
     - С PSR: хранятся в ProcessData.custom (pickle-safe, видны всем процессам)
     - Без PSR: хранятся в _local_meta (только для standalone/unit-test режима)
 """
@@ -206,7 +206,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
 
         pd.custom.setdefault("memory_names", {})
         pd.custom.setdefault("memory_params", {})
-        pd.custom.setdefault("memory_index_usage", {})
         pd.custom.setdefault("memory_coll", {})
         pd.custom.setdefault("memory_seqlock", {})
 
@@ -222,7 +221,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
 
             pd.custom["memory_names"][name] = [shm.name for shm in shm_list]
             pd.custom["memory_params"][name] = params
-            pd.custom["memory_index_usage"][name] = [0] * coll
             pd.custom["memory_coll"][name] = coll
             # Ф7 G.3(b): формат слота (seqlock) — pickle-safe в PSR, виден consumer-процессам.
             pd.custom["memory_seqlock"][name] = self._seqlock_frames
@@ -283,7 +281,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             return {
                 "handles": handles,
                 "params": pd.custom["memory_params"],
-                "index_usage": pd.custom["memory_index_usage"],
                 "coll": pd.custom["memory_coll"],
                 "names": pd.custom["memory_names"],
                 # Ф7 G.3(b): формат слота seqlock (по имени; дефолт False для старых слотов).
@@ -296,7 +293,6 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             return {
                 "handles": handles,
                 "params": {memory_name: meta.params},
-                "index_usage": {memory_name: meta.index_usage},
                 "coll": {memory_name: meta.coll},
                 "names": {},
                 "seqlock": meta.seqlock,
@@ -390,13 +386,12 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             return None
 
     def release_memory(self, process_name: str, shm_name: str, index: int) -> None:
+        # Ф7 G.H: очистка слота (seqlock-совместимая). Учёт занятости слота — за фасадом
+        # `memory.pool.FramePool` (owner-side loan-протокол), не в мёртвом index_usage.
         memory_data = self.get_memory_data(process_name, shm_name)
         if not memory_data:
             return
         val.clear_memory_slot(memory_data.get("handles"), index, seqlock=bool(memory_data.get("seqlock", False)))
-        index_usage = memory_data["index_usage"]
-        if shm_name in index_usage and 0 <= index < len(index_usage[shm_name]):
-            index_usage[shm_name][index] = 0
 
     def close_memory(self, process_name: str, shm_name: str) -> None:
         """Закрыть и очистить один shm-блок."""
@@ -408,7 +403,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         if self._process_state_registry:
             pd = self._process_state_registry.get_process_data(process_name)
             if pd:
-                for key in ("memory_names", "memory_params", "memory_index_usage", "memory_coll", "memory_seqlock"):
+                for key in ("memory_names", "memory_params", "memory_coll", "memory_seqlock"):
                     pd.custom.get(key, {}).pop(shm_name, None)
         else:
             self._local_meta.get(process_name, {}).pop(shm_name, None)
@@ -429,17 +424,9 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             return None
         return handles[index].name
 
-    def find_free_index(self, process_name: str, shm_name: str) -> Optional[int]:
-        memory_data = self.get_memory_data(process_name, shm_name)
-        if not memory_data:
-            return None
-        usage = memory_data["index_usage"].get(shm_name)
-        if usage is None:
-            return None
-        for i, used in enumerate(usage):
-            if used == 0:
-                return i
-        return None
+    # Ф7 G.H: find_free_index СНЯТ — мёртвый первый учёт занятости (index_usage писался
+    # только в 0, «used=1» никто не ставил → всегда возвращал слот 0). Реальный free-list
+    # с владением по цепочке — за фасадом `memory.pool.FramePool` (loan-протокол, G.5.d/e).
 
     def release_process_memory(self, process_name: str) -> None:
         """Полностью освободить SHM процесса при hot-swap (replace_blueprint).

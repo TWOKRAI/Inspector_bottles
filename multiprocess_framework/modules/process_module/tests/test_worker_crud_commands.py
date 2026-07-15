@@ -212,6 +212,46 @@ class TestWorkerCrudCommands:
         assert res["success"] is True
         assert wm.has_worker("w")
 
+    # ---- Ф7 G.8: worker.drain ----
+    def test_drain_worker_via_command(self) -> None:
+        """drain без remove — воркер дренирован (idle), остаётся в реестре."""
+        wm, cm = _make_crud()
+        cm.dispatch("worker.create", {"worker_name": "w"})
+        res = cm.dispatch("worker.drain", {"worker_name": "w"})
+        assert res["success"] is True
+        assert res["removed"] is False
+        assert wm.has_worker("w")  # не удалён
+
+    def test_drain_remove_via_command(self) -> None:
+        """drain remove=True — полная последовательность drain→detach→stop."""
+        wm, cm = _make_crud()
+        cm.dispatch("worker.create", {"worker_name": "w"})
+        res = cm.dispatch("worker.drain", {"worker_name": "w", "remove": True})
+        assert res["success"] is True
+        assert res["removed"] is True
+        assert not wm.has_worker("w")
+
+    def test_drain_remove_protected_blocked(self) -> None:
+        """drain remove=True защищённого воркера — запрещено (как remove/stop)."""
+        _wm, cm = _make_crud()
+        res = cm.dispatch("worker.drain", {"worker_name": "message_processor", "remove": True})
+        assert res["success"] is False
+        assert res["reason"] == "protected"
+
+    def test_drain_missing_name_rejected(self) -> None:
+        _wm, cm = _make_crud()
+        res = cm.dispatch("worker.drain", {})
+        assert res["success"] is False
+
+    def test_drain_remove_missing_worker_reports_not_removed(self) -> None:
+        """H-ревью: воркера нет + remove=True → success=False И removed=False (не ложь).
+
+        Раньше ``removed`` эхо-ил запрошенный флаг → removed=True при success=False."""
+        _wm, cm = _make_crud()
+        res = cm.dispatch("worker.drain", {"worker_name": "ghost", "remove": True})
+        assert res["success"] is False
+        assert res["removed"] is False
+
     def test_start_worker_via_command(self) -> None:
         """worker.start запускает остановленный воркер (без пересоздания)."""
         wm, cm = _make_crud()

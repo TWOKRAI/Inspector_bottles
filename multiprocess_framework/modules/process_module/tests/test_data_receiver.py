@@ -210,3 +210,76 @@ class TestRunLoop:
 
         # На паузе receive не должен вызываться (только sleep)
         assert call_count[0] == 0
+
+
+class TestReturnMessagesFlag:
+    """Ф7 G.5.a — флаг FW_DATA_PLANE_DICTS управляет return_messages на data-plane.
+
+    Дефолт off = бит-в-бит прежнее (return_messages=True, router рождает Message);
+    on = plain dict (return_messages=False, снятие двойной конверсии). Флаг читается
+    ОДИН раз в __init__ (не на кадр). Контент кадра идентичен в обоих состояниях.
+    """
+
+    @staticmethod
+    def _make_receiver(chain_q):
+        captured = {"return_messages": None, "calls": 0}
+
+        def fake_receive(**kwargs):
+            captured["calls"] += 1
+            captured["return_messages"] = kwargs.get("return_messages")
+            if captured["calls"] == 1:
+                return {"frame": "img1", "camera_id": 7, "seq_id": 3, "data": {}}
+            return None
+
+        receiver = DataReceiver(
+            receive_fn=fake_receive,
+            shm_middleware=None,
+            inspector_manager=PassThroughInspector(),
+            chain_queue=chain_q,
+        )
+        receiver._inspector._on_ready = receiver.on_items_ready
+        return receiver, captured
+
+    def _run_once(self, receiver):
+        stop_event = threading.Event()
+        pause_event = threading.Event()
+        t = threading.Thread(target=receiver.run_loop, args=(stop_event, pause_event))
+        t.start()
+        time.sleep(0.15)
+        stop_event.set()
+        t.join(timeout=1)
+
+    def test_flag_off_default_return_messages_true(self, monkeypatch):
+        """Дефолт (флаг не задан) → return_messages=True (прежнее поведение)."""
+        monkeypatch.delenv("FW_DATA_PLANE_DICTS", raising=False)
+        chain_q = queue.Queue()
+        receiver, captured = self._make_receiver(chain_q)
+        assert receiver._return_messages is True
+        self._run_once(receiver)
+        assert captured["return_messages"] is True
+        # Контент кадра дошёл до chain_queue.
+        items = chain_q.get_nowait()
+        assert items[0]["frame"] == "img1"
+        assert items[0]["camera_id"] == 7
+
+    def test_flag_on_return_messages_false(self, monkeypatch):
+        """FW_DATA_PLANE_DICTS=1 → return_messages=False (plain dict, без пересборки)."""
+        monkeypatch.setenv("FW_DATA_PLANE_DICTS", "1")
+        chain_q = queue.Queue()
+        receiver, captured = self._make_receiver(chain_q)
+        assert receiver._return_messages is False
+        self._run_once(receiver)
+        assert captured["return_messages"] is False
+        # Паритет контента: тот же кадр, что и при флаге off.
+        items = chain_q.get_nowait()
+        assert items[0]["frame"] == "img1"
+        assert items[0]["camera_id"] == 7
+
+    def test_flag_read_once_at_init(self, monkeypatch):
+        """Флаг читается в __init__ (не на кадр): смена env после init не влияет."""
+        monkeypatch.setenv("FW_DATA_PLANE_DICTS", "1")
+        receiver, _ = self._make_receiver(queue.Queue())
+        assert receiver._return_messages is False
+        # Меняем env уже после конструктора — состояние не должно поменяться.
+        monkeypatch.delenv("FW_DATA_PLANE_DICTS", raising=False)
+        assert receiver._return_messages is False

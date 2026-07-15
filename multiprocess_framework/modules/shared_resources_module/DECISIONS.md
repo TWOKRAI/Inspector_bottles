@@ -128,6 +128,18 @@ loan(writing) → publish(ready) → read(reading, refcount) → release(free).
   читателем → `None` (drop). Иначе кадр валиден. **Порванный кадр не возвращается
   никогда** — гонка превращается в честный drop + счётчик, не в тихую порчу.
 
+**Модель памяти — граница гарантии (финальное ревью фазы G, 2026-07-15).** Классический
+seqlock требует memory-барьеров: CPU не должен делать запись `generation` видимой другому
+ядру раньше/позже записей payload. Чистый Python барьеров не даёт. На **x86 (TSO)** порядок
+записей гарантирует сама архитектура — протокол корректен как есть. На **ARM (Apple
+Silicon)** переупорядочивание записей архитектурно допустимо — формальной гарантии нет;
+**практически** окно закрыто: между записями header/payload интерпретатор исполняет тысячи
+инструкций, а атомики CPython (GIL, refcount) расставляют acquire/release-заборы как
+побочный эффект. Это осознанное допущение, а не дыра: любой прорыв ловится как drop
+(`g1 != g2`), не как порча БЕЗ детекции, только с исчезающе малой вероятностью ложного
+«валиден». Формальное закрытие — Rust-реализация под тем же Protocol (Этап 3 H-задачи,
+атомики release/acquire).
+
 **Флаг формата — на слот, стамповка при создании (консистентность size↔write↔read).**
 `MemoryManager(seqlock_frames=...)` (ctor > env `FW_SHM_SEQLOCK` > конфиг > **False**).
 При `create_memory_dict` флаг слота пишется в `pd.custom["memory_seqlock"][name]` (PSR,
@@ -229,3 +241,73 @@ plain-int `+= 1` без lock (по образцу G.6 `frame_boundary_crossings`
 возможен редкий недосчёт. Это **advisory-телеметрия** (сигнал «теряем/блокируем», не точный учёт для
 логики) — недосчёт приемлем; вводить lock на hot-path send ради точности счётчика — нет (правило фазы
 «без локов на горячем пути»). Точный per-drop учёт не требуется ни одним потребителем.
+
+## ADR-SRM-013: Владение слотом за фасадом `FramePool` + снос мёртвого `index_usage` (Ф7 G.H)
+
+**Дата:** 2026-07-14
+**Статус:** Принято
+**Refs:** [plans/2026-07-06_constructor-master/plan.md](../../../plans/2026-07-06_constructor-master/plan.md) (Ф7 G.H), [h-memory-consolidation-plan.md](../../../plans/2026-07-06_constructor-master/h-memory-consolidation-plan.md), ADR-SRM-011 (заголовок слота), ADR-SRM-012 (QoS)
+
+**Контекст.** G.5.d/e построили loan-протокол владения слотом (free-list + refcount +
+released-множества + reclaim) прямо в транспортном `router_module/FrameShmMiddleware` — ~200
+строк семантики владения ПАМЯТЬЮ вне модуля памяти. Директива владельца (2026-07-14): память —
+ОДИН модуль с фасадом/интерфейсом/взаимозаменяемостью (в пределе — подмена на Rust/iceoryx2), без
+костылей. Вдобавок в `MemoryManager` жил **мёртвый первый учёт занятости**: `index_usage`
+(`memory_index_usage` в PSR + `_MemoryMeta.index_usage`) писался только в `0`, «used=1» никто не
+ставил → `find_free_index` всегда возвращал слот 0. G.5 построил ВТОРОЙ (настоящий) учёт рядом с
+недоделанным первым.
+
+**Решение.** (1) **Фасад `memory.pool.FramePool`** (Protocol) + реализация `LoanLedger` в
+`shared_resources_module/memory/pool/`: `acquire`/`commit(idx,n)`/`release(tickets)`/
+`reclaim(reader)`/`reset`/`snapshot_stats` — сигнатуры 1:1 с прежней логикой middleware и с
+контрактом iceoryx2/DDS `loan/publish/release`. `gen_reader` (чтение поколения своего слота под
+seqlock) **инжектируется** в реализацию → пул SHM-агностичен. Транспорт держит пул через DI и
+делегирует; счётчики `frame_loan_exhausted`/`slots_released`/`slots_reclaimed` стали read-only
+property транспорта, читающими `pool.snapshot_stats()` (единственный источник). (2) **Снос мёртвого
+`index_usage`/`find_free_index`** во всех локусах: `_MemoryMeta`, `create_memory_dict`,
+`get_memory_data` (ключ `index_usage` убран из возврата), `release_memory` (осталась только
+очистка слота), `close_memory` (ключ), PSR-бандл (`process_registry` producer +
+`bundle_builder` child-reconstruct), `MemoryHandle.find_free_index`. Реальный free-list с
+владением по цепочке — теперь только у пула (owner-side).
+
+**Модель конкурентности.** refcount мутирует ТОЛЬКО процесс-владелец (кросс-процессного atomic RMW
+в CPython нет — отклонение В2 mp.Lock, g5-план §8). Безопасность от torn даёт seqlock (ADR-SRM-011)
++ post-use re-check (В1), НЕ этот учёт: любая ошибка учёта безопасна (преждевременное освобождение →
+writer перезапишет → generation drift → drop, не порча).
+
+**Альтернативы (отвергнуты).** *Оставить владение в middleware* — размазанность памяти по 2 модулям,
+дорогая замена транспорта. *`index_usage` как backing пула* — пул owner-process-local (не в PSR),
+а `index_usage` был per-PSR-массив; смешивать per-process и per-PSR учёт — костыль; снос чище.
+*ABC вместо Protocol* — Protocol (runtime_checkable) даёт взаимозаменяемость без наследования
+(критерий подмены на Rust-реализацию под тем же контрактом).
+
+**Последствия.** Транспорт → чистый адаптер (Этап 2 добьёт reader-side handle-кэш за фасад
+`FrameReader`). Замена на Rust/iceoryx2 (Этап 3, триггер TECH_STACK §7) = новая реализация под тем
+же Protocol, middleware/executor не трогаются. Всё за `FW_SHM_LOAN_PROTOCOL` (дефолт off = слепой
+round-robin, бит-в-бит); пул создаётся только под флагом. PSR-бандл стал легче на один мёртвый массив.
+
+**Донастройка (H-ревью фазы G, 2026-07-14).** Ревью выявило: модель single-writer была *заявлена*,
+но не *закреплена* кодом, а «DI» был self-construction в транспорте. Исправлено «как полагается»:
+
+- **Single-writer enforced (lock-free).** `LoanLedger.acquire` связывает поток-писатель на первом
+  вызове и бросает `RuntimeError` на втором ином потоке (write-write в один слот, который seqlock НЕ
+  ловит, → громкий отказ, а не тихая порча). Топология source+processing в одном процессе кодом не
+  используется (29 рецептов), но теперь и не допускается молча.
+- **State-машина слота.** `acquire` РЕЗЕРВИРУЕТ слот (WRITING), `commit` публикует (READY), новый
+  `abort` возвращает loan без publish (WRITING→FREE; неудачная запись иначе утекла бы). release/reclaim
+  (поток message_processor) трогают только READY → с WRITING-слотом писателя не пересекаются ПО
+  ПОСТРОЕНИЮ, без lock (iceoryx2 loan/publish/abort).
+- **Настоящий DI.** `FrameShmMiddleware.__init__` принимает `pool=`/`reader=` (инжект выигрывает,
+  None → дефолт-фабрика) → подмена реализации (Rust/iceoryx2) действительно не трогает транспорт.
+- **reader-side:** `ShmFrameReader.read_frame` читает буфер под тем же lock, что close (гонка
+  close↔read закрыта и для read, не только re-check); ошибки close() считаются (`close_errors`), не
+  глотаются молча. Reader получил изолированный contract-тест (симметрия с `FramePool`).
+
+**Амендмент (2026-07-15, финальное Fable-ревью фазы G): смена писателя.** Guard «первый acquire
+связывает поток навсегда» конфликтовал с G.8 (drain→detach→stop воркера, затем create нового:
+middleware и пул переживают воркера — новый поток-писатель получал бы `RuntimeError` на первом
+кадре). Семантика уточнена до **«один писатель В КАЖДЫЙ МОМЕНТ»**: при несовпадении ident
+проверяется живость связанного потока (скан `threading.enumerate` — только на холодном пути
+смены); мёртв → перепривязка, жив → прежний громкий `RuntimeError`. Инвариант памяти не ослаблен —
+запрещены только ОДНОВРЕМЕННЫЕ писатели (их seqlock не ловит); последовательная передача роли
+безопасна (drain гарантирует завершение кадра до detach).

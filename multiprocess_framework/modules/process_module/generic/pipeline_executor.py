@@ -121,6 +121,13 @@ class PipelineExecutor:
         # get_cycle_metrics через target.__self__ и FPS/latency не доедут до GUI.
         self._chain_queue: queue.Queue | None = None
 
+        # Ф7 G.5.d-2 (В3): накопитель release-тикетов zero-copy займов по владельцам.
+        # Флаш пачкой по порогу (амортизация границы; release НЕ на per-frame пути) +
+        # на остановке ворки (не потерять хвост). Порог = боевая глубина кольца (≈coll).
+        self._pending_releases: dict[str, list[dict]] = {}
+        self._pending_release_count = 0
+        self._release_batch_threshold = 8
+
     def bind_queue(self, chain_queue: queue.Queue) -> None:
         """Привязать входную очередь для bound-метода run() (worker target)."""
         self._chain_queue = chain_queue
@@ -167,18 +174,40 @@ class PipelineExecutor:
             try:
                 items = chain_queue.get(timeout=0.05)
             except queue.Empty:
+                # Ф7 G.5 ревью-фикс 6: idle-флаш — не копить release-тикеты, когда работы
+                # нет (иначе при малом трафике/глубоком кольце тикеты голодают, а
+                # владелец не освобождает слоты). Дёшево: no-op, если копить нечего.
+                if self._pending_release_count:
+                    self._flush_releases()
                 continue
 
             # Тайминг полезной итерации (chain-обработка + send), без учёта
             # ожидания на пустой очереди. perf_counter (не monotonic): работа
-            # subмиллисекундная, а monotonic на Windows имеет ~15мс гранулярность.
+            # субмиллисекундная, а monotonic на Windows имеет ~15мс гранулярность.
             t_start = time.perf_counter()
+
+            # Ф7 G.5.c: снять view-тикеты ВХОДНЫХ items ДО прогона — цепочка может
+            # заменить item/frame, а re-check/release относятся к ВХОДНОМУ кадру (пока
+            # плагины его читали, writer мог обернуть кольцо и перезаписать слот).
+            view_tickets = self._collect_view_tickets(items)
 
             # Прогнать items через chain плагинов
             items = self._execute_chain(items)
 
-            # Если items пустой после chain — ничего не отправляем
+            # Ф7 G.5.c (В1-пол): post-use re-check — слот перезаписан под живым view за
+            # время обработки → результат на порванных пикселях. Ф7 G.5.d-2 (В3): consumer
+            # ДОЧИТАЛ входные views → release займов владельцу (батч/async), НЕЗАВИСИМО от
+            # исхода цепочки/re-check (читатель в любом случае закончил с этими слотами).
+            valid = self._frame_views_valid(view_tickets) if view_tickets else True
+            self._accumulate_releases(view_tickets)
+
+            # Если items пустой после chain — ничего не отправляем (но release уже учтён).
             if not items:
+                self._cycle_metrics.record(time.perf_counter() - t_start)
+                continue
+
+            # Stale view → ДРОП батча (frame_stale_drops уже учтён в _frame_views_valid).
+            if not valid:
                 self._cycle_metrics.record(time.perf_counter() - t_start)
                 continue
 
@@ -187,6 +216,9 @@ class PipelineExecutor:
 
             # Полный цикл обработки batch'а (chain + send) → телеметрия.
             self._cycle_metrics.record(time.perf_counter() - t_start)
+
+        # Ф7 G.5.d-2: не потерять хвост release'ов на остановке воркера.
+        self._flush_releases()
 
     def _execute_chain(self, items: list[dict]) -> list[dict]:
         """Прогон items через processing-плагины поверх ``ChainRunnable`` (C6d).
@@ -212,6 +244,81 @@ class PipelineExecutor:
             self._steps_dirty = False
         result = self._active_runnable.execute(items, None)
         return result.frame
+
+    def _collect_view_tickets(self, items: list[dict]) -> list[dict]:
+        """Ф7 G.5.c/d-2: снять тикеты входных zero-copy view-items — для re-check
+        (view_name+generation) И release (owner+shm_name+index+generation). Пусто, если
+        zero-copy не использовался (нет middleware / нет ``_frame_is_view``) — ноль
+        оверхеда на не-view пути."""
+        if self._shm is None:
+            return []
+        tickets: list[dict] = []
+        for it in items:
+            if it.get("_frame_is_view"):
+                name = it.get("_shm_view_name")
+                if name:
+                    tickets.append(
+                        {
+                            "view_name": name,
+                            "generation": int(it.get("_shm_view_generation", -1)),
+                            "owner": it.get("owner") or it.get("shm_owner") or "",
+                            "shm_name": it.get("shm_name", ""),
+                            "index": int(it.get("shm_index", -1)),
+                        }
+                    )
+        return tickets
+
+    def _frame_views_valid(self, view_tickets: list[dict]) -> bool:
+        """Ф7 G.5.c: все ли входные view пережили обработку (слот не перезаписан).
+        Любой drift → False (middleware уже учёл frame_stale_drops) → батч дропается."""
+        return all(self._shm.frame_view_valid(t["view_name"], t["generation"]) for t in view_tickets)
+
+    def _loan_active(self) -> bool:
+        """Ф7 G.5 ревью-фикс 13: активен ли loan-протокол (публичный контракт middleware)."""
+        return self._shm is not None and getattr(self._shm, "loan_protocol_enabled", False)
+
+    def _release_threshold(self) -> int:
+        """Ф7 G.5 ревью-фикс 6: порог флаша НЕ выше реальной глубины кольца owner'а —
+        иначе тикеты не набираются (в кольце max coll занятых слотов) и free-list
+        голодает перманентно. Плюс idle-флаш на пустой очереди страхует от голодания."""
+        depth = getattr(self._shm, "ring_depth", self._release_batch_threshold)
+        return max(1, min(self._release_batch_threshold, depth))
+
+    def _accumulate_releases(self, view_tickets: list[dict]) -> None:
+        """Ф7 G.5.d-2 (В3): накопить release-тикеты по владельцам; флаш пачкой по порогу
+        (амортизация границы — release НЕ на per-frame критическом пути). Активно только
+        под loan-протоколом (иначе ноль оверхеда)."""
+        if not view_tickets or not self._loan_active():
+            return
+        for t in view_tickets:
+            owner = t.get("owner")
+            if not owner or t.get("index", -1) < 0:
+                continue
+            self._pending_releases.setdefault(owner, []).append(
+                {"slot": t["shm_name"], "index": t["index"], "generation": t["generation"], "reader": self._node}
+            )
+            self._pending_release_count += 1
+        if self._pending_release_count >= self._release_threshold():
+            self._flush_releases()
+
+    def _flush_releases(self) -> None:
+        """Ф7 G.5.d-2: отправить накопленные release пачкой каждому владельцу через
+        SYSTEM-очередь (надёжная, её поллит SystemThreads → event_dispatcher → handler).
+        Ф7 G.5 ревью-фикс 16: ``queue_type="system"`` ОБЯЗАТЕЛЕН — иначе type="shm_release"
+        падает в data-очередь (её поллит DataReceiver как кадр), release НЕ доставляется.
+        Один конверт со списком тикетов на владельца."""
+        if not self._pending_releases:
+            return
+        for owner, releases in self._pending_releases.items():
+            if not releases:
+                continue
+            msg = {"target": owner, "type": "shm_release", "queue_type": "system", "data": {"releases": releases}}
+            try:
+                self._send(owner, msg)
+            except Exception as exc:  # noqa: BLE001 — потеря release не критична (В1-страховка + reclaim)
+                self._log_error(f"release flush failed for owner={owner}: {exc}")
+        self._pending_releases = {}
+        self._pending_release_count = 0
 
     def _build_active_steps(self) -> list[RunnableStep]:
         """Шаги chain на текущем breaker-состоянии, в порядке плагинов.

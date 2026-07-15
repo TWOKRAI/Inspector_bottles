@@ -47,6 +47,14 @@ class DataReceiver:
         node_name: str = "",
     ) -> None:
         self._receive = receive_fn
+        # Ф7 G.5.a — снятие двойной конверсии на data-plane. Флаг читается ОДИН раз
+        # (не на кадр): FW_DATA_PLANE_DICTS on → просим router отдавать plain dict
+        # (return_messages=False), без пересборки Message.from_dict → to_dict() ниже.
+        # Дефолт off = бит-в-бит прежнее (router рождает Message, guard to_dict его
+        # разбирает). Откат = флаг off.
+        from multiprocess_framework.modules.config_module.tools.env import env_flag
+
+        self._return_messages = not env_flag("FW_DATA_PLANE_DICTS")
         # Имя процесса-узла — для frame-trace transport-спана (from -> node).
         self._node = node_name
         self._shm = shm_middleware
@@ -146,8 +154,13 @@ class DataReceiver:
                 self._inspector.check_timeouts()
                 self._last_timeout_check = now
 
-            # Receive IPC с timeout
-            msg = self._receive(timeout=0.05, channel_types=["data"])
+            # Receive IPC с timeout. return_messages=False (флаг FW_DATA_PLANE_DICTS)
+            # → router отдаёт plain dict без пересборки Message (Ф7 G.5.a).
+            msg = self._receive(
+                timeout=0.05,
+                channel_types=["data"],
+                return_messages=self._return_messages,
+            )
             if msg is None:
                 continue
 

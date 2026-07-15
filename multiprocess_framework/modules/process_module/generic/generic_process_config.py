@@ -128,6 +128,30 @@ class GenericProcessConfig(ProcessLaunchConfig):
         FieldMeta("Critical plugins", info="Имена критических плагинов (Q7)."),
     ] = []
 
+    # --- Ф7 G.4.b/G.7: SHM-кольцо процесса-владельца (per-camera, из рецепта) ---
+
+    frame_ring_depth: Annotated[
+        int,
+        FieldMeta(
+            "Frame ring depth",
+            info="Глубина SHM-кольца кадров ЭТОГО owner'а (per-camera, Ф7 G.4.b). "
+            "0 = не задана → QoS-профиль data (при FW_QOS_PROFILES) или дефолт 3. "
+            "Действует только при FW_QOS_PROFILES=1. В рецепте — extras.frame_ring_depth.",
+            min=0,
+        ),
+    ] = 0
+
+    copy_out_targets: Annotated[
+        list[str],
+        FieldMeta(
+            "Copy-out targets",
+            info="Имена процессов-потребителей, которые кадр КОПИРУЮТ и release "
+            "loan-протокола НЕ шлют (дисплеи/GUI) — исключаются из num_consumers "
+            "(Ф7 G.7). Пусто = дефолт framework {'gui'}. В рецепте — "
+            "extras.copy_out_targets (мульти-дисплей: display_0/hmi).",
+        ),
+    ] = []
+
     @property
     def memory(self) -> dict[str, Any] | None:
         """Агрегация SHM layout из всех плагинов.

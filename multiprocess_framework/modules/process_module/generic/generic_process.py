@@ -21,6 +21,33 @@ from .plugin_runner import PluginRunner
 from .source_producer import SourceProducer
 
 
+# Ф7 G.7: copy-out терминалы кадрового fan-out — display/GUI-читатели. Они КОПИРУЮТ кадр
+# и release loan-протокола (В3) НЕ шлют, поэтому в num_consumers (refcount владельца) НЕ
+# входят. Владелец, чей fan-out состоит ТОЛЬКО из них, работает по В1 (round-robin) без
+# loan (иначе refcount застревает → free-list исчерпание → drop-на-источнике).
+# Ф7 ревью фазы G: ДЕФОЛТ, а не истина — имя процесса-дисплея принадлежит приложению,
+# не framework'у. Рецепт/конфиг процесса перекрывает списком ``copy_out_targets``
+# (мульти-дисплей: display_0/display_1/hmi — иначе они считались бы loan-aware, release
+# от них не пришёл бы → free-list исчерпание). Полный вынос в топологию (роль
+# потребителя на wire, не имя) — G.7/G.F.
+_COPY_OUT_TARGETS: frozenset[str] = frozenset({"gui"})
+
+
+def _count_loan_aware_consumers(chain_targets, copy_out_targets=None) -> int:
+    """Число loan-aware потребителей кадра (шлют release) среди ``chain_targets``.
+
+    copy-out терминалы исключаются — они кадр копируют и release НЕ шлют.
+    ``copy_out_targets`` — из конфига процесса (``app_cfg["copy_out_targets"]``,
+    рецепт-перекрытие для мульти-дисплеев); None → дефолт :data:`_COPY_OUT_TARGETS`.
+    Цели дедуплицируются: дубль-target шлёт release ОДИН раз (dedup по reader в пуле),
+    а завышенный refcount застрял бы навсегда. Результат = ``num_consumers``
+    (refcount владельца, дизайн §8.2 G.5): занижение безопасно (В1 re-check дропнет),
+    завышение → loan-exhaustion, поэтому считаем ТОЛЬКО реально релизящих потребителей.
+    """
+    copy_out = _COPY_OUT_TARGETS if copy_out_targets is None else frozenset(copy_out_targets)
+    return len({t for t in (chain_targets or []) if t not in copy_out})
+
+
 class GenericProcess(ProcessModule):
     """DEPRECATED: ProcessModule теперь поддерживает плагины нативно.
 
@@ -77,12 +104,27 @@ class GenericProcess(ProcessModule):
         from multiprocess_framework.modules.config_module.tools.env import env_flag
 
         frame_ring_depth = app_cfg.get("frame_ring_depth") if env_flag("FW_QOS_PROFILES") else None
+        # Ф7 G.7: num_consumers loan-протокола (В3) = число loan-aware потребителей кадра
+        # этого owner'а из топологии (chain_targets минус copy-out/GUI). 0 → middleware
+        # не создаёт пул (round-robin В1), исключая исчерпание free-list на GUI-only fan-out.
+        # ``copy_out_targets`` из конфига процесса (рецепт: extras.copy_out_targets)
+        # перекрывает дефолт {"gui"} — мульти-дисплей (display_0/hmi) объявляет своих
+        # copy-out читателей сам. Пусто/отсутствует = «не задано» → дефолт (typed-поле
+        # конфига даёт [] всем процессам — иначе дефолт {"gui"} молча отключился бы).
+        copy_out_targets = app_cfg.get("copy_out_targets") or None
+        num_consumers = _count_loan_aware_consumers(chain_targets, copy_out_targets)
+        copy_out_view = sorted(_COPY_OUT_TARGETS if copy_out_targets is None else set(copy_out_targets))
+        self._log_debug(
+            f"GenericProcess[{self.name}]: loan num_consumers={num_consumers} "
+            f"(chain_targets={list(chain_targets)}, copy-out {copy_out_view} исключены)"
+        )
         shm_middleware = FrameShmMiddleware(
             memory_manager=self.memory_manager,
             owner=self.name,
             slot="output_frames",
             coll=frame_ring_depth,
             log_error=self._log_error,
+            num_consumers=num_consumers,
         )
         if router is not None:
             # P3.1.2: Claim Check кадров — забота хаба, а не producer'ов. Регистрируем
@@ -93,6 +135,18 @@ class GenericProcess(ProcessModule):
             # Ф7 G.6 (F5): агрегация счётчика границ через RouterManager.get_stats()
             # (introspect.router_stats), БЕЗ колбэка — см. класс-докстринг middleware.
             router.register_frame_middleware(shm_middleware)
+            # Ф7 G.5.d-2 (В3): owner-handler release'ов zero-copy займов. Consumer,
+            # дочитав view, шлёт пачку тикетов (type="shm_release" на system-канал) →
+            # event_dispatcher → сюда → декремент refcount владельца (release_slots
+            # само no-op без loan-протокола). Регистрируем всегда (срабатывает только на
+            # shm_release-сообщениях, которых нет без флага).
+            router.register_message_handler("shm_release", lambda msg: self._handle_shm_release(msg, shm_middleware))
+            # Ф7 G.5.e (В3): owner-handler reclaim'а займов мёртвого читателя. Supervisor
+            # (confirmed-death соседа) шлёт {type:"shm_reclaim", data:{dead_reader}} →
+            # сюда → reclaim_reader освобождает зависшие займы. Без авто-триггера мёртвый
+            # держатель В1-безопасен (исчербание→drop, не corruption), но кадры теряются;
+            # reclaim — штатное восстановление free-list.
+            router.register_message_handler("shm_reclaim", lambda msg: self._handle_shm_reclaim(msg, shm_middleware))
 
         # Единый PluginRunner на процесс — общий шов вызова process()/produce() для
         # PipelineExecutor И SourceProducer. io-debug post-хук регистрируется ОДИН
@@ -195,6 +249,34 @@ class GenericProcess(ProcessModule):
                     auto_start=True,
                 )
                 self._log_info(f"GenericProcess[{self.name}]: source '{source_plugin.name}' producer started")
+
+    def _handle_shm_release(self, msg: dict, shm_middleware) -> None:
+        """Ф7 G.5.d-2 (В3): owner-handler release-пачки zero-copy займов.
+
+        Consumer, дочитав view, шлёт ``{type:"shm_release", data:{releases:[...]}}`` →
+        event_dispatcher → сюда. Делегируем в middleware (release_slots само no-op без
+        loan-протокола). Ошибка/битый конверт не роняет процесс (наблюдаемость через
+        лог); потеря release покрыта В1-страховкой + reclaim (G.5.e).
+        """
+        try:
+            data = msg.get("data", {}) if isinstance(msg, dict) else {}
+            releases = data.get("releases", []) if isinstance(data, dict) else []
+            if releases:
+                shm_middleware.release_slots(releases)
+        except Exception as exc:  # noqa: BLE001 — release не критичен для такта
+            self._log_error(f"GenericProcess[{self.name}]: shm_release handler error: {exc}")
+
+    def _handle_shm_reclaim(self, msg: dict, shm_middleware) -> None:
+        """Ф7 G.5.e (В3): owner-handler reclaim'а. Supervisor по confirmed-death соседа
+        шлёт ``{data:{dead_reader}}`` → освобождаем зависшие займы мёртвого читателя.
+        Битый конверт не роняет процесс."""
+        try:
+            data = msg.get("data", {}) if isinstance(msg, dict) else {}
+            dead_reader = data.get("dead_reader", "") if isinstance(data, dict) else ""
+            if dead_reader:
+                shm_middleware.reclaim_reader(dead_reader)
+        except Exception as exc:  # noqa: BLE001 — reclaim не критичен для такта
+            self._log_error(f"GenericProcess[{self.name}]: shm_reclaim handler error: {exc}")
 
     def _attach_io_peek(self, app_cfg: dict) -> None:
         """Подключить io-debug publisher к PluginRunner (opt-in, по умолчанию вкл).

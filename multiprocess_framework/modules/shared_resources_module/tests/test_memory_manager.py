@@ -51,11 +51,6 @@ class TestMemoryManagerCreate:
         assert handles is not None
         assert len(handles) == 2
 
-    def test_find_free_index(self, mm):
-        mm.create_memory_dict("p1", MEMORY_CONFIG, coll=2)
-        idx = mm.find_free_index("p1", "test_mem")
-        assert idx == 0
-
 
 class TestMemoryManagerWriteRead:
     def test_write_and_read_images(self, mm):
@@ -91,10 +86,10 @@ class TestMemoryManagerRelease:
     def test_release_memory(self, mm):
         mm.create_memory_dict("p1", MEMORY_CONFIG, coll=2)
         mm.write_images("p1", "test_mem", [make_image()], index=0)
+        # Ф7 G.H: release_memory только очищает слот (учёт занятости — у FramePool,
+        # не в мёртвом index_usage/find_free_index). Слот снова записываем без ошибки.
         mm.release_memory("p1", "test_mem", index=0)
-        # После release индекс должен быть свободен
-        idx = mm.find_free_index("p1", "test_mem")
-        assert idx == 0
+        assert mm.write_images("p1", "test_mem", [make_image()], index=0) is not None
 
     def test_close_memory(self, mm):
         mm.create_memory_dict("p1", MEMORY_CONFIG, coll=2)
@@ -111,7 +106,6 @@ class TestMemoryManagerUnifiedPath:
         assert data is not None
         assert "handles" in data
         assert "params" in data
-        assert "index_usage" in data
         assert "coll" in data
         assert "names" in data
         assert data["handles"] is not None
@@ -130,7 +124,6 @@ class TestMemoryManagerUnifiedPath:
         meta = mm._local_meta.get("p1", {}).get("test_mem")
         assert meta is not None
         assert meta.coll == 2
-        assert len(meta.index_usage) == 2
         assert meta.params == MEMORY_CONFIG["test_mem"]
 
     def test_write_read_standalone_consistent(self, mm):

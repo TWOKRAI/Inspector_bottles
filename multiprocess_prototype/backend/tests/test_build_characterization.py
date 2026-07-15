@@ -55,10 +55,21 @@ def _normalize_paths(obj: Any) -> Any:
     """Заменить абсолютный путь корня проекта на ``<ROOT>`` рекурсивно.
 
     Делает снапшот машинно-независимым, сохраняя относительную структуру путей.
+
+    Ф7 финальное ревью фазы G: у rooted-путей дополнительно канонизируются
+    разделители (``\\`` → ``/``). Значения вроде ``log_directory`` производны от
+    env ``INSPECTOR_LOG_DIR`` (process-global ``setdefault`` в launch + соседние
+    тесты одного pytest-процесса) — стиль разделителей зависел от порядка запуска
+    и окружения, и golden молча краснел (обнаружено: тест был red на main с merge
+    G.3/G.4, каталог backend/tests вне framework-раннера). Путь тот же — Windows
+    принимает оба разделителя; канон — ``/``.
     """
     root = str(PROJECT_ROOT)
     if isinstance(obj, str):
-        return obj.replace(root, ROOT_PLACEHOLDER)
+        s = obj.replace(root, ROOT_PLACEHOLDER)
+        if ROOT_PLACEHOLDER in s:
+            s = s.replace("\\", "/")
+        return s
     if isinstance(obj, dict):
         return {k: _normalize_paths(v) for k, v in obj.items()}
     if isinstance(obj, list):

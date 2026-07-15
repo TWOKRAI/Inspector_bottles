@@ -41,12 +41,6 @@ class TestMemoryHandle:
         assert handle.memory("frame").exists is True
         assert handle.memory("nonexistent").exists is False
 
-    def test_find_free_index(self, srm):
-        handle = srm.for_process("cam")
-        idx = handle.memory("frame").find_free_index()
-        assert idx is not None
-        assert idx == 0
-
     def test_write_and_read(self, srm):
         import numpy as np
 
