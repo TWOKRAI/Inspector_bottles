@@ -288,12 +288,12 @@ class FrameShmMiddleware:
 
     @staticmethod
     def _resolve_bool_flag(explicit: Optional[bool], env_name: str) -> bool:
-        """Разрешить булев флаг: ctor (не None) > env ``env_name`` (в т.ч. ``=0``) > False."""
-        if explicit is not None:
-            return bool(explicit)
-        from ...config_module.tools.env import env_flag
+        """Разрешить булев флаг: ctor (не None) > env ``env_name`` (в т.ч. ``=0``) > default.
 
-        return env_flag(env_name, default=False)
+        Default теперь берётся из реестра feature_flags."""
+        from ...config_module.feature_flags import resolve
+
+        return resolve(env_name, explicit)
 
     @classmethod
     def _resolve_ring_depth(cls, explicit: Optional[int]) -> int:

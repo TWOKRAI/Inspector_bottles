@@ -8,12 +8,12 @@
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 from multiprocessing import Event
 from typing import Any
 
+from ...config_module.feature_flags import is_enabled
 from ...process_module.health.schema import HealthField, HealthStatus, health_path
 from ...worker_module import ThreadConfig, ThreadPriority
 from ..core.restart_policy import RestartPolicy
@@ -625,7 +625,7 @@ class ProcessMonitor:
           - уже в ``_pending_restarts``/``_pending_recovery`` (рестарт в работе);
           - политика ``enabled`` + ``restart_on_health_failed``.
         """
-        if os.environ.get("FW_HEALTH_RESTART", "0") != "1":
+        if not is_enabled("FW_HEALTH_RESTART"):
             return
         status = self._read_health_status(process_name)
         if status == HealthStatus.OK.value:

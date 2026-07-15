@@ -9,11 +9,11 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
-import os
 import threading
 import time
 from typing import Any
 
+from ...config_module.feature_flags import is_enabled
 from ...console_module import ConsoleManager
 from ...process_module import ProcessModule
 from ...shared_resources_module import QueueRegistry
@@ -118,13 +118,7 @@ class ProcessManagerProcess(ProcessModule):
         if isinstance(restart_cfg, dict):
             restart_policy = RestartPolicy(**restart_cfg)
         else:
-            _autorestart_on = os.environ.get("FW_AUTORESTART", "1").strip().lower() not in (
-                "0",
-                "false",
-                "no",
-                "off",
-                "",
-            )
+            _autorestart_on = is_enabled("FW_AUTORESTART")
             restart_policy = RestartPolicy(enabled=_autorestart_on)
 
         self._process_monitor = ProcessMonitor(
@@ -1135,7 +1129,7 @@ class ProcessManagerProcess(ProcessModule):
         cfg = self.get_config("routing_refresh_enabled") if hasattr(self, "get_config") else None
         if cfg is False:
             return False
-        if os.environ.get("FW_ROUTING_REFRESH", "1") == "0":
+        if not is_enabled("FW_ROUTING_REFRESH"):
             return False
         return True
 
