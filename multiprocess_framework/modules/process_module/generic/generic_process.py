@@ -21,6 +21,24 @@ from .plugin_runner import PluginRunner
 from .source_producer import SourceProducer
 
 
+# Ф7 G.7: copy-out терминалы кадрового fan-out — display/GUI-читатели. Они КОПИРУЮТ кадр
+# и release loan-протокола (В3) НЕ шлют, поэтому в num_consumers (refcount владельца) НЕ
+# входят. Владелец, чей fan-out состоит ТОЛЬКО из них, работает по В1 (round-robin) без
+# loan (иначе refcount застревает → free-list исчерпание → drop-на-источнике).
+_COPY_OUT_TARGETS: frozenset[str] = frozenset({"gui"})
+
+
+def _count_loan_aware_consumers(chain_targets) -> int:
+    """Число loan-aware потребителей кадра (шлют release) среди ``chain_targets``.
+
+    copy-out терминалы (:data:`_COPY_OUT_TARGETS`) исключаются — они кадр копируют и
+    release НЕ шлют. Результат = ``num_consumers`` (refcount владельца, дизайн §8.2 G.5):
+    занижение безопасно (В1 re-check дропнет), завышение → loan-exhaustion, поэтому
+    считаем ТОЛЬКО реально релизящих потребителей.
+    """
+    return sum(1 for t in (chain_targets or []) if t not in _COPY_OUT_TARGETS)
+
+
 class GenericProcess(ProcessModule):
     """DEPRECATED: ProcessModule теперь поддерживает плагины нативно.
 
@@ -77,12 +95,21 @@ class GenericProcess(ProcessModule):
         from multiprocess_framework.modules.config_module.tools.env import env_flag
 
         frame_ring_depth = app_cfg.get("frame_ring_depth") if env_flag("FW_QOS_PROFILES") else None
+        # Ф7 G.7: num_consumers loan-протокола (В3) = число loan-aware потребителей кадра
+        # этого owner'а из топологии (chain_targets минус copy-out/GUI). 0 → middleware
+        # не создаёт пул (round-robin В1), исключая исчерпание free-list на GUI-only fan-out.
+        num_consumers = _count_loan_aware_consumers(chain_targets)
+        self._log_debug(
+            f"GenericProcess[{self.name}]: loan num_consumers={num_consumers} "
+            f"(chain_targets={list(chain_targets)}, copy-out {sorted(_COPY_OUT_TARGETS)} исключены)"
+        )
         shm_middleware = FrameShmMiddleware(
             memory_manager=self.memory_manager,
             owner=self.name,
             slot="output_frames",
             coll=frame_ring_depth,
             log_error=self._log_error,
+            num_consumers=num_consumers,
         )
         if router is not None:
             # P3.1.2: Claim Check кадров — забота хаба, а не producer'ов. Регистрируем

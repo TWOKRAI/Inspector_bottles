@@ -98,6 +98,49 @@ class TestLoanOn:
             mw.release_owned_memory()
 
 
+class TestNumConsumersWiring:
+    """Ф7 G.7: loan-протокол включается ТОЛЬКО при ≥1 loan-aware потребителе.
+
+    Владелец, чей fan-out — только copy-out терминалы (GUI, num_consumers=0): пул НЕ
+    создаётся, слепой round-robin (В1) — исчерпания free-list нет (резидуал G.5 закрыт).
+    """
+
+    def test_zero_consumers_no_own_pool_round_robin(self, monkeypatch):
+        """Флаг on, num_consumers=0 → СВОЙ пул НЕ создан (round-robin, без исчерпания),
+        но loan_protocol_enabled=True (роль консьюмера: слать release вверх сохранена)."""
+        monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
+        mw = FrameShmMiddleware(MemoryManager(), owner="points", slot="output_frames", coll=3, num_consumers=0)
+        assert mw._pool is None  # 0 loan-aware потребителей → своего пула нет
+        assert mw.loan_protocol_enabled is True  # флаг on → как консьюмер релизит upstream
+        try:
+            # Пишем БОЛЬШЕ глубины кольца без единого release — при loan это дало бы
+            # исчерпание; при round-robin (В1) слоты циклятся, дропов нет.
+            indices = [mw.strip_and_write({"frame": _frame(i)}).get("shm_index") for i in range(7)]
+            assert indices == [0, 1, 2, 0, 1, 2, 0]  # слепой цикл, как loan-off
+            assert mw.frame_loan_exhausted == 0
+        finally:
+            mw.release_owned_memory()
+
+    def test_positive_consumers_loan_active(self, monkeypatch):
+        """num_consumers>0 → loan активен (В3), refcount = число потребителей."""
+        monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
+        mw = FrameShmMiddleware(MemoryManager(), owner="seg", slot="output_frames", coll=3, num_consumers=1)
+        assert mw.loan_protocol_enabled is True
+        assert mw._pool is not None
+        try:
+            mw.strip_and_write({"frame": _frame(1)})
+            assert mw._pool._refcount[0] == 1
+        finally:
+            mw.release_owned_memory()
+
+    def test_flag_off_ignores_consumers(self, monkeypatch):
+        """Флаг off → loan не активен независимо от num_consumers (бит-в-бит прежнее)."""
+        monkeypatch.delenv("FW_SHM_LOAN_PROTOCOL", raising=False)
+        mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="output_frames", coll=3, num_consumers=5)
+        assert mw.loan_protocol_enabled is False
+        assert mw._pool is None
+
+
 class TestReleaseSlots:
     """G.5.d-2: owner-side release декрементит refcount (generation-guard + dedup)."""
 

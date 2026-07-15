@@ -209,8 +209,21 @@ class FrameShmMiddleware:
         # round-robin, ставит refcount=num_consumers (commit); release (d-2) декрементит.
         # Пул создаётся ТОЛЬКО под флагом; off → пул=None, слепой round-robin
         # (``self._write_index``), бит-в-бит прежнее поведение.
+        # Ф7 G.7. Две РАЗНЫЕ роли loan-протокола, не путать:
+        #  1) КОНСЬЮМЕР — дочитав входной zero-copy view, шлёт release ВВЕРХ владельцу
+        #     (``pipeline_executor._loan_active``). Зависит ТОЛЬКО от флага (не от своего
+        #     fan-out): процесс points читает кадры lines и ОБЯЗАН их релизить, даже если
+        #     сам фанится лишь в GUI. Поэтому ``loan_protocol_enabled`` = сырой флаг.
+        #  2) ВЛАДЕЛЕЦ — держит пул слотов на СВОЁМ выходе, commit refcount=num_consumers.
+        #     Осмыслен ТОЛЬКО при ≥1 loan-aware потребителе (том, кто пришлёт release).
+        #     copy-out терминалы (GUI: кадр КОПИРУЮТ, release НЕ шлют) в счёт НЕ входят.
+        #     Владелец с fan-out'ом ТОЛЬКО в GUI (напр. points→[gui]): 0 loan-aware →
+        #     refcount застрял бы (некому декрементить) → free-list исчерпание → вечный
+        #     drop-на-источнике (воспроизведено live). Поэтому пул создаётся лишь при
+        #     num_consumers>0 (ниже); иначе — слепой round-robin (В1: seqlock + глубокое
+        #     кольцо защищают copy-out чтение). Счёт из топологии проводит caller.
         self._loan_protocol = self._resolve_bool_flag(loan_protocol, "FW_SHM_LOAN_PROTOCOL")
-        self._num_consumers = max(1, int(num_consumers))
+        self._num_consumers = max(0, int(num_consumers))
         # Per-write сигнал «drop-на-источнике по исчерпанию» (отличить от write-fail →
         # pickle-fallback): send-middleware по нему возвращает None (дроп send).
         self._last_loan_exhausted = False
@@ -222,29 +235,24 @@ class FrameShmMiddleware:
         # Rust/iceoryx2 под тем же ``FramePool`` не трогает транспорт); None + флаг →
         # дефолт-фабрика ``LoanLedger``; None + флаг off → пул=None (слепой round-robin).
         self._pool: Optional[Any] = pool
-        if self._pool is None and self._loan_protocol:
+        if self._pool is None and self._loan_protocol and self._num_consumers > 0:
             # Import runtime-local (как format-хелперы) — coupling router→shared_resources
             # остаётся runtime, не top-level. gen_reader = чтение поколения СВОЕГО слота
             # (seqlock) → пул SHM-агностичен (не знает про формат слота).
             from ...shared_resources_module.memory.pool import LoanLedger
 
             self._pool = LoanLedger(self._coll, gen_reader=self._read_own_slot_generation)
-            # Ф7 G.5 ревью-фикс 17 (резидуал): num_consumers пока НЕ проведён из топологии
-            # (дизайн §8.2.1) — дефолт 1. При fan-out на >1 loan-aware потребителя refcount
-            # занижен → слот освободится рано → В1 re-check дропнет (безопасно, но кадры
-            # теряются). copy-out терминалы (GUI, zero_copy=False) release НЕ шлют — в счёт
-            # НЕ включать. Полная проводка (подсчёт loan-aware целей) — Этап 2 H-задачи/G.7.
-            self._log_error(
-                f"FrameShmMiddleware[{self._owner}]: loan-протокол АКТИВЕН, num_consumers="
-                f"{self._num_consumers} (дефолт при отсутствии проводки из топологии). "
-                f"Для fan-out >1 loan-aware читателя задать num_consumers ЯВНО; copy-out "
-                f"терминалы (GUI) в счёт НЕ включать (release не шлют). Резидуал G.5."
-            )
+            # Ф7 G.7: num_consumers проведён из топологии (число loan-aware целей владельца,
+            # copy-out/GUI исключены — см. связку выше). Пул создаётся только при >0, поэтому
+            # исчерпание из-за GUI-only fan-out (резидуал G.5) больше не воспроизводится.
 
     @property
     def loan_protocol_enabled(self) -> bool:
-        """Ф7 G.5 ревью-фикс 13: публичный контракт активности loan-протокола (В3) для
-        executor'а/тестов — вместо приватного ``_loan_protocol`` чужого модуля."""
+        """Ф7 G.5 ревью-фикс 13: активен ли loan-протокол (сырой флаг). Роль КОНСЬЮМЕРА —
+        executor по нему решает слать ли release ВВЕРХ владельцу входного view. НЕ означает
+        «этот процесс держит СВОЙ пул»: пул есть только при ``num_consumers>0`` (проверять
+        ``_pool is not None``). Разнос ролей — Ф7 G.7 (иначе GUI-only процесс переставал
+        релизить кадры upstream'а)."""
         return self._loan_protocol
 
     @property
