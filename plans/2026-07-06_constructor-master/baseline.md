@@ -164,3 +164,32 @@ ZERO_COPY+QOS_PROFILES+GC_FREEZE on):
 прогнал 328/330 кадров без сбоя → single-writer guard/резерв/abort (H-ремедиация) работают вживую.
 **Открыто для полной G.7:** длинный soak, оба реальных рецепта, `num_consumers` из топологии,
 E2E release/incarnation-guard/реальный kill-9, регресс backend_ctl, аллокации/кадр (`AllocProfiler`).
+
+## Ф7 G.7 — ШАГ 0: baseline all-off (Windows, tier синтетика, 2026-07-15)
+
+**Референс «до» всей флип-лесенки (0.6).** `BACKEND_CTL=1 FW_PERF_PROBES=1 python -m
+backend_ctl.g1_perf_probe 10`, окружение с ЯВНО очищенными `FW_*` (все флаги движка off,
+`MULTIPROCESS_USE_KIND_CHANNELS` снят) — единственная включённая проба = perf-пробы (одинаковый
+overhead с treatment ⇒ честные дельты). Один 10-с прогон, машина — **Windows** (эта, RTX 3050;
+не macOS-G.1). Рецепт `g1_perf_probe.yaml` (synthetic_source→consumer, 1 граница IPC/кадр,
+кадр 640×480×3). Каждый шаг лесенки 1-10 включается ПОВЕРХ этого all-off и сравнивается СЮДА
+(same-tier same-platform — с macOS-числами выше НЕ сравнивать).
+
+| Метрика | Значение (all-off, Windows) |
+|---|---|
+| **source FPS** | **21.35** (цель 30; Windows sleep-пейсинг ~15.6 мс квант — см. план §5(в), источник sleep-driven) |
+| **consumer FPS** | **21.39** (паритет с источником — дропов нет) |
+| границ процесса на кадр | **1.004** (249/248 — единственный IPC-хоп source→consumer) |
+| кадров произведено / принято (10с) | 248 / 249 |
+| capture p50 / p99 (мс) | 0.210 / 0.501 |
+| send p50 / p99 (мс) — SHM write + IPC send | 0.430 / 1.219 |
+| receive p50 / p99 (мс) — to_dict-десериализация | 0.066 / 0.146 |
+| **restore** p50 / p99 (мс) — SHM read (`.copy()`) | **0.789 / 1.382** |
+
+**Допуски лесенки к этой строке** (план §0): FPS ≥ 21.35 − 2% (≈ 20.9); restore/цикл p99 ≤
+baseline + 5%; `state.shm.*` (torn/stale_drops/loan_exhausted/pickle_fallbacks/queue_data_evicted)
+= 0 или объяснимы; `slots_released` РАСТЁТ при активном loan; **`cache_size` (0.5) стабилен на
+инкарнацию** (рост под zero-copy = утечка handle). Шаг не прошёл → флаг off бит-в-бит, находка в план.
+
+**Tier'ы вебкамера/Hikvision — hardware-gated** (per-шаг гоняются по мере железа, сравнение
+только same-tier; см. Ф0.4). Эта строка — синтетический референс шага 0 на Windows.
