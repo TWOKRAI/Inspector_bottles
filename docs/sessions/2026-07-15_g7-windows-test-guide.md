@@ -54,9 +54,11 @@ python -m backend_ctl.g1_perf_probe 30
 - **Счётчики (heartbeat → state.shm / introspect):** `frame_loan_exhausted` (читатели
   отстают), `frame_stale_drops` (view перезаписан под re-check), `close_errors` (ошибки close
   handle — рост = утечка при частых wire.deconfigure), `data_evicted` (QoS drop).
-- **num_consumers = 1 (резидуал G.H):** при fan-out на >1 loan-aware потребителя refcount
-  занижен → лишние `stale_drops`/дропы. Это ОЖИДАЕМО до проводки num_consumers из топологии
-  (часть полной G.7). На одиночном потребителе — не проявляется.
+- **num_consumers из топологии — ✅ ЗАКРЫТО** (fix `fe0f4d41`, 2026-07-15): `generic_process`
+  считает loan-aware цели из `chain_targets` (copy-out/GUI исключены); middleware разнёс две
+  роли loan-протокола — консьюмер (шлёт release вверх по флагу) и владелец (свой пул только при
+  num_consumers>0). Live webcam-проверка: GUI-only процесс `points` больше не голодает (было
+  1200+ дропов → 0), дисплей точек заполнен, `lines` 600+→0.
 - **kill -9 / switch рецепта:** осиротевшие SHM — на Windows ОС сама освобождает mapping при
   гибели последнего handle (осиротевших почти нет); `FW_SHM_PREFIX_CLEANUP` (дефолт off) —
   best-effort. Проверить, что после switch backend_ctl-socket жив (gate G.7).
@@ -71,8 +73,8 @@ python -m backend_ctl.g1_perf_probe 30
 
 ## 5. Gate G.7 (критерии приёмки)
 FPS ≥ baseline (same-tier) · p99 ≤ baseline · backend_ctl-socket жив после switch · drop-счётчики
-видимы · откат = флаг off. + резидуалы: провести `num_consumers` из топологии; E2E release живым
-транспортом; incarnation-guard; реальный kill-9.
+видимы · откат = флаг off. + резидуалы: ~~провести `num_consumers` из топологии~~ (✅ `fe0f4d41`);
+E2E release живым транспортом; incarnation-guard; реальный kill-9.
 
 ## Ориентир (macOS-peek 2026-07-15, НЕ вердикт)
 restore p99 4.14→0.35 ms (~12×), restore p50 0.59→0.088 ms (6.7×), capture p99 2.30→0.49 ms,
