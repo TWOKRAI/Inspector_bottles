@@ -51,7 +51,7 @@
 
 | Шаг | Флаг | Что проверяем кроме чисел |
 |---|---|---|
-| 1 | `FW_DATA_PLANE_DICTS` | Чистый CPU-выигрыш (нет Message/Pydantic-пересборки на кадр); ждём p99 ↓ или = |
+| 1 ✅ | `FW_DATA_PLANE_DICTS` | Чистый CPU-выигрыш (нет Message/Pydantic-пересборки на кадр); ждём p99 ↓ или =.<br>**✅ DONE 2026-07-16** (синтетика, Windows): стадия `receive` 0.123 → **0.001** мс p99 — структурный коллапс пересборки Message на consumer'е (`return_messages=False`); FPS 21.35 → 21.32 (=), границ/кадр 1.007 (=), дропов нет. Gate ✓. Числа + свежий same-session control — baseline.md «ШАГ 1». Откат `=0`. |
 | 2 | `FW_SHM_SEQLOCK` | Формат слота +8 байт; `torn` появляется как метрика и = 0 в спокойном режиме |
 | 3 | `FW_SHM_OWNER_INCARNATION` | Имена `{slot}_{owner}_{pid}_{inc}`; рестарт camera_0 (restart_policy уже в рецепте) → читатели следуют за новым именем, замороженного кадра нет (**incarnation-guard E2E — резидуал**) |
 | 4 | `FW_SHM_HANDLE_CACHE` | Снятие open/mmap/close на кадр — ждём заметное p99 ↓ на cross-process чтении; `close_errors`=0 |

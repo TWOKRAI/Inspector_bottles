@@ -193,3 +193,32 @@ baseline + 5%; `state.shm.*` (torn/stale_drops/loan_exhausted/pickle_fallbacks/q
 
 **Tier'ы вебкамера/Hikvision — hardware-gated** (per-шаг гоняются по мере железа, сравнение
 только same-tier; см. Ф0.4). Эта строка — синтетический референс шага 0 на Windows.
+
+## Ф7 G.7 — ШАГ 1: `FW_DATA_PLANE_DICTS` on (Windows, tier синтетика, 2026-07-16)
+
+**Флип шага 1 лесенки** (только этот флаг, всё остальное off) — та же команда, что ШАГ 0
+(`BACKEND_CTL=1 FW_PERF_PROBES=1 [FW_DATA_PLANE_DICTS=1] python -m backend_ctl.g1_perf_probe 12`),
+та же машина (Windows, RTX 3050), рецепт `g1_perf_probe.yaml`. Для честной дельты в ЭТОЙ же
+сессии снят свежий control (all-off) — машинный дрейф вчера↔сегодня исключён (FPS control
+сегодня 21.35 = ШАГ 0 вчера 21.35). Один 12-с прогон на конфигурацию (методология шага 0).
+
+| Метрика | Control all-off (сегодня) | `FW_DATA_PLANE_DICTS=1` | Δ |
+|---|---|---|---|
+| source / consumer FPS | 21.35 / 21.35 | 21.32 / 21.32 | ≈ (−0.14%; упор в источник ~21, gate «FPS ≥ 20.9» ✓) |
+| **receive** p50 / p99 (мс) — to_dict-десериализация | 0.035 / 0.123 | **0.001 / 0.001** | **−97% / −99%** — структурный: флаг снял пересборку Message на consumer'е |
+| restore p50 / p99 (мс) — SHM read `.copy()` | 0.403 / 1.169 | 0.398 / 0.584 | p99 −50% (частью run-to-run, частью меньше per-frame мусора) |
+| capture p50 / p99 (мс) — источник | 0.123 / 0.411 | 0.116 / 0.217 | source-side, Windows run-to-run (флаг не на источнике) |
+| send p50 / p99 (мс) — источник | 0.236 / 1.438 | 0.227 / 0.442 | source-side, Windows run-to-run |
+| границ процесса на кадр | 1.007 | 1.007 | = (единственный IPC-хоп) |
+| кадров произв. / принято (12с) | 288 / 289 | 287 / 289 | паритет, дропов нет |
+
+**Атрибутируемый эффект флага** — коллапс стадии `receive` (0.123 → 0.001 мс p99): это ровно
+та `Message.from_dict → to_dict`-пересборка, которую снимает `return_messages=False` в
+`DataReceiver` (G.5.a). Структурный (работа физически убрана), не шум — подтверждено паритетом
+FPS/границ. Стадии источника (capture/send) и restore несут Windows run-to-run-разброс
+(sleep-пейсинг ~15.6 мс квант, один прогон) — флагу их НЕ приписываю, направление благоприятное.
+
+**Gate шага 1 (план §0):** FPS 21.32 ≥ 20.9 ✓; receive/restore p99 ≤ baseline+5% ✓ (обе ↓);
+`state.shm.*` (torn/stale_drops/loan_exhausted/pickle_fallbacks/queue_data_evicted) неприменимы —
+seqlock/loan/zero-copy ЭТОГО шага off, дропов нет (паритет кадров). **ШАГ 1 ПРОЙДЕН.**
+Откат — `FW_DATA_PLANE_DICTS=0` (бит-в-бит control выше). Tier'ы вебкамера/Hikvision — по железу.
