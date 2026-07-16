@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     pass
@@ -14,15 +14,37 @@ class ProcessHeartbeat:
 
     Отправляет периодические heartbeat-сообщения в ProcessManager
     для мониторинга состояния процесса.
+
+    Task 1.2 — ДВА независимых частотных контура в одном воркере:
+      - **heartbeat-СООБЩЕНИЕ** к ``ProcessManager`` (liveness для ``ProcessMonitor``) —
+        строго каждые ``heartbeat_interval`` секунд (``self._interval``). Эта частота
+        НЕ меняется телеметрийным контрактом — иначе ложные «process dead»;
+      - **телеметрийная публикация** в дерево StateStore — каждый ``_telemetry_tick()``
+        (``min(heartbeat_interval, telemetry.publish.tick_sec)``). Управляется контрактом
+        ``TelemetryPublishConfig.tick_sec`` (boot + runtime), а не захардкоженным 5.0с.
+
+    Воркер тикает по МЕНЬШЕМУ из двух интервалов; heartbeat-сообщение и «хозяйственные»
+    self-publish'ы (health/observability/GC) выходят по расписанию liveness (счётчик по
+    времени), а телеметрия — каждый тик (per-метрика rate-limit держит ``TelemetryGate``).
+    ``tick_sec=None`` → тик = ``heartbeat_interval`` → оба контура совпадают → поведение
+    бит-в-бит прежнее (backward-compat).
     """
 
-    def __init__(self, services: Any) -> None:
+    def __init__(self, services: Any, *, clock: Callable[[], float] = time.monotonic) -> None:
         """
         Args:
             services: объект удовлетворяющий IProcessServices
+            clock: монотонный источник времени для ПЛАНИРОВАНИЯ (heartbeat-расписание +
+                gate). По умолчанию ``time.monotonic``; инъекция — для fake-clock тестов
+                каденции. Wall-clock ``timestamp`` в heartbeat-сообщении остаётся
+                ``time.time`` (реальное время для мониторинга).
         """
         self._services = services
         self._interval: float = 5.0
+        self._clock = clock
+        # Task 1.2: монотонная метка последней ОТПРАВКИ heartbeat-сообщения. None → ещё
+        # не слали (первый тик всегда шлёт — паритет с прежним «send на первой итерации»).
+        self._last_heartbeat_sent: float | None = None
         # PC 1.2: publisher-gate телеметрии. None → гейт неактивен (нет секции
         # telemetry.publish в конфиге) → все метрики каждый тик (обратная совместимость).
         self._telemetry_gate: Any = None
@@ -61,78 +83,178 @@ class ProcessHeartbeat:
         )
 
     def _loop(self, stop_event, pause_event) -> None:
-        """Цикл отправки heartbeat-сообщений."""
+        """Цикл: телеметрия по ``_telemetry_tick``, heartbeat-сообщение по ``heartbeat_interval``.
+
+        Task 1.2: воркер тикает по МЕНЬШЕМУ из двух интервалов. На каждом тике:
+          - **телеметрия** (метрики/SHM-счётчики) публикуется в дерево — ``TelemetryGate``
+            держит per-метрика rate-limit, поэтому «лишние» тики не грузят дерево;
+          - **heartbeat-сообщение + хозяйственные self-publish'ы** (health/observability/GC)
+            выходят только когда наступает срок liveness (``_heartbeat_due``) — их частота
+            равна ``heartbeat_interval`` НЕЗАВИСИМО от телеметрийного тика (инвариант: не
+            дать ``ProcessMonitor`` ложно счесть процесс мёртвым).
+
+        ``tick_sec=None`` → тик = ``heartbeat_interval`` → ``_heartbeat_due`` истинно каждый
+        тик → структура и каденция бит-в-бит прежние.
+        """
         while not stop_event.is_set():
             if pause_event.is_set():
                 time.sleep(0.1)
                 continue
+            # Тик читаем в начале итерации: reconfigure_telemetry() мог живьём сменить
+            # tick_sec (перевзвод интервала ожидания применяется со следующего тика).
+            tick = self._telemetry_tick()
             try:
-                heartbeat_msg = {
-                    "type": "system",
-                    "command": "heartbeat",
-                    "sender": self._services.name,
-                    "timestamp": time.time(),
-                    "status": getattr(self._services, "_current_process_status", "running"),
-                }
-                # Данные о воркерах для ProcessMonitor
-                # Dict at Boundary: get_all_workers_status() уже возвращает чистые dict
-                workers: dict = {}
-                if self._services.worker_manager:
-                    get_status = getattr(self._services.worker_manager, "get_all_workers_status", None)
-                    if get_status is not None:
-                        try:
-                            workers = get_status()
-                            # Исключаем metrics для экономии трафика IPC. Тайминг цикла
-                            # (effective_hz / cycle_duration_ms) подмешан на ВЕРХНИЙ
-                            # уровень статуса воркера — НЕ внутри metrics — и сохраняется.
-                            for w in workers.values():
-                                if isinstance(w, dict):
-                                    w.pop("metrics", None)
-                            heartbeat_msg["workers_status"] = workers
-                        except Exception:
-                            workers = {}
-                self._services.send_message("ProcessManager", heartbeat_msg)
+                now = self._clock()
+                # Снимок воркеров нужен И телеметрии, И (при наступлении срока)
+                # heartbeat-сообщению — берём один раз за тик.
+                workers = self._collect_workers()
 
-                # PC 1.2: publisher-gate — какие метрики разрешено публиковать на этом
-                # тике (вкл/выкл ∧ созрел per-метрика интервал). None → гейт неактивен
-                # (нет конфига) → все метрики каждый тик (обратная совместимость).
+                # --- Телеметрия (каждый тик; gate rate-limit'ит per-метрика) ---
                 # PC 3.1: ссылку на gate читаем в ЛОКАЛЬНУЮ переменную ОДИН раз за тик —
                 # reconfigure_telemetry() может атомарно подменить self._telemetry_gate
                 # из потока диспетчера команд. Локальная ссылка гарантирует, что на этом
-                # тике мы работаем с одним и тем же gate целиком (либо старым, либо новым,
-                # либо None), а не с частично подменённым состоянием.
+                # тике мы работаем с одним и тем же gate целиком (старым/новым/None), а не
+                # с частично подменённым состоянием. None → гейт неактивен → все метрики.
                 gate = self._telemetry_gate
                 allowed_metrics = gate.due_metrics() if gate is not None else None
-
                 # Self-publish метрик процесса напрямую в дерево StateStore.
-                # Здоровый путь телеметрии — тот же канал, что и статус процесса.
                 self._publish_metrics_to_tree(workers, allowed_metrics)
-
-                # Ф7 G.3 H8: SHM-счётчики router'а (pickle-fallback / torn / границы)
-                # в дерево — иначе они видны только pull-командой introspect, а вкладка
-                # Pipeline их не видит (acceptance «счётчик в state/heartbeat»).
+                # Ф7 G.3 H8: SHM-счётчики router'а (pickle-fallback / torn / границы) в дерево.
                 self._publish_router_shm_stats_to_tree(allowed_metrics)
 
-                # Self-publish здоровья процесса (Ф2 Task 2.1) — тот же канал.
-                # Отдельно от метрик: health публикуется даже без воркеров и только
-                # при изменениях (take_dirty) — естественный rate-limit на такт HB.
-                self._publish_health_to_tree()
+                # --- Heartbeat-сообщение + хозяйственные self-publish'ы (частота liveness) ---
+                if self._heartbeat_due(now, tick):
+                    # Liveness-сообщение к ProcessMonitor — строго раз в heartbeat_interval.
+                    self._send_heartbeat(workers)
 
-                # Дренаж ObservabilityHub процесса (Ф5.16): log/stats-буфер hub'а
-                # → реальные менеджеры адаптером. error/critical идут мимо буфера
-                # (write-through), здесь их нет. Прецедент — health self-publish 2.1.
-                self._drain_observability()
+                    # Self-publish здоровья процесса (Ф2 Task 2.1) — тот же канал.
+                    # health публикуется даже без воркеров и только при изменениях
+                    # (take_dirty) — естественный rate-limit на такт HB.
+                    self._publish_health_to_tree()
 
-                # Ф7 G.9(a) H-ревью: pump scheduled-GC. Heartbeat — периодический
-                # BACKGROUND-тик вне hot-path кадра → законная «пауза» для явной сборки.
-                # Без этого pump FW_GC_SCHEDULED отключил бы авто-GC НАВСЕГДА (сборки
-                # не происходило бы → утечка). No-op при флаге off (бит-в-бит).
-                self._pump_scheduled_gc()
+                    # Дренаж ObservabilityHub процесса (Ф5.16): log/stats-буфер hub'а
+                    # → реальные менеджеры адаптером. error/critical идут мимо буфера
+                    # (write-through), здесь их нет. Прецедент — health self-publish 2.1.
+                    self._drain_observability()
+
+                    # Ф7 G.9(a) H-ревью: pump scheduled-GC. Heartbeat — периодический
+                    # BACKGROUND-тик вне hot-path кадра → законная «пауза» для явной сборки.
+                    # Без этого pump FW_GC_SCHEDULED отключил бы авто-GC НАВСЕГДА (сборки
+                    # не происходило бы → утечка). No-op при флаге off (бит-в-бит).
+                    self._pump_scheduled_gc()
+
+                    self._last_heartbeat_sent = now
             except Exception as exc:
                 _log = getattr(self._services, "log_debug", self._services.log_info)
                 _log(f"Не удалось отправить heartbeat: {exc}", module="heartbeat")
             # Ожидание с проверкой stop_event для быстрого завершения
-            stop_event.wait(timeout=self._interval)
+            stop_event.wait(timeout=tick)
+
+    def _telemetry_tick(self) -> float:
+        """Эффективный интервал тика воркера, сек (Task 1.2).
+
+        ``min(heartbeat_interval, telemetry.publish.tick_sec)``: телеметрия не может
+        выходить чаще ``tick_sec``, а heartbeat-сообщение требует тика не реже
+        ``heartbeat_interval``. Gate неактивен / ``tick_sec`` не задан (``None``/≤0) →
+        ``heartbeat_interval`` (backward-compat: прежние 5.0с). Читается каждую итерацию
+        ``_loop`` → рантайм-смена ``tick_sec`` через ``reconfigure_telemetry`` подхватывается
+        на следующем тике (перевзвод интервала ожидания).
+        """
+        gate = self._telemetry_gate
+        if gate is not None:
+            cfg = getattr(gate, "config", None)
+            tick_sec = getattr(cfg, "tick_sec", None) if cfg is not None else None
+            if isinstance(tick_sec, (int, float)) and tick_sec > 0:
+                return min(self._interval, float(tick_sec))
+        return self._interval
+
+    def _heartbeat_due(self, now: float, tick: float) -> bool:
+        """Пора ли слать heartbeat-СООБЩЕНИЕ (liveness) на этом тике (Task 1.2).
+
+        Инвариант: частота heartbeat-сообщений = ``heartbeat_interval`` НЕЗАВИСИМО от
+        телеметрийного тика (иначе ProcessMonitor ложно счёл бы процесс мёртвым).
+
+          - ``tick >= self._interval`` (``tick_sec`` не задан/не меньше heartbeat) → тик
+            И ЕСТЬ heartbeat-такт → шлём каждый тик (бит-в-бит прежнее поведение);
+          - телеметрия быстрее heartbeat → шлём по расписанию: прошло ≥ ``heartbeat_interval``
+            с прошлой отправки. Порог с запасом ``tick/2`` поглощает джиттер планировщика
+            (иначе тик, пришедший на ε раньше срока, отложил бы отправку на целый тик и
+            эффективная частота heartbeat просела бы вдвое);
+          - ``_last_heartbeat_sent is None`` → ещё не слали → первый тик всегда шлёт
+            (паритет с прежним «send на первой итерации»).
+        """
+        if tick >= self._interval:
+            return True
+        if self._last_heartbeat_sent is None:
+            return True
+        return (now - self._last_heartbeat_sent) >= (self._interval - tick * 0.5)
+
+    def _collect_workers(self) -> dict:
+        """Снимок ``get_all_workers_status()`` (Dict at Boundary — чистые dict).
+
+        Общий источник для телеметрии (читает верхнеуровневые ``effective_hz`` /
+        ``cycle_duration_ms``) и heartbeat-сообщения. Нет worker_manager / ошибка →
+        пустой dict (телеметрия/сообщение просто без воркерных данных).
+        """
+        wm = getattr(self._services, "worker_manager", None)
+        if not wm:
+            return {}
+        get_status = getattr(wm, "get_all_workers_status", None)
+        if get_status is None:
+            return {}
+        try:
+            return get_status()
+        except Exception:  # noqa: BLE001 — сбой снятия статуса не должен ронять такт HB
+            return {}
+
+    def _send_heartbeat(self, workers: dict) -> None:
+        """Собрать и отправить heartbeat-сообщение к ``ProcessManager`` (liveness).
+
+        Тайминг цикла (``effective_hz`` / ``cycle_duration_ms``) подмешан на ВЕРХНИЙ
+        уровень статуса воркера (не внутри ``metrics``) и сохраняется; вложенный
+        ``metrics`` вырезается для экономии трафика IPC.
+        """
+        heartbeat_msg = {
+            "type": "system",
+            "command": "heartbeat",
+            "sender": self._services.name,
+            "timestamp": time.time(),
+            "status": getattr(self._services, "_current_process_status", "running"),
+        }
+        if getattr(self._services, "worker_manager", None):
+            for w in workers.values():
+                if isinstance(w, dict):
+                    w.pop("metrics", None)
+            heartbeat_msg["workers_status"] = workers
+        self._services.send_message("ProcessManager", heartbeat_msg)
+
+    def _warn_capped_metrics(self, config: Any) -> None:
+        """Залогировать WARNING по метрикам, чья частота ограничена телеметрийным тиком.
+
+        Task 1.2: если у метрики ``interval_sec`` МЕНЬШЕ эффективного тика
+        (``min(heartbeat_interval, tick_sec)``), настроенная частота недостижима — метрика
+        публикуется на каждом тике, но не чаще. Раньше это был тихий no-op (finding D) —
+        теперь явный WARNING (не отвергаем секцию: метрика продолжает публиковаться).
+        No-op, если ``tick_sec`` не задан (``None``) — легаси-процессы не шумят.
+        """
+        tick_sec = getattr(config, "tick_sec", None)
+        if not isinstance(tick_sec, (int, float)) or tick_sec <= 0:
+            return
+        effective_tick = min(self._interval, float(tick_sec))
+        from .telemetry import capped_metrics
+
+        capped = capped_metrics(config, effective_tick)
+        if not capped:
+            return
+        _warn = getattr(self._services, "log_warning", None) or getattr(self._services, "log_info", None)
+        if _warn is None:
+            return
+        names = ", ".join(f"{m} (interval_sec={iv}с)" for m, iv in capped)
+        _warn(
+            f"Частота метрик ограничена телеметрийным тиком {effective_tick}с: {names} "
+            "— метрика публикуется не чаще тика (подними tick_sec или ослабь interval_sec)",
+            module="heartbeat",
+        )
 
     def _pump_scheduled_gc(self) -> None:
         """Ф7 G.9(a) H-ревью: дать GcDiscipline тик для scheduled-сборки (FW_GC_SCHEDULED).
@@ -193,7 +315,11 @@ class ProcessHeartbeat:
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось собрать TelemetryPublishConfig, гейт выключен: {exc}", module="heartbeat")
             return None
-        return TelemetryGate(config)
+        # Task 1.2: WARNING по метрикам, чей interval_sec < эффективного тика (не тихий no-op).
+        self._warn_capped_metrics(config)
+        # Task 1.2: gate использует ТОТ ЖЕ clock, что и heartbeat-планирование (для
+        # fake-clock тестов каденции; в проде обоим — time.monotonic).
+        return TelemetryGate(config, clock=self._clock)
 
     def current_telemetry_publish(self) -> dict | None:
         """Текущая эффективная секция ``telemetry.publish`` живого gate (Task 1.1).
@@ -267,8 +393,11 @@ class ProcessHeartbeat:
         from .telemetry import TelemetryGate
 
         config = TelemetryPublishConfig.from_dict(publish_section)
+        # Task 1.2: WARNING по метрикам, чья частота ограничена телеметрийным тиком.
+        self._warn_capped_metrics(config)
         # Атомарный swap: сборка завершена — переприсваиваем ссылку целиком (под GIL).
-        self._telemetry_gate = TelemetryGate(config)
+        # Gate использует clock heartbeat'а (fake-clock тесты; в проде time.monotonic).
+        self._telemetry_gate = TelemetryGate(config, clock=self._clock)
 
     def _publish_metrics_to_tree(self, workers: dict, allowed_metrics: Any = None) -> None:
         """Опубликовать телеметрию процесса и каждого воркера в дерево StateStore.

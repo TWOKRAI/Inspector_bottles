@@ -61,6 +61,16 @@ class TelemetryPublishConfig(SchemaBase):
         float,
         FieldMeta("Интервал публикации метрики по умолчанию, сек", min=0.0),
     ] = 1.0
+    tick_sec: Annotated[
+        Optional[float],
+        FieldMeta(
+            "Период телеметрийного тика, сек — как часто процесс просыпается публиковать "
+            "телеметрию (верхняя ступень частотной лестницы, Task 1.2). None → наследовать "
+            "heartbeat_interval процесса (backward-compat: прежние 5.0с). Эффективный тик = "
+            "min(heartbeat_interval, tick_sec); метрика не публикуется чаще этого тика.",
+            min=0.0,
+        ),
+    ] = None
     metrics: Annotated[
         Dict[str, MetricRule],
         FieldMeta(

@@ -275,3 +275,24 @@ B. **Mixin-наследование** (ProcessModule + CameraMixin + PluginMixin
 - `chain_module` — живой исполнитель processing-цепочки (acceptance C6 «живой пайплайн через chain»); DAG/parallel доступны, НЕ подключены.
 - `run_loop`/`_send_results`/`bind_queue`/метрики/IPC НЕ переехали в chain_module; `SourceProducer` не тронут; hot-path (SHM/seqlock/per-frame Message) не тронут.
 - Reversible: yes — откат к прямому list-loop локален в `_execute_chain`. Risk: medium (перф, см. выше; смягчён — реальный регресс FPS <1.3%).
+
+
+## ADR-PM-016: телеметрийный тик в контракте (`publish.tick_sec`) — вариант (а), heartbeat-сообщение по счётчику времени
+
+**Статус:** принято
+**Дата:** 2026-07-16
+**Refs:** plans/telemetry-coherence-remediation.md (Task 1.2), ADR-PM-010/PC 1.2 (publisher-gate), telemetry-publish-control.md (finding D)
+
+**Контекст:** Частота публикации телеметрии де-факто задавалась `heartbeat_interval=5.0` — читался ОДИН раз в `ProcessHeartbeat.start()`, `reconfigure_telemetry` его не трогал. Верхняя ступень частотной лестницы (finding D ревью Fable): publisher `interval_sec < 5с` — тихий no-op, «поднять частоту» нельзя ни одной ручкой control-plane. `TelemetryGate` per-метрика rate-limit был доминирован захардкоженным 5с-тиком воркера.
+
+**Решение — вариант (а)** (из двух в плане): heartbeat-воркер тикает по `min(heartbeat_interval, tick_sec)`; телеметрия публикуется КАЖДЫЙ тик (per-метрика rate-limit держит `TelemetryGate`), а heartbeat-СООБЩЕНИЕ к `ProcessManager` + хозяйственные self-publish'ы (health/observability/GC) — по расписанию liveness (`_heartbeat_due`: прошло >= `heartbeat_interval` с прошлой отправки, порог с запасом `tick/2` против джиттера). `TelemetryPublishConfig.tick_sec: float | None = None` (None → `heartbeat_interval`, backward-compat). `_telemetry_tick()`/`_heartbeat_due()` читаются каждую итерацию `_loop` → рантайм-смена `tick_sec` через `reconfigure_telemetry` подхватывается на следующем тике. Валидация: метрика с `interval_sec < min(heartbeat_interval, tick_sec)` → WARNING «частота ограничена тиком» (было тихим no-op). Clock инъектируется в `ProcessHeartbeat` и прокидывается в `TelemetryGate` — детерминированные fake-clock тесты каденции.
+
+**Rejected — вариант (б)** (отдельный воркер `telemetry_publisher` со своим `stop_event.wait(tick_sec)`): отвергнут — второй воркер = второй lifecycle + дубль `get_all_workers_status()` + необходимость делить health/observability/GC между двумя циклами (какой контур «хозяйничает»). Вариант (а) — один воркер, один снимок воркеров за тик, инвариант liveness провозится ЯВНОЙ time-gate проверкой (heartbeat-сообщение бит-в-бит раз в `heartbeat_interval`), меньше слоёв (предпочтение владельца).
+
+**Критический инвариант:** частота heartbeat-СООБЩЕНИЙ к `ProcessMonitor` (liveness) НЕ меняется телеметрийным тиком — иначе ложные «process dead». Провозится `_heartbeat_due` (при `tick_sec=None` → `tick >= interval` → каждый тик = heartbeat-такт, бит-в-бит) и покрыт acceptance-тестом (`test_telemetry_tick.py`: `tick_sec=0.5` → телеметрия 20/10с ~ 2 Гц, heartbeat 2/10с ~ 0.2 Гц).
+
+**Последствия:**
+- Частота телеметрии управляется контрактом (boot + runtime `telemetry.reconfigure`), а не хардкодом — finding D закрыт (верхняя ступень лестницы стала управляемой).
+- health/observability/GC остаются на каденции `heartbeat_interval` (сгруппированы с heartbeat-сообщением) — их частота НЕ меняется при подъёме телеметрийного тика (нет scope-creep).
+- Reversible: yes — `tick_sec=None` возвращает прежнее поведение целиком; откат правки локален в `heartbeat/`.
+- Risk: low — liveness-инвариант под тестом; backward-compat (tick_sec=None) характеризован; `GATED_METRICS` из configs не выносился (цикл-риск Task 2.3 не тронут — `capped_metrics` живёт в heartbeat-слое, где оба импорта уже есть).

@@ -176,6 +176,37 @@ class TestThrottleMergeMode:
         assert applied == {"throttle": False}
 
 
+class TestUnknownModeRejected:
+    """Task 1.2 (замечание ревьюера Task 1.1): неизвестный mode → явная ошибка, не replace."""
+
+    def test_unknown_mode_rejected(self) -> None:
+        """Опечатка mode='mrege' → error-dict, НИ ОДНА плоскость не применена (не wipe)."""
+        hb, throttle = _FakeHeartbeat(), _FakeThrottle()
+        throttle.rules = {"keep": 5.0}
+        result = apply_telemetry_reconfigure(
+            {"publish": {"metrics": {"fps": {"enabled": False}}}, "throttle": {"a.b": 2.0}},
+            mode="mrege",  # опечатка «merge»
+            heartbeat=hb,
+            store_throttle=throttle,
+        )
+        # Наблюдаемая ошибка вместо молчаливого деструктивного replace.
+        assert "error" in result
+        assert result["mode"] == "mrege"
+        assert "publish" not in result and "throttle" not in result
+        # НИЧЕГО не тронуто: gate не пересобран, правила троттла целы.
+        assert hb.calls == [] and hb.modes == []
+        assert throttle.set_calls == 0 and throttle.update_calls == [] and throttle.remove_calls == []
+        assert throttle.rules == {"keep": 5.0}  # соседнее правило НЕ стёрто
+
+    def test_valid_modes_still_apply(self) -> None:
+        """Контроль: replace/merge остаются рабочими (валидация не ломает валидные режимы)."""
+        for mode in ("replace", "merge"):
+            hb = _FakeHeartbeat()
+            result = apply_telemetry_reconfigure({"publish": {"x": 1}}, mode=mode, heartbeat=hb)
+            assert result == {"publish": True}
+            assert hb.modes == [mode]
+
+
 class TestMakeTelemetryOnReload:
     def test_applies_throttle_from_config(self) -> None:
         """on_reload читает telemetry.throttle из Config и применяет к троттлу."""

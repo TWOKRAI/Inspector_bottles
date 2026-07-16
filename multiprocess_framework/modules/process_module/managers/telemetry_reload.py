@@ -33,6 +33,11 @@ if TYPE_CHECKING:
 # Dict-at-Boundary дружелюбно) однозначно означает «снять правило».
 THROTTLE_REMOVE: Any = None
 
+# Task 1.2 (замечание ревьюера Task 1.1): допустимые режимы применения дельты. Неизвестный
+# ``mode`` (напр. опечатка ``"mrege"``) НЕ должен молча уходить в деструктивную
+# ``replace``-ветку (wipe соседних правил/метрик) — валидируем в единой точке применения.
+VALID_MODES: tuple[str, ...] = ("replace", "merge")
+
 
 def apply_telemetry_reconfigure(
     section: Any,
@@ -78,7 +83,17 @@ def apply_telemetry_reconfigure(
         ``{"publish": bool, "throttle": bool}`` — по ключу для КАЖДОЙ ЗАПРОШЕННОЙ
         (присутствующей в ``section``) под-секции: ``True`` — применена, ``False`` —
         получателя не было. Незапрошенные под-секции в результат не попадают.
+
+        Task 1.2: неизвестный ``mode`` → ``{"error": <текст>, "mode": <mode>}`` и НИЧЕГО
+        не применяется (ни одна плоскость) — явная наблюдаемая ошибка вместо молчаливого
+        деструктивного ``replace`` (опечатка не должна стирать соседние правила/метрики).
     """
+    if mode not in VALID_MODES:
+        msg = f"неизвестный telemetry mode={mode!r} (ожидается {VALID_MODES}); секция НЕ применена"
+        if log_info is not None:
+            log_info(f"[telemetry] {msg}")
+        return {"error": msg, "mode": mode}
+
     section = section or {}
     applied: Dict[str, Any] = {}
 
@@ -188,6 +203,7 @@ def make_telemetry_on_reload(
 
 __all__ = [
     "THROTTLE_REMOVE",
+    "VALID_MODES",
     "apply_telemetry_reconfigure",
     "make_telemetry_on_reload",
     "resolve_store_throttle",

@@ -137,6 +137,37 @@ def build_worker_telemetry(
     return f"processes.{name}", data
 
 
+def capped_metrics(config: Any, effective_tick: float) -> list[tuple[str, float]]:
+    """Метрики, чей per-метрика ``interval_sec`` МЕНЬШЕ эффективного телеметрийного тика.
+
+    Task 1.2: телеметрийный тик (``min(heartbeat_interval, tick_sec)``) — верхняя
+    ступень частотной лестницы. Метрика не может публиковаться чаще этого тика, поэтому
+    метрика с ``interval_sec < effective_tick`` «ограничена тиком»: её настроенный интервал
+    не достижим (публикация на КАЖДОМ тике, но не чаще). Раньше это был тихий no-op
+    (finding D) — теперь вызывающий (``ProcessHeartbeat``) логирует WARNING по этому списку.
+
+    Чистая функция (тестируется без Qt/IPC): принимает уже вычисленный ``effective_tick``
+    (``ProcessHeartbeat`` знает ``heartbeat_interval``, config — только ``tick_sec``).
+
+    Args:
+        config: объект с ``resolve(metric) -> (enabled, interval_sec)``
+            (``TelemetryPublishConfig``).
+        effective_tick: эффективный тик публикации, сек (``min(heartbeat_interval, tick_sec)``).
+
+    Returns:
+        Список ``(metric, interval_sec)`` включённых метрик с ``interval_sec < effective_tick``
+        (пустой — ни одна метрика тиком не ограничена).
+    """
+    out: list[tuple[str, float]] = []
+    for metric in GATED_METRICS:
+        # config — валидированный TelemetryPublishConfig; resolve() тотальна для суффиксов
+        # GATED_METRICS (возвращает (enabled, interval) даже для отсутствующих правил).
+        enabled, interval = config.resolve(metric)
+        if enabled and interval < effective_tick:
+            out.append((metric, interval))
+    return out
+
+
 class TelemetryGate:
     """Publisher-side гейт публикации метрик: вкл/выкл + per-метрика rate-limit.
 
@@ -198,4 +229,4 @@ class TelemetryGate:
         return allowed
 
 
-__all__ = ["build_worker_telemetry", "TelemetryGate", "GATED_METRICS"]
+__all__ = ["build_worker_telemetry", "TelemetryGate", "GATED_METRICS", "capped_metrics"]
