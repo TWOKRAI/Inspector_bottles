@@ -194,8 +194,14 @@
 **Goal:** после миграции панелей: убрать `ensure_subscription` из `bind()`-пути телеметрии, убрать
   `cache_snapshot`-replay из `GuiStateBindings` (роль у view-model), снять мёртвые точечные подписки.
 **Acceptance:**
-- [ ] Нет вызовов `ensure_subscription` из `bind()` для путей, покрытых wildcard (координация с Task 0.1)
-- [ ] Тест-инвариант в CI: открытие каждой вкладки → счётчик `state.subscribe` == 0
+- [x] Нет вызовов `ensure_subscription` из `bind()` для путей, покрытых wildcard (координация с Task 0.1) — для «Процессов» панели в VM-режиме вообще не зовут `bind`/`ensure_subscription` на телеметрию (`test_telemetry_vm_panels.py::TestNoServerSubscriptionsInVmMode`); для остальных вкладок coverage-check (0.1) даёт 0 серверных подписок на покрытых путях (см. инвариант-тест ниже)
+- [x] Тест-инвариант в CI: открытие каждой вкладки → счётчик `state.subscribe` == 0 (для покрытых путей) + 0 блокирующего `router.request` из main thread — `test_tab_open_invariant.py::test_opening_all_tabs_does_no_blocking_ipc` (все 7 вкладок через `register_all_tabs()` + реальный GuiStateBindings поверх GuiStateProxy со spy-router)
+> **Cleanup осознанно отложен (решение Director 2026-07-16):** дуальный VM/legacy-путь в `_panels.py` и
+> `cache_snapshot`-replay в `GuiStateBindings` НЕ вырезаны — от `cache_snapshot`/legacy-bind зависят
+> НЕмигрированные вкладки (devices/calibration/recipes/settings/...); полное удаление требует их миграции
+> тем же VM-паттерном (план: «миграция вкладок вне Процессов — по мере надобности»). Инвариант при этом
+> УЖЕ enforced coverage-check'ом (0.1) для всех вкладок — удаление дублирующего кода даёт «меньше слоёв»,
+> но не меняет поведение. Вынести в отдельную задачу миграции остальных вкладок.
 
 #### Task 3.2 — ADR + память + статусы планов
 **Level:** Middle (Sonnet) · **Assignee:** tech-writer
