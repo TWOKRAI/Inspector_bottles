@@ -215,6 +215,36 @@ def _shutdown_with_watchdog(
     _force_kill_tree(orchestrator_pid, snapshot, log=log)
 
 
+def _hard_kill_pid(pid: int, *, log: Callable[[str], None], name: str = "") -> None:
+    """Жёсткий kill процесса по pid, кросс-платформенно (crash-семантика, exitcode != 0).
+
+    POSIX: ``os.kill(pid, signal.SIGKILL)`` — точный SIGKILL. Windows: ``signal.SIGKILL``
+    отсутствует (``AttributeError``) → ``psutil.Process(pid).kill()`` = TerminateProcess
+    (тоже exitcode != 0 → монитор ловит crash и авто-рестарт триггерится как на POSIX).
+    Уже мёртвый процесс — не ошибка (считаем «убит»). Скоуп строго по ОДНОМУ pid — не
+    дерево и не глобально (fault-injection бьёт конкретного ребёнка).
+    """
+    # ASCII-only в лог-строках: дефолтный print()/консоль Windows (cp1251) не кодирует
+    # не-latin символы вроде "→" → UnicodeEncodeError уронил бы вызывающего ПОСЛЕ kill.
+    tag = f"'{name}' " if name else ""
+    try:
+        os.kill(pid, signal.SIGKILL)  # POSIX
+        log(f"[harness] hard-kill {tag}pid={pid} -> SIGKILL")
+        return
+    except ProcessLookupError as exc:  # already dead — считаем как «убит»
+        log(f"[harness] hard-kill {tag}pid={pid} already dead ({exc})")
+        return
+    except AttributeError:
+        pass  # Windows: нет signal.SIGKILL → psutil-путь ниже
+    try:
+        import psutil
+
+        psutil.Process(pid).kill()  # Windows: TerminateProcess (exitcode != 0)
+        log(f"[harness] hard-kill {tag}pid={pid} -> psutil.kill (Windows)")
+    except Exception as exc:  # noqa: BLE001 — процесс мог уже умереть / нет psutil
+        log(f"[harness] hard-kill {tag}pid={pid} psutil path failed: {exc!r}")
+
+
 # ---------------------------------------------------------------------------
 # BackendHarness — фасад start/stop + контекст-менеджер
 # ---------------------------------------------------------------------------
@@ -365,11 +395,7 @@ class BackendHarness:
         pid = payload.get("pid") if isinstance(payload, dict) else None
         if not isinstance(pid, int) or pid <= 0:
             raise RuntimeError(f"kill_child('{name}'): pid не найден в introspect.status (ответ: {res!r})")
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError as exc:  # процесс уже мёртв — считаем как «убит»
-            self._log(f"[harness] kill_child('{name}'): процесс pid={pid} уже мёртв ({exc})")
-        self._log(f"[harness] kill_child('{name}') → SIGKILL pid={pid}")
+        _hard_kill_pid(pid, log=self._log, name=name)
         return pid
 
     def _orchestrator_pid(self) -> Optional[int]:
