@@ -83,6 +83,21 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         """
         self._pipeline.use(middleware)
 
+    def get_middleware(self, name: str) -> StateMiddleware | None:
+        """Вернуть живой middleware из pipeline по имени (или None).
+
+        Тонкая обёртка над ``MiddlewarePipeline.get`` — точка доступа для
+        рантайм-команд (PC 0.1/Фаза 3), которым нужно достать конкретный
+        middleware (напр. ``ThrottleMiddleware``) и позвать его мутатор.
+
+        Args:
+            name: имя middleware (например ``"throttle"``).
+
+        Returns:
+            Экземпляр StateMiddleware, если зарегистрирован; иначе None.
+        """
+        return self._pipeline.get(name)
+
     @property
     def store(self) -> TreeStore:
         """Доступ к внутреннему TreeStore (для тестов и bootstrap)."""

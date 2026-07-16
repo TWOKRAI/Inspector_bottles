@@ -75,8 +75,9 @@ telemetry:
 
 ### Фаза 0 — Фундамент: починить и раскрыть троттл (framework, небольшая, разблокирует всё)
 
-#### Task 0.1 — ThrottleMiddleware: merge-путь + рантайм-мутабельность
+#### Task 0.1 — ThrottleMiddleware: merge-путь + рантайм-мутабельность ✅ DONE
 **Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework
+**Статус:** ✅ DONE — per-leaf `before_merge` + `set_rules`/`update_rule`/`remove_rule` + `pipeline.get`/`get_middleware`; ADR-SS-018; тесты `test_throttle.py` (40) зелёные.
 **Goal:** троттл реально применяется к телеметрии (merge) и правила меняются в рантайме.
 **Files:** `state_store_module/middleware/throttle.py`, `.../manager/state_store_manager.py`,
   `.../middleware/base.py` (пайплайн — доступ по имени), tests.

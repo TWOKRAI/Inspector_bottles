@@ -231,7 +231,7 @@ def match(self, delta: Delta) -> list[Subscription]:
 def dispatch(self, delta: Delta) -> None:
     matched_subs = self.match(delta)  # фильтруем на сервере
     targets = [sub.subscriber for sub in matched_subs]
-    
+
     if targets:
         message = {
             "command": "state.changed",
@@ -660,6 +660,30 @@ if not path or not isinstance(path, str):
 
 ---
 
+## ADR-SS-018: ThrottleMiddleware — per-leaf троттл merge-поддерева + рантайм-мутабельность правил
+
+**Контекст:** Троттл частоты обновлений задаётся правилами-глобами по листовым путям (`processes.**.state.fps: 1.0`) и до сих пор применялся только в `before_set`. Но телеметрия процессов публикуется через `proxy.merge` (self-publish в heartbeat, `process_heartbeat._publish_metrics_to_tree` → `build_worker_telemetry` → `proxy.merge`), а `ThrottleMiddleware.before_merge` не был переопределён — наследовал пропускающий дефолт базового класса. Итог: правила по листам де-факто НЕ действовали на телеметрию (rate-limit сводился только к периоду heartbeat, ~5 с глобально на процесс). «Частота per-параметр» была фикцией. Плюс правила фиксировались на старте (`orchestrator.use(ThrottleMiddleware(rules))`) — не было ни доступа к живому middleware по имени, ни мутатора для рантайм-управления (нужно для config hot-reload / backend_ctl, план `telemetry-publish-control`, Фаза 3).
+
+**Решение (семантика merge — per-leaf):** `before_merge` разворачивает merge-поддерево (`path` = корень, `data` = вложенный dict) в листовые ПОЛНЫЕ пути (`path` + относительный путь листа) и применяет к каждому листу ту же логику правил, что `before_set`. Сопоставлять правила-глобы с КОРНЕМ merge (`processes.cam`) нельзя — они его не матчат, троттл остался бы no-op. Именно per-leaf делает правила `processes.**.state.fps` реально прореживающими телеметрийный merge.
+
+- лист без правила → пропускается (консервативно: статусы/health/данные без явного правила не блокируются — инвариант «status/errors always»);
+- правило `0` → лист вырезается навсегда (последнее значение копится в `_pending`);
+- `interval > 0` → per-путь rate-limit по `_last_pass` (идемпотентно, последнее значение в `_pending`) — контракт идентичен `before_set`;
+- ни один лист не покрыт правилом → merge проходит как есть (без копии); часть прошла/есть непокрытые → merge подрезается (придержанные листья вырезаны); все покрыты и все придержаны → merge отклонён целиком (`proceed=False`, симметрично `set`).
+
+Дёшево и правильно: телеметрийные поддеревья малы (единицы воркеров × единицы метрик), обход листьев — копейки.
+
+**Решение (рантайм-мутабельность):** `set_rules` / `update_rule(pattern, interval)` / `remove_rule(pattern)` меняют набор правил живьём; `MiddlewarePipeline.get(name)` + `StateStoreManager.get_middleware(name)` дают доступ к живому middleware по имени (для рантайм-команд). Потокобезопасность — **copy-on-write**: middleware читается из потока стора, а правила меняются из другого потока (рантайм-команды). Мутаторы под `Lock` строят НОВЫЙ dict и атомарно пере-присваивают `self._rules` (живой dict не правится на месте); путь чтения (`_find_rule`) берёт локальную ссылку и итерирует без блокировки — безопасно, т.к. пере-присваивание ссылки атомарно под GIL. `Lock` сериализует только мутатор-vs-мутатор. Тайминги при смене правил не сбрасываются: путь с изменённым интервалом переоценивается против нового интервала на следующем вызове (это и есть «живая» смена частоты); пути, потерявшие правило, дальше пропускаются (stale-тайминги безвредны).
+
+**Последствия:**
+- Правила теперь реально троттлят merge-телеметрию (разблокирует Фазы 1–3 плана); `before_set`-контракт не изменился (регресс покрыт).
+- Тест `test_throttle.py` «before_merge всегда пропускает» переписан под новый контракт (per-leaf троттл, партиал-подрезка, отклонение).
+- Read-path троттла без блокировки (COW) — нулевой overhead на hot-path стора.
+
+**Связанные решения:** ADR-SS-017 (тот же конверт `state.merge`, чей payload теперь троттлится), план `telemetry-publish-control.md` (Task 0.1 — фундамент управляемой публикации).
+
+---
+
 ## Индекс ADR
 
 | ID | Название | Статус | Фаза |
@@ -681,4 +705,4 @@ if not path or not isinstance(path, str):
 | ADR-SS-015 | watch-from-revision + resync через существующий state.get_subtree | ✅ Готово (пересмотрено 2026-07-11) | 4.9 |
 | ADR-SS-016 | _send_sync — router.request(), не router.send() | ✅ Готово | 4.9 |
 | ADR-SS-017 | STATE_ENVELOPE_MARKER — явный маркер конверта state.merge | ✅ Готово | Ф7 G.2 |
-
+| ADR-SS-018 | ThrottleMiddleware — per-leaf троттл merge + рантайм-мутабельность правил | ✅ Готово | PC 0.1 |
