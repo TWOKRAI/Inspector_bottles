@@ -73,12 +73,14 @@ def make_processes_runtime(
     command_sender: Any = None,
     topology_bridge: Any = None,
     bindings: Any = None,
+    telemetry: Any = None,
 ) -> RuntimeDeps:
     """Создать RuntimeDeps для processes-тестов (Task F.9)."""
     return RuntimeDeps(
         command_sender=command_sender,
         topology_bridge=topology_bridge,
         bindings=bindings,
+        telemetry=telemetry,
     )
 
 

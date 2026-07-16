@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
+    from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
 
 
 def _layout_factory() -> DiffScrollTabLayout:
@@ -67,10 +68,14 @@ class ProcessesTab(BaseListNavTab):
         command_sender: "CommandSender | None" = None,
         topology_bridge: "TopologyBridge | None" = None,
         bindings: "GuiStateBindings | None" = None,
+        telemetry: "TelemetryViewModel | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         self._services = services
         self._bindings = bindings
+        # Ф1 (gui-telemetry-read-model 1.3): локальный read-model телеметрии,
+        # прокидывается в панели (VM-режим вместо bind на телеметрию).
+        self._telemetry = telemetry
         self._presenter = ProcessesPresenter(
             services,
             command_sender=command_sender,
@@ -133,6 +138,7 @@ class ProcessesTab(BaseListNavTab):
             command_sender=runtime.command_sender,
             topology_bridge=runtime.topology_bridge,
             bindings=runtime.bindings,
+            telemetry=runtime.telemetry,
         )
 
     # ------------------------------------------------------------------ #
@@ -141,12 +147,12 @@ class ProcessesTab(BaseListNavTab):
 
     def _create_item_widget(self, key: str) -> QWidget:
         if key == ALL_PROCESSES_KEY:
-            panel = AllProcessesPanel(self._presenter, self._bindings)
+            panel = AllProcessesPanel(self._presenter, self._bindings, telemetry=self._telemetry)
             panel.card_action_requested.connect(self._on_card_action)
             panel.process_selected.connect(self._on_all_process_selected)
             self._all_panel = panel
             return panel
-        single_panel = SingleProcessPanel(self._presenter, self._bindings, key)
+        single_panel = SingleProcessPanel(self._presenter, self._bindings, key, telemetry=self._telemetry)
         single_panel.card_action_requested.connect(self._on_card_action)
         single_panel.worker_selection_changed.connect(lambda _name=None: self._update_buttons_state())
         self._single_panels[key] = single_panel

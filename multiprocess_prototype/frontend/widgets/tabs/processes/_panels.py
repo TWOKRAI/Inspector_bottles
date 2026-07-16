@@ -18,7 +18,8 @@ Task E.2: панели принимают ``bindings`` (GuiStateBindings) нап
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
+from typing import TYPE_CHECKING, Any, Callable
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -45,8 +46,11 @@ from .widgets import CreateWorkerDialog, ProcessCard, WorkerTable
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
+    from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
 
     from .presenter import ProcessesPresenter
+
+_logger = logging.getLogger(__name__)
 
 # Колонки таблицы «Все процессы»
 _ALL_TABLE_COLUMNS = ["Имя", "Категория", "Статус", "Циклов/с", "Плагины"]
@@ -92,6 +96,35 @@ def _format_uptime(value: object) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
+def _make_vm_setter(
+    widget: QWidget,
+    prop: str,
+    formatter: Callable[[Any], Any] | None = None,
+) -> Callable[[Any], None]:
+    """Собрать setter «значение → виджет» для VM-режима (Task 1.3).
+
+    Зеркалит логику ``GuiStateBindings._apply_to_widget`` БАЙТ-В-БАЙТ: тот же
+    formatter, тот же вызов setter (``text`` → ``setText(str(...))``,
+    ``set_state`` → ``set_state(...)``, прочее — ``getattr(widget, prop)(...)``).
+    Замыкает виджет сильной ссылкой — живёт ровно столько, сколько панель-владелец
+    (её dict сеттеров), затем GC вместе с ней; сигнал ``updated`` авто-отключается
+    Qt при уничтожении панели-получателя.
+    """
+
+    def _setter(value: Any) -> None:
+        display = formatter(value) if formatter is not None else value
+        if prop == "text":
+            widget.setText(str(display))  # type: ignore[attr-defined]
+        elif prop == "set_state":
+            widget.set_state(display)  # type: ignore[attr-defined]
+        else:
+            method = getattr(widget, prop, None)
+            if callable(method):
+                method(display)
+
+    return _setter
+
+
 class AllProcessesPanel(QWidget):
     """Панель для ALL_PROCESSES_KEY: health + inner-стек Cards/Table."""
 
@@ -102,11 +135,22 @@ class AllProcessesPanel(QWidget):
         self,
         presenter: "ProcessesPresenter",
         bindings: "GuiStateBindings | None",
+        *,
+        telemetry: "TelemetryViewModel | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._presenter = presenter
         self._bindings = bindings
+        # Ф1 (gui-telemetry-read-model 1.3): локальный read-model телеметрии.
+        # VM-режим предпочтителен (один слот на ``updated`` вместо N bind);
+        # None → fallback на bindings-путь (существующие тесты/оболочки без VM).
+        self._telemetry = telemetry
+        # Карта VM-режима: точный путь → setter(value). Заполняется в
+        # _connect_telemetry_vm; читается _apply_telemetry_items.
+        self._vm_setters: dict[str, Callable[[Any], None]] = {}
+        # Fan-out'ы VM-режима: точный путь → callback(path, value) (trace-таблицы).
+        self._vm_fanouts: dict[str, Callable[[str, Any], None]] = {}
         self._cards: dict[str, EntityCard] = {}
         self._selected_card_name: str | None = None
 
@@ -435,15 +479,118 @@ class AllProcessesPanel(QWidget):
                 )
 
     def _connect_bindings(self) -> None:
-        """Подписаться на StateStore для карточек и health-меток."""
+        """Подключить телеметрию карточек/health: VM-режим или bindings-fallback.
+
+        VM-режим (Task 1.3) предпочтителен: один слот на ``updated`` вместо N
+        точечных ``bind`` (0 серверных подписок из панели). Fallback на прежний
+        ``bindings.bind``-путь — когда VM не подан (telemetry=None): часть тестов
+        и оболочки без read-model.
+        """
+        # Плейсхолдеры метрик карточек — общие для обоих путей (создают QLabel'ы
+        # «Циклов/с»/«Время цикла», к которым дальше цепляются setter'ы/binding'и).
+        for card in self._cards.values():
+            card.set_metrics({"Циклов/с": "—", "Время цикла": "—"})
+
+        if self._telemetry is not None:
+            self._connect_telemetry_vm()
+        elif self._bindings is not None:
+            self._connect_bindings_legacy()
+
+    # --- VM-режим (Task 1.3) ------------------------------------------- #
+
+    def _connect_telemetry_vm(self) -> None:
+        """Собрать карту путей→setter, подписаться на ``updated`` одним слотом,
+        первично наполнить из snapshot (late-binding)."""
+        setters: dict[str, Callable[[Any], None]] = {}
+
+        # Карточки: статус + Циклов/с + Время цикла.
+        for name, card in self._cards.items():
+            setters[f"processes.{name}.state.status"] = _make_vm_setter(card._indicator, "set_state")
+            hz_label = card._metric_labels.get("Циклов/с")
+            if hz_label is not None:
+                setters[f"processes.{name}.state.fps"] = _make_vm_setter(
+                    hz_label, "text", lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—"
+                )
+            cycle_label = card._metric_labels.get("Время цикла")
+            if cycle_label is not None:
+                setters[f"processes.{name}.state.latency_ms"] = _make_vm_setter(
+                    cycle_label, "text", lambda v: f"{v:.1f} мс" if isinstance(v, (int, float)) else "—"
+                )
+
+        # Health-метки (те же formatter'ы, что в legacy — байт-в-байт).
+        setters["system.health.active"] = _make_vm_setter(
+            self._lbl_active, "text", lambda v: f"Активно: {v}" if isinstance(v, (int, float)) else "Активно: 0"
+        )
+        setters["system.health.broken_wires"] = _make_vm_setter(
+            self._lbl_wires,
+            "text",
+            lambda v: (
+                f"<span style='color: #dc2626;'>Обрывы связей: {v}</span>"
+                if isinstance(v, (int, float)) and v > 0
+                else "Обрывы связей: 0"
+            ),
+        )
+        setters["system.health.avg_fps"] = _make_vm_setter(
+            self._lbl_avg_fps,
+            "text",
+            lambda v: f"Средняя частота: {v:.1f}" if isinstance(v, (int, float)) else "Средняя частота: —",
+        )
+        setters["system.chain_fps"] = _make_vm_setter(
+            self._lbl_chain_fps,
+            "text",
+            lambda v: f"FPS цепочки: {v:.1f}" if isinstance(v, (int, float)) else "FPS цепочки: —",
+        )
+        setters["system.chain_latency_ms"] = _make_vm_setter(
+            self._lbl_chain_latency,
+            "text",
+            lambda v: f"Задержка цепочки: {v:.0f} ms" if isinstance(v, (int, float)) else "Задержка цепочки: —",
+        )
+        self._vm_setters = setters
+
+        # Fan-out'ы (trace_segments/trace_branches) — точные пути, значение списком.
+        self._vm_fanouts = {
+            "system.trace_segments": self._on_trace_segments,
+            "system.trace_branches": self._on_trace_branches,
+        }
+
+        self._telemetry.updated.connect(self._on_telemetry_batch)
+
+        # Первичное наполнение из снимка (late-binding): панель, созданная ПОСЛЕ
+        # публикации, сразу показывает актуальное. Границы поддеревьев по точке.
+        initial = list(self._telemetry.snapshot("processes").items())
+        initial += list(self._telemetry.snapshot("system").items())
+        self._apply_telemetry_items(initial)
+
+    def _on_telemetry_batch(self, batch: list[tuple[str, Any]]) -> None:
+        """Слот на ``TelemetryViewModel.updated`` — один на панель (не по пути)."""
+        self._apply_telemetry_items(batch)
+
+    def _apply_telemetry_items(self, items: list[tuple[str, Any]]) -> None:
+        """Применить пачку (path, value): setter карточки/health + trace-fan-out."""
+        for path, value in items:
+            setter = self._vm_setters.get(path)
+            if setter is not None:
+                try:
+                    setter(value)
+                except Exception as exc:  # виджет↔значение — не валим GUI (правило 5)
+                    _logger.debug("telemetry-vm: setter failed on %s: %s", path, exc)
+            fanout = self._vm_fanouts.get(path)
+            if fanout is not None:
+                try:
+                    fanout(path, value)
+                except Exception as exc:
+                    _logger.debug("telemetry-vm: fan-out failed on %s: %s", path, exc)
+
+    # --- Fallback: прежний bindings-путь ------------------------------- #
+
+    def _connect_bindings_legacy(self) -> None:
+        """Прежний путь через GuiStateBindings (VM не подан). Полное удаление —
+        Phase 3.1."""
         bindings = self._bindings
-        if bindings is None:
-            return
+        assert bindings is not None
 
         # Карточки: статус + Циклов/с (частота, среднее за секунду) + Время цикла.
         for name, card in self._cards.items():
-            card.set_metrics({"Циклов/с": "—", "Время цикла": "—"})
-
             bindings.bind(
                 f"processes.{name}.state.status",
                 card._indicator,
@@ -524,11 +671,21 @@ class SingleProcessPanel(QWidget):
         presenter: "ProcessesPresenter",
         bindings: "GuiStateBindings | None",
         process_name: str,
+        *,
+        telemetry: "TelemetryViewModel | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._presenter = presenter
         self._bindings = bindings
+        # Ф1 (gui-telemetry-read-model 1.3): локальный read-model. VM-режим
+        # предпочтителен; None → fallback на bindings-путь.
+        self._telemetry = telemetry
+        # Карты VM-режима: точный путь → setter(value). Статичные пути процесса
+        # (_vm_setters) и пере-собираемые пути воркеров (_vm_worker_setters,
+        # обновляются в _bind_worker_telemetry при каждом перестроении строк).
+        self._vm_setters: dict[str, Callable[[Any], None]] = {}
+        self._vm_worker_setters: dict[str, Callable[[Any], None]] = {}
         self._process_name = process_name
         # Рантайм-воркеры, обнаруженные из телеметрии (data_receiver,
         # pipeline_executor, source_producer_* — создаются в рантайме и в
@@ -600,8 +757,10 @@ class SingleProcessPanel(QWidget):
         self._refresh_workers()
 
         # Fan-out: обнаруживать рантайм-воркеров из телеметрии и добавлять в
-        # таблицу (их нет в конфиг-топологии get_workers()).
-        if self._bindings is not None:
+        # таблицу (их нет в конфиг-топологии get_workers()). В VM-режиме
+        # обнаружение идёт из батч-слота (_apply_telemetry_items, discover=True),
+        # bindings.bind_fanout нужен ТОЛЬКО в fallback (VM не подан).
+        if self._telemetry is None and self._bindings is not None:
             self._bindings.bind_fanout(
                 f"processes.{self._process_name}.workers.*.status",
                 self._on_worker_discovered,
@@ -740,12 +899,20 @@ class SingleProcessPanel(QWidget):
         self._presenter.update_worker(self._process_name, worker_name, **{field: value})
 
     def _bind_worker_telemetry(self) -> None:
-        """Привязать статус/Гц каждого воркера к StateStore (forward-compatible).
+        """Привязать статус/Гц каждого воркера к телеметрии (forward-compatible).
 
         Backend публикует per-worker телеметрию в processes.{proc}.workers.{name}.*
-        (heartbeat workers_status → fan-out). Привязки переживают пересоздание строк
-        через weakref auto-cleanup GuiStateBindings.
+        (heartbeat workers_status → fan-out). Вызывается после каждого перестроения
+        строк таблицы (_refresh_workers).
+
+        VM-режим (Task 1.3): пересобрать карту путей воркеров→setter и первично
+        наполнить новые строки из snapshot. Fallback: прежний bindings.bind
+        (привязки переживают пересоздание строк через weakref auto-cleanup).
         """
+        if self._telemetry is not None:
+            self._rebuild_worker_vm_setters()
+            return
+
         bindings = self._bindings
         if bindings is None:
             return
@@ -776,6 +943,37 @@ class SingleProcessPanel(QWidget):
                     "text",
                     formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
                 )
+
+    def _rebuild_worker_vm_setters(self) -> None:
+        """VM-режим: пересобрать карту путей воркеров→setter под текущие строки.
+
+        Вызывается после каждого перестроения таблицы (строки-QLabel'ы новые).
+        После пересборки первично наполняет свежие строки из snapshot (без
+        discover — строки уже созданы, повторное обнаружение вызвало бы цикл
+        refresh↔prime; discover идёт только из живого батча/начального prime).
+        """
+        proc = self._process_name
+        setters: dict[str, Callable[[Any], None]] = {}
+        for name in self._worker_table.worker_names():
+            widgets = self._worker_table.telemetry_widgets(name)
+            status_w = widgets.get("status")
+            if status_w is not None:
+                setters[f"processes.{proc}.workers.{name}.status"] = _make_vm_setter(status_w, "text", lambda v: str(v))
+            hz_w = widgets.get("hz")
+            if hz_w is not None:
+                setters[f"processes.{proc}.workers.{name}.effective_hz"] = _make_vm_setter(
+                    hz_w, "text", lambda v: f"{v:.1f} Гц" if isinstance(v, (int, float)) else "—"
+                )
+            cycle_w = widgets.get("cycle")
+            if cycle_w is not None:
+                setters[f"processes.{proc}.workers.{name}.cycle_duration_ms"] = _make_vm_setter(
+                    cycle_w, "text", lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—"
+                )
+        self._vm_worker_setters = setters
+        # Реприм новых строк из снимка (только setter'ы, без discover).
+        if self._telemetry is not None:
+            snap = self._telemetry.snapshot(f"processes.{proc}")
+            self._apply_telemetry_items(list(snap.items()), discover=False)
 
     def _build_table_page(self) -> QWidget:
         """Table-страница: key-value QTableWidget с метриками одного процесса."""
@@ -813,10 +1011,94 @@ class SingleProcessPanel(QWidget):
             self._detail_table.setItem(row, 1, QTableWidgetItem(value))
 
     def _connect_bindings(self) -> None:
-        bindings = self._bindings
-        if bindings is None or not hasattr(self, "_card"):
-            return
+        """Подключить телеметрию карточки процесса: VM-режим или bindings-fallback.
 
+        В VM-режиме карта путей→setter карточки собирается один раз, панель
+        подписывается на ``updated`` одним слотом и первично наполняется из
+        snapshot; воркер-пути и обнаружение рантайм-воркеров идут через тот же
+        батч-слот (см. _apply_telemetry_items). Fallback — прежний bind-путь.
+        """
+        if not hasattr(self, "_card"):
+            return
+        if self._telemetry is not None:
+            self._connect_telemetry_vm()
+        elif self._bindings is not None:
+            self._connect_bindings_legacy()
+
+    # --- VM-режим (Task 1.3) ------------------------------------------- #
+
+    def _is_worker_status_path(self, path: str) -> bool:
+        """Путь вида ``processes.{proc}.workers.<w>.status`` (для discover)."""
+        parts = path.split(".")
+        return (
+            len(parts) == 5
+            and parts[0] == "processes"
+            and parts[1] == self._process_name
+            and parts[2] == "workers"
+            and parts[4] == "status"
+        )
+
+    def _connect_telemetry_vm(self) -> None:
+        """Собрать карту путей карточки→setter, подписаться на ``updated``,
+        первично наполнить из snapshot (late-binding), обнаружить воркеров."""
+        card = self._card
+        name = self._process_name
+        setters: dict[str, Callable[[Any], None]] = {}
+
+        setters[f"processes.{name}.state.status"] = _make_vm_setter(card._indicator, "set_state")
+        hz_label = card._metric_labels.get("Циклов/с")
+        if hz_label is not None:
+            setters[f"processes.{name}.state.fps"] = _make_vm_setter(
+                hz_label, "text", lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—"
+            )
+        cycle_label = card._metric_labels.get("Время цикла")
+        if cycle_label is not None:
+            setters[f"processes.{name}.state.latency_ms"] = _make_vm_setter(
+                cycle_label, "text", lambda v: f"{v:.1f} мс" if isinstance(v, (int, float)) else "—"
+            )
+        uptime_label = card._metric_labels.get("Uptime")
+        if uptime_label is not None:
+            setters[f"processes.{name}.state.uptime"] = _make_vm_setter(uptime_label, "text", _format_uptime)
+        self._vm_setters = setters
+
+        # Воркер-строки, созданные в _build_cards_page → _refresh_workers →
+        # _bind_worker_telemetry, уже наполнили _vm_worker_setters. Подписка +
+        # первичный prime процесса (discover=True: строим строки рантайм-воркеров,
+        # уже опубликованных к моменту создания панели — late-binding).
+        self._telemetry.updated.connect(self._on_telemetry_batch)
+        snap = self._telemetry.snapshot(f"processes.{name}")
+        self._apply_telemetry_items(list(snap.items()), discover=True)
+
+    def _on_telemetry_batch(self, batch: list[tuple[str, Any]]) -> None:
+        """Слот на ``TelemetryViewModel.updated`` — один на панель."""
+        self._apply_telemetry_items(batch, discover=True)
+
+    def _apply_telemetry_items(self, items: list[tuple[str, Any]], *, discover: bool) -> None:
+        """Применить пачку (path, value): setter карточки/воркера + (опц.) discover.
+
+        discover=True — живой батч/начальный prime: путь ``…workers.<w>.status``
+        дополнительно скармливается _on_worker_discovered (строит строку нового
+        рантайм-воркера). discover=False — реприм после перестроения строк:
+        только setter'ы (иначе refresh↔prime зациклились бы).
+        """
+        for path, value in items:
+            setter = self._vm_setters.get(path)
+            if setter is None:
+                setter = self._vm_worker_setters.get(path)
+            if setter is not None:
+                try:
+                    setter(value)
+                except Exception as exc:  # виджет↔значение — не валим GUI (правило 5)
+                    _logger.debug("telemetry-vm: setter failed on %s: %s", path, exc)
+            if discover and self._is_worker_status_path(path):
+                self._on_worker_discovered(path, value)
+
+    # --- Fallback: прежний bindings-путь ------------------------------- #
+
+    def _connect_bindings_legacy(self) -> None:
+        """Прежний путь карточки процесса через GuiStateBindings (VM не подан)."""
+        bindings = self._bindings
+        assert bindings is not None
         card = self._card
         name = self._process_name
 
