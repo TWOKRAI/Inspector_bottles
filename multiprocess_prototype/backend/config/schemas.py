@@ -13,7 +13,10 @@ from multiprocess_framework.modules.data_schema_module import (
     SchemaBase,
     deep_merge,
 )
-from multiprocess_framework.modules.process_module.configs import ObservabilityConfig
+from multiprocess_framework.modules.process_module.configs import (
+    ObservabilityConfig,
+    TelemetryPublishConfig,
+)
 
 
 class SystemSection(SchemaBase):
@@ -147,6 +150,42 @@ class BackendCtlSection(SchemaBase):
     ] = "127.0.0.1"
 
 
+class TelemetrySection(SchemaBase):
+    """Глобальные дефолты публикации телеметрии (PC 1.3, Фаза 1 плана telemetry-publish-control).
+
+    ``publish`` — framework-контракт ``TelemetryPublishConfig`` (per-метрика вкл/выкл +
+    частота, publisher-gate в heartbeat, PC 1.1/1.2). Дефолт — **None** («секция
+    отсутствует»): ``BlueprintAssembler`` кладёт ключ ``telemetry`` в ``proc_dict['config']``
+    ТОЛЬКО когда секция реально задана (здесь глобально ИЛИ per-process в
+    ``blueprint.processes[].telemetry``). Если задать ``publish`` явно (даже пустым
+    ``{}``) — секция считается заданной, и heartbeat строит ``TelemetryGate`` для всех
+    процессов (backward-compat завязан именно на отсутствие/присутствие, см. PC 1.2
+    ``_build_telemetry_gate``).
+
+    ``throttle`` — задел под центральный store-троттл (Фаза 2 плана). Поле заведено под
+    будущий ``build_throttle_rules(sys_config)``, но в PC 1.3 НЕ читается нигде.
+    """
+
+    publish: Annotated[
+        TelemetryPublishConfig | None,
+        FieldMeta(
+            "Публикация телеметрии",
+            info="Глобальный дефолт per-метрика вкл/выкл + частота (per-process в "
+            "рецепте переопределяет). None = секция отсутствует — публикация без "
+            "гейта, как до PC 1.x.",
+        ),
+    ] = None
+
+    throttle: Annotated[
+        dict[str, float],
+        FieldMeta(
+            "Центральный троттл (задел Фазы 2)",
+            info="Правила {glob_pattern: min_interval_sec} для ThrottleMiddleware "
+            "StateStoreManager. Заведено под Фазу 2 — build_throttle_rules пока их не читает.",
+        ),
+    ] = {}
+
+
 class SystemConfig(SchemaBase):
     """Корневая схема system.yaml."""
 
@@ -158,6 +197,7 @@ class SystemConfig(SchemaBase):
     discovery: DiscoverySection = DiscoverySection()
     backend_ctl: BackendCtlSection = BackendCtlSection()
     observability: ObservabilityConfig = ObservabilityConfig()
+    telemetry: TelemetrySection = TelemetrySection()
 
     def defaults_for_category(self, category: str) -> dict[str, Any]:
         """Получить defaults dict для категории плагина.

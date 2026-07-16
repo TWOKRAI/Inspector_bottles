@@ -114,8 +114,22 @@ telemetry:
 **Acceptance:** тест: выключенная метрика отсутствует в payload и её тайминг не считается; per-метрика interval
   прореживает публикацию; включённая по дефолту работает как прежде.
 
-#### Task 1.3 — Конфиг-плумбинг до ребёнка
+#### Task 1.3 — Конфиг-плумбинг до ребёнка ✅ DONE
 **Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** mixed
+**Статус:** ✅ DONE — `SystemConfig.telemetry` (`TelemetrySection.publish: TelemetryPublishConfig | None = None`,
+  `throttle` — задел Фазы 2); `BlueprintAssembler` читает per-process `blueprint.processes[].telemetry` из СЫРОГО
+  dict (до `model_validate`, т.к. `ProcessConfig` не объявляет typed-поле) и мержит (`deep_merge`) поверх
+  глобального `telemetry_dict` конструктора → `proc_dict["config"]["telemetry"] = {"publish": ...}` — ТОЛЬКО
+  когда задано хоть где-то (backward-compat: нет секции нигде → ключ `telemetry` отсутствует у ВСЕХ процессов
+  → `TelemetryGate` не строится, PC 1.2). `launch.py` прокидывает `sys_config.telemetry.publish.model_dump()`
+  (или `None`) в assembler как `telemetry_dict`. `system.yaml` — закомментированный пример, дефолт не активен.
+  Golden-снапшоты (`test_build_characterization.py`) обновлены осознанно (`sys_config.telemetry` — новый ключ,
+  `publish: null`; proc_dict'ы рецептов НЕ изменились — проверено diff'ом). 31 новый тест (`test_telemetry_
+  section.py` + `TestTelemetryOverlay`/интеграция с `ProcessConfigHandler.get_config` в `test_assembler.py`).
+  **Известный пробел (вне Files-скоупа задачи):** `orchestrator_hooks.py::configure_topology_engine` (hot-swap
+  путь) строит свой `BlueprintAssembler` БЕЗ `telemetry_dict` — глобальный default из `system.yaml` не доедет
+  до процессов, пересобранных через runtime-замену рецепта (per-process override в самом рецепте — доедет,
+  т.к. читается assembler'ом из raw blueprint независимо). Follow-up для Фазы 3 или отдельный тикет.
 **Goal:** секция `telemetry` доезжает до каждого процесса.
 **Files:** `backend/config/schemas.py` (`SystemConfig.telemetry`), `backend/assembly/assembler.py`
   (overlay per-process, как observability), `backend/launch.py`, `system.yaml`, пример в рецепте, tests.

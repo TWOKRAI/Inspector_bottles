@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from multiprocess_framework.modules.data_schema_module import process
+from multiprocess_framework.modules.data_schema_module import deep_merge, process
 from multiprocess_framework.modules.data_schema_module.core.helpers import (
     merge_with_defaults,
 )
@@ -54,15 +54,25 @@ class BlueprintAssembler:
       делается снаружи). Применяется к ``proc_dict["managers"]`` каждого процесса.
     - ``log_dir`` — каталог логов, выставляется на ``cfg.log_dir`` если тот пуст
       (паритет с launch.py п.5: log_dir выставляется МЕЖДУ build_configs и process).
+    - ``telemetry_dict`` (PC 1.3) — глобальный дефолт секции ``telemetry.publish``
+      (``TelemetryPublishConfig``-форма: ``default_interval_sec`` + ``metrics``) ИЛИ
+      ``None``, если глобально не задан. **В отличие от** ``observability_dict`` —
+      НЕ инжектится безусловно: ``proc_dict["config"]["telemetry"]`` появляется
+      ТОЛЬКО когда телеметрия реально задана (этот параметр ИЛИ per-process
+      ``blueprint.processes[].telemetry``). Нет ни того, ни другого → ключ
+      ``telemetry`` в proc_dict отсутствует вовсе — обратная совместимость с PC 1.2
+      (``TelemetryGate`` строится только если секция присутствует).
     """
 
     def __init__(
         self,
         observability_dict: dict[str, Any],
         log_dir: str = "logs",
+        telemetry_dict: dict[str, Any] | None = None,
     ) -> None:
         self._observability_dict = observability_dict
         self._log_dir = log_dir
+        self._telemetry_dict = telemetry_dict
 
     def assemble(self, blueprint_dict: dict[str, Any]) -> dict[str, dict[str, Any]]:
         """Собрать proc_dict для каждого процесса из blueprint-топологии.
@@ -77,7 +87,10 @@ class BlueprintAssembler:
         5. Для каждого cfg: если ``cfg.log_dir`` пуст → ``cfg.log_dir = self._log_dir``.
         6. ``name, proc_dict = process(cfg)`` — framework-конвертер.
         7. ``merge_managers(proc_dict["managers"], observability_dict)``.
-        8. ``merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)`` — нормализация
+        8. PC 1.3: ``proc_dict["config"]["telemetry"]`` — ТОЛЬКО если задано (глобально
+           через ``telemetry_dict`` конструктора ИЛИ per-process
+           ``blueprint.processes[].telemetry``), см. ``_resolve_telemetry``.
+        9. ``merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)`` — нормализация
            (те же дефолты, что ``SystemLauncher.add_process``; идемпотентно).
 
         Args:
@@ -90,6 +103,13 @@ class BlueprintAssembler:
         Raises:
             BlueprintInvalid: если ``topology.check()`` вернул ошибки.
         """
+        # PC 1.3: per-process telemetry override читаем из СЫРОГО blueprint_dict ДО
+        # model_validate — ProcessConfig (SchemaBase) не объявляет typed-поле
+        # telemetry (вне Files-скоупа этой задачи), поэтому extra=ignore молча
+        # отбросил бы неизвестный ключ при валидации. blueprint_dict здесь ещё не
+        # тронут model_validate (копирует, не мутирует), поэтому raw-чтение безопасно.
+        per_process_telemetry = self._extract_per_process_telemetry(blueprint_dict)
+
         # model_validate создаёт КОПИЮ — входной dict не мутируется.
         topology = SystemBlueprint.model_validate(blueprint_dict)
 
@@ -116,7 +136,45 @@ class BlueprintAssembler:
                 proc_dict.get("managers", {}),
                 self._observability_dict,
             )
+            telemetry_section = self._resolve_telemetry(per_process_telemetry.get(name))
+            if telemetry_section is not None:
+                proc_dict["config"]["telemetry"] = telemetry_section
             proc_dict = merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)
             result[name] = proc_dict
 
         return result
+
+    @staticmethod
+    def _extract_per_process_telemetry(blueprint_dict: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """Снять per-process ``telemetry`` override из СЫРОГО blueprint (до model_validate).
+
+        Возвращает ``{process_name: telemetry_dict}`` для процессов, у которых в raw
+        dict реально есть ключ ``telemetry`` (dict). Другие процессы в результат не
+        попадают — их отсутствие в мапе означает «нет per-process override».
+        """
+        overrides: dict[str, dict[str, Any]] = {}
+        for proc in blueprint_dict.get("processes") or []:
+            if not isinstance(proc, dict):
+                continue
+            name = proc.get("process_name")
+            telemetry = proc.get("telemetry")
+            if name and isinstance(telemetry, dict):
+                overrides[name] = telemetry
+        return overrides
+
+    def _resolve_telemetry(self, override: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Слить глобальный default (конструктор) с per-process override → секция ``telemetry``.
+
+        Возвращает ``None``, если ТЕЛЕМЕТРИЯ НЕ задана нигде (ни глобально, ни у
+        этого процесса) — тогда вызывающий код НЕ кладёт ключ ``telemetry`` в
+        ``proc_dict["config"]`` вовсе (обратная совместимость с PC 1.2: нет секции →
+        ``TelemetryGate`` не строится, публикация как раньше).
+
+        Merge-семантика (глубокий merge, per-process побеждает): ``metrics.<name>``
+        per-process перекрывает одноимённую global-запись (остальные global-метрики
+        сохраняются); ``default_interval_sec`` per-process перекрывает global целиком.
+        """
+        if self._telemetry_dict is None and not override:
+            return None
+        merged_publish = deep_merge(self._telemetry_dict or {}, override or {})
+        return {"publish": merged_publish}
