@@ -108,7 +108,7 @@
 | # | Задача | Бриф |
 |---|---|---|
 | P1 | **Роль потребителя — в топологию** | num_consumers по атрибуту потребителя на wire (loan-aware / copy-out), не по именам `chain_targets`/конфигу; `wire.configure`-тракт получает num_consumers из того же источника (сейчас дефолт 1 мимо топологии — находка ревью); per-item `target`-override: задокументировать несовместимость со статическим refcount ИЛИ считать по факту отправки |
-| P2 | **Join двух камер** | `camera_id` в ключ корреляции JoinInspectorManager (сейчас `(seq_id, data_type)` — кадры двух камер тихо подменяются); `_FRAME_ID_MODULO` 121 → ≥ 100_000 (у synthetic уже так); либо развести `data_type` источников. Приёмка: рецепт «2 камеры → один join-процесс» с корректной корреляцией live |
+| P2 ✅ | **Join двух камер** | `camera_id` в ключ корреляции JoinInspectorManager (было `seq_id` — кадры двух камер тихо подменяются); `_FRAME_ID_MODULO` 121 → ≥ 100_000; либо развести `data_type`.<br>**✅ ПОЧИНЕНО 2026-07-16** (коммит `83d7d48a`): ключ буфера `(camera_id, seq_id)` вместо `seq_id`; +3 теста (fanin/30 + wiring/40 passed), backward-compat (camera_id=None → прежнее). camera_id несут source-плагины + переносят overlay (line_filter). Рецепты приёмки: `dualcam_synth`/`dualcam_webcam`. Гигиена-остаток: prod camera_service/hikvision/phone_gateway `_FRAME_ID_MODULO` 121→100_000 (мооты TTL-выселением, но лучше выровнять). |
 | P3 | Каталог `multiprocess_framework/tests/` | 7 collection-errors (`ProcessManagerCore`) — чинить ВМЕСТЕ с нейминг-рефактором (решение владельца), затем в гейт |
 | P4 | GUI: процесс → N дисплеев | Сейчас последняя привязка молча побеждает (1 процесс = 1 дисплей-слот) — снять ограничение для мульти-дисплея |
 
