@@ -8,6 +8,7 @@ IPC-сообщения от процессов: state.set, state.get, state.subs
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from ...base_manager import BaseManager, ObservableMixin
@@ -434,7 +435,7 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         except Exception as exc:  # nosec B110 — реплей best-effort, не критичен для подписки
             self._log_warning(f"Initial replay для '{subscriber}' (pattern={pattern}) не удался: {exc}")
 
-    def _iter_replay_pairs(self, pattern: str):
+    def _iter_replay_pairs(self, pattern: str) -> Iterator[tuple[str, Any]]:
         """Пары (полный_путь, значение) для реплея pattern — по статическому префиксу.
 
         Эквивалент прежнего ``iter_matches(get_subtree(''), pattern)``, но

@@ -108,6 +108,15 @@
 > `test_switching_between_two_processes_creates_both`, `test_lazily_created_panel_shows_live_state`).
 > Первый показ строит 1 панель вместо N. Верификация на нативном Windows — за владельцем.
 
+> **Угловое ревью Фазы 0 закрыто (2026-07-16, teamlead):** (1) покрывающими считаются только
+> ПОДТВЕРЖДЁННЫЕ серверные подписки (`_confirmed_patterns` заполняется в `subscribe()` при валидном
+> серверном sub_id; неподтверждённый широкий паттерн не «усыновляет» узкий → fallback на async-subscribe,
+> закрывает риск «мёртвого виджета» из таблицы Риски); (2) доставка покрытому паттерну доказана на РЕАЛЬНОМ
+> GUI-пути `GuiStateProxy(delta_sink)`→bridge→`GuiStateBindings` (тест `TestGuiDeliveryPathIntegration`),
+> комментарии в `state_proxy.py` уточнены (базовый proxy — `_invoke_callbacks`, GUI — delta_sink);
+> (3) async-подписки наблюдаемы (счётчик `_async_subscribe_count` + метрика `state_proxy.async_subscribe` +
+> INFO-лог с маркером `[async-subscribe]`).
+
 ### Фаза 1 — TelemetryViewModel: локальный read-model
 
 #### Task 1.1 — TelemetryViewModel (владелец «снимок→виджет»)

@@ -741,3 +741,108 @@ class TestReviewFixes:
             {"data_type": "state_delta", "path": "proc.cam.workers.w1", "value": 42, "deleted": False}
         )
         assert seen == [("proc.cam.workers.w1", 42)]
+
+
+# ---------------------------------------------------------------------------
+# Интеграция реального GUI-пути доставки (Ф-GUI-read-model 0.1/0.2, угловое ревью)
+# ---------------------------------------------------------------------------
+
+
+class _SyncBridge:
+    """Синхронный дубль DataReceiverBridge для state-пути.
+
+    В проде bridge лишь МАРШАЛИТ поток IO→Qt (QueuedConnection), содержимое
+    state_delta-сообщения не меняет. Здесь маршалинг убран (тест однопоточный):
+    dispatch state-сообщения сразу зовёт зарегистрированный state-callback —
+    ровно то, что делает настоящий bridge для data_type='state_delta'.
+    """
+
+    def __init__(self) -> None:
+        self._state_cb = None
+        self._state_listeners: list = []
+
+    def set_state_callback(self, cb) -> None:
+        self._state_cb = cb
+
+    def add_state_listener(self, cb) -> None:
+        self._state_listeners.append(cb)
+
+    def dispatch(self, msg_dict: dict) -> None:
+        # Только state-путь — как реальный bridge для state_delta/gui_local_metric.
+        if self._state_cb is not None:
+            self._state_cb(msg_dict)
+        for cb in list(self._state_listeners):
+            cb(msg_dict)
+
+
+class _ConfirmingRouter:
+    """Мок-router: sync subscribe подтверждается валидным sub_id (как прод-сервер).
+
+    Позволяет проверить, что покрывающий wildcard реально ПОДТВЕРЖДЁН и покрывает
+    узкий bind (0 новых серверных subscribe), а доставка идёт GUI-путём.
+    """
+
+    def __init__(self) -> None:
+        self.async_subscribes: list = []
+        self._seq = 0
+
+    def register_message_handler(self, *a, **k) -> None:
+        pass
+
+    def send_async(self, msg, priority: str = "normal") -> None:
+        if isinstance(msg, dict) and msg.get("command") == "state.subscribe":
+            self.async_subscribes.append(msg)
+
+    def request(self, msg, timeout: float = 5.0) -> dict:
+        self._seq += 1
+        return {"success": True, "result": {"status": "ok", "sub_id": f"srv-{self._seq}"}}
+
+
+class TestGuiDeliveryPathIntegration:
+    """Доставка узкому bind, покрытому подтверждённым wildcard, РЕАЛЬНЫМ GUI-путём.
+
+    Путь: сервер шлёт state.changed → GuiStateProxy.on_state_changed →
+    delta_sink(deltas) → bridge.dispatch(state_delta_message) → GuiStateBindings
+    ._on_state_msg (свой матчер) → setter виджета. _invoke_callbacks НЕ участвует
+    (delta_sink его подменяет) — именно этот путь ранее не был покрыт тестом.
+    """
+
+    def test_covered_narrow_bind_receives_live_update_via_gui_path(self, qtbot):
+        from multiprocess_framework.modules.state_store_module.core.delta import Delta
+        from multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy import (
+            GuiStateProxy,
+        )
+        from multiprocess_prototype.frontend.state.delta_message import state_delta_message
+
+        bridge = _SyncBridge()
+        router = _ConfirmingRouter()
+
+        # delta_sink — точная копия прод-GuiProcess._on_state_deltas_to_bridge.
+        proxy = GuiStateProxy(
+            "gui",
+            router=router,
+            delta_sink=lambda deltas: [bridge.dispatch(state_delta_message(d)) for d in deltas],
+        )
+
+        # Стартовый wildcard sync=True (как в frontend/process.py) → ПОДТВЕРЖДЁН.
+        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True)
+        assert "processes.**" in proxy._confirmed_patterns
+
+        # GuiStateBindings с авто-подпиской через ensure_subscription proxy.
+        bindings = GuiStateBindings(
+            bridge,
+            ensure_subscription=proxy.ensure_subscription,
+            release_subscription=proxy.release_subscription,
+        )
+
+        label = QLabel()
+        qtbot.addWidget(label)
+        # Узкий bind — покрыт подтверждённым processes.**: своей серверной подписки нет.
+        bindings.bind("processes.cam.state.fps", label, "text")
+        assert router.async_subscribes == [], "covered bind не должен слать серверный subscribe"
+
+        # Сервер шлёт дельту по покрытому пути → должна дойти до виджета GUI-путём.
+        delta = Delta(path="processes.cam.state.fps", old_value=None, new_value=30, source="camera")
+        proxy.on_state_changed({"data": {"deltas": [delta.to_dict()]}})
+
+        assert label.text() == "30"

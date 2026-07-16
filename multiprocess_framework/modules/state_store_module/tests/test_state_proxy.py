@@ -1439,18 +1439,72 @@ class TestCoverageCheck:
         assert subs_total == subs_after_wildcards, "covered pattern не должен слать state.subscribe"
 
     def test_covered_pattern_still_receives_delta(self):
-        """Covered callback продолжает получать дельты (через поток покрывающей)."""
-        proxy = StateProxy("gui", router=None)
-        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True)
+        """Covered callback продолжает получать дельты (через поток покрывающей).
 
+        Реалистично: стартовый wildcard заводится sync=True с мок-router,
+        возвращающим валидный sub_id (как в проде frontend/process.py ДО
+        открытия вкладок), поэтому processes.** ПОДТВЕРЖДЁН и реально покрывает
+        узкий паттерн (0 новых серверных subscribe). Доставка узкому — потоком
+        покрывающей подписки, разводится _invoke_callbacks базового StateProxy.
+        """
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True)  # sync=True → confirmed
+        assert "processes.**" in proxy._confirmed_patterns
+
+        subs_before = router.count(router.async_calls, "state.subscribe")
         seen: list = []
         proxy.ensure_subscription("processes.X.state.fps", seen.append)
+        # Покрыт подтверждённым wildcard'ом — своей серверной подписки нет.
+        assert router.count(router.async_calls, "state.subscribe") == subs_before
 
         delta = Delta(path="processes.X.state.fps", old_value=1, new_value=42, source="other")
         proxy.on_state_changed({"data": {"deltas": [delta.to_dict()]}})
 
         assert len(seen) == 1
         assert seen[0][0].new_value == 42
+
+    def test_async_unconfirmed_wide_does_not_cover_narrow(self):
+        """Митигация: async-неподтверждённый широкий паттерн НЕ покрывает узкий.
+
+        Латентный риск «мёртвого виджета»: широкий паттерн, заведённый async
+        (sync=False), сервер не подтвердил — он мог тихо не создаться. Узкий
+        паттерн не считает его покрывающим и заводит СВОЮ (async) подписку.
+        """
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+        # Широкий паттерн заведён async — сервер НЕ подтвердил.
+        proxy.subscribe("processes.**", lambda _d: None, sync=False, exclude_self=True)
+        assert "processes.**" not in proxy._confirmed_patterns
+
+        before = router.count(router.async_calls, "state.subscribe")  # 1 (сам широкий)
+        proxy.ensure_subscription("processes.X.state.fps")
+        after = router.count(router.async_calls, "state.subscribe")
+        assert after == before + 1  # узкий создал свою подписку, не покрыт
+
+    def test_confirmed_pattern_populated_and_cleared_on_unsubscribe(self):
+        """_confirmed_patterns заполняется на sync-subscribe и чистится в unsubscribe."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        sub_id = proxy.subscribe("processes.**", lambda _d: None, sync=True)
+        assert "processes.**" in proxy._confirmed_patterns
+
+        proxy.unsubscribe(sub_id)
+        assert "processes.**" not in proxy._confirmed_patterns
+
+    def test_confirmed_pattern_survives_while_other_subid_holds_it(self):
+        """Снятие одного sub_id не убирает подтверждение, пока паттерн держит другой."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        sub_a = proxy.subscribe("processes.**", lambda _d: None, sync=True)
+        proxy.subscribe("processes.**", lambda _d: None, sync=True)  # второй sub на тот же паттерн
+        assert "processes.**" in proxy._confirmed_patterns
+
+        proxy.unsubscribe(sub_a)
+        # Второй sub_id всё ещё держит паттерн — подтверждение сохраняется.
+        assert "processes.**" in proxy._confirmed_patterns
 
     def test_uncovered_pattern_creates_subscription(self):
         """Регресс «панель не мертва»: непокрытый паттерн создаёт серверную подписку."""
