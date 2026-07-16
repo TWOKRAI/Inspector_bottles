@@ -222,3 +222,40 @@ FPS/границ. Стадии источника (capture/send) и restore не
 `state.shm.*` (torn/stale_drops/loan_exhausted/pickle_fallbacks/queue_data_evicted) неприменимы —
 seqlock/loan/zero-copy ЭТОГО шага off, дропов нет (паритет кадров). **ШАГ 1 ПРОЙДЕН.**
 Откат — `FW_DATA_PLANE_DICTS=0` (бит-в-бит control выше). Tier'ы вебкамера/Hikvision — по железу.
+
+## Ф7 G.7 — ШАГИ 2-4: SHM-ядро seqlock→owner_incarnation→handle_cache (Windows, синтетика, 2026-07-16)
+
+Кумулятивно (каждый шаг = все предыдущие флаги + новый), тот же `g1_perf_probe 12`, свежий
+same-session control. Счётчики потерь SHM — из расширенного пробника (блок `shm_counters`,
+коммит `063cf7ed`): пробник печатал только FPS+p50/p99, теперь тянет `frame_*`/`queue_*` из
+`RouterManager.get_stats` обоих концов. Один прогон на конфигурацию (методология шага 0).
+
+| Метрика | Control all-off | ШАГ2 +SEQLOCK | ШАГ3 +OWNER_INC | ШАГ4 +HANDLE_CACHE |
+|---|---|---|---|---|
+| source / consumer FPS | 21.34 / 21.36 | 21.34 / 21.34 | 21.38 / 21.42 | 21.32 / 21.29 |
+| receive p50 / p99 (мс) | 0.046 / 0.10 | 0.001 / 0.005 | 0.001 / 0.013 | 0.001 / 0.004 |
+| **restore** p50 / p99 (мс) — SHM read | 0.503 / 1.39 | 0.484 / 1.64 | 0.467 / 1.64 | **0.136 / 0.43** |
+| capture p50 / p99 (мс) — источник | 0.134 / 0.48 | 0.151 / 0.45 | 0.150 / 0.57 | 0.141 / 0.50 |
+| границ процесса на кадр | 1.007 | 1.007 | 1.003 | 1.007 |
+| кадров произв. / принято | 289 / 291 | 289 / 290 | 290 / 291 | 288 / 289 |
+| `frame_torn_reads` (consumer) | — | **0** | **0** | **0** |
+| `frame_handle_cache_size` | 0 | 0 | 0 | **3 (= глубина кольца, стабилен)** |
+| прочие `state.shm.*` (stale/loan/pickle/evicted) | 0 | 0 | 0 | 0 |
+
+**ШАГ 2 `FW_SHM_SEQLOCK`** — формат слота +8 байт (generation parity). `frame_torn_reads` появился
+как ЖИВАЯ метрика и = 0 в спокойном режиме (torn-защита работает, кадры целы). Перф-нейтрален
+(restore ≈ control в пределах Windows-разброса; выигрыш receive несёт шаг 1). Gate: FPS ✓, torn=0 ✓,
+дропов нет. **ПРОЙДЕН.** Откат `FW_SHM_SEQLOCK=0`.
+
+**ШАГ 3 `FW_SHM_OWNER_INCARNATION`** — имена сегментов `{slot}_{owner}_{pid}_{inc}`. Перф-нейтрален
+(наименование, не hot-path): FPS/restore/границы ≈ control, torn=0. **Incarnation-guard E2E**
+(рестарт `camera_0` → читатели следуют за новым именем, без замороженного кадра) — **резидуал Фазы 2**:
+минимальный 2-проц синтетический тракт рестарт писателя не гоняет. Gate перф ✓. **ПРОЙДЕН** (перф-часть).
+Откат `FW_SHM_OWNER_INCARNATION=0`.
+
+**ШАГ 4 `FW_SHM_HANDLE_CACHE`** — снятие open/mmap/close на кадр при cross-process чтении:
+**restore p50/p99 0.503/1.39 → 0.136/0.43 мс (−73% / −69%)** — структурный (mmap-handle reader'а
+переиспользуется, не открывается на кадр). `frame_handle_cache_size = 3` = глубина кольца,
+**стабилен** (роста на инкарнацию нет → утечки handle нет; резидуал G.5 закрыт этой метрикой).
+`pickle_fallbacks`/`torn` = 0 (close_errors в набор не входит, но фолбэков/ошибок нет). Gate: FPS ✓,
+restore p99 −69% ✓, cache_size стабилен ✓. **ПРОЙДЕН.** Откат `FW_SHM_HANDLE_CACHE=0`.

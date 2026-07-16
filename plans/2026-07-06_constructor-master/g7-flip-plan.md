@@ -52,9 +52,9 @@
 | Шаг | Флаг | Что проверяем кроме чисел |
 |---|---|---|
 | 1 ✅ | `FW_DATA_PLANE_DICTS` | Чистый CPU-выигрыш (нет Message/Pydantic-пересборки на кадр); ждём p99 ↓ или =.<br>**✅ DONE 2026-07-16** (синтетика, Windows): стадия `receive` 0.123 → **0.001** мс p99 — структурный коллапс пересборки Message на consumer'е (`return_messages=False`); FPS 21.35 → 21.32 (=), границ/кадр 1.007 (=), дропов нет. Gate ✓. Числа + свежий same-session control — baseline.md «ШАГ 1». Откат `=0`. |
-| 2 | `FW_SHM_SEQLOCK` | Формат слота +8 байт; `torn` появляется как метрика и = 0 в спокойном режиме |
-| 3 | `FW_SHM_OWNER_INCARNATION` | Имена `{slot}_{owner}_{pid}_{inc}`; рестарт camera_0 (restart_policy уже в рецепте) → читатели следуют за новым именем, замороженного кадра нет (**incarnation-guard E2E — резидуал**) |
-| 4 | `FW_SHM_HANDLE_CACHE` | Снятие open/mmap/close на кадр — ждём заметное p99 ↓ на cross-process чтении; `close_errors`=0 |
+| 2 ✅ | `FW_SHM_SEQLOCK` | Формат слота +8 байт; `torn` появляется как метрика и = 0 в спокойном режиме.<br>**✅ DONE 2026-07-16** (синтетика): `frame_torn_reads` = **0** (живая метрика), перф-нейтрален, FPS 21.34 (=). Gate ✓. baseline.md «ШАГИ 2-4». |
+| 3 ✅ | `FW_SHM_OWNER_INCARNATION` | Имена `{slot}_{owner}_{pid}_{inc}`; рестарт camera_0 (restart_policy уже в рецепте) → читатели следуют за новым именем, замороженного кадра нет (**incarnation-guard E2E — резидуал**).<br>**✅ DONE 2026-07-16** перф-часть (синтетика): перф-нейтрален (наименование), torn=0, FPS 21.38–21.42 (=). **Incarnation-guard E2E → Фаза 2** (2-проц тракт рестарт писателя не гоняет). Gate перф ✓. |
+| 4 ✅ | `FW_SHM_HANDLE_CACHE` | Снятие open/mmap/close на кадр — ждём заметное p99 ↓ на cross-process чтении; `close_errors`=0.<br>**✅ DONE 2026-07-16** (синтетика): **restore p50/p99 0.503/1.39 → 0.136/0.43 мс (−73%/−69%)** структурно; `frame_handle_cache_size`=3 (=глубина кольца, стабилен → утечки нет), fallback'ов 0. Gate ✓. |
 | 5 | `FW_QOS_PROFILES` | Кольцо 3→4 (или `extras.frame_ring_depth` из рецепта — проведено ревью-фиксом `94e40b76`); data-очереди drop_oldest со счётчиком; system никогда молча |
 | 6 | `FW_SHM_ZERO_COPY` | View вместо копии на data-plane; `stale_drops`=0 в спокойном режиме; GUI остаётся copy-out |
 | 7 | `FW_SHM_LOAN_PROTOCOL` | **E2E release ЖИВЫМ транспортом — резидуал:** `slots_released` растёт, `loan_exhausted`=0, free-list не голодает (num_consumers из топологии, GUI-only владельцы без пула) |
