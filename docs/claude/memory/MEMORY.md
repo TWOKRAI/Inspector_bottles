@@ -124,3 +124,4 @@
 - [sentrux gate сужен](feedback_sentrux_gate_narrowed.md) — блок только на quality↓/циклы↑/god↑; complex-fn/coupling/depth → warning, не блок
 - [Ф7 G.7 num_consumers](project_f7_g7_num_consumers.md) — резидуал ЗАКРЫТ (fix fe0f4d41): num_consumers из топологии (chain_targets минус copy-out GUI) + УРОК loan-протокол=две роли (консьюмер/владелец); live webcam GUI-only процесс не голодает (1200+→0 дропов)
 - [webcam_sketch Processes-фриз](project_webcam_sketch_freeze.md) — вкладка Процессы вешает GUI намертво; доказано Qt-C++ стойл (не Python, stall-дамп); topology.load() кэш + перф-фиксы применены; отдано Фабле
+- [Ф7 G.7 флип-лесенка Фаза 1](project_f7_g7_flip_ladder.md) — ЗАКРЫТА 2026-07-16: 9 флагов движка флипнуты по одному с замером (синтетика/Windows), restore p99 ~1.4→0.2мс, step10 measurement-gated OFF; тулинг g1_perf_probe+state.shm.* счётчики; УРОКИ same-session control + счётчик-в-1-прогоне≠регресс; резидуалы→Ф2/Ф3
