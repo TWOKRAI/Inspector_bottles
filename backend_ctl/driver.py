@@ -699,6 +699,7 @@ class BackendDriver:
         *,
         publish: Any = _UNSET,
         throttle: Any = _UNSET,
+        mode: str = "replace",
         pm_name: str = "ProcessManager",
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
@@ -709,9 +710,18 @@ class BackendDriver:
 
           - ``publish`` → publisher-gate (что процесс СЧИТАЕТ/публикует и как часто).
             ``publish=None`` — валидная команда «выключить gate» (все метрики каждый тик).
-            **Full-apply:** секция ЦЕЛИКОМ пересобирает gate (не дельта поверх) — не
-            указанные метрики берут дефолты. Точечная правка ОДНОЙ метрики → :meth:`telemetry_set`.
           - ``throttle`` → центральный store-троттл оркестратора (rate-limit записи в дерево/IPC).
+
+        ``mode`` (Task 1.1) — режим применения ОБЕИХ плоскостей:
+          - ``"replace"`` (дефолт) — секция применяется ЦЕЛИКОМ. **ОСТОРОЖНО (wipe):**
+            publisher-gate пересобирается из ``publish`` (не указанные метрики → дефолты);
+            ``throttle`` идёт через ``set_rules`` — ПОЛНАЯ замена набора правил (сносит все
+            прочие правила, включая дефолтную IPC-страховку). Для «точечной» правки без
+            сноса соседей — ``mode="merge"`` или :meth:`telemetry_set` (он и есть merge).
+          - ``"merge"`` — дельта поверх ЖИВОГО состояния: publisher-override сохраняются,
+            throttle правится по-правилу (``update_rule``/``remove_rule``; значение ``None``
+            у throttle-паттерна → удалить правило). На проводе режим присутствует только при
+            ``merge`` (``replace`` — прежний конверт бит-в-бит).
 
         Адресация по ``process``:
           - имя процесса → адресный ``telemetry.reconfigure`` (один адресат: его
@@ -729,6 +739,10 @@ class BackendDriver:
             args["throttle"] = throttle
         if not args:
             return {"success": False, "error": "нужна хотя бы одна под-секция: publish и/или throttle"}
+        # На проводе telemetry_mode присутствует ТОЛЬКО при merge: replace — дефолт
+        # хендлеров, прежний конверт бит-в-бит (backward-compat старых сообщений).
+        if mode != "replace":
+            args["telemetry_mode"] = mode
 
         if process in (None, "all", "*"):
             return _leaf_result(self.send_command(pm_name, "telemetry.broadcast", args, timeout=timeout))
@@ -746,21 +760,19 @@ class BackendDriver:
     ) -> Dict[str, Any]:
         """Точечно поменять ОДНУ метрику/правило (узкая обёртка над :meth:`telemetry_reconfigure`).
 
+        **Точечность (Task 1.1):** обёртка шлёт ``mode="merge"`` — дельта применяется поверх
+        ЖИВОГО состояния, поэтому меняется РОВНО одно правило/метрика, а остальные override'ы
+        и правила сохраняются (раньше был full-apply, сносивший соседей).
+
         ``plane="publisher"`` (дефолт, главный рычаг) — строит
-        ``publish={"metrics": {metric: {enabled?, interval_sec?}}}``. **ЗАМЕЧАНИЕ:** backend
-        применяет ``publish`` full-apply (пересобирает gate из этой секции) — прочие метрики
-        возьмут дефолты. Чтобы сохранить остальные override'ы, передавай ПОЛНУЮ секцию в
-        :meth:`telemetry_reconfigure`.
+        ``publish={"metrics": {metric: {enabled?, interval_sec?}}}`` и мержит его в живой gate:
+        прочие метрики-override сохраняются.
 
         ``plane="throttle"`` — ``metric`` трактуется как glob-путь правила, ``interval_sec`` —
-        min-интервал; строит ``throttle={metric: interval_sec}`` (адресат — центральный троттл
-        оркестратора). **ОСТОРОЖНО (throttle тоже full-apply):** секция ``throttle`` применяется
-        через ``set_rules`` — ПОЛНАЯ замена набора правил, а не точечная правка. Один вызов
-        ``telemetry_set(plane="throttle")`` СНОСИТ все прочие правила (дефолтную IPC-страховку на
-        ``latency_ms``/``effective_hz``/… из ``manager_setup._default_throttle_rules``). Чтобы
-        поменять одно правило — передавай ПОЛНЫЙ набор через :meth:`telemetry_reconfigure`
-        ``throttle={...}``. (Точечные ``ThrottleMiddleware.update_rule``/``remove_rule`` есть, но
-        пока не проброшены в command-плоскость — кандидат на delta-apply, Фаза 4.)
+        min-интервал; строит ``throttle={metric: interval_sec}`` и мержит в центральный троттл
+        оркестратора через ``update_rule`` (остальные правила, включая дефолтную IPC-страховку
+        на ``latency_ms``/``effective_hz``/…, не тронуты). Чтобы СНЯТЬ правило точечно — передай
+        ``interval_sec=None`` в :meth:`telemetry_reconfigure` ``throttle={metric: None}, mode="merge"``.
 
         **ВАЖНО (две плоскости — потолок частоты):** центральный троттл (``throttle``) —
         независимая ступень rate-limit'а в оркестраторе поверх publisher-gate. Дефолтные
@@ -769,7 +781,7 @@ class BackendDriver:
         ``interval_sec=0.1``) НЕ поднимет эффективный поток выше центрального потолка — его
         надо ослабить/снять тем же вызовом с ``plane="throttle"``. Уменьшение частоты
         (реже потолка) работает через одну publisher-плоскость. Троттл = ceiling, publisher =
-        floor-внутри-потолка.
+        floor-внутри-потолка. (Полное согласование потолка — Task 1.3 плана telemetry-coherence.)
 
         ``process`` — имя процесса ИЛИ ``"all"`` (fan-out через PM). Требуется ``enabled``
         и/или ``interval_sec`` (для throttle — обязателен ``interval_sec``), иначе error-dict.
@@ -777,7 +789,7 @@ class BackendDriver:
         if plane == "throttle":
             if interval_sec is _UNSET:
                 return {"success": False, "error": "throttle-плоскость требует interval_sec (min-интервал правила)"}
-            return self.telemetry_reconfigure(process, throttle={metric: interval_sec}, timeout=timeout)
+            return self.telemetry_reconfigure(process, throttle={metric: interval_sec}, mode="merge", timeout=timeout)
         if plane != "publisher":
             return {"success": False, "error": f"неизвестная plane '{plane}' (publisher|throttle)"}
 
@@ -788,7 +800,7 @@ class BackendDriver:
             rule["interval_sec"] = interval_sec
         if not rule:
             return {"success": False, "error": "нужен enabled и/или interval_sec"}
-        return self.telemetry_reconfigure(process, publish={"metrics": {metric: rule}}, timeout=timeout)
+        return self.telemetry_reconfigure(process, publish={"metrics": {metric: rule}}, mode="merge", timeout=timeout)
 
     # ---- Tail логов (Ф1 Task 1.5: подписка level≥X → событийный канал driver'а) ----
 

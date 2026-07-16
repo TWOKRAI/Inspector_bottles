@@ -167,6 +167,17 @@ class TelemetryGate:
         self._clock = clock
         self._next_due: dict[str, float] = {}
 
+    @property
+    def config(self) -> Any:
+        """Текущий ``TelemetryPublishConfig`` gate (Task 1.1).
+
+        Публичный источник эффективной секции для дельта-переконфигурации
+        (``mode="merge"``): ``ProcessHeartbeat.current_telemetry_publish`` сериализует
+        его в dict-базу, поверх которой мержится дельта. Раньше состояние читалось
+        только через приватное ``_config``.
+        """
+        return self._config
+
     def due_metrics(self, now: Optional[float] = None) -> set[str]:
         """Разрешённые к публикации на этом тике метрики (enabled ∧ созрел интервал).
 

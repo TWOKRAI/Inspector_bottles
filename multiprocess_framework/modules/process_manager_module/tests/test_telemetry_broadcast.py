@@ -143,6 +143,31 @@ class TestBothPlanes:
         assert _telemetry_broadcasts(pm)[0]["data"] == {"publish": {"metrics": {"shm": {"enabled": False}}}}
 
 
+class TestMergeMode:
+    """Task 1.1: telemetry_mode прокидывается детям (publish) и в central-throttle."""
+
+    def test_replace_default_omits_mode_from_child_payload(self) -> None:
+        """replace (дефолт) → детям уходит прежний конверт без telemetry_mode (бит-в-бит)."""
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}})
+        assert _telemetry_broadcasts(pm)[0]["data"] == {"publish": {"metrics": {"fps": {"enabled": False}}}}
+
+    def test_merge_forwards_mode_to_children(self) -> None:
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}, "telemetry_mode": "merge"})
+        data = _telemetry_broadcasts(pm)[0]["data"]
+        assert data["telemetry_mode"] == "merge"
+        assert data["publish"] == {"metrics": {"fps": {"enabled": False}}}
+
+    def test_merge_throttle_keeps_other_central_rules(self) -> None:
+        """merge central-throttle: правится одно правило, дефолтная страховка соседей уцелела."""
+        throttle = ThrottleMiddleware({"processes.**.state.latency_ms": 1.0, "processes.**.state.fps": 1.0})
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+        res = pm._cmd_telemetry_broadcast({"throttle": {"processes.**.state.fps": 0.2}, "telemetry_mode": "merge"})
+        assert res["throttle"]["applied"] is True
+        assert throttle.rules == {"processes.**.state.latency_ms": 1.0, "processes.**.state.fps": 0.2}
+
+
 class TestThrottleFailureIsolated:
     def test_bad_throttle_does_not_lose_publish_coverage(self) -> None:
         """Исключение в throttle-ветке НЕ должно маскировать уже совершённый

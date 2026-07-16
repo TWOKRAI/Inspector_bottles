@@ -164,6 +164,57 @@ class TestTelemetryReconfigureCommand:
         assert "publish" in res["reason"] or "throttle" in res["reason"]
 
 
+class TestTelemetryReconfigureMergeMode:
+    """Task 1.1: mode='merge' — точечная правка не стирает соседние правила/метрики."""
+
+    def test_throttle_merge_changes_only_target_rule(self) -> None:
+        """Acceptance: telemetry_mode=merge меняет ТОЛЬКО одно правило (снимок до/после)."""
+        throttle = ThrottleMiddleware({"processes.**.state.latency_ms": 1.0, "processes.**.state.fps": 1.0})
+        _svc, cm = _make(throttle=throttle)
+        before = throttle.rules
+        res = cm.dispatch(
+            "telemetry.reconfigure",
+            {"throttle": {"processes.**.state.fps": 0.2}, "telemetry_mode": "merge"},
+        )
+        assert res["success"] is True and res["applied"] == {"throttle": True}
+        # fps изменён, latency_ms НЕ тронут (в отличие от replace/set_rules).
+        assert throttle.rules == {"processes.**.state.latency_ms": 1.0, "processes.**.state.fps": 0.2}
+        assert before["processes.**.state.latency_ms"] == 1.0
+
+    def test_throttle_merge_none_removes_rule(self) -> None:
+        """merge + None → remove_rule: правило исчезает, остальные сохранены."""
+        throttle = ThrottleMiddleware({"keep": 5.0, "drop.me": 1.0})
+        _svc, cm = _make(throttle=throttle)
+        res = cm.dispatch(
+            "telemetry.reconfigure",
+            {"throttle": {"drop.me": None}, "telemetry_mode": "merge"},
+        )
+        assert res["success"] is True
+        assert throttle.rules == {"keep": 5.0}
+
+    def test_publish_merge_keeps_other_metric_overrides(self) -> None:
+        """merge publisher: выключить fps → override соседней метрики сохранён в живом gate."""
+        _svc, cm = _make()
+        cm.dispatch(
+            "telemetry.reconfigure",
+            {"publish": {"metrics": {"fps": {"enabled": True}, "latency_ms": {"enabled": False}}}},
+        )
+        cm.dispatch(
+            "telemetry.reconfigure",
+            {"publish": {"metrics": {"fps": {"enabled": False}}}, "telemetry_mode": "merge"},
+        )
+        eff = _svc._heartbeat.current_telemetry_publish()
+        assert eff["metrics"]["fps"]["enabled"] is False
+        assert eff["metrics"]["latency_ms"]["enabled"] is False  # соседний override уцелел
+
+    def test_replace_is_default_wipes_rules(self) -> None:
+        """Характеризация: без telemetry_mode → replace → set_rules сносит соседей."""
+        throttle = ThrottleMiddleware({"latency": 1.0, "fps": 1.0})
+        _svc, cm = _make(throttle=throttle)
+        cm.dispatch("telemetry.reconfigure", {"throttle": {"fps": 0.2}})
+        assert throttle.rules == {"fps": 0.2}  # latency снесён (replace)
+
+
 class TestConfigReloadTelemetry:
     def test_reload_telemetry_only(self) -> None:
         """config.reload только с telemetry (без observability, без файла) → применяется."""

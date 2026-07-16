@@ -128,23 +128,46 @@ class TestTelemetryFanoutCoverage:
         assert res["publish"]["reached"] < res["publish"]["target_count"]
 
 
+class TestTelemetryReconfigureMode:
+    """Task 1.1: driver прокидывает mode на провод только при merge (replace — бит-в-бит)."""
+
+    def test_replace_default_omits_mode_on_wire(self, monkeypatch) -> None:
+        """mode='replace' (дефолт) → telemetry_mode НЕ добавляется (прежний конверт)."""
+        d, calls = _recorder(monkeypatch)
+        d.telemetry_reconfigure("camera_0", publish={"metrics": {"fps": {"enabled": False}}})
+        assert "telemetry_mode" not in calls[0][2]
+
+    def test_merge_adds_mode_on_wire(self, monkeypatch) -> None:
+        d, calls = _recorder(monkeypatch)
+        d.telemetry_reconfigure("camera_0", publish={"x": 1}, mode="merge")
+        assert calls[0][2]["telemetry_mode"] == "merge"
+        assert calls[0][2]["publish"] == {"x": 1}
+
+
 class TestTelemetrySet:
     def test_publisher_enabled_builds_metric_override(self, monkeypatch) -> None:
         d, calls = _recorder(monkeypatch)
         d.telemetry_set("camera_0", "fps", enabled=False)
         process, command, args = calls[0]
         assert (process, command) == ("camera_0", "telemetry.reconfigure")
-        assert args == {"publish": {"metrics": {"fps": {"enabled": False}}}}
+        # Task 1.1: telemetry_set обещает точечность → merge (сохраняет соседей).
+        assert args == {"publish": {"metrics": {"fps": {"enabled": False}}}, "telemetry_mode": "merge"}
 
     def test_publisher_interval_only(self, monkeypatch) -> None:
         d, calls = _recorder(monkeypatch)
         d.telemetry_set("camera_0", "latency_ms", interval_sec=5.0)
-        assert calls[0][2] == {"publish": {"metrics": {"latency_ms": {"interval_sec": 5.0}}}}
+        assert calls[0][2] == {
+            "publish": {"metrics": {"latency_ms": {"interval_sec": 5.0}}},
+            "telemetry_mode": "merge",
+        }
 
     def test_publisher_enabled_and_interval(self, monkeypatch) -> None:
         d, calls = _recorder(monkeypatch)
         d.telemetry_set("camera_0", "shm", enabled=True, interval_sec=10.0)
-        assert calls[0][2] == {"publish": {"metrics": {"shm": {"enabled": True, "interval_sec": 10.0}}}}
+        assert calls[0][2] == {
+            "publish": {"metrics": {"shm": {"enabled": True, "interval_sec": 10.0}}},
+            "telemetry_mode": "merge",
+        }
 
     def test_publisher_requires_a_field(self, monkeypatch) -> None:
         d, calls = _recorder(monkeypatch)
@@ -157,7 +180,8 @@ class TestTelemetrySet:
         d.telemetry_set("all", "processes.**.state.fps", interval_sec=1.0, plane="throttle")
         process, command, args = calls[0]
         assert (process, command) == ("ProcessManager", "telemetry.broadcast")
-        assert args == {"throttle": {"processes.**.state.fps": 1.0}}
+        # Task 1.1: throttle-плоскость тоже merge (update_rule, не set_rules).
+        assert args == {"throttle": {"processes.**.state.fps": 1.0}, "telemetry_mode": "merge"}
 
     def test_throttle_plane_requires_interval(self, monkeypatch) -> None:
         d, calls = _recorder(monkeypatch)

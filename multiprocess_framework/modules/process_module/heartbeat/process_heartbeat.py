@@ -195,16 +195,39 @@ class ProcessHeartbeat:
             return None
         return TelemetryGate(config)
 
-    def reconfigure_telemetry(self, publish_section: dict | None) -> None:
-        """Пересобрать publisher-gate из новой секции ``telemetry.publish`` (рантайм, PC 3.1).
+    def current_telemetry_publish(self) -> dict | None:
+        """Текущая эффективная секция ``telemetry.publish`` живого gate (Task 1.1).
+
+        Источник истины для дельта-переконфигурации (``mode="merge"``): сериализует
+        конфиг активного gate в dict (``TelemetryPublishConfig.to_dict``), поверх
+        которого мержится дельта. Gate выключен (``None``) → ``None`` (нет эффективной
+        секции; merge стартует с пустой базы — дефолтный конфиг + дельта).
+        """
+        gate = self._telemetry_gate
+        if gate is None:
+            return None
+        return gate.config.to_dict()
+
+    def reconfigure_telemetry(self, publish_section: dict | None, *, mode: str = "replace") -> None:
+        """Пересобрать publisher-gate из секции ``telemetry.publish`` (рантайм, PC 3.1 / Task 1.1).
 
         Единый механизм рантайм-переконфигурации телеметрии БЕЗ рестарта процесса —
         тот же результат, что ``_build_telemetry_gate`` на старте, но из ЯВНО переданной
-        секции (а не из ``get_config``):
+        секции (а не из ``get_config``).
 
+        Режим ``mode`` (Task 1.1):
+          - ``"replace"`` (дефолт, backward-compat) — ``publish_section`` применяется
+            ЦЕЛИКОМ: не указанные метрики берут дефолты. Прежнее поведение PC 3.1;
+          - ``"merge"`` — ``publish_section`` трактуется как ДЕЛЬТА поверх текущей
+            эффективной секции (:meth:`current_telemetry_publish`): собирается
+            ``deep_merge(current_effective, delta)`` и из результата строится новый gate.
+            «Точечная» правка одной метрики не стирает override'ы остальных.
+
+        Семантика значений (в обоих режимах после разворота дельты):
           - ``publish_section is None`` → gate ВЫКЛЮЧАЕТСЯ (``self._telemetry_gate = None``)
             → все метрики публикуются каждый тик (обратная совместимость — как при
-            отсутствии секции ``telemetry.publish`` на старте, PC 1.2);
+            отсутствии секции ``telemetry.publish`` на старте, PC 1.2). ``None`` = «нет
+            секции» и означает выключение НЕЗАВИСИМО от ``mode`` (merge с None — дегенерат);
           - dict → строит новый ``TelemetryGate`` из ``TelemetryPublishConfig.from_dict``
             (пустой dict → дефолт 1.0с на все метрики — осознанная явная команда).
 
@@ -220,13 +243,23 @@ class ProcessHeartbeat:
         чистым/тестируемым).
 
         Args:
-            publish_section: под-секция ``telemetry.publish`` (dict) или ``None``.
+            publish_section: под-секция ``telemetry.publish`` (dict) или ``None`` —
+                при ``mode="merge"`` это дельта поверх текущей эффективной секции.
+            mode: ``"replace"`` (полное применение) или ``"merge"`` (дельта).
 
         Raises:
             Пробрасывает исключение валидации ``TelemetryPublishConfig.from_dict`` при
             некорректной секции — вызывающий (``telemetry.reconfigure`` handler /
             ``apply_telemetry_reconfigure``) решает, как сообщить об ошибке инициатору.
         """
+        if publish_section is not None and mode == "merge":
+            # Дельта поверх живой эффективной секции. Gate off → пустая база (дефолтный
+            # конфиг + дельта). deep_merge из data_schema_module (нижний слой) — канон.
+            from ...data_schema_module import deep_merge
+
+            base = self.current_telemetry_publish() or {}
+            publish_section = deep_merge(base, publish_section)
+
         if publish_section is None:
             self._telemetry_gate = None
             return

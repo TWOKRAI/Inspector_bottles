@@ -1350,8 +1350,11 @@ class ProcessManagerProcess(ProcessModule):
         """Fan-out telemetry-переконфигурации на ВСЕХ детей + центральный троттл (PC 3.3).
 
         Закрывает пробел адресного ``telemetry.reconfigure`` (PC 3.1): рантайм-правка
-        publisher-gate ВСЕХ детей ОДНИМ вызовом (не по одному). Контракт ``data`` (обе
-        под-секции опциональны, но нужна хотя бы одна — проверяем НАЛИЧИЕ ключа, т.к.
+        publisher-gate ВСЕХ детей ОДНИМ вызовом (не по одному). Task 1.1: опциональный
+        ``data["telemetry_mode"]`` (``"replace"`` по умолчанию | ``"merge"``) — общий
+        режим применения обеих плоскостей; ``merge`` прокидывается детям и в central-throttle
+        как дельта (точечная правка не стирает соседние правила/метрики). Контракт ``data``
+        (обе под-секции опциональны, но нужна хотя бы одна — проверяем НАЛИЧИЕ ключа, т.к.
         ``publish=None`` валиден):
 
           - ``publish`` → рассылается ``telemetry.reconfigure {publish}`` ВСЕМ живым
@@ -1376,12 +1379,20 @@ class ProcessManagerProcess(ProcessModule):
         if not has_publish and not has_throttle:
             return {"success": False, "reason": "нужна хотя бы одна под-секция: publish и/или throttle"}
 
+        # Task 1.1: режим применения (replace|merge) — общий для обеих плоскостей.
+        # Прокидывается детям в publish-broadcast и в central-throttle apply. На проводе
+        # присутствует ТОЛЬКО при merge (replace = дефолт → бит-в-бит прежний конверт).
+        mode = str(args.get("telemetry_mode", "replace"))
+
         result: dict[str, Any] = {"success": True, "process": self.name}
 
         if has_publish:
             targets = self._live_child_names()
+            publish_payload: dict[str, Any] = {"publish": args["publish"]}
+            if mode != "replace":
+                publish_payload["telemetry_mode"] = mode
             try:
-                reached = self._broadcast_command("telemetry.reconfigure", {"publish": args["publish"]})
+                reached = self._broadcast_command("telemetry.reconfigure", publish_payload)
             except Exception as exc:  # noqa: BLE001 — рассылка не роняет применение throttle
                 self._log_error(f"telemetry.broadcast: publish fan-out упал: {exc}")
                 reached = 0
@@ -1404,6 +1415,7 @@ class ProcessManagerProcess(ProcessModule):
             try:
                 applied = apply_telemetry_reconfigure(
                     {"throttle": args["throttle"]},
+                    mode=mode,  # Task 1.1: merge → per-правило update/remove, replace → set_rules
                     heartbeat=None,  # publisher-gate детей идёт broadcast'ом (publish), не здесь
                     store_throttle=resolve_store_throttle(self),
                     log_info=getattr(self, "_log_info", None),

@@ -781,6 +781,7 @@ class BuiltinCommands:
             try:
                 telemetry_applied = apply_telemetry_reconfigure(
                     telemetry_section,
+                    mode=str(args.get("telemetry_mode", "replace")),  # Task 1.1: дельта-семантика
                     heartbeat=getattr(svc, "_heartbeat", None),
                     store_throttle=self._resolve_store_throttle(),
                     log_info=getattr(svc, "_log_info", None),
@@ -820,6 +821,11 @@ class BuiltinCommands:
         же приёмом, что менеджеры в ``config.reload`` (``getattr(svc, "_heartbeat")`` /
         ``_state_store_manager`` — оба атрибута живут на объекте процесса).
 
+        Task 1.1 — режим применения ``data["telemetry_mode"]`` (``"replace"`` по
+        умолчанию | ``"merge"``): ключ-сосед ``publish``/``throttle`` в ``data`` (НЕ внутри
+        секции — секция остаётся чистым config-dict для сборки gate/правил). ``merge`` —
+        дельта поверх живого состояния (точечная правка не стирает соседние правила/метрики).
+
         Fan-out на всех детей (``process=all``) — Task 3.2; здесь применение адресное
         (один процесс-адресат сообщения).
         """
@@ -841,6 +847,7 @@ class BuiltinCommands:
         try:
             applied = apply_telemetry_reconfigure(
                 section,
+                mode=str(args.get("telemetry_mode", "replace")),  # Task 1.1: дельта-семантика
                 heartbeat=getattr(svc, "_heartbeat", None),
                 store_throttle=self._resolve_store_throttle(),
                 log_info=getattr(svc, "_log_info", None),

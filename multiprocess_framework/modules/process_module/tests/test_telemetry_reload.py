@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from multiprocess_framework.modules.config_module.core.config import Config
 from multiprocess_framework.modules.process_module.managers.telemetry_reload import (
+    THROTTLE_REMOVE,
     apply_telemetry_reconfigure,
     make_telemetry_on_reload,
 )
@@ -19,19 +20,38 @@ from multiprocess_framework.modules.process_module.managers.telemetry_reload imp
 class _FakeHeartbeat:
     def __init__(self) -> None:
         self.calls: list = []
+        self.modes: list = []
 
-    def reconfigure_telemetry(self, publish) -> None:
+    def reconfigure_telemetry(self, publish, *, mode: str = "replace") -> None:
         self.calls.append(publish)
+        self.modes.append(mode)
 
 
 class _FakeThrottle:
+    """Стаб ThrottleMiddleware: держит правила + считает вызовы каждого мутатора.
+
+    Поддерживает и replace-путь (``set_rules``), и merge-путь (``update_rule`` /
+    ``remove_rule``) — так тесты проверяют И итоговое состояние правил, И ФАКТ, что
+    merge зовёт именно per-правило API (оживший PC 0.1), а не полную замену.
+    """
+
     def __init__(self) -> None:
         self.rules: dict = {}
         self.set_calls = 0
+        self.update_calls: list = []
+        self.remove_calls: list = []
 
     def set_rules(self, rules: dict) -> None:
         self.set_calls += 1
         self.rules = dict(rules)
+
+    def update_rule(self, pattern: str, interval_sec: float) -> None:
+        self.update_calls.append((pattern, interval_sec))
+        self.rules[pattern] = interval_sec
+
+    def remove_rule(self, pattern: str) -> bool:
+        self.remove_calls.append(pattern)
+        return self.rules.pop(pattern, None) is not None
 
 
 class TestApplyTelemetryReconfigure:
@@ -88,6 +108,72 @@ class TestApplyTelemetryReconfigure:
         applied = apply_telemetry_reconfigure({"throttle": {}}, store_throttle=throttle)
         assert applied == {"throttle": True}
         assert throttle.rules == {}
+
+    def test_default_mode_is_replace(self) -> None:
+        """mode не передан → heartbeat получает mode='replace' (backward-compat)."""
+        hb = _FakeHeartbeat()
+        apply_telemetry_reconfigure({"publish": {"x": 1}}, heartbeat=hb)
+        assert hb.modes == ["replace"]
+
+    def test_mode_forwarded_to_heartbeat(self) -> None:
+        """mode='merge' прокидывается в heartbeat.reconfigure_telemetry."""
+        hb = _FakeHeartbeat()
+        apply_telemetry_reconfigure({"publish": {"x": 1}}, mode="merge", heartbeat=hb)
+        assert hb.modes == ["merge"]
+
+
+class TestThrottleMergeMode:
+    """Task 1.1: throttle-плоскость в merge-режиме — per-правило update/remove."""
+
+    def test_replace_mode_calls_set_rules(self) -> None:
+        """mode='replace' (дефолт) → set_rules (полная замена), НЕ per-правило."""
+        throttle = _FakeThrottle()
+        throttle.rules = {"keep": 5.0}
+        applied = apply_telemetry_reconfigure({"throttle": {"a.b": 2.0}}, mode="replace", store_throttle=throttle)
+        assert applied == {"throttle": True}
+        assert throttle.set_calls == 1
+        assert throttle.update_calls == [] and throttle.remove_calls == []
+        assert throttle.rules == {"a.b": 2.0}  # 'keep' снесён (replace)
+
+    def test_merge_updates_single_rule_keeps_others(self) -> None:
+        """mode='merge' меняет ТОЛЬКО одно правило, остальные не тронуты (через update_rule)."""
+        throttle = _FakeThrottle()
+        throttle.rules = {"keep": 5.0, "a.b": 1.0}
+        applied = apply_telemetry_reconfigure({"throttle": {"a.b": 2.0}}, mode="merge", store_throttle=throttle)
+        assert applied == {"throttle": True}
+        assert throttle.set_calls == 0  # НЕ полная замена
+        assert throttle.update_calls == [("a.b", 2.0)]
+        assert throttle.rules == {"keep": 5.0, "a.b": 2.0}  # 'keep' сохранён
+
+    def test_merge_none_marker_removes_rule(self) -> None:
+        """mode='merge' + None-значение (THROTTLE_REMOVE) → remove_rule, правило исчезает."""
+        throttle = _FakeThrottle()
+        throttle.rules = {"keep": 5.0, "drop.me": 1.0}
+        applied = apply_telemetry_reconfigure(
+            {"throttle": {"drop.me": THROTTLE_REMOVE}}, mode="merge", store_throttle=throttle
+        )
+        assert applied == {"throttle": True}
+        assert throttle.remove_calls == ["drop.me"]
+        assert throttle.update_calls == []
+        assert throttle.rules == {"keep": 5.0}  # только drop.me удалён
+
+    def test_merge_zero_is_block_rule_not_removal(self) -> None:
+        """0 — валидное правило «полная блокировка», НЕ маркер удаления (update_rule)."""
+        throttle = _FakeThrottle()
+        applied = apply_telemetry_reconfigure({"throttle": {"block.me": 0}}, mode="merge", store_throttle=throttle)
+        assert applied == {"throttle": True}
+        assert throttle.update_calls == [("block.me", 0)]
+        assert throttle.remove_calls == []
+        assert throttle.rules == {"block.me": 0}
+
+    def test_merge_without_per_rule_api_reports_no_receiver(self) -> None:
+        """merge требует update_rule/remove_rule — их нет → applied False (нет приёмника)."""
+
+        class _OnlySetRules:
+            def set_rules(self, rules: dict) -> None: ...
+
+        applied = apply_telemetry_reconfigure({"throttle": {"a": 1.0}}, mode="merge", store_throttle=_OnlySetRules())
+        assert applied == {"throttle": False}
 
 
 class TestMakeTelemetryOnReload:
