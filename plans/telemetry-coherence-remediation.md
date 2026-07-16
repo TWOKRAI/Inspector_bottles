@@ -44,7 +44,7 @@ GUI** плана telemetry-publish-control (крутилки частоты не
 
 ## Фаза 1 — Частотный авторитет + дельта-семантика (БЛОКЕР Фазы 4 GUI)
 
-### Task 1.1 — Дельта-семантика telemetry-переконфигурации (`mode: merge|replace`)
+### Task 1.1 — Дельта-семантика telemetry-переконфигурации (`mode: merge|replace`) ✅ DONE (92d6f6f6)
 **Level:** Senior (Opus)
 **Assignee:** teamlead
 **Layer:** framework
@@ -69,12 +69,14 @@ GUI** плана telemetry-publish-control (крутилки частоты не
 6. Убрать из docstring `telemetry_set` предупреждение о full-apply (заменить описанием merge);
    добавить предупреждение о wipe в `replace`-ветку `telemetry_reconfigure`.
 **Acceptance:**
-- [ ] Тест: `telemetry_set(plane="throttle", metric=X, interval_sec=Y)` меняет ТОЛЬКО правило X — остальные правила (`rules`-снимок до/после) не тронуты
-- [ ] Тест: `telemetry_set(plane="publisher", metric="fps", enabled=False)` выключает только fps — прочие `metrics`-override живого gate сохранены
-- [ ] Тест: `mode="replace"` бит-в-бит воспроизводит прежнее поведение (характеризация)
-- [ ] Тест: merge-удаление правила (маркер) реально зовёт `remove_rule` и правило исчезает
-- [ ] grep: `update_rule`/`remove_rule` имеют продакшн-потребителя (не только тесты)
+- [x] Тест: `telemetry_set(plane="throttle", metric=X, interval_sec=Y)` меняет ТОЛЬКО правило X — остальные правила (`rules`-снимок до/после) не тронуты — `test_telemetry_commands.py::test_throttle_merge_changes_only_target_rule`, `test_telemetry_reload.py::test_merge_updates_single_rule_keeps_others`
+- [x] Тест: `telemetry_set(plane="publisher", metric="fps", enabled=False)` выключает только fps — прочие `metrics`-override живого gate сохранены — `test_telemetry_reconfigure.py::test_merge_preserves_other_metric_overrides`, `test_telemetry_commands.py::test_publish_merge_keeps_other_metric_overrides`
+- [x] Тест: `mode="replace"` бит-в-бит воспроизводит прежнее поведение (характеризация) — `test_telemetry_reload.py::test_replace_mode_calls_set_rules`, `test_telemetry_reconfigure.py::test_replace_mode_wipes_other_overrides`, `test_telemetry_driver.py::test_replace_default_omits_mode_on_wire`
+- [x] Тест: merge-удаление правила (маркер `None`) реально зовёт `remove_rule` и правило исчезает — `test_telemetry_reload.py::test_merge_none_marker_removes_rule`, `test_telemetry_commands.py::test_throttle_merge_none_removes_rule`
+- [x] grep: `update_rule`/`remove_rule` имеют продакшн-потребителя (`telemetry_reload.py::_apply_throttle`, не только тесты)
 **Out of scope:** тик heartbeat (Task 1.2), персист дельты через hot-swap (Task 3.2), GUI.
+
+> **Контракт `mode` (решение teamlead, 92d6f6f6):** `data["telemetry_mode"]` — ключ-СОСЕД `publish`/`throttle` (НЕ внутри секции), т.к. секция уходит в config-билдеры (`TelemetryPublishConfig.from_dict`) и должна оставаться чистым config-dict. На проводе присутствует ТОЛЬКО при `merge` (`replace` — прежний конверт бит-в-бит, backward-compat старых сообщений). Маркер удаления throttle-правила — `None` (JSON null; `0` остаётся валидной «полной блокировкой»). `publish_section=None` выключает gate НЕЗАВИСИМО от mode.
 
 ### Task 1.2 — Тик публикации в telemetry-контракте (`publish.tick_sec`)
 **Level:** Senior (Opus)
