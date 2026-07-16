@@ -85,6 +85,28 @@ def apply_telemetry_reconfigure(
     return applied
 
 
+def resolve_store_throttle(holder: Any) -> Any:
+    """Достать живой ``ThrottleMiddleware`` через ``_state_store_manager`` держателя.
+
+    ЕДИНАЯ точка резолва центрального троттла (устраняет дубль): и адресный
+    ``telemetry.reconfigure`` (``BuiltinCommands._resolve_store_throttle`` — держатель
+    = процесс-адресат), и fan-out ``telemetry.broadcast`` (PM — держатель = сам
+    оркестратор) достают троттл одинаково.
+
+    ``holder`` — любой объект с атрибутом ``_state_store_manager`` (процесс-оркестратор
+    ``GenericProcessManagerApp``). StateStoreManager держит ТОЛЬКО оркестратор → у
+    обычных процессов атрибута нет / он ``None`` → возвращаем ``None`` (троттл-плоскость
+    молча пропускается, её единственный адресат — оркестратор).
+
+    Returns:
+        Живой ``ThrottleMiddleware`` (по имени ``"throttle"``) либо ``None``.
+    """
+    store_manager = getattr(holder, "_state_store_manager", None)
+    if store_manager is None or not hasattr(store_manager, "get_middleware"):
+        return None
+    return store_manager.get_middleware("throttle")
+
+
 def make_telemetry_on_reload(
     *,
     store_throttle: Any = None,
@@ -117,4 +139,4 @@ def make_telemetry_on_reload(
     return _on_reload
 
 
-__all__ = ["apply_telemetry_reconfigure", "make_telemetry_on_reload"]
+__all__ = ["apply_telemetry_reconfigure", "make_telemetry_on_reload", "resolve_store_throttle"]

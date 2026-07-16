@@ -186,19 +186,47 @@ telemetry:
   (в оркестраторе).
 **Acceptance:** тест: inline `config.reload` с `telemetry`-секцией → метрика выключилась/частота сменилась без рестарта.
 
-#### Task 3.2 — backend_ctl команда `telemetry.*`
+#### Task 3.2 — backend_ctl команда `telemetry.*` ✅ DONE
 **Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** framework
+**Статус:** ✅ DONE — driver-обёртки `telemetry_reconfigure(process="all", *, publish=_UNSET, throttle=_UNSET,
+  pm_name="ProcessManager", timeout)` и узкая `telemetry_set(process, metric, *, enabled=_UNSET, interval_sec=_UNSET,
+  plane="publisher"|"throttle", timeout)` в `backend_ctl/driver.py`. Сентинел `_UNSET` (модульный) отличает
+  «под-секцию не передали» от `publish=None` (валидная команда «выключить gate»). Адресный кейс поверх
+  3.1-handler'а `telemetry.reconfigure`; результат применения (`applied`/охват) прокидывается наверх через
+  `_leaf_result` — «нет приёмника»/успех видны. Команды `telemetry.reconfigure`/`telemetry.broadcast`
+  зарегистрированы с описанием → видны в `introspect.handlers`/`introspect.capabilities`. 20 тестов
+  `backend_ctl/tests/test_telemetry_driver.py` (мок driver-транспорт: адресация, publish=None, обе плоскости,
+  telemetry_set publisher/throttle, прокидывание охвата). **Замечание:** publisher-plane full-apply (backend
+  пересобирает gate из секции целиком) — `telemetry_set` документирует, что не указанные метрики берут дефолты.
 **Goal:** управление из backend_ctl (и из GUI через тот же router-путь).
-**Files:** `process_module/commands/builtin_commands.py` (новый `_register_telemetry_commands`: `telemetry.set`
-  {metric, enabled?, interval_sec?, plane?}), `backend_ctl/driver.py` (обёртка `telemetry_set(process, ...)`),
-  `introspect.handlers`-видимость, tests.
+**Files:** `process_module/commands/builtin_commands.py` (handler 3.1 переиспользован; `_resolve_store_throttle`
+  делегирует в общий `resolve_store_throttle`), `backend_ctl/driver.py` (обёртки), tests.
 **Acceptance:** тест: команда меняет publisher-gate/троттл адресата; отсутствие приёмника видно через introspect.
 
-#### Task 3.3 — Fan-out на всех детей
+#### Task 3.3 — Fan-out на всех детей ✅ DONE
 **Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework
+**Статус:** ✅ DONE — PM-команда `telemetry.broadcast` (`ProcessManagerProcess._cmd_telemetry_broadcast`,
+  зарегистрирована в `_register_builtin_commands`): `publish` → рассылается `telemetry.reconfigure {publish}`
+  ВСЕМ живым детям через новый общий примитив `_broadcast_command(command, data)` — тем же путём
+  `ProcessCommunication.broadcast(exclude_self=True)`, что routing.refresh (свежие очереди PM → долетает
+  после hot-swap). `_broadcast_routing_refresh` отрефакторен на этот примитив (поведение сохранено, error-путь
+  не тронут — try/except остался у routing). `throttle` → применяется к ЦЕНТРАЛЬНОМУ `ThrottleMiddleware`
+  оркестратора через `apply_telemetry_reconfigure` (heartbeat=None; общий `resolve_store_throttle(self)`),
+  детям НЕ рассылается. Driver `telemetry_reconfigure("all"/None/"*", ...)` → шлёт `telemetry.broadcast` на PM.
+  Агрегированный результат несёт ОХВАТ доставки (`publish.reached`/`target_count`/`complete`, `targets` из
+  `get_process_names`) — «no silent caps». `publish=None` фанится как «выключить gate у всех». 11 тестов
+  `process_manager_module/tests/test_telemetry_broadcast.py` (охват, publish=None, throttle→оркестратор без
+  broadcast, нет state-plane → applied=False, обе плоскости, после apply_topology broadcast адресуется свежему
+  набору, примитив, регистрация). Framework-runner 4855 passed (эталон 2 pre-existing Windows app_module).
+  **Broadcast fire-and-forget:** сообщается охват ДОСТАВКИ, не per-child подтверждение применения (для него —
+  адресный `telemetry.reconfigure`). **Follow-up (опц. п.3 задачи):** файловый watcher оркестратора всё ещё
+  фанит детям только `throttle` (publisher-gate детей — через backend_ctl/IPC broadcast); проброс publisher-gate
+  через watcher оставлен follow-up'ом (примитивы `_broadcast_command` + `make_telemetry_on_reload` готовы к
+  досбору, но добавляют побочный broadcast на каждый reload файла — отдельное решение/тест).
 **Goal:** применить telemetry-конфиг ко ВСЕМ процессам одной командой (закрыть пробел ADR-CRM-006 Phase 4 для этого кейса).
-**Files:** `process_manager_module/process/process_manager_process.py` (переиспользовать `comm.broadcast` /
-  `_broadcast_routing_refresh`-путь либо цикл `send_message` по `get_process_names()`), driver fan-out, tests.
+**Files:** `process_manager_module/process/process_manager_process.py` (`_broadcast_command` примитив +
+  `telemetry.broadcast` handler), `process_module/managers/telemetry_reload.py` (`resolve_store_throttle`),
+  `backend_ctl/driver.py` (fan-out маршрутизация), tests.
 **Acceptance:** тест: `telemetry.set process=all ...` долетает до всех живых детей (broadcast/relay), включая после hot-swap.
 
 ### Фаза 4 — GUI-контролы + docs (прототип, переиспользует read-model)

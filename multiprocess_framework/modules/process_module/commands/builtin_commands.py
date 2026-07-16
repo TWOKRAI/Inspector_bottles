@@ -798,12 +798,13 @@ class BuiltinCommands:
         — атрибут ``_state_store_manager``, PC 0.1). У обычных процессов его нет → None →
         троттл-плоскость молча пропускается (её единственный адресат — оркестратор).
         Тот же приём, что ``config.reload`` достаёт ``logger_manager`` из ``svc``.
+
+        Делегирует в общий ``resolve_store_throttle`` (PC 3.3, тот же резолв использует
+        fan-out ``telemetry.broadcast`` PM) — единая точка, без дубля.
         """
-        svc = self._services
-        store_manager = getattr(svc, "_state_store_manager", None)
-        if store_manager is None or not hasattr(store_manager, "get_middleware"):
-            return None
-        return store_manager.get_middleware("throttle")
+        from ..managers.telemetry_reload import resolve_store_throttle
+
+        return resolve_store_throttle(self._services)
 
     def _cmd_telemetry_reconfigure(self, data=None, **kwargs) -> dict:
         """Рантайм-переконфигурация телеметрии процесса-адресата (PC 3.1).
