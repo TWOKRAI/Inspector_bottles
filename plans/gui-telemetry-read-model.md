@@ -3,7 +3,8 @@
 - **Slug:** gui-telemetry-read-model
 - **Дата:** 2026-07-16
 - **Ветка:** feat/gui-telemetry-read-model (Фаза 0 допустимо hotfix-ом раньше остальных)
-- **Статус:** ACTIVE
+- **Статус:** ACTIVE (реализация начата 2026-07-16; чекбоксы, предзаполненные при написании плана
+  несуществующими хешами, сброшены — отмечаются заново по мере реальных коммитов)
 - **Реактивирует:** [`telemetry-delivery-simplification.md`](telemetry-delivery-simplification.md) Option D (был DEFERRED
   «до gate: 2-й реактивный потребитель ИЛИ замер показал боль двойного glob»). **Gate сработал 2026-07-16:**
   диагностирован шторм блокирующих подписок при открытии вкладки «Процессы» (см. Context). После Фазы 3 пометить
@@ -60,8 +61,8 @@
   (`_sub_patterns` + `_pattern_sub_id`) новый паттерн (glob-накрытие: `processes.**` ⊇ `processes.X.state.fps`).
   2. Покрыт → зарегистрировать refcount на покрывающий, серверный subscribe НЕ слать.
 **Acceptance:**
-- [x] Открытие ProcessesTab при живых стартовых wildcard'ах → 0 исходящих `state.subscribe` (характеризационный тест) — c69ffd05
-- [x] Непокрытый паттерн по-прежнему создаёт подписку (регресс-тест 5.9 «панель мертва») — c69ffd05
+- [x] Открытие ProcessesTab при живых стартовых wildcard'ах → 0 исходящих `state.subscribe` (характеризационный тест) — `TestCoverageCheck::test_covered_pattern_sends_no_server_subscribe` + `test_covered_pattern_still_receives_delta`
+- [x] Непокрытый паттерн по-прежнему создаёт подписку (регресс-тест 5.9 «панель мертва») — `TestCoverageCheck::test_uncovered_pattern_creates_subscription`
 **Out of scope:** доставка/replay, GUI-код.
 
 #### Task 0.2 — Fire-and-forget подписка вне main thread
@@ -72,7 +73,7 @@
   отправка `send()` без ожидания ответа, ошибка сервера ловится логом (warning), sub_id локальный.
   2. Replay при этом приедет асинхронно штатным путём дельт — виджеты обновятся через bindings.
 **Acceptance:**
-- [x] Ни одного `router.request` из Qt main thread на пути `bind()` (тест с мок-router, assert по потоку) — c69ffd05
+- [x] Ни одного `router.request` из Qt main thread на пути `bind()` (тест с мок-router, assert по потоку) — `TestAsyncSubscribe::test_ensure_new_subscription_uses_only_send_async` (request_calls==[], send_calls==[], только send_async) + `test_subscribe_sync_false_uses_send_async`; sync=True сохранён (`test_subscribe_sync_true_still_uses_request`)
 **Out of scope:** переделка `router.request` как такового.
 
 #### Task 0.3 — Реплей по префиксу паттерна, не всё дерево
@@ -82,8 +83,8 @@
 **Steps:** 1. Выделить статический префикс паттерна до первого wildcard-сегмента
   (`processes.cam.state.fps` → сам путь; `processes.**` → `processes`). 2. `get_subtree(prefix)` вместо `""`.
 **Acceptance:**
-- [x] Реплей эквивалентен прежнему по содержимому (характеризационный тест на матчи) — c69ffd05
-- [x] Тест: подписка на узкий паттерн не вызывает копию корня (spy на `get_subtree`) — c69ffd05
+- [x] Реплей эквивалентен прежнему по содержимому (характеризационный тест на матчи) — `TestSubscribe::test_replay_by_prefix_equivalent_to_full_tree` (узкий + wildcard + `**`, эталон = старый get_subtree('')+iter_matches)
+- [x] Тест: подписка на узкий паттерн не вызывает копию корня (spy на `get_subtree`) — `test_replay_narrow_pattern_does_not_copy_root` (get_subtree('') не вызывается) + `test_replay_wildcard_copies_prefix_not_root` (только get_subtree('processes'))
 **Out of scope:** формат Delta, dispatcher.
 
 #### Task 0.4 — Дебаунс каскада runtime-воркеров
@@ -94,8 +95,8 @@
 **Steps:** 1. `_on_worker_discovered` только копит имя и взводит `QTimer.singleShot(50, ...)`
   (coalescing-флагом). 2. Однократный `_refresh_workers` по срабатыванию.
 **Acceptance:**
-- [x] Тест: 5 обнаружений подряд → 1 вызов `set_workers` — c69ffd05
-- [x] Qt-smoke: proto + qt_snapshot, вкладка живая (правило feedback_qt_mcp_smoke_verification) — 63d59356 (WSL: инструментальный лаг ~9с)
+- [ ] Тест: 5 обнаружений подряд → 1 вызов `set_workers`
+- [ ] Qt-smoke: proto + qt_snapshot, вкладка живая (правило feedback_qt_mcp_smoke_verification)
 **Verification Фазы 0 (整):** запуск `webcam_sketch`, открытие вкладки «Процессы» — без фриза
   (замер лог-таймстампом); `INSPECTOR_STALL_DUMP=1` — нет срезов >1 с в момент открытия.
 
@@ -116,15 +117,15 @@
   2. Подключить вторым потребителем `bridge.add_state_listener` (рядом с bindings, §11.15).
   3. API чтения: `get(path)`, `snapshot(prefix)` — для открытия вкладок без ожидания дельт.
 **Acceptance:**
-- [x] Вкладка, созданная после публикации, видит значения сразу (тест late-binding) — 74497fdf
-- [x] Ни одной серверной подписки из view-model (стартовые wildcard'ы — единственный источник) — 74497fdf
+- [ ] Вкладка, созданная после публикации, видит значения сразу (тест late-binding)
+- [ ] Ни одной серверной подписки из view-model (стартовые wildcard'ы — единственный источник)
 
 #### Task 1.2 — Кольцевые буферы для мгновенных графиков
 **Level:** Middle+ (Sonnet) · **Assignee:** developer
 **Goal:** последние ~10 мин ключевых метрик (fps/latency/hz) в памяти GUI для спарклайнов без похода в БД.
 **Files:** `telemetry_view_model.py` (ring buffer per отслеживаемый путь, конфиг: длительность/набор префиксов), tests.
 **Acceptance:**
-- [x] Fixed-size deque, O(1) append; выборка диапазона для графика — 74497fdf
+- [ ] Fixed-size deque, O(1) append; выборка диапазона для графика
 
 #### Task 1.3 — Перевод панелей «Процессов» на view-model
 **Level:** Senior (Opus) · **Assignee:** teamlead
@@ -134,8 +135,8 @@
 **Steps:** 1. Подписка панели: один слот на `updated`, фильтрация по своим путям (как `matches_live`
   в Наблюдаемости). 2. Первичное наполнение из `snapshot()`. 3. Обнаружение runtime-воркеров — из тех же батчей.
 **Acceptance:**
-- [x] Открытие вкладки: 0 `state.subscribe`, 0 блокирующих IPC (инвариант-тест) — 61799b83
-- [x] Live-обновления карточек/воркеров работают (qt-smoke по правилу) — 61799b83 (66 GUI-тестов, 892 suite)
+- [ ] Открытие вкладки: 0 `state.subscribe`, 0 блокирующих IPC (инвариант-тест)
+- [ ] Live-обновления карточек/воркеров работают (qt-smoke по правилу)
 **Out of scope:** остальные вкладки (devices/calibration) — мигрируют по мере надобности этим же паттерном.
 
 ### Фаза 2 — История и графики (pull из telemetry_sink)
@@ -148,15 +149,15 @@
 **Steps:** 1. `list_range(process_name, ts_from, ts_to, metrics, max_points)` c даунсемплом до max_points.
   2. Read-only подключение (`mode=ro`), отказоустойчиво к отсутствию файла.
 **Acceptance:**
-- [x] Диапазонная выборка с даунсемплом; отсутствие БД → пустой результат, не исключение — 0f74ec1a (25 тестов)
+- [ ] Диапазонная выборка с даунсемплом; отсутствие БД → пустой результат, не исключение
 
 #### Task 2.2 — Графики в SingleProcessPanel
 **Level:** Middle+ (Sonnet) · **Assignee:** developer
 **Goal:** график fps/latency процесса: последние минуты — из ring buffer (Task 1.2), глубже — из Task 2.1.
 **Files:** `processes/_panels.py` (+ мини-виджет графика), tests.
 **Acceptance:**
-- [x] Открытие графика не блокирует main thread (чтение БД — в воркере/по таймеру) — 468e698c (QThread + history_ready)
-- [x] Переключение диапазона (10 мин / час / день) — 468e698c (кнопки 10м/1ч/1д)
+- [ ] Открытие графика не блокирует main thread (чтение БД — в воркере/по таймеру)
+- [ ] Переключение диапазона (10 мин / час / день)
 
 ### Фаза 3 — Cleanup + enforcement + docs
 
@@ -165,8 +166,8 @@
 **Goal:** после миграции панелей: убрать `ensure_subscription` из `bind()`-пути телеметрии, убрать
   `cache_snapshot`-replay из `GuiStateBindings` (роль у view-model), снять мёртвые точечные подписки.
 **Acceptance:**
-- [x] Нет вызовов `ensure_subscription` из `bind()` для путей, покрытых wildcard (координация с Task 0.1) — 74d21af8 (полное удаление ensure/release из bind()-пути)
-- [x] Тест-инвариант в CI: открытие каждой вкладки → счётчик `state.subscribe` == 0 — 74d21af8 (все 8 вкладок, реестр-паритет)
+- [ ] Нет вызовов `ensure_subscription` из `bind()` для путей, покрытых wildcard (координация с Task 0.1)
+- [ ] Тест-инвариант в CI: открытие каждой вкладки → счётчик `state.subscribe` == 0
 
 #### Task 3.2 — ADR + память + статусы планов
 **Level:** Middle (Sonnet) · **Assignee:** tech-writer
@@ -176,7 +177,7 @@
   `project_webcam_sketch_freeze` (диагноз «Python ни при чём» опровергнут: блокирующий IPC в main thread).
   3. `telemetry-delivery-simplification.md` → SUPERSEDED (ссылка сюда). 4. Dual-write memory.
 **Acceptance:**
-- [x] ADR в индексе; memory обновлена в обоих местах; статусы планов согласованы — 0192c0a5 (ADR-131, 2 memory dual-write, SUPERSEDED)
+- [ ] ADR в индексе; memory обновлена в обоих местах; статусы планов согласованы
 
 ---
 

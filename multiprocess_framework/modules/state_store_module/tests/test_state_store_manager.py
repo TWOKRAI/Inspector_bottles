@@ -475,6 +475,92 @@ class TestStateStoreManagerSubscriptions:
         for d in replay_msg["data"]["deltas"]:
             assert d["revision"] == 2
 
+    def test_replay_by_prefix_equivalent_to_full_tree(self):
+        """0.3: реплей по префиксу эквивалентен прежнему get_subtree('')+iter_matches.
+
+        Проверяем ОБА случая — узкий (статический) и wildcard паттерн: множество
+        отправленных (path, value) совпадает с эталоном, посчитанным старым
+        алгоритмом (полное дерево + iter_matches, фильтр не-dict).
+        """
+        from multiprocess_framework.modules.state_store_module.core.glob_walker import iter_matches
+
+        initial = {
+            "processes": {
+                "cam": {"state": {"fps": 30, "status": "running"}},
+                "cam2": {"state": {"fps": 24}},
+            },
+            "system": {"health": {"active": 2}},
+        }
+
+        for pattern in ("processes.cam.state.fps", "processes.**", "processes.*.state.fps", "**"):
+            router = MockRouter()
+            mgr = StateStoreManager(router=router, initial_state=initial)
+
+            # Эталон: старое поведение (полное дерево).
+            whole = mgr.store.get_subtree("")
+            expected = {(p, v) for p, v in iter_matches(whole, pattern) if not isinstance(v, dict)}
+
+            router.sent_messages.clear()
+            mgr.handle_state_subscribe({"data": {"pattern": pattern, "subscriber": "gui"}})
+
+            got: set = set()
+            for msg in router.sent_messages:
+                if msg.get("command") == "state.changed":
+                    for d in msg["data"]["deltas"]:
+                        got.add((d["path"], d["new_value"]))
+
+            assert got == expected, f"pattern={pattern}: реплей разошёлся с эталоном"
+
+    def test_replay_narrow_pattern_does_not_copy_root(self):
+        """0.3: подписка на узкий паттерн НЕ вызывает get_subtree('') (копию корня)."""
+        router = MockRouter()
+        mgr = StateStoreManager(
+            router=router,
+            initial_state={"processes": {"cam": {"state": {"fps": 30}}}},
+        )
+
+        calls: list[str] = []
+        real_get_subtree = mgr.store.get_subtree
+
+        def spy(path):
+            calls.append(path)
+            return real_get_subtree(path)
+
+        mgr.store.get_subtree = spy  # type: ignore[method-assign]
+        try:
+            mgr.handle_state_subscribe({"data": {"pattern": "processes.cam.state.fps", "subscriber": "gui"}})
+        finally:
+            mgr.store.get_subtree = real_get_subtree  # type: ignore[method-assign]
+
+        # Полностью статический паттерн: корень не копируется вовсе (точечный get).
+        assert "" not in calls, f"get_subtree('') не должен вызываться, calls={calls}"
+
+    def test_replay_wildcard_copies_prefix_not_root(self):
+        """0.3: wildcard-паттерн копирует поддерево префикса, а не корень."""
+        router = MockRouter()
+        mgr = StateStoreManager(
+            router=router,
+            initial_state={
+                "processes": {"cam": {"state": {"fps": 30}}},
+                "system": {"health": {"active": 1}},
+            },
+        )
+
+        calls: list[str] = []
+        real_get_subtree = mgr.store.get_subtree
+
+        def spy(path):
+            calls.append(path)
+            return real_get_subtree(path)
+
+        mgr.store.get_subtree = spy  # type: ignore[method-assign]
+        try:
+            mgr.handle_state_subscribe({"data": {"pattern": "processes.**", "subscriber": "gui"}})
+        finally:
+            mgr.store.get_subtree = real_get_subtree  # type: ignore[method-assign]
+
+        assert calls == ["processes"], f"ожидался единственный get_subtree('processes'), calls={calls}"
+
     def test_unsubscribe(self):
         """Отписка по sub_id."""
         mgr = StateStoreManager()

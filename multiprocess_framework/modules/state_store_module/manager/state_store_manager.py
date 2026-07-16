@@ -407,13 +407,15 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         """
         try:
             from ..core.delta import MISSING, Delta
-            from ..core.glob_walker import iter_matches
 
-            snapshot = self._store.get_subtree("")  # thread-safe deep-copy всего дерева
-            # revision реплея (Ф4.9, ADR-SS-014) — фиксируем ПОСЛЕ снимка снапшота,
+            # Адресный реплей (Ф-GUI-read-model 0.3): копируем не всё дерево, а
+            # только поддерево статического префикса паттерна — каждый путь,
+            # матчащий pattern, обязан начинаться с этого префикса. Множество
+            # (path, value) эквивалентно прежнему get_subtree("") + iter_matches.
+            pairs = list(self._iter_replay_pairs(pattern))
+            # revision реплея (Ф4.9, ADR-SS-014) — фиксируем ПОСЛЕ снимка,
             # т.к. store.revision читается под собственным локом и может уйти
-            # вперёд между snapshot и этой строкой; для реплея это не критично
-            # (best-effort, как и весь _replay_initial_state).
+            # вперёд; для реплея это не критично (best-effort, как и весь метод).
             replay_revision = self._store.revision
             deltas = [
                 Delta(
@@ -423,7 +425,7 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
                     source="__replay__",
                     revision=replay_revision,
                 )
-                for p, v in iter_matches(snapshot, pattern)
+                for p, v in pairs
                 if not isinstance(v, dict)
             ]
             if deltas:
@@ -431,6 +433,64 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
                 self._log_debug(f"Initial replay: {len(deltas)} значений → '{subscriber}' (pattern={pattern})")
         except Exception as exc:  # nosec B110 — реплей best-effort, не критичен для подписки
             self._log_warning(f"Initial replay для '{subscriber}' (pattern={pattern}) не удался: {exc}")
+
+    def _iter_replay_pairs(self, pattern: str):
+        """Пары (полный_путь, значение) для реплея pattern — по статическому префиксу.
+
+        Эквивалент прежнего ``iter_matches(get_subtree(''), pattern)``, но
+        копирует только поддерево статического префикса (до первого wildcard),
+        а не всё дерево. Корректность: каждый путь, матчащий pattern, начинается
+        с префикса (литеральные сегменты матчатся буквально), значит матч
+        pattern по всему дереву ≡ матч остатка по поддереву префикса с обратным
+        приклеиванием префикса к путям.
+
+        Три случая:
+          - prefix == '' (pattern с wildcard'а): поддерево = всё дерево, обычный
+            iter_matches по абсолютному pattern.
+          - prefix == pattern (нет wildcard): pattern адресует ровно один узел —
+            берём его значение точечно (get), без копии поддерева.
+          - prefix — собственный префикс (есть wildcard после литералов):
+            берём поддерево prefix, матчим ОСТАТОК pattern, приклеиваем prefix.
+
+        Отсутствующий префикс / префикс-лист → пустой результат (как старый
+        код: pattern по такому дереву ничего не матчил).
+
+        Yields:
+            Кортежи (точечный_путь, значение). Как и прежде, промежуточные
+            dict-узлы отсеиваются вызывающим (`if not isinstance(v, dict)`).
+        """
+        from ..core.glob_walker import iter_matches
+        from ..core.subscription_manager import static_prefix
+
+        _missing = object()  # локальный sentinel «путь отсутствует»
+
+        prefix = static_prefix(pattern)
+
+        if prefix == "":
+            # Паттерн начинается с wildcard — префикса нет, нужен весь корень.
+            root = self._store.get_subtree("")  # thread-safe deep-copy всего дерева
+            yield from iter_matches(root, pattern)
+            return
+
+        if prefix == pattern:
+            # Полностью статический паттерн: ровно один целевой путь. Забираем
+            # значение точечно вместо копирования поддерева. Отсутствует → ничего.
+            value = self._store.get(pattern, default=_missing)
+            if value is not _missing:
+                yield (pattern, value)
+            return
+
+        # Собственный префикс: копируем только поддерево префикса и матчим остаток.
+        try:
+            subtree = self._store.get_subtree(prefix)
+        except (KeyError, TypeError):
+            # Префикс отсутствует или указывает на лист — pattern ничего не матчит.
+            return
+        prefix_len = len(prefix.split("."))
+        remainder = ".".join(pattern.split(".")[prefix_len:])
+        for relpath, value in iter_matches(subtree, remainder):
+            full = f"{prefix}.{relpath}" if relpath else prefix
+            yield (full, value)
 
     def handle_state_unsubscribe(self, msg: dict) -> dict:
         """Обработчик state.unsubscribe: отписаться от подписки.
