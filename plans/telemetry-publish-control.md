@@ -137,8 +137,17 @@ telemetry:
 
 ### Фаза 2 — Config-driven центральный троттл (заменить хардкод)
 
-#### Task 2.1 — `build_throttle_rules` из конфига
+#### Task 2.1 — `build_throttle_rules` из конфига ✅ DONE
 **Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** mixed
+**Статус:** ✅ DONE — `build_throttle_rules(sys_config: SystemConfig | None = None)` читает
+  `sys_config.telemetry.throttle`; непустой `throttle` **полностью заменяет** хардкод-дефолты (решение
+  владельца — явный контроль, не merge); пусто/`None` → прежние хардкод-дефолты (`_default_throttle_rules()`,
+  обратная совместимость). `launch.py:321` прокидывает `sys_config` вместо вызова без аргументов. `system.yaml`:
+  закомментированный пример дополнен подсекцией `throttle:` (не активна по умолчанию). Golden-снапшоты
+  (`test_build_characterization.py`) не тронуты — оба живых рецепта не задают `telemetry.throttle`, fallback
+  идентичен прежнему поведению. 6 новых тестов в `test_integration.py` (`TestManagerSetup` — характеризация
+  дефолтов/fallback/полная замена; `TestBuildThrottleRulesReachesThrottleMiddleware` — сквозная проверка
+  до живого `ThrottleMiddleware` через `_setup_state_store()`). 97/97 зелёных (73/73 по команде из acceptance).
 **Goal:** правила центрального троттла — из `telemetry.throttle` конфига, не хардкод.
 **Files:** `backend/state/manager_setup.py` (читать из sys_config), `backend/launch.py:321,364`, tests.
 **Steps:** 1. `build_throttle_rules(sys_config)` — из `telemetry.throttle` (fallback на прежние дефолты для

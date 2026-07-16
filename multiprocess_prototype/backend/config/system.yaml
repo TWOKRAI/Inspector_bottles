@@ -57,14 +57,22 @@ observability:
     aggregation_interval: 5.0
     log_level: INFO
 
-# --- Телеметрия (PC 1.3, план plans/telemetry-publish-control.md) ---
-# Publisher-gate: какие метрики процесс СЧИТАЕТ и публикует в дерево StateStore и
-# как часто (per-метрика вкл/выкл + интервал). ПО УМОЛЧАНИЮ секция ОТСУТСТВУЕТ —
-# ничего не активирует (обратная совместимость: нет секции → публикация как раньше,
-# без гейта). Раскомментируйте, чтобы включить управляемую публикацию для ВСЕХ
-# процессов; per-process override — в blueprint.processes[].telemetry конкретного
-# рецепта (мержится поверх этих значений). Errors/status — публикуются ВСЕГДА, этой
-# секцией не управляются.
+# --- Телеметрия (PC 1.3/2.1, план plans/telemetry-publish-control.md) ---
+# Две независимые плоскости, обе ПО УМОЛЧАНИЮ отключены (обратная совместимость —
+# нет секции/подсекции → поведение как раньше). Errors/status — публикуются ВСЕГДА,
+# этой секцией не управляются.
+#
+# publish — publisher-gate (Фаза 1, ГЛАВНЫЙ рычаг): какие метрики процесс СЧИТАЕТ
+# и публикует в дерево StateStore и как часто (per-метрика вкл/выкл + интервал).
+# Раскомментируйте, чтобы включить управляемую публикацию для ВСЕХ процессов;
+# per-process override — в blueprint.processes[].telemetry конкретного рецепта
+# (мержится поверх этих значений).
+#
+# throttle — центральный store-троттл (Фаза 2, IPC-страховка вторым рубежом):
+# {glob_pattern: min_interval_sec} для ThrottleMiddleware StateStoreManager.
+# Заданный (непустой) throttle ПОЛНОСТЬЮ ЗАМЕНЯЕТ хардкод-дефолты
+# build_throttle_rules (не мержится поверх них) — раскомментировав, владелец берёт
+# на себя весь список правил. Пусто/отсутствует → прежние хардкод-дефолты.
 # telemetry:
 #   publish:
 #     default_interval_sec: 1.0          # дефолтная частота публикации метрики, сек
@@ -74,6 +82,10 @@ observability:
 #       effective_hz:      {enabled: true,  interval_sec: 1.0}
 #       cycle_duration_ms: {enabled: false}                      # тяжёлая метрика — opt-in
 #       shm:               {enabled: true,  interval_sec: 5.0}
+#   throttle:
+#     "processes.**.state.fps": 1.0
+#     "processes.**.state.latency_ms": 1.0
+#     "processes.**.workers.*.effective_hz": 1.0
 
 # --- Автообнаружение плагинов и сервисов ---
 discovery:

@@ -318,7 +318,9 @@ class SystemBuilder:
         bp_dict = normalize_blueprint(self._blueprint, sys_config)
 
         initial_state = build_initial_state(bp_dict, sys_config.model_dump())
-        throttle_rules = build_throttle_rules()
+        # PC 2.1: правила центрального троттла — из telemetry.throttle конфига
+        # (fallback на хардкод-дефолты внутри build_throttle_rules, если пусто).
+        throttle_rules = build_throttle_rules(sys_config)
 
         log_dir = sys_config.system.log_dir or "logs"
 

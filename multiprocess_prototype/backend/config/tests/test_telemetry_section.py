@@ -34,7 +34,7 @@ def test_default_publish_is_none() -> None:
 
 
 def test_default_throttle_is_empty_dict() -> None:
-    """throttle — задел Фазы 2, дефолт пустой dict (build_throttle_rules его не читает)."""
+    """throttle: дефолт пустой dict — build_throttle_rules(sys_config) fallback на хардкод (PC 2.1)."""
     sc = SystemConfig()
     assert sc.telemetry.throttle == {}
 

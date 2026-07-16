@@ -162,8 +162,10 @@ class TelemetrySection(SchemaBase):
     процессов (backward-compat завязан именно на отсутствие/присутствие, см. PC 1.2
     ``_build_telemetry_gate``).
 
-    ``throttle`` — задел под центральный store-троттл (Фаза 2 плана). Поле заведено под
-    будущий ``build_throttle_rules(sys_config)``, но в PC 1.3 НЕ читается нигде.
+    ``throttle`` — центральный store-троттл (Фаза 2 плана, PC 2.1). Читается
+    ``build_throttle_rules(sys_config)`` (``backend/state/manager_setup.py``):
+    непустой ``throttle`` ПОЛНОСТЬЮ заменяет хардкод-дефолты троттла; пустой
+    dict (дефолт) — прежние хардкод-дефолты (обратная совместимость).
     """
 
     publish: Annotated[
@@ -179,9 +181,10 @@ class TelemetrySection(SchemaBase):
     throttle: Annotated[
         dict[str, float],
         FieldMeta(
-            "Центральный троттл (задел Фазы 2)",
+            "Центральный троттл",
             info="Правила {glob_pattern: min_interval_sec} для ThrottleMiddleware "
-            "StateStoreManager. Заведено под Фазу 2 — build_throttle_rules пока их не читает.",
+            "StateStoreManager. Пусто (дефолт) — хардкод-дефолты build_throttle_rules; "
+            "заданный набор ПОЛНОСТЬЮ заменяет их (PC 2.1).",
         ),
     ] = {}
 
