@@ -46,8 +46,13 @@ Windows:** `signal.SIGKILL` отсутствует → `harness.kill_child` па
 `psutil.Process(pid).kill()` (TerminateProcess, та же crash-семантика) + ASCII-логи (cp1251-консоль не
 кодирует '→'). Ломало и live fault-тесты на Windows (коммит `7d91f95f`, пробник `g7_fault_probe`).
 
-**Фаза 3 (резидуал):** длинный soak обоих ЖИВЫХ рецептов (phone_sketch + hikvision) + AllocProfiler +
-флип дефолтов в реестре G.F. Tier'ы вебкамера/Hikvision — по железу. plan.md «G.7 ✅» НЕ ставить до Фазы 3.
+**Фаза 3 — фундамент подтверждён 2026-07-16:** мультикамера на 2 синтетич. камерах
+(`dualcam_synth.yaml` + `g7_dualcam_probe`, коммит `02095664`): обе 21fps ПАРАЛЛЕЛЬНО, полный набор
+флагов, `owner_incarnation` развёл SHM-сегменты владельцев (нет коллизий), torn/stale/pickle=0.
+УРОК: `synthetic_frame_source` = ГОТОВАЯ имитация камеры (отдаёт camera_id/seq_id, modulo=100_000).
+**Остаток Фазы 3:** camera_0 → реальная вебкамера (идея владельца: вебкамера + синт. 2-я камера) +
+длинный soak ≥2ч + AllocProfiler + P2 Join-корреляция (`camera_id` в ключ JoinInspectorManager, иначе
+кадры двух камер подменяются) + флип дефолтов G.F. plan.md «G.7 ✅» НЕ ставить до длинного soak.
 
 Связано: [[project_feature_flags_registry]], [[project_f7_g7_num_consumers]], [[project_f7_g4_done]],
 [[project_phase_g_final_review]], [[feedback_logger_error_stats_managers]].
