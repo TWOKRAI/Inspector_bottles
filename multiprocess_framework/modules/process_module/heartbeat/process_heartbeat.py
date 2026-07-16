@@ -96,9 +96,13 @@ class ProcessHeartbeat:
                 # PC 1.2: publisher-gate — какие метрики разрешено публиковать на этом
                 # тике (вкл/выкл ∧ созрел per-метрика интервал). None → гейт неактивен
                 # (нет конфига) → все метрики каждый тик (обратная совместимость).
-                allowed_metrics = None
-                if self._telemetry_gate is not None:
-                    allowed_metrics = self._telemetry_gate.due_metrics()
+                # PC 3.1: ссылку на gate читаем в ЛОКАЛЬНУЮ переменную ОДИН раз за тик —
+                # reconfigure_telemetry() может атомарно подменить self._telemetry_gate
+                # из потока диспетчера команд. Локальная ссылка гарантирует, что на этом
+                # тике мы работаем с одним и тем же gate целиком (либо старым, либо новым,
+                # либо None), а не с частично подменённым состоянием.
+                gate = self._telemetry_gate
+                allowed_metrics = gate.due_metrics() if gate is not None else None
 
                 # Self-publish метрик процесса напрямую в дерево StateStore.
                 # Здоровый путь телеметрии — тот же канал, что и статус процесса.
@@ -190,6 +194,48 @@ class ProcessHeartbeat:
             _log(f"Не удалось собрать TelemetryPublishConfig, гейт выключен: {exc}", module="heartbeat")
             return None
         return TelemetryGate(config)
+
+    def reconfigure_telemetry(self, publish_section: dict | None) -> None:
+        """Пересобрать publisher-gate из новой секции ``telemetry.publish`` (рантайм, PC 3.1).
+
+        Единый механизм рантайм-переконфигурации телеметрии БЕЗ рестарта процесса —
+        тот же результат, что ``_build_telemetry_gate`` на старте, но из ЯВНО переданной
+        секции (а не из ``get_config``):
+
+          - ``publish_section is None`` → gate ВЫКЛЮЧАЕТСЯ (``self._telemetry_gate = None``)
+            → все метрики публикуются каждый тик (обратная совместимость — как при
+            отсутствии секции ``telemetry.publish`` на старте, PC 1.2);
+          - dict → строит новый ``TelemetryGate`` из ``TelemetryPublishConfig.from_dict``
+            (пустой dict → дефолт 1.0с на все метрики — осознанная явная команда).
+
+        Потокобезопасность относительно потока heartbeat (``_loop``): gate читается в
+        потоке heartbeat, а этот метод зовётся из потока диспетчера команд. Смена —
+        АТОМАРНОЕ переприсвоение ссылки ``self._telemetry_gate`` под GIL на ПОЛНОСТЬЮ
+        собранный объект (конструирование ``TelemetryGate`` завершается ДО присвоения).
+        ``_loop`` читает ``self._telemetry_gate`` в локальную переменную один раз за тик,
+        поэтому видит либо старый, либо новый gate целиком — никогда частично собранный.
+        Старый gate НЕ мутируется (его ``_next_due`` живёт до GC), новый стартует со
+        свежим (пустым) ``_next_due`` → все включённые метрики «созревают» на ближайшем
+        тике (одна публикация сразу после смены — приемлемо для телеметрии, gate остаётся
+        чистым/тестируемым).
+
+        Args:
+            publish_section: под-секция ``telemetry.publish`` (dict) или ``None``.
+
+        Raises:
+            Пробрасывает исключение валидации ``TelemetryPublishConfig.from_dict`` при
+            некорректной секции — вызывающий (``telemetry.reconfigure`` handler /
+            ``apply_telemetry_reconfigure``) решает, как сообщить об ошибке инициатору.
+        """
+        if publish_section is None:
+            self._telemetry_gate = None
+            return
+        from ..configs.telemetry_publish_config import TelemetryPublishConfig
+        from .telemetry import TelemetryGate
+
+        config = TelemetryPublishConfig.from_dict(publish_section)
+        # Атомарный swap: сборка завершена — переприсваиваем ссылку целиком (под GIL).
+        self._telemetry_gate = TelemetryGate(config)
 
     def _publish_metrics_to_tree(self, workers: dict, allowed_metrics: Any = None) -> None:
         """Опубликовать телеметрию процесса и каждого воркера в дерево StateStore.

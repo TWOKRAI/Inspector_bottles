@@ -97,13 +97,40 @@ class GenericProcessManagerApp(ProcessManagerProcess):
     # ------------------------------------------------------------------
 
     def _start_observability_watcher(self) -> None:
-        """Hot-reload observability-конфига. No-op без ``observability_config_path``."""
+        """Hot-reload observability-конфига (+ PC 3.1: центральный троттл телеметрии).
+
+        No-op без ``observability_config_path``. Помимо observability-менеджеров, файловый
+        watcher применяет секцию ``telemetry.throttle`` к ЖИВОМУ центральному троттлу
+        оркестратора (``ThrottleMiddleware`` через StateStoreManager) — вторая плоскость
+        плана ``telemetry-publish-control``: одна правка файла перестраивает и
+        observability, и центральный троттл без рестарта. Publisher-gate ДЕТЕЙ через файл
+        НЕ трогается (нужен fan-out по процессам — Task 3.2); watcher оркестратора владеет
+        только СВОИМ центральным троттлом.
+        """
         config_path = self.get_config("observability_config_path") or ""
         if not config_path:
             return
         from multiprocess_framework.modules.process_module.managers.observability_reload import (
             start_observability_watcher,
         )
+
+        # PC 3.1: если у оркестратора поднят state-plane с троттлом — дать watcher'у
+        # применять telemetry.throttle к живому ThrottleMiddleware. set_rules
+        # потокобезопасен (copy-on-write под локом), поэтому вызов из потока watchdog
+        # безопасен. Нет state-plane / нет троттла → extra=None (только observability).
+        telemetry_on_reload = None
+        store_manager = getattr(self, "_state_store_manager", None)
+        if store_manager is not None and hasattr(store_manager, "get_middleware"):
+            throttle = store_manager.get_middleware("throttle")
+            if throttle is not None:
+                from multiprocess_framework.modules.process_module.managers.telemetry_reload import (
+                    make_telemetry_on_reload,
+                )
+
+                telemetry_on_reload = make_telemetry_on_reload(
+                    store_throttle=throttle,
+                    log_info=self._log_info,
+                )
 
         self._observability_watcher = start_observability_watcher(
             config_path=config_path,
@@ -112,6 +139,7 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             stats=self.stats_manager,
             log_info=self._log_info,
             log_error=self._log_error,
+            on_reload_extra=telemetry_on_reload,
         )
 
     def _setup_state_store(self) -> None:

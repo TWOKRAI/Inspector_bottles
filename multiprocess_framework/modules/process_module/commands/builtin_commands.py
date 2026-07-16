@@ -666,7 +666,12 @@ class BuiltinCommands:
             (
                 "config.reload",
                 self._cmd_config_reload,
-                "Перечитать/применить секцию observability (уровень логов, sink'и) на лету",
+                "Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл) на лету",
+            ),
+            (
+                "telemetry.reconfigure",
+                self._cmd_telemetry_reconfigure,
+                "Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)",
             ),
             (
                 "logger.sink.enable",
@@ -702,61 +707,147 @@ class BuiltinCommands:
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
         self._services._log_debug(
-            "Встроенные команды config.reload / logger.sink.* / log.tail.* зарегистрированы",
+            "Встроенные команды config.reload / telemetry.reconfigure / logger.sink.* / log.tail.* зарегистрированы",
             module="lifecycle",
         )
 
     def _cmd_config_reload(self, data=None, **kwargs) -> dict:
-        """Перечитать observability-секцию и применить через reconfigure (Ф1 Task 1.4).
+        """Перечитать/применить секции observability И/ИЛИ telemetry (Ф1 Task 1.4 + PC 3.1).
 
-        Источник секции (по приоритету):
-          1. ``data["observability"]`` — inline-override (dict), например
-             ``{"log_level": "DEBUG"}`` — сменить уровень логгера на лету через driver;
-          2. файл конфига по ``data["path"]`` или ``get_config("observability_config_path")``
-             (тот же путь, что читает hot-reload watcher).
+        Источник секций (по приоритету):
+          1. inline: ``data["observability"]`` и/или ``data["telemetry"]`` (dict) —
+             напр. ``{"observability": {"log_level": "DEBUG"}}`` (сменить уровень логгера)
+             или ``{"telemetry": {"publish": {"metrics": {"fps": {"enabled": false}}}}}``
+             (выключить метрику fps на лету через driver);
+          2. файл конфига по ``data["path"]`` / ``get_config("observability_config_path")``
+             (тот же путь, что читает hot-reload watcher) — читаются ОБЕ секции.
 
-        Применение делегируется в ``apply_observability_reconfigure`` — ЕДИНЫЙ путь с
-        watcher'ом (идемпотентный full-rebuild ``reconfigure``, конфликта нет).
+        Применение делегируется в единые идемпотентные пути:
+        ``apply_observability_reconfigure`` (Logger/Error/Stats) и (PC 3.1)
+        ``apply_telemetry_reconfigure`` (publisher-gate процесса + центральный троттл
+        оркестратора). Один ``config.reload`` может нести ОБЕ секции — применяются обе,
+        не конфликтуя (тот же приём достаёт менеджеры/heartbeat/store из контекста svc).
+
+        Backward-compat: нет ни одной секции (и нет файла) → ошибка, как раньше; нет
+        telemetry в сообщении → telemetry-плоскость НЕ трогается.
         """
         args = self._merge_args(data, kwargs)
         svc = self._services
 
-        section = args.get("observability")
+        obs_section = args.get("observability")
+        telemetry_section = args.get("telemetry")  # PC 3.1 (inline)
         source = "inline"
-        if not isinstance(section, dict):
+
+        # Файловый фолбэк — только если НИ ОДНОЙ секции нет inline (прежнее поведение +
+        # telemetry из того же файла).
+        if not isinstance(obs_section, dict) and not isinstance(telemetry_section, dict):
             path = args.get("path") or (
                 svc.get_config("observability_config_path") if hasattr(svc, "get_config") else None
             )
             if not path:
-                return {"success": False, "reason": "нет секции observability и пути к конфигу"}
+                return {"success": False, "reason": "нет секции observability/telemetry и пути к конфигу"}
             try:
                 from ...data_schema_module.serialization.converter import DataConverter
 
                 loaded = DataConverter.load_from_file(path)
             except Exception as exc:  # noqa: BLE001 — вернуть причину инициатору
                 return {"success": False, "reason": f"не удалось прочитать конфиг {path}: {exc}"}
-            section = (loaded.get("observability", {}) if isinstance(loaded, dict) else {}) or {}
+            obs_section = (loaded.get("observability", {}) if isinstance(loaded, dict) else {}) or {}
+            telemetry_section = loaded.get("telemetry") if isinstance(loaded, dict) else None
             source = str(path)
 
-        from ..managers.observability_reload import apply_observability_reconfigure
+        result: dict = {"success": True, "process": svc.name, "source": source}
+
+        # --- observability (если задана inline или из файла) ---
+        if isinstance(obs_section, dict):
+            from ..managers.observability_reload import apply_observability_reconfigure
+
+            try:
+                expanded = apply_observability_reconfigure(
+                    obs_section,
+                    logger=getattr(svc, "logger_manager", None),
+                    error=getattr(svc, "error_manager", None),
+                    stats=getattr(svc, "stats_manager", None),
+                    log_info=getattr(svc, "_log_info", None),
+                )
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"reconfigure failed: {exc}"}
+            result["applied"] = {"log_level": expanded["logger"].get("default_level")}
+
+        # --- telemetry (PC 3.1: publisher-gate + центральный троттл) ---
+        if isinstance(telemetry_section, dict):
+            from ..managers.telemetry_reload import apply_telemetry_reconfigure
+
+            try:
+                telemetry_applied = apply_telemetry_reconfigure(
+                    telemetry_section,
+                    heartbeat=getattr(svc, "_heartbeat", None),
+                    store_throttle=self._resolve_store_throttle(),
+                    log_info=getattr(svc, "_log_info", None),
+                )
+            except Exception as exc:  # noqa: BLE001
+                return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
+            result["telemetry_applied"] = telemetry_applied
+
+        return result
+
+    def _resolve_store_throttle(self) -> Any:
+        """Достать живой ``ThrottleMiddleware`` через StateStoreManager процесса-адресата.
+
+        StateStoreManager держит ТОЛЬКО процесс-оркестратор (``GenericProcessManagerApp``
+        — атрибут ``_state_store_manager``, PC 0.1). У обычных процессов его нет → None →
+        троттл-плоскость молча пропускается (её единственный адресат — оркестратор).
+        Тот же приём, что ``config.reload`` достаёт ``logger_manager`` из ``svc``.
+        """
+        svc = self._services
+        store_manager = getattr(svc, "_state_store_manager", None)
+        if store_manager is None or not hasattr(store_manager, "get_middleware"):
+            return None
+        return store_manager.get_middleware("throttle")
+
+    def _cmd_telemetry_reconfigure(self, data=None, **kwargs) -> dict:
+        """Рантайм-переконфигурация телеметрии процесса-адресата (PC 3.1).
+
+        Принимает в ``data`` под-секции (обе опциональны, но хотя бы одна обязательна):
+          - ``publish``  → publisher-gate процесса (``ProcessHeartbeat.reconfigure_telemetry``):
+            dict → пересобрать gate; ``None`` → выключить gate (все метрики каждый тик);
+          - ``throttle`` → центральный store-троттл оркестратора (``ThrottleMiddleware``).
+
+        Применение делегируется в ``apply_telemetry_reconfigure`` — ЕДИНЫЙ путь с
+        расширенным ``config.reload`` (``data["telemetry"]``) и файловым watcher'ом.
+        ``ProcessHeartbeat`` и ``StateStoreManager`` достаются из контекста процесса тем
+        же приёмом, что менеджеры в ``config.reload`` (``getattr(svc, "_heartbeat")`` /
+        ``_state_store_manager`` — оба атрибута живут на объекте процесса).
+
+        Fan-out на всех детей (``process=all``) — Task 3.2; здесь применение адресное
+        (один процесс-адресат сообщения).
+        """
+        args = self._merge_args(data, kwargs)
+        svc = self._services
+
+        # Собираем секцию по НАЛИЧИЮ ключа (publish=None — валидная команда «выключить
+        # gate», поэтому проверяем присутствие ключа, а не истинность значения).
+        section: dict = {}
+        if "publish" in args:
+            section["publish"] = args["publish"]
+        if "throttle" in args:
+            section["throttle"] = args["throttle"]
+        if not section:
+            return {"success": False, "reason": "нужна хотя бы одна под-секция: publish и/или throttle"}
+
+        from ..managers.telemetry_reload import apply_telemetry_reconfigure
 
         try:
-            expanded = apply_observability_reconfigure(
+            applied = apply_telemetry_reconfigure(
                 section,
-                logger=getattr(svc, "logger_manager", None),
-                error=getattr(svc, "error_manager", None),
-                stats=getattr(svc, "stats_manager", None),
+                heartbeat=getattr(svc, "_heartbeat", None),
+                store_throttle=self._resolve_store_throttle(),
                 log_info=getattr(svc, "_log_info", None),
             )
-        except Exception as exc:  # noqa: BLE001
-            return {"success": False, "reason": f"reconfigure failed: {exc}"}
+        except Exception as exc:  # noqa: BLE001 — вернуть причину инициатору
+            return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
 
-        return {
-            "success": True,
-            "process": svc.name,
-            "source": source,
-            "applied": {"log_level": expanded["logger"].get("default_level")},
-        }
+        return {"success": True, "process": svc.name, "applied": applied}
 
     def _cmd_logger_sink_enable(self, data=None, **kwargs) -> dict:
         """Включить sink логгера по имени (ADR-CRM-006 п.3: register_channel)."""

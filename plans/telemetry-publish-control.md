@@ -157,8 +157,26 @@ telemetry:
 
 ### Фаза 3 — Рантайм-управление: config hot-reload + backend_ctl + fan-out (framework)
 
-#### Task 3.1 — Hot-reload телеметрии единым путём
-**Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework
+#### Task 3.1 — Hot-reload телеметрии единым путём ✅ DONE
+**Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** mixed (framework + prototype hook)
+**Статус:** ✅ DONE — `ProcessHeartbeat.reconfigure_telemetry(publish_section)` пересобирает
+  publisher-gate в рантайме (атомарный swap ссылки под GIL; `_loop` читает gate в локальную
+  переменную один раз за тик — никогда частично собранный; None → gate off). Новый
+  `process_module/managers/telemetry_reload.py::apply_telemetry_reconfigure(section, *, heartbeat,
+  store_throttle)` — единая идемпотентная точка (по образцу `apply_observability_reconfigure`):
+  `publish`→heartbeat, `throttle`→`ThrottleMiddleware.set_rules` через
+  `StateStoreManager.get_middleware("throttle")`; применяет по НАЛИЧИЮ ключа, «нет приёмника»
+  виден в результате. IPC-команда `telemetry.reconfigure` (`builtin_commands.py`,
+  рядом с observability) достаёт heartbeat/store из контекста svc (`_heartbeat`/
+  `_state_store_manager`). `config.reload` расширен: принимает `data["telemetry"]` inline И из
+  файла — один reload несёт и observability, и telemetry (прежний контракт `applied.log_level`
+  сохранён, telemetry → `telemetry_applied`). Файловый watcher оркестратора применяет
+  `telemetry.throttle` к живому центральному троттлу (seam `on_reload_extra` в
+  `start_observability_watcher` + `make_telemetry_on_reload`; publisher-gate детей — fan-out 3.2).
+  Hot-swap gap закрыт: `orchestrator_hooks.py::configure_topology_engine` прокидывает
+  `telemetry_dict` в `BlueprintAssembler` (как launch.py PC 1.3). 25 новых тестов
+  (`test_telemetry_reconfigure.py`/`test_telemetry_reload.py`/`test_telemetry_commands.py`/
+  `test_orchestrator_hooks.py`); framework runner 4844 passed (2 pre-existing Windows app_module).
 **Goal:** изменение `telemetry`-секции применяется в рантайме тем же путём, что observability.
 **Files:** расширить `ObservabilityConfig`/новую секцию + `observability_reload.py::apply_observability_reconfigure`
   (добавить 4-го получателя: publisher-gate процесса и/или центральный троттл оркестратора), `config_module` watcher, tests.
