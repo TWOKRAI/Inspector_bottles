@@ -174,7 +174,12 @@ class BlueprintAssembler:
         per-process перекрывает одноимённую global-запись (остальные global-метрики
         сохраняются); ``default_interval_sec`` per-process перекрывает global целиком.
         """
-        if self._telemetry_dict is None and not override:
+        # Различаем «ключ telemetry отсутствует» (override is None — процесса нет в
+        # мапе _extract_per_process_telemetry) и «ключ задан явно, но пуст» (override
+        # == {}). Пустой dict — намеренное «включить секцию с дефолтами» (симметрично
+        # задокументированной семантике TelemetrySection.publish: {} на глобальном
+        # уровне); `not override` схлопнул бы его в «не задано» — молча не то.
+        if self._telemetry_dict is None and override is None:
             return None
         merged_publish = deep_merge(self._telemetry_dict or {}, override or {})
         return {"publish": merged_publish}

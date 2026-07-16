@@ -173,6 +173,61 @@ class TestDeeperRangeReadsHistorySourceOffMainThread:
         assert not panel._graph_range_buttons["1h"].isChecked()
 
 
+class TestStaleHistoryResponseDiscarded:
+    """Быстрое переключение диапазона: QThreadPool не гарантирует порядок завершения,
+    поэтому ответ старого запроса (другая генерация) не должен перетирать график
+    актуального выбора. Гейт — по _graph_request_id (инкремент на каждый рефреш)."""
+
+    def test_stale_range_response_is_ignored(self, qtbot) -> None:
+        vm = TelemetryViewModel()
+        source = _RecordingHistorySource()
+        panel = SingleProcessPanel(_presenter(), None, "camera_0", telemetry=vm, history_source=source)
+        qtbot.addWidget(panel)
+
+        current = panel._graph_request_id
+        records = [{"ts": 1.0, "fps": 999.0, "latency_ms": 111.0}]
+
+        # Ответ с УСТАРЕВШЕЙ генерацией — отбрасывается, график не тронут.
+        panel._on_history_ready({"records": records, "request_id": current - 1})
+        assert panel._fps_sparkline.points() == []
+        assert panel._latency_sparkline.points() == []
+
+        # Ответ с АКТУАЛЬНОЙ генерацией — применяется.
+        panel._on_history_ready({"records": records, "request_id": current})
+        assert panel._fps_sparkline.points() == [(1.0, 999.0)]
+
+    def test_ring_graph_drops_points_older_than_10m_window(self, qtbot) -> None:
+        """Ring читается по wall-окну: после остановки потока метрики старые точки
+        (deque вытесняет их лишь при append) не должны рисоваться как текущие.
+        Регресс на `history(path)` без since — стейл-окно из прошлого."""
+        import collections
+        import time
+
+        vm = TelemetryViewModel()
+        panel = SingleProcessPanel(_presenter(), None, "camera_0", telemetry=vm)
+        qtbot.addWidget(panel)
+
+        t_now = time.monotonic()
+        path = "processes.camera_0.state.fps"
+        # Старая точка (за окном 10м = 600с) + свежая точка внутри окна.
+        vm._history[path] = collections.deque([(t_now - 3600.0, 11.0), (t_now - 1.0, 22.0)], maxlen=600)
+
+        panel._refresh_graph_from_ring()
+
+        pts = panel._fps_sparkline.points()
+        assert pts == [(t_now - 1.0, 22.0)], "старая точка за окном не отсечена по since"
+
+    def test_response_without_request_id_applies_as_current(self, qtbot) -> None:
+        """Ответ без request_id (RequestRunner при исключении _fetch → {"success": False})
+        относится к текущему запросу: деградирует в records=[], панель не падает."""
+        vm = TelemetryViewModel()
+        panel = SingleProcessPanel(_presenter(), None, "camera_0", telemetry=vm)
+        qtbot.addWidget(panel)
+
+        panel._on_history_ready({"success": False, "error": "boom"})
+        assert panel._fps_sparkline.points() == []
+
+
 # ------------------------------------------------------------------ #
 #  Деградация без падений                                             #
 # ------------------------------------------------------------------ #

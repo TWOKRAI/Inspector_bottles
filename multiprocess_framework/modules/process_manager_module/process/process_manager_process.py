@@ -1401,13 +1401,17 @@ class ProcessManagerProcess(ProcessModule):
                 resolve_store_throttle,
             )
 
-            applied = apply_telemetry_reconfigure(
-                {"throttle": args["throttle"]},
-                heartbeat=None,  # publisher-gate детей идёт broadcast'ом (publish), не здесь
-                store_throttle=resolve_store_throttle(self),
-                log_info=getattr(self, "_log_info", None),
-            )
-            result["throttle"] = {"requested": True, "applied": bool(applied.get("throttle"))}
+            try:
+                applied = apply_telemetry_reconfigure(
+                    {"throttle": args["throttle"]},
+                    heartbeat=None,  # publisher-gate детей идёт broadcast'ом (publish), не здесь
+                    store_throttle=resolve_store_throttle(self),
+                    log_info=getattr(self, "_log_info", None),
+                )
+                result["throttle"] = {"requested": True, "applied": bool(applied.get("throttle"))}
+            except Exception as exc:  # noqa: BLE001 — ошибка throttle не должна терять уже совершённый publish-fan-out
+                self._log_error(f"telemetry.broadcast: применение throttle упало: {exc}")
+                result["throttle"] = {"requested": True, "applied": False, "error": str(exc)}
 
         return result
 

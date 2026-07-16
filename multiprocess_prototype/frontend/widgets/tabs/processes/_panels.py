@@ -719,6 +719,11 @@ class SingleProcessPanel(QWidget):
         # main thread фризило бы GUI на время I/O (план запрещает это явно).
         self._history_runner = RequestRunner(self)
         self._graph_range: str = _DEFAULT_GRAPH_RANGE
+        # Генерация запроса истории: инкрементируется на каждый submit; async-ответ
+        # применяется, только если его генерация совпадает с текущей. Иначе быстрое
+        # переключение диапазона (1ч→1д→10м) могло бы применить устаревший ответ
+        # поверх актуального выбора (QThreadPool не гарантирует порядок завершения).
+        self._graph_request_id = 0
         # Карты VM-режима: точный путь → setter(value). Статичные пути процесса
         # (_vm_setters) и пере-собираемые пути воркеров (_vm_worker_setters,
         # обновляются в _bind_worker_telemetry при каждом перестроении строк).
@@ -862,6 +867,9 @@ class SingleProcessPanel(QWidget):
 
     def _refresh_graph(self) -> None:
         """Перерисовать графики под текущий выбранный диапазон."""
+        # Любой новый рефреш инвалидирует ещё летящие async-ответы истории
+        # (в т.ч. при переключении на «10 мин», обслуживаемое синхронно из ring).
+        self._graph_request_id += 1
         if self._graph_range == "10m":
             self._refresh_graph_from_ring()
         else:
@@ -872,14 +880,22 @@ class SingleProcessPanel(QWidget):
 
         VM не подан → графики деградируют в плейсхолдер «нет данных»
         (TelemetrySparkline сам показывает его при < 2 точек).
+
+        Читаем только точки внутри wall-окна (``since``): deque вытесняет старые
+        лишь при append, поэтому после ОСТАНОВКИ потока метрики (процесс встал /
+        метрика выключена gate'ом) буфер бессрочно держал бы последние точки и
+        спарклайн рисовал бы замороженное прошлое как текущее. Отсёк по времени
+        → нет свежих данных = пустой график, а не стейл-окно.
         """
         if self._telemetry is None:
             self._fps_sparkline.set_points([])
             self._latency_sparkline.set_points([])
             return
         proc = self._process_name
-        self._fps_sparkline.set_points(self._telemetry.history(f"processes.{proc}.state.fps"))
-        self._latency_sparkline.set_points(self._telemetry.history(f"processes.{proc}.state.latency_ms"))
+        window = next((s for k, _label, s in _GRAPH_RANGES if k == "10m"), 600.0)
+        since = time.monotonic() - window
+        self._fps_sparkline.set_points(self._telemetry.history(f"processes.{proc}.state.fps", since=since))
+        self._latency_sparkline.set_points(self._telemetry.history(f"processes.{proc}.state.latency_ms", since=since))
 
     def _refresh_graph_from_history(self) -> None:
         """1 час / 1 день — TelemetryHistorySource.list_range на worker-потоке.
@@ -893,10 +909,11 @@ class SingleProcessPanel(QWidget):
         ts_from = now - seconds
         proc = self._process_name
         source = self._history_source
+        request_id = self._graph_request_id
 
         def _fetch() -> dict[str, Any]:
             records = source.list_range(proc, ts_from, now, ("fps", "latency_ms"), max_points=_GRAPH_HISTORY_MAX_POINTS)
-            return {"records": records}
+            return {"records": records, "request_id": request_id}
 
         self._history_runner.submit(_fetch, on_result=self._on_history_ready)
 
@@ -910,6 +927,12 @@ class SingleProcessPanel(QWidget):
         деградируют в плейсхолдер, панель не падает.
         """
         if self._is_destroyed:
+            return
+        # Отбросить устаревший ответ: пока запрос летел, пользователь мог
+        # переключить диапазон (тогда _graph_request_id уже другой). Ответ без
+        # request_id (напр. {"success": False} от RequestRunner при исключении)
+        # относится к текущему запросу — применяем как деградацию (records=[]).
+        if "request_id" in result and result["request_id"] != self._graph_request_id:
             return
         records = result.get("records", [])
         fps_points = [(r["ts"], r["fps"]) for r in records if isinstance(r.get("fps"), (int, float))]

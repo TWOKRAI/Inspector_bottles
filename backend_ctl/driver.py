@@ -453,18 +453,20 @@ class BackendDriver:
         max_items ограничивает размер пачки (остаток останется в очереди).
         Возвращает список событий в порядке поступления (FIFO).
         """
-        deadline = None if (timeout is None or timeout == 0.0) else time.monotonic() + timeout
         with self._events_cv:
-            while not self._events:
-                if timeout == 0.0:
-                    break  # поллинг: не ждём
-                if timeout is None:
-                    # Бесконечное ожидание: чтобы не висеть вечно на закрытом/не
-                    # открытом соединении — выходим (новых событий не будет).
+            # Три режима ожидания разведены явно — так `deadline` в блокирующей
+            # ветке всегда float (без Optional-narrowing) и каждая семантика читается
+            # отдельно. Поллинг (timeout == 0.0) вообще не ждёт — сразу к drain.
+            if timeout is None:
+                while not self._events:
+                    # Бесконечное ожидание: не висеть вечно на закрытом/не открытом
+                    # соединении — выходим (новых событий не будет).
                     if not self._running and self._reader is None:
                         break
                     self._events_cv.wait()
-                else:
+            elif timeout > 0.0:
+                deadline = time.monotonic() + timeout
+                while not self._events:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         break
@@ -752,7 +754,22 @@ class BackendDriver:
 
         ``plane="throttle"`` — ``metric`` трактуется как glob-путь правила, ``interval_sec`` —
         min-интервал; строит ``throttle={metric: interval_sec}`` (адресат — центральный троттл
-        оркестратора).
+        оркестратора). **ОСТОРОЖНО (throttle тоже full-apply):** секция ``throttle`` применяется
+        через ``set_rules`` — ПОЛНАЯ замена набора правил, а не точечная правка. Один вызов
+        ``telemetry_set(plane="throttle")`` СНОСИТ все прочие правила (дефолтную IPC-страховку на
+        ``latency_ms``/``effective_hz``/… из ``manager_setup._default_throttle_rules``). Чтобы
+        поменять одно правило — передавай ПОЛНЫЙ набор через :meth:`telemetry_reconfigure`
+        ``throttle={...}``. (Точечные ``ThrottleMiddleware.update_rule``/``remove_rule`` есть, но
+        пока не проброшены в command-плоскость — кандидат на delta-apply, Фаза 4.)
+
+        **ВАЖНО (две плоскости — потолок частоты):** центральный троттл (``throttle``) —
+        независимая ступень rate-limit'а в оркестраторе поверх publisher-gate. Дефолтные
+        правила (``manager_setup._default_throttle_rules``) режут ``fps``/``latency_ms``/
+        ``effective_hz`` до 1 Гц. Поэтому УВЕЛИЧЕНИЕ частоты через publisher (например
+        ``interval_sec=0.1``) НЕ поднимет эффективный поток выше центрального потолка — его
+        надо ослабить/снять тем же вызовом с ``plane="throttle"``. Уменьшение частоты
+        (реже потолка) работает через одну publisher-плоскость. Троттл = ceiling, publisher =
+        floor-внутри-потолка.
 
         ``process`` — имя процесса ИЛИ ``"all"`` (fan-out через PM). Требуется ``enabled``
         и/или ``interval_sec`` (для throttle — обязателен ``interval_sec``), иначе error-dict.

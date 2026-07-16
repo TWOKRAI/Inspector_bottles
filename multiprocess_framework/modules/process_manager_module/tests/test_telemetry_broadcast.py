@@ -143,6 +143,28 @@ class TestBothPlanes:
         assert _telemetry_broadcasts(pm)[0]["data"] == {"publish": {"metrics": {"shm": {"enabled": False}}}}
 
 
+class TestThrottleFailureIsolated:
+    def test_bad_throttle_does_not_lose_publish_coverage(self) -> None:
+        """Исключение в throttle-ветке НЕ должно маскировать уже совершённый
+        publish-fan-out. Регресс: без try/except throttle-исключение всплывало,
+        и Dispatcher подменял ВЕСЬ ответ на generic-error — терялся охват доставки
+        publish (нарушение «no silent caps»)."""
+        throttle = ThrottleMiddleware({})
+        pm = _pm({"camera_0": {"class": "m.Cam"}, "detector": {"class": "m.Det"}}, reach=2, throttle=throttle)
+        # Не-dict throttle: set_rules → dict("bad") бросит ValueError внутри ветки.
+        res = pm._cmd_telemetry_broadcast({"publish": {}, "throttle": "bad"})
+
+        # Команда не упала, publish-охват сохранён и виден целиком.
+        assert res["success"] is True
+        assert res["publish"]["reached"] == 2
+        assert res["publish"]["target_count"] == 2
+        assert res["publish"]["complete"] is True
+        # throttle-ветка отчиталась об ошибке, не применилась.
+        assert res["throttle"]["requested"] is True
+        assert res["throttle"]["applied"] is False
+        assert "error" in res["throttle"]
+
+
 class TestValidation:
     def test_empty_command_is_error(self) -> None:
         pm = _pm({"camera_0": {"class": "m.Cam"}})

@@ -359,6 +359,22 @@ class TestTelemetryOverlay:
         assert "telemetry" not in result["renderer"]["config"]
         assert result["processor"]["config"]["telemetry"] == {"publish": {"metrics": {"fps": {"enabled": False}}}}
 
+    def test_per_process_empty_dict_override_counts_as_defined(self) -> None:
+        """Явный пустой per-process override `telemetry: {}` — «включить секцию с
+        дефолтами», НЕ «не задано» (симметрия с публично задокументированной
+        семантикой TelemetrySection.publish: {}). Регресс на `not override`,
+        глотавший пустой dict в «отсутствует» → gate молча не строился."""
+        bp = copy.deepcopy(_MINIMAL_BLUEPRINT)
+        bp["processes"][0]["telemetry"] = {}
+        # Глобального telemetry_dict нет — заданность обеспечивает ТОЛЬКО пустой override.
+        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        result = assembler.assemble(bp)
+
+        assert "telemetry" in result["worker_a"]["config"], (
+            "пустой per-process override telemetry:{} схлопнулся в «не задано» — gate не построится"
+        )
+        assert result["worker_a"]["config"]["telemetry"] == {"publish": {}}
+
     def test_default_interval_sec_override_replaces_global_scalar(self) -> None:
         """default_interval_sec — скалярное поле, per-process override заменяет
         значение целиком (не мержится по-полям)."""
