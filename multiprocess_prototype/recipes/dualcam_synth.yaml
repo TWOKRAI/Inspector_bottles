@@ -1,0 +1,84 @@
+# Рецепт dualcam_synth — ДВЕ синтетические камеры (имитация) для Ф7 G.7 Фазы 3.
+#
+# Назначение: мультикамерный tier БЕЗ железа — два независимых SHM-владельца
+# (camera_0, camera_1) с разными camera_id пишут каждый в СВОЁ кольцо, читатели
+# читают параллельно. Проверяет ключевой инвариант мультикамеры: FW_SHM_OWNER_
+# INCARNATION разводит имена сегментов {slot}_{owner}_{pid}_{inc} → сегменты двух
+# камер НЕ коллизируют (план §3: «мультикамера без owner_incarnation запрещена»).
+#
+# Phase-3 путь: заменить плагин camera_0 на реальную вебкамеру (CapturePlugin)
+# — camera_1 остаётся синтетической имитацией второй камеры (идея владельца).
+#
+# Тракт (4 процесса, 2 независимые границы IPC на кадр):
+#   camera_0[synthetic, id=0] -> consumer_0[frame_counter]
+#   camera_1[synthetic, id=1] -> consumer_1[frame_counter]
+#
+# Запуск headless (полный набор флагов):
+#   BACKEND_CTL=1 FW_PERF_PROBES=1 FW_SHM_OWNER_INCARNATION=1 ... \
+#   python -m backend_ctl.g7_dualcam_probe
+name: dualcam_synth
+version: 1
+description: "Две синтетические камеры → два счётчика — Ф7 G.7 мультикамерный tier"
+
+blueprint:
+  name: dualcam_synth
+  description: "Две независимые синтетические камеры (id 0/1) с раздельными SHM-кольцами"
+
+  processes:
+    # --- Камера 0: синтетическая имитация (позже — реальная вебкамера) ---
+    - process_name: camera_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - consumer_0
+      source_target_fps: 30
+      plugins:
+        - plugin_class: Plugins.sources.synthetic_frame_source.plugin.SyntheticFrameSourcePlugin
+          plugin_name: synthetic_frame_source
+          category: source
+          camera_id: 0
+          resolution_width: 640
+          resolution_height: 480
+
+    # --- Камера 1: синтетическая имитация второй камеры ---
+    - process_name: camera_1
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: high
+      chain_targets:
+        - consumer_1
+      source_target_fps: 30
+      plugins:
+        - plugin_class: Plugins.sources.synthetic_frame_source.plugin.SyntheticFrameSourcePlugin
+          plugin_name: synthetic_frame_source
+          category: source
+          camera_id: 1
+          resolution_width: 640
+          resolution_height: 480
+
+    # --- Потребитель камеры 0 ---
+    - process_name: consumer_0
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets: []
+      plugins:
+        - plugin_class: Plugins.sources.frame_counter.plugin.FrameCounterPlugin
+          plugin_name: frame_counter
+          category: processing
+          log_interval_sec: 5.0
+
+    # --- Потребитель камеры 1 ---
+    - process_name: consumer_1
+      process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
+      priority: normal
+      chain_targets: []
+      plugins:
+        - plugin_class: Plugins.sources.frame_counter.plugin.FrameCounterPlugin
+          plugin_name: frame_counter
+          category: processing
+          log_interval_sec: 5.0
+
+  wires:
+    - source: camera_0.synthetic_frame_source.frame
+      target: consumer_0.frame_counter.frame
+    - source: camera_1.synthetic_frame_source.frame
+      target: consumer_1.frame_counter.frame
