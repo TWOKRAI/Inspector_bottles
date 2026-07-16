@@ -37,10 +37,17 @@ push (`state.shm.*` через heartbeat → StatsManager) — источник 
 - **measurement-gated флаг честно OFF** — gc_scheduled не включать «за компанию»: его гейт (остаточные
   GC-выбросы после freeze) не выполнен на синтетике.
 
-**Резидуалы (НЕ блокируют лесенку):** Фаза 2 fault-инъекции (incarnation-guard рестарт писателя,
-реальный kill-9 читателя → `slots_reclaimed`, медленный потребитель, switch под нагрузкой);
-Фаза 3 длинный soak обоих ЖИВЫХ рецептов (phone_sketch + hikvision) + AllocProfiler + флип дефолтов
-в реестре G.F. Tier'ы вебкамера/Hikvision — по железу. plan.md «G.7 ✅» НЕ ставить до Фазы 3.
+**Фаза 2 (fault-инъекции, 2026-07-16):** 2.1 kill-9 читателя ✅ (`slots_reclaimed` 0→3 reclaim +
+авто-рестарт + source FPS ровный; `loan_exhausted +102` = back-pressure в окне смерть→восстановление),
+2.2 kill-9 писателя ✅ (авто-рестарт + consumer выжил, `torn_reads`=0, порчи нет — инвариант держится).
+Остаток: 2.3 switch под нагрузкой ([[project_recipe_hotswap]]), 2.4 slow-consumer (back-pressure показан
+2.1) — dedicated-пробы отдельно; детерминированный seqlock-recovery (write-hold+kill) → Фаза 3. **УРОК
+Windows:** `signal.SIGKILL` отсутствует → `harness.kill_child` падал AttributeError; фикс
+`psutil.Process(pid).kill()` (TerminateProcess, та же crash-семантика) + ASCII-логи (cp1251-консоль не
+кодирует '→'). Ломало и live fault-тесты на Windows (коммит `7d91f95f`, пробник `g7_fault_probe`).
+
+**Фаза 3 (резидуал):** длинный soak обоих ЖИВЫХ рецептов (phone_sketch + hikvision) + AllocProfiler +
+флип дефолтов в реестре G.F. Tier'ы вебкамера/Hikvision — по железу. plan.md «G.7 ✅» НЕ ставить до Фазы 3.
 
 Связано: [[project_feature_flags_registry]], [[project_f7_g7_num_consumers]], [[project_f7_g4_done]],
 [[project_phase_g_final_review]], [[feedback_logger_error_stats_managers]].
