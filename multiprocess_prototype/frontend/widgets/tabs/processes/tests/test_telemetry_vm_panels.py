@@ -163,6 +163,26 @@ class TestLiveUpdateViaVm:
         assert panel._card._metric_labels["Циклов/с"].text() == "30.0"
         assert panel._card._indicator.state() == "running"
 
+    def test_deleted_delta_shows_no_data_placeholder(self, qtbot) -> None:
+        """НАМЕРЕННО: удаление узла (deleted=True) → метрика показывает «—».
+
+        Расхождение с legacy-путём (тот на deleted виджет не трогал) зафиксировано
+        осознанно — для исчезнувшего процесса «нет данных» корректнее застрявшего
+        последнего значения. См. docstring _make_vm_setter.
+        """
+        vm = TelemetryViewModel()
+        panel = SingleProcessPanel(_presenter(), None, "camera_0", telemetry=vm)
+        qtbot.addWidget(panel)
+
+        vm.on_state_delta(_delta("processes.camera_0.state.fps", 30.0))
+        qtbot.wait(50)
+        assert panel._card._metric_labels["Циклов/с"].text() == "30.0"
+
+        # Узел удалён из топологии → deleted-дельта.
+        vm.on_state_delta(_delta("processes.camera_0.state.fps", None, deleted=True))
+        qtbot.wait(50)
+        assert panel._card._metric_labels["Циклов/с"].text() == "—"
+
     def test_single_panel_snapshot_priming_late_binding(self, qtbot) -> None:
         """SingleProcessPanel после публикации показывает метрики сразу (snapshot)."""
         vm = TelemetryViewModel()

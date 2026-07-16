@@ -167,7 +167,9 @@ class TelemetryViewModel(QObject):
         if msg_dict.get("data_type") not in ("state_delta", "gui_local_metric"):
             return
         path = msg_dict.get("path")
-        if not path or "value" not in msg_dict:
+        # Консистентно с GuiStateBindings._on_state_msg: пропускаем только при
+        # отсутствии path/value (пустой строкой путь в проде не бывает).
+        if path is None or "value" not in msg_dict:
             return
 
         if bool(msg_dict.get("deleted")):
