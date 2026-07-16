@@ -396,3 +396,28 @@ graceful-stop долг ([[project_graceful_stop_debt]]), **НЕ блокер G.7
 - **2.4 медленный потребитель** — back-pressure loan (`loan_exhausted` растёт, камера не блокируется)
   ЭМПИРИЧЕСКИ показан сценарием 2.1 (dead reader → drop-на-источнике, FPS ровный); dedicated slow-consumer
   (контролируемая задержка + самовосстановление после снятия) требует delay-knob в `frame_counter`.
+
+## Ф7 G.7 — Фаза 3 (фундамент): мультикамера — две синтетические камеры (Windows, 2026-07-16)
+
+Идея владельца: Phase-3 tier = реальная вебкамера + синтетическая имитация второй камеры.
+`synthetic_frame_source` — готовая имитация (отдаёт `camera_id`/`seq_id`, `_FRAME_ID_MODULO=100_000`).
+Рецепт `dualcam_synth.yaml` (camera_0 id=0, camera_1 id=1 → раздельные consumer_0/1), полный набор
+флагов, `backend_ctl.g7_dualcam_probe 12`. Инвариант: FW_SHM_OWNER_INCARNATION разводит имена сегментов
+владельцев `{slot}_{owner}_{pid}_{inc}` → два кольца НЕ коллизируют.
+
+| Камера | source / consumer FPS | кадров произв./принято | `slots_released` | `loan_exhausted` | torn/stale/pickle | cache |
+|---|---|---|---|---|---|---|
+| camera_0 (id=0) | 21.36 / 21.31 | 298 / 296 | 292 | 4 (транзиент) | 0 | 4 |
+| camera_1 (id=1) | 21.32 / 21.32 | 297 / 293 | 288 | 5 (транзиент) | 0 | 4 |
+
+**Обе камеры текут ПАРАЛЛЕЛЬНО ~21fps каждая, полный набор флагов, БЕЗ коллизий и порчи** (torn/stale/
+pickle=0 на обеих) — `owner_incarnation` развёл SHM-сегменты двух владельцев, release-контур замкнут на
+обеих (`slots_released` растёт ~290). `loan_exhausted 4-5` — тот же транзиентный back-pressure, что на
+одиночных прогонах, не коллизия. **Мультикамерный SHM-инвариант подтверждён** (план §3: «мультикамера без
+owner_incarnation запрещена» — с ним чисто).
+
+**Остаток Фазы 3:** (а) camera_0 → реальная вебкамера (одна строка в рецепте, CapturePlugin), camera_1
+синтетическая — реальный смешанный tier; (б) длинный soak ≥ 2ч (overnight, решение владельца) +
+AllocProfiler + RSS-тренд; (в) **P2 Join-корреляция двух камер** (`JoinInspectorManager` по
+`(seq_id, data_type)` — добавить `camera_id` в ключ, иначе кадры двух камер подменяются); (г) флип
+дефолтов в реестре G.F. `plan.md` «G.7 ✅» — после длинного soak.
