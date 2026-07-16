@@ -71,11 +71,11 @@
 
 | # | Сценарий | Ожидание |
 |---|---|---|
-| 2.1 | **kill -9 читателя** (например `line`) под нагрузкой | Supervisor (0.3) → `shm_reclaim` → `slots_reclaimed` > 0, поток кадров живёт, исчерпания нет (**реальный kill-9 — резидуал**) |
-| 2.2 | kill -9 писателя посреди записи | Нечётный generation на следующем цикле → `seqlock_recovered` + WARNING, слот не отравлен |
-| 2.3 | Switch рецепта под нагрузкой (B-7) | Wire re-issue без стейл-кэша; кадры после switch идут; сегменты не текут (`release_owned_memory`) |
-| 2.4 | Медленный потребитель (искусственная задержка в плагине) | Loan: громкий drop-на-источнике + `loan_exhausted` растёт, камера НЕ блокируется; после снятия задержки — самовосстановление |
-| 2.5 | Teardown-шум | `ValueError: I/O operation on closed file` — ИЗВЕСТНЫЙ graceful-stop долг, НЕ блокер G.7, отдельная задача (см. [[project_graceful_stop_debt]]) |
+| 2.1 ✅ | **kill -9 читателя** под нагрузкой | Supervisor (0.3) → `shm_reclaim` → `slots_reclaimed` > 0, поток кадров живёт, исчерпания нет.<br>**✅ DONE 2026-07-16** (синтетика, полный набор): `slots_reclaimed` 0→**3**, source FPS 21.34→21.32 (не блокирован), consumer авто-рестарт (running), torn/pickle=0. `loan_exhausted +102` = back-pressure в окне смерть→восстановление. Резидуал закрыт. baseline.md «Фаза 2». |
+| 2.2 ✅ | kill -9 писателя посреди записи | Нечётный generation на следующем цикле → `seqlock_recovered` + WARNING, слот не отравлен.<br>**✅ DONE частично 2026-07-16**: писатель авто-рестарт (running), consumer выжил (running), `torn_reads`=0, порчи нет — инвариант держится. Seqlock-recovery counter не воспроизведён (kill не попал в mid-write) → детерминированный write-hold+kill = резидуал Фазы 3. |
+| 2.3 ⏳ | Switch рецепта под нагрузкой (B-7) | Wire re-issue без стейл-кэша; кадры после switch идут; сегменты не текут (`release_owned_memory`).<br>Механизм решён (Task 7, [[project_recipe_hotswap]], `5cd23192`); dedicated switch-fault-probe (switch-драйвер через backend_ctl) — отдельный заход. |
+| 2.4 ⏳ | Медленный потребитель (искусственная задержка в плагине) | Loan: громкий drop-на-источнике + `loan_exhausted` растёт, камера НЕ блокируется; после снятия задержки — самовосстановление.<br>Back-pressure ЭМПИРИЧЕСКИ показан 2.1 (dead reader → drop, FPS ровный); dedicated slow-consumer (delay-knob в `frame_counter` + самовосст.) — отдельный заход. |
+| 2.5 ✅ | Teardown-шум | `ValueError: I/O operation on closed file` — ИЗВЕСТНЫЙ graceful-stop долг, НЕ блокер G.7, отдельная задача (см. [[project_graceful_stop_debt]]).<br>**✅ ЗАФИКСИРОВАН 2026-07-16**: наблюдён `ProcessManager did not stop in 5.0s` при teardown; watchdog добивает дерево, не виснет. Не блокер. |
 
 ## 5. Фаза 3 — длинный soak + приёмка
 

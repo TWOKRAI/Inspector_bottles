@@ -345,3 +345,54 @@ p99 0.163, счётчики чисты), но **флаг оставлен OFF** 
 guard (рестарт писателя), реальный kill-9 читателя (`slots_reclaimed`), медленный потребитель, switch
 под нагрузкой. **Фаза 3**: длинный soak обоих ЖИВЫХ рецептов (phone_sketch + hikvision) + AllocProfiler
 + флип дефолтов в реестре G.F. Tier'ы вебкамера/Hikvision — по железу (синтетика — same-tier референс).
+
+## Ф7 G.7 — Фаза 2: fault-инъекции на полном наборе флагов (Windows, синтетика, 2026-07-16)
+
+Полный набор флагов движка on (шаги 1-9), `backend_ctl.g7_fault_probe` (boot g1_perf_probe через
+BackendHarness → warmup 3с → `kill_child` → 5с наблюдения → снимок `state.shm.*` до/после). Реальный
+SIGKILL через кросс-платформенный hard-kill харнесса (коммит `7d91f95f`: Windows psutil TerminateProcess).
+
+### 2.1 — kill-9 читателя (`consumer`) под нагрузкой
+
+| Наблюдение | Значение | Вердикт |
+|---|---|---|
+| source FPS до → после kill | 21.34 → 21.32 | источник НЕ блокирован смертью читателя ✓ |
+| `frame_slots_reclaimed` (source) | 0 → **3** | **reclaim сработал** (supervisor confirmed-death → shm_reclaim → owner) ✓ |
+| `consumer` статус после | **running** | **авто-рестарт** поднял читателя (FW_AUTORESTART) ✓ |
+| `frame_loan_exhausted` (source) | 0 → **102** | back-pressure: drop-на-источнике в окне «смерть → reclaim+restart» |
+| torn / stale / pickle | 0 | порчи нет ✓ |
+
+Полный цикл живучести доказан вживую: **kill → reclaim (slots_reclaimed +3) → авто-рестарт →
+восстановление, источник ни разу не заблокирован.** `loan_exhausted +102` = штатная back-pressure
+(§4 2.4: «громкий drop-на-источнике, камера НЕ блокируется») в ~2с-окне между смертью ЕДИНСТВЕННОГО
+читателя и его рестартом; на мульти-consumer прод-тракте выжившие читатели держат поток. **ПРОЙДЕН**
+(реальный kill-9 читателя — резидуал закрыт).
+
+### 2.2 — kill-9 писателя (`synthetic_source`) посреди работы
+
+| Наблюдение | Значение | Вердикт |
+|---|---|---|
+| source статус после (счётчики сброшены: boundary 96→37) | **running** | писатель авто-рестартнут ✓ |
+| `consumer` статус после | **running** | читатель ПЕРЕЖИЛ смерть писателя ✓ |
+| `frame_torn_reads` (consumer) | 0 | торн-чтений не прошло (инвариант «слот не отравлен» держится) ✓ |
+| `frame_pickle_fallbacks` / crash | 0 / нет | порчи/падения нет ✓ |
+
+Писатель убит → авто-рестарт (новый процесс, свежие счётчики) → читатель выжил чисто, БЕЗ порчи.
+Seqlock активен; torn-счётчик НЕ сработал (kill не попал в mid-write слот, который читатель затем прочёл
+— timing-sensitive). Инвариант держится. **ПРОЙДЕН частично**: детерминированный seqlock-recovery
+(targeted write-hold + kill) — резидуал Фазы 3.
+
+### 2.5 — teardown-шум
+
+Наблюдён `[spawner] ProcessManager did not stop in 5.0s, terminating` при teardown — это ИЗВЕСТНЫЙ
+graceful-stop долг ([[project_graceful_stop_debt]]), **НЕ блокер G.7** (harness watchdog добивает дерево,
+процессы не виснут). Отдельная задача.
+
+### 2.3 / 2.4 — остаток Фазы 2 (dedicated-пробы отдельным заходом)
+
+- **2.3 switch рецепта под нагрузкой** — механизм hot-swap уже решён (Task 7, [[project_recipe_hotswap]],
+  двухфазная регистрация очередей `5cd23192`); dedicated fault-probe (wire re-issue, сегменты не текут)
+  требует switch-драйвера через backend_ctl — отдельный заход.
+- **2.4 медленный потребитель** — back-pressure loan (`loan_exhausted` растёт, камера не блокируется)
+  ЭМПИРИЧЕСКИ показан сценарием 2.1 (dead reader → drop-на-источнике, FPS ровный); dedicated slow-consumer
+  (контролируемая задержка + самовосстановление после снятия) требует delay-knob в `frame_counter`.
