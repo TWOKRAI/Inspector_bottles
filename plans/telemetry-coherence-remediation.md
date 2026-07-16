@@ -107,7 +107,7 @@ GUI** плана telemetry-publish-control (крутилки частоты не
 - [x] Доп. (замечание ревьюера 1.1): неизвестный `mode` → error-dict, не молчаливый replace — `test_telemetry_reload.py::TestUnknownModeRejected`
 **Out of scope:** liveness-контракт heartbeat→ProcessMonitor (частота heartbeat-сообщений не меняется); центральный троттл (Task 1.3).
 
-### Task 1.3 — Центральный троттл: страховка, а не второй авторитет
+### Task 1.3 — Центральный троттл: страховка, а не второй авторитет ✅ DONE (<HASH>)
 **Level:** Senior (Opus)
 **Assignee:** teamlead
 **Layer:** mixed
@@ -125,10 +125,12 @@ GUI** плана telemetry-publish-control (крутилки частоты не
    (выбрать одно; «no silent caps» обязателен).
 3. Задокументировать инвариант в `multiprocess_framework/DECISIONS.md` (ADR: «троттл — страховка,
    publisher — авторитет») + `python -m scripts.sync`.
+**Решение step 2 (teamlead):** выбран **`capped_by_throttle`-флаг**, НЕ auto-relax (зафиксировано ADR-PM-017). Auto-relax молча снёс бы операторскую страховку (runaway-публикатор авто-снял бы защиту); дефолт-мягкость (step 1) уже обеспечивает «частота реально растёт» в дефолт-сценарии без жертвы страховкой. ADR — в `process_module/DECISIONS.md` (серия ADR-PM-*, консистентно с 1.1/1.2), в global-индекс проброшен через `scripts.sync` (`ADR-PM-001…017`).
 **Acceptance:**
-- [ ] Тест: поднятие частоты метрики через publisher (interval < central-правила) → эффективная частота в дереве РЕАЛЬНО растёт (сквозной тест store+gate) ИЛИ инициатор получает явный `capped_by_throttle`
-- [ ] Тест: дефолт-правила не режут дефолтную каденцию публикации (характеризация текущих рецептов)
-- [ ] ADR в индексе, `scripts/validate.py` чист
+- [x] Тест: поднятие частоты метрики через publisher (interval < central-правила) → эффективная частота в дереве РЕАЛЬНО растёт (сквозной тест store+gate) ИЛИ инициатор получает явный `capped_by_throttle` — `test_integration.py::TestManagerSetup::test_raised_publisher_frequency_reaches_store_via_soft_default` (реально растёт при мягком дефолте) + `test_telemetry_broadcast.py::TestCappedByThrottle::test_publisher_raise_below_central_rule_is_flagged` (флаг при строгом операторском правиле)
+- [x] Тест: дефолт-правила не режут дефолтную каденцию публикации (характеризация текущих рецептов) — `test_integration.py::TestManagerSetup::test_soft_defaults_do_not_cut_publisher_cadence`
+- [x] ADR в индексе, `scripts/validate.py` чист — ADR-PM-017, `validate.py` зелёный (ADR-дрифт синхронизирован)
+- [x] Доп (finding-1 ревью 1.2): битый mode → `success=False` через все 3 хендлера — `test_telemetry_broadcast.py::TestUnknownModeRejected`, `test_telemetry_commands.py::TestUnknownModeSurfaced` (reconfigure+config.reload)
 **Out of scope:** полное удаление центрального троттла (остаётся как IPC-страховка от сбойного публикатора).
 
 ---

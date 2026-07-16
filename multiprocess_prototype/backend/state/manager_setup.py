@@ -11,32 +11,50 @@ if TYPE_CHECKING:
     from multiprocess_prototype.backend.config.schemas import SystemConfig
 
 
-def _default_throttle_rules() -> dict[str, float]:
-    """Хардкод-дефолты центрального троттла (fallback).
+# ADR-PM-017 (Task 1.3): центральный троттл — IPC-ПРЕДОХРАНИТЕЛЬ от СБОЙНОГО публикатора,
+# а НЕ второй авторитет частоты. Единственный авторитет каденции — publisher-gate процесса
+# (per-метрика ``interval_sec`` из ``telemetry.publish``, ADR-PM-016). Поэтому дефолт-правила
+# троттла ставятся ЗАВЕДОМО МЯГЧЕ (меньший min-интервал, т.е. пропускают ЧАЩЕ) минимального
+# осмысленного интервала публикации: легитимное поднятие частоты через publisher доходит до
+# дерева StateStore БЕЗ молчаливого среза (residual #6 закрыт), а троттл срабатывает лишь на
+# публикатор, шлющий БЫСТРЕЕ собственной декларации (реальный сбой). Раньше дефолты (1.0с fps
+# и др.) совпадали с publisher-дефолтом 1.0с → «поднять частоту» молча гасилось второй
+# ступенью (каскад двух плоскостей с равными дефолтами).
+_MIN_PUBLISHER_INTERVAL_SEC: float = 0.1  # осмысленный «пол» каденции публикации (10 Гц)
+_THROTTLE_SAFETY_MULTIPLIER: float = 0.5  # < 1 → троттл-интервал НИЖЕ пола публикации
+# Единый мягкий предохранительный интервал (0.05с ≈ потолок 20 Гц на запись в дерево):
+# выше любой легитимной каденции публикации, поэтому её не режет; ограничивает лишь
+# runaway-публикатор.
+_SAFETY_INTERVAL_SEC: float = _MIN_PUBLISHER_INTERVAL_SEC * _THROTTLE_SAFETY_MULTIPLIER
 
-    Используются, когда ``sys_config`` не передан или секция
-    ``telemetry.throttle`` в ``system.yaml`` не задана владельцем —
-    обратная совместимость с поведением до PC 2.1
-    (`plans/telemetry-publish-control.md`, Фаза 2).
+
+def _default_throttle_rules() -> dict[str, float]:
+    """Дефолт-правила центрального троттла — мягкий IPC-предохранитель (fallback).
+
+    Используются, когда ``sys_config`` не передан или секция ``telemetry.throttle`` в
+    ``system.yaml`` не задана владельцем.
+
+    ADR-PM-017 (Task 1.3): все правила ставятся на единый мягкий
+    :data:`_SAFETY_INTERVAL_SEC` (заведомо НИЖЕ минимального осмысленного интервала
+    публикации) — троттл перестал быть вторым авторитетом частоты и не режет поднятие
+    каденции через publisher-gate. Прежние жёсткие дефолты (1.0/2.0/5.0с) молча гасили
+    любое поднятие частоты, совпадая с publisher-дефолтом (residual #6). Per-метрика
+    каденция теперь — забота publisher-gate; троттл лишь страхует от runaway-публикатора.
 
     Returns:
         dict вида {glob_pattern: min_interval_sec}.
     """
+    interval = _SAFETY_INTERVAL_SEC
     return {
-        # fps -- максимум 1 обновление в секунду
-        "processes.**.state.fps": 1.0,
-        # latency процесса -- максимум 1 обновление в секунду
-        "processes.**.state.latency_ms": 1.0,
-        # uptime процесса -- максимум 1 обновление в секунду
-        "processes.**.state.uptime": 1.0,
-        # frame_count -- максимум 1 обновление в 2 секунды
-        "processes.**.state.frame_count": 2.0,
-        # drops -- максимум 1 обновление в 5 секунд (редкая метрика)
-        "processes.**.state.drops": 5.0,
-        # частота воркера -- максимум 1 обновление в секунду
-        "processes.**.workers.*.effective_hz": 1.0,
-        # длительность цикла воркера -- максимум 1 обновление в секунду
-        "processes.**.workers.*.cycle_duration_ms": 1.0,
+        # Метрики карточки процесса (state.*) — мягкий предохранитель, не авторитет частоты.
+        "processes.**.state.fps": interval,
+        "processes.**.state.latency_ms": interval,
+        "processes.**.state.uptime": interval,
+        "processes.**.state.frame_count": interval,
+        "processes.**.state.drops": interval,
+        # Per-worker метрики — тот же мягкий предохранитель.
+        "processes.**.workers.*.effective_hz": interval,
+        "processes.**.workers.*.cycle_duration_ms": interval,
         # Статусы (state.status, workers.*.status) НЕ троттлятся — должны быть
         # отзывчивыми на старт/стоп; публикуются только при изменении.
     }

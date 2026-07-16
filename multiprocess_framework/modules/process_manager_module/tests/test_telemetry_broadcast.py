@@ -190,6 +190,64 @@ class TestThrottleFailureIsolated:
         assert "error" in res["throttle"]
 
 
+class TestCappedByThrottle:
+    """Task 1.3 (ADR-PM-017): «no silent caps» — поднятие частоты ниже central-правила
+    сообщается явным флагом ``capped_by_throttle`` (троттл НЕ ослабляется автоматически)."""
+
+    def test_publisher_raise_below_central_rule_is_flagged(self) -> None:
+        """publisher fps=0.5с ниже central 2.0с → флаг в результате (троттл срезал бы)."""
+        throttle = ThrottleMiddleware({"processes.**.state.fps": 2.0})
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+        res = pm._cmd_telemetry_broadcast(
+            {"publish": {"metrics": {"fps": {"interval_sec": 0.5}}}, "telemetry_mode": "merge"}
+        )
+        assert res["success"] is True
+        caps = res["publish"]["capped_by_throttle"]
+        assert caps == {"fps": {"publisher_interval_sec": 0.5, "throttle_interval_sec": 2.0}}
+        # Страховка НЕ тронута (auto-relax отвергнут): central-правило осталось прежним.
+        assert throttle.rules == {"processes.**.state.fps": 2.0}
+        # publish всё равно разослан детям (детский gate поднят; central-троттл — отдельно).
+        assert _telemetry_broadcasts(pm)[0]["data"]["publish"] == {"metrics": {"fps": {"interval_sec": 0.5}}}
+
+    def test_no_flag_when_publisher_above_rule(self) -> None:
+        """publisher fps=3.0с выше central 2.0с → троттл не режет → флага нет."""
+        throttle = ThrottleMiddleware({"processes.**.state.fps": 2.0})
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+        res = pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 3.0}}}})
+        assert "capped_by_throttle" not in res["publish"]
+
+    def test_no_flag_with_soft_default_throttle(self) -> None:
+        """Мягкий дефолт-троттл (0.05с) ниже поднятого publisher (0.1с) → флага нет."""
+        throttle = ThrottleMiddleware({"processes.**.state.fps": 0.05})
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+        res = pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 0.1}}}})
+        assert "capped_by_throttle" not in res["publish"]
+
+    def test_no_flag_without_central_throttle(self) -> None:
+        """Нет StateStoreManager у PM → нет central-правил → нечего срезать, флага нет."""
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)  # throttle=None
+        res = pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 0.1}}}})
+        assert "capped_by_throttle" not in res["publish"]
+
+
+class TestUnknownModeRejected:
+    """Task 1.2 finding-1: битый telemetry_mode → success=False ДО fan-out (broadcast
+    fire-and-forget: ошибку детей никто не соберёт, поэтому валидируем в PM заранее)."""
+
+    def test_unknown_mode_returns_failure_and_no_broadcast(self) -> None:
+        throttle = ThrottleMiddleware({"keep": 1.0})
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+        res = pm._cmd_telemetry_broadcast(
+            {"publish": {"metrics": {"fps": {"enabled": False}}}, "telemetry_mode": "mrege"}
+        )
+        assert res["success"] is False
+        assert res["mode"] == "mrege"
+        assert "mrege" in res["reason"]
+        # Битый mode НЕ ушёл детям и НЕ тронул central-троттл.
+        assert pm.communication.broadcasts == []
+        assert throttle.rules == {"keep": 1.0}
+
+
 class TestValidation:
     def test_empty_command_is_error(self) -> None:
         pm = _pm({"camera_0": {"class": "m.Cam"}})

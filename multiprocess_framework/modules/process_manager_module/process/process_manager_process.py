@@ -1373,6 +1373,13 @@ class ProcessManagerProcess(ProcessModule):
             Агрегированный dict (Dict at Boundary): ``publish``-охват и/или
             ``throttle``-применение — по каждой ЗАПРОШЕННОЙ под-секции.
         """
+        from ...process_module.managers.telemetry_reload import (
+            VALID_MODES,
+            apply_telemetry_reconfigure,
+            detect_throttle_caps,
+            resolve_store_throttle,
+        )
+
         args = _merge_cmd_args(data, kwargs)
         has_publish = "publish" in args
         has_throttle = "throttle" in args
@@ -1382,7 +1389,17 @@ class ProcessManagerProcess(ProcessModule):
         # Task 1.1: режим применения (replace|merge) — общий для обеих плоскостей.
         # Прокидывается детям в publish-broadcast и в central-throttle apply. На проводе
         # присутствует ТОЛЬКО при merge (replace = дефолт → бит-в-бит прежний конверт).
+        # Task 1.2 (замечание ревьюера): валидируем mode ЗДЕСЬ, ДО fan-out — broadcast
+        # fire-and-forget (ошибку детей никто не соберёт), поэтому битый mode не должен
+        # уйти детям и молча «похорониться». Явная ошибка вместо тихого no-op.
         mode = str(args.get("telemetry_mode", "replace"))
+        if mode not in VALID_MODES:
+            return {
+                "success": False,
+                "process": self.name,
+                "mode": mode,
+                "reason": f"неизвестный telemetry mode={mode!r} (ожидается {VALID_MODES}); секция НЕ применена",
+            }
 
         result: dict[str, Any] = {"success": True, "process": self.name}
 
@@ -1404,14 +1421,20 @@ class ProcessManagerProcess(ProcessModule):
                 # Полный охват = доставили всем живым детям (иначе сигнал наверх).
                 "complete": int(reached) >= len(targets),
             }
+            # ADR-PM-017 (Task 1.3): «no silent caps». Если поднятие частоты метрики через
+            # publisher уходит НИЖЕ действующего central-правила той же метрики — троттл
+            # молча срезал бы его. Не режем тихо и не ослабляем страховку авто-магически:
+            # возвращаем ЯВНЫЙ отчёт, чтобы инициатор увидел потолок и осознанно ослабил
+            # central-правило (telemetry_set plane=throttle). Дефолт-троттл теперь мягче
+            # публикатора (manager_setup), поэтому в дефолтном сценарии caps пуст и частота
+            # реально растёт; флаг всплывает лишь при операторском строгом правиле.
+            caps = detect_throttle_caps(args["publish"], resolve_store_throttle(self))
+            if caps:
+                result["publish"]["capped_by_throttle"] = caps
+                self._log_info(f"telemetry.broadcast: publish частично ограничен central-троттлом: {caps}")
             self._log_info(f"telemetry.broadcast: publish разослан детям — reached={reached}/{len(targets)}")
 
         if has_throttle:
-            from ...process_module.managers.telemetry_reload import (
-                apply_telemetry_reconfigure,
-                resolve_store_throttle,
-            )
-
             try:
                 applied = apply_telemetry_reconfigure(
                     {"throttle": args["throttle"]},

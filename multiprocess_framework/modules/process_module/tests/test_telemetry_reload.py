@@ -13,6 +13,7 @@ from multiprocess_framework.modules.config_module.core.config import Config
 from multiprocess_framework.modules.process_module.managers.telemetry_reload import (
     THROTTLE_REMOVE,
     apply_telemetry_reconfigure,
+    detect_throttle_caps,
     make_telemetry_on_reload,
 )
 
@@ -205,6 +206,70 @@ class TestUnknownModeRejected:
             result = apply_telemetry_reconfigure({"publish": {"x": 1}}, mode=mode, heartbeat=hb)
             assert result == {"publish": True}
             assert hb.modes == [mode]
+
+
+class _RulesThrottle:
+    """Стаб троттла: отдаёт снимок правил через ``rules`` (как ThrottleMiddleware)."""
+
+    def __init__(self, rules: dict) -> None:
+        self.rules = dict(rules)
+
+
+class TestDetectThrottleCaps:
+    """Task 1.3: «no silent caps» — publisher-поднятие ниже central-правила → явный отчёт.
+
+    detect_throttle_caps НЕ трогает троттл (auto-relax отвергнут ADR-PM-017) — только
+    сообщает инициатору о потолке, чтобы тот осознанно ослабил central-правило.
+    """
+
+    def test_publisher_below_central_rule_is_reported(self) -> None:
+        """publisher fps=0.2с ниже central 1.0с → метрика в отчёте (троттл срезал бы)."""
+        throttle = _RulesThrottle({"processes.**.state.fps": 1.0})
+        caps = detect_throttle_caps({"metrics": {"fps": {"interval_sec": 0.2}}}, throttle)
+        assert caps == {"fps": {"publisher_interval_sec": 0.2, "throttle_interval_sec": 1.0}}
+
+    def test_publisher_above_central_rule_not_reported(self) -> None:
+        """publisher fps=2.0с выше central 1.0с → троттл не режет → отчёт пуст."""
+        throttle = _RulesThrottle({"processes.**.state.fps": 1.0})
+        assert detect_throttle_caps({"metrics": {"fps": {"interval_sec": 2.0}}}, throttle) == {}
+
+    def test_soft_default_does_not_cap(self) -> None:
+        """Мягкий дефолт-троттл (0.05с) ниже поднятого publisher (0.1с) → caps пуст."""
+        throttle = _RulesThrottle({"processes.**.state.fps": 0.05})
+        assert detect_throttle_caps({"metrics": {"fps": {"interval_sec": 0.1}}}, throttle) == {}
+
+    def test_full_block_rule_is_reported(self) -> None:
+        """central-правило 0 (полная блокировка) строже любого publisher → в отчёте."""
+        throttle = _RulesThrottle({"processes.**.state.fps": 0})
+        caps = detect_throttle_caps({"metrics": {"fps": {"interval_sec": 0.5}}}, throttle)
+        assert caps == {"fps": {"publisher_interval_sec": 0.5, "throttle_interval_sec": 0.0}}
+
+    def test_metric_without_explicit_interval_skipped(self) -> None:
+        """interval_sec не задан (наследование default) → не флагуем (неоднозначно)."""
+        throttle = _RulesThrottle({"processes.**.state.fps": 1.0})
+        assert detect_throttle_caps({"metrics": {"fps": {"enabled": False}}}, throttle) == {}
+
+    def test_metric_without_central_rule_skipped(self) -> None:
+        """Нет central-правила под метрику → нечему резать → пусто."""
+        throttle = _RulesThrottle({"processes.**.state.latency_ms": 1.0})
+        assert detect_throttle_caps({"metrics": {"fps": {"interval_sec": 0.1}}}, throttle) == {}
+
+    def test_suffix_match_is_generic(self) -> None:
+        """Сопоставление по суффиксу паттерна: worker-метрика effective_hz тоже ловится."""
+        throttle = _RulesThrottle({"processes.**.workers.*.effective_hz": 1.0})
+        caps = detect_throttle_caps({"metrics": {"effective_hz": {"interval_sec": 0.1}}}, throttle)
+        assert caps == {"effective_hz": {"publisher_interval_sec": 0.1, "throttle_interval_sec": 1.0}}
+
+    def test_no_throttle_or_no_metrics_is_empty(self) -> None:
+        assert detect_throttle_caps({"metrics": {"fps": {"interval_sec": 0.1}}}, None) == {}
+        assert detect_throttle_caps({}, _RulesThrottle({"processes.**.state.fps": 1.0})) == {}
+        assert detect_throttle_caps(None, _RulesThrottle({"x": 1.0})) == {}
+
+    def test_strictest_rule_wins_on_multiple_candidates(self) -> None:
+        """Несколько правил под метрику → берём строжайшее (макс. интервал)."""
+        throttle = _RulesThrottle({"a.fps": 0.5, "processes.**.state.fps": 2.0})
+        caps = detect_throttle_caps({"metrics": {"fps": {"interval_sec": 0.1}}}, throttle)
+        assert caps["fps"]["throttle_interval_sec"] == 2.0
 
 
 class TestMakeTelemetryOnReload:

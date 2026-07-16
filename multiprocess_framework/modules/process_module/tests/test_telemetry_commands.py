@@ -215,6 +215,40 @@ class TestTelemetryReconfigureMergeMode:
         assert throttle.rules == {"fps": 0.2}  # latency снесён (replace)
 
 
+class TestUnknownModeSurfaced:
+    """Task 1.2 finding-1: неизвестный mode → success=False, ошибка НЕ хоронится в applied.
+
+    Наблюдаемость через оба хендлера-обёртки (telemetry.reconfigure, config.reload). Для
+    fan-out-пути (telemetry.broadcast) — см. test_telemetry_broadcast.TestUnknownModeRejected.
+    """
+
+    def test_telemetry_reconfigure_unknown_mode_fails(self) -> None:
+        throttle = ThrottleMiddleware({"keep": 1.0})
+        _svc, cm = _make(throttle=throttle)
+        res = cm.dispatch(
+            "telemetry.reconfigure",
+            {"throttle": {"a.b": 2.0}, "telemetry_mode": "mrege"},
+        )
+        assert res["success"] is False
+        assert res["mode"] == "mrege"
+        assert "mrege" in res["reason"]
+        assert "applied" not in res  # ошибка не похоронена в applied
+        assert throttle.rules == {"keep": 1.0}  # ничего не применено
+
+    def test_config_reload_unknown_mode_fails(self) -> None:
+        throttle = ThrottleMiddleware({"keep": 1.0})
+        _svc, cm = _make(throttle=throttle)
+        res = cm.dispatch(
+            "config.reload",
+            {"telemetry": {"throttle": {"a.b": 2.0}}, "telemetry_mode": "mrege"},
+        )
+        assert res["success"] is False
+        assert res["mode"] == "mrege"
+        assert "mrege" in res["reason"]
+        assert "telemetry_applied" not in res
+        assert throttle.rules == {"keep": 1.0}
+
+
 class TestConfigReloadTelemetry:
     def test_reload_telemetry_only(self) -> None:
         """config.reload только с telemetry (без observability, без файла) → применяется."""

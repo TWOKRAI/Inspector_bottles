@@ -169,6 +169,87 @@ def resolve_store_throttle(holder: Any) -> Any:
     return store_manager.get_middleware("throttle")
 
 
+def _central_rule_for_metric(metric: str, rules: Dict[str, Any]) -> Optional[float]:
+    """Найти интервал central-правила для метрики по СУФФИКСУ паттерна (generic).
+
+    Central-правила троттла авторятся как листовые глобы вида ``processes.**.state.fps``
+    — последний сегмент == имя метрики publisher-контракта (``fps`` / ``latency_ms`` /
+    ``effective_hz`` / ``cycle_duration_ms`` / ``shm``). Сопоставляем ПО СУФФИКСУ, а не по
+    полному пути: framework не знает layout дерева прототипа (``processes.**.state.*``) —
+    это app-specific. Суффикс-матч оставляет framework generic.
+
+    Если под метрику подпадает несколько правил — берём СТРОЖАЙШЕЕ (макс. интервал; ``0``
+    = полная блокировка — строже любого интервала): именно оно и станет узким местом.
+
+    Returns:
+        Интервал строжайшего правила метрики либо ``None``, если правил нет.
+    """
+    candidates = [
+        interval
+        for pattern, interval in rules.items()
+        if isinstance(interval, (int, float)) and pattern.rsplit(".", 1)[-1] == metric
+    ]
+    if not candidates:
+        return None
+    # 0 (полная блокировка) — строжайшее; иначе максимальный интервал.
+    if any(c == 0 for c in candidates):
+        return 0.0
+    return max(candidates)
+
+
+def detect_throttle_caps(publish_section: Any, store_throttle: Any) -> Dict[str, Dict[str, float]]:
+    """Найти метрики publish-дельты, чью частоту central-троттл молча срезал бы.
+
+    Инвариант ADR-PM-017: **publisher-gate — единственный авторитет частоты**, central-троттл
+    — лишь IPC-предохранитель от СБОЙНОГО публикатора, а не второй авторитет. Если оператор
+    поднимает частоту метрики (publisher ``interval_sec``) НИЖЕ действующего central-правила
+    той же метрики, троттл молча срезал бы это поднятие — недопустимо (принцип «no silent
+    caps»). Вместо тихого среза возвращаем ЯВНЫЙ отчёт: инициатор (backend_ctl/GUI) ВИДИТ,
+    что троттл ограничивает частоту, и может осознанно ослабить central-правило (``telemetry_set
+    plane=throttle``). Троттл при этом НЕ трогается автоматически — операторская страховка
+    остаётся нетронутой (auto-relax отвергнут, см. ADR-PM-017 «Rejected»).
+
+    Сравнивается только per-метрика явный ``interval_sec`` в ``metrics.<name>`` (``None`` →
+    наследование default — не флагуем, неоднозначно). Central-правило метрики ищется по
+    суффиксу паттерна (:func:`_central_rule_for_metric`).
+
+    Args:
+        publish_section: publish-под-секция команды (dict с опциональным ``metrics``).
+        store_throttle: живой центральный ``ThrottleMiddleware`` оркестратора (или ``None``).
+
+    Returns:
+        ``{metric: {"publisher_interval_sec": p, "throttle_interval_sec": t}}`` — только для
+        метрик, где троттл строже (``t > p`` или ``t == 0`` полная блокировка). Пусто →
+        поднятие частоты дойдёт до дерева без среза (страховка мягче публикатора).
+    """
+    if not isinstance(publish_section, dict) or store_throttle is None:
+        return {}
+    metrics = publish_section.get("metrics")
+    if not isinstance(metrics, dict):
+        return {}
+    rules = getattr(store_throttle, "rules", None)
+    if not isinstance(rules, dict) or not rules:
+        return {}
+
+    caps: Dict[str, Dict[str, float]] = {}
+    for metric, rule in metrics.items():
+        if not isinstance(rule, dict):
+            continue
+        pub_interval = rule.get("interval_sec")
+        if not isinstance(pub_interval, (int, float)) or isinstance(pub_interval, bool):
+            continue
+        throttle_interval = _central_rule_for_metric(metric, rules)
+        if throttle_interval is None:
+            continue
+        # Троттл строже: больший min-интервал (реже пропускает) ИЛИ 0 (полная блокировка).
+        if throttle_interval == 0 or throttle_interval > pub_interval:
+            caps[metric] = {
+                "publisher_interval_sec": float(pub_interval),
+                "throttle_interval_sec": float(throttle_interval),
+            }
+    return caps
+
+
 def make_telemetry_on_reload(
     *,
     store_throttle: Any = None,
@@ -205,6 +286,7 @@ __all__ = [
     "THROTTLE_REMOVE",
     "VALID_MODES",
     "apply_telemetry_reconfigure",
+    "detect_throttle_caps",
     "make_telemetry_on_reload",
     "resolve_store_throttle",
 ]

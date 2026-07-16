@@ -788,6 +788,17 @@ class BuiltinCommands:
                 )
             except Exception as exc:  # noqa: BLE001
                 return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
+            # Task 1.2 finding-1: неизвестный mode → apply вернул error-dict и НИЧЕГО не
+            # применил. Ошибка не должна «хорониться» в telemetry_applied при success=True —
+            # поднимаем до success=False, чтобы инициатор (backend_ctl/GUI) её увидел.
+            if "error" in telemetry_applied:
+                return {
+                    "success": False,
+                    "process": svc.name,
+                    "source": source,
+                    "mode": telemetry_applied.get("mode"),
+                    "reason": telemetry_applied["error"],
+                }
             result["telemetry_applied"] = telemetry_applied
 
         return result
@@ -854,6 +865,16 @@ class BuiltinCommands:
             )
         except Exception as exc:  # noqa: BLE001 — вернуть причину инициатору
             return {"success": False, "reason": f"telemetry reconfigure failed: {exc}"}
+
+        # Task 1.2 finding-1: неизвестный mode → error-dict, НИЧЕГО не применено. Поднимаем
+        # до success=False (не хороним в applied), чтобы ошибка была видна инициатору.
+        if "error" in applied:
+            return {
+                "success": False,
+                "process": svc.name,
+                "mode": applied.get("mode"),
+                "reason": applied["error"],
+            }
 
         return {"success": True, "process": svc.name, "applied": applied}
 
