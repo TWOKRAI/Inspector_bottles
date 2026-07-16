@@ -687,6 +687,67 @@ class TestProcessMonitorHeartbeats:
         assert monitor.previous_states["cam"]["status"] == "unresponsive"
 
 
+class TestShmReclaimBroadcast:
+    """Ф7 G.7 (0.3): отправитель shm_reclaim по confirmed-death (owner-handler G.5.e)."""
+
+    def _dead_monitor(self):
+        mock_pm = _make_mock_process_manager()
+        dead_proc = MagicMock()
+        dead_proc.is_alive.return_value = False
+        dead_proc.exitcode = -9  # kill -9
+        dead_proc.pid = 4242
+        dead_proc.name = "line"
+        mock_registry = MagicMock()
+        mock_registry.os_processes = [dead_proc]
+        mock_pm._process_registry = mock_registry
+        mock_pm.shared_resources.process_state_registry = MagicMock()
+        mock_pm._get_protected_names.return_value = set()
+        return mock_pm, ProcessMonitor(mock_pm)
+
+    @staticmethod
+    def _reclaim_calls(mock_pm):
+        """Только broadcast-вызовы с type=shm_reclaim (status-change тоже шлёт broadcast)."""
+        out = []
+        for args, kwargs in mock_pm.communication.broadcast.call_args_list:
+            payload = args[0] if args else kwargs.get("message")
+            if isinstance(payload, dict) and payload.get("type") == "shm_reclaim":
+                out.append((payload, kwargs))
+        return out
+
+    def test_flag_on_broadcasts_reclaim_on_death(self, monkeypatch) -> None:
+        """Флаг on + confirmed-death → broadcast shm_reclaim с dead_reader на system-очередь."""
+        monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
+        mock_pm, monitor = self._dead_monitor()
+
+        monitor._check_heartbeats()
+
+        calls = self._reclaim_calls(mock_pm)
+        assert len(calls) == 1
+        sent, kwargs = calls[0]
+        assert sent["queue_type"] == "system"  # иначе уйдёт в data-очередь как кадр
+        assert sent["data"]["dead_reader"] == "line"
+        assert kwargs.get("exclude_self") is True
+
+    def test_flag_off_no_broadcast(self, monkeypatch) -> None:
+        """Дефолт (флаг off): смерть НЕ рассылает reclaim — прежнее поведение бит-в-бит."""
+        monkeypatch.delenv("FW_SHM_LOAN_PROTOCOL", raising=False)
+        mock_pm, monitor = self._dead_monitor()
+
+        monitor._check_heartbeats()
+
+        assert self._reclaim_calls(mock_pm) == []
+
+    def test_broadcast_exception_does_not_crash_monitor(self, monkeypatch) -> None:
+        """Сбой рассылки reclaim не роняет монитор (best-effort)."""
+        monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
+        mock_pm, monitor = self._dead_monitor()
+        mock_pm.communication.broadcast.side_effect = RuntimeError("boom")
+
+        monitor._check_heartbeats()  # не должно бросить
+
+        assert monitor.previous_states.get("line", {}).get("status") == "crashed"
+
+
 class TestProcessMonitorGetStats:
     def test_get_stats_returns_dict(self) -> None:
         mock_pm = _make_mock_process_manager()

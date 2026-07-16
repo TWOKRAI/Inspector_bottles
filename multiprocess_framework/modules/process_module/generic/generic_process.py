@@ -101,9 +101,9 @@ class GenericProcess(ProcessModule):
         # FW_QOS_PROFILES (ревью 2026-07-14, откат бит-в-бит): off → None → middleware
         # даёт прежние 3; on → frame_ring_depth (или профиль). Каждый source-процесс =
         # свой owner = своё независимое кольцо (изоляция per-camera).
-        from multiprocess_framework.modules.config_module.tools.env import env_flag
+        from multiprocess_framework.modules.config_module.feature_flags import is_enabled
 
-        frame_ring_depth = app_cfg.get("frame_ring_depth") if env_flag("FW_QOS_PROFILES") else None
+        frame_ring_depth = app_cfg.get("frame_ring_depth") if is_enabled("FW_QOS_PROFILES") else None
         # Ф7 G.7: num_consumers loan-протокола (В3) = число loan-aware потребителей кадра
         # этого owner'а из топологии (chain_targets минус copy-out/GUI). 0 → middleware
         # не создаёт пул (round-robin В1), исключая исчерпание free-list на GUI-only fan-out.

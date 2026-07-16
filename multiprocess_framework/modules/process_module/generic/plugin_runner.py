@@ -35,9 +35,9 @@ OFF по умолчанию (``os.environ`` не читается на hot path,
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Callable
 
+from ...config_module.feature_flags import resolve
 from ..plugins.port import validate_items_against_ports
 
 if TYPE_CHECKING:
@@ -111,11 +111,7 @@ class PluginRunner:
         self._pre_hooks: list[PreHook] = []
         self._post_hooks: list[PostHook] = []
         self._log_error = log_error or (lambda msg: None)
-        self._validate_ports = (
-            validate_ports
-            if validate_ports is not None
-            else os.environ.get("FW_PORT_VALIDATE", "") in ("1", "true", "True")
-        )
+        self._validate_ports = resolve("FW_PORT_VALIDATE", validate_ports)
 
     # ------------------------------------------------------------------ #
     #  Регистрация наблюдателей (Этап 5: io-debug publisher)              #

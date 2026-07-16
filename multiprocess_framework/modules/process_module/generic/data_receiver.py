@@ -52,9 +52,9 @@ class DataReceiver:
         # (return_messages=False), без пересборки Message.from_dict → to_dict() ниже.
         # Дефолт off = бит-в-бит прежнее (router рождает Message, guard to_dict его
         # разбирает). Откат = флаг off.
-        from multiprocess_framework.modules.config_module.tools.env import env_flag
+        from multiprocess_framework.modules.config_module.feature_flags import is_enabled
 
-        self._return_messages = not env_flag("FW_DATA_PLANE_DICTS")
+        self._return_messages = not is_enabled("FW_DATA_PLANE_DICTS")
         # Имя процесса-узла — для frame-trace transport-спана (from -> node).
         self._node = node_name
         self._shm = shm_middleware

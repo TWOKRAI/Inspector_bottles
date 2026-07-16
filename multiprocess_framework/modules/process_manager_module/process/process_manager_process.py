@@ -9,11 +9,11 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
-import os
 import threading
 import time
 from typing import Any
 
+from ...config_module.feature_flags import is_enabled
 from ...console_module import ConsoleManager
 from ...process_module import ProcessModule
 from ...shared_resources_module import QueueRegistry
@@ -118,13 +118,7 @@ class ProcessManagerProcess(ProcessModule):
         if isinstance(restart_cfg, dict):
             restart_policy = RestartPolicy(**restart_cfg)
         else:
-            _autorestart_on = os.environ.get("FW_AUTORESTART", "1").strip().lower() not in (
-                "0",
-                "false",
-                "no",
-                "off",
-                "",
-            )
+            _autorestart_on = is_enabled("FW_AUTORESTART")
             restart_policy = RestartPolicy(enabled=_autorestart_on)
 
         self._process_monitor = ProcessMonitor(
@@ -169,6 +163,30 @@ class ProcessManagerProcess(ProcessModule):
             managers={"logger": logger} if logger else {},
         )
 
+    def _log_active_feature_flags(self) -> None:
+        """Boot-лог активных ``FW_*``-маркеров движка (наблюдаемость, раз на старте).
+
+        Единая точка: оркестратор пишет в штатный LoggerManager, какие маркеры
+        отклонены от дефолта (и откуда — env/alias), чтобы активная конфигурация
+        dark-launch была видна в логах и сводилась в мониторинг. Advisory
+        requires-нарушения (напр. zero-copy без handle-cache) — WARNING; жёсткое
+        enforcement остаётся у владельца ресурса. НЕ на hot-path, boot не роняет.
+        """
+        try:
+            from ...config_module.feature_flags import list_flags, validate
+
+            states = list_flags()
+            active = [s for s in states if s.value != s.default]
+            if active:
+                summary = ", ".join(f"{s.name}={s.value}({s.source})" for s in active)
+                self._log_info(f"FW_*-маркеры (не дефолт): {summary}")
+            else:
+                self._log_info("FW_*-маркеры: все на дефолте")
+            for problem in validate({s.name: s.value for s in states}):
+                self._log_warning(f"FW_*-маркер: {problem}")
+        except Exception as exc:  # noqa: BLE001 — наблюдаемость не должна ронять boot
+            self._log_error(f"feature_flags boot-log: {exc}")
+
     def initialize(self) -> bool:
         """Инициализация: ProcessModule + создание процессов из config + запуск монитора."""
         try:
@@ -186,6 +204,7 @@ class ProcessManagerProcess(ProcessModule):
             self._setup_topology_manager()
             self._setup_state_store()
             self._register_builtin_commands()
+            self._log_active_feature_flags()
 
             processes_config = self.get_config("processes_config") or {}
             if isinstance(processes_config, dict) and processes_config:
@@ -1135,7 +1154,7 @@ class ProcessManagerProcess(ProcessModule):
         cfg = self.get_config("routing_refresh_enabled") if hasattr(self, "get_config") else None
         if cfg is False:
             return False
-        if os.environ.get("FW_ROUTING_REFRESH", "1") == "0":
+        if not is_enabled("FW_ROUTING_REFRESH"):
             return False
         return True
 

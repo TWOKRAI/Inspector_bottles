@@ -1005,9 +1005,9 @@ class BuiltinCommands:
         # Ф7 — честить его БЕЗУСЛОВНО = менять глубину 3→4 на merge (не откат бит-в-бит).
         # Поэтому config-глубину применяем ТОЛЬКО при флаге; off → None → middleware даёт
         # 3 (прежнее поведение, buffer_slots игнорируется как до Ф7).
-        from multiprocess_framework.modules.config_module.tools.env import env_flag
+        from multiprocess_framework.modules.config_module.feature_flags import is_enabled
 
-        buffer_slots = kwargs.get("buffer_slots") if env_flag("FW_QOS_PROFILES") else None
+        buffer_slots = kwargs.get("buffer_slots") if is_enabled("FW_QOS_PROFILES") else None
 
         if not wire_key or not role:
             return {"success": False, "reason": "wire_key и role обязательны"}
@@ -1424,8 +1424,10 @@ class BuiltinCommands:
 
         inc_stat = getattr(router, "_inc_stat", None)
 
+        from ...config_module.feature_flags import is_enabled
+
         # --- Fencing-token (FW_FENCE, дефолт ON) ---
-        fence_on = os.environ.get("FW_FENCE", "1").strip().lower() not in ("0", "false", "no", "off", "")
+        fence_on = is_enabled("FW_FENCE")
         if fence_on:
             from ...message_module import (
                 make_fence_filter_middleware,
@@ -1455,7 +1457,7 @@ class BuiltinCommands:
         # --- Контракт-мидлвар (warn по умолчанию; strict за флагом) ---
         from ...message_module import make_contract_check_middleware
 
-        strict = os.environ.get("FW_CONTRACTS_STRICT", "").strip().lower() in ("1", "true", "yes", "on")
+        strict = is_enabled("FW_CONTRACTS_STRICT")
 
         def _on_violation(check, _inc=inc_stat, _svc=svc, _strict=strict):
             if callable(_inc):

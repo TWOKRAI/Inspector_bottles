@@ -62,6 +62,10 @@ dev = [
     "bandit>=1.9", # security scanning (OWASP basics)
     "pre-commit>=4.6.0",
     "qt-mcp",
+    "grimp>=3.15",
+    "import-linter>=2.13",
+    "libcst>=1.8.6",
+    "pydeps>=3.0.6",
 ]
 diagrams = [
     "pylint>=3.3",      # pyreverse для UML-диаграмм классов
@@ -112,6 +116,10 @@ testpaths = [
     "multiprocess_framework/modules/state_store_module/tests",
     "multiprocess_prototype/tests",
     "multiprocess_prototype/state_store/tests",
+    # Ф7 G.7 (0.4): характеризация сборки прод-рецептов (build_characterization +
+    # run_app_prototype). Headless, без железа. В дефолтном гейте — чтобы RED на
+    # прод-рецептах больше НЕ гнил молча (был красным на main после merge G.3/G.4).
+    "multiprocess_prototype/backend/tests",
 ]
 norecursedirs = [".git", "__pycache__", ".venv"]
 python_files = ["test_*.py"]

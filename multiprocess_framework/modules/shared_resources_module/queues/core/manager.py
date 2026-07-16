@@ -84,12 +84,12 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
 
     @staticmethod
     def _resolve_env_flag(explicit: Optional[bool], env_name: str) -> bool:
-        """Разрешить булев флаг Ф7 G.4 (ADR-SRM-012): ctor (не None) > env > False."""
-        if explicit is not None:
-            return bool(explicit)
-        from ....config_module.tools.env import env_flag
+        """Разрешить булев флаг Ф7 G.4 (ADR-SRM-012): ctor (не None) > env > default.
 
-        return env_flag(env_name, default=False)
+        Default теперь берётся из реестра feature_flags."""
+        from ....config_module.feature_flags import resolve
+
+        return resolve(env_name, explicit)
 
     # =========================================================================
     # Жизненный цикл

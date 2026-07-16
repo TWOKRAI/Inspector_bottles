@@ -164,3 +164,260 @@ ZERO_COPY+QOS_PROFILES+GC_FREEZE on):
 прогнал 328/330 кадров без сбоя → single-writer guard/резерв/abort (H-ремедиация) работают вживую.
 **Открыто для полной G.7:** длинный soak, оба реальных рецепта, `num_consumers` из топологии,
 E2E release/incarnation-guard/реальный kill-9, регресс backend_ctl, аллокации/кадр (`AllocProfiler`).
+
+## Ф7 G.7 — ШАГ 0: baseline all-off (Windows, tier синтетика, 2026-07-15)
+
+**Референс «до» всей флип-лесенки (0.6).** `BACKEND_CTL=1 FW_PERF_PROBES=1 python -m
+backend_ctl.g1_perf_probe 10`, окружение с ЯВНО очищенными `FW_*` (все флаги движка off,
+`MULTIPROCESS_USE_KIND_CHANNELS` снят) — единственная включённая проба = perf-пробы (одинаковый
+overhead с treatment ⇒ честные дельты). Один 10-с прогон, машина — **Windows** (эта, RTX 3050;
+не macOS-G.1). Рецепт `g1_perf_probe.yaml` (synthetic_source→consumer, 1 граница IPC/кадр,
+кадр 640×480×3). Каждый шаг лесенки 1-10 включается ПОВЕРХ этого all-off и сравнивается СЮДА
+(same-tier same-platform — с macOS-числами выше НЕ сравнивать).
+
+| Метрика | Значение (all-off, Windows) |
+|---|---|
+| **source FPS** | **21.35** (цель 30; Windows sleep-пейсинг ~15.6 мс квант — см. план §5(в), источник sleep-driven) |
+| **consumer FPS** | **21.39** (паритет с источником — дропов нет) |
+| границ процесса на кадр | **1.004** (249/248 — единственный IPC-хоп source→consumer) |
+| кадров произведено / принято (10с) | 248 / 249 |
+| capture p50 / p99 (мс) | 0.210 / 0.501 |
+| send p50 / p99 (мс) — SHM write + IPC send | 0.430 / 1.219 |
+| receive p50 / p99 (мс) — to_dict-десериализация | 0.066 / 0.146 |
+| **restore** p50 / p99 (мс) — SHM read (`.copy()`) | **0.789 / 1.382** |
+
+**Допуски лесенки к этой строке** (план §0): FPS ≥ 21.35 − 2% (≈ 20.9); restore/цикл p99 ≤
+baseline + 5%; `state.shm.*` (torn/stale_drops/loan_exhausted/pickle_fallbacks/queue_data_evicted)
+= 0 или объяснимы; `slots_released` РАСТЁТ при активном loan; **`cache_size` (0.5) стабилен на
+инкарнацию** (рост под zero-copy = утечка handle). Шаг не прошёл → флаг off бит-в-бит, находка в план.
+
+**Tier'ы вебкамера/Hikvision — hardware-gated** (per-шаг гоняются по мере железа, сравнение
+только same-tier; см. Ф0.4). Эта строка — синтетический референс шага 0 на Windows.
+
+## Ф7 G.7 — ШАГ 1: `FW_DATA_PLANE_DICTS` on (Windows, tier синтетика, 2026-07-16)
+
+**Флип шага 1 лесенки** (только этот флаг, всё остальное off) — та же команда, что ШАГ 0
+(`BACKEND_CTL=1 FW_PERF_PROBES=1 [FW_DATA_PLANE_DICTS=1] python -m backend_ctl.g1_perf_probe 12`),
+та же машина (Windows, RTX 3050), рецепт `g1_perf_probe.yaml`. Для честной дельты в ЭТОЙ же
+сессии снят свежий control (all-off) — машинный дрейф вчера↔сегодня исключён (FPS control
+сегодня 21.35 = ШАГ 0 вчера 21.35). Один 12-с прогон на конфигурацию (методология шага 0).
+
+| Метрика | Control all-off (сегодня) | `FW_DATA_PLANE_DICTS=1` | Δ |
+|---|---|---|---|
+| source / consumer FPS | 21.35 / 21.35 | 21.32 / 21.32 | ≈ (−0.14%; упор в источник ~21, gate «FPS ≥ 20.9» ✓) |
+| **receive** p50 / p99 (мс) — to_dict-десериализация | 0.035 / 0.123 | **0.001 / 0.001** | **−97% / −99%** — структурный: флаг снял пересборку Message на consumer'е |
+| restore p50 / p99 (мс) — SHM read `.copy()` | 0.403 / 1.169 | 0.398 / 0.584 | p99 −50% (частью run-to-run, частью меньше per-frame мусора) |
+| capture p50 / p99 (мс) — источник | 0.123 / 0.411 | 0.116 / 0.217 | source-side, Windows run-to-run (флаг не на источнике) |
+| send p50 / p99 (мс) — источник | 0.236 / 1.438 | 0.227 / 0.442 | source-side, Windows run-to-run |
+| границ процесса на кадр | 1.007 | 1.007 | = (единственный IPC-хоп) |
+| кадров произв. / принято (12с) | 288 / 289 | 287 / 289 | паритет, дропов нет |
+
+**Атрибутируемый эффект флага** — коллапс стадии `receive` (0.123 → 0.001 мс p99): это ровно
+та `Message.from_dict → to_dict`-пересборка, которую снимает `return_messages=False` в
+`DataReceiver` (G.5.a). Структурный (работа физически убрана), не шум — подтверждено паритетом
+FPS/границ. Стадии источника (capture/send) и restore несут Windows run-to-run-разброс
+(sleep-пейсинг ~15.6 мс квант, один прогон) — флагу их НЕ приписываю, направление благоприятное.
+
+**Gate шага 1 (план §0):** FPS 21.32 ≥ 20.9 ✓; receive/restore p99 ≤ baseline+5% ✓ (обе ↓);
+`state.shm.*` (torn/stale_drops/loan_exhausted/pickle_fallbacks/queue_data_evicted) неприменимы —
+seqlock/loan/zero-copy ЭТОГО шага off, дропов нет (паритет кадров). **ШАГ 1 ПРОЙДЕН.**
+Откат — `FW_DATA_PLANE_DICTS=0` (бит-в-бит control выше). Tier'ы вебкамера/Hikvision — по железу.
+
+## Ф7 G.7 — ШАГИ 2-4: SHM-ядро seqlock→owner_incarnation→handle_cache (Windows, синтетика, 2026-07-16)
+
+Кумулятивно (каждый шаг = все предыдущие флаги + новый), тот же `g1_perf_probe 12`, свежий
+same-session control. Счётчики потерь SHM — из расширенного пробника (блок `shm_counters`,
+коммит `063cf7ed`): пробник печатал только FPS+p50/p99, теперь тянет `frame_*`/`queue_*` из
+`RouterManager.get_stats` обоих концов. Один прогон на конфигурацию (методология шага 0).
+
+| Метрика | Control all-off | ШАГ2 +SEQLOCK | ШАГ3 +OWNER_INC | ШАГ4 +HANDLE_CACHE |
+|---|---|---|---|---|
+| source / consumer FPS | 21.34 / 21.36 | 21.34 / 21.34 | 21.38 / 21.42 | 21.32 / 21.29 |
+| receive p50 / p99 (мс) | 0.046 / 0.10 | 0.001 / 0.005 | 0.001 / 0.013 | 0.001 / 0.004 |
+| **restore** p50 / p99 (мс) — SHM read | 0.503 / 1.39 | 0.484 / 1.64 | 0.467 / 1.64 | **0.136 / 0.43** |
+| capture p50 / p99 (мс) — источник | 0.134 / 0.48 | 0.151 / 0.45 | 0.150 / 0.57 | 0.141 / 0.50 |
+| границ процесса на кадр | 1.007 | 1.007 | 1.003 | 1.007 |
+| кадров произв. / принято | 289 / 291 | 289 / 290 | 290 / 291 | 288 / 289 |
+| `frame_torn_reads` (consumer) | — | **0** | **0** | **0** |
+| `frame_handle_cache_size` | 0 | 0 | 0 | **3 (= глубина кольца, стабилен)** |
+| прочие `state.shm.*` (stale/loan/pickle/evicted) | 0 | 0 | 0 | 0 |
+
+**ШАГ 2 `FW_SHM_SEQLOCK`** — формат слота +8 байт (generation parity). `frame_torn_reads` появился
+как ЖИВАЯ метрика и = 0 в спокойном режиме (torn-защита работает, кадры целы). Перф-нейтрален
+(restore ≈ control в пределах Windows-разброса; выигрыш receive несёт шаг 1). Gate: FPS ✓, torn=0 ✓,
+дропов нет. **ПРОЙДЕН.** Откат `FW_SHM_SEQLOCK=0`.
+
+**ШАГ 3 `FW_SHM_OWNER_INCARNATION`** — имена сегментов `{slot}_{owner}_{pid}_{inc}`. Перф-нейтрален
+(наименование, не hot-path): FPS/restore/границы ≈ control, torn=0. **Incarnation-guard E2E**
+(рестарт `camera_0` → читатели следуют за новым именем, без замороженного кадра) — **резидуал Фазы 2**:
+минимальный 2-проц синтетический тракт рестарт писателя не гоняет. Gate перф ✓. **ПРОЙДЕН** (перф-часть).
+Откат `FW_SHM_OWNER_INCARNATION=0`.
+
+**ШАГ 4 `FW_SHM_HANDLE_CACHE`** — снятие open/mmap/close на кадр при cross-process чтении:
+**restore p50/p99 0.503/1.39 → 0.136/0.43 мс (−73% / −69%)** — структурный (mmap-handle reader'а
+переиспользуется, не открывается на кадр). `frame_handle_cache_size = 3` = глубина кольца,
+**стабилен** (роста на инкарнацию нет → утечки handle нет; резидуал G.5 закрыт этой метрикой).
+`pickle_fallbacks`/`torn` = 0 (close_errors в набор не входит, но фолбэков/ошибок нет). Gate: FPS ✓,
+restore p99 −69% ✓, cache_size стабилен ✓. **ПРОЙДЕН.** Откат `FW_SHM_HANDLE_CACHE=0`.
+
+## Ф7 G.7 — ШАГИ 5-7: QoS → zero-copy → loan (Windows, синтетика, 2026-07-16)
+
+Кумулятивно поверх шага 4 (SHM-ядро on). Тот же `g1_perf_probe 12`, свежий same-session control.
+
+| Метрика | Control all-off | ШАГ5 +QOS | ШАГ6 +ZERO_COPY | ШАГ7 +LOAN |
+|---|---|---|---|---|
+| source / consumer FPS | 21.37 / 21.36 | 21.30 / 21.33 | 21.32 / 21.32 | 21.32 / 21.36 |
+| receive p50 / p99 (мс) | 0.037 / 0.19 | 0.001 / 0.004 | 0.001 / 0.004 | 0.001 / 0.004 |
+| **restore** p50 / p99 (мс) — SHM read | 0.438 / 1.386 | 0.139 / 0.408 | **0.049 / 0.163** | 0.052 / 0.178 |
+| capture p50 / p99 (мс) — источник | 0.138 / 0.546 | 0.133 / 0.488 | 0.130 / 0.544 | 0.138 / 0.542 |
+| границ процесса на кадр | 1.007 | 1.007 | 1.007 | 1.007 |
+| кадров произв. / принято | 288 / 290 | 288 / 289 | 287 / 289 | 288 / 290 |
+| `frame_handle_cache_size` | 0 | **4 (кольцо 3→4)** | 4 | 4 |
+| `frame_slots_released` (source) | — | 0 | 0 | **288 (растёт)** |
+| `queue_data_evicted` / `stale_drops` / `loan_exhausted` | 0 | 0 | 0 | 0 |
+
+**ШАГ 5 `FW_QOS_PROFILES`** — QoS-профили kind + боевые кольца per-camera. Глубина кольца 3→4
+подтверждена через `frame_handle_cache_size` = **4** (reader кэширует 4 слота вместо 3). Data-очереди
+drop_oldest со счётчиком `queue_data_evicted` = 0 (спокойный синтетик, overload'а нет — очередь не
+переполнялась); `queue_system_evict_blocked` = 0 (system никогда молча). Перф ≈ шаг 4. Gate ✓. **ПРОЙДЕН.**
+Откат `FW_QOS_PROFILES=0`.
+
+**ШАГ 6 `FW_SHM_ZERO_COPY`** — view вместо копии на data-plane: **restore p50/p99 0.438/1.386 →
+0.049/0.163 мс (−89% / −88%)** — крупнейший структурный выигрыш лесенки (физически снят memcpy чтения;
+согласуется с ранним macOS-peek 0.59→0.088). `frame_stale_drops` = **0** в спокойном режиме (consumer
+не отстаёт > глубины кольца; GUI остаётся copy-out — в синтетическом тракте GUI нет). Gate: FPS ✓,
+restore p99 −88% ✓, stale_drops=0 ✓. **ПРОЙДЕН.** Откат `FW_SHM_ZERO_COPY=0`.
+
+**ШАГ 7 `FW_SHM_LOAN_PROTOCOL`** — owner-mediated loan/release слотов. `frame_slots_released` = **288**
+(≈ кадров произведено) — **release-контур замкнут** (урок ревью G.5: слоты возвращаются, а не текут);
+`frame_loan_exhausted` = **0** (free-list не голодает, num_consumers из топологии). restore ≈ шаг 6
+(acquire/commit/release — доли мкс). **Реальный kill-9 читателя** (reclaim, `slots_reclaimed`>0) —
+**резидуал Фазы 2** (сценарий 2.1). Gate: FPS ✓, slots_released растёт ✓, loan_exhausted=0 ✓. **ПРОЙДЕН.**
+Откат `FW_SHM_LOAN_PROTOCOL=0`.
+
+**Итог SHM-тракта (шаги 1→7):** restore p99 ~1.4 → **0.16 мс (≈8.5×)**, receive p99 ~0.15 → 0.004 мс;
+все `state.shm.*` потери = 0 или объяснимы; FPS упёрт в источник ~21 (Windows sleep-пейсинг), не в
+data-plane. Осталось: доставка (шаг 8) + GC (шаги 9-10).
+
+## Ф7 G.7 — ШАГИ 8-10: доставка (kind-каналы) + GC (freeze/scheduled) (Windows, синтетика, 2026-07-16)
+
+Кумулятивно поверх шага 7 (весь SHM-тракт on). Тот же `g1_perf_probe 12`, свежий same-session control.
+
+| Метрика | Control all-off | ШАГ8 +KIND | ШАГ9 +GC_FREEZE (полный набор) | ШАГ10 +GC_SCHEDULED |
+|---|---|---|---|---|
+| source / consumer FPS | 21.32 / 21.31 | 21.31 / 21.30 | 21.34 / 21.34 | 21.34 / 21.35 |
+| receive p50 / p99 (мс) | 0.045 / 0.167 | 0.001 / 0.013 | 0.001 / 0.004 | 0.001 / 0.003 |
+| restore p50 / p99 (мс) | 0.503 / **33.746** ¹ | 0.047 / 0.219 | 0.050 / 0.207 | 0.051 / 0.163 |
+| границ процесса на кадр | 1.007 | 1.007 | 1.007 | 1.007 |
+| `frame_handle_cache_size` | 0 | 4 | 4 | 4 |
+| `frame_slots_released` (source) | — | 288 | 288 | 288 |
+| `frame_loan_exhausted` | 0 | 0 (1-й прогон 4, см. ²) | 0 | 0 |
+
+¹ Control restore p99 **33.7 мс** — ОДИНОЧНЫЙ выброс на all-off copy-пути (GC-пауза / планировщик
+  Windows во время memcpy); p50 0.503 нормальный. Именно этот класс хвостов бьют zero-copy + GC-флаги
+  (treatment restore p99 ~0.2 мс). Иллюстрация цены copy+GC, не типичное control-число.
+
+² ШАГ 8, 1-й 12-с прогон: `frame_loan_exhausted=4` (≈1.4% кадров) — транзиентный лаг consumer'а →
+  free-list на миг исчерпан → back-pressure drop-на-источнике (камера НЕ блокнута, порчи нет). **Два
+  повторных прогона → 0** (restore p99 0.08/0.09) ⇒ джиттер одного окна, не регресс kind-каналов.
+
+**ШАГ 8 `FW_USE_KIND_CHANNELS`** (alias `MULTIPROCESS_USE_KIND_CHANNELS`) — kind-каналы доставки (G.2).
+**Регресс «socket backend_ctl жив» ✓** — пробник получил статы по сокету 8766 во ВСЕХ прогонах (канал
+цел). Перф-нейтрален (restore/FPS ≈ шаг 7). `loan_exhausted` — транзиент (см. ²). Аудит opt-out'ов
+`manages_own_reply` (S5-остаток) — **резидуал** (код-аудит, не замер). Gate ✓. **ПРОЙДЕН.** Откат `=0`.
+
+**ШАГ 9 `FW_GC_FREEZE`** — полный набор флагов движка on. `gc.freeze()` после старта: startup-объекты
+в permanent-поколение, сборщик их не сканирует → короче каждая пауза. Перф-нейтрален-к-положительному:
+FPS 21.34 (=), restore p99 0.207 стабилен (без control-выброса 33.7). RSS-тренд/аллокации пробником НЕ
+снимаются — нужен длинный soak Фазы 3 + `AllocProfiler` (закрывает acceptance G.9). Gate: FPS ✓,
+счётчики чисты, p99-спайков нет. **ПРОЙДЕН.** Откат `FW_GC_FREEZE=0`.
+
+**ШАГ 10 `FW_GC_SCHEDULED`** — **measurement-gated (дизайн G.9): включать ТОЛЬКО если после шага 9
+остались p99-выбросы от GC.** После gc_freeze (шаг 9) restore/capture p99 тугие, GC-выбросов НЕТ →
+**условие активации не выполнено на синтетике**. Тестовый прогон с флагом on регресса не дал (restore
+p99 0.163, счётчики чисты), но **флаг оставлен OFF** — решение переносится на длинный soak Фазы 3 (там
+видна GC-динамика на часах, RSS-тренд). **НЕ АКТИВИРОВАН по своему гейту** (не «провален»).
+
+**Итог лесенки (шаги 1→9 активны, 10 — measurement-gated OFF):** на синтетике/Windows полный набор
+флагов движка даёт restore p99 **~1.4 → 0.2 мс** при FPS без регресса (упор в источник ~21), все
+`state.shm.*` = 0 или объяснимы, socket backend_ctl жив, release-контур loan замкнут (`slots_released`
+растёт), утечки handle нет (`cache_size` стабилен). **Резидуалы Фазы 2** (E2E на нагрузке): incarnation-
+guard (рестарт писателя), реальный kill-9 читателя (`slots_reclaimed`), медленный потребитель, switch
+под нагрузкой. **Фаза 3**: длинный soak обоих ЖИВЫХ рецептов (phone_sketch + hikvision) + AllocProfiler
++ флип дефолтов в реестре G.F. Tier'ы вебкамера/Hikvision — по железу (синтетика — same-tier референс).
+
+## Ф7 G.7 — Фаза 2: fault-инъекции на полном наборе флагов (Windows, синтетика, 2026-07-16)
+
+Полный набор флагов движка on (шаги 1-9), `backend_ctl.g7_fault_probe` (boot g1_perf_probe через
+BackendHarness → warmup 3с → `kill_child` → 5с наблюдения → снимок `state.shm.*` до/после). Реальный
+SIGKILL через кросс-платформенный hard-kill харнесса (коммит `7d91f95f`: Windows psutil TerminateProcess).
+
+### 2.1 — kill-9 читателя (`consumer`) под нагрузкой
+
+| Наблюдение | Значение | Вердикт |
+|---|---|---|
+| source FPS до → после kill | 21.34 → 21.32 | источник НЕ блокирован смертью читателя ✓ |
+| `frame_slots_reclaimed` (source) | 0 → **3** | **reclaim сработал** (supervisor confirmed-death → shm_reclaim → owner) ✓ |
+| `consumer` статус после | **running** | **авто-рестарт** поднял читателя (FW_AUTORESTART) ✓ |
+| `frame_loan_exhausted` (source) | 0 → **102** | back-pressure: drop-на-источнике в окне «смерть → reclaim+restart» |
+| torn / stale / pickle | 0 | порчи нет ✓ |
+
+Полный цикл живучести доказан вживую: **kill → reclaim (slots_reclaimed +3) → авто-рестарт →
+восстановление, источник ни разу не заблокирован.** `loan_exhausted +102` = штатная back-pressure
+(§4 2.4: «громкий drop-на-источнике, камера НЕ блокируется») в ~2с-окне между смертью ЕДИНСТВЕННОГО
+читателя и его рестартом; на мульти-consumer прод-тракте выжившие читатели держат поток. **ПРОЙДЕН**
+(реальный kill-9 читателя — резидуал закрыт).
+
+### 2.2 — kill-9 писателя (`synthetic_source`) посреди работы
+
+| Наблюдение | Значение | Вердикт |
+|---|---|---|
+| source статус после (счётчики сброшены: boundary 96→37) | **running** | писатель авто-рестартнут ✓ |
+| `consumer` статус после | **running** | читатель ПЕРЕЖИЛ смерть писателя ✓ |
+| `frame_torn_reads` (consumer) | 0 | торн-чтений не прошло (инвариант «слот не отравлен» держится) ✓ |
+| `frame_pickle_fallbacks` / crash | 0 / нет | порчи/падения нет ✓ |
+
+Писатель убит → авто-рестарт (новый процесс, свежие счётчики) → читатель выжил чисто, БЕЗ порчи.
+Seqlock активен; torn-счётчик НЕ сработал (kill не попал в mid-write слот, который читатель затем прочёл
+— timing-sensitive). Инвариант держится. **ПРОЙДЕН частично**: детерминированный seqlock-recovery
+(targeted write-hold + kill) — резидуал Фазы 3.
+
+### 2.5 — teardown-шум
+
+Наблюдён `[spawner] ProcessManager did not stop in 5.0s, terminating` при teardown — это ИЗВЕСТНЫЙ
+graceful-stop долг ([[project_graceful_stop_debt]]), **НЕ блокер G.7** (harness watchdog добивает дерево,
+процессы не виснут). Отдельная задача.
+
+### 2.3 / 2.4 — остаток Фазы 2 (dedicated-пробы отдельным заходом)
+
+- **2.3 switch рецепта под нагрузкой** — механизм hot-swap уже решён (Task 7, [[project_recipe_hotswap]],
+  двухфазная регистрация очередей `5cd23192`); dedicated fault-probe (wire re-issue, сегменты не текут)
+  требует switch-драйвера через backend_ctl — отдельный заход.
+- **2.4 медленный потребитель** — back-pressure loan (`loan_exhausted` растёт, камера не блокируется)
+  ЭМПИРИЧЕСКИ показан сценарием 2.1 (dead reader → drop-на-источнике, FPS ровный); dedicated slow-consumer
+  (контролируемая задержка + самовосстановление после снятия) требует delay-knob в `frame_counter`.
+
+## Ф7 G.7 — Фаза 3 (фундамент): мультикамера — две синтетические камеры (Windows, 2026-07-16)
+
+Идея владельца: Phase-3 tier = реальная вебкамера + синтетическая имитация второй камеры.
+`synthetic_frame_source` — готовая имитация (отдаёт `camera_id`/`seq_id`, `_FRAME_ID_MODULO=100_000`).
+Рецепт `dualcam_synth.yaml` (camera_0 id=0, camera_1 id=1 → раздельные consumer_0/1), полный набор
+флагов, `backend_ctl.g7_dualcam_probe 12`. Инвариант: FW_SHM_OWNER_INCARNATION разводит имена сегментов
+владельцев `{slot}_{owner}_{pid}_{inc}` → два кольца НЕ коллизируют.
+
+| Камера | source / consumer FPS | кадров произв./принято | `slots_released` | `loan_exhausted` | torn/stale/pickle | cache |
+|---|---|---|---|---|---|---|
+| camera_0 (id=0) | 21.36 / 21.31 | 298 / 296 | 292 | 4 (транзиент) | 0 | 4 |
+| camera_1 (id=1) | 21.32 / 21.32 | 297 / 293 | 288 | 5 (транзиент) | 0 | 4 |
+
+**Обе камеры текут ПАРАЛЛЕЛЬНО ~21fps каждая, полный набор флагов, БЕЗ коллизий и порчи** (torn/stale/
+pickle=0 на обеих) — `owner_incarnation` развёл SHM-сегменты двух владельцев, release-контур замкнут на
+обеих (`slots_released` растёт ~290). `loan_exhausted 4-5` — тот же транзиентный back-pressure, что на
+одиночных прогонах, не коллизия. **Мультикамерный SHM-инвариант подтверждён** (план §3: «мультикамера без
+owner_incarnation запрещена» — с ним чисто).
+
+**Остаток Фазы 3:** (а) camera_0 → реальная вебкамера — **рецепт готов** (`dualcam_webcam.yaml`:
+CapturePlugin device_id=0 + синтетич. camera_1); живой прогон с камерой запускает владелец; (б) длинный
+soak ≥ 2ч (overnight, решение владельца) + AllocProfiler + RSS-тренд; (в) **P2 Join-корреляция —
+ПОЧИНЕНО** (коммит `83d7d48a`: ключ `(camera_id, seq_id)`, +3 теста, fanin/30 + wiring/40 passed;
+резидуал §6 P2 закрыт); (г) флип дефолтов в реестре G.F. `plan.md` «G.7 ✅» — после длинного soak.

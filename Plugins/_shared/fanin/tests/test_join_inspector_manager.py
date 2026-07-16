@@ -129,3 +129,47 @@ class TestTTL:
         time.sleep(0.07)
         m.check_timeouts()
         assert m.pending_count == 0
+
+
+class TestP2CameraSeparation:
+    """Ф7 P2: ключ (camera_id, seq_id) разводит кадры двух камер с одинаковым seq_id.
+
+    seq_id уникален только В ПРЕДЕЛАХ камеры (per-camera счётчик) — без camera_id
+    кадры двух камер с совпавшим seq_id молча подменялись в буфере.
+    """
+
+    def test_frame_overlay_merge_with_camera_id(self):
+        """Одна камера: frame+overlay с camera_id → корреляция работает (нет регресса)."""
+        results = []
+        m = _mgr(results)
+        m.on_item({"data_type": "overlay", "seq_id": 7, "camera_id": 0, "overlay": [{"x": 1}]})
+        m.on_item({"data_type": "frame", "seq_id": 7, "camera_id": 0, "frame": "F"})
+        assert len(results) == 1
+        assert results[0][0]["frame"] == "F"
+        assert results[0][0]["overlay"] == [{"x": 1}]
+
+    def test_two_cameras_overlay_not_crossed(self):
+        """P2-баг: cam0.frame получает cam0.overlay, cam1.frame — cam1.overlay (не крест).
+
+        overlay обеих камер приходят первыми с ОДИНАКОВЫМ seq_id — раньше вторая
+        затирала первую в buffer[seq_id], и cam0.frame склеивался с cam1.overlay.
+        """
+        results = []
+        m = _mgr(results)
+        m.on_item({"data_type": "overlay", "seq_id": 3, "camera_id": 0, "overlay": [{"c": 0}]})
+        m.on_item({"data_type": "overlay", "seq_id": 3, "camera_id": 1, "overlay": [{"c": 1}]})
+        m.on_item({"data_type": "frame", "seq_id": 3, "camera_id": 0, "frame": "F0"})
+        m.on_item({"data_type": "frame", "seq_id": 3, "camera_id": 1, "frame": "F1"})
+        merged = {r[0]["camera_id"]: (r[0]["frame"], r[0].get("overlay")) for r in results}
+        assert merged[0] == ("F0", [{"c": 0}])
+        assert merged[1] == ("F1", [{"c": 1}])
+
+    def test_no_camera_id_backward_compat(self):
+        """Без camera_id (None) → прежнее поведение: frame+overlay по seq_id мёржатся."""
+        results = []
+        m = _mgr(results)
+        m.on_item({"data_type": "overlay", "seq_id": 9, "overlay": [{"z": 1}]})
+        m.on_item({"data_type": "frame", "seq_id": 9, "frame": "F"})
+        assert len(results) == 1
+        assert results[0][0]["frame"] == "F"
+        assert results[0][0]["overlay"] == [{"z": 1}]

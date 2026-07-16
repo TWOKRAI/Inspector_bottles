@@ -151,9 +151,9 @@ class SystemLauncher:
         except Exception:
             pass
         try:
-            from ...config_module.tools.env import env_flag
+            from ...config_module.feature_flags import is_enabled
 
-            if env_flag("FW_SHM_PREFIX_CLEANUP", default=False):
+            if is_enabled("FW_SHM_PREFIX_CLEANUP"):
                 from ...shared_resources_module.buffers import cleanup_orphaned_by_prefix
 
                 # M8a: базовые имена config-объявленных memory-регионов ТОЖЕ годятся как

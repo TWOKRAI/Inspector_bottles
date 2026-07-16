@@ -18,12 +18,13 @@ bool-чек. Тесты могут переопределить: ``perf_probes._
 
 from __future__ import annotations
 
-import os
 import time
 from collections import deque
 from typing import Any
 
-_ENABLED = os.environ.get("FW_PERF_PROBES", "").strip().lower() in ("1", "true", "yes")
+from ...config_module.feature_flags import is_enabled
+
+_ENABLED = is_enabled("FW_PERF_PROBES")
 
 #: Сколько последних замеров держим на этап — компромисс память/точность p99.
 _WINDOW = 200

@@ -234,6 +234,11 @@ class ProcessHeartbeat:
             # release-контур не замкнут (ревью поймало именно это через отсутствие сигнала).
             slots_released = int(rs.get("frame_slots_released", 0) or 0)
             slots_reclaimed = int(rs.get("frame_slots_reclaimed", 0) or 0)
+            # Ф7 G.7 (0.5): размер reader-кэша SHM-handle. НЕ потеря, а health-сигнал:
+            # под zero-copy эвикция отключена → рост на инкарнацию = утечка handle
+            # (резидуал G.5). Без handle-кэша (флаг off) = 0 → guard ниже сохраняет
+            # прежний no-op (off = бит-в-бит).
+            cache_size = int(rs.get("frame_handle_cache_size", 0) or 0)
             if (
                 pickle_fallbacks == 0
                 and torn == 0
@@ -244,6 +249,7 @@ class ProcessHeartbeat:
                 and loan_exhausted == 0
                 and slots_released == 0
                 and slots_reclaimed == 0
+                and cache_size == 0
             ):
                 return  # нет кадрового пути / всё чисто — не публикуем
             proxy.merge(
@@ -258,6 +264,7 @@ class ProcessHeartbeat:
                     "loan_exhausted": loan_exhausted,
                     "slots_released": slots_released,
                     "slots_reclaimed": slots_reclaimed,
+                    "cache_size": cache_size,
                 },
             )
         except Exception as exc:  # noqa: BLE001 — телеметрия не критична для такта HB

@@ -38,9 +38,9 @@ class GcDiscipline:
 
     @staticmethod
     def _flag(name: str) -> bool:
-        from ...config_module.tools.env import env_flag
+        from ...config_module.feature_flags import is_enabled
 
-        return env_flag(name)
+        return is_enabled(name)
 
     def freeze_after_startup(self) -> bool:
         """``gc.freeze()`` после старта воркеров (``FW_GC_FREEZE``). Идемпотентно.

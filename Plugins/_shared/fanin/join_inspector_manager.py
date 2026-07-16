@@ -1,4 +1,4 @@
-"""JoinInspectorManager — корреляция N именованных входов по seq_id.
+"""JoinInspectorManager — корреляция N именованных входов по (camera_id, seq_id).
 
 Обобщение InspectorManager (region fan-in) на generic multi-input join:
 вместо count-trigger (total_regions) ждёт НАБОР именованных входов по `data_type`
@@ -28,7 +28,7 @@ from typing import Callable, Iterable
 
 
 class JoinInspectorManager:
-    """Корреляция именованных входов (по data_type) по ключу seq_id.
+    """Корреляция именованных входов (по data_type) по ключу (camera_id, seq_id).
 
     Args:
         required_inputs: имена входов (значения data_type), напр. {"frame", "overlay"}.
@@ -62,10 +62,11 @@ class JoinInspectorManager:
         self._log_error = log_error or (lambda msg: None)
         self._log_debug = log_debug or (lambda msg: None)
 
-        # Буфер: {seq_id: {data_type: item}}
-        self._buffer: dict[int, dict[str, dict]] = {}
-        # Время первого item набора: {seq_id: monotonic}
-        self._timestamps: dict[int, float] = {}
+        # Буфер: {(camera_id, seq_id): {data_type: item}} — camera_id в ключе разводит
+        # кадры разных камер с одинаковым seq_id (Ф7 P2), см. on_item.
+        self._buffer: dict[tuple, dict[str, dict]] = {}
+        # Время первого item набора: {(camera_id, seq_id): monotonic}
+        self._timestamps: dict[tuple, float] = {}
         # Последняя активность входа: {data_type: monotonic}
         self._last_seen: dict[str, float] = {}
 
@@ -118,25 +119,29 @@ class JoinInspectorManager:
             self._on_ready([item])
             return
 
+        # Ф7 P2: ключ корреляции = (camera_id, seq_id). seq_id уникален только В ПРЕДЕЛАХ
+        # камеры (per-camera счётчик с modulo) — без camera_id кадры двух камер с одинаковым
+        # seq_id молча подменяют друг друга в буфере (cam0.frame склеивался с cam1.overlay).
+        # camera_id обычно есть: source-плагины ставят его, overlay-плагины переносят
+        # (см. line_filter). camera_id=None (одна камера / нет тега) → прежнее поведение.
+        key = (item.get("camera_id"), seq_id)
         now = time.monotonic()
         ready: dict | None = None
         with self._lock:
             self._last_seen[data_type] = now
-            if seq_id not in self._buffer:
-                self._buffer[seq_id] = {}
-                self._timestamps[seq_id] = now
-            if data_type in self._buffer[seq_id]:
-                self._log_debug(
-                    f"JoinInspectorManager: дубликат data_type='{data_type}' для seq_id={seq_id}, перезапись"
-                )
-            self._buffer[seq_id][data_type] = item
+            if key not in self._buffer:
+                self._buffer[key] = {}
+                self._timestamps[key] = now
+            if data_type in self._buffer[key]:
+                self._log_debug(f"JoinInspectorManager: дубликат data_type='{data_type}' для {key}, перезапись")
+            self._buffer[key][data_type] = item
 
             eff = self._effective_required(now)
-            if eff.issubset(set(self._buffer[seq_id].keys())):
-                ready = self._merge(self._buffer[seq_id])
+            if eff.issubset(set(self._buffer[key].keys())):
+                ready = self._merge(self._buffer[key])
                 self._merge_count += 1
-                self._buffer.pop(seq_id, None)
-                self._timestamps.pop(seq_id, None)
+                self._buffer.pop(key, None)
+                self._timestamps.pop(key, None)
 
         if ready is not None:
             self._on_ready([ready])
@@ -146,26 +151,24 @@ class JoinInspectorManager:
         now = time.monotonic()
         emit: list[dict] = []
         with self._lock:
-            for seq_id in list(self._timestamps.keys()):
-                elapsed = now - self._timestamps[seq_id]
+            for key in list(self._timestamps.keys()):
+                elapsed = now - self._timestamps[key]
                 if elapsed <= self._timeout_sec:
                     continue
-                by_type = self._buffer.get(seq_id, {})
+                by_type = self._buffer.get(key, {})
                 if self._primary in by_type:
                     # Left-join: primary есть — эмитим, что собрано (без second-входов).
                     emit.append(self._merge(by_type))
-                    self._log_debug(
-                        f"JoinInspectorManager: left-join flush seq_id={seq_id}, got={sorted(by_type.keys())}"
-                    )
+                    self._log_debug(f"JoinInspectorManager: left-join flush {key}, got={sorted(by_type.keys())}")
                 else:
                     # Нет primary — рисовать не на чем, дроп.
                     self._drop_count += 1
                     self._log_debug(
-                        f"JoinInspectorManager: drop seq_id={seq_id} (нет primary "
+                        f"JoinInspectorManager: drop {key} (нет primary "
                         f"'{self._primary}', got={sorted(by_type.keys())})"
                     )
-                self._buffer.pop(seq_id, None)
-                self._timestamps.pop(seq_id, None)
+                self._buffer.pop(key, None)
+                self._timestamps.pop(key, None)
 
         for merged in emit:
             self._on_ready([merged])

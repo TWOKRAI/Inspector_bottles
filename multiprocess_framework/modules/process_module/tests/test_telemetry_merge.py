@@ -169,7 +169,34 @@ class TestH8RouterShmStatsPublish:
             "loan_exhausted": 0,
             "slots_released": 0,
             "slots_reclaimed": 0,
+            # Ф7 G.7 (0.5): размер reader-кэша SHM-handle (health-сигнал утечки).
+            "cache_size": 0,
         }
+
+    def test_publishes_when_only_cache_size_nonzero(self) -> None:
+        """Ф7 G.7 (0.5): размер handle-кэша публикуется даже при нулевых потерях —
+        это health-сигнал (рост на инкарнацию = утечка handle под zero-copy), gate
+        включает cache_size. Без handle-кэша (флаг off) cache_size=0 → прежний no-op."""
+        proxy = _CountingProxy()
+        router = _FakeRouter(
+            {
+                "frame_pickle_fallbacks": 0,
+                "frame_torn_reads": 0,
+                "frame_boundary_crossings": 0,
+                "queue_data_evicted": 0,
+                "queue_system_evict_blocked": 0,
+                "frame_stale_drops": 0,
+                "frame_loan_exhausted": 0,
+                "frame_slots_released": 0,
+                "frame_slots_reclaimed": 0,
+                "frame_handle_cache_size": 2,
+            }
+        )
+        hb = ProcessHeartbeat(_FakeServicesRouter(proxy, router))
+        hb._publish_router_shm_stats_to_tree()
+        assert proxy.merge_calls == 1
+        _, data = proxy.merged[0]
+        assert data["cache_size"] == 2
 
     def test_publishes_when_only_queue_evicted_nonzero(self) -> None:
         """Ф7 G.4.a: дроп data-очереди публикуется, даже если SHM-счётчики нулевые

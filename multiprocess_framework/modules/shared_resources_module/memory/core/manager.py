@@ -102,13 +102,11 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         """Разрешить булев флаг Ф7 G.3 (ADR-SRM-011).
 
         Приоритет: явный ctor-аргумент (не None) > env ``env_name`` (в т.ч.
-        явное ``=0``) > **False** (прежнее поведение, откат = флаг off).
+        явное ``=0``) > default. Default теперь берётся из реестра feature_flags.
         """
-        if explicit is not None:
-            return bool(explicit)
-        from ....config_module.tools.env import env_flag
+        from ....config_module.feature_flags import resolve
 
-        return env_flag(env_name, default=False)
+        return resolve(env_name, explicit)
 
     def initialize(self) -> bool:
         try:

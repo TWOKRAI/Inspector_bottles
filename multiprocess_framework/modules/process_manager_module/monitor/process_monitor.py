@@ -8,12 +8,12 @@
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 from multiprocessing import Event
 from typing import Any
 
+from ...config_module.feature_flags import is_enabled
 from ...process_module.health.schema import HealthField, HealthStatus, health_path
 from ...worker_module import ThreadConfig, ThreadPriority
 from ..core.restart_policy import RestartPolicy
@@ -625,7 +625,7 @@ class ProcessMonitor:
           - уже в ``_pending_restarts``/``_pending_recovery`` (рестарт в работе);
           - политика ``enabled`` + ``restart_on_health_failed``.
         """
-        if os.environ.get("FW_HEALTH_RESTART", "0") != "1":
+        if not is_enabled("FW_HEALTH_RESTART"):
             return
         status = self._read_health_status(process_name)
         if status == HealthStatus.OK.value:
@@ -687,6 +687,12 @@ class ProcessMonitor:
             except Exception:  # nosec B110 — best-effort обновление статуса в SR, сбой некритичен
                 pass
 
+        # Ф7 G.7 (0.3): по confirmed-death (OS-процесс мёртв) — реклейм зависших
+        # SHM-займов мёртвого читателя на всех владельцах. Отправитель для owner-
+        # handler'а G.5.e (_handle_shm_reclaim). Без этого «реальный kill-9» Фазы 3
+        # не восстанавливает free-list: мёртвый reader держит слоты до исчерпания.
+        self._broadcast_shm_reclaim(proc.name)
+
         # Авто-рестарт при crash или логирование (политика — per-process/глобальная)
         if new_status == "crashed":
             policy = self._resolve_policy(proc.name)
@@ -700,6 +706,41 @@ class ProcessMonitor:
                     f"Process '{proc.name}' crashed (exitcode={proc.exitcode}), "
                     f"авто-рестарт отключён — процесс оставлен в состоянии crashed"
                 )
+
+    def _broadcast_shm_reclaim(self, dead_reader: str) -> None:
+        """Ф7 G.7 (0.3): разослать ``shm_reclaim`` всем процессам по confirmed-death.
+
+        Owner-handler у процесса-владельца пула есть (G.5.e ``_handle_shm_reclaim`` →
+        ``reclaim_reader``); отправителя не было. По подтверждённой смерти OS-процесса
+        (``is_alive() == False``) владельцы освобождают зависшие займы мёртвого
+        читателя — иначе при fan-out мёртвый reader держит слоты до исчерпания
+        free-list. У процесса без пула handler — no-op (``reclaim_reader`` guard'ит
+        ``self._pool is None``).
+
+        Гейт ``FW_SHM_LOAN_PROTOCOL``: при off ни одного владельца с пулом нет →
+        рассылка была бы пустым no-op-шумом. Off = прежнее поведение бит-в-бит
+        (правило флип-лесенки). ``queue_type="system"`` ОБЯЗАТЕЛЕН — иначе
+        ``type="shm_reclaim"`` уйдёт в data-очередь и будет принят как кадр
+        (тот же урок, что у ``shm_release``). Рассылка не роняет монитор.
+        """
+        if not is_enabled("FW_SHM_LOAN_PROTOCOL"):
+            return
+        comm = getattr(self.process, "communication", None)
+        if comm is None:
+            return
+        msg = {
+            "type": "shm_reclaim",
+            "sender": self.process.name,
+            "queue_type": "system",
+            "data": {"dead_reader": dead_reader},
+        }
+        try:
+            sent = comm.broadcast(msg, exclude_self=True)
+            self.process._log_info(
+                f"[supervisor] shm_reclaim разослан по confirmed-death '{dead_reader}' ({sent} процессов)"
+            )
+        except Exception as exc:  # noqa: BLE001 — рассылка reclaim не должна ронять монитор
+            self.process._log_error(f"_broadcast_shm_reclaim('{dead_reader}') упал: {exc}")
 
     def _check_heartbeat_timeout(self, process_name: str, now: float) -> None:
         """Проверить heartbeat timeout для живого процесса.

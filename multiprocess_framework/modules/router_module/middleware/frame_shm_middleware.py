@@ -286,14 +286,22 @@ class FrameShmMiddleware:
         read-only проекция счётчика reader'а (единственный источник)."""
         return self._reader.stale_drops
 
+    @property
+    def frame_handle_cache_size(self) -> int:
+        """Ф7 G.7 (0.5): размер reader-кэша SHM-handle — read-only проекция reader'а.
+
+        Под zero-copy эвикция отключена → на soak следим за ростом на инкарнацию
+        (резидуал G.5). Без handle-кэша (флаг off) — 0."""
+        return self._reader.cache_size
+
     @staticmethod
     def _resolve_bool_flag(explicit: Optional[bool], env_name: str) -> bool:
-        """Разрешить булев флаг: ctor (не None) > env ``env_name`` (в т.ч. ``=0``) > False."""
-        if explicit is not None:
-            return bool(explicit)
-        from ...config_module.tools.env import env_flag
+        """Разрешить булев флаг: ctor (не None) > env ``env_name`` (в т.ч. ``=0``) > default.
 
-        return env_flag(env_name, default=False)
+        Default теперь берётся из реестра feature_flags."""
+        from ...config_module.feature_flags import resolve
+
+        return resolve(env_name, explicit)
 
     @classmethod
     def _resolve_ring_depth(cls, explicit: Optional[int]) -> int:

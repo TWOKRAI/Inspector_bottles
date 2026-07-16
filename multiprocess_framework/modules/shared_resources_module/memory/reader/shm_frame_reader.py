@@ -59,6 +59,16 @@ class ShmFrameReader:
         живом exported-view). Раньше эти ошибки глотались молча (`except: pass`)."""
         return self._close_errors
 
+    @property
+    def cache_size(self) -> int:
+        """Ф7 G.7 (0.5): число открытых SHM-handle в кэше (наблюдаемость роста).
+
+        Под zero-copy эвикция с close() ОТКЛЮЧЕНА (view повис бы) → сегменты держатся
+        открытыми до teardown. На soak следим за ростом на инкарнацию: устойчивый рост
+        cache_size = утечка handle через рестарт camera_0 (резидуал G.5). Без handle-кэша
+        (флаг off) кэш пуст → 0 (off = прежнее поведение). len(dict) атомарен в CPython."""
+        return len(self._cache)
+
     def read_frame(
         self,
         shm_actual_name: str,

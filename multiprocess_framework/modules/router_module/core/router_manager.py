@@ -13,7 +13,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from ...channel_routing_module import ChannelRoutingManager
-from ...config_module.tools import env_flag
+from ...config_module.feature_flags import is_enabled
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ...message_module import (
     AddressValidationError,
@@ -1108,6 +1108,9 @@ class RouterManager(ChannelRoutingManager):
             "frame_slots_released": sum(getattr(mw, "frame_slots_released", 0) for mw in self._frame_middlewares),
             # Ф7 G.5.e (В3): займов реклеймлено после смерти читателя (kill-9 без release).
             "frame_slots_reclaimed": sum(getattr(mw, "frame_slots_reclaimed", 0) for mw in self._frame_middlewares),
+            # Ф7 G.7 (0.5): суммарный размер reader-кэша SHM-handle — рост на инкарнацию
+            # под zero-copy = утечка handle (эвикция отключена, резидуал G.5). Без кэша — 0.
+            "frame_handle_cache_size": sum(getattr(mw, "frame_handle_cache_size", 0) for mw in self._frame_middlewares),
             # Ф7 G.4.a: дроп из полных data-очередей (drop_oldest) — surface из
             # queue_registry (дешёвый property, не полный get_stats), чтобы heartbeat
             # довёл его до state.shm.* тем же путём, что и SHM-счётчики. «Дроп data виден».
@@ -1166,7 +1169,7 @@ class RouterManager(ChannelRoutingManager):
             return bool(explicit)
         raw = os.environ.get("MULTIPROCESS_USE_KIND_CHANNELS")
         if raw is not None and raw.strip() != "":
-            return env_flag("MULTIPROCESS_USE_KIND_CHANNELS")
+            return is_enabled("FW_USE_KIND_CHANNELS")
         return bool(config_default)
 
     def _resolve_kind_channels(self, msg_dict: Dict[str, Any]) -> List[IMessageChannel]:
