@@ -78,7 +78,7 @@ GUI** плана telemetry-publish-control (крутилки частоты не
 
 > **Контракт `mode` (решение teamlead, 92d6f6f6):** `data["telemetry_mode"]` — ключ-СОСЕД `publish`/`throttle` (НЕ внутри секции), т.к. секция уходит в config-билдеры (`TelemetryPublishConfig.from_dict`) и должна оставаться чистым config-dict. На проводе присутствует ТОЛЬКО при `merge` (`replace` — прежний конверт бит-в-бит, backward-compat старых сообщений). Маркер удаления throttle-правила — `None` (JSON null; `0` остаётся валидной «полной блокировкой»). `publish_section=None` выключает gate НЕЗАВИСИМО от mode.
 
-### Task 1.2 — Тик публикации в telemetry-контракте (`publish.tick_sec`)
+### Task 1.2 — Тик публикации в telemetry-контракте (`publish.tick_sec`) ✅ DONE (03449743)
 **Level:** Senior (Opus)
 **Assignee:** teamlead
 **Layer:** framework
@@ -98,11 +98,13 @@ GUI** плана telemetry-publish-control (крутилки частоты не
    воркера; допустимо срабатывание на следующем тике).
 4. Валидация: `interval_sec < tick_sec` у метрики — WARNING-лог «частота метрики ограничена тиком»
    (не тихий no-op).
+**Вариант реализации (ADR-PM-016):** выбран **(а)** — один heartbeat-воркер тикает `min(heartbeat_interval, tick_sec)`, телеметрия каждый тик (gate rate-limit), heartbeat-СООБЩЕНИЕ + health/obs/GC по расписанию liveness (`_heartbeat_due`, порог `tick/2`). Отвергнут (б) отдельный воркер (второй lifecycle + дубль снимка воркеров + дележ health/obs/GC).
 **Acceptance:**
-- [ ] Тест (fake-clock/интеграция): `tick_sec=0.5` → телеметрийный merge выходит ~2 Гц при `heartbeat_interval=5.0`; heartbeat-сообщения PM остаются ~0.2 Гц
-- [ ] Тест: `tick_sec=None` → каденция публикации бит-в-бит прежняя (характеризация)
-- [ ] Тест: runtime-смена `tick_sec` через `telemetry.reconfigure` меняет каденцию без рестарта
-- [ ] Тест: `interval_sec < tick_sec` → WARNING в логе, метрика публикуется на каждом тике
+- [x] Тест (fake-clock/интеграция): `tick_sec=0.5` → телеметрийный merge выходит ~2 Гц при `heartbeat_interval=5.0`; heartbeat-сообщения PM остаются ~0.2 Гц — `test_telemetry_tick.py::TestCadenceFastTelemetry::test_telemetry_two_hz_heartbeat_stays_slow` (20 merge/2 hb за 10с)
+- [x] Тест: `tick_sec=None` → каденция публикации бит-в-бит прежняя (характеризация) — `test_telemetry_tick.py::TestCadenceBackwardCompat` (телеметрия = такт heartbeat)
+- [x] Тест: runtime-смена `tick_sec` через `telemetry.reconfigure` меняет каденцию без рестарта — `test_telemetry_tick.py::TestRuntimeTickChange` (`_telemetry_tick` 5.0→0.5 живьём + cadence-run)
+- [x] Тест: `interval_sec < tick_sec` → WARNING в логе, метрика публикуется на каждом тике — `test_telemetry_tick.py::TestCappedMetricWarning`
+- [x] Доп. (замечание ревьюера 1.1): неизвестный `mode` → error-dict, не молчаливый replace — `test_telemetry_reload.py::TestUnknownModeRejected`
 **Out of scope:** liveness-контракт heartbeat→ProcessMonitor (частота heartbeat-сообщений не меняется); центральный троттл (Task 1.3).
 
 ### Task 1.3 — Центральный троттл: страховка, а не второй авторитет
