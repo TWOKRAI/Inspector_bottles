@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QGroupBox,
@@ -74,6 +74,10 @@ _CATEGORY_ORDER = [
 
 # QSS подсветки выбранной карточки/строки (process-scope кнопок).
 _SELECTED_CARD_QSS = "QFrame#EntityCard { border: 2px solid #2563eb; }"
+
+# Дебаунс каскада обнаружения рантайм-воркеров (Task 0.4, часть A): N
+# обнаружений подряд коалесцируются в один _refresh_workers.
+_WORKER_DISCOVERY_DEBOUNCE_MS = 50
 
 
 def _format_uptime(value: object) -> str:
@@ -530,6 +534,13 @@ class SingleProcessPanel(QWidget):
         # pipeline_executor, source_producer_* — создаются в рантайме и в
         # конфиг-топологии отсутствуют). Подмешиваются в таблицу как read-only.
         self._runtime_workers: set[str] = set()
+        # Дебаунс каскада обнаружения (Task 0.4, часть A): взведён ли уже
+        # отложенный _flush_worker_refresh (коалесцирует N обнаружений в 1).
+        self._worker_refresh_pending = False
+        # Гвард от гонки: панель уничтожена до срабатывания таймера — не
+        # трогать мёртвый виджет во _flush_worker_refresh.
+        self._is_destroyed = False
+        self.destroyed.connect(self._mark_destroyed)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -635,8 +646,10 @@ class SingleProcessPanel(QWidget):
     def _on_worker_discovered(self, path: str, _value: object) -> None:
         """Fan-out callback: обнаружен воркер в телеметрии (processes.X.workers.NAME.status).
 
-        Если воркер ещё не в таблице — перестроить её с ним. Дубли отсекаются
-        (перестроение только при новом имени), поэтому storm'а нет.
+        Только копит имя воркера и взводит одиночный отложенный
+        ``_flush_worker_refresh`` (Task 0.4, часть A) — N обнаружений подряд
+        (типичный каскад при первом подключении процесса) коалесцируются в
+        ОДНО перестроение таблицы вместо N.
         """
         parts = path.split(".")
         # ['processes', proc, 'workers', NAME, 'status']
@@ -646,7 +659,24 @@ class SingleProcessPanel(QWidget):
         if name in self._runtime_workers:
             return
         self._runtime_workers.add(name)
+        if not self._worker_refresh_pending:
+            self._worker_refresh_pending = True
+            QTimer.singleShot(_WORKER_DISCOVERY_DEBOUNCE_MS, self._flush_worker_refresh)
+
+    def _flush_worker_refresh(self) -> None:
+        """Отложенный коалесцированный refresh (см. _on_worker_discovered).
+
+        Если панель уже уничтожена к моменту срабатывания таймера — не
+        трогаем мёртвый виджет (гонка при быстром закрытии/переключении).
+        """
+        self._worker_refresh_pending = False
+        if self._is_destroyed:
+            return
         self._refresh_workers()
+
+    def _mark_destroyed(self, *_args: object) -> None:
+        """Слот на ``destroyed`` --- взводит гвард для _flush_worker_refresh."""
+        self._is_destroyed = True
 
     # ------------------------------------------------------------------ #
     #  Worker actions (вызываются из левой панели вкладки, worker-scope)  #

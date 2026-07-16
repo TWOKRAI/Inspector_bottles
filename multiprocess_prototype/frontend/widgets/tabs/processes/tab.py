@@ -93,6 +93,10 @@ class ProcessesTab(BaseListNavTab):
             ctx=None,  # type: ignore[arg-type]  # framework generic-слот, прототип не использует ctx
             layout_factory=_layout_factory,
             parent=parent,
+            # Хвост 0.4: панели процессов строятся лениво (только активная
+            # при открытии) --- иначе Qt C++ стойл на layout/paint N панелей
+            # глубокой вложенности (см. plans/gui-telemetry-read-model.md).
+            lazy_content=True,
         )
 
         # Backward-compat alias на nav-список (исторически тесты ходят через _nav_list).
@@ -383,6 +387,10 @@ class ProcessesTab(BaseListNavTab):
                 w.deleteLater()
         self._key_to_item.clear()
         self._key_to_index.clear()
+        # Ручной resync (в обход remove_item) — сбрасываем и очередь ленивых
+        # ключей, иначе имена прежней topology остаются в ней бесполезным
+        # хвостом (lazy_content=True, Хвост 0.4).
+        self._pending_lazy_keys.clear()
         self._all_panel = None
         self._single_panels.clear()
         self._nav_widget.blockSignals(False)

@@ -72,6 +72,18 @@ class _ConcreteListNavTab(BaseListNavTab):
         return QLabel(f"Content: {key}")
 
 
+class _CountingListNavTab(BaseListNavTab):
+    """Тестовый подкласс, считающий вызовы _create_item_widget (spy)."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.created_keys: list[str] = []
+        super().__init__(*args, **kwargs)
+
+    def _create_item_widget(self, key: str) -> QWidget:
+        self.created_keys.append(key)
+        return QLabel(f"Content: {key}")
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -96,6 +108,20 @@ def tab(qtbot, mock_layout):
         title="Test List Tab",
         ctx=None,
         layout_factory=factory,
+    )
+    qtbot.addWidget(t)
+    return t
+
+
+@pytest.fixture
+def lazy_tab(qtbot, mock_layout):
+    """Готовый экземпляр _CountingListNavTab с lazy_content=True."""
+    _, factory = mock_layout
+    t = _CountingListNavTab(
+        title="Test Lazy Tab",
+        ctx=None,
+        layout_factory=factory,
+        lazy_content=True,
     )
     qtbot.addWidget(t)
     return t
@@ -185,3 +211,48 @@ class TestBaseListNavTab:
         forbidden = {"SectionSpec", "SectionProtocol", "TreeNavTabPresenter"}
         found = forbidden & set(source_names)
         assert found == set(), f"Найдены запрещённые имена: {found}"
+
+
+class TestLazyContent:
+    """lazy_content=True (opt-in, Task 0.4 «Хвост»): content-виджет строится
+    лениво при первом переключении на элемент, а не сразу в add_item."""
+
+    def test_add_item_does_not_create_widget_eagerly(self, lazy_tab) -> None:
+        """add_item регистрирует ключ в nav, но НЕ строит content widget сразу."""
+        lazy_tab.add_item("a", "A")
+        assert lazy_tab.created_keys == []
+        assert lazy_tab._content_stack.count() == 0
+        assert "a" not in lazy_tab._key_to_index
+        # Ключ навигации присутствует несмотря на отсутствие content widget.
+        assert lazy_tab.nav_widget.count() == 1
+
+    def test_select_item_creates_widget_once(self, lazy_tab) -> None:
+        """Первое переключение на ключ строит его widget; повторный выбор не пересоздаёт."""
+        lazy_tab.add_item("a", "A")
+        lazy_tab.add_item("b", "B")
+
+        lazy_tab.select_item("a")
+        assert "a" in lazy_tab.created_keys
+        assert lazy_tab._content_stack.count() == 1
+        assert lazy_tab._content_stack.currentIndex() == lazy_tab._key_to_index["a"]
+
+        lazy_tab.select_item("b")
+        assert lazy_tab.created_keys.count("b") == 1
+
+        # Возврат к "a" не пересоздаёт его widget.
+        lazy_tab.select_item("a")
+        assert lazy_tab.created_keys.count("a") == 1
+        assert sorted(lazy_tab.created_keys) == ["a", "b"]
+
+    def test_remove_item_before_shown_no_error(self, lazy_tab) -> None:
+        """Удаление никогда не показанного ленивого элемента не падает."""
+        lazy_tab.add_item("a", "A")
+        lazy_tab.remove_item("a")
+        assert lazy_tab.created_keys == []
+        assert "a" not in lazy_tab._key_to_item
+
+    def test_non_lazy_mode_default_is_unchanged(self, tab) -> None:
+        """Регресс: без lazy_content=True (default False) add_item строит widget сразу."""
+        tab.add_item("a", "Recipe A")
+        assert tab._content_stack.count() == 1
+        assert "a" in tab._key_to_index

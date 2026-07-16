@@ -95,7 +95,7 @@
 **Steps:** 1. `_on_worker_discovered` только копит имя и взводит `QTimer.singleShot(50, ...)`
   (coalescing-флагом). 2. Однократный `_refresh_workers` по срабатыванию.
 **Acceptance:**
-- [ ] Тест: 5 обнаружений подряд → 1 вызов `set_workers`
+- [x] Тест: 5 обнаружений подряд → 1 вызов `set_workers` — `test_worker_debounce.py::test_five_discoveries_coalesce_into_one_refresh` (+ `test_duplicate_discovery_does_not_reschedule`, `test_flush_skips_when_panel_marked_destroyed`)
 - [ ] Qt-smoke: proto + qt_snapshot, вкладка живая (правило feedback_qt_mcp_smoke_verification)
 **Verification Фазы 0 (整):** запуск `webcam_sketch`, открытие вкладки «Процессы» — без фриза
   (замер лог-таймстампом); `INSPECTOR_STALL_DUMP=1` — нет срезов >1 с в момент открытия.
@@ -103,8 +103,10 @@
 > Хвост 0.4 (2026-07-16): в нативном Windows-запуске владельца открытие вкладки ~30с. Инструментирование
 > (INSPECTOR_TAB_TRACE) показало: Python-конструктор вкладки быстрый, стойло в Qt C++ (show/layout/paint)
 > при глубокой вложенности (панель×N процессов × QTableWidget×3 + QSS). Фикс: ленивое создание
-> SingleProcessPanel (только активная панель при открытии) — 03d21058. Ожидание: первый показ строит
-> 1 панель вместо 8. Верификация на нативном Windows — за владельцем.
+> SingleProcessPanel (только активная панель при открытии) — реализовано в 0.4 через opt-in
+> `lazy_content` в `BaseListNavTab` (тесты `test_lazy_panels.py`: `test_open_creates_only_active_panel`,
+> `test_switching_between_two_processes_creates_both`, `test_lazily_created_panel_shows_live_state`).
+> Первый показ строит 1 панель вместо N. Верификация на нативном Windows — за владельцем.
 
 ### Фаза 1 — TelemetryViewModel: локальный read-model
 
