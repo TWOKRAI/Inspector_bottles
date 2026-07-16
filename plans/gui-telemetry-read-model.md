@@ -96,7 +96,7 @@
   (coalescing-флагом). 2. Однократный `_refresh_workers` по срабатыванию.
 **Acceptance:**
 - [x] Тест: 5 обнаружений подряд → 1 вызов `set_workers` — `test_worker_debounce.py::test_five_discoveries_coalesce_into_one_refresh` (+ `test_duplicate_discovery_does_not_reschedule`, `test_flush_skips_when_panel_marked_destroyed`)
-- [ ] Qt-smoke: proto + qt_snapshot, вкладка живая (правило feedback_qt_mcp_smoke_verification)
+- [x] Qt-smoke: proto + qt_snapshot, вкладка живая (правило feedback_qt_mcp_smoke_verification) — dualcam_synth (4 синт-процесса), probe :9142: ProcessesTab собрана и отзывчива (фриза нет), в стеке РОВНО 1 панель (AllProcessesPanel — ленивость подтверждена, не 5+), консоль без ошибок/трейсбеков
 **Verification Фазы 0 (整):** запуск `webcam_sketch`, открытие вкладки «Процессы» — без фриза
   (замер лог-таймстампом); `INSPECTOR_STALL_DUMP=1` — нет срезов >1 с в момент открытия.
 
@@ -128,15 +128,15 @@
   2. Подключить вторым потребителем `bridge.add_state_listener` (рядом с bindings, §11.15).
   3. API чтения: `get(path)`, `snapshot(prefix)` — для открытия вкладок без ожидания дельт.
 **Acceptance:**
-- [ ] Вкладка, созданная после публикации, видит значения сразу (тест late-binding)
-- [ ] Ни одной серверной подписки из view-model (стартовые wildcard'ы — единственный источник)
+- [x] Вкладка, созданная после публикации, видит значения сразу (тест late-binding) — `test_telemetry_view_model.py::test_snapshot_available_immediately_after_delta` (+ `test_initial_cache_primes_snapshot`, `test_updated_emitted_once_per_packet`, `test_deleted_removes_path_and_batches_none`)
+- [x] Ни одной серверной подписки из view-model (стартовые wildcard'ы — единственный источник) — `test_view_model_creates_no_server_subscriptions` (VM не держит router/proxy/subscribe); wiring в `app.py` вторым `add_state_listener`
 
 #### Task 1.2 — Кольцевые буферы для мгновенных графиков
 **Level:** Middle+ (Sonnet) · **Assignee:** developer
 **Goal:** последние ~10 мин ключевых метрик (fps/latency/hz) в памяти GUI для спарклайнов без похода в БД.
 **Files:** `telemetry_view_model.py` (ring buffer per отслеживаемый путь, конфиг: длительность/набор префиксов), tests.
 **Acceptance:**
-- [ ] Fixed-size deque, O(1) append; выборка диапазона для графика
+- [x] Fixed-size deque, O(1) append; выборка диапазона для графика — `test_history_ring_buffer_evicts_oldest` (maxlen-вытеснение), `test_history_since_filters_range`, `test_history_records_tracked_numeric_only` (суффиксы `.state.fps`/`.latency_ms`/`.uptime`/`.effective_hz`/`.cycle_duration_ms`)
 
 #### Task 1.3 — Перевод панелей «Процессов» на view-model
 **Level:** Senior (Opus) · **Assignee:** teamlead

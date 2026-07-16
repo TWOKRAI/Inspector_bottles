@@ -125,3 +125,9 @@ class RuntimeDeps(FrameworkRuntime):
     # Recipes читают его для confirm-перед-активацией и mark_saved/applied/loaded.
     # None → dirty-контур выключен (graceful: активация/сохранение как раньше).
     topology_session: "TopologySession | None" = None
+    # Ф1 (gui-telemetry-read-model): локальный read-model телеметрии
+    # (TelemetryViewModel). Питается wildcard-потоком дельт, читается вкладками
+    # локально (get/snapshot/history) без похода на сервер. None → вкладки
+    # работают по-старому (через bindings). Runtime-объект (Qt-сигналы, живёт с
+    # приложением) → место в runtime-layer.
+    telemetry: Any = None

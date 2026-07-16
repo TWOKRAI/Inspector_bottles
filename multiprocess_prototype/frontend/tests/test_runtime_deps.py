@@ -23,6 +23,7 @@ _APP_EXTRA_FIELDS = {
     "image_panel",
     "persist_active_recipe",
     "topology_session",
+    "telemetry",
 }
 
 
