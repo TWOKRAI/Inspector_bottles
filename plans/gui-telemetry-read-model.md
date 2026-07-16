@@ -3,8 +3,11 @@
 - **Slug:** gui-telemetry-read-model
 - **Дата:** 2026-07-16
 - **Ветка:** feat/gui-telemetry-read-model (Фаза 0 допустимо hotfix-ом раньше остальных)
-- **Статус:** ACTIVE (реализация начата 2026-07-16; чекбоксы, предзаполненные при написании плана
-  несуществующими хешами, сброшены — отмечаются заново по мере реальных коммитов)
+- **Статус:** DONE (2026-07-16). Фазы 0-3 закрыты; Task 3.1 (cleanup дублирующего механизма) —
+  реализована частично осознанно: инвариант enforced coverage-check'ом для всех вкладок, но
+  дуальный VM/legacy-путь физически не вырезан (зависят немигрированные вкладки — отдельная задача).
+  Follow-up `telemetry-publish-control` (управление публикующей стороной) — отдельный план, не входит
+  в объём этого. Принцип зафиксирован ADR-136 (`multiprocess_framework/DECISIONS.md`).
 - **Реактивирует:** [`telemetry-delivery-simplification.md`](telemetry-delivery-simplification.md) Option D (был DEFERRED
   «до gate: 2-й реактивный потребитель ИЛИ замер показал боль двойного glob»). **Gate сработал 2026-07-16:**
   диагностирован шторм блокирующих подписок при открытии вкладки «Процессы» (см. Context). После Фазы 3 пометить
@@ -211,7 +214,11 @@
   `project_webcam_sketch_freeze` (диагноз «Python ни при чём» опровергнут: блокирующий IPC в main thread).
   3. `telemetry-delivery-simplification.md` → SUPERSEDED (ссылка сюда). 4. Dual-write memory.
 **Acceptance:**
-- [ ] ADR в индексе; memory обновлена в обоих местах; статусы планов согласованы
+- [x] ADR в индексе; memory обновлена в обоих местах; статусы планов согласованы — ADR-136
+  (`multiprocess_framework/DECISIONS.md`, `python -m scripts.sync` + `scripts/validate.py` чисто);
+  memory `project_gui_telemetry_read_model` (новая) + `project_webcam_sketch_freeze` (уточнена) в
+  `~/.claude/projects/.../memory/` и `docs/claude/memory/` (dual-write, оба MEMORY.md обновлены);
+  `telemetry-delivery-simplification.md` → SUPERSEDED (ссылка сюда)
 
 ---
 
