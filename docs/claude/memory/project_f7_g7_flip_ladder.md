@@ -50,9 +50,14 @@ Windows:** `signal.SIGKILL` отсутствует → `harness.kill_child` па
 (`dualcam_synth.yaml` + `g7_dualcam_probe`, коммит `02095664`): обе 21fps ПАРАЛЛЕЛЬНО, полный набор
 флагов, `owner_incarnation` развёл SHM-сегменты владельцев (нет коллизий), torn/stale/pickle=0.
 УРОК: `synthetic_frame_source` = ГОТОВАЯ имитация камеры (отдаёт camera_id/seq_id, modulo=100_000).
-**Остаток Фазы 3:** camera_0 → реальная вебкамера (идея владельца: вебкамера + синт. 2-я камера) +
-длинный soak ≥2ч + AllocProfiler + P2 Join-корреляция (`camera_id` в ключ JoinInspectorManager, иначе
-кадры двух камер подменяются) + флип дефолтов G.F. plan.md «G.7 ✅» НЕ ставить до длинного soak.
+**P2 Join ПОЧИНЕН 2026-07-16** (коммит `83d7d48a`): ключ корреляции JoinInspectorManager
+`seq_id` → `(camera_id, seq_id)` — seq_id уникален только в пределах камеры, без camera_id
+cam0.frame склеивался с cam1.overlay; +3 теста, fanin/30 + wiring/40 passed, backward-compat
+(camera_id=None → прежнее). camera_id несут source-плагины + переносят overlay (line_filter).
+
+**Остаток Фазы 3:** camera_0 → реальная вебкамера — **рецепт готов** (`dualcam_webcam.yaml`, живой
+прогон за владельцем) + длинный soak ≥2ч + AllocProfiler + флип дефолтов G.F. plan.md «G.7 ✅» НЕ
+ставить до длинного soak.
 
 Связано: [[project_feature_flags_registry]], [[project_f7_g7_num_consumers]], [[project_f7_g4_done]],
 [[project_phase_g_final_review]], [[feedback_logger_error_stats_managers]].
