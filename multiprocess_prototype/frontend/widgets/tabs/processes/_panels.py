@@ -19,6 +19,7 @@ Task E.2: панели принимают ``bindings`` (GuiStateBindings) нап
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any, Callable
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMessageBox,
+    QPushButton,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -36,13 +38,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
+from multiprocess_prototype.frontend.state.telemetry_history import TelemetryHistorySource
 from multiprocess_prototype.frontend.widgets.primitives import (
     CardAction,
     EntityCard,
 )
 
-from .widgets import CreateWorkerDialog, ProcessCard, WorkerTable
+from .widgets import CreateWorkerDialog, ProcessCard, TelemetrySparkline, WorkerTable
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
@@ -82,6 +86,18 @@ _SELECTED_CARD_QSS = "QFrame#EntityCard { border: 2px solid #2563eb; }"
 # Дебаунс каскада обнаружения рантайм-воркеров (Task 0.4, часть A): N
 # обнаружений подряд коалесцируются в один _refresh_workers.
 _WORKER_DISCOVERY_DEBOUNCE_MS = 50
+
+# Диапазоны графика телеметрии (Ф2, Task 2.2): ключ → (подпись кнопки, окно в
+# секундах). "10m" — единственный ring-buffer-диапазон (без похода в БД, см.
+# _refresh_graph_from_ring); "1h"/"1d" читают TelemetryHistorySource.
+_GRAPH_RANGES: tuple[tuple[str, str, float], ...] = (
+    ("10m", "10 мин", 600.0),
+    ("1h", "1 час", 3600.0),
+    ("1d", "1 день", 86400.0),
+)
+_DEFAULT_GRAPH_RANGE = "10m"
+# Верхняя граница точек, тащимых из БД на один запрос графика (даунсемпл — Task 2.1).
+_GRAPH_HISTORY_MAX_POINTS = 300
 
 
 def _format_uptime(value: object) -> str:
@@ -683,6 +699,7 @@ class SingleProcessPanel(QWidget):
         process_name: str,
         *,
         telemetry: "TelemetryViewModel | None" = None,
+        history_source: "TelemetryHistorySource | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -691,6 +708,17 @@ class SingleProcessPanel(QWidget):
         # Ф1 (gui-telemetry-read-model 1.3): локальный read-model. VM-режим
         # предпочтителен; None → fallback на bindings-путь.
         self._telemetry = telemetry
+        # Ф2 (gui-telemetry-read-model 2.1/2.2): read-сторона telemetry.db для
+        # графика за час/день. Конструктор source — без I/O (только путь), None
+        # → дефолтный TelemetryHistorySource() (env INSPECTOR_TELEMETRY_DB /
+        # data/telemetry.db). Инъекция параметром — для тестов (fake-источник).
+        self._history_source = history_source if history_source is not None else TelemetryHistorySource()
+        # RequestRunner (P2 command-result-bridge) — гоняет list_range() на
+        # worker-потоке QThreadPool, результат доставляется в main-thread
+        # сигналом (см. модуль request_runner.py). Без него чтение БД в
+        # main thread фризило бы GUI на время I/O (план запрещает это явно).
+        self._history_runner = RequestRunner(self)
+        self._graph_range: str = _DEFAULT_GRAPH_RANGE
         # Карты VM-режима: точный путь → setter(value). Статичные пути процесса
         # (_vm_setters) и пере-собираемые пути воркеров (_vm_worker_setters,
         # обновляются в _bind_worker_telemetry при каждом перестроении строк).
@@ -705,7 +733,7 @@ class SingleProcessPanel(QWidget):
         # отложенный _flush_worker_refresh (коалесцирует N обнаружений в 1).
         self._worker_refresh_pending = False
         # Гвард от гонки: панель уничтожена до срабатывания таймера — не
-        # трогать мёртвый виджет во _flush_worker_refresh.
+        # трогать мёртвый виджет во _flush_worker_refresh / _on_history_ready.
         self._is_destroyed = False
         self.destroyed.connect(self._mark_destroyed)
 
@@ -761,10 +789,18 @@ class SingleProcessPanel(QWidget):
         self._worker_table.changed.connect(self._on_worker_changed)
         box_layout.addWidget(self._worker_table)
         page_layout.addWidget(workers_box)
-        # Карточка + таблица прижаты вверх, без растягивания таблицы на всю высоту.
+
+        # Секция графика (Ф2, Task 2.2): fps/latency процесса, переключатель
+        # диапазона 10 мин / 1 час / 1 день.
+        page_layout.addWidget(self._build_graph_box())
+
+        # Карточка + таблица + график прижаты вверх, без растягивания на всю высоту.
         page_layout.addStretch(1)
 
         self._refresh_workers()
+        # Late-binding: панель, созданная ПОСЛЕ публикации, показывает график
+        # 10 мин сразу из ring-буфера VM (без ожидания следующего батча).
+        self._refresh_graph_from_ring()
 
         # Fan-out: обнаруживать рантайм-воркеров из телеметрии и добавлять в
         # таблицу (их нет в конфиг-топологии get_workers()). В VM-режиме
@@ -777,6 +813,109 @@ class SingleProcessPanel(QWidget):
                 owner=self,
             )
         return page
+
+    # ------------------------------------------------------------------ #
+    #  График (Ф2, Task 2.2)                                               #
+    # ------------------------------------------------------------------ #
+
+    def _build_graph_box(self) -> QWidget:
+        """Секция графика: переключатель диапазона + спарклайны fps/latency.
+
+        10 мин — ring-буфер VM (без похода в БД); 1 час/1 день — БД через
+        TelemetryHistorySource, чтение off-main (см. _refresh_graph_from_history).
+        """
+        box = QGroupBox("График")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+
+        range_row = QHBoxLayout()
+        self._graph_range_buttons: dict[str, QPushButton] = {}
+        for key, label, _seconds in _GRAPH_RANGES:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setChecked(key == self._graph_range)
+            btn.clicked.connect(lambda _checked=False, k=key: self._on_graph_range_selected(k))
+            range_row.addWidget(btn)
+            self._graph_range_buttons[key] = btn
+        range_row.addStretch()
+        layout.addLayout(range_row)
+
+        layout.addWidget(QLabel("FPS"))
+        self._fps_sparkline = TelemetrySparkline()
+        layout.addWidget(self._fps_sparkline)
+
+        layout.addWidget(QLabel("Задержка, мс"))
+        self._latency_sparkline = TelemetrySparkline()
+        layout.addWidget(self._latency_sparkline)
+
+        return box
+
+    def _on_graph_range_selected(self, key: str) -> None:
+        """Переключить диапазон графика (кнопка 10 мин / 1 час / 1 день)."""
+        if key == self._graph_range:
+            return
+        self._graph_range = key
+        for k, btn in self._graph_range_buttons.items():
+            btn.setChecked(k == key)
+        self._refresh_graph()
+
+    def _refresh_graph(self) -> None:
+        """Перерисовать графики под текущий выбранный диапазон."""
+        if self._graph_range == "10m":
+            self._refresh_graph_from_ring()
+        else:
+            self._refresh_graph_from_history()
+
+    def _refresh_graph_from_ring(self) -> None:
+        """10 мин — из кольцевого буфера VM (Task 1.2), без похода в БД.
+
+        VM не подан → графики деградируют в плейсхолдер «нет данных»
+        (TelemetrySparkline сам показывает его при < 2 точек).
+        """
+        if self._telemetry is None:
+            self._fps_sparkline.set_points([])
+            self._latency_sparkline.set_points([])
+            return
+        proc = self._process_name
+        self._fps_sparkline.set_points(self._telemetry.history(f"processes.{proc}.state.fps"))
+        self._latency_sparkline.set_points(self._telemetry.history(f"processes.{proc}.state.latency_ms"))
+
+    def _refresh_graph_from_history(self) -> None:
+        """1 час / 1 день — TelemetryHistorySource.list_range на worker-потоке.
+
+        Чтение БД гоняется через RequestRunner (QThreadPool) — main thread НЕ
+        блокируется на I/O; результат приходит в _on_history_ready сигналом
+        уже в main-thread (тот же приём, что у command-result-bridge).
+        """
+        seconds = next((s for k, _label, s in _GRAPH_RANGES if k == self._graph_range), 3600.0)
+        now = time.time()
+        ts_from = now - seconds
+        proc = self._process_name
+        source = self._history_source
+
+        def _fetch() -> dict[str, Any]:
+            records = source.list_range(proc, ts_from, now, ("fps", "latency_ms"), max_points=_GRAPH_HISTORY_MAX_POINTS)
+            return {"records": records}
+
+        self._history_runner.submit(_fetch, on_result=self._on_history_ready)
+
+    def _on_history_ready(self, result: dict[str, Any]) -> None:
+        """Callback RequestRunner (main-thread): применить выборку БД к графикам.
+
+        result — либо {"records": [...]} (успех _fetch), либо
+        {"success": False, "error": ...} (исключение source.list_range —
+        RequestRunner перехватывает сам, TelemetryHistorySource штатно её не
+        бросает, но fake-источник в тестах может). Оба случая → records=[]
+        деградируют в плейсхолдер, панель не падает.
+        """
+        if self._is_destroyed:
+            return
+        records = result.get("records", [])
+        fps_points = [(r["ts"], r["fps"]) for r in records if isinstance(r.get("fps"), (int, float))]
+        latency_points = [(r["ts"], r["latency_ms"]) for r in records if isinstance(r.get("latency_ms"), (int, float))]
+        self._fps_sparkline.set_points(fps_points)
+        self._latency_sparkline.set_points(latency_points)
 
     # ------------------------------------------------------------------ #
     #  Workers                                                             #
@@ -1091,6 +1230,9 @@ class SingleProcessPanel(QWidget):
         рантайм-воркера). discover=False — реприм после перестроения строк:
         только setter'ы (иначе refresh↔prime зациклились бы).
         """
+        fps_path = f"processes.{self._process_name}.state.fps"
+        latency_path = f"processes.{self._process_name}.state.latency_ms"
+        graph_touched = False
         for path, value in items:
             setter = self._vm_setters.get(path)
             if setter is None:
@@ -1102,6 +1244,13 @@ class SingleProcessPanel(QWidget):
                     _logger.debug("telemetry-vm: setter failed on %s: %s", path, exc)
             if discover and self._is_worker_status_path(path):
                 self._on_worker_discovered(path, value)
+            if path == fps_path or path == latency_path:
+                graph_touched = True
+        # График 10 мин читает ring-буфер VM — обновляем ТОЛЬКО когда этот
+        # диапазон активен (1ч/1д не трогаем: они читают БД по кнопке/таймеру,
+        # не по каждому батчу). Дешёвая O(k)-выборка буфера, не I/O.
+        if graph_touched and self._graph_range == "10m" and hasattr(self, "_fps_sparkline"):
+            self._refresh_graph_from_ring()
 
     # --- Fallback: прежний bindings-путь ------------------------------- #
 

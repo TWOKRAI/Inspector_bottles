@@ -160,15 +160,32 @@
 **Steps:** 1. `list_range(process_name, ts_from, ts_to, metrics, max_points)` c даунсемплом до max_points.
   2. Read-only подключение (`mode=ro`), отказоустойчиво к отсутствию файла.
 **Acceptance:**
-- [ ] Диапазонная выборка с даунсемплом; отсутствие БД → пустой результат, не исключение
+- [x] Диапазонная выборка с даунсемплом; отсутствие БД → пустой результат, не исключение —
+  `test_telemetry_history.py::TestListRangeDownsample` (`test_downsamples_to_at_most_max_points`,
+  `test_no_downsample_when_under_max_points`, `test_filters_by_process_name_and_ts_bounds`,
+  `test_record_shape_is_dict_with_ts_and_requested_metrics`) + `TestMissingDbIsFaultTolerant`
+  (`test_missing_file_returns_empty_list`, `test_missing_table_returns_empty_list`,
+  `test_empty_range_returns_empty_list`) + `TestMetricsWhitelist`
+  (`test_unknown_metric_is_ignored_known_still_returned` — попытка SQL-инъекции через имя метрики,
+  `test_all_metrics_unknown_returns_empty_without_query`, `test_allowed_metrics_matches_telemetry_snapshot_columns`)
+  + `TestResolveTelemetryDbPath` (`test_default_path`, `test_env_override` — путь к БД изолирован в
+  `resolve_telemetry_db_path()`, env `INSPECTOR_TELEMETRY_DB`)
 
 #### Task 2.2 — Графики в SingleProcessPanel
 **Level:** Middle+ (Sonnet) · **Assignee:** developer
 **Goal:** график fps/latency процесса: последние минуты — из ring buffer (Task 1.2), глубже — из Task 2.1.
 **Files:** `processes/_panels.py` (+ мини-виджет графика), tests.
 **Acceptance:**
-- [ ] Открытие графика не блокирует main thread (чтение БД — в воркере/по таймеру)
-- [ ] Переключение диапазона (10 мин / час / день)
+- [x] Открытие графика не блокирует main thread (чтение БД — в воркере/по таймеру) —
+  `test_history_graph.py::TestDeeperRangeReadsHistorySourceOffMainThread::test_history_source_called_off_main_thread`
+  (сравнение `threading.get_ident()` вызова `list_range` с main-thread) — читает через `RequestRunner`
+  (QThreadPool, тот же приём, что command-result-bridge P2), не новый механизм
+- [x] Переключение диапазона (10 мин / час / день) — `TestTenMinuteRangeUsesRingBuffer`
+  (10м → ring-буфер VM, `history_source.list_range` НЕ вызывается) +
+  `TestDeeperRangeReadsHistorySourceOffMainThread` (`test_switch_to_1h_calls_history_source`,
+  `test_1d_range_requests_86400s_window`, `test_history_result_applied_to_sparklines_in_main_thread`,
+  `test_switching_back_to_10m_does_not_call_history_source_again`) + `TestGracefulDegradation`
+  (VM=None / пустая БД → спарклайн без данных, без падений)
 
 ### Фаза 3 — Cleanup + enforcement + docs
 
@@ -198,6 +215,18 @@
   glob-матчинг перестаёт быть болью (подписок мало, биндинги локальные). Реанимировать, если замер покажет
   боль на масштабе (20 проц × 50 метрик). Текущий план даёт read-model поверх работающего потока — меньший риск.
 - Live-чтение из SQLite; изменение серверной публикации/троттлинга; миграция вкладок вне «Процессов».
+
+## Follow-up: telemetry-publish-control (отдельный план, ПОСЛЕ этого — решение владельца 2026-07-16)
+
+Замысел владельца: управлять **публикующей** стороной телеметрии — задавать частоту опроса per-параметр/
+группу и вкл/выкл, через statistics manager, чтобы не грузить систему. Комплементарно этому плану
+(тот — про дешёвое GUI-**чтение**; follow-up — про «публиковать ровно сколько надо»). Кирпичи уже есть:
+- per-паттерн троттл `backend/state/manager_setup.py:build_throttle_rules()` (сейчас **хардкод** `{glob → min_interval}`) → сделать **config-driven** (рецепт/секция);
+- observability control-plane (секция `observability` + hot-reload watcher + `reconfigure()` + IPC `config.reload`) — готовый канал рантайм-изменений ([[project_observability_control_plane]]);
+- `ObservableMixin` per-slot тумблеры (`enable/disable/context`) — есть, но **не проброшены** в hot-reload-конфиг (пробел из layer-grouping Инициатива 2 п.3);
+- fan-out конфига на дочерние процессы — пробел (layer-grouping 2C).
+Не хватает: троттл из конфига, вкл/выкл публикации метрики/группы, рантайм-крутилки через stats manager + fan-out.
+Оформить как `plans/telemetry-publish-control.md` после закрытия этого плана.
 
 ## Риски
 
