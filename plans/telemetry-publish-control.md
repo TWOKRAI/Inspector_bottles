@@ -90,8 +90,9 @@ telemetry:
 
 ### Фаза 1 — Publisher-gate: per-метрика вкл/выкл + частота (ГЛАВНЫЙ рычаг, framework)
 
-#### Task 1.1 — Контракт `TelemetryPublishConfig` (schema)
+#### Task 1.1 — Контракт `TelemetryPublishConfig` (schema) ✅ DONE
 **Level:** Middle+ (Sonnet) · **Assignee:** developer · **Layer:** framework
+**Статус:** ✅ DONE — `process_module/configs/telemetry_publish_config.py` (`MetricRule` + `TelemetryPublishConfig`, `@register_schema`); `resolve(metric)->(enabled, interval)` с наследованием default; `from_dict`/`to_dict` round-trip; экспорт в `configs/__init__.py` + ленивый в `process_module/__init__.py`; тесты `test_telemetry_publish_config.py`.
 **Goal:** декларативный контракт публикации (framework schema, Dict-at-Boundary).
 **Files:** новый `process_module/configs/telemetry_publish_config.py` (`@register_schema`), `interfaces.py`, tests.
 **Steps:** 1. `TelemetryPublishConfig(SchemaBase)`: `default_interval_sec`, `metrics: dict[str, MetricRule]`
@@ -99,8 +100,9 @@ telemetry:
   с дефолтами. 3. `expand`/merge global+per-process.
 **Acceptance:** резолв метрики с дефолтом/override; неизвестная метрика → default enabled; errors не конфигурируемы.
 
-#### Task 1.2 — Publisher-gate в heartbeat
+#### Task 1.2 — Publisher-gate в heartbeat ✅ DONE
 **Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** framework
+**Статус:** ✅ DONE — `heartbeat/telemetry.py`: `build_worker_telemetry` принял `allowed_metrics` (выключенная метрика не считается/не в payload; `status` вне гейта); новый `TelemetryGate` (per-метрика `_next_due` rate-limit, паттерн `io_peek`). `heartbeat/process_heartbeat.py`: `_build_telemetry_gate()` из `get_config("telemetry").publish` (нет секции → None → всё как раньше), `_loop` считает `allowed` один раз и пробрасывает в `_publish_metrics_to_tree` + `_publish_router_shm_stats_to_tree` (shm-гейт). health/errors/status — вне гейта. Тесты `test_telemetry_gate.py`.
 **Goal:** процесс не считает/не публикует выключенные метрики и уважает per-метрика частоту.
 **Files:** `process_module/heartbeat/process_heartbeat.py` (`_publish_metrics_to_tree`),
   `heartbeat/telemetry.py` (`build_worker_telemetry` — принять фильтр enabled-метрик), rate-limiter per-метрика

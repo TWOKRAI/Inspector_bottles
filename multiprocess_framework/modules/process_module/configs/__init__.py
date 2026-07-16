@@ -11,6 +11,7 @@ from .observability_config import (
 )
 from .process_config_handler import ProcessConfigHandler
 from .process_launch_config import ProcessLaunchConfig
+from .telemetry_publish_config import MetricRule, TelemetryPublishConfig
 
 __all__ = [
     "MANAGER_SECTION_KEYS",
@@ -21,4 +22,6 @@ __all__ = [
     "expand_observability",
     "ProcessConfigHandler",
     "ProcessLaunchConfig",
+    "MetricRule",
+    "TelemetryPublishConfig",
 ]

@@ -23,6 +23,9 @@ class ProcessHeartbeat:
         """
         self._services = services
         self._interval: float = 5.0
+        # PC 1.2: publisher-gate телеметрии. None → гейт неактивен (нет секции
+        # telemetry.publish в конфиге) → все метрики каждый тик (обратная совместимость).
+        self._telemetry_gate: Any = None
 
     def start(self) -> None:
         """Создать и запустить heartbeat воркер если включён в конфиге."""
@@ -43,6 +46,8 @@ class ProcessHeartbeat:
         from ...worker_module import ThreadConfig, ThreadPriority
 
         self._interval = interval
+        # PC 1.2: собрать publisher-gate из секции telemetry.publish (если задана).
+        self._telemetry_gate = self._build_telemetry_gate()
         self._services.worker_manager.create_worker(
             "heartbeat_sender",
             self._loop,
@@ -88,14 +93,21 @@ class ProcessHeartbeat:
                             workers = {}
                 self._services.send_message("ProcessManager", heartbeat_msg)
 
+                # PC 1.2: publisher-gate — какие метрики разрешено публиковать на этом
+                # тике (вкл/выкл ∧ созрел per-метрика интервал). None → гейт неактивен
+                # (нет конфига) → все метрики каждый тик (обратная совместимость).
+                allowed_metrics = None
+                if self._telemetry_gate is not None:
+                    allowed_metrics = self._telemetry_gate.due_metrics()
+
                 # Self-publish метрик процесса напрямую в дерево StateStore.
                 # Здоровый путь телеметрии — тот же канал, что и статус процесса.
-                self._publish_metrics_to_tree(workers)
+                self._publish_metrics_to_tree(workers, allowed_metrics)
 
                 # Ф7 G.3 H8: SHM-счётчики router'а (pickle-fallback / torn / границы)
                 # в дерево — иначе они видны только pull-командой introspect, а вкладка
                 # Pipeline их не видит (acceptance «счётчик в state/heartbeat»).
-                self._publish_router_shm_stats_to_tree()
+                self._publish_router_shm_stats_to_tree(allowed_metrics)
 
                 # Self-publish здоровья процесса (Ф2 Task 2.1) — тот же канал.
                 # Отдельно от метрик: health публикуется даже без воркеров и только
@@ -151,7 +163,35 @@ class ProcessHeartbeat:
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось слить observability-буфер: {exc}", module="heartbeat")
 
-    def _publish_metrics_to_tree(self, workers: dict) -> None:
+    def _build_telemetry_gate(self) -> Any:
+        """Собрать ``TelemetryGate`` из секции ``telemetry.publish`` конфига процесса.
+
+        Обратная совместимость: нет секции ``telemetry`` / нет под-секции ``publish``
+        → ``None`` (гейт неактивен, все метрики публикуются каждый тик — поведение как
+        раньше). Плумбинг значений из ``system.yaml``/blueprint — отдельная задача
+        (PC 1.3); здесь читаем уже доставленный ``get_config("telemetry")``.
+        """
+        try:
+            telemetry = self._services.get_config("telemetry", None)
+        except Exception:  # noqa: BLE001 — отсутствие/битость конфига не должна ронять heartbeat
+            telemetry = None
+        if not isinstance(telemetry, dict):
+            return None
+        publish = telemetry.get("publish")
+        if publish is None:
+            return None
+        from ..configs.telemetry_publish_config import TelemetryPublishConfig
+        from .telemetry import TelemetryGate
+
+        try:
+            config = TelemetryPublishConfig.from_dict(publish)
+        except Exception as exc:  # noqa: BLE001 — кривой конфиг → без гейта (как раньше), но залогировать
+            _log = getattr(self._services, "log_debug", self._services.log_info)
+            _log(f"Не удалось собрать TelemetryPublishConfig, гейт выключен: {exc}", module="heartbeat")
+            return None
+        return TelemetryGate(config)
+
+    def _publish_metrics_to_tree(self, workers: dict, allowed_metrics: Any = None) -> None:
         """Опубликовать телеметрию процесса и каждого воркера в дерево StateStore.
 
         Здоровый путь телеметрии: процесс САМ репортит свои метрики через
@@ -174,9 +214,15 @@ class ProcessHeartbeat:
 
         Процессы без StateProxy (чисто системные) тихо пропускаются.
 
+        PC 1.2: ``status`` воркеров публикуется всегда (вне гейта); частота/цикл/агрегат
+        фильтруются ``allowed_metrics`` (выключенная/зажатая метрика не считается и не
+        уходит в merge).
+
         Args:
             workers: снимок ``get_all_workers_status()`` (тайминг цикла на верхнем
                 уровне каждого статуса).
+            allowed_metrics: разрешённые на этом тике суффиксы метрик (``None`` → все,
+                обратная совместимость).
         """
         proxy = getattr(self._services, "_state_proxy", None)
         if proxy is None or not workers:
@@ -187,7 +233,7 @@ class ProcessHeartbeat:
         # merge сохраняет сиблинги (health.* и пр.), число сообщений ↓ ~в W раз.
         from .telemetry import build_worker_telemetry
 
-        result = build_worker_telemetry(workers, self._services.name)
+        result = build_worker_telemetry(workers, self._services.name, allowed_metrics)
         if result is None:
             return
         path, data = result
@@ -197,7 +243,7 @@ class ProcessHeartbeat:
             _log = getattr(self._services, "log_debug", self._services.log_info)
             _log(f"Не удалось self-publish метрик процесса: {exc}", module="heartbeat")
 
-    def _publish_router_shm_stats_to_tree(self) -> None:
+    def _publish_router_shm_stats_to_tree(self, allowed_metrics: Any = None) -> None:
         """Ф7 G.3 H8 / G.4.a: счётчики кадрового транспорта router'а → дерево StateStore
         (тот же self-publish канал, что телеметрия/health). Публикует
         ``processes.{name}.state.shm.{...}``: pickle_fallbacks (громкий slow-path),
@@ -206,7 +252,13 @@ class ProcessHeartbeat:
         все сигналы потери кадра в одном месте для вкладки Pipeline. Публикует только
         при НЕнулевых счётчиках (иначе no-op — не засоряем дерево у процессов без
         кадрового пути).
+
+        PC 1.2: группа ``shm`` проходит publisher-gate. ``allowed_metrics`` не None и
+        без ``"shm"`` → выходим сразу (не считаем ``get_stats()`` — экономим источник).
+        ``None`` → shm разрешён (обратная совместимость).
         """
+        if allowed_metrics is not None and "shm" not in allowed_metrics:
+            return  # shm выключен/зажат частотой — не считаем и не публикуем
         proxy = getattr(self._services, "_state_proxy", None)
         router = getattr(self._services, "router_manager", None)
         if proxy is None or router is None:
