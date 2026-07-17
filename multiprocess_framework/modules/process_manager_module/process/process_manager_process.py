@@ -1205,17 +1205,24 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"_broadcast_routing_refresh({reason}) упал: {exc}")
             return False
 
-    def _replay_telemetry_runtime_delta(self, reason: str) -> int:
-        """Доиграть сохранённую runtime telemetry publish-дельту всем живым детям (Task 3.2).
+    def _replay_telemetry_runtime_delta(self, reason: str, *, target: str | None = None) -> int:
+        """Доиграть сохранённую runtime telemetry publish-дельту детям (Task 3.2).
 
         Runtime-правка publisher-gate (``telemetry.broadcast`` fan-out) живёт только в
         процессах-детях; при hot-swap/respawn пересозданный ребёнок стартует с BOOT-конфига
         и потерял бы правку. PM хранит последнюю fan-out publish-дельту (``_telemetry_runtime_delta``)
-        и доигрывает её через тот же ``_broadcast_command``, что и routing.refresh (свежие
-        очереди после свитча). ``publish=None``-broadcast очистил персист → доигрывать нечего.
+        и доигрывает её. ``publish=None``-broadcast очистил персист → доигрывать нечего.
+
+        Args:
+            reason: причина доигрывания (для лога).
+            target: имя конкретного процесса → адресно ОДНОМУ ребёнку (``_send_child_command``,
+                напр. single-process ``restart_process`` — краш-рестарт частый, broadcast всем
+                избыточен). ``None`` → fan-out ВСЕМ живым детям (``_broadcast_command``, напр.
+                ``apply_topology`` пересоздал набор). Оба пути идемпотентны (replace/merge
+                повторно на уже настроенном ребёнке даёт то же состояние).
 
         Returns:
-            Охват доставки (0 — нет дельты / нет коммуникации / ошибка рассылки).
+            Охват доставки (0 — нет дельты / нет коммуникации / ошибка).
         """
         delta = getattr(self, "_telemetry_runtime_delta", None)
         if not delta:
@@ -1224,8 +1231,11 @@ class ProcessManagerProcess(ProcessModule):
         if delta.get("mode", "replace") != "replace":
             payload["telemetry_mode"] = delta["mode"]
         try:
-            reached = self._broadcast_command("telemetry.reconfigure", payload)
-            self._log_info(f"telemetry runtime-дельта доиграна ({reason}): reached={reached}")
+            if target is not None:
+                reached = 1 if self._send_child_command(target, "telemetry.reconfigure", payload) else 0
+            else:
+                reached = self._broadcast_command("telemetry.reconfigure", payload)
+            self._log_info(f"telemetry runtime-дельта доиграна ({reason}, target={target!r}): reached={reached}")
             return int(reached)
         except Exception as exc:  # noqa: BLE001 — доигрывание не должно ронять lifecycle
             self._log_error(f"_replay_telemetry_runtime_delta({reason}) упал: {exc}")
@@ -1852,6 +1862,10 @@ class ProcessManagerProcess(ProcessModule):
         # RS-2: пересозданный инстанс имеет НОВЫЙ pid — обновить identity в state,
         # иначе в дереве навсегда остаётся pid мёртвого инстанса (нарушение инварианта).
         self._publish_process_identity(process_name)
+        # Task 3.2: single-process respawn — доиграть runtime telemetry-дельту АДРЕСНО
+        # пересозданному ребёнку (иначе он взял бы boot-конфиг, потеряв рантайм-правку
+        # publisher-gate; тот же silent-loss, что закрыт для apply_topology).
+        self._replay_telemetry_runtime_delta("process.restart", target=process_name)
         self._log_info(f"Process '{process_name}' restarted")
         return True
 

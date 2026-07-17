@@ -301,9 +301,9 @@ telemetry-publish-control); изменение дефолтных central-пра
 2. Assembler читает `topology.processes[i].telemetry` после валидации; raw pre-scan удалить.
 3. Характеризация: build-снапшоты обоих живых рецептов не меняются.
 **Acceptance:**
-- [ ] Тест: per-process override доезжает до `get_config("telemetry")` (существующие тесты overlay зелёные без raw-скана)
-- [ ] grep: `_extract_per_process_telemetry` отсутствует
-- [ ] Golden-снапшоты `test_build_characterization.py` без диффа proc_dict'ов
+- [x] Тест: per-process override доезжает до `get_config("telemetry")` (существующие тесты overlay зелёные без raw-скана)
+- [x] grep: `_extract_per_process_telemetry` отсутствует
+- [x] Golden-снапшоты `test_build_characterization.py` без диффа proc_dict'ов
 **Out of scope:** семантика merge (не меняется), другие поля ProcessConfig.
 
 ### Task 3.2 — Персист runtime-дельты в PM + fan-out publisher-gate из watcher ⚠️ ЧАСТИЧНО (c0b6e01b: шаги 1-2-4; шаг 3 отложен)
@@ -332,10 +332,10 @@ telemetry-publish-control); изменение дефолтных central-пра
    сравнение с последней применённой).
 4. Явная команда сброса дельты (`telemetry.reset` или `publish=None` broadcast) очищает персист.
 **Acceptance:**
-- [ ] Тест: broadcast-дельта → hot-swap рецепта → у пересозданного ребёнка gate отражает дельту (не boot-дефолт)
+- [x] Тест: broadcast-дельта → hot-swap рецепта → у пересозданного ребёнка gate отражает дельту (не boot-дефолт)
 - [ ] Тест: правка publish-секции файла → watcher → у детей пересобран gate (mock-children/охват)
-- [ ] Тест: повторный reload файла БЕЗ изменений секции → 0 broadcast'ов (нет шторма)
-- [ ] Тест: сброс дельты → respawn берёт boot-конфиг
+- [x] Тест: повторный reload файла БЕЗ изменений секции → 0 broadcast'ов (нет шторма)
+- [x] Тест: сброс дельты → respawn берёт boot-конфиг
 **Out of scope:** персист на диск (только память PM); throttle-плоскость (живёт в оркестраторе, respawn её не теряет).
 
 ### Task 3.3 — Covered-подписки: ре-адопция при снятии покрывающего паттерна ✅ DONE (d1cb407c)
@@ -351,9 +351,9 @@ telemetry-publish-control); изменение дефолтных central-пра
    (паттерн 0.2), убрав sub_id из `_covered_sub_ids`.
 2. Лог с маркером `[re-adopt]` + счётчик (наблюдаемость как у async-subscribe).
 **Acceptance:**
-- [ ] Тест: subscribe wildcard (sync) → ensure узкого (covered) → unsubscribe wildcard → узкому отправлен собственный `state.subscribe` (spy-router)
-- [ ] Тест: два покрывающих — снятие одного НЕ создаёт новой подписки (переусыновление)
-- [ ] Регресс: прежние coverage-тесты зелёные
+- [x] Тест: subscribe wildcard (sync) → ensure узкого (covered) → unsubscribe wildcard → узкому отправлен собственный `state.subscribe` (spy-router)
+- [x] Тест: два покрывающих — снятие одного НЕ создаёт новой подписки (переусыновление)
+- [x] Регресс: прежние coverage-тесты зелёные
 **Out of scope:** серверная сторона; sync-ре-подписка (только async — инвариант «0 блокирующего IPC»).
 
 ### Task 3.4 — Гигиена ThrottleMiddleware: чистка таймингов мёртвых путей ✅ DONE (d7670228)
@@ -371,9 +371,9 @@ telemetry-publish-control); изменение дефолтных central-пра
 2. `flush()` — отдавать pending с меткой возраста ЛИБО отбрасывать записи старше порога
    (задокументировать выбор), чтобы shutdown не писал давно исчезнувшие значения.
 **Acceptance:**
-- [ ] Тест: prune по префиксу убирает тайминги/pending только своего поддерева
-- [ ] Тест: рост словарей ограничен при потоке уникальных путей (lazy-prune срабатывает)
-- [ ] Регресс: 40 тестов test_throttle.py зелёные
+- [x] Тест: prune по префиксу убирает тайминги/pending только своего поддерева
+- [x] Тест: рост словарей ограничен при потоке уникальных путей (lazy-prune срабатывает)
+- [x] Регресс: 40 тестов test_throttle.py зелёные
 **Out of scope:** семантика троттла (интервалы/правила не меняются).
 
 ### Task 3.5 — Read-model во framework + вырезание legacy bind-пути
@@ -396,9 +396,9 @@ README, STATUS, tests — правило проекта №2), `multiprocess_pro
    bind'ы. Инвариант-тест вкладок остаётся зелёным.
 4. Возможен сплит на 3.5a (перенос) / 3.5b (миграция+вырезание) — решает teamlead при декомпозиции.
 **Acceptance:**
-- [ ] `test_tab_open_invariant.py` зелёный для всех вкладок ПОСЛЕ вырезания legacy
-- [ ] grep: `_connect_bindings_legacy` / `cache_snapshot` отсутствуют в прототипе
-- [ ] Импорт-границы: `mcp__sentrux__check_rules` чист (frontend_module не импортирует прототип)
+- [x] `test_tab_open_invariant.py` зелёный для всех вкладок ПОСЛЕ вырезания legacy
+- [x] grep: `_connect_bindings_legacy` / `cache_snapshot` отсутствуют в прототипе
+- [x] Импорт-границы: `mcp__sentrux__check_rules` чист (frontend_module не импортирует прототип)
 - [ ] qt-smoke по правилу `feedback_qt_mcp_smoke_verification`: proto + qt_snapshot, все вкладки живые
 **Out of scope:** новый функционал вкладок; формат доставки дельт (ADR-COMM-001 не трогаем).
 

@@ -550,3 +550,32 @@ class TestRuntimeDeltaPersist:
         pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
         assert pm._replay_telemetry_runtime_delta("test") == 0
         assert _telemetry_broadcasts(pm) == []
+
+    def test_replay_addressed_sends_to_single_child(self) -> None:
+        """target=процесс → адресный send_to_process ОДНОМУ ребёнку (single-process respawn)."""
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}})
+        pm._replay_telemetry_runtime_delta("process.restart", target="camera_0")
+        sends = [(t, m) for t, m in pm.communication.sends if m.get("command") == "telemetry.reconfigure"]
+        assert len(sends) == 1
+        assert sends[0][0] == "camera_0"
+        assert sends[0][1]["data"] == {"publish": {"metrics": {"fps": {"enabled": False}}}}
+
+    def test_apply_topology_replays_delta_to_children(self) -> None:
+        """Интеграция: успешный apply_topology РЕАЛЬНО доигрывает сохранённую дельту (не только unit)."""
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"shm": {"enabled": False}}}})
+        before = len(_telemetry_broadcasts(pm))
+        res = pm.apply_topology({"processes": [{"process_name": "camera_0", "process_class": "m.Cam"}]})
+        assert res["success"] is True
+        after = _telemetry_broadcasts(pm)
+        # +1 broadcast telemetry.reconfigure — доигрывание дельты после свитча.
+        assert len(after) == before + 1
+        assert after[-1]["data"] == {"publish": {"metrics": {"shm": {"enabled": False}}}}
+
+    def test_apply_topology_without_delta_no_replay(self) -> None:
+        """Нет персиста → apply_topology НЕ шлёт telemetry.reconfigure (только routing.refresh)."""
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        res = pm.apply_topology({"processes": [{"process_name": "camera_0", "process_class": "m.Cam"}]})
+        assert res["success"] is True
+        assert _telemetry_broadcasts(pm) == []

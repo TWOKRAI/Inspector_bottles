@@ -247,6 +247,11 @@ from multiprocess_framework.modules.frontend_module.tabs import (  # noqa: E402
 # read-сторона SQLite-стока (generic: схема — параметры конструктора). Реэкспорт
 # здесь — чтобы контракт модуля был виден из единого interfaces.py; импортировать
 # можно и напрямую из ``frontend_module.state``.
+from multiprocess_framework.modules.frontend_module.state import (  # noqa: E402
+    DEFAULT_TRACKED_SUFFIXES,
+    TelemetryHistorySource,
+    TelemetryViewModel,
+)
 
 __all__ = [
     # Протоколы контракта модуля (объявлены выше в этом файле).

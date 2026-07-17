@@ -749,6 +749,26 @@ class TestLazyPrune:
 
         assert len(mw._last_pass) == 50
 
+    def test_lazy_prune_bounds_pending_under_block_rule_stream(self):
+        """interval=0 (полная блокировка) копит пути в _pending, НЕ в _last_pass.
+
+        Lazy-prune должен видеть рост _pending (а не слепо смотреть только _last_pass),
+        иначе поток уникальных путей под блокирующим правилом растит _pending без границы.
+        """
+        # Правило interval=0 → полная блокировка; нет положительных интервалов →
+        # порог устаревания = дефолт 5.0 * K(10) = 50с (в логическом времени теста).
+        mw = ThrottleMiddleware({"**.debug": 0})
+        n_paths = _LAZY_PRUNE_SIZE_THRESHOLD + 200
+
+        with patch("time.monotonic", side_effect=[float(i) for i in range(n_paths)]):
+            for i in range(n_paths):
+                mw.before_set(f"workers.{i}.debug", i, SOURCE, {})
+
+        assert len(mw._last_pass) == 0  # блокирующее правило не пишет тайминги пропуска
+        # Без фикса _pending дорос бы до n_paths; lazy-prune ограничил рост.
+        assert len(mw._pending) <= _LAZY_PRUNE_SIZE_THRESHOLD
+        assert 0 < len(mw._pending) < n_paths
+
 
 # ---------------------------------------------------------------------------
 # Тест 16: flush() отбрасывает stale pending-значения (Task 3.4)

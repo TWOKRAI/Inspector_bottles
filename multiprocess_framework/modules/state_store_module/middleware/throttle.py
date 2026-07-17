@@ -453,15 +453,19 @@ class ThrottleMiddleware(StateMiddleware):
         сигнал «путь исчез» — тайминг, который давно не обновлялся. Полное
         O(n)-сканирование на каждый вызов ``before_set``/``before_merge`` было
         бы лишней работой на горячем пути, поэтому сканирование запускается
-        ТОЛЬКО когда ``_last_pass`` вырос за ``_LAZY_PRUNE_SIZE_THRESHOLD`` —
-        прод-нагрузка телеметрии (десятки-сотни путей) никогда не достигает
-        этого порога, и lazy-prune для неё — одна дешёвая проверка ``len()``.
+        ТОЛЬКО когда ``_last_pass`` ЛИБО ``_pending`` вырос за
+        ``_LAZY_PRUNE_SIZE_THRESHOLD`` — прод-нагрузка телеметрии (десятки-сотни
+        путей) никогда не достигает этого порога, и lazy-prune для неё — одна
+        дешёвая проверка ``len()``. Проверяем ОБА словаря: правило ``interval == 0``
+        (полная блокировка) копит пути в ``_pending``/``_pending_since``, но НЕ в
+        ``_last_pass`` — при потоке уникальных путей под таким правилом рос бы только
+        ``_pending``, и проверка одного ``_last_pass`` его слепо пропустила бы.
 
         Args:
             now: уже посчитанный ``time.monotonic()`` вызывающего метода
                 (переиспользуем — вторым вызовом не платим).
         """
-        if len(self._last_pass) <= _LAZY_PRUNE_SIZE_THRESHOLD:
+        if max(len(self._last_pass), len(self._pending)) <= _LAZY_PRUNE_SIZE_THRESHOLD:
             return
 
         threshold = self._stale_age_threshold()
