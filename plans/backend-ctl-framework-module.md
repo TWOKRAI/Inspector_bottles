@@ -166,7 +166,7 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 **Out of scope:** reconnect (0.3).
 **Статус:** ✅ 2dbb8b8a (test_driver.py 33/33; +`_send_raw` захват сокета под локом, +`_quarantine_timed_out`)
 
-### Task 0.3 — Единый контракт ошибок + durable-подписки при reconnect (ежедневная боль №1)
+### Task 0.3 — Единый контракт ошибок + durable-подписки при reconnect (ежедневная боль №1)  ✅ (3c74b129)
 **Level:** Senior (Opus) | **Assignee:** teamlead | **Layer:** tests/tooling
 **Goal:** один контракт ошибок; реконнект MCP-сервера не теряет подписки молча.
 **Files:** `backend_ctl/driver.py`, `backend_ctl/mcp_server.py`, `backend_ctl/mcp_tools.py`, тесты.
@@ -176,9 +176,10 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 3. `mcp_server._reset_driver`: после переподключения новый driver получает реестр и делает replay; в ответ инструмента добавляется `"reconnected": true, "resubscribed": [...]`.
 4. Убрать `time.sleep(0.3)` (mcp_server.py:89) → ping-проба `introspect.status("ProcessManager", timeout=2)` с 3 ретраями.
 **Acceptance:**
-- [ ] Тест (fake-driver): обрыв → следующий tools/call переподключается и replay'ит подписки
-- [ ] Тест контракта: все обёртки на fake-транспорте с ошибкой → `success=False` + `error`
+- [x] Тест (fake-driver): обрыв → следующий tools/call переподключается и replay'ит подписки
+- [x] Тест контракта: все обёртки на fake-транспорте с ошибкой → `success=False` + `error`
 **Out of scope:** переезд реестра в `subscriptions.py` (Phase 1); авто-переподписка по «recovered» (Task 2.2).
+**Статус:** ✅ 3c74b129 (14 unit-тестов). Контракт ошибок: переписывать 30 обёрток НЕ понадобилось — единообразие `{success:False,error}` уже гарантирует `request()`; шаг закрыт проверочным тестом на 19 обёрток. Telemetry-методы не тронуты.
 
 ### Task 0.4 — Harness: env-restore + readiness-probe; дедупликация; публичные аксессоры
 **Level:** Middle+ (Sonnet) | **Assignee:** developer | **Layer:** tests/tooling
@@ -341,6 +342,8 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 **Out of scope:** i18n.
 
 > **Отложено в бэклог (решение ревью — не грузить план):** cursor-дренаж событий по плоскостям (list-watch: `events_page(plane, cursor)` + `dropped`-счётчики) и пагинация прочих тяжёлых ответов. Вернуться, когда появится реальная боль от разрушающего `events()` у нескольких потребителей.
+
+> **Идея владельца (2026-07-17) — «записная книжка модуля» / единый `help`:** сделать удобный человеко/агенто-читаемый вид `help(process)` / `describe(process)` поверх УЖЕ существующей машиночитаемой карточки `introspect.capabilities` (команды+описания+params_schema, `router_handlers` = какие сигналы слушает, `registers`, каналы/адреса из `capabilities_extra`). Данные уже есть — не хватает рендера «шпаргалки»: «команды (с примерами) · что можно подписать и как поймать · адреса/каналы · регистры». Логично лечь в Phase 3 рядом с `response_format` (Task 3.3): `capabilities(format="help")`. Ноль дублирования (тот же реестр). Гэпы, которые уже закрываются планом: «поймать сигналы» → Phase 2 (`observability_tail`/`watch_like_gui`), «телеметрия как ручка» → Task 0.5, «память/очереди» → Task 2.4, «errors that teach» → Task 3.3.
 
 ### Phase 4 — Тесты, документация
 
