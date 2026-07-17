@@ -164,6 +164,42 @@ class TestTelemetryReconfigureCommand:
         assert "publish" in res["reason"] or "throttle" in res["reason"]
 
 
+class TestTelemetryReconfigureUnknownMetrics:
+    """Task 2.3: опечатка в имени метрики — видимая диагностика в ответе команды."""
+
+    def test_typo_metric_reported_in_response(self) -> None:
+        """metrics={"latency": ...} (опечатка) → unknown_metrics=["latency"] в ответе, gate строится."""
+        svc, cm = _make()
+        res = cm.dispatch(
+            "telemetry.reconfigure",
+            {"publish": {"metrics": {"latency": {"interval_sec": 0.5}}}},
+        )
+        assert res["success"] is True
+        assert res["unknown_metrics"] == ["latency"]
+        # известные метрики продолжают публиковаться штатно (секция не отвергнута).
+        gate = svc._heartbeat._telemetry_gate
+        assert gate is not None
+        assert "fps" in gate.due_metrics(now=0.0)
+
+    def test_all_known_metrics_no_field_in_response(self) -> None:
+        """Все ключи metrics известны → поля unknown_metrics в ответе НЕТ вообще."""
+        _svc, cm = _make()
+        res = cm.dispatch(
+            "telemetry.reconfigure",
+            {"publish": {"metrics": {"fps": {"enabled": False}}}},
+        )
+        assert res["success"] is True
+        assert "unknown_metrics" not in res
+
+    def test_throttle_only_command_no_unknown_metrics_field(self) -> None:
+        """publish не запрошен (только throttle) → поля unknown_metrics нет (нечего резолвить)."""
+        throttle = ThrottleMiddleware({})
+        _svc, cm = _make(throttle=throttle)
+        res = cm.dispatch("telemetry.reconfigure", {"throttle": {"a.b": 1.0}})
+        assert res["success"] is True
+        assert "unknown_metrics" not in res
+
+
 class TestTelemetryReconfigureMergeMode:
     """Task 1.1: mode='merge' — точечная правка не стирает соседние правила/метрики."""
 

@@ -941,6 +941,11 @@ class BuiltinCommands:
         (Task 1.4 — и адресный per-process путь, и fan-out ``telemetry.broadcast`` теперь
         транзитом через PM, чтобы он детектил ``capped_by_throttle`` central-троттлом), а
         также из расширенного ``config.reload``. Применение адресное — один процесс-адресат.
+
+        Task 2.3: если ``publish`` применён и в эффективной секции остались ключи
+        ``metrics``, отсутствующие в ``GATED_METRICS`` (опечатка в имени метрики), ответ
+        дополняется ``"unknown_metrics": [...]`` (отсортированный список). Секция при
+        этом не отвергается — поле только для наблюдаемости; пустой набор → поля нет.
         """
         args = self._merge_args(data, kwargs)
         svc = self._services
@@ -978,7 +983,16 @@ class BuiltinCommands:
                 "reason": applied["error"],
             }
 
-        return {"success": True, "process": svc.name, "applied": applied}
+        result: dict = {"success": True, "process": svc.name, "applied": applied}
+        # Task 2.3: publisher-gate перестроен → отдать инициатору неизвестные ключи
+        # metrics (опечатка), если они есть — видимая диагностика вместо тихого no-op.
+        # Поле присутствует ТОЛЬКО при непустом наборе (пустой набор — как раньше).
+        if applied.get("publish"):
+            heartbeat = getattr(svc, "_heartbeat", None)
+            unknown = heartbeat.current_unknown_metrics() if heartbeat is not None else []
+            if unknown:
+                result["unknown_metrics"] = unknown
+        return result
 
     def _cmd_logger_sink_enable(self, data=None, **kwargs) -> dict:
         """Включить sink логгера по имени (ADR-CRM-006 п.3: register_channel)."""

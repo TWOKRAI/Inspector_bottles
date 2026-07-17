@@ -27,6 +27,13 @@ from pydantic import Field
 
 from ...data_schema_module import FieldMeta, SchemaBase, register_schema
 
+# Суффиксы метрик, подлежащих publisher-gate (вкл/выкл + частота). ``status``
+# воркеров и health/errors СЮДА не входят — они публикуются всегда (инвариант плана).
+# Task 2.3: константа живёт здесь (не в heartbeat/telemetry.py), т.к. этот модуль —
+# нижний слой контракта (configs не импортирует heartbeat, а heartbeat — импортирует
+# configs); heartbeat/telemetry.py ре-экспортирует её для обратной совместимости импортов.
+GATED_METRICS: tuple[str, ...] = ("fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm")
+
 
 @register_schema("MetricRule")
 class MetricRule(SchemaBase):
@@ -97,6 +104,21 @@ class TelemetryPublishConfig(SchemaBase):
         interval = rule.interval_sec if rule.interval_sec is not None else self.default_interval_sec
         return rule.enabled, interval
 
+    def unknown_metrics(self) -> set[str]:
+        """Ключи ``metrics``, отсутствующие в :data:`GATED_METRICS` — опечатка в имени.
+
+        Task 2.3: правило на несуществующий суффикс (например ``latency`` вместо
+        ``latency_ms``) раньше было тихим no-op — ``resolve()`` его просто никогда не
+        находит (метрика не публикуется, но и никакой диагностики). Метод НЕ отвергает
+        такие ключи (forward-compat: новая метрика в старом процессе не должна ронять
+        reload) — только позволяет вызывающему коду залогировать/вернуть предупреждение.
+
+        Returns:
+            Множество ключей ``metrics``, которых нет среди :data:`GATED_METRICS`
+            (пусто — все ключи известны).
+        """
+        return set(self.metrics) - set(GATED_METRICS)
+
     def to_dict(self) -> Dict[str, Any]:
         """Сериализовать в dict (Dict at Boundary — уходит в IPC/конфиг)."""
         return self.model_dump()
@@ -107,4 +129,4 @@ class TelemetryPublishConfig(SchemaBase):
         return cls.model_validate(data or {})
 
 
-__all__ = ["MetricRule", "TelemetryPublishConfig"]
+__all__ = ["GATED_METRICS", "MetricRule", "TelemetryPublishConfig"]
