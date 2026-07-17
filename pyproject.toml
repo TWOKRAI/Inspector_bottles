@@ -7,17 +7,17 @@ dependencies = [
     # Core framework
     "pydantic>=2.13",
     "pydantic-settings>=2.6",
-    "sqlalchemy[asyncio]>=2.0.49",  # asyncio extras = greenlet для async-адаптера
+    "sqlalchemy[asyncio]>=2.0.49", # asyncio extras = greenlet для async-адаптера
     "numpy>=2.4,<3",
     "PyYAML>=6.0",
-    "ruamel.yaml>=0.18",  # round-trip YAML с сохранением комментариев (рецепты, app.yaml)
+    "ruamel.yaml>=0.18", # round-trip YAML с сохранением комментариев (рецепты, app.yaml)
     "psutil>=7.0",
     # GUI (Phase 2 завершена: миграция PyQt5 → PySide6)
     "pyside6>=6.8,<6.11",
     "QDarkStyle>=3.2",
     # Node graph editor (Phase 9) — fork от C3RV1 для PySide6, гибридный режим
     "NodeGraphQt",
-    "Qt.py>=1.4",  # транзитивная зависимость NodeGraphQt
+    "Qt.py>=1.4", # транзитивная зависимость NodeGraphQt
     # Vision / image
     "opencv-python>=4.13,<5",
     "Pillow>=12.0",
@@ -43,6 +43,7 @@ dependencies = [
     # Async testing — было в стейл inner pyproject
     "pytest-asyncio>=0.24",
     "setuptools>=82.0.1",
+    "pyqtgraph>=0.14.0",
 ]
 
 [project.scripts]
