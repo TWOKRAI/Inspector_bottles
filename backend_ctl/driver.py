@@ -723,10 +723,16 @@ class BackendDriver:
             у throttle-паттерна → удалить правило). На проводе режим присутствует только при
             ``merge`` (``replace`` — прежний конверт бит-в-бит).
 
-        Адресация по ``process``:
-          - имя процесса → адресный ``telemetry.reconfigure`` (один адресат: его
-            publisher-gate + троттл, если это оркестратор). Возвращает ``applied``
-            {publish/throttle: применено ли} — виден «нет приёмника».
+        Адресация по ``process`` (Task 1.4 — ОБА пути через PM, cap-aware):
+          - имя процесса → адресно ОДНОМУ ребёнку транзитом через PM
+            (``telemetry.broadcast`` с ``target=process``): PM форвардит ``publish`` этому
+            ребёнку, ``throttle`` применяет к ЦЕНТРАЛЬНОМУ троттлу (троттл оркестратор-
+            глобален). Транзит через PM — чтобы он детектил ``capped_by_throttle`` и на
+            per-process пути (прямой driver→child путь этого не мог: central-правила живут
+            лишь на оркестраторе, ADR-PM-017 Task 1.4). Возвращает ОХВАТ (``reached``/
+            ``target_count`` = 0/1) + ``capped_by_throttle`` при срезе. Fire-and-forward:
+            per-child ``applied`` больше не возвращается (сбор ответа ребёнка в PM дедлочил
+            бы message_processor) — факт применения смотреть по ``effective_hz`` в дереве.
           - ``"all"`` / ``"*"`` / ``None`` → fan-out: ``telemetry.broadcast`` на PM →
             ``publish`` рассылается ВСЕМ живым детям, ``throttle`` применяется к
             ЦЕНТРАЛЬНОМУ троттлу оркестратора. Возвращает агрегированный ОХВАТ
@@ -744,9 +750,14 @@ class BackendDriver:
         if mode != "replace":
             args["telemetry_mode"] = mode
 
-        if process in (None, "all", "*"):
-            return _leaf_result(self.send_command(pm_name, "telemetry.broadcast", args, timeout=timeout))
-        return _leaf_result(self.send_command(process, "telemetry.reconfigure", args, timeout=timeout))
+        # Task 1.4: и адресный, и fan-out путь идут через PM (единственный держатель
+        # central-троттла → детектит capped_by_throttle на ОБОИХ путях). Адресный кейс
+        # помечается data["target"] — PM форвардит publish ОДНОМУ ребёнку (не broadcast),
+        # throttle применяет центрально. Прямой driver→child путь ретрополнен: cap на нём
+        # был принципиально не детектируем (central-правила живут лишь на оркестраторе).
+        if process not in (None, "all", "*"):
+            args["target"] = process
+        return _leaf_result(self.send_command(pm_name, "telemetry.broadcast", args, timeout=timeout))
 
     def telemetry_set(
         self,
@@ -783,11 +794,11 @@ class BackendDriver:
 
         Если оператор вручную задал строгое central-правило (``plane="throttle"``) и затем
         поднял publisher-частоту НИЖЕ него — троттл его НЕ ослабляет автоматически («no
-        silent caps»): результат fan-out'а (``process="all"`` — broadcast-путь через PM)
-        несёт явный флаг ``capped_by_throttle: {metric: {publisher_interval_sec,
-        throttle_interval_sec}}`` — увидев его, ослабь central-правило тем же вызовом с
-        ``plane="throttle"``. Адресный вызов на ОДНОГО процесса cap пока НЕ детектит (known
-        gap ADR-PM-017 / Task 1.4 плана telemetry-coherence-remediation). Throttle-плоскость
+        silent caps»): результат несёт явный флаг ``capped_by_throttle: {metric:
+        {publisher_interval_sec, throttle_interval_sec}}`` — увидев его, ослабь central-
+        правило тем же вызовом с ``plane="throttle"``. Task 1.4: флаг детектится на ОБОИХ
+        путях — и fan-out (``process="all"``), и адресном (конкретный процесс), т.к. оба
+        идут транзитом через PM (держатель central-троттла). Throttle-плоскость
         по-прежнему full-apply в ``mode="replace"`` и точечная (per-правило) в ``mode="merge"``
         (Task 1.1).
 

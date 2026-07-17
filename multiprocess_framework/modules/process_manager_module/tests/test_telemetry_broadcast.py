@@ -22,15 +22,21 @@ from .conftest import make_pm
 
 
 class _CommSpy:
-    """Стаб communication: записывает broadcast'ы и возвращает заданный охват."""
+    """Стаб communication: записывает broadcast'ы + адресные send'ы, возвращает заданный охват."""
 
-    def __init__(self, reach: int = 0) -> None:
+    def __init__(self, reach: int = 0, *, deliver: bool = True) -> None:
         self.broadcasts: list = []
+        self.sends: list = []  # (target, message) адресных send_to_process (Task 1.4)
         self.reach = reach
+        self.deliver = deliver
 
     def broadcast(self, message, exclude_self: bool = True) -> int:
         self.broadcasts.append((message, exclude_self))
         return self.reach
+
+    def send_to_process(self, target: str, message) -> bool:
+        self.sends.append((target, message))
+        return self.deliver
 
 
 class _FakeStoreManager:
@@ -53,10 +59,16 @@ class _FakeCommandManager:
         self.metadata[name] = metadata or {}
 
 
-def _pm(children: dict | None = None, *, reach: int = 0, throttle: ThrottleMiddleware | None = None):
+def _pm(
+    children: dict | None = None,
+    *,
+    reach: int = 0,
+    throttle: ThrottleMiddleware | None = None,
+    deliver: bool = True,
+):
     """PM с comm-спаем + опц. центральным троттлом + зарегистрированными детьми в PSR."""
     pm = make_pm(children or {})
-    pm.communication = _CommSpy(reach=reach)
+    pm.communication = _CommSpy(reach=reach, deliver=deliver)
     # Дети видны через shared_resources.get_process_names (источник охвата fan-out).
     for name in children or {}:
         pm.shared_resources.register_process(name, {})
@@ -250,6 +262,120 @@ class TestCappedByThrottle:
         # Cap оценивается ПОСЛЕ relax → publisher (0.5с) уже НЕ строже финального правила
         # (0.1с) → флага нет (до фикса ловился бы ложный cap по старому 2.0с).
         assert "capped_by_throttle" not in res["publish"]
+
+
+def _addressed_sends(pm) -> list:
+    """Адресные send_to_process с командой telemetry.reconfigure (Task 1.4)."""
+    return [(t, m) for t, m in pm.communication.sends if m.get("command") == "telemetry.reconfigure"]
+
+
+class TestAddressedViaPm:
+    """Task 1.4 (ADR-PM-017 Amendment): адресный per-process путь транзитом через PM.
+
+    ``data["target"]`` = имя процесса → publish форвардится ОДНОМУ ребёнку через
+    ``send_to_process`` (не broadcast всем), throttle применяется центрально, а
+    ``capped_by_throttle`` детектится тем же PM-троттлом, что и на fan-out пути.
+    """
+
+    def test_addressed_publish_sends_to_single_child_not_broadcast(self) -> None:
+        pm = _pm({"camera_0": {"class": "m.Cam"}, "detector": {"class": "m.Det"}}, reach=2)
+        res = pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}, "target": "camera_0"})
+        assert res["success"] is True
+        # Ушёл адресный send ОДНОМУ ребёнку, broadcast всем — НЕ звался.
+        sends = _addressed_sends(pm)
+        assert len(sends) == 1
+        target, msg = sends[0]
+        assert target == "camera_0"
+        assert msg["command"] == "telemetry.reconfigure"
+        assert msg["type"] == "command"
+        assert msg["sender"] == pm.name
+        assert msg["queue_type"] == "system"
+        assert msg["data"] == {"publish": {"metrics": {"fps": {"enabled": False}}}}
+        assert _telemetry_broadcasts(pm) == []  # fan-out НЕ использован
+        # Охват адресный: одна цель, доставлено.
+        assert res["publish"]["target_count"] == 1
+        assert res["publish"]["reached"] == 1
+        assert res["publish"]["targets"] == ["camera_0"]
+        assert res["publish"]["complete"] is True
+
+    def test_addressed_publish_below_central_rule_is_flagged(self) -> None:
+        """ГЛАВНЫЙ acceptance Task 1.4: адресный raise ниже central-правила → capped_by_throttle
+        в результате (а НЕ тихий success с молчаливым будущим срезом)."""
+        throttle = ThrottleMiddleware({"processes.**.state.fps": 2.0})
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+        res = pm._cmd_telemetry_broadcast(
+            {"publish": {"metrics": {"fps": {"interval_sec": 0.5}}}, "target": "camera_0", "telemetry_mode": "merge"}
+        )
+        assert res["success"] is True
+        caps = res["publish"]["capped_by_throttle"]
+        assert caps == {"fps": {"publisher_interval_sec": 0.5, "throttle_interval_sec": 2.0}}
+        # Страховка НЕ тронута (auto-relax отвергнут), publish всё равно доставлен ребёнку.
+        assert throttle.rules == {"processes.**.state.fps": 2.0}
+        assert _addressed_sends(pm)[0][1]["data"]["publish"] == {"metrics": {"fps": {"interval_sec": 0.5}}}
+
+    def test_addressed_publish_above_rule_not_flagged(self) -> None:
+        throttle = ThrottleMiddleware({"processes.**.state.fps": 0.05})  # мягкий дефолт
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+        res = pm._cmd_telemetry_broadcast(
+            {"publish": {"metrics": {"fps": {"interval_sec": 0.1}}}, "target": "camera_0"}
+        )
+        assert "capped_by_throttle" not in res["publish"]
+
+    def test_addressed_throttle_applies_centrally(self) -> None:
+        """throttle на per-process путь всё равно центральный (троттл оркестратор-глобален)."""
+        throttle = ThrottleMiddleware({})
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+        res = pm._cmd_telemetry_broadcast({"throttle": {"processes.**.state.fps": 3.0}, "target": "camera_0"})
+        assert res["throttle"]["applied"] is True
+        assert throttle.rules == {"processes.**.state.fps": 3.0}
+        # throttle не форвардится ребёнку (у него нет central-троттла).
+        assert _addressed_sends(pm) == []
+
+    def test_addressed_merge_forwards_mode_to_child(self) -> None:
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast(
+            {"publish": {"metrics": {"fps": {"enabled": False}}}, "target": "camera_0", "telemetry_mode": "merge"}
+        )
+        data = _addressed_sends(pm)[0][1]["data"]
+        assert data["telemetry_mode"] == "merge"
+        assert data["publish"] == {"metrics": {"fps": {"enabled": False}}}
+
+    def test_addressed_delivery_failure_reached_zero(self) -> None:
+        """send_to_process вернул False (нет очереди/приёмника) → reached=0, complete=False."""
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, deliver=False)
+        res = pm._cmd_telemetry_broadcast({"publish": {}, "target": "camera_0"})
+        assert res["publish"]["reached"] == 0
+        assert res["publish"]["target_count"] == 1
+        assert res["publish"]["complete"] is False
+
+    def test_target_all_is_fanout_not_addressed(self) -> None:
+        """target='all' трактуется как fan-out (broadcast), НЕ адресный send."""
+        pm = _pm({"a": {"class": "m.A"}, "b": {"class": "m.B"}}, reach=2)
+        res = pm._cmd_telemetry_broadcast({"publish": {}, "target": "all"})
+        assert len(_telemetry_broadcasts(pm)) == 1
+        assert _addressed_sends(pm) == []
+        assert res["publish"]["target_count"] == 2
+
+
+class TestSendChildPrimitive:
+    def test_send_child_command_builds_envelope_and_returns_delivered(self) -> None:
+        pm = _pm({"a": {"class": "m.A"}}, reach=1)
+        ok = pm._send_child_command("a", "custom.cmd", {"k": "v"})
+        assert ok is True
+        target, msg = pm.communication.sends[-1]
+        assert target == "a"
+        assert msg == {
+            "type": "command",
+            "command": "custom.cmd",
+            "sender": pm.name,
+            "queue_type": "system",
+            "data": {"k": "v"},
+        }
+
+    def test_send_child_command_no_comm_is_noop(self) -> None:
+        pm = make_pm({})
+        pm.communication = None
+        assert pm._send_child_command("a", "x", {}) is False
 
 
 class TestUnknownModeRejected:

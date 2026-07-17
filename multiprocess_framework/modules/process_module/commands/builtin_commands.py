@@ -837,8 +837,10 @@ class BuiltinCommands:
         секции — секция остаётся чистым config-dict для сборки gate/правил). ``merge`` —
         дельта поверх живого состояния (точечная правка не стирает соседние правила/метрики).
 
-        Fan-out на всех детей (``process=all``) — Task 3.2; здесь применение адресное
-        (один процесс-адресат сообщения).
+        Точка приёма на ребёнке: сообщение ``telemetry.reconfigure`` прилетает от PM
+        (Task 1.4 — и адресный per-process путь, и fan-out ``telemetry.broadcast`` теперь
+        транзитом через PM, чтобы он детектил ``capped_by_throttle`` central-троттлом), а
+        также из расширенного ``config.reload``. Применение адресное — один процесс-адресат.
         """
         args = self._merge_args(data, kwargs)
         svc = self._services

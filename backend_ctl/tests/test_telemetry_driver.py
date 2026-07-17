@@ -5,8 +5,9 @@
 результат применения. Транспорт мокается (``send_command`` записывает вызовы) — тот же
 приём, что TestDebugSession / TestSetRegisterVerified в test_driver.py. Проверяем:
 
-  - адресный кейс → ``telemetry.reconfigure`` на конкретный процесс;
-  - fan-out (``process="all"``/``None``/``"*"``) → ``telemetry.broadcast`` на PM;
+  - адресный кейс → ``telemetry.broadcast`` на PM с ``target=<процесс>`` (Task 1.4:
+    транзит через PM ради cap-детекции на per-process пути);
+  - fan-out (``process="all"``/``None``/``"*"``) → ``telemetry.broadcast`` на PM без ``target``;
   - ``publish=None`` доезжает как валидная под-секция (сентинел ≠ None);
   - ``telemetry_set`` строит верные args для publisher- и throttle-плоскостей;
   - результат применения (``applied`` / охват) прокидывается наверх (``_leaf_result``).
@@ -33,13 +34,15 @@ def _recorder(monkeypatch, response: Dict[str, Any] | None = None) -> Tuple[Back
 
 
 class TestTelemetryReconfigureAddressing:
-    def test_addressed_process_sends_reconfigure(self, monkeypatch) -> None:
+    def test_addressed_process_routes_via_pm_with_target(self, monkeypatch) -> None:
+        """Task 1.4: адресный кейс идёт через PM (target), а НЕ напрямую ребёнку —
+        чтобы PM детектил capped_by_throttle своим central-троттлом."""
         d, calls = _recorder(monkeypatch)
         d.telemetry_reconfigure("camera_0", publish={"metrics": {"fps": {"enabled": False}}})
         assert len(calls) == 1
         process, command, args = calls[0]
-        assert (process, command) == ("camera_0", "telemetry.reconfigure")
-        assert args == {"publish": {"metrics": {"fps": {"enabled": False}}}}
+        assert (process, command) == ("ProcessManager", "telemetry.broadcast")
+        assert args == {"publish": {"metrics": {"fps": {"enabled": False}}}, "target": "camera_0"}
 
     def test_all_process_sends_broadcast_to_pm(self, monkeypatch) -> None:
         d, calls = _recorder(monkeypatch)
@@ -67,15 +70,15 @@ class TestTelemetryReconfigureAddressing:
 
 class TestTelemetryReconfigureArgs:
     def test_publish_none_is_sent_as_subsection(self, monkeypatch) -> None:
-        """publish=None — валидная команда «выключить gate»: доезжает как ключ."""
+        """publish=None — валидная команда «выключить gate»: доезжает как ключ (+ target)."""
         d, calls = _recorder(monkeypatch)
         d.telemetry_reconfigure("camera_0", publish=None)
-        assert calls[0][2] == {"publish": None}
+        assert calls[0][2] == {"publish": None, "target": "camera_0"}
 
     def test_both_planes_in_one_call(self, monkeypatch) -> None:
         d, calls = _recorder(monkeypatch)
         d.telemetry_reconfigure("camera_0", publish={"x": 1}, throttle={"p.q": 2.0})
-        assert calls[0][2] == {"publish": {"x": 1}, "throttle": {"p.q": 2.0}}
+        assert calls[0][2] == {"publish": {"x": 1}, "throttle": {"p.q": 2.0}, "target": "camera_0"}
 
     def test_no_subsection_is_error_and_sends_nothing(self, monkeypatch) -> None:
         d, calls = _recorder(monkeypatch)
@@ -149,9 +152,14 @@ class TestTelemetrySet:
         d, calls = _recorder(monkeypatch)
         d.telemetry_set("camera_0", "fps", enabled=False)
         process, command, args = calls[0]
-        assert (process, command) == ("camera_0", "telemetry.reconfigure")
+        # Task 1.4: адресный кейс → PM с target (транзит ради cap-детекции).
+        assert (process, command) == ("ProcessManager", "telemetry.broadcast")
         # Task 1.1: telemetry_set обещает точечность → merge (сохраняет соседей).
-        assert args == {"publish": {"metrics": {"fps": {"enabled": False}}}, "telemetry_mode": "merge"}
+        assert args == {
+            "publish": {"metrics": {"fps": {"enabled": False}}},
+            "telemetry_mode": "merge",
+            "target": "camera_0",
+        }
 
     def test_publisher_interval_only(self, monkeypatch) -> None:
         d, calls = _recorder(monkeypatch)
@@ -159,6 +167,7 @@ class TestTelemetrySet:
         assert calls[0][2] == {
             "publish": {"metrics": {"latency_ms": {"interval_sec": 5.0}}},
             "telemetry_mode": "merge",
+            "target": "camera_0",
         }
 
     def test_publisher_enabled_and_interval(self, monkeypatch) -> None:
@@ -167,6 +176,7 @@ class TestTelemetrySet:
         assert calls[0][2] == {
             "publish": {"metrics": {"shm": {"enabled": True, "interval_sec": 10.0}}},
             "telemetry_mode": "merge",
+            "target": "camera_0",
         }
 
     def test_publisher_requires_a_field(self, monkeypatch) -> None:
