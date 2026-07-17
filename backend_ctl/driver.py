@@ -32,6 +32,8 @@ from multiprocess_framework.modules.message_module import (
     build_system_command_message,
 )
 
+from .endpoint_config import resolve_endpoint
+
 # Колбэк подписчика на события (получает распарсенный push-dict).
 EventCallback = Callable[[Dict[str, Any]], None]
 
@@ -239,8 +241,9 @@ class BackendDriver:
     """Тонкий driver: TCP-клиент + request-id matching + обёртки команд.
 
     Args:
-        host: адрес SocketChannel хоста (по умолчанию localhost).
-        port: TCP-порт (по умолчанию 8765, env BACKEND_CTL_PORT на стороне хоста).
+        host: адрес SocketChannel хоста; ``None`` → env ``BACKEND_CTL_HOST`` → localhost.
+        port: TCP-порт; ``None`` → env ``BACKEND_CTL_PORT`` → ``DEFAULT_PORT`` (8765).
+            Резолв через ``resolve_endpoint`` — клиент читает те же env, что сервер.
         sender: имя отправителя в router-сообщениях.
         reply_to: адрес ответа. Driver не в queue_registry, ответ физически приходит
             в очередь ProcessManager (где живёт сокет) → reply_to="ProcessManager".
@@ -252,16 +255,15 @@ class BackendDriver:
 
     def __init__(
         self,
-        host: str = "127.0.0.1",
-        port: int = 8765,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
         *,
         sender: str = "backend_ctl",
         reply_to: str = "ProcessManager",
         default_timeout: float = 5.0,
         event_queue_maxlen: int = 1000,
     ) -> None:
-        self._host = host
-        self._port = port
+        self._host, self._port = resolve_endpoint(host, port)
         self._sender = sender
         self._reply_to = reply_to
         self._default_timeout = default_timeout

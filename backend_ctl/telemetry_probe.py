@@ -33,7 +33,9 @@ def _unwrap(res: dict) -> dict:
 
 def main() -> int:
     os.environ.setdefault("BACKEND_CTL", "1")
-    port = int(os.environ.get("BACKEND_CTL_PORT", "8765"))
+    from backend_ctl.endpoint_config import resolve_endpoint
+
+    _, port = resolve_endpoint()
 
     from multiprocess_prototype.main import bootstrap
     from backend_ctl import BackendDriver

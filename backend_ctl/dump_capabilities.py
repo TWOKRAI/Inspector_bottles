@@ -93,8 +93,7 @@ def to_dump(caps: Capabilities) -> Dict[str, Any]:
         "version": DUMP_VERSION,
         "source": "python -m backend_ctl.dump_capabilities",
         "topology": {
-            name: {"class": str((cfg or {}).get("class") or "")}
-            for name, cfg in sorted(caps.topology.items())
+            name: {"class": str((cfg or {}).get("class") or "")} for name, cfg in sorted(caps.topology.items())
         },
         "channels": sorted(
             ({"name": str(c.get("name") or ""), "kind": str(c.get("kind") or "")} for c in caps.channels),
@@ -133,9 +132,9 @@ def render_md(dump: Dict[str, Any]) -> str:
         "```python",
         "from backend_ctl import BackendDriver          # или BackendHarness для headless-старта",
         "",
-        "with BackendDriver(port=8765) as drv:          # бэкенд поднят с BACKEND_CTL=1",
+        "with BackendDriver() as drv:                   # порт: env BACKEND_CTL_PORT → DEFAULT_PORT",
         '    res = drv.send_command("<процесс>", "<команда>", {<аргументы>})',
-        '    caps = drv.capabilities()                  # этот же свод, но runtime',
+        "    caps = drv.capabilities()                  # этот же свод, но runtime",
         "```",
         "",
         "Команда адресуется процессу по имени (колонка «Процесс» ниже). Ответ приходит",
@@ -188,7 +187,7 @@ def collect_live(
     *,
     recipe: Optional[str] = None,
     with_base: bool = True,
-    port: int = 8765,
+    port: Optional[int] = None,
     timeout: float = 8.0,
 ) -> Capabilities:
     """Поднять headless-бэкенд (harness) и собрать свод capabilities.
@@ -219,7 +218,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--check", action="store_true", help="не писать, а сравнить с файлами (дрейф → exit 2)")
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR), help="куда писать YAML+MD")
     parser.add_argument("--recipe", default=None, help="путь к рецепту топологии (None → дефолт harness)")
-    parser.add_argument("--port", type=int, default=8765, help="порт backend_ctl endpoint'а")
+    parser.add_argument("--port", type=int, default=None, help="port backend_ctl endpoint'a (None -> env/DEFAULT_PORT)")
     args = parser.parse_args(argv)
 
     print("[dump] поднимаю headless-бэкенд и собираю capabilities...")

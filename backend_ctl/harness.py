@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
 from backend_ctl.driver import BackendDriver, _find_payload
+from backend_ctl.endpoint_config import resolve_endpoint
 
 if TYPE_CHECKING:
     from multiprocess_framework.modules.process_manager_module.launcher.system_launcher import (
@@ -274,7 +275,7 @@ class BackendHarness:
         *,
         recipe: Optional[Path | str] = None,
         with_base: bool = False,
-        port: int = 8765,
+        port: Optional[int] = None,
         ready_timeout: float = 30.0,
         warmup: float = 1.0,
         teardown_timeout: float = 15.0,
@@ -283,7 +284,9 @@ class BackendHarness:
     ) -> None:
         self._recipe = recipe
         self._with_base = with_base
-        self._port = port
+        # Резолв через единый источник: явный порт > env BACKEND_CTL_PORT > DEFAULT_PORT.
+        # Harness затем сам фиксирует BACKEND_CTL_PORT для дочернего процесса (start()).
+        self._port = resolve_endpoint(port=port)[1]
         self._ready_timeout = ready_timeout
         self._warmup = warmup
         self._teardown_timeout = teardown_timeout

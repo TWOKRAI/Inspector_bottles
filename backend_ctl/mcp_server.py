@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from typing import Any, Dict, Optional, TextIO
 
 from backend_ctl.driver import BackendDriver
+from backend_ctl.endpoint_config import resolve_endpoint
 from backend_ctl.mcp_tools import ToolSpec, build_registry
 
 #: Версии спеки MCP, которые сервер готов подтвердить клиенту как есть.
@@ -66,14 +66,13 @@ class MCPServer:
     def __init__(
         self,
         *,
-        host: str = "127.0.0.1",
-        port: int = 8765,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
         request_timeout: float = 5.0,
         driver_factory: Any = None,
         log: Any = None,
     ) -> None:
-        self._host = host
-        self._port = port
+        self._host, self._port = resolve_endpoint(host, port)
         self._request_timeout = request_timeout
         # Фабрика для тестов: () → объект с интерфейсом BackendDriver (fake).
         self._driver_factory = driver_factory or self._default_driver_factory
@@ -214,13 +213,14 @@ class MCPServer:
 
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(description="MCP-сервер backend_ctl (stdio)")
-    parser.add_argument("--host", default=os.environ.get("BACKEND_CTL_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("BACKEND_CTL_PORT", "8765")))
+    parser.add_argument("--host", default=None, help="host endpoint'a; None -> env BACKEND_CTL_HOST -> 127.0.0.1")
+    parser.add_argument("--port", type=int, default=None, help="port endpoint'a; None -> env BACKEND_CTL_PORT")
     parser.add_argument("--timeout", type=float, default=5.0, help="таймаут ответа бэкенда, сек")
     args = parser.parse_args(argv)
 
-    server = MCPServer(host=args.host, port=args.port, request_timeout=args.timeout)
-    print(f"[mcp_server] backend-ctl MCP на stdio; бэкенд {args.host}:{args.port}", file=sys.stderr, flush=True)
+    host, port = resolve_endpoint(args.host, args.port)
+    server = MCPServer(host=host, port=port, request_timeout=args.timeout)
+    print(f"[mcp_server] backend-ctl MCP на stdio; бэкенд {host}:{port}", file=sys.stderr, flush=True)
     try:
         server.serve(sys.stdin, sys.stdout)
     except KeyboardInterrupt:
