@@ -491,3 +491,62 @@ class TestRegistration:
         assert pm.command_manager.metadata["telemetry.broadcast"]["description"]
         # Handler — это _cmd_telemetry_broadcast.
         assert pm.command_manager.handlers["telemetry.broadcast"] == pm._cmd_telemetry_broadcast
+
+
+class TestRuntimeDeltaPersist:
+    """Task 3.2: PM хранит последнюю fan-out publish-дельту и доигрывает её пересозданным
+    детям после hot-swap (иначе новый ребёнок взял бы boot-конфиг, потеряв рантайм-правку).
+    """
+
+    def test_fanout_publish_persists_delta(self) -> None:
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}})
+        assert getattr(pm, "_telemetry_runtime_delta", None) == {
+            "publish": {"metrics": {"fps": {"enabled": False}}},
+            "mode": "replace",
+        }
+
+    def test_merge_mode_persisted(self) -> None:
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}, "telemetry_mode": "merge"})
+        assert pm._telemetry_runtime_delta["mode"] == "merge"
+
+    def test_publish_none_clears_delta(self) -> None:
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}})
+        assert pm._telemetry_runtime_delta is not None
+        pm._cmd_telemetry_broadcast({"publish": None})  # выключить gate → сброс персиста
+        assert pm._telemetry_runtime_delta is None
+
+    def test_addressed_publish_not_persisted(self) -> None:
+        """Адресный (target=процесс) publish — per-child, НЕ системный runtime → не персист."""
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}, "target": "camera_0"})
+        assert getattr(pm, "_telemetry_runtime_delta", None) is None
+
+    def test_throttle_only_does_not_persist(self) -> None:
+        """throttle-плоскость не publisher-gate → не персистится (её адресат — оркестратор)."""
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=ThrottleMiddleware({}))
+        pm._cmd_telemetry_broadcast({"throttle": {"a.b": 1.0}})
+        assert getattr(pm, "_telemetry_runtime_delta", None) is None
+
+    def test_replay_broadcasts_stored_delta(self) -> None:
+        pm = _pm({"camera_0": {"class": "m.Cam"}, "detector": {"class": "m.Det"}}, reach=2)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"shm": {"enabled": False}}}})
+        before = len(_telemetry_broadcasts(pm))
+        reached = pm._replay_telemetry_runtime_delta("test")
+        assert reached == 2
+        bcasts = _telemetry_broadcasts(pm)
+        assert len(bcasts) == before + 1
+        assert bcasts[-1]["data"] == {"publish": {"metrics": {"shm": {"enabled": False}}}}
+
+    def test_replay_forwards_merge_mode(self) -> None:
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}, "telemetry_mode": "merge"})
+        pm._replay_telemetry_runtime_delta("test")
+        assert _telemetry_broadcasts(pm)[-1]["data"].get("telemetry_mode") == "merge"
+
+    def test_replay_without_delta_is_noop(self) -> None:
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        assert pm._replay_telemetry_runtime_delta("test") == 0
+        assert _telemetry_broadcasts(pm) == []

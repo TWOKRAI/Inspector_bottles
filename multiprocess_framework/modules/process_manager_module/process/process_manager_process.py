@@ -1205,6 +1205,32 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"_broadcast_routing_refresh({reason}) упал: {exc}")
             return False
 
+    def _replay_telemetry_runtime_delta(self, reason: str) -> int:
+        """Доиграть сохранённую runtime telemetry publish-дельту всем живым детям (Task 3.2).
+
+        Runtime-правка publisher-gate (``telemetry.broadcast`` fan-out) живёт только в
+        процессах-детях; при hot-swap/respawn пересозданный ребёнок стартует с BOOT-конфига
+        и потерял бы правку. PM хранит последнюю fan-out publish-дельту (``_telemetry_runtime_delta``)
+        и доигрывает её через тот же ``_broadcast_command``, что и routing.refresh (свежие
+        очереди после свитча). ``publish=None``-broadcast очистил персист → доигрывать нечего.
+
+        Returns:
+            Охват доставки (0 — нет дельты / нет коммуникации / ошибка рассылки).
+        """
+        delta = getattr(self, "_telemetry_runtime_delta", None)
+        if not delta:
+            return 0
+        payload: dict[str, Any] = {"publish": delta["publish"]}
+        if delta.get("mode", "replace") != "replace":
+            payload["telemetry_mode"] = delta["mode"]
+        try:
+            reached = self._broadcast_command("telemetry.reconfigure", payload)
+            self._log_info(f"telemetry runtime-дельта доиграна ({reason}): reached={reached}")
+            return int(reached)
+        except Exception as exc:  # noqa: BLE001 — доигрывание не должно ронять lifecycle
+            self._log_error(f"_replay_telemetry_runtime_delta({reason}) упал: {exc}")
+            return 0
+
     def _broadcast_command(self, command: str, data: dict, *, queue_type: str = "system") -> int:
         """Единый примитив рассылки command-билета всем детям (Ф3.1 / PC 3.3).
 
@@ -1473,6 +1499,15 @@ class ProcessManagerProcess(ProcessModule):
                 "complete": int(reached) >= len(targets),
             }
             self._log_info(f"telemetry.broadcast: publish → target={target!r} reached={reached}/{len(targets)}")
+            # Task 3.2: персист ПОСЛЕДНЕЙ fan-out publish-дельты — доиграть пересозданным
+            # детям после hot-swap/respawn (иначе новый ребёнок взял бы boot-конфиг, потеряв
+            # рантайм-правку publisher-gate). Адресные (target=процесс) НЕ персистятся — они
+            # per-child, а не системный runtime. publish=None (выключить gate) → сброс персиста.
+            if not addressed:
+                if args["publish"] is None:
+                    self._telemetry_runtime_delta = None
+                else:
+                    self._telemetry_runtime_delta = {"publish": args["publish"], "mode": mode}
 
         if has_throttle:
             try:
@@ -2045,6 +2080,9 @@ class ProcessManagerProcess(ProcessModule):
                 epoch = self._refresh_after_topology("topology.apply", result.get("results") or [])
                 if epoch is not None:
                     response["routing_epoch"] = epoch
+                # Task 3.2: доиграть сохранённую runtime telemetry-дельту пересозданным
+                # детям — runtime-состояние publisher-gate ≡ до свитча (не boot-дефолт).
+                self._replay_telemetry_runtime_delta("topology.apply")
                 return response
 
             except Exception as exc:
