@@ -127,12 +127,14 @@ class GenericProcessManagerApp(ProcessManagerProcess):
                     make_telemetry_on_reload,
                 )
 
-                # boot ≡ reload: те же дефолты, что build_throttle_rules положил в
-                # state_throttle_rules — пустой/удалённый throttle в файле вернёт их,
-                # а не оставит stale-правила (находка B).
+                # boot ≡ reload: throttle читается СВЕЖИМ из config_path (не из merge-
+                # аккумулированного Config — тот удерживает удалённый throttle stale).
+                # default_throttle_rules = те же boot-правила build_throttle_rules
+                # (в state_throttle_rules): пустой/удалённый throttle → возврат к ним.
                 telemetry_on_reload = make_telemetry_on_reload(
                     store_throttle=throttle,
                     default_throttle_rules=self.get_config("state_throttle_rules"),
+                    config_path=config_path,
                     log_info=self._log_info,
                 )
 

@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-from multiprocess_framework.modules.config_module.core.config import Config
 from multiprocess_framework.modules.process_module.managers.telemetry_reload import (
     THROTTLE_CLEAR_MARKER,
     THROTTLE_REMOVE,
@@ -345,87 +344,134 @@ class TestDetectThrottleCaps:
         assert caps["fps"]["throttle_interval_sec"] == 2.0
 
 
+def _write_cfg(path, text: str) -> None:
+    """Записать YAML-конфиг во временный файл (кодировка как у прод-конфигов)."""
+    path.write_text(text, encoding="utf-8")
+
+
 class TestMakeTelemetryOnReload:
-    def test_applies_throttle_from_config(self) -> None:
-        """on_reload читает telemetry.throttle из Config и применяет к троттлу."""
+    """Watcher читает throttle СВЕЖИМ из файла (не из merge-аккумулированного Config —
+    тот аддитивен, удержал бы удалённый throttle stale) и трогает троттл ТОЛЬКО при реальном
+    изменении throttle-декларации файла. Тесты гоняют реальный файл — репрезентативно проду.
+    """
+
+    _DEFAULTS = {"processes.**.state.fps": 0.05}
+
+    def test_applies_throttle_change_from_file(self, tmp_path) -> None:
+        """throttle появился в файле (изменение относительно сида) → применён к троттлу."""
+        cfg = tmp_path / "system.yaml"
+        _write_cfg(cfg, "telemetry:\n  publish: {}\n")  # boot: throttle нет → сид _unseen
         throttle = _FakeThrottle()
-        on_reload = make_telemetry_on_reload(store_throttle=throttle)
-        on_reload(Config(initial_data={"telemetry": {"throttle": {"processes.**.state.fps": 5.0}}}))
+        on_reload = make_telemetry_on_reload(store_throttle=throttle, config_path=str(cfg))
+        _write_cfg(cfg, "telemetry:\n  throttle:\n    processes.**.state.fps: 5.0\n")
+        on_reload(None)
         assert throttle.rules == {"processes.**.state.fps": 5.0}
 
-    def test_publish_in_file_does_not_touch_gate(self) -> None:
+    def test_publish_in_file_does_not_touch_gate(self, tmp_path) -> None:
         """Граница 3.1/3.2: publish в файле НЕ применяется (heartbeat=None), throttle — да."""
+        cfg = tmp_path / "system.yaml"
+        _write_cfg(cfg, "telemetry:\n  publish: {}\n")
         throttle = _FakeThrottle()
-        on_reload = make_telemetry_on_reload(store_throttle=throttle)
-        cfg = Config(
-            initial_data={
-                "telemetry": {
-                    "publish": {"metrics": {"fps": {"enabled": False}}},
-                    "throttle": {"x.y": 2.0},
-                }
-            }
+        on_reload = make_telemetry_on_reload(store_throttle=throttle, config_path=str(cfg))
+        _write_cfg(
+            cfg,
+            "telemetry:\n  publish:\n    metrics:\n      fps:\n        enabled: false\n  throttle:\n    x.y: 2.0\n",
         )
-        on_reload(cfg)  # не должно падать; publish просто «нет приёмника»
+        on_reload(None)  # publish просто «нет приёмника», throttle применён
         assert throttle.rules == {"x.y": 2.0}
 
-    def test_no_telemetry_section_noop(self) -> None:
-        """Телеметрия в файле не объявлена → троттл не трогаем (observability-only reload)."""
+    def test_no_telemetry_section_noop(self, tmp_path) -> None:
+        """Телеметрия в файле не объявлена и не менялась → троттл не трогаем."""
+        cfg = tmp_path / "system.yaml"
+        _write_cfg(cfg, "observability:\n  log_level: INFO\n")  # сид: throttle _unseen
         throttle = _FakeThrottle()
         throttle.rules = {"keep": 5.0}
-        on_reload = make_telemetry_on_reload(store_throttle=throttle)
-        on_reload(Config(initial_data={"observability": {"log_level": "DEBUG"}}))
+        on_reload = make_telemetry_on_reload(store_throttle=throttle, config_path=str(cfg))
+        _write_cfg(cfg, "observability:\n  log_level: DEBUG\n")  # throttle как не было
+        on_reload(None)
         assert throttle.set_calls == 0
-        assert throttle.rules == {"keep": 5.0}  # правила целы
+        assert throttle.rules == {"keep": 5.0}
 
-    def test_throttle_removed_from_file_resets_to_defaults(self) -> None:
-        """Task 2.1: throttle РЕАЛЬНО удалён из файла (был → нет) → boot-дефолты (не stale)."""
-        defaults = {"processes.**.state.fps": 0.05}
-        throttle = _FakeThrottle()
-        on_reload = make_telemetry_on_reload(store_throttle=throttle, default_throttle_rules=defaults)
-        # 1-й reload: throttle задан в файле → применён.
-        on_reload(Config(initial_data={"telemetry": {"throttle": {"custom.rule": 9.0}}}))
-        assert throttle.rules == {"custom.rule": 9.0}
-        # 2-й reload: throttle УДАЛЁН из файла (осталась только publish) → возврат к дефолтам.
-        on_reload(Config(initial_data={"telemetry": {"publish": {"default_interval_sec": 2.0}}}))
-        assert throttle.rules == defaults
+    def test_throttle_removed_from_file_resets_to_defaults(self, tmp_path) -> None:
+        """throttle РЕАЛЬНО удалён из файла (был при boot → убран) → boot-дефолты.
 
-    def test_unrelated_reload_preserves_runtime_throttle(self) -> None:
-        """HIGH-регресс (ревью 2026-07-17): несвязанная правка файла НЕ откатывает runtime-дельту.
-
-        throttle никогда не было в файле; оператор задал правило рантайм-командой; правка
-        observability.log_level (тот же файл) НЕ должна молча снести операторское правило.
+        Репрезентативно проду: свежее чтение файла, а не merge-Config (тот удержал бы stale).
         """
-        defaults = {"processes.**.state.fps": 0.05}
+        cfg = tmp_path / "system.yaml"
+        _write_cfg(cfg, "telemetry:\n  throttle:\n    custom.rule: 9.0\n")  # boot: throttle задан
         throttle = _FakeThrottle()
-        on_reload = make_telemetry_on_reload(store_throttle=throttle, default_throttle_rules=defaults)
-        # 1-й reload: в файле только publish, throttle отсутствует → троттл не тронут.
-        on_reload(Config(initial_data={"telemetry": {"publish": {"default_interval_sec": 2.0}}}))
-        # Оператор задал правило рантайм-командой (эмуляция telemetry.broadcast).
-        throttle.rules = {"operator.rule": 0.5}
-        # 2-й reload: правка НЕсвязанной секции; throttle в файле как не было, так и нет.
-        on_reload(
-            Config(
-                initial_data={
-                    "observability": {"log_level": "DEBUG"},
-                    "telemetry": {"publish": {"default_interval_sec": 3.0}},
-                }
-            )
+        throttle.rules = {"custom.rule": 9.0}  # состояние после boot
+        on_reload = make_telemetry_on_reload(
+            store_throttle=throttle, default_throttle_rules=self._DEFAULTS, config_path=str(cfg)
         )
-        assert throttle.rules == {"operator.rule": 0.5}  # runtime-дельта цела, не откатана
+        _write_cfg(cfg, "telemetry:\n  publish:\n    default_interval_sec: 2.0\n")  # throttle убран
+        on_reload(None)
+        assert throttle.rules == self._DEFAULTS
 
-    def test_reload_empty_throttle_restores_defaults(self) -> None:
-        """Task 2.1: throttle={} в файле → boot-дефолты (boot ≡ reload)."""
-        defaults = {"processes.**.state.fps": 0.05}
+    def test_empty_throttle_in_file_restores_defaults(self, tmp_path) -> None:
+        """throttle: {} в файле (изменение относительно сида) → boot-дефолты."""
+        cfg = tmp_path / "system.yaml"
+        _write_cfg(cfg, "telemetry:\n  throttle:\n    custom.rule: 9.0\n")
         throttle = _FakeThrottle()
         throttle.rules = {"custom.rule": 9.0}
-        on_reload = make_telemetry_on_reload(store_throttle=throttle, default_throttle_rules=defaults)
-        on_reload(Config(initial_data={"telemetry": {"throttle": {}}}))
-        assert throttle.rules == defaults
+        on_reload = make_telemetry_on_reload(
+            store_throttle=throttle, default_throttle_rules=self._DEFAULTS, config_path=str(cfg)
+        )
+        _write_cfg(cfg, "telemetry:\n  throttle: {}\n")
+        on_reload(None)
+        assert throttle.rules == self._DEFAULTS
 
-    def test_reload_custom_throttle_overrides_defaults(self) -> None:
-        """Непустой throttle в файле применяется как есть, дефолты не подмешиваются."""
-        defaults = {"processes.**.state.fps": 0.05}
+    def test_first_reload_configured_throttle_preserves_runtime(self, tmp_path) -> None:
+        """HIGH (Opus-ревью): boot с throttle + runtime-дельта → ПЕРВЫЙ несвязанный reload НЕ
+        откатывает дельту. Сид last_throttle boot-декларацией файла закрывает окно 1-го reload.
+        """
+        cfg = tmp_path / "system.yaml"
+        _write_cfg(cfg, "telemetry:\n  throttle:\n    file.rule: 9.0\n")  # boot throttle задан
         throttle = _FakeThrottle()
-        on_reload = make_telemetry_on_reload(store_throttle=throttle, default_throttle_rules=defaults)
-        on_reload(Config(initial_data={"telemetry": {"throttle": {"a.b": 4.0}}}))
+        on_reload = make_telemetry_on_reload(
+            store_throttle=throttle, default_throttle_rules=self._DEFAULTS, config_path=str(cfg)
+        )
+        throttle.rules = {"operator.rule": 0.5}  # оператор поднял частоту рантайм-командой
+        # ПЕРВЫЙ reload: правка log_level, throttle в файле НЕ менялся.
+        _write_cfg(cfg, "observability:\n  log_level: DEBUG\ntelemetry:\n  throttle:\n    file.rule: 9.0\n")
+        on_reload(None)
+        assert throttle.rules == {"operator.rule": 0.5}  # дельта цела (не сброшена на 1-м reload)
+
+    def test_unrelated_reload_preserves_runtime_throttle(self, tmp_path) -> None:
+        """throttle никогда не было в файле; правка log_level НЕ трогает операторское правило."""
+        cfg = tmp_path / "system.yaml"
+        _write_cfg(cfg, "telemetry:\n  publish:\n    default_interval_sec: 2.0\n")
+        throttle = _FakeThrottle()
+        on_reload = make_telemetry_on_reload(
+            store_throttle=throttle, default_throttle_rules=self._DEFAULTS, config_path=str(cfg)
+        )
+        throttle.rules = {"operator.rule": 0.5}
+        _write_cfg(
+            cfg,
+            "observability:\n  log_level: DEBUG\ntelemetry:\n  publish:\n    default_interval_sec: 3.0\n",
+        )
+        on_reload(None)
+        assert throttle.rules == {"operator.rule": 0.5}
+
+    def test_custom_throttle_change_applied(self, tmp_path) -> None:
+        """Непустой throttle в файле применяется как есть, дефолты не подмешиваются."""
+        cfg = tmp_path / "system.yaml"
+        _write_cfg(cfg, "telemetry:\n  publish: {}\n")  # сид: throttle нет
+        throttle = _FakeThrottle()
+        on_reload = make_telemetry_on_reload(
+            store_throttle=throttle, default_throttle_rules=self._DEFAULTS, config_path=str(cfg)
+        )
+        _write_cfg(cfg, "telemetry:\n  throttle:\n    a.b: 4.0\n")
+        on_reload(None)
         assert throttle.rules == {"a.b": 4.0}
+
+    def test_unreadable_file_skips(self, tmp_path) -> None:
+        """Битый/исчезнувший файл на reload → троттл не трогаем (SKIP, не сброс)."""
+        cfg = tmp_path / "system.yaml"
+        _write_cfg(cfg, "telemetry:\n  throttle:\n    a.b: 1.0\n")
+        throttle = _FakeThrottle()
+        on_reload = make_telemetry_on_reload(store_throttle=throttle, config_path=str(cfg))
+        throttle.rules = {"live": 2.0}
+        cfg.unlink()  # файл исчез → load бросит → SKIP
+        on_reload(None)
+        assert throttle.rules == {"live": 2.0}  # не тронут

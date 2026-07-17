@@ -202,10 +202,25 @@ telemetry-publish-control); изменение дефолтных central-пра
 ## Фаза 2 — Когерентность контракта (boot ≡ reload, видимые ошибки)
 
 > **✅ ФАЗА 2 ЗАКРЫТА** (ветка `feat/telemetry-coherence-phase2`, коммиты ff8d5745 · dc7594e6 ·
-> 93589f7f merged bab99c10). Task 2.3 исполнен параллельным агентом в worktree, слит без конфликтов.
-> Гейт: 1486 тестов затронутых модулей зелёные, ruff + pyright чисто. Pre-existing test-debt —
-> 2 golden `test_build_characterization` (дифф в `orchestrator_config`, есть на origin/main, не
-> связан с телеметрией). Следующее — Фаза 3 (гигиена + долг простоты).
+> 93589f7f merged bab99c10; ревью-фиксы ab9a5a9b + fresh-read). Task 2.3 исполнен параллельным
+> агентом в worktree, слит без конфликтов. Гейт: 853 тестов process_module+app_module зелёные,
+> ruff + pyright чисто.
+>
+> **Ревью (Sonnet + Opus, 2 итерации) — исправлено:**
+> - HIGH (Sonnet): watcher откатывал троттл на несвязанной перезагрузке файла → diff-гейт.
+> - major A+B (Opus): (A) сид `last_throttle` boot-декларацией — закрыт silent-cap на 1-м reload
+>   при сконфигурированном throttle; (B) КЛЮЧЕВОЕ — watcher-`Config` аддитивен (`Config.update` =
+>   `deep_merge`), удалённый throttle оставался stale → `make_telemetry_on_reload` теперь читает
+>   throttle СВЕЖИМ из `config_path` (как ручной `config.reload`), удаление/сброс реально видны;
+>   тесты переписаны на реальные файлы (репрезентативно проду, не свежие `Config`).
+> - minor C (Opus): расхождение семантики отсутствующего throttle-ключа watcher↔ручной
+>   `config.reload` — оставлено осознанно: watcher — декларативный boot≡reload-путь (сброс при
+>   реальном удалении), ручная команда трогает только явно присутствующие секции (не клоббит
+>   runtime-дельту на несвязанном ручном reload). Задокументировано.
+>
+> **Долги (отдельные тикеты, не блок):** 2 golden `test_build_characterization` (дифф в
+> `orchestrator_config`, есть на origin/main, не телеметрия); `pyqtgraph` в pyproject, не в `.venv`.
+> Следующее — Фаза 3 (гигиена + долг простоты).
 
 ### Task 2.1 — Единая семантика `throttle: {}` на boot и hot-reload ✅ DONE (ff8d5745)
 **Level:** Middle+ (Sonnet)

@@ -290,10 +290,46 @@ def detect_throttle_caps(publish_section: Any, store_throttle: Any) -> Dict[str,
     return caps
 
 
+# Внутренние маркеры diff-гейта watcher'а (см. make_telemetry_on_reload).
+_THROTTLE_UNSEEN: Any = object()  # throttle в файле не объявлен (отсутствует)
+_THROTTLE_SKIP: Any = object()  # файл сейчас нечитаем (частичная запись) — пропустить reload
+
+
+def _read_throttle_declaration(config_path: Any, section_key: str) -> Any:
+    """Свежая throttle-декларация ПРЯМО ИЗ ФАЙЛА (не из merge-аккумулированного Config).
+
+    Ключ находки: watcher-``Config`` аддитивен (``Config.update`` = ``deep_merge``) —
+    удалённый/опустошённый в файле ``throttle`` в нём остаётся stale, поэтому сравнивать
+    надо со свежей загрузкой файла (ровно как ручной ``config.reload``), иначе «файл —
+    источник истины» не работает для удаления/сброса throttle.
+
+    Returns:
+        - dict — throttle-под-секция как объявлена в файле;
+        - :data:`_THROTTLE_UNSEEN` — секция telemetry есть, но throttle отсутствует, ЛИБО
+          telemetry не объявлена вовсе (в обоих случаях throttle «не задан» → дефолты);
+        - :data:`_THROTTLE_SKIP` — файл нечитаем/битый прямо сейчас (не трогать троттл).
+    """
+    if not config_path:
+        return _THROTTLE_UNSEEN
+    try:
+        from ...data_schema_module.serialization.converter import DataConverter
+
+        data = DataConverter.load_from_file(config_path)
+    except Exception:  # noqa: BLE001 — частично записанный файл: пропустить этот reload
+        return _THROTTLE_SKIP
+    if not isinstance(data, dict):
+        return _THROTTLE_SKIP
+    section = data.get(section_key)
+    if not isinstance(section, dict):
+        return _THROTTLE_UNSEEN  # телеметрия в файле не объявлена
+    return section.get("throttle", _THROTTLE_UNSEEN)
+
+
 def make_telemetry_on_reload(
     *,
     store_throttle: Any = None,
     default_throttle_rules: Optional[Dict[str, Any]] = None,
+    config_path: Any = None,
     section_key: str = "telemetry",
     log_info: Optional[Callable[[str], None]] = None,
 ) -> Callable[["Config"], None]:
@@ -303,45 +339,41 @@ def make_telemetry_on_reload(
     (тот же файл, та же правка → и observability-менеджеры, и центральный троттл без
     рестарта).
 
-    **Файл — декларативный источник состояния троттла (boot ≡ reload, находка B):**
-    удаление ключа ``throttle`` из файла означает «вернуть boot-дефолты», а НЕ «оставить
-    stale». НО watcher срабатывает на ЛЮБОЕ изменение файла (в т.ч. несвязанное — правку
-    ``observability.log_level`` в том же файле). Поэтому central-троттл трогается ТОЛЬКО
-    когда throttle-объявление РЕАЛЬНО изменилось с прошлого reload: иначе runtime-дельта
-    троттла (операторская правка через ``telemetry.broadcast``, ADR-PM-017) молча
-    откатывалась бы к дефолтам при несвязанной перезагрузке — тихий срез страховки,
-    который ADR-PM-017 запрещает («no silent caps»). ``default_throttle_rules`` — те же
-    boot-правила (``build_throttle_rules``), что оркестратор кладёт в ``state_throttle_rules``.
+    **Файл — декларативный источник состояния троттла (boot ≡ reload, находка B):** throttle
+    читается СВЕЖЕЙ загрузкой ``config_path`` (не из merge-аккумулированного ``Config`` —
+    тот аддитивен, удалённый throttle в нём остаётся stale). Central-троттл трогается ТОЛЬКО
+    когда throttle-декларация файла РЕАЛЬНО изменилась с прошлого reload (diff-гейт):
+    несвязанная правка (``observability.log_level``) не откатывает runtime-дельту троттла
+    (операторская правка через ``telemetry.broadcast``, ADR-PM-017 «no silent caps»).
+    ``last_throttle`` сидируется ФАКТИЧЕСКОЙ boot-декларацией из файла — иначе первый reload
+    при сконфигурированном throttle принял бы «_unseen → {файл}» за изменение и снёс бы
+    runtime-дельту. Пустая/отсутствующая throttle-декларация → ``default_throttle_rules``
+    (те же boot-правила ``build_throttle_rules``, что оркестратор кладёт в ``state_throttle_rules``).
 
     **Граница Task 3.1 vs 3.2:** watcher живёт в оркестраторе и применяет ТОЛЬКО
     ``throttle`` (центральный store-троттл, доступный в ТОМ ЖЕ процессе). Publisher-gate
     ДЕТЕЙ через файл не перестраивается — для этого нужен fan-out по процессам
-    (broadcast), это Task 3.2. Поэтому ``heartbeat`` тут не передаётся: применяется лишь
-    throttle-плоскость (даже если в файле есть ``publish`` — он помечается «нет приёмника»
-    и никого не трогает).
+    (broadcast), это Task 3.2.
     """
-    # Маркер «throttle-объявление ещё не наблюдалось» — отличает первый reload от
-    # последующих и «throttle никогда не было в файле» от «throttle удалили».
-    _unseen = object()
-    last_throttle: Any = _unseen
+    # Сид: фактическая boot-декларация throttle из файла (фикс silent-cap на 1-м reload).
+    last_throttle: Any = _read_throttle_declaration(config_path, section_key)
+    if last_throttle is _THROTTLE_SKIP:
+        last_throttle = _THROTTLE_UNSEEN
 
-    def _on_reload(config: "Config") -> None:
+    def _on_reload(_config: "Config") -> None:
         nonlocal last_throttle
-        raw = config.get(section_key, None)
-        if raw is None:
-            # Телеметрия в файле не объявлена вовсе → центральный троттл не трогаем.
-            return
-        section = dict(raw or {})
-        declared = section.get("throttle", _unseen)  # что файл объявляет сейчас (или его отсутствие)
-        # Diff-гейт: несвязанная правка файла (throttle-объявление не изменилось) НЕ трогает
-        # троттл — не откатывает runtime-дельту к дефолтам. Реальное изменение/удаление
-        # throttle в файле → применяем (удаление → declared==_unseen → пустой → boot-дефолты).
+        declared = _read_throttle_declaration(config_path, section_key)
+        if declared is _THROTTLE_SKIP:
+            return  # файл нечитаем прямо сейчас — не трогаем троттл
+        # Diff-гейт: throttle-декларация файла не изменилась → не трогаем (сохраняем
+        # runtime-дельту). Изменение/удаление → применяем (удаление → _unseen → пустой →
+        # default_throttle_rules, boot ≡ reload).
         if declared == last_throttle:
             return
         last_throttle = declared
-        section.setdefault("throttle", {})  # объявление изменилось; отсутствие → дефолты
+        throttle_section = {} if declared is _THROTTLE_UNSEEN else declared
         apply_telemetry_reconfigure(
-            section,
+            {"throttle": throttle_section},
             heartbeat=None,  # publisher-gate детей — fan-out Task 3.2, не через файл
             store_throttle=store_throttle,
             default_throttle_rules=default_throttle_rules,
