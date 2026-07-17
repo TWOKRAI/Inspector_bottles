@@ -116,7 +116,7 @@ class TelemetryViewModel(QObject):
         # пачки (last-wins) — один и тот же путь не попадёт в батч дважды.
         self._pending: dict[str, Any] = {}
 
-        # Кольцевые буферы истории: путь → deque[(ts_monotonic, число)].
+        # Кольцевые буферы истории: путь → deque[(ts_wall, число)].
         self._history: dict[str, collections.deque[tuple[float, float]]] = {}
         self._tracked: tuple[str, ...] = (
             tuple(tracked_suffixes) if tracked_suffixes is not None else DEFAULT_TRACKED_SUFFIXES
@@ -247,16 +247,17 @@ class TelemetryViewModel(QObject):
         if buf is None:
             buf = collections.deque(maxlen=self._maxlen)
             self._history[path] = buf
-        # ts приёма: monotonic — runtime-измерение длительности (не wall-clock),
-        # устойчиво к переводу системных часов.
-        buf.append((time.monotonic(), num))
+        # ts приёма: wall-clock (Unix-epoch, time.time()) — единая ось времени с DB-историей
+        # (telemetry_sink) и с DateAxisItem графика. Ring — только для отображения (спарклайн/
+        # дашборд), длительности/Hz по нему не считаются, поэтому monotonic здесь не нужен.
+        buf.append((time.time(), num))
 
     def history(self, path: str, since: float | None = None) -> list[tuple[float, Any]]:
         """Выборка (ts, value) буфера для спарклайна.
 
         Args:
             path: полный путь метрики (например ``processes.cam.state.fps``).
-            since: нижняя граница ts (monotonic); None → весь буфер.
+            since: нижняя граница ts (wall-clock, Unix-epoch); None → весь буфер.
 
         Returns:
             Список ``(ts, value)`` в хронологическом порядке (O(k) по буферу).
