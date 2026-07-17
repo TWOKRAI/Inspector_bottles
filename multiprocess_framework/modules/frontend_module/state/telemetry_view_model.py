@@ -46,14 +46,15 @@ from PySide6.QtCore import QObject, QTimer, Signal
 _logger = logging.getLogger(__name__)
 
 
-# Суффиксы путей телеметрии, для которых копится кольцевой буфер истории.
-# Соответствуют штатным gated-метрикам фреймворка (``GATED_METRICS`` в
-# ``process_module``) и форме телеметрийного поддерева (``build_worker_telemetry``):
-# агрегат публикуется как ``processes.<P>.state.fps`` → суффикс ``.state.fps``,
-# per-worker — как ``processes.<P>.workers.<w>.effective_hz`` → суффикс
-# ``.effective_hz``. Совпадение по СУФФИКСУ пути (независимо от имени
-# процесса/воркера). Приложение с дополнительными метриками передаёт свой набор
-# через ``tracked_suffixes``.
+# Суффиксы путей телеметрии, для которых копится кольцевой буфер ИСТОРИИ (спарклайны GUI).
+# Это НАБОР ИСТОРИИ read-модели, а НЕ зеркало publish-gate (``GATED_METRICS`` в
+# ``process_module``): пересекается с ним, но намеренно отличается — ``.state.uptime``
+# трекается для истории карточки процесса (в gate его нет, публикуется всегда),
+# а транспортный счётчик ``shm`` в gate есть, но своей спарклайн-серии не имеет.
+# Форма суффикса — по телеметрийному поддереву (``build_worker_telemetry``): агрегат
+# ``processes.<P>.state.fps`` → ``.state.fps``, per-worker ``…workers.<w>.effective_hz``
+# → ``.effective_hz`` (матч по СУФФИКСУ, независимо от имени процесса/воркера).
+# Приложение задаёт свой набор истории через ``tracked_suffixes``.
 DEFAULT_TRACKED_SUFFIXES: tuple[str, ...] = (
     ".state.fps",
     ".state.latency_ms",
