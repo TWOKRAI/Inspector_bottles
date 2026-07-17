@@ -428,3 +428,88 @@ class TestDebugSession:
         assert ("gui", "ui.tap.unsubscribe") in cmds
         assert ("gui", "log.tail.unsubscribe") in cmds
         assert ("preprocessor", "log.tail.unsubscribe") in cmds
+
+
+# --- Task 0.2: гонка close()/request() + карантин поздних ответов ---
+
+
+class _FakeSock:
+    """Минимальный сокет-дублёр: sendall/close, опц. падение при закрытии."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.closed = False
+        self._fail = fail
+        self.sent: List[bytes] = []
+
+    def sendall(self, data: bytes) -> None:
+        if self.closed or self._fail:
+            raise OSError("socket closed")
+        self.sent.append(data)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class TestSendRaceAndLateReplies:
+    def test_send_raw_raises_connectionerror_when_socket_none(self) -> None:
+        # Старое поведение — AssertionError; новое — штатная ConnectionError.
+        d = BackendDriver()
+        assert d._sock is None
+        with pytest.raises(ConnectionError):
+            d._send_raw({"command": "x"})
+
+    def test_request_returns_error_dict_on_send_failure(self) -> None:
+        # sendall падает (сокет закрыт из другого потока) → request не бросает, а
+        # отдаёт error-dict с success=False.
+        d = BackendDriver()
+        d._sock = _FakeSock(fail=True)  # type: ignore[assignment]
+        res = d.request({"command": "x", "request_id": "cid-fail"}, timeout=0.2)
+        assert res["success"] is False
+        assert res["error"] == "connection closed"
+        assert res["request_id"] == "cid-fail"
+
+    def test_concurrent_close_during_request_never_asserts(self) -> None:
+        # Стресс: close() из другого потока во время in-flight request() → всегда dict,
+        # никогда AssertionError/утечка исключения (Task 0.2, 100 итераций).
+        for i in range(100):
+            d = BackendDriver()
+            d._sock = _FakeSock()  # type: ignore[assignment]
+            d._running = True
+            results: List[Any] = []
+            errors: List[BaseException] = []
+
+            def _do_request() -> None:
+                try:
+                    results.append(d.request({"command": "x", "request_id": f"cid-{i}"}, timeout=0.3))
+                except BaseException as exc:  # noqa: BLE001 — тест ловит ЛЮБУЮ утечку
+                    errors.append(exc)
+
+            t = threading.Thread(target=_do_request)
+            t.start()
+            d.close()  # обнуляет _sock из главного потока — гонка с _send_raw
+            t.join(timeout=2.0)
+
+            assert not t.is_alive(), f"request завис на итерации {i}"
+            assert not errors, f"request бросил исключение: {errors}"
+            assert len(results) == 1 and isinstance(results[0], dict)
+            assert results[0]["success"] is False
+
+    def test_late_reply_after_timeout_is_dropped_not_event(self) -> None:
+        # request() таймаутит и кладёт cid в карантин; поздний ответ с тем же cid
+        # dispatcher дропает (не псевдо-событие) и растит late_replies.
+        d = BackendDriver()
+        d._sock = _FakeSock()  # type: ignore[assignment]
+        res = d.request({"command": "slow", "request_id": "cid-late"}, timeout=0.05)
+        assert res["error"] == "timeout"
+        assert d.late_replies == 0
+
+        d._dispatch(_line({"request_id": "cid-late", "result": {"value": 1}}))
+        assert d.events() == [], "поздний ответ не должен всплывать событием"
+        assert d.late_replies == 1
+
+    def test_unquarantined_request_id_still_becomes_event(self) -> None:
+        # Регресс-контроль: cid, который НЕ таймаутили, по-прежнему → событие.
+        d = BackendDriver()
+        d._dispatch(_line({"request_id": "never-issued", "result": {"x": 1}}))
+        assert len(d.events()) == 1
+        assert d.late_replies == 0

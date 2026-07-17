@@ -41,6 +41,10 @@ EventCallback = Callable[[Dict[str, Any]], None]
 # (для телеметрии ``publish=None`` — валидная команда «выключить gate», PC 3.2).
 _UNSET: Any = object()
 
+# TTL карантина таймаутнутых request_id (Task 0.2): дольше этого поздний ответ уже
+# не ждём — запись протухает и вычищается лениво. Запас над самым долгим таймаутом.
+_TIMED_OUT_TTL_SEC: float = 60.0
+
 
 # ---------------------------------------------------------------------------
 # Типизированные результаты интроспекции (Ф1 Task 1.2)
@@ -275,6 +279,13 @@ class BackendDriver:
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
 
+        # Карантин таймаутнутых request_id (Task 0.2): request() при таймауте кладёт
+        # сюда cid → срок годности; поздний ответ, пришедший ПОСЛЕ таймаута, dispatcher
+        # опознаёт по этому множеству и дропает (иначе всплыл бы псевдо-событием).
+        # TTL-purge ленивый — множество не растёт бесконечно. Под _pending_lock.
+        self._timed_out: Dict[str, float] = {}
+        self._late_replies = 0  # счётчик дропнутых поздних ответов (диагностика)
+
         # Событийный канал: reader-поток пишет, клиентский поток читает.
         # _events_cv охраняет и очередь, и список подписчиков; на нём же
         # блокируется events(timeout) в ожидании первого события.
@@ -344,19 +355,39 @@ class BackendDriver:
             self._send_raw(message)
             wait = timeout if timeout is not None else self._default_timeout
             if not pending.event.wait(wait):
+                # Таймаут: пометить cid в карантин — поздний ответ dispatcher дропнет,
+                # а не выдаст псевдо-событием (Task 0.2).
+                self._quarantine_timed_out(cid)
                 return {"success": False, "error": "timeout", "request_id": cid}
             if pending.response is None:
                 return {"success": False, "error": "connection closed", "request_id": cid}
             return pending.response.get("result", pending.response)
+        except (ConnectionError, OSError) as exc:
+            # Гонка close()/request(): сокет обнулён/закрыт из другого потока во время
+            # отправки → чистый error-dict, не AssertionError/утечка исключения (Task 0.2).
+            return {"success": False, "error": "connection closed", "detail": str(exc), "request_id": cid}
         finally:
             with self._pending_lock:
                 self._pending.pop(cid, None)
 
+    def _quarantine_timed_out(self, cid: str) -> None:
+        """Пометить request_id как таймаутнутый + лениво вычистить протухшие (Task 0.2)."""
+        now = time.monotonic()
+        with self._pending_lock:
+            if self._timed_out:
+                for stale in [k for k, exp in self._timed_out.items() if exp <= now]:
+                    del self._timed_out[stale]
+            self._timed_out[cid] = now + _TIMED_OUT_TTL_SEC
+
     def _send_raw(self, message: Dict[str, Any]) -> None:
         line = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
         with self._write_lock:
-            assert self._sock is not None
-            self._sock.sendall(line)
+            sock = self._sock
+            if sock is None:
+                # close() из другого потока обнулил сокет — не assert'им, а поднимаем
+                # штатную ConnectionError (request() превращает её в error-dict).
+                raise ConnectionError("socket closed")
+            sock.sendall(line)
 
     def _read_loop(self) -> None:
         buf = b""
@@ -393,11 +424,20 @@ class BackendDriver:
         if cid:
             with self._pending_lock:
                 pending = self._pending.get(cid)
+                # Поздний ответ после таймаута: pending уже снят, но cid в карантине —
+                # опознаём и дропаем (не псевдо-событие). Иначе — обычная логика.
+                is_late = pending is None and cid in self._timed_out
+                if is_late:
+                    del self._timed_out[cid]
             if pending is not None:
                 pending.response = msg
                 pending.event.set()
                 return
-        # Нет request_id либо reply уже никто не ждёт → это событие.
+            if is_late:
+                # Инкремент безопасен: _dispatch зовётся только из reader-потока.
+                self._late_replies += 1
+                return
+        # Нет request_id либо reply уже никто не ждёт (и это не карантин) → это событие.
         self._emit_event(msg)
 
     # ---- Событийный канал (push-сообщения без reply) ----
@@ -483,6 +523,11 @@ class BackendDriver:
     def event_errors(self) -> int:
         """Сколько раз колбэк подписчика бросил исключение (диагностика)."""
         return self._event_errors
+
+    @property
+    def late_replies(self) -> int:
+        """Сколько поздних ответов (пришли после таймаута request) дропнуто (Task 0.2)."""
+        return self._late_replies
 
     # ---- Высокоуровневые обёртки (общие билдеры протокола) ----
 
