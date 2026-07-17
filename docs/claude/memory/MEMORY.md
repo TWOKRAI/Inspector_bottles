@@ -32,6 +32,7 @@
 - [Sentrux baseline 2026-05](project_sentrux_baseline_2026_05.md) — Quality 7161/10000 после seed 0.2.0, точка отсчёта для рефакторингов
 - [Logger/Error/Stats managers](feedback_logger_error_stats_managers.md) — логирование через logger_manager, ошибки через error_manager, статистика через statistics_manager (ObservableMixin в base_manager)
 - [Parallel agents commit race](feedback_parallel_agents_commit_race.md) — 5 параллельных агентов без worktree склеивают коммиты, теряют файлы; макс 2 без worktree
+- [Worktree при параллельной правке файла](feedback_worktree_for_parallel_samefile.md) — параллельные агенты держат uncommitted-правки в ОДНОМ файле → работать в git worktree от committed HEAD, не checkout в общем дереве
 - [ServiceRegistry state](project_service_registry.md) — Phase 3 DONE: service_module framework, 91 tests, 4 services, ADR-129/SVC-001/002/003
 - [DisplayRegistry state](project_display_registry.md) — Phase 4 DONE: display_module framework, 12 tests, generic (no vision fields), ADR-130/DM-001/002/003
 - [RecipesManager v2 state](project_recipes_manager.md) — Phase 5 DONE: Recipe=SystemBlueprint+yaml-sections, replace_blueprint with rollback, ADR-131/132
