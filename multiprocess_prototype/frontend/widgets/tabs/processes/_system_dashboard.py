@@ -70,10 +70,25 @@ class SystemDashboardSection(QGroupBox):
         layout.addLayout(top)
 
         # Generic-график: серия на процесс (строится В ЦИКЛЕ из списка процессов).
+        # crosshair=True — панель значений всех серий под курсором (читаемость при разном
+        # масштабе); y_label — подпись оси под текущую метрику.
         specs = [SeriesSpec(key=name, label=name) for name in self._process_names]
-        self._chart = TelemetryChart(specs, x_window_sec=600.0)
-        self.setMinimumHeight(280)
+        self._chart = TelemetryChart(
+            specs,
+            x_window_sec=600.0,
+            crosshair=True,
+            y_label=self._metric_label(self._metric),
+        )
+        self.setMinimumHeight(300)
         layout.addWidget(self._chart, stretch=1)
+
+    @staticmethod
+    def _metric_label(metric_key: str) -> str:
+        """Подпись оси/метрики по ключу (юнит для оси Y)."""
+        for key, label in _DASHBOARD_METRICS:
+            if key == metric_key:
+                return label
+        return metric_key
 
     # ------------------------------------------------------------------ #
     #  Обновление                                                         #
@@ -88,10 +103,11 @@ class SystemDashboardSection(QGroupBox):
             self._chart.set_series_data(name, points)
 
     def _on_metric_changed(self, _index: int) -> None:
-        """Смена метрики в переключателе → перечитать все серии под новую метрику."""
+        """Смена метрики в переключателе → сменить подпись оси + перечитать все серии."""
         key = self._metric_combo.currentData()
         if isinstance(key, str):
             self._metric = key
+        self._chart.set_y_label(self._metric_label(self._metric))
         self.refresh()
 
     def current_metric(self) -> str:

@@ -126,3 +126,81 @@ class TestGraceful:
         qtbot.addWidget(chart)
         chart.set_series_data("a", [])  # не падает
         assert chart.is_series_visible("a") is True
+
+
+class TestCrosshair:
+    def test_crosshair_off_by_default(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a"))
+        qtbot.addWidget(chart)
+        assert not hasattr(chart, "_readout")
+        assert not hasattr(chart, "_vline")
+
+    def test_values_at_x_nearest_per_series(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a", "b"), crosshair=True)
+        qtbot.addWidget(chart)
+        chart.set_series_data("a", [(1.0, 10.0), (2.0, 20.0), (3.0, 30.0)])
+        chart.set_series_data("b", [(1.0, 100.0), (2.0, 200.0), (3.0, 300.0)])
+        rows = chart.values_at_x(2.1)  # ближайшее к x=2.1 → точка ts=2.0
+        by_key = {r[0]: r[4] for r in rows}
+        assert by_key == {"a": 20.0, "b": 200.0}
+
+    def test_values_at_x_excludes_hidden_series(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a", "b"), crosshair=True)
+        qtbot.addWidget(chart)
+        chart.set_series_data("a", [(1.0, 10.0)])
+        chart.set_series_data("b", [(1.0, 20.0)])
+        chart.set_visible("b", False)
+        keys = {r[0] for r in chart.values_at_x(1.0)}
+        assert keys == {"a"}  # скрытая b не в панели
+
+    def test_values_at_x_excludes_empty_series(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a", "b"), crosshair=True)
+        qtbot.addWidget(chart)
+        chart.set_series_data("a", [(1.0, 10.0)])  # b без данных
+        keys = {r[0] for r in chart.values_at_x(1.0)}
+        assert keys == {"a"}
+
+    def test_format_readout_has_time_and_values(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a"), crosshair=True)
+        qtbot.addWidget(chart)
+        chart.set_series_data("a", [(1_700_000_000.0, 42.0)])
+        html = chart._format_readout(1_700_000_000.0)
+        assert "42.0" in html
+        assert "A" in html  # label (upper из _specs)
+
+    def test_format_readout_empty(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a"), crosshair=True)
+        qtbot.addWidget(chart)
+        assert "нет данных" in chart._format_readout(1.0)
+
+    def test_readout_time_is_cursor_not_series_ts(self, qtbot) -> None:
+        """Заголовок-время = позиция курсора x (= линия), НЕ ts ближайшей точки серии
+        (иначе при разреженных данных серии время рассинхронизировалось бы с линией)."""
+        import time as _t
+
+        chart = TelemetryChart(_specs("a"), crosshair=True)
+        qtbot.addWidget(chart)
+        chart.set_series_data("a", [(1000.0, 7.0)])  # точка далеко от курсора
+        html = chart._format_readout(5000.0)  # курсор в x=5000
+        assert _t.strftime("%H:%M:%S", _t.localtime(5000.0)) in html  # время = курсор
+        assert _t.strftime("%H:%M:%S", _t.localtime(1000.0)) not in html  # НЕ ts точки
+        assert "7.0" in html  # значение — ближайший сэмпл серии
+
+
+class TestYLabel:
+    def test_y_label_set_at_init(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a"), y_label="Задержка, мс")
+        qtbot.addWidget(chart)
+        # Подпись оси применена (не падает; текст в label оси).
+        assert "Задержка" in chart._plot.getPlotItem().getAxis("left").labelText
+
+    def test_set_y_label_changes_axis(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a"))
+        qtbot.addWidget(chart)
+        chart.set_y_label("FPS")
+        assert "FPS" in chart._plot.getPlotItem().getAxis("left").labelText
+
+    def test_set_y_label_noop_in_compact(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a"), compact=True)
+        qtbot.addWidget(chart)
+        chart.set_y_label("X")  # compact без оси — не падает
