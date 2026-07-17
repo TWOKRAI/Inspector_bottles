@@ -103,15 +103,15 @@ class BlueprintAssembler:
         Raises:
             BlueprintInvalid: если ``topology.check()`` вернул ошибки.
         """
-        # PC 1.3: per-process telemetry override читаем из СЫРОГО blueprint_dict ДО
-        # model_validate — ProcessConfig (SchemaBase) не объявляет typed-поле
-        # telemetry (вне Files-скоупа этой задачи), поэтому extra=ignore молча
-        # отбросил бы неизвестный ключ при валидации. blueprint_dict здесь ещё не
-        # тронут model_validate (копирует, не мутирует), поэтому raw-чтение безопасно.
-        per_process_telemetry = self._extract_per_process_telemetry(blueprint_dict)
-
         # model_validate создаёт КОПИЮ — входной dict не мутируется.
         topology = SystemBlueprint.model_validate(blueprint_dict)
+
+        # Task 3.1: per-process telemetry override — из ТИПИЗИРОВАННОГО поля
+        # ProcessConfig.telemetry (после валидации), а не raw-скан до model_validate.
+        # None → нет override (процесс в мапе отсутствует); {} → override задан пустым.
+        per_process_telemetry = {
+            proc.process_name: proc.telemetry for proc in topology.processes if proc.telemetry is not None
+        }
 
         # Ф4.7: join/inspector из wires — структурный вывод ДО check()/build_configs()
         # (снимает костыль _hoist_inspector_from_metadata; см. infer_missing_inspectors).
@@ -150,24 +150,6 @@ class BlueprintAssembler:
             result[name] = proc_dict
 
         return result
-
-    @staticmethod
-    def _extract_per_process_telemetry(blueprint_dict: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """Снять per-process ``telemetry`` override из СЫРОГО blueprint (до model_validate).
-
-        Возвращает ``{process_name: telemetry_dict}`` для процессов, у которых в raw
-        dict реально есть ключ ``telemetry`` (dict). Другие процессы в результат не
-        попадают — их отсутствие в мапе означает «нет per-process override».
-        """
-        overrides: dict[str, dict[str, Any]] = {}
-        for proc in blueprint_dict.get("processes") or []:
-            if not isinstance(proc, dict):
-                continue
-            name = proc.get("process_name")
-            telemetry = proc.get("telemetry")
-            if name and isinstance(telemetry, dict):
-                overrides[name] = telemetry
-        return overrides
 
     def _resolve_telemetry(self, override: dict[str, Any] | None) -> dict[str, Any] | None:
         """Слить глобальный default (конструктор) с per-process override → секция ``telemetry``.
