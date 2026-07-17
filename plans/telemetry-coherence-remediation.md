@@ -288,6 +288,24 @@ telemetry-publish-control); изменение дефолтных central-пра
 
 ## Фаза 3 — Гигиена + долг простоты
 
+> **✅ ФАЗА 3 ЗАКРЫТА** (ветка `feat/telemetry-coherence-phase2`). 3.1/3.3/3.4/3.5 DONE; 3.2 частично
+> (шаг 3 fan-out отложен). 3.3/3.4/3.5 исполнены параллельными агентами (worktree), 3.1/3.2 — основной
+> тред. Гейт: ruff+pyright чисто; ~1900 backend + 1030 frontend/PM/throttle зелёные (2 pre-existing
+> env-провала: bare-import `frontend_module.*` в patch, pyqtgraph 0.14.0 — оба на origin/main).
+>
+> **Ревью (Sonnet многоугловое → Opus целенаправленное):**
+> - Sonnet: HIGH (interfaces.py F822 — пропущен импорт реэкспорта) + 3 MED (restart_process не доигрывал
+>   дельту; нет интеграционного теста apply_topology→replay; lazy-prune слепа к `interval=0`-правилам) →
+>   всё исправлено `906bafa7`.
+> - Opus: APPROVE-with-nits; 3 Sonnet-фикса подтверждены; оси read-model/concurrency/covered-subs/3.1×2.2
+>   чисты по коду. Реальная находка — персист хранил лишь ПОСЛЕДНЮЮ дельту (при ≥2 merge respawn терял
+>   предыдущие) → исправлено аккумуляцией `deep_merge` `555e6caa`.
+>
+> **Follow-up тикеты (не блок):** (1) шаг 3 Task 3.2 — watcher fan-out publish с per-child override-мержем;
+> (2) known-gap смешанных merge→replace-цепочек в персисте (replace сбрасывает накопленное — приемлемо);
+> (3) minor pre-existing: серверная семантика `state.unsubscribe` для async/реактивированных covered-подписок
+> (sub_id локальный uuid4 vs серверный — потенциальный orphan, унаследован из штатного async-subscribe, не от 3.3).
+
 ### Task 3.1 — Типизировать `ProcessConfig.telemetry` (убрать raw-blueprint pre-scan) ✅ DONE (43368466)
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer

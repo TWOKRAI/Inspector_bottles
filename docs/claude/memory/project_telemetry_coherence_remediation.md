@@ -1,6 +1,6 @@
 ---
 name: project_telemetry_coherence_remediation
-description: Ревью телеметрии (Fable 24→42/60) + план telemetry-coherence-remediation; Фазы 1 и 2 закрыты, дальше Фаза 3 (гигиена+простота)
+description: Ревью телеметрии (Fable 24→42/60) + план telemetry-coherence-remediation; Фазы 1/2/3 закрыты (3.2 частично), Sonnet+Opus ревью каждой; ветка feat/telemetry-coherence-phase2 не в main
 metadata:
   type: project
 ---
@@ -47,10 +47,30 @@ origin/main — дифф в `orchestrator_config` (backend_ctl/replace_debounce)
 гоняться, отдельный тикет обновления снапшотов. Плюс: `pyqtgraph` в pyproject, но не в `.venv` → блокит
 сбор `test_telemetry_chart.py`/`test_telemetry_controls.py` (нужен `uv sync`).
 
-**Дальше:** **Фаза 3** remediation (3.1 typed ProcessConfig.telemetry · 3.2 персист runtime-дельты+fan-out ·
-3.3 covered-подписки ре-адопция · 3.4 гигиена ThrottleMiddleware · 3.5 read-model во framework — разблокирует
-backend_ctl 2.3). Либо Фаза 4 GUI telemetry-publish-control по приоритету владельца
-([[project_priority_product_over_engine]]).
+**Фаза 3 ЗАКРЫТА** (2026-07-18, ветка `feat/telemetry-coherence-phase2`, Sonnet+Opus ревью):
+- 3.1 typed `ProcessConfig.telemetry` (убран raw-скан до model_validate; typed-поле консистентно с
+  inspector/io_peek, C6 не нарушен — частые ключи ДЛЯ typed, редкие в extras). 3.3 ре-адопция covered-подписок.
+  3.4 гигиена ThrottleMiddleware (prune из handle_state_delete + lazy-prune; flush отбрасывает stale).
+  3.5 перенос read-model (VM+HistorySource) во `frontend_module/state/` generic + вырез legacy
+  (`_connect_bindings_legacy`, `cache_snapshot`→`read_model`) — разблокирует backend_ctl 2.3.
+- **3.2 ЧАСТИЧНО:** персист runtime-дельты в PM + доигрывание после `apply_topology` (broadcast) И
+  `restart_process` (адресно) + аккумуляция последовательных merge (`deep_merge`). **Шаг 3 (watcher
+  fan-out publish детям) ОТЛОЖЕН** — клоббер per-process override (uniform broadcast затирает overlay из 2.2).
+- **Параллель:** 3.3/3.4 (developer) + 3.5 (teamlead) в worktree одновременно, auto-merge чисто (независимые файлы).
+- **Ревью Фазы 3:** Sonnet нашёл HIGH (interfaces.py F822 — агент 3.5 добавил в `__all__` реэкспорт БЕЗ импорта)
+  + 3 MED (restart не доигрывал; нет integ-теста apply_topology→replay; lazy-prune слепа к `interval=0`);
+  Opus (APPROVE-with-nits) вскрыл персист-«последнюю-дельту» баг. Все исправлены.
+
+**Урок (Фаза 3):** (1) агент, добавляя в `__all__` реэкспорт, может забыть сам `import` → F822 (валит
+`make check`) — проверять `ruff` по interfaces.py после переноса. (2) `isolation:worktree` создаёт worktree
+от УСТАРЕВШЕГО HEAD (main), не от текущей ветки — агенты сами делали `git merge --ff-only <branch-HEAD>`;
+брифовать явным SHA базы. (3) sentrux free-tier проверяет 3/34 правил и НЕ включает boundary
+`framework→prototype` — критичный слой-инвариант сверять прямым grep, не полагаться на `check_rules`.
+(4) персист runtime-дельты должен АККУМУЛИРОВАТЬ (deep_merge), не хранить последнее wire-сообщение — иначе
+respawn теряет предыдущие точечные правки (telemetry_set в merge — типичный многошаговый сценарий).
+
+**Дальше:** общий Fable-ревью всей телеметрии (Фазы 1-3, с диффами) — директива владельца; затем решение
+о merge в main. Follow-up: шаг 3 Task 3.2 (per-child override fan-out), `state.unsubscribe` серверная семантика.
 
 **Урок (Фаза 1):** per-subsystem ревью НЕ видит межподсистемных стыков — Opus/Fable кросс-срез поверх флота
 нашёл HIGH (throttle full-apply сносил все правила) и design-critical (heartbeat=третья неуправляемая
