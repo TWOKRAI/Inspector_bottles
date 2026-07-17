@@ -164,8 +164,11 @@ def _apply_throttle(
     """
     section = throttle_section or {}
 
-    # Явный clear-маркер — снять всё намеренно (перекрывает и merge, и replace).
-    if isinstance(section, dict) and section.get(THROTTLE_CLEAR_MARKER):
+    # Явный clear-маркер — снять всё намеренно (перекрывает и merge, и replace). Строгая
+    # проверка ``is True``: маркер срабатывает только на документированную форму
+    # ``{"__clear__": true}``, а не на любое truthy-значение под этим ключом (иначе
+    # гипотетический паттepн-правило с таким именем случайно снёс бы весь набор).
+    if isinstance(section, dict) and section.get(THROTTLE_CLEAR_MARKER) is True:
         store_throttle.set_rules({})
         return
 
@@ -300,12 +303,15 @@ def make_telemetry_on_reload(
     (тот же файл, та же правка → и observability-менеджеры, и центральный троттл без
     рестарта).
 
-    **Файл — декларативный источник ПОЛНОГО состояния троттла (boot ≡ reload, находка B):**
-    отсутствие/пустота ключа ``throttle`` в файле означает «вернуть boot-дефолты», а НЕ
-    «оставить как есть» (иначе удаление секции из файла давало бы stale-правила). Поэтому
-    throttle-ключ инжектируется всегда: пустой → :func:`apply_telemetry_reconfigure`
-    ставит ``default_throttle_rules``. ``default_throttle_rules`` — те же boot-правила
-    (``build_throttle_rules``), что оркестратор кладёт в ``state_throttle_rules``.
+    **Файл — декларативный источник состояния троттла (boot ≡ reload, находка B):**
+    удаление ключа ``throttle`` из файла означает «вернуть boot-дефолты», а НЕ «оставить
+    stale». НО watcher срабатывает на ЛЮБОЕ изменение файла (в т.ч. несвязанное — правку
+    ``observability.log_level`` в том же файле). Поэтому central-троттл трогается ТОЛЬКО
+    когда throttle-объявление РЕАЛЬНО изменилось с прошлого reload: иначе runtime-дельта
+    троттла (операторская правка через ``telemetry.broadcast``, ADR-PM-017) молча
+    откатывалась бы к дефолтам при несвязанной перезагрузке — тихий срез страховки,
+    который ADR-PM-017 запрещает («no silent caps»). ``default_throttle_rules`` — те же
+    boot-правила (``build_throttle_rules``), что оркестратор кладёт в ``state_throttle_rules``.
 
     **Граница Task 3.1 vs 3.2:** watcher живёт в оркестраторе и применяет ТОЛЬКО
     ``throttle`` (центральный store-троттл, доступный в ТОМ ЖЕ процессе). Publisher-gate
@@ -314,17 +320,26 @@ def make_telemetry_on_reload(
     throttle-плоскость (даже если в файле есть ``publish`` — он помечается «нет приёмника»
     и никого не трогает).
     """
+    # Маркер «throttle-объявление ещё не наблюдалось» — отличает первый reload от
+    # последующих и «throttle никогда не было в файле» от «throttle удалили».
+    _unseen = object()
+    last_throttle: Any = _unseen
 
     def _on_reload(config: "Config") -> None:
+        nonlocal last_throttle
         raw = config.get(section_key, None)
         if raw is None:
-            # Телеметрия в файле не объявлена вовсе → центральный троттл не трогаем
-            # (observability-only reload не должен снимать/менять правила).
+            # Телеметрия в файле не объявлена вовсе → центральный троттл не трогаем.
             return
         section = dict(raw or {})
-        # Секция telemetry объявлена, но БЕЗ throttle-ключа → возврат к boot-дефолтам,
-        # а не «оставить stale» (boot ≡ reload: удаление throttle из файла == дефолты).
-        section.setdefault("throttle", {})
+        declared = section.get("throttle", _unseen)  # что файл объявляет сейчас (или его отсутствие)
+        # Diff-гейт: несвязанная правка файла (throttle-объявление не изменилось) НЕ трогает
+        # троттл — не откатывает runtime-дельту к дефолтам. Реальное изменение/удаление
+        # throttle в файле → применяем (удаление → declared==_unseen → пустой → boot-дефолты).
+        if declared == last_throttle:
+            return
+        last_throttle = declared
+        section.setdefault("throttle", {})  # объявление изменилось; отсутствие → дефолты
         apply_telemetry_reconfigure(
             section,
             heartbeat=None,  # publisher-gate детей — fan-out Task 3.2, не через файл

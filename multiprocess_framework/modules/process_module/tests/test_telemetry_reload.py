@@ -238,6 +238,17 @@ class TestThrottleBootReloadCoherence:
         assert applied == {"throttle": True}
         assert throttle.rules == {"x.y": 2.0}  # ровно заданное, без дефолтов
 
+    def test_clear_marker_strict_true_only(self) -> None:
+        """Маркер срабатывает только на ``is True``: truthy-значение ≠ full-clear.
+
+        Гипотетическое правило с именем ключа ``__clear__`` и числовым значением НЕ должно
+        случайно снести весь набор — применяется как обычное правило (replace).
+        """
+        throttle = _FakeThrottle()
+        throttle.rules = {"old": 1.0}
+        apply_telemetry_reconfigure({"throttle": {THROTTLE_CLEAR_MARKER: 0.5}}, store_throttle=throttle)
+        assert throttle.rules == {THROTTLE_CLEAR_MARKER: 0.5}  # НЕ пусто — не сработал clear
+
 
 class TestUnknownModeRejected:
     """Task 1.2 (замечание ревьюера Task 1.1): неизвестный mode → явная ошибка, не replace."""
@@ -366,14 +377,41 @@ class TestMakeTelemetryOnReload:
         assert throttle.set_calls == 0
         assert throttle.rules == {"keep": 5.0}  # правила целы
 
-    def test_reload_without_throttle_key_restores_defaults(self) -> None:
-        """Task 2.1: telemetry объявлена (publish), но БЕЗ throttle → boot-дефолты (не stale)."""
+    def test_throttle_removed_from_file_resets_to_defaults(self) -> None:
+        """Task 2.1: throttle РЕАЛЬНО удалён из файла (был → нет) → boot-дефолты (не stale)."""
         defaults = {"processes.**.state.fps": 0.05}
         throttle = _FakeThrottle()
-        throttle.rules = {"custom.rule": 9.0}  # ранее применённые кастомные правила
         on_reload = make_telemetry_on_reload(store_throttle=throttle, default_throttle_rules=defaults)
+        # 1-й reload: throttle задан в файле → применён.
+        on_reload(Config(initial_data={"telemetry": {"throttle": {"custom.rule": 9.0}}}))
+        assert throttle.rules == {"custom.rule": 9.0}
+        # 2-й reload: throttle УДАЛЁН из файла (осталась только publish) → возврат к дефолтам.
         on_reload(Config(initial_data={"telemetry": {"publish": {"default_interval_sec": 2.0}}}))
-        assert throttle.rules == defaults  # вернулись дефолты, stale-правило снято
+        assert throttle.rules == defaults
+
+    def test_unrelated_reload_preserves_runtime_throttle(self) -> None:
+        """HIGH-регресс (ревью 2026-07-17): несвязанная правка файла НЕ откатывает runtime-дельту.
+
+        throttle никогда не было в файле; оператор задал правило рантайм-командой; правка
+        observability.log_level (тот же файл) НЕ должна молча снести операторское правило.
+        """
+        defaults = {"processes.**.state.fps": 0.05}
+        throttle = _FakeThrottle()
+        on_reload = make_telemetry_on_reload(store_throttle=throttle, default_throttle_rules=defaults)
+        # 1-й reload: в файле только publish, throttle отсутствует → троттл не тронут.
+        on_reload(Config(initial_data={"telemetry": {"publish": {"default_interval_sec": 2.0}}}))
+        # Оператор задал правило рантайм-командой (эмуляция telemetry.broadcast).
+        throttle.rules = {"operator.rule": 0.5}
+        # 2-й reload: правка НЕсвязанной секции; throttle в файле как не было, так и нет.
+        on_reload(
+            Config(
+                initial_data={
+                    "observability": {"log_level": "DEBUG"},
+                    "telemetry": {"publish": {"default_interval_sec": 3.0}},
+                }
+            )
+        )
+        assert throttle.rules == {"operator.rule": 0.5}  # runtime-дельта цела, не откатана
 
     def test_reload_empty_throttle_restores_defaults(self) -> None:
         """Task 2.1: throttle={} в файле → boot-дефолты (boot ≡ reload)."""

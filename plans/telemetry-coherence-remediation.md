@@ -225,9 +225,9 @@ telemetry-publish-control); изменение дефолтных central-пра
    `apply_telemetry_reconfigure`-вызывающими (источник — `build_throttle_rules`).
 3. Удаление throttle-секции из файла при reload → тоже возврат к дефолтам (сейчас — stale).
 **Acceptance:**
-- [ ] Тест: `throttle: {}` через watcher/config.reload → живые правила == `_default_throttle_rules()` (та же таблица, что при boot)
-- [ ] Тест: явный clear-маркер → правила пусты
-- [ ] Тест: reload файла БЕЗ throttle-ключа после кастомных правил → дефолты (не stale)
+- [x] Тест: `throttle: {}` через watcher/config.reload → живые правила == `_default_throttle_rules()` (та же таблица, что при boot)
+- [x] Тест: явный clear-маркер → правила пусты
+- [x] Тест: reload файла БЕЗ throttle-ключа после кастомных правил → дефолты (не stale) — через diff-гейт (throttle реально удалён из файла)
 **Out of scope:** publish-плоскость (её семантика None/dict не меняется).
 
 ### Task 2.2 — `config.reload` из файла: сохранить per-process overlay ✅ DONE (dc7594e6)
@@ -245,9 +245,9 @@ telemetry-publish-control); изменение дефолтных central-пра
    get_config("telemetry_override") or {})` (мержится только `publish`-часть; `throttle` — как есть).
 3. inline-путь (`data["telemetry"]`) НЕ трогать — явная секция от оператора применяется как есть.
 **Acceptance:**
-- [ ] Тест: процесс с recipe-override `metrics.fps.enabled=false` после `config.reload path=system.yaml` сохраняет override (gate.resolve("fps") == (False, ...)), глобальные изменения из файла применены
-- [ ] Тест: процесс без override — поведение бит-в-бит прежнее (характеризация)
-- [ ] Golden-снапшоты build: новый ключ `telemetry_override` появляется ТОЛЬКО у процессов с override
+- [x] Тест: процесс с recipe-override `metrics.fps.enabled=false` после `config.reload path=system.yaml` сохраняет override (gate.resolve("fps") == (False, ...)), глобальные изменения из файла применены
+- [x] Тест: процесс без override — поведение бит-в-бит прежнее (характеризация)
+- [x] Golden-снапшоты build: новый ключ `telemetry_override` появляется ТОЛЬКО у процессов с override (проверено юнит-фикстурами `test_assembler.py`; живых рецептов с override пока нет — синтетика)
 **Out of scope:** watcher-fan-out publisher-gate детям (Task 3.2), персист runtime-дельты (Task 3.2).
 
 ### Task 2.3 — Валидация `metrics`-ключей против GATED_METRICS ✅ DONE (93589f7f)
@@ -265,8 +265,8 @@ telemetry-publish-control); изменение дефолтных central-пра
    видно инициатору backend_ctl/GUI).
 3. НЕ отвергать секцию (forward-compat: новые метрики в старом процессе не должны ронять reload).
 **Acceptance:**
-- [ ] Тест: `metrics: {latency: {...}}` → WARNING с точным именем + `unknown_metrics=["latency"]` в ответе команды; gate строится, известные метрики работают
-- [ ] Тест: все ключи известны → ни WARNING, ни поля в ответе
+- [x] Тест: `metrics: {latency: {...}}` → WARNING с точным именем + `unknown_metrics=["latency"]` в ответе команды; gate строится, известные метрики работают
+- [x] Тест: все ключи известны → ни WARNING, ни поля в ответе
 **Out of scope:** белый список как hard-fail; изменение состава GATED_METRICS.
 
 ---
