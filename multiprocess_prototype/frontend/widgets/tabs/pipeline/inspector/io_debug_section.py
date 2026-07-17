@@ -240,17 +240,16 @@ class IoDebugSection(QWidget):
         self._render(value)
 
     def _replay_cached(self) -> None:
-        """Подтянуть последнее известное значение io_peek из кэша bindings (если доступно)."""
+        """Подтянуть последнее известное значение io_peek из read-model (если доступно)."""
         if self._bindings is None or not self._active_path:
             return
-        snapshot_fn = getattr(self._bindings, "_cache_snapshot", None)
-        if snapshot_fn is None:
+        read_model = getattr(self._bindings, "read_model", None)
+        if read_model is None:
             return
         try:
-            snapshot = snapshot_fn() or {}
+            value = read_model.get(self._active_path)
         except Exception:
             return
-        value = snapshot.get(self._active_path)
         if value is not None:
             self._render(value)
 

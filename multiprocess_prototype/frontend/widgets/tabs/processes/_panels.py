@@ -45,7 +45,10 @@ from multiprocess_framework.modules.frontend_module.widgets.telemetry_chart impo
 )
 from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
-from multiprocess_prototype.frontend.state.telemetry_history import TelemetryHistorySource
+from multiprocess_prototype.frontend.state.telemetry_history import (
+    TelemetryHistorySource,
+    make_history_source,
+)
 from multiprocess_prototype.frontend.widgets.primitives import (
     CardAction,
     EntityCard,
@@ -57,7 +60,7 @@ from .widgets import CreateWorkerDialog, ProcessCard, WorkerTable
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
-    from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
+    from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 
     from .presenter import ProcessesPresenter
 
@@ -192,10 +195,12 @@ class AllProcessesPanel(QWidget):
     ) -> None:
         super().__init__(parent)
         self._presenter = presenter
+        # bindings — стандартная runtime-плумбинг вкладок (RuntimeDeps.bindings).
+        # Телеметрия панели течёт ИСКЛЮЧИТЕЛЬНО через read-model (VM); хранится
+        # для единообразия конструктора вкладок и будущих не-телеметрийных bind.
         self._bindings = bindings
-        # Ф1 (gui-telemetry-read-model 1.3): локальный read-model телеметрии.
-        # VM-режим предпочтителен (один слот на ``updated`` вместо N bind);
-        # None → fallback на bindings-путь (существующие тесты/оболочки без VM).
+        # Локальный read-model телеметрии: один слот на ``updated`` вместо N
+        # точечных bind. None → живой телеметрии нет (метрики «—»).
         self._telemetry = telemetry
         # Карта VM-режима: точный путь → setter(value). Заполняется в
         # _connect_telemetry_vm; читается _apply_telemetry_items.
@@ -545,24 +550,21 @@ class AllProcessesPanel(QWidget):
                 )
 
     def _connect_bindings(self) -> None:
-        """Подключить телеметрию карточек/health: VM-режим или bindings-fallback.
+        """Подключить телеметрию карточек/health через read-model (VM).
 
-        VM-режим (Task 1.3) предпочтителен: один слот на ``updated`` вместо N
-        точечных ``bind`` (0 серверных подписок из панели). Fallback на прежний
-        ``bindings.bind``-путь — когда VM не подан (telemetry=None): часть тестов
-        и оболочки без read-model.
+        Единственный путь: один слот на ``updated`` вместо N точечных ``bind``
+        (0 серверных подписок из панели). Без read-model (telemetry=None) панель
+        просто не показывает живую телеметрию — метрики остаются «—».
         """
-        # Плейсхолдеры метрик карточек — общие для обоих путей (создают QLabel'ы
-        # «Циклов/с»/«Время цикла», к которым дальше цепляются setter'ы/binding'и).
+        # Плейсхолдеры метрик карточек (QLabel'ы «Циклов/с»/«Время цикла», к
+        # которым дальше цепляются VM-setter'ы).
         for card in self._cards.values():
             card.set_metrics({"Циклов/с": "—", "Время цикла": "—"})
 
         if self._telemetry is not None:
             self._connect_telemetry_vm()
-        elif self._bindings is not None:
-            self._connect_bindings_legacy()
 
-    # --- VM-режим (Task 1.3) ------------------------------------------- #
+    # --- Подключение read-model ---------------------------------------- #
 
     def _connect_telemetry_vm(self) -> None:
         """Собрать карту путей→setter, подписаться на ``updated`` одним слотом,
@@ -654,84 +656,6 @@ class AllProcessesPanel(QWidget):
         if dashboard_touched and hasattr(self, "_dashboard"):
             self._dashboard.refresh()
 
-    # --- Fallback: прежний bindings-путь ------------------------------- #
-
-    def _connect_bindings_legacy(self) -> None:
-        """Прежний путь через GuiStateBindings (VM не подан). Полное удаление —
-        Phase 3.1."""
-        bindings = self._bindings
-        assert bindings is not None
-
-        # Карточки: статус + Циклов/с (частота, среднее за секунду) + Время цикла.
-        for name, card in self._cards.items():
-            bindings.bind(
-                f"processes.{name}.state.status",
-                card._indicator,
-                "set_state",
-            )
-            hz_label = card._metric_labels.get("Циклов/с")
-            if hz_label is not None:
-                bindings.bind(
-                    f"processes.{name}.state.fps",
-                    hz_label,
-                    "text",
-                    formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
-                )
-            cycle_label = card._metric_labels.get("Время цикла")
-            if cycle_label is not None:
-                bindings.bind(
-                    f"processes.{name}.state.latency_ms",
-                    cycle_label,
-                    "text",
-                    formatter=lambda v: f"{v:.1f} мс" if isinstance(v, (int, float)) else "—",
-                )
-
-        # Health-метки.
-        bindings.bind(
-            "system.health.active",
-            self._lbl_active,
-            "text",
-            formatter=lambda v: f"Активно: {v}" if isinstance(v, (int, float)) else "Активно: 0",
-        )
-        bindings.bind(
-            "system.health.broken_wires",
-            self._lbl_wires,
-            "text",
-            formatter=lambda v: (
-                f"<span style='color: #dc2626;'>Обрывы связей: {v}</span>"
-                if isinstance(v, (int, float)) and v > 0
-                else "Обрывы связей: 0"
-            ),
-        )
-        bindings.bind(
-            "system.health.avg_fps",
-            self._lbl_avg_fps,
-            "text",
-            formatter=lambda v: f"Средняя частота: {v:.1f}" if isinstance(v, (int, float)) else "Средняя частота: —",
-        )
-        # Сквозной FPS цепочки (кадров/с на выходе пайплайна, измеряется GUI по
-        # прибытию кадров на дисплей; инъекция локальной state-дельты в _update_fps).
-        bindings.bind(
-            "system.chain_fps",
-            self._lbl_chain_fps,
-            "text",
-            formatter=lambda v: f"FPS цепочки: {v:.1f}" if isinstance(v, (int, float)) else "FPS цепочки: —",
-        )
-        bindings.bind(
-            "system.chain_latency_ms",
-            self._lbl_chain_latency,
-            "text",
-            formatter=lambda v: (
-                f"Задержка цепочки: {v:.0f} ms" if isinstance(v, (int, float)) else "Задержка цепочки: —"
-            ),
-        )
-        # Пер-сегментная разбивка кадра (frame-trace) — fan-out: значение списком,
-        # не привязывается к одному виджету. Заполняет таблицу _trace_table.
-        bindings.bind_fanout("system.trace_segments", self._on_trace_segments, owner=self)
-        # Сводка ветвей fan-in (нелинейный пайплайн) — fan-out: заполняет
-        # мини-таблицу ветвей _branches_table. Скрыта при пустом/отсутствующем.
-        bindings.bind_fanout("system.trace_branches", self._on_trace_branches, owner=self)
-
 
 class SingleProcessPanel(QWidget):
     """Панель одного процесса: inner-стек детальной карточки и key-value таблицы."""
@@ -751,15 +675,18 @@ class SingleProcessPanel(QWidget):
     ) -> None:
         super().__init__(parent)
         self._presenter = presenter
+        # bindings — стандартная runtime-плумбинг вкладок (RuntimeDeps.bindings).
+        # Телеметрия панели течёт ИСКЛЮЧИТЕЛЬНО через read-model (VM); хранится
+        # для единообразия конструктора вкладок и будущих не-телеметрийных bind.
         self._bindings = bindings
-        # Ф1 (gui-telemetry-read-model 1.3): локальный read-model. VM-режим
-        # предпочтителен; None → fallback на bindings-путь.
+        # Локальный read-model телеметрии; None → живой телеметрии нет (метрики «—»).
         self._telemetry = telemetry
         # Ф2 (gui-telemetry-read-model 2.1/2.2): read-сторона telemetry.db для
         # графика за час/день. Конструктор source — без I/O (только путь), None
-        # → дефолтный TelemetryHistorySource() (env INSPECTOR_TELEMETRY_DB /
-        # data/telemetry.db). Инъекция параметром — для тестов (fake-источник).
-        self._history_source = history_source if history_source is not None else TelemetryHistorySource()
+        # → дефолтный источник под схему стока прототипа (env
+        # INSPECTOR_TELEMETRY_DB / data/telemetry.db). Инъекция параметром — для
+        # тестов (fake-источник).
+        self._history_source = history_source if history_source is not None else make_history_source()
         # RequestRunner (P2 command-result-bridge) — гоняет list_range() на
         # worker-потоке QThreadPool, результат доставляется в main-thread
         # сигналом (см. модуль request_runner.py). Без него чтение БД в
@@ -867,16 +794,8 @@ class SingleProcessPanel(QWidget):
         # 10 мин сразу из ring-буфера VM (без ожидания следующего батча).
         self._refresh_graph_from_ring()
 
-        # Fan-out: обнаруживать рантайм-воркеров из телеметрии и добавлять в
-        # таблицу (их нет в конфиг-топологии get_workers()). В VM-режиме
-        # обнаружение идёт из батч-слота (_apply_telemetry_items, discover=True),
-        # bindings.bind_fanout нужен ТОЛЬКО в fallback (VM не подан).
-        if self._telemetry is None and self._bindings is not None:
-            self._bindings.bind_fanout(
-                f"processes.{self._process_name}.workers.*.status",
-                self._on_worker_discovered,
-                owner=self,
-            )
+        # Обнаружение рантайм-воркеров (их нет в конфиг-топологии get_workers())
+        # идёт из батч-слота read-model (_apply_telemetry_items, discover=True).
         return page
 
     # ------------------------------------------------------------------ #
@@ -1162,50 +1081,15 @@ class SingleProcessPanel(QWidget):
         self._presenter.update_worker(self._process_name, worker_name, **{field: value})
 
     def _bind_worker_telemetry(self) -> None:
-        """Привязать статус/Гц каждого воркера к телеметрии (forward-compatible).
+        """Пересобрать per-worker телеметрию из read-model (VM).
 
         Backend публикует per-worker телеметрию в processes.{proc}.workers.{name}.*
         (heartbeat workers_status → fan-out). Вызывается после каждого перестроения
-        строк таблицы (_refresh_workers).
-
-        VM-режим (Task 1.3): пересобрать карту путей воркеров→setter и первично
-        наполнить новые строки из snapshot. Fallback: прежний bindings.bind
-        (привязки переживают пересоздание строк через weakref auto-cleanup).
+        строк таблицы (_refresh_workers): пересобрать карту путей воркеров→setter и
+        первично наполнить новые строки из snapshot. Без read-model — no-op.
         """
         if self._telemetry is not None:
             self._rebuild_worker_vm_setters()
-            return
-
-        bindings = self._bindings
-        if bindings is None:
-            return
-        proc = self._process_name
-        for name in self._worker_table.worker_names():
-            widgets = self._worker_table.telemetry_widgets(name)
-            status_w = widgets.get("status")
-            if status_w is not None:
-                bindings.bind(
-                    f"processes.{proc}.workers.{name}.status",
-                    status_w,
-                    "text",
-                    formatter=lambda v: str(v),
-                )
-            hz_w = widgets.get("hz")
-            if hz_w is not None:
-                bindings.bind(
-                    f"processes.{proc}.workers.{name}.effective_hz",
-                    hz_w,
-                    "text",
-                    formatter=lambda v: f"{v:.1f} Гц" if isinstance(v, (int, float)) else "—",
-                )
-            cycle_w = widgets.get("cycle")
-            if cycle_w is not None:
-                bindings.bind(
-                    f"processes.{proc}.workers.{name}.cycle_duration_ms",
-                    cycle_w,
-                    "text",
-                    formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
-                )
 
     def _rebuild_worker_vm_setters(self) -> None:
         """VM-режим: пересобрать карту путей воркеров→setter под текущие строки.
@@ -1274,19 +1158,18 @@ class SingleProcessPanel(QWidget):
             self._detail_table.setItem(row, 1, QTableWidgetItem(value))
 
     def _connect_bindings(self) -> None:
-        """Подключить телеметрию карточки процесса: VM-режим или bindings-fallback.
+        """Подключить телеметрию карточки процесса через read-model (VM).
 
-        В VM-режиме карта путей→setter карточки собирается один раз, панель
-        подписывается на ``updated`` одним слотом и первично наполняется из
-        snapshot; воркер-пути и обнаружение рантайм-воркеров идут через тот же
-        батч-слот (см. _apply_telemetry_items). Fallback — прежний bind-путь.
+        Карта путей→setter карточки собирается один раз, панель подписывается на
+        ``updated`` одним слотом и первично наполняется из snapshot; воркер-пути
+        и обнаружение рантайм-воркеров идут через тот же батч-слот (см.
+        _apply_telemetry_items). Без read-model (telemetry=None) живой телеметрии
+        нет — метрики остаются «—».
         """
         if not hasattr(self, "_card"):
             return
         if self._telemetry is not None:
             self._connect_telemetry_vm()
-        elif self._bindings is not None:
-            self._connect_bindings_legacy()
 
     # --- VM-режим (Task 1.3) ------------------------------------------- #
 
@@ -1368,42 +1251,3 @@ class SingleProcessPanel(QWidget):
         # Ф4.1: обновить читаемый статус строк телеметрии из read-model (fps/latency).
         if graph_touched and hasattr(self, "_telemetry_controls"):
             self._telemetry_controls.update_readouts(self._telemetry)
-
-    # --- Fallback: прежний bindings-путь ------------------------------- #
-
-    def _connect_bindings_legacy(self) -> None:
-        """Прежний путь карточки процесса через GuiStateBindings (VM не подан)."""
-        bindings = self._bindings
-        assert bindings is not None
-        card = self._card
-        name = self._process_name
-
-        bindings.bind(
-            f"processes.{name}.state.status",
-            card._indicator,
-            "set_state",
-        )
-        hz_label = card._metric_labels.get("Циклов/с")
-        if hz_label is not None:
-            bindings.bind(
-                f"processes.{name}.state.fps",
-                hz_label,
-                "text",
-                formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
-            )
-        cycle_label = card._metric_labels.get("Время цикла")
-        if cycle_label is not None:
-            bindings.bind(
-                f"processes.{name}.state.latency_ms",
-                cycle_label,
-                "text",
-                formatter=lambda v: f"{v:.1f} мс" if isinstance(v, (int, float)) else "—",
-            )
-        uptime_label = card._metric_labels.get("Uptime")
-        if uptime_label is not None:
-            bindings.bind(
-                f"processes.{name}.state.uptime",
-                uptime_label,
-                "text",
-                formatter=_format_uptime,
-            )

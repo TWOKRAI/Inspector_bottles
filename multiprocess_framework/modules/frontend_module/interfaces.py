@@ -237,6 +237,17 @@ from multiprocess_framework.modules.frontend_module.tabs import (  # noqa: E402
     TabSpec,
 )
 
+# ---------------------------------------------------------------------------
+# GUI read-model телеметрии (generic) — публичный API подсистемы state.
+# ---------------------------------------------------------------------------
+#
+# Локальный read-model «запись — всегда, чтение — локально, история — по
+# запросу»: приложение наполняет ``TelemetryViewModel`` своим потоком дельт и
+# читает снимок/историю без похода на сервер. ``TelemetryHistorySource`` —
+# read-сторона SQLite-стока (generic: схема — параметры конструктора). Реэкспорт
+# здесь — чтобы контракт модуля был виден из единого interfaces.py; импортировать
+# можно и напрямую из ``frontend_module.state``.
+
 __all__ = [
     # Протоколы контракта модуля (объявлены выше в этом файле).
     "SupportsCommandMessage",
@@ -255,4 +266,8 @@ __all__ = [
     "LazyTab",
     "AccessContextSource",
     "PlaceholderFactory",
+    # GUI read-model телеметрии (реэкспорт из frontend_module.state).
+    "TelemetryViewModel",
+    "TelemetryHistorySource",
+    "DEFAULT_TRACKED_SUFFIXES",
 ]

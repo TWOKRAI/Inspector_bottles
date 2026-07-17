@@ -23,6 +23,12 @@ Frontend Module — модуль UI-фреймворка (конструктор
   Приложение описывает вкладки как `list[TabSpec]` в composition root; реестр
   строит/лениво инстанцирует/фильтрует по правам. 0 обратных импортов.
 
+**Read-model телеметрии (generic):**
+- frontend_module.state — TelemetryViewModel, TelemetryHistorySource,
+  DEFAULT_TRACKED_SUFFIXES. Локальный read-model «запись — всегда, чтение —
+  локально, история — по запросу»: приложение наполняет VM своим потоком дельт
+  и читает снимок/историю без похода на сервер. 0 обратных импортов.
+
 **Менеджеры:**
 - frontend_module.managers — ThemeManager, ConfigSnapshotManager, YamlPersistenceStore[T],
   AccessContext, RecipeManagerProtocol, SettingsProfileManagerProtocol

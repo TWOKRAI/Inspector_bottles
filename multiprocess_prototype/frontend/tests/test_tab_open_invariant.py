@@ -26,7 +26,7 @@ from multiprocess_framework.modules.state_store_module.core import pattern_cover
 from multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy import GuiStateProxy
 from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
-from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
+from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 from multiprocess_prototype.frontend.widgets.tabs import register_all_tabs
 
 # Стартовые wildcard'ы GUI (frontend/process.py) — заводятся sync=True и
@@ -105,18 +105,20 @@ def test_opening_all_tabs_does_no_blocking_ipc(qtbot) -> None:
         proxy.subscribe(wildcard, lambda _d: None, exclude_self=True)
     assert all(w in proxy._confirmed_patterns for w in _STARTUP_WILDCARDS)
 
+    # Единый read-model — источник late-binding-снимка bindings и telemetry вкладок.
+    read_model = TelemetryViewModel(initial_cache=dict(proxy.cache))
     bindings = GuiStateBindings(
         bridge,
+        read_model=read_model,
         ensure_subscription=proxy.ensure_subscription,
         release_subscription=proxy.release_subscription,
-        cache_snapshot=lambda: dict(proxy.cache),
     )
 
     # Забываем стартовые (sync) request'ы — меряем только эффект открытия вкладок.
     router.reset()
 
     services = _make_services()
-    runtime = RuntimeDeps(bindings=bindings, telemetry=TelemetryViewModel())
+    runtime = RuntimeDeps(bindings=bindings, telemetry=read_model)
 
     factories = register_all_tabs()
     for tab_id, factory in factories.items():
