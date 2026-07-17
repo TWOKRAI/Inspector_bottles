@@ -41,7 +41,7 @@ class TestRequestMatching:
         assert "not connected" in res["error"]
 
 
-# --- Юнит: событийный канал (инжекция входящих строк через _dispatch) ---
+# --- Юнит: событийный канал (инжекция входящих строк через dispatch_raw) ---
 
 
 def _line(msg: Dict[str, Any]) -> bytes:
@@ -52,7 +52,7 @@ def _line(msg: Dict[str, Any]) -> bytes:
 class TestEventChannel:
     def test_push_without_request_id_goes_to_queue(self) -> None:
         d = BackendDriver()
-        d._dispatch(_line({"command": "state.changed", "data": {"deltas": [1]}}))
+        d.dispatch_raw(_line({"command": "state.changed", "data": {"deltas": [1]}}))
         evts = d.events()  # поллинг
         assert len(evts) == 1
         assert evts[0]["command"] == "state.changed"
@@ -61,7 +61,7 @@ class TestEventChannel:
     def test_unmatched_request_id_becomes_event(self) -> None:
         """Ответ с request_id, который никто не ждёт (поздний/чужой), → событие."""
         d = BackendDriver()
-        d._dispatch(_line({"request_id": "no-such-id", "result": {"x": 1}}))
+        d.dispatch_raw(_line({"request_id": "no-such-id", "result": {"x": 1}}))
         evts = d.events()
         assert len(evts) == 1
         assert evts[0]["request_id"] == "no-such-id"
@@ -70,7 +70,7 @@ class TestEventChannel:
         d = BackendDriver()
         received: List[Dict[str, Any]] = []
         d.subscribe(received.append)
-        d._dispatch(_line({"command": "state.changed", "data": {"n": 42}}))
+        d.dispatch_raw(_line({"command": "state.changed", "data": {"n": 42}}))
         assert len(received) == 1
         assert received[0]["data"]["n"] == 42
 
@@ -83,7 +83,7 @@ class TestEventChannel:
 
         d.subscribe(boom)
         d.subscribe(seen.append)
-        d._dispatch(_line({"command": "state.changed"}))
+        d.dispatch_raw(_line({"command": "state.changed"}))
         # Второй подписчик отработал, событие всё равно в очереди, счётчик вырос.
         assert len(seen) == 1
         assert len(d.events()) == 1
@@ -94,20 +94,20 @@ class TestEventChannel:
         received: List[Dict[str, Any]] = []
         cb = d.subscribe(received.append)
         d.unsubscribe(cb)
-        d._dispatch(_line({"command": "state.changed"}))
+        d.dispatch_raw(_line({"command": "state.changed"}))
         assert received == []
 
     def test_bounded_queue_drops_oldest(self) -> None:
         d = BackendDriver(event_queue_maxlen=3)
         for i in range(5):
-            d._dispatch(_line({"command": "state.changed", "seq": i}))
+            d.dispatch_raw(_line({"command": "state.changed", "seq": i}))
         evts = d.events()
         assert [e["seq"] for e in evts] == [2, 3, 4]  # старые (0,1) вытеснены
 
     def test_events_max_items_leaves_remainder(self) -> None:
         d = BackendDriver()
         for i in range(4):
-            d._dispatch(_line({"seq": i}))
+            d.dispatch_raw(_line({"seq": i}))
         first = d.events(max_items=2)
         assert [e["seq"] for e in first] == [0, 1]
         rest = d.events()
@@ -125,7 +125,7 @@ class TestEventChannel:
 
         def producer() -> None:
             time.sleep(0.05)
-            d._dispatch(_line({"command": "state.changed", "late": True}))
+            d.dispatch_raw(_line({"command": "state.changed", "late": True}))
 
         th = threading.Thread(target=producer)
         th.start()
@@ -144,8 +144,8 @@ class TestEventChannel:
 
     def test_malformed_line_ignored(self) -> None:
         d = BackendDriver()
-        d._dispatch(b"{not json")
-        d._dispatch(_line(["not", "a", "dict"]))
+        d.dispatch_raw(b"{not json")
+        d.dispatch_raw(_line(["not", "a", "dict"]))
         assert d.events() == []
 
 
@@ -428,3 +428,162 @@ class TestDebugSession:
         assert ("gui", "ui.tap.unsubscribe") in cmds
         assert ("gui", "log.tail.unsubscribe") in cmds
         assert ("preprocessor", "log.tail.unsubscribe") in cmds
+
+
+# --- Task 0.2: гонка close()/request() + карантин поздних ответов ---
+
+
+class _FakeSock:
+    """Минимальный сокет-дублёр: sendall/close, опц. падение при закрытии."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.closed = False
+        self._fail = fail
+        self.sent: List[bytes] = []
+
+    def sendall(self, data: bytes) -> None:
+        if self.closed or self._fail:
+            raise OSError("socket closed")
+        self.sent.append(data)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class TestSendRaceAndLateReplies:
+    def test_send_raw_raises_connectionerror_when_socket_none(self) -> None:
+        # Старое поведение — AssertionError; новое — штатная ConnectionError.
+        d = BackendDriver()
+        assert d._sock is None
+        with pytest.raises(ConnectionError):
+            d._send_raw({"command": "x"})
+
+    def test_request_returns_error_dict_on_send_failure(self) -> None:
+        # sendall падает (сокет закрыт из другого потока) → request не бросает, а
+        # отдаёт error-dict с success=False.
+        d = BackendDriver()
+        d._sock = _FakeSock(fail=True)  # type: ignore[assignment]
+        res = d.request({"command": "x", "request_id": "cid-fail"}, timeout=0.2)
+        assert res["success"] is False
+        assert res["error"] == "connection closed"
+        assert res["request_id"] == "cid-fail"
+
+    def test_concurrent_close_during_request_never_asserts(self) -> None:
+        # Стресс: close() из другого потока во время in-flight request() → всегда dict,
+        # никогда AssertionError/утечка исключения (Task 0.2, 100 итераций).
+        for i in range(100):
+            d = BackendDriver()
+            d._sock = _FakeSock()  # type: ignore[assignment]
+            d._running = True
+            results: List[Any] = []
+            errors: List[BaseException] = []
+
+            def _do_request() -> None:
+                try:
+                    results.append(d.request({"command": "x", "request_id": f"cid-{i}"}, timeout=0.3))
+                except BaseException as exc:  # noqa: BLE001 — тест ловит ЛЮБУЮ утечку
+                    errors.append(exc)
+
+            t = threading.Thread(target=_do_request)
+            t.start()
+            d.close()  # обнуляет _sock из главного потока — гонка с _send_raw
+            t.join(timeout=2.0)
+
+            assert not t.is_alive(), f"request завис на итерации {i}"
+            assert not errors, f"request бросил исключение: {errors}"
+            assert len(results) == 1 and isinstance(results[0], dict)
+            assert results[0]["success"] is False
+
+    def test_late_reply_after_timeout_is_dropped_not_event(self) -> None:
+        # request() таймаутит и кладёт cid в карантин; поздний ответ с тем же cid
+        # dispatcher дропает (не псевдо-событие) и растит late_replies.
+        d = BackendDriver()
+        d._sock = _FakeSock()  # type: ignore[assignment]
+        res = d.request({"command": "slow", "request_id": "cid-late"}, timeout=0.05)
+        assert res["error"] == "timeout"
+        assert d.late_replies == 0
+
+        d.dispatch_raw(_line({"request_id": "cid-late", "result": {"value": 1}}))
+        assert d.events() == [], "поздний ответ не должен всплывать событием"
+        assert d.late_replies == 1
+
+    def test_unquarantined_request_id_still_becomes_event(self) -> None:
+        # Регресс-контроль: cid, который НЕ таймаутили, по-прежнему → событие.
+        d = BackendDriver()
+        d.dispatch_raw(_line({"request_id": "never-issued", "result": {"x": 1}}))
+        assert len(d.events()) == 1
+        assert d.late_replies == 0
+
+
+# --- Task 0.3: durable-подписки (реестр намерений + replay) ---
+
+
+class TestSubscriptionRegistry:
+    def _recorder(self, monkeypatch):
+        """Driver, у которого send_command только пишет вызовы и отдаёт success."""
+        d = BackendDriver()
+        calls: List[tuple] = []
+
+        def fake_send(target, command, args=None, *, timeout=None):
+            calls.append((target, command, args))
+            return {"success": True}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d, calls
+
+    def test_state_subscribe_registers_intent(self, monkeypatch) -> None:
+        d, _ = self._recorder(monkeypatch)
+        d.state_subscribe("processes.**")
+        intents = d.export_subscriptions()
+        assert any(i["command"] == "state.subscribe" and i["args"]["pattern"] == "processes.**" for i in intents)
+
+    def test_log_tail_then_untail_removes_intent(self, monkeypatch) -> None:
+        d, _ = self._recorder(monkeypatch)
+        d.log_tail("preprocessor", level="ERROR")
+        assert any(
+            i["command"] == "log.tail.subscribe" and i["target"] == "preprocessor" for i in d.export_subscriptions()
+        )
+        d.log_untail("preprocessor")
+        assert not any(i["target"] == "preprocessor" for i in d.export_subscriptions())
+
+    def test_ui_untap_removes_all_for_process(self, monkeypatch) -> None:
+        d, _ = self._recorder(monkeypatch)
+        d.ui_tap("gui")
+        assert any(i["command"] == "ui.tap.subscribe" for i in d.export_subscriptions())
+        d.ui_untap("gui")
+        assert not any(i["command"] == "ui.tap.subscribe" for i in d.export_subscriptions())
+
+    def test_failed_subscribe_not_registered(self, monkeypatch) -> None:
+        d = BackendDriver()
+
+        def failing_send(target, command, args=None, *, timeout=None):
+            return {"success": False, "error": "not connected"}
+
+        monkeypatch.setattr(d, "send_command", failing_send)
+        d.state_subscribe("processes.**")
+        assert d.export_subscriptions() == []
+
+    def test_duplicate_intent_deduped(self, monkeypatch) -> None:
+        d, _ = self._recorder(monkeypatch)
+        d.state_subscribe("processes.**")
+        d.state_subscribe("processes.**")
+        same = [i for i in d.export_subscriptions() if i["args"].get("pattern") == "processes.**"]
+        assert len(same) == 1
+
+    def test_replay_resends_all_intents(self, monkeypatch) -> None:
+        d, calls = self._recorder(monkeypatch)
+        d.state_subscribe("processes.**")
+        d.log_tail("preprocessor", level="WARNING")
+        calls.clear()
+        report = d.replay_subscriptions()
+        replayed = {(t, c) for t, c, _ in calls}
+        assert ("ProcessManager", "state.subscribe") in replayed
+        assert ("preprocessor", "log.tail.subscribe") in replayed
+        assert all(r["success"] for r in report)
+
+    def test_import_export_roundtrip(self, monkeypatch) -> None:
+        d1, _ = self._recorder(monkeypatch)
+        d1.state_subscribe("system.**")
+        d2 = BackendDriver()
+        d2.import_subscriptions(d1.export_subscriptions())
+        assert d2.export_subscriptions() == d1.export_subscriptions()

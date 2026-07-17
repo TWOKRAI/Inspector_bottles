@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
-from backend_ctl.driver import Capabilities, ProcessCapabilities
+from backend_ctl.driver import BackendDriver, Capabilities, ProcessCapabilities
 from backend_ctl.mcp_server import (
     DEFAULT_PROTOCOL_VERSION,
     INVALID_PARAMS,
@@ -105,14 +105,33 @@ class TestRegistry:
         names = {s.name for s in TOOLS}
         # Минимальный набор P3 из плана + observability Ф1.4/1.5 + state/events (1.1).
         expected = {
-            "capabilities", "get_status", "introspect_handlers", "introspect_registers",
-            "introspect_router_stats", "introspect_queues", "introspect_plugins",
-            "send_command", "system_command",
-            "set_register", "set_register_verified", "state_get", "state_get_subtree",
-            "state_subscribe", "events",
-            "log_tail", "log_untail", "ui_tap", "ui_untap", "ui_tap_ping",
-            "debug_session", "debug_stop",
-            "config_reload", "logger_sink_enable", "logger_sink_disable",
+            "capabilities",
+            "get_status",
+            "introspect_handlers",
+            "introspect_registers",
+            "introspect_router_stats",
+            "introspect_queues",
+            "introspect_plugins",
+            "send_command",
+            "system_command",
+            "set_register",
+            "set_register_verified",
+            "state_get",
+            "state_get_subtree",
+            "state_subscribe",
+            "events",
+            "log_tail",
+            "log_untail",
+            "ui_tap",
+            "ui_untap",
+            "ui_tap_ping",
+            "debug_session",
+            "debug_stop",
+            "config_reload",
+            "logger_sink_enable",
+            "logger_sink_disable",
+            "telemetry_reconfigure",
+            "telemetry_set",
         }
         assert names == expected
 
@@ -173,34 +192,48 @@ class TestToolsCall:
 
     def test_send_command_passes_args_and_timeout(self) -> None:
         server, fake = make_server()
-        call(server, "tools/call", {
-            "name": "send_command",
-            "arguments": {"target": "preprocessor", "command": "introspect.handlers",
-                          "args": {"x": 1}, "timeout": 7},
-        })
+        call(
+            server,
+            "tools/call",
+            {
+                "name": "send_command",
+                "arguments": {
+                    "target": "preprocessor",
+                    "command": "introspect.handlers",
+                    "args": {"x": 1},
+                    "timeout": 7,
+                },
+            },
+        )
         assert fake.calls == [("send_command", ("preprocessor", "introspect.handlers", {"x": 1}), {"timeout": 7.0})]
 
     def test_state_get_maps_to_pm_command(self) -> None:
         server, fake = make_server()
         call(server, "tools/call", {"name": "state_get", "arguments": {"path": "processes.gui.status"}})
-        assert fake.calls == [
-            ("send_command", ("ProcessManager", "state.get", {"path": "processes.gui.status"}), {})
-        ]
+        assert fake.calls == [("send_command", ("ProcessManager", "state.get", {"path": "processes.gui.status"}), {})]
 
     def test_set_register_signature(self) -> None:
         server, fake = make_server()
-        call(server, "tools/call", {
-            "name": "set_register",
-            "arguments": {"process": "preprocessor", "register": "resize", "field": "target_width", "value": 512},
-        })
+        call(
+            server,
+            "tools/call",
+            {
+                "name": "set_register",
+                "arguments": {"process": "preprocessor", "register": "resize", "field": "target_width", "value": 512},
+            },
+        )
         assert fake.calls == [("set_register", ("preprocessor", "resize", "target_width", 512), {})]
 
     def test_set_register_verified_signature(self) -> None:
         server, fake = make_server()
-        call(server, "tools/call", {
-            "name": "set_register_verified",
-            "arguments": {"process": "preprocessor", "register": "resize", "field": "target_width", "value": 512},
-        })
+        call(
+            server,
+            "tools/call",
+            {
+                "name": "set_register_verified",
+                "arguments": {"process": "preprocessor", "register": "resize", "field": "target_width", "value": 512},
+            },
+        )
         assert fake.calls == [("set_register_verified", ("preprocessor", "resize", "target_width", 512), {})]
 
     def test_capabilities_serializes_dataclass(self) -> None:
@@ -229,6 +262,7 @@ class TestToolsCall:
             def __getattr__(self, name):
                 def _boom(*a, **k):
                     raise RuntimeError("boom")
+
                 return _boom
 
         boom = BoomDriver()
@@ -266,8 +300,9 @@ class TestServeLoop:
     def test_roundtrip_lines(self) -> None:
         server, _ = make_server()
         lines = [
-            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-                        "params": {"protocolVersion": "2025-06-18"}}),
+            json.dumps(
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}
+            ),
             json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
             "не-json-мусор",
             json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
@@ -337,7 +372,7 @@ def test_mcp_server_live_against_backend(headless_backend) -> None:
     # (test_harness, порты 8766/8767) мутируют общий os.environ["BACKEND_CTL_PORT"],
     # и в полном прогоне env указывал бы на уже погашенный бэкенд (ловушка
     # «два бэкенда в одном прогоне», см. memory project_concurrent_backends_trap).
-    env["BACKEND_CTL_PORT"] = str(headless_backend._port)
+    env["BACKEND_CTL_PORT"] = str(headless_backend.port)
     proc = subprocess.Popen(
         [sys.executable, "-m", "backend_ctl.mcp_server"],
         cwd=repo_root,
@@ -351,27 +386,38 @@ def test_mcp_server_live_against_backend(headless_backend) -> None:
     try:
         client = _StdioClient(proc)
 
-        init = client.request("initialize", {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {},
-            "clientInfo": {"name": "pytest", "version": "0"},
-        })
+        init = client.request(
+            "initialize",
+            {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "pytest", "version": "0"},
+            },
+        )
         assert init["result"]["serverInfo"]["name"] == "backend-ctl"
         client.notify("notifications/initialized")
 
         tools = client.request("tools/list")["result"]["tools"]
         assert {"capabilities", "get_status", "send_command"} <= {t["name"] for t in tools}
 
-        status = client.request("tools/call", {
-            "name": "get_status", "arguments": {"process": "preprocessor", "timeout": 8},
-        })
+        status = client.request(
+            "tools/call",
+            {
+                "name": "get_status",
+                "arguments": {"process": "preprocessor", "timeout": 8},
+            },
+        )
         assert status["result"]["isError"] is False
         payload = json.loads(status["result"]["content"][0]["text"])
         assert payload.get("success") is True, payload
 
-        handlers = client.request("tools/call", {
-            "name": "introspect_handlers", "arguments": {"process": "preprocessor", "timeout": 8},
-        })
+        handlers = client.request(
+            "tools/call",
+            {
+                "name": "introspect_handlers",
+                "arguments": {"process": "preprocessor", "timeout": 8},
+            },
+        )
         assert handlers["result"]["isError"] is False
         assert "register_update" in handlers["result"]["content"][0]["text"]
     finally:
@@ -382,3 +428,236 @@ def test_mcp_server_live_against_backend(headless_backend) -> None:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=5)
+
+
+# ---------------------------------------------------------------------------
+# Task 0.3: durable-подписки переживают реконнект + контракт ошибок
+# ---------------------------------------------------------------------------
+
+
+class _SubFakeDriver:
+    """Fake-driver с реальной семантикой подписок для проверки reconnect-replay."""
+
+    def __init__(self) -> None:
+        self._intents: List[Dict[str, Any]] = []
+        self.replayed: List[Dict[str, Any]] = []
+        self.closed = False
+        self.fail = False
+
+    def state_subscribe(self, pattern, *, timeout=None):
+        self._intents.append({"command": "state.subscribe", "target": "ProcessManager", "args": {"pattern": pattern}})
+        return {"success": True}
+
+    def log_tail(self, process, *, level="ERROR", timeout=None):
+        self._intents.append(
+            {"command": "log.tail.subscribe", "target": process, "args": {"subscriber": "backend_ctl", "level": level}}
+        )
+        return {"success": True}
+
+    def log_untail(self, process, *, timeout=None):
+        self._intents = [
+            i for i in self._intents if not (i["command"] == "log.tail.subscribe" and i["target"] == process)
+        ]
+        return {"success": True}
+
+    def get_status(self, process, *, timeout=None):
+        if self.fail:
+            raise OSError("connection lost")
+        return {"success": True, "method": "get_status"}
+
+    def export_subscriptions(self):
+        return list(self._intents)
+
+    def import_subscriptions(self, intents):
+        self._intents = list(intents)
+
+    def replay_subscriptions(self):
+        self.replayed = list(self._intents)
+        return [{"command": i["command"], "target": i["target"], "success": True} for i in self._intents]
+
+    def close(self):
+        self.closed = True
+
+
+class TestReconnectReplay:
+    def test_reconnect_replays_subscriptions_and_reports(self) -> None:
+        d1 = _SubFakeDriver()
+        d2 = _SubFakeDriver()
+        seq = iter([d1, d2])
+        server = MCPServer(driver_factory=lambda: next(seq), log=lambda m: None)
+
+        # Агент подписался — намерение записано на d1.
+        call(server, "tools/call", {"name": "state_subscribe", "arguments": {"pattern": "processes.**"}})
+        assert d1.export_subscriptions(), "подписка должна осесть в реестре driver'а"
+
+        # Соединение оборвалось на следующем вызове → сброс driver'а.
+        d1.fail = True
+        r1 = call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        assert r1["result"]["isError"] is True
+        assert d1.closed is True
+
+        # Следующий вызов — новый driver d2 получает намерения и replay'ит их.
+        r2 = call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        payload = tool_result(r2)
+        assert payload.get("reconnected") is True
+        assert any(x["command"] == "state.subscribe" for x in payload["resubscribed"])
+        assert d2.replayed, "replay должен реально выполниться на новом driver'е"
+
+    def test_no_reconnect_report_without_prior_subscriptions(self) -> None:
+        # Без подписок реконнект не докладывается (нечего восстанавливать).
+        d1 = _SubFakeDriver()
+        d2 = _SubFakeDriver()
+        seq = iter([d1, d2])
+        server = MCPServer(driver_factory=lambda: next(seq), log=lambda m: None)
+        d1.fail = True
+        call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        r2 = call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        payload = tool_result(r2)
+        assert "reconnected" not in payload
+        assert d2.replayed == []
+
+    def test_unsubscribed_not_resurrected_after_second_reconnect(self) -> None:
+        # Регресс на MAJOR #1 ревью: агент отписался → второй реконнект НЕ воскрешает
+        # снятую подписку (раньше guard `if intents:` держал стухший _sub_intents).
+        d1, d2, d3 = _SubFakeDriver(), _SubFakeDriver(), _SubFakeDriver()
+        seq = iter([d1, d2, d3])
+        server = MCPServer(driver_factory=lambda: next(seq), log=lambda m: None)
+
+        # (1) подписка на d1
+        call(server, "tools/call", {"name": "log_tail", "arguments": {"process": "cam"}})
+        assert d1.export_subscriptions()
+
+        # (2) обрыв → (3) реконнект d2 replay'ит подписку
+        d1.fail = True
+        call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        r = tool_result(call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}}))
+        assert r.get("reconnected") is True
+        assert d2.replayed and d2.export_subscriptions()
+
+        # (4) агент отписался на d2 → реестр пуст
+        call(server, "tools/call", {"name": "log_untail", "arguments": {"process": "cam"}})
+        assert d2.export_subscriptions() == []
+
+        # (5) второй обрыв → (6) реконнект d3 НЕ должен воскрешать снятую подписку
+        d2.fail = True
+        call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        r3 = tool_result(call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}}))
+        assert d3.replayed == [], "снятая подписка не должна воскресать после реконнекта"
+        assert "reconnected" not in r3
+
+
+class TestReadinessProbe:
+    def test_await_ready_polls_until_success(self) -> None:
+        from backend_ctl.mcp_server import MCPServer as _S
+
+        class _Drv:
+            def __init__(self):
+                self.n = 0
+
+            def introspect_status(self, process, *, timeout=None):
+                self.n += 1
+                return {"success": self.n >= 2}  # готов со второй пробы
+
+        drv = _Drv()
+        assert _S._await_ready(drv, attempts=3, probe_timeout=0.01) is True
+        assert drv.n == 2
+
+    def test_await_ready_gives_up_after_attempts(self) -> None:
+        from backend_ctl.mcp_server import MCPServer as _S
+
+        class _Drv:
+            def introspect_status(self, process, *, timeout=None):
+                return {"success": False, "error": "timeout"}
+
+        assert _S._await_ready(_Drv(), attempts=3, probe_timeout=0.01) is False
+
+
+class TestErrorContract:
+    """Все dict-обёртки на неподключённом транспорте → success=False + error."""
+
+    def test_dict_wrappers_uniform_error_on_disconnected_transport(self) -> None:
+        d = BackendDriver()  # _sock is None → транспорт не подключён
+        checks = [
+            lambda: d.send_command("p", "introspect.handlers"),
+            lambda: d.system_command({"action": "noop"}),
+            lambda: d.introspect_handlers("p"),
+            lambda: d.introspect_registers("p"),
+            lambda: d.introspect_status("p"),
+            lambda: d.get_status("p"),
+            lambda: d.introspect_router_stats("p"),
+            lambda: d.introspect_queues("p"),
+            lambda: d.introspect_plugins("p"),
+            lambda: d.introspect_capabilities("p"),
+            lambda: d.set_register("p", "resize", "w", 1),
+            lambda: d.config_reload("p"),
+            lambda: d.logger_sink_enable("p", "console"),
+            lambda: d.logger_sink_disable("p", "console"),
+            lambda: d.state_subscribe("processes.**"),
+            lambda: d.log_tail("p"),
+            lambda: d.log_untail("p"),
+            lambda: d.ui_tap("gui"),
+            lambda: d.ui_untap("gui"),
+        ]
+        for fn in checks:
+            res = fn()
+            assert isinstance(res, dict), fn
+            assert res.get("success") is False, (fn, res)
+            assert "error" in res, (fn, res)
+
+
+class TestTelemetryTools:
+    """Task 0.5: telemetry_* зарегистрированы в MCP и диспетчатся на driver 1:1."""
+
+    def test_reconfigure_passes_only_present_keys(self) -> None:
+        server, fake = make_server()
+        call(
+            server,
+            "tools/call",
+            {
+                "name": "telemetry_reconfigure",
+                "arguments": {
+                    "process": "preprocessor",
+                    "publish": {"metrics": {"fps": {"enabled": True}}},
+                    "mode": "merge",
+                },
+            },
+        )
+        name, args, kwargs = fake.calls[0]
+        assert name == "telemetry_reconfigure"
+        assert args == ("preprocessor",)
+        assert kwargs == {"publish": {"metrics": {"fps": {"enabled": True}}}, "mode": "merge"}
+        assert "throttle" not in kwargs  # не передан → _UNSET-семантика сохранена
+
+    def test_reconfigure_defaults_process_to_all(self) -> None:
+        server, fake = make_server()
+        call(server, "tools/call", {"name": "telemetry_reconfigure", "arguments": {"throttle": {"fps": 0.1}}})
+        _, args, kwargs = fake.calls[0]
+        assert args == ("all",)
+        assert kwargs == {"throttle": {"fps": 0.1}}
+
+    def test_reconfigure_explicit_null_publish_preserved(self) -> None:
+        # Явный null у publish = «выключить gate» — должен дойти до driver (не потеряться).
+        server, fake = make_server()
+        call(server, "tools/call", {"name": "telemetry_reconfigure", "arguments": {"process": "p", "publish": None}})
+        _, args, kwargs = fake.calls[0]
+        assert kwargs == {"publish": None}
+
+    def test_set_dispatches_1to1(self) -> None:
+        server, fake = make_server()
+        call(
+            server,
+            "tools/call",
+            {
+                "name": "telemetry_set",
+                "arguments": {"process": "p", "metric": "fps", "enabled": False, "plane": "publisher"},
+            },
+        )
+        name, args, kwargs = fake.calls[0]
+        assert name == "telemetry_set"
+        assert args == ("p", "fps")
+        assert kwargs == {"enabled": False, "plane": "publisher"}
+
+    def test_tools_present_in_list(self) -> None:
+        server, _ = make_server()
+        tools = {t["name"] for t in call(server, "tools/list")["result"]["tools"]}
+        assert {"telemetry_reconfigure", "telemetry_set"} <= tools

@@ -32,12 +32,18 @@ from multiprocess_framework.modules.message_module import (
     build_system_command_message,
 )
 
+from .endpoint_config import resolve_endpoint
+
 # Колбэк подписчика на события (получает распарсенный push-dict).
 EventCallback = Callable[[Dict[str, Any]], None]
 
 # Сентинел «под-секция не передана»: отличает отсутствие аргумента от явного None
 # (для телеметрии ``publish=None`` — валидная команда «выключить gate», PC 3.2).
 _UNSET: Any = object()
+
+# TTL карантина таймаутнутых request_id (Task 0.2): дольше этого поздний ответ уже
+# не ждём — запись протухает и вычищается лениво. Запас над самым долгим таймаутом.
+_TIMED_OUT_TTL_SEC: float = 60.0
 
 
 # ---------------------------------------------------------------------------
@@ -52,41 +58,48 @@ _UNSET: Any = object()
 # ---------------------------------------------------------------------------
 
 
-def _find_payload(res: Any, *keys: str) -> Dict[str, Any]:
-    """Найти вложенный dict полезной нагрузки, спускаясь по ключу ``result``.
+def unwrap(res: Any, *keys: str, leaf: bool = False) -> Dict[str, Any]:
+    """Единая распаковка конверта ответа команды (Task 0.4 — слияние двух хелперов).
 
-    Ответ команды может прийти как «плоским» (нужные ключи прямо в ``res``), так и
-    завёрнутым оркестратором в ``{"success": ..., "result": {<payload>}}`` (иногда
-    в два уровня). Спускаемся по ``result``, пока не встретим узел, содержащий любой
-    из ожидаемых ``keys`` (например ``router_stats``/``queue_sizes``/``workers``).
-    Если не нашли — возвращаем сам ``res`` (best-effort), чтобы парсер отдал дефолты.
+    Ответ приезжает либо «плоским», либо завёрнутым оркестратором в
+    ``{"success": ..., "result": {<payload>}}`` (иногда в два уровня). Два режима:
+
+    - ``keys`` заданы → вернуть первый узел (спускаясь по ``result``), содержащий любой
+      из ``keys`` (например ``router_stats``/``queue_sizes``/``workers``); не нашли —
+      сам ``res`` (best-effort, парсер отдаст дефолты). Прежний ``_find_payload``.
+    - ``leaf=True`` → спуститься по ``result`` до листовой нагрузки хендлера (config.reload
+      → ``applied``, logger.sink.* → ``sink``). Прежний ``_leaf_result``.
+    - иначе → ``res`` как dict.
     """
-    node = res
-    for _ in range(4):  # защита от бесконечного спуска на кривом ответе
-        if not isinstance(node, dict):
-            break
-        if any(k in node for k in keys):
-            return node
-        node = node.get("result")
+    if keys:
+        node = res
+        for _ in range(4):  # защита от бесконечного спуска на кривом ответе
+            if not isinstance(node, dict):
+                break
+            if any(k in node for k in keys):
+                return node
+            node = node.get("result")
+        return res if isinstance(res, dict) else {}
+    if leaf:
+        node = res if isinstance(res, dict) else {}
+        for _ in range(4):  # защита от бесконечного спуска на кривом ответе
+            nxt = node.get("result")
+            if isinstance(nxt, dict):
+                node = nxt
+            else:
+                break
+        return node
     return res if isinstance(res, dict) else {}
 
 
-def _leaf_result(res: Any) -> Dict[str, Any]:
-    """Спуститься по вложенным ``result`` до листовой полезной нагрузки хендлера.
+def _find_payload(res: Any, *keys: str) -> Dict[str, Any]:
+    """Алиас :func:`unwrap` (keys-режим). Оставлен до Phase 1 (переезд в protocol.py)."""
+    return unwrap(res, *keys)
 
-    Ответ команды приезжает конвертом ``{success, result: {<payload хендлера>}}``
-    (иногда в два уровня). Для команд, чьи значимые поля лежат В payload (config.reload
-    → ``applied``, logger.sink.* → ``sink``), нужен именно лист, а не внешний конверт.
-    Спускаемся по ``result``, пока следующий уровень — dict; иначе возвращаем текущий.
-    """
-    node = res if isinstance(res, dict) else {}
-    for _ in range(4):  # защита от бесконечного спуска на кривом ответе
-        nxt = node.get("result")
-        if isinstance(nxt, dict):
-            node = nxt
-        else:
-            break
-    return node
+
+def _leaf_result(res: Any) -> Dict[str, Any]:
+    """Алиас :func:`unwrap` (leaf-режим). Оставлен до Phase 1 (переезд в protocol.py)."""
+    return unwrap(res, leaf=True)
 
 
 def _is_ok(res: Any, payload: Dict[str, Any]) -> bool:
@@ -235,12 +248,63 @@ class _Pending:
         self.response: Optional[Dict[str, Any]] = None
 
 
+class _SubscriptionRegistry:
+    """Реестр durable-намерений подписки (Task 0.3, ежедневная боль №1).
+
+    Хранит, на ЧТО driver подписался (``state.subscribe`` / ``log.tail.subscribe`` /
+    ``ui.tap.subscribe``), чтобы при реконнекте MCP-сервера подписки можно было
+    повторить, а не потерять молча (события просто переставали приходить — агент
+    думал «всё тихо»). Живёт в driver'е; Phase 1 вынесет в ``subscriptions.py``.
+
+    Идентичность намерения — ``(command, target, identity)``, где identity = pattern
+    (для state) либо subscriber (для log/ui): повторная подписка того же ключа
+    перезаписывает, не плодит дубли.
+    """
+
+    def __init__(self) -> None:
+        self._intents: Dict[tuple, Dict[str, Any]] = {}
+
+    @staticmethod
+    def _key(command: str, target: str, args: Dict[str, Any]) -> tuple:
+        identity = args.get("pattern") or args.get("subscriber") or ""
+        return (command, target, identity)
+
+    def add(self, command: str, target: str, args: Dict[str, Any]) -> None:
+        """Запомнить намерение подписки (idempotent по ключу)."""
+        self._intents[self._key(command, target, args)] = {
+            "command": command,
+            "target": target,
+            "args": dict(args),
+        }
+
+    def remove(self, command: str, target: str, args: Optional[Dict[str, Any]] = None) -> None:
+        """Снять намерение. ``args=None`` → снять все с данными command+target
+        (напр. ``ui.tap.unsubscribe`` без subscriber снимает tap процесса целиком)."""
+        if args is not None:
+            self._intents.pop(self._key(command, target, args), None)
+            return
+        for k in [k for k in self._intents if k[0] == command and k[1] == target]:
+            del self._intents[k]
+
+    def export(self) -> List[Dict[str, Any]]:
+        """Снимок намерений (для передачи новому driver'у при реконнекте)."""
+        return [
+            {"command": v["command"], "target": v["target"], "args": dict(v["args"])} for v in self._intents.values()
+        ]
+
+    def load(self, intents: List[Dict[str, Any]]) -> None:
+        """Загрузить намерения (в новый driver после реконнекта)."""
+        for it in intents or []:
+            self.add(it["command"], it["target"], it.get("args") or {})
+
+
 class BackendDriver:
     """Тонкий driver: TCP-клиент + request-id matching + обёртки команд.
 
     Args:
-        host: адрес SocketChannel хоста (по умолчанию localhost).
-        port: TCP-порт (по умолчанию 8765, env BACKEND_CTL_PORT на стороне хоста).
+        host: адрес SocketChannel хоста; ``None`` → env ``BACKEND_CTL_HOST`` → localhost.
+        port: TCP-порт; ``None`` → env ``BACKEND_CTL_PORT`` → ``DEFAULT_PORT`` (8765).
+            Резолв через ``resolve_endpoint`` — клиент читает те же env, что сервер.
         sender: имя отправителя в router-сообщениях.
         reply_to: адрес ответа. Driver не в queue_registry, ответ физически приходит
             в очередь ProcessManager (где живёт сокет) → reply_to="ProcessManager".
@@ -252,16 +316,15 @@ class BackendDriver:
 
     def __init__(
         self,
-        host: str = "127.0.0.1",
-        port: int = 8765,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
         *,
         sender: str = "backend_ctl",
         reply_to: str = "ProcessManager",
         default_timeout: float = 5.0,
         event_queue_maxlen: int = 1000,
     ) -> None:
-        self._host = host
-        self._port = port
+        self._host, self._port = resolve_endpoint(host, port)
         self._sender = sender
         self._reply_to = reply_to
         self._default_timeout = default_timeout
@@ -273,6 +336,17 @@ class BackendDriver:
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
 
+        # Карантин таймаутнутых request_id (Task 0.2): request() при таймауте кладёт
+        # сюда cid → срок годности; поздний ответ, пришедший ПОСЛЕ таймаута, dispatcher
+        # опознаёт по этому множеству и дропает (иначе всплыл бы псевдо-событием).
+        # TTL-purge ленивый — множество не растёт бесконечно. Под _pending_lock.
+        self._timed_out: Dict[str, float] = {}
+        self._late_replies = 0  # счётчик дропнутых поздних ответов (диагностика)
+
+        # Durable-намерения подписки (Task 0.3): чтобы реконнект MCP-сервера мог
+        # повторить подписки, а не потерять их молча. Заполняется subscribe-обёртками.
+        self._subscriptions = _SubscriptionRegistry()
+
         # Событийный канал: reader-поток пишет, клиентский поток читает.
         # _events_cv охраняет и очередь, и список подписчиков; на нём же
         # блокируется events(timeout) в ожидании первого события.
@@ -282,6 +356,24 @@ class BackendDriver:
         self._event_errors = 0  # счётчик исключений колбэков (диагностика)
 
     # ---- Соединение ----
+
+    @property
+    def host(self) -> str:
+        """Адрес endpoint'а, к которому подключён driver (публичный аксессор, Task 0.4)."""
+        return self._host
+
+    @property
+    def port(self) -> int:
+        """TCP-порт endpoint'а (публичный аксессор вместо приватного _port, Task 0.4)."""
+        return self._port
+
+    def dispatch_raw(self, raw: bytes) -> None:
+        """Публичная точка инъекции входящей строки (для тестов; Task 0.4).
+
+        Тонкая обёртка над внутренним разбором: тесты событийного канала подают
+        «проводные» строки, не трогая приватный ``_dispatch``.
+        """
+        self._dispatch(raw)
 
     def connect(self, timeout: float = 5.0) -> None:
         """Подключиться к хосту и запустить читающий поток."""
@@ -342,19 +434,39 @@ class BackendDriver:
             self._send_raw(message)
             wait = timeout if timeout is not None else self._default_timeout
             if not pending.event.wait(wait):
+                # Таймаут: пометить cid в карантин — поздний ответ dispatcher дропнет,
+                # а не выдаст псевдо-событием (Task 0.2).
+                self._quarantine_timed_out(cid)
                 return {"success": False, "error": "timeout", "request_id": cid}
             if pending.response is None:
                 return {"success": False, "error": "connection closed", "request_id": cid}
             return pending.response.get("result", pending.response)
+        except (ConnectionError, OSError) as exc:
+            # Гонка close()/request(): сокет обнулён/закрыт из другого потока во время
+            # отправки → чистый error-dict, не AssertionError/утечка исключения (Task 0.2).
+            return {"success": False, "error": "connection closed", "detail": str(exc), "request_id": cid}
         finally:
             with self._pending_lock:
                 self._pending.pop(cid, None)
 
+    def _quarantine_timed_out(self, cid: str) -> None:
+        """Пометить request_id как таймаутнутый + лениво вычистить протухшие (Task 0.2)."""
+        now = time.monotonic()
+        with self._pending_lock:
+            if self._timed_out:
+                for stale in [k for k, exp in self._timed_out.items() if exp <= now]:
+                    del self._timed_out[stale]
+            self._timed_out[cid] = now + _TIMED_OUT_TTL_SEC
+
     def _send_raw(self, message: Dict[str, Any]) -> None:
         line = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
         with self._write_lock:
-            assert self._sock is not None
-            self._sock.sendall(line)
+            sock = self._sock
+            if sock is None:
+                # close() из другого потока обнулил сокет — не assert'им, а поднимаем
+                # штатную ConnectionError (request() превращает её в error-dict).
+                raise ConnectionError("socket closed")
+            sock.sendall(line)
 
     def _read_loop(self) -> None:
         buf = b""
@@ -391,11 +503,21 @@ class BackendDriver:
         if cid:
             with self._pending_lock:
                 pending = self._pending.get(cid)
+                # Поздний ответ после таймаута: pending уже снят, но cid в карантине —
+                # опознаём и дропаем (не псевдо-событие). Иначе — обычная логика.
+                is_late = pending is None and cid in self._timed_out
+                if is_late:
+                    del self._timed_out[cid]
+                    # Инкремент под тем же локом: dispatch_raw (Task 0.4) сделал _dispatch
+                    # публичным → нельзя опираться на «только reader-поток» (ревью MINOR #3).
+                    self._late_replies += 1
             if pending is not None:
                 pending.response = msg
                 pending.event.set()
                 return
-        # Нет request_id либо reply уже никто не ждёт → это событие.
+            if is_late:
+                return
+        # Нет request_id либо reply уже никто не ждёт (и это не карантин) → это событие.
         self._emit_event(msg)
 
     # ---- Событийный канал (push-сообщения без reply) ----
@@ -481,6 +603,55 @@ class BackendDriver:
     def event_errors(self) -> int:
         """Сколько раз колбэк подписчика бросил исключение (диагностика)."""
         return self._event_errors
+
+    @property
+    def late_replies(self) -> int:
+        """Сколько поздних ответов (пришли после таймаута request) дропнуто (Task 0.2)."""
+        return self._late_replies
+
+    # ---- Durable-подписки (Task 0.3): переживают реконнект MCP-сервера ----
+
+    @staticmethod
+    def _looks_failed(res: Any) -> bool:
+        """Ответ явно провальный? (для решения «регистрировать ли намерение»)."""
+        return isinstance(res, dict) and res.get("success") is False
+
+    def _register_subscription(self, command: str, target: str, args: Dict[str, Any], res: Any) -> None:
+        """Записать намерение подписки, если команда НЕ провалилась явно.
+
+        Смещение в сторону over-record: лишний replay безвреден (просто повторный
+        subscribe), а вот потеря реальной подписки — это как раз баг, который чиним.
+        """
+        if not self._looks_failed(res):
+            self._subscriptions.add(command, target, args)
+
+    def export_subscriptions(self) -> List[Dict[str, Any]]:
+        """Снимок durable-намерений (MCP-сервер передаёт их новому driver'у)."""
+        return self._subscriptions.export()
+
+    def import_subscriptions(self, intents: List[Dict[str, Any]]) -> None:
+        """Загрузить намерения в этот driver (после реконнекта)."""
+        self._subscriptions.load(intents)
+
+    def replay_subscriptions(self) -> List[Dict[str, Any]]:
+        """Повторить все записанные подписки на текущем соединении.
+
+        Зовётся после реконнекта: восстанавливает поток событий, который иначе
+        молча оборвался бы. Идёт напрямую через send_command (не через обёртки),
+        поэтому не пере-регистрирует намерения. Возвращает список
+        ``{command, target, success}`` для отчёта агенту.
+        """
+        results: List[Dict[str, Any]] = []
+        for it in self._subscriptions.export():
+            res = self.send_command(it["target"], it["command"], it["args"])
+            results.append(
+                {
+                    "command": it["command"],
+                    "target": it["target"],
+                    "success": bool(isinstance(res, dict) and res.get("success")),
+                }
+            )
+        return results
 
     # ---- Высокоуровневые обёртки (общие билдеры протокола) ----
 
@@ -838,14 +1009,10 @@ class BackendDriver:
         событийный канал — читаются через :meth:`events` / :meth:`subscribe` как
         сообщения с ``command == "log.record"`` (``data.record`` — сам LogRecord-dict).
         """
-        return _leaf_result(
-            self.send_command(
-                process,
-                "log.tail.subscribe",
-                {"subscriber": subscriber or self._sender, "level": level},
-                timeout=timeout,
-            )
-        )
+        args = {"subscriber": subscriber or self._sender, "level": level}
+        res = _leaf_result(self.send_command(process, "log.tail.subscribe", args, timeout=timeout))
+        self._register_subscription("log.tail.subscribe", process, args, res)
+        return res
 
     def log_untail(
         self,
@@ -855,14 +1022,10 @@ class BackendDriver:
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Снять подписку на tail логов процесса (по адресу подписчика)."""
-        return _leaf_result(
-            self.send_command(
-                process,
-                "log.tail.unsubscribe",
-                {"subscriber": subscriber or self._sender},
-                timeout=timeout,
-            )
-        )
+        args = {"subscriber": subscriber or self._sender}
+        res = _leaf_result(self.send_command(process, "log.tail.unsubscribe", args, timeout=timeout))
+        self._subscriptions.remove("log.tail.subscribe", process, args)
+        return res
 
     # ---- UI-tap (отладка фронтенда): кнопки/табы GUI → события ui.event ----
 
@@ -880,14 +1043,10 @@ class BackendDriver:
         сообщения с ``command == "ui.event"`` (``data.record`` — событие:
         kind=button|tab|ping, text, path, ts). Смоук цепочки — :meth:`ui_tap_ping`.
         """
-        return _leaf_result(
-            self.send_command(
-                process,
-                "ui.tap.subscribe",
-                {"subscriber": subscriber or self._sender},
-                timeout=timeout,
-            )
-        )
+        args = {"subscriber": subscriber or self._sender}
+        res = _leaf_result(self.send_command(process, "ui.tap.subscribe", args, timeout=timeout))
+        self._register_subscription("ui.tap.subscribe", process, args, res)
+        return res
 
     def ui_untap(
         self,
@@ -896,7 +1055,9 @@ class BackendDriver:
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Снять подписку на UI-события gui-процесса."""
-        return _leaf_result(self.send_command(process, "ui.tap.unsubscribe", {}, timeout=timeout))
+        res = _leaf_result(self.send_command(process, "ui.tap.unsubscribe", {}, timeout=timeout))
+        self._subscriptions.remove("ui.tap.subscribe", process)
+        return res
 
     def ui_tap_ping(
         self,
@@ -933,12 +1094,7 @@ class BackendDriver:
         summary: Dict[str, Any] = {"ui": None, "logs": {}, "state": None}
         summary["ui"] = self.ui_tap(gui_process, timeout=timeout)
 
-        procs = log_processes
-        if procs is None:
-            st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
-            tree = _leaf_result(st)
-            node = tree.get("subtree") or tree.get("value") or {}
-            procs = sorted(node) if isinstance(node, dict) else []
+        procs = log_processes if log_processes is not None else self._discover_processes(timeout=timeout)
         for p in procs:
             summary["logs"][p] = self.log_tail(p, level=logs_level, timeout=timeout)
 
@@ -959,15 +1115,17 @@ class BackendDriver:
         (server-side привязана к подписчику) — отдельной команды не требует.
         """
         summary: Dict[str, Any] = {"ui": self.ui_untap(gui_process, timeout=timeout), "logs": {}}
-        procs = log_processes
-        if procs is None:
-            st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
-            tree = _leaf_result(st)
-            node = tree.get("subtree") or tree.get("value") or {}
-            procs = sorted(node) if isinstance(node, dict) else []
+        procs = log_processes if log_processes is not None else self._discover_processes(timeout=timeout)
         for p in procs:
             summary["logs"][p] = self.log_untail(p, timeout=timeout)
         return summary
+
+    def _discover_processes(self, *, timeout: Optional[float] = None) -> List[str]:
+        """Список процессов из state-топологии (общий для debug_session/debug_stop, Task 0.4)."""
+        st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
+        tree = unwrap(st, leaf=True)
+        node = tree.get("subtree") or tree.get("value") or {}
+        return sorted(node) if isinstance(node, dict) else []
 
     # ---- Подписка на состояние (state.subscribe → событийный канал) ----
 
@@ -988,13 +1146,11 @@ class BackendDriver:
         (адрес, на который сервер направляет пуши). Возвращает result подписки
         (status + sub_id).
         """
-        return self.send_command(
-            "ProcessManager",
-            "state.subscribe",
-            {
-                "pattern": pattern,
-                "subscriber": subscriber or self._sender,
-                "exclude_sources": exclude_sources or [],
-            },
-            timeout=timeout,
-        )
+        args = {
+            "pattern": pattern,
+            "subscriber": subscriber or self._sender,
+            "exclude_sources": exclude_sources or [],
+        }
+        res = self.send_command("ProcessManager", "state.subscribe", args, timeout=timeout)
+        self._register_subscription("state.subscribe", "ProcessManager", args, res)
+        return res
