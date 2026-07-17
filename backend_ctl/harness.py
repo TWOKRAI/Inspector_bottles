@@ -30,7 +30,7 @@ import signal
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from backend_ctl.driver import BackendDriver, _find_payload
 from backend_ctl.endpoint_config import resolve_endpoint
@@ -302,6 +302,9 @@ class BackendHarness:
         self._driver: Optional[BackendDriver] = None
         self._descendants: list = []
         self._orch_pid: Optional[int] = None
+        #: Снимок env ДО мутаций start() → восстановление в stop() (Task 0.4).
+        #: None-значение = «переменной не было» (в stop() удаляем, не выставляем "").
+        self._saved_env: Dict[str, Optional[str]] = {}
 
     @property
     def driver(self) -> BackendDriver:
@@ -311,6 +314,8 @@ class BackendHarness:
 
     def start(self) -> BackendDriver:
         """Поднять headless-систему, дождаться готовности, подключить driver."""
+        # env-restore (Task 0.4): снимок прежних значений ДО мутации → stop() вернёт.
+        self._saved_env = {k: os.environ.get(k) for k in ("BACKEND_CTL", "BACKEND_CTL_PORT", "INSPECTOR_PID_FILE")}
         # Гейт сокета: env — escape-hatch (yaml тоже enabled). Порт driver'а должен
         # совпасть с endpoint'ом — фиксируем BACKEND_CTL_PORT (его читает endpoint).
         os.environ["BACKEND_CTL"] = "1"
@@ -340,10 +345,24 @@ class BackendHarness:
         self._orch_pid = self._orchestrator_pid()
         self._descendants = _subtree(self._orch_pid)
 
-        time.sleep(self._warmup)  # прогрев: introspect к холодному процессу может таймаутить
+        # Readiness-проба вместо фиксированных sleep (Task 0.4): опрашиваем PM, пока не
+        # ответит успехом. Дедлайн = прежний warmup + запас 3с. connect тоже ретраим —
+        # SocketChannel мог не успеть забиндиться сразу после wait_until_ready.
         drv = BackendDriver(port=self._port)
-        drv.connect()
-        time.sleep(0.3)  # дать сокету зарегистрировать клиента
+        deadline = time.monotonic() + self._warmup + 3.0
+        while True:
+            try:
+                drv.connect()
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.1)
+        while time.monotonic() < deadline:
+            res = drv.introspect_status("ProcessManager", timeout=2.0)
+            if isinstance(res, dict) and res.get("success"):
+                break
+            time.sleep(0.1)
         self._driver = drv
         return drv
 
@@ -367,12 +386,24 @@ class BackendHarness:
         self._descendants = []
         self._orch_pid = None
         # Свой PID-файл больше не нужен (дерево гарантированно добито выше).
+        # ВАЖНО: удаляем ДО восстановления env (иначе потеряем путь к своему файлу).
         try:
             pid_file = os.environ.get("INSPECTOR_PID_FILE", "")
             if f"_harness_{os.getpid()}_{self._port}" in pid_file:
                 Path(pid_file).unlink(missing_ok=True)
         except OSError:
             pass
+        # env-restore (Task 0.4): вернуть переменные к состоянию до start().
+        self._restore_env()
+
+    def _restore_env(self) -> None:
+        """Восстановить env-переменные из снимка start() (None → удалить)."""
+        for key, value in self._saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self._saved_env = {}
 
     def kill_child(self, name: str) -> int:
         """Fault-injection (Ф3.7): жёстко убить дочерний процесс по имени (SIGKILL).

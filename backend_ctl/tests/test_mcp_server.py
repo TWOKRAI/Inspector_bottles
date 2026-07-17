@@ -370,7 +370,7 @@ def test_mcp_server_live_against_backend(headless_backend) -> None:
     # (test_harness, порты 8766/8767) мутируют общий os.environ["BACKEND_CTL_PORT"],
     # и в полном прогоне env указывал бы на уже погашенный бэкенд (ловушка
     # «два бэкенда в одном прогоне», см. memory project_concurrent_backends_trap).
-    env["BACKEND_CTL_PORT"] = str(headless_backend._port)
+    env["BACKEND_CTL_PORT"] = str(headless_backend.port)
     proc = subprocess.Popen(
         [sys.executable, "-m", "backend_ctl.mcp_server"],
         cwd=repo_root,

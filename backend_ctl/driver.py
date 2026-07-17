@@ -58,41 +58,48 @@ _TIMED_OUT_TTL_SEC: float = 60.0
 # ---------------------------------------------------------------------------
 
 
-def _find_payload(res: Any, *keys: str) -> Dict[str, Any]:
-    """Найти вложенный dict полезной нагрузки, спускаясь по ключу ``result``.
+def unwrap(res: Any, *keys: str, leaf: bool = False) -> Dict[str, Any]:
+    """Единая распаковка конверта ответа команды (Task 0.4 — слияние двух хелперов).
 
-    Ответ команды может прийти как «плоским» (нужные ключи прямо в ``res``), так и
-    завёрнутым оркестратором в ``{"success": ..., "result": {<payload>}}`` (иногда
-    в два уровня). Спускаемся по ``result``, пока не встретим узел, содержащий любой
-    из ожидаемых ``keys`` (например ``router_stats``/``queue_sizes``/``workers``).
-    Если не нашли — возвращаем сам ``res`` (best-effort), чтобы парсер отдал дефолты.
+    Ответ приезжает либо «плоским», либо завёрнутым оркестратором в
+    ``{"success": ..., "result": {<payload>}}`` (иногда в два уровня). Два режима:
+
+    - ``keys`` заданы → вернуть первый узел (спускаясь по ``result``), содержащий любой
+      из ``keys`` (например ``router_stats``/``queue_sizes``/``workers``); не нашли —
+      сам ``res`` (best-effort, парсер отдаст дефолты). Прежний ``_find_payload``.
+    - ``leaf=True`` → спуститься по ``result`` до листовой нагрузки хендлера (config.reload
+      → ``applied``, logger.sink.* → ``sink``). Прежний ``_leaf_result``.
+    - иначе → ``res`` как dict.
     """
-    node = res
-    for _ in range(4):  # защита от бесконечного спуска на кривом ответе
-        if not isinstance(node, dict):
-            break
-        if any(k in node for k in keys):
-            return node
-        node = node.get("result")
+    if keys:
+        node = res
+        for _ in range(4):  # защита от бесконечного спуска на кривом ответе
+            if not isinstance(node, dict):
+                break
+            if any(k in node for k in keys):
+                return node
+            node = node.get("result")
+        return res if isinstance(res, dict) else {}
+    if leaf:
+        node = res if isinstance(res, dict) else {}
+        for _ in range(4):  # защита от бесконечного спуска на кривом ответе
+            nxt = node.get("result")
+            if isinstance(nxt, dict):
+                node = nxt
+            else:
+                break
+        return node
     return res if isinstance(res, dict) else {}
 
 
-def _leaf_result(res: Any) -> Dict[str, Any]:
-    """Спуститься по вложенным ``result`` до листовой полезной нагрузки хендлера.
+def _find_payload(res: Any, *keys: str) -> Dict[str, Any]:
+    """Алиас :func:`unwrap` (keys-режим). Оставлен до Phase 1 (переезд в protocol.py)."""
+    return unwrap(res, *keys)
 
-    Ответ команды приезжает конвертом ``{success, result: {<payload хендлера>}}``
-    (иногда в два уровня). Для команд, чьи значимые поля лежат В payload (config.reload
-    → ``applied``, logger.sink.* → ``sink``), нужен именно лист, а не внешний конверт.
-    Спускаемся по ``result``, пока следующий уровень — dict; иначе возвращаем текущий.
-    """
-    node = res if isinstance(res, dict) else {}
-    for _ in range(4):  # защита от бесконечного спуска на кривом ответе
-        nxt = node.get("result")
-        if isinstance(nxt, dict):
-            node = nxt
-        else:
-            break
-    return node
+
+def _leaf_result(res: Any) -> Dict[str, Any]:
+    """Алиас :func:`unwrap` (leaf-режим). Оставлен до Phase 1 (переезд в protocol.py)."""
+    return unwrap(res, leaf=True)
 
 
 def _is_ok(res: Any, payload: Dict[str, Any]) -> bool:
@@ -349,6 +356,24 @@ class BackendDriver:
         self._event_errors = 0  # счётчик исключений колбэков (диагностика)
 
     # ---- Соединение ----
+
+    @property
+    def host(self) -> str:
+        """Адрес endpoint'а, к которому подключён driver (публичный аксессор, Task 0.4)."""
+        return self._host
+
+    @property
+    def port(self) -> int:
+        """TCP-порт endpoint'а (публичный аксессор вместо приватного _port, Task 0.4)."""
+        return self._port
+
+    def dispatch_raw(self, raw: bytes) -> None:
+        """Публичная точка инъекции входящей строки (для тестов; Task 0.4).
+
+        Тонкая обёртка над внутренним разбором: тесты событийного канала подают
+        «проводные» строки, не трогая приватный ``_dispatch``.
+        """
+        self._dispatch(raw)
 
     def connect(self, timeout: float = 5.0) -> None:
         """Подключиться к хосту и запустить читающий поток."""
@@ -1057,12 +1082,7 @@ class BackendDriver:
         summary: Dict[str, Any] = {"ui": None, "logs": {}, "state": None}
         summary["ui"] = self.ui_tap(gui_process, timeout=timeout)
 
-        procs = log_processes
-        if procs is None:
-            st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
-            tree = _leaf_result(st)
-            node = tree.get("subtree") or tree.get("value") or {}
-            procs = sorted(node) if isinstance(node, dict) else []
+        procs = log_processes if log_processes is not None else self._discover_processes(timeout=timeout)
         for p in procs:
             summary["logs"][p] = self.log_tail(p, level=logs_level, timeout=timeout)
 
@@ -1083,15 +1103,17 @@ class BackendDriver:
         (server-side привязана к подписчику) — отдельной команды не требует.
         """
         summary: Dict[str, Any] = {"ui": self.ui_untap(gui_process, timeout=timeout), "logs": {}}
-        procs = log_processes
-        if procs is None:
-            st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
-            tree = _leaf_result(st)
-            node = tree.get("subtree") or tree.get("value") or {}
-            procs = sorted(node) if isinstance(node, dict) else []
+        procs = log_processes if log_processes is not None else self._discover_processes(timeout=timeout)
         for p in procs:
             summary["logs"][p] = self.log_untail(p, timeout=timeout)
         return summary
+
+    def _discover_processes(self, *, timeout: Optional[float] = None) -> List[str]:
+        """Список процессов из state-топологии (общий для debug_session/debug_stop, Task 0.4)."""
+        st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
+        tree = unwrap(st, leaf=True)
+        node = tree.get("subtree") or tree.get("value") or {}
+        return sorted(node) if isinstance(node, dict) else []
 
     # ---- Подписка на состояние (state.subscribe → событийный канал) ----
 

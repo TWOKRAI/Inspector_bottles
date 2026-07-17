@@ -98,3 +98,62 @@ def test_state_changed_push_reaches_driver_regression() -> None:
         assert changed, "push state.changed не дошёл до driver.events()"
     finally:
         harness.stop()
+
+
+# --- Task 0.4: env-restore (без живого бэкенда — мокаем тяжёлые части) ---
+
+
+class _FakeLauncher:
+    def start(self):
+        pass
+
+    def wait_until_ready(self, timeout):
+        return True
+
+    def get_status(self):
+        return {"process": {"pid": None}}
+
+    def stop(self):
+        pass
+
+
+class _FakeDriver:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def connect(self, timeout=5.0):
+        pass
+
+    def introspect_status(self, process, *, timeout=None):
+        return {"success": True}
+
+    def close(self):
+        pass
+
+
+class TestEnvRestore:
+    def test_env_restored_to_prior_state_after_stop(self, monkeypatch) -> None:
+        import os as _os
+
+        from backend_ctl import harness as _h
+
+        # Прежнее окружение: BACKEND_CTL задан, PORT отсутствует, PID_FILE задан.
+        monkeypatch.setenv("BACKEND_CTL", "orig")
+        monkeypatch.delenv("BACKEND_CTL_PORT", raising=False)
+        monkeypatch.setenv("INSPECTOR_PID_FILE", "orig_pid")
+        keys = ("BACKEND_CTL", "BACKEND_CTL_PORT", "INSPECTOR_PID_FILE")
+        before = {k: _os.environ.get(k) for k in keys}
+
+        h = BackendHarness(port=8799, launcher_factory=_FakeLauncher)
+        monkeypatch.setattr(_h, "BackendDriver", _FakeDriver)
+        monkeypatch.setattr(_h, "_subtree", lambda pid: [])
+        monkeypatch.setattr(_h, "_shutdown_with_watchdog", lambda *a, **k: None)
+
+        h.start()
+        # Во время работы окружение замучено под endpoint.
+        assert _os.environ["BACKEND_CTL"] == "1"
+        assert _os.environ["BACKEND_CTL_PORT"] == "8799"
+
+        h.stop()
+        after = {k: _os.environ.get(k) for k in keys}
+        assert after == before, f"env не восстановлен: {before} → {after}"

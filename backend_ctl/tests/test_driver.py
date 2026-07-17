@@ -41,7 +41,7 @@ class TestRequestMatching:
         assert "not connected" in res["error"]
 
 
-# --- Юнит: событийный канал (инжекция входящих строк через _dispatch) ---
+# --- Юнит: событийный канал (инжекция входящих строк через dispatch_raw) ---
 
 
 def _line(msg: Dict[str, Any]) -> bytes:
@@ -52,7 +52,7 @@ def _line(msg: Dict[str, Any]) -> bytes:
 class TestEventChannel:
     def test_push_without_request_id_goes_to_queue(self) -> None:
         d = BackendDriver()
-        d._dispatch(_line({"command": "state.changed", "data": {"deltas": [1]}}))
+        d.dispatch_raw(_line({"command": "state.changed", "data": {"deltas": [1]}}))
         evts = d.events()  # поллинг
         assert len(evts) == 1
         assert evts[0]["command"] == "state.changed"
@@ -61,7 +61,7 @@ class TestEventChannel:
     def test_unmatched_request_id_becomes_event(self) -> None:
         """Ответ с request_id, который никто не ждёт (поздний/чужой), → событие."""
         d = BackendDriver()
-        d._dispatch(_line({"request_id": "no-such-id", "result": {"x": 1}}))
+        d.dispatch_raw(_line({"request_id": "no-such-id", "result": {"x": 1}}))
         evts = d.events()
         assert len(evts) == 1
         assert evts[0]["request_id"] == "no-such-id"
@@ -70,7 +70,7 @@ class TestEventChannel:
         d = BackendDriver()
         received: List[Dict[str, Any]] = []
         d.subscribe(received.append)
-        d._dispatch(_line({"command": "state.changed", "data": {"n": 42}}))
+        d.dispatch_raw(_line({"command": "state.changed", "data": {"n": 42}}))
         assert len(received) == 1
         assert received[0]["data"]["n"] == 42
 
@@ -83,7 +83,7 @@ class TestEventChannel:
 
         d.subscribe(boom)
         d.subscribe(seen.append)
-        d._dispatch(_line({"command": "state.changed"}))
+        d.dispatch_raw(_line({"command": "state.changed"}))
         # Второй подписчик отработал, событие всё равно в очереди, счётчик вырос.
         assert len(seen) == 1
         assert len(d.events()) == 1
@@ -94,20 +94,20 @@ class TestEventChannel:
         received: List[Dict[str, Any]] = []
         cb = d.subscribe(received.append)
         d.unsubscribe(cb)
-        d._dispatch(_line({"command": "state.changed"}))
+        d.dispatch_raw(_line({"command": "state.changed"}))
         assert received == []
 
     def test_bounded_queue_drops_oldest(self) -> None:
         d = BackendDriver(event_queue_maxlen=3)
         for i in range(5):
-            d._dispatch(_line({"command": "state.changed", "seq": i}))
+            d.dispatch_raw(_line({"command": "state.changed", "seq": i}))
         evts = d.events()
         assert [e["seq"] for e in evts] == [2, 3, 4]  # старые (0,1) вытеснены
 
     def test_events_max_items_leaves_remainder(self) -> None:
         d = BackendDriver()
         for i in range(4):
-            d._dispatch(_line({"seq": i}))
+            d.dispatch_raw(_line({"seq": i}))
         first = d.events(max_items=2)
         assert [e["seq"] for e in first] == [0, 1]
         rest = d.events()
@@ -125,7 +125,7 @@ class TestEventChannel:
 
         def producer() -> None:
             time.sleep(0.05)
-            d._dispatch(_line({"command": "state.changed", "late": True}))
+            d.dispatch_raw(_line({"command": "state.changed", "late": True}))
 
         th = threading.Thread(target=producer)
         th.start()
@@ -144,8 +144,8 @@ class TestEventChannel:
 
     def test_malformed_line_ignored(self) -> None:
         d = BackendDriver()
-        d._dispatch(b"{not json")
-        d._dispatch(_line(["not", "a", "dict"]))
+        d.dispatch_raw(b"{not json")
+        d.dispatch_raw(_line(["not", "a", "dict"]))
         assert d.events() == []
 
 
@@ -503,14 +503,14 @@ class TestSendRaceAndLateReplies:
         assert res["error"] == "timeout"
         assert d.late_replies == 0
 
-        d._dispatch(_line({"request_id": "cid-late", "result": {"value": 1}}))
+        d.dispatch_raw(_line({"request_id": "cid-late", "result": {"value": 1}}))
         assert d.events() == [], "поздний ответ не должен всплывать событием"
         assert d.late_replies == 1
 
     def test_unquarantined_request_id_still_becomes_event(self) -> None:
         # Регресс-контроль: cid, который НЕ таймаутили, по-прежнему → событие.
         d = BackendDriver()
-        d._dispatch(_line({"request_id": "never-issued", "result": {"x": 1}}))
+        d.dispatch_raw(_line({"request_id": "never-issued", "result": {"x": 1}}))
         assert len(d.events()) == 1
         assert d.late_replies == 0
 
