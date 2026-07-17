@@ -652,13 +652,21 @@ class TestObservabilityTail:
         d.observability_tail("preprocessor", subscriber="watcher")
         assert ("preprocessor", "observability.tail.subscribe", {"subscriber": "watcher"}) in calls
 
-    def test_untail_removes_intent(self, monkeypatch) -> None:
+    def test_untail_sends_subscriber_and_removes_intent(self, monkeypatch) -> None:
+        # Регресс F1: unsubscribe ОБЯЗАН нести subscriber на проводе — снять форвардер
+        # ТОЛЬКО driver'а, не задев per-subscriber-хвост GUI (раньше слался пустой {}).
         d, calls = self._recorder(monkeypatch)
         d.observability_tail("preprocessor")
         d.observability_untail("preprocessor")
-        # На проводе unsubscribe без параметров (NoParams-контракт).
-        assert ("preprocessor", "observability.tail.unsubscribe", {}) in calls
+        assert ("preprocessor", "observability.tail.unsubscribe", {"subscriber": "backend_ctl"}) in calls
         assert not any(i["command"] == "observability.tail.subscribe" for i in d.export_subscriptions())
+
+    def test_untail_custom_subscriber_on_wire(self, monkeypatch) -> None:
+        # F1: явный subscriber доходит до провода (снять именно его форвардер).
+        d, calls = self._recorder(monkeypatch)
+        d.observability_tail("preprocessor", subscriber="watcher")
+        d.observability_untail("preprocessor", subscriber="watcher")
+        assert ("preprocessor", "observability.tail.unsubscribe", {"subscriber": "watcher"}) in calls
 
     def test_failed_tail_not_registered(self, monkeypatch) -> None:
         d = BackendDriver()

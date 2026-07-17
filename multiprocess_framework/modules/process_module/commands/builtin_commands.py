@@ -1081,11 +1081,17 @@ class BuiltinCommands:
         return svc.subscribe_observability_tail(subscriber)
 
     def _cmd_observability_tail_unsubscribe(self, data=None, **kwargs) -> dict:
-        """Снять подписку на live-хвост наблюдаемости (форвардер + error-tap'ы)."""
+        """Снять подписку на live-хвост наблюдаемости (форвардер + error-tap'ы), F1: per-subscriber.
+
+        Параметры (data): ``subscriber`` — снять форвардер ТОЛЬКО этого подписчика
+        (форвардеры прочих продолжают работать). Пусто → снять всех (legacy/teardown).
+        """
+        args = self._merge_args(data, kwargs)
         svc = self._services
         if not hasattr(svc, "unsubscribe_observability_tail"):
             return {"success": False, "reason": "процесс не поддерживает observability-tail"}
-        return svc.unsubscribe_observability_tail()
+        subscriber = str(args.get("subscriber") or "").strip() or None
+        return svc.unsubscribe_observability_tail(subscriber)
 
     @staticmethod
     def _log_tap_name(subscriber: str) -> str:

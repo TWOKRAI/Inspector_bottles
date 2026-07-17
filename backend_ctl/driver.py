@@ -1160,13 +1160,14 @@ class BackendDriver:
     ) -> Dict[str, Any]:
         """Снять подписку на live-хвост наблюдаемости процесса (зеркало :meth:`log_untail`).
 
-        Команда ``observability.tail.unsubscribe`` на проводе параметров не несёт
-        (снимает форвардер + error-tap'ы процесса целиком), поэтому шлём пустой
-        payload; ``subscriber`` нужен лишь чтобы снять то же durable-намерение,
-        которым была зарегистрирована подписка.
+        F1: форвардер наблюдаемости на процессе — per-subscriber (несколько
+        подписчиков сосуществуют). Поэтому ``observability.tail.unsubscribe`` ОБЯЗАН
+        нести ``subscriber`` на проводе — снять форвардер ТОЛЬКО driver'а, не задев
+        GUI-хвост (раньше слался пустой payload → без per-subscriber-контракта это
+        снесло бы хвост GUI). Тот же ``subscriber`` снимает durable-намерение.
         """
         identity = {"subscriber": subscriber or self._sender}
-        res = _leaf_result(self.send_command(process, "observability.tail.unsubscribe", {}, timeout=timeout))
+        res = _leaf_result(self.send_command(process, "observability.tail.unsubscribe", identity, timeout=timeout))
         self._subscriptions.remove("observability.tail.subscribe", process, identity)
         return res
 
