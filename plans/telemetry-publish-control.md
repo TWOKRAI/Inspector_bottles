@@ -248,8 +248,15 @@ telemetry:
 > latency продолжил меняться; точечность (соседи целы); 0 ошибок, без фриза (tab-open инвариант зелёный).
 > +21 pytest-qt тест (`tests/test_telemetry_controls.py`).
 
-#### Task 4.2 — ADR + memory
+#### Task 4.2 — ADR + memory ✅ DONE
 **Level:** Middle (Sonnet) · **Assignee:** tech-writer · **Layer:** docs
+**Статус:** ✅ DONE — **ADR-PM-018** (`multiprocess_framework/modules/process_module/DECISIONS.md`):
+  принцип «errors always-on; logs/stats/telemetry — вкл/выкл+частота у источника, декларативно,
+  рантайм»; связка с ADR-PM-016/017/ADR-CRM-006; зафиксирован known-gap каскада двух плоскостей
+  троттла (направление фикса — ослаблять central-правило под активный publisher-gate, не сделано).
+  `scripts.sync` пересобрал сводные разделы (`multiprocess_framework/DECISIONS.md`), `scripts/validate.py`
+  чист. Memory: `docs/claude/memory/project_telemetry_publish_control.md` (+ строка в MEMORY.md),
+  связано с `[[project_observability_control_plane]]`, `[[project_telemetry_self_publish]]`.
 **Goal:** ADR «управляемая публикация: errors always-on, logs/stats/telemetry — вкл/выкл+частота у источника,
   рантайм»; обновить memory (реверс части `feedback_all_components_base_manager`? — нет; связать
   `[[project_observability_control_plane]]`, `[[project_telemetry_self_publish]]`). `scripts.sync`.

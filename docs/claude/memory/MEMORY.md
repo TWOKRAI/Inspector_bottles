@@ -130,3 +130,4 @@
 - [Telemetry coherence remediation](project_telemetry_coherence_remediation.md) — ревью Fable 24→42/60; Фаза 1 закрыта (delta-mode/tick/троттл=страховка, ADR-PM-016/017); ветка feat/telemetry-coherence; дальше Task 1.4 → Фаза 4 GUI
 - [Telemetry GUI controls](project_telemetry_gui_controls.md) — Ф4.1: шаблонная секция вкл/выкл+частота метрик (цикл по GATED_METRICS), cap-aware, qt-smoke verified
 - [Telemetry dashboard](project_telemetry_dashboard.md) — PyQtGraph как единая система графиков + TelemetryChart (framework) + дашборд «Все процессы» + crosshair/зум; план ЗАКРЫТ
+- [Telemetry publish control](project_telemetry_publish_control.md) — план ЗАКРЫТ (ADR-PM-018): errors always-on, logs/stats/telemetry вкл/выкл+частота у источника (publisher-gate), central-throttle=IPC-страховка; residual — каскад двух плоскостей
