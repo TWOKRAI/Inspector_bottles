@@ -83,6 +83,8 @@ observability:
 #       cycle_duration_ms: {enabled: false}                      # тяжёлая метрика — opt-in
 #       shm:               {enabled: true,  interval_sec: 5.0}
 #   throttle:
+#     # строгий потолок: поднятие частоты через publisher выше него всплывёт как
+#     # `capped_by_throttle` в результате команды, троттл не срежет тихо (ADR-PM-017)
 #     "processes.**.state.fps": 1.0
 #     "processes.**.state.latency_ms": 1.0
 #     "processes.**.workers.*.effective_hz": 1.0

@@ -133,6 +133,53 @@ GUI** плана telemetry-publish-control (крутилки частоты не
 - [x] Доп (finding-1 ревью 1.2): битый mode → `success=False` через все 3 хендлера — `test_telemetry_broadcast.py::TestUnknownModeRejected`, `test_telemetry_commands.py::TestUnknownModeSurfaced` (reconfigure+config.reload)
 **Out of scope:** полное удаление центрального троттла (остаётся как IPC-страховка от сбойного публикатора).
 
+### Task 1.4 — Cap-детекция на адресном (per-process) пути
+**Level:** Senior (Opus)
+**Assignee:** teamlead
+**Layer:** framework
+**Goal:** адресный `telemetry.reconfigure` к ОДНОМУ ребёнку (не broadcast) либо тоже детектит
+`capped_by_throttle`, либо осознанно и громко отказывает в поднятии частоты — вместо текущего
+молчания (cap там сейчас не детектится вообще, см. ADR-PM-017 Known-gap). **БЛОКЕР per-process
+крутилки частоты в Фазе 4** плана telemetry-publish-control (broadcast-путь уже покрыт Task 1.3,
+поэтому Фаза 1 в целом закрыта — но эта задача обязательна ДО появления per-process
+GUI-регулятора частоты).
+**Files:** `backend_ctl/driver.py` (`telemetry_reconfigure` — точка ветвления адресный/broadcast,
+`telemetry_set` docstring — обновить под выбранный вариант),
+`multiprocess_framework/modules/process_manager_module/process/process_manager_process.py`
+(потенциальная точка перехвата, если решение — маршрутизировать адресную команду через PM),
+`multiprocess_framework/modules/process_module/commands/builtin_commands.py`
+(`_cmd_telemetry_reconfigure` — сегодняшняя точка приёма на ребёнке, `_resolve_store_throttle`
+всегда `None`), `multiprocess_framework/modules/process_module/managers/telemetry_reload.py`
+(`detect_throttle_caps` — переиспользовать, не дублировать логику), tests рядом с каждым.
+**Steps:**
+1. Зафиксировать причину пробела: адресный `telemetry.reconfigure` сегодня уходит от driver'а
+   НАПРЯМУЮ ребёнку (`driver.py::telemetry_reconfigure`, ветка `process not in (None, "all", "*")`)
+   — PM не в пути, перехватывать нечем; на ребёнке `resolve_store_throttle(self)` всегда `None`
+   (central-троттл живёт только на оркестраторе) — `detect_throttle_caps` там принципиально
+   невозможен без изменения маршрута.
+2. Выбрать один из двух вариантов (решает teamlead, зафиксировать в DECISIONS):
+   - (а) **Перехват в PM** — адресную `telemetry.reconfigure` тоже пускать транзитом через PM
+     (аналогично broadcast), чтобы PM мог вызвать `detect_throttle_caps` с СВОИМ
+     `resolve_store_throttle(self)` до форварда конкретному ребёнку и вернуть `capped_by_throttle`
+     в результате адресной команды;
+   - (б) **Осознанный явный отказ** — маршрут не меняется (адресная команда идёт ребёнку напрямую),
+     но `telemetry_set(plane="publisher", ...)` на КОНКРЕТНЫЙ процесс с интервалом, который заведомо
+     ниже известного central-правила, возвращает громкий `error`-dict («per-process raise
+     недоступен без видимости central-правил — используй `process="all"`»), а не молчаливый success.
+3. Реализовать выбранный вариант; обновить докстринг `telemetry_set`/`telemetry_reconfigure`
+   (`backend_ctl/driver.py`) под факт.
+4. Обновить ADR-PM-017 (`process_module/DECISIONS.md`): Known-gap закрыт (вариант а) либо
+   переформулирован в «осознанное ограничение» (вариант б) + `python -m scripts.sync`.
+**Acceptance:**
+- [ ] Тест: адресный `telemetry.reconfigure` (один процесс, НЕ `"all"`) с publisher-interval ниже
+  известного central-правила → `capped_by_throttle` в результате (вариант а) ИЛИ явный `error`-dict
+  (вариант б) — в обоих случаях НЕ тихий success с молчаливым будущим срезом
+- [ ] Регресс: broadcast-путь (`process="all"`, Task 1.3) не сломан — `test_telemetry_broadcast.py`
+  зелёный без изменений своей логики
+- [ ] ADR-PM-017 обновлён (Known-gap закрыт или явно переформулирован), `scripts/validate.py` чист
+**Out of scope:** GUI-крутилка частоты (сама реализация UI — Фаза 4 плана
+telemetry-publish-control); изменение дефолтных central-правил (Task 1.3 закрыта, не трогаем).
+
 ---
 
 ## Фаза 2 — Когерентность контракта (boot ≡ reload, видимые ошибки)
