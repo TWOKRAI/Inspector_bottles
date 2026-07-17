@@ -155,6 +155,27 @@ def _log_untail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.log_untail(args["process"], **_kw_timeout(args))
 
 
+def _observability_tail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.observability_tail(args["process"], **_kw_timeout(args))
+
+
+def _observability_untail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.observability_untail(args["process"], **_kw_timeout(args))
+
+
+def _watch_like_gui(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    kw: Dict[str, Any] = {}
+    if args.get("patterns"):
+        kw["patterns"] = tuple(args["patterns"])
+    if args.get("tail_level"):
+        kw["tail_level"] = args["tail_level"]
+    return drv.watch_like_gui(**kw, **_kw_timeout(args))
+
+
+def _unwatch(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.unwatch(**_kw_timeout(args))
+
+
 def _ui_tap(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.ui_tap(args.get("process", "gui"), **_kw_timeout(args))
 
@@ -407,6 +428,50 @@ TOOLS: List[ToolSpec] = [
         "Снять подписку на tail логов процесса.",
         _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
         _log_untail,
+    ),
+    ToolSpec(
+        "observability_tail",
+        "Подписаться на live-хвост наблюдаемости процесса: ЛОГИ+ОШИБКИ+СТАТИСТИКА "
+        "(богаче log_tail — три плоскости). Записи едут push'ем (command='observability.record', "
+        "поле kind=log|error|stats) в событийный канал — читать инструментом events. Создаёт подписку.",
+        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        _observability_tail,
+    ),
+    ToolSpec(
+        "observability_untail",
+        "Снять подписку на live-хвост наблюдаемости процесса (форвардер + error-tap'ы).",
+        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        _observability_untail,
+    ),
+    ToolSpec(
+        "watch_like_gui",
+        "Включить ВЕСЬ приёмный профиль GUI одной командой: state.subscribe на GUI-wildcard'ы "
+        "(processes.**/system.**/devices.**/calibration.**) + observability.tail на все процессы "
+        "+ авто-переподписка хвоста после авто-рестарта процесса. Дальше читать инструментом events. "
+        "Создаёт подписки (не read-only). Кадры/SHM вне контракта.",
+        _obj(
+            {
+                "patterns": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "State-wildcard'ы (по умолчанию GUI-набор из 4 паттернов).",
+                },
+                "tail_level": {
+                    "type": "string",
+                    "description": "Объявляемый порог логов (observability.tail форвардит все severity; "
+                    "фильтрация — на клиенте по kind). По умолчанию WARNING.",
+                },
+                "timeout": _TIMEOUT,
+            }
+        ),
+        _watch_like_gui,
+    ),
+    ToolSpec(
+        "unwatch",
+        "Выключить GUI-профиль watch_like_gui: снять observability-хвосты со всех процессов "
+        "и отключить авто-переподписку.",
+        _obj({"timeout": _TIMEOUT}),
+        _unwatch,
     ),
     ToolSpec(
         "ui_tap",
