@@ -23,7 +23,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from backend_ctl.driver import BackendDriver
+from backend_ctl.driver import GUI_DEFAULT_PATTERNS, BackendDriver
 from multiprocess_framework.modules.router_module.adapters.socket_bridge_adapter import (
     SocketBridgeAdapter,
 )
@@ -682,3 +682,125 @@ class TestObservabilityRecords:
         assert d.observability_records(events) == [rec]
         # С фильтром сопоставить не с чем → исключается.
         assert d.observability_records(events, kind="log") == []
+
+
+# --- Task 2.2: watch_like_gui — GUI-паритет приёма + авто-переподписка ---
+
+
+class TestWatchLikeGui:
+    def _driver(self, monkeypatch, procs=("gui", "preprocessor", "camera_0")):
+        d = BackendDriver()
+        calls: List[tuple] = []
+
+        def fake_send(target, command, args=None, *, timeout=None):
+            calls.append((target, command, args))
+            if command == "state.get_subtree":
+                return {"success": True, "result": {"subtree": {p: {} for p in procs}}}
+            return {"success": True}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d, calls
+
+    def test_subscribes_all_patterns_and_all_processes(self, monkeypatch) -> None:
+        d, calls = self._driver(monkeypatch)
+        try:
+            summary = d.watch_like_gui()
+            state_subs = [args["pattern"] for t, c, args in calls if c == "state.subscribe"]
+            assert set(state_subs) == set(GUI_DEFAULT_PATTERNS)
+            assert len(state_subs) == len(GUI_DEFAULT_PATTERNS)
+            obs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
+            assert set(obs) == {"gui", "preprocessor", "camera_0"}
+            assert summary["success"] is True
+            assert set(summary["processes"]) == {"gui", "preprocessor", "camera_0"}
+            assert summary["tail_level"] == "WARNING"
+        finally:
+            d.unwatch()
+
+    def test_custom_patterns(self, monkeypatch) -> None:
+        d, calls = self._driver(monkeypatch)
+        try:
+            d.watch_like_gui(patterns=("system.**",))
+            state_subs = [args["pattern"] for t, c, args in calls if c == "state.subscribe"]
+            assert state_subs == ["system.**"]
+        finally:
+            d.unwatch()
+
+    def test_recovered_event_resubscribes_exactly_that_process(self, monkeypatch) -> None:
+        d, calls = self._driver(monkeypatch)
+        try:
+            d.watch_like_gui()
+            calls.clear()
+            # Синтетическое supervisor-recovered для camera_0 (новая инкарнация).
+            recovered = {
+                "command": "state.changed",
+                "data": {
+                    "deltas": [
+                        {"path": "processes.camera_0.supervisor.event", "new_value": "recovered", "old_value": "x"}
+                    ]
+                },
+            }
+            d.dispatch_raw(_line(recovered))
+            d._resub_queue.join()  # дождаться применения намерения applier-потоком
+            resubs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
+            assert resubs == ["camera_0"], "переподписка ровно затронутого процесса, не других"
+        finally:
+            d.unwatch()
+
+    def test_non_recovered_delta_does_not_resubscribe_known_process(self, monkeypatch) -> None:
+        d, calls = self._driver(monkeypatch)
+        try:
+            d.watch_like_gui()
+            calls.clear()
+            # Обычная дельта уже подписанного процесса → без переподписки.
+            noise = {
+                "command": "state.changed",
+                "data": {"deltas": [{"path": "processes.camera_0.status", "new_value": "running"}]},
+            }
+            d.dispatch_raw(_line(noise))
+            d._resub_queue.join()
+            assert not any(c == "observability.tail.subscribe" for _, c, _ in calls)
+        finally:
+            d.unwatch()
+
+    def test_new_process_delta_subscribes_first_time(self, monkeypatch) -> None:
+        d, calls = self._driver(monkeypatch)
+        try:
+            d.watch_like_gui()
+            calls.clear()
+            # Появился НЕ виденный ранее процесс → первичная подписка (паритет активатора).
+            appeared = {
+                "command": "state.changed",
+                "data": {"deltas": [{"path": "processes.detector.status", "new_value": "running"}]},
+            }
+            d.dispatch_raw(_line(appeared))
+            d._resub_queue.join()
+            resubs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
+            assert resubs == ["detector"]
+        finally:
+            d.unwatch()
+
+    def test_unwatch_untails_all_and_stops_thread(self, monkeypatch) -> None:
+        d, calls = self._driver(monkeypatch)
+        d.watch_like_gui()
+        thread = d._resub_thread
+        assert thread is not None and thread.is_alive()
+        calls.clear()
+        summary = d.unwatch()
+        untails = {t for t, c, _ in calls if c == "observability.tail.unsubscribe"}
+        assert untails == {"gui", "preprocessor", "camera_0"}
+        assert summary["was_active"] is True
+        thread.join(timeout=2.0)
+        assert not thread.is_alive(), "applier-поток должен остановиться по sentinel"
+        # Durable-намерения watch-паттернов сняты (реконнект их не воскресит).
+        assert not any(i["command"] == "state.subscribe" for i in d.export_subscriptions())
+
+    def test_reentrant_watch_restarts_cleanly(self, monkeypatch) -> None:
+        d, _ = self._driver(monkeypatch)
+        try:
+            d.watch_like_gui()
+            first = d._resub_thread
+            d.watch_like_gui()  # повторный вызов → unwatch + свежий старт
+            assert d._resub_thread is not first
+            assert d._watch_active is True
+        finally:
+            d.unwatch()

@@ -287,9 +287,10 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 2. Клиентское зеркало `ObservabilityTailActivator` (`tail_activator.py:62-68`): подписчик EventHub на `state.changed` с `processes.<name>.supervisor.event == "recovered"` → SubscriptionRegistry повторяет subscribe для новой инкарнации.
 3. `unwatch()`. MCP: `watch_like_gui`/`unwatch`.
 **Acceptance:**
-- [ ] unit: событие recovered → повторный subscribe ровно затронутого процесса
-- [ ] live (4.1): kill_child → авто-рестарт → tail-события процесса продолжаются
+- [x] unit: событие recovered → повторный subscribe ровно затронутого процесса (`TestWatchLikeGui`: recovered→ровно P, non-recovered→no-op, new-process→subscribe, unwatch→untail+stop-thread)
+- [ ] live (4.1): kill_child → авто-рестарт → tail-события процесса продолжаются → Task 4.1
 **Out of scope:** телеметрический read-model (2.3).
+**Заметка (реализация, ветка `feat/backend-ctl-watch`):** `GUI_DEFAULT_PATTERNS` + `watch_like_gui`/`unwatch`/`_on_watch_event`/`_resub_loop` в `backend_ctl/driver.py`; MCP — `watch_like_gui`/`unwatch` в `mcp_tools.py`. **Thread-safety (главный риск, п.5):** resub-слушатель исполняется в reader-потоке; прямой `observability_tail`→`request()` оттуда дедлочит (reader блокируется в `pending.event.wait()`, а сам же должен дренировать ответ → таймаут + стойл доставки). Решение — **очередь намерений + отдельный applier-поток** (`_resub_queue` + `backend-ctl-resub`): слушатель только enqueue'ит имя процесса, applier применяет переподписку на безопасном потоке (reader свободен дренировать ответ). Подробности — в докстроке `watch_like_gui`. `tail_level` — observability.tail форвардит все severity, фильтр на клиенте (`observability_records(kind=...)`).
 
 #### Task 2.3 — Telemetry read-model (переиспользование generic-VM из frontend_module)
 **Level:** Senior (Opus) | **Assignee:** teamlead | **Layer:** framework

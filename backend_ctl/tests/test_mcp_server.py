@@ -124,6 +124,8 @@ class TestRegistry:
             "log_untail",
             "observability_tail",
             "observability_untail",
+            "watch_like_gui",
+            "unwatch",
             "ui_tap",
             "ui_untap",
             "ui_tap_ping",
@@ -667,8 +669,8 @@ class TestTelemetryTools:
         assert {"telemetry_reconfigure", "telemetry_set"} <= tools
 
 
-class TestObservabilityTools:
-    """Task 2.1: observability_tail/untail диспетчатся на driver."""
+class TestObservabilityAndWatchTools:
+    """Task 2.1/2.2: observability_tail/untail + watch_like_gui/unwatch диспетчатся на driver."""
 
     def test_observability_tail_dispatches(self) -> None:
         server, fake = make_server()
@@ -683,7 +685,32 @@ class TestObservabilityTools:
         name, args, _ = fake.calls[0]
         assert name == "observability_untail" and args == ("preprocessor",)
 
+    def test_watch_like_gui_passes_patterns_and_level(self) -> None:
+        server, fake = make_server()
+        call(
+            server,
+            "tools/call",
+            {"name": "watch_like_gui", "arguments": {"patterns": ["system.**"], "tail_level": "INFO"}},
+        )
+        name, _, kwargs = fake.calls[0]
+        assert name == "watch_like_gui"
+        assert kwargs["patterns"] == ("system.**",)
+        assert kwargs["tail_level"] == "INFO"
+
+    def test_watch_like_gui_defaults_when_no_args(self) -> None:
+        server, fake = make_server()
+        call(server, "tools/call", {"name": "watch_like_gui", "arguments": {}})
+        name, _, kwargs = fake.calls[0]
+        assert name == "watch_like_gui"
+        # Без явных аргументов driver берёт свои дефолты (patterns не передан).
+        assert "patterns" not in kwargs
+
+    def test_unwatch_dispatches(self) -> None:
+        server, fake = make_server()
+        call(server, "tools/call", {"name": "unwatch", "arguments": {}})
+        assert fake.calls[0][0] == "unwatch"
+
     def test_new_tools_present_in_list(self) -> None:
         server, _ = make_server()
         tools = {t["name"] for t in call(server, "tools/list")["result"]["tools"]}
-        assert {"observability_tail", "observability_untail"} <= tools
+        assert {"observability_tail", "observability_untail", "watch_like_gui", "unwatch"} <= tools
