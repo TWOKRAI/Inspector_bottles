@@ -284,6 +284,19 @@ def run_gui(process: "GuiProcess") -> None:
         release_subscription=(_gui_proxy.release_subscription if _gui_proxy is not None else None),
     )
 
+    # Ф1 (gui-telemetry-read-model 1.1/1.2): локальный read-model телеметрии —
+    # ВТОРОЙ потребитель того же wildcard-потока дельт (multi-subscriber §11.15),
+    # рядом с GuiStateBindings. НЕ создаёт серверных подписок: питается стартовыми
+    # wildcard'ами (processes.**/system.**/...). Первичный снимок — из кэша
+    # gui-proxy, чтобы вкладки, созданные ПОСЛЕ публикации, читали актуальное
+    # сразу (late-binding). В табы прокидывается через RuntimeDeps.telemetry.
+    from .state.telemetry_view_model import TelemetryViewModel
+
+    telemetry_view_model = TelemetryViewModel(
+        initial_cache=(_gui_proxy.cache if _gui_proxy is not None else None),
+    )
+    process._bridge.add_state_listener(telemetry_view_model.on_state_delta)
+
     # 3c. Phase 12: CommandCatalog + CommandValidator + TopologyBridge
     from .bridge.command_catalog import CommandCatalog
     from .bridge.command_validator import CommandValidator
@@ -736,6 +749,7 @@ def run_gui(process: "GuiProcess") -> None:
         image_panel=image_panel,
         data_bridge=process._bridge,
         topology_session=topology_session,  # RS-4: dirty-контур редактора топологии
+        telemetry=telemetry_view_model,  # Ф1: локальный read-model телеметрии
     )
 
     tab_factory = TabFactory(

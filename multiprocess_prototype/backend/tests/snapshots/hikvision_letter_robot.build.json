@@ -597,6 +597,10 @@
         "log_dir": "logs/prototype_2",
         "shm_budget_mb": 512,
         "stop_timeout": 5.0
+      },
+      "telemetry": {
+        "publish": null,
+        "throttle": {}
       }
     }
   },

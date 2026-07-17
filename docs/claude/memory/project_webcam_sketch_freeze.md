@@ -1,17 +1,34 @@
 ---
 name: project_webcam_sketch_freeze
-description: "webcam_sketch: вкладка Processes вешает GUI намертво — это Qt-C++ стойл (не Python, доказано stall-дампом); отдано Фабле на ревью; topology.load() кэш + перф-фиксы применены"
+description: "webcam_sketch: фриз Процессов — уточнён 2026-07-16, ГЛАВНАЯ причина блокирующий IPC-шторм в Qt main thread (не только Qt-C++ стойл); закрыто планом gui-telemetry-read-model / ADR-136"
 metadata:
   node_type: memory
   type: project
 ---
 
-**Задача-хвост (2026-07-15, отдана Фабле на ревью).** Рецепт `webcam_sketch` =
+**UPDATE 2026-07-16 (план [[project_gui_telemetry_read_model]], ADR-136):** диагноз ниже («стойло в Qt C++,
+Python ни при чём») был **неполным — уточнён и частично опровергнут**. Полная root-cause-цепочка (доказана
+по коду, не гипотеза): `ProcessesTab._sync_nav()` жадно строила панели ВСЕХ процессов → каждый `bindings.bind()`
+звал `ensure_subscription(pattern)` → **блокирующий `router.request(timeout=5.0)` в Qt main thread** на КАЖДЫЙ
+уникальный паттерн подписки (~60–150 подряд; дедуп шёл по точному совпадению строки, хотя покрывающие
+wildcard'ы `processes.**`/`system.**` уже были активны) + сервер на каждый subscribe копировал ВСЁ дерево
+состояния (`_replay_initial_state` → `get_subtree("")`) + каскад обнаружения runtime-воркеров пересобирал
+`WorkerTable` по одному обнаружению. Т.е. **главный вклад в фриз давал Python-уровень (блокирующий IPC-шторм
+в main thread), а не только Qt-C++ layout/paint-стойло** на глубокой вложенности панелей (которое тоже
+реально и устранено отдельно ленивыми панелями, см. хвост 0.4 плана). Закрыто планом
+`plans/gui-telemetry-read-model.md` (Фазы 0-3): coverage-check вместо строкового дедупа + async-subscribe
+(`sync=False`) + prefix-replay + единый `TelemetryViewModel` (read-model) + debounce/lazy panels. Инвариант
+зафиксирован **ADR-136** (`multiprocess_framework/DECISIONS.md`) и enforced тестом
+`test_tab_open_invariant.py::test_opening_all_tabs_does_no_blocking_ipc`.
+
+---
+
+**Исходная запись (2026-07-15, отдана Фабле на ревью), сохранена для истории.** Рецепт `webcam_sketch` =
 клон `phone_sketch` с источником вебкамера (`CapturePlugin` вместо `PhoneCameraPlugin`,
 ориентация точек через `robot_scale.swap_axes`, как в phone_sketch). Работает, но
 **открытие вкладки «Процессы» вешает GUI намертво**.
 
-**Диагноз (доказан, не гипотеза):** фриз — **Qt-уровень (C++), НЕ Python.**
+**Диагноз (доказан, не гипотеза — но НЕПОЛОН, см. UPDATE выше):** фриз — **Qt-уровень (C++), НЕ Python.**
 Инструмент: env `INSPECTOR_STALL_DUMP=1` → `faulthandler.dump_traceback_later(5, repeat=True)`
 в `run_gui` (app.py) пишет стеки всех потоков в `<INSPECTOR_LOG_DIR>/gui_stall_dump.log`.
 Во ВСЕХ 163 срезах main-поток gui — в `app.py:788 app.exec()` **без единого Python-фрейма
@@ -33,10 +50,10 @@ gui-статы шли ровно (~630/10с) и оборвались РЕЗКО 
 Graceful drop-oldest («не успел → выкинул слот») сидит за флагом **`FW_QOS_PROFILES`**
 (Ф7 dark-launch, default OFF — см. [[project_feature_flags_registry]]). На 25fps overload'а нет.
 
-**Фабле — направления:** (A) бисект ProcessesTab: по очереди отключать trace-box /
-таблицы воркеров / live-биндинги (`_panels.py`), ловить виновный виджет; (B) WinDbg на
+**Фабле — направления (частично устарело, см. UPDATE):** (A) бисект ProcessesTab: по очереди отключать
+trace-box / таблицы воркеров / live-биндинги (`_panels.py`), ловить виновный виджет; (B) WinDbg на
 зависший PID gui → нативный C++-стек. Presenter/bindings уже прочитаны: биндинги приходят
 в GUI-поток (QueuedConnection, `bindings.py:395`), телеметрия троттлится 1Гц
 (`build_throttle_rules`) — флуд исключён.
 
-Связано: [[feedback_qt_widget_patterns]], [[feedback_qt_mcp_smoke_verification]], [[project_processes_tab]].
+Связано: [[feedback_qt_widget_patterns]], [[feedback_qt_mcp_smoke_verification]], [[project_processes_tab]], [[project_gui_telemetry_read_model]].

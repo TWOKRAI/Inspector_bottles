@@ -350,7 +350,24 @@ class TestPluginContextStateProxy:
 
 
 class TestManagerSetup:
-    """Тесты для build_throttle_rules."""
+    """Тесты для build_throttle_rules (PC 2.1 — config-driven, план telemetry-publish-control.md)."""
+
+    # Эталон дефолтов -- НЕ импортируется из manager_setup (иначе характеризация
+    # сравнивала бы реализацию саму с собой). ADR-PM-017 (Task 1.3): троттл — мягкий
+    # IPC-предохранитель, а НЕ авторитет частоты → все правила на единый мягкий
+    # интервал 0.05с (0.1с publisher-пол × 0.5 множитель), заведомо НИЖЕ любой
+    # легитимной каденции публикации (прежние жёсткие 1.0/2.0/5.0с молча гасили
+    # поднятие частоты, совпадая с publisher-дефолтом — residual #6).
+    _SAFETY = 0.05
+    _DEFAULT_RULES = {
+        "processes.**.state.fps": _SAFETY,
+        "processes.**.state.latency_ms": _SAFETY,
+        "processes.**.state.uptime": _SAFETY,
+        "processes.**.state.frame_count": _SAFETY,
+        "processes.**.state.drops": _SAFETY,
+        "processes.**.workers.*.effective_hz": _SAFETY,
+        "processes.**.workers.*.cycle_duration_ms": _SAFETY,
+    }
 
     def test_build_throttle_rules_returns_dict(self):
         """build_throttle_rules возвращает непустой dict."""
@@ -369,3 +386,116 @@ class TestManagerSetup:
         assert any("fps" in k for k in keys)
         assert any("frame_count" in k for k in keys)
         assert any("drops" in k for k in keys)
+
+    def test_no_sys_config_returns_hardcoded_defaults(self):
+        """build_throttle_rules(None) — характеризация: бит-в-бит прежний dict (PC 2.1)."""
+        from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
+
+        assert build_throttle_rules(None) == self._DEFAULT_RULES
+        # Без аргумента (сигнатура до PC 2.1) — то же самое, обратная совместимость.
+        assert build_throttle_rules() == self._DEFAULT_RULES
+
+    def test_sys_config_with_empty_throttle_falls_back_to_defaults(self):
+        """sys_config задан, но telemetry.throttle пуст ({}) -- fallback на дефолты."""
+        from multiprocess_prototype.backend.config.schemas import SystemConfig
+        from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
+
+        sys_config = SystemConfig()  # telemetry.throttle == {} по умолчанию
+        assert sys_config.telemetry.throttle == {}
+        assert build_throttle_rules(sys_config) == self._DEFAULT_RULES
+
+    def test_sys_config_throttle_fully_replaces_defaults(self):
+        """Заданный telemetry.throttle -- ПОЛНАЯ замена дефолтов, не merge (решение владельца PC 2.1)."""
+        from multiprocess_prototype.backend.config.schemas import SystemConfig, TelemetrySection
+        from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
+
+        custom_rules = {
+            "processes.**.state.fps": 2.5,
+            "processes.**.custom.metric": 10.0,
+        }
+        sys_config = SystemConfig(telemetry=TelemetrySection(throttle=custom_rules))
+
+        result = build_throttle_rules(sys_config)
+
+        assert result == custom_rules
+        # Дефолтные ключи, отсутствующие в custom_rules, НЕ подмешаны -- полная замена.
+        assert "processes.**.state.drops" not in result
+        assert "processes.**.workers.*.effective_hz" not in result
+
+    def test_soft_defaults_do_not_cut_publisher_cadence(self):
+        """ADR-PM-017 acceptance: дефолт-правила заведомо МЯГЧЕ минимального осмысленного
+        интервала публикации → троттл не может срезать легитимную каденцию publisher-gate
+        (характеризация: current-рецепты публикуют на 5с-тике, дефолт-троттл им не мешает)."""
+        from multiprocess_prototype.backend.state.manager_setup import (
+            _MIN_PUBLISHER_INTERVAL_SEC,
+            build_throttle_rules,
+        )
+
+        rules = build_throttle_rules()
+        assert rules  # непусто — предохранитель есть
+        # Каждый дефолт-интервал строго ниже пола публикации → не режет её.
+        assert max(rules.values()) < _MIN_PUBLISHER_INTERVAL_SEC
+
+    def test_raised_publisher_frequency_reaches_store_via_soft_default(self):
+        """Сквозной store-gate (ADR-PM-017, главный acceptance): поднятая publisher-каденция
+        (10 Гц, 0.1с) РЕАЛЬНО доходит до записи в дерево — мягкий дефолт-троттл её не режет.
+
+        Прежний жёсткий дефолт (fps=1.0с) молча срезал бы второй апдейт; мягкий (0.05с) —
+        пропускает, поэтому эффективная частота в дереве реально растёт.
+        """
+        import time
+
+        from multiprocess_framework.modules.state_store_module.middleware.throttle import (
+            ThrottleMiddleware,
+        )
+        from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
+
+        mw = ThrottleMiddleware(build_throttle_rules())
+        # Первый publish fps проходит.
+        proceed1, _ = mw.before_merge("processes.cam", {"state": {"fps": 30.0}}, "cam", {})
+        assert proceed1 is True
+        # Спим дольше мягкого предохранителя (0.05с), но КОРОЧЕ прежнего дефолта (1.0с).
+        time.sleep(0.07)
+        proceed2, kept = mw.before_merge("processes.cam", {"state": {"fps": 31.0}}, "cam", {})
+        # Мягкий дефолт не режет поднятую частоту — второй апдейт тоже доходит до дерева.
+        assert proceed2 is True
+        assert kept == {"state": {"fps": 31.0}}
+
+
+class TestBuildThrottleRulesReachesThrottleMiddleware:
+    """Интеграция: правила из sys_config доезжают до ThrottleMiddleware (PC 2.1).
+
+    Тот же путь, что и в проде: build_throttle_rules(sys_config) →
+    orchestrator_config["state_throttle_rules"] → ProcessManagerProcessApp.
+    _setup_state_store() → ThrottleMiddleware(rules) (app_module/orchestrator.py).
+    """
+
+    def test_custom_sys_config_rules_reach_middleware(self, router, initial_state):
+        """Правила из sys_config.telemetry.throttle оказываются в живом ThrottleMiddleware."""
+        from multiprocess_prototype.backend.config.schemas import SystemConfig, TelemetrySection
+        from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
+
+        custom_rules = {"processes.**.state.fps": 3.0}
+        sys_config = SystemConfig(telemetry=TelemetrySection(throttle=custom_rules))
+
+        rules = build_throttle_rules(sys_config)
+        pm = _make_pm_app(router, initial_state, rules)
+        pm._setup_state_store()
+
+        pipeline = pm._state_store_manager.pipeline
+        assert len(pipeline._middlewares) == 1
+        middleware = pipeline._middlewares[0]
+        assert middleware.name == "throttle"
+        assert middleware.rules == custom_rules
+
+    def test_default_sys_config_rules_reach_middleware(self, router, initial_state):
+        """Без throttle в конфиге -- в middleware прежние хардкод-дефолты (регресс не внесён)."""
+        from multiprocess_prototype.backend.config.schemas import SystemConfig
+        from multiprocess_prototype.backend.state.manager_setup import build_throttle_rules
+
+        rules = build_throttle_rules(SystemConfig())
+        pm = _make_pm_app(router, initial_state, rules)
+        pm._setup_state_store()
+
+        middleware = pm._state_store_manager.pipeline._middlewares[0]
+        assert middleware.rules == TestManagerSetup._DEFAULT_RULES

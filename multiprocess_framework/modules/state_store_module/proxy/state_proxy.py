@@ -18,7 +18,7 @@ import uuid
 from typing import Any, Callable
 
 from ...base_manager import BaseManager, ObservableMixin
-from ..core import iter_matches, match_pattern, split_pattern
+from ..core import iter_matches, match_pattern, pattern_covers, split_pattern
 from ..core.delta import MISSING, STATE_ENVELOPE_MARKER, Delta
 from ..interfaces import IRouter, IStateProxy
 
@@ -84,6 +84,27 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         # Обратная карта sub_id → pattern: O(1)-очистка ensure-реестра в
         # unsubscribe без линейного скана (5.20 review #10).
         self._sub_id_pattern: dict[str, str] = {}
+        # Coverage-check (Ф-GUI-read-model 0.1): sub_id'ы «покрытых» паттернов —
+        # локальные подписки БЕЗ серверного state.subscribe. Их дельты приезжают
+        # потоком покрывающей ПОДТВЕРЖДЁННОЙ серверной подписки. Как они доходят
+        # до потребителя, зависит от proxy: в базовом StateProxy их разводит
+        # _invoke_callbacks (packet-wide локальный path-матч против _sub_patterns);
+        # в GUI (GuiStateProxy с delta_sink) — delta_sink→bridge→GuiStateBindings
+        # со своим матчером, а _invoke_callbacks не вызывается. Для таких sub_id
+        # unsubscribe НЕ шлёт серверный state.unsubscribe (его там нет).
+        self._covered_sub_ids: set[str] = set()
+        # Подтверждённые сервером паттерны (Ф-GUI-read-model 0.1, угловое ревью):
+        # паттерн попадает сюда ТОЛЬКО после успешного sync=True subscribe, когда
+        # сервер вернул валидный sub_id. Async-подписки (sync=False) сюда НЕ
+        # попадают — сервер их не подтвердил. Покрывающими в _find_covering_pattern
+        # считаются исключительно подтверждённые паттерны: неподтверждённый широкий
+        # паттерн (мог тихо не создаться на сервере) не должен «усыновлять» узкий и
+        # оставлять его без потока дельт (латентный «мёртвый виджет»).
+        self._confirmed_patterns: set[str] = set()
+        # Счётчик async-подписок (0.3): fire-and-forget subscribe не виден в
+        # request-раундтрипе, отказ сервера не приходит немедленно — счётчик даёт
+        # наблюдаемость (можно сверить с числом реально пришедших дельт).
+        self._async_subscribe_count: int = 0
         # Watch-from-revision (Ф4.9b, ADR-SS-014/015): revision последнего
         # успешно применённого пакета state.changed. None — ещё не было ни
         # одного пакета с revision (либо proxy только создан, либо все
@@ -237,6 +258,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         pattern: str,
         callback: Callable[[list[Delta]], None],
         exclude_self: bool = True,
+        sync: bool = True,
     ) -> str:
         """Подписаться на изменения по паттерну.
 
@@ -248,6 +270,14 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             pattern: glob-паттерн пути (например 'cameras.*.config.*').
             callback: функция, вызываемая при получении дельт.
             exclude_self: исключить изменения от этого же процесса.
+            sync: True (по умолчанию, обратная совместимость) — блокирующий
+                request/response раундтрип: ждём sub_id сервера. False
+                (Ф-GUI-read-model 0.2) — fire-and-forget: отправляем
+                state.subscribe без ожидания ответа (не блокируем вызывающий
+                поток, критично для Qt main thread), sub_id генерируется
+                локально. Серверный replay/дельты приедут асинхронно штатным
+                потоком state.changed. Отказ сервера в async-режиме не виден
+                немедленно — виджет не «мёртв», а пуст до первой дельты.
 
         Returns:
             sub_id — строка-идентификатор подписки.
@@ -255,6 +285,7 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         exclude_sources: list[str] = [self._process_name] if exclude_self else []
 
         # Генерируем локальный sub_id — он может быть переопределён ответом сервера
+        # (только в sync-режиме; в async сервер не отвечает, sub_id остаётся локальным).
         local_sub_id = str(uuid.uuid4())
 
         msg = {
@@ -269,11 +300,31 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             },
         }
 
-        # Если есть router — пробуем получить sub_id от сервера.
-        # Если ответа нет, сервер вернул error или sub_id отсутствует — логируем
-        # warning. Это значит, что серверная подписка не создана (callback не
-        # сработает), но локальный sub_id выдаём (чтобы клиентский код не падал).
-        if self._router is not None:
+        if self._router is None:
+            self._log_debug(f"StateProxy.subscribe: router=None, подписка '{pattern}' только локальная")
+        elif not sync:
+            # Fire-and-forget (0.2): не блокируем поток раундтрипом. sub_id
+            # локальный, серверный ответ не ждём; ошибку транспорта ловит _send
+            # (лог-error), отсутствие серверной подписки проявится как пустой
+            # виджет до первой дельты, а не как зависание GUI.
+            self._send(msg)
+            # Наблюдаемость async-подписок (0.3): счётчик + метрика + INFO-лог с
+            # чётким маркером. Async — штатный путь (не ошибка), поэтому уровень
+            # INFO, а не WARNING (иначе флуд на каждый непокрытый bind); отказ
+            # сервера всё равно не виден немедленно — счётчик позволяет сверить
+            # число async-подписок с числом пришедших дельт.
+            self._async_subscribe_count += 1
+            self._record_metric("state_proxy.async_subscribe")
+            self._log_info(
+                f"StateProxy '{self._process_name}': [async-subscribe] '{pattern}' "
+                f"(sub_id={local_sub_id}, ответа сервера не ждём; "
+                f"всего async-подписок={self._async_subscribe_count})"
+            )
+        else:
+            # sync: пробуем получить sub_id от сервера через блокирующий request().
+            # Если ответа нет, сервер вернул error или sub_id отсутствует — логируем
+            # warning. Это значит, что серверная подписка не создана (callback не
+            # сработает), но локальный sub_id выдаём (чтобы клиентский код не падал).
             response = self._send_sync(msg)
             if response is None:
                 self._log_warning(
@@ -290,12 +341,16 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
                 server_sub_id = response.get("sub_id")
                 if server_sub_id:
                     local_sub_id = server_sub_id
+                    # Подтверждение (0.1, угловое ревью): сервер вернул валидный
+                    # sub_id — паттерн реально существует на сервере и стримит
+                    # дельты. Только такие паттерны могут покрывать узкие (см.
+                    # _find_covering_pattern). Async/отклонённые подписки сюда
+                    # не попадают.
+                    self._confirmed_patterns.add(pattern)
                 else:
                     self._log_warning(
                         f"StateProxy '{self._process_name}': подписка на '{pattern}' не вернула sub_id от сервера"
                     )
-        else:
-            self._log_debug(f"StateProxy.subscribe: router=None, подписка '{pattern}' только локальная")
 
         # Регистрируем callback локально
         self._callbacks[local_sub_id] = [callback]
@@ -313,9 +368,16 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         """
         # Удаляем локальный callback
         self._callbacks.pop(sub_id, None)
-        self._sub_patterns.pop(sub_id, None)
+        removed_pattern = self._sub_patterns.pop(sub_id, None)
         if sub_id in self._sub_ids:
             self._sub_ids.remove(sub_id)
+
+        # Снятие подтверждения (0.1, угловое ревью): если это был ПОСЛЕДНИЙ sub_id
+        # данного паттерна — паттерн больше не активен на сервере, убираем его из
+        # _confirmed_patterns, иначе _find_covering_pattern считал бы покрывающей
+        # уже снятую подписку (и оставил бы узкий паттерн без потока дельт).
+        if removed_pattern is not None and removed_pattern not in self._sub_patterns.values():
+            self._confirmed_patterns.discard(removed_pattern)
 
         # Чистим refcount-реестр, если этот sub_id был ensure-подпиской —
         # иначе прямой unsubscribe оставил бы висячий pattern → refcount.
@@ -324,6 +386,13 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         if pat is not None:
             self._pattern_sub_id.pop(pat, None)
             self._pattern_refcount.pop(pat, None)
+
+        # Покрытая (local-only) подписка (0.1): серверной подписки за этим sub_id
+        # нет — снимаем только локальную регистрацию, IPC state.unsubscribe не шлём
+        # (иначе спурьёзное сообщение с несуществующим sub_id + лишний IPC).
+        if sub_id in self._covered_sub_ids:
+            self._covered_sub_ids.discard(sub_id)
+            return
 
         # IPC-отписка
         if self._router is not None:
@@ -371,11 +440,84 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             return existing
 
         cb = callback if callback is not None else (lambda _deltas: None)
-        sub_id = self.subscribe(pattern, cb, exclude_self=exclude_self)
+
+        # Coverage-check (0.1): если активная ПОДТВЕРЖДЁННАЯ серверная подписка уже
+        # покрывает этот pattern — не слать второй state.subscribe. Реальная
+        # гарантия доставки покрытому паттерну = покрывающая подтверждённая
+        # серверная подписка стримит эти пути в proxy; далее в базовом StateProxy
+        # их разводит _invoke_callbacks (packet-wide локальный path-матч против
+        # _sub_patterns), а в GUI (GuiStateProxy с delta_sink) —
+        # delta_sink→bridge→GuiStateBindings со своим матчером.
+        # Соображения:
+        #  - Кандидаты покрытия — только ПОДТВЕРЖДЁННЫЕ паттерны (_confirmed_patterns,
+        #    заполняются в subscribe() при валидном серверном sub_id): стартовые
+        #    wildcard'ы processes.**/system.** заводятся прямым sync=True subscribe()
+        #    (frontend/process.py) ДО открытия вкладок и подтверждаются. Async
+        #    (sync=False) паттерны не подтверждены — не покрывают (fallback на
+        #    собственную async-подписку), чтобы тихо не создавшаяся на сервере
+        #    подписка не оставила узкий паттерн без потока дельт.
+        #  - Из кандидатов исключаем сами «покрытые» (local-only) sub_id — покрывать
+        #    может только реальная серверная подписка, реально стримящая дельты.
+        #  - Консервативно ограничиваемся exclude_self=True (единственный режим
+        #    покрывающих в проде): покрытый паттерн наследует exclude_sources
+        #    покрывающего потока; при exclude_self=False создаём свою подписку,
+        #    чтобы не потерять self-sourced дельты (худший случай — лишняя
+        #    подписка, никогда не «мёртвый виджет»).
+        covering = self._find_covering_pattern(pattern) if exclude_self else None
+        if covering is not None:
+            local_sub_id = str(uuid.uuid4())
+            self._callbacks[local_sub_id] = [cb]
+            self._sub_patterns[local_sub_id] = pattern
+            self._sub_ids.append(local_sub_id)
+            self._pattern_sub_id[pattern] = local_sub_id
+            self._pattern_refcount[pattern] = 1
+            self._sub_id_pattern[local_sub_id] = pattern
+            self._covered_sub_ids.add(local_sub_id)
+            self._log_debug(
+                f"StateProxy '{self._process_name}': '{pattern}' покрыт активной "
+                f"подпиской '{covering}' — серверный state.subscribe не отправлен "
+                f"(local sub_id={local_sub_id})"
+            )
+            return local_sub_id
+
+        # Не покрыт — создаём серверную подписку. sync=False (0.2): fire-and-forget,
+        # не блокируем вызывающий поток (Qt main thread) IPC-раундтрипом.
+        sub_id = self.subscribe(pattern, cb, exclude_self=exclude_self, sync=False)
         self._pattern_sub_id[pattern] = sub_id
         self._pattern_refcount[pattern] = 1
         self._sub_id_pattern[sub_id] = pattern
         return sub_id
+
+    def _find_covering_pattern(self, new_pattern: str) -> str | None:
+        """Найти активную ПОДТВЕРЖДЁННУЮ серверную подписку, покрывающую new_pattern (0.1).
+
+        Покрывающими считаются только паттерны из _confirmed_patterns —
+        подписки, которые сервер реально подтвердил валидным sub_id (см.
+        subscribe(), sync=True). Дополнительно исключаются local-only «покрытые»
+        (_covered_sub_ids, они и так не подтверждены) и точное совпадение с
+        new_pattern (его обрабатывает refcount-ветка выше). Async-подписки
+        (sync=False) НЕ подтверждены — они могли тихо не создаться на сервере,
+        поэтому не покрывают узкие паттерны (иначе латентный «мёртвый виджет»:
+        узкий не получил своей подписки, а покрывающая не стримит дельт).
+        Coverage-проверка консервативна (см. pattern_covers): ложное «покрыто»
+        невозможно.
+
+        Args:
+            new_pattern: паттерн, для которого ищем покрытие.
+
+        Returns:
+            Строку покрывающего паттерна или None, если покрытия нет.
+        """
+        for sub_id, active_pattern in self._sub_patterns.items():
+            if sub_id in self._covered_sub_ids:
+                continue  # сам покрытый — не может быть источником потока
+            if active_pattern not in self._confirmed_patterns:
+                continue  # неподтверждённый (async) — не гарантирует поток дельт
+            if active_pattern == new_pattern:
+                continue  # точное совпадение — не сюда (refcount-ветка)
+            if pattern_covers(active_pattern, new_pattern):
+                return active_pattern
+        return None
 
     def release_subscription(
         self,
@@ -633,6 +775,8 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         self._pattern_sub_id.clear()
         self._pattern_refcount.clear()
         self._sub_id_pattern.clear()
+        self._covered_sub_ids.clear()
+        self._confirmed_patterns.clear()
         self.is_initialized = False
         self._log_debug(f"StateProxy '{self._process_name}': shutdown, все подписки удалены")
         return True

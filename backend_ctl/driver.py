@@ -35,6 +35,10 @@ from multiprocess_framework.modules.message_module import (
 # Колбэк подписчика на события (получает распарсенный push-dict).
 EventCallback = Callable[[Dict[str, Any]], None]
 
+# Сентинел «под-секция не передана»: отличает отсутствие аргумента от явного None
+# (для телеметрии ``publish=None`` — валидная команда «выключить gate», PC 3.2).
+_UNSET: Any = object()
+
 
 # ---------------------------------------------------------------------------
 # Типизированные результаты интроспекции (Ф1 Task 1.2)
@@ -449,18 +453,20 @@ class BackendDriver:
         max_items ограничивает размер пачки (остаток останется в очереди).
         Возвращает список событий в порядке поступления (FIFO).
         """
-        deadline = None if (timeout is None or timeout == 0.0) else time.monotonic() + timeout
         with self._events_cv:
-            while not self._events:
-                if timeout == 0.0:
-                    break  # поллинг: не ждём
-                if timeout is None:
-                    # Бесконечное ожидание: чтобы не висеть вечно на закрытом/не
-                    # открытом соединении — выходим (новых событий не будет).
+            # Три режима ожидания разведены явно — так `deadline` в блокирующей
+            # ветке всегда float (без Optional-narrowing) и каждая семантика читается
+            # отдельно. Поллинг (timeout == 0.0) вообще не ждёт — сразу к drain.
+            if timeout is None:
+                while not self._events:
+                    # Бесконечное ожидание: не висеть вечно на закрытом/не открытом
+                    # соединении — выходим (новых событий не будет).
                     if not self._running and self._reader is None:
                         break
                     self._events_cv.wait()
-                else:
+            elif timeout > 0.0:
+                deadline = time.monotonic() + timeout
+                while not self._events:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         break
@@ -580,9 +586,7 @@ class BackendDriver:
 
         cards: Dict[str, ProcessCapabilities] = {pm_name: pm_card}
         for name in sorted(topology):
-            cards[name] = ProcessCapabilities.from_response(
-                self.introspect_capabilities(name, timeout=timeout)
-            )
+            cards[name] = ProcessCapabilities.from_response(self.introspect_capabilities(name, timeout=timeout))
 
         return Capabilities(
             ok=pm_card.ok and all(c.ok for c in cards.values()),
@@ -687,6 +691,136 @@ class BackendDriver:
         """Выключить sink логгера процесса по имени (unregister_channel)."""
         return _leaf_result(self.send_command(process, "logger.sink.disable", {"sink": sink}, timeout=timeout))
 
+    # ---- Telemetry publish control plane (PC 3.2/3.3: адресно + fan-out на всех) ----
+
+    def telemetry_reconfigure(
+        self,
+        process: str = "all",
+        *,
+        publish: Any = _UNSET,
+        throttle: Any = _UNSET,
+        mode: str = "replace",
+        pm_name: str = "ProcessManager",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Рантайм-переконфигурация телеметрии: адресно ИЛИ fan-out на всех детей.
+
+        Две плоскости управления (план telemetry-publish-control), обе опциональны, но
+        хотя бы одна обязательна (иначе — error-dict, ничего не шлётся):
+
+          - ``publish`` → publisher-gate (что процесс СЧИТАЕТ/публикует и как часто).
+            ``publish=None`` — валидная команда «выключить gate» (все метрики каждый тик).
+          - ``throttle`` → центральный store-троттл оркестратора (rate-limit записи в дерево/IPC).
+
+        ``mode`` (Task 1.1) — режим применения ОБЕИХ плоскостей:
+          - ``"replace"`` (дефолт) — секция применяется ЦЕЛИКОМ. **ОСТОРОЖНО (wipe):**
+            publisher-gate пересобирается из ``publish`` (не указанные метрики → дефолты);
+            ``throttle`` идёт через ``set_rules`` — ПОЛНАЯ замена набора правил (сносит все
+            прочие правила, включая дефолтную IPC-страховку). Для «точечной» правки без
+            сноса соседей — ``mode="merge"`` или :meth:`telemetry_set` (он и есть merge).
+          - ``"merge"`` — дельта поверх ЖИВОГО состояния: publisher-override сохраняются,
+            throttle правится по-правилу (``update_rule``/``remove_rule``; значение ``None``
+            у throttle-паттерна → удалить правило). На проводе режим присутствует только при
+            ``merge`` (``replace`` — прежний конверт бит-в-бит).
+
+        Адресация по ``process`` (Task 1.4 — ОБА пути через PM, cap-aware):
+          - имя процесса → адресно ОДНОМУ ребёнку транзитом через PM
+            (``telemetry.broadcast`` с ``target=process``): PM форвардит ``publish`` этому
+            ребёнку, ``throttle`` применяет к ЦЕНТРАЛЬНОМУ троттлу (троттл оркестратор-
+            глобален). Транзит через PM — чтобы он детектил ``capped_by_throttle`` и на
+            per-process пути (прямой driver→child путь этого не мог: central-правила живут
+            лишь на оркестраторе, ADR-PM-017 Task 1.4). Возвращает ОХВАТ (``reached``/
+            ``target_count`` = 0/1) + ``capped_by_throttle`` при срезе. Fire-and-forward:
+            per-child ``applied`` больше не возвращается (сбор ответа ребёнка в PM дедлочил
+            бы message_processor) — факт применения смотреть по ``effective_hz`` в дереве.
+          - ``"all"`` / ``"*"`` / ``None`` → fan-out: ``telemetry.broadcast`` на PM →
+            ``publish`` рассылается ВСЕМ живым детям, ``throttle`` применяется к
+            ЦЕНТРАЛЬНОМУ троттлу оркестратора. Возвращает агрегированный ОХВАТ
+            (``publish.reached`` / ``target_count`` — «no silent caps»).
+        """
+        args: Dict[str, Any] = {}
+        if publish is not _UNSET:
+            args["publish"] = publish
+        if throttle is not _UNSET:
+            args["throttle"] = throttle
+        if not args:
+            return {"success": False, "error": "нужна хотя бы одна под-секция: publish и/или throttle"}
+        # На проводе telemetry_mode присутствует ТОЛЬКО при merge: replace — дефолт
+        # хендлеров, прежний конверт бит-в-бит (backward-compat старых сообщений).
+        if mode != "replace":
+            args["telemetry_mode"] = mode
+
+        # Task 1.4: и адресный, и fan-out путь идут через PM (единственный держатель
+        # central-троттла → детектит capped_by_throttle на ОБОИХ путях). Адресный кейс
+        # помечается data["target"] — PM форвардит publish ОДНОМУ ребёнку (не broadcast),
+        # throttle применяет центрально. Прямой driver→child путь ретрополнен: cap на нём
+        # был принципиально не детектируем (central-правила живут лишь на оркестраторе).
+        if process not in (None, "", "all", "*"):
+            args["target"] = process
+        return _leaf_result(self.send_command(pm_name, "telemetry.broadcast", args, timeout=timeout))
+
+    def telemetry_set(
+        self,
+        process: str,
+        metric: str,
+        *,
+        enabled: Any = _UNSET,
+        interval_sec: Any = _UNSET,
+        plane: str = "publisher",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Точечно поменять ОДНУ метрику/правило (узкая обёртка над :meth:`telemetry_reconfigure`).
+
+        **Точечность (Task 1.1):** обёртка шлёт ``mode="merge"`` — дельта применяется поверх
+        ЖИВОГО состояния, поэтому меняется РОВНО одно правило/метрика, а остальные override'ы
+        и правила сохраняются (раньше был full-apply, сносивший соседей).
+
+        ``plane="publisher"`` (дефолт, главный рычаг) — строит
+        ``publish={"metrics": {metric: {enabled?, interval_sec?}}}`` и мержит его в живой gate:
+        прочие метрики-override сохраняются.
+
+        ``plane="throttle"`` — ``metric`` трактуется как glob-путь правила, ``interval_sec`` —
+        min-интервал; строит ``throttle={metric: interval_sec}`` и мержит в центральный троттл
+        оркестратора через ``update_rule`` (остальные правила, включая дефолтную IPC-страховку
+        на ``latency_ms``/``effective_hz``/…, не тронуты). Чтобы СНЯТЬ правило точечно — передай
+        ``interval_sec=None`` в :meth:`telemetry_reconfigure` ``throttle={metric: None}, mode="merge"``.
+
+        **Троттл = IPC-предохранитель, НЕ потолок (Task 1.3, ADR-PM-017):** central-троттл
+        (``throttle``) — независимая ступень rate-limit'а в оркестраторе НАД publisher-gate,
+        но её роль — страховка от СБОЙНОГО публикатора, а не второй авторитет частоты.
+        Дефолтные central-правила заведомо мягче любого осмысленного publisher-интервала
+        (``0.05с`` ≈ 20 Гц) — поднятие частоты через publisher (например ``interval_sec=0.1``)
+        в дефолтном сценарии доходит до дерева БЕЗ среза.
+
+        Если оператор вручную задал строгое central-правило (``plane="throttle"``) и затем
+        поднял publisher-частоту НИЖЕ него — троттл его НЕ ослабляет автоматически («no
+        silent caps»): результат несёт явный флаг ``capped_by_throttle: {metric:
+        {publisher_interval_sec, throttle_interval_sec}}`` — увидев его, ослабь central-
+        правило тем же вызовом с ``plane="throttle"``. Task 1.4: флаг детектится на ОБОИХ
+        путях — и fan-out (``process="all"``), и адресном (конкретный процесс), т.к. оба
+        идут транзитом через PM (держатель central-троттла). Throttle-плоскость
+        по-прежнему full-apply в ``mode="replace"`` и точечная (per-правило) в ``mode="merge"``
+        (Task 1.1).
+
+        ``process`` — имя процесса ИЛИ ``"all"`` (fan-out через PM). Требуется ``enabled``
+        и/или ``interval_sec`` (для throttle — обязателен ``interval_sec``), иначе error-dict.
+        """
+        if plane == "throttle":
+            if interval_sec is _UNSET:
+                return {"success": False, "error": "throttle-плоскость требует interval_sec (min-интервал правила)"}
+            return self.telemetry_reconfigure(process, throttle={metric: interval_sec}, mode="merge", timeout=timeout)
+        if plane != "publisher":
+            return {"success": False, "error": f"неизвестная plane '{plane}' (publisher|throttle)"}
+
+        rule: Dict[str, Any] = {}
+        if enabled is not _UNSET:
+            rule["enabled"] = bool(enabled)
+        if interval_sec is not _UNSET:
+            rule["interval_sec"] = interval_sec
+        if not rule:
+            return {"success": False, "error": "нужен enabled и/или interval_sec"}
+        return self.telemetry_reconfigure(process, publish={"metrics": {metric: rule}}, mode="merge", timeout=timeout)
+
     # ---- Tail логов (Ф1 Task 1.5: подписка level≥X → событийный канал driver'а) ----
 
     def log_tail(
@@ -772,9 +906,7 @@ class BackendDriver:
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Синтетическое ui.event тем же путём доставки — проверка цепочки без клика."""
-        return _leaf_result(
-            self.send_command(process, "ui.tap.ping", {"note": note}, timeout=timeout)
-        )
+        return _leaf_result(self.send_command(process, "ui.tap.ping", {"note": note}, timeout=timeout))
 
     # ---- Debug-plane: полная наблюдаемость одним вызовом ----
 
@@ -803,9 +935,7 @@ class BackendDriver:
 
         procs = log_processes
         if procs is None:
-            st = self.send_command(
-                "ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout
-            )
+            st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
             tree = _leaf_result(st)
             node = tree.get("subtree") or tree.get("value") or {}
             procs = sorted(node) if isinstance(node, dict) else []
@@ -813,9 +943,7 @@ class BackendDriver:
             summary["logs"][p] = self.log_tail(p, level=logs_level, timeout=timeout)
 
         summary["state"] = self.state_subscribe(state_pattern, timeout=timeout)
-        summary["success"] = bool(
-            (summary["ui"] or {}).get("success") is not False
-        )
+        summary["success"] = bool((summary["ui"] or {}).get("success") is not False)
         return summary
 
     def debug_stop(
@@ -833,9 +961,7 @@ class BackendDriver:
         summary: Dict[str, Any] = {"ui": self.ui_untap(gui_process, timeout=timeout), "logs": {}}
         procs = log_processes
         if procs is None:
-            st = self.send_command(
-                "ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout
-            )
+            st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
             tree = _leaf_result(st)
             node = tree.get("subtree") or tree.get("value") or {}
             procs = sorted(node) if isinstance(node, dict) else []

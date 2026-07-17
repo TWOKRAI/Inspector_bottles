@@ -9,12 +9,21 @@
     Subscription        — описание одной подписки
     match_pattern       — публичный алиас для glob-матчинга паттерна с путём (ADR-SS-004)
     split_pattern       — публичный алиас для кэшированного split паттерна (ADR-SS-004)
+    pattern_covers      — coverage-check: покрывает ли один паттерн множество путей другого
+    static_prefix       — статический префикс паттерна до первого wildcard-сегмента
     iter_matches        — обход дерева по glob-паттерну (генератор пар path/value)
 """
 
 from .delta import STATE_ENVELOPE_MARKER, Delta, MISSING, Transaction
 from .tree_store import TreeStore
-from .subscription_manager import SubscriptionManager, Subscription, match_pattern, split_pattern
+from .subscription_manager import (
+    SubscriptionManager,
+    Subscription,
+    match_pattern,
+    split_pattern,
+    pattern_covers,
+    static_prefix,
+)
 from .glob_walker import iter_matches
 
 __all__ = [
@@ -27,5 +36,7 @@ __all__ = [
     "Subscription",
     "match_pattern",
     "split_pattern",
+    "pattern_covers",
+    "static_prefix",
     "iter_matches",
 ]

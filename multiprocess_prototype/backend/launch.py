@@ -318,7 +318,9 @@ class SystemBuilder:
         bp_dict = normalize_blueprint(self._blueprint, sys_config)
 
         initial_state = build_initial_state(bp_dict, sys_config.model_dump())
-        throttle_rules = build_throttle_rules()
+        # PC 2.1: правила центрального троттла — из telemetry.throttle конфига
+        # (fallback на хардкод-дефолты внутри build_throttle_rules, если пусто).
+        throttle_rules = build_throttle_rules(sys_config)
 
         log_dir = sys_config.system.log_dir or "logs"
 
@@ -335,12 +337,20 @@ class SystemBuilder:
         # overlay лишь применяет пользовательские значения из system.yaml.
         obs_overlay = expand_observability(sys_config.observability.model_dump())
 
+        # PC 1.3: глобальный дефолт telemetry.publish → assembler (per-process
+        # override живёт в самом blueprint, assembler читает его сам). None, если
+        # секция в system.yaml не задана — backward-compat: assembler НЕ кладёт
+        # ключ 'telemetry' ни в один proc_dict (см. TelemetrySection в schemas.py).
+        telemetry_publish = sys_config.telemetry.publish
+        telemetry_dict = telemetry_publish.model_dump() if telemetry_publish is not None else None
+
         # BlueprintAssembler: stateless сборщик — та же цепочка, что была инлайн
         # (validate → check → build_configs → log_dir → process → merge_managers →
         # merge_with_defaults).  Невалидный blueprint → BlueprintInvalid (не sys.exit).
         assembler = BlueprintAssembler(
             observability_dict=obs_overlay,
             log_dir=log_dir,
+            telemetry_dict=telemetry_dict,
         )
         try:
             proc_dicts = assembler.assemble(bp_dict)

@@ -853,7 +853,12 @@ class TestEnsureSubscription:
     """Идемпотентная подписка с refcount — дедуп по паттерну."""
 
     def test_ensure_creates_one_server_subscription(self):
-        """Два ensure на один pattern → ровно один state.subscribe."""
+        """Два ensure на один pattern → ровно один state.subscribe.
+
+        0.2: ensure_subscription теперь fire-and-forget (sync=False) — серверный
+        sub_id из ответа НЕ адоптируется (ответа не ждём), sub_id локальный. Но
+        дедуп по паттерну сохранён: второй ensure не шлёт второй subscribe.
+        """
         router = MockRouter()
         router.set_sync_response("state.subscribe", {"status": "ok", "sub_id": "srv-1"})
         proxy = StateProxy("cam", router=router)
@@ -861,7 +866,7 @@ class TestEnsureSubscription:
         s1 = proxy.ensure_subscription("processes.**")
         s2 = proxy.ensure_subscription("processes.**")
 
-        assert s1 == s2 == "srv-1"
+        assert s1 == s2  # дедуп: один и тот же (локальный) sub_id
         assert _count_sent(router, "state.subscribe") == 1
         assert proxy._pattern_refcount["processes.**"] == 2
 
@@ -1360,3 +1365,220 @@ class TestSendSyncPrefersRequestOverSend:
         proxy = StateProxy("cam", router=router)
 
         assert proxy.get("some.path") == 7
+
+
+# ---------------------------------------------------------------------------
+# Coverage-check + async-подписка (Ф-GUI-read-model 0.1 / 0.2)
+# ---------------------------------------------------------------------------
+
+
+class _SpyRouter:
+    """Роутер-шпион: раздельно считает send_async / send / request.
+
+    Реализует request() (как реальный RouterManager), поэтому _send_sync
+    пошёл бы через request(). Позволяет доказать, что async-путь (0.2) НЕ
+    трогает request()/send() — только send_async().
+    """
+
+    def __init__(self) -> None:
+        self.async_calls: list[dict] = []
+        self.send_calls: list[dict] = []
+        self.request_calls: list[dict] = []
+        self._sub_seq = 0
+
+    def register_message_handler(self, key, handler, **kwargs) -> None:
+        pass
+
+    def send_async(self, msg, priority: str = "normal") -> None:
+        self.async_calls.append(msg)
+
+    def send(self, msg) -> dict:
+        self.send_calls.append(msg)
+        return {"status": "success", "channel": "ctrl"}
+
+    def request(self, msg, timeout: float = 5.0) -> dict:
+        self.request_calls.append(msg)
+        # Уникальный sub_id на каждую подписку — как реальный сервер (иначе
+        # разные подписки склеились бы по одному sub_id в _sub_patterns).
+        self._sub_seq += 1
+        return {
+            "success": True,
+            "result": {"status": "ok", "sub_id": f"srv-{self._sub_seq}"},
+            "correlation_id": "cid",
+        }
+
+    def count(self, calls: list[dict], command: str) -> int:
+        return sum(1 for m in calls if isinstance(m, dict) and m.get("command") == command)
+
+
+class TestCoverageCheck:
+    """0.1: паттерн, покрытый активной серверной подпиской, не создаёт новую."""
+
+    def test_covered_pattern_sends_no_server_subscribe(self):
+        """Характеризация: при активных wildcard'ах covered ensure → 0 state.subscribe."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        # Стартовые wildcard'ы — как в frontend/process.py: прямой subscribe().
+        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True)
+        proxy.subscribe("system.**", lambda _d: None, exclude_self=True)
+        subs_after_wildcards = (
+            router.count(router.async_calls, "state.subscribe")
+            + router.count(router.send_calls, "state.subscribe")
+            + router.count(router.request_calls, "state.subscribe")
+        )
+
+        # Точечный covered паттерн — НЕ должен слать серверный subscribe.
+        proxy.ensure_subscription("processes.X.state.fps")
+
+        subs_total = (
+            router.count(router.async_calls, "state.subscribe")
+            + router.count(router.send_calls, "state.subscribe")
+            + router.count(router.request_calls, "state.subscribe")
+        )
+        assert subs_total == subs_after_wildcards, "covered pattern не должен слать state.subscribe"
+
+    def test_covered_pattern_still_receives_delta(self):
+        """Covered callback продолжает получать дельты (через поток покрывающей).
+
+        Реалистично: стартовый wildcard заводится sync=True с мок-router,
+        возвращающим валидный sub_id (как в проде frontend/process.py ДО
+        открытия вкладок), поэтому processes.** ПОДТВЕРЖДЁН и реально покрывает
+        узкий паттерн (0 новых серверных subscribe). Доставка узкому — потоком
+        покрывающей подписки, разводится _invoke_callbacks базового StateProxy.
+        """
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True)  # sync=True → confirmed
+        assert "processes.**" in proxy._confirmed_patterns
+
+        subs_before = router.count(router.async_calls, "state.subscribe")
+        seen: list = []
+        proxy.ensure_subscription("processes.X.state.fps", seen.append)
+        # Покрыт подтверждённым wildcard'ом — своей серверной подписки нет.
+        assert router.count(router.async_calls, "state.subscribe") == subs_before
+
+        delta = Delta(path="processes.X.state.fps", old_value=1, new_value=42, source="other")
+        proxy.on_state_changed({"data": {"deltas": [delta.to_dict()]}})
+
+        assert len(seen) == 1
+        assert seen[0][0].new_value == 42
+
+    def test_async_unconfirmed_wide_does_not_cover_narrow(self):
+        """Митигация: async-неподтверждённый широкий паттерн НЕ покрывает узкий.
+
+        Латентный риск «мёртвого виджета»: широкий паттерн, заведённый async
+        (sync=False), сервер не подтвердил — он мог тихо не создаться. Узкий
+        паттерн не считает его покрывающим и заводит СВОЮ (async) подписку.
+        """
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+        # Широкий паттерн заведён async — сервер НЕ подтвердил.
+        proxy.subscribe("processes.**", lambda _d: None, sync=False, exclude_self=True)
+        assert "processes.**" not in proxy._confirmed_patterns
+
+        before = router.count(router.async_calls, "state.subscribe")  # 1 (сам широкий)
+        proxy.ensure_subscription("processes.X.state.fps")
+        after = router.count(router.async_calls, "state.subscribe")
+        assert after == before + 1  # узкий создал свою подписку, не покрыт
+
+    def test_confirmed_pattern_populated_and_cleared_on_unsubscribe(self):
+        """_confirmed_patterns заполняется на sync-subscribe и чистится в unsubscribe."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        sub_id = proxy.subscribe("processes.**", lambda _d: None, sync=True)
+        assert "processes.**" in proxy._confirmed_patterns
+
+        proxy.unsubscribe(sub_id)
+        assert "processes.**" not in proxy._confirmed_patterns
+
+    def test_confirmed_pattern_survives_while_other_subid_holds_it(self):
+        """Снятие одного sub_id не убирает подтверждение, пока паттерн держит другой."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        sub_a = proxy.subscribe("processes.**", lambda _d: None, sync=True)
+        proxy.subscribe("processes.**", lambda _d: None, sync=True)  # второй sub на тот же паттерн
+        assert "processes.**" in proxy._confirmed_patterns
+
+        proxy.unsubscribe(sub_a)
+        # Второй sub_id всё ещё держит паттерн — подтверждение сохраняется.
+        assert "processes.**" in proxy._confirmed_patterns
+
+    def test_uncovered_pattern_creates_subscription(self):
+        """Регресс «панель не мертва»: непокрытый паттерн создаёт серверную подписку."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True)
+
+        before = router.count(router.async_calls, "state.subscribe")
+        # devices.** не покрыт processes.** — должна появиться новая подписка.
+        proxy.ensure_subscription("devices.Y.z")
+        after = router.count(router.async_calls, "state.subscribe")
+
+        assert after == before + 1
+
+    def test_release_covered_does_not_touch_covering(self):
+        """release покрытого не снимает покрывающую подписку и не шлёт unsubscribe."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True)
+
+        proxy.ensure_subscription("processes.X.state.fps")
+        released = proxy.release_subscription("processes.X.state.fps")
+
+        assert released is True  # local refcount обнулился
+        # Ни одного серверного unsubscribe (у covered нет серверной подписки).
+        assert router.count(router.async_calls, "state.unsubscribe") == 0
+        assert router.count(router.send_calls, "state.unsubscribe") == 0
+        # Покрывающая подписка жива в реестре паттернов proxy.
+        assert "processes.**" in proxy._sub_patterns.values()
+
+    def test_exclude_self_false_not_covered(self):
+        """Консервативность: exclude_self=False не покрывается — создаёт свою подписку."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+        proxy.subscribe("processes.**", lambda _d: None, exclude_self=True)
+
+        before = router.count(router.async_calls, "state.subscribe")
+        proxy.ensure_subscription("processes.X.state.fps", exclude_self=False)
+        after = router.count(router.async_calls, "state.subscribe")
+
+        assert after == before + 1
+
+
+class TestAsyncSubscribe:
+    """0.2: непокрытый ensure подписывается без блокирующего request()."""
+
+    def test_ensure_new_subscription_uses_only_send_async(self):
+        """ensure нового (непокрытого) паттерна → только send_async, без request/send."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        proxy.ensure_subscription("devices.Y.z")
+
+        assert router.count(router.async_calls, "state.subscribe") == 1
+        assert router.request_calls == []  # блокирующего раундтрипа нет
+        assert router.send_calls == []  # синхронного _send_sync нет
+
+    def test_subscribe_sync_true_still_uses_request(self):
+        """Обратная совместимость: subscribe(sync=True) по-прежнему идёт через request()."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        proxy.subscribe("a.b.c", lambda _d: None, sync=True)
+
+        assert len(router.request_calls) == 1
+        assert router.async_calls == []
+
+    def test_subscribe_sync_false_uses_send_async(self):
+        """subscribe(sync=False) — fire-and-forget через send_async, sub_id локальный."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        sub_id = proxy.subscribe("a.b.c", lambda _d: None, sync=False)
+
+        assert router.count(router.async_calls, "state.subscribe") == 1
+        assert router.request_calls == []
+        assert sub_id in proxy._sub_ids  # локальный sub_id зарегистрирован

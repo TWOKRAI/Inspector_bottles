@@ -314,6 +314,11 @@ class ProcessManagerProcess(ProcessModule):
                 self._cmd_process_relay,
                 "Relay: доставить команду в целевой процесс через свежий PSR PM",
             ),
+            "telemetry.broadcast": (
+                self._cmd_telemetry_broadcast,
+                "Телеметрия через PM: publish → всем детям (fan-out) ИЛИ адресно (data.target), "
+                "throttle → центральный троттл оркестратора; cap-детекция на обоих путях",
+            ),
         }
 
         for cmd_name, (handler, description) in commands.items():
@@ -1183,26 +1188,76 @@ class ProcessManagerProcess(ProcessModule):
         with self._routing_lock:
             epoch = self._routing_epoch
             processes = {n: {"incarnation": self._incarnations.get(n, 0)} for n in names}
-        msg = {
-            "type": "command",
-            "command": "routing.refresh",
-            "sender": self.name,
-            "queue_type": "system",
-            "data": {
-                "epoch": epoch,
-                "hub": self.name,
-                "reason": reason,
-                "processes": processes,
-                "ts": time.time(),
-            },
+        data = {
+            "epoch": epoch,
+            "hub": self.name,
+            "reason": reason,
+            "processes": processes,
+            "ts": time.time(),
         }
         try:
-            comm.broadcast(msg, exclude_self=True)
+            # Общий примитив рассылки (тот же путь comm.broadcast использует fan-out
+            # телеметрии, PC 3.3) — не дублируем сборку конверта.
+            self._broadcast_command("routing.refresh", data)
             self._log_info(f"routing.refresh разослан (reason={reason}, epoch={epoch}, процессов={len(processes)})")
             return True
         except Exception as exc:  # noqa: BLE001 — рассылка не должна ронять lifecycle
             self._log_error(f"_broadcast_routing_refresh({reason}) упал: {exc}")
             return False
+
+    def _broadcast_command(self, command: str, data: dict, *, queue_type: str = "system") -> int:
+        """Единый примитив рассылки command-билета всем детям (Ф3.1 / PC 3.3).
+
+        Строит command-конверт и отправляет существующим путём
+        ``ProcessCommunication.broadcast(exclude_self=True)`` (system-очереди детей) —
+        ТЕМ ЖЕ, которым едет routing.refresh: после hot-swap рассылка идёт по СВЕЖИМ
+        очередям PM (он держатель актуального PSR), поэтому долетает и до процессов,
+        пересозданных заменой рецепта.
+
+        Исключения НЕ глотает (пробрасывает вызывающему) — так routing.refresh
+        сохраняет своё поведение error-пути (лог «упал» + return False), а fan-out
+        телеметрии решает по-своему. ``communication`` недоступен (минимальный/тестовый
+        PM) → 0 (тихий no-op).
+
+        Returns:
+            Число успешных доставок (охват) от ``comm.broadcast``.
+        """
+        comm = getattr(self, "communication", None)
+        if comm is None:
+            return 0
+        msg = {
+            "type": "command",
+            "command": command,
+            "sender": self.name,
+            "queue_type": queue_type,
+            "data": data,
+        }
+        return int(comm.broadcast(msg, exclude_self=True))
+
+    def _send_child_command(self, target: str, command: str, data: dict, *, queue_type: str = "system") -> bool:
+        """Адресная отправка command-билета ОДНОМУ ребёнку (аналог :meth:`_broadcast_command`).
+
+        Тот же конверт, что broadcast, но через ``comm.send_to_process(target, msg)`` —
+        свежий PSR PM (долетает и до пересозданных hot-swap'ом процессов). Fire-and-forget:
+        возвращает факт ДОСТАВКИ в очередь (bool), НЕ подтверждение применения — синхронный
+        сбор ответа ребёнка в хендлере PM заблокировал бы message_processor (тот же дедлок,
+        что описан в ``driver.capabilities``). ``communication`` недоступен / без
+        ``send_to_process`` (минимальный/тестовый PM) → ``False`` (тихий no-op).
+
+        Returns:
+            ``True`` — билет доставлен в очередь адресата, иначе ``False``.
+        """
+        comm = getattr(self, "communication", None)
+        if comm is None or not hasattr(comm, "send_to_process"):
+            return False
+        msg = {
+            "type": "command",
+            "command": command,
+            "sender": self.name,
+            "queue_type": queue_type,
+            "data": data,
+        }
+        return bool(comm.send_to_process(target, msg))
 
     def _refresh_after_topology(self, reason: str, executed: list | None) -> int | None:
         """Если топология что-то исполнила (executed непуст) — bump epoch + broadcast.
@@ -1301,6 +1356,157 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"process.relay в '{target}' не удался: {exc}")
             return {"success": False, "error": str(exc)}
         return {"success": True, "target_process": target}
+
+    def _live_child_names(self) -> list[str]:
+        """Имена живых процессов-детей из PSR (для охвата fan-out), кроме себя.
+
+        Тот же источник, что снимок routing.refresh (``get_process_names``) — после
+        hot-swap отражает СВЕЖИЙ набор процессов. Best-effort: нет shared_resources /
+        сбой → пустой список (охват = 0, видно в результате).
+        """
+        sr = getattr(self, "shared_resources", None)
+        if sr is None:
+            return []
+        try:
+            return sorted(n for n in sr.get_process_names() if n != self.name)
+        except Exception:  # noqa: BLE001 — охват не критичен для применения
+            return []
+
+    def _cmd_telemetry_broadcast(self, data=None, **kwargs) -> dict:
+        """Fan-out ИЛИ адресная telemetry-переконфигурация через PM + центральный троттл (PC 3.3 / Task 1.4).
+
+        Закрывает пробел адресного ``telemetry.reconfigure`` (PC 3.1): рантайм-правка
+        publisher-gate детей ОДНИМ вызовом (не по одному). Task 1.1: опциональный
+        ``data["telemetry_mode"]`` (``"replace"`` по умолчанию | ``"merge"``) — общий
+        режим применения обеих плоскостей; ``merge`` прокидывается детям и в central-throttle
+        как дельта (точечная правка не стирает соседние правила/метрики). Контракт ``data``
+        (обе под-секции опциональны, но нужна хотя бы одна — проверяем НАЛИЧИЕ ключа, т.к.
+        ``publish=None`` валиден):
+
+          - ``publish`` → ``telemetry.reconfigure {publish}`` детям. Адресация задаётся
+            ``data["target"]`` (Task 1.4):
+
+              * ``None`` / ``""`` / ``"all"`` / ``"*"`` → **fan-out ВСЕМ живым детям** через
+                ``comm.broadcast(exclude_self=True)`` (:meth:`_broadcast_command` — тот же
+                надёжный путь, что routing.refresh: свежие очереди PM после hot-swap);
+              * имя процесса → **адресно ОДНОМУ ребёнку** через
+                :meth:`_send_child_command` (``comm.send_to_process``). Транзит через PM —
+                а не driver→child напрямую — чтобы PM (единственный держатель central-троттла)
+                мог детектить ``capped_by_throttle`` на per-process пути (ADR-PM-017 Task 1.4).
+
+            ``publish=None`` → выключить gate. **Fire-and-forget:** сообщается ОХВАТ
+            ДОСТАВКИ (``reached`` / ``target_count``, «no silent caps»), НЕ per-child
+            подтверждение применения (синхронный сбор ответа ребёнка дедлочил бы
+            message_processor — см. :meth:`_send_child_command`).
+          - ``throttle`` → применяется к ЦЕНТРАЛЬНОМУ ``ThrottleMiddleware`` самого
+            оркестратора (держатель StateStoreManager) через единый
+            ``apply_telemetry_reconfigure``; детям НЕ рассылается (у них нет
+            StateStoreManager). ``target`` throttle НЕ касается — троттл оркестратор-глобален.
+            Нет state-plane → ``applied=False`` (видно «нет приёмника»).
+
+        Returns:
+            Агрегированный dict (Dict at Boundary): ``publish``-охват (+ ``capped_by_throttle``
+            при срезе) и/или ``throttle``-применение — по каждой ЗАПРОШЕННОЙ под-секции.
+        """
+        from ...process_module.managers.telemetry_reload import (
+            VALID_MODES,
+            apply_telemetry_reconfigure,
+            detect_throttle_caps,
+            resolve_store_throttle,
+        )
+
+        args = _merge_cmd_args(data, kwargs)
+        has_publish = "publish" in args
+        has_throttle = "throttle" in args
+        if not has_publish and not has_throttle:
+            return {"success": False, "reason": "нужна хотя бы одна под-секция: publish и/или throttle"}
+
+        # Task 1.1: режим применения (replace|merge) — общий для обеих плоскостей.
+        # Прокидывается детям в publish-broadcast и в central-throttle apply. На проводе
+        # присутствует ТОЛЬКО при merge (replace = дефолт → бит-в-бит прежний конверт).
+        # Task 1.2 (замечание ревьюера): валидируем mode ЗДЕСЬ, ДО fan-out — broadcast
+        # fire-and-forget (ошибку детей никто не соберёт), поэтому битый mode не должен
+        # уйти детям и молча «похорониться». Явная ошибка вместо тихого no-op.
+        mode = str(args.get("telemetry_mode", "replace"))
+        if mode not in VALID_MODES:
+            return {
+                "success": False,
+                "process": self.name,
+                "mode": mode,
+                "reason": f"неизвестный telemetry mode={mode!r} (ожидается {VALID_MODES}); секция НЕ применена",
+            }
+
+        result: dict[str, Any] = {"success": True, "process": self.name}
+
+        # Task 1.4: адресация publish. Пусто/all/* → fan-out всем; имя процесса → адресно
+        # одному ребёнку транзитом через PM (throttle-плоскость от target не зависит —
+        # троттл оркестратор-глобален, см. блок has_throttle ниже).
+        target = args.get("target")
+        addressed = target not in (None, "", "all", "*")
+
+        if has_publish:
+            publish_payload: dict[str, Any] = {"publish": args["publish"]}
+            if mode != "replace":
+                publish_payload["telemetry_mode"] = mode
+            if addressed:
+                # Адресно ОДНОМУ ребёнку (Task 1.4): fire-and-forget, охват = 0/1.
+                try:
+                    delivered = self._send_child_command(target, "telemetry.reconfigure", publish_payload)
+                except Exception as exc:  # noqa: BLE001 — отправка не роняет применение throttle
+                    self._log_error(f"telemetry.broadcast: publish адресно target={target!r} упал: {exc}")
+                    delivered = False
+                targets = [target]
+                reached = 1 if delivered else 0
+            else:
+                targets = self._live_child_names()
+                try:
+                    reached = self._broadcast_command("telemetry.reconfigure", publish_payload)
+                except Exception as exc:  # noqa: BLE001 — рассылка не роняет применение throttle
+                    self._log_error(f"telemetry.broadcast: publish fan-out упал: {exc}")
+                    reached = 0
+            result["publish"] = {
+                "requested": True,
+                "target_count": len(targets),
+                "reached": int(reached),
+                "targets": targets,
+                # Полный охват = доставили всем адресатам (иначе сигнал наверх).
+                "complete": int(reached) >= len(targets),
+            }
+            self._log_info(f"telemetry.broadcast: publish → target={target!r} reached={reached}/{len(targets)}")
+
+        if has_throttle:
+            try:
+                applied = apply_telemetry_reconfigure(
+                    {"throttle": args["throttle"]},
+                    mode=mode,  # Task 1.1: merge → per-правило update/remove, replace → set_rules
+                    heartbeat=None,  # publisher-gate детей идёт broadcast'ом (publish), не здесь
+                    store_throttle=resolve_store_throttle(self),
+                    log_info=getattr(self, "_log_info", None),
+                )
+                result["throttle"] = {"requested": True, "applied": bool(applied.get("throttle"))}
+            except Exception as exc:  # noqa: BLE001 — ошибка throttle не должна терять уже совершённый publish-fan-out
+                self._log_error(f"telemetry.broadcast: применение throttle упало: {exc}")
+                result["throttle"] = {"requested": True, "applied": False, "error": str(exc)}
+
+        if has_publish:
+            # ADR-PM-017 (Task 1.3): «no silent caps». Если поднятие частоты метрики через
+            # publisher уходит НИЖЕ действующего central-правила той же метрики — троттл
+            # молча срезал бы его. Не режем тихо и не ослабляем страховку авто-магически:
+            # возвращаем ЯВНЫЙ отчёт, чтобы инициатор увидел потолок и осознанно ослабил
+            # central-правило (telemetry_set plane=throttle). Дефолт-троттл теперь мягче
+            # публикатора (manager_setup), поэтому в дефолтном сценарии caps пуст и частота
+            # реально растёт; флаг всплывает лишь при операторском строгом правиле.
+            #
+            # Ревью-фикс (#3): детектор зовётся ПОСЛЕ применения throttle-под-секции (блок
+            # выше), а не до — иначе комбинированная команда {publish: raise, throttle: relax}
+            # ловила бы ложноположительный cap по PRE-relax central-правилу (детектор читает
+            # store_throttle.rules ЖИВЬЁМ — тот же объект, что мутирует _apply_throttle).
+            caps = detect_throttle_caps(args["publish"], resolve_store_throttle(self))
+            if caps:
+                result["publish"]["capped_by_throttle"] = caps
+                self._log_info(f"telemetry.broadcast: publish частично ограничен central-троттлом: {caps}")
+
+        return result
 
     def _handle_process_command(self, msg: dict) -> None:
         """Обработчик Router-сообщений с command='process.command'.

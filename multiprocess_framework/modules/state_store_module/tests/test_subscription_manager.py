@@ -11,6 +11,7 @@
 - Потокобезопасность (concurrent операции)
 - Производительность
 """
+
 from __future__ import annotations
 
 import threading
@@ -23,11 +24,14 @@ from multiprocess_framework.modules.state_store_module.core.subscription_manager
     SubscriptionManager,
     _match_pattern,
     _split_pattern,
+    pattern_covers,
+    static_prefix,
 )
 
 # ===========================================================================
 # Вспомогательные функции
 # ===========================================================================
+
 
 def _make_delta(path: str, source: str = "test") -> Delta:
     """Создаёт минимальную дельту для тестирования match()."""
@@ -37,6 +41,7 @@ def _make_delta(path: str, source: str = "test") -> Delta:
 # ===========================================================================
 # Тесты _match_pattern — ядро матчинга
 # ===========================================================================
+
 
 class TestMatchPattern:
     """Тесты рекурсивного матчера паттернов."""
@@ -125,6 +130,7 @@ class TestMatchPattern:
 # ===========================================================================
 # Тесты SubscriptionManager — подписки и матчинг
 # ===========================================================================
+
 
 class TestSubscriptionManager:
     """Тесты API SubscriptionManager."""
@@ -287,6 +293,7 @@ class TestSubscriptionManager:
 # Тесты потокобезопасности
 # ===========================================================================
 
+
 class TestConcurrency:
     """Тесты параллельного доступа к SubscriptionManager."""
 
@@ -311,10 +318,7 @@ class TestConcurrency:
                 with lock:
                     errors.append(f"{name}: {e}")
 
-        threads = [
-            threading.Thread(target=subscriber_worker, args=(f"proc_{i}",))
-            for i in range(8)
-        ]
+        threads = [threading.Thread(target=subscriber_worker, args=(f"proc_{i}",)) for i in range(8)]
         for t in threads:
             t.start()
         for t in threads:
@@ -358,6 +362,7 @@ class TestConcurrency:
 # Тест производительности
 # ===========================================================================
 
+
 class TestPerformance:
     """Тесты производительности матчинга."""
 
@@ -391,6 +396,7 @@ class TestPerformance:
 # ===========================================================================
 # Edge cases
 # ===========================================================================
+
 
 class TestEdgeCases:
     """Edge cases и граничные условия."""
@@ -450,13 +456,14 @@ class TestEdgeCases:
 # Публичный API для shutdown / DevTools (ADR-SS-013)
 # ===========================================================================
 
+
 class TestSubscriptionManagerPublicSnapshot:
     """`subscribers()` и `all_subscriptions()` — без обращений к приватным."""
 
     def test_subscribers_returns_unique_names(self) -> None:
         mgr = SubscriptionManager()
         mgr.subscribe("a.*", "gui")
-        mgr.subscribe("b.*", "gui")          # тот же subscriber, две подписки
+        mgr.subscribe("b.*", "gui")  # тот же subscriber, две подписки
         mgr.subscribe("c.*", "camera_0")
 
         subscribers = sorted(mgr.subscribers())
@@ -485,3 +492,69 @@ class TestSubscriptionManagerPublicSnapshot:
         # Снимок — отдельный список (не разделяет состояние)
         snap.clear()
         assert mgr.subscription_count == 2
+
+
+# ===========================================================================
+# pattern_covers — coverage-check (Ф-GUI-read-model 0.1)
+# ===========================================================================
+
+
+class TestPatternCovers:
+    """cover покрывает candidate ⟺ множество путей candidate ⊆ множество путей cover."""
+
+    @pytest.mark.parametrize(
+        "cover, candidate, expected",
+        [
+            # Обязательные из ТЗ 0.1
+            ("processes.**", "processes.cam.state.fps", True),
+            ("processes.**", "processes.cam", True),
+            ("processes.*.fps", "processes.cam.fps", True),
+            ("processes.*", "processes.cam.state", False),
+            ("processes.*", "processes.**", False),
+            ("system.**", "processes.x", False),
+            ("a.b", "a.b", True),
+            ("a.b", "a.c", False),
+            # Дополнительные: soundness '**'/'*'/литералы
+            ("**", "processes.x.y.z", True),
+            ("**", "**", True),
+            ("*", "a", True),
+            ("*", "a.b", False),
+            ("a.**", "a.**", True),
+            ("a.**", "a.b.**", True),
+            ("a.*.c", "a.b.c", True),
+            ("a.*.c", "a.**.c", False),  # candidate '**' шире одного сегмента '*'
+            ("processes.**", "system.**", False),
+            ("a.b.**", "a.b", True),
+            ("a.b.c", "a.b", False),  # cover длиннее — candidate не покрыт
+        ],
+    )
+    def test_covers(self, cover: str, candidate: str, expected: bool) -> None:
+        assert pattern_covers(cover, candidate) is expected
+
+    def test_reflexive_wildcards(self) -> None:
+        """Любой паттерн покрывает сам себя."""
+        for p in ("a", "a.b", "a.*", "a.**", "**", "*"):
+            assert pattern_covers(p, p) is True
+
+
+# ===========================================================================
+# static_prefix — статический префикс до первого wildcard (Ф-GUI-read-model 0.3)
+# ===========================================================================
+
+
+class TestStaticPrefix:
+    @pytest.mark.parametrize(
+        "pattern, expected",
+        [
+            ("processes.cam.state.fps", "processes.cam.state.fps"),
+            ("processes.**", "processes"),
+            ("processes.*.fps", "processes"),
+            ("**", ""),
+            ("*", ""),
+            ("", ""),
+            ("a.b.**.c", "a.b"),
+            ("a.*.b.**", "a"),
+        ],
+    )
+    def test_static_prefix(self, pattern: str, expected: str) -> None:
+        assert static_prefix(pattern) == expected

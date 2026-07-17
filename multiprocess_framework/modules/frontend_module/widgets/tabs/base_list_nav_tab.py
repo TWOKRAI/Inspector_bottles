@@ -74,6 +74,7 @@ class BaseListNavTab(BaseColumnarTab):
         ctx: object,
         layout_factory: "Callable[[], TabLayoutProtocol] | None" = None,
         parent: QWidget | None = None,
+        lazy_content: bool = False,
     ) -> None:
         """Инициализировать вкладку с динамическим CRUD-списком.
 
@@ -82,6 +83,11 @@ class BaseListNavTab(BaseColumnarTab):
             ctx:            контекст приложения (generic, framework не знает тип).
             layout_factory: фабрика layout'а (TabLayoutProtocol). Обязательна.
             parent:         родительский виджет.
+            lazy_content:   если True --- ``add_item`` НЕ создаёт content-виджет
+                сразу; виджет строится лениво при первом переключении на
+                элемент (``_on_nav_changed``) и кэшируется. По умолчанию False
+                --- поведение не меняется (content создаётся синхронно в
+                ``add_item``, как раньше).
         """
         # Маппинг key -> QListWidgetItem (для O(1) поиска при remove/rename)
         self._key_to_item: dict[str, QListWidgetItem] = {}
@@ -91,6 +97,11 @@ class BaseListNavTab(BaseColumnarTab):
 
         # Guard от рекурсии: _on_list_selection_changed → _on_nav_changed → ...
         self._selection_guard = False
+
+        # Ленивый режим (opt-in): ключи, для которых content-виджет ещё не
+        # создан. Опустошается по мере первого показа каждого элемента.
+        self._lazy_content = lazy_content
+        self._pending_lazy_keys: set[str] = set()
 
         super().__init__(
             title=title,
@@ -115,8 +126,10 @@ class BaseListNavTab(BaseColumnarTab):
         """Реагировать на смену выбора: эмитить item_selected, переключить стек.
 
         Вызывается из ``_on_list_selection_changed`` (user-driven) и может
-        быть вызван подклассом напрямую.
+        быть вызван подклассом напрямую. В ``lazy_content`` режиме сначала
+        достраивает content-виджет ключа, если он ещё не создан.
         """
+        self._ensure_content_widget(key)
         if key in self._key_to_index:
             self._content_stack.setCurrentIndex(self._key_to_index[key])
         self.item_selected.emit(key)
@@ -148,9 +161,14 @@ class BaseListNavTab(BaseColumnarTab):
         self._nav_widget.addItem(item)
         self._key_to_item[key] = item
 
-        # Ленивая регистрация content widget
-        content_widget = self._create_item_widget(key)
-        self.register_content_widget(key, content_widget)
+        if self._lazy_content:
+            # Content-виджет строится лениво при первом показе элемента
+            # (см. _ensure_content_widget, вызывается из _on_nav_changed).
+            self._pending_lazy_keys.add(key)
+        else:
+            # Ленивая регистрация content widget
+            content_widget = self._create_item_widget(key)
+            self.register_content_widget(key, content_widget)
 
         self.item_added.emit(key)
 
@@ -164,6 +182,9 @@ class BaseListNavTab(BaseColumnarTab):
         if item is None:
             logger.warning("remove_item: ключ '%s' не найден", key)
             return
+
+        # Ключ мог быть ещё не материализован в lazy_content режиме.
+        self._pending_lazy_keys.discard(key)
 
         assert self._nav_widget is not None
         row = self._nav_widget.row(item)
@@ -259,6 +280,20 @@ class BaseListNavTab(BaseColumnarTab):
     # ------------------------------------------------------------------
     # Внутренние методы
     # ------------------------------------------------------------------
+
+    def _ensure_content_widget(self, key: str) -> None:
+        """Лениво создать и зарегистрировать content-виджет ключа.
+
+        No-op вне ``lazy_content`` режима и для ключей, чей виджет уже создан
+        (обычный путь --- ``add_item`` в не-ленивом режиме регистрирует
+        виджет сразу, поэтому ``key`` там никогда не попадёт в
+        ``_pending_lazy_keys``).
+        """
+        if not self._lazy_content or key not in self._pending_lazy_keys:
+            return
+        self._pending_lazy_keys.discard(key)
+        content_widget = self._create_item_widget(key)
+        self.register_content_widget(key, content_widget)
 
     def _on_list_selection_changed(
         self,

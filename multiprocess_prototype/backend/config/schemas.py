@@ -13,7 +13,10 @@ from multiprocess_framework.modules.data_schema_module import (
     SchemaBase,
     deep_merge,
 )
-from multiprocess_framework.modules.process_module.configs import ObservabilityConfig
+from multiprocess_framework.modules.process_module.configs import (
+    ObservabilityConfig,
+    TelemetryPublishConfig,
+)
 
 
 class SystemSection(SchemaBase):
@@ -147,6 +150,45 @@ class BackendCtlSection(SchemaBase):
     ] = "127.0.0.1"
 
 
+class TelemetrySection(SchemaBase):
+    """Глобальные дефолты публикации телеметрии (PC 1.3, Фаза 1 плана telemetry-publish-control).
+
+    ``publish`` — framework-контракт ``TelemetryPublishConfig`` (per-метрика вкл/выкл +
+    частота, publisher-gate в heartbeat, PC 1.1/1.2). Дефолт — **None** («секция
+    отсутствует»): ``BlueprintAssembler`` кладёт ключ ``telemetry`` в ``proc_dict['config']``
+    ТОЛЬКО когда секция реально задана (здесь глобально ИЛИ per-process в
+    ``blueprint.processes[].telemetry``). Если задать ``publish`` явно (даже пустым
+    ``{}``) — секция считается заданной, и heartbeat строит ``TelemetryGate`` для всех
+    процессов (backward-compat завязан именно на отсутствие/присутствие, см. PC 1.2
+    ``_build_telemetry_gate``).
+
+    ``throttle`` — центральный store-троттл (Фаза 2 плана, PC 2.1). Читается
+    ``build_throttle_rules(sys_config)`` (``backend/state/manager_setup.py``):
+    непустой ``throttle`` ПОЛНОСТЬЮ заменяет хардкод-дефолты троттла; пустой
+    dict (дефолт) — прежние хардкод-дефолты (обратная совместимость).
+    """
+
+    publish: Annotated[
+        TelemetryPublishConfig | None,
+        FieldMeta(
+            "Публикация телеметрии",
+            info="Глобальный дефолт per-метрика вкл/выкл + частота (per-process в "
+            "рецепте переопределяет). None = секция отсутствует — публикация без "
+            "гейта, как до PC 1.x.",
+        ),
+    ] = None
+
+    throttle: Annotated[
+        dict[str, float],
+        FieldMeta(
+            "Центральный троттл",
+            info="Правила {glob_pattern: min_interval_sec} для ThrottleMiddleware "
+            "StateStoreManager. Пусто (дефолт) — хардкод-дефолты build_throttle_rules; "
+            "заданный набор ПОЛНОСТЬЮ заменяет их (PC 2.1).",
+        ),
+    ] = {}
+
+
 class SystemConfig(SchemaBase):
     """Корневая схема system.yaml."""
 
@@ -158,6 +200,7 @@ class SystemConfig(SchemaBase):
     discovery: DiscoverySection = DiscoverySection()
     backend_ctl: BackendCtlSection = BackendCtlSection()
     observability: ObservabilityConfig = ObservabilityConfig()
+    telemetry: TelemetrySection = TelemetrySection()
 
     def defaults_for_category(self, category: str) -> dict[str, Any]:
         """Получить defaults dict для категории плагина.

@@ -8,6 +8,7 @@
 SubscriptionManager потокобезопасен (RLock).
 Дедупликация по subscriber — ответственность DeltaDispatcher (Task 4b).
 """
+
 from __future__ import annotations
 
 import threading
@@ -20,6 +21,7 @@ from .delta import Delta
 # ---------------------------------------------------------------------------
 # Subscription — описание одной подписки
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class Subscription:
@@ -43,6 +45,7 @@ class Subscription:
 # Кэширование разбора паттернов
 # ---------------------------------------------------------------------------
 
+
 @lru_cache(maxsize=256)
 def _split_pattern(pattern: str) -> tuple[str, ...]:
     """Разбивает паттерн по '.' и кэширует результат.
@@ -58,6 +61,7 @@ def _split_pattern(pattern: str) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 # Рекурсивный матчер паттернов
 # ---------------------------------------------------------------------------
+
 
 def _match_pattern(pattern_segs: tuple[str, ...], path_segs: tuple[str, ...]) -> bool:
     """Рекурсивно проверяет совпадение паттерна с путём.
@@ -103,8 +107,114 @@ def _match_pattern(pattern_segs: tuple[str, ...], path_segs: tuple[str, ...]) ->
 
 
 # ---------------------------------------------------------------------------
+# Coverage-check: покрывает ли один паттерн множество путей другого
+# ---------------------------------------------------------------------------
+
+
+def _pattern_covers(cover_segs: tuple[str, ...], candidate_segs: tuple[str, ...]) -> bool:
+    """Рекурсивно проверяет, покрывает ли cover множество путей candidate.
+
+    Возвращает True ⟺ КАЖДЫЙ путь, который может сматчить ``candidate``,
+    также матчится ``cover`` (множество путей candidate ⊆ множество путей cover).
+
+    Реализация консервативна (soundness прежде всего): при любом сомнении
+    возвращает False. Ложное «покрыто» привело бы к пропущенной серверной
+    подписке и «мёртвому виджету» — поэтому покрытие заявляется только когда
+    доказуемо для ВСЕХ путей candidate.
+
+    Правила по сегментам:
+      - '**' в cover покрывает 0+ сегментов candidate (две ветки: пропустить
+        '**' либо поглотить один сегмент candidate);
+      - '*' в cover покрывает РОВНО один сегмент candidate, если это '*' или
+        литерал, но НЕ '**' (candidate '**' может развернуться в несколько
+        сегментов — один cover-'*' их не гарантирует);
+      - литерал в cover покрывает только тот же литерал в candidate (не '*'/'**');
+      - candidate-сегмент '**' против cover-сегмента '*'/литерала → False.
+
+    Args:
+        cover_segs: сегменты покрывающего паттерна.
+        candidate_segs: сегменты кандидата.
+
+    Returns:
+        True если cover покрывает все пути candidate.
+    """
+    # Оба исчерпаны — покрытие полное.
+    if not cover_segs and not candidate_segs:
+        return True
+
+    # cover исчерпан, а у candidate остались сегменты — не покрыт.
+    if not cover_segs:
+        return False
+
+    head = cover_segs[0]
+
+    if head == "**":
+        # '**' поглощает 0 сегментов: пропускаем '**'.
+        if _pattern_covers(cover_segs[1:], candidate_segs):
+            return True
+        # '**' поглощает 1+ сегментов: съедаем один сегмент candidate.
+        # Поглотить можно любой сегмент candidate, включая '*'/'**'.
+        return bool(candidate_segs and _pattern_covers(cover_segs, candidate_segs[1:]))
+
+    # head — '*' или литерал: требуется хотя бы один сегмент candidate.
+    if not candidate_segs:
+        return False
+
+    cand_head = candidate_segs[0]
+
+    # candidate '**' может развернуться в несколько сегментов — один '*'/литерал
+    # cover покрыть это не может.
+    if cand_head == "**":
+        return False
+
+    if head == "*":
+        # '*' покрывает ровно один сегмент candidate ('*' или литерал, но не '**').
+        return _pattern_covers(cover_segs[1:], candidate_segs[1:])
+
+    # head — литерал: покрывает только тот же литерал (не '*'/'**').
+    if cand_head == head:
+        return _pattern_covers(cover_segs[1:], candidate_segs[1:])
+
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Статический префикс паттерна (до первого wildcard-сегмента)
+# ---------------------------------------------------------------------------
+
+
+def _static_prefix(pattern: str) -> str:
+    """Выделяет статический префикс паттерна до первого wildcard-сегмента.
+
+    Каждый путь, матчащий ``pattern``, обязан начинаться с этого префикса
+    (литеральные сегменты матчатся буквально). Используется для адресного
+    реплея: копировать не всё дерево, а только поддерево префикса.
+
+    Примеры:
+        'processes.cam.state.fps' → 'processes.cam.state.fps'  (нет wildcard)
+        'processes.**'            → 'processes'
+        'processes.*.fps'         → 'processes'
+        '**' / '*'                → ''  (wildcard с первого сегмента)
+        ''                        → ''
+
+    Args:
+        pattern: glob-паттерн пути.
+
+    Returns:
+        Точечный статический префикс (может быть пустой строкой).
+    """
+    segs: list[str] = []
+    for seg in _split_pattern(pattern):
+        if seg == "*" or seg == "**":
+            break
+        segs.append(seg)
+    return ".".join(segs)
+
+
+# ---------------------------------------------------------------------------
 # SubscriptionManager
 # ---------------------------------------------------------------------------
+
 
 class SubscriptionManager:
     """Управление подписками с glob-style matching.
@@ -292,3 +402,21 @@ class SubscriptionManager:
 
 match_pattern = _match_pattern
 split_pattern = _split_pattern
+pattern_covers_segs = _pattern_covers
+static_prefix = _static_prefix
+
+
+def pattern_covers(cover: str, candidate: str) -> bool:
+    """Публичный алиас coverage-check по строковым паттернам (ADR-SS-004).
+
+    True ⟺ множество путей ``candidate`` ⊆ множество путей ``cover``
+    (см. :func:`_pattern_covers`). Консервативен: при сомнении → False.
+
+    Args:
+        cover: покрывающий glob-паттерн.
+        candidate: проверяемый glob-паттерн.
+
+    Returns:
+        True если cover покрывает все пути candidate.
+    """
+    return _pattern_covers(_split_pattern(cover), _split_pattern(candidate))

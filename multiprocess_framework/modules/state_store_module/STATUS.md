@@ -26,7 +26,7 @@
 | **middleware/** | | | |
 | StateMiddleware (ABC) | middleware/base.py | Готов | Базовый класс middleware |
 | MiddlewarePipeline | middleware/base.py | Готов | Цепочка middleware (нулевой overhead на пустом pipeline) |
-| ThrottleMiddleware | middleware/throttle.py | Готов | Дебаунс/блокировка по паттернам путей |
+| ThrottleMiddleware | middleware/throttle.py | Готов | Дебаунс/блокировка по паттернам путей (set + merge per-leaf, ADR-SS-018); рантайм-мутаторы правил set_rules/update_rule/remove_rule |
 | ValidationMiddleware | middleware/validation.py | Готов | Валидация type / min / max / enum |
 | LoggingMiddleware | middleware/logging_mw.py | Готов | Логирование изменений + exclude_patterns |
 | MetricsMiddleware | middleware/metrics.py | Готов | Счётчики операций, источники, last_operation_time |

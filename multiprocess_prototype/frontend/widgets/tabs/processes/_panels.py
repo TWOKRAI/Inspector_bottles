@@ -18,9 +18,11 @@ Task E.2: панели принимают ``bindings`` (GuiStateBindings) нап
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
+import time
+from typing import TYPE_CHECKING, Any, Callable
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QGroupBox,
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMessageBox,
+    QPushButton,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -35,18 +38,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from multiprocess_framework.modules.process_module.heartbeat.telemetry import GATED_METRICS
+from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
+from multiprocess_prototype.frontend.state.telemetry_history import TelemetryHistorySource
 from multiprocess_prototype.frontend.widgets.primitives import (
     CardAction,
     EntityCard,
 )
 
-from .widgets import CreateWorkerDialog, ProcessCard, WorkerTable
+from ._telemetry_controls import TelemetryControlsSection
+from .widgets import CreateWorkerDialog, ProcessCard, TelemetrySparkline, WorkerTable
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
+    from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
 
     from .presenter import ProcessesPresenter
+
+_logger = logging.getLogger(__name__)
 
 # Колонки таблицы «Все процессы»
 _ALL_TABLE_COLUMNS = ["Имя", "Категория", "Статус", "Циклов/с", "Плагины"]
@@ -75,6 +85,40 @@ _CATEGORY_ORDER = [
 # QSS подсветки выбранной карточки/строки (process-scope кнопок).
 _SELECTED_CARD_QSS = "QFrame#EntityCard { border: 2px solid #2563eb; }"
 
+# Дебаунс каскада обнаружения рантайм-воркеров (Task 0.4, часть A): N
+# обнаружений подряд коалесцируются в один _refresh_workers.
+_WORKER_DISCOVERY_DEBOUNCE_MS = 50
+
+# Диапазоны графика телеметрии (Ф2, Task 2.2): ключ → (подпись кнопки, окно в
+# секундах). "10m" — единственный ring-buffer-диапазон (без похода в БД, см.
+# _refresh_graph_from_ring); "1h"/"1d" читают TelemetryHistorySource.
+_GRAPH_RANGES: tuple[tuple[str, str, float], ...] = (
+    ("10m", "10 мин", 600.0),
+    ("1h", "1 час", 3600.0),
+    ("1d", "1 день", 86400.0),
+)
+_DEFAULT_GRAPH_RANGE = "10m"
+
+# Шаблон секции «Телеметрия» (Ф4.1): RU-метки и дефолтные интервалы для метрик
+# framework GATED_METRICS. Ключи — те же метрики; отсутствующий ключ → сам ключ /
+# общий дефолт. Значения — app-specific presentation (framework даёт лишь список).
+_TELEMETRY_METRIC_LABELS: dict[str, str] = {
+    "fps": "FPS (кадров/с)",
+    "latency_ms": "Задержка, мс",
+    "effective_hz": "Частота цикла, Гц",
+    "cycle_duration_ms": "Длит. цикла, мс",
+    "shm": "SHM",
+}
+_TELEMETRY_METRIC_DEFAULTS: dict[str, float] = {
+    "fps": 1.0,
+    "latency_ms": 1.0,
+    "effective_hz": 1.0,
+    "cycle_duration_ms": 1.0,
+    "shm": 2.0,
+}
+# Верхняя граница точек, тащимых из БД на один запрос графика (даунсемпл — Task 2.1).
+_GRAPH_HISTORY_MAX_POINTS = 300
+
 
 def _format_uptime(value: object) -> str:
     """Секунды → «MM:SS» / «H:MM:SS» для метрики uptime карточки процесса."""
@@ -88,6 +132,45 @@ def _format_uptime(value: object) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
+def _make_vm_setter(
+    widget: QWidget,
+    prop: str,
+    formatter: Callable[[Any], Any] | None = None,
+) -> Callable[[Any], None]:
+    """Собрать setter «значение → виджет» для VM-режима (Task 1.3).
+
+    Повторяет применение значения из ``GuiStateBindings._apply_to_widget``: тот же
+    formatter, тот же вызов setter (``text`` → ``setText(str(...))``,
+    ``set_state`` → ``set_state(...)``, прочее — ``getattr(widget, prop)(...)``).
+
+    Отличие от legacy НА УДАЛЕНИИ узла (``deleted=True`` → в батче ``updated``
+    приходит ``(path, None)``): legacy-путь без явного ``reset`` виджет НЕ трогает
+    (оставляет последнее значение), VM-путь прогоняет ``None`` через formatter →
+    метка показывает «—», индикатор — состояние «unknown». Это НАМЕРЕННО: для
+    исчезнувшего процесса «нет данных» корректнее застрявшего старого значения.
+    Расхождение проявляется лишь на реальном сносе узла топологии (редко, обычно
+    с перестройкой панели). Зафиксировано тестом ``test_*deleted*`` в
+    ``test_telemetry_vm_panels.py``.
+
+    Замыкает виджет сильной ссылкой — живёт ровно столько, сколько панель-владелец
+    (её dict сеттеров), затем GC вместе с ней; сигнал ``updated`` авто-отключается
+    Qt при уничтожении панели-получателя.
+    """
+
+    def _setter(value: Any) -> None:
+        display = formatter(value) if formatter is not None else value
+        if prop == "text":
+            widget.setText(str(display))  # type: ignore[attr-defined]
+        elif prop == "set_state":
+            widget.set_state(display)  # type: ignore[attr-defined]
+        else:
+            method = getattr(widget, prop, None)
+            if callable(method):
+                method(display)
+
+    return _setter
+
+
 class AllProcessesPanel(QWidget):
     """Панель для ALL_PROCESSES_KEY: health + inner-стек Cards/Table."""
 
@@ -98,11 +181,22 @@ class AllProcessesPanel(QWidget):
         self,
         presenter: "ProcessesPresenter",
         bindings: "GuiStateBindings | None",
+        *,
+        telemetry: "TelemetryViewModel | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._presenter = presenter
         self._bindings = bindings
+        # Ф1 (gui-telemetry-read-model 1.3): локальный read-model телеметрии.
+        # VM-режим предпочтителен (один слот на ``updated`` вместо N bind);
+        # None → fallback на bindings-путь (существующие тесты/оболочки без VM).
+        self._telemetry = telemetry
+        # Карта VM-режима: точный путь → setter(value). Заполняется в
+        # _connect_telemetry_vm; читается _apply_telemetry_items.
+        self._vm_setters: dict[str, Callable[[Any], None]] = {}
+        # Fan-out'ы VM-режима: точный путь → callback(path, value) (trace-таблицы).
+        self._vm_fanouts: dict[str, Callable[[str, Any], None]] = {}
         self._cards: dict[str, EntityCard] = {}
         self._selected_card_name: str | None = None
 
@@ -431,15 +525,118 @@ class AllProcessesPanel(QWidget):
                 )
 
     def _connect_bindings(self) -> None:
-        """Подписаться на StateStore для карточек и health-меток."""
+        """Подключить телеметрию карточек/health: VM-режим или bindings-fallback.
+
+        VM-режим (Task 1.3) предпочтителен: один слот на ``updated`` вместо N
+        точечных ``bind`` (0 серверных подписок из панели). Fallback на прежний
+        ``bindings.bind``-путь — когда VM не подан (telemetry=None): часть тестов
+        и оболочки без read-model.
+        """
+        # Плейсхолдеры метрик карточек — общие для обоих путей (создают QLabel'ы
+        # «Циклов/с»/«Время цикла», к которым дальше цепляются setter'ы/binding'и).
+        for card in self._cards.values():
+            card.set_metrics({"Циклов/с": "—", "Время цикла": "—"})
+
+        if self._telemetry is not None:
+            self._connect_telemetry_vm()
+        elif self._bindings is not None:
+            self._connect_bindings_legacy()
+
+    # --- VM-режим (Task 1.3) ------------------------------------------- #
+
+    def _connect_telemetry_vm(self) -> None:
+        """Собрать карту путей→setter, подписаться на ``updated`` одним слотом,
+        первично наполнить из snapshot (late-binding)."""
+        setters: dict[str, Callable[[Any], None]] = {}
+
+        # Карточки: статус + Циклов/с + Время цикла.
+        for name, card in self._cards.items():
+            setters[f"processes.{name}.state.status"] = _make_vm_setter(card._indicator, "set_state")
+            hz_label = card._metric_labels.get("Циклов/с")
+            if hz_label is not None:
+                setters[f"processes.{name}.state.fps"] = _make_vm_setter(
+                    hz_label, "text", lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—"
+                )
+            cycle_label = card._metric_labels.get("Время цикла")
+            if cycle_label is not None:
+                setters[f"processes.{name}.state.latency_ms"] = _make_vm_setter(
+                    cycle_label, "text", lambda v: f"{v:.1f} мс" if isinstance(v, (int, float)) else "—"
+                )
+
+        # Health-метки (те же formatter'ы, что в legacy — байт-в-байт).
+        setters["system.health.active"] = _make_vm_setter(
+            self._lbl_active, "text", lambda v: f"Активно: {v}" if isinstance(v, (int, float)) else "Активно: 0"
+        )
+        setters["system.health.broken_wires"] = _make_vm_setter(
+            self._lbl_wires,
+            "text",
+            lambda v: (
+                f"<span style='color: #dc2626;'>Обрывы связей: {v}</span>"
+                if isinstance(v, (int, float)) and v > 0
+                else "Обрывы связей: 0"
+            ),
+        )
+        setters["system.health.avg_fps"] = _make_vm_setter(
+            self._lbl_avg_fps,
+            "text",
+            lambda v: f"Средняя частота: {v:.1f}" if isinstance(v, (int, float)) else "Средняя частота: —",
+        )
+        setters["system.chain_fps"] = _make_vm_setter(
+            self._lbl_chain_fps,
+            "text",
+            lambda v: f"FPS цепочки: {v:.1f}" if isinstance(v, (int, float)) else "FPS цепочки: —",
+        )
+        setters["system.chain_latency_ms"] = _make_vm_setter(
+            self._lbl_chain_latency,
+            "text",
+            lambda v: f"Задержка цепочки: {v:.0f} ms" if isinstance(v, (int, float)) else "Задержка цепочки: —",
+        )
+        self._vm_setters = setters
+
+        # Fan-out'ы (trace_segments/trace_branches) — точные пути, значение списком.
+        self._vm_fanouts = {
+            "system.trace_segments": self._on_trace_segments,
+            "system.trace_branches": self._on_trace_branches,
+        }
+
+        self._telemetry.updated.connect(self._on_telemetry_batch)
+
+        # Первичное наполнение из снимка (late-binding): панель, созданная ПОСЛЕ
+        # публикации, сразу показывает актуальное. Границы поддеревьев по точке.
+        initial = list(self._telemetry.snapshot("processes").items())
+        initial += list(self._telemetry.snapshot("system").items())
+        self._apply_telemetry_items(initial)
+
+    def _on_telemetry_batch(self, batch: list[tuple[str, Any]]) -> None:
+        """Слот на ``TelemetryViewModel.updated`` — один на панель (не по пути)."""
+        self._apply_telemetry_items(batch)
+
+    def _apply_telemetry_items(self, items: list[tuple[str, Any]]) -> None:
+        """Применить пачку (path, value): setter карточки/health + trace-fan-out."""
+        for path, value in items:
+            setter = self._vm_setters.get(path)
+            if setter is not None:
+                try:
+                    setter(value)
+                except Exception as exc:  # виджет↔значение — не валим GUI (правило 5)
+                    _logger.debug("telemetry-vm: setter failed on %s: %s", path, exc)
+            fanout = self._vm_fanouts.get(path)
+            if fanout is not None:
+                try:
+                    fanout(path, value)
+                except Exception as exc:
+                    _logger.debug("telemetry-vm: fan-out failed on %s: %s", path, exc)
+
+    # --- Fallback: прежний bindings-путь ------------------------------- #
+
+    def _connect_bindings_legacy(self) -> None:
+        """Прежний путь через GuiStateBindings (VM не подан). Полное удаление —
+        Phase 3.1."""
         bindings = self._bindings
-        if bindings is None:
-            return
+        assert bindings is not None
 
         # Карточки: статус + Циклов/с (частота, среднее за секунду) + Время цикла.
         for name, card in self._cards.items():
-            card.set_metrics({"Циклов/с": "—", "Время цикла": "—"})
-
             bindings.bind(
                 f"processes.{name}.state.status",
                 card._indicator,
@@ -520,16 +717,50 @@ class SingleProcessPanel(QWidget):
         presenter: "ProcessesPresenter",
         bindings: "GuiStateBindings | None",
         process_name: str,
+        *,
+        telemetry: "TelemetryViewModel | None" = None,
+        history_source: "TelemetryHistorySource | None" = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._presenter = presenter
         self._bindings = bindings
+        # Ф1 (gui-telemetry-read-model 1.3): локальный read-model. VM-режим
+        # предпочтителен; None → fallback на bindings-путь.
+        self._telemetry = telemetry
+        # Ф2 (gui-telemetry-read-model 2.1/2.2): read-сторона telemetry.db для
+        # графика за час/день. Конструктор source — без I/O (только путь), None
+        # → дефолтный TelemetryHistorySource() (env INSPECTOR_TELEMETRY_DB /
+        # data/telemetry.db). Инъекция параметром — для тестов (fake-источник).
+        self._history_source = history_source if history_source is not None else TelemetryHistorySource()
+        # RequestRunner (P2 command-result-bridge) — гоняет list_range() на
+        # worker-потоке QThreadPool, результат доставляется в main-thread
+        # сигналом (см. модуль request_runner.py). Без него чтение БД в
+        # main thread фризило бы GUI на время I/O (план запрещает это явно).
+        self._history_runner = RequestRunner(self)
+        self._graph_range: str = _DEFAULT_GRAPH_RANGE
+        # Генерация запроса истории: инкрементируется на каждый submit; async-ответ
+        # применяется, только если его генерация совпадает с текущей. Иначе быстрое
+        # переключение диапазона (1ч→1д→10м) могло бы применить устаревший ответ
+        # поверх актуального выбора (QThreadPool не гарантирует порядок завершения).
+        self._graph_request_id = 0
+        # Карты VM-режима: точный путь → setter(value). Статичные пути процесса
+        # (_vm_setters) и пере-собираемые пути воркеров (_vm_worker_setters,
+        # обновляются в _bind_worker_telemetry при каждом перестроении строк).
+        self._vm_setters: dict[str, Callable[[Any], None]] = {}
+        self._vm_worker_setters: dict[str, Callable[[Any], None]] = {}
         self._process_name = process_name
         # Рантайм-воркеры, обнаруженные из телеметрии (data_receiver,
         # pipeline_executor, source_producer_* — создаются в рантайме и в
         # конфиг-топологии отсутствуют). Подмешиваются в таблицу как read-only.
         self._runtime_workers: set[str] = set()
+        # Дебаунс каскада обнаружения (Task 0.4, часть A): взведён ли уже
+        # отложенный _flush_worker_refresh (коалесцирует N обнаружений в 1).
+        self._worker_refresh_pending = False
+        # Гвард от гонки: панель уничтожена до срабатывания таймера — не
+        # трогать мёртвый виджет во _flush_worker_refresh / _on_history_ready.
+        self._is_destroyed = False
+        self.destroyed.connect(self._mark_destroyed)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -583,20 +814,188 @@ class SingleProcessPanel(QWidget):
         self._worker_table.changed.connect(self._on_worker_changed)
         box_layout.addWidget(self._worker_table)
         page_layout.addWidget(workers_box)
-        # Карточка + таблица прижаты вверх, без растягивания таблицы на всю высоту.
+
+        # Секция графика (Ф2, Task 2.2): fps/latency процесса, переключатель
+        # диапазона 10 мин / 1 час / 1 день.
+        page_layout.addWidget(self._build_graph_box())
+
+        # Секция управления телеметрией (Ф4.1): авто-строки контролов вкл/выкл +
+        # частота по списку метрик GATED_METRICS (шаблон, не хардкод). Запись —
+        # через command-result-bridge (RequestRunner), результат несёт caps.
+        self._telemetry_controls = TelemetryControlsSection(
+            self._process_name,
+            list(GATED_METRICS),
+            labels=_TELEMETRY_METRIC_LABELS,
+            defaults=_TELEMETRY_METRIC_DEFAULTS,
+            on_change=self._on_telemetry_change,
+        )
+        self._telemetry_runner = RequestRunner(self)
+        page_layout.addWidget(self._telemetry_controls)
+
+        # Карточка + таблица + график прижаты вверх, без растягивания на всю высоту.
         page_layout.addStretch(1)
 
         self._refresh_workers()
+        # Late-binding: панель, созданная ПОСЛЕ публикации, показывает график
+        # 10 мин сразу из ring-буфера VM (без ожидания следующего батча).
+        self._refresh_graph_from_ring()
 
         # Fan-out: обнаруживать рантайм-воркеров из телеметрии и добавлять в
-        # таблицу (их нет в конфиг-топологии get_workers()).
-        if self._bindings is not None:
+        # таблицу (их нет в конфиг-топологии get_workers()). В VM-режиме
+        # обнаружение идёт из батч-слота (_apply_telemetry_items, discover=True),
+        # bindings.bind_fanout нужен ТОЛЬКО в fallback (VM не подан).
+        if self._telemetry is None and self._bindings is not None:
             self._bindings.bind_fanout(
                 f"processes.{self._process_name}.workers.*.status",
                 self._on_worker_discovered,
                 owner=self,
             )
         return page
+
+    # ------------------------------------------------------------------ #
+    #  График (Ф2, Task 2.2)                                               #
+    # ------------------------------------------------------------------ #
+
+    def _build_graph_box(self) -> QWidget:
+        """Секция графика: переключатель диапазона + спарклайны fps/latency.
+
+        10 мин — ring-буфер VM (без похода в БД); 1 час/1 день — БД через
+        TelemetryHistorySource, чтение off-main (см. _refresh_graph_from_history).
+        """
+        box = QGroupBox("График")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+
+        range_row = QHBoxLayout()
+        self._graph_range_buttons: dict[str, QPushButton] = {}
+        for key, label, _seconds in _GRAPH_RANGES:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setChecked(key == self._graph_range)
+            btn.clicked.connect(lambda _checked=False, k=key: self._on_graph_range_selected(k))
+            range_row.addWidget(btn)
+            self._graph_range_buttons[key] = btn
+        range_row.addStretch()
+        layout.addLayout(range_row)
+
+        layout.addWidget(QLabel("FPS"))
+        self._fps_sparkline = TelemetrySparkline()
+        layout.addWidget(self._fps_sparkline)
+
+        layout.addWidget(QLabel("Задержка, мс"))
+        self._latency_sparkline = TelemetrySparkline()
+        layout.addWidget(self._latency_sparkline)
+
+        return box
+
+    # ------------------------------------------------------------------ #
+    #  Телеметрия: управляемая публикация (Ф4.1)                           #
+    # ------------------------------------------------------------------ #
+
+    def _on_telemetry_change(self, metric: str, enabled: bool | None, interval_sec: float | None) -> None:
+        """Пользователь дёрнул тумблер/частоту метрики → запись через bridge.
+
+        RequestRunner гонит блокирующий request на worker-потоке (main-thread не
+        фризится), результат (охват + ``capped_by_throttle``) приходит в main-thread
+        и уходит в секцию — «no silent caps» (Task 1.4) виден пользователю.
+        """
+        self._telemetry_runner.submit(
+            lambda: self._presenter.apply_telemetry_metric(
+                self._process_name, metric, enabled=enabled, interval_sec=interval_sec
+            ),
+            on_result=lambda res, m=metric: self._on_telemetry_result(m, res),
+        )
+
+    def _on_telemetry_result(self, metric: str, result: dict[str, Any]) -> None:
+        """Callback RequestRunner (main-thread): показать результат записи метрики."""
+        if self._is_destroyed or not hasattr(self, "_telemetry_controls"):
+            return
+        self._telemetry_controls.show_result(metric, result)
+
+    def _on_graph_range_selected(self, key: str) -> None:
+        """Переключить диапазон графика (кнопка 10 мин / 1 час / 1 день)."""
+        if key == self._graph_range:
+            return
+        self._graph_range = key
+        for k, btn in self._graph_range_buttons.items():
+            btn.setChecked(k == key)
+        self._refresh_graph()
+
+    def _refresh_graph(self) -> None:
+        """Перерисовать графики под текущий выбранный диапазон."""
+        # Любой новый рефреш инвалидирует ещё летящие async-ответы истории
+        # (в т.ч. при переключении на «10 мин», обслуживаемое синхронно из ring).
+        self._graph_request_id += 1
+        if self._graph_range == "10m":
+            self._refresh_graph_from_ring()
+        else:
+            self._refresh_graph_from_history()
+
+    def _refresh_graph_from_ring(self) -> None:
+        """10 мин — из кольцевого буфера VM (Task 1.2), без похода в БД.
+
+        VM не подан → графики деградируют в плейсхолдер «нет данных»
+        (TelemetrySparkline сам показывает его при < 2 точек).
+
+        Читаем только точки внутри wall-окна (``since``): deque вытесняет старые
+        лишь при append, поэтому после ОСТАНОВКИ потока метрики (процесс встал /
+        метрика выключена gate'ом) буфер бессрочно держал бы последние точки и
+        спарклайн рисовал бы замороженное прошлое как текущее. Отсёк по времени
+        → нет свежих данных = пустой график, а не стейл-окно.
+        """
+        if self._telemetry is None:
+            self._fps_sparkline.set_points([])
+            self._latency_sparkline.set_points([])
+            return
+        proc = self._process_name
+        window = next((s for k, _label, s in _GRAPH_RANGES if k == "10m"), 600.0)
+        since = time.monotonic() - window
+        self._fps_sparkline.set_points(self._telemetry.history(f"processes.{proc}.state.fps", since=since))
+        self._latency_sparkline.set_points(self._telemetry.history(f"processes.{proc}.state.latency_ms", since=since))
+
+    def _refresh_graph_from_history(self) -> None:
+        """1 час / 1 день — TelemetryHistorySource.list_range на worker-потоке.
+
+        Чтение БД гоняется через RequestRunner (QThreadPool) — main thread НЕ
+        блокируется на I/O; результат приходит в _on_history_ready сигналом
+        уже в main-thread (тот же приём, что у command-result-bridge).
+        """
+        seconds = next((s for k, _label, s in _GRAPH_RANGES if k == self._graph_range), 3600.0)
+        now = time.time()
+        ts_from = now - seconds
+        proc = self._process_name
+        source = self._history_source
+        request_id = self._graph_request_id
+
+        def _fetch() -> dict[str, Any]:
+            records = source.list_range(proc, ts_from, now, ("fps", "latency_ms"), max_points=_GRAPH_HISTORY_MAX_POINTS)
+            return {"records": records, "request_id": request_id}
+
+        self._history_runner.submit(_fetch, on_result=self._on_history_ready)
+
+    def _on_history_ready(self, result: dict[str, Any]) -> None:
+        """Callback RequestRunner (main-thread): применить выборку БД к графикам.
+
+        result — либо {"records": [...]} (успех _fetch), либо
+        {"success": False, "error": ...} (исключение source.list_range —
+        RequestRunner перехватывает сам, TelemetryHistorySource штатно её не
+        бросает, но fake-источник в тестах может). Оба случая → records=[]
+        деградируют в плейсхолдер, панель не падает.
+        """
+        if self._is_destroyed:
+            return
+        # Отбросить устаревший ответ: пока запрос летел, пользователь мог
+        # переключить диапазон (тогда _graph_request_id уже другой). Ответ без
+        # request_id (напр. {"success": False} от RequestRunner при исключении)
+        # относится к текущему запросу — применяем как деградацию (records=[]).
+        if "request_id" in result and result["request_id"] != self._graph_request_id:
+            return
+        records = result.get("records", [])
+        fps_points = [(r["ts"], r["fps"]) for r in records if isinstance(r.get("fps"), (int, float))]
+        latency_points = [(r["ts"], r["latency_ms"]) for r in records if isinstance(r.get("latency_ms"), (int, float))]
+        self._fps_sparkline.set_points(fps_points)
+        self._latency_sparkline.set_points(latency_points)
 
     # ------------------------------------------------------------------ #
     #  Workers                                                             #
@@ -635,8 +1034,10 @@ class SingleProcessPanel(QWidget):
     def _on_worker_discovered(self, path: str, _value: object) -> None:
         """Fan-out callback: обнаружен воркер в телеметрии (processes.X.workers.NAME.status).
 
-        Если воркер ещё не в таблице — перестроить её с ним. Дубли отсекаются
-        (перестроение только при новом имени), поэтому storm'а нет.
+        Только копит имя воркера и взводит одиночный отложенный
+        ``_flush_worker_refresh`` (Task 0.4, часть A) — N обнаружений подряд
+        (типичный каскад при первом подключении процесса) коалесцируются в
+        ОДНО перестроение таблицы вместо N.
         """
         parts = path.split(".")
         # ['processes', proc, 'workers', NAME, 'status']
@@ -646,7 +1047,24 @@ class SingleProcessPanel(QWidget):
         if name in self._runtime_workers:
             return
         self._runtime_workers.add(name)
+        if not self._worker_refresh_pending:
+            self._worker_refresh_pending = True
+            QTimer.singleShot(_WORKER_DISCOVERY_DEBOUNCE_MS, self._flush_worker_refresh)
+
+    def _flush_worker_refresh(self) -> None:
+        """Отложенный коалесцированный refresh (см. _on_worker_discovered).
+
+        Если панель уже уничтожена к моменту срабатывания таймера — не
+        трогаем мёртвый виджет (гонка при быстром закрытии/переключении).
+        """
+        self._worker_refresh_pending = False
+        if self._is_destroyed:
+            return
         self._refresh_workers()
+
+    def _mark_destroyed(self, *_args: object) -> None:
+        """Слот на ``destroyed`` --- взводит гвард для _flush_worker_refresh."""
+        self._is_destroyed = True
 
     # ------------------------------------------------------------------ #
     #  Worker actions (вызываются из левой панели вкладки, worker-scope)  #
@@ -710,12 +1128,20 @@ class SingleProcessPanel(QWidget):
         self._presenter.update_worker(self._process_name, worker_name, **{field: value})
 
     def _bind_worker_telemetry(self) -> None:
-        """Привязать статус/Гц каждого воркера к StateStore (forward-compatible).
+        """Привязать статус/Гц каждого воркера к телеметрии (forward-compatible).
 
         Backend публикует per-worker телеметрию в processes.{proc}.workers.{name}.*
-        (heartbeat workers_status → fan-out). Привязки переживают пересоздание строк
-        через weakref auto-cleanup GuiStateBindings.
+        (heartbeat workers_status → fan-out). Вызывается после каждого перестроения
+        строк таблицы (_refresh_workers).
+
+        VM-режим (Task 1.3): пересобрать карту путей воркеров→setter и первично
+        наполнить новые строки из snapshot. Fallback: прежний bindings.bind
+        (привязки переживают пересоздание строк через weakref auto-cleanup).
         """
+        if self._telemetry is not None:
+            self._rebuild_worker_vm_setters()
+            return
+
         bindings = self._bindings
         if bindings is None:
             return
@@ -746,6 +1172,37 @@ class SingleProcessPanel(QWidget):
                     "text",
                     formatter=lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—",
                 )
+
+    def _rebuild_worker_vm_setters(self) -> None:
+        """VM-режим: пересобрать карту путей воркеров→setter под текущие строки.
+
+        Вызывается после каждого перестроения таблицы (строки-QLabel'ы новые).
+        После пересборки первично наполняет свежие строки из snapshot (без
+        discover — строки уже созданы, повторное обнаружение вызвало бы цикл
+        refresh↔prime; discover идёт только из живого батча/начального prime).
+        """
+        proc = self._process_name
+        setters: dict[str, Callable[[Any], None]] = {}
+        for name in self._worker_table.worker_names():
+            widgets = self._worker_table.telemetry_widgets(name)
+            status_w = widgets.get("status")
+            if status_w is not None:
+                setters[f"processes.{proc}.workers.{name}.status"] = _make_vm_setter(status_w, "text", lambda v: str(v))
+            hz_w = widgets.get("hz")
+            if hz_w is not None:
+                setters[f"processes.{proc}.workers.{name}.effective_hz"] = _make_vm_setter(
+                    hz_w, "text", lambda v: f"{v:.1f} Гц" if isinstance(v, (int, float)) else "—"
+                )
+            cycle_w = widgets.get("cycle")
+            if cycle_w is not None:
+                setters[f"processes.{proc}.workers.{name}.cycle_duration_ms"] = _make_vm_setter(
+                    cycle_w, "text", lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—"
+                )
+        self._vm_worker_setters = setters
+        # Реприм новых строк из снимка (только setter'ы, без discover).
+        if self._telemetry is not None:
+            snap = self._telemetry.snapshot(f"processes.{proc}")
+            self._apply_telemetry_items(list(snap.items()), discover=False)
 
     def _build_table_page(self) -> QWidget:
         """Table-страница: key-value QTableWidget с метриками одного процесса."""
@@ -783,10 +1240,107 @@ class SingleProcessPanel(QWidget):
             self._detail_table.setItem(row, 1, QTableWidgetItem(value))
 
     def _connect_bindings(self) -> None:
-        bindings = self._bindings
-        if bindings is None or not hasattr(self, "_card"):
-            return
+        """Подключить телеметрию карточки процесса: VM-режим или bindings-fallback.
 
+        В VM-режиме карта путей→setter карточки собирается один раз, панель
+        подписывается на ``updated`` одним слотом и первично наполняется из
+        snapshot; воркер-пути и обнаружение рантайм-воркеров идут через тот же
+        батч-слот (см. _apply_telemetry_items). Fallback — прежний bind-путь.
+        """
+        if not hasattr(self, "_card"):
+            return
+        if self._telemetry is not None:
+            self._connect_telemetry_vm()
+        elif self._bindings is not None:
+            self._connect_bindings_legacy()
+
+    # --- VM-режим (Task 1.3) ------------------------------------------- #
+
+    def _is_worker_status_path(self, path: str) -> bool:
+        """Путь вида ``processes.{proc}.workers.<w>.status`` (для discover)."""
+        parts = path.split(".")
+        return (
+            len(parts) == 5
+            and parts[0] == "processes"
+            and parts[1] == self._process_name
+            and parts[2] == "workers"
+            and parts[4] == "status"
+        )
+
+    def _connect_telemetry_vm(self) -> None:
+        """Собрать карту путей карточки→setter, подписаться на ``updated``,
+        первично наполнить из snapshot (late-binding), обнаружить воркеров."""
+        card = self._card
+        name = self._process_name
+        setters: dict[str, Callable[[Any], None]] = {}
+
+        setters[f"processes.{name}.state.status"] = _make_vm_setter(card._indicator, "set_state")
+        hz_label = card._metric_labels.get("Циклов/с")
+        if hz_label is not None:
+            setters[f"processes.{name}.state.fps"] = _make_vm_setter(
+                hz_label, "text", lambda v: f"{v:.1f}" if isinstance(v, (int, float)) else "—"
+            )
+        cycle_label = card._metric_labels.get("Время цикла")
+        if cycle_label is not None:
+            setters[f"processes.{name}.state.latency_ms"] = _make_vm_setter(
+                cycle_label, "text", lambda v: f"{v:.1f} мс" if isinstance(v, (int, float)) else "—"
+            )
+        uptime_label = card._metric_labels.get("Uptime")
+        if uptime_label is not None:
+            setters[f"processes.{name}.state.uptime"] = _make_vm_setter(uptime_label, "text", _format_uptime)
+        self._vm_setters = setters
+
+        # Воркер-строки, созданные в _build_cards_page → _refresh_workers →
+        # _bind_worker_telemetry, уже наполнили _vm_worker_setters. Подписка +
+        # первичный prime процесса (discover=True: строим строки рантайм-воркеров,
+        # уже опубликованных к моменту создания панели — late-binding).
+        self._telemetry.updated.connect(self._on_telemetry_batch)
+        snap = self._telemetry.snapshot(f"processes.{name}")
+        self._apply_telemetry_items(list(snap.items()), discover=True)
+
+    def _on_telemetry_batch(self, batch: list[tuple[str, Any]]) -> None:
+        """Слот на ``TelemetryViewModel.updated`` — один на панель."""
+        self._apply_telemetry_items(batch, discover=True)
+
+    def _apply_telemetry_items(self, items: list[tuple[str, Any]], *, discover: bool) -> None:
+        """Применить пачку (path, value): setter карточки/воркера + (опц.) discover.
+
+        discover=True — живой батч/начальный prime: путь ``…workers.<w>.status``
+        дополнительно скармливается _on_worker_discovered (строит строку нового
+        рантайм-воркера). discover=False — реприм после перестроения строк:
+        только setter'ы (иначе refresh↔prime зациклились бы).
+        """
+        fps_path = f"processes.{self._process_name}.state.fps"
+        latency_path = f"processes.{self._process_name}.state.latency_ms"
+        graph_touched = False
+        for path, value in items:
+            setter = self._vm_setters.get(path)
+            if setter is None:
+                setter = self._vm_worker_setters.get(path)
+            if setter is not None:
+                try:
+                    setter(value)
+                except Exception as exc:  # виджет↔значение — не валим GUI (правило 5)
+                    _logger.debug("telemetry-vm: setter failed on %s: %s", path, exc)
+            if discover and self._is_worker_status_path(path):
+                self._on_worker_discovered(path, value)
+            if path == fps_path or path == latency_path:
+                graph_touched = True
+        # График 10 мин читает ring-буфер VM — обновляем ТОЛЬКО когда этот
+        # диапазон активен (1ч/1д не трогаем: они читают БД по кнопке/таймеру,
+        # не по каждому батчу). Дешёвая O(k)-выборка буфера, не I/O.
+        if graph_touched and self._graph_range == "10m" and hasattr(self, "_fps_sparkline"):
+            self._refresh_graph_from_ring()
+        # Ф4.1: обновить читаемый статус строк телеметрии из read-model (fps/latency).
+        if graph_touched and hasattr(self, "_telemetry_controls"):
+            self._telemetry_controls.update_readouts(self._telemetry)
+
+    # --- Fallback: прежний bindings-путь ------------------------------- #
+
+    def _connect_bindings_legacy(self) -> None:
+        """Прежний путь карточки процесса через GuiStateBindings (VM не подан)."""
+        bindings = self._bindings
+        assert bindings is not None
         card = self._card
         name = self._process_name
 

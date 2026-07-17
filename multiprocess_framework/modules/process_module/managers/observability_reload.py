@@ -100,6 +100,7 @@ def start_observability_watcher(
     debounce_seconds: float = 1.0,
     log_info: Optional[Callable[[str], None]] = None,
     log_error: Optional[Callable[[str], None]] = None,
+    on_reload_extra: Optional[Callable[[Config], None]] = None,
 ) -> Optional["ConfigFileWatcher"]:
     """Запустить watcher файла конфига, перестраивающий менеджеры наблюдаемости.
 
@@ -109,6 +110,12 @@ def start_observability_watcher(
         section_key:  Имя секции в конфиге (по умолчанию ``observability``).
         debounce_seconds: Дебаунс watchdog (по умолчанию 1.0).
         log_info/log_error: Колбэки логирования (опционально).
+        on_reload_extra: Дополнительный ``on_reload(config)``-колбэк, вызываемый ПОСЛЕ
+            observability-reconfigure на том же ``Config`` (PC 3.1: оркестратор передаёт
+            сюда telemetry-throttle-колбэк из ``telemetry_reload.make_telemetry_on_reload``,
+            чтобы одна правка файла перестроила и observability-менеджеры, и центральный
+            троттл). ``None`` → только observability (прежнее поведение). Семантически
+            watcher остаётся observability-агностичным к содержимому extra-колбэка.
 
     Returns:
         Запущенный ``ConfigFileWatcher`` или None, если файл не найден.
@@ -145,6 +152,16 @@ def start_observability_watcher(
         section_key=section_key,
         log_info=log_info,
     )
+    if on_reload_extra is not None:
+        # Композиция: сначала observability-reconfigure, затем extra-колбэк (PC 3.1:
+        # telemetry-throttle) на том же Config. Наличие callback'а — child-side seam,
+        # содержимого extra эта функция не знает (остаётся observability-агностичной).
+        _base_on_reload = on_reload
+
+        def on_reload(config: Config, _base=_base_on_reload, _extra=on_reload_extra) -> None:  # noqa: F811
+            _base(config)
+            _extra(config)
+
     watcher = ConfigFileWatcher(
         path=path,
         config=config,

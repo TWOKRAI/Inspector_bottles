@@ -134,6 +134,23 @@ class MiddlewarePipeline:
                 return True
         return False
 
+    def get(self, name: str) -> StateMiddleware | None:
+        """Вернуть живой middleware по имени (или None).
+
+        Нужно рантайм-командам (PC 0.1/Фаза 3): достать конкретный middleware
+        (напр. ``ThrottleMiddleware``) и вызвать его мутатор (``update_rule``).
+
+        Args:
+            name: имя middleware.
+
+        Returns:
+            Экземпляр StateMiddleware, если зарегистрирован; иначе None.
+        """
+        for mw in self._middlewares:
+            if mw.name == name:
+                return mw
+        return None
+
     # --- run_before / run_after для set ---
 
     def run_before_set(self, path: str, value: Any, source: str) -> tuple[bool, Any, dict]:

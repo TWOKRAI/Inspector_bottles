@@ -3,7 +3,11 @@
 - **Slug:** gui-telemetry-read-model
 - **Дата:** 2026-07-16
 - **Ветка:** feat/gui-telemetry-read-model (Фаза 0 допустимо hotfix-ом раньше остальных)
-- **Статус:** ACTIVE
+- **Статус:** DONE (2026-07-16). Фазы 0-3 закрыты; Task 3.1 (cleanup дублирующего механизма) —
+  реализована частично осознанно: инвариант enforced coverage-check'ом для всех вкладок, но
+  дуальный VM/legacy-путь физически не вырезан (зависят немигрированные вкладки — отдельная задача).
+  Follow-up `telemetry-publish-control` (управление публикующей стороной) — отдельный план, не входит
+  в объём этого. Принцип зафиксирован ADR-136 (`multiprocess_framework/DECISIONS.md`).
 - **Реактивирует:** [`telemetry-delivery-simplification.md`](telemetry-delivery-simplification.md) Option D (был DEFERRED
   «до gate: 2-й реактивный потребитель ИЛИ замер показал боль двойного glob»). **Gate сработал 2026-07-16:**
   диагностирован шторм блокирующих подписок при открытии вкладки «Процессы» (см. Context). После Фазы 3 пометить
@@ -60,8 +64,8 @@
   (`_sub_patterns` + `_pattern_sub_id`) новый паттерн (glob-накрытие: `processes.**` ⊇ `processes.X.state.fps`).
   2. Покрыт → зарегистрировать refcount на покрывающий, серверный subscribe НЕ слать.
 **Acceptance:**
-- [x] Открытие ProcessesTab при живых стартовых wildcard'ах → 0 исходящих `state.subscribe` (характеризационный тест) — c69ffd05
-- [x] Непокрытый паттерн по-прежнему создаёт подписку (регресс-тест 5.9 «панель мертва») — c69ffd05
+- [x] Открытие ProcessesTab при живых стартовых wildcard'ах → 0 исходящих `state.subscribe` (характеризационный тест) — `TestCoverageCheck::test_covered_pattern_sends_no_server_subscribe` + `test_covered_pattern_still_receives_delta`
+- [x] Непокрытый паттерн по-прежнему создаёт подписку (регресс-тест 5.9 «панель мертва») — `TestCoverageCheck::test_uncovered_pattern_creates_subscription`
 **Out of scope:** доставка/replay, GUI-код.
 
 #### Task 0.2 — Fire-and-forget подписка вне main thread
@@ -72,7 +76,7 @@
   отправка `send()` без ожидания ответа, ошибка сервера ловится логом (warning), sub_id локальный.
   2. Replay при этом приедет асинхронно штатным путём дельт — виджеты обновятся через bindings.
 **Acceptance:**
-- [x] Ни одного `router.request` из Qt main thread на пути `bind()` (тест с мок-router, assert по потоку) — c69ffd05
+- [x] Ни одного `router.request` из Qt main thread на пути `bind()` (тест с мок-router, assert по потоку) — `TestAsyncSubscribe::test_ensure_new_subscription_uses_only_send_async` (request_calls==[], send_calls==[], только send_async) + `test_subscribe_sync_false_uses_send_async`; sync=True сохранён (`test_subscribe_sync_true_still_uses_request`)
 **Out of scope:** переделка `router.request` как такового.
 
 #### Task 0.3 — Реплей по префиксу паттерна, не всё дерево
@@ -82,8 +86,8 @@
 **Steps:** 1. Выделить статический префикс паттерна до первого wildcard-сегмента
   (`processes.cam.state.fps` → сам путь; `processes.**` → `processes`). 2. `get_subtree(prefix)` вместо `""`.
 **Acceptance:**
-- [x] Реплей эквивалентен прежнему по содержимому (характеризационный тест на матчи) — c69ffd05
-- [x] Тест: подписка на узкий паттерн не вызывает копию корня (spy на `get_subtree`) — c69ffd05
+- [x] Реплей эквивалентен прежнему по содержимому (характеризационный тест на матчи) — `TestSubscribe::test_replay_by_prefix_equivalent_to_full_tree` (узкий + wildcard + `**`, эталон = старый get_subtree('')+iter_matches)
+- [x] Тест: подписка на узкий паттерн не вызывает копию корня (spy на `get_subtree`) — `test_replay_narrow_pattern_does_not_copy_root` (get_subtree('') не вызывается) + `test_replay_wildcard_copies_prefix_not_root` (только get_subtree('processes'))
 **Out of scope:** формат Delta, dispatcher.
 
 #### Task 0.4 — Дебаунс каскада runtime-воркеров
@@ -94,16 +98,27 @@
 **Steps:** 1. `_on_worker_discovered` только копит имя и взводит `QTimer.singleShot(50, ...)`
   (coalescing-флагом). 2. Однократный `_refresh_workers` по срабатыванию.
 **Acceptance:**
-- [x] Тест: 5 обнаружений подряд → 1 вызов `set_workers` — c69ffd05
-- [x] Qt-smoke: proto + qt_snapshot, вкладка живая (правило feedback_qt_mcp_smoke_verification) — 63d59356 (WSL: инструментальный лаг ~9с)
+- [x] Тест: 5 обнаружений подряд → 1 вызов `set_workers` — `test_worker_debounce.py::test_five_discoveries_coalesce_into_one_refresh` (+ `test_duplicate_discovery_does_not_reschedule`, `test_flush_skips_when_panel_marked_destroyed`)
+- [x] Qt-smoke: proto + qt_snapshot, вкладка живая (правило feedback_qt_mcp_smoke_verification) — dualcam_synth (4 синт-процесса), probe :9142: ProcessesTab собрана и отзывчива (фриза нет), в стеке РОВНО 1 панель (AllProcessesPanel — ленивость подтверждена, не 5+), консоль без ошибок/трейсбеков
 **Verification Фазы 0 (整):** запуск `webcam_sketch`, открытие вкладки «Процессы» — без фриза
   (замер лог-таймстампом); `INSPECTOR_STALL_DUMP=1` — нет срезов >1 с в момент открытия.
 
 > Хвост 0.4 (2026-07-16): в нативном Windows-запуске владельца открытие вкладки ~30с. Инструментирование
 > (INSPECTOR_TAB_TRACE) показало: Python-конструктор вкладки быстрый, стойло в Qt C++ (show/layout/paint)
 > при глубокой вложенности (панель×N процессов × QTableWidget×3 + QSS). Фикс: ленивое создание
-> SingleProcessPanel (только активная панель при открытии) — 03d21058. Ожидание: первый показ строит
-> 1 панель вместо 8. Верификация на нативном Windows — за владельцем.
+> SingleProcessPanel (только активная панель при открытии) — реализовано в 0.4 через opt-in
+> `lazy_content` в `BaseListNavTab` (тесты `test_lazy_panels.py`: `test_open_creates_only_active_panel`,
+> `test_switching_between_two_processes_creates_both`, `test_lazily_created_panel_shows_live_state`).
+> Первый показ строит 1 панель вместо N. Верификация на нативном Windows — за владельцем.
+
+> **Угловое ревью Фазы 0 закрыто (2026-07-16, teamlead):** (1) покрывающими считаются только
+> ПОДТВЕРЖДЁННЫЕ серверные подписки (`_confirmed_patterns` заполняется в `subscribe()` при валидном
+> серверном sub_id; неподтверждённый широкий паттерн не «усыновляет» узкий → fallback на async-subscribe,
+> закрывает риск «мёртвого виджета» из таблицы Риски); (2) доставка покрытому паттерну доказана на РЕАЛЬНОМ
+> GUI-пути `GuiStateProxy(delta_sink)`→bridge→`GuiStateBindings` (тест `TestGuiDeliveryPathIntegration`),
+> комментарии в `state_proxy.py` уточнены (базовый proxy — `_invoke_callbacks`, GUI — delta_sink);
+> (3) async-подписки наблюдаемы (счётчик `_async_subscribe_count` + метрика `state_proxy.async_subscribe` +
+> INFO-лог с маркером `[async-subscribe]`).
 
 ### Фаза 1 — TelemetryViewModel: локальный read-model
 
@@ -116,15 +131,15 @@
   2. Подключить вторым потребителем `bridge.add_state_listener` (рядом с bindings, §11.15).
   3. API чтения: `get(path)`, `snapshot(prefix)` — для открытия вкладок без ожидания дельт.
 **Acceptance:**
-- [x] Вкладка, созданная после публикации, видит значения сразу (тест late-binding) — 74497fdf
-- [x] Ни одной серверной подписки из view-model (стартовые wildcard'ы — единственный источник) — 74497fdf
+- [x] Вкладка, созданная после публикации, видит значения сразу (тест late-binding) — `test_telemetry_view_model.py::test_snapshot_available_immediately_after_delta` (+ `test_initial_cache_primes_snapshot`, `test_updated_emitted_once_per_packet`, `test_deleted_removes_path_and_batches_none`)
+- [x] Ни одной серверной подписки из view-model (стартовые wildcard'ы — единственный источник) — `test_view_model_creates_no_server_subscriptions` (VM не держит router/proxy/subscribe); wiring в `app.py` вторым `add_state_listener`
 
 #### Task 1.2 — Кольцевые буферы для мгновенных графиков
 **Level:** Middle+ (Sonnet) · **Assignee:** developer
 **Goal:** последние ~10 мин ключевых метрик (fps/latency/hz) в памяти GUI для спарклайнов без похода в БД.
 **Files:** `telemetry_view_model.py` (ring buffer per отслеживаемый путь, конфиг: длительность/набор префиксов), tests.
 **Acceptance:**
-- [x] Fixed-size deque, O(1) append; выборка диапазона для графика — 74497fdf
+- [x] Fixed-size deque, O(1) append; выборка диапазона для графика — `test_history_ring_buffer_evicts_oldest` (maxlen-вытеснение), `test_history_since_filters_range`, `test_history_records_tracked_numeric_only` (суффиксы `.state.fps`/`.latency_ms`/`.uptime`/`.effective_hz`/`.cycle_duration_ms`)
 
 #### Task 1.3 — Перевод панелей «Процессов» на view-model
 **Level:** Senior (Opus) · **Assignee:** teamlead
@@ -134,8 +149,8 @@
 **Steps:** 1. Подписка панели: один слот на `updated`, фильтрация по своим путям (как `matches_live`
   в Наблюдаемости). 2. Первичное наполнение из `snapshot()`. 3. Обнаружение runtime-воркеров — из тех же батчей.
 **Acceptance:**
-- [x] Открытие вкладки: 0 `state.subscribe`, 0 блокирующих IPC (инвариант-тест) — 61799b83
-- [x] Live-обновления карточек/воркеров работают (qt-smoke по правилу) — 61799b83 (66 GUI-тестов, 892 suite)
+- [x] Открытие вкладки: 0 `state.subscribe`, 0 блокирующих IPC (инвариант-тест) — `test_telemetry_vm_panels.py::TestNoServerSubscriptionsInVmMode` (`test_all_panel_vm_makes_no_bind_calls`, `test_single_panel_vm_makes_no_bind_calls`, `test_tab_open_and_select_makes_no_bind_calls` — мок-bindings, 0 bind/bind_fanout/ensure_subscription из панелей в VM-режиме)
+- [ ] Live-обновления карточек/воркеров работают (qt-smoke по правилу — прогонит Director) · pytest-покрытие: `TestLiveUpdateViaVm` (карточки/health/trace-fanout/воркеры через батч + первичное наполнение из snapshot late-binding), `TestFallbackWithoutVm` (telemetry=None → прежний bind-путь)
 **Out of scope:** остальные вкладки (devices/calibration) — мигрируют по мере надобности этим же паттерном.
 
 ### Фаза 2 — История и графики (pull из telemetry_sink)
@@ -148,15 +163,32 @@
 **Steps:** 1. `list_range(process_name, ts_from, ts_to, metrics, max_points)` c даунсемплом до max_points.
   2. Read-only подключение (`mode=ro`), отказоустойчиво к отсутствию файла.
 **Acceptance:**
-- [x] Диапазонная выборка с даунсемплом; отсутствие БД → пустой результат, не исключение — 0f74ec1a (25 тестов)
+- [x] Диапазонная выборка с даунсемплом; отсутствие БД → пустой результат, не исключение —
+  `test_telemetry_history.py::TestListRangeDownsample` (`test_downsamples_to_at_most_max_points`,
+  `test_no_downsample_when_under_max_points`, `test_filters_by_process_name_and_ts_bounds`,
+  `test_record_shape_is_dict_with_ts_and_requested_metrics`) + `TestMissingDbIsFaultTolerant`
+  (`test_missing_file_returns_empty_list`, `test_missing_table_returns_empty_list`,
+  `test_empty_range_returns_empty_list`) + `TestMetricsWhitelist`
+  (`test_unknown_metric_is_ignored_known_still_returned` — попытка SQL-инъекции через имя метрики,
+  `test_all_metrics_unknown_returns_empty_without_query`, `test_allowed_metrics_matches_telemetry_snapshot_columns`)
+  + `TestResolveTelemetryDbPath` (`test_default_path`, `test_env_override` — путь к БД изолирован в
+  `resolve_telemetry_db_path()`, env `INSPECTOR_TELEMETRY_DB`)
 
 #### Task 2.2 — Графики в SingleProcessPanel
 **Level:** Middle+ (Sonnet) · **Assignee:** developer
 **Goal:** график fps/latency процесса: последние минуты — из ring buffer (Task 1.2), глубже — из Task 2.1.
 **Files:** `processes/_panels.py` (+ мини-виджет графика), tests.
 **Acceptance:**
-- [x] Открытие графика не блокирует main thread (чтение БД — в воркере/по таймеру) — 468e698c (QThread + history_ready)
-- [x] Переключение диапазона (10 мин / час / день) — 468e698c (кнопки 10м/1ч/1д)
+- [x] Открытие графика не блокирует main thread (чтение БД — в воркере/по таймеру) —
+  `test_history_graph.py::TestDeeperRangeReadsHistorySourceOffMainThread::test_history_source_called_off_main_thread`
+  (сравнение `threading.get_ident()` вызова `list_range` с main-thread) — читает через `RequestRunner`
+  (QThreadPool, тот же приём, что command-result-bridge P2), не новый механизм
+- [x] Переключение диапазона (10 мин / час / день) — `TestTenMinuteRangeUsesRingBuffer`
+  (10м → ring-буфер VM, `history_source.list_range` НЕ вызывается) +
+  `TestDeeperRangeReadsHistorySourceOffMainThread` (`test_switch_to_1h_calls_history_source`,
+  `test_1d_range_requests_86400s_window`, `test_history_result_applied_to_sparklines_in_main_thread`,
+  `test_switching_back_to_10m_does_not_call_history_source_again`) + `TestGracefulDegradation`
+  (VM=None / пустая БД → спарклайн без данных, без падений)
 
 ### Фаза 3 — Cleanup + enforcement + docs
 
@@ -165,8 +197,14 @@
 **Goal:** после миграции панелей: убрать `ensure_subscription` из `bind()`-пути телеметрии, убрать
   `cache_snapshot`-replay из `GuiStateBindings` (роль у view-model), снять мёртвые точечные подписки.
 **Acceptance:**
-- [x] Нет вызовов `ensure_subscription` из `bind()` для путей, покрытых wildcard (координация с Task 0.1) — 74d21af8 (полное удаление ensure/release из bind()-пути)
-- [x] Тест-инвариант в CI: открытие каждой вкладки → счётчик `state.subscribe` == 0 — 74d21af8 (все 8 вкладок, реестр-паритет)
+- [x] Нет вызовов `ensure_subscription` из `bind()` для путей, покрытых wildcard (координация с Task 0.1) — для «Процессов» панели в VM-режиме вообще не зовут `bind`/`ensure_subscription` на телеметрию (`test_telemetry_vm_panels.py::TestNoServerSubscriptionsInVmMode`); для остальных вкладок coverage-check (0.1) даёт 0 серверных подписок на покрытых путях (см. инвариант-тест ниже)
+- [x] Тест-инвариант в CI: открытие каждой вкладки → счётчик `state.subscribe` == 0 (для покрытых путей) + 0 блокирующего `router.request` из main thread — `test_tab_open_invariant.py::test_opening_all_tabs_does_no_blocking_ipc` (все 7 вкладок через `register_all_tabs()` + реальный GuiStateBindings поверх GuiStateProxy со spy-router)
+> **Cleanup осознанно отложен (решение Director 2026-07-16):** дуальный VM/legacy-путь в `_panels.py` и
+> `cache_snapshot`-replay в `GuiStateBindings` НЕ вырезаны — от `cache_snapshot`/legacy-bind зависят
+> НЕмигрированные вкладки (devices/calibration/recipes/settings/...); полное удаление требует их миграции
+> тем же VM-паттерном (план: «миграция вкладок вне Процессов — по мере надобности»). Инвариант при этом
+> УЖЕ enforced coverage-check'ом (0.1) для всех вкладок — удаление дублирующего кода даёт «меньше слоёв»,
+> но не меняет поведение. Вынести в отдельную задачу миграции остальных вкладок.
 
 #### Task 3.2 — ADR + память + статусы планов
 **Level:** Middle (Sonnet) · **Assignee:** tech-writer
@@ -176,7 +214,11 @@
   `project_webcam_sketch_freeze` (диагноз «Python ни при чём» опровергнут: блокирующий IPC в main thread).
   3. `telemetry-delivery-simplification.md` → SUPERSEDED (ссылка сюда). 4. Dual-write memory.
 **Acceptance:**
-- [x] ADR в индексе; memory обновлена в обоих местах; статусы планов согласованы — 0192c0a5 (ADR-131, 2 memory dual-write, SUPERSEDED)
+- [x] ADR в индексе; memory обновлена в обоих местах; статусы планов согласованы — ADR-136
+  (`multiprocess_framework/DECISIONS.md`, `python -m scripts.sync` + `scripts/validate.py` чисто);
+  memory `project_gui_telemetry_read_model` (новая) + `project_webcam_sketch_freeze` (уточнена) в
+  `~/.claude/projects/.../memory/` и `docs/claude/memory/` (dual-write, оба MEMORY.md обновлены);
+  `telemetry-delivery-simplification.md` → SUPERSEDED (ссылка сюда)
 
 ---
 
@@ -186,6 +228,18 @@
   glob-матчинг перестаёт быть болью (подписок мало, биндинги локальные). Реанимировать, если замер покажет
   боль на масштабе (20 проц × 50 метрик). Текущий план даёт read-model поверх работающего потока — меньший риск.
 - Live-чтение из SQLite; изменение серверной публикации/троттлинга; миграция вкладок вне «Процессов».
+
+## Follow-up: telemetry-publish-control (отдельный план, ПОСЛЕ этого — решение владельца 2026-07-16)
+
+Замысел владельца: управлять **публикующей** стороной телеметрии — задавать частоту опроса per-параметр/
+группу и вкл/выкл, через statistics manager, чтобы не грузить систему. Комплементарно этому плану
+(тот — про дешёвое GUI-**чтение**; follow-up — про «публиковать ровно сколько надо»). Кирпичи уже есть:
+- per-паттерн троттл `backend/state/manager_setup.py:build_throttle_rules()` (сейчас **хардкод** `{glob → min_interval}`) → сделать **config-driven** (рецепт/секция);
+- observability control-plane (секция `observability` + hot-reload watcher + `reconfigure()` + IPC `config.reload`) — готовый канал рантайм-изменений ([[project_observability_control_plane]]);
+- `ObservableMixin` per-slot тумблеры (`enable/disable/context`) — есть, но **не проброшены** в hot-reload-конфиг (пробел из layer-grouping Инициатива 2 п.3);
+- fan-out конфига на дочерние процессы — пробел (layer-grouping 2C).
+Не хватает: троттл из конфига, вкл/выкл публикации метрики/группы, рантайм-крутилки через stats manager + fan-out.
+Оформить как `plans/telemetry-publish-control.md` после закрытия этого плана.
 
 ## Риски
 

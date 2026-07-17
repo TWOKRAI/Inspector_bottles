@@ -275,3 +275,64 @@ B. **Mixin-наследование** (ProcessModule + CameraMixin + PluginMixin
 - `chain_module` — живой исполнитель processing-цепочки (acceptance C6 «живой пайплайн через chain»); DAG/parallel доступны, НЕ подключены.
 - `run_loop`/`_send_results`/`bind_queue`/метрики/IPC НЕ переехали в chain_module; `SourceProducer` не тронут; hot-path (SHM/seqlock/per-frame Message) не тронут.
 - Reversible: yes — откат к прямому list-loop локален в `_execute_chain`. Risk: medium (перф, см. выше; смягчён — реальный регресс FPS <1.3%).
+
+
+## ADR-PM-016: телеметрийный тик в контракте (`publish.tick_sec`) — вариант (а), heartbeat-сообщение по счётчику времени
+
+**Статус:** принято
+**Дата:** 2026-07-16
+**Refs:** plans/telemetry-coherence-remediation.md (Task 1.2), ADR-PM-010/PC 1.2 (publisher-gate), telemetry-publish-control.md (finding D)
+
+**Контекст:** Частота публикации телеметрии де-факто задавалась `heartbeat_interval=5.0` — читался ОДИН раз в `ProcessHeartbeat.start()`, `reconfigure_telemetry` его не трогал. Верхняя ступень частотной лестницы (finding D ревью Fable): publisher `interval_sec < 5с` — тихий no-op, «поднять частоту» нельзя ни одной ручкой control-plane. `TelemetryGate` per-метрика rate-limit был доминирован захардкоженным 5с-тиком воркера.
+
+**Решение — вариант (а)** (из двух в плане): heartbeat-воркер тикает по `min(heartbeat_interval, tick_sec)`; телеметрия публикуется КАЖДЫЙ тик (per-метрика rate-limit держит `TelemetryGate`), а heartbeat-СООБЩЕНИЕ к `ProcessManager` + хозяйственные self-publish'ы (health/observability/GC) — по расписанию liveness (`_heartbeat_due`: прошло >= `heartbeat_interval` с прошлой отправки, порог с запасом `tick/2` против джиттера). `TelemetryPublishConfig.tick_sec: float | None = None` (None → `heartbeat_interval`, backward-compat). `_telemetry_tick()`/`_heartbeat_due()` читаются каждую итерацию `_loop` → рантайм-смена `tick_sec` через `reconfigure_telemetry` подхватывается на следующем тике. Валидация: метрика с `interval_sec < min(heartbeat_interval, tick_sec)` → WARNING «частота ограничена тиком» (было тихим no-op). Clock инъектируется в `ProcessHeartbeat` и прокидывается в `TelemetryGate` — детерминированные fake-clock тесты каденции.
+
+**Rejected — вариант (б)** (отдельный воркер `telemetry_publisher` со своим `stop_event.wait(tick_sec)`): отвергнут — второй воркер = второй lifecycle + дубль `get_all_workers_status()` + необходимость делить health/observability/GC между двумя циклами (какой контур «хозяйничает»). Вариант (а) — один воркер, один снимок воркеров за тик, инвариант liveness провозится ЯВНОЙ time-gate проверкой (heartbeat-сообщение бит-в-бит раз в `heartbeat_interval`), меньше слоёв (предпочтение владельца).
+
+**Критический инвариант:** частота heartbeat-СООБЩЕНИЙ к `ProcessMonitor` (liveness) НЕ меняется телеметрийным тиком — иначе ложные «process dead». Провозится `_heartbeat_due` (при `tick_sec=None` → `tick >= interval` → каждый тик = heartbeat-такт, бит-в-бит) и покрыт acceptance-тестом (`test_telemetry_tick.py`: `tick_sec=0.5` → телеметрия 20/10с ~ 2 Гц, heartbeat 2/10с ~ 0.2 Гц).
+
+**Последствия:**
+- Частота телеметрии управляется контрактом (boot + runtime `telemetry.reconfigure`), а не хардкодом — finding D закрыт (верхняя ступень лестницы стала управляемой).
+- health/observability/GC остаются на каденции `heartbeat_interval` (сгруппированы с heartbeat-сообщением) — их частота НЕ меняется при подъёме телеметрийного тика (нет scope-creep).
+- Reversible: yes — `tick_sec=None` возвращает прежнее поведение целиком; откат правки локален в `heartbeat/`.
+- Risk: low — liveness-инвариант под тестом; backward-compat (tick_sec=None) характеризован; `GATED_METRICS` из configs не выносился (цикл-риск Task 2.3 не тронут — `capped_metrics` живёт в heartbeat-слое, где оба импорта уже есть).
+
+## ADR-PM-017: центральный троттл — IPC-предохранитель, publisher-gate — единственный авторитет частоты
+
+**Статус:** принято
+**Дата:** 2026-07-16
+**Refs:** plans/telemetry-coherence-remediation.md (Task 1.3 + Task 1.4 Amendment), ADR-PM-016 (тик публикации), telemetry-publish-control.md (residual #6, finding D вторая половина)
+
+**Контекст:** Частотная лестница телеметрии имела ДВА авторитета с равными дефолтами: publisher-gate процесса (`telemetry.publish`, per-метрика `interval_sec`, дефолт 1.0с) и центральный `ThrottleMiddleware` оркестратора (`_default_throttle_rules`, fps/latency/… = 1.0с). Поднятие частоты метрики через publisher (напр. `interval_sec=0.2`) МОЛЧА гасилось второй ступенью: троттл 1.0с > 0.2с → апдейты придерживались, эффективная частота в дереве StateStore не росла (residual #6 — «две плоскости с равными дефолтами каскадируют»; вторая половина finding D — «поднять частоту нельзя ни одной ручкой control-plane»). Central-троттл, задуманный как IPC-страховка (не перегружать StateStore/IPC), де-факто стал вторым авторитетом каденции.
+
+**Решение:** Central-троттл понижен до роли ЧИСТОГО IPC-предохранителя от СБОЙНОГО публикатора; единственный авторитет частоты — publisher-gate. Два механизма:
+1. **Дефолт заведомо мягче тика** (`manager_setup._default_throttle_rules`): все дефолт-правила на единый мягкий `_SAFETY_INTERVAL_SEC = _MIN_PUBLISHER_INTERVAL_SEC (0.1с) × _THROTTLE_SAFETY_MULTIPLIER (0.5) = 0.05с` — заведомо НИЖЕ минимального осмысленного интервала публикации. Легитимное поднятие частоты через publisher доходит до дерева без среза; троттл срабатывает лишь на публикатор, шлющий БЫСТРЕЕ собственной декларации (реальный сбой, потолок ≈20 Гц). Прежние жёсткие 1.0/2.0/5.0с (совпадавшие с publisher-дефолтом) убраны.
+2. **«No silent caps» при явном конфликте** (`telemetry_reload.detect_throttle_caps`, вызывается в `ProcessManagerProcess._cmd_telemetry_broadcast`): если оператор ВРУЧНУЮ задал строгое central-правило и поднимает publisher-частоту НИЖЕ него, троттл срезал бы поднятие → вместо тихого среза возвращается явный флаг `capped_by_throttle: {metric: {publisher_interval_sec, throttle_interval_sec}}`. Инициатор (backend_ctl/GUI) видит потолок и осознанно ослабляет central-правило (`telemetry_set plane=throttle`). Сопоставление метрика→central-правило — по СУФФИКСУ паттерна (`processes.**.state.fps` → метрика `fps`), чтобы framework не хардкодил layout дерева прототипа.
+
+**Rejected — auto-relax** (автоматически ослаблять central-правило под publisher-дельту через `update_rule`): отвергнут. (1) Прячет страховку: publisher МОЛЧА переписал бы операторский предохранитель — сбойный публикатор, декларирующий крошечный `interval_sec`, авто-снял бы защиту, ровно ту, ради которой троттл сохранён (Out of scope Task 1.3: «не удалять центральный троттл — остаётся IPC-страховкой»). (2) Молча отменяет ОСОЗНАННУЮ операторскую настройку строгого правила. `capped_by_throttle` держит обе плоскости authoritative-и-видимыми: страховка нетронута, конфликт виден. Дефолт-мягкость (механизм 1) уже обеспечивает «частота реально растёт» в дефолтном сценарии (главный acceptance) без жертвы страховкой — auto-relax не нужен для этого.
+
+**Критический инвариант (оба пути + дефолт-сценарий):** central-троттл НИКОГДА не отменяет молча
+поднятие частоты — ни на fan-out-пути (`telemetry.broadcast`, `process="all"`), ни на адресном
+per-process (Task 1.4, см. Amendment ниже). Оба идут транзитом через PM (держатель central-
+троттла), поэтому на обоих `detect_throttle_caps` работает: либо дефолт мягче публикатора (частота
+растёт), либо оператор получает `capped_by_throttle` (видит потолок). Ни одного тихого no-op.
+
+**Последствия:**
+- Publisher-gate — единственный авторитет каденции; троттл лишь страхует от runaway (residual #6 закрыт).
+- Дефолт-троттл больше не режет current-рецепты (публикуют на 5с-тике — 0.05с предохранитель им не мешает; характеризация в `test_integration.py`).
+- Reversible: yes — значения дефолтов и helper локальны; откат тривиален. Risk: low — сквозной store-gate тест доказывает рост частоты; `detect_throttle_caps` read-only (троттл не мутирует).
+
+**Amendment (Task 1.4, 2026-07-17) — Known-gap закрыт, вариант (а) «перехват в PM»:** адресный
+per-process `telemetry.reconfigure` больше НЕ уходит от driver'а ребёнку напрямую — он тоже идёт
+транзитом через PM: `driver.telemetry_reconfigure(process=X)` → `telemetry.broadcast` c
+`data["target"]=X`. PM детектит `capped_by_throttle` СВОИМ `resolve_store_throttle(self)` (тем же,
+что на broadcast-пути) и форвардит `publish` ОДНОМУ ребёнку через `_send_child_command`
+(`comm.send_to_process`); `throttle`-плоскость применяется центрально (троттл оркестратор-глобален,
+`target` её не касается). Прежний прямой driver→child путь ретрополнен — на нём cap был
+принципиально не детектируем (`resolve_store_throttle` на ребёнке всегда `None`). **Trade-off:**
+адресный путь стал fire-and-forward — per-child `applied` больше не возвращается (охват `reached`
+0/1 вместо него), т.к. синхронный сбор ответа ребёнка в хендлере PM заблокировал бы
+message_processor (тот же дедлок, что в `driver.capabilities`). Факт применения смотреть по
+`effective_hz` в дереве. **Rejected — вариант (б) «явный отказ»** (адресный raise возвращает
+error «используй process=all»): отвергнут — не разблокировал бы per-process крутилку Фазы 4 (она
+как раз про адресное поднятие частоты одному процессу), ради которой Task 1.4 и делалась.

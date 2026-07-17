@@ -75,7 +75,20 @@ def configure_topology_engine(orchestrator: "GenericProcessManagerApp") -> None:
 
     obs_overlay = expand_observability(sys_config.observability.model_dump())
     log_dir = sys_config.system.log_dir or "logs"
-    assembler = BlueprintAssembler(observability_dict=obs_overlay, log_dir=log_dir)
+
+    # PC 3.1 (hot-swap gap fix): прокинуть глобальный telemetry.publish в assembler —
+    # тем же способом, что boot (launch.py PC 1.3). Без этого процессы, ПЕРЕСОБРАННЫЕ
+    # при hot-swap рецепта (switch), не получали бы глобальный дефолт telemetry.publish
+    # из system.yaml → publisher-gate у них не строился бы (TelemetryGate активен только
+    # если секция доехала до proc_dict). per-process override живёт в самом blueprint —
+    # assembler читает его независимо; здесь закрываем именно ГЛОБАЛЬНЫЙ дефолт.
+    telemetry_publish = sys_config.telemetry.publish
+    telemetry_dict = telemetry_publish.model_dump() if telemetry_publish is not None else None
+    assembler = BlueprintAssembler(
+        observability_dict=obs_overlay,
+        log_dir=log_dir,
+        telemetry_dict=telemetry_dict,
+    )
 
     def _build_proc_dicts(bp: dict) -> dict[str, dict]:
         """unwrap рецепта v3 → normalize → assemble (единая сборка boot+switch).

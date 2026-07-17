@@ -7,6 +7,8 @@
 4. Grep-чистота: в assembler.py нет ``multiprocess_prototype`` в import'ах.
 5. Ф4.7: join/inspector из wires — регресс-тест на реальном assemble()-пути
    (без ЛЮБОЙ inspector-декларации join не деградирует в fanin).
+6. PC 1.3: overlay секции telemetry (global + per-process merge, backward-compat)
+   и что она реально доезжает до ``ProcessConfigHandler.get_config("telemetry")``.
 """
 
 from __future__ import annotations
@@ -26,6 +28,9 @@ from multiprocess_framework.modules.process_manager_module.launcher.schema impor
 from multiprocess_framework.modules.process_module.configs import expand_observability
 from multiprocess_framework.modules.process_module.configs.managers_config import (
     merge_managers,
+)
+from multiprocess_framework.modules.process_module.configs.process_config_handler import (
+    ProcessConfigHandler,
 )
 from multiprocess_framework.modules.process_manager_module.topology.blueprint import (
     SystemBlueprint,
@@ -256,6 +261,189 @@ class TestValidation:
             assembler.assemble(bp)
         assert isinstance(exc_info.value.errors, list)
         assert all(isinstance(e, str) for e in exc_info.value.errors)
+
+
+# ---------------------------------------------------------------------------
+# PC 1.3: telemetry overlay — global default + per-process override
+# ---------------------------------------------------------------------------
+
+# Глобальный дефолт telemetry.publish (форма TelemetryPublishConfig.model_dump()).
+_TELEMETRY_GLOBAL: dict = {
+    "default_interval_sec": 1.0,
+    "metrics": {
+        "fps": {"enabled": True, "interval_sec": 1.0},
+        "cycle_duration_ms": {"enabled": False, "interval_sec": None},
+    },
+}
+
+# Топология с per-process telemetry override только у "processor" (fps выключен).
+_TELEMETRY_OVERRIDE_BLUEPRINT: dict = {
+    "name": "telemetry_test",
+    "description": "per-process telemetry override у одного процесса",
+    "processes": [
+        {
+            "process_name": "camera_0",
+            "process_class": "some.module.CameraApp",
+            "plugins": [],
+        },
+        {
+            "process_name": "processor",
+            "process_class": "some.module.ProcessorApp",
+            "plugins": [],
+            "telemetry": {"metrics": {"fps": {"enabled": False}}},
+        },
+        {
+            "process_name": "renderer",
+            "process_class": "some.module.RendererApp",
+            "plugins": [],
+        },
+    ],
+    "wires": [],
+}
+
+
+class TestTelemetryOverlay:
+    """proc_dict['config']['telemetry'] — только когда реально задано (backward-compat)."""
+
+    def test_no_telemetry_anywhere_no_key_injected(self) -> None:
+        """Нет telemetry_dict в конструкторе И нет per-process override → ключ 'telemetry'
+        отсутствует НИ В ОДНОМ proc_dict (critical для PC 1.2: TelemetryGate=None)."""
+        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        result = assembler.assemble(copy.deepcopy(_MULTI_PROCESS_BLUEPRINT))
+
+        for name, proc_dict in result.items():
+            assert "telemetry" not in proc_dict["config"], (
+                f"proc_dict['{name}']['config'] содержит 'telemetry' без явной секции нигде"
+            )
+
+    def test_global_default_applied_to_all_processes(self) -> None:
+        """Глобальный telemetry_dict → ВСЕ proc_dict получают одинаковую секцию telemetry."""
+        assembler = BlueprintAssembler(
+            observability_dict=_OBS_OVERLAY,
+            log_dir="logs",
+            telemetry_dict=_TELEMETRY_GLOBAL,
+        )
+        result = assembler.assemble(copy.deepcopy(_MULTI_PROCESS_BLUEPRINT))
+
+        for name, proc_dict in result.items():
+            assert proc_dict["config"]["telemetry"] == {"publish": _TELEMETRY_GLOBAL}, name
+
+    def test_per_process_override_merges_over_global(self) -> None:
+        """Per-process override перекрывает ТОЛЬКО свою метрику; у других процессов —
+        global без изменений (регресс-тест на merge-семантику)."""
+        assembler = BlueprintAssembler(
+            observability_dict=_OBS_OVERLAY,
+            log_dir="logs",
+            telemetry_dict=_TELEMETRY_GLOBAL,
+        )
+        result = assembler.assemble(copy.deepcopy(_TELEMETRY_OVERRIDE_BLUEPRINT))
+
+        # "processor" — fps выключен override'ом, cycle_duration_ms не тронут (наследован).
+        processor_publish = result["processor"]["config"]["telemetry"]["publish"]
+        assert processor_publish["metrics"]["fps"]["enabled"] is False
+        assert processor_publish["metrics"]["cycle_duration_ms"]["enabled"] is False
+        assert processor_publish["default_interval_sec"] == 1.0
+
+        # "camera_0"/"renderer" — без override, глобальный default как есть (fps enabled).
+        for name in ("camera_0", "renderer"):
+            publish = result[name]["config"]["telemetry"]["publish"]
+            assert publish == _TELEMETRY_GLOBAL, name
+
+    def test_per_process_only_no_global(self) -> None:
+        """Нет глобального telemetry_dict, но у ОДНОГО процесса есть override →
+        telemetry-ключ появляется ТОЛЬКО у него."""
+        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        result = assembler.assemble(copy.deepcopy(_TELEMETRY_OVERRIDE_BLUEPRINT))
+
+        assert "telemetry" not in result["camera_0"]["config"]
+        assert "telemetry" not in result["renderer"]["config"]
+        assert result["processor"]["config"]["telemetry"] == {"publish": {"metrics": {"fps": {"enabled": False}}}}
+
+    def test_per_process_empty_dict_override_counts_as_defined(self) -> None:
+        """Явный пустой per-process override `telemetry: {}` — «включить секцию с
+        дефолтами», НЕ «не задано» (симметрия с публично задокументированной
+        семантикой TelemetrySection.publish: {}). Регресс на `not override`,
+        глотавший пустой dict в «отсутствует» → gate молча не строился."""
+        bp = copy.deepcopy(_MINIMAL_BLUEPRINT)
+        bp["processes"][0]["telemetry"] = {}
+        # Глобального telemetry_dict нет — заданность обеспечивает ТОЛЬКО пустой override.
+        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        result = assembler.assemble(bp)
+
+        assert "telemetry" in result["worker_a"]["config"], (
+            "пустой per-process override telemetry:{} схлопнулся в «не задано» — gate не построится"
+        )
+        assert result["worker_a"]["config"]["telemetry"] == {"publish": {}}
+
+    def test_default_interval_sec_override_replaces_global_scalar(self) -> None:
+        """default_interval_sec — скалярное поле, per-process override заменяет
+        значение целиком (не мержится по-полям)."""
+        bp = copy.deepcopy(_MINIMAL_BLUEPRINT)
+        bp["processes"][0]["telemetry"] = {"default_interval_sec": 5.0}
+        assembler = BlueprintAssembler(
+            observability_dict=_OBS_OVERLAY,
+            log_dir="logs",
+            telemetry_dict=_TELEMETRY_GLOBAL,
+        )
+        result = assembler.assemble(bp)
+
+        publish = result["worker_a"]["config"]["telemetry"]["publish"]
+        assert publish["default_interval_sec"] == 5.0
+        # metrics по-прежнему унаследованы из global (не стёрты override'ом).
+        assert publish["metrics"] == _TELEMETRY_GLOBAL["metrics"]
+
+    def test_telemetry_overlay_does_not_mutate_input(self) -> None:
+        """assemble() с telemetry-override не мутирует входной blueprint_dict."""
+        original = copy.deepcopy(_TELEMETRY_OVERRIDE_BLUEPRINT)
+        snapshot = copy.deepcopy(original)
+
+        assembler = BlueprintAssembler(
+            observability_dict=_OBS_OVERLAY,
+            log_dir="logs",
+            telemetry_dict=_TELEMETRY_GLOBAL,
+        )
+        assembler.assemble(original)
+
+        assert original == snapshot, "assemble() мутировал входной dict (telemetry override)"
+
+    def test_telemetry_dict_constructor_arg_not_mutated(self) -> None:
+        """Повторные assemble() не мутируют _TELEMETRY_GLOBAL, переданный в конструктор."""
+        snapshot = copy.deepcopy(_TELEMETRY_GLOBAL)
+        assembler = BlueprintAssembler(
+            observability_dict=_OBS_OVERLAY,
+            log_dir="logs",
+            telemetry_dict=_TELEMETRY_GLOBAL,
+        )
+        assembler.assemble(copy.deepcopy(_TELEMETRY_OVERRIDE_BLUEPRINT))
+        assembler.assemble(copy.deepcopy(_TELEMETRY_OVERRIDE_BLUEPRINT))
+
+        assert _TELEMETRY_GLOBAL == snapshot, "telemetry_dict конструктора был мутирован"
+
+    def test_get_config_telemetry_reaches_process_config_handler(self) -> None:
+        """Интеграция: proc_dict['config'] → ProcessConfigHandler.get_config('telemetry')
+        отдаёт ту же секцию, что собрал assembler (путь, которым реально читает heartbeat,
+        см. process_heartbeat.py::_build_telemetry_gate → get_config('telemetry'))."""
+        assembler = BlueprintAssembler(
+            observability_dict=_OBS_OVERLAY,
+            log_dir="logs",
+            telemetry_dict=_TELEMETRY_GLOBAL,
+        )
+        result = assembler.assemble(copy.deepcopy(_TELEMETRY_OVERRIDE_BLUEPRINT))
+
+        handler = ProcessConfigHandler("processor", config=result["processor"]["config"])
+        telemetry = handler.get_config("telemetry")
+
+        assert telemetry == result["processor"]["config"]["telemetry"]
+        assert telemetry["publish"]["metrics"]["fps"]["enabled"] is False
+
+    def test_get_config_telemetry_none_when_not_configured(self) -> None:
+        """Backward-compat через тот же путь: без секции нигде get_config('telemetry')
+        отдаёт default (None) — heartbeat трактует это как «гейт неактивен»."""
+        assembler = BlueprintAssembler(observability_dict=_OBS_OVERLAY, log_dir="logs")
+        result = assembler.assemble(copy.deepcopy(_MINIMAL_BLUEPRINT))
+
+        handler = ProcessConfigHandler("worker_a", config=result["worker_a"]["config"])
+        assert handler.get_config("telemetry", None) is None
 
 
 # ---------------------------------------------------------------------------

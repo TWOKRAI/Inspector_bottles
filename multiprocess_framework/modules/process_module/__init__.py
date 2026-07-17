@@ -65,6 +65,14 @@ def __getattr__(name: str) -> Any:
         from .configs.process_launch_config import DEFAULT_QUEUES
 
         return DEFAULT_QUEUES
+    if name == "TelemetryPublishConfig":
+        from .configs.telemetry_publish_config import TelemetryPublishConfig
+
+        return TelemetryPublishConfig
+    if name == "MetricRule":
+        from .configs.telemetry_publish_config import MetricRule
+
+        return MetricRule
     if name == "merge_managers":
         from .configs.managers_config import merge_managers
 
@@ -145,6 +153,9 @@ __all__ = [
     "class_path_from_type",
     "DEFAULT_QUEUES",
     "merge_managers",
+    # Telemetry publish contract (PC 1.1)
+    "TelemetryPublishConfig",
+    "MetricRule",
     # GenericProcess + Plugin system
     "GenericProcess",
     "GenericProcessConfig",

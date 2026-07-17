@@ -1,0 +1,189 @@
+# -*- coding: utf-8 -*-
+"""Тесты рантайм-переконфигурации publisher-gate (PC 3.1).
+
+Acceptance 3.1:
+  - ``heartbeat.reconfigure_telemetry({...})`` живьём меняет gate: метрика была
+    enabled → стала disabled → следующий payload без неё (БЕЗ пересоздания процесса);
+  - ``None`` → gate off (все метрики каждый тик, backward-compat);
+  - смена атомарна: новый gate — другой объект, старый не мутируется.
+"""
+
+from __future__ import annotations
+
+from multiprocess_framework.modules.process_module.heartbeat.process_heartbeat import (
+    ProcessHeartbeat,
+)
+from multiprocess_framework.modules.process_module.heartbeat.telemetry import GATED_METRICS
+
+
+def _workers(n: int = 2) -> dict:
+    return {f"w{i}": {"status": "running", "effective_hz": 10.0 + i, "cycle_duration_ms": 5.0 + i} for i in range(n)}
+
+
+class _CountingProxy:
+    def __init__(self) -> None:
+        self.merged: list[tuple[str, dict]] = []
+        self.set_calls = 0
+
+    def set(self, path: str, value: object) -> None:
+        self.set_calls += 1
+
+    def merge(self, path: str, data: dict) -> None:
+        self.merged.append((path, data))
+
+
+class _FakeServices:
+    def __init__(self, proxy: object, *, name: str = "proc") -> None:
+        self._state_proxy = proxy
+        self.router_manager = None
+        self.name = name
+        self._config: dict = {}
+        self._health_state = None
+
+    def get_config(self, key: str, default=None):
+        return self._config.get(key, default)
+
+    def log_info(self, *a, **k) -> None: ...
+    def log_debug(self, *a, **k) -> None: ...
+
+
+class TestReconfigureGate:
+    def test_none_disables_gate(self) -> None:
+        """None → gate off (обратная совместимость: все метрики каждый тик)."""
+        hb = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+        hb.reconfigure_telemetry({"metrics": {"fps": {"enabled": False}}})
+        assert hb._telemetry_gate is not None
+        hb.reconfigure_telemetry(None)
+        assert hb._telemetry_gate is None
+
+    def test_live_enable_to_disable(self) -> None:
+        """Метрика была enabled → live-reconfigure disabled → gate её больше не выдаёт."""
+        hb = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+
+        hb.reconfigure_telemetry({"metrics": {"fps": {"enabled": True}}})
+        gate1 = hb._telemetry_gate
+        assert "fps" in gate1.due_metrics(now=0.0)
+
+        hb.reconfigure_telemetry({"metrics": {"fps": {"enabled": False}}})
+        gate2 = hb._telemetry_gate
+        # Атомарная смена: новый объект, старый не тронут.
+        assert gate2 is not gate1
+        assert "fps" not in gate2.due_metrics(now=0.0)
+        # Старый gate не мутирован сменой (изоляция состояния _next_due).
+        assert "fps" in gate1.due_metrics(now=1000.0)
+
+    def test_empty_dict_activates_default_throttle(self) -> None:
+        """Пустой publish → дефолт 1.0с (осознанная явная команда, gate активен)."""
+        hb = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+        hb.reconfigure_telemetry({})
+        gate = hb._telemetry_gate
+        assert gate is not None
+        # Все метрики созревают на первом тике (next_due=0), затем реже 1.0с.
+        assert gate.due_metrics(now=0.0) == set(GATED_METRICS)
+        assert gate.due_metrics(now=0.5) == set()  # <1.0с — зажато
+
+    def test_payload_drops_disabled_metric_after_reconfigure(self) -> None:
+        """E2E: после live-reconfigure выключенная метрика исчезает из merge-payload."""
+        proxy = _CountingProxy()
+        hb = ProcessHeartbeat(_FakeServices(proxy))
+
+        # Выключаем per-worker частоту/цикл — status обязан остаться (вне гейта).
+        hb.reconfigure_telemetry(
+            {"metrics": {"effective_hz": {"enabled": False}, "cycle_duration_ms": {"enabled": False}}}
+        )
+        gate = hb._telemetry_gate
+        allowed = gate.due_metrics(now=0.0)
+        hb._publish_metrics_to_tree(_workers(2), allowed)
+
+        assert proxy.merged, "нет публикации"
+        _, data = proxy.merged[-1]
+        wp = data["workers"]["w0"]
+        assert "effective_hz" not in wp
+        assert "cycle_duration_ms" not in wp
+        assert wp["status"] == "running"  # status always-on
+
+    def test_reconfigure_matches_build_gate_from_config(self) -> None:
+        """reconfigure(section) эквивалентен построению gate из get_config на старте."""
+        cfg_section = {"default_interval_sec": 2.0, "metrics": {"shm": {"enabled": False}}}
+
+        svc = _FakeServices(_CountingProxy())
+        svc._config = {"telemetry": {"publish": cfg_section}}
+        hb_boot = ProcessHeartbeat(svc)
+        boot_gate = hb_boot._build_telemetry_gate()
+
+        hb_rt = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+        hb_rt.reconfigure_telemetry(cfg_section)
+        rt_gate = hb_rt._telemetry_gate
+
+        assert boot_gate.due_metrics(now=0.0) == rt_gate.due_metrics(now=0.0)
+        # shm выключен в обоих.
+        assert "shm" not in boot_gate.due_metrics(now=100.0)
+        assert "shm" not in rt_gate.due_metrics(now=100.0)
+
+
+class TestCurrentTelemetryPublish:
+    """Task 1.1: источник эффективной секции для merge (current_telemetry_publish)."""
+
+    def test_none_when_gate_off(self) -> None:
+        hb = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+        assert hb.current_telemetry_publish() is None
+
+    def test_serializes_live_config(self) -> None:
+        """Эффективная секция = to_dict живого конфига (метрики-override видны)."""
+        hb = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+        hb.reconfigure_telemetry({"default_interval_sec": 2.0, "metrics": {"fps": {"enabled": False}}})
+        eff = hb.current_telemetry_publish()
+        assert eff["default_interval_sec"] == 2.0
+        assert eff["metrics"]["fps"]["enabled"] is False
+
+
+class TestReconfigureMergeMode:
+    """Task 1.1: publisher-плоскость в merge-режиме — дельта поверх живого gate."""
+
+    def test_merge_preserves_other_metric_overrides(self) -> None:
+        """Acceptance: выключить только fps → override latency_ms живого gate сохранён."""
+        hb = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+        # Живой gate: fps enabled@0.5, latency_ms disabled.
+        hb.reconfigure_telemetry(
+            {"metrics": {"fps": {"enabled": True, "interval_sec": 0.5}, "latency_ms": {"enabled": False}}}
+        )
+        # Точечная merge-правка: выключить только fps.
+        hb.reconfigure_telemetry({"metrics": {"fps": {"enabled": False}}}, mode="merge")
+        eff = hb.current_telemetry_publish()
+        assert eff["metrics"]["fps"]["enabled"] is False  # изменено
+        assert eff["metrics"]["fps"]["interval_sec"] == 0.5  # прочие поля fps сохранены
+        assert eff["metrics"]["latency_ms"]["enabled"] is False  # соседний override НЕ тронут
+        # Эффект на gate: и fps, и latency_ms выключены.
+        gate = hb._telemetry_gate
+        assert "fps" not in gate.due_metrics(now=100.0)
+        assert "latency_ms" not in gate.due_metrics(now=100.0)
+
+    def test_merge_on_gate_off_starts_from_empty_base(self) -> None:
+        """Gate off + merge → база пустая (дефолтный конфиг + дельта), gate активируется."""
+        hb = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+        assert hb._telemetry_gate is None
+        hb.reconfigure_telemetry({"metrics": {"fps": {"enabled": False}}}, mode="merge")
+        gate = hb._telemetry_gate
+        assert gate is not None
+        # Один вызов (due_metrics продвигает _next_due — второй вызов на том же now пуст).
+        due = gate.due_metrics(now=0.0)
+        assert "fps" not in due  # дельта применена
+        assert "shm" in due  # остальные — дефолт (enabled)
+
+    def test_replace_mode_wipes_other_overrides(self) -> None:
+        """Характеризация: replace (дефолт) НЕ сохраняет соседей — прежнее поведение."""
+        hb = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+        hb.reconfigure_telemetry({"metrics": {"latency_ms": {"enabled": False}}})
+        # Replace-правка fps: latency_ms-override теряется (берёт дефолт enabled).
+        hb.reconfigure_telemetry({"metrics": {"fps": {"enabled": False}}})
+        eff = hb.current_telemetry_publish()
+        assert "latency_ms" not in eff["metrics"]  # снесён (replace-семантика)
+        assert hb._telemetry_gate.due_metrics(now=100.0).issuperset({"latency_ms"})
+
+    def test_merge_none_disables_gate_regardless_of_mode(self) -> None:
+        """publish=None → выключить gate даже в merge (None = «нет секции»)."""
+        hb = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+        hb.reconfigure_telemetry({"metrics": {"fps": {"enabled": False}}})
+        assert hb._telemetry_gate is not None
+        hb.reconfigure_telemetry(None, mode="merge")
+        assert hb._telemetry_gate is None

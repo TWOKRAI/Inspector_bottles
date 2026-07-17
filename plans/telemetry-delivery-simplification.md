@@ -1,8 +1,8 @@
 # Plan: Упрощение пути доставки live-телеметрии
 
 - **Slug:** telemetry-delivery-simplification
-- **Дата:** 2026-06-03 (статус обновлён 2026-06-05)
-- **Статус:** DEFERRED (Option D). Видимый баг «—» РЕШЁН иначе — через [`_archive/telemetry-self-publish-redesign.md`](_archive/telemetry-self-publish-redesign.md) (процесс сам публикует fps/latency в дерево; FPS зелёный, qt-smoke подтвердил). Option A (reuse bridge) стал moot. **Option D (snapshot-канал + TelemetryViewModel + вырезание реактивных биндингов) отложен** до gate реального масштаба (2-й реактивный потребитель ИЛИ замер показал боль двойного glob) — решение #1/#2 [`comm-system-execution-order.md`](comm-system-execution-order.md). Документ держим как запись D-цели.
+- **Дата:** 2026-06-03 (статус обновлён 2026-07-16)
+- **Статус:** **SUPERSEDED** (2026-07-16) → [`gui-telemetry-read-model.md`](gui-telemetry-read-model.md). Gate из решения ниже сработал 2026-07-16 (диагностирован шторм блокирующих подписок при открытии вкладки «Процессы»), но Option D реализована **не** как отдельный snapshot-канал бэкенд→GUI, а как **read-model поверх УЖЕ работающего потока дельт**: coverage-check + async-subscribe + prefix-replay (Фаза 0) + `TelemetryViewModel` (Фаза 1, тот же класс, что задуман здесь) + история из `telemetry_sink` (Фаза 2). Инвариант «0 блокирующего IPC / 0 серверных подписок на покрытых путях» зафиксирован ADR-136 (`multiprocess_framework/DECISIONS.md`). Полный snapshot-канал (третий data-plane путь бэкенд→GUI) остаётся отклонённой альтернативой — см. `gui-telemetry-read-model.md` «Отклонённые альтернативы» / ADR-136. Текст ниже — исторический (запись D-цели и анализ хопов), сохранён без изменений.
 - **Ветка:** feat/comm-system-target-architecture (часть comm-system, НЕ новый branch)
 - **Родительский план:** [`comm-system-target-architecture.md`](_archive/comm-system-target-architecture.md) §7 (а), §12 P0 «разблокировать телеметрию»
 - **Доказательная база:** memory `project_telemetry_subscription_bug`, рантайм-probe сессии 2026-06-03, аудиты [`comm-system-communication-audit.md`](_archive/comm-system-communication-audit.md)
