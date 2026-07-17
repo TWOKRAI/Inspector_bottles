@@ -127,3 +127,4 @@
 - [Ф7 G.7 флип-лесенка Фаза 1](project_f7_g7_flip_ladder.md) — ЗАКРЫТА 2026-07-16: 9 флагов движка флипнуты по одному с замером (синтетика/Windows), restore p99 ~1.4→0.2мс, step10 measurement-gated OFF; тулинг g1_perf_probe+state.shm.* счётчики; УРОКИ same-session control + счётчик-в-1-прогоне≠регресс; резидуалы→Ф2/Ф3
 - [GUI telemetry read-model](project_gui_telemetry_read_model.md) — ЗАКРЫТ 2026-07-16 (ADR-136): запись-всегда/чтение-локально/история-по-запросу, TelemetryViewModel, инвариант-тест 0 блокирующего IPC; follow-up telemetry-publish-control
 - [Telemetry coherence remediation](project_telemetry_coherence_remediation.md) — ревью Fable 24→42/60; Фаза 1 закрыта (delta-mode/tick/троттл=страховка, ADR-PM-016/017); ветка feat/telemetry-coherence; дальше Task 1.4 → Фаза 4 GUI
+- [Telemetry GUI controls](project_telemetry_gui_controls.md) — Ф4.1: шаблонная секция вкл/выкл+частота метрик (цикл по GATED_METRICS), cap-aware, qt-smoke verified
