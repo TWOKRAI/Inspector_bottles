@@ -47,6 +47,7 @@ from multiprocess_prototype.frontend.widgets.primitives import (
     EntityCard,
 )
 
+from ._system_dashboard import SystemDashboardSection
 from ._telemetry_controls import TelemetryControlsSection
 from .widgets import CreateWorkerDialog, ProcessCard, TelemetrySparkline, WorkerTable
 
@@ -207,6 +208,10 @@ class AllProcessesPanel(QWidget):
         # Health-панель sticky-сверху (до inner_stack).
         self._build_health_panel(outer)
 
+        # Дашборд телеметрии (Ф2): многосерийный график (серия на процесс),
+        # легенда-тумблеры, zoom/pan — PyQtGraph через generic TelemetryChart.
+        self._build_dashboard(outer)
+
         # Разбивка кадра по участкам (frame-trace) — под health, скрыта пока
         # нет данных (заполняется только при INSPECTOR_FRAME_TRACE=1).
         self._build_trace_panel(outer)
@@ -251,6 +256,17 @@ class AllProcessesPanel(QWidget):
         health_layout.addStretch()
 
         parent_layout.addWidget(self._health_panel)
+
+    def _build_dashboard(self, parent_layout: QVBoxLayout) -> None:
+        """Собрать системный дашборд: серия на процесс, live из read-model (Ф2).
+
+        Серии — по списку процессов топологии (конструкторно). Обновление гонится в
+        :meth:`_apply_telemetry_items` при касании fps/latency-путей. VM=None (тесты
+        без read-model) → дашборд без данных, но собирается (graceful).
+        """
+        names = [p.name for p in self._presenter.get_processes()]
+        self._dashboard = SystemDashboardSection(names, self._telemetry)
+        parent_layout.addWidget(self._dashboard)
 
     def _build_trace_panel(self, parent_layout: QVBoxLayout) -> None:
         """Таблица пер-сегментной разбивки кадра (transport + process спаны) +
@@ -612,7 +628,8 @@ class AllProcessesPanel(QWidget):
         self._apply_telemetry_items(batch)
 
     def _apply_telemetry_items(self, items: list[tuple[str, Any]]) -> None:
-        """Применить пачку (path, value): setter карточки/health + trace-fan-out."""
+        """Применить пачку (path, value): setter карточки/health + trace-fan-out + дашборд."""
+        dashboard_touched = False
         for path, value in items:
             setter = self._vm_setters.get(path)
             if setter is not None:
@@ -626,6 +643,12 @@ class AllProcessesPanel(QWidget):
                     fanout(path, value)
                 except Exception as exc:
                     _logger.debug("telemetry-vm: fan-out failed on %s: %s", path, exc)
+            # Ф2: дашборд перечитывает ring-историю при касании метрик state.<metric>.
+            if path.endswith(".state.fps") or path.endswith(".state.latency_ms"):
+                dashboard_touched = True
+        # Один refresh на батч (O(процессы×точки) из ring — дёшево, не per-путь).
+        if dashboard_touched and hasattr(self, "_dashboard"):
+            self._dashboard.refresh()
 
     # --- Fallback: прежний bindings-путь ------------------------------- #
 
