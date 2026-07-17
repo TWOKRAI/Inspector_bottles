@@ -215,27 +215,28 @@ class TestLiveUpdateViaVm:
 
 
 # ------------------------------------------------------------------ #
-#  3. Fallback: без VM — прежний bindings-путь                        #
+#  3. Без VM — телеметрия НЕ подключается (legacy bind-путь вырезан)  #
 # ------------------------------------------------------------------ #
 
 
-class TestFallbackWithoutVm:
-    def test_all_panel_without_vm_uses_bindings(self, qtbot) -> None:
-        """telemetry=None → панель биндит по-старому (bind вызван)."""
+class TestNoTelemetryWithoutVm:
+    def test_all_panel_without_vm_does_not_bind(self, qtbot) -> None:
+        """telemetry=None → панель НЕ создаёт точечных телеметрийных bind (legacy вырезан)."""
         bindings = _counting_bindings()
         panel = AllProcessesPanel(_presenter(), bindings, telemetry=None)
         qtbot.addWidget(panel)
 
-        assert bindings.bind.call_count > 0
-        assert bindings.bind_fanout.call_count > 0
+        assert bindings.bind.call_count == 0
+        assert bindings.bind_fanout.call_count == 0
 
-    def test_single_panel_without_vm_uses_bindings(self, qtbot) -> None:
-        """telemetry=None → SingleProcessPanel биндит по-старому."""
+    def test_single_panel_without_vm_does_not_bind(self, qtbot) -> None:
+        """telemetry=None → SingleProcessPanel НЕ создаёт телеметрийных bind."""
         bindings = _counting_bindings()
         panel = SingleProcessPanel(_presenter(), bindings, "camera_0", telemetry=None)
         qtbot.addWidget(panel)
 
-        assert bindings.bind.call_count > 0
+        assert bindings.bind.call_count == 0
+        assert bindings.bind_fanout.call_count == 0
 
     def test_panels_without_any_deps_construct(self, qtbot) -> None:
         """telemetry=None и bindings=None → панели всё равно конструируются."""

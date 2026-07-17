@@ -476,17 +476,37 @@ class TestAutoSubscription:
 
 
 # ---------------------------------------------------------------------------
-# Replay из кэша при bind() (Task 4.1)
+# Replay из read-model при bind() (late-binding ленивых вкладок)
 # ---------------------------------------------------------------------------
 
 
+class _FakeReadModel:
+    """Мини read-model для тестов replay: snapshot("") → полный снимок кэша."""
+
+    def __init__(self, cache: dict) -> None:
+        self._cache = dict(cache)
+
+    def snapshot(self, prefix: str) -> dict:
+        if not prefix:
+            return dict(self._cache)
+        dotted = prefix + "."
+        return {p: v for p, v in self._cache.items() if p == prefix or p.startswith(dotted)}
+
+
+class _BoomReadModel:
+    """read-model, чей snapshot бросает — bind не должен падать."""
+
+    def snapshot(self, prefix: str) -> dict:
+        raise RuntimeError("read-model unavailable")
+
+
 class TestCacheReplayOnBind:
-    """bind() сразу применяет закэшированное значение (ленивые вкладки)."""
+    """bind() сразу применяет последнее значение из read-model (ленивые вкладки)."""
 
     def test_exact_path_replayed_immediately(self, qtbot, bridge):
-        """bind на путь с уже закэшированным значением → setter сразу."""
+        """bind на путь с уже известным значением → setter сразу."""
         cache = {"processes.cam.state.status": "running"}
-        b = GuiStateBindings(bridge, cache_snapshot=lambda: dict(cache))
+        b = GuiStateBindings(bridge, read_model=_FakeReadModel(cache))
 
         label = QLabel("—")
         qtbot.addWidget(label)
@@ -496,13 +516,13 @@ class TestCacheReplayOnBind:
         assert label.text() == "running"
 
     def test_glob_pattern_replays_all_matches(self, qtbot, bridge):
-        """glob-паттерн → replay всех совпадающих путей из снимка кэша."""
+        """glob-паттерн → replay всех совпадающих путей из снимка read-model."""
         cache = {
             "processes.cam.workers.w1.status": "running",
             "processes.cam.workers.w2.status": "paused",
             "processes.other.state.fps": 30,  # не должен матчить
         }
-        b = GuiStateBindings(bridge, cache_snapshot=lambda: dict(cache))
+        b = GuiStateBindings(bridge, read_model=_FakeReadModel(cache))
 
         label = QLabel("—")
         qtbot.addWidget(label)
@@ -512,28 +532,24 @@ class TestCacheReplayOnBind:
         assert label.text() in ("running", "paused")
 
     def test_no_cached_value_keeps_default(self, qtbot, bridge):
-        """Путь не в кэше → виджет остаётся с дефолтом."""
-        b = GuiStateBindings(bridge, cache_snapshot=lambda: {})
+        """Путь не в снимке → виджет остаётся с дефолтом."""
+        b = GuiStateBindings(bridge, read_model=_FakeReadModel({}))
         label = QLabel("—")
         qtbot.addWidget(label)
         b.bind("processes.cam.state.status", label, "text")
         assert label.text() == "—"
 
-    def test_no_cache_snapshot_legacy_no_replay(self, qtbot, bridge):
-        """cache_snapshot=None → bind работает как раньше (без replay)."""
-        b = GuiStateBindings(bridge)  # без cache_snapshot
+    def test_no_read_model_no_replay(self, qtbot, bridge):
+        """read_model=None → bind работает без replay."""
+        b = GuiStateBindings(bridge)  # без read_model
         label = QLabel("—")
         qtbot.addWidget(label)
         b.bind("processes.cam.state.status", label, "text")
         assert label.text() == "—"
 
-    def test_cache_snapshot_exception_does_not_break_bind(self, qtbot, bridge):
-        """Исключение в провайдере снимка → bind не падает."""
-
-        def boom():
-            raise RuntimeError("cache unavailable")
-
-        b = GuiStateBindings(bridge, cache_snapshot=boom)
+    def test_read_model_exception_does_not_break_bind(self, qtbot, bridge):
+        """Исключение в snapshot read-model → bind не падает."""
+        b = GuiStateBindings(bridge, read_model=_BoomReadModel())
         label = QLabel("—")
         qtbot.addWidget(label)
         # не должно бросить
@@ -581,7 +597,7 @@ class TestFanout:
 
     def test_fanout_replays_cache_on_register(self, bridge):
         cache = {"processes.detector.workers.pipeline_executor.status": "running"}
-        b = GuiStateBindings(bridge, cache_snapshot=lambda: cache)
+        b = GuiStateBindings(bridge, read_model=_FakeReadModel(cache))
         seen: list[tuple[str, object]] = []
         b.bind_fanout(
             "processes.detector.workers.*.status",

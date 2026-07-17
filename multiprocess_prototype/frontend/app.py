@@ -266,17 +266,30 @@ def run_gui(process: "GuiProcess") -> None:
         )
         process._record_metric("startup.errors", len(_report.errors))
 
-    # 3b. Создать GuiStateBindings — занимает слот bridge.set_state_callback
-    #     (Phase 10B: табы получают bindings через RuntimeDeps.bindings)
+    # 3b. Локальный read-model телеметрии + GuiStateBindings.
+    #     read-model (TelemetryViewModel) — ЕДИНЫЙ источник late-binding-снимка:
+    #     наполняется тем же wildcard-потоком дельт (второй потребитель,
+    #     multi-subscriber §11.15) и первично — из кэша gui-proxy. bindings
+    #     replay'ит из него (вместо отдельного снимка над proxy.cache), чтобы
+    #     запись и late-binding-чтение мирились одним read-model.
+    from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
+
     from .state.bindings import GuiStateBindings
 
-    # cache_snapshot: replay закэшированного state при bind() (Task 4.1) —
-    # ленивые вкладки сразу получают последний статус/метрики, не дожидаясь
-    # следующей дельты (разовые status-дельты проходят до создания вкладки).
     _gui_proxy = getattr(process, "_gui_state_proxy", None)
+
+    # VM строится ПЕРВЫМ — чтобы bindings мог replay'ить из его снимка. НЕ создаёт
+    # серверных подписок: питается стартовыми wildcard'ами (processes.**/...).
+    telemetry_view_model = TelemetryViewModel(
+        initial_cache=(_gui_proxy.cache if _gui_proxy is not None else None),
+    )
+
+    # bindings занимает слот bridge.set_state_callback (Phase 10B: табы получают
+    # bindings через RuntimeDeps.bindings). read_model → replay ленивым вкладкам
+    # последнего статуса/метрик (разовые status-дельты проходят до создания вкладки).
     bindings = GuiStateBindings(
         process._bridge,
-        cache_snapshot=(lambda: _gui_proxy.cache) if _gui_proxy is not None else None,
+        read_model=telemetry_view_model,
         # Авто-подписка (5.9): bind() на pattern гарантирует серверную подписку,
         # даже если он не покрыт стартовыми wildcard'ами (processes.**/system.**/
         # devices.**/calibration.**). refcount в proxy схлопывает дубли.
@@ -284,17 +297,8 @@ def run_gui(process: "GuiProcess") -> None:
         release_subscription=(_gui_proxy.release_subscription if _gui_proxy is not None else None),
     )
 
-    # Ф1 (gui-telemetry-read-model 1.1/1.2): локальный read-model телеметрии —
-    # ВТОРОЙ потребитель того же wildcard-потока дельт (multi-subscriber §11.15),
-    # рядом с GuiStateBindings. НЕ создаёт серверных подписок: питается стартовыми
-    # wildcard'ами (processes.**/system.**/...). Первичный снимок — из кэша
-    # gui-proxy, чтобы вкладки, созданные ПОСЛЕ публикации, читали актуальное
-    # сразу (late-binding). В табы прокидывается через RuntimeDeps.telemetry.
-    from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
-
-    telemetry_view_model = TelemetryViewModel(
-        initial_cache=(_gui_proxy.cache if _gui_proxy is not None else None),
-    )
+    # VM регистрируется вторым потребителем ПОСЛЕ bindings (порядок §11.15:
+    # сначала bindings _state_cb, затем listener).
     process._bridge.add_state_listener(telemetry_view_model.on_state_delta)
 
     # 3c. Phase 12: CommandCatalog + CommandValidator + TopologyBridge
