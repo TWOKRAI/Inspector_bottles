@@ -11,8 +11,8 @@ PyQtGraph выбран для ЕДИНООБРАЗИЯ (одна система 
 downsampling/clip — тысячи точек и высокая частота не фризят. ``compact``-режим — мини-график
 (без легенды/осей) как замена кастом-спарклайну (Ф3).
 
-Границы: виджет — во frontend_module (framework GUI-слой, уже PySide6). Импортирует pyqtgraph
-лениво не нужно (модуль GUI и так грузит Qt), но numpy/pyqtgraph — на уровне модуля.
+Границы: виджет — во frontend_module (framework GUI-слой, уже PySide6). pyqtgraph импортируется
+на уровне модуля (лениво не нужно — GUI-слой и так грузит Qt); numpy тянет сам pyqtgraph.
 """
 
 from __future__ import annotations
@@ -74,6 +74,9 @@ class TelemetryChart(QWidget):
         compact: мини-режим (без легенды и осей) — замена кастом-спарклайну (Ф3).
         downsample: включить ``setDownsampling(auto)`` + ``setClipToView`` (дёшево при тысячах точек).
         time_axis: ось X как читаемое время (``DateAxisItem``) — для дашборда; в compact выключено.
+            КОНТРАКТ: при ``time_axis=True`` координата X точек — Unix-epoch секунды (wall-clock,
+            ``time.time()``). ``DateAxisItem`` и панель crosshair форматируют X через ``localtime`` —
+            подача ``monotonic()`` даст мусорные метки времени (~1970). Владелец обязан гнать wall-clock.
         crosshair: вертикальная линия под курсором + панель точных значений КАЖДОЙ серии в
             этой точке времени (Grafana-style) — читаемость при разном масштабе серий; в compact off.
         y_label: подпись оси Y (метрика+юнит) — «что за шкала»; можно менять :meth:`set_y_label`.

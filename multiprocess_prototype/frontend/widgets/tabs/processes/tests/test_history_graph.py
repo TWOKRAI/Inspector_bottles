@@ -207,7 +207,7 @@ class TestStaleHistoryResponseDiscarded:
         panel = SingleProcessPanel(_presenter(), None, "camera_0", telemetry=vm)
         qtbot.addWidget(panel)
 
-        t_now = time.monotonic()
+        t_now = time.time()
         path = "processes.camera_0.state.fps"
         # Старая точка (за окном 10м = 600с) + свежая точка внутри окна.
         vm._history[path] = collections.deque([(t_now - 3600.0, 11.0), (t_now - 1.0, 22.0)], maxlen=600)

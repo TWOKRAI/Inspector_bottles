@@ -982,7 +982,7 @@ class SingleProcessPanel(QWidget):
             return
         proc = self._process_name
         window = next((s for k, _label, s in _GRAPH_RANGES if k == "10m"), 600.0)
-        since = time.monotonic() - window
+        since = time.time() - window  # ring хранит wall-clock ts (единая ось с DB/DateAxisItem)
         self._fps_chart.set_series_data("fps", self._telemetry.history(f"processes.{proc}.state.fps", since=since))
         self._latency_chart.set_series_data(
             "latency", self._telemetry.history(f"processes.{proc}.state.latency_ms", since=since)

@@ -138,14 +138,27 @@ def test_history_since_filters_range(qtbot) -> None:
     """history(since) отдаёт только точки с ts >= since."""
     vm = TelemetryViewModel()
     vm.on_state_delta(_delta("processes.cam.state.fps", 1.0))
-    # Пауза > гранулярности time.monotonic() (на Windows ~16 мс), чтобы ts
+    # Пауза > гранулярности time.time() (на Windows ~16 мс), чтобы ts
     # первой точки был СТРОГО меньше cutoff — иначе грубые часы дают ts == cutoff.
     time.sleep(0.05)
-    cutoff = time.monotonic()
+    cutoff = time.time()
     time.sleep(0.05)
     vm.on_state_delta(_delta("processes.cam.state.fps", 2.0))
     recent = vm.history("processes.cam.state.fps", since=cutoff)
     assert [v for _ts, v in recent] == [2.0]
+
+
+def test_history_ts_is_wall_clock(qtbot) -> None:
+    """Регресс: ring-ts — wall-clock (Unix-epoch), не monotonic.
+
+    DateAxisItem/crosshair графика форматируют X через localtime — monotonic-ts
+    давал бы мусорные метки (~1970). ts должен быть в пределах пары секунд от
+    time.time(); под старой monotonic-реализацией (uptime) этот инвариант ложен.
+    """
+    vm = TelemetryViewModel()
+    vm.on_state_delta(_delta("processes.cam.state.fps", 1.0))
+    ((ts, _val),) = vm.history("processes.cam.state.fps")
+    assert abs(ts - time.time()) < 2.0, "ring-ts должен быть wall-clock (Unix-epoch), а не monotonic"
 
 
 def test_history_empty_for_unknown_path(qtbot) -> None:
