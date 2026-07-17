@@ -208,6 +208,43 @@ class WorkerStatus:
 
 
 @dataclass
+class MemoryStats:
+    """Инвентарь памяти процесса (introspect.memory): SHM / пул / очереди.
+
+    Только СТАТИСТИКА (Dict at Boundary) — кадры и содержимое SHM по сокету не
+    гоняем. Секции независимы и best-effort: недоступная подсистема → ``None``
+    (не ошибка). ``memory`` — ``MemoryManager.get_stats()``; ``pool`` — агрегат
+    ``LoanLedger`` по frame-middleware роутера; ``queues`` — глубины очередей
+    (как introspect.queues); ``shm_registry`` — инвентарь SHM-реестра (launcher-
+    level file-marker: в дочернем процессе обычно ``None``). ``raw`` — сырой ответ.
+    """
+
+    ok: bool
+    memory: Optional[Dict[str, Any]]
+    pool: Optional[Dict[str, Any]]
+    queues: Optional[Dict[str, Any]]
+    shm_registry: Optional[Dict[str, Any]]
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_response(cls, res: Any) -> "MemoryStats":
+        payload = _find_payload(res, "memory", "pool", "queues", "shm_registry")
+
+        def _sec(key: str) -> Optional[Dict[str, Any]]:
+            val = payload.get(key) if isinstance(payload, dict) else None
+            return val if isinstance(val, dict) else None
+
+        return cls(
+            ok=_is_ok(res, payload),
+            memory=_sec("memory"),
+            pool=_sec("pool"),
+            queues=_sec("queues"),
+            shm_registry=_sec("shm_registry"),
+            raw=res if isinstance(res, dict) else {},
+        )
+
+
+@dataclass
 class ProcessCapabilities:
     """Карточка процесса из introspect.capabilities (контактная книжка, Ф1 Task 1.9).
 
@@ -738,6 +775,17 @@ class BackendDriver:
     def introspect_plugins(self, process: str, **kw: Any) -> Dict[str, Any]:
         """Каталог плагинов процесса + failed_imports (Ф2.3: опечатка в плагине видна)."""
         return self.send_command(process, "introspect.plugins", **kw)
+
+    def introspect_memory(self, process: str, *, timeout: Optional[float] = None) -> MemoryStats:
+        """Инвентарь памяти процесса (SHM / пул займов / очереди) как :class:`MemoryStats`.
+
+        Только статистика (Dict at Boundary) — кадры/содержимое SHM по сокету не
+        гоняем. Секции best-effort: недоступная подсистема → ``None`` (не ошибка).
+        Возвращает типизированный результат с сырым ответом в ``.raw`` (симметрия
+        с :meth:`queues`/:meth:`router_stats`, но команда — новая ``introspect.memory``).
+        """
+        res = self.send_command(process, "introspect.memory", timeout=timeout)
+        return MemoryStats.from_response(res)
 
     # ---- Типизированные обёртки (dataclass-результаты, Ф1 Task 1.2) ----
     #

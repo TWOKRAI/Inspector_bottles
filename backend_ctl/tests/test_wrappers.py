@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend_ctl.driver import QueueDepths, RouterStats, WorkerStatus
+from backend_ctl.driver import MemoryStats, QueueDepths, RouterStats, WorkerStatus
 
 # Реальная форма ответа команды: внешний конверт success + вложенная payload под result
 # (снято с живого бэкенда — см. probe). Парсеры обязаны спускаться по result.
@@ -79,6 +79,46 @@ class TestQueueDepthsParsing:
     def test_defaults_on_empty(self) -> None:
         q = QueueDepths.from_response({"success": True, "result": {"success": True}})
         assert q.sizes == {}
+
+
+_MEMORY_RESP = {
+    "success": True,
+    "result": {
+        "success": True,
+        "process": "preprocessor",
+        "memory": {"created": 3, "errors": 0, "is_owner": True},
+        "pool": {"loan_pools": 1, "slots_released": 5, "slots_reclaimed": 0, "loan_exhausted": 2},
+        "queues": {"system": 0, "data": 2},
+        "shm_registry": None,
+    },
+}
+
+
+class TestMemoryStatsParsing:
+    def test_parses_nested_sections(self) -> None:
+        m = MemoryStats.from_response(_MEMORY_RESP)
+        assert m.ok is True
+        assert m.memory == {"created": 3, "errors": 0, "is_owner": True}
+        assert m.pool["slots_released"] == 5
+        assert m.queues == {"system": 0, "data": 2}
+        assert m.shm_registry is None  # null-секция сохраняется как None
+        assert m.raw is _MEMORY_RESP  # сырой ответ сохранён целиком
+
+    def test_null_sections_on_bare_process(self) -> None:
+        # Процесс без shared_resources: все секции null, но success=True.
+        bare = {"success": True, "result": {"success": True, "memory": None, "pool": None, "queues": None}}
+        m = MemoryStats.from_response(bare)
+        assert m.ok is True
+        assert (m.memory, m.pool, m.queues, m.shm_registry) == (None, None, None, None)
+
+    def test_defaults_on_error(self) -> None:
+        m = MemoryStats.from_response({"success": False, "error": "timeout"})
+        assert m.ok is False
+        assert (m.memory, m.pool, m.queues, m.shm_registry) == (None, None, None, None)
+
+    def test_robust_to_garbage(self) -> None:
+        m = MemoryStats.from_response(None)  # type: ignore[arg-type]
+        assert m.ok is False and m.raw == {}
 
 
 class TestWorkerStatusParsing:

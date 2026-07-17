@@ -381,6 +381,11 @@ class BuiltinCommands:
                 "Глубины очередей процесса (backpressure)",
             ),
             (
+                "introspect.memory",
+                self._cmd_introspect_memory,
+                "Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)",
+            ),
+            (
                 "introspect.capabilities",
                 self._cmd_introspect_capabilities,
                 "Карточка процесса для «контактной книжки»: команды+descriptions, регистры (поля), router-handlers",
@@ -645,6 +650,96 @@ class BuiltinCommands:
                 except (NotImplementedError, OSError, AttributeError):
                     sizes[qtype] = None  # qsize недоступен (macOS) — диагностично само по себе
         return {"success": True, "process": svc.name, "queue_sizes": sizes}
+
+    def _cmd_introspect_memory(self, data=None, **kwargs) -> dict:
+        """Инвентарь памяти процесса: SHM / пул займов / очереди (Ф2 Task 2.4).
+
+        Отвечает на «что с памятью процесса» — то, чего нет даже у GUI (GUI видит
+        state/логи/телеметрию, но не память/SHM/очереди). **Только статистика**
+        (Dict at Boundary) — кадры и содержимое SHM по IPC не гоняем.
+
+        Best-effort: каждая секция независима, недоступная подсистема → ``None``
+        (НЕ ошибка). Процесс без shared_resources отвечает ``success=True`` с
+        null-секциями. Секции:
+
+        - ``memory`` — ``MemoryManager.get_stats()`` (счётчики created/written/errors,
+          processes_with_handles, is_owner). Доступ: ``shared_resources._memory_manager``
+          (тот же фасад, что читает ``introspect.router_stats``; пиклится в дочерний
+          процесс — не в ``_PICKLE_EXCLUDE``).
+        - ``pool`` — агрегат ``LoanLedger.snapshot_stats()`` по frame-middleware
+          роутера (loan-протокол SHM-колец живёт в ``FrameShmMiddleware``, а НЕ в
+          shared_resources — поэтому берём с ``router_manager._frame_middlewares``
+          через публичные свойства ``frame_slots_*``/``frame_loan_exhausted``).
+        - ``queues`` — глубины собственных очередей (как ``introspect.queues``).
+        - ``shm_registry`` — инвентарь ``ShmRegistry``. Реестр — launcher-level
+          файл-маркер (Windows cleanup), в штатном дочернем процессе он НЕ
+          прикреплён к менеджерам → обычно ``None``; per-process число открытых
+          SHM-хендлов доступно в секции ``memory`` (``processes_with_handles``).
+        """
+        svc = self._services
+        sr = getattr(svc, "shared_resources", None)
+
+        # --- memory: MemoryManager.get_stats() ---
+        memory = None
+        mm = getattr(sr, "_memory_manager", None) if sr is not None else None
+        if mm is not None and hasattr(mm, "get_stats"):
+            try:
+                stats = mm.get_stats()
+                memory = stats if isinstance(stats, dict) else None
+            except Exception:  # noqa: BLE001 — best-effort: секция null, не ошибка
+                memory = None
+
+        # --- pool: агрегат LoanLedger по frame-middleware роутера ---
+        pool = None
+        router = getattr(svc, "router_manager", None)
+        mws = getattr(router, "_frame_middlewares", None) if router is not None else None
+        if mws:  # непустой список frame-middleware = loan-протокол активен
+            try:
+                active = sum(1 for mw in mws if getattr(mw, "loan_protocol_enabled", False))
+                pool = {
+                    "loan_pools": active,
+                    "slots_released": sum(int(getattr(mw, "frame_slots_released", 0) or 0) for mw in mws),
+                    "slots_reclaimed": sum(int(getattr(mw, "frame_slots_reclaimed", 0) or 0) for mw in mws),
+                    "loan_exhausted": sum(int(getattr(mw, "frame_loan_exhausted", 0) or 0) for mw in mws),
+                }
+            except Exception:  # noqa: BLE001 — best-effort
+                pool = None
+
+        # --- queues: глубины собственных очередей (как introspect.queues) ---
+        queues = None
+        qs = getattr(svc, "queues", None)
+        if isinstance(qs, dict):
+            queues = {}
+            for qtype, queue in qs.items():
+                try:
+                    queues[qtype] = queue.qsize()
+                except (NotImplementedError, OSError, AttributeError):
+                    queues[qtype] = None  # qsize недоступен (macOS) — диагностично
+
+        # --- shm_registry: инвентарь ShmRegistry (обычно null в дочернем процессе) ---
+        shm_registry = None
+        reg = None
+        for owner in (sr, mm):
+            if owner is None:
+                continue
+            reg = getattr(owner, "shm_registry", None) or getattr(owner, "_shm_registry", None)
+            if reg is not None:
+                break
+        if reg is not None and hasattr(reg, "all_names"):
+            try:
+                names = sorted(str(n) for n in reg.all_names())
+                shm_registry = {"names": names, "count": len(names)}
+            except Exception:  # noqa: BLE001 — best-effort
+                shm_registry = None
+
+        return {
+            "success": True,
+            "process": svc.name,
+            "memory": memory,
+            "pool": pool,
+            "queues": queues,
+            "shm_registry": shm_registry,
+        }
 
     # ========================================================================
     # OBSERVABILITY CONTROL PLANE — config.reload / logger.sink.* (Ф1 Task 1.4)

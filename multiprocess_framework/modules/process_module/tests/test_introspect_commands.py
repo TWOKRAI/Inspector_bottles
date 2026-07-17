@@ -75,6 +75,48 @@ class _FakeQueue:
         return self._size
 
 
+class _FakeMemoryManager:
+    """MemoryManager-совместимый фейк: get_stats() + опц. shm_registry."""
+
+    def __init__(self, stats, shm_registry=None) -> None:
+        self._stats = stats
+        self.shm_registry = shm_registry
+
+    def get_stats(self) -> dict:
+        return self._stats
+
+
+class _FakeSharedResources:
+    """SharedResourcesManager-совместимый фейк: держит _memory_manager."""
+
+    def __init__(self, memory_manager) -> None:
+        self._memory_manager = memory_manager
+
+
+class _FakeShmRegistry:
+    def __init__(self, names) -> None:
+        self._names = list(names)
+
+    def all_names(self) -> list:
+        return list(self._names)
+
+
+class _FakeFrameMiddleware:
+    """FrameShmMiddleware-совместимый фейк: публичные счётчики loan-протокола."""
+
+    def __init__(self, *, enabled=True, released=0, reclaimed=0, exhausted=0) -> None:
+        self.loan_protocol_enabled = enabled
+        self.frame_slots_released = released
+        self.frame_slots_reclaimed = reclaimed
+        self.frame_loan_exhausted = exhausted
+
+
+class _FakeRouterWithFrames(_FakeRouter):
+    def __init__(self, frame_middlewares, handler_keys=()) -> None:
+        super().__init__(handler_keys)
+        self._frame_middlewares = list(frame_middlewares)
+
+
 class _FakeOrchestrator:
     def __init__(self, registers_manager) -> None:
         self.registers_manager = registers_manager
@@ -91,12 +133,15 @@ class _FakeRegistersManager:
 class _FakeServices:
     """IProcessServices-совместимый фейк для introspect-команд."""
 
-    def __init__(self, *, router=None, worker_manager=None, orchestrator=None, queues=None) -> None:
+    def __init__(
+        self, *, router=None, worker_manager=None, orchestrator=None, queues=None, shared_resources=None
+    ) -> None:
         self.command_manager = _FakeCommandManager()
         self.router_manager = router
         self.worker_manager = worker_manager
         self._orchestrator = orchestrator
         self.queues = queues
+        self.shared_resources = shared_resources
         self.name = "preprocessor"
         self._current_process_status = "running"
 
@@ -124,6 +169,8 @@ class TestRegistration:
             "introspect.handlers",
             "introspect.registers",
             "introspect.status",
+            "introspect.queues",
+            "introspect.memory",
             "introspect.capabilities",
             "introspect.plugins",
         ):
@@ -333,6 +380,83 @@ class TestIntrospectQueues:
         _svc, cm = _make(queues=None)
         result = cm.dispatch("introspect.queues")
         assert result["queue_sizes"] == {}
+
+
+# ====================================================================== #
+#  introspect.memory (Ф2 Task 2.4 — инвентарь памяти/SHM/очередей)        #
+# ====================================================================== #
+
+
+class TestIntrospectMemory:
+    """Best-effort инвентарь памяти: недоступная секция → null, не ошибка."""
+
+    def test_all_sections_null_without_subsystems(self) -> None:
+        # Процесс без shared_resources/router/queues → success=True, все секции null.
+        _svc, cm = _make()
+        result = cm.dispatch("introspect.memory")
+        assert result["success"] is True
+        assert result["process"] == "preprocessor"
+        assert result["memory"] is None
+        assert result["pool"] is None
+        assert result["queues"] is None
+        assert result["shm_registry"] is None
+
+    def test_memory_section_from_memory_manager_get_stats(self) -> None:
+        mm = _FakeMemoryManager({"created": 3, "errors": 0, "is_owner": True})
+        sr = _FakeSharedResources(mm)
+        _svc, cm = _make(shared_resources=sr)
+        result = cm.dispatch("introspect.memory")
+        assert result["success"] is True
+        assert result["memory"] == {"created": 3, "errors": 0, "is_owner": True}
+
+    def test_pool_section_aggregates_frame_middlewares(self) -> None:
+        router = _FakeRouterWithFrames(
+            [
+                _FakeFrameMiddleware(enabled=True, released=5, reclaimed=1, exhausted=2),
+                _FakeFrameMiddleware(enabled=True, released=3, reclaimed=0, exhausted=0),
+            ]
+        )
+        _svc, cm = _make(router=router)
+        result = cm.dispatch("introspect.memory")
+        assert result["pool"] == {
+            "loan_pools": 2,
+            "slots_released": 8,
+            "slots_reclaimed": 1,
+            "loan_exhausted": 2,
+        }
+
+    def test_pool_null_when_no_frame_middlewares(self) -> None:
+        # Router есть, но loan-протокол не активен (пустой список) → секция null.
+        router = _FakeRouterWithFrames([])
+        _svc, cm = _make(router=router)
+        result = cm.dispatch("introspect.memory")
+        assert result["pool"] is None
+
+    def test_queues_section_mirrors_introspect_queues(self) -> None:
+        queues = {"system": _FakeQueue(2), "data": _FakeQueue(0)}
+        _svc, cm = _make(queues=queues)
+        result = cm.dispatch("introspect.memory")
+        assert result["queues"] == {"system": 2, "data": 0}
+
+    def test_shm_registry_from_registry_when_present(self) -> None:
+        mm = _FakeMemoryManager({"created": 1}, shm_registry=_FakeShmRegistry(["shm_a", "shm_b"]))
+        sr = _FakeSharedResources(mm)
+        _svc, cm = _make(shared_resources=sr)
+        result = cm.dispatch("introspect.memory")
+        assert result["shm_registry"] == {"names": ["shm_a", "shm_b"], "count": 2}
+
+    def test_all_sections_filled_together(self) -> None:
+        mm = _FakeMemoryManager({"created": 7}, shm_registry=_FakeShmRegistry(["shm_x"]))
+        sr = _FakeSharedResources(mm)
+        router = _FakeRouterWithFrames([_FakeFrameMiddleware(released=4)])
+        queues = {"system": _FakeQueue(1)}
+        _svc, cm = _make(shared_resources=sr, router=router, queues=queues)
+        result = cm.dispatch("introspect.memory")
+        assert result["success"] is True
+        assert result["memory"] == {"created": 7}
+        assert result["pool"]["slots_released"] == 4
+        assert result["queues"] == {"system": 1}
+        assert result["shm_registry"]["count"] == 1
 
 
 # ====================================================================== #

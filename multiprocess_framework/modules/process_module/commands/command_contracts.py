@@ -185,6 +185,7 @@ BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
     "introspect.status": NoParams,
     "introspect.router_stats": NoParams,
     "introspect.queues": NoParams,
+    "introspect.memory": NoParams,
     "introspect.capabilities": NoParams,
     "introspect.plugins": NoParams,
     # observability control plane (Ф1 Task 1.4/1.5, Ф5.20b)

@@ -112,6 +112,7 @@ class TestRegistry:
             "introspect_router_stats",
             "introspect_queues",
             "introspect_plugins",
+            "introspect_memory",
             "send_command",
             "system_command",
             "set_register",
@@ -193,6 +194,14 @@ class TestToolsCall:
         assert res["result"]["isError"] is False
         assert tool_result(res) == {"success": True, "method": "get_status"}
         assert fake.calls == [("get_status", ("preprocessor",), {})]
+
+    def test_introspect_memory_dispatches_to_driver(self) -> None:
+        # Ф2 Task 2.4: introspect_memory доходит до driver (read-only инвентарь памяти).
+        server, fake = make_server()
+        res = call(server, "tools/call", {"name": "introspect_memory", "arguments": {"process": "preprocessor"}})
+        assert res["result"]["isError"] is False
+        assert tool_result(res) == {"success": True, "method": "introspect_memory"}
+        assert fake.calls == [("introspect_memory", ("preprocessor",), {})]
 
     def test_send_command_passes_args_and_timeout(self) -> None:
         server, fake = make_server()

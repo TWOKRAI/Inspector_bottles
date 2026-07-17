@@ -111,6 +111,10 @@ def _introspect_plugins(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.introspect_plugins(args["process"], **_kw_timeout(args))
 
 
+def _introspect_memory(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return _jsonable(drv.introspect_memory(args["process"], **_kw_timeout(args)))
+
+
 def _send_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.send_command(args["target"], args["command"], args.get("args"), **_kw_timeout(args))
 
@@ -298,6 +302,14 @@ TOOLS: List[ToolSpec] = [
         "(модули, упавшие на discover — «куда делся мой плагин»).",
         _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
         _introspect_plugins,
+    ),
+    ToolSpec(
+        "introspect_memory",
+        "Инвентарь памяти процесса: SHM / пул займов / очереди — только СТАТИСТИКА "
+        "(read-only; кадры/содержимое SHM не отдаёт). Секции memory/pool/queues/shm_registry "
+        "best-effort: недоступная подсистема → null (не ошибка). То, чего не видит даже GUI.",
+        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        _introspect_memory,
     ),
     ToolSpec(
         "send_command",
