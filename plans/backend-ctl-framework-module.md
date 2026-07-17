@@ -151,8 +151,10 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 > **⚠️ СТРАТЕГИЯ МЕРЖА (за владельцем):** ветка ответвлена от `feat/telemetry-coherence` HEAD (11dd9dfc),
 > т.к. Task 0.5 зависит от telemetry-driver методов (f75d77b1). Значит `main..feat/backend-ctl-hardening`
 > несёт ~27 telemetry-коммитов (Фаза 1) + Phase 0. Прямой merge в main втянет и телеметрию Фазы 1.
-> **Рекомендация:** сперва влить coherence Фазу 1 в main, ЗАТЕМ Phase 0 (добавит только backend_ctl-дельту).
-> НЕ включает незакрытый Task 1.4 телеметрии (он позже 11dd9dfc). Дальше — Phases 1–4 (после codemod).
+> **Решение владельца (2026-07-17): вариант «сначала телеметрия, потом Phase 0».** Ждём, пока coherence
+> Фаза 1 ляжет в main, ЗАТЕМ `git merge feat/backend-ctl-hardening` (добавит только backend_ctl-дельту —
+> git дедуплицирует 27 общих telemetry-коммитов). main пока НЕ трогаем. НЕ включает незакрытый Task 1.4
+> телеметрии (он позже 11dd9dfc). Дальше — Phases 1–4 (после codemod).
 
 ### Task 0.1 — Единый источник endpoint-конфига  ✅ (9be0b852)
 **Level:** Middle (Sonnet) | **Assignee:** developer | **Layer:** mixed
