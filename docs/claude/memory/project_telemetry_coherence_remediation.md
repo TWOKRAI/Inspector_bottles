@@ -69,8 +69,16 @@ origin/main — дифф в `orchestrator_config` (backend_ctl/replace_debounce)
 (4) персист runtime-дельты должен АККУМУЛИРОВАТЬ (deep_merge), не хранить последнее wire-сообщение — иначе
 respawn теряет предыдущие точечные правки (telemetry_set в merge — типичный многошаговый сценарий).
 
-**Дальше:** общий Fable-ревью всей телеметрии (Фазы 1-3, с диффами) — директива владельца; затем решение
-о merge в main. Follow-up: шаг 3 Task 3.2 (per-child override fan-out), `state.unsubscribe` серверная семантика.
+**Финальная приёмка Fable (2026-07-18):** холистическая балльная оценка всей телеметрии — **24 → 42 → 47/60**,
+вердикт «цель плана достигнута, к merge готова с оговорками». 6 осей 7-8/10; +5 честная (remediation, не новая
+архитектура). Vs OTel: publisher-gate+tick_sec выше типового по cap-диагностике; read-model коммерческого уровня.
+Долги-follow-up (не блок merge, кроме qt-smoke): W1 watcher-fan-out publish детям (шаг 3, per-child overlay),
+W2 адресные дельты не персистятся (решать с W1 до Фазы 4 GUI), W3 cap-детекция слепа к wildcard-листу правила,
+W4 глобальный stale-порог throttle, W5 `GATED_METRICS` закрыт для приложений (предел универсальности конструктора),
+W6 докстринг-дрифт (исправлен ccb55eb7). Плюс: `state.unsubscribe` серверная семантика (pre-existing).
+
+**Дальше:** qt-smoke Task 3.5 (правило `feedback_qt_mcp_smoke_verification`) до/сразу после merge; затем решение
+владельца о merge ветки `feat/telemetry-coherence-phase2` в main (22+ коммита, НЕ слито). Follow-up тикеты W1-W5.
 
 **Урок (Фаза 1):** per-subsystem ревью НЕ видит межподсистемных стыков — Opus/Fable кросс-срез поверх флота
 нашёл HIGH (throttle full-apply сносил все правила) и design-critical (heartbeat=третья неуправляемая
