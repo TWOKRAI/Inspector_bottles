@@ -105,6 +105,12 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         # request-раундтрипе, отказ сервера не приходит немедленно — счётчик даёт
         # наблюдаемость (можно сверить с числом реально пришедших дельт).
         self._async_subscribe_count: int = 0
+        # Счётчик ре-адопций covered-подписок (находка F, Task 3.3): растёт при
+        # каждом снятии ПОДТВЕРЖДЁННОГО покрывающего паттерна, для которого хотя
+        # бы одна covered-подписка требует переусыновления (на другой покрывающий
+        # или собственную async-подписку). Наблюдаемость — как у
+        # _async_subscribe_count, сверяется с логом [re-adopt].
+        self._re_adopt_count: int = 0
         # Watch-from-revision (Ф4.9b, ADR-SS-014/015): revision последнего
         # успешно применённого пакета state.changed. None — ещё не было ни
         # одного пакета с revision (либо proxy только создан, либо все
@@ -377,7 +383,14 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
         # _confirmed_patterns, иначе _find_covering_pattern считал бы покрывающей
         # уже снятую подписку (и оставил бы узкий паттерн без потока дельт).
         if removed_pattern is not None and removed_pattern not in self._sub_patterns.values():
+            was_confirmed = removed_pattern in self._confirmed_patterns
             self._confirmed_patterns.discard(removed_pattern)
+            # Ре-адопция covered-подписок (находка F, Task 3.3): снятие ПОСЛЕДНЕГО
+            # sub_id подтверждённого покрывающего паттерна могло осиротить
+            # covered-подписки, которые он покрывал, — без этого шага они молча
+            # остаются без потока дельт (снятая покрывающая больше не стримит).
+            if was_confirmed:
+                self._readopt_orphaned_covered_subscriptions(removed_pattern)
 
         # Чистим refcount-реестр, если этот sub_id был ensure-подпиской —
         # иначе прямой unsubscribe оставил бы висячий pattern → refcount.
@@ -518,6 +531,90 @@ class StateProxy(BaseManager, ObservableMixin, IStateProxy):
             if pattern_covers(active_pattern, new_pattern):
                 return active_pattern
         return None
+
+    def _readopt_orphaned_covered_subscriptions(self, removed_pattern: str) -> None:
+        """Восстановить поток covered-подпискам, осиротевшим при снятии removed_pattern.
+
+        Вызывается из unsubscribe() ТОЛЬКО когда только что снят ПОСЛЕДНИЙ sub_id
+        ПОДТВЕРЖДЁННОГО покрывающего паттерна (removed_pattern уже убран из
+        _confirmed_patterns к моменту вызова). До этой правки (находка F
+        Fable-ревью 2026-07-16) covered-подписка, которую покрывал ТОЛЬКО этот
+        паттерн, молча оставалась без потока дельт навсегда — сервер её никогда
+        не подтверждал (у неё нет собственного sub_id), а последний источник
+        покрывающих пакетов исчез.
+
+        Для каждой covered-подписки (_covered_sub_ids) заново ищем покрывающий
+        паттерн (_find_covering_pattern уже учитывает актуальный, урезанный
+        _confirmed_patterns):
+          - найден другой подтверждённый покрывающий → переусыновление
+            бесплатно: его серверная подписка уже стримит пакеты, которые
+            _invoke_callbacks локально фильтрует по pattern подписки — никакого
+            нового IPC не нужно, только наблюдаемость;
+          - не найден ни один → подписка реально осиротела, ей нужен
+            собственный поток — отправляем async state.subscribe (паттерн 0.2)
+            и убираем sub_id из _covered_sub_ids (дальнейший unsubscribe(sub_id)
+            должен слать серверный state.unsubscribe, раз своя подписка есть).
+
+        Args:
+            removed_pattern: паттерн, только что снятый из _confirmed_patterns
+                (только для сообщения в логе — что вызвало осиротение).
+        """
+        for sub_id in list(self._covered_sub_ids):
+            pattern = self._sub_patterns.get(sub_id)
+            if pattern is None:
+                continue  # сама снимаемая подписка уже выпала из _sub_patterns
+            covering = self._find_covering_pattern(pattern)
+            if covering is not None:
+                self._re_adopt_count += 1
+                self._log_info(
+                    f"StateProxy '{self._process_name}': [re-adopt] '{pattern}' "
+                    f"(sub_id={sub_id}) переусыновлён на другой подтверждённый "
+                    f"покрывающий паттерн '{covering}' (снят '{removed_pattern}'; "
+                    f"всего re-adopt={self._re_adopt_count})"
+                )
+                continue
+            self._reactivate_covered_subscription(sub_id, pattern, removed_pattern)
+
+    def _reactivate_covered_subscription(self, sub_id: str, pattern: str, removed_pattern: str) -> None:
+        """Отправить осиротевшей covered-подписке собственный async state.subscribe.
+
+        Вызывается из _readopt_orphaned_covered_subscriptions, когда для sub_id
+        не осталось НИ ОДНОГО подтверждённого покрывающего паттерна. Использует
+        ТОТ ЖЕ sub_id, что уже зарегистрирован в _callbacks/_sub_patterns/
+        _sub_ids (потребитель мог сохранить его для release_subscription) — в
+        отличие от subscribe(), который всегда генерирует новый локальный
+        sub_id, поэтому здесь IPC-конверт собирается вручную.
+
+        Args:
+            sub_id: существующий локальный sub_id covered-подписки.
+            pattern: её glob-паттерн.
+            removed_pattern: паттерн, снятие которого вызвало осиротение (для лога).
+        """
+        self._covered_sub_ids.discard(sub_id)
+        msg = {
+            "type": "command",
+            "sender": self._process_name,
+            "targets": [self._server_target],
+            "command": "state.subscribe",
+            "data": {
+                "pattern": pattern,
+                "subscriber": self._process_name,
+                # Covered-подписки создаются только при exclude_self=True (см.
+                # docstring ensure_subscription) — то же консервативное допущение
+                # сохраняется при ре-адопции.
+                "exclude_sources": [self._process_name],
+            },
+        }
+        self._send(msg)
+        self._async_subscribe_count += 1
+        self._re_adopt_count += 1
+        self._record_metric("state_proxy.re_adopt")
+        self._log_info(
+            f"StateProxy '{self._process_name}': [re-adopt] '{pattern}' (sub_id={sub_id}) "
+            f"осиротел после снятия покрывающего паттерна '{removed_pattern}' — отправлена "
+            f"собственная async-подписка (всего re-adopt={self._re_adopt_count}, "
+            f"async-подписок={self._async_subscribe_count})"
+        )
 
     def release_subscription(
         self,
