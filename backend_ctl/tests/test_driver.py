@@ -246,6 +246,25 @@ class TestIntegration:
         assert calls[0]["command"] == "introspect.plugins"
         assert calls[0]["targets"] == ["camera"]
 
+    def test_introspect_memory_wrapper(self, loopback) -> None:
+        """Ф2 Task 2.4: обёртка шлёт introspect.memory адресату и парсит в MemoryStats.
+
+        Envelope — канонический (command/targets/reply-поля); результат —
+        типизированный :class:`MemoryStats` с сохранённым сырым ответом в ``.raw``.
+        """
+        from backend_ctl.driver import MemoryStats
+
+        driver, calls = loopback
+        res = driver.introspect_memory("camera", timeout=3.0)
+        # конверт корректен
+        assert calls[0]["command"] == "introspect.memory"
+        assert calls[0]["targets"] == ["camera"]
+        assert calls[0]["reply_to"] == "ProcessManager"
+        # типизированный результат + сырой ответ сохранён
+        assert isinstance(res, MemoryStats)
+        assert res.ok is True  # echo-result.success=True
+        assert res.raw["result"]["command"] == "introspect.memory"
+
     def test_set_register_builds_register_update(self, loopback) -> None:
         """Payload — канонический контракт register_update: {register, field, value}.
 

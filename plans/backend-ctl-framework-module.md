@@ -314,9 +314,18 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 2. Driver `introspect_memory(process)` + типизированный `MemoryStats` (`.raw` сохраняется). MCP `introspect_memory` (readOnlyHint).
 3. Regen `docs/contracts/CAPABILITIES.md` (drift-gate).
 **Acceptance:**
-- [ ] unit builtin_commands на fake-services; live: `success=True` + хотя бы одна секция
-- [ ] CAPABILITIES regen отражает команду; drift-gate CI зелёный
+- [x] unit builtin_commands на fake-services (менеджер отсутствует → секция `null`, `success=True`; присутствует → секция заполнена — `test_introspect_commands.py::TestIntrospectMemory`)
+- [x] unit driver: `introspect_memory` шлёт корректный конверт + парсит в `MemoryStats` (`.raw` сохранён — `test_driver.py::test_introspect_memory_wrapper`, `test_wrappers.py::TestMemoryStatsParsing`)
+- [x] unit MCP: dispatch `introspect_memory` (`test_mcp_server.py::test_introspect_memory_dispatches_to_driver` + expected_tool_set)
+- [ ] live: `success=True` + хотя бы одна секция → **Task 4.1** (нет живого backend в unit; live-suite красная pre-existing на этой машине)
+- [ ] CAPABILITIES regen отражает команду; drift-gate CI зелёный → **Task 4.1** (regen требует live headless-backend `dump_capabilities.collect_live`; drift-gate — live `test_capabilities.py::test_dump_matches_committed`, НЕ в `scripts/validate.py`; сгенерированные файлы руками не правим)
 **Out of scope:** содержимое SHM/кадры (только статистика).
+
+**Заметки по разведке (что нашёл — путь доступа к менеджерам из обработчика):**
+- `memory` ← `services.shared_resources._memory_manager.get_stats()` — тот же фасад `shared_resources`, что читает `introspect.router_stats`; `_memory_manager` НЕ в `_PICKLE_EXCLUDE` и без кастомного `__getstate__` → переживает pickling в дочерний процесс.
+- `pool` ← агрегат `LoanLedger.snapshot_stats()`, собранный НЕ из shared_resources, а с `router_manager._frame_middlewares` (loan-протокол SHM-колец живёт в `FrameShmMiddleware`), через публичные свойства `frame_slots_released/reclaimed`/`frame_loan_exhausted`.
+- `queues` ← `services.queues` (как `introspect.queues`).
+- `shm_registry` ← `ShmRegistry` — launcher-level файл-маркер (Windows cleanup), к менеджерам процесса НЕ прикреплён → в штатном дочернем процессе секция `null`; per-process число открытых SHM-хендлов доступно в секции `memory` (`processes_with_handles`). Обработчик всё же best-effort пробует `shared_resources`/`memory_manager` на атрибут `shm_registry`.
 
 ### Phase 3 — MCP на официальном SDK
 
