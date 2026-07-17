@@ -774,14 +774,22 @@ class BackendDriver:
         на ``latency_ms``/``effective_hz``/…, не тронуты). Чтобы СНЯТЬ правило точечно — передай
         ``interval_sec=None`` в :meth:`telemetry_reconfigure` ``throttle={metric: None}, mode="merge"``.
 
-        **ВАЖНО (две плоскости — потолок частоты):** центральный троттл (``throttle``) —
-        независимая ступень rate-limit'а в оркестраторе поверх publisher-gate. Дефолтные
-        правила (``manager_setup._default_throttle_rules``) режут ``fps``/``latency_ms``/
-        ``effective_hz`` до 1 Гц. Поэтому УВЕЛИЧЕНИЕ частоты через publisher (например
-        ``interval_sec=0.1``) НЕ поднимет эффективный поток выше центрального потолка — его
-        надо ослабить/снять тем же вызовом с ``plane="throttle"``. Уменьшение частоты
-        (реже потолка) работает через одну publisher-плоскость. Троттл = ceiling, publisher =
-        floor-внутри-потолка. (Полное согласование потолка — Task 1.3 плана telemetry-coherence.)
+        **Троттл = IPC-предохранитель, НЕ потолок (Task 1.3, ADR-PM-017):** central-троттл
+        (``throttle``) — независимая ступень rate-limit'а в оркестраторе НАД publisher-gate,
+        но её роль — страховка от СБОЙНОГО публикатора, а не второй авторитет частоты.
+        Дефолтные central-правила заведомо мягче любого осмысленного publisher-интервала
+        (``0.05с`` ≈ 20 Гц) — поднятие частоты через publisher (например ``interval_sec=0.1``)
+        в дефолтном сценарии доходит до дерева БЕЗ среза.
+
+        Если оператор вручную задал строгое central-правило (``plane="throttle"``) и затем
+        поднял publisher-частоту НИЖЕ него — троттл его НЕ ослабляет автоматически («no
+        silent caps»): результат fan-out'а (``process="all"`` — broadcast-путь через PM)
+        несёт явный флаг ``capped_by_throttle: {metric: {publisher_interval_sec,
+        throttle_interval_sec}}`` — увидев его, ослабь central-правило тем же вызовом с
+        ``plane="throttle"``. Адресный вызов на ОДНОГО процесса cap пока НЕ детектит (known
+        gap ADR-PM-017 / Task 1.4 плана telemetry-coherence-remediation). Throttle-плоскость
+        по-прежнему full-apply в ``mode="replace"`` и точечная (per-правило) в ``mode="merge"``
+        (Task 1.1).
 
         ``process`` — имя процесса ИЛИ ``"all"`` (fan-out через PM). Требуется ``enabled``
         и/или ``interval_sec`` (для throttle — обязателен ``interval_sec``), иначе error-dict.

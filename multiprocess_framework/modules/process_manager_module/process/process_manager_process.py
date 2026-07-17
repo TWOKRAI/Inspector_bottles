@@ -1421,17 +1421,6 @@ class ProcessManagerProcess(ProcessModule):
                 # Полный охват = доставили всем живым детям (иначе сигнал наверх).
                 "complete": int(reached) >= len(targets),
             }
-            # ADR-PM-017 (Task 1.3): «no silent caps». Если поднятие частоты метрики через
-            # publisher уходит НИЖЕ действующего central-правила той же метрики — троттл
-            # молча срезал бы его. Не режем тихо и не ослабляем страховку авто-магически:
-            # возвращаем ЯВНЫЙ отчёт, чтобы инициатор увидел потолок и осознанно ослабил
-            # central-правило (telemetry_set plane=throttle). Дефолт-троттл теперь мягче
-            # публикатора (manager_setup), поэтому в дефолтном сценарии caps пуст и частота
-            # реально растёт; флаг всплывает лишь при операторском строгом правиле.
-            caps = detect_throttle_caps(args["publish"], resolve_store_throttle(self))
-            if caps:
-                result["publish"]["capped_by_throttle"] = caps
-                self._log_info(f"telemetry.broadcast: publish частично ограничен central-троттлом: {caps}")
             self._log_info(f"telemetry.broadcast: publish разослан детям — reached={reached}/{len(targets)}")
 
         if has_throttle:
@@ -1447,6 +1436,24 @@ class ProcessManagerProcess(ProcessModule):
             except Exception as exc:  # noqa: BLE001 — ошибка throttle не должна терять уже совершённый publish-fan-out
                 self._log_error(f"telemetry.broadcast: применение throttle упало: {exc}")
                 result["throttle"] = {"requested": True, "applied": False, "error": str(exc)}
+
+        if has_publish:
+            # ADR-PM-017 (Task 1.3): «no silent caps». Если поднятие частоты метрики через
+            # publisher уходит НИЖЕ действующего central-правила той же метрики — троттл
+            # молча срезал бы его. Не режем тихо и не ослабляем страховку авто-магически:
+            # возвращаем ЯВНЫЙ отчёт, чтобы инициатор увидел потолок и осознанно ослабил
+            # central-правило (telemetry_set plane=throttle). Дефолт-троттл теперь мягче
+            # публикатора (manager_setup), поэтому в дефолтном сценарии caps пуст и частота
+            # реально растёт; флаг всплывает лишь при операторском строгом правиле.
+            #
+            # Ревью-фикс (#3): детектор зовётся ПОСЛЕ применения throttle-под-секции (блок
+            # выше), а не до — иначе комбинированная команда {publish: raise, throttle: relax}
+            # ловила бы ложноположительный cap по PRE-relax central-правилу (детектор читает
+            # store_throttle.rules ЖИВЬЁМ — тот же объект, что мутирует _apply_throttle).
+            caps = detect_throttle_caps(args["publish"], resolve_store_throttle(self))
+            if caps:
+                result["publish"]["capped_by_throttle"] = caps
+                self._log_info(f"telemetry.broadcast: publish частично ограничен central-троттлом: {caps}")
 
         return result
 

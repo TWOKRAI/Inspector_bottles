@@ -229,6 +229,28 @@ class TestCappedByThrottle:
         res = pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"interval_sec": 0.1}}}})
         assert "capped_by_throttle" not in res["publish"]
 
+    def test_combined_publish_raise_and_throttle_relax_same_metric_not_flagged(self) -> None:
+        """Ревью-фикс #3: комбинированная команда {publish: raise, throttle: relax} той же
+        метрики В ОДНОМ вызове — cap-детекция обязана читать central-правило ПОСЛЕ
+        применения throttle-под-секции, иначе ложноположительный `capped_by_throttle` по
+        pre-relax строгому правилу (детектор раньше вызывался ДО throttle-apply)."""
+        throttle = ThrottleMiddleware({"processes.**.state.fps": 2.0})  # строгое pre-relax правило
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+        res = pm._cmd_telemetry_broadcast(
+            {
+                "publish": {"metrics": {"fps": {"interval_sec": 0.5}}},
+                "throttle": {"processes.**.state.fps": 0.1},
+                "telemetry_mode": "merge",
+            }
+        )
+        assert res["success"] is True
+        # Throttle-релакс применился (правило теперь мягче publisher-интервала).
+        assert res["throttle"]["applied"] is True
+        assert throttle.rules == {"processes.**.state.fps": 0.1}
+        # Cap оценивается ПОСЛЕ relax → publisher (0.5с) уже НЕ строже финального правила
+        # (0.1с) → флага нет (до фикса ловился бы ложный cap по старому 2.0с).
+        assert "capped_by_throttle" not in res["publish"]
+
 
 class TestUnknownModeRejected:
     """Task 1.2 finding-1: битый telemetry_mode → success=False ДО fan-out (broadcast
