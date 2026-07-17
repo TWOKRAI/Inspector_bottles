@@ -755,7 +755,7 @@ class BackendDriver:
         # помечается data["target"] — PM форвардит publish ОДНОМУ ребёнку (не broadcast),
         # throttle применяет центрально. Прямой driver→child путь ретрополнен: cap на нём
         # был принципиально не детектируем (central-правила живут лишь на оркестраторе).
-        if process not in (None, "all", "*"):
+        if process not in (None, "", "all", "*"):
             args["target"] = process
         return _leaf_result(self.send_command(pm_name, "telemetry.broadcast", args, timeout=timeout))
 

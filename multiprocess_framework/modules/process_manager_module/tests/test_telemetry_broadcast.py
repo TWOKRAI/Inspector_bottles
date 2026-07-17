@@ -321,6 +321,25 @@ class TestAddressedViaPm:
         )
         assert "capped_by_throttle" not in res["publish"]
 
+    def test_addressed_combined_raise_and_relax_not_flagged(self) -> None:
+        """Ревью-фикс #3 действует и на адресном пути: cap считается ПОСЛЕ применения
+        throttle-под-секции — комбинированный {publish: raise, throttle: relax} одной метрики
+        НЕ даёт ложный cap по pre-relax строгому правилу (детектор общий для обоих путей)."""
+        throttle = ThrottleMiddleware({"processes.**.state.fps": 2.0})  # строгое pre-relax
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1, throttle=throttle)
+        res = pm._cmd_telemetry_broadcast(
+            {
+                "publish": {"metrics": {"fps": {"interval_sec": 0.5}}},
+                "throttle": {"processes.**.state.fps": 0.1},
+                "target": "camera_0",
+                "telemetry_mode": "merge",
+            }
+        )
+        assert res["throttle"]["applied"] is True
+        assert throttle.rules == {"processes.**.state.fps": 0.1}
+        # Cap оценён ПОСЛЕ relax → publisher (0.5с) уже не строже финального правила (0.1с).
+        assert "capped_by_throttle" not in res["publish"]
+
     def test_addressed_throttle_applies_centrally(self) -> None:
         """throttle на per-process путь всё равно центральный (троттл оркестратор-глобален)."""
         throttle = ThrottleMiddleware({})
@@ -375,6 +394,12 @@ class TestSendChildPrimitive:
     def test_send_child_command_no_comm_is_noop(self) -> None:
         pm = make_pm({})
         pm.communication = None
+        assert pm._send_child_command("a", "x", {}) is False
+
+    def test_send_child_command_without_send_to_process_is_noop(self) -> None:
+        """comm без метода send_to_process (минимальный/тестовый) → тихий no-op, не падает."""
+        pm = make_pm({})
+        pm.communication = object()  # нет атрибута send_to_process
         assert pm._send_child_command("a", "x", {}) is False
 
 
