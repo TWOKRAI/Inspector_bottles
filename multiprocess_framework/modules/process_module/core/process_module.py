@@ -756,7 +756,9 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self.logger_manager,
             self.error_manager,
         )
-        self._observability_forwarders[subscriber] = (forwarder, taps)
+        # Атомарный rebind, не in-place set: heartbeat-drain итерирует .values() в
+        # другом потоке — смена размера dict во время итерации дала бы RuntimeError.
+        self._observability_forwarders = {**self._observability_forwarders, subscriber: (forwarder, taps)}
         return {"success": True, "process": self.name, "subscriber": subscriber}
 
     def unsubscribe_observability_tail(self, subscriber: Optional[str] = None) -> dict:
@@ -775,8 +777,12 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             self._observability_forwarders = {}
             return {"success": had, "process": self.name}
 
-        prev = self._observability_forwarders.pop(subscriber, None)
+        # Атомарный rebind вместо .pop() (см. subscribe): убрать гонку с heartbeat-drain.
+        prev = self._observability_forwarders.get(subscriber)
         if prev is not None:
+            self._observability_forwarders = {
+                k: v for k, v in self._observability_forwarders.items() if k != subscriber
+            }
             unwire_observability_forward(prev[1])
         return {"success": prev is not None, "process": self.name, "subscriber": subscriber}
 
