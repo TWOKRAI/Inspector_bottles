@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from multiprocess_framework.modules.config_module.core.config import Config
 from multiprocess_framework.modules.process_module.managers.telemetry_reload import (
+    THROTTLE_CLEAR_MARKER,
     THROTTLE_REMOVE,
     apply_telemetry_reconfigure,
     detect_throttle_caps,
@@ -102,8 +103,13 @@ class TestApplyTelemetryReconfigure:
         assert apply_telemetry_reconfigure(None, heartbeat=hb, store_throttle=throttle) == {}
         assert hb.calls == [] and throttle.set_calls == 0
 
-    def test_throttle_empty_dict_clears_rules(self) -> None:
-        """throttle={} (ключ есть) → set_rules({}) снимает все правила."""
+    def test_throttle_empty_dict_without_defaults_clears_rules(self) -> None:
+        """throttle={} БЕЗ default_throttle_rules → set_rules({}) (backward-compat).
+
+        Адресная операторская команда без источника дефолтов сохраняет прежнее
+        поведение: пустая секция снимает все правила. Возврат к дефолтам — только когда
+        дефолты переданы (декларативный файловый путь), см. Task 2.1.
+        """
         throttle = _FakeThrottle()
         throttle.rules = {"old": 1.0}
         applied = apply_telemetry_reconfigure({"throttle": {}}, store_throttle=throttle)
@@ -175,6 +181,62 @@ class TestThrottleMergeMode:
 
         applied = apply_telemetry_reconfigure({"throttle": {"a": 1.0}}, mode="merge", store_throttle=_OnlySetRules())
         assert applied == {"throttle": False}
+
+
+class TestThrottleBootReloadCoherence:
+    """Task 2.1 (находка B): единая семантика пустоты throttle — boot ≡ reload.
+
+    Пустая throttle-секция (``{}``/``None``) в replace-режиме → boot-дефолты (когда
+    они переданы). Полная очистка — только явным :data:`THROTTLE_CLEAR_MARKER`.
+    """
+
+    _DEFAULTS = {"processes.**.state.fps": 0.05, "processes.**.state.latency_ms": 0.05}
+
+    def test_empty_throttle_with_defaults_restores_boot_rules(self) -> None:
+        """throttle={} + default_throttle_rules → set_rules(defaults), НЕ пусто."""
+        throttle = _FakeThrottle()
+        throttle.rules = {"custom": 3.0}
+        applied = apply_telemetry_reconfigure(
+            {"throttle": {}}, store_throttle=throttle, default_throttle_rules=self._DEFAULTS
+        )
+        assert applied == {"throttle": True}
+        assert throttle.rules == self._DEFAULTS  # вернулись boot-дефолты, не {}
+
+    def test_none_throttle_value_with_defaults_restores_boot_rules(self) -> None:
+        """throttle=None (ключ есть) + defaults → тоже boot-дефолты (симметрично {})."""
+        throttle = _FakeThrottle()
+        throttle.rules = {"custom": 3.0}
+        apply_telemetry_reconfigure({"throttle": None}, store_throttle=throttle, default_throttle_rules=self._DEFAULTS)
+        assert throttle.rules == self._DEFAULTS
+
+    def test_clear_marker_wipes_rules_even_with_defaults(self) -> None:
+        """Явный {"__clear__": true} → set_rules({}) даже когда дефолты переданы."""
+        throttle = _FakeThrottle()
+        throttle.rules = {"custom": 3.0}
+        applied = apply_telemetry_reconfigure(
+            {"throttle": {THROTTLE_CLEAR_MARKER: True}},
+            store_throttle=throttle,
+            default_throttle_rules=self._DEFAULTS,
+        )
+        assert applied == {"throttle": True}
+        assert throttle.rules == {}  # намеренная полная очистка
+
+    def test_clear_marker_wipes_in_merge_mode(self) -> None:
+        """Clear-маркер снимает всё и в merge-режиме (перекрывает per-правило дельту)."""
+        throttle = _FakeThrottle()
+        throttle.rules = {"keep": 5.0, "a.b": 1.0}
+        apply_telemetry_reconfigure({"throttle": {THROTTLE_CLEAR_MARKER: True}}, mode="merge", store_throttle=throttle)
+        assert throttle.set_calls == 1  # полная очистка через set_rules({})
+        assert throttle.rules == {}
+
+    def test_nonempty_throttle_ignores_defaults(self) -> None:
+        """Непустая секция применяется как есть — дефолты не подмешиваются."""
+        throttle = _FakeThrottle()
+        applied = apply_telemetry_reconfigure(
+            {"throttle": {"x.y": 2.0}}, store_throttle=throttle, default_throttle_rules=self._DEFAULTS
+        )
+        assert applied == {"throttle": True}
+        assert throttle.rules == {"x.y": 2.0}  # ровно заданное, без дефолтов
 
 
 class TestUnknownModeRejected:
@@ -296,7 +358,36 @@ class TestMakeTelemetryOnReload:
         assert throttle.rules == {"x.y": 2.0}
 
     def test_no_telemetry_section_noop(self) -> None:
+        """Телеметрия в файле не объявлена → троттл не трогаем (observability-only reload)."""
         throttle = _FakeThrottle()
+        throttle.rules = {"keep": 5.0}
         on_reload = make_telemetry_on_reload(store_throttle=throttle)
         on_reload(Config(initial_data={"observability": {"log_level": "DEBUG"}}))
         assert throttle.set_calls == 0
+        assert throttle.rules == {"keep": 5.0}  # правила целы
+
+    def test_reload_without_throttle_key_restores_defaults(self) -> None:
+        """Task 2.1: telemetry объявлена (publish), но БЕЗ throttle → boot-дефолты (не stale)."""
+        defaults = {"processes.**.state.fps": 0.05}
+        throttle = _FakeThrottle()
+        throttle.rules = {"custom.rule": 9.0}  # ранее применённые кастомные правила
+        on_reload = make_telemetry_on_reload(store_throttle=throttle, default_throttle_rules=defaults)
+        on_reload(Config(initial_data={"telemetry": {"publish": {"default_interval_sec": 2.0}}}))
+        assert throttle.rules == defaults  # вернулись дефолты, stale-правило снято
+
+    def test_reload_empty_throttle_restores_defaults(self) -> None:
+        """Task 2.1: throttle={} в файле → boot-дефолты (boot ≡ reload)."""
+        defaults = {"processes.**.state.fps": 0.05}
+        throttle = _FakeThrottle()
+        throttle.rules = {"custom.rule": 9.0}
+        on_reload = make_telemetry_on_reload(store_throttle=throttle, default_throttle_rules=defaults)
+        on_reload(Config(initial_data={"telemetry": {"throttle": {}}}))
+        assert throttle.rules == defaults
+
+    def test_reload_custom_throttle_overrides_defaults(self) -> None:
+        """Непустой throttle в файле применяется как есть, дефолты не подмешиваются."""
+        defaults = {"processes.**.state.fps": 0.05}
+        throttle = _FakeThrottle()
+        on_reload = make_telemetry_on_reload(store_throttle=throttle, default_throttle_rules=defaults)
+        on_reload(Config(initial_data={"telemetry": {"throttle": {"a.b": 4.0}}}))
+        assert throttle.rules == {"a.b": 4.0}
