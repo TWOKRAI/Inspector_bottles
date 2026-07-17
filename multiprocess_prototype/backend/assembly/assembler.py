@@ -136,9 +136,16 @@ class BlueprintAssembler:
                 proc_dict.get("managers", {}),
                 self._observability_dict,
             )
-            telemetry_section = self._resolve_telemetry(per_process_telemetry.get(name))
+            override = per_process_telemetry.get(name)
+            telemetry_section = self._resolve_telemetry(override)
             if telemetry_section is not None:
                 proc_dict["config"]["telemetry"] = telemetry_section
+            # Task 2.2 (находка C): сохранить СЫРУЮ per-process дельту рецепта (publish-уровень)
+            # отдельно от уже слитой секции telemetry. config.reload из файла несёт только
+            # GLOBAL publish; boot мержил global+override — reload обязан тоже. Ключ появляется
+            # ТОЛЬКО у процессов с override (иначе boot ≡ reload без него и так совпадают).
+            if override is not None:
+                proc_dict["config"]["telemetry_override"] = override
             proc_dict = merge_with_defaults(proc_dict, DEFAULT_PROCESS_SCHEMA)
             result[name] = proc_dict
 

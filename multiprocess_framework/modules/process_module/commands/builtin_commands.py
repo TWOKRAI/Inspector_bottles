@@ -856,6 +856,18 @@ class BuiltinCommands:
             telemetry_section = loaded.get("telemetry") if isinstance(loaded, dict) else None
             source = str(path)
 
+            # Task 2.2 (находка C): config.reload из ФАЙЛА несёт только GLOBAL publish —
+            # boot же мержил global + per-process override рецепта. Восстанавливаем overlay
+            # из сохранённой ассемблером сырой дельты (telemetry_override), иначе reload
+            # молча терял бы per-process настройку метрик (boot ≠ reload).
+            if isinstance(telemetry_section, dict):
+                override = svc.get_config("telemetry_override") if hasattr(svc, "get_config") else None
+                if override:
+                    from ...data_schema_module import deep_merge
+
+                    telemetry_section = dict(telemetry_section)
+                    telemetry_section["publish"] = deep_merge(telemetry_section.get("publish") or {}, override)
+
         result: dict = {"success": True, "process": svc.name, "source": source}
 
         # --- observability (если задана inline или из файла) ---
@@ -878,12 +890,18 @@ class BuiltinCommands:
         if isinstance(telemetry_section, dict):
             from ..managers.telemetry_reload import apply_telemetry_reconfigure
 
+            # Task 2.1: из ФАЙЛА (декларативный источник) пустой throttle → boot-дефолты;
+            # inline (операторская правка) — как есть (throttle={} снимает всё явно).
+            default_throttle = (
+                svc.get_config("state_throttle_rules") if source != "inline" and hasattr(svc, "get_config") else None
+            )
             try:
                 telemetry_applied = apply_telemetry_reconfigure(
                     telemetry_section,
                     mode=str(args.get("telemetry_mode", "replace")),  # Task 1.1: дельта-семантика
                     heartbeat=getattr(svc, "_heartbeat", None),
                     store_throttle=self._resolve_store_throttle(),
+                    default_throttle_rules=default_throttle,
                     log_info=getattr(svc, "_log_info", None),
                 )
             except Exception as exc:  # noqa: BLE001
