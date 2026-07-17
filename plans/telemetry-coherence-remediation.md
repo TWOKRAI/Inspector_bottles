@@ -201,7 +201,13 @@ telemetry-publish-control); изменение дефолтных central-пра
 
 ## Фаза 2 — Когерентность контракта (boot ≡ reload, видимые ошибки)
 
-### Task 2.1 — Единая семантика `throttle: {}` на boot и hot-reload
+> **✅ ФАЗА 2 ЗАКРЫТА** (ветка `feat/telemetry-coherence-phase2`, коммиты ff8d5745 · dc7594e6 ·
+> 93589f7f merged bab99c10). Task 2.3 исполнен параллельным агентом в worktree, слит без конфликтов.
+> Гейт: 1486 тестов затронутых модулей зелёные, ruff + pyright чисто. Pre-existing test-debt —
+> 2 golden `test_build_characterization` (дифф в `orchestrator_config`, есть на origin/main, не
+> связан с телеметрией). Следующее — Фаза 3 (гигиена + долг простоты).
+
+### Task 2.1 — Единая семантика `throttle: {}` на boot и hot-reload ✅ DONE (ff8d5745)
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
 **Layer:** mixed
@@ -224,7 +230,7 @@ telemetry-publish-control); изменение дефолтных central-пра
 - [ ] Тест: reload файла БЕЗ throttle-ключа после кастомных правил → дефолты (не stale)
 **Out of scope:** publish-плоскость (её семантика None/dict не меняется).
 
-### Task 2.2 — `config.reload` из файла: сохранить per-process overlay
+### Task 2.2 — `config.reload` из файла: сохранить per-process overlay ✅ DONE (dc7594e6)
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
 **Layer:** mixed
@@ -244,7 +250,7 @@ telemetry-publish-control); изменение дефолтных central-пра
 - [ ] Golden-снапшоты build: новый ключ `telemetry_override` появляется ТОЛЬКО у процессов с override
 **Out of scope:** watcher-fan-out publisher-gate детям (Task 3.2), персист runtime-дельты (Task 3.2).
 
-### Task 2.3 — Валидация `metrics`-ключей против GATED_METRICS
+### Task 2.3 — Валидация `metrics`-ключей против GATED_METRICS ✅ DONE (93589f7f)
 **Level:** Middle (Sonnet)
 **Assignee:** developer
 **Layer:** framework
