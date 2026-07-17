@@ -385,6 +385,7 @@ class BackendDriver:
         self._resub_thread: Optional[threading.Thread] = None
         self._watch_resub_timeout: Optional[float] = None
         self._watch_resub_errors = 0  # счётчик неудачных авто-переподписок (диагностика)
+        self._watch_patterns: tuple[str, ...] = ()  # реально включённые watch-паттерны (для unwatch)
 
     # ---- Соединение ----
 
@@ -1380,6 +1381,7 @@ class BackendDriver:
             self._watch_active = True
             self._watch_resub_timeout = timeout
             self._watch_subscribed = set()
+            self._watch_patterns = tuple(patterns)  # запомнить фактический набор для unwatch
 
         for proc in procs:
             res = self.observability_tail(proc, timeout=timeout)
@@ -1422,6 +1424,8 @@ class BackendDriver:
             self._watch_listener = None
             thread = self._resub_thread
             self._resub_thread = None
+            patterns = self._watch_patterns  # снять ровно те паттерны, что включал watch_like_gui
+            self._watch_patterns = ()
 
         if listener is not None:
             self.unsubscribe(listener)
@@ -1435,8 +1439,10 @@ class BackendDriver:
         for proc in procs:
             summary["observability"][proc] = self.observability_untail(proc, timeout=timeout)
 
-        # Снять durable-намерения watch-паттернов (obs-хвосты уже сняты untail'ом).
-        for pattern in GUI_DEFAULT_PATTERNS:
+        # Снять durable-намерения ровно тех watch-паттернов, что включал watch_like_gui
+        # (не хардкод GUI_DEFAULT_PATTERNS — иначе кастомный набор утёк бы в реестре и
+        # воскрес при реконнекте). obs-хвосты уже сняты untail'ом выше.
+        for pattern in patterns:
             self._subscriptions.remove("state.subscribe", "ProcessManager", {"pattern": pattern})
 
         summary["success"] = True

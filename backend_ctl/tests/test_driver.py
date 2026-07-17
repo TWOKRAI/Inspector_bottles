@@ -794,6 +794,23 @@ class TestWatchLikeGui:
         # Durable-намерения watch-паттернов сняты (реконнект их не воскресит).
         assert not any(i["command"] == "state.subscribe" for i in d.export_subscriptions())
 
+    def test_unwatch_removes_custom_watch_patterns(self, monkeypatch) -> None:
+        """unwatch снимает durable-намерения ИМЕННО тех паттернов, что включал
+        watch_like_gui (регресс: раньше хардкодился GUI_DEFAULT_PATTERNS → кастомный
+        набор утекал в реестре и воскресал бы при реконнекте)."""
+        d, _ = self._driver(monkeypatch)
+        custom = ("cameras.**", "renderer.**")  # намеренно НЕ из GUI_DEFAULT_PATTERNS
+        try:
+            d.watch_like_gui(patterns=custom)
+            subs = [i for i in d.export_subscriptions() if i["command"] == "state.subscribe"]
+            assert {i["args"].get("pattern") for i in subs} == set(custom)
+            d.unwatch()
+            assert not any(i["command"] == "state.subscribe" for i in d.export_subscriptions()), (
+                "кастомные watch-паттерны должны быть сняты из durable-реестра"
+            )
+        finally:
+            d.unwatch()
+
     def test_reentrant_watch_restarts_cleanly(self, monkeypatch) -> None:
         d, _ = self._driver(monkeypatch)
         try:
