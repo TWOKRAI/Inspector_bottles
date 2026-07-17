@@ -157,3 +157,29 @@ class TestEnvRestore:
         h.stop()
         after = {k: _os.environ.get(k) for k in keys}
         assert after == before, f"env не восстановлен: {before} → {after}"
+
+    def test_env_restored_when_start_raises(self, monkeypatch) -> None:
+        # Регресс на MAJOR #4 ревью: исключение на пути start() (до wait_until_ready)
+        # не должно оставлять env-мутации (__exit__ не зовётся при падении __enter__).
+        import os as _os
+
+        from backend_ctl import harness as _h
+
+        monkeypatch.setenv("BACKEND_CTL", "orig")
+        monkeypatch.delenv("BACKEND_CTL_PORT", raising=False)
+        monkeypatch.delenv("INSPECTOR_PID_FILE", raising=False)
+        keys = ("BACKEND_CTL", "BACKEND_CTL_PORT", "INSPECTOR_PID_FILE")
+        before = {k: _os.environ.get(k) for k in keys}
+
+        def _boom_factory():
+            raise RuntimeError("launcher build failed")
+
+        h = BackendHarness(port=8798, launcher_factory=_boom_factory)
+        monkeypatch.setattr(_h, "_subtree", lambda pid: [])
+        monkeypatch.setattr(_h, "_shutdown_with_watchdog", lambda *a, **k: None)
+
+        with pytest.raises(RuntimeError, match="launcher build failed"):
+            h.start()
+
+        after = {k: _os.environ.get(k) for k in keys}
+        assert after == before, f"env утёк после падения start(): {before} → {after}"

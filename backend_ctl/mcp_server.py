@@ -140,9 +140,10 @@ class MCPServer:
         """
         if self._driver is not None:
             try:
-                intents = self._driver.export_subscriptions()
-                if intents:
-                    self._sub_intents = intents
+                # Синхронизируем БЕЗУСЛОВНО (в т.ч. с пустым списком): текущий driver —
+                # источник правды. Если агент отписался — registry пуст, и replay при
+                # следующем реконнекте НЕ должен воскрешать снятые подписки (ревью MAJOR #1).
+                self._sub_intents = self._driver.export_subscriptions()
             except Exception:  # noqa: BLE001 — экспорт не должен ронять сброс
                 pass
             try:

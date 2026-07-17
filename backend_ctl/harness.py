@@ -315,56 +315,63 @@ class BackendHarness:
     def start(self) -> BackendDriver:
         """Поднять headless-систему, дождаться готовности, подключить driver."""
         # env-restore (Task 0.4): снимок прежних значений ДО мутации → stop() вернёт.
+        # Снимок ВНЕ try, чтобы восстановление всегда имело базу (ревью MAJOR #4).
         self._saved_env = {k: os.environ.get(k) for k in ("BACKEND_CTL", "BACKEND_CTL_PORT", "INSPECTOR_PID_FILE")}
-        # Гейт сокета: env — escape-hatch (yaml тоже enabled). Порт driver'а должен
-        # совпасть с endpoint'ом — фиксируем BACKEND_CTL_PORT (его читает endpoint).
-        os.environ["BACKEND_CTL"] = "1"
-        os.environ["BACKEND_CTL_PORT"] = str(self._port)
-        # PID-реестр (INSPECTOR_PID_FILE) — свой файл на инстанс harness. Общий
-        # дефолт рассчитан на «одна система на машину»: reap_and_reset при старте
-        # ВТОРОГО бэкенда (test_harness при живой session-фикстуре) убил бы процессы
-        # первого как «хвосты прошлого запуска». Осиротевшие хвосты harness добивает
-        # сам (watchdog + kill дерева в stop()) — глобальный reap ему не нужен.
-        import tempfile
+        try:
+            # Гейт сокета: env — escape-hatch (yaml тоже enabled). Порт driver'а должен
+            # совпасть с endpoint'ом — фиксируем BACKEND_CTL_PORT (его читает endpoint).
+            os.environ["BACKEND_CTL"] = "1"
+            os.environ["BACKEND_CTL_PORT"] = str(self._port)
+            # PID-реестр (INSPECTOR_PID_FILE) — свой файл на инстанс harness. Общий
+            # дефолт рассчитан на «одна система на машину»: reap_and_reset при старте
+            # ВТОРОГО бэкенда (test_harness при живой session-фикстуре) убил бы процессы
+            # первого как «хвосты прошлого запуска». Осиротевшие хвосты harness добивает
+            # сам (watchdog + kill дерева в stop()) — глобальный reap ему не нужен.
+            import tempfile
 
-        os.environ["INSPECTOR_PID_FILE"] = str(
-            Path(tempfile.gettempdir()) / f"inspector_pids_harness_{os.getpid()}_{self._port}.jsonl"
-        )
+            os.environ["INSPECTOR_PID_FILE"] = str(
+                Path(tempfile.gettempdir()) / f"inspector_pids_harness_{os.getpid()}_{self._port}.jsonl"
+            )
 
-        if self._launcher_factory is not None:
-            self._launcher = self._launcher_factory()
-        else:
-            self._launcher = build_headless_launcher(recipe=self._recipe, with_base=self._with_base)
-        self._launcher.start()
-        if not self._launcher.wait_until_ready(self._ready_timeout):
-            self._log(f"[harness] система не готова за {self._ready_timeout}s — останавливаю")
-            self.stop()
-            raise RuntimeError("headless-бэкенд не поднялся (wait_until_ready timeout)")
+            if self._launcher_factory is not None:
+                self._launcher = self._launcher_factory()
+            else:
+                self._launcher = build_headless_launcher(recipe=self._recipe, with_base=self._with_base)
+            self._launcher.start()
+            if not self._launcher.wait_until_ready(self._ready_timeout):
+                self._log(f"[harness] система не готова за {self._ready_timeout}s — останавливаю")
+                raise RuntimeError("headless-бэкенд не поднялся (wait_until_ready timeout)")
 
-        # pid оркестратора + снимок его поддерева ПОСЛЕ старта — для scoped-kill в teardown.
-        self._orch_pid = self._orchestrator_pid()
-        self._descendants = _subtree(self._orch_pid)
+            # pid оркестратора + снимок его поддерева ПОСЛЕ старта — для scoped-kill в teardown.
+            self._orch_pid = self._orchestrator_pid()
+            self._descendants = _subtree(self._orch_pid)
 
-        # Readiness-проба вместо фиксированных sleep (Task 0.4): опрашиваем PM, пока не
-        # ответит успехом. Дедлайн = прежний warmup + запас 3с. connect тоже ретраим —
-        # SocketChannel мог не успеть забиндиться сразу после wait_until_ready.
-        drv = BackendDriver(port=self._port)
-        deadline = time.monotonic() + self._warmup + 3.0
-        while True:
-            try:
-                drv.connect()
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    raise
+            # Readiness-проба вместо фиксированных sleep (Task 0.4): опрашиваем PM, пока не
+            # ответит успехом. Дедлайн = прежний warmup + запас 3с. connect тоже ретраим —
+            # SocketChannel мог не успеть забиндиться сразу после wait_until_ready.
+            drv = BackendDriver(port=self._port)
+            deadline = time.monotonic() + self._warmup + 3.0
+            while True:
+                try:
+                    drv.connect()
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.1)
+            while time.monotonic() < deadline:
+                res = drv.introspect_status("ProcessManager", timeout=2.0)
+                if isinstance(res, dict) and res.get("success"):
+                    break
                 time.sleep(0.1)
-        while time.monotonic() < deadline:
-            res = drv.introspect_status("ProcessManager", timeout=2.0)
-            if isinstance(res, dict) and res.get("success"):
-                break
-            time.sleep(0.1)
-        self._driver = drv
-        return drv
+            self._driver = drv
+            return drv
+        except Exception:
+            # Любой сбой на пути старта → погасить систему И восстановить env (иначе
+            # мутации BACKEND_CTL*/INSPECTOR_PID_FILE утекли бы в процесс pytest, т.к.
+            # __exit__ не зовётся при исключении в __enter__). stop() идемпотентен.
+            self.stop()
+            raise
 
     def stop(self) -> None:
         """Закрыть driver и гарантированно погасить систему (watchdog + kill дерева)."""

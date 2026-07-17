@@ -448,6 +448,18 @@ class _SubFakeDriver:
         self._intents.append({"command": "state.subscribe", "target": "ProcessManager", "args": {"pattern": pattern}})
         return {"success": True}
 
+    def log_tail(self, process, *, level="ERROR", timeout=None):
+        self._intents.append(
+            {"command": "log.tail.subscribe", "target": process, "args": {"subscriber": "backend_ctl", "level": level}}
+        )
+        return {"success": True}
+
+    def log_untail(self, process, *, timeout=None):
+        self._intents = [
+            i for i in self._intents if not (i["command"] == "log.tail.subscribe" and i["target"] == process)
+        ]
+        return {"success": True}
+
     def get_status(self, process, *, timeout=None):
         if self.fail:
             raise OSError("connection lost")
@@ -503,6 +515,35 @@ class TestReconnectReplay:
         payload = tool_result(r2)
         assert "reconnected" not in payload
         assert d2.replayed == []
+
+    def test_unsubscribed_not_resurrected_after_second_reconnect(self) -> None:
+        # Регресс на MAJOR #1 ревью: агент отписался → второй реконнект НЕ воскрешает
+        # снятую подписку (раньше guard `if intents:` держал стухший _sub_intents).
+        d1, d2, d3 = _SubFakeDriver(), _SubFakeDriver(), _SubFakeDriver()
+        seq = iter([d1, d2, d3])
+        server = MCPServer(driver_factory=lambda: next(seq), log=lambda m: None)
+
+        # (1) подписка на d1
+        call(server, "tools/call", {"name": "log_tail", "arguments": {"process": "cam"}})
+        assert d1.export_subscriptions()
+
+        # (2) обрыв → (3) реконнект d2 replay'ит подписку
+        d1.fail = True
+        call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        r = tool_result(call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}}))
+        assert r.get("reconnected") is True
+        assert d2.replayed and d2.export_subscriptions()
+
+        # (4) агент отписался на d2 → реестр пуст
+        call(server, "tools/call", {"name": "log_untail", "arguments": {"process": "cam"}})
+        assert d2.export_subscriptions() == []
+
+        # (5) второй обрыв → (6) реконнект d3 НЕ должен воскрешать снятую подписку
+        d2.fail = True
+        call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        r3 = tool_result(call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}}))
+        assert d3.replayed == [], "снятая подписка не должна воскресать после реконнекта"
+        assert "reconnected" not in r3
 
 
 class TestReadinessProbe:

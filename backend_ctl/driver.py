@@ -508,13 +508,14 @@ class BackendDriver:
                 is_late = pending is None and cid in self._timed_out
                 if is_late:
                     del self._timed_out[cid]
+                    # Инкремент под тем же локом: dispatch_raw (Task 0.4) сделал _dispatch
+                    # публичным → нельзя опираться на «только reader-поток» (ревью MINOR #3).
+                    self._late_replies += 1
             if pending is not None:
                 pending.response = msg
                 pending.event.set()
                 return
             if is_late:
-                # Инкремент безопасен: _dispatch зовётся только из reader-потока.
-                self._late_replies += 1
                 return
         # Нет request_id либо reply уже никто не ждёт (и это не карантин) → это событие.
         self._emit_event(msg)
