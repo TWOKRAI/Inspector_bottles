@@ -24,9 +24,10 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Iterable, Optional
 
-# Суффиксы метрик, подлежащих publisher-gate (вкл/выкл + частота). ``status``
-# воркеров и health/errors СЮДА не входят — они публикуются всегда (инвариант плана).
-GATED_METRICS: tuple[str, ...] = ("fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm")
+# Task 2.3: константа переехала в configs/telemetry_publish_config.py (нижний слой
+# контракта, configs не импортирует heartbeat) — здесь ре-экспорт для обратной
+# совместимости импортов (``from .telemetry import GATED_METRICS``).
+from ..configs.telemetry_publish_config import GATED_METRICS
 
 
 def build_worker_telemetry(

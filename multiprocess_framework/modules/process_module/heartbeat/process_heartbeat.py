@@ -256,6 +256,28 @@ class ProcessHeartbeat:
             module="heartbeat",
         )
 
+    def _warn_unknown_metrics(self, config: Any) -> None:
+        """Залогировать WARNING по ключам ``metrics``, отсутствующим в ``GATED_METRICS``.
+
+        Task 2.3: опечатка в имени метрики (например ``latency`` вместо ``latency_ms``)
+        раньше была тихим no-op — правило существует в конфиге, но ``resolve()`` его
+        никогда не находит (метрика не публикуется, диагностики нет). Секция НЕ
+        отвергается (forward-compat: новая метрика в старом процессе не должна ронять
+        boot/reload) — только явный WARNING, чтобы опечатка была видна оператору.
+        """
+        unknown = config.unknown_metrics()
+        if not unknown:
+            return
+        _warn = getattr(self._services, "log_warning", None) or getattr(self._services, "log_info", None)
+        if _warn is None:
+            return
+        names = ", ".join(sorted(unknown))
+        _warn(
+            f"Неизвестные ключи telemetry.publish.metrics: {names} "
+            "— возможна опечатка в имени метрики (секция применена, метрика игнорируется)",
+            module="heartbeat",
+        )
+
     def _pump_scheduled_gc(self) -> None:
         """Ф7 G.9(a) H-ревью: дать GcDiscipline тик для scheduled-сборки (FW_GC_SCHEDULED).
 
@@ -319,9 +341,23 @@ class ProcessHeartbeat:
             return None
         # Task 1.2: WARNING по метрикам, чей interval_sec < эффективного тика (не тихий no-op).
         self._warn_capped_metrics(config)
+        # Task 2.3: WARNING по ключам metrics, отсутствующим в GATED_METRICS (опечатка).
+        self._warn_unknown_metrics(config)
         # Task 1.2: gate использует ТОТ ЖЕ clock, что и heartbeat-планирование (для
         # fake-clock тестов каденции; в проде обоим — time.monotonic).
         return TelemetryGate(config, clock=self._clock)
+
+    def current_unknown_metrics(self) -> list[str]:
+        """Отсортированный список неизвестных ключей ``metrics`` текущего живого gate (Task 2.3).
+
+        Источник для видимой диагностики опечаток инициатору рантайм-переконфигурации
+        (``BuiltinCommands._cmd_telemetry_reconfigure``) — не тихий no-op (finding E).
+        Gate выключен (``None``) → пустой список (нечего резолвить).
+        """
+        gate = self._telemetry_gate
+        if gate is None:
+            return []
+        return sorted(gate.config.unknown_metrics())
 
     def current_telemetry_publish(self) -> dict | None:
         """Текущая эффективная секция ``telemetry.publish`` живого gate (Task 1.1).
@@ -397,6 +433,8 @@ class ProcessHeartbeat:
         config = TelemetryPublishConfig.from_dict(publish_section)
         # Task 1.2: WARNING по метрикам, чья частота ограничена телеметрийным тиком.
         self._warn_capped_metrics(config)
+        # Task 2.3: WARNING по ключам metrics, отсутствующим в GATED_METRICS (опечатка).
+        self._warn_unknown_metrics(config)
         # Атомарный swap: сборка завершена — переприсваиваем ссылку целиком (под GIL).
         # Gate использует clock heartbeat'а (fake-clock тесты; в проде time.monotonic).
         self._telemetry_gate = TelemetryGate(config, clock=self._clock)
