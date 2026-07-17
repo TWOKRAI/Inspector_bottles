@@ -107,7 +107,7 @@ GUI** плана telemetry-publish-control (крутилки частоты не
 - [x] Доп. (замечание ревьюера 1.1): неизвестный `mode` → error-dict, не молчаливый replace — `test_telemetry_reload.py::TestUnknownModeRejected`
 **Out of scope:** liveness-контракт heartbeat→ProcessMonitor (частота heartbeat-сообщений не меняется); центральный троттл (Task 1.3).
 
-### Task 1.3 — Центральный троттл: страховка, а не второй авторитет ✅ DONE (<HASH>)
+### Task 1.3 — Центральный троттл: страховка, а не второй авторитет ✅ DONE (173f5ff4)
 **Level:** Senior (Opus)
 **Assignee:** teamlead
 **Layer:** mixed
