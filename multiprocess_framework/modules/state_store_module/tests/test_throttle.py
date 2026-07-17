@@ -15,6 +15,9 @@
 - before_merge троттлит поддерево per-leaf (PC 0.1, новый контракт)
 - рантайм-мутаторы правил set_rules/update_rule/remove_rule (PC 0.1)
 - MiddlewarePipeline.get / StateStoreManager.get_middleware (PC 0.1)
+- prune(prefix) чистит тайминги/pending только своего поддерева (Task 3.4)
+- lazy-prune ограничивает рост _last_pass при потоке уникальных путей (Task 3.4)
+- flush() отбрасывает stale pending-значения (Task 3.4)
 """
 
 from __future__ import annotations
@@ -22,7 +25,10 @@ from __future__ import annotations
 from unittest.mock import patch
 
 
-from multiprocess_framework.modules.state_store_module.middleware.throttle import ThrottleMiddleware
+from multiprocess_framework.modules.state_store_module.middleware.throttle import (
+    _LAZY_PRUNE_SIZE_THRESHOLD,
+    ThrottleMiddleware,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +218,7 @@ class TestPending:
 
 class TestFlush:
     def test_flush_returns_pending_values(self):
-        """flush() возвращает все накопленные pending значения."""
+        """flush() возвращает все накопленные pending значения (свежие, не stale)."""
         mw = ThrottleMiddleware({"**.state.actual_fps": 1.0})
         path = "cameras.0.state.actual_fps"
 
@@ -222,7 +228,10 @@ class TestFlush:
         with patch("time.monotonic", return_value=100.3):
             mw.before_set(path, 26.0, SOURCE, {})
 
-        result = mw.flush()
+        # flush() вызван сразу после (100.4) — в пределах порога свежести
+        # (Task 3.4): pending-значение не stale, возвращается как раньше.
+        with patch("time.monotonic", return_value=100.4):
+            result = mw.flush()
 
         assert len(result) == 1
         assert result[0] == (path, 26.0, SOURCE)
@@ -637,3 +646,160 @@ class TestMiddlewareLookup:
         throttle.update_rule("processes.**.state.fps", 0)
 
         assert throttle.rules["processes.**.state.fps"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Тест 14: prune(prefix) — точечная чистка мёртвого поддерева (Task 3.4)
+# ---------------------------------------------------------------------------
+
+
+class TestPrune:
+    """prune(prefix) убирает тайминги/pending ТОЛЬКО своего поддерева —
+    звать при удалении поддерева процесса из StateStore (находка G)."""
+
+    def test_prune_removes_last_pass_only_for_own_subtree(self):
+        """prune(prefix) убирает _last_pass только своего поддерева — соседи целы."""
+        mw = ThrottleMiddleware({"processes.**.state.fps": 1.0})
+
+        with patch("time.monotonic", return_value=100.0):
+            mw.before_set("processes.cam1.state.fps", 25.0, SOURCE, {})
+            mw.before_set("processes.cam10.state.fps", 25.0, SOURCE, {})
+            mw.before_set("processes.cam2.state.fps", 25.0, SOURCE, {})
+
+        removed = mw.prune("processes.cam1")
+
+        # Ровно один путь убран — граница по точке, не по префиксу строки
+        # (иначе "processes.cam1" задел бы "processes.cam10").
+        assert removed == 1
+        assert "processes.cam1.state.fps" not in mw._last_pass
+        assert "processes.cam10.state.fps" in mw._last_pass
+        assert "processes.cam2.state.fps" in mw._last_pass
+
+    def test_prune_removes_pending_under_prefix(self):
+        """prune(prefix) убирает и _pending под своим поддеревом — соседний цел."""
+        mw = ThrottleMiddleware({"processes.**.state.last_frame_seq": 0})
+
+        mw.before_set("processes.cam1.state.last_frame_seq", 1, SOURCE, {})
+        mw.before_set("processes.cam2.state.last_frame_seq", 1, SOURCE, {})
+
+        assert "processes.cam1.state.last_frame_seq" in mw._pending
+        assert "processes.cam2.state.last_frame_seq" in mw._pending
+
+        mw.prune("processes.cam1")
+
+        assert "processes.cam1.state.last_frame_seq" not in mw._pending
+        assert "processes.cam2.state.last_frame_seq" in mw._pending
+
+    def test_prune_matches_exact_prefix_path(self):
+        """prune(prefix) убирает и путь, совпадающий с prefix ЦЕЛИКОМ (не только дочерние)."""
+        mw = ThrottleMiddleware({"processes.cam1": 1.0})
+
+        with patch("time.monotonic", return_value=100.0):
+            mw.before_set("processes.cam1", 1, SOURCE, {})
+
+        assert "processes.cam1" in mw._last_pass
+
+        removed = mw.prune("processes.cam1")
+
+        assert removed == 1
+        assert "processes.cam1" not in mw._last_pass
+
+    def test_prune_unknown_prefix_is_noop(self):
+        """prune на несуществующем префиксе — no-op, возвращает 0."""
+        mw = ThrottleMiddleware({"a.*": 1.0})
+        mw.before_set("a.x", 1, SOURCE, {})
+
+        assert mw.prune("processes.ghost") == 0
+        assert "a.x" in mw._last_pass  # ничего постороннего не задето
+
+
+# ---------------------------------------------------------------------------
+# Тест 15: lazy-prune ограничивает рост _last_pass (Task 3.4)
+# ---------------------------------------------------------------------------
+
+
+class TestLazyPrune:
+    def test_lazy_prune_bounds_growth_under_unique_path_stream(self):
+        """Поток уникальных путей: lazy-prune реально срабатывает при превышении
+        порога _LAZY_PRUNE_SIZE_THRESHOLD — рост _last_pass ограничен."""
+        # interval=1.0 (положительный) → порог устаревания = 1.0 * K(10) = 10с.
+        mw = ThrottleMiddleware({"**.state.fps": 1.0})
+
+        n_paths = _LAZY_PRUNE_SIZE_THRESHOLD + 200  # заведомо больше порога
+
+        # Монотонные "секунды" 0, 1, 2, ... — по одному вызову time.monotonic()
+        # на каждый before_set (одна точка чтения времени в начале метода).
+        with patch("time.monotonic", side_effect=[float(i) for i in range(n_paths)]):
+            for i in range(n_paths):
+                mw.before_set(f"cameras.{i}.state.fps", i, SOURCE, {})
+
+        # Без lazy-prune словарь дорос бы до n_paths. С lazy-prune — как только
+        # размер превысил порог, записи старше 10с (в "логическом" времени
+        # теста) были выброшены, поэтому итоговый размер заметно меньше потока.
+        assert len(mw._last_pass) <= _LAZY_PRUNE_SIZE_THRESHOLD
+        assert 0 < len(mw._last_pass) < n_paths
+
+    def test_lazy_prune_noop_below_threshold(self):
+        """Ниже порога lazy-prune не трогает _last_pass (регресс-инвариант)."""
+        mw = ThrottleMiddleware({"**.state.fps": 1.0})
+
+        with patch("time.monotonic", side_effect=[float(i) for i in range(50)]):
+            for i in range(50):
+                mw.before_set(f"cameras.{i}.state.fps", i, SOURCE, {})
+
+        assert len(mw._last_pass) == 50
+
+
+# ---------------------------------------------------------------------------
+# Тест 16: flush() отбрасывает stale pending-значения (Task 3.4)
+# ---------------------------------------------------------------------------
+
+
+class TestFlushStaleDiscard:
+    def test_flush_discards_stale_pending_value(self):
+        """flush() не возвращает pending-значение старше порога свежести."""
+        # interval=1.0 → порог = 1.0 * 10 = 10с.
+        mw = ThrottleMiddleware({"**.state.fps": 1.0})
+        path = "cameras.0.state.fps"
+
+        with patch("time.monotonic", return_value=100.0):
+            mw.before_set(path, 25.0, SOURCE, {})  # первый проход
+
+        with patch("time.monotonic", return_value=100.1):
+            mw.before_set(path, 26.0, SOURCE, {})  # придержано, _pending_since=100.1
+
+        # flush спустя 20с (> порога 10с) — значение мертво, не возвращается.
+        with patch("time.monotonic", return_value=120.1):
+            result = mw.flush()
+
+        assert result == []
+        assert mw._pending == {}  # но словарь всё равно вычищен целиком
+
+    def test_flush_keeps_fresh_discards_stale_in_mixed_set(self):
+        """Смешанный набор: свежий pending возвращён, stale — отброшен."""
+        mw = ThrottleMiddleware({"**.state.fps": 1.0, "**.state.seq": 1.0})
+        stale_path = "cameras.1.state.seq"
+        fresh_path = "cameras.0.state.fps"
+
+        with patch("time.monotonic", return_value=0.0):
+            mw.before_set(stale_path, 1, SOURCE, {})
+        with patch("time.monotonic", return_value=0.1):
+            mw.before_set(stale_path, 2, SOURCE, {})  # _pending_since=0.1
+
+        with patch("time.monotonic", return_value=100.0):
+            mw.before_set(fresh_path, 25.0, SOURCE, {})
+        with patch("time.monotonic", return_value=100.1):
+            mw.before_set(fresh_path, 26.0, SOURCE, {})  # _pending_since=100.1
+
+        # На момент flush: stale_path возраст 100.1-0.1=100с (> 10с порога);
+        # fresh_path возраст 100.1-100.1=0с (<= 10с порога).
+        with patch("time.monotonic", return_value=100.1):
+            result = mw.flush()
+
+        assert result == [(fresh_path, 26.0, SOURCE)]
+        assert mw._pending == {}
+
+    def test_flush_empty_pending_still_returns_empty_list(self):
+        """Регресс: flush() на пустом _pending по-прежнему возвращает []."""
+        mw = ThrottleMiddleware({"**.state.fps": 1.0})
+        assert mw.flush() == []

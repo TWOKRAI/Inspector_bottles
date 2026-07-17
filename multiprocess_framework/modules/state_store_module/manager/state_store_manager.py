@@ -18,6 +18,7 @@ from ..core.subscription_manager import SubscriptionManager
 from ..core.tree_store import TreeStore
 from ..interfaces import IRouter, IStateStoreManager
 from ..middleware.base import MiddlewarePipeline, StateMiddleware
+from ..middleware.throttle import ThrottleMiddleware
 from .delta_dispatcher import DeltaDispatcher
 
 
@@ -278,6 +279,11 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         (``PM._cleanup_process_resources``). Идемпотентен: удаление отсутствующего
         узла — не ошибка (``changed: False``).
 
+        При реальном удалении поддерева заодно чистит тайминги/pending
+        ``ThrottleMiddleware`` под этим же префиксом (:meth:`ThrottleMiddleware.prune`,
+        Task 3.4, находка G) — иначе они висели бы в словарях бессрочно после
+        того, как процесс/его поддерево исчезли из дерева.
+
         Returns:
             dict с результатом операции или ошибкой.
         """
@@ -292,6 +298,9 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
             delta = self._store.delete(path, source=source)
             if delta is not None:
                 self._dispatcher.dispatch_single(delta)
+                throttle = self.get_middleware("throttle")
+                if isinstance(throttle, ThrottleMiddleware):
+                    throttle.prune(path)
                 return {"status": "ok", "path": path, "changed": True}
             return {"status": "ok", "path": path, "changed": False}
         except (ValueError, TypeError) as exc:
