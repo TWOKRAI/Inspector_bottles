@@ -11,6 +11,7 @@
 - `VirtualKeyboard`, `VirtualKeyboardMini` — экранная клавиатура для сенсорных экранов.
 - `StructuredTableWidget`, `StructuredTwoLevelTreeWidget` — таблицы и иерархические деревья с toolbars.
 - `PerformanceMonitor` — виджет для мониторинга производительности процессов.
+- `TelemetryChart`, `SeriesSpec` — конструкторный многосерийный live-график на PyQtGraph (легенда-тумблеры, zoom/pan, crosshair, compact-режим); строится по декларативному списку серий.
 
 ## Stability
 

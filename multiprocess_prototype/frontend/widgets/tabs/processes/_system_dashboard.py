@@ -40,6 +40,20 @@ class SystemDashboardSection(QGroupBox):
         process_names: список процессов — ШАБЛОН серий (одна серия на процесс).
         telemetry: read-model (``TelemetryViewModel``) — источник ring-истории.
         parent: Qt-родитель.
+
+    Инвариант «свежесть при смене рецепта» (code review, нит #4): список серий
+    ФИКСИРУЕТСЯ в конструкторе и сам по себе НЕ следит за сменой набора процессов
+    (нет add/remove-series после постройки — упрощение, не баг). Актуальность
+    после hot-swap рецепта обеспечивает НЕ этот класс, а владелец —
+    ``ProcessesTab``: ``ActivateRecipe`` публикует ``TopologyReplaced``,
+    ``ProcessesTab._on_topology_replaced`` сравнивает набор процессов и при
+    расхождении зовёт ``_sync_nav()``, которая уничтожает старую
+    ``AllProcessesPanel`` (а с ней и старый ``SystemDashboardSection``,
+    ``deleteLater``) и лениво пересобирает панель заново — новый экземпляр
+    строится уже по АКТУАЛЬНОМУ списку процессов. Если рецепт меняется, но
+    набор ИМЁН процессов не меняется — пересборки не будет, но и стейла нет
+    (ключи серий = имена процессов совпадают). См.
+    ``tests/test_system_dashboard.py::TestDashboardRebuildOnRecipeSwap``.
     """
 
     def __init__(

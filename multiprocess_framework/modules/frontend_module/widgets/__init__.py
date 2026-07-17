@@ -7,6 +7,7 @@ Widgets — составной UI фреймворка: вкладки, BaseWidg
 Импорты разделены на группы try/except: base_widget и tabs имеют
 взаимную зависимость (circular), поэ��ому их нельзя объединять в один блок.
 """
+
 from .image_panel import ImagePanelWidget
 
 __all__ = ["ImagePanelWidget"]
@@ -35,12 +36,21 @@ try:
         tab_callbacks_to_dict,
     )
 
-    __all__.extend([
-        "BaseTab", "MvpTabBase", "PanelTabBase", "RegisterBindingContext",
-        "TabPresenterBase", "TabViewProtocol", "TabWidget",
-        "callback_no_args", "create_registers_placeholder",
-        "tab_callbacks_from_dict", "tab_callbacks_to_dict",
-    ])
+    __all__.extend(
+        [
+            "BaseTab",
+            "MvpTabBase",
+            "PanelTabBase",
+            "RegisterBindingContext",
+            "TabPresenterBase",
+            "TabViewProtocol",
+            "TabWidget",
+            "callback_no_args",
+            "create_registers_placeholder",
+            "tab_callbacks_from_dict",
+            "tab_callbacks_to_dict",
+        ]
+    )
 except ImportError:
     pass
 
@@ -55,10 +65,16 @@ try:
         LogoConfig,
     )
 
-    __all__.extend([
-        "HeaderWidget", "ButtonHeader", "HeaderConfig",
-        "LogoConfig", "AdminButtonConfig", "HeaderButtonItem",
-    ])
+    __all__.extend(
+        [
+            "HeaderWidget",
+            "ButtonHeader",
+            "HeaderConfig",
+            "LogoConfig",
+            "AdminButtonConfig",
+            "HeaderButtonItem",
+        ]
+    )
 except ImportError:
     pass
 
@@ -67,10 +83,14 @@ try:
     from .keyboard import VirtualKeyboard, VirtualKeyboardMini
     from .keyboard import bind_touch_keyboard_line_edit, merge_touch_keyboard_dicts
 
-    __all__.extend([
-        "VirtualKeyboard", "VirtualKeyboardMini",
-        "merge_touch_keyboard_dicts", "bind_touch_keyboard_line_edit",
-    ])
+    __all__.extend(
+        [
+            "VirtualKeyboard",
+            "VirtualKeyboardMini",
+            "merge_touch_keyboard_dicts",
+            "bind_touch_keyboard_line_edit",
+        ]
+    )
 except ImportError:
     pass
 
@@ -83,10 +103,14 @@ try:
         TwoLevelTreeWithToolbar,
     )
 
-    __all__.extend([
-        "StructuredTableWidget", "StructuredTwoLevelTreeWidget",
-        "TableWithToolbar", "TwoLevelTreeWithToolbar",
-    ])
+    __all__.extend(
+        [
+            "StructuredTableWidget",
+            "StructuredTwoLevelTreeWidget",
+            "TableWithToolbar",
+            "TwoLevelTreeWithToolbar",
+        ]
+    )
 except ImportError:
     pass
 
@@ -95,6 +119,14 @@ try:
     from .performance_monitor import PerformanceMonitor
 
     __all__.append("PerformanceMonitor")
+except ImportError:
+    pass
+
+# --- telemetry chart (конструкторный многосерийный live-график, telemetry-dashboard Ф1) ---
+try:
+    from .telemetry_chart import SeriesSpec, TelemetryChart
+
+    __all__.extend(["TelemetryChart", "SeriesSpec"])
 except ImportError:
     pass
 

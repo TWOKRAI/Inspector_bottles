@@ -87,6 +87,7 @@
 - `FrontendRegistersBridge` — connection_map, send_callback, subscribe
 - Controls: SliderControl, CheckboxControl, SpinBoxControl, NumericControl, CompoundControl
 - Widgets: BaseWidget[TModel], HeaderWidget, TabWidget, ImagePanelWidget, LoadingWindow
+- TelemetryChart, SeriesSpec — конструкторный многосерийный live-график (PyQtGraph)
 - Tables: StructuredTableWidget, StructuredTwoLevelTreeWidget, TreeWithToolbar
 - Touch-клавиатура, WidgetSignalBus
 

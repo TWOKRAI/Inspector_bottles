@@ -9,18 +9,24 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
 from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
 from multiprocess_prototype.frontend.widgets.tabs.processes._panels import AllProcessesPanel
 from multiprocess_prototype.frontend.widgets.tabs.processes._system_dashboard import (
     SystemDashboardSection,
 )
 from multiprocess_prototype.frontend.widgets.tabs.processes.presenter import ProcessesPresenter
+from multiprocess_prototype.frontend.widgets.tabs.processes.tab import ProcessesTab
 
 from ._helpers import make_processes_services
 
 
 def _presenter() -> ProcessesPresenter:
     return ProcessesPresenter(make_processes_services())
+
+
+def _cmd() -> MagicMock:
+    return MagicMock(spec=CommandSender)
 
 
 def _delta(path: str, value: object) -> dict:
@@ -91,3 +97,49 @@ class TestPanelIntegration:
         panel._apply_telemetry_items([(path, 21.0)])
         _xs, ys = panel._dashboard._chart._curves[target].getData()
         assert ys is not None and len(ys) >= 1  # дашборд обновился по касанию fps
+
+
+class TestDashboardRebuildOnRecipeSwap:
+    """Нит #4 code review: дашборд не должен оставаться стейл после смены рецепта.
+
+    ``SystemDashboardSection`` сам серии не пересобирает — актуальность обеспечивает
+    ``ProcessesTab`` через ``TopologyReplaced`` → ``_sync_nav()`` (см. докстроку
+    ``SystemDashboardSection``). Здесь проверяем именно эту гарантию lifecycle:
+    при смене набора процессов (как при ``ActivateRecipe``, которая тоже публикует
+    ``TopologyReplaced``) старая панель/дашборд уничтожаются, новая строится по
+    АКТУАЛЬНОМУ списку процессов — без стейл-серий старого рецепта.
+    """
+
+    def test_dashboard_series_refresh_on_topology_replaced(self, qtbot) -> None:
+        services = make_processes_services(use_holder=True)
+        tab = ProcessesTab(services, command_sender=_cmd())
+        qtbot.addWidget(tab)
+
+        old_dashboard = tab._all_panel._dashboard
+        assert old_dashboard._chart.series_keys() == ["camera_0", "processor", "renderer"]
+
+        # Имитируем смену рецепта: набор процессов изменился (новый добавлен,
+        # старый удалён) + событие TopologyReplaced (как публикует ActivateRecipe).
+        tab._presenter.create_process("new_proc", category="utility")
+        tab._presenter.delete_process("camera_0")
+        tab._on_topology_replaced()
+
+        new_dashboard = tab._all_panel._dashboard
+        assert new_dashboard is not old_dashboard  # панель/дашборд пересобраны заново
+        new_series = new_dashboard._chart.series_keys()
+        assert "new_proc" in new_series
+        assert "camera_0" not in new_series  # стейл-серия удалённого процесса не осталась
+
+    def test_no_rebuild_keeps_dashboard_when_process_set_unchanged(self, qtbot) -> None:
+        """Правки воркеров (набор процессов тот же) не пересобирают дашборд — не стейл,
+        т.к. ключи серий (имена процессов) не изменились."""
+        services = make_processes_services(use_holder=True)
+        tab = ProcessesTab(services, command_sender=_cmd())
+        qtbot.addWidget(tab)
+
+        old_dashboard = tab._all_panel._dashboard
+        tab._presenter.add_worker("camera_0", worker_name="w1")
+        tab._on_topology_replaced()
+
+        assert tab._all_panel._dashboard is old_dashboard
+        assert old_dashboard._chart.series_keys() == ["camera_0", "processor", "renderer"]
