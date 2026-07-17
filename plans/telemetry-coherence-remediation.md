@@ -288,7 +288,7 @@ telemetry-publish-control); изменение дефолтных central-пра
 
 ## Фаза 3 — Гигиена + долг простоты
 
-### Task 3.1 — Типизировать `ProcessConfig.telemetry` (убрать raw-blueprint pre-scan)
+### Task 3.1 — Типизировать `ProcessConfig.telemetry` (убрать raw-blueprint pre-scan) ✅ DONE (43368466)
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
 **Layer:** mixed
@@ -306,7 +306,15 @@ telemetry-publish-control); изменение дефолтных central-пра
 - [ ] Golden-снапшоты `test_build_characterization.py` без диффа proc_dict'ов
 **Out of scope:** семантика merge (не меняется), другие поля ProcessConfig.
 
-### Task 3.2 — Персист runtime-дельты в PM + fan-out publisher-gate из watcher
+### Task 3.2 — Персист runtime-дельты в PM + fan-out publisher-gate из watcher ⚠️ ЧАСТИЧНО (c0b6e01b: шаги 1-2-4; шаг 3 отложен)
+
+> **Шаги 1, 2, 4 DONE** (c0b6e01b): PM хранит `_telemetry_runtime_delta`, доигрывает после `apply_topology`
+> (residual #7 закрыт), `publish=None` broadcast сбрасывает персист. **Шаг 3 (watcher фанит publish-часть
+> детям) ОТЛОЖЕН** — обнаружен клоббер-риск: `_broadcast_command` рассылает publish ВСЕМ детям единообразно
+> (`comm.broadcast`), затирая per-process override, сохранённый Task 2.2 (boot≢reload для процесса с override).
+> Корректный fan-out требует per-child мержа override (адресные send'ы с `telemetry_override` каждого ребёнка
+> ИЛИ merge на стороне ребёнка) — отдельное решение владельца, пересекается с семантикой операторского
+> broadcast (тот тоже uniform). Acceptance-тест «правка publish файла → у детей пересобран gate» — под шагом 3.
 **Level:** Senior (Opus)
 **Assignee:** teamlead
 **Layer:** framework
@@ -330,7 +338,7 @@ telemetry-publish-control); изменение дефолтных central-пра
 - [ ] Тест: сброс дельты → respawn берёт boot-конфиг
 **Out of scope:** персист на диск (только память PM); throttle-плоскость (живёт в оркестраторе, respawn её не теряет).
 
-### Task 3.3 — Covered-подписки: ре-адопция при снятии покрывающего паттерна
+### Task 3.3 — Covered-подписки: ре-адопция при снятии покрывающего паттерна ✅ DONE (d1cb407c)
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
 **Layer:** framework
@@ -348,7 +356,7 @@ telemetry-publish-control); изменение дефолтных central-пра
 - [ ] Регресс: прежние coverage-тесты зелёные
 **Out of scope:** серверная сторона; sync-ре-подписка (только async — инвариант «0 блокирующего IPC»).
 
-### Task 3.4 — Гигиена ThrottleMiddleware: чистка таймингов мёртвых путей
+### Task 3.4 — Гигиена ThrottleMiddleware: чистка таймингов мёртвых путей ✅ DONE (d7670228)
 **Level:** Middle (Sonnet)
 **Assignee:** developer
 **Layer:** framework
