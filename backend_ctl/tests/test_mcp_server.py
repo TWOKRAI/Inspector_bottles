@@ -122,6 +122,8 @@ class TestRegistry:
             "events",
             "log_tail",
             "log_untail",
+            "observability_tail",
+            "observability_untail",
             "ui_tap",
             "ui_untap",
             "ui_tap_ping",
@@ -595,6 +597,8 @@ class TestErrorContract:
             lambda: d.state_subscribe("processes.**"),
             lambda: d.log_tail("p"),
             lambda: d.log_untail("p"),
+            lambda: d.observability_tail("p"),
+            lambda: d.observability_untail("p"),
             lambda: d.ui_tap("gui"),
             lambda: d.ui_untap("gui"),
         ]
@@ -661,3 +665,25 @@ class TestTelemetryTools:
         server, _ = make_server()
         tools = {t["name"] for t in call(server, "tools/list")["result"]["tools"]}
         assert {"telemetry_reconfigure", "telemetry_set"} <= tools
+
+
+class TestObservabilityTools:
+    """Task 2.1: observability_tail/untail диспетчатся на driver."""
+
+    def test_observability_tail_dispatches(self) -> None:
+        server, fake = make_server()
+        call(server, "tools/call", {"name": "observability_tail", "arguments": {"process": "preprocessor"}})
+        name, args, kwargs = fake.calls[0]
+        assert name == "observability_tail"
+        assert args == ("preprocessor",)
+
+    def test_observability_untail_dispatches(self) -> None:
+        server, fake = make_server()
+        call(server, "tools/call", {"name": "observability_untail", "arguments": {"process": "preprocessor"}})
+        name, args, _ = fake.calls[0]
+        assert name == "observability_untail" and args == ("preprocessor",)
+
+    def test_new_tools_present_in_list(self) -> None:
+        server, _ = make_server()
+        tools = {t["name"] for t in call(server, "tools/list")["result"]["tools"]}
+        assert {"observability_tail", "observability_untail"} <= tools

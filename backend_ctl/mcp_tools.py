@@ -155,6 +155,14 @@ def _log_untail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.log_untail(args["process"], **_kw_timeout(args))
 
 
+def _observability_tail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.observability_tail(args["process"], **_kw_timeout(args))
+
+
+def _observability_untail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.observability_untail(args["process"], **_kw_timeout(args))
+
+
 def _ui_tap(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.ui_tap(args.get("process", "gui"), **_kw_timeout(args))
 
@@ -407,6 +415,20 @@ TOOLS: List[ToolSpec] = [
         "Снять подписку на tail логов процесса.",
         _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
         _log_untail,
+    ),
+    ToolSpec(
+        "observability_tail",
+        "Подписаться на live-хвост наблюдаемости процесса: ЛОГИ+ОШИБКИ+СТАТИСТИКА "
+        "(богаче log_tail — три плоскости). Записи едут push'ем (command='observability.record', "
+        "поле kind=log|error|stats) в событийный канал — читать инструментом events. Создаёт подписку.",
+        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        _observability_tail,
+    ),
+    ToolSpec(
+        "observability_untail",
+        "Снять подписку на live-хвост наблюдаемости процесса (форвардер + error-tap'ы).",
+        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        _observability_untail,
     ),
     ToolSpec(
         "ui_tap",

@@ -587,3 +587,98 @@ class TestSubscriptionRegistry:
         d2 = BackendDriver()
         d2.import_subscriptions(d1.export_subscriptions())
         assert d2.export_subscriptions() == d1.export_subscriptions()
+
+
+# --- Task 2.1: observability_tail — live ЛОГИ+ОШИБКИ+СТАТИСТИКА ---
+
+
+def _obs_record(kind: str, message: str = "msg") -> Dict[str, Any]:
+    """Синтетическая display-запись наблюдаемости (форма record_display)."""
+    return {"kind": kind, "process": "preprocessor", "module": "m", "ts": 1.0, "severity": "", "message": message}
+
+
+def _obs_event(records: Any = None, record: Any = None) -> Dict[str, Any]:
+    """Синтетическое событие observability.record (пачка records и/или одиночная record)."""
+    data: Dict[str, Any] = {"process": "preprocessor"}
+    if records is not None:
+        data["records"] = records
+    if record is not None:
+        data["record"] = record
+    return {"command": "observability.record", "data": data}
+
+
+class TestObservabilityTail:
+    def _recorder(self, monkeypatch):
+        d = BackendDriver()
+        calls: List[tuple] = []
+
+        def fake_send(target, command, args=None, *, timeout=None):
+            calls.append((target, command, args))
+            return {"success": True}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d, calls
+
+    def test_tail_sends_canonical_envelope_and_registers_intent(self, monkeypatch) -> None:
+        d, calls = self._recorder(monkeypatch)
+        d.observability_tail("preprocessor")
+        assert ("preprocessor", "observability.tail.subscribe", {"subscriber": "backend_ctl"}) in calls
+        assert any(
+            i["command"] == "observability.tail.subscribe" and i["target"] == "preprocessor"
+            for i in d.export_subscriptions()
+        )
+
+    def test_tail_custom_subscriber(self, monkeypatch) -> None:
+        d, calls = self._recorder(monkeypatch)
+        d.observability_tail("preprocessor", subscriber="watcher")
+        assert ("preprocessor", "observability.tail.subscribe", {"subscriber": "watcher"}) in calls
+
+    def test_untail_removes_intent(self, monkeypatch) -> None:
+        d, calls = self._recorder(monkeypatch)
+        d.observability_tail("preprocessor")
+        d.observability_untail("preprocessor")
+        # На проводе unsubscribe без параметров (NoParams-контракт).
+        assert ("preprocessor", "observability.tail.unsubscribe", {}) in calls
+        assert not any(i["command"] == "observability.tail.subscribe" for i in d.export_subscriptions())
+
+    def test_failed_tail_not_registered(self, monkeypatch) -> None:
+        d = BackendDriver()
+        monkeypatch.setattr(d, "send_command", lambda *a, **k: {"success": False, "error": "no receiver"})
+        d.observability_tail("preprocessor")
+        assert d.export_subscriptions() == []
+
+
+class TestObservabilityRecords:
+    def test_classifies_batch_by_kind(self) -> None:
+        d = BackendDriver()
+        events = [_obs_event(records=[_obs_record("log"), _obs_record("stats"), _obs_record("error")])]
+        assert [r["kind"] for r in d.observability_records(events)] == ["log", "stats", "error"]
+        assert [r["kind"] for r in d.observability_records(events, kind="error")] == ["error"]
+        assert d.observability_records(events, kind="log")[0]["message"] == "msg"
+
+    def test_flattens_single_and_batch_and_ignores_foreign(self) -> None:
+        d = BackendDriver()
+        events = [
+            _obs_event(records=[_obs_record("log")]),
+            _obs_event(record=_obs_record("error")),
+            {"command": "state.changed", "data": {"deltas": []}},  # чужое событие — игнор
+            {"command": "log.record", "data": {"record": {}}},  # log_tail — не observability
+        ]
+        kinds = [r["kind"] for r in d.observability_records(events)]
+        assert kinds == ["log", "error"]
+
+    def test_none_events_drains_channel(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(_line(_obs_event(records=[_obs_record("stats")])))
+        recs = d.observability_records()  # events=None → дренирует events()
+        assert [r["kind"] for r in recs] == ["stats"]
+        assert d.events() == [], "канал должен быть осушён"
+
+    def test_record_without_kind_excluded_by_filter(self) -> None:
+        d = BackendDriver()
+        rec = {"process": "p", "message": "no kind"}
+        events = [_obs_event(record=rec)]
+        # Без фильтра запись без kind отдаётся как есть (best-effort по доступным полям).
+        assert d.observability_records(events) == [rec]
+        # С фильтром сопоставить не с чем → исключается.
+        assert d.observability_records(events, kind="log") == []

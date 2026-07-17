@@ -273,9 +273,10 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 3. Push `observability.record` классифицируется EventHub в плоскости logs/errors/stats по kind записи.
 4. MCP-инструменты `observability_tail`/`observability_untail`.
 **Acceptance:**
-- [ ] unit: fake-транспорт получает канонический конверт; записи расходятся по плоскостям
-- [ ] live (Task 4.1): tail на процесс → `events()` содержит stats-записи
+- [x] unit: fake-транспорт получает канонический конверт; записи расходятся по плоскостям (`observability_tail`/`observability_untail`/`observability_records`, `TestObservabilityTail`/`TestObservabilityRecords`)
+- [ ] live (Task 4.1): tail на процесс → `events()` содержит stats-записи → Task 4.1
 **Out of scope:** авто-переподписка (2.2).
+**Заметка (реализация на текущей раскладке, ветка `feat/backend-ctl-watch`):** методы добавлены в `backend_ctl/driver.py` (не `domains/observability.py` — переезд отложен до codemod), MCP-инструменты — в `backend_ctl/mcp_tools.py`. Классификация записей — по полю `kind` ∈ {log, error, stats} (нормализатор `record_display`); `observability_records(events=None)` дренирует канал, со снимком — неразрушающий.
 
 #### Task 2.2 — `watch_like_gui()`: GUI-эквивалентный приёмный профиль + авто-переподписка
 **Level:** Senior (Opus) | **Assignee:** teamlead | **Layer:** framework

@@ -45,6 +45,12 @@ _UNSET: Any = object()
 # не ждём — запись протухает и вычищается лениво. Запас над самым долгим таймаутом.
 _TIMED_OUT_TTL_SEC: float = 60.0
 
+# Команда live-хвоста наблюдаемости на проводе (Ф5.20b): процесс пушит записи
+# логов/ошибок/статистики адресно подписчику ЭТИМ command (зеркало
+# RecordForwardChannel.FORWARD_COMMAND). Строка-контракт, не импортируем из
+# framework-канала — чтобы driver не тянул серверный модуль (Dict at Boundary).
+OBSERVABILITY_RECORD_COMMAND: str = "observability.record"
+
 
 # ---------------------------------------------------------------------------
 # Типизированные результаты интроспекции (Ф1 Task 1.2)
@@ -1026,6 +1032,121 @@ class BackendDriver:
         res = _leaf_result(self.send_command(process, "log.tail.unsubscribe", args, timeout=timeout))
         self._subscriptions.remove("log.tail.subscribe", process, args)
         return res
+
+    # ---- Observability-tail (Task 2.1: live ЛОГИ+ОШИБКИ+СТАТИСТИКА одним хвостом) ----
+    #
+    # Богаче log_tail: тот несёт только LogRecord'ы (одна плоскость), а
+    # observability.tail форвардит ВСЕ три плоскости наблюдаемости процесса
+    # (drain log/stats из hub'а + write-through error/critical) адресным пушем
+    # command="observability.record". Это тот же хвост, что активирует GUI
+    # (ObservabilityTailActivator). Записи приходят в событийный канал driver'а —
+    # классифицировать по kind помогает :meth:`observability_records`.
+
+    def observability_tail(
+        self,
+        process: str,
+        *,
+        subscriber: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Подписаться на live-хвост наблюдаемости процесса (логи+ошибки+статистика).
+
+        Ставит на процессе форвардер (drain log/stats) + error-tap'ы (write-through):
+        каждая запись пушится ``targets=[subscriber]`` + ``queue_type="system"`` →
+        мост 1.1b → событийный канал driver'а. Записи читаются через :meth:`events` /
+        :meth:`subscribe` как сообщения с ``command == "observability.record"``:
+        ``data.records`` (пачка из drain log/stats) ИЛИ ``data.record`` (одна запись
+        error/critical). Каждая запись несёт ``kind`` ∈ {``log``, ``error``, ``stats``}
+        — разложить по плоскостям помогает :meth:`observability_records`.
+
+        Зеркало :meth:`log_tail`: ``subscriber`` по умолчанию = self.sender (адрес
+        driver'а); намерение регистрируется в durable-реестре (переживает реконнект).
+        Подписка идемпотентна по подписчику на стороне процесса.
+
+        Args:
+            process: имя процесса-источника (должен поддерживать observability-hub;
+                процесс без него вернёт ``success=False`` — честно, не бросок).
+            subscriber: адрес получателя пушей (по умолчанию адрес driver'а).
+            timeout: таймаут ожидания подтверждения подписки.
+
+        Returns:
+            dict результата подписки (``success`` + детали процесса).
+        """
+        args = {"subscriber": subscriber or self._sender}
+        res = _leaf_result(self.send_command(process, "observability.tail.subscribe", args, timeout=timeout))
+        self._register_subscription("observability.tail.subscribe", process, args, res)
+        return res
+
+    def observability_untail(
+        self,
+        process: str,
+        *,
+        subscriber: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Снять подписку на live-хвост наблюдаемости процесса (зеркало :meth:`log_untail`).
+
+        Команда ``observability.tail.unsubscribe`` на проводе параметров не несёт
+        (снимает форвардер + error-tap'ы процесса целиком), поэтому шлём пустой
+        payload; ``subscriber`` нужен лишь чтобы снять то же durable-намерение,
+        которым была зарегистрирована подписка.
+        """
+        identity = {"subscriber": subscriber or self._sender}
+        res = _leaf_result(self.send_command(process, "observability.tail.unsubscribe", {}, timeout=timeout))
+        self._subscriptions.remove("observability.tail.subscribe", process, identity)
+        return res
+
+    def observability_records(
+        self,
+        events: Optional[List[Dict[str, Any]]] = None,
+        *,
+        kind: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Выбрать записи наблюдаемости из событий и (опц.) отфильтровать по плоскости.
+
+        Классификатор поверх :meth:`events`: отбирает сообщения
+        ``command == "observability.record"``, разворачивает их полезную нагрузку
+        (``data.records`` — пачка и/или ``data.record`` — одиночная запись) в ПЛОСКИЙ
+        список записей и, если задан ``kind``, оставляет только записи этой плоскости.
+
+        Классификация — ПО ФАКТУ доступного поля ``kind`` записи (нормализатор
+        ``record_display`` проставляет ``kind`` ∈ {``log``, ``error``, ``stats``} каждой
+        записи). Запись без ``kind`` при ``kind=None`` отдаётся как есть; при заданном
+        фильтре — отбрасывается (сопоставить не с чем).
+
+        Args:
+            events: список событий для разбора. ``None`` → **дренирует** канал через
+                :meth:`events` (деструктивно: прочие события — state.changed/log.record
+                — при этом теряются). Для неразрушающего разбора передай снимок:
+                ``recs = drv.observability_records(drv.events())`` — там останутся все
+                события, а сюда придёт их копия.
+            kind: плоскость-фильтр (``"log"`` | ``"error"`` | ``"stats"``); ``None`` —
+                вернуть все плоскости.
+
+        Returns:
+            Плоский список record-dict'ов (display-вид: kind/process/module/ts/
+            severity/message/extra) в порядке поступления.
+        """
+        source = self.events() if events is None else events
+        out: List[Dict[str, Any]] = []
+        for msg in source:
+            if not isinstance(msg, dict) or msg.get("command") != OBSERVABILITY_RECORD_COMMAND:
+                continue
+            data = msg.get("data")
+            if not isinstance(data, dict):
+                continue
+            records: List[Dict[str, Any]] = []
+            batch = data.get("records")
+            if isinstance(batch, list):
+                records.extend(r for r in batch if isinstance(r, dict))
+            single = data.get("record")
+            if isinstance(single, dict):
+                records.append(single)
+            for rec in records:
+                if kind is not None and rec.get("kind") != kind:
+                    continue
+                out.append(rec)
+        return out
 
     # ---- UI-tap (отладка фронтенда): кнопки/табы GUI → события ui.event ----
 
