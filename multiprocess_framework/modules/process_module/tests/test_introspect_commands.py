@@ -101,22 +101,6 @@ class _FakeShmRegistry:
         return list(self._names)
 
 
-class _FakeFrameMiddleware:
-    """FrameShmMiddleware-совместимый фейк: публичные счётчики loan-протокола."""
-
-    def __init__(self, *, enabled=True, released=0, reclaimed=0, exhausted=0) -> None:
-        self.loan_protocol_enabled = enabled
-        self.frame_slots_released = released
-        self.frame_slots_reclaimed = reclaimed
-        self.frame_loan_exhausted = exhausted
-
-
-class _FakeRouterWithFrames(_FakeRouter):
-    def __init__(self, frame_middlewares, handler_keys=()) -> None:
-        super().__init__(handler_keys)
-        self._frame_middlewares = list(frame_middlewares)
-
-
 class _FakeOrchestrator:
     def __init__(self, registers_manager) -> None:
         self.registers_manager = registers_manager
@@ -409,13 +393,19 @@ class TestIntrospectMemory:
         assert result["success"] is True
         assert result["memory"] == {"created": 3, "errors": 0, "is_owner": True}
 
-    def test_pool_section_aggregates_frame_middlewares(self) -> None:
-        router = _FakeRouterWithFrames(
-            [
-                _FakeFrameMiddleware(enabled=True, released=5, reclaimed=1, exhausted=2),
-                _FakeFrameMiddleware(enabled=True, released=3, reclaimed=0, exhausted=0),
-            ]
+    def test_pool_section_from_public_get_stats(self) -> None:
+        # F6: pool берётся из ПУБЛИЧНОГО router.get_stats() (frame_loan_pools/frame_slots_*),
+        # НЕ из приватного _frame_middlewares. Router без _frame_middlewares → доказывает,
+        # что читаем публичный агрегат (иначе секция была бы null).
+        router = _FakeRouterWithStats(
+            stats={
+                "frame_loan_pools": 2,
+                "frame_slots_released": 8,
+                "frame_slots_reclaimed": 1,
+                "frame_loan_exhausted": 2,
+            }
         )
+        assert not hasattr(router, "_frame_middlewares"), "фейк не должен иметь приватного атрибута"
         _svc, cm = _make(router=router)
         result = cm.dispatch("introspect.memory")
         assert result["pool"] == {
@@ -425,9 +415,9 @@ class TestIntrospectMemory:
             "loan_exhausted": 2,
         }
 
-    def test_pool_null_when_no_frame_middlewares(self) -> None:
-        # Router есть, но loan-протокол не активен (пустой список) → секция null.
-        router = _FakeRouterWithFrames([])
+    def test_pool_null_when_no_loan_pools(self) -> None:
+        # get_stats есть, но loan-протокол не активен (frame_loan_pools=0) → секция null.
+        router = _FakeRouterWithStats(stats={"frame_loan_pools": 0, "frame_slots_released": 0})
         _svc, cm = _make(router=router)
         result = cm.dispatch("introspect.memory")
         assert result["pool"] is None
@@ -448,7 +438,7 @@ class TestIntrospectMemory:
     def test_all_sections_filled_together(self) -> None:
         mm = _FakeMemoryManager({"created": 7}, shm_registry=_FakeShmRegistry(["shm_x"]))
         sr = _FakeSharedResources(mm)
-        router = _FakeRouterWithFrames([_FakeFrameMiddleware(released=4)])
+        router = _FakeRouterWithStats(stats={"frame_loan_pools": 1, "frame_slots_released": 4})
         queues = {"system": _FakeQueue(1)}
         _svc, cm = _make(shared_resources=sr, router=router, queues=queues)
         result = cm.dispatch("introspect.memory")

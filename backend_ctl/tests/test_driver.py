@@ -711,6 +711,62 @@ class TestObservabilityRecords:
         assert d.observability_records(events, kind="log") == []
 
 
+def _sev_rec(kind: str, severity: str, message: str = "m") -> Dict[str, Any]:
+    """Display-запись с явным severity (для F5-фильтра по уровню)."""
+    return {"kind": kind, "process": "p", "module": "m", "ts": 1.0, "severity": severity, "message": message}
+
+
+class TestObservabilityLevelFilter:
+    """F5: клиентский severity-фильтр реально отсекает (tail_level больше не пустышка)."""
+
+    def _events(self):
+        return [
+            _obs_event(
+                records=[
+                    _sev_rec("log", "debug"),
+                    _sev_rec("log", "info"),
+                    _sev_rec("log", "warning"),
+                    _sev_rec("error", "error"),
+                    _sev_rec("stats", "gauge"),  # чужой severity — плоскость независима
+                ]
+            )
+        ]
+
+    def test_level_filter_cuts_below_threshold(self) -> None:
+        d = BackendDriver()
+        recs = d.observability_records(self._events(), level="WARNING")
+        sevs = [r["severity"] for r in recs]
+        # debug/info срезаны; warning/error остались; stats (gauge) НЕ режется log-порогом.
+        assert "debug" not in sevs and "info" not in sevs
+        assert "warning" in sevs and "error" in sevs
+        assert "gauge" in sevs
+
+    def test_level_none_no_filter_without_watch(self) -> None:
+        d = BackendDriver()
+        # Watch не активен, level=None → severity-фильтр не применяется (все 5 записей).
+        assert len(d.observability_records(self._events())) == 5
+
+    def test_watch_tail_level_becomes_default_filter(self, monkeypatch) -> None:
+        # Регресс F5: tail_level из watch_like_gui теперь реально дефолтит severity-фильтр.
+        d = BackendDriver()
+
+        def fake_send(target, command, args=None, *, timeout=None):
+            if command == "state.get_subtree":
+                return {"success": True, "result": {"subtree": {}}}
+            return {"success": True}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        try:
+            d.watch_like_gui(tail_level="ERROR")  # объявлен ERROR
+            recs = d.observability_records(self._events())  # level=None → берёт tail_level=ERROR
+            sevs = [r["severity"] for r in recs]
+            assert sevs == ["error", "gauge"], "ниже ERROR лог-записи срезаны; stats независим"
+            # Явный level="DEBUG" перекрывает дефолт watch — вернуть всё.
+            assert len(d.observability_records(self._events(), level="DEBUG")) == 5
+        finally:
+            d.unwatch()
+
+
 # --- Task 2.2: watch_like_gui — GUI-паритет приёма + авто-переподписка ---
 
 

@@ -52,6 +52,18 @@ _TIMED_OUT_TTL_SEC: float = 60.0
 # framework-канала — чтобы driver не тянул серверный модуль (Dict at Boundary).
 OBSERVABILITY_RECORD_COMMAND: str = "observability.record"
 
+# Ранги лог-severity для клиентского фильтра observability_records(level=...) (F5).
+# Только лог-плоскость: stats-метрики (gauge/counter) сюда НЕ попадают и не режутся.
+_LOG_SEVERITY_RANK: Dict[str, int] = {
+    "debug": 10,
+    "info": 20,
+    "warning": 30,
+    "warn": 30,
+    "error": 40,
+    "critical": 50,
+    "fatal": 50,
+}
+
 # GUI-эквивалентный набор wildcard'ов state-подписки (Task 2.2): зеркало
 # multiprocess_prototype/frontend/process.py — ровно то, на что подписан GUI.
 # Прототип может передать свой набор в watch_like_gui(patterns=...).
@@ -233,10 +245,11 @@ class MemoryStats:
 
     Только СТАТИСТИКА (Dict at Boundary) — кадры и содержимое SHM по сокету не
     гоняем. Секции независимы и best-effort: недоступная подсистема → ``None``
-    (не ошибка). ``memory`` — ``MemoryManager.get_stats()``; ``pool`` — агрегат
-    ``LoanLedger`` по frame-middleware роутера; ``queues`` — глубины очередей
-    (как introspect.queues); ``shm_registry`` — инвентарь SHM-реестра (launcher-
-    level file-marker: в дочернем процессе обычно ``None``). ``raw`` — сырой ответ.
+    (не ошибка). ``memory`` — ``MemoryManager.get_stats()``; ``pool`` — loan-счётчики
+    SHM-колец из ПУБЛИЧНОГО ``router_manager.get_stats()`` (F6: ``frame_loan_pools``/
+    ``frame_slots_*``); ``queues`` — глубины очередей (как introspect.queues);
+    ``shm_registry`` — инвентарь SHM-реестра (launcher-level file-marker: в дочернем
+    процессе обычно ``None``). ``raw`` — сырой ответ.
     """
 
     ok: bool
@@ -1206,18 +1219,28 @@ class BackendDriver:
         events: Optional[List[Dict[str, Any]]] = None,
         *,
         kind: Optional[str] = None,
+        level: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Выбрать записи наблюдаемости из событий и (опц.) отфильтровать по плоскости.
+        """Выбрать записи наблюдаемости из событий и (опц.) отфильтровать по плоскости/severity.
 
         Классификатор поверх :meth:`events`: отбирает сообщения
         ``command == "observability.record"``, разворачивает их полезную нагрузку
         (``data.records`` — пачка и/или ``data.record`` — одиночная запись) в ПЛОСКИЙ
-        список записей и, если задан ``kind``, оставляет только записи этой плоскости.
+        список записей и фильтрует по ``kind`` (плоскость) и ``level`` (severity).
 
         Классификация — ПО ФАКТУ доступного поля ``kind`` записи (нормализатор
         ``record_display`` проставляет ``kind`` ∈ {``log``, ``error``, ``stats``} каждой
         записи). Запись без ``kind`` при ``kind=None`` отдаётся как есть; при заданном
         фильтре — отбрасывается (сопоставить не с чем).
+
+        F5: ``level`` — КЛИЕНТСКИЙ severity-фильтр (``observability.tail`` форвардит все
+        severity без фильтра на проводе). Это и есть эффект ``tail_level`` из
+        :meth:`watch_like_gui`: при активном watch ``level=None`` берёт объявленный
+        ``tail_level`` дефолтом (раньше ``tail_level`` был пустышкой — нигде не срезал).
+        Фильтр применяется ТОЛЬКО к записям с распознаваемым лог-severity
+        (debug/info/warning/error/critical); записи с чужим severity (stats-метрики:
+        gauge/counter) НЕ режутся log-порогом — плоскости независимы. Передай
+        ``level="DEBUG"``, чтобы явно вернуть все severity даже при активном watch.
 
         Args:
             events: список событий для разбора. ``None`` → **дренирует** канал через
@@ -1227,11 +1250,17 @@ class BackendDriver:
                 события, а сюда придёт их копия.
             kind: плоскость-фильтр (``"log"`` | ``"error"`` | ``"stats"``); ``None`` —
                 вернуть все плоскости.
+            level: severity-порог (``"WARNING"`` и т.п.); ``None`` — дефолт watch
+                (``tail_level``, если watch активен) либо без severity-фильтра.
 
         Returns:
             Плоский список record-dict'ов (display-вид: kind/process/module/ts/
             severity/message/extra) в порядке поступления.
         """
+        # F5: дефолт severity-фильтра — объявленный tail_level активного watch.
+        effective_level = level if level is not None else (self._watch_tail_level if self._watch_active else None)
+        threshold = _LOG_SEVERITY_RANK.get(str(effective_level).lower()) if effective_level else None
+
         source = self.events() if events is None else events
         out: List[Dict[str, Any]] = []
         for msg in source:
@@ -1250,6 +1279,12 @@ class BackendDriver:
             for rec in records:
                 if kind is not None and rec.get("kind") != kind:
                     continue
+                if threshold is not None:
+                    rank = _LOG_SEVERITY_RANK.get(str(rec.get("severity", "")).lower())
+                    # Режем ТОЛЬКО распознанный лог-severity ниже порога; чужой severity
+                    # (stats-метрики) и записи без severity — плоскость независима, пропускаем.
+                    if rank is not None and rank < threshold:
+                        continue
                 out.append(rec)
         return out
 

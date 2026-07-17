@@ -666,10 +666,12 @@ class BuiltinCommands:
           processes_with_handles, is_owner). Доступ: ``shared_resources._memory_manager``
           (тот же фасад, что читает ``introspect.router_stats``; пиклится в дочерний
           процесс — не в ``_PICKLE_EXCLUDE``).
-        - ``pool`` — агрегат ``LoanLedger.snapshot_stats()`` по frame-middleware
-          роутера (loan-протокол SHM-колец живёт в ``FrameShmMiddleware``, а НЕ в
-          shared_resources — поэтому берём с ``router_manager._frame_middlewares``
-          через публичные свойства ``frame_slots_*``/``frame_loan_exhausted``).
+        - ``pool`` — подмножество ПУБЛИЧНОГО ``router_manager.get_stats()`` (F6): loan-
+          протокол SHM-колец живёт в ``FrameShmMiddleware``, а его счётчики уже
+          агрегированы в ``get_stats`` (``frame_loan_pools``/``frame_slots_*``/
+          ``frame_loan_exhausted``). Читаем оттуда, НЕ дублируя агрегацию по приватному
+          ``_frame_middlewares`` (была третья точка сборки). Секция ``null``, если
+          loan-протокол не активен (``frame_loan_pools == 0``).
         - ``queues`` — глубины собственных очередей (как ``introspect.queues``).
         - ``shm_registry`` — инвентарь ``ShmRegistry``. Реестр — launcher-level
           файл-маркер (Windows cleanup), в штатном дочернем процессе он НЕ
@@ -689,20 +691,23 @@ class BuiltinCommands:
             except Exception:  # noqa: BLE001 — best-effort: секция null, не ошибка
                 memory = None
 
-        # --- pool: агрегат LoanLedger по frame-middleware роутера ---
+        # --- pool: подмножество ПУБЛИЧНОГО router_manager.get_stats() (F6) ---
+        # Не читаем приватный _frame_middlewares (была третья точка агрегации, дубль
+        # get_stats). loan-счётчики уже агрегированы в get_stats публично.
         pool = None
         router = getattr(svc, "router_manager", None)
-        mws = getattr(router, "_frame_middlewares", None) if router is not None else None
-        if mws:  # непустой список frame-middleware = loan-протокол активен
+        if router is not None and hasattr(router, "get_stats"):
             try:
-                active = sum(1 for mw in mws if getattr(mw, "loan_protocol_enabled", False))
-                pool = {
-                    "loan_pools": active,
-                    "slots_released": sum(int(getattr(mw, "frame_slots_released", 0) or 0) for mw in mws),
-                    "slots_reclaimed": sum(int(getattr(mw, "frame_slots_reclaimed", 0) or 0) for mw in mws),
-                    "loan_exhausted": sum(int(getattr(mw, "frame_loan_exhausted", 0) or 0) for mw in mws),
-                }
-            except Exception:  # noqa: BLE001 — best-effort
+                rstats = router.get_stats()
+                loan_pools = int(rstats.get("frame_loan_pools", 0) or 0)
+                if loan_pools > 0:  # loan-протокол активен
+                    pool = {
+                        "loan_pools": loan_pools,
+                        "slots_released": int(rstats.get("frame_slots_released", 0) or 0),
+                        "slots_reclaimed": int(rstats.get("frame_slots_reclaimed", 0) or 0),
+                        "loan_exhausted": int(rstats.get("frame_loan_exhausted", 0) or 0),
+                    }
+            except Exception:  # noqa: BLE001 — best-effort: секция null, не ошибка
                 pool = None
 
         # --- queues: глубины собственных очередей (как introspect.queues) ---
