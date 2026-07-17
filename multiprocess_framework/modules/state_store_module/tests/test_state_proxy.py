@@ -1582,3 +1582,75 @@ class TestAsyncSubscribe:
         assert router.count(router.async_calls, "state.subscribe") == 1
         assert router.request_calls == []
         assert sub_id in proxy._sub_ids  # локальный sub_id зарегистрирован
+
+
+# ---------------------------------------------------------------------------
+# Ре-адопция covered-подписок при снятии покрывающего паттерна (находка F,
+# Task 3.3 плана telemetry-coherence-remediation)
+# ---------------------------------------------------------------------------
+
+
+class TestCoveredSubscriptionReadoption:
+    """Covered-подписка не остаётся молча без потока при unsubscribe покрывающей."""
+
+    def test_unsubscribe_sole_covering_sends_own_subscribe(self):
+        """Единственный покрывающий снят → узкому отправлена СОБСТВЕННАЯ подписка."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        wide_sub_id = proxy.subscribe("processes.**", lambda _d: None, exclude_self=True)  # sync=True → confirmed
+        assert "processes.**" in proxy._confirmed_patterns
+
+        narrow_sub_id = proxy.ensure_subscription("processes.X.state.fps")
+        assert narrow_sub_id in proxy._covered_sub_ids
+        subs_before = router.count(router.async_calls, "state.subscribe")
+
+        proxy.unsubscribe(wide_sub_id)
+
+        # Узкому реально отправлен собственный state.subscribe (spy-router).
+        assert router.count(router.async_calls, "state.subscribe") == subs_before + 1
+        own_subscribe = [
+            m
+            for m in router.async_calls
+            if m.get("command") == "state.subscribe" and m["data"]["pattern"] == "processes.X.state.fps"
+        ]
+        assert len(own_subscribe) == 1
+        assert own_subscribe[0]["data"]["exclude_sources"] == ["gui"]
+        # sub_id узкой подписки сохранился (потребитель мог держать его для release).
+        assert narrow_sub_id not in proxy._covered_sub_ids
+        assert proxy._sub_patterns[narrow_sub_id] == "processes.X.state.fps"
+        assert proxy._re_adopt_count == 1
+
+    def test_unsubscribe_one_of_two_covering_reuses_the_other(self):
+        """Два покрывающих паттерна — снятие ОДНОГО не создаёт новой подписки."""
+        router = _SpyRouter()
+        proxy = StateProxy("gui", router=router)
+
+        wide_sub_id = proxy.subscribe("processes.**", lambda _d: None, exclude_self=True)
+        narrower_sub_id = proxy.subscribe("processes.X.**", lambda _d: None, exclude_self=True)
+        assert {"processes.**", "processes.X.**"} <= proxy._confirmed_patterns
+
+        narrow_sub_id = proxy.ensure_subscription("processes.X.state.fps")
+        assert narrow_sub_id in proxy._covered_sub_ids
+        subs_before = router.count(router.async_calls, "state.subscribe")
+
+        # Снимаем ОДИН из двух покрывающих (processes.**) — второй (processes.X.**)
+        # по-прежнему покрывает узкий паттерн.
+        proxy.unsubscribe(wide_sub_id)
+
+        assert router.count(router.async_calls, "state.subscribe") == subs_before  # новой подписки нет
+        assert narrow_sub_id in proxy._covered_sub_ids  # остаётся local-only
+        assert proxy._re_adopt_count == 1  # переусыновление залогировано
+
+        # Узкий продолжает получать дельты потоком оставшегося покрывающего.
+        seen: list = []
+        proxy._callbacks[narrow_sub_id] = [seen.append]
+        delta = Delta(path="processes.X.state.fps", old_value=1, new_value=42, source="other")
+        proxy.on_state_changed({"data": {"deltas": [delta.to_dict()]}})
+        assert len(seen) == 1
+        assert seen[0][0].new_value == 42
+
+        # Регресс: второй покрывающий по-прежнему валиден и снимается штатно.
+        proxy.unsubscribe(narrower_sub_id)
+        assert router.count(router.async_calls, "state.subscribe") == subs_before + 1  # теперь узкий осиротел
+        assert narrow_sub_id not in proxy._covered_sub_ids
