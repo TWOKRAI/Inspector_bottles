@@ -181,7 +181,7 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 **Out of scope:** переезд реестра в `subscriptions.py` (Phase 1); авто-переподписка по «recovered» (Task 2.2).
 **Статус:** ✅ 3c74b129 (14 unit-тестов). Контракт ошибок: переписывать 30 обёрток НЕ понадобилось — единообразие `{success:False,error}` уже гарантирует `request()`; шаг закрыт проверочным тестом на 19 обёрток. Telemetry-методы не тронуты.
 
-### Task 0.4 — Harness: env-restore + readiness-probe; дедупликация; публичные аксессоры
+### Task 0.4 — Harness: env-restore + readiness-probe; дедупликация; публичные аксессоры  ✅ (a0adb2e3)
 **Level:** Middle+ (Sonnet) | **Assignee:** developer | **Layer:** tests/tooling
 **Goal:** env-мутации с восстановлением; poll вместо sleep; убрать дубли и доступ тестов к приватным полям.
 **Files:** `backend_ctl/harness.py`, `backend_ctl/driver.py`, `backend_ctl/tests/conftest.py`, `test_harness.py`.
@@ -191,9 +191,10 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 3. Дедуп: общий `driver._discover_processes()` для `debug_session`/`debug_stop`; `_find_payload`/`_leaf_result` → единый `unwrap(res, keys=..., leaf=...)` (старые имена — алиасы до Phase 1).
 4. Публичные `driver.port` (property) и `driver.dispatch_raw()` — тесты переводятся с `_port`/`_dispatch`.
 **Acceptance:**
-- [ ] Тест: env после `stop()` == env до `start()`
-- [ ] live harness_smoke зелёный; grep `_dispatch\b|\._port\b` по tests пуст
+- [x] Тест: env после `stop()` == env до `start()`
+- [x] live harness_smoke зелёный; grep `_dispatch\b|\._port\b` по tests пуст
 **Out of scope:** перенос harness во framework.
+**Статус:** ✅ a0adb2e3. `unwrap(res, *keys, leaf=)` — единый распаковщик (аргумент `keys` позиционный, не kw). `_discover_processes` дедуплицирован. Публичные `port`/`host`/`dispatch_raw`.
 
 ### Task 0.5 — Telemetry в MCP на текущем реестре (дешёвый ежедневный win, из ревью)
 **Level:** Middle (Sonnet) | **Assignee:** developer | **Layer:** tests/tooling
