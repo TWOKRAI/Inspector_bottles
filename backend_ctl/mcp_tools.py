@@ -470,8 +470,10 @@ TOOLS: List[ToolSpec] = [
                 },
                 "tail_level": {
                     "type": "string",
-                    "description": "Объявляемый порог логов (observability.tail форвардит все severity; "
-                    "фильтрация — на клиенте по kind). По умолчанию WARNING.",
+                    "description": "Порог логов. observability.tail форвардит ВСЕ severity; этот порог "
+                    "становится КЛИЕНТСКИМ дефолтом severity-фильтра: observability_records(level=None) "
+                    "при активном watch режет лог-записи ниже него (stats/errors — независимые плоскости, "
+                    "не режутся). По умолчанию WARNING.",
                 },
                 "timeout": _TIMEOUT,
             }

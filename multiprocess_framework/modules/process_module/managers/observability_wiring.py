@@ -33,7 +33,7 @@ Wiring ObservabilityHub в composition root процесса (Ф5.16).
 
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 from ...channel_routing_module.observability import (
     KIND_LOG,
@@ -52,9 +52,22 @@ from ...channel_routing_module.observability import (
 STORE_ERROR_TAP = "observability_store::error"
 STORE_LOGGER_TAP = "observability_store::logger_error"
 
-# Имена forward-tap'ов live-хвоста hub→GUI (Ф5.20b), симметрично store-tap'ам.
-FORWARD_ERROR_TAP = "observability_forward::error"
-FORWARD_LOGGER_TAP = "observability_forward::logger_error"
+# Префикс forward-tap'ов live-хвоста hub→подписчик (Ф5.20b), симметрично store-tap'ам.
+# F1: имена tap'ов KEYED по subscriber — несколько подписчиков (GUI + backend_ctl)
+# держат независимые форвардеры на ОДНОМ процессе (раньше был единственный слот →
+# второй подписчик угонял хвост у первого). Образец — log.tail (``log_tail::{subscriber}``).
+FORWARD_TAP_PREFIX = "observability_forward"
+
+
+def forward_tap_names(subscriber: str) -> Tuple[str, str, str]:
+    """Детерминированные имена forward-tap'ов подписчика (F1: per-subscriber).
+
+    Возвращает ``(batch, error, logger)`` — уникальные по подписчику имена каналов,
+    чтобы форвардеры разных подписчиков не пересекались в реестре tap'ов менеджера.
+    """
+    base = f"{FORWARD_TAP_PREFIX}::{subscriber}"
+    return f"{base}::batch", f"{base}::error", f"{base}::logger_error"
+
 
 # Severity лог-канала, идущие write-through: симметрично error-слоту (Ф5.16),
 # пишутся в реальный logger_manager СРАЗУ (минуя hub-буфер) — tap'ы (store/forward,
@@ -175,14 +188,17 @@ def drain_process_observability(
     hub: Optional[ObservabilityHub],
     adapter: Optional[ObservabilityDrainAdapter],
     store: Optional[ObservabilityStore] = None,
-    forwarder: Optional[Callable[[List[dict]], None]] = None,
+    forwarders: Union[Callable[[List[dict]], None], Iterable[Callable[[List[dict]], None]], None] = None,
 ) -> None:
-    """Слить буфер hub'а (log/stats) в реальные менеджеры, стор и live-хвост GUI.
+    """Слить буфер hub'а (log/stats) в реальные менеджеры, стор и live-хвосты.
 
     Зовётся по такту heartbeat и финально на graceful-teardown. `drain_all()`
     осушает каналы — вызываем ОДИН раз и разветвляем: adapter → sink-менеджеры,
-    store → персистентная история (Ф5.20a), forwarder → live-хвост hub→GUI
-    (Ф5.20b). error-канал hub'а пуст (track_error идёт write-through мимо буфера);
+    store → персистентная история (Ф5.20a), forwarders → live-хвосты hub→подписчики
+    (Ф5.20b). F1: ``forwarders`` — итерабл форвардеров (по одному на подписчика,
+    фан-аут одной и той же пачки записей каждому) ИЛИ единственный callable
+    (back-compat). Буфер дренируется РОВНО один раз независимо от числа подписчиков.
+    error-канал hub'а пуст (track_error идёт write-through мимо буфера);
     error/critical ЛОГА тоже мимо буфера — расщепитель logger-слота пишет их
     write-through (R1/R3), поэтому drained[KIND_LOG] содержит только severity <
     ERROR. В стор и в GUI ошибки попадают отдельными tap'ами на error/logger-
@@ -204,11 +220,14 @@ def drain_process_observability(
             store.append_records(records)
         except Exception:  # nosec B110 — сбой стора не критичен для heartbeat
             pass
-    if forwarder is not None and records:
-        try:
-            forwarder(records)
-        except Exception:  # nosec B110 — сбой доставки хвоста не критичен для heartbeat
-            pass
+    # F1: фан-аут пачки каждому подписчику. Один callable → back-compat (обернём).
+    if records and forwarders is not None:
+        fwds: Iterable[Callable[[List[dict]], None]] = (forwarders,) if callable(forwarders) else forwarders
+        for fwd in fwds:
+            try:
+                fwd(records)
+            except Exception:  # nosec B110 — сбой доставки одному хвосту не рушит остальные
+                pass
 
 
 def wire_observability_forward(
@@ -218,14 +237,18 @@ def wire_observability_forward(
     logger_manager: Optional[Any] = None,
     error_manager: Optional[Any] = None,
 ) -> Tuple[Callable[[List[dict]], None], list]:
-    """Собрать live-форвардер hub→GUI и повесить error-tap'ы (Ф5.20b).
+    """Собрать live-форвардер hub→подписчик и повесить error-tap'ы (Ф5.20b).
 
     Симметрично ``wire_observability_store`` (Ф5.20a), но записи не в SQLite, а
-    адресным router-пушем ``command="observability.record"`` на GUI-подписчика:
+    адресным router-пушем ``command="observability.record"`` на подписчика:
       - log/stats — пачкой из drain-петли: возвращаемый ``forwarder(hub_records)``
         нормализует hub-записи в display-вид и пушит одним сообщением;
       - error/critical — по одной у tap'а на logger+error менеджерах (min ERROR),
         те же write-through записи, что ловит store-tap.
+
+    F1: имена tap'ов и канала — per-subscriber (``observability_forward::{subscriber}::…``),
+    поэтому форвардеры разных подписчиков (GUI + backend_ctl) сосуществуют на одном
+    процессе и не перетирают друг друга (раньше был единственный слот на процесс).
 
     Args:
         router: живой RouterManager процесса (``send_async``). None → forwarder-no-op.
@@ -237,16 +260,15 @@ def wire_observability_forward(
         (forwarder, taps) — forwarder: Callable для drain-петли; taps: список
         (manager, tap_name) для unwire.
     """
-    batch_channel = RecordForwardChannel(
-        router=router, subscriber=subscriber, sender=sender, name="observability_forward::batch"
-    )
+    batch_name, error_name, logger_name = forward_tap_names(subscriber)
+    batch_channel = RecordForwardChannel(router=router, subscriber=subscriber, sender=sender, name=batch_name)
 
     def forwarder(hub_records: List[dict]) -> None:
         # process=sender (5.21 (c)): каждая live-запись несёт имя процесса-источника.
         batch_channel.push_batch([hub_record_to_display(r, process=sender) for r in hub_records])
 
     taps: list[Tuple[Any, str]] = []
-    for mgr, tap_name in ((error_manager, FORWARD_ERROR_TAP), (logger_manager, FORWARD_LOGGER_TAP)):
+    for mgr, tap_name in ((error_manager, error_name), (logger_manager, logger_name)):
         if mgr is None or not hasattr(mgr, "add_log_tap"):
             continue
         channel = RecordForwardChannel(router=router, subscriber=subscriber, sender=sender, name=tap_name)

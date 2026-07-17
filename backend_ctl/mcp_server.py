@@ -82,6 +82,10 @@ class MCPServer:
         # Durable-подписки переживают реконнект driver'а (Task 0.3): при сбросе
         # driver'а его намерения сохраняются здесь и replay'ятся на новый driver.
         self._sub_intents: list = []
+        # F2: манифест активного watch-профиля переживает реконнект — после replay'я
+        # намерений новый driver ПОДНИМАЕТ watch-контур (слушатель+applier), а не только
+        # серверные подписки. Иначе авто-resub мёртв и unwatch — no-op (профиль воскресал).
+        self._watch_manifest: Optional[Dict[str, Any]] = None
         # Одноразовый отчёт о состоявшемся реконнекте — вливается в следующий tool-ответ.
         self._reconnect_report: Optional[Dict[str, Any]] = None
 
@@ -130,6 +134,15 @@ class MCPServer:
                 resubscribed = self._driver.replay_subscriptions()
                 self._reconnect_report = {"reconnected": True, "resubscribed": resubscribed}
                 self._log(f"[mcp_server] реконнект: replay {len(resubscribed)} подписк(и)")
+            # F2: если watch был активен — поднять watch-КОНТУР на новом driver'е (слушатель
+            # + applier). Серверные подписки уже восстановлены replay'ем выше; resume_watch
+            # НЕ переподписывает, только оживляет авто-resub и делает unwatch управляемым.
+            if self._watch_manifest and self._watch_manifest.get("active") and hasattr(self._driver, "resume_watch"):
+                wr = self._driver.resume_watch(self._watch_manifest)
+                report = self._reconnect_report or {"reconnected": True}
+                report["watch_resumed"] = bool(isinstance(wr, dict) and wr.get("resumed"))
+                self._reconnect_report = report
+                self._log(f"[mcp_server] реконнект: watch-контур восстановлен ({wr})")
         return self._driver
 
     def _reset_driver(self) -> None:
@@ -146,6 +159,13 @@ class MCPServer:
                 self._sub_intents = self._driver.export_subscriptions()
             except Exception:  # noqa: BLE001 — экспорт не должен ронять сброс
                 pass
+            # F2: снять снимок watch-профиля ДО закрытия (источник правды — текущий driver).
+            # Watch снят → манифест {"active": False}, resume на реконнекте будет no-op.
+            if hasattr(self._driver, "watch_manifest"):
+                try:
+                    self._watch_manifest = self._driver.watch_manifest()
+                except Exception:  # noqa: BLE001 — снимок не должен ронять сброс
+                    self._watch_manifest = None
             try:
                 self._driver.close()
             except Exception:  # noqa: BLE001 — сброс не должен падать

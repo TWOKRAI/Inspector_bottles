@@ -157,6 +157,19 @@ class ObservabilityTailSubscribeParams(BaseModel):
     subscriber: Optional[str] = None
 
 
+class ObservabilityTailUnsubscribeParams(BaseModel):
+    """Параметры ``observability.tail.unsubscribe`` (F1: per-subscriber отписка).
+
+    Форвардер наблюдаемости — per-subscriber (несколько подписчиков сосуществуют на
+    одном процессе: GUI + backend_ctl). ``subscriber`` снимает форвардер ТОЛЬКО этого
+    подписчика; ``None`` (legacy/teardown) — снять форвардеры всех подписчиков.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    subscriber: Optional[str] = None
+
+
 class HealthReportParams(BaseModel):
     """Параметры ``health.report`` (диагностический впрыск health-события, Ф2 Task 2.1)."""
 
@@ -195,7 +208,7 @@ BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
     "log.tail.subscribe": LogTailSubscribeParams,
     "log.tail.unsubscribe": LogTailUnsubscribeParams,
     "observability.tail.subscribe": ObservabilityTailSubscribeParams,
-    "observability.tail.unsubscribe": NoParams,
+    "observability.tail.unsubscribe": ObservabilityTailUnsubscribeParams,
     # health (Ф2 Task 2.1)
     "health.report": HealthReportParams,
     "health.status": NoParams,

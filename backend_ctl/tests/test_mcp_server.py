@@ -559,6 +559,66 @@ class TestReconnectReplay:
         assert "reconnected" not in r3
 
 
+class _WatchFakeDriver(_SubFakeDriver):
+    """Fake-driver с watch-манифестом/resume для проверки восстановления контура (F2)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.resumed_with: Any = None
+        self._active_watch = False
+
+    def watch_like_gui(self, **kwargs):
+        self._active_watch = True
+        return {"success": True, "processes": ["gui"], "tail_level": "WARNING"}
+
+    def watch_manifest(self):
+        if not self._active_watch:
+            return {"active": False}
+        return {"active": True, "patterns": ["processes.**"], "tail_level": "WARNING", "processes": ["gui"]}
+
+    def resume_watch(self, manifest):
+        self.resumed_with = manifest
+        self._active_watch = True
+        return {"resumed": True, "processes": ["gui"], "patterns": ["processes.**"]}
+
+
+class TestReconnectResumesWatch:
+    """F2: реконнект восстанавливает watch-КОНТУР на новом driver'е, не только подписки."""
+
+    def test_reconnect_resumes_watch_loop(self) -> None:
+        d1, d2 = _WatchFakeDriver(), _WatchFakeDriver()
+        seq = iter([d1, d2])
+        server = MCPServer(driver_factory=lambda: next(seq), log=lambda m: None)
+
+        # Агент включил watch → манифест активен на d1.
+        call(server, "tools/call", {"name": "watch_like_gui", "arguments": {}})
+        assert d1._active_watch is True
+
+        # Обрыв → сброс d1 (манифест снят ДО закрытия).
+        d1.fail = True
+        call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        assert d1.closed is True
+
+        # Реконнект → d2 поднимает watch-контур из манифеста и докладывает.
+        r2 = call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        payload = tool_result(r2)
+        assert payload.get("watch_resumed") is True
+        assert d2.resumed_with is not None and d2.resumed_with.get("active") is True
+
+    def test_inactive_watch_not_resumed(self) -> None:
+        # Watch не включали → манифест неактивен → resume не зовётся (нет ложного контура).
+        d1, d2 = _WatchFakeDriver(), _WatchFakeDriver()
+        seq = iter([d1, d2])
+        server = MCPServer(driver_factory=lambda: next(seq), log=lambda m: None)
+        call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        d1.fail = True
+        call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        r2 = call(server, "tools/call", {"name": "get_status", "arguments": {"process": "p"}})
+        payload = tool_result(r2)
+        assert "watch_resumed" not in payload
+        assert d2.resumed_with is None
+
+
 class TestReadinessProbe:
     def test_await_ready_polls_until_success(self) -> None:
         from backend_ctl.mcp_server import MCPServer as _S

@@ -293,6 +293,30 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 
 ### Phase 2 — Receive-plane: паритет с GUI
 
+> **✅ РЕВЬЮ FABLE Phase 2 (2026-07-17): все 7 находок F1–F7 закрыты** на ветке
+> `feat/backend-ctl-watch-hardening` (от main, worktree). Каждый фикс — со своим
+> регресс-тестом на найденный дефект. Коммиты:
+> - **F1** (БЛОКЕР) `7410f566` — per-subscriber observability-форвардер: `_observability_forwarders`
+>   dict keyed по subscriber, tap-имена `observability_forward::{subscriber}::…`, drain фан-аутит
+>   список форвардеров; `observability.tail.unsubscribe` несёт `subscriber` (новый контракт
+>   `ObservabilityTailUnsubscribeParams`); driver `observability_untail` шлёт subscriber. GUI +
+>   backend_ctl сосуществуют (раньше watch угонял единственный слот → вкладки GUI молча умирали).
+> - **F2/F3/F4** `5ec1df6d` — watch-lifecycle: (F2) `watch_manifest()`/`resume_watch()` +
+>   mcp_server поднимает watch-контур после реконнекта; unwatch чистит durable даже при
+>   was_active=False; +`state_unsubscribe`. (F3) двухслойная защита гонки unwatch/in-flight resub
+>   (pre-guard + само-исцеление untail'ом) + очередь на поколение. (F4) listener+applier ДО
+>   первичных подписок (recovered в стартовом окне не теряется).
+> - **F5/F6** `eb7b657d` — (F5) `observability_records(level=…)` severity-фильтр, tail_level стал
+>   реальным клиентским дефолтом (был пустышкой). (F6) introspect.memory pool читает публичный
+>   `router.get_stats()` (+`frame_loan_pools`), не приватный `_frame_middlewares`; docstring'и выправлены.
+> - **F7** `b47cac9b` — contract-тест `OBSERVABILITY_RECORD_COMMAND == FORWARD_COMMAND`;
+>   watch self-skip (не тейлит self._sender); комментарий про app-инъекцию GUI-паттернов пост-codemod.
+>
+> **Развилки (решения):** F2 — вариант **а+б** (primary: resume-контур из манифеста; safety-net:
+> unwatch чистит durable при потерянном контуре). F5 — **реализован** фильтр (severity в записи
+> надёжна), НЕ убран из схемы. Тесты: `944 passed` (backend_ctl + process_module, без live/harness_smoke).
+> Пре-existing красный `test_hard_kill::test_already_dead_is_not_error` (Windows mojibake, harness не тронут).
+
 #### Task 2.1 — `observability_tail`: live ЛОГИ+ОШИБКИ+СТАТИСТИКА
 **Level:** Middle+ (Sonnet) | **Assignee:** developer | **Layer:** framework
 **Goal:** driver умеет то, что `ObservabilityTailActivator` делает для GUI.

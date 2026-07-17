@@ -1108,6 +1108,10 @@ class RouterManager(ChannelRoutingManager):
             "frame_slots_released": sum(getattr(mw, "frame_slots_released", 0) for mw in self._frame_middlewares),
             # Ф7 G.5.e (В3): займов реклеймлено после смерти читателя (kill-9 без release).
             "frame_slots_reclaimed": sum(getattr(mw, "frame_slots_reclaimed", 0) for mw in self._frame_middlewares),
+            # F6: число frame-middleware с активным loan-протоколом (SHM-кольца). Публичный
+            # агрегат для introspect.memory pool-секции — чтобы не читать приватный
+            # _frame_middlewares второй точкой агрегации.
+            "frame_loan_pools": sum(1 for mw in self._frame_middlewares if getattr(mw, "loan_protocol_enabled", False)),
             # Ф7 G.7 (0.5): суммарный размер reader-кэша SHM-handle — рост на инкарнацию
             # под zero-copy = утечка handle (эвикция отключена, резидуал G.5). Без кэша — 0.
             "frame_handle_cache_size": sum(getattr(mw, "frame_handle_cache_size", 0) for mw in self._frame_middlewares),
