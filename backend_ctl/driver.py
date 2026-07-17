@@ -241,6 +241,56 @@ class _Pending:
         self.response: Optional[Dict[str, Any]] = None
 
 
+class _SubscriptionRegistry:
+    """Реестр durable-намерений подписки (Task 0.3, ежедневная боль №1).
+
+    Хранит, на ЧТО driver подписался (``state.subscribe`` / ``log.tail.subscribe`` /
+    ``ui.tap.subscribe``), чтобы при реконнекте MCP-сервера подписки можно было
+    повторить, а не потерять молча (события просто переставали приходить — агент
+    думал «всё тихо»). Живёт в driver'е; Phase 1 вынесет в ``subscriptions.py``.
+
+    Идентичность намерения — ``(command, target, identity)``, где identity = pattern
+    (для state) либо subscriber (для log/ui): повторная подписка того же ключа
+    перезаписывает, не плодит дубли.
+    """
+
+    def __init__(self) -> None:
+        self._intents: Dict[tuple, Dict[str, Any]] = {}
+
+    @staticmethod
+    def _key(command: str, target: str, args: Dict[str, Any]) -> tuple:
+        identity = args.get("pattern") or args.get("subscriber") or ""
+        return (command, target, identity)
+
+    def add(self, command: str, target: str, args: Dict[str, Any]) -> None:
+        """Запомнить намерение подписки (idempotent по ключу)."""
+        self._intents[self._key(command, target, args)] = {
+            "command": command,
+            "target": target,
+            "args": dict(args),
+        }
+
+    def remove(self, command: str, target: str, args: Optional[Dict[str, Any]] = None) -> None:
+        """Снять намерение. ``args=None`` → снять все с данными command+target
+        (напр. ``ui.tap.unsubscribe`` без subscriber снимает tap процесса целиком)."""
+        if args is not None:
+            self._intents.pop(self._key(command, target, args), None)
+            return
+        for k in [k for k in self._intents if k[0] == command and k[1] == target]:
+            del self._intents[k]
+
+    def export(self) -> List[Dict[str, Any]]:
+        """Снимок намерений (для передачи новому driver'у при реконнекте)."""
+        return [
+            {"command": v["command"], "target": v["target"], "args": dict(v["args"])} for v in self._intents.values()
+        ]
+
+    def load(self, intents: List[Dict[str, Any]]) -> None:
+        """Загрузить намерения (в новый driver после реконнекта)."""
+        for it in intents or []:
+            self.add(it["command"], it["target"], it.get("args") or {})
+
+
 class BackendDriver:
     """Тонкий driver: TCP-клиент + request-id matching + обёртки команд.
 
@@ -285,6 +335,10 @@ class BackendDriver:
         # TTL-purge ленивый — множество не растёт бесконечно. Под _pending_lock.
         self._timed_out: Dict[str, float] = {}
         self._late_replies = 0  # счётчик дропнутых поздних ответов (диагностика)
+
+        # Durable-намерения подписки (Task 0.3): чтобы реконнект MCP-сервера мог
+        # повторить подписки, а не потерять их молча. Заполняется subscribe-обёртками.
+        self._subscriptions = _SubscriptionRegistry()
 
         # Событийный канал: reader-поток пишет, клиентский поток читает.
         # _events_cv охраняет и очередь, и список подписчиков; на нём же
@@ -528,6 +582,50 @@ class BackendDriver:
     def late_replies(self) -> int:
         """Сколько поздних ответов (пришли после таймаута request) дропнуто (Task 0.2)."""
         return self._late_replies
+
+    # ---- Durable-подписки (Task 0.3): переживают реконнект MCP-сервера ----
+
+    @staticmethod
+    def _looks_failed(res: Any) -> bool:
+        """Ответ явно провальный? (для решения «регистрировать ли намерение»)."""
+        return isinstance(res, dict) and res.get("success") is False
+
+    def _register_subscription(self, command: str, target: str, args: Dict[str, Any], res: Any) -> None:
+        """Записать намерение подписки, если команда НЕ провалилась явно.
+
+        Смещение в сторону over-record: лишний replay безвреден (просто повторный
+        subscribe), а вот потеря реальной подписки — это как раз баг, который чиним.
+        """
+        if not self._looks_failed(res):
+            self._subscriptions.add(command, target, args)
+
+    def export_subscriptions(self) -> List[Dict[str, Any]]:
+        """Снимок durable-намерений (MCP-сервер передаёт их новому driver'у)."""
+        return self._subscriptions.export()
+
+    def import_subscriptions(self, intents: List[Dict[str, Any]]) -> None:
+        """Загрузить намерения в этот driver (после реконнекта)."""
+        self._subscriptions.load(intents)
+
+    def replay_subscriptions(self) -> List[Dict[str, Any]]:
+        """Повторить все записанные подписки на текущем соединении.
+
+        Зовётся после реконнекта: восстанавливает поток событий, который иначе
+        молча оборвался бы. Идёт напрямую через send_command (не через обёртки),
+        поэтому не пере-регистрирует намерения. Возвращает список
+        ``{command, target, success}`` для отчёта агенту.
+        """
+        results: List[Dict[str, Any]] = []
+        for it in self._subscriptions.export():
+            res = self.send_command(it["target"], it["command"], it["args"])
+            results.append(
+                {
+                    "command": it["command"],
+                    "target": it["target"],
+                    "success": bool(isinstance(res, dict) and res.get("success")),
+                }
+            )
+        return results
 
     # ---- Высокоуровневые обёртки (общие билдеры протокола) ----
 
@@ -874,14 +972,10 @@ class BackendDriver:
         событийный канал — читаются через :meth:`events` / :meth:`subscribe` как
         сообщения с ``command == "log.record"`` (``data.record`` — сам LogRecord-dict).
         """
-        return _leaf_result(
-            self.send_command(
-                process,
-                "log.tail.subscribe",
-                {"subscriber": subscriber or self._sender, "level": level},
-                timeout=timeout,
-            )
-        )
+        args = {"subscriber": subscriber or self._sender, "level": level}
+        res = _leaf_result(self.send_command(process, "log.tail.subscribe", args, timeout=timeout))
+        self._register_subscription("log.tail.subscribe", process, args, res)
+        return res
 
     def log_untail(
         self,
@@ -891,14 +985,10 @@ class BackendDriver:
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Снять подписку на tail логов процесса (по адресу подписчика)."""
-        return _leaf_result(
-            self.send_command(
-                process,
-                "log.tail.unsubscribe",
-                {"subscriber": subscriber or self._sender},
-                timeout=timeout,
-            )
-        )
+        args = {"subscriber": subscriber or self._sender}
+        res = _leaf_result(self.send_command(process, "log.tail.unsubscribe", args, timeout=timeout))
+        self._subscriptions.remove("log.tail.subscribe", process, args)
+        return res
 
     # ---- UI-tap (отладка фронтенда): кнопки/табы GUI → события ui.event ----
 
@@ -916,14 +1006,10 @@ class BackendDriver:
         сообщения с ``command == "ui.event"`` (``data.record`` — событие:
         kind=button|tab|ping, text, path, ts). Смоук цепочки — :meth:`ui_tap_ping`.
         """
-        return _leaf_result(
-            self.send_command(
-                process,
-                "ui.tap.subscribe",
-                {"subscriber": subscriber or self._sender},
-                timeout=timeout,
-            )
-        )
+        args = {"subscriber": subscriber or self._sender}
+        res = _leaf_result(self.send_command(process, "ui.tap.subscribe", args, timeout=timeout))
+        self._register_subscription("ui.tap.subscribe", process, args, res)
+        return res
 
     def ui_untap(
         self,
@@ -932,7 +1018,9 @@ class BackendDriver:
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Снять подписку на UI-события gui-процесса."""
-        return _leaf_result(self.send_command(process, "ui.tap.unsubscribe", {}, timeout=timeout))
+        res = _leaf_result(self.send_command(process, "ui.tap.unsubscribe", {}, timeout=timeout))
+        self._subscriptions.remove("ui.tap.subscribe", process)
+        return res
 
     def ui_tap_ping(
         self,
@@ -1024,13 +1112,11 @@ class BackendDriver:
         (адрес, на который сервер направляет пуши). Возвращает result подписки
         (status + sub_id).
         """
-        return self.send_command(
-            "ProcessManager",
-            "state.subscribe",
-            {
-                "pattern": pattern,
-                "subscriber": subscriber or self._sender,
-                "exclude_sources": exclude_sources or [],
-            },
-            timeout=timeout,
-        )
+        args = {
+            "pattern": pattern,
+            "subscriber": subscriber or self._sender,
+            "exclude_sources": exclude_sources or [],
+        }
+        res = self.send_command("ProcessManager", "state.subscribe", args, timeout=timeout)
+        self._register_subscription("state.subscribe", "ProcessManager", args, res)
+        return res

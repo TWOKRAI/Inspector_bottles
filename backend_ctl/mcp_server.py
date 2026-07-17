@@ -79,17 +79,42 @@ class MCPServer:
         self._driver: Optional[BackendDriver] = None
         self._registry: Dict[str, ToolSpec] = build_registry()
         self._log = log or (lambda m: print(m, file=sys.stderr, flush=True))
+        # Durable-подписки переживают реконнект driver'а (Task 0.3): при сбросе
+        # driver'а его намерения сохраняются здесь и replay'ятся на новый driver.
+        self._sub_intents: list = []
+        # Одноразовый отчёт о состоявшемся реконнекте — вливается в следующий tool-ответ.
+        self._reconnect_report: Optional[Dict[str, Any]] = None
 
     # ---- Driver lifecycle ----
 
     def _default_driver_factory(self) -> BackendDriver:
         drv = BackendDriver(self._host, self._port, default_timeout=self._request_timeout)
         drv.connect()
-        time.sleep(0.3)  # дать SocketChannel зарегистрировать клиента (как в harness)
+        # Readiness-проба вместо фиксированного sleep (Task 0.3): ждём, пока
+        # SocketChannel зарегистрирует клиента и PM начнёт отвечать.
+        self._await_ready(drv)
         return drv
 
+    @staticmethod
+    def _await_ready(drv: BackendDriver, *, attempts: int = 3, probe_timeout: float = 2.0) -> bool:
+        """Пинг-проба готовности PM (3 ретрая). best-effort: неответ не бросает —
+        первый реальный вызов инструмента и так покажет ошибку с понятным текстом."""
+        for _ in range(attempts):
+            try:
+                res = drv.introspect_status("ProcessManager", timeout=probe_timeout)
+            except Exception:  # noqa: BLE001 — проба не должна ронять старт
+                res = None
+            if isinstance(res, dict) and res.get("success") is True:
+                return True
+            time.sleep(0.1)
+        return False
+
     def _ensure_driver(self) -> BackendDriver:
-        """Лениво подключить driver; при недоступном бэкенде — понятная ошибка."""
+        """Лениво подключить driver; при недоступном бэкенде — понятная ошибка.
+
+        После реконнекта (driver был сброшен, но остались durable-подписки) новый
+        driver получает намерения и replay'ит их — поток событий не теряется молча.
+        """
         if self._driver is None:
             try:
                 self._driver = self._driver_factory()
@@ -99,11 +124,27 @@ class MCPServer:
                     "Подними систему с BACKEND_CTL=1 (например `python multiprocess_prototype/run.py` "
                     "или BackendHarness) и повтори вызов."
                 ) from exc
+            # Реконнект: восстановить durable-подписки на новом driver'е (Task 0.3).
+            if self._sub_intents:
+                self._driver.import_subscriptions(self._sub_intents)
+                resubscribed = self._driver.replay_subscriptions()
+                self._reconnect_report = {"reconnected": True, "resubscribed": resubscribed}
+                self._log(f"[mcp_server] реконнект: replay {len(resubscribed)} подписк(и)")
         return self._driver
 
     def _reset_driver(self) -> None:
-        """Сбросить соединение (следующий вызов переподключится)."""
+        """Сбросить соединение (следующий вызов переподключится).
+
+        Durable-намерения подписки сохраняются ДО закрытия driver'а, чтобы новый
+        driver мог их replay'нуть (иначе подписки терялись бы молча — Task 0.3).
+        """
         if self._driver is not None:
+            try:
+                intents = self._driver.export_subscriptions()
+                if intents:
+                    self._sub_intents = intents
+            except Exception:  # noqa: BLE001 — экспорт не должен ронять сброс
+                pass
             try:
                 self._driver.close()
             except Exception:  # noqa: BLE001 — сброс не должен падать
@@ -165,6 +206,11 @@ class MCPServer:
             return self._tool_error(msg_id, f"соединение с бэкендом оборвано: {exc}")
         except Exception as exc:  # noqa: BLE001 — ошибка инструмента ≠ ошибка протокола
             return self._tool_error(msg_id, f"{type(exc).__name__}: {exc}")
+        # Если только что был реконнект — доложить о нём в ЭТОМ ответе (однократно),
+        # чтобы агент знал: соединение восстановлено и подписки replay'нуты (Task 0.3).
+        if self._reconnect_report is not None and isinstance(result, dict):
+            result = {**result, **self._reconnect_report}
+            self._reconnect_report = None
         text = json.dumps(result, ensure_ascii=False, default=str)
         return self._result(msg_id, {"content": [{"type": "text", "text": text}], "isError": False})
 

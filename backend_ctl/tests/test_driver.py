@@ -513,3 +513,77 @@ class TestSendRaceAndLateReplies:
         d._dispatch(_line({"request_id": "never-issued", "result": {"x": 1}}))
         assert len(d.events()) == 1
         assert d.late_replies == 0
+
+
+# --- Task 0.3: durable-подписки (реестр намерений + replay) ---
+
+
+class TestSubscriptionRegistry:
+    def _recorder(self, monkeypatch):
+        """Driver, у которого send_command только пишет вызовы и отдаёт success."""
+        d = BackendDriver()
+        calls: List[tuple] = []
+
+        def fake_send(target, command, args=None, *, timeout=None):
+            calls.append((target, command, args))
+            return {"success": True}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d, calls
+
+    def test_state_subscribe_registers_intent(self, monkeypatch) -> None:
+        d, _ = self._recorder(monkeypatch)
+        d.state_subscribe("processes.**")
+        intents = d.export_subscriptions()
+        assert any(i["command"] == "state.subscribe" and i["args"]["pattern"] == "processes.**" for i in intents)
+
+    def test_log_tail_then_untail_removes_intent(self, monkeypatch) -> None:
+        d, _ = self._recorder(monkeypatch)
+        d.log_tail("preprocessor", level="ERROR")
+        assert any(
+            i["command"] == "log.tail.subscribe" and i["target"] == "preprocessor" for i in d.export_subscriptions()
+        )
+        d.log_untail("preprocessor")
+        assert not any(i["target"] == "preprocessor" for i in d.export_subscriptions())
+
+    def test_ui_untap_removes_all_for_process(self, monkeypatch) -> None:
+        d, _ = self._recorder(monkeypatch)
+        d.ui_tap("gui")
+        assert any(i["command"] == "ui.tap.subscribe" for i in d.export_subscriptions())
+        d.ui_untap("gui")
+        assert not any(i["command"] == "ui.tap.subscribe" for i in d.export_subscriptions())
+
+    def test_failed_subscribe_not_registered(self, monkeypatch) -> None:
+        d = BackendDriver()
+
+        def failing_send(target, command, args=None, *, timeout=None):
+            return {"success": False, "error": "not connected"}
+
+        monkeypatch.setattr(d, "send_command", failing_send)
+        d.state_subscribe("processes.**")
+        assert d.export_subscriptions() == []
+
+    def test_duplicate_intent_deduped(self, monkeypatch) -> None:
+        d, _ = self._recorder(monkeypatch)
+        d.state_subscribe("processes.**")
+        d.state_subscribe("processes.**")
+        same = [i for i in d.export_subscriptions() if i["args"].get("pattern") == "processes.**"]
+        assert len(same) == 1
+
+    def test_replay_resends_all_intents(self, monkeypatch) -> None:
+        d, calls = self._recorder(monkeypatch)
+        d.state_subscribe("processes.**")
+        d.log_tail("preprocessor", level="WARNING")
+        calls.clear()
+        report = d.replay_subscriptions()
+        replayed = {(t, c) for t, c, _ in calls}
+        assert ("ProcessManager", "state.subscribe") in replayed
+        assert ("preprocessor", "log.tail.subscribe") in replayed
+        assert all(r["success"] for r in report)
+
+    def test_import_export_roundtrip(self, monkeypatch) -> None:
+        d1, _ = self._recorder(monkeypatch)
+        d1.state_subscribe("system.**")
+        d2 = BackendDriver()
+        d2.import_subscriptions(d1.export_subscriptions())
+        assert d2.export_subscriptions() == d1.export_subscriptions()
