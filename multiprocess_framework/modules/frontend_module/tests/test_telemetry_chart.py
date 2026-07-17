@@ -100,6 +100,33 @@ class TestVisibility:
         assert chart._checks["a"].isChecked() is True
 
 
+class TestLegendParam:
+    def test_legend_false_no_checkboxes(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a"), legend=False)
+        qtbot.addWidget(chart)
+        assert chart._checks == {}  # легенды нет (одиночная серия / mini)
+        assert len(chart._curves) == 1  # кривая есть
+
+    def test_legend_true_by_default(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a", "b"))
+        qtbot.addWidget(chart)
+        assert set(chart._checks) == {"a", "b"}
+
+
+class TestSeriesPoints:
+    def test_series_points_roundtrip(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a"))
+        qtbot.addWidget(chart)
+        chart.set_series_data("a", [(1.0, 10.0), (2.0, 20.0)])
+        assert chart.series_points("a") == [(1.0, 10.0), (2.0, 20.0)]
+
+    def test_series_points_unknown_or_empty(self, qtbot) -> None:
+        chart = TelemetryChart(_specs("a"))
+        qtbot.addWidget(chart)
+        assert chart.series_points("a") == []  # пусто
+        assert chart.series_points("nope") == []  # неизвестный ключ
+
+
 class TestCompactMode:
     def test_compact_has_no_legend(self, qtbot) -> None:
         chart = TelemetryChart(_specs("a", "b"), compact=True)

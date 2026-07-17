@@ -39,6 +39,10 @@ from PySide6.QtWidgets import (
 )
 
 from multiprocess_framework.modules.process_module.heartbeat.telemetry import GATED_METRICS
+from multiprocess_framework.modules.frontend_module.widgets.telemetry_chart import (
+    SeriesSpec,
+    TelemetryChart,
+)
 from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
 from multiprocess_prototype.frontend.state.telemetry_history import TelemetryHistorySource
@@ -49,7 +53,7 @@ from multiprocess_prototype.frontend.widgets.primitives import (
 
 from ._system_dashboard import SystemDashboardSection
 from ._telemetry_controls import TelemetryControlsSection
-from .widgets import CreateWorkerDialog, ProcessCard, TelemetrySparkline, WorkerTable
+from .widgets import CreateWorkerDialog, ProcessCard, WorkerTable
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
@@ -902,13 +906,18 @@ class SingleProcessPanel(QWidget):
         range_row.addStretch()
         layout.addLayout(range_row)
 
+        # Мини-графики fps/latency — тот же generic TelemetryChart, что дашборд (единая
+        # система графиков), одиночная серия без легенды, но интерактивный: зум колесом
+        # по времени (Ф2.3). Отдельные графики (разные юниты — своя авто-шкала у каждого).
         layout.addWidget(QLabel("FPS"))
-        self._fps_sparkline = TelemetrySparkline()
-        layout.addWidget(self._fps_sparkline)
+        self._fps_chart = TelemetryChart([SeriesSpec("fps", "FPS", color="#2563eb")], legend=False)
+        self._fps_chart.setMaximumHeight(150)
+        layout.addWidget(self._fps_chart)
 
         layout.addWidget(QLabel("Задержка, мс"))
-        self._latency_sparkline = TelemetrySparkline()
-        layout.addWidget(self._latency_sparkline)
+        self._latency_chart = TelemetryChart([SeriesSpec("latency", "Задержка, мс", color="#d97706")], legend=False)
+        self._latency_chart.setMaximumHeight(150)
+        layout.addWidget(self._latency_chart)
 
         return box
 
@@ -958,8 +967,8 @@ class SingleProcessPanel(QWidget):
     def _refresh_graph_from_ring(self) -> None:
         """10 мин — из кольцевого буфера VM (Task 1.2), без похода в БД.
 
-        VM не подан → графики деградируют в плейсхолдер «нет данных»
-        (TelemetrySparkline сам показывает его при < 2 точек).
+        VM не подан → графики деградируют в пустую серию (TelemetryChart рисует
+        пустой график без падений).
 
         Читаем только точки внутри wall-окна (``since``): deque вытесняет старые
         лишь при append, поэтому после ОСТАНОВКИ потока метрики (процесс встал /
@@ -968,14 +977,16 @@ class SingleProcessPanel(QWidget):
         → нет свежих данных = пустой график, а не стейл-окно.
         """
         if self._telemetry is None:
-            self._fps_sparkline.set_points([])
-            self._latency_sparkline.set_points([])
+            self._fps_chart.set_series_data("fps", [])
+            self._latency_chart.set_series_data("latency", [])
             return
         proc = self._process_name
         window = next((s for k, _label, s in _GRAPH_RANGES if k == "10m"), 600.0)
         since = time.monotonic() - window
-        self._fps_sparkline.set_points(self._telemetry.history(f"processes.{proc}.state.fps", since=since))
-        self._latency_sparkline.set_points(self._telemetry.history(f"processes.{proc}.state.latency_ms", since=since))
+        self._fps_chart.set_series_data("fps", self._telemetry.history(f"processes.{proc}.state.fps", since=since))
+        self._latency_chart.set_series_data(
+            "latency", self._telemetry.history(f"processes.{proc}.state.latency_ms", since=since)
+        )
 
     def _refresh_graph_from_history(self) -> None:
         """1 час / 1 день — TelemetryHistorySource.list_range на worker-потоке.
@@ -1017,8 +1028,8 @@ class SingleProcessPanel(QWidget):
         records = result.get("records", [])
         fps_points = [(r["ts"], r["fps"]) for r in records if isinstance(r.get("fps"), (int, float))]
         latency_points = [(r["ts"], r["latency_ms"]) for r in records if isinstance(r.get("latency_ms"), (int, float))]
-        self._fps_sparkline.set_points(fps_points)
-        self._latency_sparkline.set_points(latency_points)
+        self._fps_chart.set_series_data("fps", fps_points)
+        self._latency_chart.set_series_data("latency", latency_points)
 
     # ------------------------------------------------------------------ #
     #  Workers                                                             #
@@ -1352,7 +1363,7 @@ class SingleProcessPanel(QWidget):
         # График 10 мин читает ring-буфер VM — обновляем ТОЛЬКО когда этот
         # диапазон активен (1ч/1д не трогаем: они читают БД по кнопке/таймеру,
         # не по каждому батчу). Дешёвая O(k)-выборка буфера, не I/O.
-        if graph_touched and self._graph_range == "10m" and hasattr(self, "_fps_sparkline"):
+        if graph_touched and self._graph_range == "10m" and hasattr(self, "_fps_chart"):
             self._refresh_graph_from_ring()
         # Ф4.1: обновить читаемый статус строк телеметрии из read-model (fps/latency).
         if graph_touched and hasattr(self, "_telemetry_controls"):

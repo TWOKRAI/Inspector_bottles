@@ -76,7 +76,7 @@ class TestTenMinuteRangeUsesRingBuffer:
         panel = SingleProcessPanel(_presenter(), None, "camera_0", telemetry=vm)
         qtbot.addWidget(panel)
 
-        points = panel._fps_sparkline.points()
+        points = panel._fps_chart.series_points("fps")
         assert points and points[-1][1] == 42.0
 
     def test_live_batch_updates_10m_graph(self, qtbot) -> None:
@@ -87,7 +87,7 @@ class TestTenMinuteRangeUsesRingBuffer:
         vm.on_state_delta(_delta("processes.camera_0.state.fps", 33.0))
         qtbot.wait(50)  # коалесинг updated
 
-        points = panel._fps_sparkline.points()
+        points = panel._fps_chart.series_points("fps")
         assert points and points[-1][1] == 33.0
 
     def test_batch_for_other_process_does_not_touch_graph(self, qtbot) -> None:
@@ -98,7 +98,7 @@ class TestTenMinuteRangeUsesRingBuffer:
         vm.on_state_delta(_delta("processes.processor.state.fps", 99.0))
         qtbot.wait(50)
 
-        assert panel._fps_sparkline.points() == []
+        assert panel._fps_chart.series_points("fps") == []
 
 
 # ------------------------------------------------------------------ #
@@ -154,8 +154,8 @@ class TestDeeperRangeReadsHistorySourceOffMainThread:
         qtbot.addWidget(panel)
 
         panel._on_graph_range_selected("1h")
-        qtbot.waitUntil(lambda: panel._fps_sparkline.points() == [(10.0, 25.0), (20.0, 27.0)], timeout=1000)
-        assert panel._latency_sparkline.points() == [(10.0, 8.0), (20.0, 9.0)]
+        qtbot.waitUntil(lambda: panel._fps_chart.series_points("fps") == [(10.0, 25.0), (20.0, 27.0)], timeout=1000)
+        assert panel._latency_chart.series_points("latency") == [(10.0, 8.0), (20.0, 9.0)]
 
     def test_switching_back_to_10m_does_not_call_history_source_again(self, qtbot) -> None:
         vm = TelemetryViewModel()
@@ -189,12 +189,12 @@ class TestStaleHistoryResponseDiscarded:
 
         # Ответ с УСТАРЕВШЕЙ генерацией — отбрасывается, график не тронут.
         panel._on_history_ready({"records": records, "request_id": current - 1})
-        assert panel._fps_sparkline.points() == []
-        assert panel._latency_sparkline.points() == []
+        assert panel._fps_chart.series_points("fps") == []
+        assert panel._latency_chart.series_points("latency") == []
 
         # Ответ с АКТУАЛЬНОЙ генерацией — применяется.
         panel._on_history_ready({"records": records, "request_id": current})
-        assert panel._fps_sparkline.points() == [(1.0, 999.0)]
+        assert panel._fps_chart.series_points("fps") == [(1.0, 999.0)]
 
     def test_ring_graph_drops_points_older_than_10m_window(self, qtbot) -> None:
         """Ring читается по wall-окну: после остановки потока метрики старые точки
@@ -214,7 +214,7 @@ class TestStaleHistoryResponseDiscarded:
 
         panel._refresh_graph_from_ring()
 
-        pts = panel._fps_sparkline.points()
+        pts = panel._fps_chart.series_points("fps")
         assert pts == [(t_now - 1.0, 22.0)], "старая точка за окном не отсечена по since"
 
     def test_response_without_request_id_applies_as_current(self, qtbot) -> None:
@@ -225,7 +225,7 @@ class TestStaleHistoryResponseDiscarded:
         qtbot.addWidget(panel)
 
         panel._on_history_ready({"success": False, "error": "boom"})
-        assert panel._fps_sparkline.points() == []
+        assert panel._fps_chart.series_points("fps") == []
 
 
 # ------------------------------------------------------------------ #
@@ -237,8 +237,8 @@ class TestGracefulDegradation:
     def test_without_vm_graph_shows_no_points_and_does_not_crash(self, qtbot) -> None:
         panel = SingleProcessPanel(_presenter(), None, "camera_0", telemetry=None)
         qtbot.addWidget(panel)
-        assert panel._fps_sparkline.points() == []
-        assert panel._latency_sparkline.points() == []
+        assert panel._fps_chart.series_points("fps") == []
+        assert panel._latency_chart.series_points("latency") == []
 
     def test_empty_history_result_leaves_sparklines_empty(self, qtbot) -> None:
         vm = TelemetryViewModel()
@@ -250,7 +250,7 @@ class TestGracefulDegradation:
         qtbot.waitUntil(lambda: len(source.calls) == 1, timeout=1000)
         qtbot.wait(50)
 
-        assert panel._fps_sparkline.points() == []
+        assert panel._fps_chart.series_points("fps") == []
 
     def test_default_history_source_constructed_when_not_injected(self, qtbot) -> None:
         """telemetry/history_source не переданы — панель конструируется без падений

@@ -89,6 +89,7 @@ class TelemetryChart(QWidget):
         downsample: bool = True,
         time_axis: bool = True,
         crosshair: bool = False,
+        legend: bool = True,
         y_label: str = "",
         parent: QWidget | None = None,
     ) -> None:
@@ -97,6 +98,9 @@ class TelemetryChart(QWidget):
         self._x_window_sec = x_window_sec
         self._compact = compact
         self._crosshair_enabled = crosshair and not compact
+        # Легенда-тумблеры: только не-compact И явно разрешена (для одиночной серии
+        # легенда бессмысленна — mini-график процесса передаёт legend=False).
+        self._legend_enabled = legend and not compact
         self._curves: dict[str, pg.PlotDataItem] = {}
         self._checks: dict[str, QCheckBox] = {}
 
@@ -114,6 +118,7 @@ class TelemetryChart(QWidget):
             pi.setClipToView(True)
         if y_label and not compact:
             pi.setLabel("left", y_label)
+        vb = pi.getViewBox()
         if compact:
             # Мини-режим (спарклайн-паритет): без осей/кнопок/меню/интерактива.
             pi.hideAxis("bottom")
@@ -122,6 +127,14 @@ class TelemetryChart(QWidget):
             pi.setMenuEnabled(False)
             self._plot.setMouseEnabled(x=False, y=False)
             self.setMinimumHeight(56)
+        elif vb is not None:
+            # Time-series зум колесом: скролл масштабирует ТОЛЬКО X (время), Y авто-
+            # подгоняется под данные в видимом окне (setAutoVisible) — интуитивно для
+            # телеметрии и заодно решает масштаб (зум по времени → Y перешкаливается).
+            # Двойной клик / кнопка «A» pyqtgraph — сброс к полному диапазону.
+            vb.setMouseEnabled(x=True, y=False)
+            vb.enableAutoRange(axis="y", enable=True)
+            vb.setAutoVisible(y=True)
         layout.addWidget(self._plot, stretch=1)
 
         # ГЛАВНОЕ: кривые строятся В ЦИКЛЕ по списку серий — не хардкод.
@@ -135,8 +148,8 @@ class TelemetryChart(QWidget):
             self._setup_crosshair(layout)
 
         # Легенда-тумблеры (свой ряд чекбоксов = кликабельная легенда) — конструкторно,
-        # тестируемо. В compact легенды нет (мини-график).
-        if not compact:
+        # тестируемо. Нет в compact и при legend=False (одиночная серия).
+        if self._legend_enabled:
             self._build_legend(layout)
 
     # ------------------------------------------------------------------ #
@@ -281,6 +294,20 @@ class TelemetryChart(QWidget):
     def series_keys(self) -> list[str]:
         """Ключи серий в порядке объявления (для драйверов/тестов)."""
         return [s.key for s in self._specs]
+
+    def series_points(self, key: str) -> list[tuple[float, float]]:
+        """Точки серии как ``[(ts, value), …]`` (для тестов/диагностики).
+
+        Возвращает исходные данные (``PlotDataItem.getData`` — не downsampled-дисплей).
+        Неизвестный ключ / пустая серия → ``[]``.
+        """
+        curve = self._curves.get(key)
+        if curve is None:
+            return []
+        xs, ys = curve.getData()
+        if xs is None or ys is None:
+            return []
+        return [(float(t), float(v)) for t, v in zip(xs, ys)]
 
     def is_series_visible(self, key: str) -> bool:
         """Видима ли серия (для тестов/диагностики)."""
