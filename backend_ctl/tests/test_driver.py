@@ -1071,3 +1071,41 @@ class TestWatchDurability:
         assert summary["was_active"] is False
         assert not any(i["command"] == "observability.tail.subscribe" for i in d.export_subscriptions())
         assert not any(i["command"] == "state.subscribe" for i in d.export_subscriptions())
+
+
+class TestObservabilityContract:
+    """F7: строка-контракт driver'а совпадает с серверным message-слоем."""
+
+    def test_record_command_matches_forward_channel(self) -> None:
+        # driver держит OBSERVABILITY_RECORD_COMMAND строкой (Dict at Boundary, не тянет
+        # серверный модуль). Контракт-тест пиннит равенство серверному FORWARD_COMMAND —
+        # рассинхрон строки молча оборвал бы приём observability.record.
+        from backend_ctl.driver import OBSERVABILITY_RECORD_COMMAND
+        from multiprocess_framework.modules.channel_routing_module.observability import FORWARD_COMMAND
+
+        assert OBSERVABILITY_RECORD_COMMAND == FORWARD_COMMAND
+
+
+class TestWatchSelfSkip:
+    """F7: watch_like_gui не тейлит собственный процесс driver'а (убирает шум сводки)."""
+
+    def test_own_process_excluded_from_obs_tail(self, monkeypatch) -> None:
+        d = BackendDriver()  # self._sender == "backend_ctl"
+        calls: List[tuple] = []
+
+        def fake_send(target, command, args=None, *, timeout=None):
+            calls.append((target, command, args))
+            if command == "state.get_subtree":
+                # Топология содержит сам driver'ский адрес + gui + рабочий процесс.
+                return {"success": True, "result": {"subtree": {p: {} for p in ("backend_ctl", "gui", "camera_0")}}}
+            return {"success": True}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        try:
+            summary = d.watch_like_gui()
+            obs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
+            assert "backend_ctl" not in obs, "собственный процесс driver'а не тейлится"
+            assert "gui" in obs and "camera_0" in obs  # gui driver тейлить МОЖЕТ (оставлен)
+            assert "backend_ctl" not in summary["observability"]
+        finally:
+            d.unwatch()

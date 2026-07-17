@@ -67,6 +67,10 @@ _LOG_SEVERITY_RANK: Dict[str, int] = {
 # GUI-эквивалентный набор wildcard'ов state-подписки (Task 2.2): зеркало
 # multiprocess_prototype/frontend/process.py — ровно то, на что подписан GUI.
 # Прототип может передать свой набор в watch_like_gui(patterns=...).
+# F7 (framework-first): ``devices.**``/``calibration.**`` — app-домены прототипа,
+# захардкоженные здесь как удобный дефолт. Пост-codemod (переезд в tooling/) набор
+# инжектируется app-слоем (прототип передаёт свои паттерны), а модульный дефолт
+# сузится до generic ``processes.**``/``system.**``. Сейчас поведение НЕ меняем.
 GUI_DEFAULT_PATTERNS: tuple[str, ...] = (
     "processes.**",
     "system.**",
@@ -1534,6 +1538,13 @@ class BackendDriver:
         summary["processes"] = list(procs)
 
         for proc in procs:
+            # F7: не тейлим собственный процесс driver'а (self._sender) — тейлить себя
+            # бессмысленно (ObservabilityTailActivator у GUI тоже себя не подписывает).
+            # gui-процесс НЕ исключаем: driver может его тейлить, но у него нет пилот-hub'а,
+            # поэтому obs_tail(gui) честно вернёт success=False (reason: нет hub'а) — это
+            # ОЖИДАЕМО, не ошибка; в сводку кладём как есть, без шумного «fail».
+            if proc == self._sender:
+                continue
             res = self.observability_tail(proc, timeout=timeout)
             summary["observability"][proc] = res
             # Дедуп: пометить процесс подписанным независимо от исхода (over-record —
@@ -1695,8 +1706,8 @@ class BackendDriver:
                 continue
             parts = path.split(".")
             proc = parts[1] if len(parts) >= 2 else ""
-            if not proc:
-                continue
+            if not proc or proc == self._sender:
+                continue  # F7: себя не тейлим (симметрично стартовому циклу watch_like_gui)
             recovered = path.endswith(".supervisor.event") and delta.get("new_value") == "recovered"
             with self._watch_lock:
                 if not self._watch_active:
