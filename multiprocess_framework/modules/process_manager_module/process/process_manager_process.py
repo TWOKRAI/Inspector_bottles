@@ -1509,15 +1509,37 @@ class ProcessManagerProcess(ProcessModule):
                 "complete": int(reached) >= len(targets),
             }
             self._log_info(f"telemetry.broadcast: publish → target={target!r} reached={reached}/{len(targets)}")
-            # Task 3.2: персист ПОСЛЕДНЕЙ fan-out publish-дельты — доиграть пересозданным
+            # Task 3.2: персист эффективной fan-out publish-дельты — доиграть пересозданным
             # детям после hot-swap/respawn (иначе новый ребёнок взял бы boot-конфиг, потеряв
             # рантайм-правку publisher-gate). Адресные (target=процесс) НЕ персистятся — они
             # per-child, а не системный runtime. publish=None (выключить gate) → сброс персиста.
+            #
+            # ПОСЛЕДОВАТЕЛЬНЫЕ merge-дельты АККУМУЛИРУЮТСЯ (deep_merge): telemetry_set работает
+            # в merge — частый операторский сценарий из нескольких точечных правок. Хранить лишь
+            # последнюю — потерять предыдущие при respawn (расхождение с выжившими детьми, которые
+            # аккумулировали всё). replace семантически обнуляет прошлое → перезапись целиком.
+            # ИЗВЕСТНЫЙ GAP: смешанные merge→replace→merge-цепочки полной эффективной-от-boot
+            # модели не дают (replace сбрасывает накопленное) — приемлемо для рантайм-правок.
             if not addressed:
                 if args["publish"] is None:
                     self._telemetry_runtime_delta = None
                 else:
-                    self._telemetry_runtime_delta = {"publish": args["publish"], "mode": mode}
+                    prev = getattr(self, "_telemetry_runtime_delta", None)
+                    if (
+                        mode == "merge"
+                        and isinstance(prev, dict)
+                        and prev.get("mode") == "merge"
+                        and isinstance(prev.get("publish"), dict)
+                        and isinstance(args["publish"], dict)
+                    ):
+                        from ...data_schema_module import deep_merge
+
+                        self._telemetry_runtime_delta = {
+                            "publish": deep_merge(prev["publish"], args["publish"]),
+                            "mode": "merge",
+                        }
+                    else:
+                        self._telemetry_runtime_delta = {"publish": args["publish"], "mode": mode}
 
         if has_throttle:
             try:

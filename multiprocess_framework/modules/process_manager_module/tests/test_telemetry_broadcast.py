@@ -511,6 +511,32 @@ class TestRuntimeDeltaPersist:
         pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}, "telemetry_mode": "merge"})
         assert pm._telemetry_runtime_delta["mode"] == "merge"
 
+    def test_consecutive_merges_accumulate(self) -> None:
+        """Две merge-дельты подряд → персист содержит ОБЕ (deep_merge), не только последнюю.
+
+        Иначе respawn потерял бы первую правку (расхождение с выжившими детьми, которые
+        аккумулировали обе). Закрывает находку Opus-ревью Фазы 3 (ось 1).
+        """
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}, "telemetry_mode": "merge"})
+        pm._cmd_telemetry_broadcast(
+            {"publish": {"metrics": {"latency_ms": {"interval_sec": 2.0}}}, "telemetry_mode": "merge"}
+        )
+        metrics = pm._telemetry_runtime_delta["publish"]["metrics"]
+        assert metrics["fps"] == {"enabled": False}  # первая правка сохранена
+        assert metrics["latency_ms"] == {"interval_sec": 2.0}  # вторая добавлена
+        assert pm._telemetry_runtime_delta["mode"] == "merge"
+
+    def test_replace_resets_accumulated_delta(self) -> None:
+        """replace семантически обнуляет прошлое → персист = только replace-секция."""
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}, "telemetry_mode": "merge"})
+        pm._cmd_telemetry_broadcast({"publish": {"metrics": {"shm": {"enabled": False}}}})  # replace
+        metrics = pm._telemetry_runtime_delta["publish"]["metrics"]
+        assert "fps" not in metrics  # накопленное сброшено replace'ом
+        assert metrics["shm"] == {"enabled": False}
+        assert pm._telemetry_runtime_delta["mode"] == "replace"
+
     def test_publish_none_clears_delta(self) -> None:
         pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
         pm._cmd_telemetry_broadcast({"publish": {"metrics": {"fps": {"enabled": False}}}})
