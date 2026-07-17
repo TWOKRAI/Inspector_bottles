@@ -140,11 +140,19 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 
 ## Phase 0 — Hardening на текущей раскладке (Этап 1, СЕЙЧАС; ветка `feat/backend-ctl-hardening`)
 
-> **✅ PHASE 0 ЗАВЕРШЕНА (2026-07-17).** Все 5 задач закрыты на ветке `feat/backend-ctl-hardening`
-> (worktree, изолированно от параллельной телеметрии). Итог: 9be0b852 · 2dbb8b8a · 3c74b129 · a0adb2e3 · 1a420c81.
-> backend_ctl unit ~109 зелёных + live harness_smoke зелёный. Единственный красный live-тест
-> (`test_mcp_server_live_against_backend`) — **pre-existing** (воспроизводится на чистом HEAD, не регресс).
-> Готово к мержу в main (после/параллельно coherence Фазы 1). Дальше — Phases 1–4 (после codemod).
+> **✅ PHASE 0 ЗАВЕРШЕНА + ОТРЕВЬЮ (2026-07-17).** Все 5 задач закрыты на ветке `feat/backend-ctl-hardening`
+> (worktree, изолированно от параллельной телеметрии). Код: 9be0b852 · 2dbb8b8a · 3c74b129 · a0adb2e3 · 1a420c81.
+> **Ревью Opus:** merge-с-правками, 0 блокеров. Внесены фиксы (b68c439f): MAJOR #1 (реконнект воскрешал
+> отписанные подписки), MAJOR #4 (env-leak при падении start()), MINOR #3 (late_replies под лок) + 2 регресс-теста.
+> **Вердикт Fable: PASS** — фиксы доказаны эмпирически (регресс-тесты падают на pre-fix коде), 111/111 unit.
+> Отложено в Phase 1: MINOR #2 (композиты best-effort), #6 (over-record), NIT #5 (pre-existing read_loop).
+> live harness_smoke зелёный; красный `test_mcp_server_live_against_backend` — pre-existing (не регресс).
+>
+> **⚠️ СТРАТЕГИЯ МЕРЖА (за владельцем):** ветка ответвлена от `feat/telemetry-coherence` HEAD (11dd9dfc),
+> т.к. Task 0.5 зависит от telemetry-driver методов (f75d77b1). Значит `main..feat/backend-ctl-hardening`
+> несёт ~27 telemetry-коммитов (Фаза 1) + Phase 0. Прямой merge в main втянет и телеметрию Фазы 1.
+> **Рекомендация:** сперва влить coherence Фазу 1 в main, ЗАТЕМ Phase 0 (добавит только backend_ctl-дельту).
+> НЕ включает незакрытый Task 1.4 телеметрии (он позже 11dd9dfc). Дальше — Phases 1–4 (после codemod).
 
 ### Task 0.1 — Единый источник endpoint-конфига  ✅ (9be0b852)
 **Level:** Middle (Sonnet) | **Assignee:** developer | **Layer:** mixed
