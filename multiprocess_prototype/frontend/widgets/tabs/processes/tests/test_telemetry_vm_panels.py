@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
+from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 from multiprocess_prototype.frontend.widgets.tabs.processes._panels import (
     AllProcessesPanel,
     SingleProcessPanel,

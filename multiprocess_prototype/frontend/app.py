@@ -290,7 +290,7 @@ def run_gui(process: "GuiProcess") -> None:
     # wildcard'ами (processes.**/system.**/...). Первичный снимок — из кэша
     # gui-proxy, чтобы вкладки, созданные ПОСЛЕ публикации, читали актуальное
     # сразу (late-binding). В табы прокидывается через RuntimeDeps.telemetry.
-    from .state.telemetry_view_model import TelemetryViewModel
+    from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 
     telemetry_view_model = TelemetryViewModel(
         initial_cache=(_gui_proxy.cache if _gui_proxy is not None else None),

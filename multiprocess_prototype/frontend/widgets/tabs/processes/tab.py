@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from multiprocess_prototype.frontend.bridge.command_sender import CommandSender
     from multiprocess_prototype.frontend.bridge.topology_bridge import TopologyBridge
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
-    from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
+    from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 
 
 def _layout_factory() -> DiffScrollTabLayout:

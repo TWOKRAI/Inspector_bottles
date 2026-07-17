@@ -23,7 +23,7 @@ from multiprocess_framework.modules.frontend_module.widgets.telemetry_chart impo
 )
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
+    from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 
 # Метрики дашборда (process-level агрегаты в дереве: processes.<P>.state.<metric>).
 # (ключ метрики, подпись в переключателе).

@@ -45,7 +45,10 @@ from multiprocess_framework.modules.frontend_module.widgets.telemetry_chart impo
 )
 from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
-from multiprocess_prototype.frontend.state.telemetry_history import TelemetryHistorySource
+from multiprocess_prototype.frontend.state.telemetry_history import (
+    TelemetryHistorySource,
+    make_history_source,
+)
 from multiprocess_prototype.frontend.widgets.primitives import (
     CardAction,
     EntityCard,
@@ -57,7 +60,7 @@ from .widgets import CreateWorkerDialog, ProcessCard, WorkerTable
 
 if TYPE_CHECKING:
     from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
-    from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
+    from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 
     from .presenter import ProcessesPresenter
 
@@ -757,9 +760,10 @@ class SingleProcessPanel(QWidget):
         self._telemetry = telemetry
         # Ф2 (gui-telemetry-read-model 2.1/2.2): read-сторона telemetry.db для
         # графика за час/день. Конструктор source — без I/O (только путь), None
-        # → дефолтный TelemetryHistorySource() (env INSPECTOR_TELEMETRY_DB /
-        # data/telemetry.db). Инъекция параметром — для тестов (fake-источник).
-        self._history_source = history_source if history_source is not None else TelemetryHistorySource()
+        # → дефолтный источник под схему стока прототипа (env
+        # INSPECTOR_TELEMETRY_DB / data/telemetry.db). Инъекция параметром — для
+        # тестов (fake-источник).
+        self._history_source = history_source if history_source is not None else make_history_source()
         # RequestRunner (P2 command-result-bridge) — гоняет list_range() на
         # worker-потоке QThreadPool, результат доставляется в main-thread
         # сигналом (см. модуль request_runner.py). Без него чтение БД в

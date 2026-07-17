@@ -26,7 +26,7 @@ from multiprocess_framework.modules.state_store_module.core import pattern_cover
 from multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy import GuiStateProxy
 from multiprocess_prototype.frontend.runtime_deps import RuntimeDeps
 from multiprocess_prototype.frontend.state.bindings import GuiStateBindings
-from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
+from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 from multiprocess_prototype.frontend.widgets.tabs import register_all_tabs
 
 # Стартовые wildcard'ы GUI (frontend/process.py) — заводятся sync=True и

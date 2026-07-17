@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 if TYPE_CHECKING:
-    from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
+    from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 
 # Колбэк изменения: (metric, enabled|None, interval_sec|None). ``None`` = «не менялось»
 # на этой оси (тумблер дёрнули — enabled задан, интервал None; и наоборот).

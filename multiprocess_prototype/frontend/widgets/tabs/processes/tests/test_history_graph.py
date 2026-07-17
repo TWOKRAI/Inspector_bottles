@@ -17,7 +17,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 
-from multiprocess_prototype.frontend.state.telemetry_view_model import TelemetryViewModel
+from multiprocess_framework.modules.frontend_module.state import TelemetryViewModel
 from multiprocess_prototype.frontend.widgets.tabs.processes._panels import SingleProcessPanel
 from multiprocess_prototype.frontend.widgets.tabs.processes.presenter import ProcessesPresenter
 
