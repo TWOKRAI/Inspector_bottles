@@ -130,6 +130,55 @@ class ProcessesPresenter:
         command = cmd_map.get(action_id, action_id)
         self._command_sender.send_system_command({"cmd": command, "process_name": process_name})
 
+    # ---- Телеметрия: управляемая публикация (telemetry-publish-control Ф4.1) ----
+
+    @staticmethod
+    def telemetry_command(
+        process_name: str,
+        metric: str,
+        *,
+        enabled: bool | None = None,
+        interval_sec: float | None = None,
+    ) -> dict[str, Any]:
+        """Построить system-конверт `telemetry.broadcast` для ОДНОЙ метрики (pure).
+
+        Точечная правка publisher-gate одного процесса: `mode="merge"` (соседние
+        метрики не тронуты), `target=process_name` (адресно через PM — cap-детекция
+        на per-process пути, Task 1.4). ``None``-ось (enabled/interval) не кладётся в
+        rule — меняется ровно то, что дёрнул пользователь. Форма publish идентична
+        `BackendDriver.telemetry_set`: `{"metrics": {metric: {enabled?, interval_sec?}}}`.
+        """
+        rule: dict[str, Any] = {}
+        if enabled is not None:
+            rule["enabled"] = bool(enabled)
+        if interval_sec is not None:
+            rule["interval_sec"] = float(interval_sec)
+        return {
+            "cmd": "telemetry.broadcast",
+            "publish": {"metrics": {metric: rule}},
+            "telemetry_mode": "merge",
+            "target": process_name,
+        }
+
+    def apply_telemetry_metric(
+        self,
+        process_name: str,
+        metric: str,
+        *,
+        enabled: bool | None = None,
+        interval_sec: float | None = None,
+    ) -> dict[str, Any]:
+        """Применить правку метрики через command-result-bridge (БЛОКИРУЮЩИЙ).
+
+        Зовётся с worker-потока RequestRunner'а (не из Qt main — иначе фриз, запрещено
+        планом): `request_system_command` ждёт ответ PM. Результат несёт охват
+        (`reached`) и `capped_by_throttle` (Task 1.4) — владелец покажет их в UI.
+        """
+        if self._command_sender is None:
+            return {"success": False, "error": "command_sender недоступен"}
+        command = self.telemetry_command(process_name, metric, enabled=enabled, interval_sec=interval_sec)
+        return self._command_sender.request_system_command(command)
+
     def get_health_summary(self) -> dict[str, Any]:
         """Сводка здоровья системы.
 

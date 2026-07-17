@@ -231,11 +231,22 @@ telemetry:
 
 ### Фаза 4 — GUI-контролы + docs (прототип, переиспользует read-model)
 
-#### Task 4.1 — GUI: тумблеры/частота метрик
+#### Task 4.1 — GUI: тумблеры/частота метрик ✅ DONE
 **Level:** Senior (Opus) · **Assignee:** teamlead · **Layer:** prototype
 **Goal:** в панели процесса/observability — вкл/выкл метрик + частота; запись через command-result-bridge (router),
   чтение статуса — из read-model (gui-telemetry-read-model). Контролы переиспустимы (constructor-виджеты).
 **Acceptance:** qt-smoke: тумблер выключает метрику (график перестаёт расти), частота меняется live.
+
+> **Реализация (2026-07-17):** конструкторный шаблонный виджет `TelemetryControlsSection`
+> (`processes/_telemetry_controls.py`) — строит строку на метрику В ЦИКЛЕ по списку `GATED_METRICS`
+> (не хардкод per-метрика): `[✓ вкл] метка | частота (interval_sec) | статус`. Запись — presenter
+> `apply_telemetry_metric` → `telemetry.broadcast {publish, mode=merge, target=<proc>}` через
+> command-result-bridge (RequestRunner off-main); результат несёт `capped_by_throttle` (Task 1.4
+> telemetry-coherence) → показывается в строке («no silent caps» доведено до пользователя). Статус —
+> из `TelemetryViewModel`. **qt-smoke PASSED** (dualcam_synth): 5 авто-строк, RU-метки/дефолты,
+> live-readout (fps 21.4/latency 46.0); выключение FPS заморозило его readout (gate применён end-to-end),
+> latency продолжил меняться; точечность (соседи целы); 0 ошибок, без фриза (tab-open инвариант зелёный).
+> +21 pytest-qt тест (`tests/test_telemetry_controls.py`).
 
 #### Task 4.2 — ADR + memory
 **Level:** Middle (Sonnet) · **Assignee:** tech-writer · **Layer:** docs

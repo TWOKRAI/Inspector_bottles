@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from multiprocess_framework.modules.process_module.heartbeat.telemetry import GATED_METRICS
 from multiprocess_prototype.frontend.bridge.request_runner import RequestRunner
 from multiprocess_prototype.frontend.forms.view_mode_toggle import ViewMode
 from multiprocess_prototype.frontend.state.telemetry_history import TelemetryHistorySource
@@ -46,6 +47,7 @@ from multiprocess_prototype.frontend.widgets.primitives import (
     EntityCard,
 )
 
+from ._telemetry_controls import TelemetryControlsSection
 from .widgets import CreateWorkerDialog, ProcessCard, TelemetrySparkline, WorkerTable
 
 if TYPE_CHECKING:
@@ -96,6 +98,24 @@ _GRAPH_RANGES: tuple[tuple[str, str, float], ...] = (
     ("1d", "1 день", 86400.0),
 )
 _DEFAULT_GRAPH_RANGE = "10m"
+
+# Шаблон секции «Телеметрия» (Ф4.1): RU-метки и дефолтные интервалы для метрик
+# framework GATED_METRICS. Ключи — те же метрики; отсутствующий ключ → сам ключ /
+# общий дефолт. Значения — app-specific presentation (framework даёт лишь список).
+_TELEMETRY_METRIC_LABELS: dict[str, str] = {
+    "fps": "FPS (кадров/с)",
+    "latency_ms": "Задержка, мс",
+    "effective_hz": "Частота цикла, Гц",
+    "cycle_duration_ms": "Длит. цикла, мс",
+    "shm": "SHM",
+}
+_TELEMETRY_METRIC_DEFAULTS: dict[str, float] = {
+    "fps": 1.0,
+    "latency_ms": 1.0,
+    "effective_hz": 1.0,
+    "cycle_duration_ms": 1.0,
+    "shm": 2.0,
+}
 # Верхняя граница точек, тащимых из БД на один запрос графика (даунсемпл — Task 2.1).
 _GRAPH_HISTORY_MAX_POINTS = 300
 
@@ -799,6 +819,19 @@ class SingleProcessPanel(QWidget):
         # диапазона 10 мин / 1 час / 1 день.
         page_layout.addWidget(self._build_graph_box())
 
+        # Секция управления телеметрией (Ф4.1): авто-строки контролов вкл/выкл +
+        # частота по списку метрик GATED_METRICS (шаблон, не хардкод). Запись —
+        # через command-result-bridge (RequestRunner), результат несёт caps.
+        self._telemetry_controls = TelemetryControlsSection(
+            self._process_name,
+            list(GATED_METRICS),
+            labels=_TELEMETRY_METRIC_LABELS,
+            defaults=_TELEMETRY_METRIC_DEFAULTS,
+            on_change=self._on_telemetry_change,
+        )
+        self._telemetry_runner = RequestRunner(self)
+        page_layout.addWidget(self._telemetry_controls)
+
         # Карточка + таблица + график прижаты вверх, без растягивания на всю высоту.
         page_layout.addStretch(1)
 
@@ -855,6 +888,30 @@ class SingleProcessPanel(QWidget):
         layout.addWidget(self._latency_sparkline)
 
         return box
+
+    # ------------------------------------------------------------------ #
+    #  Телеметрия: управляемая публикация (Ф4.1)                           #
+    # ------------------------------------------------------------------ #
+
+    def _on_telemetry_change(self, metric: str, enabled: bool | None, interval_sec: float | None) -> None:
+        """Пользователь дёрнул тумблер/частоту метрики → запись через bridge.
+
+        RequestRunner гонит блокирующий request на worker-потоке (main-thread не
+        фризится), результат (охват + ``capped_by_throttle``) приходит в main-thread
+        и уходит в секцию — «no silent caps» (Task 1.4) виден пользователю.
+        """
+        self._telemetry_runner.submit(
+            lambda: self._presenter.apply_telemetry_metric(
+                self._process_name, metric, enabled=enabled, interval_sec=interval_sec
+            ),
+            on_result=lambda res, m=metric: self._on_telemetry_result(m, res),
+        )
+
+    def _on_telemetry_result(self, metric: str, result: dict[str, Any]) -> None:
+        """Callback RequestRunner (main-thread): показать результат записи метрики."""
+        if self._is_destroyed or not hasattr(self, "_telemetry_controls"):
+            return
+        self._telemetry_controls.show_result(metric, result)
 
     def _on_graph_range_selected(self, key: str) -> None:
         """Переключить диапазон графика (кнопка 10 мин / 1 час / 1 день)."""
@@ -1274,6 +1331,9 @@ class SingleProcessPanel(QWidget):
         # не по каждому батчу). Дешёвая O(k)-выборка буфера, не I/O.
         if graph_touched and self._graph_range == "10m" and hasattr(self, "_fps_sparkline"):
             self._refresh_graph_from_ring()
+        # Ф4.1: обновить читаемый статус строк телеметрии из read-model (fps/latency).
+        if graph_touched and hasattr(self, "_telemetry_controls"):
+            self._telemetry_controls.update_readouts(self._telemetry)
 
     # --- Fallback: прежний bindings-путь ------------------------------- #
 
