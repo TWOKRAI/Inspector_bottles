@@ -153,7 +153,7 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 **Out of scope:** серверная сторона.
 **Заметка:** `smoke_proof.py`/`telemetry_probe.py` тоже переведены на резолвер (не были в списке Files, но содержали 8765). `g7_fault_probe.py` оставлен с явным `_PORT=8791` (осознанная изоляция от общих фикстур, не дубль дефолта).
 
-### Task 0.2 — Гонка close()/request() + карантин поздних ответов
+### Task 0.2 — Гонка close()/request() + карантин поздних ответов  ✅ (2dbb8b8a)
 **Level:** Middle+ (Sonnet) | **Assignee:** developer | **Layer:** tests/tooling
 **Goal:** закрыть баги гонки и псевдо-событий.
 **Files:** `backend_ctl/driver.py`, `backend_ctl/tests/test_driver.py`.
@@ -161,9 +161,10 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 1. `_send_raw`: вместо `assert self._sock is not None` — проверка под `_write_lock` + `raise ConnectionError`; в `request()` перехват → `{"success": False, "error": "connection closed"}`.
 2. Поздние ответы: при таймауте `request()` кладёт `request_id` в `_timed_out` (TTL 60с, lazy-purge); `_dispatch` такие дропает + счётчик `late_replies` (property) — НЕ псевдо-событие.
 **Acceptance:**
-- [ ] Тест: `close()` из другого потока при in-flight `request()` → error-dict, не AssertionError (стресс 100 итераций)
-- [ ] Тест: ответ после таймаута не появляется в `events()`, `late_replies` растёт
+- [x] Тест: `close()` из другого потока при in-flight `request()` → error-dict, не AssertionError (стресс 100 итераций)
+- [x] Тест: ответ после таймаута не появляется в `events()`, `late_replies` растёт
 **Out of scope:** reconnect (0.3).
+**Статус:** ✅ 2dbb8b8a (test_driver.py 33/33; +`_send_raw` захват сокета под локом, +`_quarantine_timed_out`)
 
 ### Task 0.3 — Единый контракт ошибок + durable-подписки при reconnect (ежедневная боль №1)
 **Level:** Senior (Opus) | **Assignee:** teamlead | **Layer:** tests/tooling
