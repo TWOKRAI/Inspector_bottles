@@ -131,3 +131,4 @@
 - [Telemetry GUI controls](project_telemetry_gui_controls.md) — Ф4.1: шаблонная секция вкл/выкл+частота метрик (цикл по GATED_METRICS), cap-aware, qt-smoke verified
 - [Telemetry dashboard](project_telemetry_dashboard.md) — PyQtGraph как единая система графиков + TelemetryChart (framework) + дашборд «Все процессы» + crosshair/зум; план ЗАКРЫТ
 - [Telemetry publish control](project_telemetry_publish_control.md) — план ЗАКРЫТ (ADR-PM-018): errors always-on, logs/stats/telemetry вкл/выкл+частота у источника (publisher-gate), central-throttle=IPC-страховка; residual — каскад двух плоскостей
+- [backend_ctl framework-module](project_backend_ctl_framework_module.md) — Phase 0+2 в main (agent=GUI-паритет: observability_tail/watch_like_gui/introspect.memory на текущей раскладке); урок: авто-resub из reader-потока=дедлог → applier-поток; переезд/SDK/2.3 отложены
