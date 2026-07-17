@@ -140,6 +140,12 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 
 ## Phase 0 — Hardening на текущей раскладке (Этап 1, СЕЙЧАС; ветка `feat/backend-ctl-hardening`)
 
+> **✅ PHASE 0 ЗАВЕРШЕНА (2026-07-17).** Все 5 задач закрыты на ветке `feat/backend-ctl-hardening`
+> (worktree, изолированно от параллельной телеметрии). Итог: 9be0b852 · 2dbb8b8a · 3c74b129 · a0adb2e3 · 1a420c81.
+> backend_ctl unit ~109 зелёных + live harness_smoke зелёный. Единственный красный live-тест
+> (`test_mcp_server_live_against_backend`) — **pre-existing** (воспроизводится на чистом HEAD, не регресс).
+> Готово к мержу в main (после/параллельно coherence Фазы 1). Дальше — Phases 1–4 (после codemod).
+
 ### Task 0.1 — Единый источник endpoint-конфига  ✅ (9be0b852)
 **Level:** Middle (Sonnet) | **Assignee:** developer | **Layer:** mixed
 **Goal:** убрать 5 хардкодов 8765; клиент читает те же env, что сервер.
@@ -196,7 +202,7 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 **Out of scope:** перенос harness во framework.
 **Статус:** ✅ a0adb2e3. `unwrap(res, *keys, leaf=)` — единый распаковщик (аргумент `keys` позиционный, не kw). `_discover_processes` дедуплицирован. Публичные `port`/`host`/`dispatch_raw`.
 
-### Task 0.5 — Telemetry в MCP на текущем реестре (дешёвый ежедневный win, из ревью)
+### Task 0.5 — Telemetry в MCP на текущем реестре (дешёвый ежедневный win, из ревью)  ✅ (1a420c81)
 **Level:** Middle (Sonnet) | **Assignee:** developer | **Layer:** tests/tooling
 **Goal:** агенты получают `telemetry_reconfigure`/`telemetry_set` через MCP немедленно, не дожидаясь SDK.
 **Files:** `backend_ctl/mcp_tools.py`, `backend_ctl/tests/test_mcp_server.py`, `backend_ctl/README.md`, `backend_ctl/AGENTS.md`.
@@ -204,9 +210,10 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 1. Два `ToolSpec`, зеркалящие существующие driver-методы (:696, :751): схемы publish/throttle/mode/plane; описания предупреждают о wipe в `replace` и советуют `telemetry_set` для точечных правок.
 2. Обновить `test_expected_tool_set`; README/AGENTS — упомянуть инструменты.
 **Acceptance:**
-- [ ] `tools/list` содержит `telemetry_reconfigure`/`telemetry_set`; unit-тест dispatch на fake-driver
-- [ ] Семантика на проводе НЕ меняется (только регистрация; driver-методы не трогаются)
+- [x] `tools/list` содержит `telemetry_reconfigure`/`telemetry_set`; unit-тест dispatch на fake-driver
+- [x] Семантика на проводе НЕ меняется (только регистрация; driver-методы не трогаются)
 **Out of scope:** SDK, annotations, новые driver-методы.
+**Статус:** ✅ 1a420c81. Handlers пробрасывают только присутствующие ключи (сохранена `_UNSET`-семантика; `publish=null` доходит как «выключить gate»). Live-тест телеметрии — Task 4.1.
 
 ---
 
