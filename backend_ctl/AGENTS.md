@@ -85,9 +85,13 @@ PY
 | `ui_tap_ping("gui", note=...)` | синтетическое `ui.event` тем же путём доставки — проверка цепочки без клика |
 | `debug_session(logs_level=, state_pattern=, log_processes=)` / `debug_stop()` | ВСЯ отладочная плоскость одним вызовом: ui_tap + log_tail (по умолчанию на все процессы топологии) + state_subscribe; дизайн — `plans/2026-07-06_constructor-master/debug-plane-idea.md` |
 | `subscribe(cb)` / `events(timeout)` | событийный канал: колбэк или слив накопленных push-событий |
+| `telemetry_set(process, metric, enabled=, interval_sec=, plane=)` | **точечно** поменять ОДНУ метрику/правило телеметрии (merge — соседей не сносит); `plane="publisher"` (частота публикации) или `"throttle"` (central rate-limit) |
+| `telemetry_reconfigure(process="all", publish=, throttle=, mode=)` | секцией: publisher-gate и/или central-троттл; `mode="replace"` (дефолт) применяет ЦЕЛИКОМ (**wipe** неуказанных) — для одной метрики предпочитай `telemetry_set` |
 | `request(message, timeout=None)` | низкоуровневый: готовый router-dict → ответ по `request_id` |
 
 Все обёртки возвращают `result` из ответа, либо `{"success": False, "error": "timeout"/"not connected"/...}`.
+Те же имена доступны как MCP-инструменты (`telemetry_set`/`telemetry_reconfigure` — Task 0.5).
+После реконнекта MCP-сервера подписки (`state_subscribe`/`log_tail`/`ui_tap`) восстанавливаются автоматически (Task 0.3).
 
 ### Примеры
 

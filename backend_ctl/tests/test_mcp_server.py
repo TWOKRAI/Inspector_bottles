@@ -130,6 +130,8 @@ class TestRegistry:
             "config_reload",
             "logger_sink_enable",
             "logger_sink_disable",
+            "telemetry_reconfigure",
+            "telemetry_set",
         }
         assert names == expected
 
@@ -560,3 +562,61 @@ class TestErrorContract:
             assert isinstance(res, dict), fn
             assert res.get("success") is False, (fn, res)
             assert "error" in res, (fn, res)
+
+
+class TestTelemetryTools:
+    """Task 0.5: telemetry_* зарегистрированы в MCP и диспетчатся на driver 1:1."""
+
+    def test_reconfigure_passes_only_present_keys(self) -> None:
+        server, fake = make_server()
+        call(
+            server,
+            "tools/call",
+            {
+                "name": "telemetry_reconfigure",
+                "arguments": {
+                    "process": "preprocessor",
+                    "publish": {"metrics": {"fps": {"enabled": True}}},
+                    "mode": "merge",
+                },
+            },
+        )
+        name, args, kwargs = fake.calls[0]
+        assert name == "telemetry_reconfigure"
+        assert args == ("preprocessor",)
+        assert kwargs == {"publish": {"metrics": {"fps": {"enabled": True}}}, "mode": "merge"}
+        assert "throttle" not in kwargs  # не передан → _UNSET-семантика сохранена
+
+    def test_reconfigure_defaults_process_to_all(self) -> None:
+        server, fake = make_server()
+        call(server, "tools/call", {"name": "telemetry_reconfigure", "arguments": {"throttle": {"fps": 0.1}}})
+        _, args, kwargs = fake.calls[0]
+        assert args == ("all",)
+        assert kwargs == {"throttle": {"fps": 0.1}}
+
+    def test_reconfigure_explicit_null_publish_preserved(self) -> None:
+        # Явный null у publish = «выключить gate» — должен дойти до driver (не потеряться).
+        server, fake = make_server()
+        call(server, "tools/call", {"name": "telemetry_reconfigure", "arguments": {"process": "p", "publish": None}})
+        _, args, kwargs = fake.calls[0]
+        assert kwargs == {"publish": None}
+
+    def test_set_dispatches_1to1(self) -> None:
+        server, fake = make_server()
+        call(
+            server,
+            "tools/call",
+            {
+                "name": "telemetry_set",
+                "arguments": {"process": "p", "metric": "fps", "enabled": False, "plane": "publisher"},
+            },
+        )
+        name, args, kwargs = fake.calls[0]
+        assert name == "telemetry_set"
+        assert args == ("p", "fps")
+        assert kwargs == {"enabled": False, "plane": "publisher"}
+
+    def test_tools_present_in_list(self) -> None:
+        server, _ = make_server()
+        tools = {t["name"] for t in call(server, "tools/list")["result"]["tools"]}
+        assert {"telemetry_reconfigure", "telemetry_set"} <= tools

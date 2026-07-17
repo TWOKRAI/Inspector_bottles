@@ -120,9 +120,7 @@ def _system_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 
 def _set_register(drv: BackendDriver, args: Dict[str, Any]) -> Any:
-    return drv.set_register(
-        args["process"], args["register"], args["field"], args.get("value"), **_kw_timeout(args)
-    )
+    return drv.set_register(args["process"], args["register"], args["field"], args.get("value"), **_kw_timeout(args))
 
 
 def _set_register_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -136,9 +134,7 @@ def _state_get(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 
 def _state_get_subtree(drv: BackendDriver, args: Dict[str, Any]) -> Any:
-    return drv.send_command(
-        "ProcessManager", "state.get_subtree", {"path": args.get("path", "")}, **_kw_timeout(args)
-    )
+    return drv.send_command("ProcessManager", "state.get_subtree", {"path": args.get("path", "")}, **_kw_timeout(args))
 
 
 def _state_subscribe(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -204,6 +200,30 @@ def _logger_sink_enable(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 def _logger_sink_disable(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.logger_sink_disable(args["process"], args["sink"], **_kw_timeout(args))
+
+
+def _telemetry_reconfigure(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    # publish/throttle пробрасываем ТОЛЬКО если ключ присутствует: явный null у publish —
+    # валидная команда «выключить gate», её нельзя путать с «не передано» (_UNSET в driver).
+    kw: Dict[str, Any] = {}
+    if "publish" in args:
+        kw["publish"] = args["publish"]
+    if "throttle" in args:
+        kw["throttle"] = args["throttle"]
+    if args.get("mode"):
+        kw["mode"] = args["mode"]
+    return drv.telemetry_reconfigure(args.get("process", "all"), **kw, **_kw_timeout(args))
+
+
+def _telemetry_set(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    kw: Dict[str, Any] = {}
+    if "enabled" in args:
+        kw["enabled"] = args["enabled"]
+    if "interval_sec" in args:
+        kw["interval_sec"] = args["interval_sec"]
+    if args.get("plane"):
+        kw["plane"] = args["plane"]
+    return drv.telemetry_set(args["process"], args["metric"], **kw, **_kw_timeout(args))
 
 
 # ---------------------------------------------------------------------------
@@ -392,13 +412,17 @@ TOOLS: List[ToolSpec] = [
         "ui_tap",
         "Отладка фронтенда: подписаться на UI-события gui (нажатия кнопок, переключения "
         "табов) — события едут push'ем (command='ui.event') — читать инструментом events.",
-        _obj({"process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"}, "timeout": _TIMEOUT}),
+        _obj(
+            {"process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"}, "timeout": _TIMEOUT}
+        ),
         _ui_tap,
     ),
     ToolSpec(
         "ui_untap",
         "Снять подписку на UI-события gui.",
-        _obj({"process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"}, "timeout": _TIMEOUT}),
+        _obj(
+            {"process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"}, "timeout": _TIMEOUT}
+        ),
         _ui_untap,
     ),
     ToolSpec(
@@ -485,6 +509,69 @@ TOOLS: List[ToolSpec] = [
             ["process", "sink"],
         ),
         _logger_sink_disable,
+    ),
+    ToolSpec(
+        "telemetry_reconfigure",
+        "Рантайм-переконфигурация телеметрии: publisher-gate (что процесс считает/публикует и как "
+        "часто) и/или central-троттл оркестратора. process='all' (дефолт) — fan-out на всех детей; "
+        "имя процесса — адресно. mode='replace' (дефолт) ПРИМЕНЯЕТ СЕКЦИЮ ЦЕЛИКОМ — ОСТОРОЖНО: сносит "
+        "неуказанные метрики/правила (включая дефолтную IPC-страховку). Для точечной правки ОДНОЙ "
+        "метрики без сноса соседей используй telemetry_set (он и есть merge). Меняет поведение бэкенда "
+        "(разрушающий).",
+        _obj(
+            {
+                "process": {
+                    "type": "string",
+                    "description": "Имя процесса или 'all'/'*' (fan-out на всех детей). По умолчанию 'all'.",
+                },
+                "publish": {
+                    "type": ["object", "null"],
+                    "description": "Publisher-gate config ({'metrics': {...}}). null = выключить gate.",
+                    "additionalProperties": True,
+                },
+                "throttle": {
+                    "type": ["object", "null"],
+                    "description": "Central store-троттл оркестратора ({glob_path: min_interval_sec}).",
+                    "additionalProperties": True,
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["replace", "merge"],
+                    "description": "replace (дефолт, ЦЕЛИКОМ, wipe) | merge (дельта поверх живого состояния).",
+                },
+                "timeout": _TIMEOUT,
+            },
+        ),
+        _telemetry_reconfigure,
+    ),
+    ToolSpec(
+        "telemetry_set",
+        "Точечно поменять ОДНУ метрику/правило телеметрии (merge поверх живого состояния — соседние "
+        "override'ы и правила сохраняются). plane='publisher' (дефолт, главный рычаг частоты публикации) "
+        "или plane='throttle' (central rate-limit; metric трактуется как glob-путь, требуется interval_sec). "
+        "Безопаснее telemetry_reconfigure(mode='replace') для правки одной метрики. Меняет поведение бэкенда.",
+        _obj(
+            {
+                "process": {"type": "string", "description": "Имя процесса или 'all' (fan-out через PM)."},
+                "metric": {
+                    "type": "string",
+                    "description": "Имя метрики (publisher) ИЛИ glob-путь правила (throttle), напр. 'fps'.",
+                },
+                "enabled": {"type": "boolean", "description": "Включить/выключить публикацию метрики (publisher)."},
+                "interval_sec": {
+                    "type": ["number", "null"],
+                    "description": "Интервал публикации/min-интервал правила, сек (для throttle обязателен).",
+                },
+                "plane": {
+                    "type": "string",
+                    "enum": ["publisher", "throttle"],
+                    "description": "publisher (дефолт) — частота публикации | throttle — central rate-limit.",
+                },
+                "timeout": _TIMEOUT,
+            },
+            ["process", "metric"],
+        ),
+        _telemetry_set,
     ),
 ]
 
