@@ -3,13 +3,13 @@
 # Назначение: измерить FPS/latency p50-p99/границы-процесса на кадр БЕЗ
 # реального железа (tier: синтетика) — воспроизводимо на любой машине CI.
 # НЕ прод-рецепт: не выставлен в GUI-каталоге как основной сценарий, только
-# для headless-прогона через BackendHarness/backend_ctl.g1_perf_probe.
+# для headless-прогона через BackendHarness/backend_ctl.probes.g1_perf_probe.
 #
 # Тракт (2 процесса, ровно 1 граница IPC на кадр):
 #   synthetic_source[synthetic_frame_source] → consumer[frame_counter]
 #
 # Запуск headless:
-#   BACKEND_CTL=1 FW_PERF_PROBES=1 python -m backend_ctl.g1_perf_probe
+#   BACKEND_CTL=1 FW_PERF_PROBES=1 python -m backend_ctl.probes.g1_perf_probe
 name: g1_perf_probe
 version: 1
 description: "Synthetic source → frame_counter — Ф7 G.1 perf-baseline (tier: синтетика)"

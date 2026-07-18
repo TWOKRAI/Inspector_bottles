@@ -11,7 +11,7 @@ metadata:
 План `plans/2026-07-06_constructor-master/g7-flip-plan.md`, все числа — в baseline.md.
 
 **Что сделано:** по одному `FW_*`-флагу за шаг ПОВЕРХ предыдущих, замер на каждом через
-`backend_ctl.g1_perf_probe 12` (tier синтетика, Windows — same-tier референс ШАГ 0). Шаги 1-9
+`backend_ctl.probes.g1_perf_probe 12` (tier синтетика, Windows — same-tier референс ШАГ 0). Шаги 1-9
 включены, gate ✓ на каждом. Шаг 10 `FW_GC_SCHEDULED` — **measurement-gated OFF** (после gc_freeze
 GC-выбросов p99 нет → условие активации не выполнено; решение на soak Фазы 3, НЕ провален).
 

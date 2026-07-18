@@ -157,11 +157,12 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 **Goal:** минимальный live-тест (реальный spawn через harness, локально): watch_like_gui → snapshot непуст → разрыв соединения → replay подписок + watch-resume → tail продолжается. Прогнать **до** C.1 (зафиксировать зелёным) и **после** C.1 (доказательство «бит-в-бит» не только на fake-транспорте).
 **Files:** `backend_ctl/tests/test_reconnect_live.py` (маркер `live`, skip при недоступном окружении).
 **Acceptance:**
-- [ ] live-тест зелёный до сплита (baseline-коммит) и после сплита; в CI по маркеру, локально обязателен для C.1
+- [x] live-тест зелёный до сплита (baseline-коммит `197a54af`) и после каждого шага сплита; маркер `harness_smoke`, стабилен 3/3 (~9-10с)
 
 ### Task C.1 — Распил driver.py (1922 стр) на модули (текущая раскладка)
 **Level:** Senior (Opus) | **Layer:** tools
-**Goal:** god-file → пакет `backend_ctl/driver/` (transport / protocol / events / subscriptions / domains/* / watch), поведение бит-в-бит.
+**Status (2026-07-18):** ЧАСТИЧНО. Вынесены две независимые от транспорта зоны как соседние модули (чистый git mv пост-codemod): `protocol.py` (`ce222be6` — unwrap + 6 dataclass'ов) и `subscriptions.py` (`ab95d23d` — `_SubscriptionRegistry`). driver.py 1922 → ~1694, C.0 зелёный после каждого шага, реэкспорт сохраняет back-compat. **Отложено (сцеплено с concurrency-ядром Phase A — заслуживает отдельного захода + ревью):** transport (`SocketConnection`: сокет/reader/request), events (`EventHub` — но его перестраивает B.1), watch (`WatchController`). Событийный `events()` читает транспортные `_running`/`_reader`, `_emit_event` — из reader-потока, watch дёргает request+subscribe: composition-распил трогает ровно тот reader/close()/watch-контур, что чинился и ревьюился в Phase A.
+**Goal:** god-file → соседние модули (transport / protocol / events / subscriptions / domains/* / watch), поведение бит-в-бит.
 **Проблема:** транспорт + протокол + 5 датаклассов + ~30 обёрток + watch-стейт-машина (~15 полей: lock/active/subscribed/listener/queue/thread/манифест) в одном классе. Watch-машина — готовый модуль, живущий полями чужого класса.
 **Files:** новый пакет `backend_ctl/driver/` + re-export-шим `backend_ctl/driver.py`; tests на новых импортах.
 **Steps:**
@@ -176,7 +177,7 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 **Goal:** `STATUS.md` + `interfaces.py` (Protocol) для backend_ctl; probe-скрипты из корня в `backend_ctl/probes/`.
 **Files:** `backend_ctl/STATUS.md`, `backend_ctl/interfaces.py`, `backend_ctl/probes/` (перенос g1/g7/telemetry_probe/smoke_proof/… с шимами при нужде).
 **Acceptance:**
-- [ ] `interfaces.py`: `IBackendClient`/`IEventSource`/`ISubscriptionRegistry` (Protocol); probes не в корне; `scripts/validate.py` чист
+- [x] `interfaces.py`: `IBackendClient`/`IEventSource`/`ISubscriptionRegistry` (Protocol, runtime_checkable + контракт-тест); `STATUS.md`; 6 probes → `backend_ctl/probes/` (fix `__file__`-путей + ссылок); `scripts/validate.py` чист
 
 ---
 

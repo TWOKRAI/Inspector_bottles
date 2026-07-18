@@ -7,7 +7,7 @@ introspect.handlers подтверждает: у `preprocessor` (плагин re
 Ровно та диагностика, что в Этапе 2 заняла ~30 шагов qt-mcp.
 
 Запуск:
-    BACKEND_CTL=1 python -m backend_ctl.smoke_proof
+    BACKEND_CTL=1 python -m backend_ctl.probes.smoke_proof
 """
 
 from __future__ import annotations

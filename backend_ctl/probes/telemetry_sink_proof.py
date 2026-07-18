@@ -10,7 +10,7 @@
 вертикальный срез subscribe→sample-worker→SQLite собирается и пишет в проде.
 
 Запуск:
-    python -m backend_ctl.telemetry_sink_proof
+    python -m backend_ctl.probes.telemetry_sink_proof
 """
 
 from __future__ import annotations

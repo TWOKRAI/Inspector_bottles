@@ -15,7 +15,7 @@
 #   BACKEND_CTL=1 FW_PERF_PROBES=1 FW_SHM_OWNER_INCARNATION=1 FW_SHM_SEQLOCK=1 \
 #   FW_SHM_HANDLE_CACHE=1 FW_QOS_PROFILES=1 FW_SHM_ZERO_COPY=1 FW_SHM_LOAN_PROTOCOL=1 \
 #   FW_DATA_PLANE_DICTS=1 FW_USE_KIND_CHANNELS=1 FW_GC_FREEZE=1 \
-#   python -m backend_ctl.g7_dualcam_probe   (нужна подключённая камера на device_id=0)
+#   python -m backend_ctl.probes.g7_dualcam_probe   (нужна подключённая камера на device_id=0)
 name: dualcam_webcam
 version: 1
 description: "Реальная вебкамера + синтетическая 2-я камера — Ф7 G.7 мультикамерный soak"

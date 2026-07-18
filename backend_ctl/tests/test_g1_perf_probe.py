@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Тесты чистых хелперов perf-пробника Ф7 G.1/G.7 (``backend_ctl.g1_perf_probe``).
+"""Тесты чистых хелперов perf-пробника Ф7 G.1/G.7 (``backend_ctl.probes.g1_perf_probe``).
 
 Только форма разбора dict-ответа ``introspect.router_stats`` — без запуска системы.
 Гейт лесенки G.7 (§0/§1) читает счётчики потерь SHM через :func:`_shm_counters`;
@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from backend_ctl.g1_perf_probe import _COUNTER_KEYS, _shm_counters
+from backend_ctl.probes.g1_perf_probe import _COUNTER_KEYS, _shm_counters
 
 # Реальная форма (снято с живого бэкенда): внешний конверт success + payload под
 # result, счётчики — под router_stats. Парсер обязан спуститься и достать их.

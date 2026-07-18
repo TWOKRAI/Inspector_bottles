@@ -14,7 +14,7 @@
       fork-safe конфиг `start()` (fork_safe=True + check_same_thread=False, подписка processes/system),
       гонка flush/worker (`_write_lock`, 20 потоков на файловой БД). ruff чисто.
 - [x] **Task 3.2** — live headless-приёмка `backend_ctl/telemetry_sink_proof.py`
-      (`python -m backend_ctl.telemetry_sink_proof`): реальный процесс telemetry_sink + SQLManager →
+      (`python -m backend_ctl.probes.telemetry_sink_proof`): реальный процесс telemetry_sink + SQLManager →
       20 строк в `data/telemetry.db` (camera_0/system/ProcessManager/telemetry_sink × 5 окон),
       `total_written=20` в логе совпал с числом строк, ноль ошибок пула/fork.
 

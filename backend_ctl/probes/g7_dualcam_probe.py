@@ -11,7 +11,7 @@ FW_SHM_OWNER_INCARNATION разводит имена SHM-сегментов вл
   BACKEND_CTL=1 FW_PERF_PROBES=1 FW_SHM_SEQLOCK=1 FW_SHM_OWNER_INCARNATION=1 \
   FW_SHM_HANDLE_CACHE=1 FW_QOS_PROFILES=1 FW_SHM_ZERO_COPY=1 FW_SHM_LOAN_PROTOCOL=1 \
   FW_DATA_PLANE_DICTS=1 FW_USE_KIND_CHANNELS=1 FW_GC_FREEZE=1 \
-  python -m backend_ctl.g7_dualcam_probe [duration_sec]
+  python -m backend_ctl.probes.g7_dualcam_probe [duration_sec]
 
 Числа печатаются json → в baseline.md вручную (живой документ плана).
 """
@@ -24,9 +24,9 @@ import sys
 import time
 from pathlib import Path
 
-from backend_ctl.g1_perf_probe import _shm_counters
+from backend_ctl.probes.g1_perf_probe import _shm_counters
 
-_RECIPES = Path(__file__).resolve().parent.parent / "multiprocess_prototype" / "recipes"
+_RECIPES = Path(__file__).resolve().parent.parent.parent / "multiprocess_prototype" / "recipes"
 _RECIPE = _RECIPES / "dualcam_synth.yaml"
 _PORT = 8792
 

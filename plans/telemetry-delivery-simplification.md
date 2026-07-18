@@ -236,7 +236,7 @@ GUI: message_processor → message_dispatcher → GuiStateProxy.on_state_changed
 4. Тесты: unit на агрегацию (несколько воркеров → ожидаемый fps/latency); тест что application-воркер отдаёт effective_hz.
 
 **Acceptance criteria:**
-- [ ] Probe `BACKEND_CTL=1 python -m backend_ctl.telemetry_probe` (или аналог) показывает `processes.X.state.fps` и `state.latency_ms` непустыми для running-процессов.
+- [ ] Probe `BACKEND_CTL=1 python -m backend_ctl.probes.telemetry_probe` (или аналог) показывает `processes.X.state.fps` и `state.latency_ms` непустыми для running-процессов.
 - [ ] **qt-mcp smoke:** карточки показывают FPS — число (не «—»), Latency — число.
 - [ ] `python scripts/run_framework_tests.py` без новых fail.
 

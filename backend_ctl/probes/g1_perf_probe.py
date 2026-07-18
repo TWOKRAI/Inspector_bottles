@@ -14,7 +14,7 @@
     .frame_boundary_crossings`` / отправленных кадров).
 
 Запуск:
-    BACKEND_CTL=1 python -m backend_ctl.g1_perf_probe [duration_sec]
+    BACKEND_CTL=1 python -m backend_ctl.probes.g1_perf_probe [duration_sec]
 
 Числа печатаются в консоль (json) — переносятся в baseline.md вручную
 (живой документ плана, не генерируется автоматически).
@@ -28,7 +28,7 @@ import sys
 import time
 from pathlib import Path
 
-_RECIPES = Path(__file__).resolve().parent.parent / "multiprocess_prototype" / "recipes"
+_RECIPES = Path(__file__).resolve().parent.parent.parent / "multiprocess_prototype" / "recipes"
 _RECIPE = _RECIPES / "g1_perf_probe.yaml"
 
 

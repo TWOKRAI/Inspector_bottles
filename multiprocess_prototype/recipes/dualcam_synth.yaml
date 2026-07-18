@@ -15,7 +15,7 @@
 #
 # Запуск headless (полный набор флагов):
 #   BACKEND_CTL=1 FW_PERF_PROBES=1 FW_SHM_OWNER_INCARNATION=1 ... \
-#   python -m backend_ctl.g7_dualcam_probe
+#   python -m backend_ctl.probes.g7_dualcam_probe
 name: dualcam_synth
 version: 1
 description: "Две синтетические камеры → два счётчика — Ф7 G.7 мультикамерный tier"
