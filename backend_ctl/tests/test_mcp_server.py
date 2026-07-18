@@ -662,7 +662,8 @@ class TestReadinessProbe:
                 return {"success": self.n >= 2}  # готов со второй пробы
 
         drv = _Drv()
-        assert DriverSession._await_ready(drv, attempts=3, probe_timeout=0.01) is True
+        session = DriverSession(driver_factory=lambda: None, log=lambda m: None)
+        assert session._await_ready(drv, attempts=3, probe_timeout=0.01) is True
         assert drv.n == 2
 
     def test_await_ready_gives_up_after_attempts(self) -> None:
@@ -672,7 +673,8 @@ class TestReadinessProbe:
             def introspect_status(self, process, *, timeout=None):
                 return {"success": False, "error": "timeout"}
 
-        assert DriverSession._await_ready(_Drv(), attempts=3, probe_timeout=0.01) is False
+        session = DriverSession(driver_factory=lambda: None, log=lambda m: None)
+        assert session._await_ready(_Drv(), attempts=3, probe_timeout=0.01) is False
 
 
 class TestErrorContract:

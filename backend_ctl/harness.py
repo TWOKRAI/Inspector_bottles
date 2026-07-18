@@ -359,11 +359,19 @@ class BackendHarness:
                     if time.monotonic() >= deadline:
                         raise
                     time.sleep(0.1)
+            ready = False
             while time.monotonic() < deadline:
                 res = drv.introspect_status("ProcessManager", timeout=2.0)
                 if isinstance(res, dict) and res.get("success"):
+                    ready = True
                     break
                 time.sleep(0.1)
+            if not ready:
+                # A.4: не молчим о непрогретости — иначе первый вызов теста таймаутит
+                # без причины. Driver отдаём (best-effort), но с явным сигналом в лог.
+                self._log(
+                    f"[harness] PM не подтвердил готовность за дедлайн — driver отдан непрогретым (порт {self._port})"
+                )
             self._driver = drv
             return drv
         except Exception:

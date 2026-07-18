@@ -53,8 +53,11 @@ class DriverSession:
         # F2: манифест активного watch-профиля переживает реконнект — после replay'я
         # намерений новый driver ПОДНИМАЕТ watch-контур (слушатель+applier).
         self._watch_manifest: Optional[Dict[str, Any]] = None
-        # Одноразовый отчёт о состоявшемся реконнекте — вливается в следующий tool-ответ.
+        # Одноразовый отчёт (реконнект / прогрев) — вливается в следующий tool-ответ.
         self._reconnect_report: Optional[Dict[str, Any]] = None
+        # A.4: подтверждена ли готовность PM readiness-пробой. False → бэкенд ещё
+        # прогревается (первый вызов может таймаутить) — не молчим об этом.
+        self._ready: bool = True
         self._log = log or (lambda m: print(m, file=sys.stderr, flush=True))
 
     @property
@@ -75,19 +78,36 @@ class DriverSession:
         self._await_ready(drv)
         return drv
 
-    @staticmethod
-    def _await_ready(drv: BackendDriver, *, attempts: int = 3, probe_timeout: float = 2.0) -> bool:
-        """Пинг-проба готовности PM (3 ретрая). best-effort: неответ не бросает —
-        первый реальный вызов инструмента и так покажет ошибку с понятным текстом."""
+    def _await_ready(self, drv: BackendDriver, *, attempts: int = 3, probe_timeout: float = 2.0) -> bool:
+        """Пинг-проба готовности PM (3 ретрая). best-effort: неответ не бросает.
+
+        A.4: если готовность НЕ подтверждена за дедлайн — больше не молчим. Ставим
+        флаг ``_ready=False``, логируем warning и кладём одноразовый маркер
+        ``backend_warming`` в следующий tool-ответ, чтобы агент видел причину
+        непонятного таймаута первого вызова (бэкенд ещё прогревается), а не гадал.
+        """
         for _ in range(attempts):
             try:
                 res = drv.introspect_status("ProcessManager", timeout=probe_timeout)
             except Exception:  # noqa: BLE001 — проба не должна ронять старт
                 res = None
             if isinstance(res, dict) and res.get("success") is True:
+                self._ready = True
                 return True
             time.sleep(0.1)
+        self._ready = False
+        self._log(
+            f"[mcp] readiness: PM на {self._host}:{self._port} не подтвердил готовность за "
+            f"{attempts}×{probe_timeout}s — бэкенд прогревается, первый вызов может таймаутить"
+        )
+        self._note_report(backend_warming=True)
         return False
+
+    def _note_report(self, **fields: Any) -> None:
+        """Домержить поля в одноразовый tool-отчёт (реконнект/прогрев не затирают друг друга)."""
+        report = self._reconnect_report or {}
+        report.update(fields)
+        self._reconnect_report = report
 
     # ---- Lifecycle ----
 
@@ -106,20 +126,26 @@ class DriverSession:
                     "Подними систему с BACKEND_CTL=1 (например `python multiprocess_prototype/run.py` "
                     "или BackendHarness) и повтори вызов."
                 ) from exc
+            except Exception as exc:  # noqa: BLE001 — любое исключение фабрики → понятный контракт
+                # Контракт «driver не бросает» — на уровне сессии: не-OSError (сборка
+                # driver'а, кривой fake, protocol) тоже становится BackendUnavailable,
+                # а не сырым исключением сквозь MCP-протокол.
+                raise BackendUnavailable(
+                    f"не удалось поднять driver к {self._host}:{self._port} "
+                    f"({type(exc).__name__}: {exc}). Проверь, что бэкенд запущен с BACKEND_CTL=1."
+                ) from exc
             # Реконнект: восстановить durable-подписки на новом driver'е (Task 0.3).
             if self._sub_intents:
                 self._driver.import_subscriptions(self._sub_intents)
                 resubscribed = self._driver.replay_subscriptions()
-                self._reconnect_report = {"reconnected": True, "resubscribed": resubscribed}
+                self._note_report(reconnected=True, resubscribed=resubscribed)
                 self._log(f"[mcp] реконнект: replay {len(resubscribed)} подписк(и)")
             # F2: если watch был активен — поднять watch-КОНТУР на новом driver'е (слушатель
             # + applier). Серверные подписки уже восстановлены replay'ем выше; resume_watch
             # НЕ переподписывает, только оживляет авто-resub и делает unwatch управляемым.
             if self._watch_manifest and self._watch_manifest.get("active") and hasattr(self._driver, "resume_watch"):
                 wr = self._driver.resume_watch(self._watch_manifest)
-                report = self._reconnect_report or {"reconnected": True}
-                report["watch_resumed"] = bool(isinstance(wr, dict) and wr.get("resumed"))
-                self._reconnect_report = report
+                self._note_report(reconnected=True, watch_resumed=bool(isinstance(wr, dict) and wr.get("resumed")))
                 self._log(f"[mcp] реконнект: watch-контур восстановлен ({wr})")
         return self._driver
 

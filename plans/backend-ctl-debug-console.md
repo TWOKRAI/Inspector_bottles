@@ -95,7 +95,7 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 
 Шаги 1 и 2 независимы — коммитить раздельно, чтобы откат одного не тянул второй.
 **Acceptance:**
-- [ ] unit: фабрика бросает не-OSError → `BackendUnavailable`, не сырое; readiness-таймаут → warning + флаг
+- [x] unit: фабрика бросает не-OSError → `BackendUnavailable`, не сырое; readiness-таймаут → warning + флаг `_ready=False` + `backend_warming` в отчёте; harness.start() логирует непрогретость
 
 ---
 
