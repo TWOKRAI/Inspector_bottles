@@ -535,7 +535,10 @@ class BackendDriver:
             self._resub_thread = None
             resub_q = self._resub_queue
         # Закрыть и обнулить сокет под _write_lock (симметрия с _send_raw/_read_loop):
-        # иначе гонка обнуления с чтением _sock в другом потоке (A.3).
+        # иначе гонка обнуления с чтением _sock в другом потоке (A.3). Обнуление здесь
+        # ДО очистки/пробуждения _pending ниже — намеренно: применитель, чей request()
+        # ещё не вставил pending, увидит _sock is None в _send_raw и упадёт ConnectionError
+        # мгновенно (не повиснет), а уже вставленные pending будятся снапшотом ниже.
         with self._write_lock:
             sock = self._sock
             self._sock = None

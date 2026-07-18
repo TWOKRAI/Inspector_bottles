@@ -86,3 +86,46 @@ def test_await_ready_success_sets_ready_no_report() -> None:
     assert session._ready is True
     assert fake.calls == 1, "успех на первой пробе — без лишних ретраев"
     assert session.pop_reconnect_report() is None
+
+
+class _ReconnectProbeFakeDriver:
+    """Fake: провальная readiness-проба + семантика replay durable-подписок."""
+
+    def __init__(self) -> None:
+        self._intents: List[Dict[str, Any]] = []
+
+    def introspect_status(self, process: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        return {"success": False}  # прогрев не подтверждён → backend_warming
+
+    def import_subscriptions(self, intents: List[Dict[str, Any]]) -> None:
+        self._intents = list(intents)
+
+    def replay_subscriptions(self) -> List[Dict[str, Any]]:
+        return [{"command": i["command"], "target": i["target"], "success": True} for i in self._intents]
+
+
+def test_reconnect_and_warming_merge_in_one_ensure() -> None:
+    # Комбинированный путь, ради которого вводился _note_report: в ОДНОМ ensure()
+    # фабрика прогоняет readiness (провал → backend_warming), а затем ветка реконнекта
+    # replay'ит durable-подписки (reconnected/resubscribed). Оба набора полей обязаны
+    # оказаться в одном одноразовом отчёте, не затирая друг друга.
+    fake = _ReconnectProbeFakeDriver()
+    session, _ = _session(lambda: None)
+
+    def _factory() -> Any:
+        # Имитируем _default_driver_factory: провальная readiness ставит warming ДО
+        # присвоения self._driver, как в проде.
+        session._await_ready(fake, attempts=1, probe_timeout=0.01)  # type: ignore[arg-type]
+        return fake
+
+    session._driver_factory = _factory
+    # Прошлые durable-подписки → ensure() пойдёт по ветке replay.
+    session._sub_intents = [{"command": "state.subscribe", "target": "ProcessManager", "args": {"pattern": "p.**"}}]
+
+    session.ensure()
+    report = session.pop_reconnect_report()
+
+    assert report is not None
+    assert report.get("backend_warming") is True, "warming не должен быть затёрт reconnect-отчётом"
+    assert report.get("reconnected") is True
+    assert "resubscribed" in report
