@@ -31,18 +31,20 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 
 Средневзвешенно: **~7.4 → ~8.9** при закрытии A–F. Потолок не 10: streamable-HTTP мультиклиент и session-isolation — реальная работа с транспортом (Phase D), детерминированный rr-реплей сознательно отклонён.
 
+> Цифры таблицы — мотивационный ориентир, **не критерий приёмки**: шкала самопридуманная, приёмка — только чекбоксы Acceptance по задачам. Финальную оценку даёт независимое Fable-ревью, и спорить с его цифрой этой таблицей нельзя.
+
 ---
 
 ## Порядок фаз (приоритеты)
 
 1. **Phase A — Багфиксы ревью** (сначала: 2 регресса в main + thread-safety). Дёшево, разблокирует доверие.
 2. **Phase B — P0 эргономика** (наибольшая ежедневная ценность: cursor list-watch, await_condition, system_overview, help/concise). Product-first ([[feedback_priority_product_over_engine]]).
-3. **Phase C — Сплит god-file + гигиена** (архитектура; НЕ откладывать надолго — каждая фича B/D в 1922-строчный файл ухудшает его). Сплит на текущей раскладке, переезд в `tooling/` — пост-codemod.
+3. **Phase C — Сплит god-file + гигиена** (архитектура; НЕ откладывать надолго — каждая фича B/D в 1922-строчный файл ухудшает его). Сначала C.0 — live-якорь (вынесен из Phase F): сплит нельзя страховать только unit'ами на fake-транспорте, недостаточность которых план сам констатирует. Сплит на текущей раскладке, переезд в `tooling/` — пост-codemod.
 4. **Phase D — P1 власть агента** (supervision, session-isolation → streamable-HTTP, trace-id, flight-recorder, commit-confirmed регистры).
 5. **Phase E — P2 доверие** (аудит-журнал, клиентская валидация, response_format-лимиты).
 6. **Phase F — Live-доказательства** (поглощает Task 4.1 старого плана: реальный spawn, реконнект, watch, SDK-смоук из Claude Code).
 
-**Зависимости:** B.1 (cursor-плоскости) гейтит мультиклиент D.2; session-isolation D.1a гейтит D.2; trace-id D.4 гейтит Ф7 G.6 (внешний план). Сплит C рекомендуется до тяжёлых D-фич.
+**Зависимости:** B.1 (cursor-плоскости) гейтит мультиклиент D.2; session-isolation D.1a гейтит D.2; контракт trace-id D.3 — вход в Ф7 G.6 (внешний план), сама трассировка исполняется там. Сплит C рекомендуется до тяжёлых D-фич; C.0 (live-якорь) — строго до C.1.
 
 ---
 
@@ -90,6 +92,8 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 **Steps:**
 1. `_await_ready` не подтвердил готовность → `log` warning + флаг `ready=False` в сессии; первый tool-ответ несёт `"backend_warming": true` (agent видит причину непонятного таймаута).
 2. `DriverSession.ensure`: ловить не только `OSError`, но любое исключение фабрики → `BackendUnavailable` с текстом (соблюдение контракта «driver не бросает» на уровне сессии).
+
+Шаги 1 и 2 независимы — коммитить раздельно, чтобы откат одного не тянул второй.
 **Acceptance:**
 - [ ] unit: фабрика бросает не-OSError → `BackendUnavailable`, не сырое; readiness-таймаут → warning + флаг
 
@@ -105,7 +109,7 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 **Steps:**
 1. EventHub → per-plane кольцевые буферы (state / logs / errors / stats / telemetry / ui) с монотонным `seq`; классификация push'ей по плоскости.
 2. `events_page(plane=None, cursor=None, limit=)` — недеструктивно; ответ `{items, next_cursor, dropped, bookmark}`; `dropped` растёт при вытеснении из кольца.
-3. `events()` — обёртка back-compat (дренаж всех плоскостей) с deprecation-нотой.
+3. `events()` — обёртка back-compat (дренаж всех плоскостей) с deprecation-нотой. Срок жизни ограничен этим планом: перевод вызывающих на `events_page` и **удаление обёртки — в F.1** (два конкурирующих режима потребления не должны жить дольше плана).
 **Acceptance:**
 - [ ] unit: два независимых курсора читают одну плоскость без взаимной кражи; переполнение кольца → `dropped>0` виден; `next_cursor` монотонен
 - [ ] back-compat: существующие тесты `events()` зелёные
@@ -148,6 +152,13 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 
 ## Phase C — Сплит god-file + гигиена
 
+### Task C.0 — Live-якорь для сплита (вынесен из Phase F)
+**Level:** Middle+ (Sonnet) | **Layer:** tests
+**Goal:** минимальный live-тест (реальный spawn через harness, локально): watch_like_gui → snapshot непуст → разрыв соединения → replay подписок + watch-resume → tail продолжается. Прогнать **до** C.1 (зафиксировать зелёным) и **после** C.1 (доказательство «бит-в-бит» не только на fake-транспорте).
+**Files:** `backend_ctl/tests/test_reconnect_live.py` (маркер `live`, skip при недоступном окружении).
+**Acceptance:**
+- [ ] live-тест зелёный до сплита (baseline-коммит) и после сплита; в CI по маркеру, локально обязателен для C.1
+
 ### Task C.1 — Распил driver.py (1922 стр) на модули (текущая раскладка)
 **Level:** Senior (Opus) | **Layer:** tools
 **Goal:** god-file → пакет `backend_ctl/driver/` (transport / protocol / events / subscriptions / domains/* / watch), поведение бит-в-бит.
@@ -158,7 +169,7 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 2. Watch-стейт-машина → отдельный класс (`WatchController`), инъекция в driver.
 3. Последующий `git mv` в `tooling/` (пост-codemod) остаётся чистым.
 **Acceptance:**
-- [ ] `pytest backend_ctl` зелёный на новых импортах; `from backend_ctl.driver import BackendDriver` работает (шим); sentrux depth не хуже
+- [ ] `pytest backend_ctl` зелёный на новых импортах; live-якорь C.0 зелёный после сплита; `from backend_ctl.driver import BackendDriver` работает (шим); sentrux: quality/циклы/god не хуже baseline (depth — ориентир, не гейт, [[feedback_sentrux_depth_opaque]] + [[feedback_sentrux_gate_narrowed]])
 
 ### Task C.2 — Гигиена правила №2 + probes/
 **Level:** Middle (Sonnet) | **Layer:** tools/docs
@@ -173,6 +184,7 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 
 ### Task D.1 — Session-isolation на транспорте (HIGH-архитектурный) + supervision-ручка
 **Level:** Senior (Opus) | **Layer:** framework
+**Гейт на старт:** самая рискованная задача плана при самой тонкой спецификации — перед исполнением обязателен **мини-план отдельным заходом** (Steps по файлам уровня Phase A, контракт-тесты изоляции, флаг отката). Ниже — рамка, не спецификация.
 **Goal (D.1a, session-isolation):** per-connection identity в `SocketChannel`/`SocketBridgeAdapter` — реплаи и push адресуются приславшему сокету, не broadcast.
 **Проблема:** один общий канал `"backend_ctl"` рассылает всем подключениям; адаптер не знает, чей запрос → отвечает всем. Изоляция сессий (на которую рассчитаны durable-subscriptions/watch) на транспорте НЕ существует; второй агент/проба → протечка реплаев и событий в чужой read-model ([[project_concurrent_backends_trap]]). **Гейтит мультиклиент (D.2).**
 **Goal (D.1b, supervision):** `supervision_status(process?)` (incarnation/epoch, restarts, last_exit, стратегия, health) + `supervise(process, action=restart|drain_restart|set_policy)`; инкарнацию/epoch светить во всех событиях (основа fencing-token + маркер «до/после рестарта»).
@@ -187,13 +199,11 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 **Acceptance:**
 - [ ] две параллельные сессии: одна тейлит observability, другая крутит регистры — без взаимных помех
 
-### Task D.3 — Trace-id сквозь IPC (гейтится Ф7 G.6)
-**Level:** Middle+ (Sonnet) | **Layer:** framework
-**Goal:** driver штампует `trace_id` на send_command/set_register; EventHub индексирует по trace_id; `trace(trace_id)` собирает причинную цепочку (waterfall) по всем плоскостям.
-**Предусловие:** заложить в контракт Ф7 G.6 требование — trace-поля обязаны доезжать до `observability.record` и `state.changed`, не только до `Message`.
+### Task D.3 — Застолбить контракт trace-id в Ф7 G.6
+**Level:** Middle (Sonnet) | **Layer:** docs
+**Goal:** зафиксировать в контракте/плане Ф7 G.6 (внешний план) требование: trace-поля обязаны доезжать до `observability.record` и `state.changed`, не только до `Message`. **Сама трассировка** (driver штампует `trace_id` на send_command/set_register; EventHub индексирует; `trace(trace_id)` собирает waterfall — аналог OTel/Jaeger, CDP initiator-chain) — **исполняется в плане G.6**, не здесь: задача с acceptance «после G.6» в этом плане не закрывается и вечно висела бы в `/plan-status`.
 **Acceptance:**
-- [ ] после G.6: `trace(id)` возвращает клик/команда → лог → state.changed одной цепочкой
-**Аналог:** OTel/Jaeger waterfall, CDP initiator-chain.
+- [ ] требование записано в контракт G.6 (ссылка на документ); до G.6 корреляция — по (process, worker, ts)
 
 ### Task D.4 — Flight recorder (запись → offline-реплей в read-model)
 **Level:** Senior (Opus) | **Layer:** tools
@@ -241,10 +251,11 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 **Level:** Middle+ (Sonnet) | **Layer:** tests
 **Files:** `backend_ctl/tests/test_*_live.py` (telemetry/watch/reconnect), SDK-смоук из Claude Code.
 **Steps:**
-1. Реальный spawn (Windows): watch_like_gui → telemetry_snapshot непуст; kill_child → авто-рестарт → tail продолжается; разрыв → replay подписок + watch-resume; subtree-delete (A.1) на живом; applier-поток (A.2) не течёт.
+1. Реальный spawn (Windows): watch_like_gui → telemetry_snapshot непуст; kill_child → авто-рестарт → tail продолжается; subtree-delete (A.1) на живом; applier-поток (A.2) не течёт. Разрыв/replay/watch-resume уже покрыт C.0 — здесь только прогнать его на Windows.
 2. Живой смоук SDK-сервера из Claude Code (плагин на `mcp_server_sdk`); после успеха — **удалить рукописный `mcp_server.py`** (BCTL-ADR-001).
+3. Перевести оставшихся вызывающих `events()` на `events_page` и **удалить back-compat-обёртку** (закрытие срока жизни из B.1).
 **Acceptance:**
-- [ ] новые live-тесты зелёные локально; SDK-смоук подтверждён; рукописный сервер удалён
+- [ ] новые live-тесты зелёные локально; SDK-смоук подтверждён; рукописный сервер удалён; `events()`-обёртка удалена
 
 ---
 
@@ -254,13 +265,14 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 2. Границы: `mcp__sentrux__session_start` (baseline до Phase C) → `check_rules` после сплита → `session_end` (не хуже baseline; depth после C.1 — не хуже).
 3. Формальный `/code-review` перед merge каждой фазы ([[feedback_formal_review_before_merge]]); финдеры на Sonnet, оценка/советы — Fable ([[feedback_review_economy_tiers]]).
 4. Коммиты: Conventional + `Why:`/`Layer:` + `Refs: plans/backend-ctl-debug-console.md`; чекбоксы `[x]` + hash после задачи.
+5. **Док-синк инструментов:** каждая фаза, добавляющая/меняющая MCP-инструменты (B, D), закрывается обновлением `backend_ctl/AGENTS.md` + README (список инструментов, форматы ответов) — иначе агентские доки описывают устаревший API ([[feedback_mcp_tool_api_drift]]).
 
 ## Риски
 
 | Риск | Митигация |
 |---|---|
-| Сплит god-file (C.1) конфликтует с параллельными фичами B/D | Сплит — отдельным заходом, быстрый merge; фичи после него; характеризация существующими тестами |
-| Session-isolation (D.1a) трогает серверный транспорт | baseline sentrux + контракт-тесты изоляции; за флагом до доказательства |
+| Сплит god-file (C.1) конфликтует с параллельными фичами B/D | Сплит — отдельным заходом, быстрый merge; фичи после него; характеризация существующими тестами + live-якорь C.0 до/после |
+| Session-isolation (D.1a) трогает серверный транспорт | обязательный мини-план перед стартом (см. гейт в D.1); baseline sentrux + контракт-тесты изоляции; за флагом до доказательства |
 | await_condition/HTTP блокируют tools/call надолго | жёсткий cap таймаута; для HTTP — per-session изоляция обязательна (B.1+D.1a) |
 | Live-тесты флак на Windows (Phase F) | readiness-probe (A.4) вместо sleep; отдельный маркер; эталон pre-existing 2 Windows-фейла |
 | trace-id (D.3) ждёт Ф7 G.6 | заложить требование в контракт G.6 заранее; до этого — корреляция по (process,worker,ts) |
