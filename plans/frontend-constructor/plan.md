@@ -82,6 +82,22 @@
 | T0.4 | Создать `plans/frontend-constructor/plan.md` с решениями Р1–Р6 | новый план | владелец подтвердил Р1–Р6 |
 | T0.5 | Пограничный список (Р6): поимённая классификация `main_window.py`/`styles/`/`dialogs/`/`prefs/`/`permissions.py`/`auth_context.py`/`startup_checks.py` → `promote/app/frozen` | раздел плана | у каждого файла решение и целевой путь; «суждению T3.0» остаются только тривиальные случаи |
 
+### T0.5 — Пограничный список (Р6, классификация выполнена 2026-07-18)
+
+Критерий: 0 упоминаний домена (bottle/defect/inspection/устройства) → `promote`; значения/компоновка/матрица → `app`; ADR-замороженное → `frozen`. Грепы домена по 3 неоднозначным файлам (`permissions.py`/`auth_context.py`/`startup_checks.py`) дали **0 доменных терминов** — все generic-глю.
+
+| Файл (`multiprocess_prototype/frontend/`) | LOC | Домен-хиты | Классификация | Целевой путь / примечание |
+|---|--:|--:|---|---|
+| `windows/main_window.py` | 766 | — | **split** | generic-шелл `GuiHostWindow` (меню/доки/статусбар/tab-host/apply-theme) → `frontend/windows/` (T4.6); прикладная компоновка остаётся в прототипе |
+| `widgets/dialogs/` (helper `confirm_unsaved_changes`) | — | — | **promote** | стандарт платформы (memory `feedback_dialog_conventions`) → `frontend/components/`; доменные диалоги остаются |
+| `prefs/` (QSettings-обёртка) | — | — | **promote** | generic → `frontend/core/prefs/` (T3.4) |
+| `styles/theme_loader.py`, `styles/style_manifest.py` | — | — | **promote** | загрузчик тем (generic) → `frontend/core/styles/`; `styles/themes/` (значения) → **app** |
+| `permissions.py` | 54 | 0 | **promote (глю)** | generic RBAC-глю → framework; матрица ролей/значения — как декларация остаётся в прототипе (уточнить в T3.0) |
+| `auth_context.py` | 47 | 0 | **promote** | generic → framework (T3.4/T3.7 рядом с runtime) |
+| `startup_checks.py` | 169 | 0 | **promote** | generic startup-валидация → framework; проверить прикладные проверки поимённо в T3.0 |
+
+Тривиальные случаи (чистые promote/shim-delete) остаются суждению инвентаря T3.0; здесь закрыты все 7 пограничных из Р6.
+
 ## Ф1 — Гигиена frontend_module (до codemod, ~1 день)
 
 | # | Задача | Acceptance |

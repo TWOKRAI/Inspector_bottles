@@ -61,6 +61,10 @@
 
 Стратегия нативного стека — [`docs/direction/TECH_STACK_2026.md`](../docs/direction/TECH_STACK_2026.md) (живой документ, 2026-07-12). Волна 1 (2026 H2, каждый пункт — отдельный план): чистка pyproject (10 мёртвых core-deps) → bump Python 3.13 → `Services/analytics` (Polars) → msgspec на границах (стык с G.9/G.2) → ORT автодетект EP → Rerun dev-extra → пилот PySide6 6.11 → ADR лицензий моделей. Пункты, пересекающиеся с hot-path (msgspec на IPC-пути, бенч msgspec-vs-pickle), — исполнять В СОСТАВЕ Ф7 (G.2/G.9), не отдельно (принцип «одним вскрытием»); остальное (deps, analytics, Rerun, лицензии) — независимо, можно между волнами.
 
+### Параллельный трек — frontend-constructor (исполнение В3 ось NEW-D)
+
+План [`frontend-constructor/plan.md`](frontend-constructor/plan.md) — выделение фронт-конструктора из прототипа во фреймворк (поглощает NEW-D2/`proto-frontend-carve` → SUPERSEDED). **Блок А (Ф0 docs → Ф1 гигиена frontend_module → Ф2 граница фронт/бэк) — parallel-safe ДО codemod layer-grouping**, самодостаточен. Блок В (Ф3+ промоушены) — ПОСЛЕ codemod. Инвариант: кодовые фазы никогда не параллельны Фазе 3-codemod (freeze-окно). Старт Блока А — 2026-07-18.
+
 ### Опциональные (решаются по ходу, вне строгого порядка)
 
 1.8 record/replay (решение на GATE G3) · 2.6 JSONL-sink · 4.10 driver watch-from-revision · 3.10 stop/start воркера (drain-часть уже в G.8) · 5.18 depth-reduction (**отложено владельцем** до sentrux Pro root-cause; порог 0.57 до H.5) · LP-1..LP-5 (находки живого прогона 2026-07-12, constructor-master «Живой прогон»; LP-1 name/description — кандидат на быстрый фикс до В3).
