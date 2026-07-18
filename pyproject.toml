@@ -104,6 +104,14 @@ modbus = [
     "pymodbus>=3.7",
 ]
 
+# MCP-сервер backend_ctl на официальном SDK (backend_ctl/mcp_server_sdk.py) —
+# опциональный dev-инструмент. Без extra модуль импортируется, но запуск SDK-сервера
+# даёт понятную ошибку с командой установки: pip install '.[ctl]'.
+# Пин minor-версии (ADR): SDK молодой, minor-релизы двигают API low-level Server.
+ctl = [
+    "mcp>=1.27,<1.28",
+]
+
 [tool.uv.sources]
 # NodeGraphQt-PySide6 — fork от C3RV1, не публикуется на PyPI.
 # Sha-pin для воспроизводимости (последний коммит на master 2023-01-08).

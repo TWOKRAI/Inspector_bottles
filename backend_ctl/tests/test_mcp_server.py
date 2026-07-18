@@ -651,7 +651,7 @@ class TestReconnectResumesWatch:
 
 class TestReadinessProbe:
     def test_await_ready_polls_until_success(self) -> None:
-        from backend_ctl.mcp_server import MCPServer as _S
+        from backend_ctl.mcp_driver_session import DriverSession
 
         class _Drv:
             def __init__(self):
@@ -662,17 +662,17 @@ class TestReadinessProbe:
                 return {"success": self.n >= 2}  # готов со второй пробы
 
         drv = _Drv()
-        assert _S._await_ready(drv, attempts=3, probe_timeout=0.01) is True
+        assert DriverSession._await_ready(drv, attempts=3, probe_timeout=0.01) is True
         assert drv.n == 2
 
     def test_await_ready_gives_up_after_attempts(self) -> None:
-        from backend_ctl.mcp_server import MCPServer as _S
+        from backend_ctl.mcp_driver_session import DriverSession
 
         class _Drv:
             def introspect_status(self, process, *, timeout=None):
                 return {"success": False, "error": "timeout"}
 
-        assert _S._await_ready(_Drv(), attempts=3, probe_timeout=0.01) is False
+        assert DriverSession._await_ready(_Drv(), attempts=3, probe_timeout=0.01) is False
 
 
 class TestErrorContract:

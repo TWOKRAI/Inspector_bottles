@@ -700,12 +700,132 @@ TOOLS: List[ToolSpec] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Классификация безопасности (Task 3.2) + MCP-annotations (Task 3.1)
+# ---------------------------------------------------------------------------
+#
+# Один источник правды: каждому инструменту — класс безопасности. Из класса
+# деривятся и MCP tool-annotations (readOnlyHint/destructiveHint/…), и лестница
+# safety-режимов сервера. Классы (по возрастанию воздействия на бэкенд):
+#   read       — только чтение (introspect/state.get/snapshot/events); бэкенд не меняется.
+#   subscribe  — управление подписками/тапами (state.subscribe/*_tail/watch/debug/ui_tap
+#                и их снятие); меняет серверную подписку, но не данные бэкенда.
+#   write      — меняет поведение бэкенда (регистры/логгер-синки/телеметрия-конфиг).
+#   escalated  — произвольная команда (send_command/system_command): «открытый мир».
+SAFETY_READ = "read"
+SAFETY_SUBSCRIBE = "subscribe"
+SAFETY_WRITE = "write"
+SAFETY_ESCALATED = "escalated"
+
+TOOL_SAFETY: Dict[str, str] = {
+    # read
+    "capabilities": SAFETY_READ,
+    "get_status": SAFETY_READ,
+    "introspect_handlers": SAFETY_READ,
+    "introspect_registers": SAFETY_READ,
+    "introspect_router_stats": SAFETY_READ,
+    "introspect_queues": SAFETY_READ,
+    "introspect_plugins": SAFETY_READ,
+    "introspect_memory": SAFETY_READ,
+    "state_get": SAFETY_READ,
+    "state_get_subtree": SAFETY_READ,
+    "events": SAFETY_READ,
+    "telemetry_snapshot": SAFETY_READ,
+    "telemetry_history": SAFETY_READ,
+    "ui_tap_ping": SAFETY_READ,
+    # subscribe
+    "state_subscribe": SAFETY_SUBSCRIBE,
+    "log_tail": SAFETY_SUBSCRIBE,
+    "log_untail": SAFETY_SUBSCRIBE,
+    "observability_tail": SAFETY_SUBSCRIBE,
+    "observability_untail": SAFETY_SUBSCRIBE,
+    "watch_like_gui": SAFETY_SUBSCRIBE,
+    "unwatch": SAFETY_SUBSCRIBE,
+    "debug_session": SAFETY_SUBSCRIBE,
+    "debug_stop": SAFETY_SUBSCRIBE,
+    "ui_tap": SAFETY_SUBSCRIBE,
+    "ui_untap": SAFETY_SUBSCRIBE,
+    # write
+    "set_register": SAFETY_WRITE,
+    "set_register_verified": SAFETY_WRITE,
+    "config_reload": SAFETY_WRITE,
+    "logger_sink_enable": SAFETY_WRITE,
+    "logger_sink_disable": SAFETY_WRITE,
+    "telemetry_reconfigure": SAFETY_WRITE,
+    "telemetry_set": SAFETY_WRITE,
+    # escalated
+    "send_command": SAFETY_ESCALATED,
+    "system_command": SAFETY_ESCALATED,
+}
+
+# Префиксы команд, безопасных для чтения через escalated send_command в read-only
+# режиме (Task 3.2): только интроспекция и точечное чтение state.
+READ_SAFE_COMMAND_PREFIXES: tuple[str, ...] = ("introspect.", "state.get")
+
+# Класс безопасности → MCP tool-annotations (hints для клиента; НЕ enforce — enforce
+# делает сервер по классу, Task 3.2). Форма — dict, чтобы mcp_tools не зависел от SDK
+# (SDK-адаптер конвертирует в types.ToolAnnotations).
+_SAFETY_ANNOTATIONS: Dict[str, Dict[str, bool]] = {
+    SAFETY_READ: {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    SAFETY_SUBSCRIBE: {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False},
+    SAFETY_WRITE: {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False},
+    SAFETY_ESCALATED: {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
+}
+
+# Safety-режимы сервера (Task 3.2).
+MODE_FULL = "full"  # всё разрешено (дефолт)
+MODE_READ_ONLY = "read-only"  # только read + subscribe (write/escalated блок; send_command — whitelist)
+MODE_NO_DESTRUCTIVE = "no-destructive"  # блок инструментов с destructiveHint (write/escalated)
+
+# Классы, разрешённые режимом (кроме особого случая send_command в read-only).
+_MODE_ALLOWED_CLASSES: Dict[str, frozenset] = {
+    MODE_FULL: frozenset({SAFETY_READ, SAFETY_SUBSCRIBE, SAFETY_WRITE, SAFETY_ESCALATED}),
+    MODE_READ_ONLY: frozenset({SAFETY_READ, SAFETY_SUBSCRIBE}),
+    MODE_NO_DESTRUCTIVE: frozenset({SAFETY_READ, SAFETY_SUBSCRIBE}),
+}
+
+
+def tool_safety(name: str) -> str:
+    """Класс безопасности инструмента (KeyError, если не классифицирован — ловит build_registry)."""
+    return TOOL_SAFETY[name]
+
+
+def tool_annotations(name: str) -> Dict[str, bool]:
+    """MCP-annotations инструмента, деривированные из класса безопасности."""
+    return dict(_SAFETY_ANNOTATIONS[TOOL_SAFETY[name]])
+
+
+def is_tool_allowed(name: str, mode: str) -> bool:
+    """Разрешён ли инструмент в режиме (без учёта arg-whitelist send_command).
+
+    В read-only ``send_command`` (escalated) допускается УСЛОВНО — только для
+    whitelisted-команд; финальное решение по аргументам — :func:`is_command_read_safe`
+    на стороне сервера. Здесь для send_command в read-only возвращаем True (сервер
+    доуточнит по args), для остальных escalated/write — по классам режима.
+    """
+    allowed = _MODE_ALLOWED_CLASSES.get(mode, _MODE_ALLOWED_CLASSES[MODE_FULL])
+    cls = TOOL_SAFETY.get(name)
+    if cls is None:
+        return False
+    if cls in allowed:
+        return True
+    # read-only: send_command проходит name-гейт, а по args фильтрует сервер.
+    return mode == MODE_READ_ONLY and name == "send_command"
+
+
+def is_command_read_safe(command: str) -> bool:
+    """Команда send_command безопасна для чтения (introspect.* / state.get*)?"""
+    return bool(command) and command.startswith(READ_SAFE_COMMAND_PREFIXES)
+
+
 def build_registry() -> Dict[str, ToolSpec]:
-    """Реестр name → ToolSpec (имена уникальны — проверяется на импорте)."""
+    """Реестр name → ToolSpec (имена уникальны + все классифицированы по безопасности)."""
     registry: Dict[str, ToolSpec] = {}
     for spec in TOOLS:
         if spec.name in registry:
             raise ValueError(f"дубликат имени MCP-инструмента: {spec.name!r}")
+        if spec.name not in TOOL_SAFETY:
+            raise ValueError(f"инструмент {spec.name!r} не классифицирован в TOOL_SAFETY (Task 3.2)")
         registry[spec.name] = spec
     return registry
 

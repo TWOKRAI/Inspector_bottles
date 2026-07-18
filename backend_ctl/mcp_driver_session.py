@@ -1,0 +1,163 @@
+# -*- coding: utf-8 -*-
+"""mcp_driver_session.py — жизненный цикл driver'а под MCP-сервером (общий слой).
+
+Тонкая, но критичная логика, общая для рукописного и SDK-сервера:
+  * ленивое подключение driver'а к сокету живого бэкенда + readiness-проба;
+  * durable-подписки переживают реконнект (export → replay на новом driver'е);
+  * watch-профиль переживает реконнект (манифест → resume_watch поднимает контур);
+  * одноразовый отчёт о реконнекте вливается в следующий tool-ответ.
+
+Вынесено из ``mcp_server.py``, чтобы обе реализации сервера (транспорт/маршрутизация)
+делили ОДНУ реализацию lifecycle, а не расходящиеся копии (Task 3.1).
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+from typing import Any, Dict, Optional
+
+from backend_ctl.driver import BackendDriver
+from backend_ctl.endpoint_config import resolve_endpoint
+
+
+class BackendUnavailable(RuntimeError):
+    """Бэкенд недоступен (сокет не поднят/оборван) — понятный текст для агента."""
+
+
+class DriverSession:
+    """Владелец жизненного цикла одного :class:`BackendDriver` под MCP-сервером.
+
+    Держит ленивое соединение; при сбросе сохраняет durable-намерения подписки и
+    снимок watch-профиля, чтобы следующий :meth:`ensure` (реконнект) их восстановил.
+    Не знает про транспорт/JSON-RPC — сервер (любой) дергает :meth:`ensure`/:meth:`reset`.
+    """
+
+    def __init__(
+        self,
+        *,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        request_timeout: float = 5.0,
+        driver_factory: Any = None,
+        log: Any = None,
+    ) -> None:
+        self._host, self._port = resolve_endpoint(host, port)
+        self._request_timeout = request_timeout
+        # Фабрика для тестов: () → объект с интерфейсом BackendDriver (fake).
+        self._driver_factory = driver_factory or self._default_driver_factory
+        self._driver: Optional[BackendDriver] = None
+        # Durable-подписки переживают реконнект driver'а (Task 0.3): при сбросе
+        # driver'а его намерения сохраняются здесь и replay'ятся на новый driver.
+        self._sub_intents: list = []
+        # F2: манифест активного watch-профиля переживает реконнект — после replay'я
+        # намерений новый driver ПОДНИМАЕТ watch-контур (слушатель+applier).
+        self._watch_manifest: Optional[Dict[str, Any]] = None
+        # Одноразовый отчёт о состоявшемся реконнекте — вливается в следующий tool-ответ.
+        self._reconnect_report: Optional[Dict[str, Any]] = None
+        self._log = log or (lambda m: print(m, file=sys.stderr, flush=True))
+
+    @property
+    def host(self) -> str:
+        return self._host
+
+    @property
+    def port(self) -> int:
+        return self._port
+
+    # ---- Фабрика + readiness ----
+
+    def _default_driver_factory(self) -> BackendDriver:
+        drv = BackendDriver(self._host, self._port, default_timeout=self._request_timeout)
+        drv.connect()
+        # Readiness-проба вместо фиксированного sleep (Task 0.3): ждём, пока
+        # SocketChannel зарегистрирует клиента и PM начнёт отвечать.
+        self._await_ready(drv)
+        return drv
+
+    @staticmethod
+    def _await_ready(drv: BackendDriver, *, attempts: int = 3, probe_timeout: float = 2.0) -> bool:
+        """Пинг-проба готовности PM (3 ретрая). best-effort: неответ не бросает —
+        первый реальный вызов инструмента и так покажет ошибку с понятным текстом."""
+        for _ in range(attempts):
+            try:
+                res = drv.introspect_status("ProcessManager", timeout=probe_timeout)
+            except Exception:  # noqa: BLE001 — проба не должна ронять старт
+                res = None
+            if isinstance(res, dict) and res.get("success") is True:
+                return True
+            time.sleep(0.1)
+        return False
+
+    # ---- Lifecycle ----
+
+    def ensure(self) -> BackendDriver:
+        """Лениво подключить driver; при недоступном бэкенде — :class:`BackendUnavailable`.
+
+        После реконнекта (driver был сброшен, но остались durable-подписки) новый
+        driver получает намерения и replay'ит их — поток событий не теряется молча.
+        """
+        if self._driver is None:
+            try:
+                self._driver = self._driver_factory()
+            except OSError as exc:
+                raise BackendUnavailable(
+                    f"бэкенд недоступен на {self._host}:{self._port} ({exc}). "
+                    "Подними систему с BACKEND_CTL=1 (например `python multiprocess_prototype/run.py` "
+                    "или BackendHarness) и повтори вызов."
+                ) from exc
+            # Реконнект: восстановить durable-подписки на новом driver'е (Task 0.3).
+            if self._sub_intents:
+                self._driver.import_subscriptions(self._sub_intents)
+                resubscribed = self._driver.replay_subscriptions()
+                self._reconnect_report = {"reconnected": True, "resubscribed": resubscribed}
+                self._log(f"[mcp] реконнект: replay {len(resubscribed)} подписк(и)")
+            # F2: если watch был активен — поднять watch-КОНТУР на новом driver'е (слушатель
+            # + applier). Серверные подписки уже восстановлены replay'ем выше; resume_watch
+            # НЕ переподписывает, только оживляет авто-resub и делает unwatch управляемым.
+            if self._watch_manifest and self._watch_manifest.get("active") and hasattr(self._driver, "resume_watch"):
+                wr = self._driver.resume_watch(self._watch_manifest)
+                report = self._reconnect_report or {"reconnected": True}
+                report["watch_resumed"] = bool(isinstance(wr, dict) and wr.get("resumed"))
+                self._reconnect_report = report
+                self._log(f"[mcp] реконнект: watch-контур восстановлен ({wr})")
+        return self._driver
+
+    def reset(self) -> None:
+        """Сбросить соединение (следующий :meth:`ensure` переподключится).
+
+        Durable-намерения подписки и снимок watch-профиля сохраняются ДО закрытия
+        driver'а, чтобы новый driver мог их restore'нуть (иначе подписки/watch
+        терялись бы молча — Task 0.3 / F2).
+        """
+        if self._driver is not None:
+            try:
+                # Синхронизируем БЕЗУСЛОВНО (в т.ч. с пустым списком): текущий driver —
+                # источник правды. Если агент отписался — registry пуст, и replay при
+                # следующем реконнекте НЕ должен воскрешать снятые подписки (ревью MAJOR #1).
+                self._sub_intents = self._driver.export_subscriptions()
+            except Exception:  # noqa: BLE001 — экспорт не должен ронять сброс
+                pass
+            # F2: снять снимок watch-профиля ДО закрытия (источник правды — текущий driver).
+            if hasattr(self._driver, "watch_manifest"):
+                try:
+                    self._watch_manifest = self._driver.watch_manifest()
+                except Exception:  # noqa: BLE001 — снимок не должен ронять сброс
+                    self._watch_manifest = None
+            try:
+                self._driver.close()
+            except Exception:  # noqa: BLE001 — сброс не должен падать
+                pass
+            self._driver = None
+
+    def pop_reconnect_report(self) -> Optional[Dict[str, Any]]:
+        """Забрать одноразовый отчёт о реконнекте (и очистить) — для вливания в tool-ответ."""
+        report = self._reconnect_report
+        self._reconnect_report = None
+        return report
+
+    def close(self) -> None:
+        self.reset()
+
+
+__all__ = ["BackendUnavailable", "DriverSession"]
