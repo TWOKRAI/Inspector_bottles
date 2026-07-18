@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, Protocol, TYPE_CHECKING, runtime_checkable
 
 from PySide6.QtWidgets import QWidget
 
@@ -25,6 +25,17 @@ if TYPE_CHECKING:
 # Несовместимость виджета со значением — ожидаемая ситуация (не валим GUI), но по
 # правилу 5 не глушим молча: логируем на debug, чтобы видеть при отладке биндингов.
 _logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _ReadModelLike(Protocol):
+    """Минимальный контракт read-model для replay (duck-typed, для тестов-фейков).
+
+    Совместим с ``TelemetryViewModel`` (frontend_module.state): даёт снимок
+    поддерева по префиксу (``snapshot("")`` — полный снимок ``{path: value}``).
+    """
+
+    def snapshot(self, prefix: str) -> dict[str, Any]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +150,7 @@ class GuiStateBindings:
     def __init__(
         self,
         bridge: "DataReceiverBridge",
-        cache_snapshot: Callable[[], dict[str, Any]] | None = None,
+        read_model: "_ReadModelLike | None" = None,
         ensure_subscription: Callable[[str], Any] | None = None,
         release_subscription: Callable[[str], Any] | None = None,
     ) -> None:
@@ -147,11 +158,13 @@ class GuiStateBindings:
 
         Args:
             bridge: экземпляр DataReceiverBridge (уже инициализированный).
-            cache_snapshot: опциональный провайдер снимка кэша состояния
-                ({path: value}). Если задан, bind() сразу применяет к виджету
-                последнее известное значение (replay) — закрывает разрыв
-                ленивых вкладок, созданных после прохождения разовых дельт
-                (Task 4.1). При None replay не выполняется (legacy-поведение).
+            read_model: единый read-model состояния (``TelemetryViewModel``),
+                выступающий источником late-binding-снимка. Если задан, bind()/
+                bind_fanout() сразу применяют к виджету последнее известное
+                значение (replay через ``read_model.snapshot("")``) — закрывает
+                разрыв ленивых вкладок, созданных после прохождения разовых дельт.
+                При None replay не выполняется. Единый источник снимка (вместо
+                отдельного кэша) — read-model мирит запись и late-binding-чтение.
             ensure_subscription: опциональный колбэк (обычно
                 StateProxy.ensure_subscription) — bind()/bind_fanout() вызывают
                 его на pattern, чтобы серверная подписка гарантированно
@@ -168,8 +181,19 @@ class GuiStateBindings:
         # подписчику динамически создавать виджеты по обнаруженным ключам
         # (например строки рантайм-воркеров processes.X.workers.*).
         self._fanouts: list[FanoutHandle] = []
-        self._cache_snapshot = cache_snapshot
+        # Единый read-model — источник late-binding-снимка (public: секции могут
+        # читать актуальное сами, напр. io_debug при выборе плагин-ноды).
+        self.read_model = read_model
         bridge.set_state_callback(self._on_state_msg)
+
+    def _replay_snapshot(self) -> dict[str, Any]:
+        """Снимок read-model для replay ({path: value}); пусто, если модели нет."""
+        if self.read_model is None:
+            return {}
+        try:
+            return self.read_model.snapshot("")
+        except Exception:
+            return {}
 
     # ------------------------------------------------------------------
     # Авто-подписка (5.9): bind/unbind ↔ proxy.ensure/release_subscription
@@ -240,17 +264,12 @@ class GuiStateBindings:
         # Авто-уборка при уничтожении виджета Qt
         widget.destroyed.connect(lambda *_: self.unbind_widget(widget))
 
-        # Replay: сразу применить последнее известное значение из кэша (Task 4.1).
+        # Replay: сразу применить последнее известное значение из read-model.
         # Нужно для ленивых вкладок, созданных ПОСЛЕ прохождения разовых дельт
         # (например processes.X.state.status публикуется один раз при смене статуса).
-        if self._cache_snapshot is not None:
-            try:
-                snapshot = self._cache_snapshot()
-            except Exception:
-                snapshot = {}
-            for cached_path, cached_value in snapshot.items():
-                if match_glob(handle.pattern, cached_path):
-                    self._apply_to_widget(handle, cached_value)
+        for cached_path, cached_value in self._replay_snapshot().items():
+            if match_glob(handle.pattern, cached_path):
+                self._apply_to_widget(handle, cached_value)
 
         return handle
 
@@ -299,18 +318,13 @@ class GuiStateBindings:
             # unbind_fanout: повторный вызов (после ручного unbind) безопасен.
             owner.destroyed.connect(lambda *_: self.unbind_fanout(handle))
 
-        # Replay закэшированных значений.
-        if self._cache_snapshot is not None:
-            try:
-                snapshot = self._cache_snapshot()
-            except Exception:
-                snapshot = {}
-            for cached_path, cached_value in snapshot.items():
-                if match_glob(pattern, cached_path):
-                    try:
-                        callback(cached_path, cached_value)
-                    except Exception:
-                        pass
+        # Replay значений из read-model.
+        for cached_path, cached_value in self._replay_snapshot().items():
+            if match_glob(pattern, cached_path):
+                try:
+                    callback(cached_path, cached_value)
+                except Exception:
+                    pass
 
         return handle
 

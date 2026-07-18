@@ -29,6 +29,18 @@ def _workers(n: int = 2) -> dict:
     return {f"w{i}": {"status": "running", "effective_hz": 10.0 + i, "cycle_duration_ms": 5.0 + i} for i in range(n)}
 
 
+class TestGatedMetricsLocation:
+    """Task 2.3: GATED_METRICS переехала в configs — оба пути импорта работают (round-trip)."""
+
+    def test_old_and_new_import_paths_agree(self) -> None:
+        from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
+            GATED_METRICS as NEW_LOCATION,
+        )
+
+        assert GATED_METRICS is NEW_LOCATION
+        assert GATED_METRICS == ("fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm")
+
+
 # --------------------------------------------------------------------------- #
 # build_worker_telemetry — фильтр allowed_metrics
 # --------------------------------------------------------------------------- #
@@ -165,12 +177,16 @@ class _FakeServices:
         self.name = name
         self._config = config or {}
         self._health_state = None
+        self.logs: list[tuple[str, str]] = []
 
     def get_config(self, key: str, default=None):
         return self._config.get(key, default)
 
     def log_info(self, *a, **k) -> None: ...
     def log_debug(self, *a, **k) -> None: ...
+
+    def log_warning(self, msg, *a, **k) -> None:
+        self.logs.append(("warning", str(msg)))
 
 
 class TestBuildTelemetryGate:
@@ -190,6 +206,52 @@ class TestBuildTelemetryGate:
         gate = hb._build_telemetry_gate()
         assert gate is not None
         assert "fps" not in gate.due_metrics(now=0.0)
+
+
+class TestUnknownMetricsWarning:
+    """Task 2.3: опечатка в имени метрики → видимая диагностика, не тихий no-op."""
+
+    def test_boot_typo_metric_warns_but_gate_still_built(self) -> None:
+        """Boot (_build_telemetry_gate): опечатка → WARNING с точным именем, gate строится."""
+        cfg = {"telemetry": {"publish": {"metrics": {"latency": {"interval_sec": 0.5}}}}}
+        svc = _FakeServices(_CountingProxy(), config=cfg)
+        hb = ProcessHeartbeat(svc)
+        gate = hb._build_telemetry_gate()
+        assert gate is not None  # секция не отвергнута
+        warnings = [m for _lvl, m in svc.logs]
+        assert any("latency" in m for m in warnings), svc.logs
+        # известные метрики продолжают работать штатно.
+        assert "fps" in gate.due_metrics(now=0.0)
+
+    def test_boot_all_known_metrics_no_warning(self) -> None:
+        """Boot: все ключи metrics известны → WARNING нет."""
+        cfg = {"telemetry": {"publish": {"metrics": {"fps": {"enabled": False}}}}}
+        svc = _FakeServices(_CountingProxy(), config=cfg)
+        hb = ProcessHeartbeat(svc)
+        hb._build_telemetry_gate()
+        assert svc.logs == []
+
+    def test_runtime_reconfigure_typo_metric_warns(self) -> None:
+        """reconfigure_telemetry: опечатка в рантайме → WARNING с точным именем."""
+        svc = _FakeServices(_CountingProxy())
+        hb = ProcessHeartbeat(svc)
+        hb.reconfigure_telemetry({"metrics": {"latency": {"interval_sec": 0.5}}})
+        warnings = [m for _lvl, m in svc.logs]
+        assert any("latency" in m for m in warnings), svc.logs
+        assert hb.current_unknown_metrics() == ["latency"]
+
+    def test_runtime_reconfigure_all_known_no_warning(self) -> None:
+        """reconfigure_telemetry: все ключи известны → ни WARNING, ни unknown_metrics."""
+        svc = _FakeServices(_CountingProxy())
+        hb = ProcessHeartbeat(svc)
+        hb.reconfigure_telemetry({"metrics": {"fps": {"enabled": False}}})
+        assert svc.logs == []
+        assert hb.current_unknown_metrics() == []
+
+    def test_current_unknown_metrics_empty_when_gate_off(self) -> None:
+        """Gate выключен (None) → current_unknown_metrics() пуст (нечего резолвить)."""
+        hb = ProcessHeartbeat(_FakeServices(_CountingProxy()))
+        assert hb.current_unknown_metrics() == []
 
 
 class TestPublishMetricsGated:

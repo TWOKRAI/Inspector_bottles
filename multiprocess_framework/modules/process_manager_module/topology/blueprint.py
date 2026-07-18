@@ -143,6 +143,17 @@ class ProcessConfig(SchemaBase):
         FieldMeta("io-debug", info="Сводка in/out плагинов в дерево: {enabled, rate_hz, head_len}"),
     ] = {}
 
+    telemetry: Annotated[
+        dict[str, Any] | None,
+        FieldMeta(
+            "Telemetry override",
+            info="Per-process override секции telemetry.publish (метрики/частота), сливается "
+            "поверх глобального дефолта. None → нет override (ключ telemetry в proc_dict не "
+            "появляется). Typed-поле (не raw-скан до model_validate) — extra=ignore иначе "
+            "молча отбросил бы ключ.",
+        ),
+    ] = None
+
     # --- Domain-opaque bag (C6 рычаг 1) ---
 
     extras: Annotated[

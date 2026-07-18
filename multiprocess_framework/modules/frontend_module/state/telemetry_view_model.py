@@ -1,11 +1,17 @@
-"""telemetry_view_model.py — локальный GUI read-model телеметрии (Ф1, Task 1.1/1.2).
+"""telemetry_view_model.py — generic GUI read-model телеметрии.
 
-Принцип плана gui-telemetry-read-model: «запись — всегда, чтение — локально,
-история — по запросу». Backend публикует телеметрию постоянно (троттлинг 1 Гц)
-в дерево StateStore; GUI держит ОДИН локальный read-model, наполняемый ОДНИМ
-wildcard-потоком дельт (``processes.**``/``system.**``/``devices.**``/
-``calibration.**`` заведены в frontend/process.py). Виджеты читают только
-локально — без похода на сервер за снимком.
+Принцип «запись — всегда, чтение — локально, история — по запросу». Backend
+публикует телеметрию постоянно (троттлинг на стороне источника) в дерево
+StateStore; GUI держит ОДИН локальный read-model, наполняемый ОДНИМ
+wildcard-потоком дельт. Виджеты читают только локально — без похода на сервер
+за снимком.
+
+Модуль generic: он не знает ни имён процессов, ни конкретного набора метрик
+приложения. Набор путей, для которых копится история (``tracked_suffixes``),
+и параметры окна — аргументы конструктора. Дефолт ``DEFAULT_TRACKED_SUFFIXES``
+покрывает штатные gated-метрики фреймворка (см. ``process_module`` —
+``GATED_METRICS`` и форму дерева ``build_worker_telemetry``); приложение с
+дополнительными метриками передаёт собственный набор суффиксов.
 
 Инвариант (enforce тестом ``test_view_model_creates_no_server_subscriptions``):
     view-model НЕ создаёт серверных подписок и не делает блокирующий IPC. Он не
@@ -14,17 +20,15 @@ wildcard-потоком дельт (``processes.**``/``system.**``/``devices.**`
     единственный источник потока.
 
 Что умеет:
-    * on_state_delta(msg_dict)  — слот-потребитель того же ``msg_dict``, что и
-      GuiStateBindings/topology-forwarder (multi-subscriber §11.15). Пишет
-      read-model синхронно, а Qt-сигнал ``updated`` эмитит ОДИН раз на пачку
-      дельт (коалесинг через 0-таймер), а не по каждой дельте.
+    * on_state_delta(msg_dict)  — слот-потребитель ``msg_dict`` того же формата,
+      что и общий state-fan-out (multi-subscriber). Пишет read-model синхронно,
+      а Qt-сигнал ``updated`` эмитит ОДИН раз на пачку дельт (коалесинг через
+      0-таймер), а не по каждой дельте.
     * get(path) / snapshot(prefix)  — чтение текущего снимка. Late-binding:
-      вкладка, созданная ПОСЛЕ публикации, читает актуальное сразу (поглощает
-      прежнюю роль cache_snapshot-replay).
-    * history(path, since)  — кольцевой буфер последних ~10 мин по ключевым
-      метрикам (fps/latency/effective_hz/cycle) для мгновенных спарклайнов без
-      похода в БД истории (telemetry_sink). Fixed-size deque, append O(1),
-      выборка диапазона O(k).
+      вкладка, созданная ПОСЛЕ публикации, читает актуальное сразу.
+    * history(path, since)  — кольцевой буфер последних ~N минут по ключевым
+      метрикам для мгновенных спарклайнов без похода в БД истории. Fixed-size
+      deque, append O(1), выборка диапазона O(k).
 
 Dict-at-Boundary: view-model ест dict-сообщение (не live SchemaBase) — граница
 процессов соблюдена.
@@ -42,13 +46,15 @@ from PySide6.QtCore import QObject, QTimer, Signal
 _logger = logging.getLogger(__name__)
 
 
-# Суффиксы путей телеметрии, для которых копится кольцевой буфер истории
-# (Task 1.2). Имена сверены с авторитетным списком throttle-правил
-# ``build_throttle_rules`` (backend/state/manager_setup.py) и колонками
-# telemetry_sink (_STATE_COLS): именно эти метрики публикуются как числовые
-# с троттлингом 1 Гц. Совпадение по СУФФИКСУ пути (независимо от имени
-# процесса/воркера): ``processes.<P>.state.fps`` → суффикс ``.state.fps``,
-# ``processes.<P>.workers.<w>.effective_hz`` → суффикс ``.effective_hz``.
+# Суффиксы путей телеметрии, для которых копится кольцевой буфер ИСТОРИИ (спарклайны GUI).
+# Это НАБОР ИСТОРИИ read-модели, а НЕ зеркало publish-gate (``GATED_METRICS`` в
+# ``process_module``): пересекается с ним, но намеренно отличается — ``.state.uptime``
+# трекается для истории карточки процесса (в gate его нет, публикуется всегда),
+# а транспортный счётчик ``shm`` в gate есть, но своей спарклайн-серии не имеет.
+# Форма суффикса — по телеметрийному поддереву (``build_worker_telemetry``): агрегат
+# ``processes.<P>.state.fps`` → ``.state.fps``, per-worker ``…workers.<w>.effective_hz``
+# → ``.effective_hz`` (матч по СУФФИКСУ, независимо от имени процесса/воркера).
+# Приложение задаёт свой набор истории через ``tracked_suffixes``.
 DEFAULT_TRACKED_SUFFIXES: tuple[str, ...] = (
     ".state.fps",
     ".state.latency_ms",
@@ -67,7 +73,7 @@ class TelemetryViewModel(QObject):
     """Владелец «снимок телеметрии → виджет»: read-model + батч-сигнал обновления.
 
     Один объект в GUI. Питается существующим wildcard-потоком дельт (второй
-    потребитель рядом с GuiStateBindings). НЕ создаёт серверных подписок.
+    потребитель рядом с общим state-fan-out). НЕ создаёт серверных подписок.
 
     Сигналы:
         updated(list): список ``tuple[str, Any]`` — (path, value) путей,
@@ -77,7 +83,7 @@ class TelemetryViewModel(QObject):
     Использование:
         vm = TelemetryViewModel(initial_cache=proxy.cache)  # опц. первичный снимок
         bridge.add_state_listener(vm.on_state_delta)         # второй потребитель
-        vm.updated.connect(panel.on_telemetry_batch)         # Task 1.3
+        vm.updated.connect(panel.on_telemetry_batch)         # батч-слот панели
         vm.snapshot("processes.cam")                          # late-binding чтение
         vm.history("processes.cam.state.fps", since=...)      # спарклайн
     """
@@ -98,12 +104,13 @@ class TelemetryViewModel(QObject):
         Args:
             parent: Qt-родитель (владение жизненным циклом).
             initial_cache: опциональный первичный снимок ``{path: value}``
-                (обычно ``GuiStateProxy.cache``). Заливается сразу — snapshot()
+                (обычно кэш state-proxy). Заливается сразу — snapshot()
                 работает ещё до первой дельты. None/пустой → стартуем пустыми.
             tracked_suffixes: набор суффиксов путей для кольцевых буферов
-                истории. None → DEFAULT_TRACKED_SUFFIXES.
+                истории. None → DEFAULT_TRACKED_SUFFIXES. Пустой кортеж →
+                история не копится (только snapshot/get).
             window_sec: длительность окна истории в секундах (~10 мин = 600).
-            sample_hz: ожидаемая частота семплов метрики (троттлинг 1 Гц).
+            sample_hz: ожидаемая частота семплов метрики (троттлинг источника).
                 maxlen буфера = ceil(window_sec * sample_hz) ≈ 600 точек.
         """
         super().__init__(parent)
@@ -153,12 +160,12 @@ class TelemetryViewModel(QObject):
     def on_state_delta(self, msg_dict: dict) -> None:
         """Слот-потребитель dict-сообщения из bridge (Qt main thread).
 
-        Формат (тот же, что у GuiStateBindings, bindings.py):
+        Формат (тот же, что у общего state-fan-out):
             {'data_type': 'state_delta', 'path': 'processes.cam.state.fps',
              'value': 25.3, 'deleted': False}
 
-        Принимаем также ``gui_local_metric`` — GUI-локальные метрики
-        (system.chain_fps/chain_latency_ms), питающие те же path-модели.
+        Принимаем также ``gui_local_metric`` — GUI-локальные метрики,
+        измеряемые самим фронтендом и питающие те же path-модели.
 
         Пишет read-model СИНХРОННО (snapshot/get актуальны сразу), а Qt-сигнал
         ``updated`` планирует одним батчем на пачку (коалесинг). Прочие
@@ -167,8 +174,8 @@ class TelemetryViewModel(QObject):
         if msg_dict.get("data_type") not in ("state_delta", "gui_local_metric"):
             return
         path = msg_dict.get("path")
-        # Консистентно с GuiStateBindings._on_state_msg: пропускаем только при
-        # отсутствии path/value (пустой строкой путь в проде не бывает).
+        # Пропускаем только при отсутствии path/value (пустой строкой путь в
+        # проде не бывает).
         if path is None or "value" not in msg_dict:
             return
 
@@ -199,7 +206,7 @@ class TelemetryViewModel(QObject):
         self.updated.emit(batch)
 
     # ------------------------------------------------------------------
-    # Чтение снимка (late-binding — поглощает роль cache_snapshot-replay)
+    # Чтение снимка (late-binding — снимает нужду в cache-replay биндингов)
     # ------------------------------------------------------------------
 
     def get(self, path: str, default: Any = None) -> Any:
@@ -220,7 +227,7 @@ class TelemetryViewModel(QObject):
         return {p: v for p, v in self._state.items() if p == prefix or p.startswith(dotted)}
 
     # ------------------------------------------------------------------
-    # Кольцевые буферы истории (Task 1.2)
+    # Кольцевые буферы истории
     # ------------------------------------------------------------------
 
     def _is_tracked(self, path: str) -> bool:
@@ -247,9 +254,10 @@ class TelemetryViewModel(QObject):
         if buf is None:
             buf = collections.deque(maxlen=self._maxlen)
             self._history[path] = buf
-        # ts приёма: wall-clock (Unix-epoch, time.time()) — единая ось времени с DB-историей
-        # (telemetry_sink) и с DateAxisItem графика. Ring — только для отображения (спарклайн/
-        # дашборд), длительности/Hz по нему не считаются, поэтому monotonic здесь не нужен.
+        # ts приёма: wall-clock (Unix-epoch, time.time()) — единая ось времени с
+        # DB-историей и с DateAxisItem графика. Ring — только для отображения
+        # (спарклайн/дашборд), длительности/Hz по нему не считаются, поэтому
+        # monotonic здесь не нужен.
         buf.append((time.time(), num))
 
     def history(self, path: str, since: float | None = None) -> list[tuple[float, Any]]:
@@ -269,3 +277,6 @@ class TelemetryViewModel(QObject):
         if since is None:
             return list(buf)
         return [(ts, val) for ts, val in buf if ts >= since]
+
+
+__all__ = ["TelemetryViewModel", "DEFAULT_TRACKED_SUFFIXES"]

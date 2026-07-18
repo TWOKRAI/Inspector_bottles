@@ -359,6 +359,35 @@ class TestTelemetryOverlay:
         assert "telemetry" not in result["renderer"]["config"]
         assert result["processor"]["config"]["telemetry"] == {"publish": {"metrics": {"fps": {"enabled": False}}}}
 
+    def test_telemetry_override_stored_only_for_processes_with_override(self) -> None:
+        """Task 2.2: сырая per-process дельта рецепта → config['telemetry_override'] ТОЛЬКО
+        у процессов с override (нужна config.reload из файла для восстановления overlay)."""
+        assembler = BlueprintAssembler(
+            observability_dict=_OBS_OVERLAY,
+            log_dir="logs",
+            telemetry_dict=_TELEMETRY_GLOBAL,
+        )
+        result = assembler.assemble(copy.deepcopy(_TELEMETRY_OVERRIDE_BLUEPRINT))
+
+        # "processor" имеет override → сохранён СЫРОЙ (publish-уровень), без слияния с global.
+        assert result["processor"]["config"]["telemetry_override"] == {"metrics": {"fps": {"enabled": False}}}
+        # Процессы без override → ключа нет (boot ≡ reload и без него совпадают).
+        assert "telemetry_override" not in result["camera_0"]["config"]
+        assert "telemetry_override" not in result["renderer"]["config"]
+
+    def test_no_telemetry_override_key_when_global_only(self) -> None:
+        """Только глобальный telemetry_dict (нет per-process) → telemetry_override нигде
+        (характеризация: процессы без override — бит-в-бит прежний proc_dict)."""
+        assembler = BlueprintAssembler(
+            observability_dict=_OBS_OVERLAY,
+            log_dir="logs",
+            telemetry_dict=_TELEMETRY_GLOBAL,
+        )
+        result = assembler.assemble(copy.deepcopy(_MULTI_PROCESS_BLUEPRINT))
+
+        for name, proc_dict in result.items():
+            assert "telemetry_override" not in proc_dict["config"], name
+
     def test_per_process_empty_dict_override_counts_as_defined(self) -> None:
         """Явный пустой per-process override `telemetry: {}` — «включить секцию с
         дефолтами», НЕ «не задано» (симметрия с публично задокументированной

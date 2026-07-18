@@ -19,18 +19,27 @@ from multiprocess_prototype.frontend.widgets.tabs.pipeline.inspector.io_debug_se
 )
 
 
+class _FakeReadModel:
+    """Двойник read-model: get(path) из кэша (io_debug replay читает его)."""
+
+    def __init__(self, cache: dict):
+        self._cache = cache
+
+    def get(self, path, default=None):
+        return self._cache.get(path, default)
+
+
 class _FakeBindings:
     """Двойник GuiStateBindings: хранит fan-out callbacks, умеет их дёргать."""
 
     def __init__(self):
         self.fanouts: list = []
         self._cache: dict = {}
+        # io_debug реплеит через bindings.read_model.get(path).
+        self.read_model = _FakeReadModel(self._cache)
 
     def bind_fanout(self, pattern, callback, owner=None):
         self.fanouts.append((pattern, callback))
-
-    def _cache_snapshot(self):
-        return dict(self._cache)
 
     def emit(self, path, value):
         for _pattern, cb in self.fanouts:

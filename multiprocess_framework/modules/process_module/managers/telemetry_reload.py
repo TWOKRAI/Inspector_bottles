@@ -27,11 +27,19 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 if TYPE_CHECKING:
     from ...config_module.core.config import Config
 
-# Task 1.1: маркер удаления правила в throttle-дельте (``mode="merge"``). Значение
-# ``None`` у паттерна → ``remove_rule(pattern)``. ``0`` остаётся ВАЛИДНЫМ правилом
-# «полная блокировка», поэтому не может служить маркером — только ``None`` (JSON null,
+# Маркер удаления правила в throttle-дельте (``mode="merge"``). Значение ``None`` у
+# паттерна → ``remove_rule(pattern)``. ``0`` остаётся ВАЛИДНЫМ правилом «полная
+# блокировка», поэтому не может служить маркером — только ``None`` (JSON null,
 # Dict-at-Boundary дружелюбно) однозначно означает «снять правило».
 THROTTLE_REMOVE: Any = None
+
+# Явный маркер полной очистки набора central-правил: ``throttle: {"__clear__": true}``.
+# Введён, чтобы развести две семантики пустоты (находка B): ПУСТАЯ секция
+# (``{}``/``None``) означает «вернуть boot-дефолты» — так boot ≡ reload на одном YAML;
+# «снять ВСЕ правила» теперь требует ЯВНОГО намерения через этот маркер, а не совпадает
+# с пустым dict. Раньше ``throttle: {}`` на boot давал дефолты, а на hot-reload —
+# ``set_rules({})`` (снимал всё): один и тот же файл давал разное состояние.
+THROTTLE_CLEAR_MARKER: str = "__clear__"
 
 # Task 1.2 (замечание ревьюера Task 1.1): допустимые режимы применения дельты. Неизвестный
 # ``mode`` (напр. опечатка ``"mrege"``) НЕ должен молча уходить в деструктивную
@@ -45,6 +53,7 @@ def apply_telemetry_reconfigure(
     mode: str = "replace",
     heartbeat: Any = None,
     store_throttle: Any = None,
+    default_throttle_rules: Optional[Dict[str, Any]] = None,
     log_info: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """Применить секцию ``telemetry`` к publisher-gate и/или центральному троттлу.
@@ -61,7 +70,9 @@ def apply_telemetry_reconfigure(
     Режим ``mode`` (Task 1.1) — общий для ОБЕИХ плоскостей:
       - ``"replace"`` (дефолт, backward-compat) — полное применение секции целиком
         (publisher-gate пересобирается из секции; throttle → ``set_rules`` заменяет ВЕСЬ
-        набор правил, ``{}`` → снять все);
+        набор правил). ПУСТАЯ throttle-под-секция (``{}``/``None``) → ``default_throttle_rules``
+        (единая семантика с boot: тот же YAML даёт то же состояние при рестарте и reload,
+        находка B); полная очистка — только явным :data:`THROTTLE_CLEAR_MARKER`;
       - ``"merge"`` — дельта поверх ЖИВОГО состояния: publisher-gate строится из
         ``deep_merge(current_effective, delta)``; throttle применяется ПО-ПРАВИЛУ через
         ``update_rule``/``remove_rule`` (значение :data:`THROTTLE_REMOVE`/``None`` у
@@ -77,6 +88,10 @@ def apply_telemetry_reconfigure(
         heartbeat: ``ProcessHeartbeat`` процесса-адресата (или None — нет приёмника).
         store_throttle: живой ``ThrottleMiddleware`` оркестратора (или None — процесс
             не держит StateStoreManager, троттл ему не адресуется).
+        default_throttle_rules: boot-дефолты central-троттла (результат
+            ``build_throttle_rules``). Пустая throttle-под-секция в режиме ``replace`` →
+            эти правила (boot ≡ reload). ``None`` (вызов без источника дефолтов, напр.
+            адресная операторская команда) → пустая секция снимает все правила, как раньше.
         log_info: колбэк логирования (опционально).
 
     Returns:
@@ -106,7 +121,7 @@ def apply_telemetry_reconfigure(
 
     if "throttle" in section:
         if _throttle_applicable(store_throttle, mode):
-            _apply_throttle(store_throttle, section["throttle"], mode)
+            _apply_throttle(store_throttle, section["throttle"], mode, default_throttle_rules)
             applied["throttle"] = True
         else:
             applied["throttle"] = False  # процесс не держит StateStoreManager/throttle
@@ -129,22 +144,47 @@ def _throttle_applicable(store_throttle: Any, mode: str) -> bool:
     return hasattr(store_throttle, "set_rules")
 
 
-def _apply_throttle(store_throttle: Any, throttle_section: Any, mode: str) -> None:
+def _apply_throttle(
+    store_throttle: Any,
+    throttle_section: Any,
+    mode: str,
+    default_rules: Optional[Dict[str, Any]] = None,
+) -> None:
     """Применить throttle-под-секцию к живому ``ThrottleMiddleware``.
 
-    ``replace`` — ``set_rules(section or {})`` заменяет ВЕСЬ набор (``{}`` → снять все).
-    ``merge`` — пройти дельту по правилам: ``None``-значение (:data:`THROTTLE_REMOVE`) →
-    ``remove_rule(pattern)``, иначе ``update_rule(pattern, interval)``. Остальные (не
-    упомянутые в дельте) правила не трогаются — это и есть «точечная» правка.
+    Семантика пустоты (находка B, boot ≡ reload):
+      - явный :data:`THROTTLE_CLEAR_MARKER` (``{"__clear__": true}``) в ЛЮБОМ режиме →
+        ``set_rules({})`` — единственный способ снять ВСЕ правила намеренно;
+      - ``replace`` + пустая секция (``{}``/``None``) → ``default_rules`` (boot-дефолты);
+        ``None``-дефолты (нет источника) → снять все, как раньше (backward-compat);
+      - ``replace`` + непустая секция → ``set_rules(section)`` заменяет весь набор;
+      - ``merge`` — пройти дельту по правилам: ``None``-значение (:data:`THROTTLE_REMOVE`)
+        → ``remove_rule(pattern)``, иначе ``update_rule(pattern, interval)``. Остальные
+        (не упомянутые в дельте) правила не трогаются — это и есть «точечная» правка.
     """
+    section = throttle_section or {}
+
+    # Явный clear-маркер — снять всё намеренно (перекрывает и merge, и replace). Строгая
+    # проверка ``is True``: маркер срабатывает только на документированную форму
+    # ``{"__clear__": true}``, а не на любое truthy-значение под этим ключом (иначе
+    # гипотетический паттepн-правило с таким именем случайно снёс бы весь набор).
+    if isinstance(section, dict) and section.get(THROTTLE_CLEAR_MARKER) is True:
+        store_throttle.set_rules({})
+        return
+
     if mode == "merge":
-        for pattern, interval in (throttle_section or {}).items():
+        for pattern, interval in section.items():
             if interval is THROTTLE_REMOVE:
                 store_throttle.remove_rule(pattern)
             else:
                 store_throttle.update_rule(pattern, interval)
         return
-    store_throttle.set_rules(throttle_section or {})
+
+    # replace: пустая секция → boot-дефолты (единая семантика с рестартом), иначе — набор.
+    if not section:
+        store_throttle.set_rules(dict(default_rules) if default_rules else {})
+        return
+    store_throttle.set_rules(section)
 
 
 def resolve_store_throttle(holder: Any) -> Any:
@@ -250,9 +290,46 @@ def detect_throttle_caps(publish_section: Any, store_throttle: Any) -> Dict[str,
     return caps
 
 
+# Внутренние маркеры diff-гейта watcher'а (см. make_telemetry_on_reload).
+_THROTTLE_UNSEEN: Any = object()  # throttle в файле не объявлен (отсутствует)
+_THROTTLE_SKIP: Any = object()  # файл сейчас нечитаем (частичная запись) — пропустить reload
+
+
+def _read_throttle_declaration(config_path: Any, section_key: str) -> Any:
+    """Свежая throttle-декларация ПРЯМО ИЗ ФАЙЛА (не из merge-аккумулированного Config).
+
+    Ключ находки: watcher-``Config`` аддитивен (``Config.update`` = ``deep_merge``) —
+    удалённый/опустошённый в файле ``throttle`` в нём остаётся stale, поэтому сравнивать
+    надо со свежей загрузкой файла (ровно как ручной ``config.reload``), иначе «файл —
+    источник истины» не работает для удаления/сброса throttle.
+
+    Returns:
+        - dict — throttle-под-секция как объявлена в файле;
+        - :data:`_THROTTLE_UNSEEN` — секция telemetry есть, но throttle отсутствует, ЛИБО
+          telemetry не объявлена вовсе (в обоих случаях throttle «не задан» → дефолты);
+        - :data:`_THROTTLE_SKIP` — файл нечитаем/битый прямо сейчас (не трогать троттл).
+    """
+    if not config_path:
+        return _THROTTLE_UNSEEN
+    try:
+        from ...data_schema_module.serialization.converter import DataConverter
+
+        data = DataConverter.load_from_file(config_path)
+    except Exception:  # noqa: BLE001 — частично записанный файл: пропустить этот reload
+        return _THROTTLE_SKIP
+    if not isinstance(data, dict):
+        return _THROTTLE_SKIP
+    section = data.get(section_key)
+    if not isinstance(section, dict):
+        return _THROTTLE_UNSEEN  # телеметрия в файле не объявлена
+    return section.get("throttle", _THROTTLE_UNSEEN)
+
+
 def make_telemetry_on_reload(
     *,
     store_throttle: Any = None,
+    default_throttle_rules: Optional[Dict[str, Any]] = None,
+    config_path: Any = None,
     section_key: str = "telemetry",
     log_info: Optional[Callable[[str], None]] = None,
 ) -> Callable[["Config"], None]:
@@ -262,20 +339,44 @@ def make_telemetry_on_reload(
     (тот же файл, та же правка → и observability-менеджеры, и центральный троттл без
     рестарта).
 
-    **ВАЖНО (граница Task 3.1 vs 3.2):** watcher живёт в оркестраторе и применяет ТОЛЬКО
+    **Файл — декларативный источник состояния троттла (boot ≡ reload, находка B):** throttle
+    читается СВЕЖЕЙ загрузкой ``config_path`` (не из merge-аккумулированного ``Config`` —
+    тот аддитивен, удалённый throttle в нём остаётся stale). Central-троттл трогается ТОЛЬКО
+    когда throttle-декларация файла РЕАЛЬНО изменилась с прошлого reload (diff-гейт):
+    несвязанная правка (``observability.log_level``) не откатывает runtime-дельту троттла
+    (операторская правка через ``telemetry.broadcast``, ADR-PM-017 «no silent caps»).
+    ``last_throttle`` сидируется ФАКТИЧЕСКОЙ boot-декларацией из файла — иначе первый reload
+    при сконфигурированном throttle принял бы «_unseen → {файл}» за изменение и снёс бы
+    runtime-дельту. Пустая/отсутствующая throttle-декларация → ``default_throttle_rules``
+    (те же boot-правила ``build_throttle_rules``, что оркестратор кладёт в ``state_throttle_rules``).
+
+    **Граница Task 3.1 vs 3.2:** watcher живёт в оркестраторе и применяет ТОЛЬКО
     ``throttle`` (центральный store-троттл, доступный в ТОМ ЖЕ процессе). Publisher-gate
     ДЕТЕЙ через файл не перестраивается — для этого нужен fan-out по процессам
-    (broadcast), это Task 3.2. Поэтому ``heartbeat`` тут не передаётся: применяется лишь
-    throttle-плоскость (даже если в файле есть ``publish`` — он помечается «нет приёмника»
-    и никого не трогает).
+    (broadcast), это Task 3.2.
     """
+    # Сид: фактическая boot-декларация throttle из файла (фикс silent-cap на 1-м reload).
+    last_throttle: Any = _read_throttle_declaration(config_path, section_key)
+    if last_throttle is _THROTTLE_SKIP:
+        last_throttle = _THROTTLE_UNSEEN
 
-    def _on_reload(config: "Config") -> None:
-        section = config.get(section_key, {}) or {}
+    def _on_reload(_config: "Config") -> None:
+        nonlocal last_throttle
+        declared = _read_throttle_declaration(config_path, section_key)
+        if declared is _THROTTLE_SKIP:
+            return  # файл нечитаем прямо сейчас — не трогаем троттл
+        # Diff-гейт: throttle-декларация файла не изменилась → не трогаем (сохраняем
+        # runtime-дельту). Изменение/удаление → применяем (удаление → _unseen → пустой →
+        # default_throttle_rules, boot ≡ reload).
+        if declared == last_throttle:
+            return
+        last_throttle = declared
+        throttle_section = {} if declared is _THROTTLE_UNSEEN else declared
         apply_telemetry_reconfigure(
-            section,
+            {"throttle": throttle_section},
             heartbeat=None,  # publisher-gate детей — fan-out Task 3.2, не через файл
             store_throttle=store_throttle,
+            default_throttle_rules=default_throttle_rules,
             log_info=log_info,
         )
 
@@ -283,6 +384,7 @@ def make_telemetry_on_reload(
 
 
 __all__ = [
+    "THROTTLE_CLEAR_MARKER",
     "THROTTLE_REMOVE",
     "VALID_MODES",
     "apply_telemetry_reconfigure",

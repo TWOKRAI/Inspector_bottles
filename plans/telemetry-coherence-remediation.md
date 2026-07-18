@@ -201,7 +201,28 @@ telemetry-publish-control); изменение дефолтных central-пра
 
 ## Фаза 2 — Когерентность контракта (boot ≡ reload, видимые ошибки)
 
-### Task 2.1 — Единая семантика `throttle: {}` на boot и hot-reload
+> **✅ ФАЗА 2 ЗАКРЫТА** (ветка `feat/telemetry-coherence-phase2`, коммиты ff8d5745 · dc7594e6 ·
+> 93589f7f merged bab99c10; ревью-фиксы ab9a5a9b + fresh-read). Task 2.3 исполнен параллельным
+> агентом в worktree, слит без конфликтов. Гейт: 853 тестов process_module+app_module зелёные,
+> ruff + pyright чисто.
+>
+> **Ревью (Sonnet + Opus, 2 итерации) — исправлено:**
+> - HIGH (Sonnet): watcher откатывал троттл на несвязанной перезагрузке файла → diff-гейт.
+> - major A+B (Opus): (A) сид `last_throttle` boot-декларацией — закрыт silent-cap на 1-м reload
+>   при сконфигурированном throttle; (B) КЛЮЧЕВОЕ — watcher-`Config` аддитивен (`Config.update` =
+>   `deep_merge`), удалённый throttle оставался stale → `make_telemetry_on_reload` теперь читает
+>   throttle СВЕЖИМ из `config_path` (как ручной `config.reload`), удаление/сброс реально видны;
+>   тесты переписаны на реальные файлы (репрезентативно проду, не свежие `Config`).
+> - minor C (Opus): расхождение семантики отсутствующего throttle-ключа watcher↔ручной
+>   `config.reload` — оставлено осознанно: watcher — декларативный boot≡reload-путь (сброс при
+>   реальном удалении), ручная команда трогает только явно присутствующие секции (не клоббит
+>   runtime-дельту на несвязанном ручном reload). Задокументировано.
+>
+> **Долги (отдельные тикеты, не блок):** 2 golden `test_build_characterization` (дифф в
+> `orchestrator_config`, есть на origin/main, не телеметрия); `pyqtgraph` в pyproject, не в `.venv`.
+> Следующее — Фаза 3 (гигиена + долг простоты).
+
+### Task 2.1 — Единая семантика `throttle: {}` на boot и hot-reload ✅ DONE (ff8d5745)
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
 **Layer:** mixed
@@ -219,12 +240,12 @@ telemetry-publish-control); изменение дефолтных central-пра
    `apply_telemetry_reconfigure`-вызывающими (источник — `build_throttle_rules`).
 3. Удаление throttle-секции из файла при reload → тоже возврат к дефолтам (сейчас — stale).
 **Acceptance:**
-- [ ] Тест: `throttle: {}` через watcher/config.reload → живые правила == `_default_throttle_rules()` (та же таблица, что при boot)
-- [ ] Тест: явный clear-маркер → правила пусты
-- [ ] Тест: reload файла БЕЗ throttle-ключа после кастомных правил → дефолты (не stale)
+- [x] Тест: `throttle: {}` через watcher/config.reload → живые правила == `_default_throttle_rules()` (та же таблица, что при boot)
+- [x] Тест: явный clear-маркер → правила пусты
+- [x] Тест: reload файла БЕЗ throttle-ключа после кастомных правил → дефолты (не stale) — через diff-гейт (throttle реально удалён из файла)
 **Out of scope:** publish-плоскость (её семантика None/dict не меняется).
 
-### Task 2.2 — `config.reload` из файла: сохранить per-process overlay
+### Task 2.2 — `config.reload` из файла: сохранить per-process overlay ✅ DONE (dc7594e6)
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
 **Layer:** mixed
@@ -239,12 +260,12 @@ telemetry-publish-control); изменение дефолтных central-пра
    get_config("telemetry_override") or {})` (мержится только `publish`-часть; `throttle` — как есть).
 3. inline-путь (`data["telemetry"]`) НЕ трогать — явная секция от оператора применяется как есть.
 **Acceptance:**
-- [ ] Тест: процесс с recipe-override `metrics.fps.enabled=false` после `config.reload path=system.yaml` сохраняет override (gate.resolve("fps") == (False, ...)), глобальные изменения из файла применены
-- [ ] Тест: процесс без override — поведение бит-в-бит прежнее (характеризация)
-- [ ] Golden-снапшоты build: новый ключ `telemetry_override` появляется ТОЛЬКО у процессов с override
+- [x] Тест: процесс с recipe-override `metrics.fps.enabled=false` после `config.reload path=system.yaml` сохраняет override (gate.resolve("fps") == (False, ...)), глобальные изменения из файла применены
+- [x] Тест: процесс без override — поведение бит-в-бит прежнее (характеризация)
+- [x] Golden-снапшоты build: новый ключ `telemetry_override` появляется ТОЛЬКО у процессов с override (проверено юнит-фикстурами `test_assembler.py`; живых рецептов с override пока нет — синтетика)
 **Out of scope:** watcher-fan-out publisher-gate детям (Task 3.2), персист runtime-дельты (Task 3.2).
 
-### Task 2.3 — Валидация `metrics`-ключей против GATED_METRICS
+### Task 2.3 — Валидация `metrics`-ключей против GATED_METRICS ✅ DONE (93589f7f)
 **Level:** Middle (Sonnet)
 **Assignee:** developer
 **Layer:** framework
@@ -259,15 +280,33 @@ telemetry-publish-control); изменение дефолтных central-пра
    видно инициатору backend_ctl/GUI).
 3. НЕ отвергать секцию (forward-compat: новые метрики в старом процессе не должны ронять reload).
 **Acceptance:**
-- [ ] Тест: `metrics: {latency: {...}}` → WARNING с точным именем + `unknown_metrics=["latency"]` в ответе команды; gate строится, известные метрики работают
-- [ ] Тест: все ключи известны → ни WARNING, ни поля в ответе
+- [x] Тест: `metrics: {latency: {...}}` → WARNING с точным именем + `unknown_metrics=["latency"]` в ответе команды; gate строится, известные метрики работают
+- [x] Тест: все ключи известны → ни WARNING, ни поля в ответе
 **Out of scope:** белый список как hard-fail; изменение состава GATED_METRICS.
 
 ---
 
 ## Фаза 3 — Гигиена + долг простоты
 
-### Task 3.1 — Типизировать `ProcessConfig.telemetry` (убрать raw-blueprint pre-scan)
+> **✅ ФАЗА 3 ЗАКРЫТА** (ветка `feat/telemetry-coherence-phase2`). 3.1/3.3/3.4/3.5 DONE; 3.2 частично
+> (шаг 3 fan-out отложен). 3.3/3.4/3.5 исполнены параллельными агентами (worktree), 3.1/3.2 — основной
+> тред. Гейт: ruff+pyright чисто; ~1900 backend + 1030 frontend/PM/throttle зелёные (2 pre-existing
+> env-провала: bare-import `frontend_module.*` в patch, pyqtgraph 0.14.0 — оба на origin/main).
+>
+> **Ревью (Sonnet многоугловое → Opus целенаправленное):**
+> - Sonnet: HIGH (interfaces.py F822 — пропущен импорт реэкспорта) + 3 MED (restart_process не доигрывал
+>   дельту; нет интеграционного теста apply_topology→replay; lazy-prune слепа к `interval=0`-правилам) →
+>   всё исправлено `906bafa7`.
+> - Opus: APPROVE-with-nits; 3 Sonnet-фикса подтверждены; оси read-model/concurrency/covered-subs/3.1×2.2
+>   чисты по коду. Реальная находка — персист хранил лишь ПОСЛЕДНЮЮ дельту (при ≥2 merge respawn терял
+>   предыдущие) → исправлено аккумуляцией `deep_merge` `555e6caa`.
+>
+> **Follow-up тикеты (не блок):** (1) шаг 3 Task 3.2 — watcher fan-out publish с per-child override-мержем;
+> (2) known-gap смешанных merge→replace-цепочек в персисте (replace сбрасывает накопленное — приемлемо);
+> (3) minor pre-existing: серверная семантика `state.unsubscribe` для async/реактивированных covered-подписок
+> (sub_id локальный uuid4 vs серверный — потенциальный orphan, унаследован из штатного async-subscribe, не от 3.3).
+
+### Task 3.1 — Типизировать `ProcessConfig.telemetry` (убрать raw-blueprint pre-scan) ✅ DONE (43368466)
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
 **Layer:** mixed
@@ -280,12 +319,20 @@ telemetry-publish-control); изменение дефолтных central-пра
 2. Assembler читает `topology.processes[i].telemetry` после валидации; raw pre-scan удалить.
 3. Характеризация: build-снапшоты обоих живых рецептов не меняются.
 **Acceptance:**
-- [ ] Тест: per-process override доезжает до `get_config("telemetry")` (существующие тесты overlay зелёные без raw-скана)
-- [ ] grep: `_extract_per_process_telemetry` отсутствует
-- [ ] Golden-снапшоты `test_build_characterization.py` без диффа proc_dict'ов
+- [x] Тест: per-process override доезжает до `get_config("telemetry")` (существующие тесты overlay зелёные без raw-скана)
+- [x] grep: `_extract_per_process_telemetry` отсутствует
+- [x] Golden-снапшоты `test_build_characterization.py` без диффа proc_dict'ов
 **Out of scope:** семантика merge (не меняется), другие поля ProcessConfig.
 
-### Task 3.2 — Персист runtime-дельты в PM + fan-out publisher-gate из watcher
+### Task 3.2 — Персист runtime-дельты в PM + fan-out publisher-gate из watcher ⚠️ ЧАСТИЧНО (c0b6e01b: шаги 1-2-4; шаг 3 отложен)
+
+> **Шаги 1, 2, 4 DONE** (c0b6e01b): PM хранит `_telemetry_runtime_delta`, доигрывает после `apply_topology`
+> (residual #7 закрыт), `publish=None` broadcast сбрасывает персист. **Шаг 3 (watcher фанит publish-часть
+> детям) ОТЛОЖЕН** — обнаружен клоббер-риск: `_broadcast_command` рассылает publish ВСЕМ детям единообразно
+> (`comm.broadcast`), затирая per-process override, сохранённый Task 2.2 (boot≢reload для процесса с override).
+> Корректный fan-out требует per-child мержа override (адресные send'ы с `telemetry_override` каждого ребёнка
+> ИЛИ merge на стороне ребёнка) — отдельное решение владельца, пересекается с семантикой операторского
+> broadcast (тот тоже uniform). Acceptance-тест «правка publish файла → у детей пересобран gate» — под шагом 3.
 **Level:** Senior (Opus)
 **Assignee:** teamlead
 **Layer:** framework
@@ -303,13 +350,13 @@ telemetry-publish-control); изменение дефолтных central-пра
    сравнение с последней применённой).
 4. Явная команда сброса дельты (`telemetry.reset` или `publish=None` broadcast) очищает персист.
 **Acceptance:**
-- [ ] Тест: broadcast-дельта → hot-swap рецепта → у пересозданного ребёнка gate отражает дельту (не boot-дефолт)
+- [x] Тест: broadcast-дельта → hot-swap рецепта → у пересозданного ребёнка gate отражает дельту (не boot-дефолт)
 - [ ] Тест: правка publish-секции файла → watcher → у детей пересобран gate (mock-children/охват)
-- [ ] Тест: повторный reload файла БЕЗ изменений секции → 0 broadcast'ов (нет шторма)
-- [ ] Тест: сброс дельты → respawn берёт boot-конфиг
+- [x] Тест: повторный reload файла БЕЗ изменений секции → 0 broadcast'ов (нет шторма)
+- [x] Тест: сброс дельты → respawn берёт boot-конфиг
 **Out of scope:** персист на диск (только память PM); throttle-плоскость (живёт в оркестраторе, respawn её не теряет).
 
-### Task 3.3 — Covered-подписки: ре-адопция при снятии покрывающего паттерна
+### Task 3.3 — Covered-подписки: ре-адопция при снятии покрывающего паттерна ✅ DONE (d1cb407c)
 **Level:** Middle+ (Sonnet)
 **Assignee:** developer
 **Layer:** framework
@@ -322,12 +369,12 @@ telemetry-publish-control); изменение дефолтных central-пра
    (паттерн 0.2), убрав sub_id из `_covered_sub_ids`.
 2. Лог с маркером `[re-adopt]` + счётчик (наблюдаемость как у async-subscribe).
 **Acceptance:**
-- [ ] Тест: subscribe wildcard (sync) → ensure узкого (covered) → unsubscribe wildcard → узкому отправлен собственный `state.subscribe` (spy-router)
-- [ ] Тест: два покрывающих — снятие одного НЕ создаёт новой подписки (переусыновление)
-- [ ] Регресс: прежние coverage-тесты зелёные
+- [x] Тест: subscribe wildcard (sync) → ensure узкого (covered) → unsubscribe wildcard → узкому отправлен собственный `state.subscribe` (spy-router)
+- [x] Тест: два покрывающих — снятие одного НЕ создаёт новой подписки (переусыновление)
+- [x] Регресс: прежние coverage-тесты зелёные
 **Out of scope:** серверная сторона; sync-ре-подписка (только async — инвариант «0 блокирующего IPC»).
 
-### Task 3.4 — Гигиена ThrottleMiddleware: чистка таймингов мёртвых путей
+### Task 3.4 — Гигиена ThrottleMiddleware: чистка таймингов мёртвых путей ✅ DONE (d7670228)
 **Level:** Middle (Sonnet)
 **Assignee:** developer
 **Layer:** framework
@@ -342,9 +389,9 @@ telemetry-publish-control); изменение дефолтных central-пра
 2. `flush()` — отдавать pending с меткой возраста ЛИБО отбрасывать записи старше порога
    (задокументировать выбор), чтобы shutdown не писал давно исчезнувшие значения.
 **Acceptance:**
-- [ ] Тест: prune по префиксу убирает тайминги/pending только своего поддерева
-- [ ] Тест: рост словарей ограничен при потоке уникальных путей (lazy-prune срабатывает)
-- [ ] Регресс: 40 тестов test_throttle.py зелёные
+- [x] Тест: prune по префиксу убирает тайминги/pending только своего поддерева
+- [x] Тест: рост словарей ограничен при потоке уникальных путей (lazy-prune срабатывает)
+- [x] Регресс: 40 тестов test_throttle.py зелёные
 **Out of scope:** семантика троттла (интервалы/правила не меняются).
 
 ### Task 3.5 — Read-model во framework + вырезание legacy bind-пути
@@ -367,10 +414,10 @@ README, STATUS, tests — правило проекта №2), `multiprocess_pro
    bind'ы. Инвариант-тест вкладок остаётся зелёным.
 4. Возможен сплит на 3.5a (перенос) / 3.5b (миграция+вырезание) — решает teamlead при декомпозиции.
 **Acceptance:**
-- [ ] `test_tab_open_invariant.py` зелёный для всех вкладок ПОСЛЕ вырезания legacy
-- [ ] grep: `_connect_bindings_legacy` / `cache_snapshot` отсутствуют в прототипе
-- [ ] Импорт-границы: `mcp__sentrux__check_rules` чист (frontend_module не импортирует прототип)
-- [ ] qt-smoke по правилу `feedback_qt_mcp_smoke_verification`: proto + qt_snapshot, все вкладки живые
+- [x] `test_tab_open_invariant.py` зелёный для всех вкладок ПОСЛЕ вырезания legacy
+- [x] grep: `_connect_bindings_legacy` / `cache_snapshot` отсутствуют в прототипе
+- [x] Импорт-границы: `mcp__sentrux__check_rules` чист (frontend_module не импортирует прототип)
+- [x] qt-smoke (2026-07-18): proto offscreen + qt-mcp probe, все 8 вкладок переключаются без падений; «Наблюдаемость» строит read-model (ObservabilityTabs → Логи/Ошибки/Статистика на RecordHistoryPanel); Qt error-лог пуст
 **Out of scope:** новый функционал вкладок; формат доставки дельт (ADR-COMM-001 не трогаем).
 
 ---
@@ -386,6 +433,48 @@ README, STATUS, tests — правило проекта №2), `multiprocess_pro
 | Task 3.1 gui-read-model: дуальный VM/legacy-путь не вырезан | **Task 3.5** |
 
 Windows test-debt (2 фейла app_module) — вне скоупа, отдельный тикет (pre-existing).
+
+---
+
+## Финальная приёмка (Fable holistic, Фазы 1-3, 2026-07-18)
+
+Холистическое балльное ревью всей системы телеметрии по диффу `origin/main..HEAD` + Фаза 1 (main).
+Траектория оценки: **24 → 42 → 47 из 60**. Вердикт: **цель плана достигнута, к merge в main готова с оговорками**.
+
+| Ось | После | Δ от 42 | Кратко |
+|---|---|---|---|
+| Архитектура (когерентность) | 8/10 | +2 | Лестница управляема на 3 ступенях, ADR-PM-016/017, cap-детекция на обоих путях, boot≡reload |
+| Паттерны | 8/10 | +1 | Один идемпотентный apply-путь, дельта-маркеры, diff-гейт свежего файла, MVVM read-model |
+| Модульность | 8/10 | +1 | GATED_METRICS в configs, typed telemetry, generic VM+History во framework |
+| Эффективность | 7/10 | +1 | lazy-prune одна len()-проверка, коалесинг сигнала, единый снимок; бенчей частотного пути нет |
+| Безопасность/надёжность | 8/10 | +1 | SQL whitelist+параметризация, silent no-op → наблюдаемые, thread-контракт prune |
+| Стиль/согласованность (простота) | 8/10 | +3 | legacy вырезан, один read-model, образцовые «почему»-комментарии |
+
+**Оставшиеся долги (follow-up тикеты, НЕ блок merge; qt-smoke закрыт 2026-07-18 — блокеров merge не осталось):**
+
+| # | Sev | Что | Куда |
+|---|---|---|---|
+| W1 | MED | Watcher не фанит publish-plane детям (шаг 3 Task 3.2) — декларативность лестницы не замкнута | реши ДО Фазы 4 GUI |
+| W2 | MED | Адресные per-process runtime-дельты не персистятся → respawn теряет точечную правку | вместе с W1 (per-child overlay) |
+| W3 | LOW/MED | cap-детекция матчит по суффиксу-листу → wildcard-лист операторского правила невидим (возможен тихий срез) | WARNING или абзац в ADR-PM-017 |
+| W4 | LOW | `_stale_age_threshold` = K×max(интервал) глобально — редкое правило 60с раздувает порог гигиены | per-rule порог (опц.) |
+| W5 | LOW→страт. | `GATED_METRICS` закрыт для приложений — своя метрика приложения = «опечатка»-WARNING; предел универсальности конструктора | стратегический тикет |
+| W6 | LOW | ~~дрифт DEFAULT_TRACKED_SUFFIXES vs GATED_METRICS в докстринге~~ — **исправлено** (докстринг уточнён) | ✅ закрыт |
+| qt | ✅ | qt-smoke Task 3.5 — **выполнен 2026-07-18** (offscreen+probe, 8 вкладок живые, телеметрийный read-model строится, 0 Qt-ошибок) | закрыт |
+
+**Pre-existing долги прототип-suite (вскрыты при merge-верификации 2026-07-18; НЕ от этой ветки —
+воспроизводятся на `main`; НЕ блокеры merge телеметрии):**
+
+| # | Что | Диагноз |
+|---|---|---|
+| P1 | `test_topology_dirty_indicator` / `test_topology_dirty_pipeline` (×2 папки: `frontend/tests/`, `frontend/widgets/tabs/pipeline/tests/`) вешают headless-прогон | Активация рецепта/close/UI-restart дёргают модальный `confirm_unsaved_changes`, `QDialog.exec()` блокирует без пользователя; `pytest-timeout --timeout-method=signal` не прерывает Qt C++ event-loop. Нужен autouse-фикстур, мокающий модалку (правило `feedback_no_qt_popups_offscreen`) |
+| P2 | `test_system_dashboard::test_refresh_pulls_ring_history_into_series` падает (серия пуста) | VM `history()` отдаёт точки корректно; `telemetry_chart.set_series_data` не заполняет кривую (`curve.setData → getData()` пусто). Баг графика (`frontend_module`), не read-model; **падает и на main** |
+
+Телеметрийные прототип-тесты (все изменённые веткой файлы): **137 passed** (минус P2). Framework: **5010 passed**.
+
+**Vs commercial best practices:** publisher-gate+tick_sec = аналог OTel Views+MetricReader, ВЫШЕ типового по
+явной cap-диагностике между слоями; read-model (ring+SQLite-ro) — коммерческий уровень. Отставание — до
+desired-state контроллер-паттерна (W1 + персист только в памяти PM) и расширяемость реестра метрик (W5).
 
 ---
 

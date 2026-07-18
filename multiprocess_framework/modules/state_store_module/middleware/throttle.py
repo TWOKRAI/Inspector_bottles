@@ -18,6 +18,22 @@ StateStore на каждый кадр.
 Рантайм-мутабельность правил (PC 0.1): :meth:`set_rules` / :meth:`update_rule` /
 :meth:`remove_rule` меняют набор правил живьём (потокобезопасно, copy-on-write) —
 нужно для рантайм-команд (config hot-reload / backend_ctl, Фаза 3).
+
+Гигиена таймингов мёртвых путей (находка G, Task 3.4): без чистки ``_last_pass``/
+``_pending`` растут бессрочно при hot-swap процессов с новыми именами/instance-id
+(старые пути никогда не удаляются). Два независимых механизма:
+
+- :meth:`prune` — точечная чистка по префиксу пути, звать при удалении поддерева
+  из StateStore (``state.delete`` на корне ``processes.<name>``,
+  см. ``StateStoreManager.handle_state_delete``).
+- lazy-prune по размеру (:meth:`_maybe_lazy_prune`) — подстраховка НА СЛУЧАЙ, если
+  путь исчез без явного ``state.delete`` (например, тайминг остался от снятого
+  правила без снятия поддерева): срабатывает только когда ``_last_pass`` вырос за
+  ``_LAZY_PRUNE_SIZE_THRESHOLD``, выбрасывает записи старше
+  ``_STALE_AGE_MULTIPLIER × базовый_интервал``.
+
+:meth:`flush` отбрасывает (не возвращает) pending-значения старше того же порога —
+см. docstring метода.
 """
 
 from __future__ import annotations
@@ -28,6 +44,25 @@ from typing import Any, Iterator
 
 from ..core import match_pattern, split_pattern
 from .base import StateMiddleware
+
+# ---------------------------------------------------------------------------
+# Константы гигиены таймингов (находка G, Task 3.4)
+# ---------------------------------------------------------------------------
+
+# N — порог размера _last_pass, после которого запускается lazy-prune (см.
+# _maybe_lazy_prune). Прод-нагрузка телеметрии (десятки-сотни путей) никогда
+# не задевает этот порог — lazy-prune для неё чистый no-op (одна проверка len()).
+_LAZY_PRUNE_SIZE_THRESHOLD = 1000
+
+# K — множитель "запись мертва, если её возраст > K × базовый_интервал". Путь,
+# не обновлявшийся дольше нескольких СВОИХ интервалов, почти наверняка исчез
+# (hot-swap/остановленный процесс), а не просто временно не шлёт кадры.
+_STALE_AGE_MULTIPLIER = 10
+
+# Базовый интервал, когда среди правил нет ни одного ПОЛОЖИТЕЛЬНОГО (только
+# interval=0 полные блокировки, либо правил нет вовсе) — без этого fallback'а
+# порог вырождался бы в 0 и любая запись считалась бы мёртвой мгновенно.
+_DEFAULT_RULE_INTERVAL_SEC = 5.0
 
 
 class ThrottleMiddleware(StateMiddleware):
@@ -61,8 +96,14 @@ class ThrottleMiddleware(StateMiddleware):
         итерирует её без блокировки — это безопасно, т.к. пере-присваивание ссылки
         атомарно под GIL, а живой dict неизменен. ``_lock`` сериализует только
         мутатор-vs-мутатор (без него два одновременных ``update_rule`` могли бы
-        потерять правку). Тайминги (``_last_pass`` / ``_pending``) трогаются только
-        из потока стора — их синхронизировать не нужно.
+        потерять правку). Тайминги (``_last_pass`` / ``_pending`` / ``_pending_since``)
+        трогаются только из потока стора — их синхронизировать не нужно. Это же
+        относится и к :meth:`prune` (Task 3.4): звать его разрешено ТОЛЬКО из
+        потока стора (того же, что обрабатывает ``state.set``/``state.merge``/
+        ``state.delete`` — все IPC-команды ``StateStoreManager`` диспетчерятся
+        серийно одним воркер-тредом ``message_processor``, см.
+        ``StateStoreManager.handle_state_delete``); вызов из другого потока не
+        потокобезопасен (гонка с ``before_set``/``before_merge`` того же процесса).
     """
 
     @property
@@ -82,6 +123,13 @@ class ThrottleMiddleware(StateMiddleware):
 
         # Последнее заблокированное значение: path → (value, source)
         self._pending: dict[str, tuple[Any, str]] = {}
+
+        # Момент последней записи в _pending для того же пути (не путать со
+        # значением из _last_pass — это момент постановки в очередь, а не
+        # момент пропуска). Отдельный dict, а не третий элемент кортежа в
+        # _pending, — чтобы не менять внешнюю форму _pending (используется в
+        # тестах и в flush()). Нужен для age-проверок в prune/flush (Task 3.4).
+        self._pending_since: dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # before_set — троттл одного пути (лист)
@@ -103,7 +151,14 @@ class ThrottleMiddleware(StateMiddleware):
         4. Прошло меньше ``interval`` с последнего пропуска → сохранить
            в ``_pending``, вернуть (False, value).
         5. Иначе → пропустить, обновить ``_last_pass``, очистить ``_pending``.
+
+        Перед основной логикой опционально запускает lazy-prune (Task 3.4,
+        см. :meth:`_maybe_lazy_prune`) — недорогая проверка размера на
+        каждый вызов, полное сканирование — только при превышении порога.
         """
+        now = time.monotonic()
+        self._maybe_lazy_prune(now)
+
         interval = self._find_rule(path)
 
         # Путь не покрыт правилами — пропускаем без ограничений
@@ -113,21 +168,23 @@ class ThrottleMiddleware(StateMiddleware):
         # Полная блокировка
         if interval == 0:
             self._pending[path] = (value, source)
+            self._pending_since[path] = now
             context["rejection_reason"] = "throttled"
             return False, value
 
-        now = time.monotonic()
         last = self._last_pass.get(path)
 
         if last is not None and (now - last) < interval:
             # Слишком рано — накапливаем последнее значение
             self._pending[path] = (value, source)
+            self._pending_since[path] = now
             context["rejection_reason"] = "throttled"
             return False, value
 
         # Пропускаем: обновляем время и убираем pending для этого пути
         self._last_pass[path] = now
         self._pending.pop(path, None)
+        self._pending_since.pop(path, None)
         return True, value
 
     # ------------------------------------------------------------------
@@ -179,12 +236,14 @@ class ThrottleMiddleware(StateMiddleware):
         Returns:
             ``(proceed, data_or_pruned)`` — см. «Результат» выше.
         """
+        now = time.monotonic()
+        self._maybe_lazy_prune(now)  # Task 3.4, см. _maybe_lazy_prune
+
         rules = self._rules  # copy-on-write снимок: чтение без блокировки
 
         if not rules or not isinstance(data, dict) or not data:
             return True, data
 
-        now = time.monotonic()
         kept: dict = {}
         any_ruled = False  # был ли хоть один лист с правилом
 
@@ -202,17 +261,20 @@ class ThrottleMiddleware(StateMiddleware):
             # Полная блокировка
             if interval == 0:
                 self._pending[full] = (leaf, source)
+                self._pending_since[full] = now
                 continue
 
             last = self._last_pass.get(full)
             if last is not None and (now - last) < interval:
                 # Слишком рано — придерживаем, копим последнее значение.
                 self._pending[full] = (leaf, source)
+                self._pending_since[full] = now
                 continue
 
             # Пропускаем лист: обновляем тайминг, чистим pending.
             self._last_pass[full] = now
             self._pending.pop(full, None)
+            self._pending_since.pop(full, None)
             self._nested_set(kept, rel, leaf)
 
         if not any_ruled:
@@ -287,22 +349,135 @@ class ThrottleMiddleware(StateMiddleware):
     # ------------------------------------------------------------------
 
     def flush(self) -> list[tuple[str, Any, str]]:
-        """Принудительный сброс всех накопленных throttled-значений.
+        """Принудительный сброс накопленных throttled-значений.
 
-        Вызывается при shutdown, чтобы не потерять последние значения.
+        Вызывается при shutdown, чтобы не потерять последние ЖИВЫЕ значения.
         Покрывает и set-, и merge-листья (в ``_pending`` лежат полные пути).
 
+        **Выбранная семантика (Task 3.4, находка G): ОТБРАСЫВАТЬ stale-записи.**
+        Запись считается мёртвой, если её возраст (время с последней постановки
+        в ``_pending``, ``_pending_since``) превышает :meth:`_stale_age_threshold`
+        (``K × базовый_интервал`` — те же константы, что у lazy-prune). Мёртвые
+        записи НЕ попадают в возвращаемый список: путь, не обновлявшийся много
+        интервалов подряд, почти наверняка принадлежит остановленному/снятому
+        процессу — записать его последнее известное значение в StateStore при
+        shutdown значило бы воскресить давно неактуальные данные (собственно
+        находка G). «Свежие» pending-значения (путь реально ждал своего
+        интервала на момент shutdown) возвращаются как раньше — контракт
+        вызывающей стороны (список кортежей на запись в стор) не меняется.
+
         Returns:
-            Список кортежей ``(path, value, source)`` для каждого pending значения.
-            После вызова ``_pending`` очищается.
+            Список кортежей ``(path, value, source)`` для каждого СВЕЖЕГО pending
+            значения (stale — отброшены). После вызова ``_pending`` и
+            ``_pending_since`` очищаются целиком — и свежие, и отброшенные записи.
         """
-        result = [(path, value, source) for path, (value, source) in self._pending.items()]
+        now = time.monotonic()
+        threshold = self._stale_age_threshold()
+
+        result = [
+            (path, value, source)
+            for path, (value, source) in self._pending.items()
+            if (now - self._pending_since.get(path, now)) <= threshold
+        ]
+
         self._pending.clear()
+        self._pending_since.clear()
         return result
+
+    # ------------------------------------------------------------------
+    # prune — точечная чистка таймингов/pending мёртвого поддерева (Task 3.4)
+    # ------------------------------------------------------------------
+
+    def prune(self, prefix: str) -> int:
+        """Удалить тайминги и pending-значения по путям под ``prefix``.
+
+        Вызывается точечно при удалении поддерева из StateStore (``state.delete``
+        на корне поддерева процесса, например ``processes.cam1`` — см.
+        ``StateStoreManager.handle_state_delete``, RS-2/Ж-2/LP-4 cleanup). Без
+        этого тайминги/pending исчезнувшего процесса висят в словарях бессрочно
+        (находка G): частые hot-swap с новыми именами/instance-id растят
+        ``_last_pass``/``_pending`` без ограничения.
+
+        Путь считается «под префиксом», если совпадает с ним целиком либо
+        начинается с ``prefix + "."`` — точка как граница сегмента пути дерева,
+        чтобы ``processes.cam1`` не задел ``processes.cam10``.
+
+        Потокобезопасность: см. docstring класса — звать ТОЛЬКО из потока
+        стора (того же, что обрабатывает ``state.set``/``state.merge``/
+        ``state.delete``).
+
+        Args:
+            prefix: путь корня удалённого поддерева.
+
+        Returns:
+            Число удалённых записей (тайминги + pending) — для наблюдаемости/лога.
+        """
+
+        def _under_prefix(p: str) -> bool:
+            return p == prefix or p.startswith(prefix + ".")
+
+        last_pass_hits = [p for p in self._last_pass if _under_prefix(p)]
+        for p in last_pass_hits:
+            del self._last_pass[p]
+
+        pending_hits = [p for p in self._pending if _under_prefix(p)]
+        for p in pending_hits:
+            del self._pending[p]
+            self._pending_since.pop(p, None)
+
+        return len(last_pass_hits) + len(pending_hits)
 
     # ------------------------------------------------------------------
     # Вспомогательные методы
     # ------------------------------------------------------------------
+
+    def _stale_age_threshold(self) -> float:
+        """Возрастной порог «мёртвой» записи: K × макс. положительный интервал.
+
+        Используется и lazy-prune'ом (:meth:`_maybe_lazy_prune`), и :meth:`flush`
+        — единая логика «что считать устаревшим» (Task 3.4, находка G). Как и
+        :meth:`_find_rule`, читает copy-on-write снимок ``self._rules`` без
+        блокировки.
+
+        Returns:
+            Порог в секундах.
+        """
+        positive_intervals = [v for v in self._rules.values() if v > 0]
+        base = max(positive_intervals) if positive_intervals else _DEFAULT_RULE_INTERVAL_SEC
+        return base * _STALE_AGE_MULTIPLIER
+
+    def _maybe_lazy_prune(self, now: float) -> None:
+        """Lazy-prune таймингов/pending при превышении размера (находка G).
+
+        Без хука удаления поддерева (:meth:`prune`) единственный доступный
+        сигнал «путь исчез» — тайминг, который давно не обновлялся. Полное
+        O(n)-сканирование на каждый вызов ``before_set``/``before_merge`` было
+        бы лишней работой на горячем пути, поэтому сканирование запускается
+        ТОЛЬКО когда ``_last_pass`` ЛИБО ``_pending`` вырос за
+        ``_LAZY_PRUNE_SIZE_THRESHOLD`` — прод-нагрузка телеметрии (десятки-сотни
+        путей) никогда не достигает этого порога, и lazy-prune для неё — одна
+        дешёвая проверка ``len()``. Проверяем ОБА словаря: правило ``interval == 0``
+        (полная блокировка) копит пути в ``_pending``/``_pending_since``, но НЕ в
+        ``_last_pass`` — при потоке уникальных путей под таким правилом рос бы только
+        ``_pending``, и проверка одного ``_last_pass`` его слепо пропустила бы.
+
+        Args:
+            now: уже посчитанный ``time.monotonic()`` вызывающего метода
+                (переиспользуем — вторым вызовом не платим).
+        """
+        if max(len(self._last_pass), len(self._pending)) <= _LAZY_PRUNE_SIZE_THRESHOLD:
+            return
+
+        threshold = self._stale_age_threshold()
+
+        stale_last_pass = [p for p, ts in self._last_pass.items() if (now - ts) > threshold]
+        for p in stale_last_pass:
+            del self._last_pass[p]
+
+        stale_pending = [p for p, ts in self._pending_since.items() if (now - ts) > threshold]
+        for p in stale_pending:
+            self._pending.pop(p, None)
+            del self._pending_since[p]
 
     def _find_rule(self, path: str, rules: dict[str, float] | None = None) -> float | None:
         """Найти первое матчащее правило для ``path``.

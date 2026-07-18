@@ -1,10 +1,11 @@
-"""Тесты TelemetryViewModel — локальный GUI read-model телеметрии (Ф1 Task 1.1/1.2).
+"""Тесты TelemetryViewModel — generic GUI read-model телеметрии.
 
 Проверяют:
   * late-binding: snapshot/get актуальны сразу после дельт (без ожидания);
   * коалесинг: один updated-батч на пачку дельт; deleted убирает путь;
   * инвариант: VM не держит router/proxy и не создаёт серверных подписок;
-  * кольцевые буферы: maxlen-вытеснение, O(1) append, выборка since.
+  * кольцевые буферы: maxlen-вытеснение, O(1) append, выборка since;
+  * generic: пустой tracked_suffixes → история не копится; свой набор суффиксов.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import time
 
 import pytest
 
-from multiprocess_prototype.frontend.state.telemetry_view_model import (
+from multiprocess_framework.modules.frontend_module.state.telemetry_view_model import (
     DEFAULT_TRACKED_SUFFIXES,
     TelemetryViewModel,
 )
@@ -24,7 +25,7 @@ def _delta(path: str, value: object, deleted: bool = False) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-#  Task 1.1 — read-model / late-binding / коалесинг                            #
+#  read-model / late-binding / коалесинг                                       #
 # --------------------------------------------------------------------------- #
 
 
@@ -33,7 +34,6 @@ def test_snapshot_available_immediately_after_delta(qtbot) -> None:
     vm = TelemetryViewModel()
     vm.on_state_delta(_delta("processes.cam.state.fps", 25.0))
     vm.on_state_delta(_delta("processes.cam.state.latency_ms", 12.0))
-    # snapshot читает read-model, наполняемый синхронно — flush не нужен.
     assert vm.get("processes.cam.state.fps") == 25.0
     assert vm.snapshot("processes.cam") == {
         "processes.cam.state.fps": 25.0,
@@ -42,7 +42,7 @@ def test_snapshot_available_immediately_after_delta(qtbot) -> None:
 
 
 def test_initial_cache_primes_snapshot(qtbot) -> None:
-    """Первичный снимок (cache gui-proxy) доступен через snapshot без дельт."""
+    """Первичный снимок (cache proxy) доступен через snapshot без дельт."""
     vm = TelemetryViewModel(initial_cache={"processes.cam.state.fps": 30.0})
     assert vm.get("processes.cam.state.fps") == 30.0
 
@@ -52,8 +52,7 @@ def test_snapshot_prefix_boundary_no_sibling_leak(qtbot) -> None:
     vm = TelemetryViewModel()
     vm.on_state_delta(_delta("processes.cam.state.fps", 25.0))
     vm.on_state_delta(_delta("processes.cam2.state.fps", 9.0))
-    snap = vm.snapshot("processes.cam")
-    assert snap == {"processes.cam.state.fps": 25.0}
+    assert vm.snapshot("processes.cam") == {"processes.cam.state.fps": 25.0}
 
 
 def test_updated_emitted_once_per_packet(qtbot) -> None:
@@ -63,8 +62,7 @@ def test_updated_emitted_once_per_packet(qtbot) -> None:
         vm.on_state_delta(_delta("processes.a.state.fps", 1.0))
         vm.on_state_delta(_delta("processes.b.state.fps", 2.0))
         vm.on_state_delta(_delta("processes.c.state.fps", 3.0))
-    batch = dict(blocker.args[0])
-    assert batch == {
+    assert dict(blocker.args[0]) == {
         "processes.a.state.fps": 1.0,
         "processes.b.state.fps": 2.0,
         "processes.c.state.fps": 3.0,
@@ -111,7 +109,7 @@ def test_view_model_creates_no_server_subscriptions(qtbot) -> None:
 
 
 # --------------------------------------------------------------------------- #
-#  Task 1.2 — кольцевые буферы истории                                         #
+#  Кольцевые буферы истории                                                    #
 # --------------------------------------------------------------------------- #
 
 
@@ -138,8 +136,8 @@ def test_history_since_filters_range(qtbot) -> None:
     """history(since) отдаёт только точки с ts >= since."""
     vm = TelemetryViewModel()
     vm.on_state_delta(_delta("processes.cam.state.fps", 1.0))
-    # Пауза > гранулярности time.time() (на Windows ~16 мс), чтобы ts
-    # первой точки был СТРОГО меньше cutoff — иначе грубые часы дают ts == cutoff.
+    # Пауза > гранулярности time.time() (на Windows ~16 мс), чтобы ts первой
+    # точки был СТРОГО меньше cutoff.
     time.sleep(0.05)
     cutoff = time.time()
     time.sleep(0.05)
@@ -149,12 +147,7 @@ def test_history_since_filters_range(qtbot) -> None:
 
 
 def test_history_ts_is_wall_clock(qtbot) -> None:
-    """Регресс: ring-ts — wall-clock (Unix-epoch), не monotonic.
-
-    DateAxisItem/crosshair графика форматируют X через localtime — monotonic-ts
-    давал бы мусорные метки (~1970). ts должен быть в пределах пары секунд от
-    time.time(); под старой monotonic-реализацией (uptime) этот инвариант ложен.
-    """
+    """Регресс: ring-ts — wall-clock (Unix-epoch), не monotonic."""
     vm = TelemetryViewModel()
     vm.on_state_delta(_delta("processes.cam.state.fps", 1.0))
     ((ts, _val),) = vm.history("processes.cam.state.fps")
@@ -164,6 +157,28 @@ def test_history_ts_is_wall_clock(qtbot) -> None:
 def test_history_empty_for_unknown_path(qtbot) -> None:
     vm = TelemetryViewModel()
     assert vm.history("processes.nope.state.fps") == []
+
+
+# --------------------------------------------------------------------------- #
+#  Generic: tracked_suffixes — параметр (не хардкод)                           #
+# --------------------------------------------------------------------------- #
+
+
+def test_empty_tracked_suffixes_disables_history(qtbot) -> None:
+    """Пустой tracked_suffixes → история не копится (только snapshot/get)."""
+    vm = TelemetryViewModel(tracked_suffixes=())
+    vm.on_state_delta(_delta("processes.cam.state.fps", 25.0))
+    assert vm.get("processes.cam.state.fps") == 25.0  # snapshot работает
+    assert vm.history("processes.cam.state.fps") == []  # история — нет
+
+
+def test_custom_tracked_suffixes(qtbot) -> None:
+    """Свой набор суффиксов: копится только по нему, дефолтный игнорируется."""
+    vm = TelemetryViewModel(tracked_suffixes=(".custom.metric",))
+    vm.on_state_delta(_delta("app.node.custom.metric", 7.0))
+    vm.on_state_delta(_delta("processes.cam.state.fps", 25.0))  # дефолтный суффикс — не трек
+    assert [v for _ts, v in vm.history("app.node.custom.metric")] == [7.0]
+    assert vm.history("processes.cam.state.fps") == []
 
 
 if __name__ == "__main__":

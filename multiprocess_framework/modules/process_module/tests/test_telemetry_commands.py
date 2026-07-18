@@ -164,6 +164,42 @@ class TestTelemetryReconfigureCommand:
         assert "publish" in res["reason"] or "throttle" in res["reason"]
 
 
+class TestTelemetryReconfigureUnknownMetrics:
+    """Task 2.3: опечатка в имени метрики — видимая диагностика в ответе команды."""
+
+    def test_typo_metric_reported_in_response(self) -> None:
+        """metrics={"latency": ...} (опечатка) → unknown_metrics=["latency"] в ответе, gate строится."""
+        svc, cm = _make()
+        res = cm.dispatch(
+            "telemetry.reconfigure",
+            {"publish": {"metrics": {"latency": {"interval_sec": 0.5}}}},
+        )
+        assert res["success"] is True
+        assert res["unknown_metrics"] == ["latency"]
+        # известные метрики продолжают публиковаться штатно (секция не отвергнута).
+        gate = svc._heartbeat._telemetry_gate
+        assert gate is not None
+        assert "fps" in gate.due_metrics(now=0.0)
+
+    def test_all_known_metrics_no_field_in_response(self) -> None:
+        """Все ключи metrics известны → поля unknown_metrics в ответе НЕТ вообще."""
+        _svc, cm = _make()
+        res = cm.dispatch(
+            "telemetry.reconfigure",
+            {"publish": {"metrics": {"fps": {"enabled": False}}}},
+        )
+        assert res["success"] is True
+        assert "unknown_metrics" not in res
+
+    def test_throttle_only_command_no_unknown_metrics_field(self) -> None:
+        """publish не запрошен (только throttle) → поля unknown_metrics нет (нечего резолвить)."""
+        throttle = ThrottleMiddleware({})
+        _svc, cm = _make(throttle=throttle)
+        res = cm.dispatch("telemetry.reconfigure", {"throttle": {"a.b": 1.0}})
+        assert res["success"] is True
+        assert "unknown_metrics" not in res
+
+
 class TestTelemetryReconfigureMergeMode:
     """Task 1.1: mode='merge' — точечная правка не стирает соседние правила/метрики."""
 
@@ -295,3 +331,50 @@ class TestConfigReloadTelemetry:
         assert "telemetry_applied" not in res
         assert throttle.rules == {"keep": 1.0}  # троттл не тронут
         assert svc._heartbeat._telemetry_gate is None  # gate не строился
+
+
+class TestConfigReloadPerProcessOverlay:
+    """Task 2.2 (находка C): config.reload из ФАЙЛА восстанавливает per-process overlay.
+
+    Файл несёт только GLOBAL publish; сохранённый ассемблером ``telemetry_override``
+    домердживается на publish → тот же effective-конфиг, что и при boot (boot ≡ reload).
+    """
+
+    def test_file_reload_preserves_per_process_override(self, tmp_path) -> None:
+        """Recipe-override fps.enabled=false переживает reload из файла (global fps=true)."""
+        svc, cm = _make()
+        # Ассемблер положил бы сырую per-process дельту сюда:
+        svc._config["telemetry_override"] = {"metrics": {"fps": {"enabled": False}}}
+        cfg_file = tmp_path / "system.yaml"
+        cfg_file.write_text(
+            "telemetry:\n"
+            "  publish:\n"
+            "    metrics:\n"
+            "      fps:\n"
+            "        enabled: true\n"  # ГЛОБАЛЬНО включён — но override должен победить
+            "      latency_ms:\n"
+            "        enabled: false\n",  # новое глобальное изменение из файла
+            encoding="utf-8",
+        )
+        res = cm.dispatch("config.reload", {"path": str(cfg_file)})
+        assert res["success"] is True
+        gate = svc._heartbeat._telemetry_gate
+        assert gate is not None
+        due = gate.due_metrics(now=0.0)
+        assert "fps" not in due  # per-process override победил global (сохранён)
+        assert "latency_ms" not in due  # глобальное изменение из файла применено
+        assert "effective_hz" in due  # незатронутая метрика по-прежнему публикуется
+
+    def test_file_reload_without_override_uses_global_verbatim(self, tmp_path) -> None:
+        """Процесс без override → бит-в-бит global из файла (характеризация)."""
+        svc, cm = _make()  # telemetry_override НЕ задан
+        cfg_file = tmp_path / "system.yaml"
+        cfg_file.write_text(
+            "telemetry:\n  publish:\n    metrics:\n      fps:\n        enabled: false\n",
+            encoding="utf-8",
+        )
+        res = cm.dispatch("config.reload", {"path": str(cfg_file)})
+        assert res["success"] is True
+        due = svc._heartbeat._telemetry_gate.due_metrics(now=0.0)
+        assert "fps" not in due
+        assert "effective_hz" in due

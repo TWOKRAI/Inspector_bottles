@@ -1205,6 +1205,42 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"_broadcast_routing_refresh({reason}) упал: {exc}")
             return False
 
+    def _replay_telemetry_runtime_delta(self, reason: str, *, target: str | None = None) -> int:
+        """Доиграть сохранённую runtime telemetry publish-дельту детям (Task 3.2).
+
+        Runtime-правка publisher-gate (``telemetry.broadcast`` fan-out) живёт только в
+        процессах-детях; при hot-swap/respawn пересозданный ребёнок стартует с BOOT-конфига
+        и потерял бы правку. PM хранит последнюю fan-out publish-дельту (``_telemetry_runtime_delta``)
+        и доигрывает её. ``publish=None``-broadcast очистил персист → доигрывать нечего.
+
+        Args:
+            reason: причина доигрывания (для лога).
+            target: имя конкретного процесса → адресно ОДНОМУ ребёнку (``_send_child_command``,
+                напр. single-process ``restart_process`` — краш-рестарт частый, broadcast всем
+                избыточен). ``None`` → fan-out ВСЕМ живым детям (``_broadcast_command``, напр.
+                ``apply_topology`` пересоздал набор). Оба пути идемпотентны (replace/merge
+                повторно на уже настроенном ребёнке даёт то же состояние).
+
+        Returns:
+            Охват доставки (0 — нет дельты / нет коммуникации / ошибка).
+        """
+        delta = getattr(self, "_telemetry_runtime_delta", None)
+        if not delta:
+            return 0
+        payload: dict[str, Any] = {"publish": delta["publish"]}
+        if delta.get("mode", "replace") != "replace":
+            payload["telemetry_mode"] = delta["mode"]
+        try:
+            if target is not None:
+                reached = 1 if self._send_child_command(target, "telemetry.reconfigure", payload) else 0
+            else:
+                reached = self._broadcast_command("telemetry.reconfigure", payload)
+            self._log_info(f"telemetry runtime-дельта доиграна ({reason}, target={target!r}): reached={reached}")
+            return int(reached)
+        except Exception as exc:  # noqa: BLE001 — доигрывание не должно ронять lifecycle
+            self._log_error(f"_replay_telemetry_runtime_delta({reason}) упал: {exc}")
+            return 0
+
     def _broadcast_command(self, command: str, data: dict, *, queue_type: str = "system") -> int:
         """Единый примитив рассылки command-билета всем детям (Ф3.1 / PC 3.3).
 
@@ -1473,6 +1509,37 @@ class ProcessManagerProcess(ProcessModule):
                 "complete": int(reached) >= len(targets),
             }
             self._log_info(f"telemetry.broadcast: publish → target={target!r} reached={reached}/{len(targets)}")
+            # Task 3.2: персист эффективной fan-out publish-дельты — доиграть пересозданным
+            # детям после hot-swap/respawn (иначе новый ребёнок взял бы boot-конфиг, потеряв
+            # рантайм-правку publisher-gate). Адресные (target=процесс) НЕ персистятся — они
+            # per-child, а не системный runtime. publish=None (выключить gate) → сброс персиста.
+            #
+            # ПОСЛЕДОВАТЕЛЬНЫЕ merge-дельты АККУМУЛИРУЮТСЯ (deep_merge): telemetry_set работает
+            # в merge — частый операторский сценарий из нескольких точечных правок. Хранить лишь
+            # последнюю — потерять предыдущие при respawn (расхождение с выжившими детьми, которые
+            # аккумулировали всё). replace семантически обнуляет прошлое → перезапись целиком.
+            # ИЗВЕСТНЫЙ GAP: смешанные merge→replace→merge-цепочки полной эффективной-от-boot
+            # модели не дают (replace сбрасывает накопленное) — приемлемо для рантайм-правок.
+            if not addressed:
+                if args["publish"] is None:
+                    self._telemetry_runtime_delta = None
+                else:
+                    prev = getattr(self, "_telemetry_runtime_delta", None)
+                    if (
+                        mode == "merge"
+                        and isinstance(prev, dict)
+                        and prev.get("mode") == "merge"
+                        and isinstance(prev.get("publish"), dict)
+                        and isinstance(args["publish"], dict)
+                    ):
+                        from ...data_schema_module import deep_merge
+
+                        self._telemetry_runtime_delta = {
+                            "publish": deep_merge(prev["publish"], args["publish"]),
+                            "mode": "merge",
+                        }
+                    else:
+                        self._telemetry_runtime_delta = {"publish": args["publish"], "mode": mode}
 
         if has_throttle:
             try:
@@ -1817,6 +1884,10 @@ class ProcessManagerProcess(ProcessModule):
         # RS-2: пересозданный инстанс имеет НОВЫЙ pid — обновить identity в state,
         # иначе в дереве навсегда остаётся pid мёртвого инстанса (нарушение инварианта).
         self._publish_process_identity(process_name)
+        # Task 3.2: single-process respawn — доиграть runtime telemetry-дельту АДРЕСНО
+        # пересозданному ребёнку (иначе он взял бы boot-конфиг, потеряв рантайм-правку
+        # publisher-gate; тот же silent-loss, что закрыт для apply_topology).
+        self._replay_telemetry_runtime_delta("process.restart", target=process_name)
         self._log_info(f"Process '{process_name}' restarted")
         return True
 
@@ -2045,6 +2116,9 @@ class ProcessManagerProcess(ProcessModule):
                 epoch = self._refresh_after_topology("topology.apply", result.get("results") or [])
                 if epoch is not None:
                     response["routing_epoch"] = epoch
+                # Task 3.2: доиграть сохранённую runtime telemetry-дельту пересозданным
+                # детям — runtime-состояние publisher-gate ≡ до свитча (не boot-дефолт).
+                self._replay_telemetry_runtime_delta("topology.apply")
                 return response
 
             except Exception as exc:

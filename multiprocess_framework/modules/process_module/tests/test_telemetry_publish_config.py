@@ -6,6 +6,10 @@ Acceptance 1.1:
   - неизвестная метрика → (enabled=True, default_interval_sec);
   - выключенная метрика → enabled=False;
   - from_dict/to_dict round-trip (Dict at Boundary).
+
+Acceptance 2.3 (валидация metrics-ключей против GATED_METRICS):
+  - опечатка в имени метрики → unknown_metrics() её ловит;
+  - все ключи известны → unknown_metrics() пуст.
 """
 
 from __future__ import annotations
@@ -14,6 +18,31 @@ from multiprocess_framework.modules.process_module.configs import (
     MetricRule,
     TelemetryPublishConfig,
 )
+from multiprocess_framework.modules.process_module.configs.telemetry_publish_config import (
+    GATED_METRICS,
+)
+
+
+class TestUnknownMetrics:
+    def test_typo_metric_is_reported(self) -> None:
+        """Опечатка в имени метрики (``latency`` вместо ``latency_ms``) → в unknown_metrics()."""
+        cfg = TelemetryPublishConfig(metrics={"latency": MetricRule(interval_sec=0.5)})
+        assert cfg.unknown_metrics() == {"latency"}
+
+    def test_all_known_metrics_empty(self) -> None:
+        """Все ключи metrics из GATED_METRICS → unknown_metrics() пуст."""
+        cfg = TelemetryPublishConfig(metrics={m: MetricRule() for m in GATED_METRICS})
+        assert cfg.unknown_metrics() == set()
+
+    def test_empty_metrics_empty(self) -> None:
+        """Пустой metrics (дефолт) → unknown_metrics() пуст."""
+        cfg = TelemetryPublishConfig()
+        assert cfg.unknown_metrics() == set()
+
+    def test_mixed_known_and_unknown(self) -> None:
+        """Смесь известных и неизвестных ключей → в unknown_metrics() только вторые."""
+        cfg = TelemetryPublishConfig(metrics={"fps": MetricRule(), "typo_metric": MetricRule(), "shm": MetricRule()})
+        assert cfg.unknown_metrics() == {"typo_metric"}
 
 
 class TestResolve:
