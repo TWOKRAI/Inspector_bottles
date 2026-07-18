@@ -132,3 +132,4 @@
 - [Telemetry dashboard](project_telemetry_dashboard.md) — PyQtGraph как единая система графиков + TelemetryChart (framework) + дашборд «Все процессы» + crosshair/зум; план ЗАКРЫТ
 - [Telemetry publish control](project_telemetry_publish_control.md) — план ЗАКРЫТ (ADR-PM-018): errors always-on, logs/stats/telemetry вкл/выкл+частота у источника (publisher-gate), central-throttle=IPC-страховка; residual — каскад двух плоскостей
 - [backend_ctl framework-module](project_backend_ctl_framework_module.md) — Phase 0+2 в main (agent=GUI-паритет: observability_tail/watch_like_gui/introspect.memory на текущей раскладке); урок: авто-resub из reader-потока=дедлог → applier-поток; переезд/SDK/2.3 отложены
+- [git stash pop хватает чужой стэш](feedback_git_stash_pop_wrong_stash.md) — проверка pre-existing через stash+checkout: pop на чистом дереве вытащит чужой стэш → конфликт-маркеры; используй worktree
