@@ -2,11 +2,11 @@
 
 ## Context (зачем это)
 
-Сейчас все 26 модулей фреймворка лежат **физически плоско** в `multiprocess_framework/modules/`. При этом
+Сейчас все 27 модулей фреймворка лежат **физически плоско** в `multiprocess_framework/modules/`. При этом
 разведка кода показала, что архитектура **уже зрелая**, а не «каша»:
 
-- Единообразие высокое: у всех 26 модулей есть `README.md`/`STATUS.md`/`DECISIONS.md`/`tests/`;
-  у 25 из 26 — верхний `interfaces.py`; у большинства — `core/` + фасад `XxxManager`/`Registry` + `__all__`.
+- Единообразие высокое: у всех 27 модулей есть `README.md`/`STATUS.md`/`DECISIONS.md`/`tests/`;
+  у 26 из 27 — верхний `interfaces.py`; у большинства — `core/` + фасад `XxxManager`/`Registry` + `__all__`.
 - Граф зависимостей уже ацикличен и направлен снизу вверх: `coupling 0.13`, god-файлов 0,
   цикл `recipe↔state_store` осознанно разорван через `StoreProtocol`.
 - 12-слойная модель задокументирована согласованно в трёх местах: `CONSTRUCTOR_BLUEPRINT.md`,
@@ -22,7 +22,7 @@
    (`process_module/generic/blueprint.py`, ADR-PMM-016, помечен «после миграции удаляется»).
 4. `actions_module` — единственный без верхнего `interfaces.py`.
 
-**Решение (выбранный масштаб):** физически сгруппировать 26 модулей по ~8 папкам-слоям, **сохранив все
+**Решение (выбранный масштаб):** физически сгруппировать 27 модулей по ~8 папкам-слоям, **сохранив все
 модули, их API и логику** (никаких слияний/удалений в духе радикальной схемы) + убрать суффикс `_module`
 + формализовать слои через `import-linter` + закрыть шим-цикл + дать `actions` свой `interfaces.py`.
 
@@ -50,7 +50,7 @@ ADR/контракты/2904 теста ради косметики; против
    → Vertical slices применяем в `multiprocess_prototype/` (фичи), НЕ в движке. Парадигму движка не меняем.
 3. **«Модули ссылаются только на контракты».** Краеугольный камень modular monolith: потребитель
    импортирует **публичный API** модуля (`interfaces.py` + фасад), а не его внутренности.
-   → У нас 25/26 уже имеют `interfaces.py`; закрываем 26-й (`actions`). `import-linter` умеет
+   → У нас 26/27 уже имеют `interfaces.py`; закрываем последний (`actions`). `import-linter` умеет
    enforce «public interface» (импорт только через фасад).
 4. **Enforcement архитектурными тестами.** `import-linter` (layers/independence/forbidden) в CI.
    Альтернатива `Tach` — **не берём**: не поддерживается с 2025-06. `import-linter` — безопасный выбор.
@@ -117,11 +117,12 @@ multiprocess_framework/
 ├── execution/           # тир 2 (сиблинг): работа/исполнение
 │   ├── worker/              (worker_module)
 │   └── chain/               (chain_module)        # chain→worker внутри группы
-├── state/               # тир 2 (сиблинг): состояние/регистры/undo
+├── state/               # тир 2 (сиблинг): состояние/регистры/undo/телеметрия(read-model)
 │   ├── state_store/         (state_store_module)  # state_store→recipe внутри группы
 │   ├── recipe/              (recipe)
 │   ├── registers/           (registers_module)
-│   └── actions/             (actions_module)      ← из execution (undo-патчи СОСТОЯНИЯ, ADR-124)
+│   ├── actions/             (actions_module)      ← из execution (undo-патчи СОСТОЯНИЯ, ADR-124)
+│   └── telemetry_readmodel/ (telemetry_readmodel_module) ← 27-й модуль: проекция дерева StateStore (Р1, frontend-constructor Ф0)
 ├── catalogs/            # тир 2 (сиблинг): реестры внешних сущностей (листья)
 │   ├── display/             (display_module)
 │   └── service/             (service_module)
@@ -212,7 +213,7 @@ layers =
 ### Фаза 1 — ✅ Граф измерен, слои утверждены (см. раздел «Реальный граф»)
 - ГОТОВО: `grimp` + AST-агент дали точный DAG; финальный 7-уровневый порядок и раскладка папок —
   в разделах выше. Осталось оформить: `scripts/regroup_modules/mapping.py` (rename-таблица 1:1 из
-  26 модулей → `<layer>/<module без _module>`) + `docs/refactors/2026-07_layer-grouping.md`
+  27 модулей → `<layer>/<module без _module>`) + `docs/refactors/2026-07_layer-grouping.md`
   (перенести туда обоснование + вывод `measure_graph.py`/`cycle_details.py` из scratchpad).
 - **Не-модульные обитатели `modules/` (ревью K5):** `_fallback.py` (импортится `from ..._fallback import
   FallbackLogger` → положить в `foundation/` или `observability/`, обновить импортёров), `conftest.py`/
@@ -230,10 +231,11 @@ layers =
   console_process_config.py` → `process_module/configs/` (это артефакт запуска процесса, не собственность
   консоли); обратное `process → console` (владение) остаётся.
 - Проверить `measure_graph.py` (мерит import-time): раздел «ЦИКЛЫ» пуст.
-- Заодно (единообразие 26/26): дать `actions_module` верхний `interfaces.py`
+- Заодно (единообразие 27/27): дать `actions_module` верхний `interfaces.py`
   (поднять `IActionLogWriter`/`IActionLogRepository`/`IRegistersManagerGui` в канонический контракт).
 
 ### Фаза 3 — Codemod: перенос + переписывание импортов
+- **Precondition (frontend-constructor Ф0):** влиты/закрыты все in-flight ветки, трогающие import-поверхность — в частности `feat/backend-ctl-debug-console` (**влит в main 2026-07-18**, SHA 27d17ee7). `backend_ctl → tooling/` — отдельный пост-codemod план (BCTL-DECISIONS); codemod лишь переписывает импорты ВНУТРИ `backend_ctl`, не переносит пакет.
 - Написать и прогнать `scripts/regroup_modules/` (см. «Способ переноса»). Один атомарный проход,
   либо послойно (foundation → … → application), каждый слой — отдельный коммит, но всё в одной ветке.
 - Обновить якоря на старые пути: `.sentrux/rules.toml` (boundaries), `pyproject.toml`
@@ -274,7 +276,7 @@ layers =
 | Латентный цикл process↔process_manager всплывёт при переносе | Закрыть ДО переноса (Фаза 2) |
 | Продукт важнее движка (установка владельца) | Работа изолирована в одной ветке, атомарна, полностью откатываема; не трогает поведение |
 | Динамический скан плагинов/сервисов по путям | Проверить `app_module/discovery.py` и `service_module/scanner.py` на хардкод `modules.` |
-| Codemod-конфликт с параллельными ветками (переписывает импорты в 910 файлах) | Precondition Фазы 3: влить/закрыть in-flight ветки (в т.ч. [`gui-telemetry-read-model`](../gui-telemetry-read-model.md) — его Фаза 0-hotfix идёт ДО codemod); на время Фазы 3 — freeze-окно на новые ветки |
+| Codemod-конфликт с параллельными ветками (переписывает импорты в 910 файлах) | Precondition Фазы 3: влить/закрыть in-flight ветки (`feat/backend-ctl-debug-console` — **влит 2026-07-18**; в т.ч. [`gui-telemetry-read-model`](../gui-telemetry-read-model.md) — его Фаза 0-hotfix идёт ДО codemod); на время Фазы 3 — freeze-окно на новые ветки |
 | Строковые dotted-пути вне импортов (YAML-топологии `worker_class`, рецепты, БД, pickle-останки очередей) | Свип `multiprocess_framework.modules.` по НЕ-py файлам (yaml/json/db/md) + отдельная проверка перед merge; персистированные рецепты перегенерировать |
 
 ## Verification (как убедиться, что всё работает)
@@ -299,12 +301,12 @@ layers =
 **Фаза 2 — разорвать 2 runtime-цикла (ДО переноса)**
 - [ ] `process_module/generic/blueprint.py:12` — убрать шим-импорт `process_manager` (ADR-PMM-016), потребители берут типы из `process_manager_module.topology`
 - [ ] `console_module/configs/console_process_config.py:12-13` — импорт `process.configs.*` под `if TYPE_CHECKING:`
-- [ ] `actions_module/interfaces.py` — создать (поднять `IActionLogWriter`/`IActionLogRepository`/`IRegistersManagerGui`) → единообразие 26/26
+- [ ] `actions_module/interfaces.py` — создать (поднять `IActionLogWriter`/`IActionLogRepository`/`IRegistersManagerGui`) → единообразие 27/27
 - [ ] `measure_graph.py`: раздел «ЦИКЛЫ» пуст, топосортировка без остатка
 - [ ] Тесты зелёные (циклы правились — прогнать `run_framework_tests.py`)
 
 **Фаза 3 — codemod (перенос + импорты)**
-- [ ] `scripts/regroup_modules/mapping.py` — rename-таблица 1:1 (26 модулей → `<layer>/<без _module>`)
+- [ ] `scripts/regroup_modules/mapping.py` — rename-таблица 1:1 (27 модулей → `<layer>/<без _module>`)
 - [ ] `git mv` папок по 9 группам (сохранить историю)
 - [ ] Codemod (`libcst`): переписать абсолютные импорты по таблице
 - [ ] Codemod: relative cross-module → absolute (чинит слепоту sentrux)
@@ -327,7 +329,7 @@ layers =
 - [ ] Коммиты по Conventional Commits (`Why:`/`Layer:`/`Refs:`)
 
 ## Критерии приёмки
-- [ ] 26 модулей физически лежат в 9 папках-слоях, суффикс `_module` снят
+- [ ] 27 модулей физически лежат в 9 папках-слоях, суффикс `_module` снят
 - [ ] Все 26 имеют `interfaces.py` + фасад + `README/STATUS/DECISIONS/tests` (единообразие сохранено)
 - [ ] `import-linter` layers зелёный, runtime-граф ацикличен (доказано `measure_graph.py`, не ложно)
 - [ ] Число тестов не упало, прототип запускается
@@ -347,13 +349,13 @@ layers =
 
 | Элемент замысла | Статус | Где |
 |---|---|---|
-| Фасад + `interfaces.py` + инкапсуляция | ✅ 25/26 | `XxxManager` в `core/` + `__all__`; DI внутренней сборки |
+| Фасад + `interfaces.py` + инкапсуляция | ✅ 26/27 | `XxxManager` в `core/` + `__all__`; DI внутренней сборки |
 | **Единый tap** (один порт, 3 сигнала log/error/stats) | ✅ есть | `ObservabilityHub` (ADR-CRM-007): 3 `BoundedChannel`, drop-in в слоты, pull-drain + счётчик потерь |
 | **Ошибки always-on** | ✅ есть | write-through `ErrorManager` (переживает SIGKILL) + ERROR-tap в стор/GUI; ErrorManager создаётся всегда |
 | **Логи/стат — рантайм-toggle через конфиг** | ✅ есть | секция `observability` + `ConfigFileWatcher` (watchdog) + `reconfigure()`; IPC `config.reload`; `logger.sink.enable/disable` |
 | **Оркестратор-`main` модуля** | ✅ на уровне процесса | `ProcessModule` собирает 7 менеджеров в порядке зависимостей (`ProcessManagers.create_all`, return-based ADR-PM-009) |
 | **Фасад + бутстрап фреймворка** | ✅ есть (два) | корневой `multiprocess_framework/__init__.py` (реестр по слоям, lazy GUI) + `app_module` (`run_app`/`SystemBuilder`, bootstrap из `app.yaml`) |
-| Документация на модуль | ✅ README/STATUS/DECISIONS 26/26 | `docs/` только 7/26, `ARCHITECTURE.md` 2/26 — не единообразно |
+| Документация на модуль | ✅ README/STATUS/DECISIONS 27/27 | `docs/` только 7/27, `ARCHITECTURE.md` 2/27 — не единообразно |
 
 **Вывод:** замысел реализован на ~75–80% разрозненно. Задача Инициативы 2 — **формализовать и
 доунифицировать**, а не строить с нуля. Это согласуется с установкой «продукт важнее движка».
@@ -370,7 +372,7 @@ layers =
    pipeline и `Message`/router для IPC, но не декларативный «вход/выход/двунаправленный» на каждом модуле).
    → описать контракт портов (можно поверх существующих `Port`/`FieldRouting`), не плодя новый механизм.
 5. **Терминология и docs**: «оркестратор-main» реально только у процесса; рядовые модули — «фасад+сборка».
-   `docs/`/`ARCHITECTURE.md` не у всех. → либо довести до 26/26, либо явно объявить опциональными.
+   `docs/`/`ARCHITECTURE.md` не у всех. → либо довести до 27/27, либо явно объявить опциональными.
 
 ## Решение A (ПРИНЯТО) — полный переход ObservableMixin → композитный obs-порт
 
@@ -419,7 +421,7 @@ layers =
 
 ## Критерии приёмки Инициативы 2
 - [ ] `MODULE_DEVICE_CONTRACT.md` + шаблон модуля; `import-linter` public-interface зелёный (импорт только через фасад)
-- [ ] `docs/`/`ARCHITECTURE.md` единообразны (26/26) либо явно помечены опциональными в контракте
+- [ ] `docs/`/`ARCHITECTURE.md` единообразны (27/27) либо явно помечены опциональными в контракте
 - [ ] `ObservableMixin` удалён; все менеджеры получают `obs: IObservability` в конструкторе; тесты зелёные
 - [ ] `ObservabilityHub` подключён во все модули (не только пилот); per-module/per-slot тумблеры в `observability`
 - [ ] Изменение `observability` в `system.yaml` долетает до дочерних процессов (fan-out) без рестарта — verified probe
@@ -431,13 +433,13 @@ layers =
 
 ## Балльная оценка: до → после
 
-«До» — по измерениям (sentrux `quality 7356`, `modularity raw 0.053`, grimp-циклы, interfaces 25/26).
+«До» — по измерениям (sentrux `quality 7356`, `modularity raw 0.053`, grimp-циклы, interfaces 26/27).
 «После» — проекция при ПОЛНОМ выполнении обеих инициатив.
 
 | # | Критерий | До | После | Обоснование |
 |---|----------|:--:|:-----:|-------------|
 | 1 | Навигация (папки=слои) | 4 | 8.5 | было: 26 плоско, слои на бумаге; стало: 9 папок-слоёв |
-| 2 | Единообразие модулей | 8 | 9.5 | уже сильно (interfaces 25/26, RSD+tests 26/26); станет 26/26 + контракт+шаблон |
+| 2 | Единообразие модулей | 8 | 9.5 | уже сильно (interfaces 26/27, RSD+tests 27/27); станет 27/27 + контракт+шаблон |
 | 3 | Ацикличность графа | 6 | 9 | 2 реальных runtime-цикла (grimp) → разорваны |
 | 4 | Enforcement слоёв | 2 | 9 | sentrux слеп к relative («10000» ложна); станет import-linter в CI |
 | 5 | Инкапсуляция / контракт-устройство | 6 | 8.5 | фасады есть, но не формализованы/не enforced |

@@ -2,7 +2,7 @@
 
 - **Slug:** proto-frontend-carve
 - **Дата:** 2026-07-11
-- **Статус:** DRAFT
+- **Статус:** **SUPERSEDED** → [`frontend-constructor/plan.md`](frontend-constructor/plan.md) Ф2 (2026-07-18). Поглощён (Р2): задачи Task 0.1/1.1/1.2/2.1/2.2/3.1 исполняются как frontend-constructor Ф2. Файл остаётся **справочной спецификацией** (freeze, не kill) — статусы фаз ведутся только в новом плане.
 - **Ветка:** docs/plan-proto-frontend-carve (документ); ветка исполнения — `feat/proto-frontend-carve` (создаётся оркестратором при старте)
 - **NEW-ID:** NEW-D2 (ось D — GUI/фронт-конструктор, после NEW-D1)
 - **Волна:** В3 (GUI-конструктор) — фундаментный пред-шаг; исполнять **после хвоста В1** (recipe-ось C3/4.7)

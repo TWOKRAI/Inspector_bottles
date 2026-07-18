@@ -1,6 +1,6 @@
 # Статус модулей — MODULES_STATUS.md
 
-Сводка по 25 модулям фреймворка. Источник истины по одному модулю — `modules/{name}/STATUS.md`.
+Сводка по 27 модулям фреймворка. Источник истины по одному модулю — `modules/{name}/STATUS.md`.
 Прикладные сервисы (`Services/`) — см. [`Services/STATUS.md`](../Services/STATUS.md).
 Карта ответственности и границы (где что, чтобы не дублировать) — [`docs/MODULES_RESPONSIBILITY_MAP.md`](docs/MODULES_RESPONSIBILITY_MAP.md).
 
