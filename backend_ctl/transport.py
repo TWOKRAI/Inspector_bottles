@@ -70,16 +70,9 @@ class _TransportMixin:
         ``q.get()``, удерживая ссылкой на ``self._resub_loop`` весь старый driver.
         """
         self._running = False
-        # Снять watch-контур ПОД ЛОКОМ: гасим _watch_active, чтобы применитель по
-        # layer-1 guard не дёргал сеть на закрывающемся сокете; забираем поток+очередь.
-        with self._watch_lock:
-            self._watch_active = False
-            resub_thread = self._resub_thread
-            self._resub_thread = None
-            resub_q = self._resub_queue
         # Закрыть и обнулить сокет под _write_lock (симметрия с _send_raw/_read_loop):
-        # иначе гонка обнуления с чтением _sock в другом потоке (A.3). Обнуление здесь
-        # ДО очистки/пробуждения _pending ниже — намеренно: применитель, чей request()
+        # иначе гонка обнуления с чтением _sock в другом потоке (A.3). Обнуление ДО
+        # очистки/пробуждения _pending ниже — намеренно: применитель, чей request()
         # ещё не вставил pending, увидит _sock is None в _send_raw и упадёт ConnectionError
         # мгновенно (не повиснет), а уже вставленные pending будятся снапшотом ниже.
         with self._write_lock:
@@ -97,11 +90,10 @@ class _TransportMixin:
             self._pending.clear()
         for p in pendings:
             p.event.set()
-        # Остановить applier: sentinel в очередь его поколения + join. Idle-поток
-        # получит None и выйдет; in-flight — уже разбужен пробуждением pendings выше.
-        if resub_thread is not None:
-            resub_q.put(None)
-            resub_thread.join(timeout=1.0)
+        # Погасить applier-поток watch — ПОСЛЕ пробуждения pending'ов (in-flight
+        # applier-request уже разбужен, join не виснет). Деактивация + sentinel + join
+        # инкапсулированы в WatchController.stop() (владелец watch-состояния, C.1).
+        self._watch.stop()
         if self._reader is not None:
             self._reader.join(timeout=1.0)
             self._reader = None

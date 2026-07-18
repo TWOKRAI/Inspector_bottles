@@ -611,14 +611,14 @@ class TestCloseStopsApplierThread:
         d._running = True
         # Поднять watch-контур БЕЗ сети (как реконнект после replay durable-намерений).
         d.resume_watch({"active": True, "patterns": ["processes.**"], "processes": []})
-        thread = d._resub_thread
+        thread = d._watch._resub_thread
         assert thread is not None and thread.is_alive()
 
         d.close()
 
         thread.join(timeout=2.0)
         assert not thread.is_alive(), "applier-поток backend-ctl-resub не погашен close()"
-        assert d._resub_thread is None
+        assert d._watch._resub_thread is None
         # Идемпотентность: повторный close не бросает.
         d.close()
 
@@ -923,7 +923,7 @@ class TestWatchLikeGui:
                 },
             }
             d.dispatch_raw(_line(recovered))
-            d._resub_queue.join()  # дождаться применения намерения applier-потоком
+            d._watch._resub_queue.join()  # дождаться применения намерения applier-потоком
             resubs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
             assert resubs == ["camera_0"], "переподписка ровно затронутого процесса, не других"
         finally:
@@ -940,7 +940,7 @@ class TestWatchLikeGui:
                 "data": {"deltas": [{"path": "processes.camera_0.status", "new_value": "running"}]},
             }
             d.dispatch_raw(_line(noise))
-            d._resub_queue.join()
+            d._watch._resub_queue.join()
             assert not any(c == "observability.tail.subscribe" for _, c, _ in calls)
         finally:
             d.unwatch()
@@ -956,7 +956,7 @@ class TestWatchLikeGui:
                 "data": {"deltas": [{"path": "processes.detector.status", "new_value": "running"}]},
             }
             d.dispatch_raw(_line(appeared))
-            d._resub_queue.join()
+            d._watch._resub_queue.join()
             resubs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
             assert resubs == ["detector"]
         finally:
@@ -965,7 +965,7 @@ class TestWatchLikeGui:
     def test_unwatch_untails_all_and_stops_thread(self, monkeypatch) -> None:
         d, calls = self._driver(monkeypatch)
         d.watch_like_gui()
-        thread = d._resub_thread
+        thread = d._watch._resub_thread
         assert thread is not None and thread.is_alive()
         calls.clear()
         summary = d.unwatch()
@@ -998,10 +998,10 @@ class TestWatchLikeGui:
         d, _ = self._driver(monkeypatch)
         try:
             d.watch_like_gui()
-            first = d._resub_thread
+            first = d._watch._resub_thread
             d.watch_like_gui()  # повторный вызов → unwatch + свежий старт
-            assert d._resub_thread is not first
-            assert d._watch_active is True
+            assert d._watch._resub_thread is not first
+            assert d._watch._watch_active is True
         finally:
             d.unwatch()
 
@@ -1034,7 +1034,7 @@ class TestWatchStartupWindow:
         monkeypatch.setattr(d, "send_command", fake_send)
         try:
             d.watch_like_gui()
-            d._resub_queue.join()  # дождаться применения намерения applier-потоком
+            d._watch._resub_queue.join()  # дождаться применения намерения applier-потоком
             obs = [t for t, c, _ in calls if c == "observability.tail.subscribe"]
             assert "latecomer" in obs, "recovered в стартовом окне подхвачен (listener активен ДО подписок)"
         finally:
@@ -1082,7 +1082,7 @@ class TestWatchUnwatchRace:
         time.sleep(0.05)  # дать unwatch снять _watch_active + начать join
         release.set()  # отпустить in-flight resub — он завершится ПОСЛЕ untail-цикла
         assert done.wait(timeout=5), "unwatch должен завершиться"
-        d._resub_queue.join()  # applier само-исцелился и добрал sentinel
+        d._watch._resub_queue.join()  # applier само-исцелился и добрал sentinel
 
         # Регресс F3: форвардер/намерение НЕ воскресли после teardown.
         assert not any(i["command"] == "observability.tail.subscribe" for i in d.export_subscriptions()), (
@@ -1126,14 +1126,14 @@ class TestWatchDurability:
         d.watch_like_gui()
         manifest = d.watch_manifest()
         d.unwatch()  # эмулируем потерю контура на реконнекте
-        assert d._watch_active is False
+        assert d._watch._watch_active is False
         calls.clear()
 
         res = d.resume_watch(manifest)
         try:
             assert res["resumed"] is True
-            assert d._watch_active is True
-            assert d._resub_thread is not None and d._resub_thread.is_alive()
+            assert d._watch._watch_active is True
+            assert d._watch._resub_thread is not None and d._watch._resub_thread.is_alive()
             # resume НЕ шлёт повторных подписок (их вернул replay durable-намерений).
             assert not any(c in ("state.subscribe", "observability.tail.subscribe") for _, c, _ in calls)
             # Контур жив: recovered → переподписка (unwatch более НЕ no-op).
@@ -1142,7 +1142,7 @@ class TestWatchDurability:
                 "data": {"deltas": [{"path": "processes.camera_0.supervisor.event", "new_value": "recovered"}]},
             }
             d.dispatch_raw(_line(recovered))
-            d._resub_queue.join()
+            d._watch._resub_queue.join()
             assert any(c == "observability.tail.subscribe" and t == "camera_0" for t, c, _ in calls)
         finally:
             d.unwatch()
@@ -1151,7 +1151,7 @@ class TestWatchDurability:
         d, _ = self._driver(monkeypatch)
         assert d.resume_watch({"active": False}) == {"resumed": False}
         assert d.resume_watch(None) == {"resumed": False}
-        assert d._watch_active is False
+        assert d._watch._watch_active is False
 
     def test_state_unsubscribe_removes_durable_intent(self) -> None:
         d = BackendDriver()
@@ -1166,7 +1166,7 @@ class TestWatchDurability:
         d = BackendDriver()
         d._subscriptions.add("observability.tail.subscribe", "camera_0", {"subscriber": "backend_ctl"})
         d._subscriptions.add("state.subscribe", "ProcessManager", {"pattern": "processes.**"})
-        assert d._watch_active is False
+        assert d._watch._watch_active is False
         summary = d.unwatch()
         assert summary["was_active"] is False
         assert not any(i["command"] == "observability.tail.subscribe" for i in d.export_subscriptions())
