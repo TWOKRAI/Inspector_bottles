@@ -42,8 +42,10 @@ class TestNormalizeManagersView:
 
 
 def test_console_process_config_build_and_process_helper():
-    from multiprocess_framework.modules.console_module.configs import ConsoleProcessConfig
     from multiprocess_framework.modules.data_schema_module import process as proc_fn
+    from multiprocess_framework.modules.process_module.configs.console_process_config import (
+        ConsoleProcessConfig,
+    )
 
     name, proc_dict = proc_fn(ConsoleProcessConfig())
     assert name == "console_app"

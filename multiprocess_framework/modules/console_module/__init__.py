@@ -14,11 +14,14 @@ console_module — менеджер терминальных окон проце
     ConsoleLogChannel    — канал для LoggerManager
     ConsoleRedirector    — перенаправитель stdout/stderr
     ConsoleAdapter       — интегратор с LoggerManager и CommandManager
-    ConsoleProcessConfig — конфиг God Mode процесса
+
+ConsoleProcessConfig (конфиг God Mode процесса) переехал в
+``process_module.configs.console_process_config`` (Фаза 2 framework-layer-grouping,
+K1) — это артефакт запуска процесса, не собственность консоли.
 """
 
 from .core.console_manager import ConsoleManager
-from .configs import ConsoleConfig, ConsoleProcessConfig
+from .configs import ConsoleConfig
 from .interfaces import IConsoleManager, IPlatformConsole
 from .channels.console_log_channel import ConsoleLogChannel
 from .redirectors.console_redirector import ConsoleRedirector
@@ -33,7 +36,6 @@ __all__ = [
     "ConsoleLogChannel",
     "ConsoleRedirector",
     "ConsoleAdapter",
-    "ConsoleProcessConfig",
     "RegisterCommandHandler",
     "SystemCommandHandler",
 ]

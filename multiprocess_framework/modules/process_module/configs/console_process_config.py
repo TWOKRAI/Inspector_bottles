@@ -2,16 +2,17 @@
 """
 God Mode: отдельный процесс с консолью. Пример: launcher.add_process(*process(ConsoleProcessConfig())).
 """
+
 from __future__ import annotations
 
 from typing import Annotated
 
 from pydantic import Field
 
+from ...console_module.configs.console_config import ConsoleConfig
 from ...data_schema_module import FieldMeta, register_schema
-from ...process_module.configs.managers_config import ManagersConfig
-from ...process_module.configs.process_launch_config import ProcessLaunchConfig
-from .console_config import ConsoleConfig
+from .managers_config import ManagersConfig
+from .process_launch_config import ProcessLaunchConfig
 
 
 def _god_managers() -> ManagersConfig:
