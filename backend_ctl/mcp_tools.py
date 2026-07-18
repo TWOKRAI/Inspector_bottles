@@ -795,13 +795,18 @@ def tool_annotations(name: str) -> Dict[str, bool]:
     return dict(_SAFETY_ANNOTATIONS[TOOL_SAFETY[name]])
 
 
+#: Ограниченные режимы, где ``send_command`` (escalated) допускается УСЛОВНО —
+#: только для read-безопасных команд (сервер доуточняет по :func:`is_command_read_safe`).
+#: read-only и no-destructive согласованы: оба разрешают ЧТЕНИЕ через send_command.
+_RESTRICTED_MODES: frozenset = frozenset({MODE_READ_ONLY, MODE_NO_DESTRUCTIVE})
+
+
 def is_tool_allowed(name: str, mode: str) -> bool:
     """Разрешён ли инструмент в режиме (без учёта arg-whitelist send_command).
 
-    В read-only ``send_command`` (escalated) допускается УСЛОВНО — только для
-    whitelisted-команд; финальное решение по аргументам — :func:`is_command_read_safe`
-    на стороне сервера. Здесь для send_command в read-only возвращаем True (сервер
-    доуточнит по args), для остальных escalated/write — по классам режима.
+    В ограниченных режимах (read-only / no-destructive) ``send_command`` (escalated)
+    допускается УСЛОВНО — проходит name-гейт, а по аргументу ``command`` фильтрует
+    сервер (:func:`is_command_read_safe`). Остальные escalated/write — по классам режима.
     """
     allowed = _MODE_ALLOWED_CLASSES.get(mode, _MODE_ALLOWED_CLASSES[MODE_FULL])
     cls = TOOL_SAFETY.get(name)
@@ -809,8 +814,8 @@ def is_tool_allowed(name: str, mode: str) -> bool:
         return False
     if cls in allowed:
         return True
-    # read-only: send_command проходит name-гейт, а по args фильтрует сервер.
-    return mode == MODE_READ_ONLY and name == "send_command"
+    # Ограниченный режим: send_command проходит name-гейт, а по args фильтрует сервер.
+    return name == "send_command" and mode in _RESTRICTED_MODES
 
 
 def is_command_read_safe(command: str) -> bool:

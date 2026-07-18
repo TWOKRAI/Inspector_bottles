@@ -78,14 +78,6 @@ class MCPServer:
         )
         self._registry: Dict[str, ToolSpec] = build_registry()
 
-    @property
-    def _host(self) -> str:
-        return self._session.host
-
-    @property
-    def _port(self) -> int:
-        return self._session.port
-
     def close(self) -> None:
         self._session.close()
 

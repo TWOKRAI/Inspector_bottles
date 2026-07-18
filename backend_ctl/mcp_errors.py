@@ -33,11 +33,11 @@ def blocked_tool_error(name: str, mode: str, allowed_names: Iterable[str]) -> st
     )
 
 
-def read_only_command_blocked_error(command: str) -> str:
-    """send_command с не-read командой в read-only → назвать разрешённые префиксы."""
+def restricted_command_blocked_error(command: str) -> str:
+    """send_command с не-read командой в ограниченном режиме → назвать разрешённые префиксы."""
     return (
-        f"send_command({command!r}) заблокирован в режиме read-only: через него разрешены "
-        f"только read-команды (introspect.* / state.get*). Для записи запусти сервер без --read-only."
+        f"send_command({command!r}) отклонён: в ограниченном режиме сервера через него разрешены "
+        f"только read-команды (introspect.* / state.get*). Запусти сервер в режиме full для записи."
     )
 
 
@@ -45,5 +45,5 @@ __all__ = [
     "suggest_tools",
     "unknown_tool_error",
     "blocked_tool_error",
-    "read_only_command_blocked_error",
+    "restricted_command_blocked_error",
 ]

@@ -118,7 +118,10 @@ class TestListTools:
     def test_no_destructive_hides_write(self) -> None:
         server, _ = make_server(MODE_NO_DESTRUCTIVE)
         names = {t.name for t in server.list_tools()}
-        assert "telemetry_set" not in names and "send_command" not in names
+        assert "telemetry_set" not in names  # write скрыт
+        assert "system_command" not in names  # чистый escalated скрыт
+        # send_command условно доступен (read-safe) → виден в обоих ограниченных режимах
+        assert "send_command" in names
         assert "telemetry_snapshot" in names and "watch_like_gui" in names
 
 
@@ -172,7 +175,7 @@ class TestSafetyModes:
         server, fake = make_server(MODE_READ_ONLY)
         res = server.call_tool("send_command", {"target": "cam", "command": "recipe.activate"})
         msg = _error_text(res)
-        assert "read-only" in msg
+        assert "introspect." in msg  # назвал разрешённые read-префиксы
         assert not any(c[0] == "send_command" for c in fake.calls)
 
     def test_no_destructive_blocks_telemetry_set(self) -> None:
@@ -184,6 +187,19 @@ class TestSafetyModes:
         server, _ = make_server(MODE_NO_DESTRUCTIVE)
         res = server.call_tool("watch_like_gui", {})
         assert json.loads(_text(res))["success"] is True
+
+    def test_no_destructive_send_command_readsafe_allowed(self) -> None:
+        # Согласованность режимов: no-destructive, как и read-only, пропускает read-safe send_command.
+        server, fake = make_server(MODE_NO_DESTRUCTIVE)
+        res = server.call_tool("send_command", {"target": "cam", "command": "introspect.handlers"})
+        assert json.loads(_text(res))["success"] is True
+        assert any(c[0] == "send_command" for c in fake.calls)
+
+    def test_no_destructive_send_command_write_blocked(self) -> None:
+        server, fake = make_server(MODE_NO_DESTRUCTIVE)
+        res = server.call_tool("send_command", {"target": "cam", "command": "recipe.activate"})
+        assert "introspect." in _error_text(res)
+        assert not any(c[0] == "send_command" for c in fake.calls)
 
 
 # --------------------------------------------------------------------------- #
@@ -245,8 +261,8 @@ class TestMcpErrors:
         msg = mcp_errors.blocked_tool_error("set_register", MODE_READ_ONLY, ["get_status", "events"])
         assert "set_register" in msg and "get_status" in msg
 
-    def test_read_only_command_blocked_names_prefixes(self) -> None:
-        msg = mcp_errors.read_only_command_blocked_error("recipe.activate")
+    def test_restricted_command_blocked_names_prefixes(self) -> None:
+        msg = mcp_errors.restricted_command_blocked_error("recipe.activate")
         assert "introspect." in msg and "state.get" in msg
 
 

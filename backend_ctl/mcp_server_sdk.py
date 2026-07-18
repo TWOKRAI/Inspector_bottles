@@ -164,11 +164,11 @@ class SDKToolServer:
         # Safety-режим: блок недоступного инструмента ДО driver'а (annotations — лишь hints).
         if not is_tool_allowed(name, self._mode):
             return self._error(mcp_types, mcp_errors.blocked_tool_error(name, self._mode, self._allowed_names()))
-        # read-only: send_command пропускает только read-команды (introspect.* / state.get*).
-        if self._mode == MODE_READ_ONLY and name == "send_command":
+        # Ограниченный режим: send_command пропускает только read-команды (introspect.* / state.get*).
+        if self._mode in (MODE_READ_ONLY, MODE_NO_DESTRUCTIVE) and name == "send_command":
             command = str(arguments.get("command") or "")
             if not is_command_read_safe(command):
-                return self._error(mcp_types, mcp_errors.read_only_command_blocked_error(command))
+                return self._error(mcp_types, mcp_errors.restricted_command_blocked_error(command))
 
         try:
             driver = self._session.ensure()
