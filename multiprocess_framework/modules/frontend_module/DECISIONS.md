@@ -102,3 +102,17 @@ PySide6-фреймворк виджетов с привязкой к `data_schem
 **Реализация.** `CommandSender.request_command/request_system_command` + `IRequestingProcess` (framework, `deae8b91`); `RequestRunner` + `ProcessManagerProxy.*_async(on_result)` (prototype, `e9e29f71`); presenter активации рецепта (`c4894133`). Авто-reply транспортом по `request_id` даёт паритет с fire-and-forget (no-op без correlation).
 
 **Альтернативы.** `request()` из main-thread — отвергнуто (фриз UI). Request для field-write — отвергнуто (блокировка hot-path). Модальный диалог результата — отвергнуто (`c4894133` non-modal, не рвёт поток работы).
+
+---
+
+### FE-005: Qt-free ядро read-model телеметрии вынесено в общий модуль (reuse-vs-own, 2026-07-18)
+
+**Контекст.** Плану `backend-ctl-framework-module` (Task 2.3) нужен GUI-эквивалент чтения телеметрии для headless-драйвера диагностики (backend_ctl): локальная модель поверх `state.changed`-дельт + история, 0 IPC на чтение. Единственный кандидат на переиспользование — generic `TelemetryViewModel` (промотирован coherence Task 3.5). Прямой reuse невозможен: VM — `QObject` (`Signal`+`QTimer`-коалесинг), а `frontend_module`/`state_store_module` тянут PySide6 через package `__init__` → импорт из headless-драйвера затащил бы Qt (регресс: driver сознательно тонкий, из фреймворка тянет только `message_module`).
+
+**Решение.** Хранилище снимка (`path → value`) + кольцевые буферы истории + их тонкие инварианты (граница префикса `snapshot`, приведение к числу, окно `maxlen`) вынесены в новый Qt-free `telemetry_readmodel_module.TelemetryReadModel` (envelope-agnostic `ingest(path, value, deleted)`). `TelemetryViewModel` теперь **композирует** ядро, оставляя себе только GUI-специфику: разбор конверта `state_delta`/`gui_local_metric` и коалесинг Qt-сигнала `updated`. Публичный API VM не изменился (тесты — safety-net). backend_ctl композирует то же ядро, наполняя его push'ами `state.changed`.
+
+**Почему не own-дублирование.** Ядро мало (~90 строк), но его ценность — не строки, а тонкие инварианты: две копии `snapshot`-boundary / number-coercion / ring-window разъедутся при первом же баг-фиксе в одной из них. DRY здесь = защита от дрейфа, а не экономия LOC.
+
+**Почему новый модуль, а не существующий.** Qt-free дома во фреймворке не нашлось: `frontend_module` — Qt-слой; `state_store_module.__init__` тянет `GuiStateProxy`→PySide6 (рефактор его `__init__` — шире blast-radius, чем оправдано). Маленький сфокусированный framework-модуль (README/STATUS/interfaces/tests) — согласуется с правилом №2 и импортируется и GUI-слоем, и headless-tooling.
+
+**Альтернативы.** (1) Прямой reuse GUI-VM — отвергнуто (Qt в headless-драйвере). (2) Own-копия ядра в backend_ctl — отвергнуто (дрейф инвариантов; план допускал лишь «последним вариантом»). (3) Ядро в `state_store_module`/`frontend_module` — отвергнуто (Qt в цепочке импортов package `__init__`).

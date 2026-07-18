@@ -43,4 +43,4 @@ MODULE_LAYERS: list[tuple[str, str]] = [
 
 # Модули, у которых есть DECISIONS.md, но нет локального ADR-кода
 # (содержат только ссылки на глобальные ADR).
-MODULES_WITHOUT_LOCAL_ADR: set[str] = {"frontend_module"}
+MODULES_WITHOUT_LOCAL_ADR: set[str] = {"frontend_module", "telemetry_readmodel_module"}

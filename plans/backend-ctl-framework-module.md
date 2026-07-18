@@ -347,6 +347,19 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 **Заметка (реализация, ветка `feat/backend-ctl-watch`):** `GUI_DEFAULT_PATTERNS` + `watch_like_gui`/`unwatch`/`_on_watch_event`/`_resub_loop` в `backend_ctl/driver.py`; MCP — `watch_like_gui`/`unwatch` в `mcp_tools.py`. **Thread-safety (главный риск, п.5):** resub-слушатель исполняется в reader-потоке; прямой `observability_tail`→`request()` оттуда дедлочит (reader блокируется в `pending.event.wait()`, а сам же должен дренировать ответ → таймаут + стойл доставки). Решение — **очередь намерений + отдельный applier-поток** (`_resub_queue` + `backend-ctl-resub`): слушатель только enqueue'ит имя процесса, applier применяет переподписку на безопасном потоке (reader свободен дренировать ответ). Подробности — в докстроке `watch_like_gui`. `tail_level` — observability.tail форвардит все severity, фильтр на клиенте (`observability_records(kind=...)`).
 
 #### Task 2.3 — Telemetry read-model (переиспользование generic-VM из frontend_module)
+
+> **✅ РЕАЛИЗОВАНО (2026-07-18), ветка `feat/backend-ctl-readmodel` от main.** Разблокирован
+> закрытием coherence Task 3.5 (read-model 3.5 в main). Reuse-решение — **извлечь общее Qt-free
+> ядро** (не own-дублирование, не прямой reuse): `TelemetryViewModel` — `QObject`, а
+> `frontend_module`/`state_store_module` тянут PySide6 через package `__init__` → прямой reuse затащил
+> бы Qt в headless-драйвер. Извлечено ядро `TelemetryReadModel` (снимок + история + инварианты) в новый
+> **Qt-free `multiprocess_framework/modules/telemetry_readmodel_module/`**; GUI-VM теперь композирует
+> его (публичный API без изменений, 15/15 тестов), backend_ctl композирует то же ядро на push
+> `state.changed`. ADR — **FE-005** (`frontend_module/DECISIONS.md`) + модульный `DECISIONS.md`.
+> Коммиты: b3802d07 (framework) · 247f6811 (driver+MCP). Корреляционный ключ process/worker — в каждой
+> записи snapshot/history (ts — в точках истории). Реализация на **текущей раскладке** (driver.py +
+> mcp_tools.py; переезд в `tooling/` — пост-codemod, Этап 4). Live (4.1) — нет живого backend на macOS.
+
 **Level:** Senior (Opus) | **Assignee:** teamlead | **Layer:** framework
 **Goal:** GUI-эквивалент чтения телеметрии: локальная модель поверх `state.changed`-дельт + история, 0 IPC на чтение. Только приём — telemetry.*-семантика не трогается.
 **Files:** `domains/state.py`, `events.py`, `mcp/tools.py`; источник — `frontend_module` (generic `TelemetryViewModel`+`HistorySource` после coherence Task 3.5).
@@ -356,9 +369,9 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 3. Корреляционный ключ `(process, worker, ts)` во всех событиях — нормализация в EventHub (OTel: сигналы раздельно, ключ общий).
 4. MCP: `telemetry_snapshot`, `telemetry_history` (readOnlyHint).
 **Acceptance:**
-- [ ] unit: поток синтетических дельт → snapshot/history корректны, память bounded
-- [ ] live: после `watch_like_gui` snapshot непуст для fps живого процесса
-- [ ] В DECISIONS зафиксировано решение reuse-vs-own с обоснованием
+- [x] unit: поток синтетических дельт → snapshot/history корректны, память bounded (17 ядро + 11 driver + 3 MCP dispatch; ring-buffer maxlen-вытеснение покрыто)
+- [ ] live: после `watch_like_gui` snapshot непуст для fps живого процесса → **Task 4.1** (нет живого backend в unit)
+- [x] В DECISIONS зафиксировано решение reuse-vs-own с обоснованием (FE-005 + `telemetry_readmodel_module/DECISIONS.md`)
 **Out of scope:** правки `heartbeat/telemetry.py`/`telemetry_reload.py`; история из БД-стока.
 
 #### Task 2.4 — Новая framework-команда `introspect.memory` (SHM/память/очереди)
