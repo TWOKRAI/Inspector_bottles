@@ -59,8 +59,8 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 1. `ingest(deleted=True)`: удалить `path` И все ключи с префиксом `path + "."` из `_state` и `_history` (граница по точке-разделителю, как в `snapshot`).
 2. Регресс-тест: subtree-delete чистит поддерево, соседний процесс с общим строковым префиксом (`cam2`) не затронут.
 **Acceptance:**
-- [ ] unit: после `ingest("processes.cam", deleted=True)` snapshot/history по `processes.cam.*` пусты; `processes.cam2.*` целы
-- [ ] GUI `test_telemetry_view_model` не регрессирует (то же ядро)
+- [x] unit: после `ingest("processes.cam", deleted=True)` snapshot/history по `processes.cam.*` пусты; `processes.cam2.*` целы
+- [x] GUI `test_telemetry_view_model` не регрессирует (то же ядро)
 
 ### Task A.2 — утечка applier-потока при close() (MED/HIGH, в main)
 **Level:** Middle+ (Sonnet) | **Layer:** tools

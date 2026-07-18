@@ -131,11 +131,26 @@ class TelemetryReadModel:
         Пишет СИНХРОННО: snapshot/get/history актуальны сразу после вызова.
         """
         if deleted:
-            self._state.pop(path, None)
+            # tree_store.delete() шлёт ОДНУ дельту на корень поддерева, поэтому
+            # чистим и сам путь, и всё поддерево под ним. Граница — точка-разделитель
+            # (как в snapshot): удаление ``processes.cam`` не заденет ``processes.cam2``.
+            self._purge_subtree(path)
             return
         self._state[path] = value
         # История — по каждой дельте (все точки важны для графика).
         self._record_history(path, value)
+
+    def _purge_subtree(self, path: str) -> None:
+        """Убрать путь и всё поддерево под ним из снимка и истории.
+
+        Граница — точка-разделитель: удаляются ``path`` и ключи с префиксом
+        ``path + "."`` (сосед с общим строковым префиксом не затрагивается).
+        """
+        dotted = path + "."
+        for store in (self._state, self._history):
+            stale = [p for p in store if p == path or p.startswith(dotted)]
+            for p in stale:
+                del store[p]
 
     # ------------------------------------------------------------------
     # Чтение снимка (late-binding)

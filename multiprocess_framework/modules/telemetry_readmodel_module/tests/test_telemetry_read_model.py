@@ -82,6 +82,32 @@ def test_delete_unknown_path_is_noop() -> None:
     assert m.snapshot("") == {}
 
 
+def test_delete_subtree_root_purges_all_descendants() -> None:
+    """Удаление узла-корня поддерева чистит все листья под ним (не только точный ключ).
+
+    tree_store.delete() шлёт ОДНУ дельту на корень поддерева. Без очистки по
+    префиксу листья (fps/latency/uptime) остаются навсегда в _state/_history —
+    snapshot/history отдают данные по несуществующей сущности.
+    """
+    m = TelemetryReadModel()
+    m.ingest("processes.cam.state.fps", 25.0)
+    m.ingest("processes.cam.state.latency_ms", 12.0)
+    m.ingest("processes.cam.state.uptime", 100.0)
+    # Сосед с общим СТРОКОВЫМ префиксом — не должен пострадать.
+    m.ingest("processes.cam2.state.fps", 30.0)
+
+    m.ingest("processes.cam", None, deleted=True)
+
+    # Всё поддерево cam вычищено из снимка И истории.
+    assert m.snapshot("processes.cam") == {}
+    assert m.history("processes.cam.state.fps") == []
+    assert m.history("processes.cam.state.latency_ms") == []
+    assert m.history("processes.cam.state.uptime") == []
+    # Сосед cam2 цел (в снимке и в истории).
+    assert m.get("processes.cam2.state.fps") == 30.0
+    assert len(m.history("processes.cam2.state.fps")) == 1
+
+
 # --------------------------------------------------------------------------- #
 #  Инвариант: ядро без транспорта                                              #
 # --------------------------------------------------------------------------- #
