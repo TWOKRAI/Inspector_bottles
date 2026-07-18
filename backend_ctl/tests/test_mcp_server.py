@@ -137,6 +137,8 @@ class TestRegistry:
             "logger_sink_disable",
             "telemetry_reconfigure",
             "telemetry_set",
+            "telemetry_snapshot",
+            "telemetry_history",
         }
         assert names == expected
 
@@ -202,6 +204,34 @@ class TestToolsCall:
         assert res["result"]["isError"] is False
         assert tool_result(res) == {"success": True, "method": "introspect_memory"}
         assert fake.calls == [("introspect_memory", ("preprocessor",), {})]
+
+    def test_telemetry_snapshot_dispatches_to_driver(self) -> None:
+        # Task 2.3: telemetry_snapshot — локальное чтение read-model (0 IPC), фильтры process/metric.
+        server, fake = make_server()
+        res = call(
+            server,
+            "tools/call",
+            {"name": "telemetry_snapshot", "arguments": {"process": "cam", "metric": "fps"}},
+        )
+        assert res["result"]["isError"] is False
+        assert tool_result(res) == {"success": True, "method": "telemetry_snapshot"}
+        assert fake.calls == [("telemetry_snapshot", ("cam", "fps"), {})]
+
+    def test_telemetry_snapshot_no_args_passes_none(self) -> None:
+        server, fake = make_server()
+        call(server, "tools/call", {"name": "telemetry_snapshot", "arguments": {}})
+        assert fake.calls == [("telemetry_snapshot", (None, None), {})]
+
+    def test_telemetry_history_dispatches_to_driver(self) -> None:
+        server, fake = make_server()
+        res = call(
+            server,
+            "tools/call",
+            {"name": "telemetry_history", "arguments": {"path": "processes.cam.state.fps", "limit": 50}},
+        )
+        assert res["result"]["isError"] is False
+        assert tool_result(res) == {"success": True, "method": "telemetry_history"}
+        assert fake.calls == [("telemetry_history", ("processes.cam.state.fps",), {"limit": 50})]
 
     def test_send_command_passes_args_and_timeout(self) -> None:
         server, fake = make_server()

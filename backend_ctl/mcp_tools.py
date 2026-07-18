@@ -251,6 +251,15 @@ def _telemetry_set(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.telemetry_set(args["process"], args["metric"], **kw, **_kw_timeout(args))
 
 
+def _telemetry_snapshot(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    # Локальное чтение read-model (0 IPC) — timeout не нужен.
+    return drv.telemetry_snapshot(args.get("process"), args.get("metric"))
+
+
+def _telemetry_history(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.telemetry_history(args["path"], limit=args.get("limit"))
+
+
 # ---------------------------------------------------------------------------
 # Реестр
 # ---------------------------------------------------------------------------
@@ -651,6 +660,42 @@ TOOLS: List[ToolSpec] = [
             ["process", "metric"],
         ),
         _telemetry_set,
+    ),
+    ToolSpec(
+        "telemetry_snapshot",
+        "Снимок телеметрии из ЛОКАЛЬНОГО read-model — read-only, 0 IPC (не ходит на сервер). "
+        "Наполняется, пока активна state-подписка на 'processes.**' (напр. после watch_like_gui). "
+        "process — снимок поддерева процесса; metric — фильтр по суффиксу метрики (например 'fps', "
+        "'effective_hz'). Каждая запись несёт корреляционный ключ process/worker. Пустой read-model "
+        "(не было дельт) → count=0 (не ошибка).",
+        _obj(
+            {
+                "process": {"type": "string", "description": "Фильтр по процессу (снимок поддерева). Опц."},
+                "metric": {
+                    "type": "string",
+                    "description": "Фильтр по метрике: суффикс '.<metric>' или точное совпадение (напр. 'fps'). Опц.",
+                },
+            },
+        ),
+        _telemetry_snapshot,
+    ),
+    ToolSpec(
+        "telemetry_history",
+        "Кольцевой буфер истории метрики из ЛОКАЛЬНОГО read-model — read-only, 0 IPC (спарклайн без БД). "
+        "История копится только для штатных gated-метрик (fps/latency_ms/uptime/effective_hz/"
+        "cycle_duration_ms). Возвращает точки [ts, value] в хронологическом порядке + ключ process/worker. "
+        "Путь не трекается / нет данных → count=0. Глубже (час/день) — из БД-стока (вне этого инструмента).",
+        _obj(
+            {
+                "path": {"type": "string", "description": "Полный путь метрики (например 'processes.cam.state.fps')."},
+                "limit": {
+                    "type": "integer",
+                    "description": "Вернуть последние N точек (опц., по умолчанию весь буфер).",
+                },
+            },
+            ["path"],
+        ),
+        _telemetry_history,
     ),
 ]
 

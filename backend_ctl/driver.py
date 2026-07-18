@@ -28,6 +28,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, Dict, List, Optional
 
+from multiprocess_framework.modules.telemetry_readmodel_module import TelemetryReadModel
 from multiprocess_framework.modules.message_module import (
     build_command_message,
     build_system_command_message,
@@ -470,6 +471,18 @@ class BackendDriver:
         self._watch_resub_errors = 0  # счётчик неудачных авто-переподписок (диагностика)
         self._watch_patterns: tuple[str, ...] = ()  # реально включённые watch-паттерны (для unwatch)
         self._watch_tail_level = "WARNING"  # объявленный порог логов (для watch-манифеста, F2)
+
+        # Локальный read-model телеметрии (Task 2.3): «запись — всегда, чтение —
+        # локально, история — по запросу» (ADR-136). Пассивно накапливает проекцию
+        # state.changed-дельт (0 IPC на чтение), питая telemetry_snapshot/
+        # telemetry_history. Generic Qt-free ядро (то же, что у GUI TelemetryViewModel).
+        # Ингест лёгкий (dict + deque, без request()) — исполняется в reader-потоке;
+        # читатели (snapshot/history) зовутся из другого потока, поэтому доступ к
+        # модели сериализуется _telemetry_lock (dict/deque не потокобезопасны на
+        # одновременную запись+итерацию).
+        self._telemetry_model = TelemetryReadModel()
+        self._telemetry_lock = threading.Lock()
+        self.subscribe(self._ingest_state_changed)
 
     # ---- Соединение ----
 
@@ -1118,6 +1131,140 @@ class BackendDriver:
         if not rule:
             return {"success": False, "error": "нужен enabled и/или interval_sec"}
         return self.telemetry_reconfigure(process, publish={"metrics": {metric: rule}}, mode="merge", timeout=timeout)
+
+    # ---- Telemetry read-model (Task 2.3: GUI-эквивалент чтения телеметрии, 0 IPC) ----
+
+    _MISSING_MARKER = "__MISSING__"  # зеркало Delta.to_dict(): new_value=='__MISSING__' → удаление
+
+    def _ingest_state_changed(self, msg: Dict[str, Any]) -> None:
+        """Слушатель событийного канала: питает локальный telemetry read-model.
+
+        Исполняется в reader-потоке (колбэк :meth:`subscribe`) — только лёгкий
+        ingest в память, без ``request()`` (как и :meth:`_on_watch_event`). Разбирает
+        push ``state.changed`` (конверт ``{"command":"state.changed","data":{"deltas":
+        [Delta.to_dict(), ...]}}``): каждую дельту вносит в read-model. Удаление узла
+        распознаётся по ``new_value == "__MISSING__"`` (сериализация MISSING).
+
+        Ингест под ``_telemetry_lock`` — читатели snapshot/history зовутся из другого
+        потока и итерируют те же dict/deque.
+        """
+        if not isinstance(msg, dict) or msg.get("command") != "state.changed":
+            return
+        data = msg.get("data")
+        if not isinstance(data, dict):
+            return
+        deltas = data.get("deltas")
+        if not isinstance(deltas, list):
+            return
+        with self._telemetry_lock:
+            for delta in deltas:
+                if not isinstance(delta, dict):
+                    continue
+                path = delta.get("path")
+                if not isinstance(path, str) or not path:
+                    continue
+                new_value = delta.get("new_value")
+                if new_value == self._MISSING_MARKER:
+                    self._telemetry_model.ingest(path, None, deleted=True)
+                else:
+                    self._telemetry_model.ingest(path, new_value)
+
+    @staticmethod
+    def _telemetry_key(path: str) -> Dict[str, Optional[str]]:
+        """Корреляционный ключ ``(process, worker)`` из пути телеметрии.
+
+        Форма пути — ``processes.<process>[...workers.<worker>...].<metric>``
+        (см. ``build_worker_telemetry``). ts у истории отдельно (в точках буфера) —
+        вместе это ключ ``(process, worker, ts)`` (OTel: сигналы раздельно, ключ общий).
+        Не-``processes.*`` путь → process/worker = None.
+        """
+        parts = path.split(".")
+        process = parts[1] if len(parts) >= 2 and parts[0] == "processes" else None
+        worker = None
+        if "workers" in parts:
+            wi = parts.index("workers")
+            if wi + 1 < len(parts):
+                worker = parts[wi + 1]
+        return {"process": process, "worker": worker}
+
+    def _telemetry_matches_metric(self, path: str, metric: str) -> bool:
+        """Путь соответствует метрике: точное совпадение или суффикс ``.<metric>``.
+
+        ``metric="fps"`` матчит ``processes.cam.state.fps``; ``metric="state.fps"``
+        тоже. Граница — точка-разделитель (не подстрока), чтобы ``fps`` не цеплял
+        ``max_fps`` и т.п.
+        """
+        return path == metric or path.endswith("." + metric)
+
+    def telemetry_snapshot(
+        self,
+        process: Optional[str] = None,
+        metric: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Локальный снимок телеметрии из read-model — 0 IPC (ADR-136).
+
+        Читает накопленную проекцию ``state.changed``-дельт (наполняется, пока
+        активна state-подписка на ``processes.**`` — напр. после
+        :meth:`watch_like_gui`). Похода на сервер НЕ делает.
+
+        Args:
+            process: фильтр по процессу — снимок поддерева ``processes.<process>``.
+                None → весь накопленный снимок.
+            metric: фильтр по метрике (суффикс ``.<metric>`` или точное совпадение),
+                напр. ``"fps"`` / ``"state.fps"`` / ``"effective_hz"``. None → все пути.
+
+        Returns:
+            ``{"success": True, "process": ..., "metric": ..., "count": N,
+            "metrics": {path: {"value": v, "process": p, "worker": w}}}``. Пустой
+            read-model (не было дельт) → ``count=0`` (не ошибка).
+        """
+        prefix = f"processes.{process}" if process else ""
+        with self._telemetry_lock:
+            snap = self._telemetry_model.snapshot(prefix)
+        metrics: Dict[str, Any] = {}
+        for path, value in snap.items():
+            if metric is not None and not self._telemetry_matches_metric(path, metric):
+                continue
+            metrics[path] = {"value": value, **self._telemetry_key(path)}
+        return {
+            "success": True,
+            "process": process,
+            "metric": metric,
+            "count": len(metrics),
+            "metrics": metrics,
+        }
+
+    def telemetry_history(
+        self,
+        path: str,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Локальный кольцевой буфер истории метрики — 0 IPC (спарклайн без БД).
+
+        История копится только для отслеживаемых суффиксов read-model
+        (``DEFAULT_TRACKED_SUFFIXES``: fps/latency_ms/uptime/effective_hz/
+        cycle_duration_ms). Глубже (час/день) — из БД-стока (вне контракта Task 2.3).
+
+        Args:
+            path: полный путь метрики (``processes.cam.state.fps``).
+            limit: вернуть последние N точек (None → весь буфер, ≤ окна ~600).
+
+        Returns:
+            ``{"success": True, "path": ..., "process": ..., "worker": ...,
+            "count": N, "points": [[ts, value], ...]}`` в хронологическом порядке.
+            Нет буфера (путь не трекается / нет данных) → ``count=0``.
+        """
+        with self._telemetry_lock:
+            points = self._telemetry_model.history(path)
+        if limit is not None and limit >= 0:
+            points = points[-limit:]
+        return {
+            "success": True,
+            "path": path,
+            **self._telemetry_key(path),
+            "count": len(points),
+            "points": [[ts, val] for ts, val in points],
+        }
 
     # ---- Tail логов (Ф1 Task 1.5: подписка level≥X → событийный канал driver'а) ----
 

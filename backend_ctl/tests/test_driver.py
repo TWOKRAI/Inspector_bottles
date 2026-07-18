@@ -1109,3 +1109,107 @@ class TestWatchSelfSkip:
             assert "backend_ctl" not in summary["observability"]
         finally:
             d.unwatch()
+
+
+# --- Юнит: локальный telemetry read-model (Task 2.3, 0 IPC) ---
+
+
+def _delta(path: str, new_value: Any, old_value: Any = None) -> Dict[str, Any]:
+    """Дельта в проводной форме Delta.to_dict() (new_value=='__MISSING__' → удаление)."""
+    return {
+        "path": path,
+        "old_value": old_value,
+        "new_value": new_value,
+        "source": "test",
+        "timestamp": 0.0,
+        "transaction_id": "t",
+        "revision": 0,
+    }
+
+
+def _state_changed(*deltas: Dict[str, Any]) -> bytes:
+    return _line({"command": "state.changed", "data": {"deltas": list(deltas)}})
+
+
+class TestTelemetryReadModel:
+    def test_ingest_populates_snapshot(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", 25.0)))
+        snap = d.telemetry_snapshot()
+        assert snap["success"] is True
+        assert snap["count"] == 1
+        assert snap["metrics"]["processes.cam.state.fps"]["value"] == 25.0
+
+    def test_snapshot_filters_by_process(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(
+            _state_changed(
+                _delta("processes.cam.state.fps", 25.0),
+                _delta("processes.cam2.state.fps", 9.0),
+            )
+        )
+        snap = d.telemetry_snapshot(process="cam")
+        assert set(snap["metrics"]) == {"processes.cam.state.fps"}  # cam2 не течёт
+
+    def test_snapshot_filters_by_metric_suffix_boundary(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(
+            _state_changed(
+                _delta("processes.cam.state.fps", 25.0),
+                _delta("processes.cam.state.max_fps", 60.0),  # не должен матчить metric="fps"
+            )
+        )
+        snap = d.telemetry_snapshot(metric="fps")
+        assert set(snap["metrics"]) == {"processes.cam.state.fps"}
+
+    def test_snapshot_correlation_key_process_worker(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(_state_changed(_delta("processes.cam.workers.w0.effective_hz", 12.0)))
+        entry = d.telemetry_snapshot()["metrics"]["processes.cam.workers.w0.effective_hz"]
+        assert entry["process"] == "cam"
+        assert entry["worker"] == "w0"
+
+    def test_deleted_delta_removes_path(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", 25.0)))
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", "__MISSING__", old_value=25.0)))
+        assert d.telemetry_snapshot()["count"] == 0
+
+    def test_history_tracked_metric(self) -> None:
+        d = BackendDriver()
+        for v in (10.0, 20.0, 30.0):
+            d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", v)))
+        hist = d.telemetry_history("processes.cam.state.fps")
+        assert hist["success"] is True
+        assert [val for _ts, val in hist["points"]] == [10.0, 20.0, 30.0]
+        assert hist["process"] == "cam"
+
+    def test_history_limit_returns_last_n(self) -> None:
+        d = BackendDriver()
+        for v in range(5):
+            d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", float(v))))
+        hist = d.telemetry_history("processes.cam.state.fps", limit=2)
+        assert [val for _ts, val in hist["points"]] == [3.0, 4.0]
+
+    def test_history_untracked_metric_empty(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.status", "running")))
+        assert d.telemetry_history("processes.cam.state.status")["count"] == 0
+
+    def test_empty_read_model_is_not_error(self) -> None:
+        d = BackendDriver()
+        snap = d.telemetry_snapshot()
+        assert snap["success"] is True and snap["count"] == 0
+
+    def test_non_state_changed_events_ignored(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(_line({"command": "log.record", "data": {"record": {"x": 1}}}))
+        assert d.telemetry_snapshot()["count"] == 0
+
+    def test_snapshot_read_does_not_drain_event_queue(self) -> None:
+        """Чтение read-model локально — событийный канал (events()) не трогается."""
+        d = BackendDriver()
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", 25.0)))
+        _ = d.telemetry_snapshot()
+        # событие state.changed по-прежнему доступно потребителю events()
+        assert any(e.get("command") == "state.changed" for e in d.events())
