@@ -17,6 +17,7 @@ Integration (loopback TCP):
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import time
 from typing import Any, Dict, List
@@ -467,6 +468,73 @@ class _FakeSock:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _FakeReaderSock:
+    """Сокет-дублёр для reader-стресса: recv крутит socket.timeout, close → OSError."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def recv(self, _n: int) -> bytes:
+        if self.closed:
+            raise OSError("socket closed")
+        time.sleep(0.0005)
+        raise socket.timeout()  # держать reader в цикле, не отдавая данных
+
+    def sendall(self, data: bytes) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _NullingReaderSock:
+    """recv() бросает AttributeError — как ``None.recv`` в TOCTOU-окне close()/read_loop."""
+
+    def recv(self, _n: int) -> bytes:
+        raise AttributeError("'NoneType' object has no attribute 'recv'")
+
+    def sendall(self, data: bytes) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+class TestReadLoopThreadSafety:
+    """A.3: конкурентные close()/read_loop не роняют reader AttributeError'ом."""
+
+    def test_read_loop_catches_attributeerror_from_nulled_sock(self) -> None:
+        # Детерминированно: recv бросает AttributeError (как None.recv в TOCTOU-окне).
+        # pre-fix ловит только OSError → пробрасывает и роняет reader; post-fix — break.
+        d = BackendDriver()
+        d._running = True
+        d._sock = _NullingReaderSock()  # type: ignore[assignment]
+        d._read_loop()  # не должен бросить — завершается штатно
+        assert True
+
+    def test_concurrent_close_during_read_loop_never_crashes(self) -> None:
+        for i in range(100):
+            d = BackendDriver()
+            d._sock = _FakeReaderSock()  # type: ignore[assignment]
+            d._running = True
+            errors: List[BaseException] = []
+
+            def _run_reader() -> None:
+                try:
+                    d._read_loop()
+                except BaseException as exc:  # noqa: BLE001 — тест ловит ЛЮБУЮ утечку
+                    errors.append(exc)
+
+            t = threading.Thread(target=_run_reader)
+            t.start()
+            time.sleep(0.001)
+            d.close()  # обнуляет _sock из другого потока — гонка с recv()
+            t.join(timeout=2.0)
+
+            assert not t.is_alive(), f"reader завис на итерации {i}"
+            assert not errors, f"reader бросил исключение на итерации {i}: {errors}"
 
 
 class TestSendRaceAndLateReplies:

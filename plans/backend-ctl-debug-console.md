@@ -82,7 +82,7 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 1. `_read_loop`: захватить локальную ссылку `sock = self._sock` под коротким локом (или в начале итерации) и звать `sock.recv()`; ловить `AttributeError`/`OSError` явно; при обрыве — залогировать (не только stderr-трейсбек).
 2. `close()`: обнулять `_sock` под `_write_lock` (симметрия с `_send_raw`).
 **Acceptance:**
-- [ ] стресс-тест: конкурентные close()/read_loop 100 итераций без AttributeError-падения reader'а; reader завершается штатно
+- [x] детерминированный: recv→AttributeError (None.recv в TOCTOU-окне) → reader break, не пробрасывает (падал на pre-fix); + стресс close()/read_loop 100 итераций
 
 ### Task A.4 — readiness-проба перестаёт молчать (MED/LOW)
 **Level:** Middle (Sonnet) | **Layer:** tools
