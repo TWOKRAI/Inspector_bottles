@@ -513,23 +513,42 @@ class BackendDriver:
         self._reader.start()
 
     def close(self) -> None:
-        """Остановить читающий поток и закрыть сокет."""
+        """Остановить читающий поток и закрыть сокет.
+
+        Гасит и applier-поток watch (``backend-ctl-resub``): его иначе снимает только
+        :meth:`unwatch`, а реконнект зовёт ``close()`` (``DriverSession.reset``) — без
+        этого на каждый реконнект-с-активным-watch daemon-поток навсегда висел бы в
+        ``q.get()``, удерживая ссылкой на ``self._resub_loop`` весь старый driver.
+        """
         self._running = False
+        # Снять watch-контур ПОД ЛОКОМ: гасим _watch_active, чтобы применитель по
+        # layer-1 guard не дёргал сеть на закрывающемся сокете; забираем поток+очередь.
+        with self._watch_lock:
+            self._watch_active = False
+            resub_thread = self._resub_thread
+            self._resub_thread = None
+            resub_q = self._resub_queue
         if self._sock is not None:
             try:
                 self._sock.close()
             except OSError:
                 pass
             self._sock = None
-        if self._reader is not None:
-            self._reader.join(timeout=1.0)
-            self._reader = None
-        # Разбудить всех ожидающих ответа (соединение закрыто).
+        # Разбудить всех ожидающих ответа (соединение закрыто) — в т.ч. applier,
+        # если он застрял в in-flight request(): иначе его join ниже висел бы до таймаута.
         with self._pending_lock:
             pendings = list(self._pending.values())
             self._pending.clear()
         for p in pendings:
             p.event.set()
+        # Остановить applier: sentinel в очередь его поколения + join. Idle-поток
+        # получит None и выйдет; in-flight — уже разбужен пробуждением pendings выше.
+        if resub_thread is not None:
+            resub_q.put(None)
+            resub_thread.join(timeout=1.0)
+        if self._reader is not None:
+            self._reader.join(timeout=1.0)
+            self._reader = None
         # Разбудить тех, кто блокирует в events(timeout): новых событий не будет.
         with self._events_cv:
             self._events_cv.notify_all()

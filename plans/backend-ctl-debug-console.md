@@ -71,7 +71,7 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 1. `close()`: если `_resub_thread` жив — снять `_watch_active` под локом (чтобы self-heal applier'а не дёргал сеть), положить `None`-sentinel в его очередь, `join(timeout)`; без сетевого `observability_untail` (сокет закрывается).
 2. Регресс-тест: активный watch → `close()` → applier-поток завершился (`is_alive()==False`), повторные close идемпотентны.
 **Acceptance:**
-- [ ] unit: watch активен → close() → `_resub_thread` не жив; счётчик живых `backend-ctl-resub` потоков не растёт после N reconnect-циклов
+- [x] unit: watch активен → close() → `_resub_thread` не жив; счётчик живых `backend-ctl-resub` потоков не растёт после N reconnect-циклов
 
 ### Task A.3 — thread-safety close()/read_loop (MED)
 **Level:** Middle+ (Sonnet) | **Layer:** tools

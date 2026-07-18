@@ -534,6 +534,38 @@ class TestSendRaceAndLateReplies:
         assert d.late_replies == 0
 
 
+class TestCloseStopsApplierThread:
+    """A.2: close() гасит applier-поток watch (иначе реконнект плодит зомби-потоки)."""
+
+    def test_close_joins_resub_applier(self) -> None:
+        d = BackendDriver()
+        d._sock = _FakeSock()  # type: ignore[assignment]
+        d._running = True
+        # Поднять watch-контур БЕЗ сети (как реконнект после replay durable-намерений).
+        d.resume_watch({"active": True, "patterns": ["processes.**"], "processes": []})
+        thread = d._resub_thread
+        assert thread is not None and thread.is_alive()
+
+        d.close()
+
+        thread.join(timeout=2.0)
+        assert not thread.is_alive(), "applier-поток backend-ctl-resub не погашен close()"
+        assert d._resub_thread is None
+        # Идемпотентность: повторный close не бросает.
+        d.close()
+
+    def test_reconnect_cycles_do_not_leak_resub_threads(self) -> None:
+        # N реконнект-циклов (watch активен) → ни одного живого applier-потока после.
+        d = BackendDriver()
+        for _ in range(5):
+            d._sock = _FakeSock()  # type: ignore[assignment]
+            d._running = True
+            d.resume_watch({"active": True, "patterns": ["p.**"], "processes": []})
+            d.close()
+        alive = [t for t in threading.enumerate() if t.name == "backend-ctl-resub" and t.is_alive()]
+        assert alive == [], f"живые applier-потоки после реконнектов: {alive}"
+
+
 # --- Task 0.3: durable-подписки (реестр намерений + replay) ---
 
 
