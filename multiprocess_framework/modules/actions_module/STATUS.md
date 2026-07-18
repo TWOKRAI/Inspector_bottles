@@ -14,7 +14,6 @@
 | Action | schemas.py | Готов | Иммутабельная единица изменения (`forward_patch`/`backward_patch`/`coalesce_key`/`undoable`); SchemaBase для SQL-маппинга |
 | ActionBuilder | builder.py | Готов | Generic-фабрика: `field_set`, `from_field` (с `RegisterBindingLike` Protocol), `command` |
 | ActionBus | bus.py | Готов | Шина выполнения: undo/redo-стеки (max_history), coalescing, change-callbacks, опциональный `IActionLogWriter` |
-| IRegistersManagerGui | bus.py (Protocol) | Готов | Контракт RegistersManager на стороне GUI (`set_field_value`) |
 | ActionHandler | bus.py (Protocol) | Готов | Контракт обработчика (`apply`/`revert`) |
 | **handlers** | | | |
 | NodeMoveHandler | handlers/move_handler.py | Готов | apply/revert перемещения ноды через `on_position_changed(node_id, x, y)` callback |
@@ -22,9 +21,10 @@
 | **snapshot** | | | |
 | SnapshotHistory[T] | snapshot_history.py | Готов | Generic snapshot-стек над immutable-агрегатом T (record/take_undo/take_redo/can_*/entries/clear, coalescing, max_history); строит. блок SNAPSHOT-реализации `UndoRedoController` |
 | SnapshotEntry | snapshot_history.py | Готов | Проекция метаданных записи стека (label/command_type/timestamp), generic-аналог доменного HistoryEntry |
-| **persistence (Protocols)** | | | |
-| IActionLogWriter | persistence/interfaces.py | Готов | Буферизованный writer лога (`enqueue`/`flush`/`start`/`stop`) |
-| IActionLogRepository | persistence/interfaces.py | Готов | CRUD-репозиторий action_log |
+| **interfaces (канонический контракт, Фаза 2)** | | | |
+| IRegistersManagerGui | interfaces.py (Protocol) | Готов | Контракт RegistersManager на стороне GUI (`set_field_value`); поднят из bus.py |
+| IActionLogWriter | interfaces.py ← persistence/interfaces.py | Готов | Буферизованный writer лога (`enqueue`/`flush`/`start`/`stop`) |
+| IActionLogRepository | interfaces.py ← persistence/interfaces.py | Готов | CRUD-репозиторий action_log |
 
 ## Внешние зависимости
 

@@ -12,7 +12,6 @@ import logging
 from collections.abc import Callable
 from typing import (
     TYPE_CHECKING,
-    Any,
 )
 
 try:
@@ -20,10 +19,11 @@ try:
 except ImportError:
     from typing_extensions import Protocol, runtime_checkable
 
+from .interfaces import IRegistersManagerGui
 from .schemas import Action
 
 if TYPE_CHECKING:
-    from multiprocess_framework.modules.actions_module.persistence.interfaces import IActionLogWriter
+    from .interfaces import IActionLogWriter
 
 logger = logging.getLogger(__name__)
 
@@ -31,20 +31,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Протоколы
 # ---------------------------------------------------------------------------
-
-
-@runtime_checkable
-class IRegistersManagerGui(Protocol):
-    """Протокол для RegistersManager на стороне GUI."""
-
-    def set_field_value(
-        self,
-        register_name: str,
-        field_name: str,
-        value: Any,
-    ) -> tuple[bool, str | None]:
-        """Установить значение поля регистра. Возвращает (ok, error_msg)."""
-        ...
+# IRegistersManagerGui — канонический контракт в interfaces.py (Фаза 2
+# framework-layer-grouping, единообразие 26/26); здесь остаётся только
+# ActionHandler, специфичный для ActionBus.
 
 
 @runtime_checkable
