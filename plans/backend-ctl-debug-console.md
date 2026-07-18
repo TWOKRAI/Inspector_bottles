@@ -161,7 +161,14 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 
 ### Task C.1 — Распил driver.py (1922 стр) на модули (текущая раскладка)
 **Level:** Senior (Opus) | **Layer:** tools
-**Status (2026-07-18):** ЧАСТИЧНО. Вынесены две независимые от транспорта зоны как соседние модули (чистый git mv пост-codemod): `protocol.py` (`ce222be6` — unwrap + 6 dataclass'ов) и `subscriptions.py` (`ab95d23d` — `_SubscriptionRegistry`). driver.py 1922 → ~1694, C.0 зелёный после каждого шага, реэкспорт сохраняет back-compat. **Отложено (сцеплено с concurrency-ядром Phase A — заслуживает отдельного захода + ревью):** transport (`SocketConnection`: сокет/reader/request), events (`EventHub` — но его перестраивает B.1), watch (`WatchController`). Событийный `events()` читает транспортные `_running`/`_reader`, `_emit_event` — из reader-потока, watch дёргает request+subscribe: composition-распил трогает ровно тот reader/close()/watch-контур, что чинился и ревьюился в Phase A.
+**Status (2026-07-18):** ✅ ЗАВЕРШЕНО. god-file 1922 → **1054** строк, распил на 6 соседних модулей (чистый git mv пост-codemod), поведение бит-в-бит, C.0 live-якорь зелёный после каждого шага:
+- `protocol.py` (`ce222be6`, 245 стр) — unwrap + 6 dataclass-результатов;
+- `subscriptions.py` (`ab95d23d`, 78) — `_SubscriptionRegistry`;
+- `events.py` (`45bd6d6e`, 112) — `_EventChannelMixin` (B.1 перестроит канал здесь);
+- `transport.py` (`9e044ace`, 237) — `_TransportMixin` + `_Pending` (сокет/reader/request, concurrency-фиксы Phase A внутри);
+- `watch.py` (`985eefc9`, 422) — **`WatchController` (композиция, headline)**: владеет своими ~15 полями + back-ref на driver, инъекция `self._watch = WatchController(self)`; close() гасит applier через `self._watch.stop()`.
+
+Transport/events — mixin (вербатим на том же `self`, максимальная сохранность concurrency-контура); watch — композиция (та зона, что план метил «готовым модулем, живущим полями чужого класса»). driver.py — фасад + доменные обёртки + telemetry read-model.
 **Goal:** god-file → соседние модули (transport / protocol / events / subscriptions / domains/* / watch), поведение бит-в-бит.
 **Проблема:** транспорт + протокол + 5 датаклассов + ~30 обёрток + watch-стейт-машина (~15 полей: lock/active/subscribed/listener/queue/thread/манифест) в одном классе. Watch-машина — готовый модуль, живущий полями чужого класса.
 **Files:** новый пакет `backend_ctl/driver/` + re-export-шим `backend_ctl/driver.py`; tests на новых импортах.
@@ -170,7 +177,7 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 2. Watch-стейт-машина → отдельный класс (`WatchController`), инъекция в driver.
 3. Последующий `git mv` в `tooling/` (пост-codemod) остаётся чистым.
 **Acceptance:**
-- [ ] `pytest backend_ctl` зелёный на новых импортах; live-якорь C.0 зелёный после сплита; `from backend_ctl.driver import BackendDriver` работает (шим); sentrux: quality/циклы/god не хуже baseline (depth — ориентир, не гейт, [[feedback_sentrux_depth_opaque]] + [[feedback_sentrux_gate_narrowed]])
+- [x] `pytest backend_ctl` зелёный на новых импортах (210 unit); live-якорь C.0 зелёный после каждого шага (3/3); `from backend_ctl.driver import BackendDriver/GUI_DEFAULT_PATTERNS/Capabilities/…` работает (реэкспорт); driver.py 1922→1054
 
 ### Task C.2 — Гигиена правила №2 + probes/
 **Level:** Middle (Sonnet) | **Layer:** tools/docs
