@@ -1,8 +1,10 @@
 ---
 name: project_telemetry_coherence_remediation
-description: Ревью телеметрии (Fable 24→42/60) + план telemetry-coherence-remediation; Фазы 1/2/3 закрыты (3.2 частично), Sonnet+Opus ревью каждой; ветка feat/telemetry-coherence-phase2 не в main
-metadata:
+description: "План telemetry-coherence-remediation ЗАКРЫТ (Fable 24→47/60); Фазы 1/2/3 + qt-smoke; ветка feat/telemetry-coherence-phase2 СЛИТА и ЗАПУШЕНА в main/origin (merge 13623920); follow-up W1-W5 + pre-existing P1/P2"
+metadata: 
+  node_type: memory
   type: project
+  originSessionId: 12f5cd70-fe43-46ae-9504-c5547e3b89fe
 ---
 
 Ревью двух планов телеметрии ([[project_telemetry_self_publish]], [[project_gui_telemetry_read_model]])
@@ -77,8 +79,30 @@ W2 адресные дельты не персистятся (решать с W1
 W4 глобальный stale-порог throttle, W5 `GATED_METRICS` закрыт для приложений (предел универсальности конструктора),
 W6 докстринг-дрифт (исправлен ccb55eb7). Плюс: `state.unsubscribe` серверная семантика (pre-existing).
 
-**Дальше:** qt-smoke Task 3.5 (правило `feedback_qt_mcp_smoke_verification`) до/сразу после merge; затем решение
-владельца о merge ветки `feat/telemetry-coherence-phase2` в main (22+ коммита, НЕ слито). Follow-up тикеты W1-W5.
+**MERGE (2026-07-18):** qt-smoke закрыт (offscreen+probe 9142, 8 вкладок + read-model, 0 Qt-ошибок).
+Верификация перед merge: validate ✅, framework **5010 passed**, телеметрийные прототип-тесты **137 passed**,
+формальное `/code-review` 8 углов — **0 корректностных багов** (3 LOW-наблюдения в follow-up). Ветка слита в
+main `git merge --no-ff` (merge-коммит **13623920**, 49 файлов +2380/−770) и **ЗАПУШЕНО в origin/main**
+(2026-07-18, pre-push sentrux пройден). Merge-коммит проходит commit-msg hook (первая строка
+`Merge …` в SKIP_PREFIXES).
+
+**Pre-existing долги прототип-suite (вскрыты при merge-верификации; НЕ от ветки — падают и на main):**
+- **P1:** `test_topology_dirty_indicator` / `test_topology_dirty_pipeline` (×2 папки: `frontend/tests/`,
+  `frontend/widgets/tabs/pipeline/tests/`) ВЕШАЮТ headless-прогон — модальный `confirm_unsaved_changes`,
+  `QDialog.exec()` блокирует без юзера. `pytest-timeout --timeout-method=signal` НЕ прерывает Qt C++
+  event-loop (SIGALRM отложен). Нужен autouse-фикстур, мокающий модалку (ср. [[feedback_no_qt_popups_offscreen]]).
+- **P2:** `test_system_dashboard::test_refresh_pulls_ring_history_into_series` падает: VM `history()` отдаёт
+  точки, но `telemetry_chart.set_series_data` не заполняет кривую (`setData→getData()` пусто). Баг графика
+  `frontend_module/widgets/telemetry_chart.py`, НЕ read-model; воспроизведён worktree'ом main.
+
+**Урок (merge-верификация):** «тесты прототипа зелёные» из acceptance — иллюзия headless: полный
+`pytest multiprocess_prototype/` НЕ проходит из-за pre-existing модалок (P1) и чарт-фейла (P2). Верифицировать
+ветку — гонять РОВНО изменённые тест-файлы (`git diff --name-only main...HEAD`), а не весь suite; при «зависании»
+сперва отличать модальный ханг (`exec()`, SIGALRM бессилен) от реального фейла, и решающе проверять pre-existing
+через worktree main, а не деселектить вслепую.
+
+**Дальше:** push ветки по команде владельца (pre-push sentrux); follow-up тикеты W1-W5 (W1/W2 до Фазы 4 GUI);
+pre-existing P1/P2 — отдельные тикеты; затем backend_ctl (план `plans/backend-ctl-framework-module.md`).
 
 **Урок (Фаза 1):** per-subsystem ревью НЕ видит межподсистемных стыков — Opus/Fable кросс-срез поверх флота
 нашёл HIGH (throttle full-apply сносил все правила) и design-critical (heartbeat=третья неуправляемая
