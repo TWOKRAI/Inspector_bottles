@@ -77,6 +77,10 @@ def __getattr__(name: str) -> Any:
         from .configs.managers_config import merge_managers
 
         return merge_managers
+    if name == "ConsoleProcessConfig":
+        from .configs.console_process_config import ConsoleProcessConfig
+
+        return ConsoleProcessConfig
     # GenericProcess + Plugin system
     if name == "GenericProcess":
         from .generic.generic_process import GenericProcess
@@ -153,6 +157,7 @@ __all__ = [
     "class_path_from_type",
     "DEFAULT_QUEUES",
     "merge_managers",
+    "ConsoleProcessConfig",
     # Telemetry publish contract (PC 1.1)
     "TelemetryPublishConfig",
     "MetricRule",
