@@ -398,6 +398,21 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 
 ### Phase 3 — MCP на официальном SDK
 
+> **✅ РЕАЛИЗОВАНО (2026-07-18), ветка `feat/backend-ctl-mcp-sdk` от main.** На ТЕКУЩЕЙ раскладке
+> (пути `mcp/server.py`→`backend_ctl/mcp_server_sdk.py`, `mcp/tools.py`→`mcp_tools.py`,
+> `mcp/errors.py`→`mcp_errors.py`; переезд в `tooling/` — пост-codemod). Владелец дал разрешение
+> на установку `mcp` (уже был в venv 1.27.1). Коммит: 903014b1.
+> - **3.1 SDK-сервер:** `mcp.server.lowlevel` + stdio поверх того же реестра ToolSpec; lifecycle
+>   driver'а вынесен в общий `mcp_driver_session.DriverSession` (рукописный сервер переведён на него,
+>   не дублируется). Ленивый импорт `mcp`. Extra `ctl = mcp>=1.27,<1.28`. Annotations из класса
+>   безопасности. Рукописный `mcp_server.py` — fallback до живого смоука.
+> - **3.2 safety-режимы:** `--read-only`/`--disable-destructive` + env `BACKEND_CTL_MCP_MODE`; enforce
+>   ДО driver'а; ограниченный режим скрывает из tools/list; read-only whitelist для send_command.
+> - **3.3 actionable-ошибки:** `mcp_errors` (неизвестный→ближайшие; блок→доступные). `capabilities
+>   response_format concise`/`help`-рендер — DEFER (опц. идея владельца, не блокирует закрытие плоскости).
+> - Тесты: 24 SDK-unit (вкл. 2 e2e через реальный протокол in-memory client↔server) + рукописный 43
+>   зелёные после рефактора. ADR — `backend_ctl/DECISIONS.md` (BCTL-ADR-001..004).
+
 #### Task 3.1 — Миграция сервера на официальный MCP Python SDK
 **Level:** Senior (Opus) | **Assignee:** teamlead | **Layer:** framework
 **Goal:** `mcp/server.py` на пакете `mcp`, stdio; реестр ToolSpec остаётся своим — SDK-адаптер регистрирует инструменты из него (смена стека = один файл).
@@ -409,9 +424,9 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 4. Golden-тест `tools/list` (полный каталог + annotations). Рукописный сервер удаляется только после живого смоука SDK-версии из Claude Code.
 5. ADR в DECISIONS: SDK за реестром, пин версии, триггеры отката.
 **Acceptance:**
-- [ ] `tools/list` через SDK == golden (все инструменты Phases 0–2 с annotations)
-- [ ] Живой смоук из Claude Code (плагин mcp-backend-ctl на финальном entrypoint)
-- [ ] Без extra `ctl` импорт модуля не падает
+- [x] `tools/list` через SDK == golden (34 инструмента Phases 0–2 с annotations) — unit + e2e через реальный протокол SDK + stdio-subprocess smoke
+- [ ] Живой смоук из Claude Code (плагин на финальном entrypoint) → **шаг владельца** (`.mcp.json` перенаправлён на `mcp_server_sdk`; subprocess-smoke initialize/tools/list зелёный)
+- [x] Без extra `ctl` импорт модуля не падает (ленивый импорт; `test_module_imports_without_calling_mcp`)
 **Out of scope:** streamable HTTP (SDK делает дешёвым — следующая итерация); переименования инструментов.
 
 #### Task 3.2 — Safety-режимы: `--read-only` / `--disable-destructive`
@@ -423,7 +438,7 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 2. read-only → read+subscribe; `send_command` пропускает только whitelisted `introspect.*`/`state.get*`.
 3. Отказ actionable: «X заблокирован режимом read-only; доступны: …». `tools/list` в ограниченном режиме скрывает write-инструменты.
 **Acceptance:**
-- [ ] Тесты трёх режимов; в read-only `set_register` отклоняется в SDK-обёртке ДО driver (fake фиксирует отсутствие вызова)
+- [x] Тесты трёх режимов; в read-only `set_register` отклоняется в SDK-обёртке ДО driver (fake фиксирует отсутствие вызова); read-only скрывает write/escalated из tools/list; send_command whitelist
 **Out of scope:** аутентификация (endpoint остаётся localhost-dev).
 
 #### Task 3.3 — Actionable-ошибки + response_format для capabilities
@@ -434,7 +449,8 @@ backend_ctl/                                      ← tooling-слой ВНЕ fr
 1. Неизвестный инструмент → ближайшие имена; неизвестная команда → hint «см. introspect_handlers процесса X»; timeout на адресате → hint со списком процессов из последнего capabilities-кэша.
 2. `capabilities`: `response_format` (`concise` = имена команд без params_schema) + `process`-фильтр.
 **Acceptance:**
-- [ ] Тесты на каждый класс ошибок (fake); `capabilities(concise)` кратно меньше detailed на живой системе
+- [x] Тесты на каждый класс ошибок (unknown-tool→ближайшие, blocked→доступные, read-only-command→префиксы)
+- [ ] `capabilities(concise)`/`help`-рендер — **DEFER** (опц. идея владельца; не блокирует закрытие плоскости)
 **Out of scope:** i18n.
 
 > **Отложено в бэклог (решение ревью — не грузить план):** cursor-дренаж событий по плоскостям (list-watch: `events_page(plane, cursor)` + `dropped`-счётчики) и пагинация прочих тяжёлых ответов. Вернуться, когда появится реальная боль от разрушающего `events()` у нескольких потребителей.

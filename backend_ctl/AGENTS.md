@@ -87,11 +87,22 @@ PY
 | `subscribe(cb)` / `events(timeout)` | событийный канал: колбэк или слив накопленных push-событий |
 | `telemetry_set(process, metric, enabled=, interval_sec=, plane=)` | **точечно** поменять ОДНУ метрику/правило телеметрии (merge — соседей не сносит); `plane="publisher"` (частота публикации) или `"throttle"` (central rate-limit) |
 | `telemetry_reconfigure(process="all", publish=, throttle=, mode=)` | секцией: publisher-gate и/или central-троттл; `mode="replace"` (дефолт) применяет ЦЕЛИКОМ (**wipe** неуказанных) — для одной метрики предпочитай `telemetry_set` |
+| `telemetry_snapshot(process=None, metric=None)` | **локальный** снимок телеметрии (0 IPC): read-model поверх `state.changed`; наполняется после `watch_like_gui`; фильтр по процессу/суффиксу метрики + ключ process/worker |
+| `telemetry_history(path, limit=None)` | **локальная** история метрики (спарклайн без БД): кольцевой буфер (fps/latency_ms/uptime/effective_hz/cycle_duration_ms) |
+| `observability_tail(process)` / `observability_untail(process)` | live ЛОГИ+ОШИБКИ+СТАТИСТИКА процесса (то, что GUI получает через `ObservabilityTailActivator`); записи по плоскостям — `observability_records(kind=)` |
+| `watch_like_gui()` / `unwatch()` | ВЕСЬ приёмный профиль GUI одной командой: state.subscribe (processes/system/devices/calibration) + observability.tail на все процессы + **авто-переподписка** после авто-рестарта |
+| `introspect_memory(process)` | инвентарь памяти (SHM/пул займов/очереди) — только статистика; секции best-effort (`null`, не ошибка) |
 | `request(message, timeout=None)` | низкоуровневый: готовый router-dict → ответ по `request_id` |
 
 Все обёртки возвращают `result` из ответа, либо `{"success": False, "error": "timeout"/"not connected"/...}`.
-Те же имена доступны как MCP-инструменты (`telemetry_set`/`telemetry_reconfigure` — Task 0.5).
-После реконнекта MCP-сервера подписки (`state_subscribe`/`log_tail`/`ui_tap`) восстанавливаются автоматически (Task 0.3).
+Все имена доступны как MCP-инструменты (полный каталог — `tools/list`).
+После реконнекта MCP-сервера подписки (`state_subscribe`/`log_tail`/`ui_tap`/`watch`) восстанавливаются автоматически (Task 0.3/F2).
+
+**Safety-режимы MCP-сервера** (Phase 3, флаги сервера или env `BACKEND_CTL_MCP_MODE`):
+`--read-only` — только чтение+подписки (write/escalated скрыты и блокируются;
+`send_command` пропускает лишь `introspect.*`/`state.get*`); `--disable-destructive` —
+блок разрушающих. Инструменты несут annotations (`readOnlyHint`/`destructiveHint`).
+Неизвестный инструмент → подсказка ближайших имён; блок → список доступных.
 
 ### Примеры
 
