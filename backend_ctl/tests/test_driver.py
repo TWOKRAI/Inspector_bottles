@@ -1191,6 +1191,24 @@ class TestTelemetryReadModel:
         hist = d.telemetry_history("processes.cam.state.fps", limit=2)
         assert [val for _ts, val in hist["points"]] == [3.0, 4.0]
 
+    def test_history_limit_zero_returns_empty(self) -> None:
+        """limit=0 → пусто («последние 0 точек»), НЕ весь буфер (регресс points[-0:])."""
+        d = BackendDriver()
+        for v in range(3):
+            d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", float(v))))
+        assert d.telemetry_history("processes.cam.state.fps", limit=0)["count"] == 0
+
+    def test_history_negative_limit_returns_empty(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", 1.0)))
+        assert d.telemetry_history("processes.cam.state.fps", limit=-1)["count"] == 0
+
+    def test_missing_marker_matches_state_store(self) -> None:
+        """Контракт: sentinel удаления в driver == приватный маркер state_store (дрейф → фейл)."""
+        from multiprocess_framework.modules.state_store_module.core.delta import _MISSING_MARKER
+
+        assert BackendDriver._MISSING_MARKER == _MISSING_MARKER
+
     def test_history_untracked_metric_empty(self) -> None:
         d = BackendDriver()
         d.dispatch_raw(_state_changed(_delta("processes.cam.state.status", "running")))

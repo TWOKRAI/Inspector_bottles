@@ -1134,7 +1134,11 @@ class BackendDriver:
 
     # ---- Telemetry read-model (Task 2.3: GUI-эквивалент чтения телеметрии, 0 IPC) ----
 
-    _MISSING_MARKER = "__MISSING__"  # зеркало Delta.to_dict(): new_value=='__MISSING__' → удаление
+    # Зеркало Delta.to_dict(): new_value=='__MISSING__' → удаление узла. Литерал, а
+    # не импорт, СОЗНАТЕЛЬНО: импорт state_store_module.core.delta затащил бы Qt в
+    # headless-драйвер (package __init__ тянет GuiStateProxy→PySide6). Дрейф маркера
+    # ловит контракт-тест test_missing_marker_matches_state_store (импорт Qt в тесте — ок).
+    _MISSING_MARKER = "__MISSING__"
 
     def _ingest_state_changed(self, msg: Dict[str, Any]) -> None:
         """Слушатель событийного канала: питает локальный telemetry read-model.
@@ -1256,8 +1260,11 @@ class BackendDriver:
         """
         with self._telemetry_lock:
             points = self._telemetry_model.history(path)
-        if limit is not None and limit >= 0:
-            points = points[-limit:]
+        if limit is not None:
+            # limit>0 → последние N; limit==0 → пусто («последние 0 точек»);
+            # limit<0 (бессмыслица) → пусто. Нельзя points[-limit:]: при limit==0
+            # это points[0:] = ВЕСЬ буфер.
+            points = points[-limit:] if limit > 0 else []
         return {
             "success": True,
             "path": path,
