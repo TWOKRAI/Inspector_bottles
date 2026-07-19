@@ -203,8 +203,9 @@ Transport/events — mixin (вербатим на том же `self`, макси
 **Goal (D.1b, supervision):** `supervision_status(process?)` (incarnation/epoch, restarts, last_exit, стратегия, health) + `supervise(process, action=restart|drain_restart|set_policy)`; инкарнацию/epoch светить во всех событиях (основа fencing-token + маркер «до/после рестарта»). Ревью B.1 (2026-07-19): generation-токен курсоров ловит только пересоздание driver'а (транспорт), НЕ рестарт процесса — epoch в событиях должен не только светиться, но и гейтить курсорные плоскости B.1 (`reset_required` при смене инкарнации наблюдаемого процесса), иначе курсор молча читает через границу рестарта.
 **Files:** `socket_channel.py`, `socket_bridge_adapter.py`, `backend_ctl_endpoint.py`, `driver.py`, `mcp_tools.py`, tests.
 **Acceptance:**
-- [ ] два клиента на одном порту не видят реплаи/события друг друга; supervision_status читает incarnation/restarts; события несут epoch
+- [x] два клиента на одном порту не видят реплаи/события друг друга; supervision_status читает incarnation/restarts; события несут epoch — **ЗАКРЫТ** (ветка `feat/bctl-d1-session-isolation`, мини-план [`backend-ctl-d1-session-isolation.md`](backend-ctl-d1-session-isolation.md); формальное ревью 2026-07-19 xhigh — 7 находок закрыты; повторное ревью high перед merge — 3 low-находки, не блок). *«события несут epoch»*: supervisor-события несут переход рестарта (сигнал смены инкарнации, гейтит курсоры §8); численный epoch в КАЖДОМ событии — follow-up.
 **Аналог:** CDP multi-session, systemctl status/restart, OTP supervisor introspection.
+**Follow-up (не acceptance):** `supervise(action=drain_restart|set_policy)` (нужна drain-machinery + live-мутация RestartPolicy); per-event numeric epoch + per-process/per-plane точность гейтинга курсоров (сейчас — safe superset глобального токена); пин на wire-форму значения supervisor-события (ревью #3); регенерация `CAPABILITIES.yaml` на рабочем харнессе.
 
 ### Task D.2 — Streamable-HTTP мультиклиент (строго после B.1 + D.1a)
 **Level:** Senior (Opus) | **Layer:** tools
