@@ -290,6 +290,32 @@ class TestPerSessionLifespan:
         assert len(created) == 2
         assert created[0] is not created[1]
 
+    @pytest.mark.asyncio
+    async def test_call_tool_runs_in_worker_thread(self) -> None:
+        """D.2 Step 3: диспатч call_tool оффлоудится в worker-thread (не в event loop) —
+        одна блокирующая сессия (await_condition/долгий introspect) не морозит остальные."""
+        import threading
+
+        from mcp.shared.memory import create_connected_server_and_client_session
+
+        from backend_ctl.mcp_server_sdk import build_server
+
+        loop_thread = threading.get_ident()
+        seen: dict = {}
+
+        class RecordingDriver(FakeDriver):
+            def get_status(self, *a: Any, **k: Any) -> Any:
+                seen["thread"] = threading.get_ident()
+                return {"success": True, "method": "get_status"}
+
+        server = build_server(lambda: SDKToolServer(driver_factory=lambda: RecordingDriver(), log=lambda m: None))
+        async with create_connected_server_and_client_session(server) as client:
+            res = await client.call_tool("get_status", {"process": "p"})
+            assert res.isError is False
+        # driver-вызов исполнился в ДРУГОМ потоке, чем event loop → оффлоуд состоялся
+        assert seen.get("thread") is not None
+        assert seen["thread"] != loop_thread
+
 
 class TestMcpErrors:
     def test_suggest_tools_finds_near(self) -> None:

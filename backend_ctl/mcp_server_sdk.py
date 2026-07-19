@@ -236,6 +236,7 @@ def build_server(tool_server_or_factory: Any):
     Хендлеры берут свой tool_server из ``request_context.lifespan_context`` — состояние
     реестра/driver'а изолировано между сессиями.
     """
+
     _, Server = _require_mcp()
     factory = _as_tool_server_factory(tool_server_or_factory)
 
@@ -262,7 +263,15 @@ def build_server(tool_server_or_factory: Any):
 
     @server.call_tool()
     async def _handle_call_tool(name: str, arguments: Optional[Dict[str, Any]]):  # noqa: D401
-        return server.request_context.lifespan_context.call_tool(name, arguments)
+        import anyio  # noqa: PLC0415 — dep of mcp; локально, чтобы модуль импортировался без extra
+
+        ts = server.request_context.lifespan_context
+        # call_tool — блокирующий sync (driver ждёт сокет). Прямой вызов в async-хендлере
+        # заморозил бы event loop и ВСЕ MCP-сессии (риск родителя «await_condition/HTTP
+        # блокируют tools/call»). Оффлоуд в worker-thread: долгая сессия не блокирует
+        # остальные. Внутрисессионная конкурентность безопасна — transport.request()
+        # thread-safe (_pending_lock/_write_lock).
+        return await anyio.to_thread.run_sync(ts.call_tool, name, arguments)
 
     return server
 
