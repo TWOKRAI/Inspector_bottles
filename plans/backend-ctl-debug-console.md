@@ -220,7 +220,8 @@ Transport/events — mixin (вербатим на том же `self`, макси
 - [ ] требование записано в контракт G.6 (ссылка на документ); до G.6 корреляция — по (process, worker, ts)
 
 ### Task D.4 — Flight recorder (запись → offline-реплей в read-model)
-**Level:** Senior (Opus) | **Layer:** tools
+**Level:** Senior (Opus) | **Layer:** mixed (tools + один additive-шов framework)
+**Мини-план (2026-07-19):** [`backend-ctl-d4-flight-recorder.md`](backend-ctl-d4-flight-recorder.md) — дизайн «detached driver» (единый read-model live+offline через `_emit_event`), формат JSONL-записи, offline-await = playhead-навигация, 6 MCP-инструментов (все READ), 8 Steps. ✅ Дизайн одобрен владельцем (§Записка ратифицирована — все 6 дефолтов). Гейт открыт, код разрешён. BCTL-ADR-006.
 **Goal:** дешёвый тайм-трэвел: `record_start(path)` (снимок overview+state+telemetry + JSONL событий с seq/ts) + `record_load(path)` (прогрузить в тот же read-model оффлайн — snapshot/history/await_condition работают над записью). Всегда-включённый чёрный ящик (кольцо + dump при обрыве) — бонус. Детерминированный rr — **отклонён** (цена несоизмерима, multiprocess+SHM исключают).
 **Files:** новый `backend_ctl/recorder.py`, `mcp_tools.py`, tests.
 **Acceptance:**
