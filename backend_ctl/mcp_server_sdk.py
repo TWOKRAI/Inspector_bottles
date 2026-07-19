@@ -142,11 +142,10 @@ class SDKToolServer:
         """Закрыть сессию, сняв durable-подписки на бэкенде (D.2 §5.2, долг D.1 §12).
 
         Единая точка cleanup из lifespan для ВСЕХ путей завершения MCP-сессии
-        (DELETE / idle-timeout / крэш). Step 2 — пока обычный ``close()``; реальный
-        graceful-unsubscribe (обход registry → снимающие команды, пока сокет жив)
-        придёт в Step 5. Держит стабильную сигнатуру вызова через все шаги.
+        (DELETE / idle-timeout / крэш) — делегирует :meth:`DriverSession.close_graceful`
+        (unwatch → unsubscribe_all → close, sync, короткий таймаут).
         """
-        self.close()
+        self._session.close_graceful()
 
     def _allowed_names(self) -> List[str]:
         """Имена инструментов, доступных в текущем режиме (для tools/list и подсказок)."""

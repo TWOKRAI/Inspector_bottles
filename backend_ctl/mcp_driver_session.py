@@ -182,6 +182,30 @@ class DriverSession:
         self._reconnect_report = None
         return report
 
+    def close_graceful(self, *, timeout: float = 1.0) -> None:
+        """Закрыть сессию, СНЯВ durable-подписки на бэкенде, пока сокет ещё жив (D.2 §5.2).
+
+        Долг D.1 §12: :meth:`close`/:meth:`reset` лишь закрывают сокет — durable-регистрации
+        ``backend_ctl.<sid>`` осиротели бы на бэкенде. Здесь ДО закрытия: ``unwatch`` (сетевой
+        teardown watch-контура, если активен) → ``unsubscribe_all`` (реестр → снимающие
+        команды). Всё SYNC с коротким таймаутом: зовётся из выхода lifespan, в т.ч. при
+        idle-reap (отменённый cancel-scope) — ``await`` недопустим, виснуть нельзя. Best-effort:
+        бэкенд мёртв → просто закрываем (:meth:`reset`).
+        """
+        drv = self._driver
+        if drv is not None:
+            if hasattr(drv, "unwatch"):
+                try:
+                    drv.unwatch()
+                except Exception:  # noqa: BLE001 — best-effort teardown перед закрытием
+                    pass
+            if hasattr(drv, "unsubscribe_all"):
+                try:
+                    drv.unsubscribe_all(timeout=timeout)
+                except Exception:  # noqa: BLE001 — best-effort teardown перед закрытием
+                    pass
+        self.reset()
+
     def close(self) -> None:
         self.reset()
 

@@ -249,6 +249,40 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             )
         return results
 
+    def unsubscribe_all(self, *, timeout: Optional[float] = None) -> List[Dict[str, Any]]:
+        """Снять ВСЕ durable-подписки на бэкенде, пока сокет ещё жив (D.2 §5.2, долг D.1 §12).
+
+        Обход снимка реестра намерений (:meth:`_SubscriptionRegistry.export`) → снимающая
+        команда на каждое, через существующие обёртки (та же адресная семантика, что и
+        ручное снятие: ui.tap → пустой payload, log/obs → по subscriber). ``state.subscribe``
+        освобождается закрытием сокета (сервер-команды снятия по subscriber нет) → снимаем
+        только локальное намерение. Best-effort: бэкенд мог умереть — исключения глушатся
+        (сокет всё равно закрывается следом). Итерируем СНИМОК, обёртки мутируют реестр —
+        безопасно. Возвращает отчёт ``{command, target, success}`` (для лога/пина).
+        """
+        results: List[Dict[str, Any]] = []
+        for it in self._subscriptions.export():
+            command = it.get("command")
+            target = it.get("target") or ""
+            args = it.get("args") or {}
+            subscriber = args.get("subscriber")
+            ok = True
+            try:
+                if command == "log.tail.subscribe":
+                    self.log_untail(target, subscriber=subscriber, timeout=timeout)
+                elif command == "observability.tail.subscribe":
+                    self.observability_untail(target, subscriber=subscriber, timeout=timeout)
+                elif command == "ui.tap.subscribe":
+                    self.ui_untap(target, timeout=timeout)
+                elif command == "state.subscribe":
+                    self.state_unsubscribe(args.get("pattern", ""), subscriber=subscriber, timeout=timeout)
+                else:
+                    continue  # неизвестное намерение — не трогаем
+            except Exception:  # noqa: BLE001 — best-effort перед закрытием сокета
+                ok = False
+            results.append({"command": command, "target": target, "success": ok})
+        return results
+
     # ---- Высокоуровневые обёртки (общие билдеры протокола) ----
 
     def send_command(

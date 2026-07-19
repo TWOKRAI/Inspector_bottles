@@ -355,6 +355,65 @@ class TestHttpRunner:
         assert mgr is not None
 
 
+class TestGracefulCleanup:
+    """D.2 Step 5: завершение MCP-сессии снимает durable-подписки на бэкенде (долг D.1 §12)."""
+
+    def test_unsubscribe_all_sends_untail_per_intent(self) -> None:
+        from backend_ctl.driver import BackendDriver
+
+        drv = BackendDriver("127.0.0.1", 59999)  # не подключаем — стабим send_command
+        sent: List[tuple] = []
+
+        def rec(target: str, command: str, args: Any = None, *, timeout: Any = None) -> dict:
+            sent.append((target, command, dict(args or {})))
+            return {"success": True}
+
+        drv.send_command = rec  # type: ignore[method-assign]
+        drv._subscriptions.add("log.tail.subscribe", "cam", {"subscriber": "backend_ctl.abc", "level": "INFO"})
+        drv._subscriptions.add("observability.tail.subscribe", "cam", {"subscriber": "backend_ctl.abc"})
+        drv._subscriptions.add("ui.tap.subscribe", "gui", {"subscriber": "backend_ctl.abc"})
+        drv._subscriptions.add(
+            "state.subscribe", "ProcessManager", {"pattern": "processes.**", "subscriber": "backend_ctl.abc"}
+        )
+
+        report = drv.unsubscribe_all(timeout=0.5)
+        cmds = {c for _, c, _ in sent}
+        assert {"log.tail.unsubscribe", "observability.tail.unsubscribe", "ui.tap.unsubscribe"} <= cmds
+        # state.subscribe освобождается закрытием сокета — серверная команда снятия НЕ шлётся
+        assert not any(c.startswith("state.") for _, c, _ in sent)
+        assert all(r["success"] for r in report)
+        assert drv._subscriptions.export() == []  # реестр опустошён
+
+    def test_close_graceful_unsubscribes_then_closes(self) -> None:
+        calls: List[str] = []
+
+        class RecordingDriver(FakeDriver):
+            def unwatch(self, *a: Any, **k: Any) -> Any:
+                calls.append("unwatch")
+                return {"success": True}
+
+            def unsubscribe_all(self, *a: Any, **k: Any) -> Any:
+                calls.append("unsubscribe_all")
+                return []
+
+            def export_subscriptions(self, *a: Any, **k: Any) -> Any:
+                return []
+
+            def watch_manifest(self, *a: Any, **k: Any) -> Any:
+                return None
+
+            def close(self) -> None:
+                calls.append("close")
+
+        from backend_ctl.mcp_driver_session import DriverSession
+
+        ds = DriverSession(driver_factory=lambda: RecordingDriver(), log=lambda m: None)
+        ds.ensure()
+        ds.close_graceful()
+        # unwatch и unsubscribe_all — пока сокет жив; close — последним (порядок §5.2)
+        assert calls == ["unwatch", "unsubscribe_all", "close"]
+
+
 class TestMcpErrors:
     def test_suggest_tools_finds_near(self) -> None:
         assert "get_status" in mcp_errors.suggest_tools("get_statuz", build_registry().keys())
