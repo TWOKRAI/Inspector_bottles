@@ -300,6 +300,22 @@ class TestProcessManagerProcessBuiltinCommands:
             assert set(res["processes"]) == {"camera"}
             assert res["processes"]["camera"]["incarnation"] == 1
 
+    def test_cmd_supervision_status_tolerates_non_dict_data(self) -> None:
+        # Ревью #6: non-dict data не роняет хендлер (фильтр просто не применяется).
+        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+            pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
+            pmp.name = "ProcessManager"
+            pmp._routing_epoch = 0
+            pmp._incarnations = {"cam": 1}
+            mon = MagicMock()
+            mon.get_supervision_snapshot.return_value = {
+                "cam": {"status": "running", "last_exit": None, "restart_count": 0}
+            }
+            pmp._process_monitor = mon
+            res = pmp._cmd_supervision_status(data=["cam"])  # non-dict
+            assert res["success"] is True
+            assert "cam" in res["processes"]
+
     def test_register_builtin_commands_registers_all(self) -> None:
         with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)

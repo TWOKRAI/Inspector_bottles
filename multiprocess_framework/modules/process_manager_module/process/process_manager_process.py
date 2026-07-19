@@ -497,7 +497,7 @@ class ProcessManagerProcess(ProcessModule):
             incarnations = dict(self._incarnations)
         mon = getattr(self, "_process_monitor", None)
         snap = mon.get_supervision_snapshot() if mon is not None else {}
-        target = (data or {}).get("process")
+        target = data.get("process") if isinstance(data, dict) else None
         processes: dict = {}
         for name in sorted(set(snap) | set(incarnations)):
             if target and name != target:
