@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from .breaker import (
     DEFAULT_COOLDOWN_SEC,
-    DEFAULT_FAIL_THRESHOLD,
+    DEFAULT_THRESHOLD,
     BreakerState,
     CircuitBreaker,
 )
@@ -30,8 +30,6 @@ from .schema import (
     health_root,
 )
 from .state import (
-    BREAKER_COOLDOWN_ENV,
-    BREAKER_THRESHOLD_ENV,
     DEFAULT_THROTTLE,
     LOG_ONLY_ENV,
     HealthReporter,
@@ -60,11 +58,9 @@ __all__ = [
     "publish_health",
     "DEFAULT_THROTTLE",
     "LOG_ONLY_ENV",
-    # breaker (Task 2.2)
+    # breaker (Ф2 Task 2.2)
     "CircuitBreaker",
     "BreakerState",
-    "BREAKER_THRESHOLD_ENV",
-    "BREAKER_COOLDOWN_ENV",
-    "DEFAULT_FAIL_THRESHOLD",
+    "DEFAULT_THRESHOLD",
     "DEFAULT_COOLDOWN_SEC",
 ]

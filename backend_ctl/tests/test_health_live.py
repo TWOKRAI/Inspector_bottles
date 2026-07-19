@@ -47,14 +47,8 @@ def health_backend():
         harness.stop()
 
 
-def _collect_health_deltas(drv, deadline: float, *, want: tuple = ("errors", "last_error")) -> dict:
-    """Слить события до дедлайна, вернуть {path: new_value} по health-путям процесса.
-
-    Поля публикуются leaf-wise (по одному proxy.set) и приезжают ОТДЕЛЬНЫМИ
-    дельтами, возможно в разных state.changed-пачках. Ранний выход — только когда
-    собраны ВСЕ ожидаемые ``want``-листья (регресс: обрыв по первому ``errors``
-    гонял last_error и давал флак).
-    """
+def _collect_health_deltas(drv, deadline: float) -> dict:
+    """Слить события до дедлайна, вернуть {path: new_value} по health-путям процесса."""
     prefix = f"processes.{_PROC}.health."
     found: dict = {}
     while time.time() < deadline:
@@ -65,7 +59,7 @@ def _collect_health_deltas(drv, deadline: float, *, want: tuple = ("errors", "la
                 path = d.get("path", "")
                 if path.startswith(prefix):
                     found[path] = d.get("new_value")
-        if all(f"{prefix}{leaf}" in found for leaf in want):
+        if f"{prefix}errors" in found:
             break
     return found
 
@@ -120,41 +114,68 @@ def test_health_status_command_reads_snapshot(health_backend) -> None:
     res = _result(drv.send_command(_PROC, "health.status", timeout=5.0))
     assert res.get("success") is True, res
     health = res.get("health") or {}
-    # Контракт снапшота: ровно поля схемы (сверяем со схемой, не с копией списка —
-    # Task 2.2 добавил breaker, копии в тестах устаревают молча).
-    from multiprocess_framework.modules.process_module.health.schema import HEALTH_FIELDS
-
-    assert set(health.keys()) == set(HEALTH_FIELDS)
+    # Контракт снапшота: ровно поля схемы.
+    assert set(health.keys()) == {"status", "errors", "last_error", "degraded_reason", "updated_at"}
     assert health["status"] in ("ok", "degraded", "failed")
     assert isinstance(health["errors"], int)
-    assert health["breaker"] in ("closed", "open", "half_open")
+    # breaker — диагностика Ф2 2.2, отдельным полем ответа (вне контракта схемы).
+    breaker = res.get("breaker") or {}
+    assert set(breaker.keys()) == {"state", "consecutive", "threshold", "trips"}
+    assert breaker["state"] in ("closed", "open", "half_open")
+
+
+# --- Ф2 Task 2.2: честный breaker (тот же бэкенд — НЕ второй, чтобы не поймать
+# ловушку двух бэкендов; идёт ПОСЛЕ теста 2.1, т.к. деградирует процесс) ---
+
+_BREAKER_COUNT = 6  # с запасом над дефолтным порогом breaker (5)
+
+
+def _wait_breaker_degraded(drv, deadline: float) -> dict:
+    """Слить события до дедлайна; ждать И status=degraded, И непустой degraded_reason.
+
+    Листья публикуются leaf-wise отдельными дельтами (status раньше reason) — рвать
+    цикл только по status приводило бы к гонке (reason ещё не доехал).
+    """
+    prefix = f"processes.{_PROC}.health."
+    found: dict = {}
+    while time.time() < deadline:
+        for e in drv.events(timeout=2.0):
+            if e.get("command") != "state.changed":
+                continue
+            for d in (e.get("data") or {}).get("deltas", []) or []:
+                path = d.get("path", "")
+                if path.startswith(prefix):
+                    found[path] = d.get("new_value")
+        if found.get(f"{prefix}status") == "degraded" and found.get(f"{prefix}degraded_reason"):
+            break
+    return found
 
 
 @pytest.mark.harness_smoke
-def test_breaker_opens_and_degrades_after_n_consecutive_errors(health_backend) -> None:
-    """Acceptance Ф2.2: N подряд report_error → breaker open → health degraded.
-
-    Порог по умолчанию 5 (INSPECTOR_HEALTH_BREAKER_THRESHOLD) — впрыскиваем 5 ошибок
-    подряд через health.report и ждём в state-дереве status=degraded + breaker=open.
-    """
+def test_consecutive_errors_open_breaker_degrade_via_driver(health_backend) -> None:
+    """N подряд report_error → breaker open → health degraded (виден через driver, 2.2)."""
     drv = health_backend
-    for i in range(5):
-        res = _result(
-            drv.send_command(
-                _PROC,
-                "health.report",
-                {"context": "breaker-acceptance", "message": f"fail #{i}"},
-                timeout=5.0,
-            )
-        )
-        assert res.get("success") is True, res
 
-    deltas = _collect_health_deltas(
-        drv, deadline=time.time() + 20.0, want=("status", "breaker")
+    drv.events()  # осушить накопленное до провокации
+
+    # N подряд-впрысков одной командой (count) — серия для breaker.
+    res = _result(
+        drv.send_command(
+            _PROC,
+            "health.report",
+            {"context": "breaker-selftest", "message": "sensor storm", "count": _BREAKER_COUNT},
+            timeout=5.0,
+        )
     )
+    assert res.get("success") is True, f"health.report не success: {res}"
+    breaker = res.get("breaker") or {}
+    assert breaker.get("state") == "open", f"breaker не open в ответе: {breaker}"
+    assert breaker.get("consecutive", 0) >= _BREAKER_COUNT, breaker
+
+    deltas = _wait_breaker_degraded(drv, deadline=time.time() + 20.0)
+
     status_path = f"processes.{_PROC}.health.status"
-    breaker_path = f"processes.{_PROC}.health.breaker"
-    assert deltas.get(breaker_path) == "open", f"breaker не open; собрано: {deltas}"
-    assert deltas.get(status_path) == "degraded", f"status не degraded; собрано: {deltas}"
-    reason = deltas.get(f"processes.{_PROC}.health.degraded_reason")
-    assert reason and "breaker" in str(reason), reason
+    reason_path = f"processes.{_PROC}.health.degraded_reason"
+    assert deltas.get(status_path) == "degraded", f"status не degraded; собрано: {sorted(deltas)}"
+    reason = deltas.get(reason_path) or ""
+    assert "breaker open" in reason, f"degraded_reason без breaker-признака: {reason!r}"
