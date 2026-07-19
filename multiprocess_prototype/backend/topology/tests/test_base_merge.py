@@ -1,8 +1,10 @@
-"""Тесты слияния фундамент ⊕ pipeline (main.merge_topologies).
+"""Тесты слияния фундамент ⊕ presentation ⊕ pipeline (launch.merge_topologies).
 
-Гарантируют, что вынос процесса `gui` в фундамент (base.yaml) эквивалентен
-прежней встроенной топологии: merged-сборка содержит те же процессы, gui берётся
-из фундамента, chain_targets:[gui] резолвится после слияния.
+Ф2 frontend-constructor (2026-07): презентация (`gui`) вынесена из обязательного
+фундамента (`base.yaml`) в отдельный overlay (`frontend/presentation.yaml`).
+Гарантируют: base.yaml — headless-only (без gui), presentation-overlay даёт gui,
+merge(base, presentation) добавляет gui ровно один раз, chain_targets:[gui]
+резолвится после полного слияния (base ⊕ presentation ⊕ pipeline).
 """
 
 from pathlib import Path
@@ -15,6 +17,8 @@ from multiprocess_prototype.backend.launch import merge_topologies, unwrap_recip
 
 TOPOLOGY_DIR = Path(__file__).resolve().parents[1]
 BASE_PATH = TOPOLOGY_DIR / "base.yaml"
+# gui-overlay переехал из base.yaml во frontend/presentation.yaml (Ф2).
+PRESENTATION_PATH = Path(__file__).resolve().parents[3] / "frontend" / "presentation.yaml"
 # region_pipeline переехал в recipes/ (запускаемый рецепт) — грузим через unwrap_recipe.
 RECIPE_REGION = Path(__file__).resolve().parents[3] / "recipes" / "region_pipeline.yaml"
 
@@ -44,28 +48,56 @@ def _base() -> dict:
         return yaml.safe_load(f)
 
 
-class TestBaseMerge:
-    """Контракт merge_topologies: фундамент ⊕ pipeline."""
+def _presentation() -> dict:
+    with open(PRESENTATION_PATH, encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
-    def test_base_provides_gui_process(self):
-        """Фундамент содержит процесс презентации `gui` (класс GuiProcess)."""
+
+def _base_with_presentation() -> dict:
+    """Полный фундамент с включённой презентацией: base ⊕ presentation."""
+    return merge_topologies(_base(), _presentation())
+
+
+class TestBaseMerge:
+    """Контракт merge_topologies: фундамент ⊕ presentation-overlay ⊕ pipeline."""
+
+    def test_base_is_headless_infra_only(self):
+        """base.yaml — headless-only фундамент: только always-on инфра (devices),
+        БЕЗ презентации (Ф2 — gui вынесен в overlay)."""
         base = _base()
-        gui = next((p for p in base["processes"] if p["process_name"] == "gui"), None)
-        assert gui is not None, "base.yaml должен содержать процесс gui"
+        names = {p["process_name"] for p in base["processes"]}
+        assert "gui" not in names, "gui должен быть вынесен в presentation-overlay"
+        assert "devices" in names
+
+    def test_presentation_overlay_provides_gui_process(self):
+        """Презентационный overlay содержит процесс презентации `gui` (класс GuiProcess)."""
+        presentation = _presentation()
+        gui = next((p for p in presentation["processes"] if p["process_name"] == "gui"), None)
+        assert gui is not None, "presentation.yaml должен содержать процесс gui"
+        assert gui["process_class"] == GUI_CLASS
+
+    def test_base_plus_presentation_adds_gui_once(self):
+        """merge(base, presentation): gui добавлен из overlay ровно один раз,
+        always-on инфра фундамента (devices) сохранена."""
+        merged = _base_with_presentation()
+        names = [p["process_name"] for p in merged["processes"]]
+        assert names.count("gui") == 1
+        assert "devices" in names
+        gui = next(p for p in merged["processes"] if p["process_name"] == "gui")
         assert gui["process_class"] == GUI_CLASS
 
     def test_pipelines_have_no_gui(self):
-        """Pipeline-топологии больше НЕ объявляют gui (он в фундаменте)."""
+        """Pipeline-топологии не объявляют gui (он в presentation-overlay)."""
         for name in ACTIVE_PIPELINES:
             names = {p["process_name"] for p in _load(name)["processes"]}
-            assert "gui" not in names, f"{name}: gui должен быть вынесен в фундамент"
+            assert "gui" not in names, f"{name}: gui должен приходить из presentation-overlay"
 
     @pytest.mark.parametrize("name", ACTIVE_PIPELINES)
     def test_merge_adds_gui_preserves_pipeline(self, name):
-        """merge(base, pipeline): gui добавлен из фундамента ровно один раз,
+        """merge(base⊕presentation, pipeline): gui добавлен из overlay ровно один раз,
         все процессы pipeline сохранены."""
         pipeline = _load(name)
-        merged = merge_topologies(_base(), pipeline)
+        merged = merge_topologies(_base_with_presentation(), pipeline)
         names = [p["process_name"] for p in merged["processes"]]
         assert names.count("gui") == 1, f"{name}: gui должен быть ровно один"
         gui = next(p for p in merged["processes"] if p["process_name"] == "gui")
@@ -74,25 +106,41 @@ class TestBaseMerge:
             assert p["process_name"] in names, f"{name}: процесс {p['process_name']} потерян при merge"
 
     def test_region_pipeline_merge_golden_build(self):
-        """Golden: merge(base, region_pipeline) собирается в configs; gui (из фундамента)
-        присутствует ровно один раз с классом GuiProcess."""
-        merged = merge_topologies(_base(), _load_region_pipeline())
+        """Golden: merge(base⊕presentation, region_pipeline) собирается в configs;
+        gui (из overlay) присутствует ровно один раз с классом GuiProcess."""
+        merged = merge_topologies(_base_with_presentation(), _load_region_pipeline())
         configs = SystemBlueprint.model_validate(merged).build_configs()
         names = [c.process_name for c in configs]
         assert names.count("gui") == 1
         assert next(c for c in configs if c.process_name == "gui").process_class == GUI_CLASS
 
     def test_chain_targets_gui_resolves_after_merge(self):
-        """chain_targets:[gui] из pipeline резолвится после слияния с фундаментом."""
-        merged = merge_topologies(_base(), _load_region_pipeline())
+        """chain_targets:[gui] из pipeline резолвится после полного слияния
+        (base ⊕ presentation ⊕ pipeline)."""
+        merged = merge_topologies(_base_with_presentation(), _load_region_pipeline())
         names = {p["process_name"] for p in merged["processes"]}
         for proc in merged["processes"]:
             for target in proc.get("chain_targets", []):
                 assert target in names, f"chain_target '{target}' не резолвится в merged"
 
+    def test_base_plus_pipeline_without_presentation_is_headless(self):
+        """Полный фундамент (base, БЕЗ presentation) ⊕ pipeline собирается без gui —
+        headless по умолчанию (аналог test_pipeline_alone_is_headless, но с фундаментом:
+        полный манифест без presentation даёт configs без процесса gui)."""
+        merged = merge_topologies(_base(), _load_region_pipeline())
+        configs = SystemBlueprint.model_validate(merged).build_configs()
+        names = {c.process_name for c in configs}
+        assert "gui" not in names
+        assert "devices" in names
+        assert "camera_0" in names and "stitcher" in names
+
     def test_merge_dedupes_on_collision_base_wins(self):
-        """Если pipeline тоже объявляет gui — побеждает фундамент (dedupe)."""
-        base = _base()
+        """Если pipeline тоже объявляет gui — побеждает фундамент (dedupe).
+
+        base здесь = base ⊕ presentation (полный фундамент с включённой презентацией) —
+        overlay мёржится ПЕРЕД pipeline, поэтому именно overlay должен победить.
+        """
+        base = _base_with_presentation()
         pipeline = {
             "name": "dup",
             "processes": [
@@ -103,7 +151,7 @@ class TestBaseMerge:
         merged = merge_topologies(base, pipeline)
         guis = [p for p in merged["processes"] if p["process_name"] == "gui"]
         assert len(guis) == 1, "gui не должен дублироваться"
-        assert guis[0]["process_class"] == GUI_CLASS, "должен победить фундамент"
+        assert guis[0]["process_class"] == GUI_CLASS, "должен победить presentation-overlay"
 
     def test_merge_preserves_pipeline_name(self):
         """Результат берёт name/description из pipeline (активная нагрузка)."""
@@ -164,13 +212,14 @@ class TestBaseMerge:
         assert protected_flags["devices"] is True
         assert protected_flags["worker"] is False
 
-    def test_real_base_yaml_protected_gui(self):
-        """Реальный base.yaml: gui помечен protected, флаг доезжает до proc_dict."""
-        base = _base()
-        gui_proc = next(p for p in base["processes"] if p["process_name"] == "gui")
+    def test_real_presentation_yaml_protected_gui(self):
+        """Реальный presentation.yaml: gui помечен protected, флаг доезжает до
+        proc_dict через полное слияние (base ⊕ presentation ⊕ pipeline)."""
+        presentation = _presentation()
+        gui_proc = next(p for p in presentation["processes"] if p["process_name"] == "gui")
         assert gui_proc.get("protected") is True
         # Через build
-        merged = merge_topologies(base, _load_region_pipeline())
+        merged = merge_topologies(_base_with_presentation(), _load_region_pipeline())
         sb = SystemBlueprint.model_validate(merged)
         for cfg in sb.build_configs():
             if cfg.process_name == "gui":

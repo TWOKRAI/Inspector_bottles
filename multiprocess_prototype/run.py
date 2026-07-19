@@ -63,7 +63,16 @@ def launch() -> int:
 
     from multiprocess_prototype.main import main as app_main
 
-    return app_main(sys.argv[1] if len(sys.argv) > 1 else None)
+    # --headless (Ф2 T2.2): явный backend-only флаг основного входа — вырезаем его
+    # из argv ДО извлечения позиционного pipeline-override, чтобы он не был принят
+    # за имя рецепта. Отсутствие флага не значит "не headless" — main() сам смотрит
+    # env INSPECTOR_HEADLESS, если explicit-флаг не передан (см. main._is_headless).
+    argv = sys.argv[1:]
+    headless_flag = "--headless" in argv
+    if headless_flag:
+        argv = [a for a in argv if a != "--headless"]
+
+    return app_main(argv[0] if argv else None, headless=True if headless_flag else None)
 
 
 if __name__ == "__main__":

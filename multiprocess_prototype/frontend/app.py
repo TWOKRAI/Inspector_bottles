@@ -125,6 +125,14 @@ def run_gui(process: "GuiProcess") -> None:
     from multiprocess_prototype.main import PROJECT_ROOT, resolve_manifest_path
 
     _manifest = load_manifest(resolve_manifest_path())
+    if _manifest.styles is None:
+        # Ф2 T2.3: styles — опциональный презентационный концерн (headless-бэкенд его
+        # не читает и не дефолтит на frontend/styles/...). GUI без стилей — не тихий
+        # дефолт, а явная ошибка конфигурации манифеста.
+        raise RuntimeError(
+            f"GUI запущен, но манифест {_manifest.source} не задаёт styles — "
+            "добавь styles.dir/active (каталог тем) в манифест перед запуском презентации."
+        )
     apply_default_theme(app, _manifest.styles.active)
 
     # 2. Сканировать плагины и построить RegistersManager

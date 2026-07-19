@@ -1,0 +1,33 @@
+# presentation.yaml — ПРЕЗЕНТАЦИОННЫЙ OVERLAY (Ф2 frontend-constructor, 2026-07).
+#
+# Единственный процесс презентации (GUI). Раньше жил в backend/topology/base.yaml
+# (обязательный фундамент); теперь — отдельный overlay, который подмешивается
+# ТОЛЬКО когда явно запрошен (см. AppManifest.presentation, SystemBuilder.from_manifest):
+#   merged = base ⊕ presentation ⊕ pipeline   (порядок важен — overlay мёржится
+#                                               ПЕРЕД pipeline, побеждает при коллизии)
+#
+# Как включить:
+#   - явная точка входа фронта: multiprocess_prototype/frontend/run.py
+#     (выставляет env INSPECTOR_PRESENTATION=<путь к этому файлу>);
+#   - headless-флаг основного входа (INSPECTOR_HEADLESS=1 / --headless) ПЕРЕБИВАЕТ
+#     этот overlay — даже если presentation задан, GUI не поднимается.
+#
+# Без overlay (обычный backend-only запуск через main.py/run.py) бэкенд бутится
+# headless — только always-on инфра из base.yaml (``devices``) + pipeline.
+#
+# Известный edge case (вне скоупа Ф2, реконсиляция — после C3/4.7 recipe-оси):
+# несколько рецептов (phone_sketch, hikvision_letter_robot, dataset_circle_capture,
+# camera_robot_calibration, letter_angle_inspect, webcam_sketch) объявляют процесс
+# `gui` ИНЛАЙН прямо в себе — при запуске БЕЗ presentation-overlay они всё равно
+# поднимут GUI, т.к. несут его сами. Это ожидаемо и не является багом headless-режима.
+
+name: presentation
+description: "Презентационный overlay: GUI (PySide6)"
+
+processes:
+  - process_name: gui
+    protected: true
+    process_class: multiprocess_prototype.frontend.process.GuiProcess
+    plugins: []
+
+wires: []
