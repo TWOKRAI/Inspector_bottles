@@ -15,6 +15,7 @@ Claude↔driver — см. решение владельца в plans/_archive/20
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -31,6 +32,15 @@ ToolHandler = Callable[[BackendDriver, Dict[str, Any]], Any]
 
 #: Потолок блокировки events(timeout) — MCP-вызов не должен подвешивать сервер.
 MAX_EVENTS_TIMEOUT = 30.0
+
+# E.3: защита контекста агента от гигантских ответов тяжёлых read-инструментов.
+#: Дефолтный лимит точек telemetry_history, если не задан явно (спарклайн, не дамп БД).
+DEFAULT_HISTORY_LIMIT = 100
+#: Потолок сериализации тяжёлого ответа (байт). Свыше — усечение до карты формы,
+#: полный объём — по явному ``full=true``.
+RESPONSE_BYTE_CAP = 12000
+#: Тяжёлые read-инструменты, к ответам которых применяется byte-cap (concise-дефолт).
+_HEAVY_TOOLS: frozenset = frozenset({"state_get_subtree", "system_overview", "telemetry_history"})
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,8 @@ def _obj(
 
 _PROCESS = {"type": "string", "description": "Имя процесса (например 'preprocessor', 'ProcessManager')"}
 _TIMEOUT = {"type": "number", "description": "Таймаут ожидания ответа, сек (по умолчанию таймаут driver)"}
+# E.3: снять дефолтное усечение тяжёлого ответа и вернуть полный объём.
+_FULL = {"type": "boolean", "description": "Вернуть полный объём без усечения по размеру (E.3). По умолчанию false."}
 
 
 def _kw_timeout(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -333,7 +345,12 @@ def _telemetry_snapshot(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 
 def _telemetry_history(drv: BackendDriver, args: Dict[str, Any]) -> Any:
-    return drv.telemetry_history(args["path"], limit=args.get("limit"))
+    # E.3: дефолтный лимит точек — не выливать всё кольцо истории в контекст.
+    # Явный limit (в т.ч. больший) переопределяет; full=true снимает потолок.
+    limit = args.get("limit")
+    if limit is None and not args.get("full"):
+        limit = DEFAULT_HISTORY_LIMIT
+    return drv.telemetry_history(args["path"], limit=limit)
 
 
 # ---------------------------------------------------------------------------
@@ -367,8 +384,9 @@ TOOLS: List[ToolSpec] = [
         "(статус/воркеры/router-счётчики/очереди/память) + telemetry fps + счётчики driver'а "
         "+ секция anomalies (подсказки: router_dropped, queue_depth, fps_zero_while_running, "
         "recent_recovery, late_replies, events_evicted, …). Первая команда сессии после "
-        "capabilities: вердикты, не археология. Только существующие introspect-ручки (read-only).",
-        _obj({"timeout": _TIMEOUT}),
+        "capabilities: вердикты, не археология. Только существующие introspect-ручки (read-only). "
+        "Крупный ответ усекается до карты формы — full=true для полного объёма (E.3).",
+        _obj({"timeout": _TIMEOUT, "full": _FULL}),
         _system_overview,
     ),
     ToolSpec(
@@ -574,8 +592,15 @@ TOOLS: List[ToolSpec] = [
     ),
     ToolSpec(
         "state_get_subtree",
-        "Прочитать поддерево state-дерева по пути ('' = корень целиком — снимок состояния системы).",
-        _obj({"path": {"type": "string", "description": "Путь поддерева ('' = корень)"}, "timeout": _TIMEOUT}),
+        "Прочитать поддерево state-дерева по пути ('' = корень целиком — снимок состояния системы). "
+        "Крупное поддерево усекается до карты ключей — сузь path или full=true для полного объёма (E.3).",
+        _obj(
+            {
+                "path": {"type": "string", "description": "Путь поддерева ('' = корень)"},
+                "timeout": _TIMEOUT,
+                "full": _FULL,
+            }
+        ),
         _state_get_subtree,
     ),
     ToolSpec(
@@ -918,8 +943,9 @@ TOOLS: List[ToolSpec] = [
                 "path": {"type": "string", "description": "Полный путь метрики (например 'processes.cam.state.fps')."},
                 "limit": {
                     "type": "integer",
-                    "description": "Вернуть последние N точек (опц., по умолчанию весь буфер).",
+                    "description": "Вернуть последние N точек (опц., по умолчанию 100 — E.3; больший переопределяет).",
                 },
+                "full": _FULL,
             },
             ["path"],
         ),
@@ -1004,6 +1030,18 @@ TOOLS: List[ToolSpec] = [
         ),
         _record_tool_stub,
     ),
+    ToolSpec(
+        "session_log",
+        "Аудит-журнал мутаций ЭТОЙ сессии (E.1): каждый write/escalated-вызов "
+        "(set_register/send_command/…) с аргументами, временем и исходом (ok/error). "
+        "Доверие к автономной сессии и вход для откатов. read-only; read/subscribe в журнал не шумят. "
+        "limit — сколько последних записей (по умолчанию все в кольце).",
+        _obj(
+            {"limit": {"type": "integer", "description": "Сколько последних записей вернуть. Опц."}},
+            [],
+        ),
+        _record_tool_stub,
+    ),
 ]
 
 
@@ -1053,6 +1091,8 @@ TOOL_SAFETY: Dict[str, str] = {
     "record_load": SAFETY_READ,
     "record_unload": SAFETY_READ,
     "record_dump": SAFETY_READ,
+    # audit (E.1): чтение журнала мутаций — сам по себе read-only, не мутирует бэкенд
+    "session_log": SAFETY_READ,
     # subscribe
     "state_subscribe": SAFETY_SUBSCRIBE,
     "log_tail": SAFETY_SUBSCRIBE,
@@ -1083,6 +1123,10 @@ TOOL_SAFETY: Dict[str, str] = {
 # Префиксы команд, безопасных для чтения через escalated send_command в read-only
 # режиме (Task 3.2): только интроспекция и точечное чтение state.
 READ_SAFE_COMMAND_PREFIXES: tuple[str, ...] = ("introspect.", "state.get")
+
+# E.1: классы, чьи вызовы оседают в аудит-журнале сессии (мутации). read/subscribe —
+# не шумят (наблюдение бэкенда, не изменение).
+_AUDITED_SAFETY: frozenset = frozenset({SAFETY_WRITE, SAFETY_ESCALATED})
 
 # Класс безопасности → MCP tool-annotations (hints для клиента; НЕ enforce — enforce
 # делает сервер по классу, Task 3.2). Форма — dict, чтобы mcp_tools не зависел от SDK
@@ -1320,6 +1364,45 @@ def _replay_rejected(name: str) -> Dict[str, Any]:
     }
 
 
+def _shape(value: Any) -> Any:
+    """Компактная форма значения для карты усечённого ответа (тип + размер, не содержимое)."""
+    if isinstance(value, dict):
+        return {"type": "dict", "keys": len(value)}
+    if isinstance(value, (list, tuple)):
+        return {"type": "list", "len": len(value)}
+    if isinstance(value, str) and len(value) > 80:
+        return {"type": "str", "len": len(value), "head": value[:80]}
+    return value
+
+
+def _cap_heavy(name: str, result: Any, args: Dict[str, Any]) -> Any:
+    """E.3: усечь тяжёлый ответ до карты формы, если он превышает потолок и не запрошен full.
+
+    Не тяжёлый инструмент / ``full=true`` / ответ в пределах потолка → как есть. Иначе
+    карта верхнего уровня (ключи→форма) + подсказка запросить полный объём/сузить путь.
+    Так агент видит СТРУКТУРУ (и может сузить path/передать full=true), не глотая 50К токенов.
+    """
+    if name not in _HEAVY_TOOLS or args.get("full"):
+        return result
+    try:
+        size = len(json.dumps(result, ensure_ascii=False, default=str))
+    except Exception:  # noqa: BLE001 — несериализуемое не усекаем (пусть решает сервер)
+        return result
+    if size <= RESPONSE_BYTE_CAP:
+        return result
+    hint = f"ответ усечён по размеру ({size}B > {RESPONSE_BYTE_CAP}B). full=true — полный объём"
+    if isinstance(result, dict):
+        return {
+            "_truncated": True,
+            "_bytes": size,
+            "_hint": hint + " (или сузь path/limit).",
+            "keys": {k: _shape(v) for k, v in result.items()},
+        }
+    if isinstance(result, list):
+        return {"_truncated": True, "_bytes": size, "_hint": hint + ".", "len": len(result), "head": result[:20]}
+    return {"_truncated": True, "_bytes": size, "_hint": hint + ".", "value": _shape(result)}
+
+
 def dispatch_tool(session: Any, name: str, arguments: Optional[Dict[str, Any]]) -> Any:
     """Единая session-aware диспетчеризация инструмента (live + replay + record).
 
@@ -1334,11 +1417,38 @@ def dispatch_tool(session: Any, name: str, arguments: Optional[Dict[str, Any]]) 
     arguments = arguments or {}
     if name in RECORD_HANDLERS:
         return RECORD_HANDLERS[name](session, arguments)
+    if name == "session_log":
+        return _session_log(session, arguments)
     if session.mode == _MODE_REPLAY:
         served = _serve_replay(session, name, arguments)
         if served is not _REPLAY_REJECT:
-            return served
+            return _cap_heavy(name, served, arguments)  # E.3: тяжёлые ответы усекаются и над записью
         return _replay_rejected(name)
     driver = session.ensure()
     spec = build_registry()[name]
-    return spec.handler(driver, arguments)
+    safety = TOOL_SAFETY.get(name)
+    # E.2: предполётная сверка send_command со схемой свода — обучающая ошибка вместо
+    # таймаута. Блок тоже оседает в аудит (escalated-попытка со своим исходом).
+    if name == "send_command":
+        verr = session.validate_send_command(arguments)
+        if verr is not None:
+            result = {"success": False, "error": verr, "validation": True}
+            session.record_audit(name, safety, arguments, result=result)
+            return result
+    # E.1: write/escalated оседают в аудит-журнале сессии (успех И исключение).
+    if safety in _AUDITED_SAFETY:
+        try:
+            result = spec.handler(driver, arguments)
+        except Exception as exc:  # noqa: BLE001 — записать исход, затем пробросить серверу
+            session.record_audit(name, safety, arguments, error=exc)
+            raise
+        session.record_audit(name, safety, arguments, result=result)
+        return result
+    # E.3: read-путь тяжёлых инструментов — усечение по размеру (full=true снимает).
+    return _cap_heavy(name, spec.handler(driver, arguments), arguments)
+
+
+def _session_log(session: Any, args: Dict[str, Any]) -> Any:
+    """Хвост аудит-журнала мутаций ЭТОЙ сессии (E.1). ``limit`` — сколько последних."""
+    limit = args.get("limit")
+    return session.read_audit(int(limit) if limit is not None else None)

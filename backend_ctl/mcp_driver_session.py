@@ -17,6 +17,8 @@ import sys
 import time
 from typing import Any, Dict, Optional
 
+from backend_ctl.audit import AuditLog
+from backend_ctl.command_validate import target_unknown, validate_command_args
 from backend_ctl.driver import BackendDriver
 from backend_ctl.endpoint_config import resolve_endpoint
 from backend_ctl.recorder import (
@@ -75,6 +77,7 @@ class DriverSession:
         driver_factory: Any = None,
         log: Any = None,
         require_isolation: bool = False,
+        audit_log: Optional[AuditLog] = None,
     ) -> None:
         self._host, self._port = resolve_endpoint(host, port)
         self._request_timeout = request_timeout
@@ -104,6 +107,13 @@ class DriverSession:
         self._mode: str = MODE_LIVE
         self._recorder: Optional[Recorder] = None
         self._replay: Optional[ReplayPlayer] = None
+        # E.1: аудит-журнал мутаций (write/escalated) сессии. Ленивая инициализация
+        # файла — при первой записи (read-only-сессия не создаёт файл). Тест может
+        # подставить свой AuditLog.
+        self._audit: Optional[AuditLog] = audit_log
+        # E.2: кэш свода capabilities (для клиентской валидации send_command). Строится
+        # лениво при первой валидации; refresh — при неизвестном адресате (мог hot-added).
+        self._caps: Any = None
 
     @property
     def host(self) -> str:
@@ -205,6 +215,81 @@ class DriverSession:
         self._replay = None
         self._mode = MODE_LIVE
         return {"success": True, "mode": MODE_LIVE, "unloaded": True}
+
+    # ---- Аудит мутаций (E.1) ----
+
+    def _audit_log(self) -> AuditLog:
+        """Ленивая инициализация журнала (файл создаётся при первой записи)."""
+        if self._audit is None:
+            self._audit = AuditLog()
+        return self._audit
+
+    def record_audit(
+        self,
+        tool: str,
+        safety: str,
+        args: Any,
+        *,
+        result: Any = None,
+        error: Optional[BaseException] = None,
+    ) -> None:
+        """Записать write/escalated-вызов в журнал. Best-effort (сбой не бросается)."""
+        try:
+            self._audit_log().record(tool, safety, args, result=result, error=error)
+        except Exception:  # noqa: BLE001 — аудит наблюдает, не мешает инструменту
+            pass
+
+    def read_audit(self, limit: Optional[int] = None) -> Dict[str, Any]:
+        """Хвост журнала мутаций ЭТОЙ сессии (для session_log()). Пустой журнал — [] и path."""
+        if self._audit is None:
+            return {"success": True, "entries": [], "count": 0, "path": None}
+        entries = self._audit.records(limit)
+        return {
+            "success": True,
+            "entries": entries,
+            "count": len(entries),
+            "path": self._audit.path,
+        }
+
+    # ---- Валидация send_command по схеме (E.2) ----
+
+    def capabilities_cache(self, *, refresh: bool = False) -> Any:
+        """Свод capabilities (кэш сессии). ``refresh`` — перечитать с бэкенда.
+
+        Best-effort: сбой сбора возвращает ``None`` (валидатор тогда пропускает — не
+        мешает работе из-за собственной неспособности прочитать схему). В replay-режиме
+        живого свода нет — тоже ``None``.
+        """
+        if self._mode == MODE_REPLAY:
+            return None
+        if self._caps is not None and not refresh:
+            return self._caps
+        try:
+            drv = self.ensure()
+            self._caps = drv.capabilities()
+        except Exception:  # noqa: BLE001 — валидация опциональна, не роняем инструмент
+            self._caps = None
+        return self._caps
+
+    def validate_send_command(self, arguments: Dict[str, Any]) -> Optional[str]:
+        """Сверить args send_command со схемой свода ДО отправки. ``None`` — ок; строка — ошибка.
+
+        Неизвестный адресат → один refresh кэша (процесс мог быть hot-added), затем
+        повторная проверка. Пустой target/command — не наша забота (обязательность полей
+        инструмента гейтит клиент MCP); валидируем лишь заявленные значения.
+        """
+        target = arguments.get("target")
+        command = arguments.get("command")
+        if not target or not command:
+            return None
+        caps = self.capabilities_cache()
+        if caps is None:
+            return None
+        if target_unknown(caps, target):
+            caps = self.capabilities_cache(refresh=True)
+            if caps is None:
+                return None
+        return validate_command_args(caps, target, command, arguments.get("args"))
 
     # ---- Фабрика + readiness ----
 

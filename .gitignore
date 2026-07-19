@@ -139,3 +139,5 @@ _archive/
 # ManifestStore sidecar lock (Ф5.11) — runtime-артефакт, не трекать
 *.yaml.lock
 *.yaml.tmp.*
+# backend_ctl flight-recorder / аудит-журнал (E.1) — дефолтный runtime-каталог записей
+backend_ctl_records/

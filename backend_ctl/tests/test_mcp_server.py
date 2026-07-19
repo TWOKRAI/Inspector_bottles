@@ -47,7 +47,12 @@ class FakeDriver:
                 self.calls.append((name, args, kwargs))
                 return Capabilities(
                     ok=True,
-                    processes={"ProcessManager": ProcessCapabilities(True, "ProcessManager", [], [], {})},
+                    processes={
+                        "ProcessManager": ProcessCapabilities(True, "ProcessManager", [], [], {}),
+                        # preprocessor присутствует как реальный адресат (в проде свод несёт
+                        # карточки ВСЕХ процессов) — иначе E.2-валидация ложно заблокирует send_command.
+                        "preprocessor": ProcessCapabilities(True, "preprocessor", [], [], {}),
+                    },
                     topology={"preprocessor": {"class": "x.Y"}},
                     channels=[],
                 )
@@ -154,6 +159,8 @@ class TestRegistry:
             "record_load",
             "record_unload",
             "record_dump",
+            # audit (E.1)
+            "session_log",
         }
         assert names == expected
 
@@ -263,7 +270,12 @@ class TestToolsCall:
                 },
             },
         )
-        assert fake.calls == [("send_command", ("preprocessor", "introspect.handlers", {"x": 1}), {"timeout": 7.0})]
+        # E.2: send_command предваряется одним capabilities()-fan-out (кэш сессии) для
+        # валидации args по схеме; затем сам вызов с аргументами/таймаутом.
+        assert fake.calls == [
+            ("capabilities", (), {}),
+            ("send_command", ("preprocessor", "introspect.handlers", {"x": 1}), {"timeout": 7.0}),
+        ]
 
     def test_state_get_maps_to_pm_command(self) -> None:
         server, fake = make_server()

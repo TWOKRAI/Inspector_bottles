@@ -243,20 +243,23 @@ Transport/events — mixin (вербатим на том же `self`, макси
 
 ## Phase E — P2 доверие
 
-### Task E.1 — Аудит-журнал мутаций
+### Task E.1 — Аудит-журнал мутаций ✅
 **Level:** Middle (Sonnet) | **Layer:** tools
 **Goal:** все write/escalated вызовы сессии в JSONL (кто/что/когда/аргументы/результат) + `session_log()`. Даёт владельцу доверие к автономным сессиям и вход для откатов (D.5).
-**Acceptance:** [ ] каждый write/escalated пишет запись; `session_log()` читает; read-инструменты не шумят в журнал.
+**Acceptance:** [x] каждый write/escalated пишет запись; `session_log()` читает; read-инструменты не шумят в журнал.
+**Done (2026-07-20):** `audit.py` (`AuditLog`: in-memory кольцо ЭТОЙ сессии + durable JSONL, best-effort); `DriverSession.record_audit/read_audit`; вотка в `dispatch_tool` (успех/мягкий-неуспех/исключение записываются, read/subscribe — нет); инструмент `session_log` (SAFETY_READ, session-owned). Путь — `BACKEND_CTL_AUDIT` или `<record_dir>/audit.jsonl`. Тесты — `test_phase_e_trust.py::TestAudit`.
 
-### Task E.2 — Клиентская валидация send_command по схеме
+### Task E.2 — Клиентская валидация send_command по схеме ✅
 **Level:** Middle (Sonnet) | **Layer:** tools
 **Goal:** `send_command` сверяет args со схемой из capabilities-кэша ДО отправки; ошибка учит («поле X обязательно, схема: …») вместо таймаута.
-**Acceptance:** [ ] неполные args → actionable-ошибка до отправки, не таймаут.
+**Acceptance:** [x] неполные args → actionable-ошибка до отправки, не таймаут.
+**Done (2026-07-20):** `command_validate.py` (чистая сверка по `params_schema` v1 свода); `DriverSession` держит capabilities-кэш (lazy, refresh при неизвестном адресате). Гейт в `dispatch_tool` до отправки; блок оседает в аудит. Консервативно: неизвестный адресат блокируется только по здоровому своду (`ok`), незаявленная команда / отсутствие схемы — пропуск (карточка может быть неполной). Кэш переживает вызовы (один fan-out на сессию). Тесты — `TestSendCommandValidation`/`TestValidatorPure`.
 
-### Task E.3 — response_format/limits на тяжёлых ответах
+### Task E.3 — response_format/limits на тяжёлых ответах ✅
 **Level:** Middle (Sonnet) | **Layer:** tools
 **Goal:** `state_get_subtree`/`telemetry_history`/overview с `concise`/`limit`-дефолтами — ни один инструмент не выливает 50К токенов в контекст.
-**Acceptance:** [ ] тяжёлые ответы по умолчанию ограничены; полный объём — по явному флагу.
+**Acceptance:** [x] тяжёлые ответы по умолчанию ограничены; полный объём — по явному флагу.
+**Done (2026-07-20):** `telemetry_history` — дефолтный `limit=100` (native, явный больший переопределяет); `state_get_subtree`/`system_overview`/`telemetry_history` — byte-cap (`RESPONSE_BYTE_CAP=12K`) в `dispatch_tool`: свыше — карта формы верхнего уровня (ключи→тип/размер) + подсказка. Флаг `full=true` снимает усечение. Работает и над записью (replay). Тесты — `TestResponseLimits`.
 
 ---
 

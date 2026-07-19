@@ -280,6 +280,19 @@ record_unload()                                  # вернуться к live
 - **⚠️ Запись содержит состояние системы** (пути/конфиги/параметры рецептов) — v1 без редакции,
   dev-only, локальный файл. **Не прикладывай запись к публичным issue.**
 
+### Доверие: аудит / валидация / limits (Phase E)
+
+- **E.1 аудит-журнал.** Каждый write/escalated-вызов сессии (`set_register`/`send_command`/…) оседает
+  записью JSONL: инструмент, аргументы, время, исход (`ok`/`error`). Read/subscribe в журнал не шумят.
+  `session_log(limit?)` — хвост журнала ЭТОЙ сессии (in-memory кольцо, без протечки чужих сессий);
+  durable-файл — `BACKEND_CTL_AUDIT` или `<record_dir>/audit.jsonl`. Best-effort: сбой журнала не роняет вызов.
+- **E.2 валидация `send_command`.** Перед отправкой args сверяются со схемой (`params_schema`) из
+  capabilities-кэша сессии: неполные аргументы / неизвестный адресат → обучающая ошибка (`validation:true`)
+  вместо таймаута. Консервативно: незаявленная команда / деградированный свод → пропуск (не ложный блок).
+- **E.3 limits тяжёлых ответов.** `telemetry_history` — дефолт `limit=100`; `state_get_subtree`/
+  `system_overview`/`telemetry_history` крупнее `RESPONSE_BYTE_CAP` (12K) усекаются до карты формы
+  (ключи→тип/размер) + подсказка. `full=true` — полный объём.
+
 ## Тесты и headless-harness (Ф1 Task 1.3)
 
 `backend_ctl/harness.py::BackendHarness` — pytest-инструмент headless-запуска прототипа
