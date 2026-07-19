@@ -122,9 +122,21 @@ Session-isolation — **за флагом**, broadcast остаётся дефо
 
 ## 11. Acceptance (из родителя)
 
-- [ ] два клиента на одном порту не видят реплаи/события друг друга
-- [ ] `supervision_status` читает incarnation/restarts; события несут epoch
-- [ ] epoch наблюдаемого процесса гейтит курсоры B.1 (`reset_required` при смене инкарнации)
+- [x] **два клиента на одном порту не видят реплаи/события друг друга** — D.1a закрыт (`test_session_isolation.py`, 4 теста: distinct subscribers, reply не течёт, push адресный, ghost→никому)
+- [ ] `supervision_status` читает incarnation/restarts; события несут epoch — D.1b
+- [ ] epoch наблюдаемого процесса гейтит курсоры B.1 (`reset_required` при смене инкарнации) — §8
+
+### Прогресс D.1a (2026-07-19) — ЗАКРЫТ
+
+Коммиты на ветке `feat/bctl-d1-session-isolation`:
+1. `docs(plans)` — гейт §5=A + механика Fable.
+2. `test(tooling)` — характеризация (broadcast fan-out, version-skew tolerance).
+3. `feat(framework)` — SocketChannel: `_sessions` + адресный `send` + unbind + флаг.
+4. `feat(framework)` — адаптер pop/echo + endpoint резолв флага + `get_info.session_isolation`.
+5. `feat(tooling)` — клиент: sid per-connect + инъекция + dotted-subscriber + replay-retarget.
+6. `test(tooling)` — acceptance два driver'а изолированы.
+
+sentrux-дельта против baseline: signal 7008→7008 (Δ0), циклов +0, 0 нарушений. Регрессии тестов — только pre-existing env (2 live-теста observability + порт-8765 конфликт от подвисшего бэкенда). **Осталось: D.1b (§7) + epoch-гейтинг B.1 (§8) + формальное ревью (§Порядок 5).**
 
 ## 12. Риски
 
