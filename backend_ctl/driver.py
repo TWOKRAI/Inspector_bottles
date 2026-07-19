@@ -117,6 +117,13 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         self._reply_to = reply_to
         self._default_timeout = default_timeout
 
+        # session-identity (D.1): назначается в connect() (per-connection). До connect
+        # _subscriber падает на плоский _sender (back-compat: не-connected unit-тесты и
+        # broadcast-режим сервера). После connect — dotted "<sender>.<session>":
+        # дефолт получателя push'ей, изолирующий driver'ы на push-плоскости.
+        self._session: Optional[str] = None
+        self._subscriber: str = sender
+
         self._sock: Optional[socket.socket] = None
         self._reader: Optional[threading.Thread] = None
         self._running = False
@@ -196,17 +203,33 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """Загрузить намерения в этот driver (после реконнекта)."""
         self._subscriptions.load(intents)
 
+    def _retarget_subscriber(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Пере-нацелить subscriber durable-намерения на ТЕКУЩУЮ сессию (D.1).
+
+        Реконнект создаёт driver с новым session → dotted-subscriber старой сессии
+        (``<sender>.<old_sid>``) при session_isolation ON адресовал бы push мёртвому
+        соединению (канал → «session not connected»). Переписываем СВОЙ subscriber
+        (плоский ``<sender>`` или dotted той же семьи) на актуальный ``self._subscriber``;
+        чужой/явный subscriber (напр. "watcher") не трогаем. При OFF безвредно.
+        """
+        sub = args.get("subscriber")
+        if isinstance(sub, str) and (sub == self._sender or sub.startswith(self._sender + ".")):
+            if sub != self._subscriber:
+                return {**args, "subscriber": self._subscriber}
+        return args
+
     def replay_subscriptions(self) -> List[Dict[str, Any]]:
         """Повторить все записанные подписки на текущем соединении.
 
         Зовётся после реконнекта: восстанавливает поток событий, который иначе
         молча оборвался бы. Идёт напрямую через send_command (не через обёртки),
-        поэтому не пере-регистрирует намерения. Возвращает список
-        ``{command, target, success}`` для отчёта агенту.
+        поэтому не пере-регистрирует намерения. subscriber durable-намерения
+        пере-нацеливается на текущую сессию (_retarget_subscriber). Возвращает
+        список ``{command, target, success}`` для отчёта агенту.
         """
         results: List[Dict[str, Any]] = []
         for it in self._subscriptions.export():
-            res = self.send_command(it["target"], it["command"], it["args"])
+            res = self.send_command(it["target"], it["command"], self._retarget_subscriber(it["args"]))
             results.append(
                 {
                     "command": it["command"],
@@ -744,7 +767,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         событийный канал — читаются через :meth:`events` / :meth:`subscribe` как
         сообщения с ``command == "log.record"`` (``data.record`` — сам LogRecord-dict).
         """
-        args = {"subscriber": subscriber or self._sender, "level": level}
+        args = {"subscriber": subscriber or self._subscriber, "level": level}
         res = _leaf_result(self.send_command(process, "log.tail.subscribe", args, timeout=timeout))
         self._register_subscription("log.tail.subscribe", process, args, res)
         return res
@@ -757,7 +780,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Снять подписку на tail логов процесса (по адресу подписчика)."""
-        args = {"subscriber": subscriber or self._sender}
+        args = {"subscriber": subscriber or self._subscriber}
         res = _leaf_result(self.send_command(process, "log.tail.unsubscribe", args, timeout=timeout))
         self._subscriptions.remove("log.tail.subscribe", process, args)
         return res
@@ -801,7 +824,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         Returns:
             dict результата подписки (``success`` + детали процесса).
         """
-        args = {"subscriber": subscriber or self._sender}
+        args = {"subscriber": subscriber or self._subscriber}
         res = _leaf_result(self.send_command(process, "observability.tail.subscribe", args, timeout=timeout))
         self._register_subscription("observability.tail.subscribe", process, args, res)
         return res
@@ -821,7 +844,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         GUI-хвост (раньше слался пустой payload → без per-subscriber-контракта это
         снесло бы хвост GUI). Тот же ``subscriber`` снимает durable-намерение.
         """
-        identity = {"subscriber": subscriber or self._sender}
+        identity = {"subscriber": subscriber or self._subscriber}
         res = _leaf_result(self.send_command(process, "observability.tail.unsubscribe", identity, timeout=timeout))
         self._subscriptions.remove("observability.tail.subscribe", process, identity)
         return res
@@ -906,7 +929,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         сообщения с ``command == "ui.event"`` (``data.record`` — событие:
         kind=button|tab|ping, text, path, ts). Смоук цепочки — :meth:`ui_tap_ping`.
         """
-        args = {"subscriber": subscriber or self._sender}
+        args = {"subscriber": subscriber or self._subscriber}
         res = _leaf_result(self.send_command(process, "ui.tap.subscribe", args, timeout=timeout))
         self._register_subscription("ui.tap.subscribe", process, args, res)
         return res
@@ -1011,7 +1034,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """
         args = {
             "pattern": pattern,
-            "subscriber": subscriber or self._sender,
+            "subscriber": subscriber or self._subscriber,
             "exclude_sources": exclude_sources or [],
         }
         res = self.send_command("ProcessManager", "state.subscribe", args, timeout=timeout)
@@ -1035,7 +1058,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         Серверная state-подписка освобождается закрытием соединения (как в
         :meth:`debug_stop`); durable-намерение — это то, что переживало бы реконнект.
         """
-        sub = subscriber or self._sender
+        sub = subscriber or self._subscriber
         self._subscriptions.remove("state.subscribe", "ProcessManager", {"pattern": pattern})
         return {"success": True, "pattern": pattern, "subscriber": sub}
 

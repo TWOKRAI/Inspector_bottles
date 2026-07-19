@@ -301,7 +301,10 @@ class TestPushEvents:
         assert sent["command"] == "state.subscribe"
         assert sent["targets"] == ["ProcessManager"]
         assert sent["data"]["pattern"] == "processes.**"
-        assert sent["data"]["subscriber"] == "backend_ctl"  # = self.sender
+        # D.1: connected driver подписывается под session-scoped subscriber
+        # (<sender>.<session>), не под плоским sender — изоляция и push-плоскости.
+        assert sent["data"]["subscriber"] == driver._subscriber
+        assert sent["data"]["subscriber"] == f"backend_ctl.{driver._session}"
 
     def test_unsolicited_push_reaches_subscriber(self, loopback_push) -> None:
         """Реальный сокет: сервер шлёт state.changed (без request_id) → подписчик."""

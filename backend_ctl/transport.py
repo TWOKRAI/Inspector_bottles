@@ -55,7 +55,15 @@ class _TransportMixin:
         self._dispatch(raw)
 
     def connect(self, timeout: float = 5.0) -> None:
-        """Подключиться к хосту и запустить читающий поток."""
+        """Подключиться к хосту и запустить читающий поток.
+
+        Генерит session (D.1): per-connection адрес этого driver'а — сервер по нему
+        адресует reply/push именно нашему сокету (при session_isolation ON). Из него
+        же строится dotted-``_subscriber`` (``<sender>.<session>``) — дефолт получателя
+        push'ей: разные driver'ы = разные подписчики, изоляция и на push-плоскости.
+        """
+        self._session = uuid.uuid4().hex[:12]
+        self._subscriber = f"{self._sender}.{self._session}"
         self._sock = socket.create_connection((self._host, self._port), timeout=timeout)
         self._sock.settimeout(0.5)
         self._running = True
@@ -153,6 +161,12 @@ class _TransportMixin:
             self._timed_out[cid] = now + _TIMED_OUT_TTL_SEC
 
     def _send_raw(self, message: Dict[str, Any]) -> None:
+        # session (D.1): обратный адрес соединения в КАЖДОМ исходящем сообщении —
+        # сервер (при session_isolation ON) адресует reply/push именно этому сокету.
+        # setdefault — не затираем явно заданный session. Единственный choke-point
+        # исходящих (все sends идут через request()→_send_raw).
+        if self._session is not None:
+            message.setdefault("session", self._session)
         line = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
         with self._write_lock:
             sock = self._sock
