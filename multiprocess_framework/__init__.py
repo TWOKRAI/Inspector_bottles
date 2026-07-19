@@ -148,20 +148,19 @@ from multiprocess_framework.modules.actions_module import (
 # Грузим FrontendManager только при РЕАЛЬНОМ обращении. В v3-прототипе фасадный
 # FrontendManager не используется (GUI тянет PySide6 своим путём), так что в норме
 # это не грузится вовсе. См. docs/COMMUNICATION_MAP.md.
-# frontend-constructor Ф1 (T1.2): FrontendManager — Gen-1, frozen и убран из
-# публичного фасада frontend_module (freeze, не kill — Р4 плана
-# plans/frontend-constructor/plan.md). Этот лениво-загружаемый alias намеренно
-# НЕ переключён на прямой импорт Gen-1-подпакета application/ — держим инвариант
-# T1.2 «0 внешних ссылок на Gen-1-подпакет вне модуля» буквально; при отсутствии
-# в фасаде импорт ниже падает ImportError и возвращается None (как и раньше при
-# отсутствии PySide6/атрибута).
+# frontend-constructor Ф1 (T1.2 + MED-1 ревью): FrontendManager — Gen-1, frozen и
+# УБРАН из публичного фасада (freeze, не kill — Р4). Из top-level __all__ тоже снят:
+# отдавать None было контракт-обманкой (mpf.FrontendManager() падал бы TypeError
+# вдали от места импорта — правило «неиспользуемые пути = контракты»). Обращение к
+# имени теперь честно кидает AttributeError с указателем на живое Gen-1-место; сам
+# класс остаётся импортируемым напрямую из application/ (freeze = «остаётся рабочим»).
 def __getattr__(name: str):
     if name == "FrontendManager":
-        try:
-            from multiprocess_framework.modules.frontend_module import FrontendManager
-        except ImportError:
-            return None
-        return FrontendManager
+        raise AttributeError(
+            "FrontendManager — frozen Gen-1 (frontend-constructor Ф1, Р4), убран из "
+            "публичного фасада multiprocess_framework. Импортируй напрямую: "
+            "from multiprocess_framework.modules.frontend_module.application import FrontendManager"
+        )
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -244,6 +243,4 @@ __all__ = [
     "ActionBus",
     "ActionHandler",
     "IRegistersManagerGui",
-    # UI (optional)
-    "FrontendManager",
 ]
