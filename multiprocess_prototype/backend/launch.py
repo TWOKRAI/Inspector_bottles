@@ -233,8 +233,24 @@ class SystemBuilder:
     # --- Фабрики ---
 
     @classmethod
-    def from_manifest(cls, app: "AppManifest", pipeline_override: str | None = None) -> "SystemBuilder":
-        """Из главного конфига: system.yaml + (фундамент ⊕ активный pipeline)."""
+    def from_manifest(
+        cls,
+        app: "AppManifest",
+        pipeline_override: str | None = None,
+        *,
+        include_presentation: bool = True,
+    ) -> "SystemBuilder":
+        """Из главного конфига: system.yaml + (фундамент ⊕ presentation ⊕ активный pipeline).
+
+        Args:
+            app: загруженный манифест.
+            pipeline_override: CLI-override активного pipeline (имя рецепта или путь).
+            include_presentation: единственный резолвер презентации (Ф2 T1.2/T2.2) —
+                presentation-overlay подмешивается ⟺ ``app.presentation`` задан И
+                ``include_presentation`` истинен. ``False`` — headless-флаг
+                (``INSPECTOR_HEADLESS``/``--headless``) перебивает presentation, даже
+                если тот задан в манифесте/env-overlay.
+        """
         from .config.schemas import load_system_config
 
         sys_config = load_system_config(app.system)
@@ -245,7 +261,14 @@ class SystemBuilder:
         blueprint = unwrap_recipe(raw)
 
         if app.base:
-            blueprint = merge_topologies(load_topology_dict(app.base), blueprint)
+            foundation = load_topology_dict(app.base)
+            if include_presentation and app.presentation:
+                # overlay мёржится ПЕРЕД pipeline — при коллизии (напр. рецепт с
+                # инлайн-gui) побеждает presentation, не pipeline.
+                foundation = merge_topologies(foundation, load_topology_dict(app.presentation))
+            blueprint = merge_topologies(foundation, blueprint)
+        elif include_presentation and app.presentation:
+            blueprint = merge_topologies(load_topology_dict(app.presentation), blueprint)
 
         # Boot-инжект recipe_devices в конфиг device_hub (Р11 device-hub)
         from multiprocess_prototype.recipes.devices_sync import (
@@ -264,7 +287,7 @@ class SystemBuilder:
             topology_path=bp_path,
             manifest_path=app.source,
             system_path=app.system,
-            theme=app.styles.active,
+            theme=app.styles.active if app.styles else None,
         )
 
     @classmethod

@@ -1,6 +1,6 @@
 # multiprocess_prototype — STATUS.md
 
-> Обновлено: 2026-05-27
+> Обновлено: 2026-07-18 (Ф2 frontend-constructor — граница фронт/бэк)
 > Активный прототип Inspector_bottles.
 
 ## Что это
@@ -49,6 +49,11 @@
 
 ## Точка входа
 
+Ф2 frontend-constructor (2026-07) развёл фронт/бэк на уровне composition root: **два
+режима запуска**, headless по умолчанию.
+
+**Headless (backend-only, по умолчанию)** — always-on инфра (`devices`) + pipeline,
+без окна:
 ```bash
 python -m multiprocess_prototype.main
 ```
@@ -56,9 +61,40 @@ python -m multiprocess_prototype.main
 ```bash
 python multiprocess_prototype/run.py
 ```
+Явный headless-флаг (перебивает presentation, даже если та задана) — `INSPECTOR_HEADLESS=1`
+или `--headless`:
+```bash
+python multiprocess_prototype/run.py --headless
+```
+
+**GUI (фронт, отдельная точка входа)** — тот же бэкенд + презентационный overlay
+(`frontend/presentation.yaml`, процесс `gui`):
+```bash
+python multiprocess_prototype/frontend/run.py
+```
+Подробности хардкод-shell механизма — [`frontend/README.md`](frontend/README.md).
+
+## Граница фронт/бэк (Ф2 frontend-constructor)
+
+- `backend/topology/base.yaml` — headless-only фундамент (только `devices`); презентация
+  (`gui`) вынесена в `frontend/presentation.yaml` (overlay, подмешивается ⟺ явно запрошен).
+- `AppManifest.presentation: Path | None` — `None` = headless. Резолвер: `SystemBuilder.
+  from_manifest(app, include_presentation=...)` — единственная точка, где решается,
+  подмешивать ли overlay (`base ⊕ presentation ⊕ pipeline`).
+- `backend/config/manifest.py` больше не хардкодит `frontend/styles/themes` — `styles`
+  опционален (headless не читает); фронт fail-loud, если `styles` не задан.
+- sentrux-инвариант `backend/* → frontend/*` = forbid (`.sentrux/rules.toml`) — backend
+  не импортирует Qt-слой на уровне Python (обратное, `frontend/` форвард-импортит
+  `backend.launch/config/state`, — разрешено, это хардкод-shell по определению).
+- **Отложено (эстафета в В3/конструктор фронта):** dual-launcher runtime-аттач (фронт
+  как отдельный ОС-процесс к живому бэкенду — грабли «два бэкенда в одном прогоне»),
+  сокращение forward-импортов `frontend → backend`, реконсиляция recipe-инлайн `gui`
+  (5-6 рецептов держат свой `gui` внутри — после C3/4.7 recipe-оси, вне скоупа Ф2).
 
 ## Связанные документы
 
 - [Refactor-doc 2026-05](../docs/refactors/2026-05_prototype_skeleton.md)
 - [Master plan](../plans/prototype-skeleton-2026-05/plan.md)
 - [Verification report](../plans/prototype-skeleton-2026-05/verification-report.md)
+- [frontend-constructor plan](../plans/frontend-constructor/plan.md) — Ф2 (граница фронт/бэк)
+- [proto-frontend-carve.md](../plans/proto-frontend-carve.md) — справочная спецификация задач Ф2

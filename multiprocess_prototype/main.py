@@ -47,11 +47,35 @@ def resolve_manifest_path() -> Path:
     return Path(os.environ.get("INSPECTOR_MANIFEST") or DEFAULT_MANIFEST)
 
 
-def build_launcher(app: "AppManifest", pipeline_override: str | None = None) -> "SystemLauncher":
+#: Headless-флаг основного входа (Ф2 T2.2): ``INSPECTOR_HEADLESS=1``/``true``/``yes``
+#: ИЛИ CLI ``--headless`` (см. ``__main__`` ниже, ``run.py``). Перебивает presentation,
+#: даже если тот задан в манифесте/env-overlay (``INSPECTOR_PRESENTATION``, см.
+#: ``frontend/run.py``) — симметрично: фронт-энтри ВКЛЮЧАЕТ presentation, headless-флаг
+#: его ВЫКЛЮЧАЕТ, и побеждает headless.
+HEADLESS_ENV = "INSPECTOR_HEADLESS"
+_HEADLESS_TRUE_VALUES = {"1", "true", "yes"}
+
+
+def _is_headless(explicit: bool | None) -> bool:
+    """Единственный резолвер headless: явный флаг (CLI/API) > env ``INSPECTOR_HEADLESS``.
+
+    ``explicit=None`` — флаг не передан явно вызывающей стороной → смотрим env.
+    """
+    if explicit is not None:
+        return explicit
+    return os.environ.get(HEADLESS_ENV, "").strip().lower() in _HEADLESS_TRUE_VALUES
+
+
+def build_launcher(
+    app: "AppManifest",
+    pipeline_override: str | None = None,
+    *,
+    include_presentation: bool = True,
+) -> "SystemLauncher":
     """Собрать систему из главного конфига (манифеста). Тонкая обёртка над SystemBuilder."""
     from multiprocess_prototype.backend.launch import SystemBuilder
 
-    return SystemBuilder.from_manifest(app, pipeline_override).build()
+    return SystemBuilder.from_manifest(app, pipeline_override, include_presentation=include_presentation).build()
 
 
 def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
@@ -65,7 +89,7 @@ def bootstrap(topology_path: Path | str | None = None) -> "SystemLauncher":
     return SystemBuilder.from_topology_path(CONFIG_PATH, bp_path).build()
 
 
-def _prototype_launcher_factory(manifest, pipeline_override: str | None):
+def _prototype_launcher_factory(manifest, pipeline_override: str | None, *, headless: bool = False):
     """``launcher_factory`` для ``app_module.run_app`` (factory-шов Ф5.11).
 
     Вход прототипа выражен через ``run_app`` (generic-контур: env-алиасы
@@ -73,14 +97,20 @@ def _prototype_launcher_factory(manifest, pipeline_override: str | None):
     сложившийся ``SystemBuilder.build()`` остаётся источником истины сборки —
     характеризационный снапшот 5.1 не трогаем, back-compat полный. Прототипный
     манифест (со стилями/темой) грузится по ``manifest.source``.
+
+    ``headless`` (Ф2 T2.2) — привязывается ``main()`` через ``functools.partial`` ДО
+    того, как ``run_app``/``AppSpec`` вызовет фабрику своим фиксированным контрактом
+    ``factory(manifest, pipeline_override)`` (framework, не расширяем). Дефолт
+    ``False`` сохраняет back-compat для прямых вызовов (тесты вызывают фабрику без
+    partial — presentation включена, как было до Ф2).
     """
     from multiprocess_prototype.backend.config.manifest import load_manifest
 
     app = load_manifest(manifest.source)
-    return build_launcher(app, pipeline_override)
+    return build_launcher(app, pipeline_override, include_presentation=not headless)
 
 
-def main(pipeline_override: str | None = None) -> int:
+def main(pipeline_override: str | None = None, *, headless: bool | None = None) -> int:
     """Запуск приложения через ``app_module.run_app`` (Ф5.11).
 
     CLI-аргумент (`run.py <recipe>`) трактуется как «сделать этот рецепт
@@ -88,7 +118,13 @@ def main(pipeline_override: str | None = None) -> int:
     (NEW-1 — единая сериализованная точка, гонка backend↔GUI закрыта) ДО сборки.
     Тогда и бэкенд, и дочерний GUI-процесс читают ОДИН активный рецепт. При ошибке
     записи — graceful fallback (override только в бэкенд).
+
+    ``headless`` (Ф2 T2.2) — явный backend-only режим (см. ``_is_headless``): ``None``
+    смотрит env ``INSPECTOR_HEADLESS``; явный ``True``/``False`` (CLI ``--headless``,
+    см. ``__main__``) приоритетен. Перебивает presentation, даже если тот задан.
     """
+    from functools import partial
+
     from multiprocess_framework.modules.app_module import AppSpec, apply_env_aliases, run_app
 
     # Env-алиасы ПЕРВЫМ делом (до resolve_manifest_path/persist): resolve_manifest_path
@@ -96,6 +132,8 @@ def main(pipeline_override: str | None = None) -> int:
     # MULTIPROCESS_MANIFEST без раннего алиаса backend собрал бы дефолтный app.yaml, а
     # GUI-ребёнок (run_app → apply_env_aliases → spawn с алиасом) — кастомный (split-brain).
     apply_env_aliases()
+
+    is_headless = _is_headless(headless)
 
     manifest_path = resolve_manifest_path()
     effective_override = pipeline_override
@@ -116,10 +154,14 @@ def main(pipeline_override: str | None = None) -> int:
     spec = AppSpec(
         manifest_path=manifest_path,
         pipeline_override=effective_override,
-        launcher_factory=_prototype_launcher_factory,
+        launcher_factory=partial(_prototype_launcher_factory, headless=is_headless),
     )
     return run_app(spec)
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else None))
+    _argv = sys.argv[1:]
+    _headless_flag = "--headless" in _argv
+    if _headless_flag:
+        _argv = [a for a in _argv if a != "--headless"]
+    sys.exit(main(_argv[0] if _argv else None, headless=True if _headless_flag else None))

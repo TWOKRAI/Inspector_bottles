@@ -206,3 +206,15 @@ reason = "domain — pure Python, без Qt. Phase D."
 # Обратное (adapters/ импортирует frontend/) — запрещено выше.
 #
 # Phase F удалит прямые ctx.extras[...] → останется только services.X через Protocols.
+
+# Граница фронт/бэк прототипа (Ф2 frontend-constructor, 2026-07). До Ф2 сцепление
+# было де-факто нулевым на импортах (только строковый путь frontend/styles/themes
+# в manifest.py, устранён Ф2 T2.3, и process_class-ссылка на GuiProcess в
+# base.yaml/presentation.yaml — YAML-конфиг, не Python-импорт, sentrux не видит).
+# Инвариант закрепляет это структурно: backend/ не должен ЗНАТЬ про frontend/ на
+# уровне Python-импортов (обратное — frontend/ форвард-импортит backend/launch,
+# config, state — разрешено, это forward-направление хардкод-shell).
+[[boundaries]]
+from   = "multiprocess_prototype/backend/*"
+to     = "multiprocess_prototype/frontend/*"
+reason = "backend headless-first (Ф2) — не импортирует Qt-слой frontend/. Обратное (frontend → backend) разрешено — форвард-импорт хардкод-shell."

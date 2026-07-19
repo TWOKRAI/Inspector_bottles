@@ -6,6 +6,10 @@ import yaml
 
 TOPOLOGY_DIR = Path(__file__).resolve().parents[1]
 BASE_PATH = TOPOLOGY_DIR / "base.yaml"
+# gui-overlay (Ф2 frontend-constructor) — валидная цель chain_targets наравне с base,
+# т.к. pipeline-топологии адресуют gui по имени, полагаясь на полный запуск
+# (base ⊕ presentation ⊕ pipeline), а не только на headless-фундамент.
+PRESENTATION_PATH = TOPOLOGY_DIR.parent.parent / "frontend" / "presentation.yaml"
 
 # Все рабочие topology (не TEMPLATE, не архив).
 # region_pipeline переехал в recipes/ (запускаемый рецепт) — здесь только сырые topology.
@@ -18,10 +22,13 @@ ACTIVE_TOPOLOGIES = [
 
 
 def _base_process_names() -> set[str]:
-    """Имена процессов фундамента (base.yaml) — валидные цели chain_targets."""
-    with open(BASE_PATH, encoding="utf-8") as f:
-        base = yaml.safe_load(f) or {}
-    return {p["process_name"] for p in base.get("processes", [])}
+    """Имена процессов фундамента + presentation-overlay — валидные цели chain_targets."""
+    names: set[str] = set()
+    for path in (BASE_PATH, PRESENTATION_PATH):
+        with open(path, encoding="utf-8") as f:
+            topo = yaml.safe_load(f) or {}
+        names |= {p["process_name"] for p in topo.get("processes", [])}
+    return names
 
 
 @pytest.fixture(params=ACTIVE_TOPOLOGIES)

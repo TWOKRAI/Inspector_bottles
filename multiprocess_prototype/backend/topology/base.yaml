@@ -1,28 +1,26 @@
-# base.yaml — ФУНДАМЕНТ (приватная топология).
+# base.yaml — ФУНДАМЕНТ (приватная топология, headless-only).
 #
-# Базовые процессы, которые есть ВСЕГДА и НЕ участвуют в pipeline:
-#   - презентация (GUI) — объявлена классом, заменяема (PyQt → веб-сервер и т.п.)
-#   - (будущее) другие always-on процессы инфраструктуры
+# Базовые always-on процессы инфраструктуры, которые есть ВСЕГДА и НЕ участвуют
+# в pipeline. Презентация (GUI) здесь БОЛЬШЕ НЕ объявляется (Ф2 frontend-constructor,
+# 2026-07) — она вынесена в отдельный презентационный overlay
+# ``multiprocess_prototype/frontend/presentation.yaml``.
 #
-# При запуске фундамент СУММИРУЕТСЯ с активным pipeline (см. main.merge_topologies):
+# При запуске фундамент СУММИРУЕТСЯ с активным pipeline (см. launch.merge_topologies):
 #   merged.processes = base.processes + pipeline.processes
-# Pipeline адресует презентацию по имени процесса (chain_targets: [gui]).
+# Если задан презентационный overlay (``AppManifest.presentation``), он подмешивается
+# ПЕРЕД pipeline: merged = base ⊕ presentation ⊕ pipeline (см. SystemBuilder.from_manifest).
 #
-# Headless: убрать процесс презентации отсюда (или указать в манифесте другой
-# base без GUI) — бэкенд/цепочки работают так же, просто без окна.
+# Headless по умолчанию: без presentation-overlay бэкенд бутится без окна — просто
+# always-on инфра (``devices``) + pipeline. GUI поднимается только через явную точку
+# входа ``multiprocess_prototype/frontend/run.py`` (включает presentation-overlay).
 #
 # Оркестратор (ProcessManagerProcessApp) — процесс-хозяин, добавляется лончером
 # отдельно (orchestrator_class_path), здесь не объявляется.
 
 name: base
-description: "Фундамент: презентация (GUI) + always-on инфра"
+description: "Фундамент: always-on инфра (headless, без презентации)"
 
 processes:
-  - process_name: gui
-    protected: true
-    process_class: multiprocess_prototype.frontend.process.GuiProcess
-    plugins: []
-
   - process_name: devices
     protected: true
     process_class: multiprocess_prototype.generic_process_app.GenericProcessApp
