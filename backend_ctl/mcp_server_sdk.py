@@ -29,7 +29,8 @@ import argparse
 import json
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from contextlib import asynccontextmanager
+from typing import Any, Callable, Dict, List, Optional
 
 from backend_ctl import mcp_errors
 from backend_ctl.endpoint_config import resolve_endpoint
@@ -125,6 +126,16 @@ class SDKToolServer:
     def close(self) -> None:
         self._session.close()
 
+    def close_graceful(self) -> None:
+        """Закрыть сессию, сняв durable-подписки на бэкенде (D.2 §5.2, долг D.1 §12).
+
+        Единая точка cleanup из lifespan для ВСЕХ путей завершения MCP-сессии
+        (DELETE / idle-timeout / крэш). Step 2 — пока обычный ``close()``; реальный
+        graceful-unsubscribe (обход registry → снимающие команды, пока сокет жив)
+        придёт в Step 5. Держит стабильную сигнатуру вызова через все шаги.
+        """
+        self.close()
+
     def _allowed_names(self) -> List[str]:
         """Имена инструментов, доступных в текущем режиме (для tools/list и подсказок)."""
         return [name for name in self._registry if is_tool_allowed(name, self._mode)]
@@ -198,18 +209,60 @@ class SDKToolServer:
         )
 
 
-def build_server(tool_server: SDKToolServer):
-    """Собрать low-level MCP Server, привязав list_tools/call_tool к :class:`SDKToolServer`."""
+def _as_tool_server_factory(spec: Any) -> Callable[[], SDKToolServer]:
+    """Нормализовать вход :func:`build_server` в фабрику per-session ``SDKToolServer``.
+
+    * инстанс ``SDKToolServer`` → фабрика, возвращающая ЕГО ЖЕ (stdio / тесты: одна
+      сессия на процесс, back-compat);
+    * zero-arg callable → сама фабрика (HTTP-мультиклиент: свежий ``SDKToolServer`` —
+      свой ``DriverSession`` → сокет → ``session``-uuid → dotted-subscriber — на КАЖДУЮ
+      MCP-сессию, изоляция поверх D.1a).
+    """
+    if isinstance(spec, SDKToolServer):
+        return lambda: spec
+    if callable(spec):
+        return spec
+    raise TypeError(f"build_server ждёт SDKToolServer или zero-arg фабрику, получено {type(spec).__name__}")
+
+
+def build_server(tool_server_or_factory: Any):
+    """Собрать low-level MCP Server с per-session lifespan (D.2, Вариант B).
+
+    ``tool_server_or_factory`` — инстанс :class:`SDKToolServer` (один на процесс:
+    stdio, тесты) ИЛИ zero-arg фабрика (свежий per MCP-сессию — HTTP-мультиклиент).
+    lifespan создаёт tool_server на ВХОД каждой MCP-сессии и гарантированно закрывает
+    его на ВЫХОДЕ (DELETE / idle-timeout / крэш — все пути завершения сессии в
+    stateful-менеджере SDK): здесь закрывается долг D.1 §12 (осиротевшие подписки).
+    Хендлеры берут свой tool_server из ``request_context.lifespan_context`` — состояние
+    реестра/driver'а изолировано между сессиями.
+    """
     _, Server = _require_mcp()
-    server = Server(SERVER_NAME, version=SERVER_VERSION, instructions=INSTRUCTIONS)
+    factory = _as_tool_server_factory(tool_server_or_factory)
+
+    @asynccontextmanager
+    async def _session_lifespan(_server):  # noqa: D401 — фабрика per-session контекста
+        ts = factory()
+        try:
+            yield ts
+        finally:
+            # Cleanup осиротевших подписок (долг D.1 §12). SYNC, без await: idle-reap
+            # завершает сессию отменой cancel-scope, где await недопустим (§5.2). Step 5
+            # наполнит close_graceful реальным unsubscribe; здесь — обычный close.
+            # Best-effort: бэкенд мог умереть — не роняем shutdown сессии.
+            try:
+                ts.close_graceful()
+            except Exception:  # noqa: BLE001 — cleanup не роняет завершение сессии
+                pass
+
+    server = Server(SERVER_NAME, version=SERVER_VERSION, instructions=INSTRUCTIONS, lifespan=_session_lifespan)
 
     @server.list_tools()
     async def _handle_list_tools():  # noqa: D401 — SDK-хендлер
-        return tool_server.list_tools()
+        return server.request_context.lifespan_context.list_tools()
 
     @server.call_tool()
     async def _handle_call_tool(name: str, arguments: Optional[Dict[str, Any]]):  # noqa: D401
-        return tool_server.call_tool(name, arguments)
+        return server.request_context.lifespan_context.call_tool(name, arguments)
 
     return server
 

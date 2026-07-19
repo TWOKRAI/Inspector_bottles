@@ -249,6 +249,48 @@ class TestEndToEndOverSdk:
             assert "read-only" in res.content[0].text
 
 
+class TestPerSessionLifespan:
+    """D.2 Step 2: build_server принимает фабрику → свежий SDKToolServer на КАЖДУЮ
+    MCP-сессию (мультиплекс поверх изоляции D.1a). Инстанс — back-compat (одна на процесс)."""
+
+    def test_factory_normalization_instance_and_callable(self) -> None:
+        from backend_ctl.mcp_server_sdk import _as_tool_server_factory
+
+        inst, _ = make_server()
+        assert _as_tool_server_factory(inst)() is inst  # инстанс → тот же
+        fresh = _as_tool_server_factory(lambda: inst)  # callable → сама фабрика
+        assert fresh() is inst
+
+    def test_factory_rejects_garbage(self) -> None:
+        from backend_ctl.mcp_server_sdk import _as_tool_server_factory
+
+        with pytest.raises(TypeError):
+            _as_tool_server_factory(object())
+
+    @pytest.mark.asyncio
+    async def test_lifespan_creates_tool_server_per_session(self) -> None:
+        from mcp.shared.memory import create_connected_server_and_client_session
+
+        from backend_ctl.mcp_server_sdk import build_server
+
+        created: List[SDKToolServer] = []
+
+        def factory() -> SDKToolServer:
+            ts = SDKToolServer(driver_factory=lambda: FakeDriver(), log=lambda m: None)
+            created.append(ts)
+            return ts
+
+        server = build_server(factory)
+        async with create_connected_server_and_client_session(server) as client:
+            assert {t.name for t in (await client.list_tools()).tools} == set(build_registry())
+        async with create_connected_server_and_client_session(server) as client:
+            res = await client.call_tool("get_status", {"process": "p"})
+            assert res.isError is False
+        # свежий tool_server на каждую MCP-сессию (не разделяется между сессиями)
+        assert len(created) == 2
+        assert created[0] is not created[1]
+
+
 class TestMcpErrors:
     def test_suggest_tools_finds_near(self) -> None:
         assert "get_status" in mcp_errors.suggest_tools("get_statuz", build_registry().keys())
