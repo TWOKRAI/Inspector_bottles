@@ -49,6 +49,7 @@ from .protocol import (  # noqa: F401 — re-export для back-compat шима
     unwrap,
 )
 from .conditions import DEFAULT_AWAIT_TIMEOUT, await_condition as _await_condition
+from .overview import system_overview as _system_overview
 from .subscriptions import _SubscriptionRegistry
 from .events import (  # noqa: F401 — EventCallback/OBSERVABILITY_RECORD_COMMAND re-export
     _EventChannelMixin,
@@ -704,6 +705,17 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             "count": len(points),
             "points": [[ts, val] for ts, val in points],
         }
+
+    # ---- system_overview (B.3): «один вызов = вся картина» ----
+
+    def system_overview(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Компактная сводка системы + anomalies-подсказки (делегат :mod:`.overview`).
+
+        Fan-out существующими introspect-ручками по процессам топологии + локальные
+        источники (telemetry read-model, счётчики driver'а/hub'а) — ноль новых
+        IPC-команд. Первая команда сессии: вердикты, не археология.
+        """
+        return _system_overview(self, timeout=timeout)
 
     # ---- await_condition (B.2): серверное ожидание вместо поллинга ----
 

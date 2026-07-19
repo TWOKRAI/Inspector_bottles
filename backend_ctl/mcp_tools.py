@@ -162,6 +162,10 @@ def _await_condition(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.await_condition(args["kind"], args.get("spec"), timeout=timeout)
 
 
+def _system_overview(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.system_overview(**_kw_timeout(args))
+
+
 def _log_tail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.log_tail(args["process"], level=args.get("level", "ERROR"), **_kw_timeout(args))
 
@@ -282,6 +286,16 @@ TOOLS: List[ToolSpec] = [
         "регистры (поля), router-handlers, каналы. Первый вызов сессии — вместо чтения исходников.",
         _obj({"timeout": _TIMEOUT}),
         _capabilities,
+    ),
+    ToolSpec(
+        "system_overview",
+        "«Один вызов = вся картина» (B.3): компактная сводка по всем процессам топологии "
+        "(статус/воркеры/router-счётчики/очереди/память) + telemetry fps + счётчики driver'а "
+        "+ секция anomalies (подсказки: router_dropped, queue_depth, fps_zero_while_running, "
+        "recent_recovery, late_replies, events_evicted, …). Первая команда сессии после "
+        "capabilities: вердикты, не археология. Только существующие introspect-ручки (read-only).",
+        _obj({"timeout": _TIMEOUT}),
+        _system_overview,
     ),
     ToolSpec(
         "get_status",
@@ -798,6 +812,7 @@ TOOL_SAFETY: Dict[str, str] = {
     "events": SAFETY_READ,
     "events_page": SAFETY_READ,
     "await_condition": SAFETY_READ,
+    "system_overview": SAFETY_READ,
     "telemetry_snapshot": SAFETY_READ,
     "telemetry_history": SAFETY_READ,
     "ui_tap_ping": SAFETY_READ,

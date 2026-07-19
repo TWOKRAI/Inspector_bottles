@@ -77,6 +77,7 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `worker_status(process)` → `WorkerStatus` | типизированно: `process`/`status`/`workers` (+ `.raw`) |
 | `introspect_capabilities(process)` | карточка процесса: команды+descriptions, регистры (поля), handlers |
 | `capabilities()` → `Capabilities` | «контактная книжка»: свод по ВСЕМ процессам (fan-out) — топология, каналы, карточки |
+| `system_overview(timeout=)` | **B.3**: «один вызов = вся картина» — компактная сводка процессов + anomalies-подсказки; ноль новых IPC-команд |
 | `set_register(process, register, field, value)` | live-запись регистра (`register_update`, ключи `{register, field, value}`) |
 | `set_register_verified(process, register, field, value)` | verify-probe (Ф1.6): write → readback `introspect.registers` → diff (`verified`/`expected`/`actual`) — ловит молчаливые no-op'ы |
 | `state_subscribe(pattern, subscriber=None)` | подписка на state-дерево (`state.subscribe`); пуши `state.changed` идут в событийный канал |

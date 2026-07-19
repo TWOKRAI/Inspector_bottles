@@ -130,13 +130,14 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 
 ### Task B.3 — system_overview («один вызов = вся картина» + anomalies)
 **Level:** Middle+ (Sonnet) | **Layer:** tools
+**Status (2026-07-19):** ✅ ЗАВЕРШЕНО. Новый соседний модуль `overview.py` (driver — делегат): fan-out существующими introspect-ручками по топологии + локальные источники (telemetry read-model fps/supervisor, счётчики driver'а и колец B.1). 11 видов anomalies-hints, best-effort по недоступным ручкам. Полноценный «рестарт-луп» — после epoch D.1b (сейчас — `recent_recovery` по supervisor-событию).
 **Goal:** первая команда любой сессии: вердикты, не археология.
-**Files:** `backend_ctl/driver.py`, `backend_ctl/mcp_tools.py`, tests.
+**Files:** `backend_ctl/overview.py` (новый), `backend_ctl/driver.py`, `backend_ctl/mcp_tools.py`, tests.
 **Steps:**
 1. Серверный fan-out по процессам (существующие ручки: status/router_stats/queues/introspect_memory/telemetry_snapshot) → компактная сводка.
 2. Секция `anomalies` (hints, не verdicts): очередь растёт, `middleware_dropped>0`, рестарт-луп, fps=0 при running, `late_replies>0`, `dropped>0`.
 **Acceptance:**
-- [ ] unit на fake: сводка компактна; аномалии детектятся на подставных счётчиках; ноль новых IPC-команд
+- [x] unit на fake: сводка компактна (raw не протекает); аномалии детектятся на подставных счётчиках (router_dropped/queue_depth/fps_zero/recovery/late_replies/events_evicted); ноль новых IPC-команд (журнал команд ⊆ существующих) — 9 тестов `test_overview.py`
 **Аналог:** `kubectl get all`+`top`, Grafana health, Erlang observer.
 
 ### Task B.4 — capabilities(format="help"|"concise") + response_format

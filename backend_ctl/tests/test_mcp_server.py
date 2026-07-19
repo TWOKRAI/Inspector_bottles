@@ -106,6 +106,7 @@ class TestRegistry:
         # Минимальный набор P3 из плана + observability Ф1.4/1.5 + state/events (1.1).
         expected = {
             "capabilities",
+            "system_overview",
             "get_status",
             "introspect_handlers",
             "introspect_registers",
