@@ -123,11 +123,17 @@ class SDKToolServer:
         request_timeout: float = 5.0,
         driver_factory: Any = None,
         log: Any = None,
+        require_isolation: bool = False,
     ) -> None:
         self._mode = mode
         self._log = log or (lambda m: print(m, file=sys.stderr, flush=True))
         self._session = DriverSession(
-            host=host, port=port, request_timeout=request_timeout, driver_factory=driver_factory, log=self._log
+            host=host,
+            port=port,
+            request_timeout=request_timeout,
+            driver_factory=driver_factory,
+            log=self._log,
+            require_isolation=require_isolation,
         )
         self._registry = build_registry()
 
@@ -398,7 +404,8 @@ def main(argv: Optional[list] = None) -> int:
         # HTTP-мультиклиент (D.2): фабрика создаёт свежий SDKToolServer на КАЖДУЮ MCP-сессию
         # (свой driver/сокет/session-uuid). Per-session cleanup — в lifespan (build_server).
         def _factory() -> SDKToolServer:
-            return SDKToolServer(mode=mode, host=host, port=port, request_timeout=args.timeout)
+            # require_isolation=True: HTTP-режим fail-fast, если бэкенд поднят broadcast'ом (§5.4).
+            return SDKToolServer(mode=mode, host=host, port=port, request_timeout=args.timeout, require_isolation=True)
 
         http_bind = args.http_bind or os.environ.get(HTTP_BIND_ENV_VAR) or DEFAULT_HTTP_BIND
         http_host, http_port = _parse_http_bind(http_bind)

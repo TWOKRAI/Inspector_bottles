@@ -414,6 +414,58 @@ class TestGracefulCleanup:
         assert calls == ["unwatch", "unsubscribe_all", "close"]
 
 
+class TestIsolationProbe:
+    """D.2 Step 6: HTTP-режим fail-fast при backend session_isolation=OFF (§5.4)."""
+
+    def test_extract_isolation_various_shapes(self) -> None:
+        from backend_ctl.mcp_driver_session import _extract_backend_ctl_isolation
+
+        # dict-по-имени
+        on = {"channels": {"backend_ctl": {"name": "backend_ctl", "session_isolation": True}}}
+        assert _extract_backend_ctl_isolation(on) is True
+        # вложенный список каналов
+        off = {"router_stats": {"channels": [{"name": "other"}, {"name": "backend_ctl", "session_isolation": False}]}}
+        assert _extract_backend_ctl_isolation(off) is False
+        # нет канала backend_ctl → None
+        assert _extract_backend_ctl_isolation({"channels": {}}) is None
+
+    def test_probe_blocks_when_isolation_off(self) -> None:
+        from backend_ctl.mcp_driver_session import BackendUnavailable, DriverSession
+
+        class OffDriver(FakeDriver):
+            def introspect_router_stats(self, *a: Any, **k: Any) -> Any:
+                return {"channels": {"backend_ctl": {"name": "backend_ctl", "session_isolation": False}}}
+
+        ds = DriverSession(driver_factory=lambda: OffDriver(), log=lambda m: None, require_isolation=True)
+        with pytest.raises(BackendUnavailable):
+            ds.ensure()
+
+    def test_probe_passes_when_isolation_on(self) -> None:
+        from backend_ctl.mcp_driver_session import DriverSession
+
+        class OnDriver(FakeDriver):
+            def introspect_router_stats(self, *a: Any, **k: Any) -> Any:
+                return {"channels": {"backend_ctl": {"name": "backend_ctl", "session_isolation": True}}}
+
+        ds = DriverSession(driver_factory=lambda: OnDriver(), log=lambda m: None, require_isolation=True)
+        assert ds.ensure() is not None
+
+    def test_stdio_mode_skips_probe(self) -> None:
+        from backend_ctl.mcp_driver_session import DriverSession
+
+        called: List[bool] = []
+
+        class OffDriver(FakeDriver):
+            def introspect_router_stats(self, *a: Any, **k: Any) -> Any:
+                called.append(True)
+                return {"channels": {"backend_ctl": {"name": "backend_ctl", "session_isolation": False}}}
+
+        # require_isolation по умолчанию False (stdio) → проба не выполняется даже при OFF
+        ds = DriverSession(driver_factory=lambda: OffDriver(), log=lambda m: None)
+        ds.ensure()
+        assert called == []
+
+
 class TestMcpErrors:
     def test_suggest_tools_finds_near(self) -> None:
         assert "get_status" in mcp_errors.suggest_tools("get_statuz", build_registry().keys())

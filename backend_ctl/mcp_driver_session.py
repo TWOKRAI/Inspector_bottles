@@ -25,6 +25,28 @@ class BackendUnavailable(RuntimeError):
     """Бэкенд недоступен (сокет не поднят/оборван) — понятный текст для агента."""
 
 
+def _extract_backend_ctl_isolation(stats: Any) -> Optional[bool]:
+    """Найти ``session_isolation`` канала ``backend_ctl`` в дереве ``introspect.router_stats``.
+
+    Форма ответа может отличаться между версиями (channels — dict-по-имени или список),
+    поэтому рекурсивный обход по dict/list: ищем узел с ``name == "backend_ctl"`` и полем
+    ``session_isolation`` (его кладёт ``SocketChannel.get_info``). ``None`` → не найдено.
+    """
+    if isinstance(stats, dict):
+        if stats.get("name") == "backend_ctl" and "session_isolation" in stats:
+            return bool(stats["session_isolation"])
+        for value in stats.values():
+            found = _extract_backend_ctl_isolation(value)
+            if found is not None:
+                return found
+    elif isinstance(stats, (list, tuple)):
+        for value in stats:
+            found = _extract_backend_ctl_isolation(value)
+            if found is not None:
+                return found
+    return None
+
+
 class DriverSession:
     """Владелец жизненного цикла одного :class:`BackendDriver` под MCP-сервером.
 
@@ -41,9 +63,14 @@ class DriverSession:
         request_timeout: float = 5.0,
         driver_factory: Any = None,
         log: Any = None,
+        require_isolation: bool = False,
     ) -> None:
         self._host, self._port = resolve_endpoint(host, port)
         self._request_timeout = request_timeout
+        # D.2 §5.4: HTTP-мультиклиент требует backend session_isolation=ON (иначе broadcast
+        # протекает между сессиями). Ставится HTTP-раннером; stdio (один клиент) — False.
+        self._require_isolation = require_isolation
+        self._isolation_ok = False  # проба выполняется один раз при первом ensure()
         # Фабрика для тестов: () → объект с интерфейсом BackendDriver (fake).
         self._driver_factory = driver_factory or self._default_driver_factory
         self._driver: Optional[BackendDriver] = None
@@ -147,7 +174,38 @@ class DriverSession:
                 wr = self._driver.resume_watch(self._watch_manifest)
                 self._note_report(reconnected=True, watch_resumed=bool(isinstance(wr, dict) and wr.get("resumed")))
                 self._log(f"[mcp] реконнект: watch-контур восстановлен ({wr})")
+        # D.2 §5.4: fail-fast, если HTTP-режим требует изоляции, а бэкенд поднят broadcast'ом.
+        # Одна проба на сессию (existing router-ручка); OFF/непрочитано → громкий отказ,
+        # НЕ тихая работа с протечкой между сессиями.
+        if self._require_isolation and not self._isolation_ok:
+            self._probe_isolation(self._driver)
+            self._isolation_ok = True
         return self._driver
+
+    def _probe_isolation(self, drv: BackendDriver) -> None:
+        """Проверить, что бэкенд поднят с session_isolation=ON (D.2 §5.4). Иначе broadcast
+        протекает между HTTP-сессиями — мультиклиент опаснее его отсутствия. Читает флаг
+        существующей ручкой ``introspect.router_stats`` (ноль правок бэкенда). OFF или
+        непрочитанный флаг → :class:`BackendUnavailable` с actionable-текстом."""
+        try:
+            stats = drv.introspect_router_stats("ProcessManager", timeout=self._request_timeout)
+        except Exception as exc:  # noqa: BLE001 — контракт «понятная ошибка», не сырое исключение
+            raise BackendUnavailable(
+                f"не удалось проверить session-isolation бэкенда на {self._host}:{self._port} ({exc})."
+            ) from exc
+        iso = _extract_backend_ctl_isolation(stats)
+        if iso is True:
+            return
+        if iso is False:
+            raise BackendUnavailable(
+                "HTTP-мультиклиент требует backend session_isolation=ON, а бэкенд поднят с broadcast "
+                "(протечка reply/событий между сессиями). Перезапусти бэкенд с "
+                "BACKEND_CTL_SESSION_ISOLATION=1 (или config backend_ctl.session_isolation=true)."
+            )
+        raise BackendUnavailable(
+            "не удалось прочитать session_isolation канала backend_ctl из introspect.router_stats — "
+            "обнови бэкенд до версии с session-isolation (D.1) или используй stdio-режим."
+        )
 
     def reset(self) -> None:
         """Сбросить соединение (следующий :meth:`ensure` переподключится).
