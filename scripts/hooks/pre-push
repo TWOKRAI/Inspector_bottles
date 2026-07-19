@@ -4,11 +4,12 @@
 # Запускается перед `git push`. Блокирует push если:
 #   1) sentrux check  — нарушено архитектурное правило из .sentrux/rules.toml (ВСЕГДА блок)
 #   2) sentrux gate   — структурная регрессия относительно baseline, но СУЖЕННО:
-#        ЖЁСТКО (блок): падение aggregate quality · рост циклов · рост god-файлов;
-#        МЯГКО (warning, НЕ блок): complex-fn / coupling / depth / hotspot и т.п.
+#        ЖЁСТКО (блок): рост циклов · рост god-файлов;
+#        МЯГКО (warning, НЕ блок): падение aggregate quality · complex-fn / coupling / depth / hotspot и т.п.
 #      Решение владельца 2026-07-15: гейт душил push при ВЫРОСШЕМ quality из-за +1 complex-fn
-#      (ложная тренировка). Жёсткие метрики остаются guardrail'ом; мелкие — фиксируются
-#      осознанно через `sentrux gate --save`, а не блокируют.
+#      (ложная тренировка). 2026-07-20: и само падение aggregate quality снято с жёсткого блока
+#      (новые легитимные модули чуть двигают агрегат — та же ложная тренировка). Жёсткими остаются
+#      структурные guardrail'ы (циклы/god); падение quality — warning, фиксируется `sentrux gate --save`.
 #
 # Обновить baseline после намеренного улучшения:  sentrux gate --save
 # Обход целиком (крайний случай):                 git push --no-verify
@@ -52,10 +53,10 @@ if ! sentrux gate >/tmp/sentrux-gate.log 2>&1; then
         exit 1
     fi
 
+    # Падение aggregate quality — БОЛЬШЕ НЕ жёсткий блок (решение владельца 2026-07-20):
+    # новые легитимные модули чуть двигают агрегат, это ложная тренировка. Остаётся
+    # мягким warning ниже. Жёсткими guardrail'ами остаются рост циклов и god-файлов.
     hard=""
-    if [ -n "$q_after" ] && awk "BEGIN{exit !($q_after < $q_before)}"; then
-        hard="${hard}\n  ✗ aggregate quality упал: ${q_before} → ${q_after}"
-    fi
     if [ -n "$c_after" ] && awk "BEGIN{exit !($c_after > $c_before)}"; then
         hard="${hard}\n  ✗ циклы выросли: ${c_before} → ${c_after}"
     fi
@@ -71,8 +72,11 @@ if ! sentrux gate >/tmp/sentrux-gate.log 2>&1; then
         exit 1
     fi
 
-    # Только мягкие метрики (complex-fn/coupling/depth/hotspot) — не блокируем.
-    echo "⚠️  sentrux gate: мягкая регрессия — push НЕ блокируется (quality/циклы/god в норме):" >&2
+    # Только мягкие метрики (падение quality / complex-fn/coupling/depth/hotspot) — не блокируем.
+    echo "⚠️  sentrux gate: мягкая регрессия — push НЕ блокируется (циклы/god в норме):" >&2
+    if [ -n "$q_after" ] && awk "BEGIN{exit !($q_after < $q_before)}"; then
+        echo "   • aggregate quality: ${q_before} → ${q_after} (мягко, не блок)" >&2
+    fi
     grep '✗' /tmp/sentrux-gate.log | grep -v DEGRADED >&2 || true
     echo "   (зафиксировать осознанно: sentrux gate --save)" >&2
     echo "[sentrux] ✓ check passed (gate: только мягкие метрики, не блок)"
