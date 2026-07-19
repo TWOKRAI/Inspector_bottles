@@ -628,6 +628,72 @@ class ReplayPlayer:
             "truncated": self.recording.truncated,
         }
 
+    def await_condition(
+        self,
+        kind: str,
+        spec: Optional[Dict[str, Any]] = None,
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Offline-await: прокрутка playhead'а до попадания (делегат §5.1)."""
+        return replay_await_condition(self, kind, spec, timeout=timeout)
+
+
+def replay_await_condition(
+    player: ReplayPlayer,
+    kind: str,
+    spec: Optional[Dict[str, Any]],
+    *,
+    timeout: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Offline-семантика await_condition над записью — «прокрутка до попадания» (§5.1).
+
+    Живой await ждёт будущего; над записью будущее — остаток ленты. Порядок:
+      1. проверить условие на ТЕКУЩЕМ достигнутом состоянии read-model (initial_check,
+         тот же код) → мгновенный успех, лента не двигается;
+      2. иначе прокручивать playhead (``pump(1)`` → ``_emit_event`` в вызывающем
+         потоке; подписчики синхронны, wall-clock ожидания НЕТ) до попадания либо
+         конца записи;
+      3. попадание → успех + секция ``replay`` (playhead ОСТАЁТСЯ на месте попадания —
+         снимок/история после показывают состояние момента срабатывания);
+      4. конец без попадания → таймаут-эквивалент (``end_of_recording``).
+
+    ``timeout`` в offline игнорируется (нечего ждать — прокрутка мгновенна).
+    Предикаты и ``_Waiter`` переиспользуются из :func:`conditions.setup_condition`
+    (нет второго парсера условий).
+    """
+    from backend_ctl.conditions import setup_condition
+
+    drv = player.driver
+    setup = setup_condition(drv, kind, spec)
+    if isinstance(setup, dict):  # ошибка валидации kind/spec — обучающий текст
+        return setup
+    waiter, initial_check = setup
+
+    listener = drv.subscribe(waiter.offer)
+    try:
+        # Порядок race-free тот же, что вживую: подписка → начальная проверка →
+        # прокрутка. Offline reader-потока нет — offer зовётся синхронно из pump.
+        waiter.resolve_initial(initial_check())
+        while waiter.matched is None and player.has_more():
+            player.pump(1)
+    finally:
+        drv.unsubscribe(listener)
+
+    replay = {"position": player.playhead, "of": player.total}
+    if waiter.matched is not None:
+        return {"success": True, "kind": kind, "matched": waiter.matched, "replay": replay}
+    return {
+        "success": False,
+        "timed_out": True,
+        "end_of_recording": True,
+        "kind": kind,
+        "waited": dict(spec) if isinstance(spec, dict) else spec,
+        "events_seen": waiter.events_seen,
+        "last_seen": waiter.last_seen,
+        "replay": replay,
+    }
+
 
 __all__ = [
     "FORMAT",
@@ -645,4 +711,5 @@ __all__ = [
     "RecordingError",
     "load_recording",
     "ReplayPlayer",
+    "replay_await_condition",
 ]

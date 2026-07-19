@@ -163,3 +163,74 @@ def test_replay_rejects_unknown_position(tmp_path: Path) -> None:
     _record_fps_session(path, [10.0])
     with pytest.raises(RecordingError, match="position"):
         ReplayPlayer(load_recording(path), position="middle")
+
+
+# --------------------------------------------------------------------------- #
+#  Offline await_condition (§5.1)                                             #
+# --------------------------------------------------------------------------- #
+
+
+def test_await_immediate_success_no_scroll(tmp_path: Path) -> None:
+    """Условие уже достигнуто → мгновенный успех, лента не двигается."""
+    path = str(tmp_path / "r.jsonl")
+    _record_fps_session(path, [10.0, 20.0, 30.0])
+    player = ReplayPlayer(load_recording(path), position="end")  # playhead=3, fps=30
+    res = player.await_condition("state_path", {"path": "processes.cam.state.fps", "value": 30.0})
+    assert res["success"] is True
+    assert res["matched"]["source"] == "read-model"  # без прокрутки
+    assert res["replay"]["position"] == 3  # playhead не сдвинулся
+
+
+def test_await_scrolls_to_hit_and_stays(tmp_path: Path) -> None:
+    """Условие в будущем ленты → прокрутка до попадания, playhead остаётся на месте."""
+    path = str(tmp_path / "r.jsonl")
+    _record_fps_session(path, [10.0, 20.0, 30.0])
+    player = ReplayPlayer(load_recording(path), position="start")  # playhead=0
+    res = player.await_condition("state_path", {"path": "processes.cam.state.fps", "value": 20.0})
+    assert res["success"] is True
+    assert res["replay"]["position"] == 2  # прокручено до события со значением 20
+    assert res["replay"]["of"] == 3
+    # snapshot после await = состояние момента срабатывания (не финал 30).
+    snap = player.driver.telemetry_snapshot()
+    assert snap["metrics"]["processes.cam.state.fps"]["value"] == 20.0
+
+
+def test_await_metric_threshold_scroll(tmp_path: Path) -> None:
+    path = str(tmp_path / "r.jsonl")
+    _record_fps_session(path, [10.0, 20.0, 30.0])
+    player = ReplayPlayer(load_recording(path), position="start")
+    res = player.await_condition("metric_threshold", {"path": "processes.cam.state.fps", "op": ">=", "value": 25.0})
+    assert res["success"] is True
+    assert res["replay"]["position"] == 3  # попадание на значении 30
+
+
+def test_await_event_matches_by_plane(tmp_path: Path) -> None:
+    path = str(tmp_path / "r.jsonl")
+    _record_fps_session(path, [10.0, 20.0])
+    player = ReplayPlayer(load_recording(path), position="start")
+    res = player.await_condition("event_matches", {"plane": "state", "pattern": "processes.cam.state.fps"})
+    assert res["success"] is True
+    assert res["replay"]["position"] == 1  # первое же событие плоскости state
+
+
+def test_await_end_of_recording_diagnoses(tmp_path: Path) -> None:
+    """Конец ленты без попадания → end_of_recording-диагноз (не пустота)."""
+    path = str(tmp_path / "r.jsonl")
+    _record_fps_session(path, [10.0, 20.0, 30.0])
+    player = ReplayPlayer(load_recording(path), position="start")
+    res = player.await_condition("state_path", {"path": "processes.cam.state.fps", "value": 999.0})
+    assert res["success"] is False
+    assert res["timed_out"] is True
+    assert res["end_of_recording"] is True
+    assert res["replay"]["position"] == res["replay"]["of"] == 3
+    assert res["events_seen"] >= 3
+    assert res["last_seen"] is not None  # видел релевантные дельты пути
+
+
+def test_await_invalid_kind_learning_error(tmp_path: Path) -> None:
+    path = str(tmp_path / "r.jsonl")
+    _record_fps_session(path, [10.0])
+    player = ReplayPlayer(load_recording(path), position="start")
+    res = player.await_condition("nonsense", {"path": "x", "value": 1})
+    assert res["success"] is False
+    assert "kind" in res["error"]

@@ -151,18 +151,8 @@ def await_condition(
         "events_seen", "last_seen", "hint"?}`` — диагноз, не пустота. Невалидный
         вход → error-dict сразу (обучающий текст, без ожидания).
     """
-    if kind not in KINDS:
-        return _error(f"неизвестный kind {kind!r}: ожидаю один из {list(KINDS)}")
-    if not isinstance(spec, dict):
-        return _error(f"spec должен быть dict, получено {type(spec).__name__}")
-
-    if kind == "state_path":
-        setup = _setup_state_path(drv, spec)
-    elif kind == "metric_threshold":
-        setup = _setup_metric_threshold(drv, spec)
-    else:
-        setup = _setup_event_matches(spec)
-    if isinstance(setup, dict):  # ошибка валидации spec
+    setup = setup_condition(drv, kind, spec)
+    if isinstance(setup, dict):  # ошибка валидации kind/spec
         return setup
     waiter, initial_check = setup
 
@@ -204,6 +194,25 @@ def await_condition(
 
 
 # ---- Настройка предикатов по kind: (waiter, initial_check) либо error-dict ----
+
+
+def setup_condition(drv: Any, kind: str, spec: Optional[Dict[str, Any]]):
+    """Собрать ``(waiter, initial_check)`` по ``(kind, spec)`` либо вернуть error-dict.
+
+    Публичная точка переиспользования предикатов: живой :func:`await_condition`
+    и offline-реплей (``recorder.replay_await_condition``) строят один и тот же
+    предикат из одних настройщиков — без второго парсера условий. Валидация
+    ``kind``/``spec`` — обучающая ошибка (error-dict), не таймаут.
+    """
+    if kind not in KINDS:
+        return _error(f"неизвестный kind {kind!r}: ожидаю один из {list(KINDS)}")
+    if not isinstance(spec, dict):
+        return _error(f"spec должен быть dict, получено {type(spec).__name__}")
+    if kind == "state_path":
+        return _setup_state_path(drv, spec)
+    if kind == "metric_threshold":
+        return _setup_metric_threshold(drv, spec)
+    return _setup_event_matches(spec)
 
 
 def _setup_state_path(drv: Any, spec: Dict[str, Any]):
@@ -322,4 +331,4 @@ def _read_model_entry(drv: Any, path: str) -> tuple[bool, Any]:
     return (True, snap[path]) if path in snap else (False, None)
 
 
-__all__ = ["await_condition", "KINDS", "DEFAULT_AWAIT_TIMEOUT"]
+__all__ = ["await_condition", "setup_condition", "KINDS", "DEFAULT_AWAIT_TIMEOUT"]
