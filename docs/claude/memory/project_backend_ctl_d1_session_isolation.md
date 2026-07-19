@@ -24,6 +24,18 @@ sentrux Δ0 (7008→7008, циклов +0, 0 нарушений). Регресс
 
 **Формальное ревью (xhigh, 7 находок) — ВСЕ ЗАКРЫТЫ:** #1 (MED-HIGH зомби-подписка) — retarget subscriber на import (ключ реестра согласован → untail снимает); #3/#4 — курсоры ротируются только на `recovered` (не crashed/gave_up, убран thrashing); #5/#7 — hardening bind (чужой сокет не угоняет session); #6 — guard non-dict data. #2 (клиент шлёт dotted-subscriber безусловно) — принято как дизайн, вредное следствие #1 устранено.
 
-**Осталось по D.1:** merge (owner-gated) → **разблокирует D.2** (streamable-HTTP мультиклиент). Follow-up: `supervise`-действия, per-event numeric epoch, per-process точность гейтинга курсоров. Осиротевшие durable-подписки мёртвой сессии — out-of-scope, вход D.2.
+**D.1 СЛИТ в main** (2026-07-19, FF `a6f72baa..8d8c4f21`), формальное ревью в транскрипте (повторное high — 3 low, не блок).
+
+**D.2 (streamable-HTTP мультиклиент) ЗАКРЫТ и СЛИТ в main** (2026-07-19, `8d8c4f21..06525a26`; мини-план `plans/backend-ctl-d2-streamable-http.md`, 9 Steps). Дизайн-развилки §5 делегированы Fable, владелец «как лучше» → все 5 приняты. **BCTL-ADR-005.** Ключевое:
+- **Вариант B — per-session lifespan:** `build_server` принимает фабрику; stateful `StreamableHTTPSessionManager` зовёт `app.run()` на каждую MCP-сессию → lifespan создаёт свежий `SDKToolServer`/driver/сокет/`session`-uuid (мультиплекс поверх D.1a); свой словарь+reaper НЕ нужны (SDK держит map + idle-TTL). Весь код — в `mcp_server_sdk.py`, **бэкенд не тронут**.
+- `call_tool` → `anyio.to_thread` (блокирующая сессия не морозит остальные). stdio — дефолт, бит-в-бит; HTTP — opt-in `--http`/`--http-bind` (default `127.0.0.1:8901`), idle-TTL env, localhost-security.
+- **Долг D.1 §12 закрыт:** `DriverSession.close_graceful` (unwatch → `driver.unsubscribe_all` → close, sync) на выходе lifespan снимает осиротевшие подписки.
+- **Инвариант §5.4:** HTTP требует backend `session_isolation=ON` — fail-fast probe через `introspect.router_stats` (`_extract_backend_ctl_isolation`), OFF → громкий отказ. Safety per-server.
+- **Пин SDK не поднимали:** `StreamableHTTPSessionManager` есть в установленном `mcp` (верифицировано интроспекцией).
+- Тесты: 41 SDK-пин + live-смоук (реальный uvicorn + 2 `streamablehttp_client`, ПРОШЁЛ). Формальное ревью high — 4 low; #1 (кривой HTTP-конфиг → чистая ошибка) + #2 (текст probe) закрыты; #3 (гонка close_graceful, защищена A.3-локами) / #4 (instance-mode не multiplex-safe) — follow-up.
+
+**Что дальше по родителю `backend-ctl-debug-console.md`:** D.3 (контракт trace-id — ждёт внешнего плана Ф7 G.6), D.4 (flight recorder), D.5 (регистры commit-confirmed + snapshot/restore), E.1 (аудит-журнал), E.2 (клиентская валидация send_command), E.3 (response_format/limits), F.1 (live-тесты Windows + SDK-смоук → удаление рукописного `mcp_server.py` + удаление `events()`-обёртки). Плюс из `backend-ctl-framework-module.md`: переезд в `tooling/backend_ctl/` (ждёт codemod layer-grouping).
+
+**Follow-up D.2 (не acceptance):** бэкенд-GC осиротевших регистраций при `kill -9` сервера; live-прогон против реального бэкенда с `session_isolation=ON` (obs-tail vs register-crank); deprecation `streamablehttp_client`→`streamable_http_client` при подъёме пина SDK.
 
 Layer для коммитов backend_ctl — `mixed` (см. [[feedback-backend-ctl-layer-mixed]]). Тестировать бэкенд через driver, не qt-mcp ([[feedback-backend-ctl-for-agents]]).
