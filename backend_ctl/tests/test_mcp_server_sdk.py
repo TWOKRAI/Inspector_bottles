@@ -316,6 +316,39 @@ class TestPerSessionLifespan:
         assert seen.get("thread") is not None
         assert seen["thread"] != loop_thread
 
+    @pytest.mark.asyncio
+    async def test_two_sessions_have_isolated_drivers(self) -> None:
+        """D.2 Step 7: две MCP-сессии → разные driver-объекты с изолированными реестрами
+        подписок (мультиплекс поверх D.1a: каждая сессия = свой driver → свой сокет/session).
+        Заодно end-to-end проверяет cleanup Step 5 через реальный lifespan-выход."""
+        from mcp.shared.memory import create_connected_server_and_client_session
+
+        from backend_ctl.driver import BackendDriver
+        from backend_ctl.mcp_server_sdk import build_server
+
+        drivers: List[BackendDriver] = []
+
+        def factory() -> SDKToolServer:
+            drv = BackendDriver("127.0.0.1", 59999)  # не подключаем — стабим send_command
+            drv.send_command = lambda *a, **k: {"success": True}  # type: ignore[method-assign]
+            drivers.append(drv)
+            return SDKToolServer(driver_factory=lambda: drv, log=lambda m: None)
+
+        server = build_server(factory)
+        # сессия A: подписка регистрирует durable-намерение в СВОЁМ driver'е
+        async with create_connected_server_and_client_session(server) as client:
+            assert (await client.call_tool("log_tail", {"process": "cam"})).isError is False
+            assert len(drivers[0]._subscriptions.export()) >= 1  # намерение в driver'е сессии A
+        # выход сессии A → close_graceful → unsubscribe_all снял намерение (долг D.1 §12)
+        assert drivers[0]._subscriptions.export() == []
+
+        # сессия B: свежий driver — его реестр пуст, подписка сессии A не протекла
+        async with create_connected_server_and_client_session(server) as client:
+            assert (await client.call_tool("get_status", {"process": "cam"})).isError is False
+
+        assert len(drivers) == 2 and drivers[0] is not drivers[1]
+        assert drivers[1]._subscriptions.export() == []
+
 
 class TestHttpRunner:
     """D.2 Step 4: HTTP-раннер. Полный сетевой прогон — live-смоук (Step 8, маркер live);
