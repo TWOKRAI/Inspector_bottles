@@ -163,6 +163,25 @@ class TestAudit:
             log.record("set_register", "write", {"i": i}, result={"success": True})
         assert [e["args"]["i"] for e in log.records()] == [2, 3, 4]
 
+    def test_records_limit_zero_returns_empty(self) -> None:
+        """limit=0 → пусто (регресс среза items[-0:] == весь список)."""
+        log = AuditLog(path="/dev/null")
+        for i in range(3):
+            log.record("set_register", "write", {"i": i}, result={"success": True})
+        assert log.records(0) == []
+        assert len(log.records(2)) == 2
+
+    def test_session_log_zero_limit_empty(self, session_factory) -> None:
+        session, _ = session_factory()
+        dispatch_tool(session, "set_register", {"process": "P", "register": "r", "field": "f", "value": 1})
+        assert dispatch_tool(session, "session_log", {"limit": 0})["count"] == 0
+
+    def test_session_log_bad_limit_learning_error(self, session_factory) -> None:
+        session, _ = session_factory()
+        res = dispatch_tool(session, "session_log", {"limit": "abc"})
+        assert res["success"] is False
+        assert "limit" in res["error"]
+
 
 # --------------------------------------------------------------------------- #
 #  E.2 — клиентская валидация send_command                                    #
@@ -292,3 +311,16 @@ class TestResponseLimits:
         res = dispatch_tool(session, "system_overview", {})
         assert res["_truncated"] is True
         assert "processes" in res["keys"]
+
+    def test_truncation_preserves_small_sections(self, session_factory) -> None:
+        """Крупная секция сворачивается в форму, но ценная малая (anomalies) доезжает целиком."""
+        session, drv = session_factory()
+        drv.system_overview = lambda **k: {  # type: ignore[method-assign]
+            "success": True,
+            "processes": {f"p{i}": {"blob": "y" * 80} for i in range(400)},  # крупная → форма
+            "anomalies": {"router_dropped": 5, "fps_zero_while_running": ["cam"]},  # малая → verbatim
+        }
+        res = dispatch_tool(session, "system_overview", {})
+        assert res["_truncated"] is True
+        assert res["keys"]["processes"] == {"type": "dict", "keys": 400}
+        assert res["keys"]["anomalies"] == {"router_dropped": 5, "fps_zero_while_running": ["cam"]}

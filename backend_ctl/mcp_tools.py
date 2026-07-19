@@ -1375,12 +1375,35 @@ def _shape(value: Any) -> Any:
     return value
 
 
-def _cap_heavy(name: str, result: Any, args: Dict[str, Any]) -> Any:
-    """E.3: усечь тяжёлый ответ до карты формы, если он превышает потолок и не запрошен full.
+def _cap_dict(result: Dict[str, Any], budget: int) -> Dict[str, Any]:
+    """Карта ключей: малые значения сохраняются verbatim в пределах бюджета, крупные — форма.
 
-    Не тяжёлый инструмент / ``full=true`` / ответ в пределах потолка → как есть. Иначе
-    карта верхнего уровня (ключи→форма) + подсказка запросить полный объём/сузить путь.
-    Так агент видит СТРУКТУРУ (и может сузить path/передать full=true), не глотая 50К токенов.
+    Крупная секция (per-process detail) сворачивается в форму, но ценные малые (anomalies,
+    счётчики) доезжают целиком — усечение не прячет то, ради чего инструмент зовут. Бюджет
+    кумулятивный → общий размер ограничен даже при россыпи малых ключей.
+    """
+    kept: Dict[str, Any] = {}
+    remaining = budget
+    for k, v in result.items():
+        try:
+            vsize = len(json.dumps(v, ensure_ascii=False, default=str))
+        except Exception:  # noqa: BLE001 — несериализуемое → сворачиваем в форму
+            vsize = remaining + 1
+        if 0 <= vsize <= remaining:
+            kept[k] = v
+            remaining -= vsize
+        else:
+            kept[k] = _shape(v)
+    return kept
+
+
+def _cap_heavy(name: str, result: Any, args: Dict[str, Any]) -> Any:
+    """E.3: усечь тяжёлый ответ, если он превышает потолок и не запрошен ``full``.
+
+    Не тяжёлый инструмент / ``full=true`` / ответ в пределах потолка → как есть. Иначе для
+    dict — карта ключей с сохранением малых секций (см. :func:`_cap_dict`) + подсказка
+    сузить path / запросить полный объём. Агент видит СТРУКТУРУ и ценные малые данные,
+    не глотая 50К токенов.
     """
     if name not in _HEAVY_TOOLS or args.get("full"):
         return result
@@ -1396,7 +1419,7 @@ def _cap_heavy(name: str, result: Any, args: Dict[str, Any]) -> Any:
             "_truncated": True,
             "_bytes": size,
             "_hint": hint + " (или сузь path/limit).",
-            "keys": {k: _shape(v) for k, v in result.items()},
+            "keys": _cap_dict(result, RESPONSE_BYTE_CAP),
         }
     if isinstance(result, list):
         return {"_truncated": True, "_bytes": size, "_hint": hint + ".", "len": len(result), "head": result[:20]}
@@ -1450,5 +1473,12 @@ def dispatch_tool(session: Any, name: str, arguments: Optional[Dict[str, Any]]) 
 
 def _session_log(session: Any, args: Dict[str, Any]) -> Any:
     """Хвост аудит-журнала мутаций ЭТОЙ сессии (E.1). ``limit`` — сколько последних."""
-    limit = args.get("limit")
-    return session.read_audit(int(limit) if limit is not None else None)
+    raw = args.get("limit")
+    if raw is None:
+        return session.read_audit(None)
+    try:
+        limit = int(raw)
+    except (TypeError, ValueError):
+        # Обучающая ошибка, как record_* через _int_arg_or_error — не сырой ValueError.
+        return {"success": False, "error": f"limit должно быть целым числом, получено {raw!r}"}
+    return session.read_audit(limit)

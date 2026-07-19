@@ -18,9 +18,16 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional
+
+#: Сериализует дозапись в durable-файл в пределах процесса: несколько сессий D.2
+#: (HTTP-мультиклиент) пишут в ОДИН дефолтный файл — без блокировки строки >PIPE_BUF
+#: интерливятся и бьют JSONL. Кросс-процессную гонку не покрывает (обычно record-dir
+#: свой на бэкенд), но реальный кейс «много сессий в одном сервере» — да.
+_FILE_LOCK = threading.Lock()
 
 #: Переменная окружения с явным путём файла журнала. Опущено → путь в каталоге записей.
 AUDIT_PATH_ENV = "BACKEND_CTL_AUDIT"
@@ -123,10 +130,13 @@ class AuditLog:
         return entry
 
     def records(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Последние записи ЭТОЙ сессии (кольцо), новейшие в конце. ``limit`` — хвост."""
+        """Последние записи ЭТОЙ сессии (кольцо), новейшие в конце. ``limit`` — хвост.
+
+        ``limit=0`` → пустой список (а не весь журнал: срез ``items[-0:]`` == ``items[0:]``).
+        """
         items = list(self._ring)
         if limit is not None and limit >= 0:
-            items = items[-limit:]
+            items = items[-limit:] if limit else []
         return items
 
     def _append_file(self, entry: Dict[str, Any]) -> None:
@@ -134,7 +144,9 @@ class AuditLog:
         try:
             os.makedirs(os.path.dirname(self._path) or ".", exist_ok=True)
             line = json.dumps(entry, ensure_ascii=False, default=str)
-            with open(self._path, "a", encoding="utf-8") as fh:
+            # Лок сериализует открытие+запись строки между сессиями одного процесса —
+            # иначе конкурентные append'ы в общий файл интерливятся (строка > PIPE_BUF).
+            with _FILE_LOCK, open(self._path, "a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
         except Exception:  # noqa: BLE001 — журнал не должен ронять инструмент
             pass
