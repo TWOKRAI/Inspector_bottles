@@ -87,6 +87,25 @@ class TestHappyPath:
         assert resp["result"] == {"success": True, "result": {"ok": 1}}
 
 
+class TestVersionSkewTolerance:
+    """Пин ДО session-isolation (D.1, §10): неизвестное top-level поле в команде
+    не ломает обработку. Новее-сервера driver кладёт поля, которых сервер не знает
+    (напр. будущий `session`) — request() обязан отработать штатно, не упасть.
+    После ввода изоляции адаптер `pop`'нет ТОЛЬКО `session`; любое иное лишнее
+    поле по-прежнему доезжает до request — этот пин это и стережёт.
+    """
+
+    def test_unknown_top_level_field_passes_through_to_request(self) -> None:
+        router = FakeRouter(request_result={"success": True})
+        adapter = SocketBridgeAdapter(router, "backend_ctl")
+        m = _msg(future_field="skew")
+        adapter.on_inbound(m)
+        assert router.request_calls[0].get("future_field") == "skew"
+        resp = router.sent[0]
+        assert resp["type"] == "response"
+        assert resp["result"] == {"success": True}
+
+
 class TestErrorHandling:
     def test_request_error_becomes_error_response(self) -> None:
         router = FakeRouter(request_raises=True)

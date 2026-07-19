@@ -37,6 +37,16 @@ def _connect(ch: SocketChannel, timeout: float = 2.0) -> socket.socket:
     return c
 
 
+def _connect_nth(ch: SocketChannel, n: int, timeout: float = 2.0) -> socket.socket:
+    """Подключить очередного клиента и дождаться, пока сервер учтёт всех ``n``."""
+    c = socket.create_connection((ch.host, ch.port), timeout=timeout)
+    c.settimeout(timeout)
+    deadline = time.time() + timeout
+    while ch.get_info()["clients"] < n and time.time() < deadline:
+        time.sleep(0.01)
+    return c
+
+
 def _wait(predicate, timeout: float = 2.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -193,6 +203,30 @@ class TestOutbound:
         channel.send({"a": 1})
         assert channel.get_info()["tx"] >= 1
         c.close()
+
+
+# --- broadcast characterization (D.1: пин ДО session-isolation) ---
+
+
+class TestBroadcastCharacterization:
+    """Пин текущего fan-out ПЕРЕД вводом session-isolation (D.1, §10).
+
+    Гарантия back-compat: после ввода флага `session_isolation` при default-off
+    (и для сообщений без `session`) `send()` обязан остаться broadcast'ом на всех
+    подключённых клиентов. Существующие OUTBOUND-тесты используют ОДИН сокет —
+    этот фиксирует именно рассылку на N>1 и счётчик `clients` в ответе.
+    """
+
+    def test_send_broadcasts_to_all_connected_clients(self, channel: SocketChannel) -> None:
+        c1 = _connect_nth(channel, 1)
+        c2 = _connect_nth(channel, 2)
+        res = channel.send({"type": "event", "command": "state.changed", "data": {"v": 1}})
+        assert res["status"] == "success"
+        assert res["clients"] == 2  # fan-out на обоих
+        assert _recv_line(c1)["data"] == {"v": 1}
+        assert _recv_line(c2)["data"] == {"v": 1}
+        c1.close()
+        c2.close()
 
 
 # --- lifecycle ---
