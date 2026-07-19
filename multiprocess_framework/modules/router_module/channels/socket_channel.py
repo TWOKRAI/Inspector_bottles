@@ -41,6 +41,8 @@ class SocketChannel(MessageChannel):
         on_inbound: колбэк(msg: dict) для каждого прочитанного сообщения. None → сообщения
             читаются и отбрасываются (канал работает, но никуда не передаёт).
         log_warning/log_error: инъекция логирования (или от RouterManager при регистрации).
+        session_isolation: True → адресная доставка по session (D.1, Вариант A);
+            False (default) → broadcast всем подключённым (back-compat).
     """
 
     def __init__(
@@ -51,12 +53,17 @@ class SocketChannel(MessageChannel):
         on_inbound: Optional[Callable[[Dict[str, Any]], None]] = None,
         log_warning: Optional[Callable[[str], None]] = None,
         log_error: Optional[Callable[[str], None]] = None,
+        session_isolation: bool = False,
     ) -> None:
         super().__init__(log_warning=log_warning, log_error=log_error)
         self._name = name
         self._host = host
         self._port = port
         self._on_inbound = on_inbound
+        # D.1 (Вариант A): при True send() адресует одному соединению по session,
+        # а _handle_line ведёт маппинг session→сокет. При False — прежний broadcast
+        # (default, back-compat). Гейт задаёт endpoint по config/env.
+        self._session_isolation = session_isolation
 
         self._server_sock: Optional[socket.socket] = None
         self._accept_thread: Optional[threading.Thread] = None
@@ -65,6 +72,9 @@ class SocketChannel(MessageChannel):
 
         # Клиентские соединения + лок на запись (fan-out ответов всем подключённым).
         self._clients: List[socket.socket] = []
+        # Маппинг session→сокет для адресной доставки (D.1). Живёт под _clients_lock
+        # (согласованность со списком клиентов). Пуст при session_isolation=False.
+        self._sessions: Dict[str, socket.socket] = {}
         self._clients_lock = threading.Lock()
         self._write_lock = threading.Lock()
 
@@ -168,6 +178,16 @@ class SocketChannel(MessageChannel):
             self._log_error(f"[SocketChannel:{self._name}] json encode failed: {exc}")
             return {"status": "error", "reason": str(exc), "channel": self._name}
 
+        # Session-isolation (D.1, Вариант A): адресуем ОДНОМУ соединению, если
+        # сообщение несёт session — поле `session` (reply, эхнутое адаптером) ИЛИ
+        # dotted-суффикс subscriber (push: `_address=[name, sid]`, положен мостом
+        # Ф1.1b router'а). Без session-адреса — broadcast (back-compat). Гейт:
+        # при OFF ветка мертва, поведение бит-в-бит прежним broadcast'ом.
+        if self._session_isolation:
+            sid = self._resolve_session(message)
+            if sid is not None:
+                return self._send_to_session(sid, line)
+
         with self._clients_lock:
             clients = list(self._clients)
         if not clients:
@@ -189,6 +209,39 @@ class SocketChannel(MessageChannel):
             return {"status": "error", "reason": "all clients dead", "channel": self._name}
         self._tx += sent
         return {"status": "success", "channel": self._name, "clients": sent}
+
+    def _resolve_session(self, message: Dict[str, Any]) -> Optional[str]:
+        """Извлечь session-адрес из сообщения. Порядок: явное поле ``session``
+        (reply, эхнутое адаптером) → хвост ``_address=[name, sid, …]`` (push через
+        мост Ф1.1b). ``None`` → адреса нет, вызывающий уходит в broadcast."""
+        sid = message.get("session")
+        if sid:
+            return str(sid)
+        addr = message.get("_address")
+        if isinstance(addr, list) and len(addr) > 1 and addr[0] == self._name:
+            return str(addr[1])
+        return None
+
+    def _send_to_session(self, sid: str, line: bytes) -> Dict[str, Any]:
+        """Адресная отправка одному соединению по ``sid``.
+
+        Неизвестный sid → error, **НЕ** fallback в broadcast (иначе изоляция
+        дырявая на гонке disconnect: пуш мёртвой сессии протёк бы всем). Мёртвый
+        сокет → drop + error (тот же путь, что broadcast при сбое sendall).
+        """
+        with self._clients_lock:
+            sock = self._sessions.get(sid)
+        if sock is None:
+            return {"status": "error", "reason": "session not connected", "channel": self._name, "session": sid}
+        try:
+            with self._write_lock:
+                sock.sendall(line)
+        except OSError as exc:
+            self._log_warning(f"[SocketChannel:{self._name}] send to session {sid} failed: {exc}")
+            self._drop_clients([sock])
+            return {"status": "error", "reason": "session dead", "channel": self._name, "session": sid}
+        self._tx += 1
+        return {"status": "success", "channel": self._name, "clients": 1, "session": sid}
 
     # ---- IMessageChannel: получение ----
 
@@ -241,11 +294,16 @@ class SocketChannel(MessageChannel):
                 raw, buf = buf.split(b"\n", 1)
                 if not raw.strip():
                     continue
-                self._handle_line(raw)
+                self._handle_line(raw, client)
         self._drop_clients([client])
 
-    def _handle_line(self, raw: bytes) -> None:
-        """Распарсить одну строку wire и вызвать on_inbound (изоляция ошибок)."""
+    def _handle_line(self, raw: bytes, client: socket.socket) -> None:
+        """Распарсить одну строку wire и вызвать on_inbound (изоляция ошибок).
+
+        При session-isolation ПЕРЕД on_inbound привязывает session→сокет: peek поля
+        ``session`` (адаптер снимет его позже своим pop). Bind — единственная точка;
+        self-heal на реконнекте (первое же сообщение переустановит маппинг).
+        """
         try:
             msg = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
@@ -255,6 +313,11 @@ class SocketChannel(MessageChannel):
             self._log_warning(f"[SocketChannel:{self._name}] non-dict message skipped")
             return
         self._rx += 1
+        if self._session_isolation:
+            sid = msg.get("session")
+            if sid:
+                with self._clients_lock:
+                    self._sessions[str(sid)] = client
         if self._on_inbound is None:
             return
         try:
@@ -263,11 +326,19 @@ class SocketChannel(MessageChannel):
             self._log_error(f"[SocketChannel:{self._name}] on_inbound error: {exc}")
 
     def _drop_clients(self, clients: List[socket.socket]) -> None:
-        """Убрать мёртвые соединения из списка и закрыть их."""
+        """Убрать мёртвые соединения из списка и закрыть их.
+
+        Заодно снимает session-маппинг — **единственная точка unbind**: все пути
+        смерти сокета (read-loop exit, dead-on-send, close) сходятся сюда.
+        """
+        drop_ids = {id(c) for c in clients}
         with self._clients_lock:
             for c in clients:
                 if c in self._clients:
                     self._clients.remove(c)
+            if self._sessions:
+                for sid in [s for s, sock in self._sessions.items() if id(sock) in drop_ids]:
+                    del self._sessions[sid]
         for c in clients:
             try:
                 c.close()
@@ -279,6 +350,7 @@ class SocketChannel(MessageChannel):
     def get_info(self) -> Dict[str, Any]:
         with self._clients_lock:
             clients = len(self._clients)
+            sessions = len(self._sessions)
         return {
             "name": self._name,
             "type": self.channel_type,
@@ -287,6 +359,7 @@ class SocketChannel(MessageChannel):
             "host": self._host,
             "port": self._port,
             "clients": clients,
+            "sessions": sessions,
             "rx": self._rx,
             "tx": self._tx,
         }

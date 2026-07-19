@@ -56,6 +56,21 @@ def _wait(predicate, timeout: float = 2.0) -> bool:
     return False
 
 
+def _register_session(ch: SocketChannel, c: socket.socket, sid: str, expect: int, timeout: float = 2.0) -> None:
+    """Отправить сообщение с ``session`` и дождаться привязки session→сокет (D.1)."""
+    c.sendall((json.dumps({"session": sid, "type": "command", "command": "ping"}) + "\n").encode("utf-8"))
+    deadline = time.time() + timeout
+    while ch.get_info()["sessions"] < expect and time.time() < deadline:
+        time.sleep(0.01)
+
+
+def _assert_no_data(sock: socket.socket, timeout: float = 0.3) -> None:
+    """Убедиться, что сокету НИЧЕГО не адресовано (recv упирается в таймаут)."""
+    sock.settimeout(timeout)
+    with pytest.raises(socket.timeout):
+        sock.recv(4096)
+
+
 def _recv_line(sock: socket.socket, timeout: float = 2.0) -> Dict[str, Any]:
     """Прочитать одну newline-JSON строку из сокета."""
     sock.settimeout(timeout)
@@ -227,6 +242,110 @@ class TestBroadcastCharacterization:
         assert _recv_line(c2)["data"] == {"v": 1}
         c1.close()
         c2.close()
+
+
+# --- session-isolation (D.1a, Вариант A: флаг ON) ---
+
+
+@pytest.fixture
+def iso_channel(inbound: List[Dict[str, Any]]):
+    ch = SocketChannel("backend_ctl", host="127.0.0.1", port=0, on_inbound=inbound.append, session_isolation=True)
+    assert ch.start() is True
+    yield ch
+    ch.close()
+
+
+class TestSessionIsolation:
+    """Ядро D.1a: при session_isolation два клиента на одном порту НЕ видят
+    reply/push друг друга. Адрес — поле `session` (reply) или `_address` (push).
+    """
+
+    def test_reply_addressed_to_one_session(self, iso_channel: SocketChannel) -> None:
+        a = _connect_nth(iso_channel, 1)
+        b = _connect_nth(iso_channel, 2)
+        _register_session(iso_channel, a, "sid-a", 1)
+        _register_session(iso_channel, b, "sid-b", 2)
+        res = iso_channel.send({"type": "response", "session": "sid-a", "request_id": "r1", "result": {"ok": 1}})
+        assert res["status"] == "success"
+        assert res["clients"] == 1
+        assert _recv_line(a)["request_id"] == "r1"
+        _assert_no_data(b)  # чужой reply НЕ протёк
+        a.close()
+        b.close()
+
+    def test_push_addressed_via_address_field(self, iso_channel: SocketChannel) -> None:
+        # Push edет как targets=["backend_ctl.<sid>"] → router кладёт _address=[name, sid].
+        a = _connect_nth(iso_channel, 1)
+        b = _connect_nth(iso_channel, 2)
+        _register_session(iso_channel, a, "sid-a", 1)
+        _register_session(iso_channel, b, "sid-b", 2)
+        res = iso_channel.send(
+            {"type": "event", "command": "state.changed", "_address": ["backend_ctl", "sid-b"], "data": {"v": 9}}
+        )
+        assert res["status"] == "success"
+        assert res["clients"] == 1
+        assert _recv_line(b)["data"] == {"v": 9}
+        _assert_no_data(a)  # чужой push НЕ протёк
+        a.close()
+        b.close()
+
+    def test_unknown_session_errors_without_broadcast(self, iso_channel: SocketChannel) -> None:
+        # Инвариант §9: неизвестный sid → error, НЕ тихий fallback в broadcast.
+        a = _connect_nth(iso_channel, 1)
+        b = _connect_nth(iso_channel, 2)
+        _register_session(iso_channel, a, "sid-a", 1)
+        _register_session(iso_channel, b, "sid-b", 2)
+        res = iso_channel.send({"type": "response", "session": "ghost", "result": {}})
+        assert res["status"] == "error"
+        assert res["reason"] == "session not connected"
+        _assert_no_data(a)
+        _assert_no_data(b)
+        a.close()
+        b.close()
+
+    def test_unaddressed_message_still_broadcasts(self, iso_channel: SocketChannel) -> None:
+        # Сообщение без session/_address — broadcast даже при isolation ON (back-compat).
+        a = _connect_nth(iso_channel, 1)
+        b = _connect_nth(iso_channel, 2)
+        _register_session(iso_channel, a, "sid-a", 1)
+        _register_session(iso_channel, b, "sid-b", 2)
+        res = iso_channel.send({"type": "event", "command": "sys", "data": {"all": True}})
+        assert res["status"] == "success"
+        assert res["clients"] == 2
+        assert _recv_line(a)["data"] == {"all": True}
+        assert _recv_line(b)["data"] == {"all": True}
+        a.close()
+        b.close()
+
+    def test_session_unbound_on_disconnect(self, iso_channel: SocketChannel) -> None:
+        a = _connect_nth(iso_channel, 1)
+        _register_session(iso_channel, a, "sid-a", 1)
+        assert iso_channel.get_info()["sessions"] == 1
+        a.close()
+        assert _wait(lambda: iso_channel.get_info()["sessions"] == 0)  # unbind в _drop_clients
+        res = iso_channel.send({"type": "response", "session": "sid-a", "result": {}})
+        assert res["status"] == "error"
+        assert res["reason"] == "session not connected"
+
+    def test_reconnect_rebinds_session(self, iso_channel: SocketChannel) -> None:
+        # Реконнект под тем же sid — маппинг self-heal'ится первым же сообщением.
+        a1 = _connect_nth(iso_channel, 1)
+        _register_session(iso_channel, a1, "sid-a", 1)
+        a1.close()
+        assert _wait(lambda: iso_channel.get_info()["sessions"] == 0)
+        a2 = _connect_nth(iso_channel, 1)
+        _register_session(iso_channel, a2, "sid-a", 1)
+        res = iso_channel.send({"type": "response", "session": "sid-a", "result": {"ok": 2}})
+        assert res["status"] == "success"
+        assert _recv_line(a2)["result"] == {"ok": 2}
+        a2.close()
+
+    def test_get_info_reports_sessions(self, iso_channel: SocketChannel) -> None:
+        assert iso_channel.get_info()["sessions"] == 0
+        c = _connect_nth(iso_channel, 1)
+        _register_session(iso_channel, c, "sid-x", 1)
+        assert iso_channel.get_info()["sessions"] == 1
+        c.close()
 
 
 # --- lifecycle ---
