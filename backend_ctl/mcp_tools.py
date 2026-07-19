@@ -156,6 +156,12 @@ def _events_page(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.events_page(args.get("plane"), cursor=args.get("cursor"), limit=args.get("limit"))
 
 
+def _await_condition(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    # Жёсткий cap таймаута: блокирующий tools/call не должен подвешивать сервер.
+    timeout = min(float(args.get("timeout", 10.0) or 10.0), MAX_EVENTS_TIMEOUT)
+    return drv.await_condition(args["kind"], args.get("spec"), timeout=timeout)
+
+
 def _log_tail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.log_tail(args["process"], level=args.get("level", "ERROR"), **_kw_timeout(args))
 
@@ -465,6 +471,32 @@ TOOLS: List[ToolSpec] = [
         _events_page,
     ),
     ToolSpec(
+        "await_condition",
+        "Серверное ожидание условия одним вызовом вместо поллинга (B.2): kind='state_path' "
+        "(spec={path, value} — точное значение пути в локальном read-model), 'event_matches' "
+        "(spec={plane, pattern} — glob по command/path события плоскости B.1), 'metric_threshold' "
+        "(spec={path, op: >|>=|<|<=|==|!=, value} — метрика пересекла порог). Блокирует до timeout "
+        "(сек, максимум 30). Таймаут возвращает диагноз (waited/last_seen/events_seen), не пустоту. "
+        "Требует активной подписки (watch_like_gui/state_subscribe) — иначе дельты не приходят.",
+        _obj(
+            {
+                "kind": {
+                    "type": "string",
+                    "enum": ["state_path", "event_matches", "metric_threshold"],
+                    "description": "Вид условия.",
+                },
+                "spec": {
+                    "type": "object",
+                    "description": "Параметры условия (по kind, см. описание инструмента).",
+                    "additionalProperties": True,
+                },
+                "timeout": {"type": "number", "description": "Максимум ожидания, сек (по умолчанию 10, cap 30)."},
+            },
+            ["kind", "spec"],
+        ),
+        _await_condition,
+    ),
+    ToolSpec(
         "log_tail",
         "Подписаться на LogRecord'ы процесса с level ≥ заданного: записи едут push'ем "
         "в событийный канал (command='log.record') — читать инструментом events.",
@@ -765,6 +797,7 @@ TOOL_SAFETY: Dict[str, str] = {
     "state_get_subtree": SAFETY_READ,
     "events": SAFETY_READ,
     "events_page": SAFETY_READ,
+    "await_condition": SAFETY_READ,
     "telemetry_snapshot": SAFETY_READ,
     "telemetry_history": SAFETY_READ,
     "ui_tap_ping": SAFETY_READ,

@@ -103,7 +103,7 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 
 ### Task B.1 — Cursor list-watch по плоскостям (фундамент, гейтит мультиклиент)
 **Level:** Senior (Opus) | **Layer:** framework
-**Status (2026-07-19):** ✅ ЗАВЕРШЕНО (`76e5ed4a`). `EventHub` (композиция, как WatchController) в `events.py`: arrival-кольцо оригиналов + 7 плоскостных колец (`state/logs/errors/stats/telemetry/ui` + `other` — ничто не теряется молча) с плотным per-plane seq → точная арифметика `dropped`; курсор `plane:seq@gen` (generation-токен даёт явный `reset_required` вместо тихого чтения не с того места после реконнекта; полный re-list — Phase D); `telemetry` — per-delta зеркало ingest-потока read-model (вход для B.2 `metric_threshold`); смешанный observability-батч расщепляется по `kind` только в плоскостных view (arrival не тронут → `events()` бит-в-бит). `events()` — обёртка над hub (внутренний drain-курсор), помечена устаревшей; `events_stats()` — вход для overview B.3. MCP: `events_page` (SAFETY_READ).
+**Status (2026-07-19):** ✅ ЗАВЕРШЕНО (`a571f475`; после rebase на main; фиксы 8-углового ревью — `db436193`). `EventHub` (композиция, как WatchController) в `events.py`: arrival-кольцо оригиналов + 7 плоскостных колец (`state/logs/errors/stats/telemetry/ui` + `other` — ничто не теряется молча) с плотным per-plane seq → точная арифметика `dropped`; курсор `plane:seq@gen` (generation-токен даёт явный `reset_required` вместо тихого чтения не с того места после реконнекта; полный re-list — Phase D); `telemetry` — per-delta зеркало ingest-потока read-model (вход для B.2 `metric_threshold`); смешанный observability-батч расщепляется по `kind` только в плоскостных view (arrival не тронут → `events()` бит-в-бит). `events()` — обёртка над hub (внутренний drain-курсор), помечена устаревшей; `events_stats()` — вход для overview B.3. MCP: `events_page` (SAFETY_READ).
 **Goal:** недеструктивное, повторяемое чтение событий с курсором и видимой потерей.
 **Проблема:** `events()` деструктивно дренирует единую `deque(1000)`; два потребителя (или два tools/call подряд) крадут события друг у друга; `observability_records(events=None)` конфликтует с `events()`; переполнение вытесняет молча — агент не знает, что ослеп (тот же класс «тихой слепоты», что худший баг Phase 0, на уровень выше).
 **Files:** `backend_ctl/driver.py` (EventHub), `backend_ctl/mcp_tools.py`, tests.
@@ -118,13 +118,14 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 
 ### Task B.2 — await_condition (серверное ожидание вместо поллинга)
 **Level:** Middle+ (Sonnet) | **Layer:** tools
+**Status (2026-07-19):** ✅ ЗАВЕРШЕНО. Новый соседний модуль `conditions.py` (driver — тонкий делегат, дисциплина C.1): временный подписчик событийного канала + `threading.Event` (ноль поллинга), race-free порядок «подписка → начальная проверка read-model → ожидание». `event_matches` использует ТОТ ЖЕ `_classify`, что кольца B.1 (нет второго классификатора); `__MISSING__` не участвует в сравнениях; отсутствие узла ≠ значение `None` (вскрыто тестом). Таймаут-диагноз: `waited`/`last_seen`/`events_seen` + hint «активна ли подписка» при нуле дельт. MCP `await_condition` (SAFETY_READ, cap 30с).
 **Goal:** один вызов «сделал → дождался → проверил» вместо 3–10 round-trip'ов.
-**Files:** `backend_ctl/driver.py`, `backend_ctl/mcp_tools.py`, tests.
+**Files:** `backend_ctl/conditions.py` (новый), `backend_ctl/driver.py`, `backend_ctl/mcp_tools.py`, tests.
 **Steps:**
 1. `await_condition(kind, spec, timeout)`: `state_path == value` (поверх telemetry read-model / state), `event_matches(plane, pattern)` (поверх B.1-плоскостей), `metric_threshold(path, op, value)`. Блокировка на сервере с жёстким cap таймаута.
 2. Возврат: сработавшее событие/значение ИЛИ таймаут-диагноз (что ждали, что видели последним).
 **Acceptance:**
-- [ ] unit: синтетический поток дельт → условие срабатывает на нужной; таймаут возвращает диагноз, не пустоту
+- [x] unit: синтетический поток дельт → условие срабатывает на нужной; таймаут возвращает диагноз, не пустоту (12 тестов `test_await_condition.py`; 260 unit зелёные)
 **Аналог:** `kubectl wait`, Playwright waitFor, свой же `qt_wait_for`.
 
 ### Task B.3 — system_overview («один вызов = вся картина» + anomalies)

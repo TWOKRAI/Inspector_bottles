@@ -48,6 +48,7 @@ from .protocol import (  # noqa: F401 — re-export для back-compat шима
     _leaf_result,
     unwrap,
 )
+from .conditions import DEFAULT_AWAIT_TIMEOUT, await_condition as _await_condition
 from .subscriptions import _SubscriptionRegistry
 from .events import (  # noqa: F401 — EventCallback/OBSERVABILITY_RECORD_COMMAND re-export
     _EventChannelMixin,
@@ -703,6 +704,25 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             "count": len(points),
             "points": [[ts, val] for ts, val in points],
         }
+
+    # ---- await_condition (B.2): серверное ожидание вместо поллинга ----
+
+    def await_condition(
+        self,
+        kind: str,
+        spec: Optional[Dict[str, Any]] = None,
+        *,
+        timeout: float = DEFAULT_AWAIT_TIMEOUT,
+    ) -> Dict[str, Any]:
+        """Дождаться условия на живом потоке событий (делегат :mod:`.conditions`).
+
+        Один вызов «сделал → дождался → проверил» вместо серии поллингов:
+        ``state_path`` (значение пути в read-model), ``event_matches`` (событие
+        плоскости B.1 по glob'у), ``metric_threshold`` (метрика пересекла порог).
+        Блокирует вызывающий поток не дольше timeout; таймаут возвращает диагноз
+        (что ждали / что видели последним), не пустоту.
+        """
+        return _await_condition(self, kind, spec, timeout=timeout)
 
     # ---- Tail логов (Ф1 Task 1.5: подписка level≥X → событийный канал driver'а) ----
 

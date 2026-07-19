@@ -122,6 +122,7 @@ class TestRegistry:
             "state_subscribe",
             "events",
             "events_page",
+            "await_condition",
             "log_tail",
             "log_untail",
             "observability_tail",
