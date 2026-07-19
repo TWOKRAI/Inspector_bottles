@@ -147,6 +147,13 @@ class TestRegistry:
             "telemetry_set",
             "telemetry_snapshot",
             "telemetry_history",
+            # flight recorder (D.4)
+            "record_start",
+            "record_stop",
+            "record_status",
+            "record_load",
+            "record_unload",
+            "record_dump",
         }
         assert names == expected
 

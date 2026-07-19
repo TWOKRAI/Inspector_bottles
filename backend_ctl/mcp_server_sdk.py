@@ -40,6 +40,7 @@ from backend_ctl.mcp_tools import (
     MODE_NO_DESTRUCTIVE,
     MODE_READ_ONLY,
     build_registry,
+    dispatch_tool,
     is_command_read_safe,
     is_tool_allowed,
     tool_annotations,
@@ -199,8 +200,9 @@ class SDKToolServer:
                 return self._error(mcp_types, mcp_errors.restricted_command_blocked_error(command))
 
         try:
-            driver = self._session.ensure()
-            result = spec.handler(driver, arguments)
+            # D.4: session-aware диспетчеризация (live + replay + record_*). В live
+            # внутри вызовется session.ensure() (может бросить BackendUnavailable).
+            result = dispatch_tool(self._session, name, arguments)
         except BackendUnavailable as exc:
             self._session.reset()
             return self._error(mcp_types, str(exc))

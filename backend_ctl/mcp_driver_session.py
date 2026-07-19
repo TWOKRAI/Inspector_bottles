@@ -19,6 +19,17 @@ from typing import Any, Dict, Optional
 
 from backend_ctl.driver import BackendDriver
 from backend_ctl.endpoint_config import resolve_endpoint
+from backend_ctl.recorder import (
+    REASON_DISCONNECT,
+    Recorder,
+    ReplayPlayer,
+    dump_recording,
+    load_recording,
+)
+
+#: Режимы сессии: живой бэкенд vs offline-реплей загруженной записи (D.4).
+MODE_LIVE: str = "live"
+MODE_REPLAY: str = "replay"
 
 
 class BackendUnavailable(RuntimeError):
@@ -86,6 +97,13 @@ class DriverSession:
         # прогревается (первый вызов может таймаутить) — не молчим об этом.
         self._ready: bool = True
         self._log = log or (lambda m: print(m, file=sys.stderr, flush=True))
+        # Flight recorder (D.4): режим live|replay + владение активной записью/реплеем.
+        # Запись привязана к текущему live-driver'у; reset() финализирует её footer'ом
+        # disconnect ДО закрытия (файл не остаётся без footer'а). Реплей — session-локальный
+        # detached-driver (ensure() в replay НЕ коннектится).
+        self._mode: str = MODE_LIVE
+        self._recorder: Optional[Recorder] = None
+        self._replay: Optional[ReplayPlayer] = None
 
     @property
     def host(self) -> str:
@@ -94,6 +112,99 @@ class DriverSession:
     @property
     def port(self) -> int:
         return self._port
+
+    @property
+    def mode(self) -> str:
+        """Режим сессии: ``live`` (бэкенд) или ``replay`` (загруженная запись, D.4)."""
+        return self._mode
+
+    @property
+    def replay_player(self) -> Optional[ReplayPlayer]:
+        """Активный реплеер (в replay-режиме) либо None."""
+        return self._replay
+
+    # ---- Flight recorder (D.4) ----
+
+    def start_recording(
+        self,
+        path: str,
+        *,
+        max_events: Optional[int] = None,
+        max_bytes: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Начать запись потока событий текущего live-driver'а в ``path``.
+
+        В replay-режиме запись не имеет смысла (нет живого потока) — обучающий отказ.
+        Уже идёт запись — отказ (одна запись = один файл).
+        """
+        if self._mode == MODE_REPLAY:
+            return {
+                "success": False,
+                "error": "нельзя писать в replay-режиме: сначала record_unload() для возврата к live",
+            }
+        if self._recorder is not None and self._recorder.active:
+            return {"success": False, "error": f"запись уже идёт в {self._recorder.path!r} — сначала record_stop()"}
+        drv = self.ensure()  # live-driver (может бросить BackendUnavailable — ловит сервер)
+        kwargs: Dict[str, Any] = {}
+        if max_events is not None:
+            kwargs["max_events"] = int(max_events)
+        if max_bytes is not None:
+            kwargs["max_bytes"] = int(max_bytes)
+        self._recorder = Recorder(drv, path, **kwargs)
+        return self._recorder.start()
+
+    def stop_recording(self) -> Dict[str, Any]:
+        """Остановить активную запись (footer reason=stopped). Нет записи → обучающий отказ."""
+        if self._recorder is None:
+            return {"success": False, "error": "нет активной записи (record_start сначала)"}
+        status = self._recorder.stop()
+        self._recorder = None
+        return status
+
+    def dump_recording(self, path: str) -> Dict[str, Any]:
+        """One-shot дамп текущего arrival-кольца live-driver'а (§5.3, чёрный ящик)."""
+        if self._mode == MODE_REPLAY:
+            return {"success": False, "error": "record_dump доступен только в live-режиме (record_unload для возврата)"}
+        drv = self.ensure()
+        return dump_recording(drv, path)
+
+    def record_status(self) -> Dict[str, Any]:
+        """Статус: активная запись (файл/счётчики) ЛИБО загруженный реплей (имя/позиция)."""
+        if self._replay is not None:
+            return self._replay.status()
+        if self._recorder is not None:
+            return self._recorder.status()
+        return {"success": True, "mode": self._mode, "recording": False, "replay": False}
+
+    def load_replay(
+        self,
+        path: str,
+        *,
+        position: str = "end",
+        ring_maxlen: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Загрузить запись в offline-реплей (detached driver); перевести сессию в replay.
+
+        Активная запись сначала должна быть остановлена (одна активность на сессию).
+        Реплей ничего не пишет и не коннектится — session-локальный режим.
+        """
+        if self._recorder is not None and self._recorder.active:
+            return {"success": False, "error": "идёт запись — сначала record_stop() перед загрузкой реплея"}
+        recording = load_recording(path)  # RecordingError ловит сервер (обучающий текст)
+        self._replay = ReplayPlayer(recording, position=position, ring_maxlen=ring_maxlen)
+        self._mode = MODE_REPLAY
+        out = self._replay.status()
+        out["truncated"] = recording.truncated
+        out["position_mode"] = position
+        return out
+
+    def unload_replay(self) -> Dict[str, Any]:
+        """Выгрузить реплей, вернуть сессию в live (следующий ensure() переподключится)."""
+        if self._replay is None:
+            return {"success": False, "error": "нет загруженного реплея (record_load сначала)"}
+        self._replay = None
+        self._mode = MODE_LIVE
+        return {"success": True, "mode": MODE_LIVE, "unloaded": True}
 
     # ---- Фабрика + readiness ----
 
@@ -143,7 +254,12 @@ class DriverSession:
 
         После реконнекта (driver был сброшен, но остались durable-подписки) новый
         driver получает намерения и replay'ит их — поток событий не теряется молча.
+
+        В replay-режиме (D.4) возвращает detached-driver реплеера БЕЗ connect и без
+        isolation-пробы — offline read-model уже наполнен записью.
         """
+        if self._mode == MODE_REPLAY and self._replay is not None:
+            return self._replay.driver
         if self._driver is None:
             try:
                 self._driver = self._driver_factory()
@@ -215,7 +331,17 @@ class DriverSession:
         Durable-намерения подписки и снимок watch-профиля сохраняются ДО закрытия
         driver'а, чтобы новый driver мог их restore'нуть (иначе подписки/watch
         терялись бы молча — Task 0.3 / F2).
+
+        D.4: активная запись финализируется footer'ом ``disconnect`` ДО закрытия
+        driver'а — файл не остаётся без footer'а на обрыве/реконнекте сессии.
         """
+        # Финализировать активную запись ДО закрытия driver'а (footer=disconnect).
+        if self._recorder is not None:
+            try:
+                self._recorder.stop(REASON_DISCONNECT)
+            except Exception:  # noqa: BLE001 — финализация не должна ронять сброс
+                pass
+            self._recorder = None
         if self._driver is not None:
             try:
                 # Синхронизируем БЕЗУСЛОВНО (в т.ч. с пустым списком): текущий driver —
@@ -270,4 +396,4 @@ class DriverSession:
         self.reset()
 
 
-__all__ = ["BackendUnavailable", "DriverSession"]
+__all__ = ["BackendUnavailable", "DriverSession", "MODE_LIVE", "MODE_REPLAY"]

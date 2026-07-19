@@ -15,6 +15,8 @@ Claude↔driver — см. решение владельца в plans/_archive/20
 from __future__ import annotations
 
 import dataclasses
+import os
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
@@ -22,6 +24,7 @@ from backend_ctl.capability_render import FORMATS, render_concise, render_help
 from backend_ctl.conditions import DEFAULT_AWAIT_TIMEOUT
 from backend_ctl.driver import BackendDriver
 from backend_ctl.events import ALL_PLANE, PLANES
+from backend_ctl.recorder import DEFAULT_MAX_EVENTS, RecordingError
 
 #: Handler инструмента: (driver, arguments) → JSON-сериализуемый результат.
 ToolHandler = Callable[[BackendDriver, Dict[str, Any]], Any]
@@ -311,6 +314,17 @@ def _telemetry_set(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     if args.get("plane"):
         kw["plane"] = args["plane"]
     return drv.telemetry_set(args["process"], args["metric"], **kw, **_kw_timeout(args))
+
+
+def _record_tool_stub(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    """Заглушка handler'а record_* для реестра: эти инструменты session-owned (D.4).
+
+    Диспетчеризуются через :func:`dispatch_tool` (session), а не через
+    call_tool(driver, …) — им нужны запись/реплей уровня сессии, а не сам driver.
+    """
+    raise RuntimeError(
+        "record_* — session-owned инструменты: вызывай через dispatch_tool(session, …), не через call_tool(driver, …)"
+    )
 
 
 def _telemetry_snapshot(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -911,6 +925,85 @@ TOOLS: List[ToolSpec] = [
         ),
         _telemetry_history,
     ),
+    # ---- Flight recorder (D.4): все SAFETY_READ, session-owned (dispatch_tool) ----
+    ToolSpec(
+        "record_start",
+        "Начать ЗАПИСЬ потока событий driver'а в файл (flight recorder, D.4). Пишет снимок "
+        "состояния + JSONL-ленту событий; позже record_load грузит запись в тот же read-model "
+        "БЕЗ живой системы. name — имя записи (не путь; резолвится в BACKEND_CTL_RECORD_DIR). "
+        "Пиши только то, на что подписан (watch_like_gui/state_subscribe) — без подписок лента пуста "
+        "(вернётся hint). max_events — лимит (по достижении авто-стоп, файл валиден). read-only: "
+        "запись — локальный наблюдатель, бэкенд не мутируется. ПРЕДУПРЕЖДЕНИЕ: запись содержит "
+        "состояние системы (пути/конфиги) — не прикладывай к публичным issue.",
+        _obj(
+            {
+                "name": {"type": "string", "description": "Имя записи (без разделителей/'..'); .jsonl добавится."},
+                "max_events": {
+                    "type": "integer",
+                    "description": f"Лимит событий (по умолчанию {DEFAULT_MAX_EVENTS}); при достижении авто-стоп.",
+                },
+            },
+            ["name"],
+        ),
+        _record_tool_stub,
+    ),
+    ToolSpec(
+        "record_stop",
+        "Остановить активную запись (footer reason=stopped, файл финализируется fsync'ом). "
+        "read-only. Нет активной записи → обучающий отказ.",
+        _obj({}),
+        _record_tool_stub,
+    ),
+    ToolSpec(
+        "record_status",
+        "Статус flight recorder'а: активная запись (файл/счётчики events_written/dropped) ЛИБО "
+        "загруженный реплей (имя/позиция playhead/total/обрыв). read-only.",
+        _obj({}),
+        _record_tool_stub,
+    ),
+    ToolSpec(
+        "record_load",
+        "Загрузить запись в OFFLINE-реплей: тот же read-model наполняется записью БЕЗ живой системы "
+        "(detached driver). После load сессия в replay-режиме — telemetry_snapshot/telemetry_history/"
+        "events_page/await_condition/state_get/system_overview отвечают ПО ЗАПИСИ; прочие (write/IPC) "
+        "требуют record_unload. position='end' (дефолт) — сразу финальное состояние; 'start' — только "
+        "снимок, playhead двигается await_condition'ами (тайм-трэвел). name — имя записи в "
+        "BACKEND_CTL_RECORD_DIR. read-only.",
+        _obj(
+            {
+                "name": {"type": "string", "description": "Имя записи в BACKEND_CTL_RECORD_DIR (без разделителей)."},
+                "position": {
+                    "type": "string",
+                    "enum": ["end", "start"],
+                    "description": "'end' (дефолт): вся лента сразу; 'start': только снимок, прокрутка await'ами.",
+                },
+                "ring_maxlen": {
+                    "type": "integer",
+                    "description": "Потолок колец событий реплея (опц.; по умолчанию min(события, 10000)).",
+                },
+            },
+            ["name"],
+        ),
+        _record_tool_stub,
+    ),
+    ToolSpec(
+        "record_unload",
+        "Выгрузить реплей, вернуть сессию в LIVE-режим (следующий вызов переподключится к бэкенду). "
+        "read-only. Нет загруженного реплея → обучающий отказ.",
+        _obj({}),
+        _record_tool_stub,
+    ),
+    ToolSpec(
+        "record_dump",
+        "One-shot ДАМП чёрного ящика: снимок состояния + текущее содержимое arrival-кольца событий "
+        "в файл (footer reason=dump). Покрывает 'система умирает — сохрани, что driver успел увидеть'. "
+        "name — имя в BACKEND_CTL_RECORD_DIR. read-only. Грузится тем же record_load.",
+        _obj(
+            {"name": {"type": "string", "description": "Имя дампа в BACKEND_CTL_RECORD_DIR (без разделителей)."}},
+            ["name"],
+        ),
+        _record_tool_stub,
+    ),
 ]
 
 
@@ -953,6 +1046,13 @@ TOOL_SAFETY: Dict[str, str] = {
     "telemetry_snapshot": SAFETY_READ,
     "telemetry_history": SAFETY_READ,
     "ui_tap_ping": SAFETY_READ,
+    # flight recorder (D.4): бэкенд не мутируется (запись — наблюдатель, реплей — session-локален)
+    "record_start": SAFETY_READ,
+    "record_stop": SAFETY_READ,
+    "record_status": SAFETY_READ,
+    "record_load": SAFETY_READ,
+    "record_unload": SAFETY_READ,
+    "record_dump": SAFETY_READ,
     # subscribe
     "state_subscribe": SAFETY_SUBSCRIBE,
     "log_tail": SAFETY_SUBSCRIBE,
@@ -1061,3 +1161,165 @@ def call_tool(driver: BackendDriver, name: str, arguments: Dict[str, Any]) -> An
     """Вызвать инструмент по имени. KeyError — неизвестный инструмент (решает вызывающий)."""
     spec = build_registry()[name]
     return spec.handler(driver, arguments or {})
+
+
+# ---------------------------------------------------------------------------
+# Flight recorder (D.4): session-owned диспетчеризация + offline-реплей
+# ---------------------------------------------------------------------------
+
+#: Значение session.mode для offline-реплея (без импорта mcp_driver_session — нет цикла).
+_MODE_REPLAY = "replay"
+
+#: Каталог записей по умолчанию (env BACKEND_CTL_RECORD_DIR переопределяет).
+_RECORD_DIR_ENV = "BACKEND_CTL_RECORD_DIR"
+_DEFAULT_RECORD_DIR = "./backend_ctl_records"
+
+#: Допустимое имя записи: буквы/цифры/._- (без разделителей путей и '..').
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def resolve_record_path(name: Any) -> str:
+    """Имя записи → путь в BACKEND_CTL_RECORD_DIR (валидация: без разделителей/'..').
+
+    Агент передаёт ИМЯ, а не путь — сервер удерживает файлы в отведённом каталоге
+    (§5.4): нельзя писать/читать произвольные пути. Каталог создаётся при записи.
+
+    Raises:
+        ValueError: имя пустое, содержит разделители/'..' или недопустимые символы.
+    """
+    if not isinstance(name, str) or not name:
+        raise ValueError("record: требуется непустое имя записи (name)")
+    if "/" in name or "\\" in name or os.sep in name or ".." in name:
+        raise ValueError(f"недопустимое имя записи {name!r}: без разделителей путей и '..' (только имя, не путь)")
+    if not _SAFE_NAME_RE.match(name):
+        raise ValueError(f"недопустимое имя записи {name!r}: только буквы/цифры/._- ")
+    filename = name if name.endswith(".jsonl") else f"{name}.jsonl"
+    base = os.environ.get(_RECORD_DIR_ENV) or _DEFAULT_RECORD_DIR
+    os.makedirs(base, exist_ok=True)
+    return os.path.abspath(os.path.join(base, filename))
+
+
+# ---- Session-owned handlers (session, arguments) ----
+
+
+def _record_start(session: Any, args: Dict[str, Any]) -> Any:
+    try:
+        path = resolve_record_path(args.get("name"))
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    max_events = args.get("max_events")
+    return session.start_recording(path, max_events=int(max_events) if max_events is not None else None)
+
+
+def _record_stop(session: Any, args: Dict[str, Any]) -> Any:
+    return session.stop_recording()
+
+
+def _record_status(session: Any, args: Dict[str, Any]) -> Any:
+    return session.record_status()
+
+
+def _record_dump(session: Any, args: Dict[str, Any]) -> Any:
+    try:
+        path = resolve_record_path(args.get("name"))
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    return session.dump_recording(path)
+
+
+def _record_load(session: Any, args: Dict[str, Any]) -> Any:
+    try:
+        path = resolve_record_path(args.get("name"))
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    position = args.get("position", "end")
+    if position not in ("end", "start"):
+        return {"success": False, "error": f"position должна быть 'end' или 'start', получено {position!r}"}
+    ring_maxlen = args.get("ring_maxlen")
+    try:
+        return session.load_replay(
+            path,
+            position=position,
+            ring_maxlen=int(ring_maxlen) if ring_maxlen is not None else None,
+        )
+    except (RecordingError, FileNotFoundError) as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def _record_unload(session: Any, args: Dict[str, Any]) -> Any:
+    return session.unload_replay()
+
+
+#: Session-owned record-инструменты: диспетчеризуются по session, а не driver.
+RECORD_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Any]] = {
+    "record_start": _record_start,
+    "record_stop": _record_stop,
+    "record_status": _record_status,
+    "record_load": _record_load,
+    "record_unload": _record_unload,
+    "record_dump": _record_dump,
+}
+
+#: Инструменты, обслуживаемые НАД ЗАПИСЬЮ в replay-режиме через detached-driver реплеера.
+_REPLAY_DRIVER_SERVED: frozenset = frozenset({"events", "events_page", "telemetry_snapshot", "telemetry_history"})
+#: Инструменты, обслуживаемые реплеером напрямую (записанный снимок / offline-семантика).
+_REPLAY_PLAYER_SERVED: frozenset = frozenset({"system_overview", "state_get", "state_get_subtree", "await_condition"})
+#: Полный набор REPLAY_SERVED (кроме record_*, которые в RECORD_HANDLERS).
+REPLAY_SERVED: frozenset = _REPLAY_DRIVER_SERVED | _REPLAY_PLAYER_SERVED
+
+_REPLAY_REJECT = object()  # sentinel: инструмент не обслуживается над записью
+
+
+def _serve_replay(session: Any, name: str, args: Dict[str, Any]) -> Any:
+    """Обслужить инструмент над записью (replay-режим) или вернуть sentinel-отказ."""
+    player = session.replay_player
+    if player is None:
+        return _REPLAY_REJECT
+    if name in _REPLAY_DRIVER_SERVED:
+        # Те же handler'ы, что вживую — читают hub/read-model detached-driver'а (0 IPC).
+        return build_registry()[name].handler(player.driver, args)
+    if name == "system_overview":
+        return player.system_overview()
+    if name == "state_get":
+        return player.state_get(args.get("path", ""))
+    if name == "state_get_subtree":
+        return player.state_get_subtree(args.get("path", ""))
+    if name == "await_condition":
+        return player.await_condition(args.get("kind"), args.get("spec"), timeout=args.get("timeout"))
+    return _REPLAY_REJECT
+
+
+def _replay_rejected(name: str) -> Dict[str, Any]:
+    """Обучающая ошибка для live-инструмента, вызванного в replay-режиме (§3)."""
+    return {
+        "success": False,
+        "error": (
+            f"offline-реплей записи: инструмент {name!r} требует живой системы — "
+            "record_unload() для возврата к live. Над записью доступны: "
+            + ", ".join(sorted(REPLAY_SERVED | set(RECORD_HANDLERS)))
+        ),
+    }
+
+
+def dispatch_tool(session: Any, name: str, arguments: Optional[Dict[str, Any]]) -> Any:
+    """Единая session-aware диспетчеризация инструмента (live + replay + record).
+
+    Порядок:
+      1. record_* → session-owned handler (работает в любом режиме);
+      2. replay-режим → REPLAY_SERVED над записью, прочие → обучающая ошибка (§3);
+      3. live → штатно: session.ensure() (может бросить BackendUnavailable — ловит сервер)
+         + handler реестра.
+
+    KeyError — неизвестный инструмент (решает вызывающий сервер).
+    """
+    arguments = arguments or {}
+    if name in RECORD_HANDLERS:
+        return RECORD_HANDLERS[name](session, arguments)
+    if session.mode == _MODE_REPLAY:
+        served = _serve_replay(session, name, arguments)
+        if served is not _REPLAY_REJECT:
+            return served
+        return _replay_rejected(name)
+    driver = session.ensure()
+    spec = build_registry()[name]
+    return spec.handler(driver, arguments)

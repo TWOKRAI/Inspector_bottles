@@ -27,7 +27,7 @@ from typing import Any, Dict, Optional, TextIO
 
 from backend_ctl.endpoint_config import resolve_endpoint
 from backend_ctl.mcp_driver_session import BackendUnavailable, DriverSession
-from backend_ctl.mcp_tools import ToolSpec, build_registry
+from backend_ctl.mcp_tools import ToolSpec, build_registry, dispatch_tool
 
 #: Версии спеки MCP, которые сервер готов подтвердить клиенту как есть.
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
@@ -122,8 +122,9 @@ class MCPServer:
             return self._error(msg_id, INVALID_PARAMS, f"неизвестный инструмент: {name!r}")
         arguments = params.get("arguments") or {}
         try:
-            driver = self._session.ensure()
-            result = spec.handler(driver, arguments)
+            # D.4: session-aware диспетчеризация (live + replay + record_*). В live
+            # внутри вызовется session.ensure() (может бросить BackendUnavailable).
+            result = dispatch_tool(self._session, name, arguments)
         except BackendUnavailable as exc:
             self._session.reset()
             return self._tool_error(msg_id, str(exc))

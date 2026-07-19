@@ -142,6 +142,46 @@ def _safe_section(name: str, fn: Callable[[], Any]) -> Any:
         return {"error": f"{type(exc).__name__}: {exc}", "section": name}
 
 
+def _collect_telemetry(drv: Any) -> Dict[str, Any]:
+    """values (плоский path→value из read-model) + history (export_history, записанные ts)."""
+    snap = drv.telemetry_snapshot()
+    values = {path: entry.get("value") for path, entry in (snap.get("metrics") or {}).items()}
+    with drv._telemetry_lock:
+        history = drv._telemetry_model.export_history()
+    history_json = {path: [[ts, val] for ts, val in points] for path, points in history.items()}
+    return {"values": values, "history": history_json}
+
+
+def _collect_state(drv: Any) -> Any:
+    """Полное state-дерево через существующую ручку (тот же вес, что state_get_subtree('' ))."""
+    return drv.send_command("ProcessManager", "state.get_subtree", {"path": ""})
+
+
+def collect_header(drv: Any, created_ts: float) -> Dict[str, Any]:
+    """Снимок системы для строки-header (best-effort по секциям).
+
+    Переиспользуется :class:`Recorder` (старт записи) и :func:`dump_recording`
+    (one-shot дамп чёрного ящика) — один сборщик header'а, не два.
+    """
+    return {
+        "format": FORMAT,
+        "version": VERSION,
+        "created_ts": created_ts,
+        "endpoint": {
+            "host": _safe_section("host", lambda: drv.host),
+            "port": _safe_section("port", lambda: drv.port),
+        },
+        "session": _safe_section("session", lambda: getattr(drv, "_session", None)),
+        "subscriptions": _safe_section("subscriptions", lambda: drv.export_subscriptions()),
+        "snapshot": {
+            "overview": _safe_section("overview", lambda: drv.system_overview()),
+            "state": _safe_section("state", lambda: _collect_state(drv)),
+            "telemetry": _safe_section("telemetry", lambda: _collect_telemetry(drv)),
+            "events_stats": _safe_section("events_stats", lambda: drv.events_stats()),
+        },
+    }
+
+
 class Recorder:
     """Пишущая сторона flight recorder'а: лёгкий подписчик hub'а + writer-поток.
 
@@ -231,42 +271,8 @@ class Recorder:
         return out
 
     def _collect_header(self) -> Dict[str, Any]:
-        """Снимок системы для строки-header (best-effort по секциям)."""
-        drv = self._drv
-        telemetry = _safe_section("telemetry", lambda: self._collect_telemetry())
-        return {
-            "format": FORMAT,
-            "version": VERSION,
-            "created_ts": self._created_ts,
-            "endpoint": {
-                "host": _safe_section("host", lambda: drv.host),
-                "port": _safe_section("port", lambda: drv.port),
-            },
-            "session": _safe_section("session", lambda: getattr(drv, "_session", None)),
-            "subscriptions": _safe_section("subscriptions", lambda: drv.export_subscriptions()),
-            "snapshot": {
-                "overview": _safe_section("overview", lambda: drv.system_overview()),
-                "state": _safe_section("state", lambda: self._collect_state()),
-                "telemetry": telemetry,
-                "events_stats": _safe_section("events_stats", lambda: drv.events_stats()),
-            },
-        }
-
-    def _collect_telemetry(self) -> Dict[str, Any]:
-        """values (плоский path→value из read-model) + history (export_history, записанные ts)."""
-        drv = self._drv
-        snap = drv.telemetry_snapshot()
-        values = {path: entry.get("value") for path, entry in (snap.get("metrics") or {}).items()}
-        with drv._telemetry_lock:
-            history = drv._telemetry_model.export_history()
-        # history — JSON-safe: tuple → list.
-        history_json = {path: [[ts, val] for ts, val in points] for path, points in history.items()}
-        return {"values": values, "history": history_json}
-
-    def _collect_state(self) -> Any:
-        """Полное state-дерево через существующую ручку (тот же вес, что state_get_subtree('' ))."""
-        res = self._drv.send_command("ProcessManager", "state.get_subtree", {"path": ""})
-        return res
+        """Снимок системы для строки-header (делегат :func:`collect_header`)."""
+        return collect_header(self._drv, self._created_ts)
 
     # ---- Колбэк подписки (reader-поток) ----
 
@@ -369,6 +375,43 @@ class Recorder:
             "reason": None if self.active else self._reason,
             "subscriptions": self._subscriptions,
         }
+
+
+def dump_recording(drv: Any, path: str, *, ring_limit: int = 500) -> Dict[str, Any]:
+    """One-shot дамп чёрного ящика: header-снимок + текущее arrival-кольцо (§5.3).
+
+    EventHub — always-on чёрный ящик в пределах maxlen; дамп = тот же writer-код на
+    готовых данных (~ноль доп. цены). Покрывает «система умерла — сохрани, что успел
+    увидеть». ts событий — время дампа (кольцо не хранит per-event arrival ts);
+    ``reason="dump"`` в footer сигналит, что это снимок, а не хронированная запись.
+    """
+    dump_ts = time.time()
+    writer = RecordWriter(path)
+    try:
+        writer.write_header(collect_header(drv, dump_ts))
+        seq = 0
+        cursor: Optional[str] = None
+        # Пройти всё arrival-кольцо страницами до исчерпания (курсорное чтение B.1).
+        while True:
+            page = drv.events_page("all", cursor=cursor, limit=ring_limit)
+            if not isinstance(page, dict) or not page.get("success"):
+                break
+            items = page.get("items") or []
+            for item in items:
+                seq += 1
+                event = item.get("event")
+                if isinstance(event, dict):
+                    writer.write_event(seq, dump_ts, event)
+            next_cursor = page.get("next_cursor")
+            if not items or next_cursor == cursor:
+                break
+            cursor = next_cursor
+        writer.write_footer(
+            {"footer": True, "stopped_ts": time.time(), "events_written": seq, "dropped": 0, "reason": REASON_DUMP}
+        )
+    finally:
+        writer.close()
+    return {"success": True, "path": path, "events_written": seq, "reason": REASON_DUMP}
 
 
 # --------------------------------------------------------------------------- #
@@ -707,6 +750,8 @@ __all__ = [
     "REASON_DUMP",
     "RecordWriter",
     "Recorder",
+    "collect_header",
+    "dump_recording",
     "Recording",
     "RecordingError",
     "load_recording",
