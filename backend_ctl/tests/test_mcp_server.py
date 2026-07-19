@@ -121,6 +121,7 @@ class TestRegistry:
             "state_get_subtree",
             "state_subscribe",
             "events",
+            "events_page",
             "log_tail",
             "log_untail",
             "observability_tail",

@@ -36,7 +36,11 @@ class ISubscriptionRegistry(Protocol):
 
 @runtime_checkable
 class IEventSource(Protocol):
-    """Событийный канал: push-сообщения без reply (state.changed / observability.record)."""
+    """Событийный канал: push-сообщения без reply (state.changed / observability.record).
+
+    ``events_page`` — курсорное недеструктивное чтение по плоскостям (B.1);
+    ``events`` — устаревший деструктивный дренаж (удаление обёртки — F.1).
+    """
 
     def subscribe(self, callback: EventCallback) -> EventCallback: ...
 
@@ -48,6 +52,14 @@ class IEventSource(Protocol):
         *,
         max_items: Optional[int] = None,
     ) -> List[Dict[str, Any]]: ...
+
+    def events_page(
+        self,
+        plane: Optional[str] = None,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]: ...
 
 
 @runtime_checkable

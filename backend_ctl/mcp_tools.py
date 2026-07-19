@@ -151,6 +151,10 @@ def _events(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.events(timeout=timeout, max_items=int(max_items) if max_items is not None else None)
 
 
+def _events_page(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.events_page(args.get("plane"), cursor=args.get("cursor"), limit=args.get("limit"))
+
+
 def _log_tail(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.log_tail(args["process"], level=args.get("level", "ERROR"), **_kw_timeout(args))
 
@@ -420,7 +424,9 @@ TOOLS: List[ToolSpec] = [
     ),
     ToolSpec(
         "events",
-        "Забрать накопленные push-события (state.changed, log.record, …) из событийного канала driver. "
+        "УСТАРЕЛ (B.1, удаление в F.1): деструктивно дренирует ВСЕ плоскости — параллельные читатели "
+        "крадут события друг у друга. Используй events_page (курсорное недеструктивное чтение). "
+        "Забирает накопленные push-события (state.changed, log.record, …) из событийного канала driver. "
         "timeout>0 — подождать первое событие (сек, максимум 30); 0 — вернуть что есть сразу.",
         _obj(
             {
@@ -429,6 +435,32 @@ TOOLS: List[ToolSpec] = [
             }
         ),
         _events,
+    ),
+    ToolSpec(
+        "events_page",
+        "Курсорное НЕдеструктивное чтение push-событий по плоскостям (B.1): state (state.changed) / "
+        "logs (log.record + observability kind=log) / errors / stats / telemetry (per-delta зеркало "
+        "state.changed) / ui (ui.event) / other (вне классификации) / all (всё в порядке прихода). "
+        "Несколько читателей не мешают друг другу. Ответ: items [{seq, event}], next_cursor (передай "
+        "в следующий вызов), dropped (сколько событий вытеснено из кольца между курсором и первым "
+        "возвращённым — видимая потеря), bookmark (курсор «хвост сейчас» — начать только с нового). "
+        "reset_required=true — курсор прежнего соединения: начни заново с cursor=null.",
+        _obj(
+            {
+                "plane": {
+                    "type": "string",
+                    "enum": ["all", "state", "logs", "errors", "stats", "telemetry", "ui", "other"],
+                    "description": "Плоскость событий (по умолчанию all — оригиналы в порядке прихода).",
+                },
+                "cursor": {
+                    "type": "string",
+                    "description": "next_cursor/bookmark прошлого ответа ('plane:seq@gen'); "
+                    "пусто = с самого старого доступного.",
+                },
+                "limit": {"type": "integer", "description": "Максимум событий в странице (дефолт 100, потолок 500)."},
+            }
+        ),
+        _events_page,
     ),
     ToolSpec(
         "log_tail",
@@ -730,6 +762,7 @@ TOOL_SAFETY: Dict[str, str] = {
     "state_get": SAFETY_READ,
     "state_get_subtree": SAFETY_READ,
     "events": SAFETY_READ,
+    "events_page": SAFETY_READ,
     "telemetry_snapshot": SAFETY_READ,
     "telemetry_history": SAFETY_READ,
     "ui_tap_ping": SAFETY_READ,

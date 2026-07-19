@@ -1,42 +1,181 @@
 # -*- coding: utf-8 -*-
-"""events.py — событийный канал driver'а (push-сообщения без reply).
+"""events.py — событийный канал driver'а: курсорные плоскости (B.1).
 
-Mixin `_EventChannelMixin`: bounded-очередь + список подписчиков под одним
-Condition. reader-поток пишет (`_emit_event`), клиентский поток дренирует
-(`events`); подписчики зовутся синхронно в reader-потоке (колбэк не роняет reader).
+Ядро — :class:`EventHub` (композиция, как ``WatchController``): reader-поток пишет
+(`emit`), читатели ходят курсорами (`page`) — недеструктивно и независимо друг от
+друга. Аналог: K8s watch (resourceVersion + bookmarks), CDP event domains,
+journald cursor.
 
-Выделено из ``driver.py`` (Phase C, C.1) как mixin — код переезжает дословно на тот
-же ``self`` (поведение бит-в-бит), давая модульную границу без перестройки
-concurrency-контура. Хост (`BackendDriver`) обязан завести поля в ``__init__``:
-``_events`` (deque), ``_events_cv`` (Condition), ``_subscribers`` (list),
-``_event_errors`` (int), и транспортные ``_running``/``_reader`` (для выхода из
-бесконечного ожидания на закрытом соединении). B.1 перестроит канал на курсорные
-плоскости — тогда этот модуль станет местом той работы.
+Устройство:
+
+  * **arrival-кольцо** — оригинальные push-сообщения в порядке прихода (плотный
+    глобальный ``seq``). Источник для ``plane="all"`` и для legacy-дренажа
+    :meth:`drain` (обёртка ``events()``);
+  * **плоскостные кольца** (:data:`PLANES`) — классифицированные view сообщений с
+    плотным per-plane ``seq``: state / logs / errors / stats / telemetry / ui +
+    ``other`` (всё, что не подошло ни под одну классификацию, — НЕ теряется молча);
+  * **курсор** ``"plane:seq@gen"`` — позиция читателя. ``gen`` — токен поколения
+    hub'а: реконнект пересоздаёт driver (и hub), нумерация начинается заново —
+    курсор прежнего поколения даёт явный ``reset_required``, а не тихое чтение
+    не с того места. Полный re-list после реконнекта — Phase D;
+  * **dropped** — точная потеря ОТНОСИТЕЛЬНО КУРСОРА: плотный seq ⇒
+    ``oldest_в_кольце − cursor − 1``. Переполнение кольца видно читателю, а не
+    съедается молча (тот же класс «тихой слепоты», что чинил Phase 0);
+  * **bookmark** — курсор «хвост сейчас»: начать читать только новое.
+
+Классификация push'ей:
+
+  * ``state.changed`` → ``state`` (сообщение целиком) + ``telemetry`` (каждая
+    дельта отдельным ``telemetry.delta``-item — курсорное зеркало ingest-потока
+    telemetry read-model, вход для B.2 ``metric_threshold``);
+  * ``log.record`` → ``logs``; ``ui.event`` → ``ui``;
+  * ``observability.record`` → расщепляется ПО ``kind`` записей (log→logs,
+    error→errors, stats→stats; без kind → other): смешанный батч даёт по view на
+    плоскость, форма конверта (``data.records``) сохраняется. Оригинал в
+    arrival-кольце НЕ расщепляется — legacy-дренаж бит-в-бит;
+  * прочее (незнакомая команда, некарантинный поздний reply) → ``other``.
+
+Синхронные подписчики (``subscribe``) получают ОРИГИНАЛЬНОЕ сообщение в
+reader-потоке (колбэк не роняет reader) — контракт Ф1 Task 1.1 сохранён.
+
+`_EventChannelMixin` остался публичным API driver'а — теперь это тонкие делегаты
+в ``self._hub`` (хост заводит его в ``__init__``); транспортные ``_running``/
+``_reader`` доезжают в hub предикатом ``alive`` (выход из бесконечного ожидания
+на закрытом соединении).
 """
 
 from __future__ import annotations
 
+import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+import uuid
+from collections import deque
+from itertools import islice
+from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
 # Колбэк подписчика на события (получает распарсенный push-dict).
 EventCallback = Callable[[Dict[str, Any]], None]
 
+# Команда live-хвоста наблюдаемости на проводе (Ф5.20b): процесс пушит записи
+# логов/ошибок/статистики адресно подписчику ЭТИМ command (зеркало
+# RecordForwardChannel.FORWARD_COMMAND). Строка-контракт, не импортируем из
+# framework-канала — чтобы driver не тянул серверный модуль (Dict at Boundary).
+OBSERVABILITY_RECORD_COMMAND: str = "observability.record"
 
-class _EventChannelMixin:
-    """Событийный канал: bounded-очередь push-сообщений + синхронные подписчики."""
+#: Плоскости событий (B.1). ``other`` — сверх плана: события мимо классификации
+#: обязаны остаться видимыми, а не пропасть молча.
+PLANES: Tuple[str, ...] = ("state", "logs", "errors", "stats", "telemetry", "ui", "other")
 
-    def _emit_event(self, msg: Dict[str, Any]) -> None:
-        """Положить событие в bounded-очередь и синхронно оповестить подписчиков.
+#: Псевдо-плоскость «все события в порядке прихода» (arrival-кольцо, оригиналы).
+ALL_PLANE: str = "all"
 
-        Вызывается только из reader-потока. Исключение любого колбэка не роняет
-        reader-поток (глотается, инкрементит счётчик _event_errors) и не мешает
-        остальным подписчикам.
+# kind записи наблюдаемости → плоскость (нормализатор record_display проставляет
+# kind ∈ {log, error, stats}; чужой/отсутствующий kind → other).
+_KIND_TO_PLANE: Dict[Any, str] = {"log": "logs", "error": "errors", "stats": "stats"}
+
+# Размер страницы events_page: дефолт держит MCP-ответ компактным, потолок
+# страхует контекст агента от заливки (response_format-лимиты целиком — Phase E).
+_DEFAULT_PAGE_LIMIT = 100
+_MAX_PAGE_LIMIT = 500
+
+
+def _classify(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    """Разложить push-сообщение по плоскостям: список пар (plane, view).
+
+    view для state/logs/ui/other — само сообщение (без копий); для
+    observability.record — производный конверт с записями одной плоскости; для
+    telemetry — производный ``telemetry.delta`` на каждую дельту (сырая дельта в
+    ``data``, без интерпретации маркера удаления — это забота читателя).
+    """
+    cmd = msg.get("command")
+    if cmd == "state.changed":
+        views: List[Tuple[str, Dict[str, Any]]] = [("state", msg)]
+        data = msg.get("data")
+        deltas = data.get("deltas") if isinstance(data, dict) else None
+        if isinstance(deltas, list):
+            for delta in deltas:
+                if isinstance(delta, dict) and isinstance(delta.get("path"), str):
+                    views.append(("telemetry", {"command": "telemetry.delta", "data": delta}))
+        return views
+    if cmd == "log.record":
+        return [("logs", msg)]
+    if cmd == "ui.event":
+        return [("ui", msg)]
+    if cmd == OBSERVABILITY_RECORD_COMMAND:
+        return _classify_observability(msg)
+    return [("other", msg)]
+
+
+def _classify_observability(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    """Расщепить observability.record по kind записей (батч и/или одиночная).
+
+    Каждая плоскость получает конверт прежней формы (``data.records`` — всегда
+    список, одиночная ``data.record`` нормализуется в батч из одной), прочие ключи
+    ``data`` и верхнего уровня сохраняются. Сообщение без разборных записей —
+    целиком в ``other``.
+    """
+    data = msg.get("data")
+    if not isinstance(data, dict):
+        return [("other", msg)]
+    records: List[Dict[str, Any]] = []
+    batch = data.get("records")
+    if isinstance(batch, list):
+        records.extend(r for r in batch if isinstance(r, dict))
+    single = data.get("record")
+    if isinstance(single, dict):
+        records.append(single)
+    if not records:
+        return [("other", msg)]
+
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for rec in records:
+        groups.setdefault(_KIND_TO_PLANE.get(rec.get("kind"), "other"), []).append(rec)
+    base_data = {k: v for k, v in data.items() if k not in ("records", "record")}
+    return [(plane, {**msg, "data": {**base_data, "records": group}}) for plane, group in groups.items()]
+
+
+class EventHub:
+    """Курсорные плоскости событий: недеструктивное повторяемое чтение с видимой потерей.
+
+    Один Condition охраняет все кольца, счётчики и список подписчиков (наследник
+    ``_events_cv``); на нём же блокируется legacy-``drain(timeout)`` и будятся
+    ожидающие при :meth:`wake` (close() driver'а).
+    """
+
+    def __init__(self, maxlen: int = 1000, *, alive: Optional[Callable[[], bool]] = None) -> None:
+        self._cv = threading.Condition()
+        # Предикат «соединение ещё живо»: выход drain(None) из вечного ожидания
+        # на закрытом/не открытом соединении (новых событий не будет).
+        self._alive: Callable[[], bool] = alive if alive is not None else (lambda: False)
+        # Токен поколения в курсорах: новый hub (реконнект) ⇒ старый курсор даёт
+        # явный reset_required, а не тихое чтение с совпавшего по числу места.
+        self._gen = uuid.uuid4().hex[:6]
+
+        self._arrival: Deque[Tuple[int, Dict[str, Any]]] = deque(maxlen=maxlen)
+        self._gseq = 0  # плотный глобальный seq (arrival)
+        self._rings: Dict[str, Deque[Tuple[int, Dict[str, Any]]]] = {p: deque(maxlen=maxlen) for p in PLANES}
+        self._pseq: Dict[str, int] = dict.fromkeys(PLANES, 0)  # плотные per-plane seq
+
+        self._drain_seq = 0  # внутренний курсор legacy-дренажа events()
+        self._subscribers: List[EventCallback] = []
+        self._event_errors = 0  # счётчик исключений колбэков (диагностика)
+
+    # ---- Запись (reader-поток) ----
+
+    def emit(self, msg: Dict[str, Any]) -> None:
+        """Принять push: arrival-кольцо + классификация по плоскостям + подписчики.
+
+        Вызывается из reader-потока. Исключение любого колбэка не роняет
+        reader (глотается, инкрементит ``event_errors``) и не мешает остальным.
         """
-        with self._events_cv:
-            self._events.append(msg)
+        with self._cv:
+            self._gseq += 1
+            self._arrival.append((self._gseq, msg))
+            for plane, view in _classify(msg):
+                self._pseq[plane] += 1
+                self._rings[plane].append((self._pseq[plane], view))
             subscribers = list(self._subscribers)  # снимок под локом
-            self._events_cv.notify_all()
+            self._cv.notify_all()
         # Колбэки — вне лока: могут быть медленными и/или звать driver повторно.
         for cb in subscribers:
             try:
@@ -44,23 +183,230 @@ class _EventChannelMixin:
             except Exception:  # noqa: BLE001 — контракт: колбэк не роняет reader
                 self._event_errors += 1
 
+    def wake(self) -> None:
+        """Разбудить ожидающих в drain(timeout): новых событий не будет (close())."""
+        with self._cv:
+            self._cv.notify_all()
+
+    # ---- Подписчики (синхронные, reader-поток) ----
+
     def subscribe(self, callback: EventCallback) -> EventCallback:
-        """Подписаться на события: callback зовётся на каждое push-сообщение.
+        """Подписаться: callback зовётся на каждое push-сообщение (оригинал).
 
         Колбэк исполняется в reader-потоке — держи его лёгким (тяжёлую работу
         отдай в свой поток/очередь). Возвращает сам callback (хэндл для unsubscribe).
         """
-        with self._events_cv:
+        with self._cv:
             self._subscribers.append(callback)
         return callback
 
     def unsubscribe(self, callback: EventCallback) -> None:
         """Отписать ранее зарегистрированный callback (no-op, если его нет)."""
-        with self._events_cv:
+        with self._cv:
             try:
                 self._subscribers.remove(callback)
             except ValueError:
                 pass
+
+    @property
+    def event_errors(self) -> int:
+        """Сколько раз колбэк подписчика бросил исключение (диагностика)."""
+        return self._event_errors
+
+    # ---- Курсорное чтение (B.1) ----
+
+    def page(
+        self,
+        plane: Optional[str] = None,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Недеструктивная страница событий плоскости от курсора.
+
+        Args:
+            plane: имя плоскости (:data:`PLANES`) или ``"all"``/``None`` — все
+                события в порядке прихода (оригинальные сообщения).
+            cursor: ``next_cursor``/``bookmark`` прошлого ответа; ``None`` — с
+                самого старого доступного (потеря до него — в ``dropped``).
+            limit: максимум событий в странице (дефолт 100, потолок 500).
+
+        Returns:
+            ``{"success": True, "plane", "items": [{"seq", "event"}, ...], "count",
+            "next_cursor", "dropped", "bookmark"}``. ``dropped`` — сколько событий
+            между курсором и первым возвращённым вытеснено из кольца (читатель
+            видит свою слепую зону). Ошибки курсора/плоскости — error-dict;
+            курсор чужого поколения/впереди потока → ``reset_required: True``
+            (начать заново с ``cursor=null``; полный re-list — Phase D).
+        """
+        plane_key = plane or ALL_PLANE
+        if plane_key != ALL_PLANE and plane_key not in self._rings:
+            return {
+                "success": False,
+                "error": f"неизвестная плоскость {plane_key!r}",
+                "planes": [ALL_PLANE, *PLANES],
+            }
+        try:
+            cursor_seq = self._parse_cursor(cursor, plane_key)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
+        try:
+            page_limit = int(limit) if limit is not None else _DEFAULT_PAGE_LIMIT
+        except (TypeError, ValueError):
+            return {"success": False, "error": f"limit должен быть целым числом, получено {limit!r}"}
+        page_limit = max(1, min(page_limit, _MAX_PAGE_LIMIT))
+
+        with self._cv:
+            ring = self._arrival if plane_key == ALL_PLANE else self._rings[plane_key]
+            newest = self._gseq if plane_key == ALL_PLANE else self._pseq[plane_key]
+            bookmark = self._fmt_cursor(plane_key, newest)
+            if cursor_seq > newest:
+                return {
+                    "success": False,
+                    "error": (
+                        f"курсор {cursor!r} впереди потока (последний seq {newest}) — "
+                        "вероятно, курсор прежнего соединения; начни заново с cursor=null"
+                    ),
+                    "reset_required": True,
+                    "bookmark": bookmark,
+                }
+            ring_len = len(ring)
+            oldest = ring[0][0] if ring_len else newest + 1
+            dropped = max(0, oldest - (cursor_seq + 1))
+            offset = max(cursor_seq + 1, oldest) - oldest  # плотный seq ⇒ индекс в деке
+            selected = list(islice(ring, offset, offset + page_limit))
+
+        items = [{"seq": s, "event": m} for s, m in selected]
+        if items:
+            next_seq = items[-1]["seq"]
+        elif ring_len == 0:
+            # Всё вытеснено: потеря уже сообщена в dropped — курсор вперёд, чтобы
+            # не рапортовать одну и ту же слепую зону бесконечно.
+            next_seq = newest
+        else:
+            next_seq = cursor_seq  # догнали хвост — курсор стабилен
+        return {
+            "success": True,
+            "plane": plane_key,
+            "items": items,
+            "count": len(items),
+            "next_cursor": self._fmt_cursor(plane_key, next_seq),
+            "dropped": dropped,
+            "bookmark": bookmark,
+        }
+
+    def _fmt_cursor(self, plane_key: str, seq: int) -> str:
+        return f"{plane_key}:{seq}@{self._gen}"
+
+    def _parse_cursor(self, cursor: Optional[Any], plane_key: str) -> int:
+        """Курсор → seq. ValueError с обучающим текстом на любой неразборный вход."""
+        if cursor in (None, "", 0):
+            return 0
+        text = str(cursor)
+        if "@" in text:
+            text, _, gen = text.rpartition("@")
+            if gen != self._gen:
+                raise ValueError(
+                    f"курсор поколения {gen!r} не подходит к текущему {self._gen!r} "
+                    "(driver пересоздан после реконнекта) — начни заново с cursor=null"
+                )
+        if ":" in text:
+            prefix, _, seq_text = text.partition(":")
+            if prefix != plane_key:
+                raise ValueError(
+                    f"курсор плоскости {prefix!r} не подходит к чтению {plane_key!r} — "
+                    "у каждой плоскости своя нумерация"
+                )
+        else:
+            seq_text = text
+        if not seq_text.isdigit():
+            raise ValueError(f"нечитаемый курсор {cursor!r}: ожидаю 'plane:seq@gen' из next_cursor/bookmark")
+        return int(seq_text)
+
+    # ---- Legacy-дренаж (обёртка events(), удаление — F.1) ----
+
+    def drain(
+        self,
+        timeout: Optional[float] = 0.0,
+        *,
+        max_items: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Прежняя семантика events(): «всё новое с прошлого дренажа», деструктивно.
+
+        Реализована внутренним курсором поверх arrival-кольца: сами кольца не
+        трогает (курсорные читатели events_page не страдают), но два конкурирующих
+        вызова drain по-прежнему крадут события друг у друга — это и есть причина
+        депрекации. Вытеснение из кольца между дренажами — молча (легаси-поведение
+        deque(maxlen) сохранено бит-в-бит).
+
+        Семантика timeout:
+        - ``0.0`` (по умолчанию) — поллинг: сразу вернуть, что накоплено (может быть []);
+        - ``>0`` — блокировать до появления нового события, но не дольше timeout;
+        - ``None`` — блокировать до первого нового события (или до close()).
+
+        max_items ограничивает размер пачки (остаток отдаст следующий вызов).
+        """
+        with self._cv:
+            # Три режима ожидания разведены явно (как в прежней реализации).
+            if timeout is None:
+                while not self._has_new():
+                    if not self._alive():
+                        break
+                    self._cv.wait()
+            elif timeout > 0.0:
+                deadline = time.monotonic() + timeout
+                while not self._has_new():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self._cv.wait(remaining)
+            fresh = [(s, m) for s, m in self._arrival if s > self._drain_seq]
+            if max_items is not None:
+                fresh = fresh[:max_items]
+            if fresh:
+                self._drain_seq = fresh[-1][0]
+            return [m for _, m in fresh]
+
+    def _has_new(self) -> bool:
+        """Есть ли в arrival событие новее drain-курсора (зовётся под ``_cv``)."""
+        return bool(self._arrival) and self._arrival[-1][0] > self._drain_seq
+
+    # ---- Диагностика ----
+
+    def stats(self) -> Dict[str, Any]:
+        """Счётчики hub'а: per-plane seq/размер/вытеснено + arrival + подписчики.
+
+        ``evicted`` выводится из плотного seq (``seq − size``) — отдельных
+        счётчиков не нужно. Вход для system_overview (B.3).
+        """
+        with self._cv:
+            planes = {
+                p: {"seq": self._pseq[p], "size": len(self._rings[p]), "evicted": self._pseq[p] - len(self._rings[p])}
+                for p in PLANES
+            }
+            return {
+                "planes": planes,
+                "all": {"seq": self._gseq, "size": len(self._arrival), "evicted": self._gseq - len(self._arrival)},
+                "drain_cursor": self._drain_seq,
+                "subscribers": len(self._subscribers),
+                "event_errors": self._event_errors,
+            }
+
+
+class _EventChannelMixin:
+    """Публичное API событийного канала driver'а — тонкие делегаты в ``self._hub``."""
+
+    def _emit_event(self, msg: Dict[str, Any]) -> None:
+        """Точка входа транспорта: push из reader-потока → hub (кольца + подписчики)."""
+        self._hub.emit(msg)
+
+    def subscribe(self, callback: EventCallback) -> EventCallback:
+        """Подписаться на события: callback зовётся на каждое push-сообщение."""
+        return self._hub.subscribe(callback)
+
+    def unsubscribe(self, callback: EventCallback) -> None:
+        """Отписать ранее зарегистрированный callback (no-op, если его нет)."""
+        self._hub.unsubscribe(callback)
 
     def events(
         self,
@@ -68,45 +414,38 @@ class _EventChannelMixin:
         *,
         max_items: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """Прочитать накопленные события (drain).
-
-        Семантика timeout:
-        - `0.0` (по умолчанию) — поллинг: сразу вернуть, что накоплено (может быть []);
-        - `>0` — блокировать до появления хотя бы одного события, но не дольше timeout,
-          затем слить всё накопленное;
-        - `None` — блокировать до первого события (или до close()).
-
-        max_items ограничивает размер пачки (остаток останется в очереди).
-        Возвращает список событий в порядке поступления (FIFO).
+        """УСТАРЕЛО (B.1): деструктивный дренаж всех плоскостей — конкурирующие
+        читатели крадут события друг у друга. Используй :meth:`events_page`
+        (курсорное недеструктивное чтение). Обёртка живёт до перевода вызывающих
+        и удаляется в F.1 (см. plans/backend-ctl-debug-console.md).
         """
-        with self._events_cv:
-            # Три режима ожидания разведены явно — так `deadline` в блокирующей
-            # ветке всегда float (без Optional-narrowing) и каждая семантика читается
-            # отдельно. Поллинг (timeout == 0.0) вообще не ждёт — сразу к drain.
-            if timeout is None:
-                while not self._events:
-                    # Бесконечное ожидание: не висеть вечно на закрытом/не открытом
-                    # соединении — выходим (новых событий не будет).
-                    if not self._running and self._reader is None:
-                        break
-                    self._events_cv.wait()
-            elif timeout > 0.0:
-                deadline = time.monotonic() + timeout
-                while not self._events:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        break
-                    self._events_cv.wait(remaining)
-            if max_items is None:
-                count = len(self._events)
-            else:
-                count = min(max_items, len(self._events))
-            return [self._events.popleft() for _ in range(count)]
+        return self._hub.drain(timeout, max_items=max_items)
+
+    def events_page(
+        self,
+        plane: Optional[str] = None,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Курсорная страница событий плоскости (см. :meth:`EventHub.page`)."""
+        return self._hub.page(plane, cursor=cursor, limit=limit)
+
+    def events_stats(self) -> Dict[str, Any]:
+        """Счётчики событийного hub'а (см. :meth:`EventHub.stats`)."""
+        return self._hub.stats()
 
     @property
     def event_errors(self) -> int:
         """Сколько раз колбэк подписчика бросил исключение (диагностика)."""
-        return self._event_errors
+        return self._hub.event_errors
 
 
-__all__ = ["_EventChannelMixin", "EventCallback"]
+__all__ = [
+    "EventHub",
+    "_EventChannelMixin",
+    "EventCallback",
+    "OBSERVABILITY_RECORD_COMMAND",
+    "PLANES",
+    "ALL_PLANE",
+]

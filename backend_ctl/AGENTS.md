@@ -10,7 +10,7 @@
 > ([`mcp_server.py`](mcp_server.py), stdio, без SDK-зависимостей). Имена инструментов
 > зеркалят методы driver: `mcp__backend-ctl__capabilities` / `get_status` /
 > `introspect_handlers` / `send_command` / `set_register` / `state_get` / `log_tail` /
-> `events` / … Если инструменты доступны в сессии — используй их вместо Bash-сниппетов.
+> `events_page` / … Если инструменты доступны в сессии — используй их вместо Bash-сниппетов.
 > Включение: плагин `mcp-backend-ctl` (`.claude/plugins/mcp-backend-ctl/`) в
 > `.claude/enabled.yaml` (или запись `backend-ctl` в `.mcp.json`:
 > `.venv/bin/python -m backend_ctl.mcp_server`). Бэкенд поднимается отдельно (`BACKEND_CTL=1`).
@@ -23,7 +23,7 @@
 | «Применить параметр в живой процесс (live field-write)» | **backend_ctl** (`set_register`) |
 | «Запустить/остановить процесс, послать system-команду» | **backend_ctl** (`system_command`) |
 | «Проверить что GUI-кнопка реально дергает бэкенд» | сперва backend_ctl (доказать backend-путь), потом qt-mcp (GUI-путь) |
-| «Что пользователь нажал в GUI?» (события кнопок/табов агенту) | **backend_ctl** (`ui_tap` → события `ui.event` в `events`) |
+| «Что пользователь нажал в GUI?» (события кнопок/табов агенту) | **backend_ctl** (`ui_tap` → события `ui.event` в `events_page(plane="ui")`) |
 | Состояние **виджетов**, клики, снимок UI | qt-mcp (`QT_MCP_PROBE=1`) — НЕ backend_ctl |
 | Поиск/рефакторинг исходников | qex / Serena / Grep — driver видит только runtime |
 
@@ -84,7 +84,9 @@ PY
 | `ui_tap("gui")` / `ui_untap("gui")` | подписка на UI-события gui: жесты (kind=button/tab) И намерения — команды GUI→бэкенд через перехват двери CommandSender (kind=command/system_command) → пуши `ui.event` (общий seq) |
 | `ui_tap_ping("gui", note=...)` | синтетическое `ui.event` тем же путём доставки — проверка цепочки без клика |
 | `debug_session(logs_level=, state_pattern=, log_processes=)` / `debug_stop()` | ВСЯ отладочная плоскость одним вызовом: ui_tap + log_tail (по умолчанию на все процессы топологии) + state_subscribe; дизайн — `plans/2026-07-06_constructor-master/debug-plane-idea.md` |
-| `subscribe(cb)` / `events(timeout)` | событийный канал: колбэк или слив накопленных push-событий |
+| `events_page(plane=, cursor=, limit=)` | **B.1**: курсорное НЕдеструктивное чтение событий по плоскостям (`state`/`logs`/`errors`/`stats`/`telemetry`/`ui`/`other`/`all`); ответ `{items[{seq,event}], next_cursor, dropped, bookmark}` — несколько читателей не мешают друг другу, потеря из кольца видна в `dropped`, `bookmark` = «читать только новое» |
+| `subscribe(cb)` / `events(timeout)` | событийный канал: колбэк на каждый push; `events` — **устаревший** деструктивный дренаж (крадёт события у параллельных читателей; удаление в F.1) — используй `events_page` |
+| `events_stats()` | счётчики hub'а: per-plane seq/размер/вытеснено |
 | `telemetry_set(process, metric, enabled=, interval_sec=, plane=)` | **точечно** поменять ОДНУ метрику/правило телеметрии (merge — соседей не сносит); `plane="publisher"` (частота публикации) или `"throttle"` (central rate-limit) |
 | `telemetry_reconfigure(process="all", publish=, throttle=, mode=)` | секцией: publisher-gate и/или central-троттл; `mode="replace"` (дефолт) применяет ЦЕЛИКОМ (**wipe** неуказанных) — для одной метрики предпочитай `telemetry_set` |
 | `telemetry_snapshot(process=None, metric=None)` | **локальный** снимок телеметрии (0 IPC): read-model поверх `state.changed`; наполняется после `watch_like_gui`; фильтр по процессу/суффиксу метрики + ключ process/worker |

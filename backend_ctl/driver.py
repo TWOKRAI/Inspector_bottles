@@ -6,11 +6,14 @@ BackendDriver — socket-клиент к SocketChannel хоста (request-id ma
 request_id в pending-слоты, request() блокирует до ответа/таймаута. Высокоуровневые
 обёртки строят сообщения общими билдерами протокола (один источник правды с GUI).
 
-Помимо reply-пути есть **событийный канал** (Ф1 Task 1.1): push-сообщения без
+Помимо reply-пути есть **событийный канал** (Ф1 Task 1.1 → B.1): push-сообщения без
 request_id (или не матчащие ни один pending) — например `state.changed` — не
-дропаются, а складываются в bounded-очередь и рассылаются подписчикам. Так
-`state.subscribe` через driver становится рабочим end-to-end. Разделение потоков:
-reader-поток пишет события, клиентский поток читает их через events()/subscribe().
+дропаются, а уходят в :class:`~backend_ctl.events.EventHub`: курсорные плоскости
+(state/logs/errors/stats/telemetry/ui) с недеструктивным чтением `events_page()`
+и видимой потерей + синхронные подписчики. Так `state.subscribe` через driver
+работает end-to-end. Разделение потоков: reader-поток пишет события, клиентские
+потоки читают их курсорами events_page()/subscribe() (`events()` — устаревший
+деструктивный дренаж, удаление в F.1).
 
 Без бизнес-логики: driver только транспортирует router-сообщения. Вся интроспекция/
 команды исполняются процессами системы, ответы едут обратно чистым RouterManager.
@@ -21,8 +24,7 @@ from __future__ import annotations
 import logging
 import socket
 import threading
-from collections import deque
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from multiprocess_framework.modules.telemetry_readmodel_module import TelemetryReadModel
 from multiprocess_framework.modules.message_module import (
@@ -47,7 +49,12 @@ from .protocol import (  # noqa: F401 — re-export для back-compat шима
     unwrap,
 )
 from .subscriptions import _SubscriptionRegistry
-from .events import _EventChannelMixin, EventCallback  # noqa: F401 — EventCallback re-export
+from .events import (  # noqa: F401 — EventCallback/OBSERVABILITY_RECORD_COMMAND re-export
+    _EventChannelMixin,
+    EventCallback,
+    EventHub,
+    OBSERVABILITY_RECORD_COMMAND,
+)
 from .transport import _TransportMixin, _Pending  # noqa: F401 — _Pending re-export для тестов
 from .watch import WatchController, GUI_DEFAULT_PATTERNS  # noqa: F401 — GUI_DEFAULT_PATTERNS re-export
 
@@ -59,12 +66,6 @@ _log = logging.getLogger(__name__)
 # Сентинел «под-секция не передана»: отличает отсутствие аргумента от явного None
 # (для телеметрии ``publish=None`` — валидная команда «выключить gate», PC 3.2).
 _UNSET: Any = object()
-
-# Команда live-хвоста наблюдаемости на проводе (Ф5.20b): процесс пушит записи
-# логов/ошибок/статистики адресно подписчику ЭТИМ command (зеркало
-# RecordForwardChannel.FORWARD_COMMAND). Строка-контракт, не импортируем из
-# framework-канала — чтобы driver не тянул серверный модуль (Dict at Boundary).
-OBSERVABILITY_RECORD_COMMAND: str = "observability.record"
 
 # Ранги лог-severity для клиентского фильтра observability_records(level=...) (F5).
 # Только лог-плоскость: stats-метрики (gauge/counter) сюда НЕ попадают и не режутся.
@@ -90,9 +91,10 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         reply_to: адрес ответа. Driver не в queue_registry, ответ физически приходит
             в очередь ProcessManager (где живёт сокет) → reply_to="ProcessManager".
         default_timeout: таймаут request() по умолчанию.
-        event_queue_maxlen: ёмкость bounded-очереди событий. При переполнении
-            вытесняются самые старые (deque maxlen) — очередь не течёт, даже если
-            подписчиков нет и события никто не вычитывает.
+        event_queue_maxlen: ёмкость КАЖДОГО кольца событий (arrival + плоскости
+            EventHub). При переполнении вытесняются самые старые — память не
+            течёт, даже если события никто не вычитывает; курсорный читатель
+            видит потерю в поле ``dropped`` (B.1).
     """
 
     def __init__(
@@ -128,13 +130,11 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         # повторить подписки, а не потерять их молча. Заполняется subscribe-обёртками.
         self._subscriptions = _SubscriptionRegistry()
 
-        # Событийный канал: reader-поток пишет, клиентский поток читает.
-        # _events_cv охраняет и очередь, и список подписчиков; на нём же
-        # блокируется events(timeout) в ожидании первого события.
-        self._events: Deque[Dict[str, Any]] = deque(maxlen=event_queue_maxlen)
-        self._events_cv = threading.Condition()
-        self._subscribers: List[EventCallback] = []
-        self._event_errors = 0  # счётчик исключений колбэков (диагностика)
+        # Событийный канал (B.1): EventHub — курсорные плоскости + подписчики.
+        # reader-поток пишет (emit), клиентские потоки читают курсорами
+        # (events_page) либо legacy-дренажем (events). Предикат alive выводит
+        # блокирующий drain из вечного ожидания на закрытом соединении.
+        self._hub = EventHub(maxlen=event_queue_maxlen, alive=lambda: self._running or self._reader is not None)
 
         # GUI-эквивалентный watch (Task 2.2): авто-переподписка observability-хвоста
         # после авто-рестарта. Стейт-машина ВЫНЕСЕНА в WatchController (C.1) — она

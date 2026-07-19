@@ -103,6 +103,7 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 
 ### Task B.1 — Cursor list-watch по плоскостям (фундамент, гейтит мультиклиент)
 **Level:** Senior (Opus) | **Layer:** framework
+**Status (2026-07-18):** ✅ ЗАВЕРШЕНО. `EventHub` (композиция, как WatchController) в `events.py`: arrival-кольцо оригиналов + 7 плоскостных колец (`state/logs/errors/stats/telemetry/ui` + `other` — ничто не теряется молча) с плотным per-plane seq → точная арифметика `dropped`; курсор `plane:seq@gen` (generation-токен даёт явный `reset_required` вместо тихого чтения не с того места после реконнекта; полный re-list — Phase D); `telemetry` — per-delta зеркало ingest-потока read-model (вход для B.2 `metric_threshold`); смешанный observability-батч расщепляется по `kind` только в плоскостных view (arrival не тронут → `events()` бит-в-бит). `events()` — обёртка над hub (внутренний drain-курсор), помечена устаревшей; `events_stats()` — вход для overview B.3. MCP: `events_page` (SAFETY_READ).
 **Goal:** недеструктивное, повторяемое чтение событий с курсором и видимой потерей.
 **Проблема:** `events()` деструктивно дренирует единую `deque(1000)`; два потребителя (или два tools/call подряд) крадут события друг у друга; `observability_records(events=None)` конфликтует с `events()`; переполнение вытесняет молча — агент не знает, что ослеп (тот же класс «тихой слепоты», что худший баг Phase 0, на уровень выше).
 **Files:** `backend_ctl/driver.py` (EventHub), `backend_ctl/mcp_tools.py`, tests.
@@ -111,8 +112,8 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 2. `events_page(plane=None, cursor=None, limit=)` — недеструктивно; ответ `{items, next_cursor, dropped, bookmark}`; `dropped` растёт при вытеснении из кольца.
 3. `events()` — обёртка back-compat (дренаж всех плоскостей) с deprecation-нотой. Срок жизни ограничен этим планом: перевод вызывающих на `events_page` и **удаление обёртки — в F.1** (два конкурирующих режима потребления не должны жить дольше плана).
 **Acceptance:**
-- [ ] unit: два независимых курсора читают одну плоскость без взаимной кражи; переполнение кольца → `dropped>0` виден; `next_cursor` монотонен
-- [ ] back-compat: существующие тесты `events()` зелёные
+- [x] unit: два независимых курсора читают одну плоскость без взаимной кражи; переполнение кольца → `dropped>0` виден; `next_cursor` монотонен (18 новых тестов `test_events_page.py`)
+- [x] back-compat: существующие тесты `events()` зелёные (245 unit passed; C.0 live-якорь reconnect зелёный; 1 unit `test_hard_kill` + 8 live фейлов — pre-existing, идентичны на базе `27d17ee7`)
 **Аналог:** K8s watch (resourceVersion+bookmarks), CDP event domains, journald cursor.
 
 ### Task B.2 — await_condition (серверное ожидание вместо поллинга)

@@ -1,0 +1,261 @@
+# -*- coding: utf-8 -*-
+"""Тесты B.1: курсорные плоскости EventHub (events_page).
+
+Acceptance плана (plans/backend-ctl-debug-console.md, Task B.1):
+- два независимых курсора читают одну плоскость без взаимной кражи;
+- переполнение кольца → dropped>0 виден читателю;
+- next_cursor монотонен;
+- back-compat: legacy events() (существующие тесты test_driver.py) не регрессирует —
+  здесь дополнительно закреплено взаимное невлияние events() ↔ events_page().
+
+Инжекция входящих строк — через dispatch_raw (как в TestEventChannel), без сокета
+и без live-бэкенда.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Dict, List
+
+from backend_ctl.driver import BackendDriver
+
+
+def _line(msg: Dict[str, Any]) -> bytes:
+    """Собрать проводную строку так же, как её видит reader-поток."""
+    return json.dumps(msg, ensure_ascii=False).encode("utf-8")
+
+
+def _push_state(d: BackendDriver, value: Any, path: str = "processes.cam.state.fps") -> None:
+    d.dispatch_raw(_line({"command": "state.changed", "data": {"deltas": [{"path": path, "new_value": value}]}}))
+
+
+def _seqs(page: Dict[str, Any]) -> List[int]:
+    return [it["seq"] for it in page["items"]]
+
+
+class TestPlaneClassification:
+    def test_state_changed_lands_in_state_and_telemetry(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(
+            _line(
+                {
+                    "command": "state.changed",
+                    "data": {
+                        "deltas": [
+                            {"path": "processes.cam.state.fps", "new_value": 30},
+                            {"path": "system.mode", "new_value": "run"},
+                        ]
+                    },
+                }
+            )
+        )
+        state = d.events_page("state")
+        assert state["success"] is True
+        assert state["count"] == 1
+        assert state["items"][0]["event"]["command"] == "state.changed"
+        # telemetry — per-delta зеркало ingest-потока read-model: 2 дельты → 2 item'а.
+        tele = d.events_page("telemetry")
+        assert tele["count"] == 2
+        assert [it["event"]["command"] for it in tele["items"]] == ["telemetry.delta", "telemetry.delta"]
+        assert tele["items"][0]["event"]["data"]["path"] == "processes.cam.state.fps"
+        assert tele["items"][1]["event"]["data"]["new_value"] == "run"
+
+    def test_log_ui_unknown_planes(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(_line({"command": "log.record", "data": {"record": {"severity": "error"}}}))
+        d.dispatch_raw(_line({"command": "ui.event", "data": {"record": {"kind": "button"}}}))
+        d.dispatch_raw(_line({"command": "какая-то.новая", "data": {}}))
+        d.dispatch_raw(_line({"request_id": "no-such-id", "result": {"x": 1}}))  # некарантинный поздний reply
+        assert d.events_page("logs")["count"] == 1
+        assert d.events_page("ui")["count"] == 1
+        other = d.events_page("other")
+        assert other["count"] == 2  # незнакомая команда + reply-как-событие: не потеряны молча
+        assert d.events_page("all")["count"] == 4
+
+    def test_observability_batch_split_by_kind(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(
+            _line(
+                {
+                    "command": "observability.record",
+                    "data": {
+                        "process": "cam",
+                        "records": [
+                            {"kind": "log", "severity": "info", "message": "a"},
+                            {"kind": "stats", "severity": "gauge", "message": "b"},
+                            {"kind": "log", "severity": "warning", "message": "c"},
+                        ],
+                    },
+                }
+            )
+        )
+        d.dispatch_raw(
+            _line({"command": "observability.record", "data": {"record": {"kind": "error", "message": "boom"}}})
+        )
+        logs = d.events_page("logs")
+        assert logs["count"] == 1
+        log_view = logs["items"][0]["event"]
+        assert log_view["command"] == "observability.record"
+        assert [r["message"] for r in log_view["data"]["records"]] == ["a", "c"]
+        assert log_view["data"]["process"] == "cam"  # прочие ключи data сохранены
+        stats = d.events_page("stats")
+        assert [r["message"] for r in stats["items"][0]["event"]["data"]["records"]] == ["b"]
+        errors = d.events_page("errors")
+        # Одиночная data.record нормализована в батч из одной записи.
+        assert [r["message"] for r in errors["items"][0]["event"]["data"]["records"]] == ["boom"]
+        # Оригиналы в arrival НЕ расщеплены: 2 сообщения как пришли.
+        assert d.events_page("all")["count"] == 2
+
+    def test_observability_record_without_kind_goes_other(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(_line({"command": "observability.record", "data": {"records": [{"message": "нет kind"}]}}))
+        assert d.events_page("other")["count"] == 1
+        assert d.events_page("logs")["count"] == 0
+
+
+class TestCursorIndependence:
+    def test_two_cursors_read_same_plane_without_theft(self) -> None:
+        d = BackendDriver()
+        for i in range(3):
+            _push_state(d, i)
+        a1 = d.events_page("state")
+        b1 = d.events_page("state")
+        # Оба читателя видят ВСЕ события — никто ни у кого не украл.
+        assert _seqs(a1) == [1, 2, 3]
+        assert _seqs(b1) == [1, 2, 3]
+        # Продолжение каждого курсора независимо: догнали хвост — пусто, без потерь.
+        a2 = d.events_page("state", cursor=a1["next_cursor"])
+        assert a2["items"] == [] and a2["dropped"] == 0
+        _push_state(d, 99)
+        a3 = d.events_page("state", cursor=a2["next_cursor"])
+        b2 = d.events_page("state", cursor=b1["next_cursor"])
+        assert _seqs(a3) == [4]
+        assert _seqs(b2) == [4]
+
+    def test_page_and_legacy_drain_do_not_consume_each_other(self) -> None:
+        d = BackendDriver()
+        _push_state(d, 1)
+        _push_state(d, 2)
+        assert len(d.events()) == 2  # legacy-дренаж забрал «своё»
+        # ...но курсорный читатель по-прежнему видит всё.
+        assert d.events_page("state")["count"] == 2
+        # ...а повторный legacy-дренаж — нет (его семантика «новое с прошлого раза»).
+        assert d.events() == []
+        # Чтение страницей не съедает события у legacy-дренажа.
+        _push_state(d, 3)
+        assert d.events_page("state", limit=10)["count"] == 3
+        assert len(d.events()) == 1
+
+
+class TestDroppedAndMonotonic:
+    def test_overflow_dropped_visible(self) -> None:
+        d = BackendDriver(event_queue_maxlen=3)
+        for i in range(5):
+            _push_state(d, i)
+        page = d.events_page("state")
+        # Кольцо на 3: события seq 1–2 вытеснены — потеря ВИДНА, не съедена молча.
+        assert page["dropped"] == 2
+        assert _seqs(page) == [3, 4, 5]
+
+    def test_dropped_relative_to_cursor(self) -> None:
+        d = BackendDriver(event_queue_maxlen=3)
+        for i in range(5):
+            _push_state(d, i)
+        cursor = d.events_page("state")["next_cursor"]  # прочитано до seq 5
+        for i in range(5):
+            _push_state(d, 10 + i)  # seq 6..10; кольцо держит 8..10
+        page = d.events_page("state", cursor=cursor)
+        assert page["dropped"] == 2  # seq 6–7 вытеснены МЕЖДУ чтениями
+        assert _seqs(page) == [8, 9, 10]
+
+    def test_next_cursor_monotonic_across_pages(self) -> None:
+        d = BackendDriver()
+        for i in range(5):
+            _push_state(d, i)
+        seen: List[int] = []
+        cursor = None
+        for _ in range(4):
+            page = d.events_page("state", cursor=cursor, limit=2)
+            seen.extend(_seqs(page))
+            cursor = page["next_cursor"]
+        assert seen == [1, 2, 3, 4, 5]
+        assert seen == sorted(seen)  # seq строго возрастает, без повторов
+
+    def test_caught_up_cursor_stable(self) -> None:
+        d = BackendDriver()
+        _push_state(d, 1)
+        p1 = d.events_page("state")
+        p2 = d.events_page("state", cursor=p1["next_cursor"])
+        assert p2["items"] == [] and p2["dropped"] == 0
+        assert p2["next_cursor"] == p1["next_cursor"]
+
+    def test_empty_plane_returns_empty_page(self) -> None:
+        d = BackendDriver()
+        page = d.events_page("errors")
+        assert page["success"] is True
+        assert page["items"] == [] and page["dropped"] == 0
+        assert page["next_cursor"] == page["bookmark"]
+
+    def test_limit_clamped_to_at_least_one(self) -> None:
+        d = BackendDriver()
+        _push_state(d, 1)
+        _push_state(d, 2)
+        page = d.events_page("state", limit=0)
+        assert page["count"] == 1  # limit<1 поднят до 1, не «всё» и не ошибка
+
+
+class TestCursorSafety:
+    def test_plane_mismatch_cursor_error(self) -> None:
+        d = BackendDriver()
+        _push_state(d, 1)
+        d.dispatch_raw(_line({"command": "log.record", "data": {}}))
+        log_cursor = d.events_page("logs")["next_cursor"]
+        res = d.events_page("state", cursor=log_cursor)
+        assert res["success"] is False
+        assert "плоскост" in res["error"]
+
+    def test_foreign_generation_cursor_reset_required(self) -> None:
+        d1 = BackendDriver()
+        _push_state(d1, 1)
+        stale = d1.events_page("state")["next_cursor"]
+        d2 = BackendDriver()  # реконнект = новый driver = новый hub/gen
+        _push_state(d2, 1)
+        res = d2.events_page("state", cursor=stale)
+        assert res["success"] is False
+        assert "cursor=null" in res["error"]
+
+    def test_cursor_ahead_of_stream_reset_required(self) -> None:
+        d = BackendDriver()
+        _push_state(d, 1)
+        res = d.events_page("state", cursor="state:999")
+        assert res["success"] is False
+        assert res["reset_required"] is True
+
+    def test_unknown_plane_lists_valid_planes(self) -> None:
+        d = BackendDriver()
+        res = d.events_page("нет-такой")
+        assert res["success"] is False
+        assert "state" in res["planes"] and "all" in res["planes"]
+
+    def test_bookmark_jumps_to_tail(self) -> None:
+        d = BackendDriver()
+        for i in range(3):
+            _push_state(d, i)
+        bookmark = d.events_page("state", limit=1)["bookmark"]
+        fresh = d.events_page("state", cursor=bookmark)
+        assert fresh["items"] == [] and fresh["dropped"] == 0  # старое пропущено сознательно
+        _push_state(d, 42)
+        after = d.events_page("state", cursor=fresh["next_cursor"])
+        assert after["count"] == 1
+        assert after["items"][0]["event"]["data"]["deltas"][0]["new_value"] == 42
+
+
+class TestEventsStats:
+    def test_stats_expose_eviction_and_sizes(self) -> None:
+        d = BackendDriver(event_queue_maxlen=3)
+        for i in range(5):
+            _push_state(d, i)
+        stats = d.events_stats()
+        assert stats["all"] == {"seq": 5, "size": 3, "evicted": 2}
+        assert stats["planes"]["state"] == {"seq": 5, "size": 3, "evicted": 2}
+        assert stats["planes"]["logs"]["seq"] == 0
