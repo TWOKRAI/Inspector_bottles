@@ -1360,3 +1360,39 @@ class TestSupervisionStatus:
         monkeypatch.setattr(d, "send_command", fake_send)
         d.supervision_status("camera")
         assert calls == [("ProcessManager", "supervision.status", {"process": "camera"})]
+
+
+class TestImportRetargetsSubscriber:
+    """Ревью-фикс #1: import пере-нацеливает свой subscriber на текущую сессию, чтобы
+    ключ durable-намарения совпадал с ним и последующий untail реально снимал его
+    (иначе снятая подписка воскресала бы на следующем реконнекте)."""
+
+    def test_import_retargets_own_subscriber_so_untail_matches(self) -> None:
+        d = BackendDriver()
+        d._subscriber = "backend_ctl.NEW"  # как после connect новой сессии
+        d.import_subscriptions(
+            [{"command": "observability.tail.subscribe", "target": "cam", "args": {"subscriber": "backend_ctl.OLD"}}]
+        )
+        # Намерение хранится под ТЕКУЩИМ subscriber.
+        assert d.export_subscriptions()[0]["args"]["subscriber"] == "backend_ctl.NEW"
+        # Untail по текущему subscriber снимает намерение (не воскресает).
+        d._subscriptions.remove("observability.tail.subscribe", "cam", {"subscriber": "backend_ctl.NEW"})
+        assert d.export_subscriptions() == []
+
+    def test_import_retargets_plain_sender_subscriber(self) -> None:
+        d = BackendDriver()
+        d._subscriber = "backend_ctl.NEW"
+        d.import_subscriptions(
+            [{"command": "log.tail.subscribe", "target": "cam", "args": {"subscriber": "backend_ctl", "level": "info"}}]
+        )
+        exported = d.export_subscriptions()[0]
+        assert exported["args"]["subscriber"] == "backend_ctl.NEW"
+        assert exported["args"]["level"] == "info"  # прочие args сохранены
+
+    def test_import_leaves_foreign_subscriber_untouched(self) -> None:
+        d = BackendDriver()
+        d._subscriber = "backend_ctl.NEW"
+        d.import_subscriptions(
+            [{"command": "observability.tail.subscribe", "target": "cam", "args": {"subscriber": "watcher"}}]
+        )
+        assert d.export_subscriptions()[0]["args"]["subscriber"] == "watcher"

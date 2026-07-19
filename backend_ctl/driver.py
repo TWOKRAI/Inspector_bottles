@@ -200,8 +200,18 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         return self._subscriptions.export()
 
     def import_subscriptions(self, intents: List[Dict[str, Any]]) -> None:
-        """Загрузить намерения в этот driver (после реконнекта)."""
-        self._subscriptions.load(intents)
+        """Загрузить намерения в этот driver (после реконнекта).
+
+        subscriber durable-намерения ПЕРЕ-НАЦЕЛИВАЕТСЯ на текущую сессию ЗДЕСЬ, при
+        загрузке (D.1): реконнект создаёт driver с новым session, и намерение старой
+        сессии (``<sender>.<old_sid>``) иначе осело бы в реестре с ключом по старому
+        subscriber (``_SubscriptionRegistry._key`` идентифицирует log/ui/obs-намерение
+        ПО subscriber). Тогда последующий ``*_untail`` (снимает по ТЕКУЩЕМУ subscriber)
+        не нашёл бы намерение → снятая подписка воскресала бы на следующем реконнекте.
+        Ретаргет на import держит ключ реестра согласованным с текущим subscriber.
+        """
+        retargeted = [{**it, "args": self._retarget_subscriber(it.get("args") or {})} for it in (intents or [])]
+        self._subscriptions.load(retargeted)
 
     def _retarget_subscriber(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Пере-нацелить subscriber durable-намерения на ТЕКУЩУЮ сессию (D.1).
@@ -223,13 +233,13 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         Зовётся после реконнекта: восстанавливает поток событий, который иначе
         молча оборвался бы. Идёт напрямую через send_command (не через обёртки),
-        поэтому не пере-регистрирует намерения. subscriber durable-намерения
-        пере-нацеливается на текущую сессию (_retarget_subscriber). Возвращает
-        список ``{command, target, success}`` для отчёта агенту.
+        поэтому не пере-регистрирует намерения. subscriber уже пере-нацелен на
+        текущую сессию при :meth:`import_subscriptions`, поэтому реестр и отправка
+        согласованы. Возвращает список ``{command, target, success}`` для отчёта агенту.
         """
         results: List[Dict[str, Any]] = []
         for it in self._subscriptions.export():
-            res = self.send_command(it["target"], it["command"], self._retarget_subscriber(it["args"]))
+            res = self.send_command(it["target"], it["command"], it["args"])
             results.append(
                 {
                     "command": it["command"],
