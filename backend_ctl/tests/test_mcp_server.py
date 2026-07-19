@@ -114,6 +114,7 @@ class TestRegistry:
             "introspect_queues",
             "introspect_plugins",
             "introspect_memory",
+            "supervision_status",
             "send_command",
             "system_command",
             "set_register",

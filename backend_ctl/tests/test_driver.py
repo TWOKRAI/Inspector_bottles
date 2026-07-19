@@ -1331,3 +1331,32 @@ class TestTelemetryReadModel:
         _ = d.telemetry_snapshot()
         # событие state.changed по-прежнему доступно потребителю events()
         assert any(e.get("command") == "state.changed" for e in d.events())
+
+
+class TestSupervisionStatus:
+    """D.1b: supervision_status(process?) шлёт supervision.status в ProcessManager."""
+
+    def test_sends_supervision_status_command(self, monkeypatch) -> None:
+        d = BackendDriver()
+        calls: List[tuple] = []
+
+        def fake_send(target, command, args=None, *, timeout=None):
+            calls.append((target, command, args))
+            return {"success": True, "epoch": 5, "processes": {}}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        res = d.supervision_status()
+        assert calls == [("ProcessManager", "supervision.status", {})]
+        assert res["epoch"] == 5
+
+    def test_filters_by_process(self, monkeypatch) -> None:
+        d = BackendDriver()
+        calls: List[tuple] = []
+
+        def fake_send(target, command, args=None, *, timeout=None):
+            calls.append((target, command, args))
+            return {"success": True}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        d.supervision_status("camera")
+        assert calls == [("ProcessManager", "supervision.status", {"process": "camera"})]

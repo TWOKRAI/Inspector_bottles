@@ -330,6 +330,23 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """Карточка процесса (сырой dict): команды+descriptions, регистры, handlers."""
         return self.send_command(process, "introspect.capabilities", **kw)
 
+    def supervision_status(
+        self,
+        process: Optional[str] = None,
+        *,
+        pm_name: str = "ProcessManager",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Supervision-снимок (D.1b): epoch топологии + per-process incarnation,
+        restart_count, last_exit, status. ``process`` фильтрует один процесс.
+
+        Сырой dict (Dict at Boundary). incarnation растёт на каждое пересоздание
+        очередей процесса → смена incarnation = пересечён рестарт (маркер «до/после»
+        для fencing-token и курсорной плоскости B.1).
+        """
+        args = {"process": process} if process else {}
+        return self.send_command(pm_name, "supervision.status", args, timeout=timeout)
+
     def capabilities(
         self,
         *,

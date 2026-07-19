@@ -137,6 +137,10 @@ def _introspect_memory(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return _jsonable(drv.introspect_memory(args["process"], **_kw_timeout(args)))
 
 
+def _supervision_status(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return _jsonable(drv.supervision_status(args.get("process"), **_kw_timeout(args)))
+
+
 def _send_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.send_command(args["target"], args["command"], args.get("args"), **_kw_timeout(args))
 
@@ -380,6 +384,19 @@ TOOLS: List[ToolSpec] = [
         "best-effort: недоступная подсистема → null (не ошибка). То, чего не видит даже GUI.",
         _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
         _introspect_memory,
+    ),
+    ToolSpec(
+        "supervision_status",
+        "Supervision-снимок (D.1b): epoch топологии + per-process incarnation, restart_count, "
+        "last_exit, status. Смена incarnation процесса = пересечён его рестарт (маркер «до/после» "
+        "для fencing и курсоров B.1). process — сузить до одного. Read-only.",
+        _obj(
+            {
+                "process": {"type": "string", "description": "Сузить до одного процесса. Опц."},
+                "timeout": _TIMEOUT,
+            }
+        ),
+        _supervision_status,
     ),
     ToolSpec(
         "send_command",
@@ -843,6 +860,7 @@ TOOL_SAFETY: Dict[str, str] = {
     "introspect_queues": SAFETY_READ,
     "introspect_plugins": SAFETY_READ,
     "introspect_memory": SAFETY_READ,
+    "supervision_status": SAFETY_READ,
     "state_get": SAFETY_READ,
     "state_get_subtree": SAFETY_READ,
     "events": SAFETY_READ,
