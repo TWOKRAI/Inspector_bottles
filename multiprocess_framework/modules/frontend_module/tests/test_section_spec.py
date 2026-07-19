@@ -201,36 +201,8 @@ def test_section_spec_factory_invocation() -> None:
     assert isinstance(section, SectionProtocol)
 
 
-# ---------------------------------------------------------------------------
-# 5. Совместимость с существующими секциями SettingsTab
-# ---------------------------------------------------------------------------
-
-
-def test_existing_settings_sections_satisfy_section_protocol() -> None:
-    """SystemSection / AppearanceSection / HistorySection остаются валидными.
-
-    Это критично: расширение `SectionProtocol` опциональным mixin'ом
-    (`SectionWithEvents`) не должно ломать существующие реализации.
-    """
-    # Эти импорты требуют PySide6 (секции — QWidget'ы), но Protocol-проверка
-    # выполняется без инстанцирования виджетов.
-    pytest.importorskip("PySide6")
-
-    from multiprocess_prototype.frontend.widgets.tabs.settings.system import (
-        SystemSection,
-    )
-    from multiprocess_prototype.frontend.widgets.tabs.settings.appearance import (
-        AppearanceSection,
-    )
-    from multiprocess_prototype.frontend.widgets.tabs.settings.history import (
-        HistorySection,
-    )
-
-    # У классов должны быть обязательные методы SectionProtocol
-    for cls in (SystemSection, AppearanceSection, HistorySection):
-        assert hasattr(cls, "key")
-        assert hasattr(cls, "title")
-        assert hasattr(cls, "widget")
-        assert hasattr(cls, "action_buttons")
-        assert hasattr(cls, "on_activated")
-        assert hasattr(cls, "on_deactivated")
+# Тест совместимости с прикладными секциями SettingsTab (SystemSection,
+# AppearanceSection, HistorySection) перенесён в frontend-constructor Ф1
+# (T1.4) в тесты settings-вкладок прототипа
+# (test_section_protocol_compat.py) — frontend_module/tests не должен
+# зависеть от кода приложения (инверсия слоёв).
