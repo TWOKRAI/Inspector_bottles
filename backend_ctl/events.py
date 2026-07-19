@@ -110,16 +110,19 @@ def iter_state_deltas(msg: Any) -> List[Dict[str, Any]]:
     return out
 
 
-#: supervisor-переходы, означающие смену идентичности процесса (рестарт/смерть).
-#: Приход такого события = наблюдаемый процесс пересёк границу инкарнации.
-_RESTART_BOUNDARY_EVENTS: frozenset = frozenset({"recovered", "crashed", "gave_up"})
+#: supervisor-переход, отмечающий, что процесс ВЕРНУЛСЯ новой инкарнацией и снова
+#: эмитит события. ТОЛЬКО ``recovered`` — момент, с которого возможно чтение «сквозь»
+#: границу инкарнации (ревью-фикс #3): ``crashed``/``gave_up`` означают, что процесс
+#: МЁРТВ (новых событий инкарнации ещё/уже нет), поэтому ротация на них не закрывала
+#: бы дополнительный долг, а лишь плодила бы reset-thrashing курсора в crash-loop.
+_RESTART_BOUNDARY_EVENTS: frozenset = frozenset({"recovered"})
 
 
 def _is_restart_boundary(msg: Dict[str, Any]) -> bool:
-    """True, если push несёт supervisor-переход рестарта наблюдаемого процесса
-    (``processes.<name>.supervisor.event`` ∈ boundary). Такой переход = смена
-    инкарнации → курсорные плоскости B.1 обязаны сброситься (§8), иначе курсор
-    молча читает СКВОЗЬ границу рестарта (долг ревью B.1)."""
+    """True, если push несёт supervisor-``recovered`` наблюдаемого процесса
+    (``processes.<name>.supervisor.event``). Такой переход = новая инкарнация ожила →
+    курсорные плоскости B.1 обязаны сброситься (§8), иначе курсор молча читает СКВОЗЬ
+    границу рестарта (долг ревью B.1)."""
     for delta in iter_state_deltas(msg):
         path = delta.get("path")
         if isinstance(path, str) and path.endswith(".supervisor.event"):

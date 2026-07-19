@@ -322,9 +322,10 @@ class TestEventsStats:
 
 
 class TestRestartBoundaryGating:
-    """§8: рестарт наблюдаемого процесса (supervisor.event ∈ {recovered/crashed/
-    gave_up}) ротирует generation-токен → курсор «до рестарта» даёт reset_required,
-    а не читает молча СКВОЗЬ границу инкарнации (закрытый долг ревью B.1)."""
+    """§8 (ревью-фикс #3): ТОЛЬКО ``recovered`` (новая инкарнация ожила) ротирует
+    generation-токен → курсор «до рестарта» даёт reset_required, а не читает молча
+    СКВОЗЬ границу инкарнации (долг B.1). ``crashed``/``gave_up`` = процесс мёртв
+    (новых событий нет) → НЕ ротируют (иначе reset-thrashing в crash-loop)."""
 
     def test_recovered_event_invalidates_prior_cursor(self) -> None:
         d = BackendDriver()
@@ -336,13 +337,16 @@ class TestRestartBoundaryGating:
         assert res["reset_required"] is True
         assert "cursor=null" in res["error"]
 
-    def test_crashed_and_gave_up_also_rotate(self) -> None:
+    def test_crashed_and_gave_up_do_not_rotate(self) -> None:
+        # Процесс мёртв: новых событий инкарнации нет → курсор остаётся валидным
+        # (ротация на них лишь плодила бы reset-thrashing в crash-loop — фикс #3).
         for event in ("crashed", "gave_up"):
             d = BackendDriver()
             _push_state(d, 1)
-            stale = d.events_page("state")["next_cursor"]
+            cur = d.events_page("state")["next_cursor"]
             _push_supervisor(d, event)
-            assert d.events_page("state", cursor=stale)["reset_required"] is True
+            assert d.events_page("state", cursor=cur)["success"] is True
+        assert d.events_stats()["gen_rotations"] == 0
 
     def test_in_progress_supervisor_event_does_not_rotate(self) -> None:
         # restarting/unresponsive — рестарт в процессе, идентичность ещё не сменилась.
@@ -365,5 +369,6 @@ class TestRestartBoundaryGating:
     def test_gen_rotations_counter(self) -> None:
         d = BackendDriver()
         _push_supervisor(d, "recovered")
-        _push_supervisor(d, "crashed")
+        _push_supervisor(d, "crashed")  # не ротирует
+        _push_supervisor(d, "recovered")
         assert d.events_stats()["gen_rotations"] == 2
