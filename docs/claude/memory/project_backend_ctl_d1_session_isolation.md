@@ -1,6 +1,6 @@
 ---
 name: project-backend-ctl-d1-session-isolation
-description: "D.1a session-isolation ЗАКРЫТ (ветка feat/bctl-d1-session-isolation, 7 коммитов): Вариант A in-band session + dotted-subscriber, router/push-строители НЕ тронуты. Флаг default OFF. Осталось D.1b (supervision) + epoch-гейтинг B.1 §8 + формальное ревью → merge → разблокирует D.2."
+description: "D.1a изоляция + D.1b-чтение (supervision.status) + §8 гейтинг курсоров ЗАКРЫТЫ (ветка feat/bctl-d1-session-isolation, ~11 коммитов): Вариант A in-band session + dotted-subscriber (router/push НЕ тронуты), флаг default OFF. Осталось: формальное ревью → merge → D.2. Follow-up: supervise-действия, per-event numeric epoch."
 metadata:
   type: project
 ---
@@ -18,6 +18,10 @@ metadata:
 
 sentrux Δ0 (7008→7008, циклов +0, 0 нарушений). Регресс — только pre-existing env (2 live-теста observability + порт-8765 конфликт от подвисшего бэкенда, воспроизводятся и на базе).
 
-**Осталось:** D.1b supervision-ручка (§7: incarnation/epoch/last_exit наружу + `supervision_status` + `supervise(action)` + epoch в каждом событии) → epoch-гейтинг курсоров B.1 (§8: `reset_required` при смене инкарнации наблюдаемого процесса) → формальное `/code-review` → merge → **разблокирует D.2** (streamable-HTTP мультиклиент). Осиротевшие durable-подписки мёртвой сессии — out-of-scope, вход D.2.
+**D.1b + §8 (ЗАКРЫТЫ 2026-07-19):** команда `supervision.status` (PM: epoch + per-process incarnation/restart_count/last_exit/status; monitor `get_supervision_snapshot`) + driver `supervision_status` + MCP tool (SAFETY_READ). §8 — EventHub ротирует generation-токен на supervisor-границе рестарта (`processes.<name>.supervisor.event` ∈ {recovered,crashed,gave_up}) → курсор «до рестарта» даёт `reset_required` (закрыт долг B.1 «чтение сквозь границу инкарнации»), driver-side, без правок server push-путей. Консервативно (safe superset).
+
+**Отложено (follow-up, НЕ acceptance):** `supervise(action=restart|drain_restart|set_policy)` — `restart` уже есть (`process.restart`), drain/live-policy = новая machinery; численный epoch/incarnation в КАЖДОМ событии (плумбинг shared push-путей, которых D.1a избегал); регенерация `CAPABILITIES.yaml` (новая команда) на рабочем харнессе — в текущем env харнесс сломан (introspect-хендлеры не регистрируются, `_live`/`harness_smoke` тесты красные, дамп вырождается). `test_hard_kill::test_already_dead_is_not_error` — pre-existing (harness.py не менялся).
+
+**Осталось по D.1:** формальное `/code-review` → merge → **разблокирует D.2** (streamable-HTTP мультиклиент). Осиротевшие durable-подписки мёртвой сессии — out-of-scope, вход D.2.
 
 Layer для коммитов backend_ctl — `mixed` (см. [[feedback-backend-ctl-layer-mixed]]). Тестировать бэкенд через driver, не qt-mcp ([[feedback-backend-ctl-for-agents]]).

@@ -135,4 +135,4 @@
 - [git stash pop хватает чужой стэш](feedback_git_stash_pop_wrong_stash.md) — проверка pre-existing через stash+checkout: pop на чистом дереве вытащит чужой стэш → конфликт-маркеры; используй worktree
 - [os.walk в worktrees](feedback_walk_skips_worktrees.md) — project-wide replace лезет в .claude/worktrees чужих агентов; скипать worktrees+.git; откат реверс-заменой
 - [backend_ctl Layer:mixed](feedback_backend_ctl_layer_mixed.md) — план пишет Layer:tools, но hook его не знает; для backend_ctl ставить Layer:mixed
-- [backend_ctl D.1a session-isolation](project_backend_ctl_d1_session_isolation.md) — ЗАКРЫТ (ветка feat/bctl-d1-session-isolation, 7 коммитов): Вариант A in-band session + dotted-subscriber, router/push НЕ тронуты (мост Ф1.1b), флаг default OFF; осталось D.1b + epoch-гейтинг §8 + ревью → D.2
+- [backend_ctl D.1a+D.1b+§8](project_backend_ctl_d1_session_isolation.md) — изоляция + supervision.status + гейтинг курсоров ЗАКРЫТЫ (ветка feat/bctl-d1-session-isolation): Вариант A dotted-subscriber (router/push НЕ тронуты, мост Ф1.1b), флаг default OFF; осталось формальное ревью → merge → D.2. Follow-up: supervise-действия, per-event epoch
