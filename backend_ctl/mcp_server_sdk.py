@@ -407,10 +407,14 @@ def main(argv: Optional[list] = None) -> int:
             # require_isolation=True: HTTP-режим fail-fast, если бэкенд поднят broadcast'ом (§5.4).
             return SDKToolServer(mode=mode, host=host, port=port, request_timeout=args.timeout, require_isolation=True)
 
-        http_bind = args.http_bind or os.environ.get(HTTP_BIND_ENV_VAR) or DEFAULT_HTTP_BIND
-        http_host, http_port = _parse_http_bind(http_bind)
-        idle_env = os.environ.get(HTTP_IDLE_ENV_VAR)
-        idle_timeout: Optional[float] = float(idle_env) if idle_env else DEFAULT_HTTP_IDLE_TIMEOUT
+        try:  # ревью #1: кривой --http-bind / BACKEND_CTL_HTTP_IDLE_TIMEOUT → понятное сообщение, не трейсбек
+            http_bind = args.http_bind or os.environ.get(HTTP_BIND_ENV_VAR) or DEFAULT_HTTP_BIND
+            http_host, http_port = _parse_http_bind(http_bind)
+            idle_env = os.environ.get(HTTP_IDLE_ENV_VAR)
+            idle_timeout: Optional[float] = float(idle_env) if idle_env else DEFAULT_HTTP_IDLE_TIMEOUT
+        except ValueError as exc:
+            print(f"[mcp_server_sdk] неверная HTTP-конфигурация: {exc}", file=sys.stderr, flush=True)
+            return 2
         if idle_timeout is not None and idle_timeout <= 0:
             idle_timeout = None  # 0/отрицательное = без TTL
         print(

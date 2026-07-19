@@ -366,6 +366,12 @@ class TestHttpRunner:
         with pytest.raises(ValueError):
             _parse_http_bind("8901")
 
+    def test_main_http_bad_bind_returns_clean_error(self) -> None:
+        # ревью #1: кривой --http-bind → код 2 (понятное сообщение), не трейсбек и не serve
+        from backend_ctl import mcp_server_sdk as m
+
+        assert m.main(["--http", "--http-bind", "garbage"]) == 2
+
     def test_build_server_compatible_with_streamable_manager(self) -> None:
         """build_server(factory) конструируется в StreamableHTTPSessionManager (stateful,
         idle-TTL, security) без ошибок типов/валидаций — wiring HTTP-раннера корректен."""

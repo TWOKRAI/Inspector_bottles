@@ -202,9 +202,11 @@ class DriverSession:
                 "(протечка reply/событий между сессиями). Перезапусти бэкенд с "
                 "BACKEND_CTL_SESSION_ISOLATION=1 (или config backend_ctl.session_isolation=true)."
             )
+        # ревью #2: None = флаг не найден в ответе. Причин две — не смешиваем в диагностике.
         raise BackendUnavailable(
-            "не удалось прочитать session_isolation канала backend_ctl из introspect.router_stats — "
-            "обнови бэкенд до версии с session-isolation (D.1) или используй stdio-режим."
+            "не удалось прочитать session_isolation канала backend_ctl из introspect.router_stats "
+            "(бэкенд без session-isolation D.1 ЛИБО router_stats недоступен/вернул ошибку). "
+            "Обнови бэкенд до версии с session-isolation или используй stdio-режим."
         )
 
     def reset(self) -> None:
