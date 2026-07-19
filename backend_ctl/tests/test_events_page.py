@@ -26,6 +26,18 @@ def _push_state(d: BackendDriver, value: Any, path: str = "processes.cam.state.f
     d.dispatch_raw(_line({"command": "state.changed", "data": {"deltas": [{"path": path, "new_value": value}]}}))
 
 
+def _push_supervisor(d: BackendDriver, event: str, name: str = "cam") -> None:
+    """Push supervisor-перехода наблюдаемого процесса (state.changed)."""
+    d.dispatch_raw(
+        _line(
+            {
+                "command": "state.changed",
+                "data": {"deltas": [{"path": f"processes.{name}.supervisor.event", "new_value": event}]},
+            }
+        )
+    )
+
+
 def _seqs(page: Dict[str, Any]) -> List[int]:
     return [it["seq"] for it in page["items"]]
 
@@ -307,3 +319,51 @@ class TestEventsStats:
         assert stats["all"] == {"seq": 5, "size": 3, "evicted": 2}
         assert stats["planes"]["state"] == {"seq": 5, "size": 3, "evicted": 2}
         assert stats["planes"]["logs"]["seq"] == 0
+
+
+class TestRestartBoundaryGating:
+    """§8: рестарт наблюдаемого процесса (supervisor.event ∈ {recovered/crashed/
+    gave_up}) ротирует generation-токен → курсор «до рестарта» даёт reset_required,
+    а не читает молча СКВОЗЬ границу инкарнации (закрытый долг ревью B.1)."""
+
+    def test_recovered_event_invalidates_prior_cursor(self) -> None:
+        d = BackendDriver()
+        _push_state(d, 1)
+        stale = d.events_page("state")["next_cursor"]
+        _push_supervisor(d, "recovered")  # процесс вернулся с новой инкарнацией
+        res = d.events_page("state", cursor=stale)
+        assert res["success"] is False
+        assert res["reset_required"] is True
+        assert "cursor=null" in res["error"]
+
+    def test_crashed_and_gave_up_also_rotate(self) -> None:
+        for event in ("crashed", "gave_up"):
+            d = BackendDriver()
+            _push_state(d, 1)
+            stale = d.events_page("state")["next_cursor"]
+            _push_supervisor(d, event)
+            assert d.events_page("state", cursor=stale)["reset_required"] is True
+
+    def test_in_progress_supervisor_event_does_not_rotate(self) -> None:
+        # restarting/unresponsive — рестарт в процессе, идентичность ещё не сменилась.
+        d = BackendDriver()
+        _push_state(d, 1)
+        cur = d.events_page("state")["next_cursor"]
+        _push_supervisor(d, "restarting")
+        res = d.events_page("state", cursor=cur)
+        assert res["success"] is True  # курсор НЕ инвалидирован
+
+    def test_fresh_cursor_after_rotation_is_stable(self) -> None:
+        d = BackendDriver()
+        _push_state(d, 1)
+        _push_supervisor(d, "recovered")
+        fresh = d.events_page("state")["bookmark"]  # bookmark уже с новым gen
+        _push_state(d, 2)
+        res = d.events_page("state", cursor=fresh)
+        assert res["success"] is True
+
+    def test_gen_rotations_counter(self) -> None:
+        d = BackendDriver()
+        _push_supervisor(d, "recovered")
+        _push_supervisor(d, "crashed")
+        assert d.events_stats()["gen_rotations"] == 2

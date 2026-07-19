@@ -110,6 +110,25 @@ def iter_state_deltas(msg: Any) -> List[Dict[str, Any]]:
     return out
 
 
+#: supervisor-переходы, означающие смену идентичности процесса (рестарт/смерть).
+#: Приход такого события = наблюдаемый процесс пересёк границу инкарнации.
+_RESTART_BOUNDARY_EVENTS: frozenset = frozenset({"recovered", "crashed", "gave_up"})
+
+
+def _is_restart_boundary(msg: Dict[str, Any]) -> bool:
+    """True, если push несёт supervisor-переход рестарта наблюдаемого процесса
+    (``processes.<name>.supervisor.event`` ∈ boundary). Такой переход = смена
+    инкарнации → курсорные плоскости B.1 обязаны сброситься (§8), иначе курсор
+    молча читает СКВОЗЬ границу рестарта (долг ревью B.1)."""
+    for delta in iter_state_deltas(msg):
+        path = delta.get("path")
+        if isinstance(path, str) and path.endswith(".supervisor.event"):
+            value = delta.get("new_value", delta.get("value"))
+            if value in _RESTART_BOUNDARY_EVENTS:
+                return True
+    return False
+
+
 def _classify(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
     """Разложить push-сообщение по плоскостям: список пар (plane, view).
 
@@ -193,7 +212,9 @@ class EventHub:
         self._alive: Callable[[], bool] = alive if alive is not None else (lambda: False)
         # Токен поколения в курсорах: новый hub (реконнект) ⇒ старый курсор даёт
         # явный reset_required, а не тихое чтение с совпавшего по числу места.
+        # §8: тот же токен ротируется на границе рестарта наблюдаемого процесса.
         self._gen = uuid.uuid4().hex[:6]
+        self._gen_rotations = 0  # сколько раз токен ротирован из-за рестарта (диагностика)
 
         self._arrival: Deque[Tuple[int, Dict[str, Any]]] = deque(maxlen=maxlen)
         self._gseq = 0  # плотный глобальный seq (arrival)
@@ -218,6 +239,13 @@ class EventHub:
             for plane, view in _classify(msg):
                 self._pseq[plane] += 1
                 self._rings[plane].append((self._pseq[plane], view))
+            if _is_restart_boundary(msg):
+                # §8: наблюдаемый процесс пересёк рестарт (supervisor.event) → ротируем
+                # generation-токен. Курсоры «до рестарта» на следующем page() дадут
+                # reset_required, а не прочитают молча через границу инкарнации —
+                # закрытый долг ревью B.1. Событие-граница уже в кольцах (см. выше).
+                self._gen = uuid.uuid4().hex[:6]
+                self._gen_rotations += 1
             subscribers = list(self._subscribers)  # снимок под локом
             self._cv.notify_all()
         # Колбэки — вне лока: могут быть медленными и/или звать driver повторно.
@@ -455,6 +483,7 @@ class EventHub:
                 "drain_cursor": self._drain_seq,
                 "subscribers": len(self._subscribers),
                 "event_errors": self._event_errors,
+                "gen_rotations": self._gen_rotations,
             }
 
 
