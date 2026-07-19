@@ -106,6 +106,32 @@ class TestVersionSkewTolerance:
         assert resp["result"] == {"success": True}
 
 
+class TestSessionIsolation:
+    """D.1: поле `session` снимается из msg ВСЕГДА (защита внутренней маршрутизации
+    от просачивания), а обратный адрес возвращается в response ТОЛЬКО при isolation ON.
+    """
+
+    def test_session_popped_before_request_and_no_echo_when_off(self) -> None:
+        router = FakeRouter(request_result={"success": True})
+        adapter = SocketBridgeAdapter(router, "backend_ctl")  # isolation off (default)
+        adapter.on_inbound(_msg(session="sid-x"))
+        assert "session" not in router.request_calls[0]  # не течёт во внутренний handler
+        assert "session" not in router.sent[0]  # и не возвращается в response при OFF
+
+    def test_session_popped_but_echoed_in_response_when_on(self) -> None:
+        router = FakeRouter(request_result={"success": True})
+        adapter = SocketBridgeAdapter(router, "backend_ctl", session_isolation=True)
+        adapter.on_inbound(_msg(session="sid-x"))
+        assert "session" not in router.request_calls[0]  # всё равно снят до request
+        assert router.sent[0]["session"] == "sid-x"  # но возвращён как обратный адрес
+
+    def test_no_session_field_no_echo_when_on(self) -> None:
+        router = FakeRouter(request_result={"success": True})
+        adapter = SocketBridgeAdapter(router, "backend_ctl", session_isolation=True)
+        adapter.on_inbound(_msg())  # без session
+        assert "session" not in router.sent[0]
+
+
 class TestErrorHandling:
     def test_request_error_becomes_error_response(self) -> None:
         router = FakeRouter(request_raises=True)

@@ -27,6 +27,8 @@ BACKEND_CTL_CHANNEL = "backend_ctl"
 ENV_ENABLE = "BACKEND_CTL"
 #: env-переопределение порта.
 ENV_PORT = "BACKEND_CTL_PORT"
+#: env-флаг session-isolation (D.1); строго "1".
+ENV_SESSION_ISOLATION = "BACKEND_CTL_SESSION_ISOLATION"
 DEFAULT_PORT = 8765
 
 
@@ -52,6 +54,15 @@ def _resolve_port(source: dict, config: Optional[dict], port: Optional[int]) -> 
     if config and config.get("port"):
         return int(config["port"])
     return DEFAULT_PORT
+
+
+def _resolve_session_isolation(source: dict, config: Optional[dict]) -> bool:
+    """Флаг session-isolation (D.1). Источников два (OR, зеркально `is_enabled`):
+    env `BACKEND_CTL_SESSION_ISOLATION=1` ИЛИ config `backend_ctl.session_isolation`.
+    Default False (broadcast) — остаётся дефолтом до доказательства (§9)."""
+    if source.get(ENV_SESSION_ISOLATION) == "1":
+        return True
+    return bool(config and config.get("session_isolation"))
 
 
 def setup_backend_ctl_channel(
@@ -88,13 +99,15 @@ def setup_backend_ctl_channel(
     source = env if env is not None else os.environ
     resolved_port = _resolve_port(source, config, port)
     resolved_host = host if host is not None else ((config or {}).get("host") or "127.0.0.1")
+    session_isolation = _resolve_session_isolation(source, config)
 
-    adapter = SocketBridgeAdapter(router_manager, BACKEND_CTL_CHANNEL)
+    adapter = SocketBridgeAdapter(router_manager, BACKEND_CTL_CHANNEL, session_isolation=session_isolation)
     channel = SocketChannel(
         BACKEND_CTL_CHANNEL,
         host=resolved_host,
         port=resolved_port,
         on_inbound=adapter.on_inbound,
+        session_isolation=session_isolation,
     )
     router_manager.register_channel(channel)
     if not channel.start():
@@ -109,7 +122,8 @@ def setup_backend_ctl_channel(
     if log_info:
         log_info(
             f"[backend_ctl] endpoint поднят на {resolved_host}:{channel.port} "
-            f"(канал '{BACKEND_CTL_CHANNEL}') — DEV-инструмент"
+            f"(канал '{BACKEND_CTL_CHANNEL}', session_isolation={'on' if session_isolation else 'off'}) "
+            f"— DEV-инструмент"
         )
     return channel
 

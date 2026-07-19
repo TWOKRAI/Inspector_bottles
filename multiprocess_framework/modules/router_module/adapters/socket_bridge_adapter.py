@@ -36,10 +36,14 @@ class SocketBridgeAdapter:
         router: Any,
         channel_name: str,
         default_timeout: float = 5.0,
+        session_isolation: bool = False,
     ) -> None:
         self._router = router
         self._channel_name = channel_name
         self._default_timeout = default_timeout
+        # D.1: при True возвращаем обратный адрес session в response (SocketChannel
+        # адресует его одному сокету). pop(session) из msg — ВСЕГДА, вне флага.
+        self._session_isolation = session_isolation
 
     def on_inbound(self, msg: Dict[str, Any]) -> None:
         """Обработать входящее сообщение от driver'а и отправить ответ.
@@ -49,6 +53,11 @@ class SocketBridgeAdapter:
         read-loop сокета.
         """
         corr: Optional[str] = msg.get("request_id")
+        # session (D.1) снимаем ВСЕГДА, до router.request — поле изоляции не должно
+        # течь во внутренние handler'ы (защита маршрутизации; при OFF команда
+        # обрабатывается идентично прежней). Обратный адрес вернём в response только
+        # при включённой изоляции — иначе wire бит-в-бит прежним.
+        sid: Optional[str] = msg.pop("session", None)
         timeout = msg.get("timeout", self._default_timeout)
 
         # Универсальность драйвера: ответ handler'а должен вернуться ХОСТУ (где
@@ -74,6 +83,9 @@ class SocketBridgeAdapter:
             "request_id": corr,
             "result": result,
         }
+        if self._session_isolation and sid is not None:
+            # Обратный адрес доставки — SocketChannel.send резолвит его в один сокет.
+            response["session"] = sid
         try:
             self._router.send(response)
         except Exception:  # noqa: BLE001 — не роняем read-loop, если ответ не ушёл (best-effort)

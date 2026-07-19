@@ -17,6 +17,7 @@ from typing import Any, Dict, List
 
 from ..process.backend_ctl_endpoint import (
     BACKEND_CTL_CHANNEL,
+    _resolve_session_isolation,
     is_enabled,
     setup_backend_ctl_channel,
     teardown_backend_ctl_channel,
@@ -122,6 +123,44 @@ class TestSetupTeardown:
 
     def test_teardown_none_safe(self) -> None:
         teardown_backend_ctl_channel(None)  # не падает
+
+
+class TestSessionIsolationFlag:
+    """D.1 §9: флаг session_isolation — OR из env/config, default off, проброс в канал."""
+
+    def test_resolve_default_off(self) -> None:
+        assert _resolve_session_isolation({}, None) is False
+        assert _resolve_session_isolation({}, {}) is False
+
+    def test_resolve_from_env(self) -> None:
+        assert _resolve_session_isolation({"BACKEND_CTL_SESSION_ISOLATION": "1"}, None) is True
+        assert _resolve_session_isolation({"BACKEND_CTL_SESSION_ISOLATION": "0"}, None) is False
+
+    def test_resolve_from_config(self) -> None:
+        assert _resolve_session_isolation({}, {"session_isolation": True}) is True
+        assert _resolve_session_isolation({}, {"session_isolation": False}) is False
+
+    def test_resolve_env_wins_over_config(self) -> None:
+        # env=1 включает даже при config.session_isolation=False (escape-hatch)
+        assert _resolve_session_isolation({"BACKEND_CTL_SESSION_ISOLATION": "1"}, {"session_isolation": False}) is True
+
+    def test_setup_wires_flag_on(self) -> None:
+        router = FakeRouter()
+        ch = setup_backend_ctl_channel(router, port=0, env={"BACKEND_CTL": "1", "BACKEND_CTL_SESSION_ISOLATION": "1"})
+        try:
+            assert ch is not None
+            assert ch.get_info()["session_isolation"] is True
+        finally:
+            teardown_backend_ctl_channel(ch, router)
+
+    def test_setup_default_flag_off(self) -> None:
+        router = FakeRouter()
+        ch = setup_backend_ctl_channel(router, port=0, env={"BACKEND_CTL": "1"})
+        try:
+            assert ch is not None
+            assert ch.get_info()["session_isolation"] is False  # broadcast default
+        finally:
+            teardown_backend_ctl_channel(ch, router)
 
 
 class TestEndToEnd:

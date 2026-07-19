@@ -360,6 +360,7 @@ class SocketChannel(MessageChannel):
             "port": self._port,
             "clients": clients,
             "sessions": sessions,
+            "session_isolation": self._session_isolation,
             "rx": self._rx,
             "tx": self._tx,
         }
