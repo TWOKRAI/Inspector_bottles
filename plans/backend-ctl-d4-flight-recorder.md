@@ -143,13 +143,13 @@
 
 ## 9. Acceptance / DoD (из родителя + план)
 
-- [ ] записанная сессия грузится в read-model **без живой системы**; `snapshot`/`history`/`await_condition` отвечают по записи (сквозной тест Step 7)
-- [ ] offline-`await_condition`: успех по состоянию / прокрутка / `end_of_recording` — семантика §5.1 запинена тестами
-- [ ] запись не деградирует живую сессию (лёгкий колбэк, потери видимы) и корректно финализируется на всех путях (stop/limit/disconnect)
-- [ ] MCP: `record_start`/`record_stop`/`record_status`/`record_load`/`record_unload`/`record_dump`, все SAFETY_READ, path-confinement; в replay-режиме прочие инструменты отказывают обучающе
-- [ ] framework-шов clock/`export_history`/`import_history` — аддитивен, дефолт бит-в-бит, контракт-тесты модуля зелёные
-- [ ] `AGENTS.md`/`README` обновлены; BCTL-ADR-006 записан; `python scripts/validate.py` чист; sentrux baseline→delta не хуже (трогается framework-модуль)
-- [ ] формальный `/code-review` high (финдеры Sonnet, оценка Fable, 8 углов) — находки закрыты до merge
+- [x] записанная сессия грузится в read-model **без живой системы**; `snapshot`/`history`/`await_condition` отвечают по записи (сквозной тест Step 7)
+- [x] offline-`await_condition`: успех по состоянию / прокрутка / `end_of_recording` — семантика §5.1 запинена тестами
+- [x] запись не деградирует живую сессию (лёгкий колбэк, потери видимы) и корректно финализируется на всех путях (stop/limit/disconnect)
+- [x] MCP: `record_start`/`record_stop`/`record_status`/`record_load`/`record_unload`/`record_dump`, все SAFETY_READ, path-confinement; в replay-режиме прочие инструменты отказывают обучающе
+- [x] framework-шов clock/`export_history`/`import_history` — аддитивен, дефолт бит-в-бит, контракт-тесты модуля зелёные
+- [x] `AGENTS.md`/`README` обновлены; BCTL-ADR-006 записан; `python scripts/validate.py` чист; sentrux baseline→delta не хуже (трогается framework-модуль)
+- [ ] формальный `/code-review` high (финдеры Sonnet, оценка Fable, 8 углов) — находки закрыты до merge (оркеструет родитель)
 
 ## Порядок исполнения
 

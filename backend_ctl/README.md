@@ -89,6 +89,9 @@ backend_ctl.BackendDriver ──TCP(newline-JSON)──► SocketChannel (в Pro
 | `events_page(plane=None, cursor=None, limit=None)` | **B.1**: курсорная страница событий плоскости — недеструктивно, несколько читателей не мешают друг другу; ответ несёт `next_cursor`/`dropped`/`bookmark` |
 | `events_stats()` | счётчики hub'а: per-plane seq/размер/вытеснено (вход для overview B.3) |
 | `await_condition(kind, spec, timeout=)` | **B.2**: дождаться условия одним вызовом вместо поллинга — `state_path`/`event_matches`/`metric_threshold`; таймаут → диагноз (что ждали/что видели), не пустота |
+| `record_start(name, max_events=)` / `record_stop()` | **D.4 flight recorder**: запись потока событий в файл (`BACKEND_CTL_RECORD_DIR`) → offline-реплей; лимит → авто-стоп (footer valid) |
+| `record_load(name, position=, ring_maxlen=)` / `record_unload()` | загрузить запись в offline-реплей (сессия → replay) / вернуть live; `position="end"` (финал) \| `"start"` (тайм-трэвел) |
+| `record_status()` / `record_dump(name)` | статус записи/реплея; one-shot дамп arrival-кольца (`reason=dump`) |
 | `events(timeout=0.0, max_items=None)` | **УСТАРЕЛО** (удаление в F.1): деструктивный дренаж всех плоскостей — конкурирующие читатели крадут события друг у друга |
 | `request(message, timeout=None)` | низкоуровневый: готовый router-dict → ответ по `request_id` |
 
@@ -246,6 +249,36 @@ python -m backend_ctl.mcp_server_sdk --http [--http-bind 127.0.0.1:8901] [--read
 ```json
 "backend-ctl-http": {"type": "http", "url": "http://127.0.0.1:8901/mcp"}
 ```
+
+### Flight recorder — запись → offline-реплей (D.4, BCTL-ADR-006)
+
+Живая сессия отладки невоспроизводима. `record_start` пишет снимок состояния + JSONL-ленту
+событий; `record_load` прогружает запись в **тот же** read-model **без живой системы**
+(«detached driver» — реплей качает события через ту же точку входа `_emit_event`, что живой
+транспорт; второго read-model/классификатора не появляется). Над записью работают
+`telemetry_snapshot` / `telemetry_history` (с записанными ts) / `events_page` / `state_get` /
+`system_overview` (записанный, `recorded=true`) / `await_condition`; прочие инструменты
+(write/IPC/subscribe) в replay-режиме дают обучающую ошибку «требует живой системы —
+`record_unload()`».
+
+```bash
+# в live-сессии:
+record_start(name="bug_repro")   # пиши то, на что подписан (watch_like_gui/state_subscribe)
+# …активность… → record_stop()
+# позже, без живой системы:
+record_load(name="bug_repro", position="end")   # end — финал сразу; start — тайм-трэвел
+telemetry_snapshot(); telemetry_history(path=...); await_condition(...)
+record_unload()                                  # вернуться к live
+```
+
+- **`await_condition` над записью** — навигация playhead'ом: прокручивает ленту до попадания и
+  ОСТАЁТСЯ там (snapshot после = момент срабатывания); конец без попадания → `end_of_recording`.
+  `position="start"` + серия `await_condition` = пошаговый тайм-трэвел.
+- **Границы:** все `record_*` = read-safety (бэкенд не мутируется). Файлы — только в
+  `BACKEND_CTL_RECORD_DIR` (default `./backend_ctl_records/`) по ИМЕНИ (без разделителей/`..`).
+  Файл без footer (crash) → `truncated:true`, но грузится.
+- **⚠️ Запись содержит состояние системы** (пути/конфиги/параметры рецептов) — v1 без редакции,
+  dev-only, локальный файл. **Не прикладывай запись к публичным issue.**
 
 ## Тесты и headless-harness (Ф1 Task 1.3)
 

@@ -97,6 +97,10 @@ PY
 | `telemetry_reconfigure(process="all", publish=, throttle=, mode=)` | секцией: publisher-gate и/или central-троттл; `mode="replace"` (дефолт) применяет ЦЕЛИКОМ (**wipe** неуказанных) — для одной метрики предпочитай `telemetry_set` |
 | `telemetry_snapshot(process=None, metric=None)` | **локальный** снимок телеметрии (0 IPC): read-model поверх `state.changed`; наполняется после `watch_like_gui`; фильтр по процессу/суффиксу метрики + ключ process/worker |
 | `telemetry_history(path, limit=None)` | **локальная** история метрики (спарклайн без БД): кольцевой буфер (fps/latency_ms/uptime/effective_hz/cycle_duration_ms) |
+| `record_start(name, max_events=)` / `record_stop()` | **D.4 flight recorder**: ЗАПИСЬ потока событий в файл (`BACKEND_CTL_RECORD_DIR`, имя без разделителей). Пиши то, на что подписан (без подписок — hint про пустую ленту); лимит → авто-стоп |
+| `record_load(name, position="end"\|"start", ring_maxlen=)` / `record_unload()` | загрузить запись в OFFLINE-реплей (сессия → replay-режим) / вернуть live. `end` — финал сразу; `start` — тайм-трэвел (playhead двигают `await_condition`'ы) |
+| `record_status()` | активная запись (файл/`events_written`/`dropped`) ЛИБО загруженный реплей (имя/позиция/total/`truncated`) |
+| `record_dump(name)` | one-shot дамп чёрного ящика: снимок + текущее arrival-кольцо (`reason=dump`); грузится тем же `record_load` |
 | `observability_tail(process)` / `observability_untail(process)` | live ЛОГИ+ОШИБКИ+СТАТИСТИКА процесса (то, что GUI получает через `ObservabilityTailActivator`); записи по плоскостям — `observability_records(kind=)` |
 | `watch_like_gui()` / `unwatch()` | ВЕСЬ приёмный профиль GUI одной командой: state.subscribe (processes/system/devices/calibration) + observability.tail на все процессы + **авто-переподписка** после авто-рестарта |
 | `introspect_memory(process)` | инвентарь памяти (SHM/пул займов/очереди) — только статистика; секции best-effort (`null`, не ошибка) |
@@ -118,6 +122,19 @@ PY
 снимает её подписки). **Требует бэкенд с `session_isolation=ON`** (`BACKEND_CTL_SESSION_ISOLATION=1`)
 — иначе fail-fast отказ. Safety-режим per-server (нужны разные — два инстанса на разных портах).
 Дефолт остаётся stdio. Детали — [`DECISIONS.md`](DECISIONS.md) BCTL-ADR-005, [`README.md`](README.md).
+
+**Flight recorder (D.4, offline-реплей):** `record_start(name)` пишет снимок + ленту
+событий; `record_load(name)` прогружает запись в ТОТ ЖЕ read-model **без живой системы**
+(detached driver) — `telemetry_snapshot`/`telemetry_history`/`events_page`/`state_get`/
+`system_overview`/`await_condition` отвечают ПО ЗАПИСИ. В replay-режиме прочие инструменты
+(write/IPC/subscribe) дают обучающую ошибку «требует живой системы — `record_unload()`».
+Все `record_*` = **read-safety** (бэкенд не мутируется). `await_condition` над записью —
+навигация playhead'ом: прокручивает ленту до попадания и ОСТАЁТСЯ там (snapshot после =
+момент срабатывания); конец без попадания → `end_of_recording`. Файлы — только в
+`BACKEND_CTL_RECORD_DIR` (default `./backend_ctl_records/`) по ИМЕНИ, не пути.
+**⚠️ Запись содержит состояние системы (пути/конфиги/параметры рецептов) — не прикладывай
+её к публичным issue** (v1 без редакции; dev-only, локальный файл). Детали —
+[`DECISIONS.md`](DECISIONS.md) BCTL-ADR-006.
 
 ### Примеры
 
