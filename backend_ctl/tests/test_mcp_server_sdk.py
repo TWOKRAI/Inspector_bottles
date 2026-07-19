@@ -317,6 +317,44 @@ class TestPerSessionLifespan:
         assert seen["thread"] != loop_thread
 
 
+class TestHttpRunner:
+    """D.2 Step 4: HTTP-раннер. Полный сетевой прогон — live-смоук (Step 8, маркер live);
+    здесь — чистые пины парсинга bind и совместимости wiring со StreamableHTTPSessionManager."""
+
+    def test_parse_http_bind(self) -> None:
+        from backend_ctl.mcp_server_sdk import _parse_http_bind
+
+        assert _parse_http_bind("127.0.0.1:8901") == ("127.0.0.1", 8901)
+        assert _parse_http_bind("localhost:9000") == ("localhost", 9000)
+
+    def test_parse_http_bind_rejects_portless(self) -> None:
+        from backend_ctl.mcp_server_sdk import _parse_http_bind
+
+        with pytest.raises(ValueError):
+            _parse_http_bind("8901")
+
+    def test_build_server_compatible_with_streamable_manager(self) -> None:
+        """build_server(factory) конструируется в StreamableHTTPSessionManager (stateful,
+        idle-TTL, security) без ошибок типов/валидаций — wiring HTTP-раннера корректен."""
+        from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        from backend_ctl.mcp_server_sdk import build_server
+
+        server = build_server(lambda: SDKToolServer(driver_factory=lambda: FakeDriver(), log=lambda m: None))
+        mgr = StreamableHTTPSessionManager(
+            app=server,
+            stateless=False,
+            session_idle_timeout=1800.0,
+            security_settings=TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=["127.0.0.1:8901"],
+                allowed_origins=["http://127.0.0.1:8901"],
+            ),
+        )
+        assert mgr is not None
+
+
 class TestMcpErrors:
     def test_suggest_tools_finds_near(self) -> None:
         assert "get_status" in mcp_errors.suggest_tools("get_statuz", build_registry().keys())

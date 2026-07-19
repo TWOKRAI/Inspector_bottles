@@ -57,6 +57,18 @@ INSTRUCTIONS = (
 #: env-переменная выбора safety-режима (альтернатива argv-флагам).
 MODE_ENV_VAR = "BACKEND_CTL_MCP_MODE"
 
+#: env-адрес bind HTTP-сервера (D.2; альтернатива --http-bind). Формат host:port.
+#: НЕ путать с --host/--port (адрес БЭКЕНДА, к которому подключается driver).
+HTTP_BIND_ENV_VAR = "BACKEND_CTL_HTTP_BIND"
+#: env-idle-timeout HTTP-сессии в секундах (D.2): SDK терминирует простаивающую сессию.
+HTTP_IDLE_ENV_VAR = "BACKEND_CTL_HTTP_IDLE_TIMEOUT"
+#: дефолт bind HTTP-сервера — localhost-only (dev-инструмент; auth/TLS отклонены, D.1 §5).
+DEFAULT_HTTP_BIND = "127.0.0.1:8901"
+#: дефолт idle-timeout HTTP-сессии (сек) — рекомендация SDK; 0/пусто = без TTL.
+DEFAULT_HTTP_IDLE_TIMEOUT = 1800.0
+#: mount-путь streamable-HTTP endpoint'а.
+HTTP_MOUNT_PATH = "/mcp"
+
 _INSTALL_HINT = "pip install 'inspector-bottles[ctl]'  (или: pip install 'mcp>=1.27,<1.28')"
 
 
@@ -277,7 +289,7 @@ def build_server(tool_server_or_factory: Any):
 
 
 async def _run(tool_server: SDKToolServer) -> None:
-    """Поднять сервер на stdio до EOF."""
+    """Поднять сервер на stdio до EOF (один клиент)."""
     import mcp.server.stdio as mcp_stdio  # noqa: PLC0415 — ленивый импорт опционального extra
 
     server = build_server(tool_server)
@@ -285,11 +297,84 @@ async def _run(tool_server: SDKToolServer) -> None:
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
+def _parse_http_bind(bind: str) -> tuple[str, int]:
+    """Разобрать ``host:port`` bind HTTP-сервера. НЕ путать с --host/--port (адрес БЭКЕНДА)."""
+    host, sep, port = bind.rpartition(":")
+    if not sep or not host:
+        raise ValueError(f"--http-bind ждёт host:port, получено {bind!r}")
+    return host, int(port)
+
+
+async def _run_http(
+    server_factory: Callable[[], SDKToolServer],
+    *,
+    http_host: str,
+    http_port: int,
+    idle_timeout: Optional[float],
+) -> None:
+    """Поднять сервер на streamable-HTTP (D.2 §5.3): мультиклиент, per-session lifespan.
+
+    ``server_factory`` — zero-arg фабрика ``SDKToolServer`` (свежий на КАЖДУЮ MCP-сессию:
+    свой ``DriverSession`` → сокет → ``session``-uuid → dotted-subscriber, изоляция поверх
+    D.1a). Stateful-менеджер SDK держит map сессий и зовёт ``app.run()`` per-session →
+    lifespan (и его cleanup — долг D.1 §12) отрабатывает на каждую сессию. ``idle_timeout``
+    терминирует простаивающие сессии (свой reaper не нужен). Bind — localhost-only
+    (DNS-rebinding guard; auth/TLS отклонены как dev-only, D.1 §5).
+    """
+    import contextlib  # noqa: PLC0415
+
+    import uvicorn  # noqa: PLC0415 — extra ctl
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager  # noqa: PLC0415
+    from mcp.server.transport_security import TransportSecuritySettings  # noqa: PLC0415
+    from starlette.applications import Starlette  # noqa: PLC0415
+    from starlette.routing import Mount  # noqa: PLC0415
+
+    server = build_server(server_factory)  # lowlevel Server; lifespan создаёт per-session tool_server
+    allowed = (
+        [f"127.0.0.1:{http_port}", f"localhost:{http_port}"]
+        if http_host in ("127.0.0.1", "localhost")
+        else [f"{http_host}:{http_port}"]
+    )
+    security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed,
+        allowed_origins=[f"http://{h}" for h in allowed],
+    )
+    manager = StreamableHTTPSessionManager(
+        app=server,
+        stateless=False,  # stateful: session-id + per-session app.run() = мультиплекс + cleanup
+        session_idle_timeout=idle_timeout,
+        security_settings=security,
+    )
+
+    async def _asgi(scope: Any, receive: Any, send: Any) -> None:
+        await manager.handle_request(scope, receive, send)
+
+    @contextlib.asynccontextmanager
+    async def _app_lifespan(_app: Any):
+        async with manager.run():  # task-group менеджера сессий на время жизни приложения
+            yield
+
+    app = Starlette(routes=[Mount(HTTP_MOUNT_PATH, app=_asgi)], lifespan=_app_lifespan)
+    config = uvicorn.Config(app, host=http_host, port=http_port, log_level="warning")
+    await uvicorn.Server(config).serve()
+
+
 def main(argv: Optional[list] = None) -> int:
-    parser = argparse.ArgumentParser(description="MCP-сервер backend_ctl на официальном SDK (stdio)")
-    parser.add_argument("--host", default=None, help="host endpoint'a; None -> env BACKEND_CTL_HOST -> 127.0.0.1")
-    parser.add_argument("--port", type=int, default=None, help="port endpoint'a; None -> env BACKEND_CTL_PORT")
+    parser = argparse.ArgumentParser(description="MCP-сервер backend_ctl на официальном SDK (stdio | --http)")
+    parser.add_argument("--host", default=None, help="host БЭКЕНДА; None -> env BACKEND_CTL_HOST -> 127.0.0.1")
+    parser.add_argument("--port", type=int, default=None, help="port БЭКЕНДА; None -> env BACKEND_CTL_PORT")
     parser.add_argument("--timeout", type=float, default=5.0, help="таймаут ответа бэкенда, сек")
+    parser.add_argument(
+        "--http",
+        action="store_true",
+        help="streamable-HTTP мультиклиент (D.2) вместо stdio; требует backend session_isolation=ON",
+    )
+    parser.add_argument(
+        "--http-bind",
+        default=None,
+        help=f"адрес bind HTTP-СЕРВЕРА host:port (не бэкенда); None -> env {HTTP_BIND_ENV_VAR} -> {DEFAULT_HTTP_BIND}",
+    )
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--read-only", action="store_true", help="только read+subscribe (write/escalated блок)")
     mode_group.add_argument(
@@ -309,6 +394,31 @@ def main(argv: Optional[list] = None) -> int:
 
     mode = resolve_mode(read_only=args.read_only, disable_destructive=args.disable_destructive)
     host, port = resolve_endpoint(args.host, args.port)
+
+    if args.http:
+        # HTTP-мультиклиент (D.2): фабрика создаёт свежий SDKToolServer на КАЖДУЮ MCP-сессию
+        # (свой driver/сокет/session-uuid). Per-session cleanup — в lifespan (build_server).
+        def _factory() -> SDKToolServer:
+            return SDKToolServer(mode=mode, host=host, port=port, request_timeout=args.timeout)
+
+        http_bind = args.http_bind or os.environ.get(HTTP_BIND_ENV_VAR) or DEFAULT_HTTP_BIND
+        http_host, http_port = _parse_http_bind(http_bind)
+        idle_env = os.environ.get(HTTP_IDLE_ENV_VAR)
+        idle_timeout: Optional[float] = float(idle_env) if idle_env else DEFAULT_HTTP_IDLE_TIMEOUT
+        if idle_timeout is not None and idle_timeout <= 0:
+            idle_timeout = None  # 0/отрицательное = без TTL
+        print(
+            f"[mcp_server_sdk] backend-ctl MCP (SDK) на HTTP {http_host}:{http_port}{HTTP_MOUNT_PATH}; "
+            f"бэкенд {host}:{port}; режим={mode}; idle={idle_timeout}s — требует backend session_isolation=ON",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            asyncio.run(_run_http(_factory, http_host=http_host, http_port=http_port, idle_timeout=idle_timeout))
+        except KeyboardInterrupt:
+            pass
+        return 0
+
     tool_server = SDKToolServer(mode=mode, host=host, port=port, request_timeout=args.timeout)
     print(
         f"[mcp_server_sdk] backend-ctl MCP (SDK) на stdio; бэкенд {host}:{port}; режим={mode}",
