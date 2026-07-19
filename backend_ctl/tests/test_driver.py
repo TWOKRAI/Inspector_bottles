@@ -1396,3 +1396,161 @@ class TestImportRetargetsSubscriber:
             [{"command": "observability.tail.subscribe", "target": "cam", "args": {"subscriber": "watcher"}}]
         )
         assert d.export_subscriptions()[0]["args"]["subscriber"] == "watcher"
+
+
+# --- Юнит: snapshot/restore + commit-confirmed регистры (D.5) ---
+
+
+class TestRegisterSnapshotRestore:
+    """Снимок регистров → правки → restore возвращает исходное (D.5)."""
+
+    @staticmethod
+    def _driver_with_fake_backend(registers: Dict[str, Any], monkeypatch) -> BackendDriver:
+        d = BackendDriver()
+
+        def fake_send(process, command, args=None, **kw):
+            if command == "register_update":
+                reg = registers.setdefault(args["register"], {})
+                if args["field"] in reg:  # реальный бэкенд: неизвестное поле = no-op
+                    reg[args["field"]] = args["value"]
+                return {"success": True}
+            if command == "introspect.registers":
+                return {"success": True, "process": process, "registers": registers}
+            raise AssertionError(f"неожиданная команда: {command}")
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d
+
+    def test_series_of_edits_then_restore_returns_original(self, monkeypatch) -> None:
+        regs = {"resize": {"target_width": 640, "target_height": 480}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        snap = d.register_snapshot("preprocessor")
+
+        d.set_register("preprocessor", "resize", "target_width", 100)
+        d.set_register("preprocessor", "resize", "target_height", 50)
+        assert regs["resize"] == {"target_width": 100, "target_height": 50}
+
+        res = d.register_restore(snap)
+        assert res["success"] is True
+        assert res["written"] == 2
+        assert res["verified"] == 2
+        assert res["mismatches"] == []
+        assert regs["resize"] == {"target_width": 640, "target_height": 480}
+
+    def test_snapshot_is_detached_deep_copy(self, monkeypatch) -> None:
+        regs = {"resize": {"target_width": 640}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        snap = d.register_snapshot("preprocessor")
+        d.set_register("preprocessor", "resize", "target_width", 1)
+        # снимок не изменился вслед за живым бэкендом
+        assert snap["processes"]["preprocessor"]["resize"]["target_width"] == 640
+
+    def test_snapshot_uniform_shape(self, monkeypatch) -> None:
+        regs = {"resize": {"target_width": 640}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        snap = d.register_snapshot("preprocessor")
+        assert snap == {"processes": {"preprocessor": {"resize": {"target_width": 640}}}}
+
+    def test_restore_reports_mismatch_when_field_absent(self, monkeypatch) -> None:
+        regs = {"resize": {"target_width": 640}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        # снимок ссылается на несуществующее поле — restore не сможет записать (no-op)
+        bogus = {"processes": {"preprocessor": {"resize": {"phantom": 7}}}}
+        res = d.register_restore(bogus)
+        assert res["success"] is False
+        assert res["mismatches"] == [
+            {"process": "preprocessor", "register": "resize", "field": "phantom", "expected": 7, "actual": None}
+        ]
+
+    def test_restore_rejects_malformed_snapshot(self, monkeypatch) -> None:
+        d = self._driver_with_fake_backend({"resize": {"target_width": 1}}, monkeypatch)
+        res = d.register_restore({"nope": {}})
+        assert res["success"] is False
+        assert "processes" in res["error"]
+
+    def test_snapshot_all_processes_via_capabilities(self, monkeypatch) -> None:
+        import types
+
+        regs = {"p1": {"resize": {"w": 1}}, "p2": {"crop": {"x": 2}}}
+        d = BackendDriver()
+
+        def fake_send(process, command, args=None, **kw):
+            assert command == "introspect.registers"
+            return {"success": True, "registers": regs[process]}
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        monkeypatch.setattr(d, "capabilities", lambda **kw: types.SimpleNamespace(processes={"p1": 0, "p2": 0}))
+        snap = d.register_snapshot()  # process опущен → все процессы
+        assert snap == {"processes": {"p1": {"resize": {"w": 1}}, "p2": {"crop": {"x": 2}}}}
+
+
+class TestRegisterCommitConfirmed:
+    """set_register(confirm_within=N): подтверждение снимает откат, молчание — откатывает (D.5)."""
+
+    @staticmethod
+    def _driver_with_fake_backend(registers: Dict[str, Any], monkeypatch, *, write_ok: bool = True) -> BackendDriver:
+        d = BackendDriver()
+
+        def fake_send(process, command, args=None, **kw):
+            if command == "register_update":
+                if not write_ok:
+                    return {"success": False, "error": "нет приёмника"}
+                reg = registers.setdefault(args["register"], {})
+                if args["field"] in reg:
+                    reg[args["field"]] = args["value"]
+                return {"success": True}
+            if command == "introspect.registers":
+                return {"success": True, "process": process, "registers": registers}
+            raise AssertionError(f"неожиданная команда: {command}")
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        return d
+
+    def test_confirm_cancels_rollback(self, monkeypatch) -> None:
+        regs = {"resize": {"target_width": 640}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        res = d.set_register("preprocessor", "resize", "target_width", 100, confirm_within=0.2)
+        assert res["pending"] is True and res["success"] is True
+        assert res["pre_value"] == 640 and res["had_field"] is True
+        assert regs["resize"]["target_width"] == 100
+
+        conf = d.register_confirm(res["commit_id"])
+        assert conf["success"] is True
+        time.sleep(0.35)  # окно, в котором таймер бы сработал, если бы не был снят
+        assert regs["resize"]["target_width"] == 100  # подтверждено — не откатилось
+
+    def test_confirm_twice_is_unknown(self, monkeypatch) -> None:
+        regs = {"resize": {"target_width": 640}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        res = d.set_register("preprocessor", "resize", "target_width", 100, confirm_within=5.0)
+        assert d.register_confirm(res["commit_id"])["success"] is True
+        again = d.register_confirm(res["commit_id"])
+        assert again["success"] is False
+        assert again["known"] == []
+
+    def test_auto_rollback_without_confirm(self, monkeypatch) -> None:
+        regs = {"resize": {"target_width": 640}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        res = d.set_register("preprocessor", "resize", "target_width", 100, confirm_within=0.15)
+        assert regs["resize"]["target_width"] == 100  # запись применилась
+        time.sleep(0.4)  # даём таймеру сработать
+        assert regs["resize"]["target_width"] == 640  # авто-откат к pre-image
+        # запись больше не ожидает подтверждения
+        assert d.register_confirm(res["commit_id"])["success"] is False
+
+    def test_failed_write_does_not_arm_timer(self, monkeypatch) -> None:
+        regs = {"resize": {"target_width": 640}}
+        d = self._driver_with_fake_backend(regs, monkeypatch, write_ok=False)
+        res = d.set_register("preprocessor", "resize", "target_width", 100, confirm_within=0.15)
+        assert res["success"] is False and res["pending"] is False
+        assert "commit_id" not in res
+        assert d._pending_commits == {}
+
+    def test_close_cancels_pending_rollback(self, monkeypatch) -> None:
+        regs = {"resize": {"target_width": 640}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        d.set_register("preprocessor", "resize", "target_width", 100, confirm_within=0.15)
+        d.close()  # driver уходит — таймеры сняты, откат по мёртвому сокету не бьёт
+        assert d._pending_commits == {}
+        time.sleep(0.4)
+        assert regs["resize"]["target_width"] == 100  # не откатилось: таймер снят в close()

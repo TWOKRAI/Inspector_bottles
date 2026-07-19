@@ -235,7 +235,7 @@ Transport/events — mixin (вербатим на том же `self`, макси
 1. `register_snapshot(process?)` (через introspect.registers) + `register_restore(snapshot)`.
 2. Режим `set_register(..., confirm_within=N)`: не подтвердил `register_confirm()` за N сек → авто-откат.
 **Acceptance:**
-- [ ] unit: серия правок → restore возвращает исходное; confirm_within без подтверждения → авто-откат
+- [x] unit: серия правок → restore возвращает исходное; confirm_within без подтверждения → авто-откат — **ЗАКРЫТ** (ветка `feat/bctl-d5-commit-confirmed`; driver: `register_snapshot`/`register_restore`/`register_confirm` + `set_register(confirm_within=N)` с threading.Timer-откатом к pre-image; MCP: 3 новых инструмента + `confirm_within`, safety read/write/write; 15 unit-тестов зелёные; AGENTS/README синхронизированы). **Follow-up:** live-смоук на реальном бэкенде; регенерация `CAPABILITIES.yaml` на рабочем харнессе (общий долг с D.1, каталог backend-**команд** — новых команд D.5 не вводит).
 **Аналог:** Juniper `commit confirmed`, NETCONF candidate-config.
 
 ---

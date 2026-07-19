@@ -21,9 +21,12 @@ request_id (или не матчащие ни один pending) — наприм
 
 from __future__ import annotations
 
+import copy
+import itertools
 import logging
 import socket
 import threading
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from multiprocess_framework.modules.telemetry_readmodel_module import TelemetryReadModel
@@ -83,6 +86,28 @@ _LOG_SEVERITY_RANK: Dict[str, int] = {
     "critical": 50,
     "fatal": 50,
 }
+
+
+@dataclass
+class _PendingCommit:
+    """Ожидающая подтверждения запись регистра (D.5, commit-confirmed).
+
+    Клиентский предохранитель по аналогии с Juniper ``commit confirmed``: пока не
+    вызван :meth:`BackendDriver.register_confirm`, армированный таймер восстановит
+    ``pre_value`` (или снимет запись, если поля до записи не было). ``had_field``
+    отличает «поле существовало, откатываем к прежнему значению» от «поля не было —
+    откатывать нечего, только разоружить».
+    """
+
+    commit_id: str
+    process: str
+    register: str
+    field: str
+    pre_value: Any
+    had_field: bool
+    timer: "threading.Timer"
+    confirmed: bool = False
+    rolled_back: bool = False
 
 
 class BackendDriver(_TransportMixin, _EventChannelMixin):
@@ -166,6 +191,15 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         self._telemetry_model = TelemetryReadModel()
         self._telemetry_lock = threading.Lock()
         self.subscribe(self._ingest_state_changed)
+
+        # commit-confirmed регистры (D.5): армированные, но ещё не подтверждённые
+        # записи. Каждая держит threading.Timer, который восстановит pre-image, если
+        # register_confirm() не вызван за confirm_within сек (клиентский предохранитель
+        # для безопасных экспериментов — аналог Juniper `commit confirmed`). Таймеры
+        # снимаются в close() (driver уходит → откатывать по мёртвому сокету нечем).
+        self._pending_commits: Dict[str, _PendingCommit] = {}
+        self._pending_commits_lock = threading.Lock()
+        self._commit_counter = itertools.count(1)
 
     # ---- Соединение ----
 
@@ -425,12 +459,26 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             raw=pm_res if isinstance(pm_res, dict) else {},
         )
 
+    def _read_registers(self, process: str, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Регистры процесса как ``{register: {field: value}}`` (один readback-хелпер).
+
+        Общий разбор ответа ``introspect.registers`` (снимает конверт ``{success,
+        result: …}`` через ``_find_payload``) для verify-probe, snapshot и restore —
+        чтобы форма ответа парсилась в одном месте.
+        """
+        res = self.introspect_registers(process, timeout=timeout)
+        payload = _find_payload(res, "registers")
+        registers = payload.get("registers") if isinstance(payload, dict) else None
+        return registers if isinstance(registers, dict) else {}
+
     def set_register(
         self,
         process: str,
         register: str,
         field: str,
         value: Any,
+        *,
+        confirm_within: Optional[float] = None,
         **kw: Any,
     ) -> Dict[str, Any]:
         """Записать значение регистра в живой процесс (live field-write).
@@ -440,7 +488,15 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         Исторический баг: driver слал ``plugin_name`` — обработчик оркестратора молча
         выходил, запись была no-op (найдено verify-probe Ф1.6). Имя регистра обычно
         совпадает с plugin_name (регистр на плагин).
+
+        ``confirm_within=N`` (D.5) переводит запись в режим *commit-confirmed*: перед
+        записью снимается pre-image поля, а после — армируется таймер, который через
+        ``N`` секунд восстановит прежнее значение, если не вызван
+        :meth:`register_confirm` с вернувшимся ``commit_id``. Аналог Juniper
+        ``commit confirmed`` — безопасный эксперимент с гарантированным откатом.
         """
+        if confirm_within is not None:
+            return self._set_register_confirmed(process, register, field, value, float(confirm_within), **kw)
         return self.send_command(
             process,
             "register_update",
@@ -467,10 +523,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         тогда смотреть ``actual``.
         """
         ack = self.set_register(process, register, field, value, timeout=timeout)
-        res = self.introspect_registers(process, timeout=timeout)
-        payload = _find_payload(res, "registers")
-        registers = payload.get("registers") if isinstance(payload, dict) else None
-        registers = registers if isinstance(registers, dict) else {}
+        registers = self._read_registers(process, timeout=timeout)
         reg = registers.get(register)
         found = isinstance(reg, dict) and field in reg
         actual = reg.get(field) if found else None
@@ -487,6 +540,210 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             "known_registers": sorted(registers),
             "ack": ack,
         }
+
+    # ---- Snapshot / restore регистров (D.5): гарантированный откат эксперимента ----
+
+    def register_snapshot(
+        self,
+        process: Optional[str] = None,
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Снять снимок регистров для последующего :meth:`register_restore` (D.5).
+
+        ``process`` задан — снимок одного процесса; опущен — снимок всех процессов
+        системы (топология из :meth:`capabilities`). Форма всегда единообразна::
+
+            {"processes": {proc: {register: {field: value}}}}
+
+        Значения — глубокие копии (отвязаны от живого read-model), поэтому снимок
+        переживает последующие правки. Аналог NETCONF candidate-config / running snapshot.
+        """
+        if process is not None:
+            targets = [process]
+        else:
+            caps = self.capabilities(timeout=timeout or 8.0)
+            targets = sorted(caps.processes)
+        processes: Dict[str, Dict[str, Any]] = {}
+        for name in targets:
+            registers = self._read_registers(name, timeout=timeout)
+            processes[name] = {
+                reg: copy.deepcopy(fields) for reg, fields in registers.items() if isinstance(fields, dict)
+            }
+        return {"processes": processes}
+
+    def register_restore(
+        self,
+        snapshot: Dict[str, Any],
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Восстановить регистры из снимка :meth:`register_snapshot` (D.5).
+
+        Пишет каждое ``(process, register, field, value)`` снимка обратно через
+        :meth:`set_register`, затем сверяет одним readback на процесс. Возвращает
+        ``success`` (все поля совпали), число ``written``/``verified`` и список
+        ``mismatches`` — не доверяет ack'ам записи (как verify-probe).
+        """
+        processes = snapshot.get("processes") if isinstance(snapshot, dict) else None
+        if not isinstance(processes, dict):
+            return {"success": False, "error": "снимок без ключа 'processes' (ожидается форма register_snapshot)"}
+
+        written = 0
+        for proc, registers in processes.items():
+            if not isinstance(registers, dict):
+                continue
+            for reg, fields in registers.items():
+                if not isinstance(fields, dict):
+                    continue
+                for field, value in fields.items():
+                    self.set_register(proc, reg, field, value, timeout=timeout)
+                    written += 1
+
+        mismatches: List[Dict[str, Any]] = []
+        for proc, registers in processes.items():
+            if not isinstance(registers, dict):
+                continue
+            actual = self._read_registers(proc, timeout=timeout)
+            for reg, fields in registers.items():
+                if not isinstance(fields, dict):
+                    continue
+                areg = actual.get(reg)
+                for field, value in fields.items():
+                    got = areg.get(field) if isinstance(areg, dict) else None
+                    if got != value:
+                        mismatches.append(
+                            {"process": proc, "register": reg, "field": field, "expected": value, "actual": got}
+                        )
+        return {
+            "success": not mismatches,
+            "written": written,
+            "verified": written - len(mismatches),
+            "mismatches": mismatches,
+        }
+
+    # ---- commit-confirmed запись регистра (D.5): авто-откат без подтверждения ----
+
+    def _set_register_confirmed(
+        self,
+        process: str,
+        register: str,
+        field: str,
+        value: Any,
+        confirm_within: float,
+        **kw: Any,
+    ) -> Dict[str, Any]:
+        """Ядро режима ``set_register(confirm_within=N)`` — см. :meth:`set_register`."""
+        # pre-image ДО записи: к нему откатимся, если поле уже существовало.
+        registers = self._read_registers(process, timeout=kw.get("timeout"))
+        reg = registers.get(register)
+        had_field = isinstance(reg, dict) and field in reg
+        pre_value = copy.deepcopy(reg[field]) if had_field else None
+
+        ack = self.send_command(
+            process,
+            "register_update",
+            {"register": register, "field": field, "value": value},
+            **kw,
+        )
+        if self._looks_failed(ack):
+            # Запись явно провалилась — таймер отката не армируем (откатывать нечего).
+            return {
+                "success": False,
+                "pending": False,
+                "error": "запись регистра провалилась — commit-confirmed не вооружён",
+                "process": process,
+                "register": register,
+                "field": field,
+                "ack": ack,
+            }
+
+        commit_id = f"{process}:{register}.{field}#{next(self._commit_counter)}"
+        timer = threading.Timer(confirm_within, self._auto_rollback, args=(commit_id,))
+        timer.daemon = True
+        pc = _PendingCommit(commit_id, process, register, field, pre_value, had_field, timer)
+        with self._pending_commits_lock:
+            self._pending_commits[commit_id] = pc
+        timer.start()
+        return {
+            "success": True,
+            "pending": True,
+            "commit_id": commit_id,
+            "process": process,
+            "register": register,
+            "field": field,
+            "value": value,
+            "pre_value": pre_value,
+            "had_field": had_field,
+            "confirm_within": confirm_within,
+            "ack": ack,
+        }
+
+    def register_confirm(self, commit_id: str) -> Dict[str, Any]:
+        """Подтвердить commit-confirmed запись (D.5): снять таймер авто-отката.
+
+        После подтверждения значение остаётся навсегда. Если ``commit_id`` неизвестен
+        (уже подтверждён, уже откачен по таймауту или опечатка) — ``success=False`` со
+        списком ещё ожидающих ``known``.
+        """
+        with self._pending_commits_lock:
+            pc = self._pending_commits.pop(commit_id, None)
+            known = sorted(self._pending_commits)
+        if pc is None:
+            return {
+                "success": False,
+                "commit_id": commit_id,
+                "error": "нет ожидающего commit-confirmed (уже подтверждён, откачен или неизвестен)",
+                "known": known,
+            }
+        pc.timer.cancel()
+        pc.confirmed = True
+        return {
+            "success": True,
+            "commit_id": commit_id,
+            "confirmed": True,
+            "process": pc.process,
+            "register": pc.register,
+            "field": pc.field,
+        }
+
+    def _auto_rollback(self, commit_id: str) -> None:
+        """Callback таймера: восстановить pre-image, если запись не подтверждена.
+
+        Атомарный ``pop`` под локом — арбитр гонки с :meth:`register_confirm`: кто
+        первым забрал запись, тот и действует (второй увидит ``None`` и выйдет).
+        """
+        with self._pending_commits_lock:
+            pc = self._pending_commits.pop(commit_id, None)
+        if pc is None:
+            return
+        if not pc.had_field:
+            # Поля до записи не существовало — откатывать нечего, только разоружаем.
+            pc.rolled_back = True
+            return
+        try:
+            self.set_register(pc.process, pc.register, pc.field, pc.pre_value)
+            pc.rolled_back = True
+        except Exception:  # noqa: BLE001 — таймер в daemon-потоке, исключение иначе теряется
+            _log.exception("commit-confirmed авто-откат %s не удался", commit_id)
+
+    def _cancel_all_pending_commits(self) -> None:
+        """Снять все армированные таймеры отката (вызывается из close())."""
+        with self._pending_commits_lock:
+            pcs = list(self._pending_commits.values())
+            self._pending_commits.clear()
+        for pc in pcs:
+            pc.timer.cancel()
+
+    def close(self) -> None:
+        """Закрыть driver: сперва снять таймеры commit-confirmed, затем транспорт.
+
+        Driver уходит — откатывать по закрывающемуся сокету нечем (и не нужно: авто-
+        откат это клиентский предохранитель на время жизни сессии). Неподтверждённые
+        записи остаются применёнными; таймеры снимаются, чтобы не бить по мёртвому сокету.
+        """
+        self._cancel_all_pending_commits()
+        super().close()
 
     # ---- Observability control plane (Ф1 Task 1.4: config.reload / logger.sink.*) ----
 

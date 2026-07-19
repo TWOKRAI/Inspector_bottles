@@ -150,13 +150,28 @@ def _system_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 
 def _set_register(drv: BackendDriver, args: Dict[str, Any]) -> Any:
-    return drv.set_register(args["process"], args["register"], args["field"], args.get("value"), **_kw_timeout(args))
+    kw = _kw_timeout(args)
+    if args.get("confirm_within") is not None:
+        kw["confirm_within"] = float(args["confirm_within"])
+    return drv.set_register(args["process"], args["register"], args["field"], args.get("value"), **kw)
 
 
 def _set_register_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.set_register_verified(
         args["process"], args["register"], args["field"], args.get("value"), **_kw_timeout(args)
     )
+
+
+def _register_snapshot(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.register_snapshot(args.get("process"), **_kw_timeout(args))
+
+
+def _register_restore(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.register_restore(args["snapshot"], **_kw_timeout(args))
+
+
+def _register_confirm(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.register_confirm(args["commit_id"])
 
 
 def _state_get(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -436,13 +451,20 @@ TOOLS: List[ToolSpec] = [
     ),
     ToolSpec(
         "set_register",
-        "Записать значение поля регистра в живой процесс (live field-write, register_update).",
+        "Записать значение поля регистра в живой процесс (live field-write, register_update). "
+        "confirm_within=N (D.5) — режим commit-confirmed: запись авто-откатится через N сек, "
+        "если не подтвердить её register_confirm(commit_id из ответа). Аналог Juniper `commit confirmed`.",
         _obj(
             {
                 "process": _PROCESS,
                 "register": {"type": "string", "description": "Имя регистра (обычно = plugin_name владельца)"},
                 "field": {"type": "string", "description": "Имя поля регистра"},
                 "value": {"description": "Новое значение (любой JSON-тип)"},
+                "confirm_within": {
+                    "type": "number",
+                    "description": "Сек до авто-отката, если нет register_confirm (commit-confirmed, D.5). "
+                    "Опущено — обычная запись без предохранителя.",
+                },
                 "timeout": _TIMEOUT,
             },
             ["process", "register", "field", "value"],
@@ -464,6 +486,48 @@ TOOLS: List[ToolSpec] = [
             ["process", "register", "field", "value"],
         ),
         _set_register_verified,
+    ),
+    ToolSpec(
+        "register_snapshot",
+        "Снять снимок регистров для гарантированного отката эксперимента (D.5). "
+        "process задан — один процесс; опущен — все процессы системы. Форма ответа: "
+        "{processes: {proc: {register: {field: value}}}} — передать в register_restore.",
+        _obj(
+            {
+                "process": {**_PROCESS, "description": _PROCESS["description"] + "; опущено — все процессы"},
+                "timeout": _TIMEOUT,
+            }
+        ),
+        _register_snapshot,
+    ),
+    ToolSpec(
+        "register_restore",
+        "Восстановить регистры из снимка register_snapshot (D.5): пишет каждое поле обратно "
+        "и сверяет readback'ом. Ответ: success, written/verified, mismatches[].",
+        _obj(
+            {
+                "snapshot": {
+                    "type": "object",
+                    "description": "Снимок из register_snapshot (ключ 'processes')",
+                    "additionalProperties": True,
+                },
+                "timeout": _TIMEOUT,
+            },
+            ["snapshot"],
+        ),
+        _register_restore,
+    ),
+    ToolSpec(
+        "register_confirm",
+        "Подтвердить commit-confirmed запись (D.5): снять таймер авто-отката по commit_id из "
+        "ответа set_register(confirm_within=…). Без подтверждения запись откатится автоматически.",
+        _obj(
+            {
+                "commit_id": {"type": "string", "description": "commit_id из ответа set_register(confirm_within=…)"},
+            },
+            ["commit_id"],
+        ),
+        _register_confirm,
     ),
     ToolSpec(
         "state_get",
@@ -861,6 +925,7 @@ TOOL_SAFETY: Dict[str, str] = {
     "introspect_plugins": SAFETY_READ,
     "introspect_memory": SAFETY_READ,
     "supervision_status": SAFETY_READ,
+    "register_snapshot": SAFETY_READ,
     "state_get": SAFETY_READ,
     "state_get_subtree": SAFETY_READ,
     "events": SAFETY_READ,
@@ -885,6 +950,8 @@ TOOL_SAFETY: Dict[str, str] = {
     # write
     "set_register": SAFETY_WRITE,
     "set_register_verified": SAFETY_WRITE,
+    "register_restore": SAFETY_WRITE,
+    "register_confirm": SAFETY_WRITE,
     "config_reload": SAFETY_WRITE,
     "logger_sink_enable": SAFETY_WRITE,
     "logger_sink_disable": SAFETY_WRITE,

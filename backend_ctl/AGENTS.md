@@ -79,6 +79,9 @@ PY
 | `capabilities()` / `introspect_capabilities(p)` | «контактная книжка»: свод команд/регистров/каналов по всем процессам (или карточка одного). MCP-инструмент принимает `format="concise"` (только имена, кратно дешевле) / `"help"` (пример вызова + какое push-событие в какую плоскость + корреляционные ключи) / `"detailed"` (дефолт) и `process`-фильтр (B.4) |
 | `set_register(process, register, field, value)` | live-запись регистра (`register_update`, ключи `{register, field, value}`) |
 | `set_register_verified(process, register, field, value)` | verify-probe (Ф1.6): write → readback `introspect.registers` → diff (`verified`/`expected`/`actual`) — ловит молчаливые no-op'ы |
+| `set_register(..., confirm_within=N)` | **commit-confirmed** (D.5): запись авто-откатится через `N` сек, если не вызвать `register_confirm(commit_id)`. Аналог Juniper `commit confirmed` |
+| `register_snapshot(process=None)` / `register_restore(snapshot)` | снимок регистров (один процесс или все) → гарантированный откат: `{processes: {proc: {register: {field: value}}}}`; restore пишет обратно + сверяет readback'ом (`success`/`written`/`mismatches`) |
+| `register_confirm(commit_id)` | подтвердить commit-confirmed запись — снять таймер авто-отката (D.5) |
 | `send_command(target, command, args=None)` | прямая команда процессу (форма `CommandSender.send_command`) |
 | `system_command({"cmd": ..., ...})` | system-команда в ProcessManager (`process.start`/`stop`/`worker.*`/…) |
 | `state_subscribe(pattern)` | подписка на state-дерево; пуши `state.changed` → событийный канал |
