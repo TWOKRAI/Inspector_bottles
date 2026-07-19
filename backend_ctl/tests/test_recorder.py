@@ -109,21 +109,58 @@ def test_stop_is_idempotent(tmp_path: Path) -> None:
     assert len(footers) == 1  # ровно один footer
 
 
-def test_max_events_limit_auto_stops(tmp_path: Path) -> None:
-    drv = _detached_driver()
-    rec = Recorder(drv, str(tmp_path / "r.jsonl"), max_events=3)
-    rec.start()
-    for i in range(10):
-        drv._emit_event(_state_push("processes.cam.state.fps", float(i)))
-    # writer авто-останавливается по достижении лимита.
-    deadline = time.monotonic() + 2.0
+def _wait_inactive(rec: Recorder, timeout: float = 3.0) -> None:
+    deadline = time.monotonic() + timeout
     while rec.active and time.monotonic() < deadline:
-        time.sleep(0.01)
+        time.sleep(0.005)
+
+
+def test_max_events_limit_no_silent_loss(tmp_path: Path) -> None:
+    """Нагрузка: много быстрых событий + малый лимит.
+
+    Инвариант учёта: events_written + dropped == accepted (ничего не теряется молча);
+    events_written НЕ превышает лимит; подписчик отписан после автостопа; footer —
+    последняя строка (загрузчик полагается на это как на маркер чистого завершения).
+    """
+    drv = _detached_driver()
+    subs_before = drv.events_stats()["subscribers"]
+    rec = Recorder(drv, str(tmp_path / "r.jsonl"), max_events=3, queue_maxlen=100_000)
+    rec.start()
+    assert drv.events_stats()["subscribers"] == subs_before + 1  # подписчик recorder'а
+
+    for i in range(2000):
+        drv._emit_event(_state_push("processes.cam.state.fps", float(i)))
+    _wait_inactive(rec)
     assert not rec.active
+
+    # Учёт: всё принятое либо записано, либо посчитано в dropped — тихой потери НЕТ.
+    assert rec._events_written + rec._dropped == rec._accepted
+    assert rec._events_written == 3  # ровно лимит, не поверх (проверка ПЕРЕД записью)
+    assert rec._dropped > 0  # остаток честно виден
+
+    # Подписчик отписан после автостопа (не копится мёртвым в EventHub).
+    assert drv.events_stats()["subscribers"] == subs_before
+
     lines = _read_lines(str(tmp_path / "r.jsonl"))
-    footer = lines[-1]
-    assert footer["reason"] == REASON_LIMIT
-    assert footer["events_written"] == 3
+    assert lines[-1]["footer"] is True  # footer = ПОСЛЕДНЯЯ строка
+    assert lines[-1]["reason"] == REASON_LIMIT
+    assert lines[-1]["events_written"] == 3
+    assert lines[-1]["dropped"] == rec._dropped
+    # События в файле — ровно events_written (footer не считается событием).
+    assert sum(1 for ln in lines if "event" in ln) == 3
+
+
+def test_stop_after_autostop_is_idempotent(tmp_path: Path) -> None:
+    """record_stop ПОСЛЕ автостопа по лимиту не роняет и не пишет второй footer."""
+    drv = _detached_driver()
+    rec = Recorder(drv, str(tmp_path / "r.jsonl"), max_events=2, queue_maxlen=100_000)
+    rec.start()
+    for i in range(500):
+        drv._emit_event(_state_push("processes.cam.state.fps", float(i)))
+    _wait_inactive(rec)
+    rec.stop()  # идемпотентно
+    lines = _read_lines(str(tmp_path / "r.jsonl"))
+    assert sum(1 for ln in lines if ln.get("footer")) == 1
 
 
 def test_queue_overflow_counts_dropped(tmp_path: Path) -> None:
@@ -140,6 +177,22 @@ def test_queue_overflow_counts_dropped(tmp_path: Path) -> None:
     drv._emit_event(_state_push("p", 3))  # очередь полна → dropped++
     assert rec._dropped >= 1
     rec.stop()
+
+
+def test_clean_stop_drains_all_no_drop(tmp_path: Path) -> None:
+    """Чистый стоп (не лимит) дописывает ВСЁ поставленное в очередь — dropped=0."""
+    drv = _detached_driver()
+    rec = Recorder(drv, str(tmp_path / "r.jsonl"), queue_maxlen=100_000)
+    rec.start()
+    for i in range(500):
+        drv._emit_event(_state_push("processes.cam.state.fps", float(i)))
+    status = rec.stop()
+    assert status["dropped"] == 0
+    assert status["events_written"] == 500
+    assert rec._events_written + rec._dropped == rec._accepted
+    lines = _read_lines(str(tmp_path / "r.jsonl"))
+    assert sum(1 for ln in lines if "event" in ln) == 500
+    assert lines[-1]["reason"] == REASON_STOPPED
 
 
 def test_start_without_subscriptions_hints(tmp_path: Path) -> None:

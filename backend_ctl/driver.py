@@ -1041,6 +1041,11 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         deltas = iter_state_deltas(msg)
         if not deltas:
             return
+        # ПОЗДНЕЕ СВЯЗЫВАНИЕ (grep-маркер): recorder.ReplayPlayer монки-патчит
+        # self._telemetry_model на clock-aware инстанс ЗАДНИМ числом (offline-реплей D.4).
+        # Этот колбэк ОБЯЗАН читать модель по атрибуту self._telemetry_model в момент
+        # вызова — НЕ кэшировать её в локальной переменной подписчика, иначе реплей
+        # писал бы историю в старую модель с ложными ts.
         with self._telemetry_lock:
             for delta in deltas:
                 new_value = delta.get("new_value")

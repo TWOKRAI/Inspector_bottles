@@ -79,6 +79,22 @@ def test_load_rejects_unknown_version(tmp_path: Path) -> None:
         load_recording(str(path))
 
 
+def test_load_mid_file_malformed_counted_separately(tmp_path: Path) -> None:
+    """Битая СРЕДНЯЯ строка (за ней есть валидные) → skipped_malformed, НЕ truncated."""
+    path = str(tmp_path / "r.jsonl")
+    _record_fps_session(path, [10.0, 20.0, 30.0])
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    # Портим одну событийную строку в середине (не хвост — footer остаётся последним).
+    lines.insert(2, "{ battered json ---")
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    rec = load_recording(path)
+    assert rec.truncated is False  # footer на месте — запись завершена чисто
+    assert rec.skipped_malformed == 1  # порча посчитана ОТДЕЛЬНО от truncated
+    # Разобранные события грузятся (валидные строки не потеряны).
+    assert len(rec.events) >= 2
+
+
 def test_load_truncated_file_still_loads(tmp_path: Path) -> None:
     """Файл без footer (жёсткий обрыв) → truncated=True, но грузится разобранное."""
     path = str(tmp_path / "r.jsonl")

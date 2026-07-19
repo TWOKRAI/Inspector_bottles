@@ -20,16 +20,16 @@ from typing import Any, Dict, Optional
 from backend_ctl.driver import BackendDriver
 from backend_ctl.endpoint_config import resolve_endpoint
 from backend_ctl.recorder import (
+    MODE_LIVE,
+    MODE_REPLAY,
     REASON_DISCONNECT,
     Recorder,
     ReplayPlayer,
-    dump_recording,
     load_recording,
 )
-
-#: Режимы сессии: живой бэкенд vs offline-реплей загруженной записи (D.4).
-MODE_LIVE: str = "live"
-MODE_REPLAY: str = "replay"
+from backend_ctl.recorder import (
+    dump_recording as _dump_recording_file,  # алиас: не путать с методом DriverSession.dump_recording
+)
 
 
 class BackendUnavailable(RuntimeError):
@@ -166,7 +166,7 @@ class DriverSession:
         if self._mode == MODE_REPLAY:
             return {"success": False, "error": "record_dump доступен только в live-режиме (record_unload для возврата)"}
         drv = self.ensure()
-        return dump_recording(drv, path)
+        return _dump_recording_file(drv, path)
 
     def record_status(self) -> Dict[str, Any]:
         """Статус: активная запись (файл/счётчики) ЛИБО загруженный реплей (имя/позиция)."""

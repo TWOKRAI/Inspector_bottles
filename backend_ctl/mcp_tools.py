@@ -24,7 +24,7 @@ from backend_ctl.capability_render import FORMATS, render_concise, render_help
 from backend_ctl.conditions import DEFAULT_AWAIT_TIMEOUT
 from backend_ctl.driver import BackendDriver
 from backend_ctl.events import ALL_PLANE, PLANES
-from backend_ctl.recorder import DEFAULT_MAX_EVENTS, RecordingError
+from backend_ctl.recorder import DEFAULT_MAX_EVENTS, MODE_REPLAY, RecordingError
 
 #: Handler инструмента: (driver, arguments) → JSON-сериализуемый результат.
 ToolHandler = Callable[[BackendDriver, Dict[str, Any]], Any]
@@ -1167,8 +1167,9 @@ def call_tool(driver: BackendDriver, name: str, arguments: Dict[str, Any]) -> An
 # Flight recorder (D.4): session-owned диспетчеризация + offline-реплей
 # ---------------------------------------------------------------------------
 
-#: Значение session.mode для offline-реплея (без импорта mcp_driver_session — нет цикла).
-_MODE_REPLAY = "replay"
+#: Значение session.mode для offline-реплея — из recorder (общее место обеих сторон,
+#: обе ходят «вниз» на recorder; обратной зависимости tools→session нет).
+_MODE_REPLAY = MODE_REPLAY
 
 #: Каталог записей по умолчанию (env BACKEND_CTL_RECORD_DIR переопределяет).
 _RECORD_DIR_ENV = "BACKEND_CTL_RECORD_DIR"
@@ -1202,13 +1203,35 @@ def resolve_record_path(name: Any) -> str:
 # ---- Session-owned handlers (session, arguments) ----
 
 
+class _ArgError(Exception):
+    """Ошибка разбора аргумента record-инструмента → обучающий error-dict, не сырой ValueError."""
+
+
+def _resolve_or_error(name: Any) -> str:
+    """Резолв имени записи в путь; ValueError валидации → :class:`_ArgError`."""
+    try:
+        return resolve_record_path(name)
+    except ValueError as exc:
+        raise _ArgError(str(exc)) from exc
+
+
+def _int_arg_or_error(value: Any, field: str) -> Optional[int]:
+    """``None`` → None; иначе int(value) или обучающая :class:`_ArgError` (не сырой ValueError)."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise _ArgError(f"{field} должно быть целым числом, получено {value!r}") from exc
+
+
 def _record_start(session: Any, args: Dict[str, Any]) -> Any:
     try:
-        path = resolve_record_path(args.get("name"))
-    except ValueError as exc:
+        path = _resolve_or_error(args.get("name"))
+        max_events = _int_arg_or_error(args.get("max_events"), "max_events")
+    except _ArgError as exc:
         return {"success": False, "error": str(exc)}
-    max_events = args.get("max_events")
-    return session.start_recording(path, max_events=int(max_events) if max_events is not None else None)
+    return session.start_recording(path, max_events=max_events)
 
 
 def _record_stop(session: Any, args: Dict[str, Any]) -> Any:
@@ -1221,27 +1244,23 @@ def _record_status(session: Any, args: Dict[str, Any]) -> Any:
 
 def _record_dump(session: Any, args: Dict[str, Any]) -> Any:
     try:
-        path = resolve_record_path(args.get("name"))
-    except ValueError as exc:
+        path = _resolve_or_error(args.get("name"))
+    except _ArgError as exc:
         return {"success": False, "error": str(exc)}
     return session.dump_recording(path)
 
 
 def _record_load(session: Any, args: Dict[str, Any]) -> Any:
     try:
-        path = resolve_record_path(args.get("name"))
-    except ValueError as exc:
+        path = _resolve_or_error(args.get("name"))
+        ring_maxlen = _int_arg_or_error(args.get("ring_maxlen"), "ring_maxlen")
+    except _ArgError as exc:
         return {"success": False, "error": str(exc)}
     position = args.get("position", "end")
     if position not in ("end", "start"):
         return {"success": False, "error": f"position должна быть 'end' или 'start', получено {position!r}"}
-    ring_maxlen = args.get("ring_maxlen")
     try:
-        return session.load_replay(
-            path,
-            position=position,
-            ring_maxlen=int(ring_maxlen) if ring_maxlen is not None else None,
-        )
+        return session.load_replay(path, position=position, ring_maxlen=ring_maxlen)
     except (RecordingError, FileNotFoundError) as exc:
         return {"success": False, "error": str(exc)}
 

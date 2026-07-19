@@ -52,6 +52,11 @@ DEFAULT_QUEUE_MAXLEN: int = 50_000
 #: Дефолтный потолок колец detached-driver'а при реплее (переопределяемо ring_maxlen).
 DEFAULT_RING_MAXLEN: int = 10_000
 
+#: Режимы сессии backend_ctl (общее место: и mcp_driver_session, и mcp_tools ходят сюда,
+#: обе — «вниз» на recorder, обратной зависимости tools→session нет).
+MODE_LIVE: str = "live"
+MODE_REPLAY: str = "replay"
+
 #: Причины завершения записи (footer.reason).
 REASON_STOPPED: str = "stopped"
 REASON_LIMIT: str = "limit"
@@ -214,11 +219,16 @@ class Recorder:
         self._listener: Optional[Callable[[Dict[str, Any]], None]] = None
         self._thread: Optional[threading.Thread] = None
 
-        # Очередь writer'а + сигнализация. seq — плотный счётчик ЗАПИСАННЫХ событий.
+        # Очередь writer'а + сигнализация. seq — плотный счётчик ПОСТАВЛЕННЫХ В ОЧЕРЕДЬ
+        # событий (тот же, что пишется в файл как event.seq).
         self._queue: Deque[Tuple[int, float, Dict[str, Any]]] = collections.deque()
         self._qlock = threading.Lock()
         self._qcond = threading.Condition(self._qlock)
         self._seq = 0
+        # Инвариант учёта (пин теста): events_written + dropped == accepted, где accepted —
+        # число событий, ПРИНЯТЫХ колбэком пока запись активна (прошедших stop-гейт). Всё
+        # принятое обязано быть либо записано, либо посчитано в dropped — тихой потери нет.
+        self._accepted = 0
         self._dropped = 0
         self._events_written = 0
 
@@ -226,7 +236,10 @@ class Recorder:
         self._stop_requested = False
         self._reason: str = REASON_STOPPED
         self._reason_locked = False
+        # Финализация (footer+close) — РОВНО один раз, владелец строго writer-поток.
+        # _finalize_lock сериализует guard _finalized (writer-поток vs fallback stop()).
         self._finalized = False
+        self._finalize_lock = threading.Lock()
         self._subscriptions: List[Dict[str, Any]] = []
         self._created_ts: float = 0.0
 
@@ -280,7 +293,10 @@ class Recorder:
         """Лёгкий колбэк: ТОЛЬКО enqueue (контракт §7 — не блокировать reader)."""
         with self._qlock:
             if self._stop_requested:
+                # Запись уже останавливается — событие пост-стоп, в ленту не входит
+                # (не accepted: не теряем «данные записи», их просто нет после стопа).
                 return
+            self._accepted += 1
             if len(self._queue) >= self._max_queue:
                 # Очередь переполнена — writer не успевает. Роняем НОВОЕ событие и
                 # считаем (видимо в footer.dropped), а не тихо теряем.
@@ -299,45 +315,91 @@ class Recorder:
                 self._reason = reason
                 self._reason_locked = True
 
+    def _drain_pending_to_dropped(self) -> None:
+        """Учесть всё поставленное в очередь, но не записанное, как dropped (под _qlock).
+
+        Зовётся при остановке по ЛИМИТУ: _stop_requested уже True (продюсер больше не
+        кладёт — _on_event на стоп-гейте возвращается), поэтому drain захватывает всё,
+        что просочилось в очередь до выставления флага. Инвариант
+        ``events_written + dropped == accepted`` сохраняется: остаток ленты не теряется
+        молча, а честно виден в footer.dropped.
+        """
+        with self._qlock:
+            self._dropped += len(self._queue)
+            self._queue.clear()
+
     def _writer_loop(self) -> None:
-        """Сливать очередь в файл до запроса стопа; следить за лимитами."""
+        """Сливать очередь в файл до стопа; при лимите — остаток в dropped (не тихо).
+
+        Единственный писатель файла (RecordWriter не потокобезопасен) и единственный
+        владелец :meth:`_finalize` — footer/close случаются строго здесь, не в stop().
+        """
         assert self._writer is not None
         writer = self._writer
-        while True:
-            with self._qlock:
-                while not self._queue and not self._stop_requested:
-                    self._qcond.wait()
-                batch = list(self._queue)
-                self._queue.clear()
-                stop_now = self._stop_requested and not batch
-            if stop_now:
-                break
-            for seq, ts, event in batch:
-                writer.write_event(seq, ts, event)
-                self._events_written += 1
-                if self._events_written >= self._max_events or writer.bytes_written >= self._max_bytes:
-                    self._set_reason(REASON_LIMIT)
-                    with self._qlock:
-                        self._stop_requested = True
+        try:
+            while True:
+                with self._qlock:
+                    while not self._queue and not self._stop_requested:
+                        self._qcond.wait()
+                    batch = list(self._queue)
+                    self._queue.clear()
+                hit_limit = False
+                for idx, (seq, ts, event) in enumerate(batch):
+                    # Лимит проверяется ПЕРЕД записью: не пишем поверх max_events/max_bytes.
+                    if self._events_written >= self._max_events or writer.bytes_written >= self._max_bytes:
+                        self._set_reason(REASON_LIMIT)
+                        with self._qlock:
+                            self._stop_requested = True
+                            # Текущее + весь остаток batch не будут записаны → в dropped.
+                            self._dropped += len(batch) - idx
+                        hit_limit = True
+                        break
+                    writer.write_event(seq, ts, event)
+                    self._events_written += 1
+                writer.flush()
+                if hit_limit:
+                    # Просочившееся в очередь после clear (до флага) — тоже в dropped.
+                    self._drain_pending_to_dropped()
                     break
-            writer.flush()
-        self._finalize()
+                # Чистый стоп (stopped/disconnect): дослили batch; выходим, когда очередь
+                # пуста — pending события записаны, НЕ сброшены (в отличие от лимита).
+                with self._qlock:
+                    if self._stop_requested and not self._queue:
+                        break
+        finally:
+            self._finalize()
 
     def _finalize(self) -> None:
-        """Записать footer + закрыть файл (ровно один раз)."""
-        if self._finalized:
-            return
-        self._finalized = True
+        """Отписаться + записать footer + закрыть файл — ровно один раз, идемпотентно.
+
+        Владелец — writer-поток (единственный писатель файла). ``stop()`` НЕ зовёт это
+        напрямую, пока поток жив, чтобы не гонять RecordWriter из двух потоков; guard
+        под ``_finalize_lock`` защищает и от fallback-вызова (поток не поднимался).
+        """
+        with self._finalize_lock:
+            if self._finalized:
+                return
+            self._finalized = True
+        # Отписка — на ВСЕХ путях завершения (stop/limit/disconnect), идемпотентно:
+        # иначе мёртвый подписчик копится в EventHub и держит Recorder через замыкание.
+        if self._listener is not None:
+            try:
+                self._drv.unsubscribe(self._listener)
+            except Exception:  # noqa: BLE001 — teardown не роняем
+                pass
+            self._listener = None
         writer = self._writer
         if writer is None:
             return
+        with self._qlock:
+            reason, events_written, dropped = self._reason, self._events_written, self._dropped
         writer.write_footer(
             {
                 "footer": True,
                 "stopped_ts": time.time(),
-                "events_written": self._events_written,
-                "dropped": self._dropped,
-                "reason": self._reason,
+                "events_written": events_written,
+                "dropped": dropped,
+                "reason": reason,
             }
         )
         writer.close()
@@ -345,34 +407,38 @@ class Recorder:
     # ---- Стоп (идемпотентно, все пути) ----
 
     def stop(self, reason: str = REASON_STOPPED) -> Dict[str, Any]:
-        """Остановить запись: отписаться, дослить очередь, footer, fsync. Идемпотентно."""
-        # Отписка от hub'а: новых событий в очередь не поступит.
-        if self._listener is not None:
-            try:
-                self._drv.unsubscribe(self._listener)
-            except Exception:  # noqa: BLE001 — teardown не роняем
-                pass
-            self._listener = None
+        """Сигнализировать стоп и дождаться финализации writer-потоком. Идемпотентно.
+
+        stop() НЕ пишет в файл сам: только ставит стоп-флаг, будит и join-ит writer-поток
+        (он дослит очередь и запишет footer через :meth:`_finalize`). Отписка — тоже в
+        _finalize (все пути). Fallback-финализация — ТОЛЬКО если writer-поток не поднимался
+        (гарантия footer'а без гонки с живым писателем).
+        """
         self._set_reason(reason)
         with self._qlock:
             self._stop_requested = True
             self._qcond.notify_all()
         thread = self._thread
-        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+        if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=5.0)
-        # На случай, если поток не поднимался/уже мёртв — гарантируем footer.
-        self._finalize()
+        # Финализируем сами ТОЛЬКО когда нет живого writer-потока (не поднимался/уже мёртв):
+        # если join истёк по таймауту и поток ещё пишет — владелец footer'а он, не гоняем.
+        if thread is None or not thread.is_alive():
+            self._finalize()
         return self.status()
 
     def status(self) -> Dict[str, Any]:
         """Текущее состояние записи (файл, счётчики, активность)."""
+        with self._qlock:
+            events_written, dropped, reason = self._events_written, self._dropped, self._reason
+        active = self.active
         return {
             "success": True,
-            "recording": self.active,
+            "recording": active,
             "path": self._path,
-            "events_written": self._events_written,
-            "dropped": self._dropped,
-            "reason": None if self.active else self._reason,
+            "events_written": events_written,
+            "dropped": dropped,
+            "reason": None if active else reason,
             "subscriptions": self._subscriptions,
         }
 
@@ -438,12 +504,17 @@ class Recording:
         *,
         truncated: bool,
         path: str,
+        skipped_malformed: int = 0,
     ) -> None:
         self.header = header
         self.events = events
         self.footer = footer
         self.truncated = truncated
         self.path = path
+        # Битые СРЕДНИЕ строки JSONL (частичная порча файла), НЕ смешиваются с truncated
+        # (оборванный хвост). truncated=False + skipped_malformed>0 → файл завершён чисто,
+        # но внутри есть потерянные строки — честный отдельный сигнал.
+        self.skipped_malformed = skipped_malformed
 
     @property
     def snapshot(self) -> Dict[str, Any]:
@@ -458,18 +529,27 @@ def load_recording(path: str) -> Recording:
             (обучающий текст — не тихий разбор чужой схемы).
         FileNotFoundError: файла нет.
     """
-    lines: List[Dict[str, Any]] = []
+    # Читаем сырые строки целиком: битую СРЕДНЮЮ строку (за которой есть валидные)
+    # надо отличить от оборванного ХВОСТА (последняя строка) — первое = порча файла
+    # (skipped_malformed), второе = truncated. По ходу чтения этого не различить.
     with open(path, encoding="utf-8") as fh:
-        for raw in fh:
-            raw = raw.strip()
-            if not raw:
-                continue
-            try:
-                lines.append(json.loads(raw))
-            except json.JSONDecodeError:
-                # Оборванная последняя строка (crash в середине write) — игнор,
+        raw_lines = [stripped for raw in fh if (stripped := raw.strip())]
+    if not raw_lines:
+        raise RecordingError(f"пустой/нечитаемый файл записи {path!r}")
+
+    lines: List[Dict[str, Any]] = []
+    skipped_malformed = 0
+    last_idx = len(raw_lines) - 1
+    for idx, raw in enumerate(raw_lines):
+        try:
+            lines.append(json.loads(raw))
+        except json.JSONDecodeError:
+            if idx == last_idx:
+                # Оборванный хвост (crash в середине write последней строки) — не порча,
                 # запись пометится truncated (footer не встретится).
                 continue
+            # Битая строка В СЕРЕДИНЕ файла — реальная потеря, не тихо: считаем отдельно.
+            skipped_malformed += 1
     if not lines:
         raise RecordingError(f"пустой/нечитаемый файл записи {path!r}")
 
@@ -488,7 +568,7 @@ def load_recording(path: str) -> Recording:
 
     footer = lines[-1] if isinstance(lines[-1], dict) and lines[-1].get("footer") else None
     events = [ln for ln in lines[1:] if isinstance(ln, dict) and "event" in ln]
-    return Recording(header, events, footer, truncated=footer is None, path=path)
+    return Recording(header, events, footer, truncated=footer is None, path=path, skipped_malformed=skipped_malformed)
 
 
 def _flatten_tree(tree: Any, prefix: str = "") -> Dict[str, Any]:
@@ -669,6 +749,7 @@ class ReplayPlayer:
             "position": self._playhead,
             "total": self.total,
             "truncated": self.recording.truncated,
+            "skipped_malformed": self.recording.skipped_malformed,
         }
 
     def await_condition(
@@ -741,6 +822,8 @@ def replay_await_condition(
 __all__ = [
     "FORMAT",
     "VERSION",
+    "MODE_LIVE",
+    "MODE_REPLAY",
     "DEFAULT_MAX_EVENTS",
     "DEFAULT_MAX_BYTES",
     "DEFAULT_RING_MAXLEN",

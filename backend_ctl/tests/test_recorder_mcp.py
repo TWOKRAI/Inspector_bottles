@@ -66,6 +66,24 @@ def test_record_start_bad_name_returns_error(record_dir: Path, session_and_drive
     assert "имя" in res["error"]
 
 
+def test_record_start_bad_max_events_learning_error(record_dir: Path, session_and_driver) -> None:
+    """Нечисловой max_events → обучающая ошибка, НЕ сырой ValueError сквозь протокол."""
+    session, _drv = session_and_driver
+    res = dispatch_tool(session, "record_start", {"name": "ok", "max_events": "не-число"})
+    assert res["success"] is False
+    assert "max_events" in res["error"]
+
+
+def test_record_load_bad_ring_maxlen_learning_error(record_dir: Path, session_and_driver) -> None:
+    session, drv = session_and_driver
+    dispatch_tool(session, "record_start", {"name": "r"})
+    time.sleep(0.02)
+    dispatch_tool(session, "record_stop", {})
+    res = dispatch_tool(session, "record_load", {"name": "r", "ring_maxlen": "оуч"})
+    assert res["success"] is False
+    assert "ring_maxlen" in res["error"]
+
+
 # --------------------------------------------------------------------------- #
 #  Полный цикл record → replay через dispatch_tool                            #
 # --------------------------------------------------------------------------- #
