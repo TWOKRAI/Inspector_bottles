@@ -22,6 +22,8 @@ sentrux Δ0 (7008→7008, циклов +0, 0 нарушений). Регресс
 
 **Отложено (follow-up, НЕ acceptance):** `supervise(action=restart|drain_restart|set_policy)` — `restart` уже есть (`process.restart`), drain/live-policy = новая machinery; численный epoch/incarnation в КАЖДОМ событии (плумбинг shared push-путей, которых D.1a избегал); регенерация `CAPABILITIES.yaml` (новая команда) на рабочем харнессе — в текущем env харнесс сломан (introspect-хендлеры не регистрируются, `_live`/`harness_smoke` тесты красные, дамп вырождается). `test_hard_kill::test_already_dead_is_not_error` — pre-existing (harness.py не менялся).
 
-**Осталось по D.1:** формальное `/code-review` → merge → **разблокирует D.2** (streamable-HTTP мультиклиент). Осиротевшие durable-подписки мёртвой сессии — out-of-scope, вход D.2.
+**Формальное ревью (xhigh, 7 находок) — ВСЕ ЗАКРЫТЫ:** #1 (MED-HIGH зомби-подписка) — retarget subscriber на import (ключ реестра согласован → untail снимает); #3/#4 — курсоры ротируются только на `recovered` (не crashed/gave_up, убран thrashing); #5/#7 — hardening bind (чужой сокет не угоняет session); #6 — guard non-dict data. #2 (клиент шлёт dotted-subscriber безусловно) — принято как дизайн, вредное следствие #1 устранено.
+
+**Осталось по D.1:** merge (owner-gated) → **разблокирует D.2** (streamable-HTTP мультиклиент). Follow-up: `supervise`-действия, per-event numeric epoch, per-process точность гейтинга курсоров. Осиротевшие durable-подписки мёртвой сессии — out-of-scope, вход D.2.
 
 Layer для коммитов backend_ctl — `mixed` (см. [[feedback-backend-ctl-layer-mixed]]). Тестировать бэкенд через driver, не qt-mcp ([[feedback-backend-ctl-for-agents]]).
