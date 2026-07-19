@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-WidgetDescriptor — схема описания виджета для декларативной сборки UI.
+LEGACY Gen-1 (frozen 2026-07-18) — WidgetDescriptor — схема описания виджета
+для декларативной сборки UI. 0 внешних потребителей (см. frontend_module/STATUS.md).
 
-Используется WidgetRegistry для создания виджетов по конфигу.
+Используется WidgetRegistry (Gen-1, тоже frozen) для создания виджетов по конфигу.
 """
 
 from typing import Annotated, Any, Dict, Optional

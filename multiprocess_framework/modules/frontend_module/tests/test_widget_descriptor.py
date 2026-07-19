@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Тесты WidgetDescriptor."""
+"""LEGACY Gen-1 (frozen 2026-07-18) — тесты WidgetDescriptor."""
+
+import pytest
 
 from multiprocess_framework.modules.frontend_module.schemas.widget_descriptor import (
     WidgetDescriptor,
     widget_descriptor_from_dict,
 )
+
+pytestmark = pytest.mark.legacy_gen1
 
 
 class TestWidgetDescriptor:

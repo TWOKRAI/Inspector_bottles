@@ -4,7 +4,7 @@
 
 frontend_module — generic UI-фреймворк, не должен знать имя конкретного продукта
 ("Inspector Bottles" и т.п.). AppIdentity — точка инъекции org/app_name/title/logo_text
-из composition root приложения (multiprocess_prototype). Дефолт — нейтральный.
+из composition root приложения (v3-прототипа). Дефолт — нейтральный.
 
 Покрываем:
   - дефолтная идентичность нейтральна (не "Inspector"), берётся из env MPF_APP_NAME
@@ -97,6 +97,7 @@ class TestPrefsStoreUsesIdentity:
         assert settings.organizationName() == "OtherOrg"
 
 
+@pytest.mark.legacy_gen1  # LoadingWindow — Gen-1 (frozen 2026-07-18), см. frontend_module/STATUS.md
 class TestLoadingWindowUsesIdentity:
     def test_fallback_logo_text_defaults_to_identity(self, qtbot) -> None:
         from multiprocess_framework.modules.frontend_module.windows.loading_window import (

@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-WidgetRegistry — реестр типов виджетов и фабрика для их создания.
+LEGACY Gen-1 (frozen 2026-07-18) — WidgetRegistry — реестр типов виджетов и
+фабрика для их создания. 0 внешних потребителей (см. frontend_module/STATUS.md).
 
 Позволяет регистрировать фабрики по типу (slider, checkbox, ...) и создавать
 виджеты по дескриптору или dict. Гибкая расширяемость: новый тип = register().
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -75,4 +77,3 @@ class WidgetRegistry(IWidgetFactory):
         else:
             kwargs = {}
         return factory(widget_type, kwargs, registers_manager, parent)
-

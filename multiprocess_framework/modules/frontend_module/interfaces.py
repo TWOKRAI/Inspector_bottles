@@ -253,6 +253,21 @@ from multiprocess_framework.modules.frontend_module.state import (  # noqa: E402
     TelemetryViewModel,
 )
 
+# ---------------------------------------------------------------------------
+# Идентичность приложения (NEW-2, de-brand frontend_module) — публичный API.
+# ---------------------------------------------------------------------------
+#
+# Composition root приложения инжектирует org/имя/лого ДО создания первого
+# виджета, читающего идентичность (AppHeaderWidget → prefs_store.QSettings,
+# LoadingWindow — фолбэк-текст логотипа). Реэкспорт здесь — чтобы контракт
+# модуля был виден из единого interfaces.py; импортировать можно и напрямую
+# из ``frontend_module.core.app_identity``.
+from multiprocess_framework.modules.frontend_module.core.app_identity import (  # noqa: E402
+    AppIdentity,
+    get_app_identity,
+    set_app_identity,
+)
+
 __all__ = [
     # Протоколы контракта модуля (объявлены выше в этом файле).
     "SupportsCommandMessage",
@@ -275,4 +290,8 @@ __all__ = [
     "TelemetryViewModel",
     "TelemetryHistorySource",
     "DEFAULT_TRACKED_SUFFIXES",
+    # Идентичность приложения (NEW-2, реэкспорт из frontend_module.core.app_identity).
+    "AppIdentity",
+    "get_app_identity",
+    "set_app_identity",
 ]
