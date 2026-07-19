@@ -124,7 +124,7 @@ Session-isolation — **за флагом**, broadcast остаётся дефо
 
 - [x] **два клиента на одном порту не видят реплаи/события друг друга** — D.1a закрыт (`test_session_isolation.py`, 4 теста: distinct subscribers, reply не течёт, push адресный, ghost→никому)
 - [x] **`supervision_status` читает incarnation/restarts** — D.1b закрыт (команда `supervision.status`: epoch + per-process incarnation/restart_count/last_exit/status; driver+MCP tool). *«события несут epoch»* — supervisor-события (`processes.<name>.supervisor.event`) несут переход рестарта (сигнал смены инкарнации) и гейтят курсоры; численный epoch/incarnation в КАЖДОМ событии — follow-up (требует плумбинга через shared push-пути, которых D.1a избегал).
-- [x] **epoch наблюдаемого процесса гейтит курсоры B.1** — §8 закрыт driver-side: EventHub ротирует generation-токен на supervisor-границе рестарта (recovered/crashed/gave_up) → курсор «до» даёт `reset_required` (5 тестов). Консервативно (safe superset: reset на любом рестарте наблюдаемого процесса).
+- [x] **epoch наблюдаемого процесса гейтит курсоры B.1** — §8 закрыт driver-side: EventHub ротирует generation-токен на supervisor-**`recovered`** (новая инкарнация ожила — момент, с которого возможно чтение «сквозь» границу) → курсор «до» даёт `reset_required`. `crashed`/`gave_up` НЕ ротируют (ревью-фикс #3: процесс мёртв, thrashing без пользы). Гранулярность — глобальный токен (per-process/per-plane точность — follow-up, ревью #4).
 
 ### Прогресс D.1a (2026-07-19) — ЗАКРЫТ
 
@@ -151,7 +151,15 @@ sentrux-дельта против baseline: signal 7008→7008 (Δ0), цикло
 
 **CAPABILITIES.yaml** (новая команда `supervision.status`) — перегенерировать на рабочем харнессе (`python -m backend_ctl.dump_capabilities`); в текущем окружении харнесс сломан (introspect-хендлеры не регистрируются), дамп вырождается — отложено владельцу/CI. `test_dump_matches_committed` (harness_smoke) уже был красным на main (telemetry-дрейф config.reload).
 
-**Осталось по D.1:** формальное `/code-review` (§Порядок 5) → merge → разблокирует D.2. Опц. follow-up: `supervise`-действия, per-event epoch.
+### Формальное ревью (2026-07-19, xhigh, 10 углов) — 7 находок, все закрыты
+
+- **#1 (MED-HIGH)** зомби-подписка: retarget subscriber теперь на **import** (ключ реестра согласован с текущим subscriber → `*_untail` реально снимает намерение). Коммит `fix(tooling): ревью #1`.
+- **#3/#4 (MED)** курсоры ротируются **только на `recovered`** (не crashed/gave_up) — убран reset-thrashing в crash-loop; per-process точность гейтинга — follow-up. Коммит `fix(tooling): ревью #3/#4`.
+- **#5/#7 (MED/LOW)** hardening bind: чужой сокет не угоняет session (reject+log), тот же сокет — no-op. Коммит `fix(framework): ревью #5/#7`.
+- **#6 (LOW)** guard non-dict `data` в `supervision.status`. Коммит `fix(framework): ревью #6`.
+- **#2 (MED, altitude)** клиент шлёт session/dotted-subscriber безусловно (независимо от серверного флага) — **принято как дизайн** (клиент не знает флаг сервера; адаптер pop'ает session, изоляция гейтится сервером); вредное следствие (#1) устранено.
+
+**Осталось по D.1:** merge (owner-gated) → разблокирует D.2. Опц. follow-up: `supervise`-действия, per-event numeric epoch, per-process точность гейтинга курсоров.
 
 ## 12. Риски
 
