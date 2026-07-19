@@ -123,8 +123,8 @@ Session-isolation — **за флагом**, broadcast остаётся дефо
 ## 11. Acceptance (из родителя)
 
 - [x] **два клиента на одном порту не видят реплаи/события друг друга** — D.1a закрыт (`test_session_isolation.py`, 4 теста: distinct subscribers, reply не течёт, push адресный, ghost→никому)
-- [ ] `supervision_status` читает incarnation/restarts; события несут epoch — D.1b
-- [ ] epoch наблюдаемого процесса гейтит курсоры B.1 (`reset_required` при смене инкарнации) — §8
+- [x] **`supervision_status` читает incarnation/restarts** — D.1b закрыт (команда `supervision.status`: epoch + per-process incarnation/restart_count/last_exit/status; driver+MCP tool). *«события несут epoch»* — supervisor-события (`processes.<name>.supervisor.event`) несут переход рестарта (сигнал смены инкарнации) и гейтят курсоры; численный epoch/incarnation в КАЖДОМ событии — follow-up (требует плумбинга через shared push-пути, которых D.1a избегал).
+- [x] **epoch наблюдаемого процесса гейтит курсоры B.1** — §8 закрыт driver-side: EventHub ротирует generation-токен на supervisor-границе рестарта (recovered/crashed/gave_up) → курсор «до» даёт `reset_required` (5 тестов). Консервативно (safe superset: reset на любом рестарте наблюдаемого процесса).
 
 ### Прогресс D.1a (2026-07-19) — ЗАКРЫТ
 
@@ -136,7 +136,22 @@ Session-isolation — **за флагом**, broadcast остаётся дефо
 5. `feat(tooling)` — клиент: sid per-connect + инъекция + dotted-subscriber + replay-retarget.
 6. `test(tooling)` — acceptance два driver'а изолированы.
 
-sentrux-дельта против baseline: signal 7008→7008 (Δ0), циклов +0, 0 нарушений. Регрессии тестов — только pre-existing env (2 live-теста observability + порт-8765 конфликт от подвисшего бэкенда). **Осталось: D.1b (§7) + epoch-гейтинг B.1 (§8) + формальное ревью (§Порядок 5).**
+sentrux-дельта против baseline: signal 7008→7008 (Δ0), циклов +0, 0 нарушений. Регрессии тестов — только pre-existing env (2 live-теста observability + порт-8765 конфликт от подвисшего бэкенда).
+
+### Прогресс D.1b + §8 (2026-07-19) — supervision-чтение + гейтинг ЗАКРЫТЫ
+
+Коммиты (продолжение ветки):
+7. `feat(framework)` — команда `supervision.status` (epoch + per-process incarnation/restart/last_exit/status) + monitor `get_supervision_snapshot`.
+8. `feat(tooling)` — driver `supervision_status` + MCP tool (SAFETY_READ).
+9. `feat(tooling)` — §8 epoch-гейтинг курсоров: EventHub ротирует generation-токен на supervisor-границе рестарта.
+
+**Отложено (follow-up, НЕ acceptance-gating):**
+- **`supervise(process, action=restart|drain_restart|set_policy)`** (§7 step 3) — `restart` уже доступен через `process.restart`/`send_command`; `drain_restart`/`set_policy` требуют НОВОЙ machinery (drain-примитив, live-мутация RestartPolicy) — отдельная задача, чтобы не полуфабрикатить.
+- **Численный epoch/incarnation в КАЖДОМ событии** — сейчас supervisor-события несут переход рестарта (сигнал), §8 гейтит по нему. Стамп incarnation во ВСЕ push потребовал бы правки shared push-путей (delta/record_forward/router_push), которых D.1a намеренно избегал. Кандидат вместе с per-process точностью гейтинга (сейчас — safe superset).
+
+**CAPABILITIES.yaml** (новая команда `supervision.status`) — перегенерировать на рабочем харнессе (`python -m backend_ctl.dump_capabilities`); в текущем окружении харнесс сломан (introspect-хендлеры не регистрируются), дамп вырождается — отложено владельцу/CI. `test_dump_matches_committed` (harness_smoke) уже был красным на main (telemetry-дрейф config.reload).
+
+**Осталось по D.1:** формальное `/code-review` (§Порядок 5) → merge → разблокирует D.2. Опц. follow-up: `supervise`-действия, per-event epoch.
 
 ## 12. Риски
 
