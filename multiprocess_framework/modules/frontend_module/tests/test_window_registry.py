@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Тесты WindowRegistry и WindowConfig."""
+"""LEGACY Gen-1 (frozen 2026-07-18) — тесты WindowRegistry и WindowConfig."""
+
+import pytest
 
 from multiprocess_framework.modules.frontend_module.core.window_registry import WindowRegistry
 from multiprocess_framework.modules.frontend_module.schemas.window_config import WindowConfig
+
+pytestmark = pytest.mark.legacy_gen1
 
 
 class TestWindowRegistry:

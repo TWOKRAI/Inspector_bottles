@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-LayoutComposer — сборка контейнера из списка дескрипторов виджетов.
+LEGACY Gen-1 (frozen 2026-07-18) — LayoutComposer — сборка контейнера из
+списка дескрипторов виджетов. 0 внешних потребителей (см. frontend_module/STATUS.md).
 
 Добавляет виджеты в layout родителя по порядку. Гибкий: orientation, spacing.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional

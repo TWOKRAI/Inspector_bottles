@@ -148,6 +148,13 @@ from multiprocess_framework.modules.actions_module import (
 # Грузим FrontendManager только при РЕАЛЬНОМ обращении. В v3-прототипе фасадный
 # FrontendManager не используется (GUI тянет PySide6 своим путём), так что в норме
 # это не грузится вовсе. См. docs/COMMUNICATION_MAP.md.
+# frontend-constructor Ф1 (T1.2): FrontendManager — Gen-1, frozen и убран из
+# публичного фасада frontend_module (freeze, не kill — Р4 плана
+# plans/frontend-constructor/plan.md). Этот лениво-загружаемый alias намеренно
+# НЕ переключён на прямой импорт Gen-1-подпакета application/ — держим инвариант
+# T1.2 «0 внешних ссылок на Gen-1-подпакет вне модуля» буквально; при отсутствии
+# в фасаде импорт ниже падает ImportError и возвращается None (как и раньше при
+# отсутствии PySide6/атрибута).
 def __getattr__(name: str):
     if name == "FrontendManager":
         try:

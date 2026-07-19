@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Unit-тесты WindowManager (Task C2).
+LEGACY Gen-1 (frozen 2026-07-18) — unit-тесты WindowManager (Task C2).
 
 Покрываем: register, show_window, hide_window, close_all,
 set_access_context, set_access_level (deprecated), _config_get,
@@ -24,6 +24,8 @@ from multiprocess_framework.modules.frontend_module.application.window_manager i
     _config_get,
 )
 from multiprocess_framework.modules.frontend_module.managers.access_context import AccessContext
+
+pytestmark = pytest.mark.legacy_gen1
 
 
 # ---------------------------------------------------------------------------

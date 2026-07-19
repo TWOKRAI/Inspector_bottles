@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-WindowConfig — схема описания окна для декларативной сборки.
+LEGACY Gen-1 (frozen 2026-07-18) — WindowConfig — схема описания окна для
+декларативной сборки. 0 внешних потребителей (см. frontend_module/STATUS.md).
 
-Список виджетов + layout-подсказки. Используется LayoutComposer (будущий).
+Список виджетов + layout-подсказки. Используется LayoutComposer (Gen-1, тоже frozen).
 """
+
 from typing import Annotated, Any, Dict, List, Optional
 
 from multiprocess_framework.modules.frontend_module.schema_adapter import FieldMeta, SchemaBase

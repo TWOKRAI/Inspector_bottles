@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-WindowRegistry — реестр окон и фабрика для их создания.
+LEGACY Gen-1 (frozen 2026-07-18) — WindowRegistry — реестр окон и фабрика для
+их создания. 0 внешних потребителей (см. frontend_module/STATUS.md).
 
 Регистрирует фабрики по имени окна. Поддерживает singleton-режим.
 Расширенные флаги: needs_fullscreen, needs_cursor, needs_access_level, auto_close.

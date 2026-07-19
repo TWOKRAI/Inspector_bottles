@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Фабрики виджетов по умолчанию для WidgetRegistry.
+LEGACY Gen-1 (frozen 2026-07-18) — фабрики виджетов по умолчанию для
+WidgetRegistry. 0 внешних потребителей (см. frontend_module/STATUS.md).
 
 Регистрирует slider и checkbox. Расширяемо: добавить новый тип = новая функция + register().
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, Optional

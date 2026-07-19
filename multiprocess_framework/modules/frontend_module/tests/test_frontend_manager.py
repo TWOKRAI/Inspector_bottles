@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Unit-тесты FrontendManager (Task C1).
+LEGACY Gen-1 (frozen 2026-07-18) — unit-тесты FrontendManager (Task C1).
 
 Покрываем: initialize, shutdown, run_app, shutdown_app,
 _on_config_changed, update_config, set_connection_map, set_router,
@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from multiprocess_framework.modules.frontend_module.application.frontend_manager import FrontendManager
+
+pytestmark = pytest.mark.legacy_gen1
 
 
 # ---------------------------------------------------------------------------
