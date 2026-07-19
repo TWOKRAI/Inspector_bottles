@@ -271,7 +271,7 @@ UI (опционально)   L12  frontend_module (PySide6)
 - `ProcessRegistry` — реестр (per-process `stop_event`, lifecycle).
 - `ProcessMonitor` — heartbeat + state broadcast.
 - `TopologyManager` (`process/topology_manager.py`) — runtime-применение топологии (switch/hot-apply).
-- `topology/blueprint.py` — schema-модель топологии системы: `SystemBlueprint`, `ProcessConfig` (`inspector`/`extras`/`metadata` — typed-поля с приоритетом typed > extras, C6 рычаг 1), `Wire`, `Port` (переехали из `process_module/generic/blueprint.py`, C6 (c), ADR-PMM-016; шим на старом пути — переходный).
+- `topology/blueprint.py` — schema-модель топологии системы: `SystemBlueprint`, `ProcessConfig` (`inspector`/`extras`/`metadata` — typed-поля с приоритетом typed > extras, C6 рычаг 1), `Wire`, `Port` (переехали из `process_module/generic/blueprint.py`, C6 (c), ADR-PMM-016; back-compat шим на старом пути удалён — grouping Фаза 2, 2026-07-19).
 - `SystemBlueprint.infer_missing_inspectors()` — структурный вывод `{mode: join, inputs, primary}` из wires для процессов без явного `inspector` (≥2 required-источника → join; escape-hatch — явный `inspector`/`extras["inspector"]`), заменяет снятый костыль `_hoist_inspector_from_metadata` (Ф4.7, ADR-PMM-017).
 - Built-in commands: `process.list/start/stop/restart/status`, `system.shutdown/stats`.
 

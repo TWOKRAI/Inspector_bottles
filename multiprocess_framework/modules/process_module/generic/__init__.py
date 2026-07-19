@@ -8,7 +8,8 @@
 SystemBlueprint/ProcessConfig/Wire (системная топология) переехали в
 ``process_manager_module/topology/blueprint.py`` (C6 c). Из пакета ``generic`` больше НЕ
 экспортируются (пакетный re-export создавал бы runtime-цикл generic→topology→plugins→
-generic); импортёры используют новый дом напрямую (переходный шим — ``generic/blueprint.py``).
+generic); импортёры используют новый дом напрямую (``process_manager_module.topology``).
+Back-compat шим ``generic/blueprint.py`` удалён (grouping Фаза 2, 2026-07-19).
 """
 
 from .data_receiver import DataReceiver
