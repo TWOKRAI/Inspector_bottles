@@ -18,6 +18,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
+from backend_ctl.capability_render import FORMATS, render_concise, render_help
 from backend_ctl.driver import BackendDriver
 from backend_ctl.events import ALL_PLANE, PLANES
 
@@ -85,7 +86,24 @@ def _jsonable(value: Any) -> Any:
 
 
 def _capabilities(drv: BackendDriver, args: Dict[str, Any]) -> Any:
-    return _jsonable(drv.capabilities(**_kw_timeout(args)))
+    fmt = args.get("format") or "detailed"
+    if fmt not in FORMATS:
+        return {"success": False, "error": f"неизвестный format {fmt!r}: ожидаю один из {list(FORMATS)}"}
+    caps = drv.capabilities(**_kw_timeout(args))
+    process = args.get("process")
+    if fmt == "concise":
+        return render_concise(caps, process)
+    if fmt == "help":
+        return render_help(caps, process)
+    if process is not None:  # detailed + фильтр: сузить карточки до одного процесса
+        if process not in caps.processes:
+            return {
+                "success": False,
+                "error": f"процесс {process!r} не найден в капабилити-своде",
+                "known_processes": sorted(caps.processes),
+            }
+        caps = dataclasses.replace(caps, processes={process: caps.processes[process]})
+    return _jsonable(caps)
 
 
 def _get_status(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -283,8 +301,21 @@ TOOLS: List[ToolSpec] = [
     ToolSpec(
         "capabilities",
         "«Контактная книжка» всей системы: топология процессов, их команды с описаниями, "
-        "регистры (поля), router-handlers, каналы. Первый вызов сессии — вместо чтения исходников.",
-        _obj({"timeout": _TIMEOUT}),
+        "регистры (поля), router-handlers, каналы. Первый вызов сессии — вместо чтения исходников. "
+        "format='concise' — только имена (кратно дешевле контексту); 'help' — карточка команды с "
+        "примером вызова, подписочной подсказкой (какое push-событие в какую плоскость B.1) и "
+        "корреляционными ключами; 'detailed' (дефолт) — полный дамп. process — фильтр до одной карточки.",
+        _obj(
+            {
+                "format": {
+                    "type": "string",
+                    "enum": ["detailed", "concise", "help"],
+                    "description": "Формат ответа (по умолчанию detailed).",
+                },
+                "process": {"type": "string", "description": "Сузить свод до одного процесса. Опц."},
+                "timeout": _TIMEOUT,
+            }
+        ),
         _capabilities,
     ),
     ToolSpec(

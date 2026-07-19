@@ -76,7 +76,7 @@ PY
 | `introspect_registers(process)` | имена регистров + поля (**пусто = нет worker-side приёмника**) |
 | `introspect_status(process)` / `get_status(process)` | имя, воркеры, состояние процесса |
 | `router_stats(p)` / `queues(p)` / `worker_status(p)` | типизированно (dataclass + `.raw`): счётчики router'а / глубины очередей / статус воркеров |
-| `capabilities()` / `introspect_capabilities(p)` | «контактная книжка»: свод команд/регистров/каналов по всем процессам (или карточка одного) |
+| `capabilities()` / `introspect_capabilities(p)` | «контактная книжка»: свод команд/регистров/каналов по всем процессам (или карточка одного). MCP-инструмент принимает `format="concise"` (только имена, кратно дешевле) / `"help"` (пример вызова + какое push-событие в какую плоскость + корреляционные ключи) / `"detailed"` (дефолт) и `process`-фильтр (B.4) |
 | `set_register(process, register, field, value)` | live-запись регистра (`register_update`, ключи `{register, field, value}`) |
 | `set_register_verified(process, register, field, value)` | verify-probe (Ф1.6): write → readback `introspect.registers` → diff (`verified`/`expected`/`actual`) — ловит молчаливые no-op'ы |
 | `send_command(target, command, args=None)` | прямая команда процессу (форма `CommandSender.send_command`) |

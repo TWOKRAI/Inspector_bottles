@@ -142,13 +142,14 @@ Fable-ревью (2026-07-18, 3 агента: честная оценка / ох
 
 ### Task B.4 — capabilities(format="help"|"concise") + response_format
 **Level:** Middle (Sonnet) | **Layer:** tools
+**Status (2026-07-19):** ✅ ЗАВЕРШЕНО. Новый `capability_render.py` — чистый рендер над `Capabilities` (ноль дублирования, ноль IPC): `concise` (имена команд/регистров/handlers), `help` (пример вызова из params_schema v1 — только required-поля с placeholder по типу; подписочная карта wire-контрактов subscribe→push→плоскость B.1 + `read_with`; `correlation_keys` process/worker/ts, trace_id после G.6), `process`-фильтр во всех трёх форматах (detailed — через `dataclasses.replace`).
 **Goal:** холодный старт агента за 1 вызов; концайз против взрыва контекста (закрывает DEFER Task 3.3).
-**Files:** `backend_ctl/mcp_tools.py`, `backend_ctl/mcp_errors.py`, tests.
+**Files:** `backend_ctl/capability_render.py` (новый), `backend_ctl/mcp_tools.py`, tests.
 **Steps:**
 1. `concise` — имена команд без params_schema; `help` — карточка: 1 пример вызова (генерится из схемы) + «какое событие придёт и в какой плоскости» + корреляционные ключи (process/worker/ts, позже trace_id). Чистый рендер над реестром, ноль дублирования.
 2. `process`-фильтр.
 **Acceptance:**
-- [ ] unit: `concise` кратно меньше detailed; `help` содержит пример вызова и подписочную подсказку
+- [x] unit: `concise` кратно меньше detailed (×3 на fake-своде); `help` содержит пример вызова и подписочную подсказку — 8 тестов `test_capability_render.py`
 **Аналог:** `kubectl explain`, CDP domain docs.
 
 ---
