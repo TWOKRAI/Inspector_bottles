@@ -75,6 +75,7 @@ class TelemetryReadModel:
         tracked_suffixes: tuple[str, ...] | None = None,
         window_sec: float = 600.0,
         sample_hz: float = 1.0,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         """Инициализировать read-model.
 
@@ -88,6 +89,11 @@ class TelemetryReadModel:
             window_sec: длительность окна истории в секундах (~10 мин = 600).
             sample_hz: ожидаемая частота семплов метрики (троттлинг источника).
                 maxlen буфера = ceil(window_sec * sample_hz) ≈ 600 точек.
+            clock: источник wall-clock ts для точек истории. Дефолт ``time.time``
+                (бит-в-бит прежнее поведение). Инъекция нужна offline-реплею
+                (backend_ctl flight recorder): точки истории при прокрутке записи
+                должны нести ЗАПИСАННЫЕ ts (playhead-часы), а не время загрузки.
+                На live-путь не влияет — дефолт остаётся ``time.time``.
         """
         # Проекция состояния: путь → последнее значение. Пишется в ingest,
         # читается get()/snapshot() (late-binding).
@@ -100,6 +106,10 @@ class TelemetryReadModel:
         )
         # maxlen из окна и ожидаемого троттлинга: 600 с × 1 Гц = 600 точек.
         self._maxlen: int = max(1, int(round(window_sec * sample_hz)))
+
+        # Источник ts точек истории. Дефолт time.time (live-путь бит-в-бит);
+        # инъекция — только для offline-реплея (см. докстроку конструктора).
+        self._clock: Callable[[], float] = clock
 
         if initial_cache:
             self.prime(initial_cache)
@@ -201,11 +211,12 @@ class TelemetryReadModel:
         if buf is None:
             buf = collections.deque(maxlen=self._maxlen)
             self._history[path] = buf
-        # ts приёма: wall-clock (Unix-epoch, time.time()) — единая ось времени с
-        # DB-историей и с DateAxisItem графика. Ring — только для отображения
-        # (спарклайн/дашборд), длительности/Hz по нему не считаются, поэтому
-        # monotonic здесь не нужен.
-        buf.append((time.time(), num))
+        # ts приёма: wall-clock (Unix-epoch) через self._clock() — единая ось
+        # времени с DB-историей и с DateAxisItem графика. Ring — только для
+        # отображения (спарклайн/дашборд), длительности/Hz по нему не считаются,
+        # поэтому monotonic здесь не нужен. Дефолт clock=time.time; инъекция —
+        # offline-реплей (записанные ts вместо времени загрузки).
+        buf.append((self._clock(), num))
 
     def history(self, path: str, since: float | None = None) -> list[tuple[float, Any]]:
         """Выборка (ts, value) буфера для спарклайна.
@@ -224,6 +235,46 @@ class TelemetryReadModel:
         if since is None:
             return list(buf)
         return [(ts, val) for ts, val in buf if ts >= since]
+
+    # ------------------------------------------------------------------
+    # Экспорт / импорт истории (сериализация колец для flight recorder)
+    # ------------------------------------------------------------------
+
+    def export_history(self) -> dict[str, list[tuple[float, float]]]:
+        """Снимок всех кольцевых буферов истории: ``path → [(ts, value), ...]``.
+
+        JSON-safe (числа + списки) — граница процессов/файла соблюдена. Порядок
+        точек хронологический (как в буфере). Пустые буферы не включаются.
+        Используется recorder'ом для сохранения истории в header записи.
+        """
+        return {path: list(buf) for path, buf in self._history.items() if buf}
+
+    def import_history(self, data: dict[str, list[tuple[float, float]]]) -> None:
+        """Восстановить кольцевые буферы истории из :meth:`export_history`-снимка.
+
+        Точки несут ЗАПИСАННЫЕ ts (не «сейчас») — это ключ честного offline-реплея.
+        maxlen соблюдается: если серия длиннее окна, остаётся хвост (последние
+        ``maxlen`` точек, как при живом накоплении). Существующие буферы этих
+        путей заменяются. Нечисловые/битые точки пропускаются best-effort.
+
+        Args:
+            data: ``{path: [(ts, value), ...]}`` — обычно из header записи.
+        """
+        for path, points in data.items():
+            if not isinstance(path, str) or not points:
+                continue
+            buf: collections.deque[tuple[float, float]] = collections.deque(maxlen=self._maxlen)
+            for point in points:
+                if not isinstance(point, (list, tuple)) or len(point) != 2:
+                    continue
+                ts, value = point
+                num = self._as_number(value)
+                ts_num = self._as_number(ts)
+                if num is None or ts_num is None:
+                    continue
+                buf.append((ts_num, num))
+            if buf:
+                self._history[path] = buf
 
 
 __all__ = ["TelemetryReadModel", "DEFAULT_TRACKED_SUFFIXES"]

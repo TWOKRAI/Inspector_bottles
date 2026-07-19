@@ -47,6 +47,12 @@ m.history("processes.cam.state.fps", since=ts)         # спарклайн (ts,
   `processes.cam2.*`); пустой prefix → весь снимок.
 - `history(path, since)` — кольцевой буфер (fixed-size deque, `maxlen =
   ceil(window_sec * sample_hz)`), ts — wall-clock (Unix-epoch, единая ось с БД-историей).
+- `export_history() -> {path: [(ts, value), ...]}` / `import_history(data)` —
+  сериализация/восстановление колец истории (JSON-safe). Импорт несёт ЗАПИСАННЫЕ
+  ts и соблюдает `maxlen`. Для offline-реплея записи (backend_ctl flight recorder).
+- `clock: Callable[[], float] = time.time` (аргумент конструктора) — источник ts
+  точек истории. Дефолт `time.time` (live-путь бит-в-бит); инъекция нужна только
+  offline-реплею, чтобы точки несли записанные ts, а не время загрузки.
 
 ## Инварианты
 

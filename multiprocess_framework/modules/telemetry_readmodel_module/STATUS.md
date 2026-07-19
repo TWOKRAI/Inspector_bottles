@@ -7,6 +7,8 @@
 
 - `TelemetryReadModel` — снимок `path → value` + кольцевые буферы истории;
   envelope-agnostic `ingest`; `get`/`snapshot`/`history`.
+- `export_history`/`import_history` + инъектируемый `clock` (D.4 flight recorder):
+  аддитивно, дефолт `clock=time.time` бит-в-бит (характеризационный пин).
 - `ITelemetryReadModel` (Protocol) — контракт.
 - Unit-тесты (`tests/test_telemetry_read_model.py`), без Qt.
 

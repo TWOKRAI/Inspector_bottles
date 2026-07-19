@@ -192,5 +192,91 @@ def test_custom_tracked_suffixes() -> None:
     assert m.history("processes.cam.state.fps") == []
 
 
+# --------------------------------------------------------------------------- #
+#  Инъекция clock + экспорт/импорт истории (flight recorder, D.4)              #
+# --------------------------------------------------------------------------- #
+
+
+def test_default_clock_is_wall_clock_bit_for_bit() -> None:
+    """Характеризация: без инъекции clock ts точки истории — time.time (прежнее поведение).
+
+    Пин ДО добавления параметра clock: дефолт обязан остаться time.time,
+    иначе live-путь (GUI/headless) молча сменил бы ось времени истории.
+    """
+    m = TelemetryReadModel()
+    before = time.time()
+    m.ingest("processes.cam.state.fps", 1.0)
+    after = time.time()
+    ((ts, _val),) = m.history("processes.cam.state.fps")
+    assert before <= ts <= after, "дефолтный clock должен быть time.time (wall-clock)"
+
+
+def test_injected_clock_stamps_history_ts() -> None:
+    """Инъекция clock: точки истории несут значение из clock, а не time.time."""
+    ticks = iter([100.0, 200.0, 300.0])
+    m = TelemetryReadModel(clock=lambda: next(ticks))
+    m.ingest("processes.cam.state.fps", 1.0)
+    m.ingest("processes.cam.state.fps", 2.0)
+    assert m.history("processes.cam.state.fps") == [(100.0, 1.0), (200.0, 2.0)]
+
+
+def test_export_history_snapshot() -> None:
+    ticks = iter([10.0, 20.0])
+    m = TelemetryReadModel(clock=lambda: next(ticks))
+    m.ingest("processes.cam.state.fps", 5.0)
+    m.ingest("processes.cam.state.latency_ms", 12.0)
+    exported = m.export_history()
+    assert exported == {
+        "processes.cam.state.fps": [(10.0, 5.0)],
+        "processes.cam.state.latency_ms": [(20.0, 12.0)],
+    }
+
+
+def test_export_import_history_round_trip() -> None:
+    """export → import восстанавливает буферы бит-в-бит (записанные ts)."""
+    ticks = iter([1.0, 2.0, 3.0])
+    src = TelemetryReadModel(clock=lambda: next(ticks))
+    src.ingest("processes.cam.state.fps", 5.0)
+    src.ingest("processes.cam.state.fps", 6.0)
+    src.ingest("processes.cam.state.uptime", 100.0)
+    exported = src.export_history()
+
+    dst = TelemetryReadModel()  # дефолтный clock — не влияет на импорт
+    dst.import_history(exported)
+    assert dst.export_history() == exported
+    # ts истории — записанные, не время импорта.
+    assert dst.history("processes.cam.state.fps") == [(1.0, 5.0), (2.0, 6.0)]
+
+
+def test_import_history_respects_maxlen() -> None:
+    """Серия длиннее окна усекается до maxlen (хвост), как при живом накоплении."""
+    m = TelemetryReadModel(window_sec=3.0, sample_hz=1.0)  # maxlen = 3
+    m.import_history({"processes.cam.state.fps": [(float(i), float(i)) for i in range(6)]})
+    assert m.history("processes.cam.state.fps") == [(3.0, 3.0), (4.0, 4.0), (5.0, 5.0)]
+
+
+def test_import_history_skips_malformed_points() -> None:
+    m = TelemetryReadModel()
+    m.import_history(
+        {
+            "processes.cam.state.fps": [
+                (1.0, 5.0),
+                ("bad_ts", 6.0),  # нечисловой ts — пропуск
+                (2.0, "bad_val"),  # нечисловое значение — пропуск
+                (3.0,),  # неполная точка — пропуск
+                (4.0, 7.0),
+            ]
+        }
+    )
+    assert m.history("processes.cam.state.fps") == [(1.0, 5.0), (4.0, 7.0)]
+
+
+def test_export_history_excludes_empty() -> None:
+    """Пустых буферов в экспорте нет (нечисловые пути истории не заводят)."""
+    m = TelemetryReadModel()
+    m.ingest("processes.cam.state.status", "running")  # не число → нет буфера
+    assert m.export_history() == {}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-q"])

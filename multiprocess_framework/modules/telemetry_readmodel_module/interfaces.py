@@ -39,5 +39,13 @@ class ITelemetryReadModel(Protocol):
         """Кольцевой буфер ``(ts, value)`` метрики; since — нижняя граница ts (wall-clock)."""
         ...
 
+    def export_history(self) -> dict[str, list[tuple[float, float]]]:
+        """Снимок всех кольцевых буферов истории (``path → [(ts, value), ...]``), JSON-safe."""
+        ...
+
+    def import_history(self, data: dict[str, list[tuple[float, float]]]) -> None:
+        """Восстановить буферы истории из export_history-снимка (записанные ts, maxlen соблюдён)."""
+        ...
+
 
 __all__ = ["ITelemetryReadModel"]
