@@ -1183,16 +1183,24 @@ class BuiltinCommands:
         """Впрыснуть синтетическую ошибку в HealthState процесса (диагностика).
 
         data: ``context`` (сайт-тег, по умолч. "diagnostics"), ``message`` (текст),
+        ``count`` (опц., сколько report_error подряд — для проверки breaker 2.2),
         ``status`` (опц.: перевести процесс в degraded/failed после впрыска).
         """
         args = self._merge_args(data, kwargs)
         context = str(args.get("context") or "diagnostics")
         message = str(args.get("message") or "synthetic health event")
+        try:
+            count = max(1, int(args.get("count", 1)))
+        except (TypeError, ValueError):
+            count = 1
 
         from ..health import HealthSelfTestError, get_or_create_health_state
 
         state = get_or_create_health_state(self._services)
-        state.report_error(HealthSelfTestError(message), context=context)
+        # count подряд-впрысков без успеха между ними → серия для breaker (Ф2 2.2):
+        # N >= порога размыкает breaker → процесс сам деградирует.
+        for _ in range(count):
+            state.report_error(HealthSelfTestError(message), context=context)
 
         status = args.get("status")
         if status:
@@ -1205,14 +1213,28 @@ class BuiltinCommands:
                     "reason": f"неизвестный status '{status}' (ok|degraded|failed)",
                 }
 
-        return {"success": True, "process": self._services.name, "errors": state.error_count}
+        return {
+            "success": True,
+            "process": self._services.name,
+            "errors": state.error_count,
+            "breaker": state.breaker_snapshot(),
+        }
 
     def _cmd_health_status(self, data=None, **kwargs) -> dict:
-        """Вернуть снапшот здоровья процесса (status/errors/last_error/...)."""
+        """Вернуть снапшот здоровья процесса (status/errors/last_error/...).
+
+        ``health`` — контракт схемы (ровно 5 полей); ``breaker`` — диагностика
+        размыкателя (Ф2 2.2), вне контракта публикации.
+        """
         from ..health import get_or_create_health_state
 
         state = get_or_create_health_state(self._services)
-        return {"success": True, "process": self._services.name, "health": state.snapshot()}
+        return {
+            "success": True,
+            "process": self._services.name,
+            "health": state.snapshot(),
+            "breaker": state.breaker_snapshot(),
+        }
 
     # ========================================================================
     # WIRE COMMANDS — runtime-настройка SHM-каналов

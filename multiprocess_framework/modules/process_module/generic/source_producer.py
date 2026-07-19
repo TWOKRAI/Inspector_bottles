@@ -10,20 +10,16 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from ..plugins.base import ProcessModulePlugin
-from ..health import IHealthReporter
 from . import frame_trace
-from . import perf_probes
 from .cycle_metrics import CycleMetricsRecorder
 from .plugin_runner import PluginRunner
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
 
-#: Backoff (сек) при открытом produce-breaker: вместо горячего цикла ошибок на
-#: мёртвом источнике спим дольше, отдавая CPU. Держим отзывчивость на stop_event
-#: порциями внутри smart-sleep.
-DEFAULT_BREAKER_BACKOFF_SEC = 1.0
+if TYPE_CHECKING:
+    from ..health import HealthReporter
 
 
 class SourceProducer:
@@ -37,10 +33,6 @@ class SourceProducer:
         target_fps: целевой FPS (для throttle)
         log_info: callback
         log_error: callback
-        health: honest-репортер здоровья (Task 2.2). produce()-фейлы кормят его
-            breaker (report_error), успех — record_success. None → no-op (юниты/
-            обратная совместимость): поведение как раньше, только без наблюдаемости.
-        breaker_backoff_sec: сон при открытом breaker (вместо target_interval).
     """
 
     def __init__(
@@ -55,11 +47,18 @@ class SourceProducer:
         log_debug: Callable[[str], None] | None = None,
         node_name: str = "",
         plugin_runner: PluginRunner | None = None,
-        health: IHealthReporter | None = None,
-        breaker_backoff_sec: float = DEFAULT_BREAKER_BACKOFF_SEC,
+        health: "HealthReporter | None" = None,
+        breaker_backoff_sec: float = 1.0,
     ) -> None:
         self._plugin = plugin
         self._shm = shm_middleware
+        # Health-репортёр процесса (Ф2 Task 2.2). Провал produce() — это
+        # проглоченная ошибка (раньше просто лог + items=[]): регистрируем через
+        # report_error (честный счётчик + процесс-breaker), удачный кадр —
+        # report_success (обнуляет серию). Когда breaker разомкнут — тормозим
+        # цикл на breaker_backoff_sec, чтобы не крутить горячий цикл отказов.
+        self._health = health
+        self._breaker_backoff = max(0.0, float(breaker_backoff_sec))
         # Единый шов вызова produce() (pre/post-хуки → io-debug, Этап 5). Default —
         # пустой раннер без хуков (поведение идентично прямому plugin.produce()).
         self._runner = plugin_runner or PluginRunner(log_error=log_error)
@@ -70,36 +69,20 @@ class SourceProducer:
         self._target_interval = 1.0 / max(target_fps, 1.0)
         self._log_info = log_info or (lambda msg: None)
         self._log_error = log_error or (lambda msg: None)
-        # Kwargs-safe no-op по умолчанию (F6d, ревью 2026-07-13): реальный
-        # ProcessModule._log_debug тоже kwargs-safe (несёт trace_id=... как extra
-        # для LogRecord, Ф7 G.6). Периодический per-frame TRACE снят в Ф7 G.1 —
-        # latency этапов теперь через perf_probes (см. self._perf ниже).
-        self._log_debug = log_debug or frame_trace.noop_log
-        # Honest produce-breaker (Task 2.2). context-тег фиксируем на источнике,
-        # чтобы last_error показывал, ЧЕЙ produce() падает.
-        self._health = health
-        self._health_context = f"produce:{getattr(plugin, 'name', '') or 'source'}"
-        self._breaker_backoff = max(0.0, float(breaker_backoff_sec))
+        # [TRACE] per-frame диагностика → DEBUG (не флудить INFO-консоль).
+        self._log_debug = log_debug or (lambda msg: None)
 
         # Тайминг цикла (produce + send + smart-sleep) для телеметрии GUI.
         # target_interval = 1/target_fps, поэтому effective_hz ≈ фактический FPS.
         self._cycle_metrics = CycleMetricsRecorder(target_interval_s=self._target_interval)
-        # HP-1 (Ф7 G.1): per-stage latency (capture/send), за флагом FW_PERF_PROBES,
-        # дефолт OFF — см. perf_probes.py.
-        self._perf = perf_probes.LatencyProbes()
 
     def get_cycle_metrics(self) -> dict:
         """Снимок тайминга цикла (потокобезопасно).
 
         WorkerManager.get_worker_status подмешивает результат в статус воркера →
-        heartbeat → ProcessMonitor.state.fps/latency_ms → GUI. При включённых
-        perf-пробах (FW_PERF_PROBES=1) дополнительно несёт ``perf_probes``:
-        p50/p99/count по этапам capture/send (HP-1, Ф7 G.1).
+        heartbeat → ProcessMonitor.state.fps/latency_ms → GUI.
         """
-        metrics = self._cycle_metrics.get_cycle_metrics()
-        if perf_probes.enabled():
-            metrics["perf_probes"] = self._perf.get_stats()
-        return metrics
+        return self._cycle_metrics.get_cycle_metrics()
 
     def run_loop(self, stop_event: threading.Event, pause_event: threading.Event) -> None:
         """LOOP worker: produce() → SHM write → IPC send.
@@ -120,20 +103,12 @@ class SourceProducer:
 
             t_start = time.monotonic()
 
-            # Снимок кумулятивного счётчика ошибок ДО produce() — чтобы отличить
-            # честно-успешную итерацию от той, где плагин ПРОГЛОТИЛ ошибку внутри
-            # (contain→report→degrade, M-err-1/2, волна C): такой плагин ловит отказ
-            # железа/соседа в своём produce(), зовёт ctx.health.report_error и
-            # возвращает [] — produce() НЕ бросает, но итерация НЕ успешна.
-            errors_before = self._health.error_count if self._health is not None else 0
-
-            produce_failed = False
             try:
                 # Вызов через PluginRunner — единый шов с pre/post-хуками (io-debug).
-                # HP-1: perf-проба этапа "capture" — за флагом FW_PERF_PROBES, дефолт
-                # OFF (см. perf_probes.py), при off — ноль вызовов perf_counter.
-                with self._perf.measure("capture"):
-                    items = self._runner.call_produce(self._plugin)
+                items = self._runner.call_produce(self._plugin)
+                # Удачный кадр обнуляет серию отказов breaker (восстановление).
+                if self._health is not None:
+                    self._health.report_success(context=f"produce:{self._plugin.name}")
             except NotImplementedError:
                 self._log_error(f"SourceProducer: {self._plugin.name} не реализует produce()")
                 stop_event.set()
@@ -141,67 +116,69 @@ class SourceProducer:
             except Exception as e:
                 self._log_error(f"SourceProducer: {self._plugin.name}.produce() error: {e}")
                 items = []
-                produce_failed = True
-                # Honest produce-breaker (Task 2.2): кормим тот же счётчик, что и
-                # плагины — N подряд produce()-фейлов откроют breaker → health degraded.
+                # Проглоченная ошибка produce() → в health (честный счётчик +
+                # процесс-breaker). Раньше отказ железа был невидим в state-дереве.
                 if self._health is not None:
-                    self._health.report_error(e, context=self._health_context)
+                    self._health.report_error(e, context=f"produce:{self._plugin.name}")
+                    # Breaker разомкнут → не крутим горячий цикл отказов: тормозим
+                    # (кооперативно к stop_event), давая источнику/железу время.
+                    if self._health.breaker_open and self._breaker_backoff > 0.0:
+                        self._backoff(stop_event)
 
-            # record_success сбрасывает подряд-счётчик breaker → закрывает деградацию.
-            # Зовём ТОЛЬКО если итерация честно успешна: produce() не бросил И плагин
-            # не отчитался об ошибке внутри (error_count не вырос). Иначе безусловный
-            # record_success «съедал» бы report_error флагман-источников
-            # (capture/camera_service ловят ошибку внутри и возвращают []) —
-            # breaker никогда бы не открылся, degrade не наступил (баг Ф2 prod-пути).
-            if not produce_failed and self._health is not None:
-                if self._health.error_count == errors_before:
-                    self._health.record_success()
+            # [TRACE] Логируем каждый 30-й кадр (чтобы не спамить)
+            if items and hasattr(self, "_trace_cnt"):
+                self._trace_cnt += 1
+            elif items:
+                self._trace_cnt = 1
+            if items and self._trace_cnt % 30 == 1:
+                frame = items[0].get("frame")
+                shape = frame.shape if frame is not None and hasattr(frame, "shape") else None
+                self._log_debug(
+                    f"[TRACE] SourceProducer({self._plugin.name}): "
+                    f"produce() → {len(items)} item(s), frame shape={shape}, "
+                    f"targets={self._chain_targets}"
+                )
 
             # Штамп времени захвата → метаданные кадра (едут через всю цепочку как
             # item["capture_ts"]). На выходе пайплайна (дисплей) считается
             # сквозная задержка now - capture_ts. time.time() (wall) —
             # кросс-процессно сравнимо на одной машине.
             # produce-спан пишет декоратор frame_trace.traced (авто на produce()).
-            # Ф7 G.6: trace_id назначается ЗДЕСЬ — единственное место рождения кадра
-            # (звено 1) — до TRACE-лога ниже, чтобы он тоже мог нести trace_id.
             capture_ts = time.time()
             for item in items:
                 if isinstance(item, dict):
                     item.setdefault("capture_ts", capture_ts)
-                    frame_trace.ensure_trace_id(item)
 
-            # Отправить каждый item (HP-1: perf-проба этапа "send" — за флагом
-            # FW_PERF_PROBES, дефолт OFF, см. perf_probes.py).
-            with self._perf.measure("send"):
-                for item in items:
-                    self._send_item(item)
+            # Отправить каждый item
+            for item in items:
+                self._send_item(item)
 
-            # Backoff при открытом produce-breaker (Task 2.2): не жечь CPU в горячем
-            # цикле ошибок на мёртвом источнике — спим breaker_backoff (обычно >>
-            # интервала кадра). Иначе — обычный smart-sleep до target FPS.
-            if self._health is not None and self._health.breaker_open:
-                self._sleep_cooperative(self._breaker_backoff, stop_event)
-            else:
-                elapsed = time.monotonic() - t_start
-                sleep_time = self._target_interval - elapsed
-                if sleep_time > 0:
-                    self._sleep_cooperative(sleep_time, stop_event)
+            # Smart sleep
+            elapsed = time.monotonic() - t_start
+            sleep_time = self._target_interval - elapsed
+            if sleep_time > 0:
+                # Спим порциями для отзывчивости на stop_event.
+                # max(0.0, ...) защищает от race: между проверкой условия
+                # while и вычислением остатка время может «проскочить»
+                # за deadline, и без max() в time.sleep() уйдёт отрицательное
+                # значение → ValueError.
+                deadline = time.monotonic() + sleep_time
+                while time.monotonic() < deadline and not stop_event.is_set():
+                    time.sleep(max(0.0, min(0.01, deadline - time.monotonic())))
 
-            # Полный цикл (produce + send + sleep) → телеметрия.
+            # Полный цикл (produce + send + smart-sleep) → телеметрия.
             self._cycle_metrics.record(time.monotonic() - t_start)
 
-    def _sleep_cooperative(self, sleep_time: float, stop_event: threading.Event) -> None:
-        """Сон порциями с проверкой stop_event (отзывчивость на остановку).
+    def _backoff(self, stop_event: threading.Event) -> None:
+        """Кооперативная пауза при разомкнутом breaker (не горячий цикл отказов).
 
-        max(0.0, ...) защищает от race: между проверкой while и вычислением остатка
-        время может «проскочить» за deadline — без max() в time.sleep() уйдёт
-        отрицательное значение → ValueError.
+        Спит ``breaker_backoff_sec`` порциями, проверяя ``stop_event`` — worker
+        обязан останавливаться за дедлайн ``stop_all_workers`` (см. контракт
+        кооперативности в run_loop).
         """
-        if sleep_time <= 0:
-            return
-        deadline = time.monotonic() + sleep_time
+        deadline = time.monotonic() + self._breaker_backoff
         while time.monotonic() < deadline and not stop_event.is_set():
-            time.sleep(max(0.0, min(0.01, deadline - time.monotonic())))
+            time.sleep(max(0.0, min(0.05, deadline - time.monotonic())))
 
     def _send_item(self, item: dict) -> None:
         """IPC send одного item.

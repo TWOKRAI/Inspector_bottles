@@ -31,9 +31,8 @@ import time
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from .breaker import (
-    DEFAULT_COOLDOWN_SEC,
-    DEFAULT_FAIL_THRESHOLD,
-    BreakerState,
+    DEFAULT_COOLDOWN_SEC as _BREAKER_DEFAULT_COOLDOWN,
+    DEFAULT_THRESHOLD as _BREAKER_DEFAULT_THRESHOLD,
     CircuitBreaker,
 )
 from .schema import (
@@ -51,9 +50,9 @@ DEFAULT_THROTTLE = 5.0
 #: Переключатель отката: report_error/set_status только логируют, state не трогают.
 LOG_ONLY_ENV = "INSPECTOR_HEALTH_LOG_ONLY"
 
-#: Конфиг breaker через env (разумные дефолты в breaker.py) — порог подряд-ошибок…
+#: Порог breaker процесса: N подряд report_error → degraded. Env-override (Ф2 Task 2.2).
 BREAKER_THRESHOLD_ENV = "INSPECTOR_HEALTH_BREAKER_THRESHOLD"
-#: …и окно тишины (сек) для шага восстановления.
+#: Cooldown breaker процесса (сек) перед half-open пробой. Env-override.
 BREAKER_COOLDOWN_ENV = "INSPECTOR_HEALTH_BREAKER_COOLDOWN"
 
 #: Обрезка длинных сообщений исключений (защита state-дерева от гигантских строк).
@@ -72,19 +71,19 @@ def _env_log_only() -> bool:
     return os.environ.get(LOG_ONLY_ENV, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _env_float(name: str, default: float) -> float:
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
     try:
-        raw = os.environ.get(name, "").strip()
-        return float(raw) if raw else default
-    except (TypeError, ValueError):
+        return int(raw) if raw else default
+    except ValueError:
         return default
 
 
-def _env_int(name: str, default: int) -> int:
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
     try:
-        raw = os.environ.get(name, "").strip()
-        return int(raw) if raw else default
-    except (TypeError, ValueError):
+        return float(raw) if raw else default
+    except ValueError:
         return default
 
 
@@ -100,16 +99,16 @@ class IHealthReporter(Protocol):
         """Зарегистрировать проглоченную/обработанную ошибку (инкремент + last_error)."""
         ...
 
+    def report_success(self, context: str | None = ...) -> None:
+        """Учесть успешную операцию (обнуляет серию breaker)."""
+        ...
+
     def set_status(self, status: "HealthStatus | str", reason: str | None = ...) -> None:
         """Явно выставить статус здоровья."""
         ...
 
     def degraded(self, reason: str) -> None:
         """Сокращение для ``set_status(DEGRADED, reason)``."""
-        ...
-
-    def record_success(self) -> None:
-        """Сигнал успешной итерации: сброс подряд-счётчика breaker (Task 2.2)."""
         ...
 
 
@@ -127,16 +126,19 @@ class HealthState:
         log: Callable[[str], None] | None = None,
         log_only: bool | None = None,
         clock: Callable[[], float] = time.time,
-        breaker: CircuitBreaker | None = None,
+        breaker_threshold: int | None = None,
+        breaker_cooldown_sec: float | None = None,
+        breaker_clock: Callable[[], float] = time.monotonic,
     ) -> None:
         """
         Args:
             log: callback логирования (обычно ``services.log_warning``); None → no-op.
             log_only: форсировать режим отката; None → читать из env ``LOG_ONLY_ENV``.
-            clock: источник времени (инъекция для детерминизма в тестах).
-            breaker: честный circuit breaker подряд-ошибок (Task 2.2); None →
-                создать с дефолтами (env ``BREAKER_THRESHOLD_ENV``/``BREAKER_COOLDOWN_ENV``).
-                Разделяет ``clock`` с HealthState — тесты двигают одно время.
+            clock: источник времени для timestamp'ов (инъекция для детерминизма).
+            breaker_threshold: порог breaker (N подряд report_error → degraded);
+                None → env ``INSPECTOR_HEALTH_BREAKER_THRESHOLD`` или дефолт.
+            breaker_cooldown_sec: cooldown breaker; None → env или дефолт.
+            breaker_clock: монотонный источник для cooldown breaker (инъекция в тестах).
         """
         self._lock = threading.Lock()
         self._clock = clock
@@ -153,16 +155,29 @@ class HealthState:
         # Дросселирование логов: (тип|context) → ts последней записи в лог.
         self._last_log_ts: dict[str, float] = {}
 
-        # Честный breaker: кормится КАЖДЫМ report_error (Task 2.2). Делит clock с
-        # HealthState, чтобы тесты двигали единое время.
-        self._breaker = breaker if breaker is not None else CircuitBreaker(
-            fail_threshold=_env_int(BREAKER_THRESHOLD_ENV, DEFAULT_FAIL_THRESHOLD),
-            cooldown_sec=_env_float(BREAKER_COOLDOWN_ENV, DEFAULT_COOLDOWN_SEC),
-            clock=clock,
+        # Breaker процесса (Ф2 Task 2.2): считает ПОДРЯД идущие report_error —
+        # когда серия достигает порога, процесс сам деградирует. Счётчик breaker
+        # отдельный от монотонного errors: любой report_success/возврат в ok его
+        # обнуляет. Callback'и (on_open→degraded, on_close→ok) зовутся ВНЕ lock
+        # breaker'а, поэтому взятие self._lock внутри них безопасно.
+        threshold = (
+            _env_int(BREAKER_THRESHOLD_ENV, _BREAKER_DEFAULT_THRESHOLD)
+            if breaker_threshold is None
+            else int(breaker_threshold)
         )
-        # Владеет ли breaker текущей деградацией: снимаем degraded по восстановлению
-        # ТОЛЬКО если её выставил breaker (не затираем чужой явный degraded/failed).
-        self._breaker_owns_degraded = False
+        cooldown = (
+            _env_float(BREAKER_COOLDOWN_ENV, _BREAKER_DEFAULT_COOLDOWN)
+            if breaker_cooldown_sec is None
+            else float(breaker_cooldown_sec)
+        )
+        self._breaker = CircuitBreaker(
+            threshold=threshold,
+            cooldown_sec=cooldown,
+            clock=breaker_clock,
+            on_open=self._on_breaker_open,
+            on_close=self._on_breaker_close,
+            name="process",
+        )
 
     # --- свойства (для breaker/тестов) ---
 
@@ -181,14 +196,34 @@ class HealthState:
             return self._status
 
     @property
-    def breaker_state(self) -> str:
-        """Состояние breaker (``closed``/``open``/``half_open``) — Task 2.2."""
-        return self._breaker.state
+    def breaker(self) -> CircuitBreaker:
+        """Breaker процесса (для produce-цикла / диагностики)."""
+        return self._breaker
 
     @property
     def breaker_open(self) -> bool:
-        """True, пока breaker не восстановлен (loop-раннер по нему решает про backoff)."""
+        """Разомкнут ли breaker процесса (серия отказов достигла порога)."""
         return self._breaker.is_open
+
+    def breaker_snapshot(self) -> dict[str, Any]:
+        """Снимок breaker для диагностики (health.status). Не часть контракта схемы."""
+        return self._breaker.snapshot()
+
+    # --- breaker callbacks (зовутся ВНЕ lock breaker'а) ---
+
+    def _on_breaker_open(self, breaker: CircuitBreaker) -> None:
+        """Серия отказов достигла порога → деградировать процесс.
+
+        Fallback-деградация: НЕ затираем уже выставленную (более конкретную)
+        причину — напр. от produce-breaker источника. Если процесс ещё ok —
+        ставим общую причину «breaker open».
+        """
+        if self.status is HealthStatus.OK:
+            self.degraded(f"breaker open: {breaker.consecutive} подряд ошибок")
+
+    def _on_breaker_close(self, breaker: CircuitBreaker) -> None:
+        """Восстановление после серии (успех) → вернуть процесс в ok."""
+        self.ok()
 
     # --- мутации (зовут плагины через HealthReporter) ---
 
@@ -231,53 +266,21 @@ class HealthState:
             where = f" @ {ctx}" if ctx else ""
             self._safe_log(f"[health] {etype}{where}: {emsg}")
 
-        # Честный breaker (Task 2.2): инкремент подряд-счётчика ВНЕ self._lock —
-        # breaker держит собственный lock, а переход в degraded ниже снова берёт
-        # self._lock, поэтому блокировки не вкладываем (нет цикла lock-order).
-        transition = self._breaker.record_failure()
-        if transition == BreakerState.OPEN:
-            where = f" @ {ctx}" if ctx else ""
-            reason = f"breaker open: {etype}{where} ×{self._breaker.threshold} подряд"
-            self.set_status(HealthStatus.DEGRADED, reason)
-            with self._lock:
-                self._breaker_owns_degraded = True
+        # Breaker считает подряд-фейлы; вне self._lock (record_failure может позвать
+        # on_open → degraded, который берёт self._lock). Инкремент — всегда (честность),
+        # даже под лог-only; сам degrade под лог-only подавляется в set_status.
+        self._breaker.record_failure()
 
-    def record_success(self) -> None:
-        """Сигнал успешной итерации loop-раннера (produce/process удались).
+    def report_success(self, context: str | None = None) -> None:
+        """Учесть успешную операцию: обнулить серию breaker.
 
-        Сбрасывает подряд-счётчик breaker и — при переходе в ``closed`` — снимает
-        деградацию, если её владелец breaker. Сайты, умеющие только report_error,
-        не зовут это: их breaker восстанавливается пассивно через :meth:`poll`.
+        Дёшево при штатной работе (breaker CLOSED → просто сброс счётчика). Если
+        breaker был разомкнут — успех замыкает его (on_close → ok()). Зовётся
+        produce-циклом источника на каждый удачный кадр (см. SourceProducer).
+        ``context`` пока не используется в состоянии — принят для симметрии с
+        report_error и будущей per-site диагностики.
         """
-        if self._breaker.record_success() == BreakerState.CLOSED:
-            self._mark_dirty()
-            self._clear_breaker_degraded()
-
-    def poll(self) -> None:
-        """Пассивный шаг восстановления breaker (зовёт heartbeat каждый такт).
-
-        Любой переход breaker меняет публикуемое поле ``health.breaker`` → поднимаем
-        dirty; закрытие снимает breaker-owned деградацию.
-        """
-        transition = self._breaker.poll()
-        if transition is None:
-            return
-        self._mark_dirty()
-        if transition == BreakerState.CLOSED:
-            self._clear_breaker_degraded()
-
-    def _mark_dirty(self) -> None:
-        with self._lock:
-            if not self._log_only:
-                self._dirty = True
-
-    def _clear_breaker_degraded(self) -> None:
-        """Снять деградацию, выставленную breaker'ом (не трогая чужой degraded/failed)."""
-        with self._lock:
-            owns = self._breaker_owns_degraded and self._status == HealthStatus.DEGRADED
-            self._breaker_owns_degraded = False
-        if owns:
-            self.ok(None)
+        self._breaker.record_success()
 
     def set_status(self, status: HealthStatus | str, reason: str | None = None) -> None:
         """Явно выставить статус (ok/degraded/failed) + причину. Идемпотентно."""
@@ -294,6 +297,11 @@ class HealthState:
                 if not self._log_only:
                     self._updated_at = now
                     self._dirty = True
+
+        # Возврат в ok — ручное восстановление: обнуляем серию breaker (без on_close,
+        # чтобы не зациклиться с этим же путём). Вне self._lock — breaker берёт свой.
+        if st is HealthStatus.OK:
+            self._breaker.reset()
 
         if changed:
             suffix = f": {rsn}" if rsn else ""
@@ -335,8 +343,6 @@ class HealthState:
             HealthField.LAST_ERROR: dict(self._last_error) if self._last_error else None,
             HealthField.DEGRADED_REASON: self._degraded_reason,
             HealthField.UPDATED_AT: self._updated_at,
-            # Task 2.2: чтение state breaker'а lock-free (безопасно под self._lock).
-            HealthField.BREAKER: self._breaker.state,
         }
 
     def _safe_log(self, msg: str) -> None:
@@ -373,6 +379,10 @@ class HealthReporter:
         ctx = context if context is not None else self._source
         self._state.report_error(exc, context=ctx, throttle=throttle)
 
+    def report_success(self, context: str | None = None) -> None:
+        """Успешная операция сайта — обнулить серию breaker (см. HealthState)."""
+        self._state.report_success(context=context)
+
     def set_status(self, status: HealthStatus | str, reason: str | None = None) -> None:
         self._state.set_status(status, reason)
 
@@ -385,18 +395,6 @@ class HealthReporter:
     def ok(self, reason: str | None = None) -> None:
         self._state.ok(reason)
 
-    def record_success(self) -> None:
-        """Сигнал успешной итерации loop-раннеру (produce/process удались) — Task 2.2."""
-        self._state.record_success()
-
-    @property
-    def breaker_open(self) -> bool:
-        return self._state.breaker_open
-
-    @property
-    def breaker_state(self) -> str:
-        return self._state.breaker_state
-
     @property
     def error_count(self) -> int:
         return self._state.error_count
@@ -408,6 +406,14 @@ class HealthReporter:
     @property
     def log_only(self) -> bool:
         return self._state.log_only
+
+    @property
+    def breaker_open(self) -> bool:
+        """Разомкнут ли breaker процесса (для backoff produce-цикла)."""
+        return self._state.breaker_open
+
+    def breaker_snapshot(self) -> dict[str, Any]:
+        return self._state.breaker_snapshot()
 
 
 # ---------------------------------------------------------------------------

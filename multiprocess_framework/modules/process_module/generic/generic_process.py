@@ -15,37 +15,11 @@ import queue
 from ..core.process_module import ProcessModule
 from .data_receiver import DataReceiver
 from ...router_module.middleware.frame_shm_middleware import FrameShmMiddleware
-from .inspector_registry import build_inspector
+from .inspector_manager import InspectorManager
+from .join_inspector_manager import JoinInspectorManager
 from .pipeline_executor import PipelineExecutor
 from .plugin_runner import PluginRunner
 from .source_producer import SourceProducer
-
-
-# Ф7 G.7: copy-out терминалы кадрового fan-out — display/GUI-читатели. Они КОПИРУЮТ кадр
-# и release loan-протокола (В3) НЕ шлют, поэтому в num_consumers (refcount владельца) НЕ
-# входят. Владелец, чей fan-out состоит ТОЛЬКО из них, работает по В1 (round-robin) без
-# loan (иначе refcount застревает → free-list исчерпание → drop-на-источнике).
-# Ф7 ревью фазы G: ДЕФОЛТ, а не истина — имя процесса-дисплея принадлежит приложению,
-# не framework'у. Рецепт/конфиг процесса перекрывает списком ``copy_out_targets``
-# (мульти-дисплей: display_0/display_1/hmi — иначе они считались бы loan-aware, release
-# от них не пришёл бы → free-list исчерпание). Полный вынос в топологию (роль
-# потребителя на wire, не имя) — G.7/G.F.
-_COPY_OUT_TARGETS: frozenset[str] = frozenset({"gui"})
-
-
-def _count_loan_aware_consumers(chain_targets, copy_out_targets=None) -> int:
-    """Число loan-aware потребителей кадра (шлют release) среди ``chain_targets``.
-
-    copy-out терминалы исключаются — они кадр копируют и release НЕ шлют.
-    ``copy_out_targets`` — из конфига процесса (``app_cfg["copy_out_targets"]``,
-    рецепт-перекрытие для мульти-дисплеев); None → дефолт :data:`_COPY_OUT_TARGETS`.
-    Цели дедуплицируются: дубль-target шлёт release ОДИН раз (dedup по reader в пуле),
-    а завышенный refcount застрял бы навсегда. Результат = ``num_consumers``
-    (refcount владельца, дизайн §8.2 G.5): занижение безопасно (В1 re-check дропнет),
-    завышение → loan-exhaustion, поэтому считаем ТОЛЬКО реально релизящих потребителей.
-    """
-    copy_out = _COPY_OUT_TARGETS if copy_out_targets is None else frozenset(copy_out_targets)
-    return len({t for t in (chain_targets or []) if t not in copy_out})
 
 
 class GenericProcess(ProcessModule):
@@ -78,6 +52,10 @@ class GenericProcess(ProcessModule):
         max_fails = app_cfg.get("error_max_consecutive_fails", 5)
         auto_reset = app_cfg.get("error_auto_reset_sec", 60.0)
         critical = app_cfg.get("error_critical_plugins", [])
+        # Ф2 Task 2.2: пауза produce-цикла при разомкнутом health-breaker (backoff,
+        # чтобы отказ железа не крутил горячий цикл). Порог/cooldown самого breaker
+        # процесса — через env (INSPECTOR_HEALTH_BREAKER_THRESHOLD/_COOLDOWN).
+        produce_backoff = app_cfg.get("produce_breaker_backoff_sec", 1.0)
 
         # Плагины через orchestrator
         all_plugins = self._orchestrator.plugins
@@ -90,63 +68,22 @@ class GenericProcess(ProcessModule):
         if not source_plugins and not processing_plugins:
             return
 
-        # FrameShmMiddleware — регистрируется НЕЗАВИСИМО от наличия memory_manager
-        # (Ф7 G.6 ревью 2026-07-13, F3): без mm strip_and_write сам деградирует в
-        # pickle-fallback (try/except внутри уже это делает), но middleware ДОЛЖЕН
-        # быть на месте — иначе счётчик границ (frame_boundary_crossings) на этом
-        # пути вообще не считает, а wire.configure-путь (builtin_commands.py) считает
-        # всегда — раньше была асимметрия.
-        router = getattr(self, "router_manager", None)
-        # Ф7 G.4.b: глубина кольца per-camera из конфига процесса (рецепт). Гейт
-        # FW_QOS_PROFILES (ревью 2026-07-14, откат бит-в-бит): off → None → middleware
-        # даёт прежние 3; on → frame_ring_depth (или профиль). Каждый source-процесс =
-        # свой owner = своё независимое кольцо (изоляция per-camera).
-        from multiprocess_framework.modules.config_module.feature_flags import is_enabled
-
-        frame_ring_depth = app_cfg.get("frame_ring_depth") if is_enabled("FW_QOS_PROFILES") else None
-        # Ф7 G.7: num_consumers loan-протокола (В3) = число loan-aware потребителей кадра
-        # этого owner'а из топологии (chain_targets минус copy-out/GUI). 0 → middleware
-        # не создаёт пул (round-robin В1), исключая исчерпание free-list на GUI-only fan-out.
-        # ``copy_out_targets`` из конфига процесса (рецепт: extras.copy_out_targets)
-        # перекрывает дефолт {"gui"} — мульти-дисплей (display_0/hmi) объявляет своих
-        # copy-out читателей сам. Пусто/отсутствует = «не задано» → дефолт (typed-поле
-        # конфига даёт [] всем процессам — иначе дефолт {"gui"} молча отключился бы).
-        copy_out_targets = app_cfg.get("copy_out_targets") or None
-        num_consumers = _count_loan_aware_consumers(chain_targets, copy_out_targets)
-        copy_out_view = sorted(_COPY_OUT_TARGETS if copy_out_targets is None else set(copy_out_targets))
-        self._log_debug(
-            f"GenericProcess[{self.name}]: loan num_consumers={num_consumers} "
-            f"(chain_targets={list(chain_targets)}, copy-out {copy_out_view} исключены)"
-        )
-        shm_middleware = FrameShmMiddleware(
-            memory_manager=self.memory_manager,
-            owner=self.name,
-            slot="output_frames",
-            coll=frame_ring_depth,
-            log_error=self._log_error,
-            num_consumers=num_consumers,
-        )
-        if router is not None:
+        # FrameShmMiddleware (если есть memory_manager)
+        shm_middleware = None
+        if self.memory_manager:
+            shm_middleware = FrameShmMiddleware(
+                memory_manager=self.memory_manager,
+                owner=self.name,
+                slot="output_frames",
+                log_error=self._log_error,
+            )
             # P3.1.2: Claim Check кадров — забота хаба, а не producer'ов. Регистрируем
             # send-middleware: SourceProducer/PipelineExecutor шлют msg с frame в data,
             # router сам выносит его в SHM (strip_and_write по generic-семантике). Guard
             # внутри метода (type=="data") — no-op для команд/heartbeat/state.
-            router.add_send_middleware(shm_middleware.strip_data_frame_on_send)
-            # Ф7 G.6 (F5): агрегация счётчика границ через RouterManager.get_stats()
-            # (introspect.router_stats), БЕЗ колбэка — см. класс-докстринг middleware.
-            router.register_frame_middleware(shm_middleware)
-            # Ф7 G.5.d-2 (В3): owner-handler release'ов zero-copy займов. Consumer,
-            # дочитав view, шлёт пачку тикетов (type="shm_release" на system-канал) →
-            # event_dispatcher → сюда → декремент refcount владельца (release_slots
-            # само no-op без loan-протокола). Регистрируем всегда (срабатывает только на
-            # shm_release-сообщениях, которых нет без флага).
-            router.register_message_handler("shm_release", lambda msg: self._handle_shm_release(msg, shm_middleware))
-            # Ф7 G.5.e (В3): owner-handler reclaim'а займов мёртвого читателя. Supervisor
-            # (confirmed-death соседа) шлёт {type:"shm_reclaim", data:{dead_reader}} →
-            # сюда → reclaim_reader освобождает зависшие займы. Без авто-триггера мёртвый
-            # держатель В1-безопасен (исчербание→drop, не corruption), но кадры теряются;
-            # reclaim — штатное восстановление free-list.
-            router.register_message_handler("shm_reclaim", lambda msg: self._handle_shm_reclaim(msg, shm_middleware))
+            router = getattr(self, "router_manager", None)
+            if router is not None:
+                router.add_send_middleware(shm_middleware.strip_data_frame_on_send)
 
         # Единый PluginRunner на процесс — общий шов вызова process()/produce() для
         # PipelineExecutor И SourceProducer. io-debug post-хук регистрируется ОДИН
@@ -159,9 +96,7 @@ class GenericProcess(ProcessModule):
 
         # --- DataReceiver (если есть processing плагины) ---
         if processing_plugins:
-            # Домен fan-in/join живёт в Plugins/_shared/fanin (C6 b); framework получает
-            # готовый буфер через реестр (build_inspector), не зная конкретный класс.
-            inspector = build_inspector(app_cfg, self._log_info, self._log_error, self._log_debug)
+            inspector = self._build_inspector(app_cfg)
             self._data_receiver = DataReceiver(
                 receive_fn=self.receive_message,
                 shm_middleware=shm_middleware,
@@ -213,15 +148,14 @@ class GenericProcess(ProcessModule):
                     f"GenericProcess[{self.name}]: data pipeline started ({len(processing_plugins)} processing plugins)"
                 )
 
-        # --- SourceProducer (для каждого source-плагина) ---
-        # Общий на процесс HealthReporter (Task 2.2): produce()-фейлы кормят тот же
-        # честный breaker, что и плагины через ctx.health — единый агрегат здоровья
-        # процесса (тот же _health_state, что читает heartbeat).
+        # Единый на процесс HealthState (тот же инстанс, что видят плагины через
+        # ctx.health и heartbeat при публикации) — produce()-фейлы источника
+        # честно текут в тот же счётчик/breaker.
         from ..health import HealthReporter, get_or_create_health_state
 
         health_state = get_or_create_health_state(self)
-        breaker_backoff = app_cfg.get("source_breaker_backoff_sec", 1.0)
 
+        # --- SourceProducer (для каждого source-плагина) ---
         self._source_producers: list[SourceProducer] = []
         for i, source_plugin in enumerate(source_plugins):
             producer = SourceProducer(
@@ -236,7 +170,7 @@ class GenericProcess(ProcessModule):
                 node_name=self.name,
                 plugin_runner=self._plugin_runner,
                 health=HealthReporter(health_state, source=source_plugin.name),
-                breaker_backoff_sec=breaker_backoff,
+                breaker_backoff_sec=produce_backoff,
             )
             self._source_producers.append(producer)
 
@@ -249,34 +183,6 @@ class GenericProcess(ProcessModule):
                     auto_start=True,
                 )
                 self._log_info(f"GenericProcess[{self.name}]: source '{source_plugin.name}' producer started")
-
-    def _handle_shm_release(self, msg: dict, shm_middleware) -> None:
-        """Ф7 G.5.d-2 (В3): owner-handler release-пачки zero-copy займов.
-
-        Consumer, дочитав view, шлёт ``{type:"shm_release", data:{releases:[...]}}`` →
-        event_dispatcher → сюда. Делегируем в middleware (release_slots само no-op без
-        loan-протокола). Ошибка/битый конверт не роняет процесс (наблюдаемость через
-        лог); потеря release покрыта В1-страховкой + reclaim (G.5.e).
-        """
-        try:
-            data = msg.get("data", {}) if isinstance(msg, dict) else {}
-            releases = data.get("releases", []) if isinstance(data, dict) else []
-            if releases:
-                shm_middleware.release_slots(releases)
-        except Exception as exc:  # noqa: BLE001 — release не критичен для такта
-            self._log_error(f"GenericProcess[{self.name}]: shm_release handler error: {exc}")
-
-    def _handle_shm_reclaim(self, msg: dict, shm_middleware) -> None:
-        """Ф7 G.5.e (В3): owner-handler reclaim'а. Supervisor по confirmed-death соседа
-        шлёт ``{data:{dead_reader}}`` → освобождаем зависшие займы мёртвого читателя.
-        Битый конверт не роняет процесс."""
-        try:
-            data = msg.get("data", {}) if isinstance(msg, dict) else {}
-            dead_reader = data.get("dead_reader", "") if isinstance(data, dict) else ""
-            if dead_reader:
-                shm_middleware.reclaim_reader(dead_reader)
-        except Exception as exc:  # noqa: BLE001 — reclaim не критичен для такта
-            self._log_error(f"GenericProcess[{self.name}]: shm_reclaim handler error: {exc}")
 
     def _attach_io_peek(self, app_cfg: dict) -> None:
         """Подключить io-debug publisher к PluginRunner (opt-in, по умолчанию вкл).
@@ -310,3 +216,36 @@ class GenericProcess(ProcessModule):
         # Держим ссылку (хуки — bound-методы publisher, иначе GC).
         self._io_peek_publisher = publisher
         self._log_info(f"GenericProcess[{self.name}]: io-debug publisher активен (rate={cfg.get('rate_hz', 1.0)} Гц)")
+
+    def _build_inspector(self, app_cfg: dict):
+        """Выбрать корреляционный буфер DataReceiver по конфигу.
+
+        Дефолт `fanin` (InspectorManager, region fan-in по count) — backward-compat.
+        `join` (JoinInspectorManager) — generic-слияние именованных входов по
+        (seq_id, data_type) для многовходовых узлов (напр. overlay_draw: frame+overlay).
+
+        Конфиг процесса:
+            config.inspector.mode: "fanin" | "join"
+            config.inspector.inputs: ["frame", "overlay"]      # для join
+            config.inspector.primary: "frame"
+            config.inspector.timeout_sec / inactive_sec / list_merge_keys
+        """
+        insp = app_cfg.get("inspector", {}) or {}
+        mode = insp.get("mode", "fanin")
+        if mode == "join":
+            return JoinInspectorManager(
+                required_inputs=insp.get("inputs", ["frame", "overlay"]),
+                primary=insp.get("primary", "frame"),
+                timeout_sec=insp.get("timeout_sec", 0.08),
+                list_merge_keys=insp.get("list_merge_keys", ("overlay",)),
+                inactive_sec=insp.get("inactive_sec", 1.0),
+                log_info=self._log_info,
+                log_error=self._log_error,
+                log_debug=self._log_debug,
+            )
+        return InspectorManager(
+            timeout_sec=insp.get("timeout_sec", 0.5),
+            log_info=self._log_info,
+            log_error=self._log_error,
+            log_debug=self._log_debug,
+        )

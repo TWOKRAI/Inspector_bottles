@@ -7,6 +7,11 @@ import time
 from multiprocess_framework.modules.process_module.generic.source_producer import (
     SourceProducer,
 )
+from multiprocess_framework.modules.process_module.health import (
+    HealthReporter,
+    HealthState,
+    HealthStatus,
+)
 from multiprocess_framework.modules.process_module.plugins.base import (
     ProcessModulePlugin,
 )
@@ -207,3 +212,102 @@ class TestRunLoop:
 
         # При 10 FPS за 0.35 сек ≈ 3-4 кадра (с учётом погрешности)
         assert 2 <= len(sent) <= 6
+
+
+class FlakySource(ProcessModulePlugin):
+    """Источник: первые ``fail_first`` produce() падают, затем отдаёт кадр."""
+
+    name = "flaky_cam"
+    category = "source"
+
+    def __init__(self, fail_first: int) -> None:
+        super().__init__()
+        self._fail_first = fail_first
+        self._calls = 0
+
+    def configure(self, ctx): ...
+    def start(self, ctx): ...
+
+    def produce(self) -> list[dict]:
+        self._calls += 1
+        if self._calls <= self._fail_first:
+            raise RuntimeError("camera disconnected")
+        return [{"frame": "ok", "frame_id": self._calls}]
+
+
+class TestProduceBreaker:
+    """Ф2 Task 2.2: produce()-фейлы → health degraded + backoff, успех → recovery."""
+
+    def test_consecutive_produce_fails_degrade_health(self):
+        """N подряд-фейлов produce() → breaker open → health degraded (не горячий цикл)."""
+        health = HealthState(breaker_threshold=3)
+        producer = SourceProducer(
+            plugin=FailSource(),
+            shm_middleware=None,
+            send_fn=lambda t, m: None,
+            chain_targets=["out"],
+            target_fps=100.0,
+            health=HealthReporter(health, source="fail_source"),
+            breaker_backoff_sec=0.02,  # короткий backoff для теста
+        )
+        stop_event = threading.Event()
+        pause_event = threading.Event()
+        t = threading.Thread(target=producer.run_loop, args=(stop_event, pause_event))
+        t.start()
+        time.sleep(0.2)
+        stop_event.set()
+        t.join(timeout=1)
+
+        assert health.status is HealthStatus.DEGRADED
+        assert health.breaker_open is True
+        # Честный счётчик растёт; last_error несёт контекст produce.
+        assert health.error_count >= 3
+        assert health.snapshot()["last_error"]["context"] == "produce:fail_source"
+
+    def test_recovery_after_source_returns(self):
+        """Источник восстановился (produce отдаёт кадр) → breaker close → health ok."""
+        health = HealthState(breaker_threshold=2)
+        source = FlakySource(fail_first=2)
+        sent = []
+        producer = SourceProducer(
+            plugin=source,
+            shm_middleware=None,
+            send_fn=lambda t, m: sent.append((t, m)),
+            chain_targets=["out"],
+            target_fps=100.0,
+            health=HealthReporter(health, source="flaky_cam"),
+            breaker_backoff_sec=0.01,
+        )
+        stop_event = threading.Event()
+        pause_event = threading.Event()
+        t = threading.Thread(target=producer.run_loop, args=(stop_event, pause_event))
+        t.start()
+        time.sleep(0.2)
+        stop_event.set()
+        t.join(timeout=1)
+
+        # 2 фейла разомкнули breaker, затем успех замкнул → ok, кадры пошли.
+        assert health.status is HealthStatus.OK
+        assert health.breaker_open is False
+        assert len(sent) >= 1
+
+    def test_no_health_reporter_backward_compat(self):
+        """health=None → поведение как раньше (лог + продолжение, без падений)."""
+        errors = []
+        producer = SourceProducer(
+            plugin=FailSource(),
+            shm_middleware=None,
+            send_fn=lambda t, m: None,
+            chain_targets=["out"],
+            target_fps=100.0,
+            log_error=errors.append,
+            health=None,
+        )
+        stop_event = threading.Event()
+        pause_event = threading.Event()
+        t = threading.Thread(target=producer.run_loop, args=(stop_event, pause_event))
+        t.start()
+        time.sleep(0.1)
+        stop_event.set()
+        t.join(timeout=1)
+        assert len(errors) >= 1
