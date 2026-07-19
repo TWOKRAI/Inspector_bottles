@@ -211,7 +211,7 @@ Transport/events — mixin (вербатим на том же `self`, макси
 **Level:** Senior (Opus) | **Layer:** tools
 **Goal:** несколько агентов одновременно (наблюдатель/экспериментатор/ревьюер) на одной живой системе. SDK делает транспорт дёшево (BCTL-ADR-001); дорогая часть — per-session изоляция подписок/событий (решается B.1 + D.1a).
 **Acceptance:**
-- [ ] две параллельные сессии: одна тейлит observability, другая крутит регистры — без взаимных помех
+- [x] две параллельные сессии: одна тейлит observability, другая крутит регистры — без взаимных помех — **ЗАКРЫТ и СЛИТ в main** (ветка `feat/bctl-d2-streamable-http`, мини-план [`backend-ctl-d2-streamable-http.md`](backend-ctl-d2-streamable-http.md); 9 Steps; live-смоук на реальном HTTP; формальное ревью high — 4 low, #1/#2 закрыты; BCTL-ADR-005). Per-session lifespan поверх изоляции D.1a; долг D.1 §12 (осиротевшие подписки) закрыт graceful-cleanup. **Follow-up:** бэкенд-GC при hard-kill сервера; live-прогон против реального бэкенда; deprecation `streamablehttp_client`.
 
 ### Task D.3 — Застолбить контракт trace-id в Ф7 G.6
 **Level:** Middle (Sonnet) | **Layer:** docs
