@@ -106,8 +106,6 @@ class _PendingCommit:
     pre_value: Any
     had_field: bool
     timer: "threading.Timer"
-    confirmed: bool = False
-    rolled_back: bool = False
 
 
 class BackendDriver(_TransportMixin, _EventChannelMixin):
@@ -490,10 +488,13 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         совпадает с plugin_name (регистр на плагин).
 
         ``confirm_within=N`` (D.5) переводит запись в режим *commit-confirmed*: перед
-        записью снимается pre-image поля, а после — армируется таймер, который через
-        ``N`` секунд восстановит прежнее значение, если не вызван
-        :meth:`register_confirm` с вернувшимся ``commit_id``. Аналог Juniper
-        ``commit confirmed`` — безопасный эксперимент с гарантированным откатом.
+        записью снимается pre-image поля, а после — readback-подтверждение (иначе
+        молчаливый no-op не вооружает таймер) и армируется таймер, который через ``N``
+        секунд восстановит прежнее значение, если не вызван :meth:`register_confirm` с
+        вернувшимся ``commit_id``. Аналог Juniper ``commit confirmed`` — безопасный
+        эксперимент с гарантированным откатом. **Ограничение:** предохранитель живёт
+        только в пределах этой driver-сессии — ``close()``/реконнект снимает таймер, и
+        неподтверждённая запись остаётся применённой (ответ несёт ``session_scoped``).
         """
         if confirm_within is not None:
             return self._set_register_confirmed(process, register, field, value, float(confirm_within), **kw)
@@ -658,6 +659,31 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 "ack": ack,
             }
 
+        # Readback-подтверждение ДО арминга (не доверяем ack'у, как verify-probe Ф1.6):
+        # если поля нет в снимке после записи — это молчаливый no-op (опечатка в имени
+        # регистра/поля, отвал приёмника). Армировать таймер отката тогда — ложная
+        # уверенность: откатывать нечего, а агент верит, что вооружён. Значение может
+        # НЕ совпасть с value при легитимной Pydantic-коэрции — тогда verified=False,
+        # но поле есть → запись применилась, откат к pre_value корректен.
+        post = self._read_registers(process, timeout=kw.get("timeout"))
+        preg = post.get(register)
+        field_present = isinstance(preg, dict) and field in preg
+        actual = preg.get(field) if field_present else None
+        if not field_present:
+            return {
+                "success": False,
+                "pending": False,
+                "verified": False,
+                "error": "запись не подтверждена readback'ом (нет регистра/поля?) — commit-confirmed не вооружён",
+                "process": process,
+                "register": register,
+                "field": field,
+                "expected": value,
+                "actual": actual,
+                "had_field": had_field,
+                "ack": ack,
+            }
+
         commit_id = f"{process}:{register}.{field}#{next(self._commit_counter)}"
         timer = threading.Timer(confirm_within, self._auto_rollback, args=(commit_id,))
         timer.daemon = True
@@ -668,14 +694,20 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         return {
             "success": True,
             "pending": True,
+            "verified": actual == value,
             "commit_id": commit_id,
             "process": process,
             "register": register,
             "field": field,
             "value": value,
+            "actual": actual,
             "pre_value": pre_value,
             "had_field": had_field,
             "confirm_within": confirm_within,
+            # Предохранитель живёт только в пределах ЭТОЙ driver-сессии: close()/реконнект
+            # (DriverSession.reset) снимает таймер, и неподтверждённая запись остаётся
+            # применённой. Не полагаться на авто-откат через границу реконнекта.
+            "session_scoped": True,
             "ack": ack,
         }
 
@@ -697,7 +729,6 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                 "known": known,
             }
         pc.timer.cancel()
-        pc.confirmed = True
         return {
             "success": True,
             "commit_id": commit_id,
@@ -719,11 +750,9 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             return
         if not pc.had_field:
             # Поля до записи не существовало — откатывать нечего, только разоружаем.
-            pc.rolled_back = True
             return
         try:
             self.set_register(pc.process, pc.register, pc.field, pc.pre_value)
-            pc.rolled_back = True
         except Exception:  # noqa: BLE001 — таймер в daemon-потоке, исключение иначе теряется
             _log.exception("commit-confirmed авто-откат %s не удался", commit_id)
 

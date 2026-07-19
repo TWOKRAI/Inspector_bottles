@@ -1512,6 +1512,7 @@ class TestRegisterCommitConfirmed:
         res = d.set_register("preprocessor", "resize", "target_width", 100, confirm_within=0.2)
         assert res["pending"] is True and res["success"] is True
         assert res["pre_value"] == 640 and res["had_field"] is True
+        assert res["verified"] is True and res["session_scoped"] is True
         assert regs["resize"]["target_width"] == 100
 
         conf = d.register_confirm(res["commit_id"])
@@ -1544,6 +1545,19 @@ class TestRegisterCommitConfirmed:
         res = d.set_register("preprocessor", "resize", "target_width", 100, confirm_within=0.15)
         assert res["success"] is False and res["pending"] is False
         assert "commit_id" not in res
+        assert d._pending_commits == {}
+
+    def test_silent_noop_field_does_not_arm_timer(self, monkeypatch) -> None:
+        """Опечатка в имени поля: ack ok, но readback не находит поле → не армируем (ложная уверенность)."""
+        regs = {"resize": {"target_width": 640}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        # поле "width" не существует — register_update молча no-op, ack=success
+        res = d.set_register("preprocessor", "resize", "width", 100, confirm_within=0.15)
+        assert res["success"] is False and res["pending"] is False
+        assert res["verified"] is False
+        assert "commit_id" not in res
+        assert d._pending_commits == {}
+        time.sleep(0.25)  # таймера нет — ничего не происходит
         assert d._pending_commits == {}
 
     def test_close_cancels_pending_rollback(self, monkeypatch) -> None:
