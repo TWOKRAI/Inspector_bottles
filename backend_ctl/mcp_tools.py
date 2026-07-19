@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from backend_ctl.driver import BackendDriver
+from backend_ctl.events import ALL_PLANE, PLANES
 
 #: Handler инструмента: (driver, arguments) → JSON-сериализуемый результат.
 ToolHandler = Callable[[BackendDriver, Dict[str, Any]], Any]
@@ -449,13 +450,14 @@ TOOLS: List[ToolSpec] = [
             {
                 "plane": {
                     "type": "string",
-                    "enum": ["all", "state", "logs", "errors", "stats", "telemetry", "ui", "other"],
+                    "enum": [ALL_PLANE, *PLANES],
                     "description": "Плоскость событий (по умолчанию all — оригиналы в порядке прихода).",
                 },
                 "cursor": {
                     "type": "string",
-                    "description": "next_cursor/bookmark прошлого ответа ('plane:seq@gen'); "
-                    "пусто = с самого старого доступного.",
+                    "description": "next_cursor/bookmark прошлого ответа — ТОЛЬКО полная форма "
+                    "'plane:seq@gen'; пусто = с самого старого доступного. Любая ошибка курсора → "
+                    "reset_required=true + bookmark.",
                 },
                 "limit": {"type": "integer", "description": "Максимум событий в странице (дефолт 100, потолок 500)."},
             }

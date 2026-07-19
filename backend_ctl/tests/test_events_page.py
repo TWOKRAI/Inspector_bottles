@@ -106,6 +106,30 @@ class TestPlaneClassification:
         # Оригиналы в arrival НЕ расщеплены: 2 сообщения как пришли.
         assert d.events_page("all")["count"] == 2
 
+    def test_telemetry_delta_marks_deletion(self) -> None:
+        """Удаление узла (__MISSING__) в telemetry-плоскости помечено deleted=True.
+
+        B.2 metric_threshold не должен сравнивать строку-сентинел с числом
+        (вскрыто ревью B.1).
+        """
+        d = BackendDriver()
+        d.dispatch_raw(
+            _line(
+                {
+                    "command": "state.changed",
+                    "data": {
+                        "deltas": [
+                            {"path": "processes.cam.state.fps", "new_value": "__MISSING__"},
+                            {"path": "processes.cam.state.uptime", "new_value": 5},
+                        ]
+                    },
+                }
+            )
+        )
+        items = d.events_page("telemetry")["items"]
+        assert items[0]["event"]["data"]["deleted"] is True
+        assert "deleted" not in items[1]["event"]["data"]
+
     def test_observability_record_without_kind_goes_other(self) -> None:
         d = BackendDriver()
         d.dispatch_raw(_line({"command": "observability.record", "data": {"records": [{"message": "нет kind"}]}}))
@@ -213,6 +237,8 @@ class TestCursorSafety:
         res = d.events_page("state", cursor=log_cursor)
         assert res["success"] is False
         assert "плоскост" in res["error"]
+        assert res["reset_required"] is True
+        assert res["bookmark"].startswith("state:")
 
     def test_foreign_generation_cursor_reset_required(self) -> None:
         d1 = BackendDriver()
@@ -222,20 +248,45 @@ class TestCursorSafety:
         _push_state(d2, 1)
         res = d2.events_page("state", cursor=stale)
         assert res["success"] is False
+        assert res["reset_required"] is True
+        assert "bookmark" in res
         assert "cursor=null" in res["error"]
 
     def test_cursor_ahead_of_stream_reset_required(self) -> None:
         d = BackendDriver()
         _push_state(d, 1)
-        res = d.events_page("state", cursor="state:999")
+        # Валидный gen, seq впереди потока: собрать из настоящего next_cursor.
+        cur = d.events_page("state")["next_cursor"]  # 'state:1@<gen>'
+        gen = cur.rpartition("@")[2]
+        res = d.events_page("state", cursor=f"state:999@{gen}")
         assert res["success"] is False
         assert res["reset_required"] is True
+
+    def test_truncated_cursor_forms_rejected(self) -> None:
+        """Курсор без @gen или без префикса плоскости — отказ, не тихое чтение.
+
+        Усечённая форма пропускала бы проверку поколения/плоскости и молча
+        читала не с того места (вскрыто ревью B.1) — принимается только полная
+        форма из next_cursor/bookmark.
+        """
+        d = BackendDriver()
+        for i in range(3):
+            _push_state(d, i)
+        for bad in ("state:2", "2", "state@2", f"logs:1@{'x' * 6}"):
+            res = d.events_page("state", cursor=bad)
+            assert res["success"] is False, bad
+            assert res["reset_required"] is True, bad
 
     def test_unknown_plane_lists_valid_planes(self) -> None:
         d = BackendDriver()
         res = d.events_page("нет-такой")
         assert res["success"] is False
         assert "state" in res["planes"] and "all" in res["planes"]
+
+    def test_empty_plane_string_rejected(self) -> None:
+        d = BackendDriver()
+        res = d.events_page("")
+        assert res["success"] is False  # пустая строка ≠ "all": ошибка вызывающего видна
 
     def test_bookmark_jumps_to_tail(self) -> None:
         d = BackendDriver()

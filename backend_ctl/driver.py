@@ -53,7 +53,9 @@ from .events import (  # noqa: F401 — EventCallback/OBSERVABILITY_RECORD_COMMA
     _EventChannelMixin,
     EventCallback,
     EventHub,
+    MISSING_MARKER,
     OBSERVABILITY_RECORD_COMMAND,
+    extract_observability_records,
 )
 from .transport import _TransportMixin, _Pending  # noqa: F401 — _Pending re-export для тестов
 from .watch import WatchController, GUI_DEFAULT_PATTERNS  # noqa: F401 — GUI_DEFAULT_PATTERNS re-export
@@ -563,11 +565,11 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
     # ---- Telemetry read-model (Task 2.3: GUI-эквивалент чтения телеметрии, 0 IPC) ----
 
-    # Зеркало Delta.to_dict(): new_value=='__MISSING__' → удаление узла. Литерал, а
-    # не импорт, СОЗНАТЕЛЬНО: импорт state_store_module.core.delta затащил бы Qt в
-    # headless-драйвер (package __init__ тянет GuiStateProxy→PySide6). Дрейф маркера
-    # ловит контракт-тест test_missing_marker_matches_state_store (импорт Qt в тесте — ок).
-    _MISSING_MARKER = "__MISSING__"
+    # Зеркало Delta.to_dict(): new_value==MISSING_MARKER → удаление узла. Литерал
+    # живёт в events.py (один источник для driver и плоскостной классификации);
+    # в state_store не ходим СОЗНАТЕЛЬНО — package __init__ затащил бы Qt в
+    # headless-драйвер. Дрейф ловит контракт-тест test_missing_marker_matches_state_store.
+    _MISSING_MARKER = MISSING_MARKER
 
     def _ingest_state_changed(self, msg: Dict[str, Any]) -> None:
         """Слушатель событийного канала: питает локальный telemetry read-model.
@@ -853,17 +855,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         for msg in source:
             if not isinstance(msg, dict) or msg.get("command") != OBSERVABILITY_RECORD_COMMAND:
                 continue
-            data = msg.get("data")
-            if not isinstance(data, dict):
-                continue
-            records: List[Dict[str, Any]] = []
-            batch = data.get("records")
-            if isinstance(batch, list):
-                records.extend(r for r in batch if isinstance(r, dict))
-            single = data.get("record")
-            if isinstance(single, dict):
-                records.append(single)
-            for rec in records:
+            for rec in extract_observability_records(msg.get("data")):
                 if kind is not None and rec.get("kind") != kind:
                     continue
                 if threshold is not None:

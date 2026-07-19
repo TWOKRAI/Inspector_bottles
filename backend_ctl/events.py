@@ -27,7 +27,11 @@ journald cursor.
 
   * ``state.changed`` → ``state`` (сообщение целиком) + ``telemetry`` (каждая
     дельта отдельным ``telemetry.delta``-item — курсорное зеркало ingest-потока
-    telemetry read-model, вход для B.2 ``metric_threshold``);
+    telemetry read-model, вход для B.2 ``metric_threshold``; удаление узла
+    помечено ``deleted: True``). Из-за fan-out'а k дельт → k item'ов при общем
+    maxlen плоскость telemetry вытесняется быстрее остальных: ``dropped``
+    НЕсравним между плоскостями — это счётчик потери СВОЕЙ плоскости, не
+    общий барометр системы;
   * ``log.record`` → ``logs``; ``ui.event`` → ``ui``;
   * ``observability.record`` → расщепляется ПО ``kind`` записей (log→logs,
     error→errors, stats→stats; без kind → other): смешанный батч даёт по view на
@@ -62,6 +66,11 @@ EventCallback = Callable[[Dict[str, Any]], None]
 # framework-канала — чтобы driver не тянул серверный модуль (Dict at Boundary).
 OBSERVABILITY_RECORD_COMMAND: str = "observability.record"
 
+# Зеркало Delta.to_dict(): new_value == '__MISSING__' → удаление узла. Литерал,
+# а не импорт state_store_module — package __init__ тянет Qt в headless-клиент;
+# дрейф маркера ловит контракт-тест test_missing_marker_matches_state_store.
+MISSING_MARKER: str = "__MISSING__"
+
 #: Плоскости событий (B.1). ``other`` — сверх плана: события мимо классификации
 #: обязаны остаться видимыми, а не пропасть молча.
 PLANES: Tuple[str, ...] = ("state", "logs", "errors", "stats", "telemetry", "ui", "other")
@@ -84,8 +93,10 @@ def _classify(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
 
     view для state/logs/ui/other — само сообщение (без копий); для
     observability.record — производный конверт с записями одной плоскости; для
-    telemetry — производный ``telemetry.delta`` на каждую дельту (сырая дельта в
-    ``data``, без интерпретации маркера удаления — это забота читателя).
+    telemetry — производный ``telemetry.delta`` на каждую дельту: дельта в
+    ``data``, удаление узла (:data:`MISSING_MARKER`) помечено ``deleted: True``
+    — читатель (B.2 metric_threshold) не должен сравнивать строку-сентинел
+    с числом.
     """
     cmd = msg.get("command")
     if cmd == "state.changed":
@@ -95,6 +106,8 @@ def _classify(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
         if isinstance(deltas, list):
             for delta in deltas:
                 if isinstance(delta, dict) and isinstance(delta.get("path"), str):
+                    if delta.get("new_value") == MISSING_MARKER:
+                        delta = {**delta, "deleted": True}
                     views.append(("telemetry", {"command": "telemetry.delta", "data": delta}))
         return views
     if cmd == "log.record":
@@ -106,6 +119,27 @@ def _classify(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
     return [("other", msg)]
 
 
+def extract_observability_records(data: Any) -> List[Dict[str, Any]]:
+    """Развернуть конверт observability.record в плоский список записей.
+
+    ``data.records`` (пачка из drain log/stats) и/или ``data.record`` (одиночная
+    write-through запись error/critical) → список record-dict'ов в порядке
+    поступления. ЕДИНСТВЕННЫЙ разборщик этого wire-контракта — им пользуются и
+    плоскостная классификация здесь, и ``BackendDriver.observability_records``
+    (два независимых парсера разъезжались бы молча).
+    """
+    if not isinstance(data, dict):
+        return []
+    records: List[Dict[str, Any]] = []
+    batch = data.get("records")
+    if isinstance(batch, list):
+        records.extend(r for r in batch if isinstance(r, dict))
+    single = data.get("record")
+    if isinstance(single, dict):
+        records.append(single)
+    return records
+
+
 def _classify_observability(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
     """Расщепить observability.record по kind записей (батч и/или одиночная).
 
@@ -115,15 +149,7 @@ def _classify_observability(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, An
     целиком в ``other``.
     """
     data = msg.get("data")
-    if not isinstance(data, dict):
-        return [("other", msg)]
-    records: List[Dict[str, Any]] = []
-    batch = data.get("records")
-    if isinstance(batch, list):
-        records.extend(r for r in batch if isinstance(r, dict))
-    single = data.get("record")
-    if isinstance(single, dict):
-        records.append(single)
+    records = extract_observability_records(data)
     if not records:
         return [("other", msg)]
 
@@ -235,11 +261,13 @@ class EventHub:
             ``{"success": True, "plane", "items": [{"seq", "event"}, ...], "count",
             "next_cursor", "dropped", "bookmark"}``. ``dropped`` — сколько событий
             между курсором и первым возвращённым вытеснено из кольца (читатель
-            видит свою слепую зону). Ошибки курсора/плоскости — error-dict;
-            курсор чужого поколения/впереди потока → ``reset_required: True``
-            (начать заново с ``cursor=null``; полный re-list — Phase D).
+            видит свою слепую зону). ЛЮБАЯ ошибка курсора (нечитаемый, чужое
+            поколение, чужая плоскость, впереди потока) → error-dict c
+            ``reset_required: True`` + ``bookmark`` — восстановление всегда одно:
+            начать заново с ``cursor=null`` (полный re-list — Phase D). Неизвестная
+            плоскость → error-dict со списком ``planes``.
         """
-        plane_key = plane or ALL_PLANE
+        plane_key = ALL_PLANE if plane is None else plane
         if plane_key != ALL_PLANE and plane_key not in self._rings:
             return {
                 "success": False,
@@ -249,7 +277,14 @@ class EventHub:
         try:
             cursor_seq = self._parse_cursor(cursor, plane_key)
         except ValueError as exc:
-            return {"success": False, "error": str(exc)}
+            with self._cv:
+                newest = self._gseq if plane_key == ALL_PLANE else self._pseq[plane_key]
+            return {
+                "success": False,
+                "error": str(exc),
+                "reset_required": True,
+                "bookmark": self._fmt_cursor(plane_key, newest),
+            }
         try:
             page_limit = int(limit) if limit is not None else _DEFAULT_PAGE_LIMIT
         except (TypeError, ValueError):
@@ -299,28 +334,38 @@ class EventHub:
         return f"{plane_key}:{seq}@{self._gen}"
 
     def _parse_cursor(self, cursor: Optional[Any], plane_key: str) -> int:
-        """Курсор → seq. ValueError с обучающим текстом на любой неразборный вход."""
+        """Курсор → seq. ValueError с обучающим текстом на любой неразборный вход.
+
+        Принимается ТОЛЬКО полная форма ``plane:seq@gen`` — та, что выдают
+        ``next_cursor``/``bookmark``. Усечённые формы (без ``@gen`` или без
+        префикса плоскости) отвергаются: пропуск проверки поколения/плоскости
+        означал бы тихое чтение не с того места — ровно тот класс слепоты,
+        который B.1 устраняет.
+        """
         if cursor in (None, "", 0):
             return 0
         text = str(cursor)
-        if "@" in text:
-            text, _, gen = text.rpartition("@")
-            if gen != self._gen:
-                raise ValueError(
-                    f"курсор поколения {gen!r} не подходит к текущему {self._gen!r} "
-                    "(driver пересоздан после реконнекта) — начни заново с cursor=null"
-                )
-        if ":" in text:
-            prefix, _, seq_text = text.partition(":")
-            if prefix != plane_key:
-                raise ValueError(
-                    f"курсор плоскости {prefix!r} не подходит к чтению {plane_key!r} — "
-                    "у каждой плоскости своя нумерация"
-                )
-        else:
-            seq_text = text
+        if "@" not in text or ":" not in text:
+            raise ValueError(
+                f"нечитаемый курсор {cursor!r}: ожидаю полную форму 'plane:seq@gen' "
+                "из next_cursor/bookmark прошлого ответа — начни заново с cursor=null"
+            )
+        text, _, gen = text.rpartition("@")
+        if gen != self._gen:
+            raise ValueError(
+                f"курсор поколения {gen!r} не подходит к текущему {self._gen!r} "
+                "(driver пересоздан после реконнекта) — начни заново с cursor=null"
+            )
+        prefix, _, seq_text = text.partition(":")
+        if prefix != plane_key:
+            raise ValueError(
+                f"курсор плоскости {prefix!r} не подходит к чтению {plane_key!r} — у каждой плоскости своя нумерация"
+            )
         if not seq_text.isdigit():
-            raise ValueError(f"нечитаемый курсор {cursor!r}: ожидаю 'plane:seq@gen' из next_cursor/bookmark")
+            raise ValueError(
+                f"нечитаемый курсор {cursor!r}: ожидаю 'plane:seq@gen' из next_cursor/bookmark — "
+                "начни заново с cursor=null"
+            )
         return int(seq_text)
 
     # ---- Legacy-дренаж (обёртка events(), удаление — F.1) ----
@@ -377,7 +422,9 @@ class EventHub:
         """Счётчики hub'а: per-plane seq/размер/вытеснено + arrival + подписчики.
 
         ``evicted`` выводится из плотного seq (``seq − size``) — отдельных
-        счётчиков не нужно. Вход для system_overview (B.3).
+        счётчиков не нужно. Вход для system_overview (B.3). ``evicted``/``dropped``
+        разных плоскостей НЕсравнимы между собой: telemetry получает k item'ов на
+        одну state.changed с k дельтами и вытесняется пропорционально быстрее.
         """
         with self._cv:
             planes = {
@@ -446,6 +493,8 @@ __all__ = [
     "_EventChannelMixin",
     "EventCallback",
     "OBSERVABILITY_RECORD_COMMAND",
+    "MISSING_MARKER",
     "PLANES",
     "ALL_PLANE",
+    "extract_observability_records",
 ]
