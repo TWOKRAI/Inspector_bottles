@@ -174,6 +174,11 @@ def _register_confirm(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.register_confirm(args["commit_id"])
 
 
+def _register_rollback_log(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    limit = args.get("limit")
+    return drv.register_rollback_log(limit=int(limit) if limit is not None else None)
+
+
 def _state_get(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.send_command("ProcessManager", "state.get", {"path": args["path"]}, **_kw_timeout(args))
 
@@ -528,6 +533,18 @@ TOOLS: List[ToolSpec] = [
             ["commit_id"],
         ),
         _register_confirm,
+    ),
+    ToolSpec(
+        "register_rollback_log",
+        "Журнал исходов авто-откатов commit-confirmed этой сессии (D.5): для каждого "
+        "сработавшего таймера — outcome ok/failed(+error)/noop. Так агент узнаёт, чем "
+        "закончился откат, даже если не вызывал register_confirm. Кольцо на 64 записи.",
+        _obj(
+            {
+                "limit": {"type": "integer", "description": "Вернуть последние N записей (по умолчанию все, до 64)"},
+            }
+        ),
+        _register_rollback_log,
     ),
     ToolSpec(
         "state_get",
@@ -926,6 +943,7 @@ TOOL_SAFETY: Dict[str, str] = {
     "introspect_memory": SAFETY_READ,
     "supervision_status": SAFETY_READ,
     "register_snapshot": SAFETY_READ,
+    "register_rollback_log": SAFETY_READ,
     "state_get": SAFETY_READ,
     "state_get_subtree": SAFETY_READ,
     "events": SAFETY_READ,

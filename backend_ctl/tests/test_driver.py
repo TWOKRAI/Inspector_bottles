@@ -1468,20 +1468,46 @@ class TestRegisterSnapshotRestore:
         assert res["success"] is False
         assert "processes" in res["error"]
 
-    def test_snapshot_all_processes_via_capabilities(self, monkeypatch) -> None:
-        import types
-
-        regs = {"p1": {"resize": {"w": 1}}, "p2": {"crop": {"x": 2}}}
+    def test_snapshot_all_processes_via_topology_no_fanout(self, monkeypatch) -> None:
+        """process опущен → список процессов одним introspect.capabilities PM (без per-process fan-out, #6)."""
+        regs = {"ProcessManager": {}, "p1": {"resize": {"w": 1}}, "p2": {"crop": {"x": 2}}}
         d = BackendDriver()
+        cap_calls: List[str] = []
 
         def fake_send(process, command, args=None, **kw):
-            assert command == "introspect.registers"
-            return {"success": True, "registers": regs[process]}
+            if command == "introspect.capabilities":
+                cap_calls.append(process)
+                return {"success": True, "processes": {"p1": {}, "p2": {}}}
+            if command == "introspect.registers":
+                return {"success": True, "registers": regs[process]}
+            raise AssertionError(f"неожиданная команда: {command}")
 
         monkeypatch.setattr(d, "send_command", fake_send)
-        monkeypatch.setattr(d, "capabilities", lambda **kw: types.SimpleNamespace(processes={"p1": 0, "p2": 0}))
         snap = d.register_snapshot()  # process опущен → все процессы
-        assert snap == {"processes": {"p1": {"resize": {"w": 1}}, "p2": {"crop": {"x": 2}}}}
+        assert snap == {"processes": {"ProcessManager": {}, "p1": {"resize": {"w": 1}}, "p2": {"crop": {"x": 2}}}}
+        assert cap_calls == ["ProcessManager"]  # только карточка PM, НЕ каждого процесса
+
+    def test_restore_skips_unchanged_fields(self, monkeypatch) -> None:
+        """restore пишет только дрейфнувшие поля — уже-верные не трогает (#2)."""
+        regs = {"resize": {"a": 1, "b": 2}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        snap = d.register_snapshot("preprocessor")
+        d.set_register("preprocessor", "resize", "b", 9)  # дрейфнуло только b
+
+        writes: List[tuple] = []
+        orig = d.send_command
+
+        def recording_send(process, command, args=None, **kw):
+            if command == "register_update":
+                writes.append((args["register"], args["field"], args["value"]))
+            return orig(process, command, args, **kw)
+
+        monkeypatch.setattr(d, "send_command", recording_send)
+        res = d.register_restore(snap)
+        assert res["success"] is True
+        assert res["written"] == 1 and res["skipped"] == 1
+        assert writes == [("resize", "b", 2)]  # a (уже верное) не переписывалось
+        assert regs["resize"] == {"a": 1, "b": 2}
 
 
 class TestRegisterCommitConfirmed:
@@ -1568,3 +1594,42 @@ class TestRegisterCommitConfirmed:
         assert d._pending_commits == {}
         time.sleep(0.4)
         assert regs["resize"]["target_width"] == 100  # не откатилось: таймер снят в close()
+
+    def test_successful_rollback_recorded_in_journal(self, monkeypatch) -> None:
+        regs = {"resize": {"target_width": 640}}
+        d = self._driver_with_fake_backend(regs, monkeypatch)
+        res = d.set_register("preprocessor", "resize", "target_width", 100, confirm_within=0.15)
+        time.sleep(0.4)  # таймер сработал → откат к 640
+        log = d.register_rollback_log()
+        assert log["entries"][-1]["commit_id"] == res["commit_id"]
+        assert log["entries"][-1]["outcome"] == "ok"
+
+    def test_failed_rollback_surfaced(self, monkeypatch) -> None:
+        """Провал авто-отката фиксируется в журнале и виден 'опоздавшему' register_confirm (#4)."""
+        regs = {"resize": {"target_width": 640}}
+        d = BackendDriver()
+
+        def fake_send(process, command, args=None, **kw):
+            if command == "register_update":
+                if args["value"] == 640:  # это откат к pre-image — имитируем отказ бэкенда
+                    return {"success": False, "error": "backend rejected"}
+                reg = regs.setdefault(args["register"], {})
+                if args["field"] in reg:
+                    reg[args["field"]] = args["value"]
+                return {"success": True}
+            if command == "introspect.registers":
+                return {"success": True, "registers": regs}
+            raise AssertionError(f"неожиданная команда: {command}")
+
+        monkeypatch.setattr(d, "send_command", fake_send)
+        res = d.set_register("preprocessor", "resize", "target_width", 100, confirm_within=0.15)
+        time.sleep(0.4)  # таймер сработал → откат провалился (backend rejected)
+        assert regs["resize"]["target_width"] == 100  # не откатилось
+
+        log = d.register_rollback_log(limit=1)
+        assert log["entries"][-1]["outcome"] == "failed"
+        assert log["entries"][-1]["commit_id"] == res["commit_id"]
+        # «опоздавший» confirm узнаёт исход из журнала
+        conf = d.register_confirm(res["commit_id"])
+        assert conf["success"] is False
+        assert conf["rolled_back"]["outcome"] == "failed"

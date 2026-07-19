@@ -122,6 +122,7 @@ class TestRegistry:
             "register_snapshot",
             "register_restore",
             "register_confirm",
+            "register_rollback_log",
             "state_get",
             "state_get_subtree",
             "state_subscribe",
