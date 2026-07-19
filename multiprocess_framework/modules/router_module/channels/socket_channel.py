@@ -316,14 +316,32 @@ class SocketChannel(MessageChannel):
         if self._session_isolation:
             sid = msg.get("session")
             if sid:
-                with self._clients_lock:
-                    self._sessions[str(sid)] = client
+                self._bind_session(str(sid), client)
         if self._on_inbound is None:
             return
         try:
             self._on_inbound(msg)
         except Exception as exc:  # noqa: BLE001 — граница: ошибка обработки не должна ронять read-loop
             self._log_error(f"[SocketChannel:{self._name}] on_inbound error: {exc}")
+
+    def _bind_session(self, sid: str, client: socket.socket) -> None:
+        """Привязать session→сокет (D.1). Идемпотентно для того же сокета (ревью #7:
+        не переписываем маппинг на каждом сообщении). sid, уже занятый ДРУГИМ
+        соединением, НЕ угоняем (ревью #5): реконнект берёт НОВЫЙ sid (uuid per-connect),
+        поэтому чужой sid на нашем сокете = баг/спуфинг — логируем и игнорируем."""
+        rejected = False
+        with self._clients_lock:
+            existing = self._sessions.get(sid)
+            if existing is client:
+                return  # уже привязан к этому же сокету — no-op (ревью #7)
+            if existing is None:
+                self._sessions[sid] = client
+            else:
+                rejected = True  # занят другим соединением (ревью #5)
+        if rejected:
+            self._log_warning(
+                f"[SocketChannel:{self._name}] session {sid} уже за другим соединением — привязка отклонена"
+            )
 
     def _drop_clients(self, clients: List[socket.socket]) -> None:
         """Убрать мёртвые соединения из списка и закрыть их.

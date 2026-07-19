@@ -340,6 +340,21 @@ class TestSessionIsolation:
         assert _recv_line(a2)["result"] == {"ok": 2}
         a2.close()
 
+    def test_foreign_socket_cannot_hijack_session(self, iso_channel: SocketChannel) -> None:
+        # Ревью #5: второй сокет, приславший ЧУЖОЙ sid, не угоняет поток первого.
+        a = _connect_nth(iso_channel, 1)
+        _register_session(iso_channel, a, "sid-a", 1)
+        b = _connect_nth(iso_channel, 2)
+        b.sendall((json.dumps({"session": "sid-a", "type": "command", "command": "steal"}) + "\n").encode("utf-8"))
+        assert _wait(lambda: iso_channel.get_info()["rx"] >= 2)
+        assert iso_channel.get_info()["sessions"] == 1  # угон отклонён, маппинг не раздулся
+        res = iso_channel.send({"type": "response", "session": "sid-a", "result": {"ok": 1}})
+        assert res["clients"] == 1
+        assert _recv_line(a)["result"] == {"ok": 1}  # reply у владельца A
+        _assert_no_data(b)  # НЕ у угонщика B
+        a.close()
+        b.close()
+
     def test_get_info_reports_sessions(self, iso_channel: SocketChannel) -> None:
         assert iso_channel.get_info()["sessions"] == 0
         c = _connect_nth(iso_channel, 1)
