@@ -14,15 +14,12 @@ Acceptance плана (plans/backend-ctl-debug-console.md, Task B.1):
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List
 
 from backend_ctl.driver import BackendDriver
 
 
-def _line(msg: Dict[str, Any]) -> bytes:
-    """Собрать проводную строку так же, как её видит reader-поток."""
-    return json.dumps(msg, ensure_ascii=False).encode("utf-8")
+from backend_ctl.tests.conftest import wire_line as _line  # noqa: E402 — общий хелпер
 
 
 def _push_state(d: BackendDriver, value: Any, path: str = "processes.cam.state.fps") -> None:

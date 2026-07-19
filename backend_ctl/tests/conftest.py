@@ -11,9 +11,21 @@ harness-тесты модуля. Тесты только читают состо
 
 from __future__ import annotations
 
+import json
+from typing import Any, Dict
+
 import pytest
 
 from backend_ctl.harness import BackendHarness
+
+
+def wire_line(msg: Dict[str, Any]) -> bytes:
+    """Собрать проводную строку push'а так же, как её видит reader-поток.
+
+    Общий хелпер unit-тестов событийного контура (инжекция через dispatch_raw) —
+    одна точка правды о wire-кодировке вместо копий по тест-файлам.
+    """
+    return json.dumps(msg, ensure_ascii=False).encode("utf-8")
 
 
 @pytest.fixture(scope="session")

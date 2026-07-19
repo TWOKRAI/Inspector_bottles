@@ -58,6 +58,7 @@ from .events import (  # noqa: F401 — EventCallback/OBSERVABILITY_RECORD_COMMA
     MISSING_MARKER,
     OBSERVABILITY_RECORD_COMMAND,
     extract_observability_records,
+    iter_state_deltas,
 )
 from .transport import _TransportMixin, _Pending  # noqa: F401 — _Pending re-export для тестов
 from .watch import WatchController, GUI_DEFAULT_PATTERNS  # noqa: F401 — GUI_DEFAULT_PATTERNS re-export
@@ -585,26 +586,16 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         Ингест под ``_telemetry_lock`` — читатели snapshot/history зовутся из другого
         потока и итерируют те же dict/deque.
         """
-        if not isinstance(msg, dict) or msg.get("command") != "state.changed":
-            return
-        data = msg.get("data")
-        if not isinstance(data, dict):
-            return
-        deltas = data.get("deltas")
-        if not isinstance(deltas, list):
+        deltas = iter_state_deltas(msg)
+        if not deltas:
             return
         with self._telemetry_lock:
             for delta in deltas:
-                if not isinstance(delta, dict):
-                    continue
-                path = delta.get("path")
-                if not isinstance(path, str) or not path:
-                    continue
                 new_value = delta.get("new_value")
                 if new_value == self._MISSING_MARKER:
-                    self._telemetry_model.ingest(path, None, deleted=True)
+                    self._telemetry_model.ingest(delta["path"], None, deleted=True)
                 else:
-                    self._telemetry_model.ingest(path, new_value)
+                    self._telemetry_model.ingest(delta["path"], new_value)
 
     @staticmethod
     def _telemetry_key(path: str) -> Dict[str, Optional[str]]:

@@ -88,6 +88,28 @@ _DEFAULT_PAGE_LIMIT = 100
 _MAX_PAGE_LIMIT = 500
 
 
+def iter_state_deltas(msg: Any) -> List[Dict[str, Any]]:
+    """Дельты push'а ``state.changed`` — ЕДИНСТВЕННЫЙ разборщик этого wire-контракта.
+
+    Возвращает только dict-дельты с непустым строковым ``path``. Им пользуются
+    плоскостная классификация, telemetry-ingest driver'а и предикаты
+    ``await_condition`` — три независимых парсера разъезжались бы молча.
+    """
+    if not isinstance(msg, dict) or msg.get("command") != "state.changed":
+        return []
+    data = msg.get("data")
+    deltas = data.get("deltas") if isinstance(data, dict) else None
+    if not isinstance(deltas, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for delta in deltas:
+        if isinstance(delta, dict):
+            path = delta.get("path")
+            if isinstance(path, str) and path:
+                out.append(delta)
+    return out
+
+
 def _classify(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
     """Разложить push-сообщение по плоскостям: список пар (plane, view).
 
@@ -101,14 +123,10 @@ def _classify(msg: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
     cmd = msg.get("command")
     if cmd == "state.changed":
         views: List[Tuple[str, Dict[str, Any]]] = [("state", msg)]
-        data = msg.get("data")
-        deltas = data.get("deltas") if isinstance(data, dict) else None
-        if isinstance(deltas, list):
-            for delta in deltas:
-                if isinstance(delta, dict) and isinstance(delta.get("path"), str):
-                    if delta.get("new_value") == MISSING_MARKER:
-                        delta = {**delta, "deleted": True}
-                    views.append(("telemetry", {"command": "telemetry.delta", "data": delta}))
+        for delta in iter_state_deltas(msg):
+            if delta.get("new_value") == MISSING_MARKER:
+                delta = {**delta, "deleted": True}
+            views.append(("telemetry", {"command": "telemetry.delta", "data": delta}))
         return views
     if cmd == "log.record":
         return [("logs", msg)]
@@ -497,4 +515,5 @@ __all__ = [
     "PLANES",
     "ALL_PLANE",
     "extract_observability_records",
+    "iter_state_deltas",
 ]

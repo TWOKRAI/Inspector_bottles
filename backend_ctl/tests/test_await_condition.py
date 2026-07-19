@@ -10,7 +10,6 @@ Acceptance плана: синтетический поток дельт → ус
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from typing import Any, Dict, List
@@ -18,8 +17,7 @@ from typing import Any, Dict, List
 from backend_ctl.driver import BackendDriver
 
 
-def _line(msg: Dict[str, Any]) -> bytes:
-    return json.dumps(msg, ensure_ascii=False).encode("utf-8")
+from backend_ctl.tests.conftest import wire_line as _line  # noqa: E402 — общий хелпер
 
 
 def _state_line(path: str, value: Any) -> bytes:
@@ -140,6 +138,50 @@ class TestEventMatches:
         res = d.await_condition("event_matches", {"plane": "нет", "pattern": "*"}, timeout=0.1)
         assert res["success"] is False
         assert "plane" in res["error"]
+
+
+class TestTimeoutDiagnosis:
+    def test_hint_survives_irrelevant_traffic(self) -> None:
+        """Фоновый трафик (логи при активном debug_session) не гасит подсказку.
+
+        Ревью фазы B: hint гейтился на events_seen==0 и подавлялся ЛЮБЫМИ
+        событиями — теперь он привязан к отсутствию РЕЛЕВАНТНЫХ наблюдений.
+        """
+        d = BackendDriver()
+        th = _feed_later(d, [_line({"command": "log.record", "data": {"record": {"severity": "info"}}})] * 3)
+        res = d.await_condition("state_path", {"path": "processes.cam.state.status", "value": "running"}, timeout=0.3)
+        th.join()
+        assert res["success"] is False
+        assert res["events_seen"] >= 3  # трафик шёл...
+        assert "подписка" in res["hint"]  # ...но подсказка о недостающей подписке жива
+
+    def test_metric_threshold_wrong_type_visible_in_last_seen(self) -> None:
+        """Нечисловое значение по нужному пути видно в диагнозе («не метрика»)."""
+        d = BackendDriver()
+        th = _feed_later(d, [_state_line("processes.cam.state.status", "running")])
+        res = d.await_condition(
+            "metric_threshold", {"path": "processes.cam.state.status", "op": ">", "value": 10}, timeout=0.3
+        )
+        th.join()
+        assert res["success"] is False
+        assert res["last_seen"]["value"] == "running"  # диагноз: путь отдаёт строку, не метрику
+        assert "hint" not in res  # релевантное наблюдение было — подсказка о подписке не нужна
+
+    def test_mcp_timeout_capped_and_zero_passthrough(self, monkeypatch) -> None:
+        """MCP-cap: timeout=999 режется до 30; timeout=0 — валидный «проверь сейчас»."""
+        from backend_ctl.mcp_tools import MAX_EVENTS_TIMEOUT, call_tool
+
+        d = BackendDriver()
+        seen: List[float] = []
+
+        def fake_await(kind: str, spec: Any, *, timeout: float) -> Dict[str, Any]:
+            seen.append(timeout)
+            return {"success": False, "timed_out": True}
+
+        monkeypatch.setattr(d, "await_condition", fake_await)
+        call_tool(d, "await_condition", {"kind": "state_path", "spec": {}, "timeout": 999})
+        call_tool(d, "await_condition", {"kind": "state_path", "spec": {}, "timeout": 0})
+        assert seen == [MAX_EVENTS_TIMEOUT, 0.0]
 
 
 class TestContract:

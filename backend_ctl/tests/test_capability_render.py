@@ -106,5 +106,22 @@ class TestProcessFilterAndMcp:
         monkeypatch.setattr(d, "capabilities", lambda **kw: _fake_caps())
         res = call_tool(d, "capabilities", {"process": "cam"})
         assert list(res["processes"]) == ["cam"]  # detailed отфильтрован и JSON-сериализуем
+        assert res["success"] is True  # у всех форматов единый ключ успеха (ревью фазы B)
         missing = call_tool(d, "capabilities", {"process": "нет"})
         assert missing["success"] is False
+
+    def test_malformed_cards_degrade_gracefully(self) -> None:
+        """Битая карточка (bare-строка команды, None вместо полей) не роняет рендер."""
+        card = ProcessCapabilities(
+            ok=False,
+            process="cam",
+            commands=["голая-строка", {"name": "ok.cmd", "description": "", "tags": []}],
+            router_handlers=[],
+            registers={"camera": None},
+        )
+        caps = Capabilities(ok=False, processes={"cam": card}, topology={}, channels=[])
+        concise = render_concise(caps)
+        assert concise["processes"]["cam"]["commands"] == ["ok.cmd"]
+        assert concise["processes"]["cam"]["registers"] == {"camera": []}
+        help_res = render_help(caps)
+        assert [c["name"] for c in help_res["processes"]["cam"]["commands"]] == ["ok.cmd"]

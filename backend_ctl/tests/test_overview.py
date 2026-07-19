@@ -13,8 +13,7 @@ from typing import Any, Dict, List
 from backend_ctl.driver import BackendDriver
 
 
-def _line(msg: Dict[str, Any]) -> bytes:
-    return json.dumps(msg, ensure_ascii=False).encode("utf-8")
+from backend_ctl.tests.conftest import wire_line as _line  # noqa: E402 — общий хелпер
 
 
 def _feed_state(d: BackendDriver, path: str, value: Any) -> None:
@@ -152,3 +151,18 @@ class TestAnomalies:
         res = d.system_overview()
         assert res["processes"]["cam"]["ok"] is False
         assert any(a["kind"] == "introspect_failed" for a in res["anomalies"])
+
+    def test_memory_failure_flags_process(self, monkeypatch) -> None:
+        """Отказ introspect.memory — тоже introspect_failed, а не тихий memory_ok=False.
+
+        Ревью фазы B: mem.ok выпадал из агрегата ok — агент, читающий только
+        ok/anomalies, считал процесс здоровым при сломанном memory-канале.
+        """
+        d = BackendDriver()
+        responses = _healthy_responses()
+        del responses["introspect.memory"]
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+        assert res["processes"]["cam"]["ok"] is False
+        hits = [a for a in res["anomalies"] if a["kind"] == "introspect_failed"]
+        assert hits and "memory" in hits[0]["detail"]

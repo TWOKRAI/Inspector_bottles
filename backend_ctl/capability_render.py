@@ -87,8 +87,13 @@ def render_concise(caps: Capabilities, process: Optional[str] = None) -> Dict[st
         "processes": {
             name: {
                 "ok": card.ok,
-                "commands": sorted(str(c.get("name") or "") for c in card.commands),
-                "registers": {reg: list(fields) for reg, fields in sorted(card.registers.items())},
+                # Пер-элементные гарды: битая карточка (bare-строка вместо dict,
+                # None вместо списка полей) деградирует тихо, не роняет рендер.
+                "commands": sorted(str(c.get("name") or "") for c in card.commands if isinstance(c, dict)),
+                "registers": {
+                    reg: (list(fields) if isinstance(fields, (list, tuple)) else [])
+                    for reg, fields in sorted(card.registers.items())
+                },
                 "router_handlers": sorted(card.router_handlers),
             }
             for name, card in cards.items()
@@ -105,6 +110,8 @@ def render_help(caps: Capabilities, process: Optional[str] = None) -> Dict[str, 
     for name, card in cards.items():
         commands: List[Dict[str, Any]] = []
         for cmd in card.commands:
+            if not isinstance(cmd, dict):
+                continue  # битая карточка команды — пропускаем, не роняем рендер
             cmd_name = str(cmd.get("name") or "")
             entry: Dict[str, Any] = {
                 "name": cmd_name,

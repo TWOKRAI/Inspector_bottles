@@ -36,7 +36,14 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from .events import ALL_PLANE, MISSING_MARKER, PLANES, _classify
+from .events import (
+    ALL_PLANE,
+    MISSING_MARKER,
+    OBSERVABILITY_RECORD_COMMAND,
+    PLANES,
+    _classify,
+    iter_state_deltas,
+)
 
 # Виды условий (валидация входа — обучающая ошибка, не таймаут).
 KINDS: tuple[str, ...] = ("state_path", "event_matches", "metric_threshold")
@@ -53,18 +60,18 @@ _OPS: Dict[str, Callable[[Any, Any], bool]] = {
 #: Дефолт ожидания (сек); потолок для MCP ставит mcp_tools.MAX_EVENTS_TIMEOUT.
 DEFAULT_AWAIT_TIMEOUT: float = 10.0
 
+# Какие плоскости вообще возможны для данного wire-command — пре-фильтр предиката
+# event_matches (зеркало веток _classify; команды вне карты попадают только в other).
+_PLANE_CANDIDATES: Dict[Any, tuple[str, ...]] = {
+    "state.changed": ("state", "telemetry"),
+    "log.record": ("logs",),
+    "ui.event": ("ui",),
+    OBSERVABILITY_RECORD_COMMAND: ("logs", "errors", "stats", "other"),
+}
+
 
 def _error(text: str) -> Dict[str, Any]:
     return {"success": False, "error": text}
-
-
-def _iter_deltas(msg: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Дельты из push ``state.changed`` (пустой список для прочих сообщений)."""
-    if not isinstance(msg, dict) or msg.get("command") != "state.changed":
-        return []
-    data = msg.get("data")
-    deltas = data.get("deltas") if isinstance(data, dict) else None
-    return [d for d in deltas if isinstance(d, dict)] if isinstance(deltas, list) else []
 
 
 def _match_targets(view: Dict[str, Any]) -> List[str]:
@@ -78,10 +85,7 @@ def _match_targets(view: Dict[str, Any]) -> List[str]:
         path = data.get("path")
         if isinstance(path, str):
             targets.append(path)
-    for delta in _iter_deltas(view):
-        path = delta.get("path")
-        if isinstance(path, str):
-            targets.append(path)
+    targets.extend(delta["path"] for delta in iter_state_deltas(view))
     return targets
 
 
@@ -187,10 +191,14 @@ def await_condition(
         "events_seen": events_seen,
         "last_seen": last_seen,
     }
-    if events_seen == 0 and kind != "event_matches":
+    # Подсказка — по отсутствию РЕЛЕВАНТНЫХ наблюдений (note), не любых событий:
+    # фоновый трафик (log.record/ui.event при активном debug_session) не должен
+    # гасить диагноз «нужные дельты/события так и не пришли».
+    if last_seen is None:
         out["hint"] = (
-            "за время ожидания не пришло ни одной state-дельты — активна ли подписка "
-            "(watch_like_gui / state_subscribe на нужный паттерн)?"
+            "за время ожидания не было ни одного релевантного наблюдения (дельты нужного "
+            "пути / события плоскости) — активна ли подписка (watch_like_gui / "
+            "state_subscribe на нужный паттерн)?"
         )
     return out
 
@@ -204,13 +212,16 @@ def _setup_state_path(drv: Any, spec: Dict[str, Any]):
         return _error("state_path требует spec.path (строка-путь state-дерева)")
 
     def predicate(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        for delta in _iter_deltas(msg):
+        for delta in iter_state_deltas(msg):
             if delta.get("path") != path:
                 continue
             new_value = delta.get("new_value")
             if new_value == MISSING_MARKER:
-                continue  # удаление узла — не значение
-            waiter.note({"path": path, "value": new_value})
+                # Удаление узла — не значение, но наблюдение релевантное: диагноз
+                # «видел удаление» информативнее пустого last_seen.
+                waiter.note({"path": path, "deleted": True, "source": "delta"})
+                continue
+            waiter.note({"path": path, "value": new_value, "source": "delta"})
             if new_value == value:
                 return {"path": path, "value": new_value, "source": "delta"}
         return None
@@ -237,19 +248,26 @@ def _setup_metric_threshold(drv: Any, spec: Dict[str, Any]):
         return _error("metric_threshold требует числовой spec.value (порог)")
 
     def check(candidate: Any, source: str) -> Optional[Dict[str, Any]]:
-        if not isinstance(candidate, (int, float)) or isinstance(candidate, bool):
-            return None  # не-числа (и удаления) порог не пересекают
+        # note ДО численного гейта: нечисловое значение по нужному пути — важнейший
+        # диагноз («ты смотришь не на метрику»), его нельзя терять из last_seen.
         waiter.note({"path": path, "value": candidate, "source": source})
+        if not isinstance(candidate, (int, float)) or isinstance(candidate, bool):
+            return None  # не-числа порог не пересекают
         if op(candidate, value):
             return {"path": path, "value": candidate, "op": op_name, "threshold": value, "source": source}
         return None
 
     def predicate(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        for delta in _iter_deltas(msg):
-            if delta.get("path") == path:
-                found = check(delta.get("new_value"), "delta")
-                if found is not None:
-                    return found
+        for delta in iter_state_deltas(msg):
+            if delta.get("path") != path:
+                continue
+            new_value = delta.get("new_value")
+            if new_value == MISSING_MARKER:
+                waiter.note({"path": path, "deleted": True, "source": "delta"})
+                continue
+            found = check(new_value, "delta")
+            if found is not None:
+                return found
         return None
 
     def initial_check() -> Optional[Dict[str, Any]]:
@@ -268,6 +286,11 @@ def _setup_event_matches(spec: Dict[str, Any]):
         return _error("event_matches требует spec.pattern (glob по command/path события)")
 
     def predicate(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        # Дешёвый пре-фильтр по command: не гонять полную классификацию (аллокации
+        # на каждую дельту) для сообщений, которые в искомую плоскость не попадают, —
+        # предикат живёт в reader-потоке и обязан быть лёгким.
+        if plane != ALL_PLANE and plane not in _PLANE_CANDIDATES.get(msg.get("command"), ("other",)):
+            return None
         # Тот же классификатор, что у колец B.1 — плоскость события едина всюду.
         views = [(ALL_PLANE, msg)] if plane == ALL_PLANE else _classify(msg)
         for view_plane, view in views:

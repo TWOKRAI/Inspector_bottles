@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from backend_ctl.capability_render import FORMATS, render_concise, render_help
+from backend_ctl.conditions import DEFAULT_AWAIT_TIMEOUT
 from backend_ctl.driver import BackendDriver
 from backend_ctl.events import ALL_PLANE, PLANES
 
@@ -103,7 +104,9 @@ def _capabilities(drv: BackendDriver, args: Dict[str, Any]) -> Any:
                 "known_processes": sorted(caps.processes),
             }
         caps = dataclasses.replace(caps, processes={process: caps.processes[process]})
-    return _jsonable(caps)
+    # Явный success и в detailed: у concise/help/ошибок он есть, асимметрия формата
+    # заставляла бы вызывающего угадывать, по какому ключу проверять успех.
+    return {"success": True, **_jsonable(caps)}
 
 
 def _get_status(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -176,8 +179,10 @@ def _events_page(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 def _await_condition(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     # Жёсткий cap таймаута: блокирующий tools/call не должен подвешивать сервер.
-    timeout = min(float(args.get("timeout", 10.0) or 10.0), MAX_EVENTS_TIMEOUT)
-    return drv.await_condition(args["kind"], args.get("spec"), timeout=timeout)
+    # timeout=0 — валидное «проверь сейчас, не жди» (не путать с «не передан»).
+    raw = args.get("timeout")
+    timeout = DEFAULT_AWAIT_TIMEOUT if raw is None else float(raw)
+    return drv.await_condition(args["kind"], args.get("spec"), timeout=min(timeout, MAX_EVENTS_TIMEOUT))
 
 
 def _system_overview(drv: BackendDriver, args: Dict[str, Any]) -> Any:

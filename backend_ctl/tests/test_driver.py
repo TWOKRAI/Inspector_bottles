@@ -16,7 +16,6 @@ Integration (loopback TCP):
 
 from __future__ import annotations
 
-import json
 import socket
 import threading
 import time
@@ -45,9 +44,7 @@ class TestRequestMatching:
 # --- Юнит: событийный канал (инжекция входящих строк через dispatch_raw) ---
 
 
-def _line(msg: Dict[str, Any]) -> bytes:
-    """Собрать проводную строку так же, как её видит reader-поток."""
-    return json.dumps(msg, ensure_ascii=False).encode("utf-8")
+from backend_ctl.tests.conftest import wire_line as _line  # noqa: E402 — общий хелпер
 
 
 class TestEventChannel:
