@@ -262,6 +262,44 @@ class TestProcessManagerProcessBuiltinCommands:
             assert "monitor" in result
             assert "processes" in result
 
+    def test_cmd_supervision_status_returns_epoch_and_processes(self) -> None:
+        # D.1b: routing-fence-истина PM (epoch/incarnation) + monitor-срез одним ответом.
+        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+            pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
+            pmp.name = "ProcessManager"
+            pmp._routing_epoch = 3
+            pmp._incarnations = {"camera": 2, "gui": 0}
+            mon = MagicMock()
+            mon.get_supervision_snapshot.return_value = {
+                "camera": {"status": "running", "last_exit": None, "restart_count": 1},
+                "gui": {"status": "running", "last_exit": 0, "restart_count": 0},
+            }
+            pmp._process_monitor = mon
+
+            res = pmp._cmd_supervision_status()
+            assert res["success"] is True
+            assert res["epoch"] == 3
+            assert res["processes"]["camera"]["incarnation"] == 2
+            assert res["processes"]["camera"]["restart_count"] == 1
+            assert res["processes"]["camera"]["status"] == "running"
+            assert res["processes"]["gui"]["last_exit"] == 0
+
+    def test_cmd_supervision_status_filters_by_process(self) -> None:
+        with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
+            pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
+            pmp.name = "ProcessManager"
+            pmp._routing_epoch = 1
+            pmp._incarnations = {"camera": 1, "gui": 0}
+            mon = MagicMock()
+            mon.get_supervision_snapshot.return_value = {
+                "camera": {"status": "running", "last_exit": None, "restart_count": 0},
+                "gui": {"status": "running", "last_exit": None, "restart_count": 0},
+            }
+            pmp._process_monitor = mon
+            res = pmp._cmd_supervision_status(data={"process": "camera"})
+            assert set(res["processes"]) == {"camera"}
+            assert res["processes"]["camera"]["incarnation"] == 1
+
     def test_register_builtin_commands_registers_all(self) -> None:
         with patch.object(ProcessManagerProcess, "__init__", lambda self, *a, **kw: None):
             pmp = ProcessManagerProcess.__new__(ProcessManagerProcess)
@@ -283,6 +321,7 @@ class TestProcessManagerProcessBuiltinCommands:
             assert "process.status" in registered_names
             assert "system.shutdown" in registered_names
             assert "system.stats" in registered_names
+            assert "supervision.status" in registered_names
             assert "process.relay" in registered_names
 
     def test_register_builtin_commands_skips_if_no_command_manager(self) -> None:

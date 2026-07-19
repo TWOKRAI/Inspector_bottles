@@ -1195,3 +1195,20 @@ class ProcessMonitor:
             ],
             "failed_processes": [n for n, st in self.previous_states.items() if st.get("status") == "failed"],
         }
+
+    def get_supervision_snapshot(self) -> dict[str, dict[str, Any]]:
+        """Per-process срез для supervision-ручки (D.1b): статус, последний exitcode,
+        число рестартов в окне.
+
+        Истина incarnation/epoch живёт в PM (routing-fence), здесь её нет — PM
+        домешивает её в ответ ``supervision.status``. Читает уже собранные
+        ``previous_states``/``_restart_history`` (без новых опросов ОС).
+        """
+        out: dict[str, dict[str, Any]] = {}
+        for name, st in self.previous_states.items():
+            out[name] = {
+                "status": st.get("status"),
+                "last_exit": st.get("exitcode"),
+                "restart_count": len(self._restart_history.get(name, [])),
+            }
+        return out

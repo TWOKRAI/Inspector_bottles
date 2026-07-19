@@ -1209,3 +1209,26 @@ class TestRecoveredCriterionAfterScheduling:
 
         assert self._event(ssm) == "recovered"
         assert "cam" not in m._pending_recovery
+
+
+class TestSupervisionSnapshot:
+    """get_supervision_snapshot (D.1b): per-process статус/last_exit/restart_count
+    из уже собранных previous_states/_restart_history (без новых опросов ОС)."""
+
+    def test_snapshot_merges_status_exit_and_restarts(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor.previous_states = {
+            "cam": {"status": "crashed", "exitcode": 1},
+            "gui": {"status": "running", "exitcode": None},
+        }
+        monitor._restart_history = {"cam": [1.0, 2.0], "gui": []}
+
+        snap = monitor.get_supervision_snapshot()
+
+        assert snap["cam"] == {"status": "crashed", "last_exit": 1, "restart_count": 2}
+        assert snap["gui"] == {"status": "running", "last_exit": None, "restart_count": 0}
+
+    def test_snapshot_empty_when_nothing_tracked(self) -> None:
+        monitor = ProcessMonitor(_make_mock_process_manager())
+        assert monitor.get_supervision_snapshot() == {}

@@ -304,6 +304,10 @@ class ProcessManagerProcess(ProcessModule):
             "process.status": (self._cmd_process_status, "Статус именованного процесса"),
             "system.shutdown": (self._cmd_system_shutdown, "Завершить систему"),
             "system.stats": (self._cmd_system_stats, "Статистика системы"),
+            "supervision.status": (
+                self._cmd_supervision_status,
+                "Supervision-снимок: epoch + per-process incarnation/restart/last_exit/status",
+            ),
             "topology.apply": (self._cmd_topology_apply, "Применить топологию процессов"),
             "topology.get": (self._cmd_topology_get, "Получить текущую топологию"),
             "topology.diff": (self._cmd_topology_diff, "Вычислить diff топологии (dry-run)"),
@@ -477,6 +481,35 @@ class ProcessManagerProcess(ProcessModule):
             stats["monitor"] = self._process_monitor.get_stats()
         stats["processes"] = self.get_all_processes_status()
         return stats
+
+    def _cmd_supervision_status(self, data=None, **kwargs) -> dict:
+        """Supervision-снимок (D.1b): epoch топологии + per-process incarnation,
+        restart_count, last_exit, status. Опц. фильтр ``data["process"]``.
+
+        Наружу отдаём routing-fence-истину PM (``_incarnations``/``_routing_epoch``)
+        + monitor-срез (restart/exit/status) одним ответом — основа fencing-token
+        и маркера «до/после рестарта». incarnation процесса растёт на каждое
+        пересоздание его очередей → смена incarnation = пересечён рестарт.
+        """
+        self._ensure_routing_state()
+        with self._routing_lock:
+            epoch = self._routing_epoch
+            incarnations = dict(self._incarnations)
+        mon = getattr(self, "_process_monitor", None)
+        snap = mon.get_supervision_snapshot() if mon is not None else {}
+        target = (data or {}).get("process")
+        processes: dict = {}
+        for name in sorted(set(snap) | set(incarnations)):
+            if target and name != target:
+                continue
+            s = snap.get(name, {})
+            processes[name] = {
+                "incarnation": incarnations.get(name, 0),
+                "restart_count": s.get("restart_count", 0),
+                "last_exit": s.get("last_exit"),
+                "status": s.get("status"),
+            }
+        return {"success": True, "epoch": epoch, "processes": processes}
 
     # -------------------------------------------------------------------------
     # Topology commands
