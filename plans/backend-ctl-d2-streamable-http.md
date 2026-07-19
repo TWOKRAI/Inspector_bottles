@@ -141,9 +141,23 @@ SDK-сервер ([mcp_server_sdk.py:217](../backend_ctl/mcp_server_sdk.py#L217)
 
 ## 10. Acceptance (из родителя)
 
-- [ ] **две параллельные сессии: одна тейлит observability, другая крутит регистры — без взаимных помех** (fake-пин Step 7 + live-смоук Step 8)
-- [ ] долг D.1 §12 закрыт: завершение MCP-сессии (DELETE/idle/обрыв) снимает durable-подписки и session-bind (Step 5 + пины §7)
-- [ ] stdio-путь бит-в-бит прежним (пины Step 1 зелёные на финальном HEAD)
+- [x] **две параллельные сессии без взаимных помех** — Step 7 (fake-мультиплекс через реальный in-memory протокол) + Step 8 (live-смоук: реальный uvicorn + два `streamablehttp_client`, ПРОШЁЛ). Каждая сессия = свой driver/сокет/`session`
+- [x] долг D.1 §12 закрыт: завершение MCP-сессии (DELETE/idle/обрыв) → `close_graceful` → `unsubscribe_all` снимает durable-намерения (Step 5 + end-to-end пин §7)
+- [x] stdio-путь бит-в-бит прежним — 40/40 SDK-пинов зелёные на финальном HEAD (включая e2e-over-SDK)
+
+### Прогресс D.2 (2026-07-19) — ЗАКРЫТ (ожидает merge)
+
+Коммиты на ветке `feat/bctl-d2-streamable-http` (9 Steps + план):
+1. `docs(plans)` — мини-план + гейт §5 одобрен.
+2–3. `feat(tooling)` — per-session lifespan-фабрика `build_server` + `call_tool` через `anyio.to_thread`.
+4. `feat(tooling)` — HTTP-раннер (`StreamableHTTPSessionManager` + uvicorn, `--http`/`--http-bind`, idle-TTL, security localhost).
+5. `feat(tooling)` — graceful cleanup (`unsubscribe_all` + `close_graceful`, долг D.1 §12).
+6. `feat(tooling)` — fail-fast isolation-probe (§5.4).
+7–8. `test(tooling)` — мультиплекс-пин (fake) + live-смоук (реальный HTTP, ПРОШЁЛ).
+9. `docs` — README/AGENTS (HTTP-режим) + BCTL-ADR-005.
+
+**Осталось:** формальный `/code-review` → merge (owner-gated) → разблокирован остаток Phase D (D.3–D.5) и E/F.
+**Follow-up (не acceptance):** бэкенд-GC осиротевших регистраций при hard-kill сервера; live-прогон против реального бэкенда с `session_isolation=ON` (obs-tail vs register-crank) — харнесс-сценарий владельца; deprecation `streamablehttp_client`→`streamable_http_client` при подъёме пина SDK.
 
 ---
 

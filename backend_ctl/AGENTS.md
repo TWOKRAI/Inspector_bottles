@@ -108,6 +108,13 @@ PY
 блок разрушающих. Инструменты несут annotations (`readOnlyHint`/`destructiveHint`).
 Неизвестный инструмент → подсказка ближайших имён; блок → список доступных.
 
+**Мультиклиент (D.2, streamable-HTTP):** `python -m backend_ctl.mcp_server_sdk --http`
+[`--http-bind 127.0.0.1:8901`] — несколько агентов на одной живой системе одновременно
+(каждая MCP-сессия = свой driver/сокет/`session`, изоляция поверх D.1a; завершение сессии
+снимает её подписки). **Требует бэкенд с `session_isolation=ON`** (`BACKEND_CTL_SESSION_ISOLATION=1`)
+— иначе fail-fast отказ. Safety-режим per-server (нужны разные — два инстанса на разных портах).
+Дефолт остаётся stdio. Детали — [`DECISIONS.md`](DECISIONS.md) BCTL-ADR-005, [`README.md`](README.md).
+
 ### Примеры
 
 ```python

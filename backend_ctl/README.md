@@ -207,6 +207,39 @@ python -m backend_ctl.mcp_server [--host 127.0.0.1] [--port 8765] [--timeout 5]
 "backend-ctl": {"command": ".venv/bin/python", "args": ["-m", "backend_ctl.mcp_server"]}
 ```
 
+### SDK-сервер на официальном MCP SDK (BCTL-ADR-001)
+
+`backend_ctl/mcp_server_sdk.py` — тот же реестр инструментов на официальном SDK (`mcp`,
+extra `ctl`): tool-annotations, safety-режимы, actionable-ошибки. Дефолт — stdio (бит-в-бит
+с рукописным сервером для клиента):
+
+```bash
+python -m backend_ctl.mcp_server_sdk [--read-only | --disable-destructive]
+```
+
+### streamable-HTTP мультиклиент (D.2, BCTL-ADR-005)
+
+`--http` поднимает **streamable-HTTP** транспорт: несколько агентов (наблюдатель/
+экспериментатор/ревьюер) на одной живой системе одновременно. Каждая MCP-сессия получает
+свой `DriverSession` → сокет → `session`-uuid (изоляция поверх D.1a); завершение сессии
+(DELETE / idle-timeout / обрыв) снимает её durable-подписки.
+
+```bash
+python -m backend_ctl.mcp_server_sdk --http [--http-bind 127.0.0.1:8901] [--read-only]
+# --http-bind — адрес HTTP-СЕРВЕРА (не путать с --host/--port БЭКЕНДА)
+# env: BACKEND_CTL_HTTP_BIND, BACKEND_CTL_HTTP_IDLE_TIMEOUT (сек, default 1800)
+```
+
+**Инвариант:** HTTP-режим ТРЕБУЕТ бэкенд с `session_isolation=ON` (иначе broadcast течёт
+между сессиями). Сервер fail-fast проверяет флаг через `introspect.router_stats` и громко
+отказывает, если бэкенд поднят broadcast'ом. Подними бэкенд с `BACKEND_CTL_SESSION_ISOLATION=1`.
+**Safety-режим — per-server:** нужны одновременно read-only и full — два инстанса на разных
+портах (не per-session). `.mcp.json` с HTTP-транспортом:
+
+```json
+"backend-ctl-http": {"type": "http", "url": "http://127.0.0.1:8901/mcp"}
+```
+
 ## Тесты и headless-harness (Ф1 Task 1.3)
 
 `backend_ctl/harness.py::BackendHarness` — pytest-инструмент headless-запуска прототипа
