@@ -10,7 +10,7 @@ stdio/subprocess. Живой смоук (реальный `python -m backend_ctl
 from __future__ import annotations
 
 import json
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pytest
 
@@ -200,6 +200,207 @@ class TestSafetyModes:
         res = server.call_tool("send_command", {"target": "cam", "command": "recipe.activate"})
         assert "introspect." in _error_text(res)
         assert not any(c[0] == "send_command" for c in fake.calls)
+
+
+# --------------------------------------------------------------------------- #
+#  reset/reconnect ветки call_tool (Task 1.2) — покрытие потеряно вместе с    #
+#  mcp_server.py (b128c246, 844 строки), адаптировано под SDKToolServer +    #
+#  контракт Task 1.1 (ensure()/call_tool ловят BackendUnavailable ИЛИ        #
+#  ConnectionError, голый OSError больше не значит «связь оборвана»)         #
+# --------------------------------------------------------------------------- #
+
+
+class _SubFakeDriver:
+    """Fake-driver с реальной семантикой durable-подписок для проверки reconnect-replay.
+
+    Адаптация под Task 1.1: обрыв связи мид-вызов сигналится через ``ConnectionError``
+    (не голый ``OSError`` — тот теперь зарезервирован за файловыми ошибками record_*
+    и НЕ триггерит reset в call_tool).
+    """
+
+    def __init__(self) -> None:
+        self._intents: List[Dict[str, Any]] = []
+        self.replayed: List[Dict[str, Any]] = []
+        self.closed = False
+        self.fail = False
+
+    def state_subscribe(self, pattern: str, *, timeout: Any = None) -> Dict[str, Any]:
+        self._intents.append({"command": "state.subscribe", "target": "ProcessManager", "args": {"pattern": pattern}})
+        return {"success": True}
+
+    def log_tail(self, process: str, *, level: str = "ERROR", timeout: Any = None) -> Dict[str, Any]:
+        self._intents.append(
+            {"command": "log.tail.subscribe", "target": process, "args": {"subscriber": "backend_ctl", "level": level}}
+        )
+        return {"success": True}
+
+    def log_untail(self, process: str, *, timeout: Any = None) -> Dict[str, Any]:
+        self._intents = [
+            i for i in self._intents if not (i["command"] == "log.tail.subscribe" and i["target"] == process)
+        ]
+        return {"success": True}
+
+    def get_status(self, process: str, *, timeout: Any = None) -> Dict[str, Any]:
+        if self.fail:
+            raise ConnectionError("соединение оборвано")
+        return {"success": True, "method": "get_status"}
+
+    def export_subscriptions(self) -> List[Dict[str, Any]]:
+        return list(self._intents)
+
+    def import_subscriptions(self, intents: List[Dict[str, Any]]) -> None:
+        self._intents = list(intents)
+
+    def replay_subscriptions(self) -> List[Dict[str, Any]]:
+        self.replayed = list(self._intents)
+        return [{"command": i["command"], "target": i["target"], "success": True} for i in self._intents]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class TestResetReconnectBranches:
+    def test_backend_unavailable_resets_and_retries_next_call(self) -> None:
+        """Task 1.1: ensure() поднимает BackendUnavailable, когда фабрика driver'а не
+        может подключиться (OSError на connect). call_tool обязан её поймать и сбросить
+        сессию — иначе повторный вызов молча наследует ту же мёртвую попытку вместо
+        того, чтобы снова дёрнуть фабрику."""
+        attempts = {"n": 0}
+        fake = FakeDriver()
+
+        def factory() -> Any:
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise ConnectionRefusedError(61, "Connection refused")
+            return fake
+
+        server = SDKToolServer(driver_factory=factory, log=lambda m: None)
+
+        res1 = server.call_tool("get_status", {"process": "p"})
+        assert "бэкенд недоступен" in _error_text(res1)
+
+        res2 = server.call_tool("get_status", {"process": "p"})
+        assert json.loads(_text(res2))["success"] is True
+        assert attempts["n"] == 2  # после отказа сервер не кэширует мёртвую фабрику
+
+    def test_connection_error_mid_call_resets_and_retries_next_call(self) -> None:
+        """Task 1.1 сузил `except OSError` в call_tool до `except (ConnectionError,
+        BackendUnavailable)`: обрыв связи ПОСЛЕ успешного connect (driver жил, сокет умер
+        на самом вызове) обязан сбросить сессию (закрыть мёртвый driver), иначе следующий
+        вызов молча получил бы тот же нерабочий driver вместо реконнекта."""
+
+        class DyingDriver:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def get_status(self, *a: Any, **k: Any) -> Any:
+                raise ConnectionError("соединение оборвано")
+
+            def close(self) -> None:
+                self.closed = True
+
+        dying = DyingDriver()
+        healthy = FakeDriver()
+        seq = iter([dying, healthy])
+        server = SDKToolServer(driver_factory=lambda: next(seq), log=lambda m: None)
+
+        res1 = server.call_tool("get_status", {"process": "p"})
+        assert "соединение с бэкендом оборвано" in _error_text(res1)
+        assert dying.closed is True  # session.reset() закрыл мёртвый driver
+
+        res2 = server.call_tool("get_status", {"process": "p"})
+        assert json.loads(_text(res2))["success"] is True
+
+    def test_handler_exception_is_tool_error_not_protocol_error(self) -> None:
+        """Ошибка ВНУТРИ инструмента (не связанная с соединением) — это результат
+        инструмента (isError=True), а не протокольная ошибка: call_tool не должен
+        поднимать исключение наружу (иначе упал бы весь MCP-транспорт из-за одного
+        сбойного driver-вызова)."""
+
+        class BoomDriver(FakeDriver):
+            def __getattr__(self, name: str) -> Any:
+                def _boom(*a: Any, **k: Any) -> Any:
+                    raise RuntimeError("boom")
+
+                return _boom
+
+        server = SDKToolServer(driver_factory=lambda: BoomDriver(), log=lambda m: None)
+        res = server.call_tool("get_status", {"process": "p"})  # не должно бросить исключение
+        msg = _error_text(res)
+        assert "RuntimeError" in msg and "boom" in msg
+
+    def test_reconnect_replays_subscriptions_and_reports(self) -> None:
+        """Durable-подписки переживают реконнект (Task 0.3), а одноразовый отчёт о
+        реконнекте вливается РОВНО в один следующий ответ — не теряется и не дублируется."""
+        d1, d2 = _SubFakeDriver(), _SubFakeDriver()
+        seq = iter([d1, d2])
+        server = SDKToolServer(driver_factory=lambda: next(seq), log=lambda m: None)
+
+        # Агент подписался — намерение осело в реестре d1.
+        sub_res = server.call_tool("state_subscribe", {"pattern": "processes.**"})
+        assert json.loads(_text(sub_res))["success"] is True
+        assert d1.export_subscriptions(), "подписка должна осесть в реестре driver'а"
+
+        # Соединение оборвалось на следующем вызове → call_tool ловит ConnectionError, сбрасывает d1.
+        d1.fail = True
+        r1 = server.call_tool("get_status", {"process": "p"})
+        assert "оборвано" in _error_text(r1)
+        assert d1.closed is True
+
+        # Следующий вызов — новый driver d2, ensure() replay'ит намерения d1 на него.
+        r2 = server.call_tool("get_status", {"process": "p"})
+        payload = json.loads(_text(r2))
+        assert payload.get("reconnected") is True
+        assert any(x["command"] == "state.subscribe" for x in payload["resubscribed"])
+        assert d2.replayed, "replay должен реально выполниться на новом driver'е"
+
+        # Отчёт одноразовый (pop_reconnect_report очищается) — третий вызов его уже не несёт.
+        r3 = server.call_tool("get_status", {"process": "p"})
+        assert "reconnected" not in json.loads(_text(r3))
+
+    def test_no_reconnect_report_without_prior_subscriptions(self) -> None:
+        """Без подписок реконнект не докладывается (нечего восстанавливать) — иначе агент
+        решил бы, что что-то реально было переподключено/восстановлено."""
+        d1, d2 = _SubFakeDriver(), _SubFakeDriver()
+        seq = iter([d1, d2])
+        server = SDKToolServer(driver_factory=lambda: next(seq), log=lambda m: None)
+
+        d1.fail = True
+        server.call_tool("get_status", {"process": "p"})
+        r2 = server.call_tool("get_status", {"process": "p"})
+        payload = json.loads(_text(r2))
+        assert "reconnected" not in payload
+        assert d2.replayed == []
+
+    def test_unsubscribed_not_resurrected_after_second_reconnect(self) -> None:
+        """Регресс на MAJOR #1 старого ревью: агент отписался ДО обрыва → второй реконнект
+        не должен воскрешать снятую подписку (стухший _sub_intents не должен пережить
+        честный export пустого реестра на reset())."""
+        d1, d2, d3 = _SubFakeDriver(), _SubFakeDriver(), _SubFakeDriver()
+        seq = iter([d1, d2, d3])
+        server = SDKToolServer(driver_factory=lambda: next(seq), log=lambda m: None)
+
+        # (1) подписка на d1
+        server.call_tool("log_tail", {"process": "cam"})
+        assert d1.export_subscriptions()
+
+        # (2) обрыв → (3) реконнект d2 replay'ит подписку
+        d1.fail = True
+        server.call_tool("get_status", {"process": "p"})
+        r = json.loads(_text(server.call_tool("get_status", {"process": "p"})))
+        assert r.get("reconnected") is True
+        assert d2.replayed and d2.export_subscriptions()
+
+        # (4) агент отписался на d2 → реестр пуст
+        server.call_tool("log_untail", {"process": "cam"})
+        assert d2.export_subscriptions() == []
+
+        # (5) второй обрыв → (6) реконнект d3 НЕ должен воскрешать снятую подписку
+        d2.fail = True
+        server.call_tool("get_status", {"process": "p"})
+        r3 = json.loads(_text(server.call_tool("get_status", {"process": "p"})))
+        assert d3.replayed == [], "снятая подписка не должна воскресать после реконнекта"
+        assert "reconnected" not in r3
 
 
 # --------------------------------------------------------------------------- #
