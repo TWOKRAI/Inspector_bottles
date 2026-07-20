@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -32,6 +33,10 @@ class _FakeDriver:
     def __init__(self) -> None:
         self.closed = False
         self._events_tool_cursor: Optional[str] = None
+        # Часть контракта driver'а с Task 2.3: мост events берёт этот лок вокруг
+        # триплета «прочитал курсор → взял страницу → записал». Fake обязан его иметь —
+        # делать код терпимым к его отсутствию нельзя, это молча вернуло бы гонку.
+        self._tool_cursor_lock = threading.Lock()
 
     def export_subscriptions(self) -> List[Dict[str, Any]]:
         return []
