@@ -8,9 +8,11 @@ DriverSession с fake-factory (detached driver вместо сокета).
 
 from __future__ import annotations
 
+import os
+import threading
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import pytest
 
@@ -57,6 +59,73 @@ def test_path_confinement_rejects_separators(record_dir: Path) -> None:
     for bad in ["../escape", "sub/dir", "..", "a\\b", ""]:
         with pytest.raises(ValueError):
             resolve_record_path(bad)
+
+
+def test_path_confinement_rejects_reserved_device_names(record_dir: Path) -> None:
+    """Зарезервированные имена устройств ОС проходят проверку символов, но уводят из каталога.
+
+    ``NUL`` проглотил бы запись (success без файла), ``CON`` писал бы ленту в консоль —
+    на stdio-сервере прямо в MCP-транспорт, а ``record_load("CON")`` повесил бы сервер
+    на stdin. Проверка обязана быть по ФАКТИЧЕСКИ отрезолвленному пути, а не по символам.
+    """
+    for bad in ["CON", "NUL", "COM1", "LPT1", "AUX", "PRN", "nul", "con.jsonl"]:
+        with pytest.raises(ValueError):
+            resolve_record_path(bad)
+    # Контроль: обычное имя по-прежнему резолвится внутрь каталога записей.
+    good = resolve_record_path("good")
+    assert good.endswith("good.jsonl")
+    assert os.path.commonpath([str(record_dir / "records"), good]) == str(record_dir / "records")
+
+
+def test_read_tool_does_not_create_record_dir(record_dir: Path) -> None:
+    """Резолв для чтения не создаёт каталог побочным эффектом (пишет — только пишущий)."""
+    base = record_dir / "records"
+    assert not base.exists()
+    resolve_record_path("some_name")
+    assert not base.exists(), "read-путь создал каталог записей"
+    resolve_record_path("some_name", create_dir=True)
+    assert base.exists()
+
+
+def test_parallel_record_start_second_refuses_no_orphan(record_dir: Path, session_and_driver) -> None:
+    """Два одновременных record_start: ровно один стартует, второй честно отказывает.
+
+    Каждый tools/call уходит в свой поток (SDK-сервер отдаёт их в to_thread без
+    per-session сериализации), поэтому проверка «запись уже идёт» и присвоение
+    _recorder обязаны быть атомарны. Без лока проходят оба: сессия помнит только
+    вторую запись, а первая остаётся осиротевшим подписчиком на hot-path EventHub —
+    её никто уже не остановит и не отпишет.
+    """
+    session, drv = session_and_driver
+    before = len(drv._hub._subscribers)
+    barrier = threading.Barrier(2)
+    results: List[Dict[str, Any]] = []
+    lock = threading.Lock()
+
+    def racer(name: str) -> None:
+        barrier.wait()  # столкнуть вызовы максимально плотно
+        res = dispatch_tool(session, "record_start", {"name": name})
+        with lock:
+            results.append(res)
+
+    threads = [threading.Thread(target=racer, args=(f"race_{i}",)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10.0)
+
+    assert len(results) == 2
+    ok = [r for r in results if r.get("success")]
+    refused = [r for r in results if not r.get("success")]
+    assert len(ok) == 1, f"стартовали обе записи — гонка не закрыта: {results}"
+    assert len(refused) == 1
+    assert "уже идёт" in refused[0]["error"]
+
+    # Осиротевших подписчиков нет: ровно одна живая запись держит одну подписку.
+    assert len(drv._hub._subscribers) == before + 1
+    session.stop_recording()
+    # После остановки подписка снята полностью — hub вернулся к исходному состоянию.
+    assert len(drv._hub._subscribers) == before
 
 
 def test_record_start_bad_name_returns_error(record_dir: Path, session_and_driver) -> None:

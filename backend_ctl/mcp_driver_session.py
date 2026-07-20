@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from typing import Any, Dict, Optional
 
@@ -107,6 +108,13 @@ class DriverSession:
         self._mode: str = MODE_LIVE
         self._recorder: Optional[Recorder] = None
         self._replay: Optional[ReplayPlayer] = None
+        # Recorder-секция сериализуется целиком. Каждый tools/call уходит в свой поток
+        # (SDK-сервер: anyio.to_thread.run_sync без per-session очереди), поэтому проверка
+        # «запись уже идёт» и присвоение _recorder обязаны быть одной операцией — иначе
+        # два параллельных record_start оба проходят, и запись, потерявшая ссылку,
+        # остаётся осиротевшим подписчиком на hot-path EventHub навсегда.
+        # RLock (не Lock): start_recording держит его и заходит в ensure().
+        self._rec_lock = threading.RLock()
         # E.1: аудит-журнал мутаций (write/escalated) сессии. Ленивая инициализация
         # файла — при первой записи (read-only-сессия не создаёт файл). Тест может
         # подставить свой AuditLog.
@@ -147,44 +155,56 @@ class DriverSession:
         В replay-режиме запись не имеет смысла (нет живого потока) — обучающий отказ.
         Уже идёт запись — отказ (одна запись = один файл).
         """
-        if self._mode == MODE_REPLAY:
-            return {
-                "success": False,
-                "error": "нельзя писать в replay-режиме: сначала record_unload() для возврата к live",
-            }
-        if self._recorder is not None and self._recorder.active:
-            return {"success": False, "error": f"запись уже идёт в {self._recorder.path!r} — сначала record_stop()"}
-        drv = self.ensure()  # live-driver (может бросить BackendUnavailable — ловит сервер)
-        kwargs: Dict[str, Any] = {}
-        if max_events is not None:
-            kwargs["max_events"] = int(max_events)
-        if max_bytes is not None:
-            kwargs["max_bytes"] = int(max_bytes)
-        self._recorder = Recorder(drv, path, **kwargs)
-        return self._recorder.start()
+        with self._rec_lock:
+            if self._mode == MODE_REPLAY:
+                return {
+                    "success": False,
+                    "error": "нельзя писать в replay-режиме: сначала record_unload() для возврата к live",
+                }
+            if self._recorder is not None and self._recorder.active:
+                return {"success": False, "error": f"запись уже идёт в {self._recorder.path!r} — сначала record_stop()"}
+            drv = self.ensure()  # live-driver (может бросить BackendUnavailable — ловит сервер)
+            kwargs: Dict[str, Any] = {}
+            if max_events is not None:
+                kwargs["max_events"] = int(max_events)
+            if max_bytes is not None:
+                kwargs["max_bytes"] = int(max_bytes)
+            recorder = Recorder(drv, path, **kwargs)
+            out = recorder.start()
+            # Ссылку публикуем только на успешном старте: неудачно стартовавший Recorder
+            # не должен занять слот сессии и заблокировать следующий record_start.
+            if out.get("success"):
+                self._recorder = recorder
+            return out
 
     def stop_recording(self) -> Dict[str, Any]:
         """Остановить активную запись (footer reason=stopped). Нет записи → обучающий отказ."""
-        if self._recorder is None:
-            return {"success": False, "error": "нет активной записи (record_start сначала)"}
-        status = self._recorder.stop()
-        self._recorder = None
-        return status
+        with self._rec_lock:
+            if self._recorder is None:
+                return {"success": False, "error": "нет активной записи (record_start сначала)"}
+            status = self._recorder.stop()
+            self._recorder = None
+            return status
 
     def dump_recording(self, path: str) -> Dict[str, Any]:
         """One-shot дамп текущего arrival-кольца live-driver'а (§5.3, чёрный ящик)."""
-        if self._mode == MODE_REPLAY:
-            return {"success": False, "error": "record_dump доступен только в live-режиме (record_unload для возврата)"}
-        drv = self.ensure()
-        return _dump_recording_file(drv, path)
+        with self._rec_lock:
+            if self._mode == MODE_REPLAY:
+                return {
+                    "success": False,
+                    "error": "record_dump доступен только в live-режиме (record_unload для возврата)",
+                }
+            drv = self.ensure()
+            return _dump_recording_file(drv, path)
 
     def record_status(self) -> Dict[str, Any]:
         """Статус: активная запись (файл/счётчики) ЛИБО загруженный реплей (имя/позиция)."""
-        if self._replay is not None:
-            return self._replay.status()
-        if self._recorder is not None:
-            return self._recorder.status()
-        return {"success": True, "mode": self._mode, "recording": False, "replay": False}
+        with self._rec_lock:
+            if self._replay is not None:
+                return self._replay.status()
+            if self._recorder is not None:
+                return self._recorder.status()
+            return {"success": True, "mode": self._mode, "recording": False, "replay": False}
 
     def load_replay(
         self,
@@ -198,23 +218,25 @@ class DriverSession:
         Активная запись сначала должна быть остановлена (одна активность на сессию).
         Реплей ничего не пишет и не коннектится — session-локальный режим.
         """
-        if self._recorder is not None and self._recorder.active:
-            return {"success": False, "error": "идёт запись — сначала record_stop() перед загрузкой реплея"}
-        recording = load_recording(path)  # RecordingError ловит сервер (обучающий текст)
-        self._replay = ReplayPlayer(recording, position=position, ring_maxlen=ring_maxlen)
-        self._mode = MODE_REPLAY
-        out = self._replay.status()
-        out["truncated"] = recording.truncated
-        out["position_mode"] = position
-        return out
+        with self._rec_lock:
+            if self._recorder is not None and self._recorder.active:
+                return {"success": False, "error": "идёт запись — сначала record_stop() перед загрузкой реплея"}
+            recording = load_recording(path)  # RecordingError ловит сервер (обучающий текст)
+            self._replay = ReplayPlayer(recording, position=position, ring_maxlen=ring_maxlen)
+            self._mode = MODE_REPLAY
+            out = self._replay.status()
+            out["truncated"] = recording.truncated
+            out["position_mode"] = position
+            return out
 
     def unload_replay(self) -> Dict[str, Any]:
         """Выгрузить реплей, вернуть сессию в live (следующий ensure() переподключится)."""
-        if self._replay is None:
-            return {"success": False, "error": "нет загруженного реплея (record_load сначала)"}
-        self._replay = None
-        self._mode = MODE_LIVE
-        return {"success": True, "mode": MODE_LIVE, "unloaded": True}
+        with self._rec_lock:
+            if self._replay is None:
+                return {"success": False, "error": "нет загруженного реплея (record_load сначала)"}
+            self._replay = None
+            self._mode = MODE_LIVE
+            return {"success": True, "mode": MODE_LIVE, "unloaded": True}
 
     # ---- Аудит мутаций (E.1) ----
 
@@ -421,12 +443,15 @@ class DriverSession:
         driver'а — файл не остаётся без footer'а на обрыве/реконнекте сессии.
         """
         # Финализировать активную запись ДО закрытия driver'а (footer=disconnect).
-        if self._recorder is not None:
-            try:
-                self._recorder.stop(REASON_DISCONNECT)
-            except Exception:  # noqa: BLE001 — финализация не должна ронять сброс
-                pass
-            self._recorder = None
+        # Под тем же локом, что record_start/stop: сброс не должен пересечься с
+        # параллельным стартом записи и оставить её на закрытом driver'е.
+        with self._rec_lock:
+            if self._recorder is not None:
+                try:
+                    self._recorder.stop(REASON_DISCONNECT)
+                except Exception:  # noqa: BLE001 — финализация не должна ронять сброс
+                    pass
+                self._recorder = None
         if self._driver is not None:
             try:
                 # Синхронизируем БЕЗУСЛОВНО (в т.ч. с пустым списком): текущий driver —
