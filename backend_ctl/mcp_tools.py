@@ -1251,15 +1251,30 @@ _DEFAULT_RECORD_DIR = "./backend_ctl_records"
 #: Допустимое имя записи: буквы/цифры/._- (без разделителей путей и '..').
 _SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
+#: Зарезервированные имена устройств Windows. Они проходят проверку символов, но ОС
+#: резолвит их в устройство мимо каталога: "NUL" глотает запись (success без файла),
+#: "CON" пишет ленту в консоль — на stdio-сервере прямо в MCP-транспорт, а чтение с
+#: "CON" вешает сервер на stdin. Отсекаем по basename без расширения, регистронезависимо.
+_RESERVED_DEVICE_NAMES: frozenset = frozenset(
+    {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
+)
 
-def resolve_record_path(name: Any) -> str:
+
+def resolve_record_path(name: Any, *, create_dir: bool = False) -> str:
     """Имя записи → путь в BACKEND_CTL_RECORD_DIR (валидация: без разделителей/'..').
 
     Агент передаёт ИМЯ, а не путь — сервер удерживает файлы в отведённом каталоге
-    (§5.4): нельзя писать/читать произвольные пути. Каталог создаётся при записи.
+    (§5.4): нельзя писать/читать произвольные пути. Удержание проверяется не только
+    по символам имени, но и по ФАКТИЧЕСКИ отрезолвленному пути: только так ловятся
+    имена, которые ОС уводит за пределы каталога (зарезервированные устройства).
+
+    Args:
+        create_dir: создать каталог записей. Только для пишущих инструментов —
+            read-инструмент (record_load) не должен создавать каталог побочным эффектом.
 
     Raises:
-        ValueError: имя пустое, содержит разделители/'..' или недопустимые символы.
+        ValueError: имя пустое, содержит разделители/'..'/недопустимые символы,
+            зарезервировано ОС либо резолвится за пределы каталога записей.
     """
     if not isinstance(name, str) or not name:
         raise ValueError("record: требуется непустое имя записи (name)")
@@ -1267,10 +1282,23 @@ def resolve_record_path(name: Any) -> str:
         raise ValueError(f"недопустимое имя записи {name!r}: без разделителей путей и '..' (только имя, не путь)")
     if not _SAFE_NAME_RE.match(name):
         raise ValueError(f"недопустимое имя записи {name!r}: только буквы/цифры/._- ")
+    stem = name.split(".", 1)[0].upper()
+    if stem in _RESERVED_DEVICE_NAMES:
+        raise ValueError(
+            f"недопустимое имя записи {name!r}: {stem} — зарезервированное имя устройства ОС "
+            "(запись ушла бы в устройство, а не в файл). Выбери другое имя, например "
+            f"{name}_rec."
+        )
     filename = name if name.endswith(".jsonl") else f"{name}.jsonl"
-    base = os.environ.get(_RECORD_DIR_ENV) or _DEFAULT_RECORD_DIR
-    os.makedirs(base, exist_ok=True)
-    return os.path.abspath(os.path.join(base, filename))
+    base = os.path.abspath(os.environ.get(_RECORD_DIR_ENV) or _DEFAULT_RECORD_DIR)
+    if create_dir:
+        os.makedirs(base, exist_ok=True)
+    path = os.path.abspath(os.path.join(base, filename))
+    # Финальная проверка удержания: сверяем отрезолвленный путь, а не исходное имя —
+    # это последний рубеж, ловящий всё, что ОС увела за пределы каталога.
+    if os.path.commonpath([base, path]) != base:
+        raise ValueError(f"недопустимое имя записи {name!r}: путь уходит за пределы каталога записей {base!r}")
+    return path
 
 
 # ---- Session-owned handlers (session, arguments) ----
@@ -1280,10 +1308,10 @@ class _ArgError(Exception):
     """Ошибка разбора аргумента record-инструмента → обучающий error-dict, не сырой ValueError."""
 
 
-def _resolve_or_error(name: Any) -> str:
+def _resolve_or_error(name: Any, *, create_dir: bool = False) -> str:
     """Резолв имени записи в путь; ValueError валидации → :class:`_ArgError`."""
     try:
-        return resolve_record_path(name)
+        return resolve_record_path(name, create_dir=create_dir)
     except ValueError as exc:
         raise _ArgError(str(exc)) from exc
 
@@ -1300,7 +1328,7 @@ def _int_arg_or_error(value: Any, field: str) -> Optional[int]:
 
 def _record_start(session: Any, args: Dict[str, Any]) -> Any:
     try:
-        path = _resolve_or_error(args.get("name"))
+        path = _resolve_or_error(args.get("name"), create_dir=True)
         max_events = _int_arg_or_error(args.get("max_events"), "max_events")
     except _ArgError as exc:
         return {"success": False, "error": str(exc)}
@@ -1317,7 +1345,7 @@ def _record_status(session: Any, args: Dict[str, Any]) -> Any:
 
 def _record_dump(session: Any, args: Dict[str, Any]) -> Any:
     try:
-        path = _resolve_or_error(args.get("name"))
+        path = _resolve_or_error(args.get("name"), create_dir=True)
     except _ArgError as exc:
         return {"success": False, "error": str(exc)}
     return session.dump_recording(path)

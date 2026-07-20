@@ -179,6 +179,56 @@ def test_queue_overflow_counts_dropped(tmp_path: Path) -> None:
     rec.stop()
 
 
+def test_events_during_header_collection_are_not_lost(tmp_path: Path) -> None:
+    """Окно старта записи: сбор header'а не мгновенен — поток за это время не теряется.
+
+    На живом бэкенде ``collect_header`` делает fan-out overview + полное state-дерево +
+    телеметрию, это сотни мс. Если подписаться ПОСЛЕ снимка, всё пришедшее за окно
+    пропадает молча: в снимок не вошло (он снят раньше), в ленту не вошло (подписки
+    ещё нет), а ``dropped`` остаётся 0. Здесь окно воспроизводится замедленным сбором.
+    """
+    drv = _detached_driver()
+    rec = Recorder(drv, str(tmp_path / "r.jsonl"))
+    original = rec._collect_header
+
+    def slow_header() -> Dict[str, Any]:
+        # Поток событий идёт, пока собирается снимок — ровно то самое окно.
+        for i in range(5):
+            drv._emit_event(_state_push("processes.cam.state.fps", float(i)))
+        time.sleep(0.2)
+        return original()
+
+    rec._collect_header = slow_header  # type: ignore[method-assign]
+    rec.start()
+    status = rec.stop()
+
+    # Ни одно событие окна не потеряно и не списано в dropped.
+    assert status["events_written"] == 5, "события окна старта потеряны"
+    assert status["dropped"] == 0
+
+    lines = _read_lines(str(tmp_path / "r.jsonl"))
+    header = lines[0]
+    # Граница окна зафиксирована в header: подписка раньше готовности снимка.
+    assert header["subscribed_ts"] <= header["header_ready_ts"]
+    events = [ln for ln in lines if "event" in ln]
+    assert len(events) == 5
+    # События окна помечены: они могли уже отразиться в снимке (при реплее — идемпотентно).
+    assert all(ln.get("pre_header") is True for ln in events)
+
+
+def test_events_after_header_are_not_marked_pre_header(tmp_path: Path) -> None:
+    """Обычная строка ленты (событие после снимка) остаётся прежней формы — без флага."""
+    drv = _detached_driver()
+    rec = Recorder(drv, str(tmp_path / "r.jsonl"))
+    rec.start()
+    drv._emit_event(_state_push("processes.cam.state.fps", 30.0))
+    rec.stop()
+
+    events = [ln for ln in _read_lines(str(tmp_path / "r.jsonl")) if "event" in ln]
+    assert len(events) == 1
+    assert "pre_header" not in events[0]
+
+
 def test_clean_stop_drains_all_no_drop(tmp_path: Path) -> None:
     """Чистый стоп (не лимит) дописывает ВСЁ поставленное в очередь — dropped=0."""
     drv = _detached_driver()

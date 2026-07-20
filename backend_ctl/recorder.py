@@ -102,8 +102,17 @@ class RecordWriter:
         self._write_line(header)
         self._fh.flush()
 
-    def write_event(self, seq: int, ts: float, event: Dict[str, Any]) -> None:
-        self._write_line({"seq": seq, "ts": ts, "event": event})
+    def write_event(self, seq: int, ts: float, event: Dict[str, Any], *, pre_header: bool = False) -> None:
+        """Записать событие ленты. ``pre_header`` — событие пришло, пока собирался снимок.
+
+        Ключ ``pre_header`` пишется ТОЛЬКО когда он True: обычная строка ленты остаётся
+        прежней формы, а помеченные несут честный сигнал «это могло уже попасть в снимок»
+        (при реплее переприменяется идемпотентно).
+        """
+        row: Dict[str, Any] = {"seq": seq, "ts": ts, "event": event}
+        if pre_header:
+            row["pre_header"] = True
+        self._write_line(row)
 
     def flush(self) -> None:
         if not self._closed:
@@ -162,13 +171,18 @@ def _collect_state(drv: Any) -> Any:
     return drv.send_command("ProcessManager", "state.get_subtree", {"path": ""})
 
 
-def collect_header(drv: Any, created_ts: float) -> Dict[str, Any]:
+def collect_header(drv: Any, created_ts: float, *, subscribed_ts: Optional[float] = None) -> Dict[str, Any]:
     """Снимок системы для строки-header (best-effort по секциям).
 
     Переиспользуется :class:`Recorder` (старт записи) и :func:`dump_recording`
     (one-shot дамп чёрного ящика) — один сборщик header'а, не два.
+
+    ``subscribed_ts`` — момент, с которого лента уже пишется. Он РАНЬШЕ секций снимка:
+    сбор снимка тяжёлый (fan-out overview + полное state-дерево), и всё, что прилетело
+    за это время, обязано быть в ленте. Наличие поля даёт читателю честную границу
+    «снимок собран не мгновенно» вместо иллюзии атомарного среза.
     """
-    return {
+    header: Dict[str, Any] = {
         "format": FORMAT,
         "version": VERSION,
         "created_ts": created_ts,
@@ -185,6 +199,12 @@ def collect_header(drv: Any, created_ts: float) -> Dict[str, Any]:
             "events_stats": _safe_section("events_stats", lambda: drv.events_stats()),
         },
     }
+    if subscribed_ts is not None:
+        header["subscribed_ts"] = subscribed_ts
+        # Момент готовности снимка: события ленты с ts до него собирались параллельно
+        # со снимком и могут в нём уже отражаться (помечаются pre_header).
+        header["header_ready_ts"] = time.time()
+    return header
 
 
 class Recorder:
@@ -242,6 +262,11 @@ class Recorder:
         self._finalize_lock = threading.Lock()
         self._subscriptions: List[Dict[str, Any]] = []
         self._created_ts: float = 0.0
+        # Границы окна старта: подписка активна с _subscribed_ts, снимок готов к
+        # _header_ready_ts. События между ними попадают и в ленту (помечены pre_header),
+        # и потенциально в снимок — дубль честно виден, потери нет.
+        self._subscribed_ts: float = 0.0
+        self._header_ready_ts: float = 0.0
 
     @property
     def path(self) -> str:
@@ -254,7 +279,15 @@ class Recorder:
     # ---- Старт ----
 
     def start(self) -> Dict[str, Any]:
-        """Собрать header, подписаться на hub, поднять writer-поток.
+        """Подписаться на hub, собрать header, поднять writer-поток.
+
+        Порядок критичен. Подписка идёт ПЕРВОЙ, до сбора header'а: сбор снимка тяжёлый
+        (fan-out ``system_overview`` + полное state-дерево + телеметрия — сотни мс на
+        живом бэкенде), и если подписываться после него, всё пришедшее за это окно не
+        попадает ни в снимок (он снят раньше), ни в ленту (подписки ещё нет) — при
+        ``dropped == 0``, то есть потеря невидима. Колбэк ТОЛЬКО кладёт в очередь,
+        поэтому подписка до writer-потока безопасна: события копятся в bounded-очереди
+        и сливаются, как только поток поднимется.
 
         Returns:
             ``{"success": True, "path", "subscriptions": [...], "hint"?}`` — если
@@ -264,16 +297,23 @@ class Recorder:
         if self.active:
             return {"success": False, "error": "запись уже идёт"}
         self._created_ts = time.time()
-        header = self._collect_header()
-        self._subscriptions = list(header.get("subscriptions") or [])
-
-        self._writer = RecordWriter(self._path)
-        self._writer.write_header(header)
-
-        # Подписка ДО старта потока: колбэк лёгкий (только enqueue).
+        self._subscribed_ts = time.time()
         self._listener = self._drv.subscribe(self._on_event)
-        self._thread = threading.Thread(target=self._writer_loop, name="bctl-recorder", daemon=True)
-        self._thread.start()
+        try:
+            header = self._collect_header()
+            self._header_ready_ts = float(header.get("header_ready_ts") or time.time())
+            self._subscriptions = list(header.get("subscriptions") or [])
+
+            self._writer = RecordWriter(self._path)
+            self._writer.write_header(header)
+
+            self._thread = threading.Thread(target=self._writer_loop, name="bctl-recorder", daemon=True)
+            self._thread.start()
+        except BaseException:
+            # Старт не доехал (не открылся файл, сорвался сбор) — снять подписку, иначе
+            # мёртвый подписчик остаётся на hot-path EventHub и держит Recorder замыканием.
+            self._detach_listener()
+            raise
 
         out: Dict[str, Any] = {"success": True, "path": self._path, "subscriptions": self._subscriptions}
         if not self._subscriptions:
@@ -285,7 +325,17 @@ class Recorder:
 
     def _collect_header(self) -> Dict[str, Any]:
         """Снимок системы для строки-header (делегат :func:`collect_header`)."""
-        return collect_header(self._drv, self._created_ts)
+        return collect_header(self._drv, self._created_ts, subscribed_ts=self._subscribed_ts)
+
+    def _detach_listener(self) -> None:
+        """Снять подписку с hub'а, идемпотентно. Teardown не роняем."""
+        if self._listener is None:
+            return
+        try:
+            self._drv.unsubscribe(self._listener)
+        except Exception:  # noqa: BLE001 — teardown не роняем
+            pass
+        self._listener = None
 
     # ---- Колбэк подписки (reader-поток) ----
 
@@ -354,7 +404,7 @@ class Recorder:
                             self._dropped += len(batch) - idx
                         hit_limit = True
                         break
-                    writer.write_event(seq, ts, event)
+                    writer.write_event(seq, ts, event, pre_header=ts < self._header_ready_ts)
                     self._events_written += 1
                 writer.flush()
                 if hit_limit:
@@ -382,27 +432,27 @@ class Recorder:
             self._finalized = True
         # Отписка — на ВСЕХ путях завершения (stop/limit/disconnect), идемпотентно:
         # иначе мёртвый подписчик копится в EventHub и держит Recorder через замыкание.
-        if self._listener is not None:
-            try:
-                self._drv.unsubscribe(self._listener)
-            except Exception:  # noqa: BLE001 — teardown не роняем
-                pass
-            self._listener = None
+        self._detach_listener()
         writer = self._writer
         if writer is None:
             return
         with self._qlock:
             reason, events_written, dropped = self._reason, self._events_written, self._dropped
-        writer.write_footer(
-            {
-                "footer": True,
-                "stopped_ts": time.time(),
-                "events_written": events_written,
-                "dropped": dropped,
-                "reason": reason,
-            }
-        )
-        writer.close()
+        # close() — в finally: отказ записи footer'а (ENOSPC, битый дескриптор) не должен
+        # утекать файловым дескриптором. Повтор невозможен (_finalized уже True), поэтому
+        # закрыть обязаны здесь и сейчас.
+        try:
+            writer.write_footer(
+                {
+                    "footer": True,
+                    "stopped_ts": time.time(),
+                    "events_written": events_written,
+                    "dropped": dropped,
+                    "reason": reason,
+                }
+            )
+        finally:
+            writer.close()
 
     # ---- Стоп (идемпотентно, все пути) ----
 
@@ -805,14 +855,18 @@ def replay_await_condition(
         drv.unsubscribe(listener)
 
     replay = {"position": player.playhead, "of": player.total}
+    # elapsed_sec — часть контракта ответа живого await_condition (и на успехе, и на
+    # таймауте). Оффлайн прокрутка мгновенна, поэтому 0.0, но поле обязано быть: клиент
+    # разбирает один и тот же ответ независимо от режима сессии.
     if waiter.matched is not None:
-        return {"success": True, "kind": kind, "matched": waiter.matched, "replay": replay}
+        return {"success": True, "kind": kind, "matched": waiter.matched, "elapsed_sec": 0.0, "replay": replay}
     return {
         "success": False,
         "timed_out": True,
         "end_of_recording": True,
         "kind": kind,
         "waited": dict(spec) if isinstance(spec, dict) else spec,
+        "elapsed_sec": 0.0,
         "events_seen": waiter.events_seen,
         "last_seen": waiter.last_seen,
         "replay": replay,

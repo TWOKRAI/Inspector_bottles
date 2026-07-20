@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import collections
 import time
-from typing import Any
+from typing import Any, Callable
 
 # Суффиксы путей телеметрии, для которых копится кольцевой буфер ИСТОРИИ (спарклайны).
 # Это НАБОР ИСТОРИИ read-модели, а НЕ зеркало publish-gate (``GATED_METRICS`` в
