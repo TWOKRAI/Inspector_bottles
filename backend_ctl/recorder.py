@@ -889,7 +889,9 @@ def replay_await_condition(
     from backend_ctl.conditions import setup_condition
 
     drv = player.driver
-    setup = setup_condition(drv, kind, spec)
+    # scan_history=True — только здесь (Task 4.2): над записью «будущего» нет, и при
+    # дефолтном position='end' event_matches не мог совпасть в принципе.
+    setup = setup_condition(drv, kind, spec, scan_history=True)
     if isinstance(setup, dict):  # ошибка валидации kind/spec — обучающий текст
         return setup
     waiter, initial_check = setup

@@ -250,3 +250,52 @@ def test_await_invalid_kind_learning_error(tmp_path: Path) -> None:
     res = player.await_condition("nonsense", {"path": "x", "value": 1})
     assert res["success"] is False
     assert "kind" in res["error"]
+
+
+# --------------------------------------------------------------------------- #
+#  Task 4.2 — await_condition(event_matches) на дефолтной позиции               #
+# --------------------------------------------------------------------------- #
+
+
+def test_event_matches_finds_event_already_in_recording(tmp_path: Path) -> None:
+    """position='end' (ДЕФОЛТ) + событие ИЗ записи → matched, а не end_of_recording.
+
+    Находка ultra-ревью: initial_check для event_matches всегда возвращал None («ждём
+    только новые»), а над записью с playhead'ом в конце новых нет по определению —
+    флагманская фича отладки была мертва в дефолтной конфигурации.
+    """
+    path = str(tmp_path / "ev.jsonl")
+    _record_fps_session(path, [10.0, 20.0, 30.0])
+
+    player = ReplayPlayer(load_recording(path), position="end")
+    res = player.await_condition("event_matches", {"plane": "all", "pattern": "state.changed"})
+
+    assert res.get("success") is True, f"ожидалось попадание по записи, пришло {res}"
+    assert res.get("timeout") is not True
+    assert "end_of_recording" not in str(res)
+
+
+def test_event_matches_still_reports_miss_when_nothing_matches(tmp_path: Path) -> None:
+    """Отсутствие совпадения по-прежнему честный промах — скан не выдаёт ложных срабатываний."""
+    path = str(tmp_path / "ev2.jsonl")
+    _record_fps_session(path, [10.0])
+
+    player = ReplayPlayer(load_recording(path), position="end")
+    res = player.await_condition("event_matches", {"plane": "all", "pattern": "такой.команды.нет"})
+
+    assert res.get("success") is not True
+
+
+def test_live_await_still_waits_only_for_new_events() -> None:
+    """Live-семантика не изменилась: прошлые события живой await НЕ подхватывает.
+
+    scan_history ставит только replay-путь; иначе живой await начал бы срабатывать
+    на том, что уже уехало в кольца, — это другое поведение, его не просили.
+    """
+    from backend_ctl.conditions import setup_condition
+
+    drv = _detached_driver()
+    drv._emit_event(_state_push("processes.cam.state.fps", 42.0))  # прошлое событие
+
+    waiter, initial_check = setup_condition(drv, "event_matches", {"plane": "all", "pattern": "state.changed"})
+    assert initial_check() is None, "живой await не должен видеть прошлые события"

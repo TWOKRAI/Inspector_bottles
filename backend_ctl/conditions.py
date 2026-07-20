@@ -196,13 +196,21 @@ def await_condition(
 # ---- Настройка предикатов по kind: (waiter, initial_check) либо error-dict ----
 
 
-def setup_condition(drv: Any, kind: str, spec: Optional[Dict[str, Any]]):
+def setup_condition(drv: Any, kind: str, spec: Optional[Dict[str, Any]], *, scan_history: bool = False):
     """Собрать ``(waiter, initial_check)`` по ``(kind, spec)`` либо вернуть error-dict.
 
     Публичная точка переиспользования предикатов: живой :func:`await_condition`
     и offline-реплей (``recorder.replay_await_condition``) строят один и тот же
     предикат из одних настройщиков — без второго парсера условий. Валидация
     ``kind``/``spec`` — обучающая ошибка (error-dict), не таймаут.
+
+    Args:
+        scan_history: искать совпадение ещё и в УЖЕ НАКОПЛЕННЫХ кольцах событий, а не
+            только среди новых (Task 4.2). Ставит ТОЛЬКО replay-путь: над записью
+            «будущего» нет, а при дефолтном ``position='end'`` playhead уже в конце —
+            ``event_matches`` не мог совпасть в принципе и всегда отдавал
+            ``end_of_recording``. Живой await семантику не меняет: там «ждём новое» —
+            это ровно то, что просили, а прошлое читается через ``events_page``.
     """
     if kind not in KINDS:
         return _error(f"неизвестный kind {kind!r}: ожидаю один из {list(KINDS)}")
@@ -212,7 +220,7 @@ def setup_condition(drv: Any, kind: str, spec: Optional[Dict[str, Any]]):
         return _setup_state_path(drv, spec)
     if kind == "metric_threshold":
         return _setup_metric_threshold(drv, spec)
-    return _setup_event_matches(spec)
+    return _setup_event_matches(spec, drv=drv, scan_history=scan_history)
 
 
 def _setup_state_path(drv: Any, spec: Dict[str, Any]):
@@ -287,7 +295,7 @@ def _setup_metric_threshold(drv: Any, spec: Dict[str, Any]):
     return waiter, initial_check
 
 
-def _setup_event_matches(spec: Dict[str, Any]):
+def _setup_event_matches(spec: Dict[str, Any], *, drv: Any = None, scan_history: bool = False):
     plane, pattern = spec.get("plane"), spec.get("pattern")
     if plane not in (ALL_PLANE, *PLANES):
         return _error(f"event_matches требует spec.plane из {[ALL_PLANE, *PLANES]}, получено {plane!r}")
@@ -314,10 +322,45 @@ def _setup_event_matches(spec: Dict[str, Any]):
         return None
 
     def initial_check() -> Optional[Dict[str, Any]]:
-        return None  # прошлые события — через events_page; ждём только новые
+        # Live: прошлые события — через events_page; ждём только новые.
+        if not scan_history or drv is None:
+            return None
+        # Replay (Task 4.2): «новых» событий не будет — при position='end' лента уже
+        # прокручена. Ищем совпадение в уже наполненных кольцах ТЕМ ЖЕ предикатом:
+        # второго парсера условий не появляется.
+        return _scan_rings(drv, plane, predicate)
 
     waiter = _Waiter(predicate)
     return waiter, initial_check
+
+
+def _scan_rings(drv: Any, plane: str, predicate: Any) -> Optional[Dict[str, Any]]:
+    """Прогнать предикат по уже накопленным кольцам hub'а (для replay-инициализации).
+
+    Читает недеструктивно и СВОИМ курсором с начала (``cursor=None``), страницами —
+    чужие читатели плоскости не затрагиваются. Первое совпадение возвращается сразу.
+    Kind ``event_matches`` работает над оригинальными сообщениями arrival-кольца,
+    поэтому сканируем ``ALL_PLANE``: классификацию по плоскостям делает сам предикат.
+    """
+    cursor: Any = None
+    while True:
+        try:
+            page = drv.events_page(ALL_PLANE, cursor=cursor, limit=500)
+        except Exception:  # noqa: BLE001 — недоступные кольца не должны ронять await
+            return None
+        if not page.get("success", True):
+            return None
+        items = page.get("items") or []
+        for item in items:
+            event = item.get("event")
+            if isinstance(event, dict):
+                hit = predicate(event)
+                if hit is not None:
+                    return hit
+        next_cursor = page.get("next_cursor")
+        if not items or next_cursor == cursor:
+            return None  # догнали хвост — совпадения в записи нет
+        cursor = next_cursor
 
 
 def _read_model_entry(drv: Any, path: str) -> tuple[bool, Any]:
