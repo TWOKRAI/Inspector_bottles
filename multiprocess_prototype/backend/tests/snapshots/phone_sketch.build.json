@@ -102,7 +102,7 @@
           "config": {
             "chain_targets": [],
             "plugins": [],
-            "priority": "normal"
+            "priority": null
           },
           "state": {
             "error": null,
@@ -1025,13 +1025,13 @@
     "observability_config_path": "<ROOT>/multiprocess_prototype/backend/config/system.yaml",
     "replace_debounce_s": 1.0,
     "state_throttle_rules": {
-      "processes.**.state.drops": 5.0,
-      "processes.**.state.fps": 1.0,
-      "processes.**.state.frame_count": 2.0,
-      "processes.**.state.latency_ms": 1.0,
-      "processes.**.state.uptime": 1.0,
-      "processes.**.workers.*.cycle_duration_ms": 1.0,
-      "processes.**.workers.*.effective_hz": 1.0
+      "processes.**.state.drops": 0.05,
+      "processes.**.state.fps": 0.05,
+      "processes.**.state.frame_count": 0.05,
+      "processes.**.state.latency_ms": 0.05,
+      "processes.**.state.uptime": 0.05,
+      "processes.**.workers.*.cycle_duration_ms": 0.05,
+      "processes.**.workers.*.effective_hz": 0.05
     },
     "sys_config": {
       "backend_ctl": {
@@ -3616,8 +3616,8 @@
   },
   "process_count": 7,
   "process_names": [
-    "gui",
     "devices",
+    "gui",
     "camera_0",
     "seg",
     "lines",
