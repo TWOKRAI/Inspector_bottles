@@ -26,6 +26,7 @@ queues=false`) бампит incarnation процесса (`_bump_incarnation` + 
 
 Собственные порты ≥8790 (изоляция от общих фикстур: ловушка «двух бэкендов»).
 """
+
 from __future__ import annotations
 
 import time
@@ -120,6 +121,4 @@ def test_stale_passes_without_fence_red(monkeypatch) -> None:
         _restart_peer(drv)
         time.sleep(6.0)  # столько же, сколько окно GREEN — честное отсутствие дропов
         dropped = _fence_dropped(drv, "ProcessManager")
-        assert dropped == 0, (
-            f"при FW_FENCE=0 стейл не должен дропаться fence-фильтром, но fence_dropped={dropped}"
-        )
+        assert dropped == 0, f"при FW_FENCE=0 стейл не должен дропаться fence-фильтром, но fence_dropped={dropped}"

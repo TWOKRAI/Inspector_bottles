@@ -27,6 +27,7 @@ import time
 from contextlib import contextmanager
 
 import pytest
+from backend_ctl.protocol import unwrap
 
 from backend_ctl.harness import BackendHarness
 from backend_ctl.tests.conftest import bookmark_cursor as _bookmark
@@ -48,12 +49,6 @@ def _status_pid(drv, name: str):
             return node.get("pid"), node.get("status")
         node = node.get("result") if isinstance(node, dict) else None
     return None, None
-
-
-def _result(res: dict) -> dict:
-    if isinstance(res, dict) and isinstance(res.get("result"), dict):
-        return res["result"]
-    return res if isinstance(res, dict) else {}
 
 
 @contextmanager
@@ -98,7 +93,7 @@ def test_default_on_restarts_unpoliced_process_green() -> None:
     """GREEN: kill non-policed процесса → авто-рестарт по глобальному дефолту +
     supervisor-события (crashed/restarting → recovered), новый pid."""
     with _backend(_PORT_GREEN, autorestart=None) as (harness, drv):
-        sub = _result(drv.state_subscribe(f"processes.{_PROC}.**", timeout=8.0))
+        sub = unwrap(drv.state_subscribe(f"processes.{_PROC}.**", timeout=8.0), leaf=True)
         assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
         cursor = _bookmark(drv)  # осушить накопленное
 

@@ -23,6 +23,7 @@ wire.configure в пересозданный инстанс) → broken_wires с
 from __future__ import annotations
 
 import time
+from backend_ctl.protocol import unwrap
 
 import pytest
 
@@ -37,13 +38,6 @@ _PORT = 8782  # уникальный порт (8770-8781 заняты)
 
 _BROKEN = "system.health.broken_wires"
 _WIRE_STATUS = f"system.wires.{_WIRE}.status"
-
-
-def _result(res: dict) -> dict:
-    """Развернуть result-конверт ответа (см. test_health_live._result)."""
-    if isinstance(res, dict) and isinstance(res.get("result"), dict):
-        return res["result"]
-    return res if isinstance(res, dict) else {}
 
 
 @pytest.fixture(scope="module")
@@ -92,17 +86,19 @@ def test_broken_wires_honest_and_recovers(wire_backend) -> None:
     from multiprocess_prototype.main import DEFAULT_BLUEPRINT
 
     bp = load_topology_dict(DEFAULT_BLUEPRINT)
-    applied = _result(drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp}, timeout=30.0))
+    applied = unwrap(
+        drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp}, timeout=30.0), leaf=True
+    )
     assert applied.get("success") is True, f"topology.apply не success: {applied}"
     time.sleep(3.0)  # дать процессам подняться + первый heartbeat
 
     # --- Подписка на health/wire-ветки ДО манипуляций ---
-    sub = _result(drv.state_subscribe("system.**", timeout=8.0))
+    sub = unwrap(drv.state_subscribe("system.**", timeout=8.0), leaf=True)
     assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
     cursor = _bookmark(drv)  # осушить накопленное (курсор → «хвост сейчас»)
 
     # --- Синтетический провод devices→preprocessor (путь B, обычно GUI-only) ---
-    ws = _result(
+    ws = unwrap(
         drv.send_command(
             "ProcessManager",
             "wire.setup",
@@ -114,7 +110,8 @@ def test_broken_wires_honest_and_recovers(wire_backend) -> None:
                 "shm_config": {"shm_name": "syn_frames", "buffer_slots": 4},
             },
             timeout=10.0,
-        )
+        ),
+        leaf=True,
     )
     assert ws.get("success") is True, f"wire.setup не success: {ws}"
 
@@ -123,7 +120,9 @@ def test_broken_wires_honest_and_recovers(wire_backend) -> None:
     assert active == "active", f"wire не 'active' при живой топологии: {active}"
 
     # --- Разрыв: stop peer → endpoint мёртв → broken_wires ≥ 1 (honest) ---
-    stopped = _result(drv.send_command("ProcessManager", "process.stop", {"process_name": _PEER}, timeout=15.0))
+    stopped = unwrap(
+        drv.send_command("ProcessManager", "process.stop", {"process_name": _PEER}, timeout=15.0), leaf=True
+    )
     assert stopped.get("success") is True, f"process.stop не success: {stopped}"
 
     broken, cursor = _wait_path(drv, _BROKEN, lambda v: isinstance(v, int) and v >= 1, time.time() + 20.0, cursor)
@@ -133,7 +132,7 @@ def test_broken_wires_honest_and_recovers(wire_backend) -> None:
 
     # --- Восстановление: restart peer → re-issue wire.configure → broken_wires 0 ---
     cursor = _bookmark(drv)  # осушить буфер до restart (изолировать post-restart серию)
-    r = _result(drv.send_command("ProcessManager", "process.restart", {"process_name": _PEER}, timeout=30.0))
+    r = unwrap(drv.send_command("ProcessManager", "process.restart", {"process_name": _PEER}, timeout=30.0), leaf=True)
     assert r.get("success") is True, f"process.restart не success: {r}"
 
     # Копим серию broken_wires после restart: re-issue вернул wire в active,

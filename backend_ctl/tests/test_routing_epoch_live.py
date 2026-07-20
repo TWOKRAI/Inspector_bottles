@@ -20,6 +20,7 @@ switch (FullReplacePlanner пересоздаёт ВСЕ non-protected) выжи
 from __future__ import annotations
 
 import time
+from backend_ctl.protocol import unwrap
 
 import pytest
 
@@ -34,13 +35,6 @@ _PEER = "preprocessor"  # non-protected → пересоздаётся на swit
 # обязан стартовать с чистого бэкенда, иначе relayed_to_hub-проба ложно растёт.
 _PORT_SWITCH = 8778  # уникальные порты (≥8770)
 _PORT_RESTART = 8779
-
-
-def _result(res: dict) -> dict:
-    """Развернуть result-конверт ответа (см. test_health_live._result)."""
-    if isinstance(res, dict) and isinstance(res.get("result"), dict):
-        return res["result"]
-    return res if isinstance(res, dict) else {}
 
 
 @pytest.fixture(scope="module")
@@ -72,7 +66,7 @@ def _probe(drv, sender: str, peer: str, tag: str) -> dict:
         "command": "health.report",
         "data": {"context": "routing-probe", "message": f"probe:{tag}"},
     }
-    return _result(drv.send_command(sender, "routing.probe", {"target": peer, "inner": inner}, timeout=5.0))
+    return unwrap(drv.send_command(sender, "routing.probe", {"target": peer, "inner": inner}, timeout=5.0), leaf=True)
 
 
 def _wait_health_errors(drv, peer: str, deadline: float, cursor=None, *, min_errors: int = 1):
@@ -113,7 +107,7 @@ def test_peer_send_after_switch_delivered(switch_backend) -> None:
     """peer→peer send выжившего процесса после switch доставляется (acceptance A)."""
     drv = switch_backend
 
-    sub = _result(drv.state_subscribe(f"processes.{_PEER}.**", timeout=8.0))
+    sub = unwrap(drv.state_subscribe(f"processes.{_PEER}.**", timeout=8.0), leaf=True)
     assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
     cursor = _bookmark(drv)  # осушить накопленное
 
@@ -127,7 +121,9 @@ def test_peer_send_after_switch_delivered(switch_backend) -> None:
     from multiprocess_prototype.main import DEFAULT_BLUEPRINT
 
     bp = load_topology_dict(DEFAULT_BLUEPRINT)
-    applied = _result(drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp}, timeout=30.0))
+    applied = unwrap(
+        drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp}, timeout=30.0), leaf=True
+    )
     assert applied.get("success") is True, f"topology.apply не success: {applied}"
 
     time.sleep(3.0)  # дать новому preprocessor подняться + первый heartbeat
@@ -144,7 +140,7 @@ def test_peer_send_after_restart_delivered(restart_backend) -> None:
     """peer→peer send после restart соседа доставлен И relayed_to_hub==0 (acceptance B)."""
     drv = restart_backend
 
-    sub = _result(drv.state_subscribe(f"processes.{_PEER}.**", timeout=8.0))
+    sub = unwrap(drv.state_subscribe(f"processes.{_PEER}.**", timeout=8.0), leaf=True)
     assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
     cursor = _bookmark(drv)
 
@@ -153,7 +149,7 @@ def test_peer_send_after_restart_delivered(restart_backend) -> None:
     assert baseline and baseline >= 1, f"baseline probe {_SENDER}→{_PEER} не доставлен: {baseline}"
 
     # Restart одного процесса: peer пересоздан, devices выживает.
-    r = _result(drv.send_command("ProcessManager", "process.restart", {"process_name": _PEER}, timeout=30.0))
+    r = unwrap(drv.send_command("ProcessManager", "process.restart", {"process_name": _PEER}, timeout=30.0), leaf=True)
     assert r.get("success") is True, f"process.restart не success: {r}"
     time.sleep(3.0)
     cursor = _bookmark(drv)

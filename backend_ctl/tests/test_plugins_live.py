@@ -18,19 +18,13 @@ import shutil
 from pathlib import Path
 
 import pytest
+from backend_ctl.protocol import unwrap
 
 from backend_ctl.harness import BackendHarness
 
 _PORT = 8776  # уникальный порт этого модуля (≥8770)
 _PROBE_PREFIX = "_f23_broken_probe_"
 _PLUGINS_ROOT = Path(__file__).resolve().parents[2] / "Plugins"
-
-
-def _result(res: dict) -> dict:
-    """Развернуть result-конверт (ответ PM приходит уже развёрнутым)."""
-    if isinstance(res, dict) and isinstance(res.get("result"), dict):
-        return res["result"]
-    return res if isinstance(res, dict) else {}
 
 
 @pytest.fixture(scope="module")
@@ -72,7 +66,7 @@ class TestPluginsVisibilityLive:
     def test_typo_plugin_visible_via_driver(self, plugins_backend, broken_plugin_dir) -> None:
         """Acceptance Ф2.3: сломанный модуль виден в failed_imports через driver."""
         res = plugins_backend.introspect_plugins("ProcessManager", timeout=8.0)
-        body = _result(res)
+        body = unwrap(res, leaf=True)
         assert body.get("success") is True, body
 
         failed = body.get("failed_imports") or {}
@@ -83,7 +77,7 @@ class TestPluginsVisibilityLive:
     def test_healthy_plugins_still_registered(self, plugins_backend) -> None:
         """Сломанный модуль не мешает остальному каталогу (contain, not crash)."""
         res = plugins_backend.introspect_plugins("ProcessManager", timeout=8.0)
-        body = _result(res)
+        body = unwrap(res, leaf=True)
         assert body.get("success") is True, body
         assert body.get("count", 0) > 0
         assert body.get("plugins")

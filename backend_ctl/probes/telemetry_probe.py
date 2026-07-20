@@ -22,13 +22,7 @@ import json
 import os
 import sys
 import time
-
-
-def _unwrap(res: dict) -> dict:
-    """Достать вложенный handler-результат: request() → {success, result:{...}}."""
-    if not isinstance(res, dict):
-        return {}
-    return res.get("result") if isinstance(res.get("result"), dict) else res
+from backend_ctl.protocol import unwrap
 
 
 def main() -> int:
@@ -58,7 +52,7 @@ def main() -> int:
             #    process.command) — в CommandManager (поле `commands`); события
             #    (state.changed) — в event_dispatcher (поле `router_handlers`).
             res = drv.introspect_handlers("ProcessManager", timeout=8.0)
-            inner = _unwrap(res)
+            inner = unwrap(res, leaf=True)
             rh = inner.get("router_handlers") or []
             cmds = inner.get("commands") or []
             print(f"[1] introspect.handlers(ProcessManager): success={res.get('success')}")
@@ -76,7 +70,7 @@ def main() -> int:
                 {"pattern": "processes.**", "subscriber": "backend_ctl_probe", "exclude_sources": []},
                 timeout=6.0,
             )
-            sub_r = _unwrap(sub)
+            sub_r = unwrap(sub, leaf=True)
             print(
                 f"[2] state.subscribe(processes.**): success={sub.get('success')}, "
                 f"status={sub_r.get('status')}, sub_id={sub_r.get('sub_id')}"
@@ -85,7 +79,7 @@ def main() -> int:
 
             # 3. state.get(processes) — публикует ли ProcessMonitor телеметрию?
             got = drv.send_command("ProcessManager", "state.get", {"path": "processes"}, timeout=6.0)
-            got_r = _unwrap(got)
+            got_r = unwrap(got, leaf=True)
             value = got_r.get("value")
             print(f"[3] state.get(processes): success={got.get('success')}, status={got_r.get('status')}")
             vs = json.dumps(value, ensure_ascii=False)
@@ -97,7 +91,7 @@ def main() -> int:
             # 4. Статус живого процесса
             for proc in ("camera_0", "ProcessManager"):
                 st = drv.introspect_status(proc, timeout=5.0)
-                print(f"[4] introspect.status({proc}): {json.dumps(_unwrap(st), ensure_ascii=False)[:400]}")
+                print(f"[4] introspect.status({proc}): {json.dumps(unwrap(st, leaf=True), ensure_ascii=False)[:400]}")
     finally:
         print("\n[probe] гашу систему (PID-specific)...")
         launcher.shutdown()

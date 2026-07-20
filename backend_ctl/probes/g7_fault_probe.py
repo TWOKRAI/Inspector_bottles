@@ -32,6 +32,8 @@ import sys
 import time
 from pathlib import Path
 
+from backend_ctl.protocol import unwrap
+
 from backend_ctl.probes.g1_perf_probe import _shm_counters
 
 _RECIPES = Path(__file__).resolve().parent.parent.parent / "multiprocess_prototype" / "recipes"
@@ -42,21 +44,15 @@ _CONSUMER = "consumer"  # читатель (loan-потребитель)
 _PORT = 8791  # свой порт (изоляция от общих фикстур/занятых 8765-8779)
 
 
-def _unwrap(res: dict) -> dict:
-    if not isinstance(res, dict):
-        return {}
-    return res.get("result") if isinstance(res.get("result"), dict) else res
-
-
 def _fps(drv, process: str, worker: str) -> float | None:
     """effective_hz воркера процесса из introspect.status (None если недоступен)."""
-    st = _unwrap(drv.introspect_status(process, timeout=6.0))
+    st = unwrap(drv.introspect_status(process, timeout=6.0), leaf=True)
     workers = st.get("workers", {}) if isinstance(st, dict) else {}
     return (workers.get(worker, {}) or {}).get("effective_hz")
 
 
 def _alive(drv, process: str) -> str | None:
-    st = _unwrap(drv.introspect_status(process, timeout=6.0))
+    st = unwrap(drv.introspect_status(process, timeout=6.0), leaf=True)
     return st.get("status") if isinstance(st, dict) else None
 
 

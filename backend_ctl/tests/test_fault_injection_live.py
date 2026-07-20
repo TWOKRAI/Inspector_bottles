@@ -35,13 +35,6 @@ _SOURCE = "camera_0"  # source-плагин capture; non-protected → авто-
 _PORT = 8783
 
 
-def _result(res: dict) -> dict:
-    """Развернуть result-конверт ответа (см. test_routing_epoch_live._result)."""
-    if isinstance(res, dict) and isinstance(res.get("result"), dict):
-        return res["result"]
-    return res if isinstance(res, dict) else {}
-
-
 def _status_pid(drv, name: str) -> tuple[int | None, str | None]:
     """(pid, status) из introspect.status процесса; (None, None) при недоступности."""
     try:
@@ -114,10 +107,8 @@ def test_source_death_triggers_auto_restart(fault_backend) -> None:
         time.sleep(1.0)
 
     assert isinstance(pid_2, int) and pid_2 > 0, (
-        f"source '{_SOURCE}' не воскрес после SIGKILL за 25с (авто-рестарт не сработал): "
-        f"pid={pid_2}, status={status_2}"
+        f"source '{_SOURCE}' не воскрес после SIGKILL за 25с (авто-рестарт не сработал): pid={pid_2}, status={status_2}"
     )
     assert pid_2 != pid_1, (
-        f"pid не изменился ({pid_1}) — процесс не был пересоздан монитором "
-        f"(смерть → авто-рестарт не доказана)"
+        f"pid не изменился ({pid_1}) — процесс не был пересоздан монитором (смерть → авто-рестарт не доказана)"
     )

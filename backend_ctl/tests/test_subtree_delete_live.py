@@ -23,6 +23,7 @@ backend_ctl/AGENTS.md, project_concurrent_backends_trap).
 from __future__ import annotations
 
 import time
+from backend_ctl.protocol import unwrap
 
 import pytest
 
@@ -33,13 +34,6 @@ _PORT = 8785
 _ROOT = "processes._selftest_subtree"
 
 
-def _result(res: dict) -> dict:
-    """Развернуть result-конверт ответа (см. test_health_live._result)."""
-    if isinstance(res, dict) and isinstance(res.get("result"), dict):
-        return res["result"]
-    return res if isinstance(res, dict) else {}
-
-
 def _merge(drv, path: str, data: dict, *, timeout: float = 8.0) -> dict:
     """state.merge с явным маркером конверта (ADR-SS-017: STATE_ENVELOPE_MARKER).
 
@@ -48,7 +42,7 @@ def _merge(drv, path: str, data: dict, *, timeout: float = 8.0) -> dict:
     сообщение с вложенным data» (envelope = наш payload), и ``path`` теряется.
     """
     args = {"path": path, "data": data, "source": "backend_ctl", STATE_ENVELOPE_MARKER: True}
-    return _result(drv.send_command("ProcessManager", "state.merge", args, timeout=timeout))
+    return unwrap(drv.send_command("ProcessManager", "state.merge", args, timeout=timeout), leaf=True)
 
 
 def _wait_metrics(drv, deadline: float, *, present: tuple[str, ...] = (), absent: tuple[str, ...] = ()) -> dict:
@@ -69,7 +63,7 @@ def test_subtree_delete_cleans_read_model() -> None:
     harness = BackendHarness(with_base=True, port=_PORT)
     try:
         drv = harness.start()
-        sub = _result(drv.state_subscribe(f"{_ROOT}.**", timeout=8.0))
+        sub = unwrap(drv.state_subscribe(f"{_ROOT}.**", timeout=8.0), leaf=True)
         assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
 
         # Поддерево-жертва: два листа под "a" — мержим ПРЯМО в узел "{_ROOT}.a" плоскими
@@ -95,7 +89,9 @@ def test_subtree_delete_cleans_read_model() -> None:
         assert sibling in metrics, f"read-model не наполнился соседом a2.leaf: {sorted(metrics)}"
 
         # --- Удаление поддерева-родителя ЕДИНОЙ командой (сервер шлёт ОДНУ дельту на "{_ROOT}.a") ---
-        deleted = _result(drv.send_command("ProcessManager", "state.delete", {"path": f"{_ROOT}.a"}, timeout=8.0))
+        deleted = unwrap(
+            drv.send_command("ProcessManager", "state.delete", {"path": f"{_ROOT}.a"}, timeout=8.0), leaf=True
+        )
         assert deleted.get("status") == "ok" and deleted.get("changed") is True, f"state.delete не ok: {deleted}"
 
         snap = _wait_metrics(drv, time.time() + 15.0, absent=(leaf1, leaf2))

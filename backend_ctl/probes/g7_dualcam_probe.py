@@ -24,6 +24,8 @@ import sys
 import time
 from pathlib import Path
 
+from backend_ctl.protocol import unwrap
+
 from backend_ctl.probes.g1_perf_probe import _shm_counters
 
 _RECIPES = Path(__file__).resolve().parent.parent.parent / "multiprocess_prototype" / "recipes"
@@ -36,20 +38,14 @@ _SRC_WORKER = "source_producer_synthetic_frame_source"
 _CON_WORKER = "data_receiver"
 
 
-def _unwrap(res: dict) -> dict:
-    if not isinstance(res, dict):
-        return {}
-    return res.get("result") if isinstance(res.get("result"), dict) else res
-
-
 def _fps(drv, process: str, worker: str):
-    st = _unwrap(drv.introspect_status(process, timeout=8.0))
+    st = unwrap(drv.introspect_status(process, timeout=8.0), leaf=True)
     workers = st.get("workers", {}) if isinstance(st, dict) else {}
     return (workers.get(worker, {}) or {}).get("effective_hz")
 
 
 def _cycles(drv, process: str, worker: str):
-    st = _unwrap(drv.introspect_status(process, timeout=8.0))
+    st = unwrap(drv.introspect_status(process, timeout=8.0), leaf=True)
     workers = st.get("workers", {}) if isinstance(st, dict) else {}
     return (workers.get(worker, {}) or {}).get("cycles")
 

@@ -15,17 +15,11 @@ live-модулями). См. project_concurrent_backends_trap.
 from __future__ import annotations
 
 import pytest
+from backend_ctl.protocol import unwrap
 
 from backend_ctl.harness import BackendHarness
 
 _PORT = 8781  # уникальный порт этого модуля
-
-
-def _result(res: dict) -> dict:
-    """Развернуть result-конверт ответа (см. test_health_live._result)."""
-    if isinstance(res, dict) and isinstance(res.get("result"), dict):
-        return res["result"]
-    return res if isinstance(res, dict) else {}
 
 
 @pytest.fixture(scope="module")
@@ -48,8 +42,8 @@ def test_switch_reports_all_ready(ready_backend) -> None:
     from multiprocess_prototype.main import DEFAULT_BLUEPRINT
 
     bp = load_topology_dict(DEFAULT_BLUEPRINT)
-    applied = _result(
-        drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp}, timeout=30.0)
+    applied = unwrap(
+        drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp}, timeout=30.0), leaf=True
     )
 
     assert applied.get("success") is True, f"topology.apply не success: {applied}"

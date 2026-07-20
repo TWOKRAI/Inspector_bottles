@@ -28,15 +28,10 @@ import sys
 import time
 from pathlib import Path
 
+from backend_ctl.protocol import unwrap
+
 _RECIPES = Path(__file__).resolve().parent.parent.parent / "multiprocess_prototype" / "recipes"
 _RECIPE = _RECIPES / "g1_perf_probe.yaml"
-
-
-def _unwrap(res: dict) -> dict:
-    """Достать вложенный handler-результат: request() → {success, result:{...}}."""
-    if not isinstance(res, dict):
-        return {}
-    return res.get("result") if isinstance(res.get("result"), dict) else res
 
 
 #: Счётчики потерь/здоровья SHM-тракта, агрегируемые ``RouterManager.get_stats``
@@ -62,7 +57,7 @@ def _shm_counters(router_stats_res: dict) -> dict:
     либо (реже) плоско. Отсутствующий счётчик → ``0`` (int). Чистая функция над
     dict-контрактом — юнит-тестируется без запуска системы.
     """
-    payload = _unwrap(router_stats_res)
+    payload = unwrap(router_stats_res, leaf=True)
     rs = payload.get("router_stats", payload) if isinstance(payload, dict) else {}
     if not isinstance(rs, dict):
         rs = {}
@@ -82,8 +77,8 @@ def main() -> int:
     with harness as drv:
         time.sleep(duration)
 
-        source_status = _unwrap(drv.introspect_status("synthetic_source", timeout=8.0))
-        consumer_status = _unwrap(drv.introspect_status("consumer", timeout=8.0))
+        source_status = unwrap(drv.introspect_status("synthetic_source", timeout=8.0), leaf=True)
+        consumer_status = unwrap(drv.introspect_status("consumer", timeout=8.0), leaf=True)
         # Ф7 G.7 лесенка: счётчики потерь SHM обоих концов тракта (source = владелец/
         # писатель кольца → slots_released/reclaimed/loan_exhausted/queue_data_evicted;
         # consumer = reader → torn_reads/stale_drops/handle_cache_size). Гейт шага (§0)
