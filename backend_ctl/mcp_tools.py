@@ -42,8 +42,17 @@ DEFAULT_HISTORY_LIMIT = 100
 #: Потолок сериализации тяжёлого ответа (байт). Свыше — усечение до карты формы,
 #: полный объём — по явному ``full=true``.
 RESPONSE_BYTE_CAP = 12000
-#: Тяжёлые read-инструменты, к ответам которых применяется byte-cap (concise-дефолт).
-_HEAVY_TOOLS: frozenset = frozenset({"state_get_subtree", "system_overview", "telemetry_history"})
+#: Инструменты, к ответам которых byte-cap НЕ применяется. Политика инвертирована
+#: (Task 3.2): раньше это был белый список тяжёлых, и любой НОВЫЙ инструмент по
+#: умолчанию отдавал неограниченный объём — fail-open, о котором никто не вспоминал,
+#: пока контекст агента не заливало. Теперь урезается всё, кроме перечисленного здесь.
+#:
+#: Исключения — не «маленькие», а те, для кого усечение ЛОМАЕТ контракт:
+#:   * ``events``/``events_page`` — курсор уже продвинулся, усечённые события потеряны
+#:     безвозвратно, а у events_page в ответе ещё и next_cursor (позиция читателя);
+#:   * ``register_snapshot`` — снимок целиком является входом для register_restore.
+#: Их объём ограничивается своими средствами (limit/max_items), а не байтовым потолком.
+_UNCAPPED_TOOLS: frozenset = frozenset({"events", "events_page", "register_snapshot"})
 
 
 @dataclass(frozen=True)
@@ -1474,7 +1483,7 @@ def _cap_heavy(name: str, result: Any, args: Dict[str, Any]) -> Any:
     сузить path / запросить полный объём. Агент видит СТРУКТУРУ и ценные малые данные,
     не глотая 50К токенов.
     """
-    if name not in _HEAVY_TOOLS or args.get("full"):
+    if name in _UNCAPPED_TOOLS or args.get("full"):
         return result
     try:
         size = len(json.dumps(result, ensure_ascii=False, default=str))
@@ -1547,8 +1556,11 @@ def dispatch_tool(session: Any, name: str, arguments: Optional[Dict[str, Any]]) 
             session.record_audit(name, safety, arguments, error=exc)
             raise
         session.record_audit(name, safety, arguments, result=result)
-        return result
-    # E.3: read-путь тяжёлых инструментов — усечение по размеру (full=true снимает).
+        # Task 3.2: cap и на audited-ветке. В журнал пишется ПОЛНЫЙ результат (аудит
+        # обязан быть точным), а агенту уходит усечённый — раньше write-путь обходил
+        # потолок целиком, и send_command('state.get_subtree') заливал контекст.
+        return _cap_heavy(name, result, arguments)
+    # E.3: усечение по размеру (full=true снимает).
     return _cap_heavy(name, spec.handler(driver, arguments), arguments)
 
 

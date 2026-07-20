@@ -853,8 +853,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """
         with self._pending_commits_lock:
             entries = list(self._rollback_journal)
-        if limit is not None and limit >= 0:
-            entries = entries[-limit:]
+        if limit is not None:
+            # limit>0 → последние N; limit==0 → пусто («последние 0 записей»);
+            # limit<0 (бессмыслица) → пусто. Нельзя entries[-limit:]: при limit==0
+            # это entries[0:], то есть ВЕСЬ журнал вместо пустого (зеркало контракта
+            # telemetry_history — там та же ловушка falsy-slice уже закрыта).
+            entries = entries[-limit:] if limit > 0 else []
         return {"success": True, "entries": entries}
 
     def _cancel_all_pending_commits(self) -> None:
