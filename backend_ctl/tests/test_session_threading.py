@@ -180,7 +180,9 @@ def test_failed_capabilities_fetch_does_not_clobber_good_cache() -> None:
 
 def test_parallel_audit_log_init_creates_single_journal(tmp_path, monkeypatch) -> None:
     """Ленивый аудит-журнал инициализируется один раз даже под конкуренцией."""
-    monkeypatch.setenv("BACKEND_CTL_AUDIT_DIR", str(tmp_path))
+    # BACKEND_CTL_AUDIT — путь ФАЙЛА журнала (не каталога): изоляция теста должна быть
+    # настоящей, иначе журнал уедет в рабочий каталог, как только тест начнёт писать.
+    monkeypatch.setenv("BACKEND_CTL_AUDIT", str(tmp_path / "audit.jsonl"))
     session = DriverSession(driver_factory=lambda: _CountingFakeDriver(0), log=lambda _m: None)
 
     journals = _run_concurrently(session._audit_log)

@@ -121,3 +121,27 @@ def test_audited_write_path_is_capped_too() -> None:
     # В журнал уходит ПОЛНЫЙ результат: аудит обязан быть точным, усечение — только для агента.
     logged_result = audited[-1][1].get("result")
     assert logged_result is not None and "_truncated" not in logged_result
+
+
+def test_session_log_is_capped_too() -> None:
+    """session_log больше не обходит потолок (находка ревью Task 3.2).
+
+    Ветка session-owned инструментов уходила early-return'ом МИМО _cap_heavy. Каждая
+    аудит-запись несёт до 4КБ args + 4КБ result, а дефолтный session_log отдаёт всё
+    кольцо — до ~1.6МБ в контекст агента без opt-in full=true.
+    """
+    from backend_ctl.mcp_tools import dispatch_tool
+
+    class _FatAuditSession:
+        mode = "live"
+
+        def read_audit(self, limit: Any = None) -> Dict[str, Any]:
+            entries = [{"seq": i, "tool": "set_register", "args": {"blob": "x" * 400}} for i in range(200)]
+            return {"success": True, "entries": entries, "count": len(entries), "path": "audit.jsonl"}
+
+    out = dispatch_tool(_FatAuditSession(), "session_log", {})
+    assert out["_truncated"] is True, "session_log обязан урезаться как все прочие"
+    assert out["_bytes"] > RESPONSE_BYTE_CAP
+
+    full = dispatch_tool(_FatAuditSession(), "session_log", {"full": True})
+    assert "_truncated" not in full, "явный full=true по-прежнему отдаёт всё"

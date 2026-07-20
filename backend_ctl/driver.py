@@ -1356,11 +1356,13 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             # Триплет «прочитал курсор → взял страницу → записал курсор» под локом
             # (Task 2.3): иначе параллельный вызов отдаёт ту же страницу второй раз.
             with self._tool_cursor_lock:
-                page = page_with_reset_retry(
-                    lambda c: self.events_page(cursor=c),
-                    self._obs_records_cursor,
-                )
-                self._obs_records_cursor = page.get("next_cursor")
+                cursor = self._obs_records_cursor
+                page = page_with_reset_retry(lambda c: self.events_page(cursor=c), cursor)
+                # Провал обеих попыток (двойная ротация gen между ними) — СОХРАНИТЬ старый
+                # курсор, а не обнулить: page.get("next_cursor") дал бы None, и следующий
+                # вызов перечитал бы весь ринг логов заново. Семантика едина с мостом
+                # MCP-инструмента events (ревью Task 2.3).
+                self._obs_records_cursor = page.get("next_cursor", cursor)
             source: List[Dict[str, Any]] = [it["event"] for it in page.get("items", [])]
         else:
             source = events

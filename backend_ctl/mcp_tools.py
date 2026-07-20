@@ -1516,10 +1516,14 @@ def dispatch_tool(session: Any, name: str, arguments: Optional[Dict[str, Any]]) 
     KeyError — неизвестный инструмент (решает вызывающий сервер).
     """
     arguments = arguments or {}
+    # Cap и здесь (ревью Task 3.2): раньше session-owned ветки уходили early-return'ом
+    # МИМО _cap_heavy, и байтовый потолок обходился собственным исключением. Опаснее
+    # прочих именно session_log: каждая аудит-запись несёт до 4КБ args + 4КБ result, а
+    # дефолтный вызов отдаёт всё кольцо — до ~1.6МБ в контекст агента без opt-in full=true.
     if name in RECORD_HANDLERS:
-        return RECORD_HANDLERS[name](session, arguments)
+        return _cap_heavy(name, RECORD_HANDLERS[name](session, arguments), arguments)
     if name == "session_log":
-        return _session_log(session, arguments)
+        return _cap_heavy(name, _session_log(session, arguments), arguments)
     if session.mode == _MODE_REPLAY:
         served = _serve_replay(session, name, arguments)
         if served is not _REPLAY_REJECT:

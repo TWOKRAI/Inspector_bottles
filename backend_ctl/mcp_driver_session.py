@@ -313,11 +313,10 @@ class DriverSession:
                 drv = self.ensure()
                 self._caps = drv.capabilities()
             except Exception:  # noqa: BLE001 — валидация опциональна, не роняем инструмент
-                # НЕ затираем удачный кэш соседа своей неудачей: обнуляем только если
-                # кэша всё ещё нет. Иначе один сбойный сбор ослеплял бы валидацию
-                # send_command для всей сессии.
-                if self._caps is None:
-                    self._caps = None
+                # Кэш НЕ трогаем вовсе: неудачный refresh не должен ослеплять валидацию
+                # send_command на всю сессию, стирая ранее собранный свод. Пусто было —
+                # пусто и останется; был свод — переживёт сбой.
+                pass
             return self._caps
 
     def validate_send_command(self, arguments: Dict[str, Any]) -> Optional[str]:

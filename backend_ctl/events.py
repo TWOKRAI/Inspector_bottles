@@ -266,7 +266,10 @@ class EventHub:
             try:
                 cb(msg)
             except Exception:  # noqa: BLE001 — контракт: колбэк не роняет reader
-                self._event_errors += 1
+                # Под локом: emit() публичен через dispatch_raw, значит «инкрементит
+                # только reader-поток» больше не гарантия (симметрия с _late_replies).
+                with self._cv:
+                    self._event_errors += 1
 
     def wake(self) -> None:
         """Разбудить ожидающих в drain(timeout): новых событий не будет (close())."""
