@@ -50,13 +50,24 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
     # Fan-out параллельно по процессам: request() конкурентно-безопасен by design
     # (pending-слоты по request_id, один reader), а 4 серийных round-trip'а × N
     # процессов превращали бы «один вызов = вся картина» в серийный обход.
-    def _collect(proc: str) -> tuple:
-        return (
-            drv.worker_status(proc, timeout=timeout),
-            drv.router_stats(proc, timeout=timeout),
-            drv.queues(proc, timeout=timeout),
-            drv.introspect_memory(proc, timeout=timeout),
-        )
+    def _collect(proc: str) -> Any:
+        """Секция одного процесса; ЛЮБОЙ сбой возвращается значением, не исключением.
+
+        Контракт модуля — best-effort: «не ответившая ручка — честная пометка, остальные
+        секции работают». Но исключение внутри пула (не error-dict, а именно raise:
+        разрыв соединения, кривой ответ) пробивалось наружу через ``pool.map`` и роняло
+        ВЕСЬ overview — первая команда сессии падала целиком из-за одного больного
+        процесса. Возвращаем исключение как значение и разбираем ниже.
+        """
+        try:
+            return (
+                drv.worker_status(proc, timeout=timeout),
+                drv.router_stats(proc, timeout=timeout),
+                drv.queues(proc, timeout=timeout),
+                drv.introspect_memory(proc, timeout=timeout),
+            )
+        except Exception as exc:  # noqa: BLE001 — сбой одного процесса не должен рушить сводку
+            return exc
 
     collected: Dict[str, tuple] = {}
     if procs:
@@ -64,7 +75,22 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             collected = dict(zip(procs, pool.map(_collect, procs)))
 
     for proc in procs:
-        ws, rs, qd, mem = collected[proc]
+        section = collected[proc]
+        if isinstance(section, BaseException):
+            processes[proc] = {
+                "ok": False,
+                "error": f"{type(section).__name__}: {section}",
+                "process": proc,
+            }
+            anomalies.append(
+                {
+                    "kind": "introspect_failed",
+                    "process": proc,
+                    "detail": f"сбор секции упал: {type(section).__name__}: {section}",
+                }
+            )
+            continue
+        ws, rs, qd, mem = section
         # Воркеры — до статус-строки: сводка компактна, детали — get_status.
         workers = {name: (w.get("status") if isinstance(w, dict) else w) for name, w in ws.workers.items()}
         failed_handles = [
@@ -124,18 +150,49 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
 
     events_stats = drv.events_stats()
     events_evicted = {plane: st["evicted"] for plane, st in events_stats.get("planes", {}).items() if st.get("evicted")}
-    driver_section = {
+
+    # Счётчики driver'а КУМУЛЯТИВНЫ: одна давняя ошибка светилась аномалией в КАЖДОЙ
+    # последующей сводке, и «свежая беда» была неотличима от «шрама» (Task 5.3).
+    # Флагаем только прирост с прошлого overview; lifetime-значения остаются в ответе
+    # плоскими ключами (на них опираются потребители), дельты — рядом в ``deltas``.
+    totals = {
         "late_replies": drv.late_replies,
         "event_errors": drv.event_errors,
         "watch_resub_errors": drv.watch_resub_errors,
+    }
+    seen = getattr(drv, "_overview_counters_seen", None) or {}
+    deltas = {key: value - seen.get(key, 0) for key, value in totals.items()}
+    try:
+        drv._overview_counters_seen = dict(totals)  # noqa: SLF001 — память сводки на этом driver'е
+    except Exception:  # noqa: BLE001 — fake-driver без сеттера не должен ронять сводку
+        pass
+
+    driver_section = {
+        **totals,
+        "deltas": deltas,
         "events_evicted": events_evicted,
     }
-    if drv.late_replies > 0:
-        anomalies.append({"kind": "late_replies", "detail": f"late_replies={drv.late_replies}"})
-    if drv.event_errors > 0:
-        anomalies.append({"kind": "event_callback_errors", "detail": f"event_errors={drv.event_errors}"})
-    if drv.watch_resub_errors > 0:
-        anomalies.append({"kind": "watch_resub_errors", "detail": f"watch_resub_errors={drv.watch_resub_errors}"})
+    if deltas["late_replies"] > 0:
+        anomalies.append(
+            {
+                "kind": "late_replies",
+                "detail": f"late_replies +{deltas['late_replies']} (всего {totals['late_replies']})",
+            }
+        )
+    if deltas["event_errors"] > 0:
+        anomalies.append(
+            {
+                "kind": "event_callback_errors",
+                "detail": f"event_errors +{deltas['event_errors']} (всего {totals['event_errors']})",
+            }
+        )
+    if deltas["watch_resub_errors"] > 0:
+        anomalies.append(
+            {
+                "kind": "watch_resub_errors",
+                "detail": f"watch_resub_errors +{deltas['watch_resub_errors']} (всего {totals['watch_resub_errors']})",
+            }
+        )
     for plane, evicted in events_evicted.items():
         anomalies.append(
             {"kind": "events_evicted", "detail": f"плоскость {plane!r}: вытеснено {evicted} (читатели отстают)"}

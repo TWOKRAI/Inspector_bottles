@@ -166,3 +166,61 @@ class TestAnomalies:
         assert res["processes"]["cam"]["ok"] is False
         hits = [a for a in res["anomalies"] if a["kind"] == "introspect_failed"]
         assert hits and "memory" in hits[0]["detail"]
+
+
+class TestOverviewResilience:
+    """Task 5.3 — сводка не падает целиком и не помнит старые беды вечно."""
+
+    def test_throwing_process_does_not_kill_whole_overview(self, monkeypatch) -> None:
+        """Исключение по ОДНОМУ процессу → у него error-секция, остальные собраны.
+
+        Контракт модуля — best-effort, но raise внутри пула (разрыв связи, кривой ответ)
+        пробивался через pool.map и ронял ВЕСЬ overview: первая команда сессии падала
+        целиком из-за одного больного процесса.
+        """
+        d = BackendDriver()
+        _fake_backend(monkeypatch, d, procs=["cam", "плохой"], responses=_healthy_responses())
+
+        healthy_worker_status = d.worker_status
+
+        def boom(proc: str, **kw: Any) -> Any:
+            if proc == "плохой":
+                raise ConnectionError("процесс не отвечает")
+            return healthy_worker_status(proc, **kw)
+
+        monkeypatch.setattr(d, "worker_status", boom)
+        res = d.system_overview()
+
+        assert res["success"] is True, "сводка обязана собраться, несмотря на больной процесс"
+        assert res["processes"]["cam"]["status"] == "running", "здоровый процесс обязан быть собран"
+        bad = res["processes"]["плохой"]
+        assert bad["ok"] is False
+        assert "ConnectionError" in bad["error"], "причина обязана быть названа, а не проглочена"
+        assert any(a["kind"] == "introspect_failed" and a.get("process") == "плохой" for a in res["anomalies"])
+
+    def test_cumulative_counter_flags_once_not_forever(self, monkeypatch) -> None:
+        """Счётчик тикнул один раз → аномалия в первой сводке, но не во второй.
+
+        Счётчики driver'а кумулятивны: раньше одна давняя ошибка светилась в КАЖДОЙ
+        последующей сводке, и свежая беда была неотличима от старого шрама.
+        """
+        d = BackendDriver()
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=_healthy_responses())
+
+        d._late_replies = 2  # подставной счётчик driver'а
+        first = d.system_overview()
+        assert any(a["kind"] == "late_replies" for a in first["anomalies"]), "первый раз обязан быть виден"
+        assert first["driver"]["late_replies"] == 2, "lifetime-значение обязано остаться в ответе"
+        assert first["driver"]["deltas"]["late_replies"] == 2
+
+        second = d.system_overview()
+        assert not any(a["kind"] == "late_replies" for a in second["anomalies"]), (
+            "старый шрам не должен светиться снова"
+        )
+        assert second["driver"]["late_replies"] == 2, "lifetime-значение никуда не девается"
+        assert second["driver"]["deltas"]["late_replies"] == 0
+
+        d._late_replies = 5  # новая беда — снова видна
+        third = d.system_overview()
+        assert any(a["kind"] == "late_replies" for a in third["anomalies"]), "прирост обязан снова поднять аномалию"
+        assert third["driver"]["deltas"]["late_replies"] == 3
