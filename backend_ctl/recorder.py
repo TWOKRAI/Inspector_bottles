@@ -80,7 +80,14 @@ class RecordWriter:
     def __init__(self, path: str) -> None:
         self._path = path
         # Каталог создаётся заранее вызывающим; открываем на запись (перезапись).
-        self._fh = open(path, "w", encoding="utf-8")
+        # OSError → RecordingError с путём и причиной (Task 1.4): голый PermissionError
+        # ловила выше ветка «соединение оборвано» и сбрасывала здоровый driver.
+        try:
+            self._fh = open(path, "w", encoding="utf-8")
+        except OSError as exc:
+            raise RecordingError(
+                f"не удалось открыть файл записи {path!r} на запись ({exc.__class__.__name__}: {exc})"
+            ) from exc
         self._bytes = 0
         self._closed = False
 
@@ -582,8 +589,16 @@ def load_recording(path: str) -> Recording:
     # Читаем сырые строки целиком: битую СРЕДНЮЮ строку (за которой есть валидные)
     # надо отличить от оборванного ХВОСТА (последняя строка) — первое = порча файла
     # (skipped_malformed), второе = truncated. По ходу чтения этого не различить.
-    with open(path, encoding="utf-8") as fh:
-        raw_lines = [stripped for raw in fh if (stripped := raw.strip())]
+    # FileNotFoundError оставляем как есть (документированный контракт функции), прочие
+    # файловые беды (нет прав, путь — каталог, битая кодировка) → RecordingError с путём:
+    # иначе голый OSError выдавал себя за обрыв связи и сбрасывал driver (Task 1.4).
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw_lines = [stripped for raw in fh if (stripped := raw.strip())]
+    except FileNotFoundError:
+        raise
+    except (OSError, UnicodeDecodeError) as exc:
+        raise RecordingError(f"не удалось прочитать файл записи {path!r} ({exc.__class__.__name__}: {exc})") from exc
     if not raw_lines:
         raise RecordingError(f"пустой/нечитаемый файл записи {path!r}")
 

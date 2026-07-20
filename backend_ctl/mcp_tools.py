@@ -1309,11 +1309,22 @@ class _ArgError(Exception):
 
 
 def _resolve_or_error(name: Any, *, create_dir: bool = False) -> str:
-    """Резолв имени записи в путь; ValueError валидации → :class:`_ArgError`."""
+    """Резолв имени записи в путь; ошибка валидации ИЛИ файловой системы → :class:`_ArgError`.
+
+    OSError ловится наравне с ValueError (Task 1.4): ``create_dir=True`` делает mkdir, и
+    недоступный ``BACKEND_CTL_RECORD_DIR`` (нет прав, путь — файл, диск отвалился) давал
+    PermissionError/NotADirectoryError. Выше по стеку это ловила ветка «соединение с
+    бэкендом оборвано» и сбрасывала ЗДОРОВЫЙ driver, обрывая живые подписки — при том что
+    сеть ни при чём. Агент получал ложную диагностику вместо имени нечитаемого пути.
+    """
     try:
         return resolve_record_path(name, create_dir=create_dir)
     except ValueError as exc:
         raise _ArgError(str(exc)) from exc
+    except OSError as exc:
+        raise _ArgError(
+            f"каталог записей недоступен ({exc.__class__.__name__}: {exc}). Проверь BACKEND_CTL_RECORD_DIR."
+        ) from exc
 
 
 def _int_arg_or_error(value: Any, field: str) -> Optional[int]:
