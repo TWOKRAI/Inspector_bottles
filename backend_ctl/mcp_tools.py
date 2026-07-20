@@ -9,7 +9,8 @@ Claude↔driver — см. решение владельца в plans/_archive/20
 
 Имена инструментов зеркалят методы driver (обещание AGENTS.md): `get_status`,
 `introspect_handlers`, `send_command`, `set_register`, `capabilities`, …
-Транспортный слой (stdio JSON-RPC) — в :mod:`backend_ctl.mcp_server`.
+Транспортный слой (stdio JSON-RPC, MCP SDK) — в :mod:`backend_ctl.mcp_server_sdk`
+(рукописный `mcp_server.py` удалён в F.1, BCTL-ADR-001).
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import dataclasses
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
@@ -207,9 +209,35 @@ def _state_subscribe(drv: BackendDriver, args: Dict[str, Any]) -> Any:
 
 
 def _events(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    """Легаси-совместимый инструмент ``events`` — F.1: переписан поверх events_page.
+
+    driver.events() (деструктивный дренаж всего hub'а) удалён — сохраняем ИМЯ и
+    привычное поведение («новое с прошлого вызова», timeout>0 недолго ждёт первое
+    событие) поверх курсорного :meth:`~backend_ctl.driver.BackendDriver.events_page`.
+    Курсор — приватный атрибут ЭТОГО инструмента на driver'е (``_events_tool_cursor``):
+    не конкурирует с курсорами других читателей events_page (в т.ч. другого MCP-клиента
+    этой же сессии) — теми самыми конкурирующими читателями, ради которых events()
+    депрекировали в B.1.
+    """
     timeout = min(float(args.get("timeout", 0.0) or 0.0), MAX_EVENTS_TIMEOUT)
     max_items = args.get("max_items")
-    return drv.events(timeout=timeout, max_items=int(max_items) if max_items is not None else None)
+    limit = int(max_items) if max_items is not None else None
+    cursor = getattr(drv, "_events_tool_cursor", None)
+    deadline = time.monotonic() + timeout if timeout > 0 else None
+    while True:
+        page = drv.events_page(cursor=cursor, limit=limit)
+        if not page.get("success", True):
+            # reset_required (курсор чужого/прежнего поколения) — начать заново один
+            # раз, прозрачно для агента: тул называется events(), не events_page(), и
+            # не обязан знать про generation-токены курсора.
+            cursor = None
+            page = drv.events_page(cursor=None, limit=limit)
+        cursor = page.get("next_cursor", cursor)
+        items = [it["event"] for it in page.get("items", [])]
+        if items or deadline is None or time.monotonic() >= deadline:
+            drv._events_tool_cursor = cursor  # noqa: SLF001 — приватное состояние ИМЕННО этого инструмента
+            return items
+        time.sleep(0.05)
 
 
 def _events_page(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -618,8 +646,9 @@ TOOLS: List[ToolSpec] = [
     ),
     ToolSpec(
         "events",
-        "УСТАРЕЛ (B.1, удаление в F.1): деструктивно дренирует ВСЕ плоскости — параллельные читатели "
-        "крадут события друг у друга. Используй events_page (курсорное недеструктивное чтение). "
+        "Простой дренаж 'новое с прошлого вызова' по ВСЕМ плоскостям (F.1: реализован поверх "
+        "events_page курсором ЭТОГО инструмента — не крадёт события у events_page/у другого клиента). "
+        "Для нескольких независимых читателей или чтения по одной плоскости — events_page. "
         "Забирает накопленные push-события (state.changed, log.record, …) из событийного канала driver. "
         "timeout>0 — подождать первое событие (сек, максимум 30); 0 — вернуть что есть сразу.",
         _obj(

@@ -44,23 +44,32 @@ class TestRequestMatching:
 # --- Юнит: событийный канал (инжекция входящих строк через dispatch_raw) ---
 
 
+from backend_ctl.tests.conftest import page_events as _page  # noqa: E402 — общий хелпер
+from backend_ctl.tests.conftest import wait_for_events as _wait_events  # noqa: E402 — общий хелпер
 from backend_ctl.tests.conftest import wire_line as _line  # noqa: E402 — общий хелпер
 
 
 class TestEventChannel:
+    """F.1: события читаются через events_page (legacy-дренаж events() удалён —
+
+    блокирующий timeout/max_items events() тестировался отдельно ниже до F.1;
+    курсорная пагинация/лимиты — контракт test_events_page.py, здесь не дублируем.
+    """
+
     def test_push_without_request_id_goes_to_queue(self) -> None:
         d = BackendDriver()
         d.dispatch_raw(_line({"command": "state.changed", "data": {"deltas": [1]}}))
-        evts = d.events()  # поллинг
+        evts, cursor = _page(d, None)
         assert len(evts) == 1
         assert evts[0]["command"] == "state.changed"
-        assert d.events() == []  # очередь опустошена (drain)
+        evts2, _ = _page(d, cursor)
+        assert evts2 == []  # курсор догнал хвост
 
     def test_unmatched_request_id_becomes_event(self) -> None:
         """Ответ с request_id, который никто не ждёт (поздний/чужой), → событие."""
         d = BackendDriver()
         d.dispatch_raw(_line({"request_id": "no-such-id", "result": {"x": 1}}))
-        evts = d.events()
+        evts, _ = _page(d, None)
         assert len(evts) == 1
         assert evts[0]["request_id"] == "no-such-id"
 
@@ -82,9 +91,10 @@ class TestEventChannel:
         d.subscribe(boom)
         d.subscribe(seen.append)
         d.dispatch_raw(_line({"command": "state.changed"}))
-        # Второй подписчик отработал, событие всё равно в очереди, счётчик вырос.
+        # Второй подписчик отработал, событие всё равно в канале, счётчик вырос.
         assert len(seen) == 1
-        assert len(d.events()) == 1
+        evts, _ = _page(d, None)
+        assert len(evts) == 1
         assert d.event_errors == 1
 
     def test_unsubscribe_stops_delivery(self) -> None:
@@ -99,52 +109,15 @@ class TestEventChannel:
         d = BackendDriver(event_queue_maxlen=3)
         for i in range(5):
             d.dispatch_raw(_line({"command": "state.changed", "seq": i}))
-        evts = d.events()
+        evts, _ = _page(d, None)
         assert [e["seq"] for e in evts] == [2, 3, 4]  # старые (0,1) вытеснены
-
-    def test_events_max_items_leaves_remainder(self) -> None:
-        d = BackendDriver()
-        for i in range(4):
-            d.dispatch_raw(_line({"seq": i}))
-        first = d.events(max_items=2)
-        assert [e["seq"] for e in first] == [0, 1]
-        rest = d.events()
-        assert [e["seq"] for e in rest] == [2, 3]
-
-    def test_events_polling_returns_empty(self) -> None:
-        d = BackendDriver()
-        t0 = time.monotonic()
-        assert d.events() == []  # timeout=0.0 не блокирует
-        assert time.monotonic() - t0 < 0.5
-
-    def test_events_blocks_until_event_arrives(self) -> None:
-        """Клиентский поток ждёт в events(timeout), reader-«поток» кладёт событие."""
-        d = BackendDriver()
-
-        def producer() -> None:
-            time.sleep(0.05)
-            d.dispatch_raw(_line({"command": "state.changed", "late": True}))
-
-        th = threading.Thread(target=producer)
-        th.start()
-        evts = d.events(timeout=2.0)  # блокируется до появления
-        th.join()
-        assert len(evts) == 1
-        assert evts[0]["late"] is True
-
-    def test_events_timeout_returns_empty_when_silent(self) -> None:
-        d = BackendDriver()
-        t0 = time.monotonic()
-        evts = d.events(timeout=0.1)
-        dt = time.monotonic() - t0
-        assert evts == []
-        assert 0.05 < dt < 1.0  # действительно ждал ~timeout, не вечно
 
     def test_malformed_line_ignored(self) -> None:
         d = BackendDriver()
         d.dispatch_raw(b"{not json")
         d.dispatch_raw(_line(["not", "a", "dict"]))
-        assert d.events() == []
+        evts, _ = _page(d, None)
+        assert evts == []
 
 
 # --- Integration: реальный loopback round-trip ---
@@ -321,7 +294,7 @@ class TestPushEvents:
         assert res.get("status") == "success"
 
         # reader-поток driver'а должен доставить push подписчику
-        evts = driver.events(timeout=2.0)
+        evts, _ = _wait_events(driver, timeout=2.0)
         assert len(evts) == 1
         assert evts[0]["command"] == "state.changed"
         assert evts[0]["data"]["deltas"][0]["value"] == 30
@@ -341,7 +314,7 @@ class TestPushEvents:
         assert res["success"] is True
         assert res["result"]["target"] == "preprocessor"
         # push осел в событиях
-        evts = driver.events(timeout=1.0)
+        evts, _ = _wait_events(driver, timeout=1.0)
         assert any(e.get("command") == "state.changed" for e in evts)
 
 
@@ -591,14 +564,16 @@ class TestSendRaceAndLateReplies:
         assert d.late_replies == 0
 
         d.dispatch_raw(_line({"request_id": "cid-late", "result": {"value": 1}}))
-        assert d.events() == [], "поздний ответ не должен всплывать событием"
+        evts, _ = _page(d, None)
+        assert evts == [], "поздний ответ не должен всплывать событием"
         assert d.late_replies == 1
 
     def test_unquarantined_request_id_still_becomes_event(self) -> None:
         # Регресс-контроль: cid, который НЕ таймаутили, по-прежнему → событие.
         d = BackendDriver()
         d.dispatch_raw(_line({"request_id": "never-issued", "result": {"x": 1}}))
-        assert len(d.events()) == 1
+        evts, _ = _page(d, None)
+        assert len(evts) == 1
         assert d.late_replies == 0
 
 
@@ -794,12 +769,17 @@ class TestObservabilityRecords:
         kinds = [r["kind"] for r in d.observability_records(events)]
         assert kinds == ["log", "error"]
 
-    def test_none_events_drains_channel(self) -> None:
+    def test_none_events_reads_since_last_call(self) -> None:
+        """F.1: events=None читает НЕдеструктивно через events_page своим приватным
+        курсором — повторный вызов без нового push'а не повторяет уже отданное
+        (курсор продвинулся), но НЕ съедает событие у других читателей events_page."""
         d = BackendDriver()
         d.dispatch_raw(_line(_obs_event(records=[_obs_record("stats")])))
-        recs = d.observability_records()  # events=None → дренирует events()
+        recs = d.observability_records()  # events=None → своя страница events_page
         assert [r["kind"] for r in recs] == ["stats"]
-        assert d.events() == [], "канал должен быть осушён"
+        assert d.observability_records() == [], "повторный вызов не должен повторять уже отданное"
+        # Другой читатель events_page по-прежнему видит событие (недеструктивно).
+        assert d.events_page("stats")["count"] == 1
 
     def test_record_without_kind_excluded_by_filter(self) -> None:
         d = BackendDriver()
@@ -1325,12 +1305,13 @@ class TestTelemetryReadModel:
         assert d.telemetry_snapshot()["count"] == 0
 
     def test_snapshot_read_does_not_drain_event_queue(self) -> None:
-        """Чтение read-model локально — событийный канал (events()) не трогается."""
+        """Чтение read-model локально — событийный канал (events_page) не трогается."""
         d = BackendDriver()
         d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", 25.0)))
         _ = d.telemetry_snapshot()
-        # событие state.changed по-прежнему доступно потребителю events()
-        assert any(e.get("command") == "state.changed" for e in d.events())
+        # событие state.changed по-прежнему доступно потребителю events_page
+        evts, _ = _page(d, None)
+        assert any(e.get("command") == "state.changed" for e in evts)
 
 
 class TestSupervisionStatus:

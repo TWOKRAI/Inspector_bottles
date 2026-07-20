@@ -7,7 +7,7 @@
 реализация может переехать между модулями, контракт остаётся здесь.
 
   * :class:`ISubscriptionRegistry` — реестр durable-намерений (``subscriptions.py``);
-  * :class:`IEventSource` — событийный канал push-сообщений (``events`` внутри driver);
+  * :class:`IEventSource` — событийный канал push-сообщений (``events_page`` внутри driver);
   * :class:`IBackendClient` — ядро TCP-клиента: соединение + request-response +
     команды + durable-подписки (``BackendDriver``).
 """
@@ -38,20 +38,13 @@ class ISubscriptionRegistry(Protocol):
 class IEventSource(Protocol):
     """Событийный канал: push-сообщения без reply (state.changed / observability.record).
 
-    ``events_page`` — курсорное недеструктивное чтение по плоскостям (B.1);
-    ``events`` — устаревший деструктивный дренаж (удаление обёртки — F.1).
+    ``events_page`` — курсорное недеструктивное чтение по плоскостям (B.1) — ЕДИНСТВЕННЫЙ
+    публичный способ читать события; легаси-деструктивный дренаж ``events()`` удалён (F.1).
     """
 
     def subscribe(self, callback: EventCallback) -> EventCallback: ...
 
     def unsubscribe(self, callback: EventCallback) -> None: ...
-
-    def events(
-        self,
-        timeout: Optional[float] = 0.0,
-        *,
-        max_items: Optional[int] = None,
-    ) -> List[Dict[str, Any]]: ...
 
     def events_page(
         self,

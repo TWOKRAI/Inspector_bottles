@@ -18,6 +18,8 @@ import time
 import pytest
 
 from backend_ctl.harness import BackendHarness
+from backend_ctl.tests.conftest import bookmark_cursor as _bookmark
+from backend_ctl.tests.conftest import page_events as _page
 
 _PROC = "preprocessor"  # тот же процесс, что в live-тестах Ф1
 _PORT = 8774  # уникальный порт этого модуля (≥8770)
@@ -54,11 +56,18 @@ def _collect_health_deltas(drv, deadline: float, *, want: tuple = ("errors", "la
     дельтами, возможно в разных state.changed-пачках. Ранний выход — только когда
     собраны ВСЕ ожидаемые ``want``-листья (регресс: обрыв по первому ``errors``
     гонял last_error и давал флак).
+
+    F.1: events_page курсором, персистентным на driver'е между вызовами этой функции
+    в разных тестах модуля (``_health_test_cursor``) — вперёд-только чтение, как было
+    у legacy events() (единый курсор драйвера), но недеструктивно.
     """
     prefix = f"processes.{_PROC}.health."
     found: dict = {}
+    cursor = getattr(drv, "_health_test_cursor", None)
     while time.time() < deadline:
-        for e in drv.events(timeout=2.0):
+        evts, cursor = _page(drv, cursor)
+        drv._health_test_cursor = cursor
+        for e in evts:
             if e.get("command") != "state.changed":
                 continue
             for d in (e.get("data") or {}).get("deltas", []) or []:
@@ -67,6 +76,8 @@ def _collect_health_deltas(drv, deadline: float, *, want: tuple = ("errors", "la
                     found[path] = d.get("new_value")
         if all(f"{prefix}{leaf}" in found for leaf in want):
             break
+        if not evts:
+            time.sleep(0.2)
     return found
 
 
@@ -78,7 +89,7 @@ def test_report_error_visible_in_state_tree_via_driver(health_backend) -> None:
     sub = _result(drv.state_subscribe(f"processes.{_PROC}.**", timeout=8.0))
     assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
 
-    drv.events()  # осушить накопленное до провокации
+    drv._health_test_cursor = _bookmark(drv)  # осушить накопленное до провокации
 
     # Провокация: диагностический впрыск health-события в живой процесс.
     res = _result(
@@ -149,9 +160,7 @@ def test_breaker_opens_and_degrades_after_n_consecutive_errors(health_backend) -
         )
         assert res.get("success") is True, res
 
-    deltas = _collect_health_deltas(
-        drv, deadline=time.time() + 20.0, want=("status", "breaker")
-    )
+    deltas = _collect_health_deltas(drv, deadline=time.time() + 20.0, want=("status", "breaker"))
     status_path = f"processes.{_PROC}.health.status"
     breaker_path = f"processes.{_PROC}.health.breaker"
     assert deltas.get(breaker_path) == "open", f"breaker не open; собрано: {deltas}"

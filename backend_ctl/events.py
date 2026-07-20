@@ -9,8 +9,8 @@ journald cursor.
 Устройство:
 
   * **arrival-кольцо** — оригинальные push-сообщения в порядке прихода (плотный
-    глобальный ``seq``). Источник для ``plane="all"`` и для legacy-дренажа
-    :meth:`drain` (обёртка ``events()``);
+    глобальный ``seq``). Источник для ``plane="all"`` (legacy-дренаж ``drain()``/
+    ``events()`` удалён в F.1 — см. plans/backend-ctl-debug-console.md);
   * **плоскостные кольца** (:data:`PLANES`) — классифицированные view сообщений с
     плотным per-plane ``seq``: state / logs / errors / stats / telemetry / ui +
     ``other`` (всё, что не подошло ни под одну классификацию, — НЕ теряется молча);
@@ -36,7 +36,7 @@ journald cursor.
   * ``observability.record`` → расщепляется ПО ``kind`` записей (log→logs,
     error→errors, stats→stats; без kind → other): смешанный батч даёт по view на
     плоскость, форма конверта (``data.records``) сохраняется. Оригинал в
-    arrival-кольце НЕ расщепляется — legacy-дренаж бит-в-бит;
+    arrival-кольце НЕ расщепляется;
   * прочее (незнакомая команда, некарантинный поздний reply) → ``other``.
 
 Синхронные подписчики (``subscribe``) получают ОРИГИНАЛЬНОЕ сообщение в
@@ -45,13 +45,14 @@ reader-потоке (колбэк не роняет reader) — контракт
 `_EventChannelMixin` остался публичным API driver'а — теперь это тонкие делегаты
 в ``self._hub`` (хост заводит его в ``__init__``); транспортные ``_running``/
 ``_reader`` доезжают в hub предикатом ``alive`` (выход из бесконечного ожидания
-на закрытом соединении).
+на закрытом соединении). Legacy-дренаж ``events()``/``EventHub.drain()`` (единственный
+потребитель ``alive``/блокирующего ожидания на ``_cv``) удалён в F.1 — единственный
+публичный способ читать события теперь :meth:`events_page` (курсорный, недеструктивный).
 """
 
 from __future__ import annotations
 
 import threading
-import time
 import uuid
 from collections import deque
 from itertools import islice
@@ -204,14 +205,14 @@ class EventHub:
     """Курсорные плоскости событий: недеструктивное повторяемое чтение с видимой потерей.
 
     Один Condition охраняет все кольца, счётчики и список подписчиков (наследник
-    ``_events_cv``); на нём же блокируется legacy-``drain(timeout)`` и будятся
-    ожидающие при :meth:`wake` (close() driver'а).
+    ``_events_cv``); на нём же будятся ожидающие при :meth:`wake` (close() driver'а).
     """
 
     def __init__(self, maxlen: int = 1000, *, alive: Optional[Callable[[], bool]] = None) -> None:
         self._cv = threading.Condition()
-        # Предикат «соединение ещё живо»: выход drain(None) из вечного ожидания
-        # на закрытом/не открытом соединении (новых событий не будет).
+        # Предикат «соединение ещё живо» — сохранён как часть контракта hub'а
+        # (будущие блокирующие читатели поверх ``_cv``); legacy-``drain`` (единственный
+        # потребитель) удалён в F.1.
         self._alive: Callable[[], bool] = alive if alive is not None else (lambda: False)
         # Токен поколения в курсорах: новый hub (реконнект) ⇒ старый курсор даёт
         # явный reset_required, а не тихое чтение с совпавшего по числу места.
@@ -224,7 +225,6 @@ class EventHub:
         self._rings: Dict[str, Deque[Tuple[int, Dict[str, Any]]]] = {p: deque(maxlen=maxlen) for p in PLANES}
         self._pseq: Dict[str, int] = dict.fromkeys(PLANES, 0)  # плотные per-plane seq
 
-        self._drain_seq = 0  # внутренний курсор legacy-дренажа events()
         self._subscribers: List[EventCallback] = []
         self._event_errors = 0  # счётчик исключений колбэков (диагностика)
 
@@ -417,54 +417,6 @@ class EventHub:
             )
         return int(seq_text)
 
-    # ---- Legacy-дренаж (обёртка events(), удаление — F.1) ----
-
-    def drain(
-        self,
-        timeout: Optional[float] = 0.0,
-        *,
-        max_items: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
-        """Прежняя семантика events(): «всё новое с прошлого дренажа», деструктивно.
-
-        Реализована внутренним курсором поверх arrival-кольца: сами кольца не
-        трогает (курсорные читатели events_page не страдают), но два конкурирующих
-        вызова drain по-прежнему крадут события друг у друга — это и есть причина
-        депрекации. Вытеснение из кольца между дренажами — молча (легаси-поведение
-        deque(maxlen) сохранено бит-в-бит).
-
-        Семантика timeout:
-        - ``0.0`` (по умолчанию) — поллинг: сразу вернуть, что накоплено (может быть []);
-        - ``>0`` — блокировать до появления нового события, но не дольше timeout;
-        - ``None`` — блокировать до первого нового события (или до close()).
-
-        max_items ограничивает размер пачки (остаток отдаст следующий вызов).
-        """
-        with self._cv:
-            # Три режима ожидания разведены явно (как в прежней реализации).
-            if timeout is None:
-                while not self._has_new():
-                    if not self._alive():
-                        break
-                    self._cv.wait()
-            elif timeout > 0.0:
-                deadline = time.monotonic() + timeout
-                while not self._has_new():
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        break
-                    self._cv.wait(remaining)
-            fresh = [(s, m) for s, m in self._arrival if s > self._drain_seq]
-            if max_items is not None:
-                fresh = fresh[:max_items]
-            if fresh:
-                self._drain_seq = fresh[-1][0]
-            return [m for _, m in fresh]
-
-    def _has_new(self) -> bool:
-        """Есть ли в arrival событие новее drain-курсора (зовётся под ``_cv``)."""
-        return bool(self._arrival) and self._arrival[-1][0] > self._drain_seq
-
     # ---- Диагностика ----
 
     def stats(self) -> Dict[str, Any]:
@@ -483,7 +435,6 @@ class EventHub:
             return {
                 "planes": planes,
                 "all": {"seq": self._gseq, "size": len(self._arrival), "evicted": self._gseq - len(self._arrival)},
-                "drain_cursor": self._drain_seq,
                 "subscribers": len(self._subscribers),
                 "event_errors": self._event_errors,
                 "gen_rotations": self._gen_rotations,
@@ -504,19 +455,6 @@ class _EventChannelMixin:
     def unsubscribe(self, callback: EventCallback) -> None:
         """Отписать ранее зарегистрированный callback (no-op, если его нет)."""
         self._hub.unsubscribe(callback)
-
-    def events(
-        self,
-        timeout: Optional[float] = 0.0,
-        *,
-        max_items: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
-        """УСТАРЕЛО (B.1): деструктивный дренаж всех плоскостей — конкурирующие
-        читатели крадут события друг у друга. Используй :meth:`events_page`
-        (курсорное недеструктивное чтение). Обёртка живёт до перевода вызывающих
-        и удаляется в F.1 (см. plans/backend-ctl-debug-console.md).
-        """
-        return self._hub.drain(timeout, max_items=max_items)
 
     def events_page(
         self,

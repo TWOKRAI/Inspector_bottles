@@ -24,13 +24,15 @@ import time
 import pytest
 
 from backend_ctl.harness import BackendHarness
+from backend_ctl.tests.conftest import bookmark_cursor as _bookmark
+from backend_ctl.tests.conftest import page_events as _page
 
-_SENDER = "devices"       # protected → выживает full-replace switch и restart соседа
-_PEER = "preprocessor"    # non-protected → пересоздаётся на switch/restart
+_SENDER = "devices"  # protected → выживает full-replace switch и restart соседа
+_PEER = "preprocessor"  # non-protected → пересоздаётся на switch/restart
 # По СВОЕМУ бэкенду на каждый тест (изоляция): switch необратимо роняет очередь
 # соседа у devices (тот навсегда доставляет через relay), поэтому restart-тест
 # обязан стартовать с чистого бэкенда, иначе relayed_to_hub-проба ложно растёт.
-_PORT_SWITCH = 8778       # уникальные порты (≥8770)
+_PORT_SWITCH = 8778  # уникальные порты (≥8770)
 _PORT_RESTART = 8779
 
 
@@ -73,20 +75,26 @@ def _probe(drv, sender: str, peer: str, tag: str) -> dict:
     return _result(drv.send_command(sender, "routing.probe", {"target": peer, "inner": inner}, timeout=5.0))
 
 
-def _wait_health_errors(drv, peer: str, deadline: float, *, min_errors: int = 1):
-    """Дождаться дельты processes.<peer>.health.errors >= min_errors (или None)."""
+def _wait_health_errors(drv, peer: str, deadline: float, cursor=None, *, min_errors: int = 1):
+    """Дождаться дельты processes.<peer>.health.errors >= min_errors (или None).
+
+    Возвращает ``(значение, новый курсор)`` — F.1: events_page вместо legacy events().
+    """
     path = f"processes.{peer}.health.errors"
     latest = None
     while time.time() < deadline:
-        for e in drv.events(timeout=2.0):
+        evts, cursor = _page(drv, cursor)
+        for e in evts:
             if e.get("command") != "state.changed":
                 continue
             for d in (e.get("data") or {}).get("deltas", []) or []:
                 if d.get("path") == path:
                     latest = d.get("new_value")
         if isinstance(latest, int) and latest >= min_errors:
-            return latest
-    return latest
+            return latest, cursor
+        if not evts:
+            time.sleep(0.2)
+    return latest, cursor
 
 
 def _relayed_to_hub(drv, proc: str) -> int:
@@ -107,11 +115,11 @@ def test_peer_send_after_switch_delivered(switch_backend) -> None:
 
     sub = _result(drv.state_subscribe(f"processes.{_PEER}.**", timeout=8.0))
     assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
-    drv.events()  # осушить накопленное
+    cursor = _bookmark(drv)  # осушить накопленное
 
     # Baseline: probe до switch доставляется (свежие очереди).
     _probe(drv, _SENDER, _PEER, "baseline")
-    baseline = _wait_health_errors(drv, _PEER, time.time() + 20.0)
+    baseline, cursor = _wait_health_errors(drv, _PEER, time.time() + 20.0, cursor)
     assert baseline and baseline >= 1, f"baseline probe {_SENDER}→{_PEER} не доставлен: {baseline}"
 
     # Switch: full-replace pipeline (preprocessor пересоздан; devices — protected — выживает).
@@ -119,20 +127,16 @@ def test_peer_send_after_switch_delivered(switch_backend) -> None:
     from multiprocess_prototype.main import DEFAULT_BLUEPRINT
 
     bp = load_topology_dict(DEFAULT_BLUEPRINT)
-    applied = _result(
-        drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp}, timeout=30.0)
-    )
+    applied = _result(drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp}, timeout=30.0))
     assert applied.get("success") is True, f"topology.apply не success: {applied}"
 
     time.sleep(3.0)  # дать новому preprocessor подняться + первый heartbeat
-    drv.events()     # осушить републикацию нового процесса (health.errors=0)
+    cursor = _bookmark(drv)  # осушить републикацию нового процесса (health.errors=0)
 
     # Post-switch probe: на main теряется (devices держит стейл-очередь старого peer'а).
     _probe(drv, _SENDER, _PEER, "post-switch")
-    errors = _wait_health_errors(drv, _PEER, time.time() + 20.0)
-    assert errors and errors >= 1, (
-        f"probe {_SENDER}→{_PEER} после switch НЕ доставлен (стейл-очередь): {errors}"
-    )
+    errors, cursor = _wait_health_errors(drv, _PEER, time.time() + 20.0, cursor)
+    assert errors and errors >= 1, f"probe {_SENDER}→{_PEER} после switch НЕ доставлен (стейл-очередь): {errors}"
 
 
 @pytest.mark.harness_smoke
@@ -142,27 +146,23 @@ def test_peer_send_after_restart_delivered(restart_backend) -> None:
 
     sub = _result(drv.state_subscribe(f"processes.{_PEER}.**", timeout=8.0))
     assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
-    drv.events()
+    cursor = _bookmark(drv)
 
     _probe(drv, _SENDER, _PEER, "baseline-restart")
-    baseline = _wait_health_errors(drv, _PEER, time.time() + 20.0)
+    baseline, cursor = _wait_health_errors(drv, _PEER, time.time() + 20.0, cursor)
     assert baseline and baseline >= 1, f"baseline probe {_SENDER}→{_PEER} не доставлен: {baseline}"
 
     # Restart одного процесса: peer пересоздан, devices выживает.
-    r = _result(
-        drv.send_command("ProcessManager", "process.restart", {"process_name": _PEER}, timeout=30.0)
-    )
+    r = _result(drv.send_command("ProcessManager", "process.restart", {"process_name": _PEER}, timeout=30.0))
     assert r.get("success") is True, f"process.restart не success: {r}"
     time.sleep(3.0)
-    drv.events()
+    cursor = _bookmark(drv)
 
     relayed_before = _relayed_to_hub(drv, _SENDER)
 
     _probe(drv, _SENDER, _PEER, "post-restart")
-    errors = _wait_health_errors(drv, _PEER, time.time() + 20.0)
-    assert errors and errors >= 1, (
-        f"probe {_SENDER}→{_PEER} после restart НЕ доставлен (стейл-очередь): {errors}"
-    )
+    errors, cursor = _wait_health_errors(drv, _PEER, time.time() + 20.0, cursor)
+    assert errors and errors >= 1, f"probe {_SENDER}→{_PEER} после restart НЕ доставлен (стейл-очередь): {errors}"
 
     # Доказательство B: доставка ПРЯМАЯ (переиспользованная очередь), не через relay.
     relayed_after = _relayed_to_hub(drv, _SENDER)

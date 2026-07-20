@@ -12,6 +12,7 @@ harness-тесты модуля. Тесты только читают состо
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Dict
 
 import pytest
@@ -26,6 +27,47 @@ def wire_line(msg: Dict[str, Any]) -> bytes:
     одна точка правды о wire-кодировке вместо копий по тест-файлам.
     """
     return json.dumps(msg, ensure_ascii=False).encode("utf-8")
+
+
+def page_events(drv, cursor: Any = None, *, plane: Any = None, limit: int = 200):
+    """Одна страница ``events_page`` → (сырые event-dict'ы, next_cursor).
+
+    Тонкий адаптер миграции с legacy-дренажа ``events()`` (F.1, удалён): вызывающий
+    держит ``cursor`` во внешнем цикле между вызовами (как раньше держал неявно сам
+    driver в ``_drain_seq``), здесь — только чтение одной страницы. ``reset_required``
+    (курсор чужого поколения — например после реконнекта в другом тесте модуля)
+    обрабатывается один раз прозрачно: страница перечитывается с ``cursor=None``.
+    """
+    page = drv.events_page(plane, cursor=cursor, limit=limit)
+    if not page.get("success", True):
+        page = drv.events_page(plane, cursor=None, limit=limit)
+    events = [it["event"] for it in page.get("items", [])]
+    return events, page.get("next_cursor")
+
+
+def wait_for_events(drv, cursor: Any = None, *, plane: Any = None, timeout: float = 2.0, limit: int = 200):
+    """Дождаться хотя бы одного события плоскости (events_page-поллинг, не дольше timeout).
+
+    Заменяет legacy блокирующее ``events(timeout=N)`` (удалено в F.1): events_page
+    неблокирующий, поэтому ждём коротким поллингом. Молчание за timeout — пустой
+    список (симметрично прежнему таймаут-поведению drain'а).
+    """
+    deadline = time.monotonic() + timeout
+    evts, cursor = page_events(drv, cursor, plane=plane, limit=limit)
+    while not evts and time.monotonic() < deadline:
+        time.sleep(0.02)
+        evts, cursor = page_events(drv, cursor, plane=plane, limit=limit)
+    return evts, cursor
+
+
+def bookmark_cursor(drv, *, plane: Any = None):
+    """Курсор «хвост сейчас» плоскости — эквивалент legacy ``drv.events()  # осушить``.
+
+    Прыжок к текущему хвосту без чтения backlog'а: то же намерение, что было у
+    вызова-дренажа «слить накопленное перед провокацией», но недеструктивно —
+    других читателей той же плоскости не затрагивает.
+    """
+    return drv.events_page(plane)["bookmark"]
 
 
 @pytest.fixture(scope="session")
