@@ -139,7 +139,8 @@ def render_md(dump: Dict[str, Any]) -> str:
         "",
         "Команда адресуется процессу по имени (колонка «Процесс» ниже). Ответ приходит",
         "request-response (dict). События (push без request_id) читаются курсором "
-        "`drv.events_page(plane)` (B.1; `drv.events()` — устаревший дренаж).",
+        "`drv.events_page(plane)` (B.1; Python-driver'а `drv.events()` больше нет — "
+        "удалён в F.1).",
         "",
         "## Топология (управляемые процессы)",
         "",

@@ -4,7 +4,8 @@
 UiEventTap ловит взаимодействия пользователя (кнопки, табы) на уровне
 QApplication-фильтра и пушит их подписчику (внешнему driver'у) тем же
 маршрутом, что log-tail (Ф1.5): targets=[subscriber] + queue_type=system →
-мост 1.1b / relay 1.7 → события `ui.event` в driver.events() / MCP `events`.
+мост 1.1b / relay 1.7 → события `ui.event` в событийном канале driver'а
+(`driver.events_page("ui")` / MCP `events`/`events_page`).
 """
 
 from .intent_taps import CommandSenderTap

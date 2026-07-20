@@ -12,8 +12,8 @@ request_id (или не матчащие ни один pending) — наприм
 (state/logs/errors/stats/telemetry/ui) с недеструктивным чтением `events_page()`
 и видимой потерей + синхронные подписчики. Так `state.subscribe` через driver
 работает end-to-end. Разделение потоков: reader-поток пишет события, клиентские
-потоки читают их курсорами events_page()/subscribe() (`events()` — устаревший
-деструктивный дренаж, удаление в F.1).
+потоки читают их курсорами events_page()/subscribe() (legacy-дренаж `events()`
+удалён в F.1).
 
 Без бизнес-логики: driver только транспортирует router-сообщения. Вся интроспекция/
 команды исполняются процессами системы, ответы едут обратно чистым RouterManager.
@@ -167,10 +167,16 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         self._subscriptions = _SubscriptionRegistry()
 
         # Событийный канал (B.1): EventHub — курсорные плоскости + подписчики.
-        # reader-поток пишет (emit), клиентские потоки читают курсорами
-        # (events_page) либо legacy-дренажем (events). Предикат alive выводит
-        # блокирующий drain из вечного ожидания на закрытом соединении.
+        # reader-поток пишет (emit), клиентские потоки читают курсорами (events_page,
+        # недеструктивно — единственный публичный способ с F.1, legacy-дренаж events()
+        # удалён). Предикат alive — часть контракта hub'а для будущих блокирующих
+        # читателей поверх ``_cv``.
         self._hub = EventHub(maxlen=event_queue_maxlen, alive=lambda: self._running or self._reader is not None)
+
+        # F.1: приватный курсор для наблюдательного дефолта observability_records(events=None) —
+        # «новое с прошлого вызова» поверх events_page(all), НЕ конкурирует с курсорами
+        # других читателей (свой, привязанный к этому driver'у).
+        self._obs_records_cursor: Optional[str] = None
 
         # GUI-эквивалентный watch (Task 2.2): авто-переподписка observability-хвоста
         # после авто-рестарта. Стейт-машина ВЫНЕСЕНА в WatchController (C.1) — она
@@ -1198,7 +1204,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         Процесс ставит router-push sink: записи ≥ level едут пушем на ``subscriber``
         (по умолчанию self.sender = адрес driver'а) через мост 1.1b и приходят в
-        событийный канал — читаются через :meth:`events` / :meth:`subscribe` как
+        событийный канал — читаются через :meth:`events_page` / :meth:`subscribe` как
         сообщения с ``command == "log.record"`` (``data.record`` — сам LogRecord-dict).
         """
         args = {"subscriber": subscriber or self._subscriber, "level": level}
@@ -1239,7 +1245,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         Ставит на процессе форвардер (drain log/stats) + error-tap'ы (write-through):
         каждая запись пушится ``targets=[subscriber]`` + ``queue_type="system"`` →
-        мост 1.1b → событийный канал driver'а. Записи читаются через :meth:`events` /
+        мост 1.1b → событийный канал driver'а. Записи читаются через :meth:`events_page` /
         :meth:`subscribe` как сообщения с ``command == "observability.record"``:
         ``data.records`` (пачка из drain log/stats) ИЛИ ``data.record`` (одна запись
         error/critical). Каждая запись несёт ``kind`` ∈ {``log``, ``error``, ``stats``}
@@ -1292,7 +1298,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
     ) -> List[Dict[str, Any]]:
         """Выбрать записи наблюдаемости из событий и (опц.) отфильтровать по плоскости/severity.
 
-        Классификатор поверх :meth:`events`: отбирает сообщения
+        Классификатор поверх :meth:`events_page`: отбирает сообщения
         ``command == "observability.record"``, разворачивает их полезную нагрузку
         (``data.records`` — пачка и/или ``data.record`` — одиночная запись) в ПЛОСКИЙ
         список записей и фильтрует по ``kind`` (плоскость) и ``level`` (severity).
@@ -1312,11 +1318,10 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         ``level="DEBUG"``, чтобы явно вернуть все severity даже при активном watch.
 
         Args:
-            events: список событий для разбора. ``None`` → **дренирует** канал через
-                :meth:`events` (деструктивно: прочие события — state.changed/log.record
-                — при этом теряются). Для неразрушающего разбора передай снимок:
-                ``recs = drv.observability_records(drv.events())`` — там останутся все
-                события, а сюда придёт их копия.
+            events: список событий для разбора. ``None`` → читает НЕдеструктивно
+                через :meth:`events_page` (плоскость ``all``) курсором ЭТОГО метода
+                (F.1: свой приватный курсор, не делится с другими читателями
+                events_page/MCP `events` — конкуренции за события нет).
             kind: плоскость-фильтр (``"log"`` | ``"error"`` | ``"stats"``); ``None`` —
                 вернуть все плоскости.
             level: severity-порог (``"WARNING"`` и т.п.); ``None`` — дефолт watch
@@ -1330,7 +1335,16 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         effective_level = level if level is not None else self._watch.default_tail_level()
         threshold = _LOG_SEVERITY_RANK.get(str(effective_level).lower()) if effective_level else None
 
-        source = self.events() if events is None else events
+        if events is None:
+            page = self.events_page(cursor=self._obs_records_cursor)
+            if not page.get("success", True):
+                # reset_required (курсор чужого поколения) — начать заново один раз,
+                # прозрачно для вызывающего (симметрично мосту MCP-инструмента events).
+                page = self.events_page(cursor=None)
+            self._obs_records_cursor = page.get("next_cursor")
+            source: List[Dict[str, Any]] = [it["event"] for it in page.get("items", [])]
+        else:
+            source = events
         out: List[Dict[str, Any]] = []
         for msg in source:
             if not isinstance(msg, dict) or msg.get("command") != OBSERVABILITY_RECORD_COMMAND:
@@ -1405,8 +1419,9 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         Жест+намерение (``ui_tap`` gui: клики/табы + команды GUI→бэкенд), эффект
         (``log_tail`` уровня ``logs_level`` на процессы ``log_processes``, по
         умолчанию — все из state-топологии, + ``state_subscribe(state_pattern)``).
-        Всё приходит в ЕДИНУЮ очередь :meth:`events`: команды ``ui.event`` /
-        ``log.record`` / ``state.changed``, упорядочивание — ts (+seq у ui.event).
+        Всё приходит в ЕДИНЫЙ событийный канал (:meth:`events_page`, plane ``all``):
+        команды ``ui.event`` / ``log.record`` / ``state.changed``, упорядочивание —
+        ts (+seq у ui.event).
 
         Возвращает сводку по каждому включённому источнику (best-effort: недоступный
         источник — честная запись об ошибке, остальные работают).
@@ -1462,7 +1477,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         Отправляет `state.subscribe` в ProcessManager (форма StateProxy.subscribe).
         После подтверждения сервер шлёт адресные push `state.changed` (targets=
         [subscriber], без request_id) — они приходят в событийный канал driver'а:
-        читаются через events()/subscribe(). subscriber по умолчанию = self.sender
+        читаются через events_page()/subscribe(). subscriber по умолчанию = self.sender
         (адрес, на который сервер направляет пуши). Возвращает result подписки
         (status + sub_id).
         """
