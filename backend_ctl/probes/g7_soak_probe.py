@@ -105,34 +105,71 @@ def _rss_mb(pid: int | None) -> float | None:
         return None
 
 
-def _sample(drv: Any, elapsed: float) -> dict[str, Any]:
-    """Один снимок обоих концов тракта: FPS, perf-пробы, счётчики, RSS."""
-    source_status = unwrap(drv.introspect_status("synthetic_source", timeout=8.0), leaf=True)
-    consumer_status = unwrap(drv.introspect_status("consumer", timeout=8.0), leaf=True)
+def discover_processes(drv: Any, timeout: float = 15.0) -> list[str]:
+    """Имена процессов живой топологии.
 
-    source_workers = source_status.get("workers", {}) if isinstance(source_status, dict) else {}
-    consumer_workers = consumer_status.get("workers", {}) if isinstance(consumer_status, dict) else {}
-    producer = source_workers.get("source_producer_synthetic_frame_source", {})
-    receiver = consumer_workers.get("data_receiver", {})
+    Через ПУБЛИЧНЫЙ ``system_overview`` (его ключи ``processes`` — и есть список),
+    а не через приватный ``drv._discover_processes``. Сами метрики оттуда брать
+    нельзя: overview схлопывает воркеров до строк-статусов, теряя ``effective_hz``
+    и ``perf_probes`` — их добираем per-process в :func:`_sample`.
+    """
+    try:
+        overview = drv.system_overview(timeout=timeout)
+    except Exception:
+        return []
+    payload = unwrap(overview, leaf=True)
+    procs = payload.get("processes") if isinstance(payload, dict) else None
+    return sorted(procs) if isinstance(procs, dict) else []
 
+
+def _worker_metrics(workers: dict) -> dict[str, Any]:
+    """Свести воркеров процесса к FPS/циклам/пробам, не зная их имён.
+
+    Универсально по топологии: у синтетики воркеры зовутся
+    ``source_producer_*``/``data_receiver``, у прод-рецептов — иначе. Берём
+    максимальный ``effective_hz`` как темп процесса (ведущий воркер) и
+    сохраняем пробы всех воркеров, у кого они есть.
+    """
+    if not isinstance(workers, dict):
+        return {"fps": None, "cycles": None, "perf_probes": {}}
+    hz = [w.get("effective_hz") for w in workers.values() if isinstance(w, dict) and w.get("effective_hz")]
+    cycles = [w.get("cycles") for w in workers.values() if isinstance(w, dict) and w.get("cycles")]
+    probes = {name: w["perf_probes"] for name, w in workers.items() if isinstance(w, dict) and w.get("perf_probes")}
     return {
-        "elapsed_sec": round(elapsed, 1),
-        "source_fps": producer.get("effective_hz"),
-        "consumer_fps": receiver.get("effective_hz"),
-        "frames_produced": producer.get("cycles"),
-        "frames_consumed": receiver.get("cycles"),
-        "source_perf_probes": producer.get("perf_probes"),
-        "consumer_perf_probes": receiver.get("perf_probes"),
-        "counters": {
-            "source": _counters(drv.introspect_router_stats("synthetic_source", timeout=8.0)),
-            "consumer": _counters(drv.introspect_router_stats("consumer", timeout=8.0)),
-        },
-        # pid берём из уже снятого status — без лишнего IPC-раунда на сэмпл.
-        "rss_mb": {
-            "synthetic_source": _rss_mb(source_status.get("pid") if isinstance(source_status, dict) else None),
-            "consumer": _rss_mb(consumer_status.get("pid") if isinstance(consumer_status, dict) else None),
-        },
+        "fps": round(max(hz), 2) if hz else None,
+        "cycles": max(cycles) if cycles else None,
+        "perf_probes": probes,
     }
+
+
+def _sample(drv: Any, elapsed: float, processes: list[str]) -> dict[str, Any]:
+    """Снимок ВСЕХ процессов топологии: FPS, циклы, perf-пробы, счётчики, RSS.
+
+    Раньше проба была зашита под 2-процессный синтетический тракт
+    (``synthetic_source``/``consumer``). Прод-рецепты (``webcam_sketch`` — 7
+    процессов с живой камерой) требуют универсального обхода, иначе soak
+    реального тракта невозможен.
+    """
+    per_process: dict[str, Any] = {}
+    for proc in processes:
+        try:
+            status = unwrap(drv.introspect_status(proc, timeout=8.0), leaf=True)
+        except Exception as exc:  # noqa: BLE001 — один больной процесс не рушит сэмпл
+            per_process[proc] = {"error": repr(exc)}
+            continue
+        if not isinstance(status, dict):
+            per_process[proc] = {"error": "status не dict"}
+            continue
+        entry = _worker_metrics(status.get("workers", {}))
+        entry["pid"] = status.get("pid")
+        entry["rss_mb"] = _rss_mb(status.get("pid"))
+        try:
+            entry["counters"] = _counters(drv.introspect_router_stats(proc, timeout=8.0))
+        except Exception:  # noqa: BLE001
+            entry["counters"] = dict.fromkeys(_COUNTER_KEYS, 0)
+        per_process[proc] = entry
+
+    return {"elapsed_sec": round(elapsed, 1), "processes": per_process}
 
 
 def _summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -147,35 +184,45 @@ def _summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
 
     first, last = samples[0], samples[-1]
     findings: list[str] = []
+    fps_first_last: dict[str, list] = {}
+    rss_first_last: dict[str, list] = {}
 
-    for end in ("source", "consumer"):
+    for proc, entry in (last.get("processes") or {}).items():
+        if "error" in entry:
+            findings.append(f"{proc}: сэмпл не снялся — {entry['error']}")
+            continue
+        prev = (first.get("processes") or {}).get(proc, {})
+
+        counters = entry.get("counters") or {}
         for key in _LEAK_KEYS:
-            val = last["counters"][end].get(key, 0)
-            if val:
-                findings.append(f"{end}.{key} = {val} (ожидалось 0)")
-        cache_first = first["counters"][end].get("frame_handle_cache_size", 0)
-        cache_last = last["counters"][end].get("frame_handle_cache_size", 0)
+            if counters.get(key):
+                findings.append(f"{proc}.{key} = {counters[key]} (ожидалось 0)")
+
+        cache_first = (prev.get("counters") or {}).get("frame_handle_cache_size", 0)
+        cache_last = counters.get("frame_handle_cache_size", 0)
         if cache_last > cache_first:
             findings.append(
-                f"{end}.frame_handle_cache_size рос {cache_first} -> {cache_last} "
+                f"{proc}.frame_handle_cache_size рос {cache_first} -> {cache_last} "
                 "(резидуал G.5: рост кэша на инкарнацию под zero-copy)"
             )
 
-    for proc in ("synthetic_source", "consumer"):
-        rss_first = (first.get("rss_mb") or {}).get(proc)
-        rss_last = (last.get("rss_mb") or {}).get(proc)
-        if rss_first and rss_last and rss_last > rss_first * 1.20:
-            findings.append(f"{proc} RSS {rss_first} -> {rss_last} МБ (рост > 20% — проверить утечку)")
+        if entry.get("pid") and prev.get("pid") and entry["pid"] != prev["pid"]:
+            findings.append(f"{proc}: pid сменился {prev['pid']} -> {entry['pid']} (был рестарт процесса)")
+
+        rss_first, rss_last = prev.get("rss_mb"), entry.get("rss_mb")
+        if rss_first and rss_last:
+            rss_first_last[proc] = [rss_first, rss_last]
+            if rss_last > rss_first * 1.20:
+                findings.append(f"{proc} RSS {rss_first} -> {rss_last} МБ (рост > 20% — проверить утечку)")
+
+        fps_first_last[proc] = [prev.get("fps"), entry.get("fps")]
 
     return {
         "samples": len(samples),
         "duration_sec": last["elapsed_sec"],
-        "fps_first_last": {
-            "source": [first["source_fps"], last["source_fps"]],
-            "consumer": [first["consumer_fps"], last["consumer_fps"]],
-        },
-        "rss_first_last_mb": {"first": first.get("rss_mb"), "last": last.get("rss_mb")},
-        "counters_last": last["counters"],
+        "fps_first_last": fps_first_last,
+        "rss_first_last_mb": rss_first_last,
+        "counters_last": {p: e.get("counters") for p, e in (last.get("processes") or {}).items() if "error" not in e},
         "verdict": "CLEAN" if not findings else "FINDINGS",
         "findings": findings,
     }
@@ -187,7 +234,19 @@ def main() -> int:
     parser.add_argument("--interval", type=float, default=300.0, help="период снятия, сек (умолч. 5 мин)")
     parser.add_argument("--out", type=Path, default=Path("logs/g7_soak.jsonl"), help="путь JSONL")
     parser.add_argument("--port", type=int, default=8766, help="порт backend_ctl харнесса")
+    parser.add_argument(
+        "--recipe",
+        type=str,
+        default=_RECIPE.name,
+        help="имя рецепта в multiprocess_prototype/recipes (умолч. синтетика g1_perf_probe.yaml; "
+        "прод-тракт — webcam_sketch.yaml)",
+    )
     args = parser.parse_args()
+
+    recipe = _RECIPES / args.recipe
+    if not recipe.exists():
+        print(f"[g7-soak] нет рецепта {recipe}")
+        return 2
 
     os.environ.setdefault("BACKEND_CTL", "1")
     os.environ.setdefault("FW_PERF_PROBES", "1")
@@ -198,15 +257,21 @@ def main() -> int:
 
     from backend_ctl.harness import BackendHarness
 
-    print(f"[g7-soak] recipe={_RECIPE.name} duration={args.duration}s interval={args.interval}s")
+    print(f"[g7-soak] recipe={recipe.name} duration={args.duration}s interval={args.interval}s")
     print(f"[g7-soak] флаги ON: {', '.join(_SOAK_FLAGS)} (+FW_PERF_PROBES; FW_GC_SCHEDULED намеренно OFF)")
     print(f"[g7-soak] JSONL: {args.out}")
 
     samples: list[dict[str, Any]] = []
     started = time.monotonic()
-    harness = BackendHarness(recipe=_RECIPE, port=args.port)
+    harness = BackendHarness(recipe=recipe, port=args.port)
 
     with harness as drv, args.out.open("w", encoding="utf-8") as fp:
+        processes = discover_processes(drv)
+        if not processes:
+            print("[g7-soak] топология пуста — бэкенд не поднялся или не прогрет")
+            return 2
+        print(f"[g7-soak] процессов в топологии: {len(processes)} — {', '.join(processes)}")
+
         while True:
             elapsed = time.monotonic() - started
             if elapsed >= args.duration:
@@ -215,19 +280,28 @@ def main() -> int:
             time.sleep(min(args.interval, args.duration - elapsed))
 
             try:
-                sample = _sample(drv, time.monotonic() - started)
+                sample = _sample(drv, time.monotonic() - started, processes)
             except Exception as exc:  # noqa: BLE001 — soak не должен падать из-за одного сэмпла
                 sample = {"elapsed_sec": round(time.monotonic() - started, 1), "error": repr(exc)}
                 print(f"[g7-soak] сэмпл упал: {exc!r} (soak продолжается)")
             else:
-                cs = sample["counters"]["source"]
-                cc = sample["counters"]["consumer"]
+                # Агрегат по всей топологии — построчный дамп 7 процессов нечитаем.
+                agg = {k: 0 for k in ("frame_torn_reads", "frame_stale_drops", "frame_loan_exhausted")}
+                fps_line = []
+                rss_total = 0.0
+                for proc, entry in sample["processes"].items():
+                    if "error" in entry:
+                        continue
+                    for k in agg:
+                        agg[k] += (entry.get("counters") or {}).get(k, 0)
+                    if entry.get("fps"):
+                        fps_line.append(f"{proc}={entry['fps']}")
+                    rss_total += entry.get("rss_mb") or 0.0
                 print(
                     f"[g7-soak] t={sample['elapsed_sec']:>6.0f}s "
-                    f"fps={sample['source_fps']}/{sample['consumer_fps']} "
-                    f"torn={cc['frame_torn_reads']} stale={cc['frame_stale_drops']} "
-                    f"released={cs['frame_slots_released']} exhausted={cs['frame_loan_exhausted']} "
-                    f"cache={cc['frame_handle_cache_size']} rss={sample['rss_mb']}"
+                    f"fps[{' '.join(fps_line)}] "
+                    f"torn={agg['frame_torn_reads']} stale={agg['frame_stale_drops']} "
+                    f"exhausted={agg['frame_loan_exhausted']} rss_total={rss_total:.0f}МБ"
                 )
 
             samples.append(sample)
