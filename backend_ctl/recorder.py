@@ -785,25 +785,60 @@ class ReplayPlayer:
     # ---- Read-served ручки (offline) ----
 
     def system_overview(self) -> Dict[str, Any]:
-        """Записанный снимок overview (IPC fan-out оффлайн неисполним) с пометкой recorded."""
+        """Записанный снимок overview (IPC fan-out оффлайн неисполним) с пометкой recorded.
+
+        Записанная секция может быть НЕ снимком, а error-dict'ом (``_safe_section`` пишет
+        ``{"error": ..., "section": ...}``, когда ручка не ответила в момент записи). Раньше
+        такой dict отдавался как есть — потребитель, ожидающий форму overview, падал на
+        KeyError по ``processes``/``anomalies``. Теперь ошибка оборачивается в ВАЛИДНУЮ
+        форму overview с ``success: False``: отлаживаться по записи с одной битой секцией
+        должно быть можно (Task 4.1).
+        """
         overview = self.recording.snapshot.get("overview")
+        if isinstance(overview, dict) and "error" in overview and "processes" not in overview:
+            return {
+                "success": False,
+                "error": overview["error"],
+                "recorded": True,
+                "anomalies": [],
+                "anomaly_count": 0,
+                "processes": {},
+            }
         if isinstance(overview, dict):
             return {**overview, "recorded": True}
         return {"success": True, "recorded": True, "note": "overview не записан в header"}
 
     def state_get(self, path: str) -> Dict[str, Any]:
-        """Точное значение пути из read-model (примированного снимком записи)."""
+        """Точное значение пути из read-model (примированного снимком записи).
+
+        Форма — БЭКЕНДНАЯ (``status: ok|error`` + ``value``), как у живого
+        ``StateStoreManager.handle_state_get``, а не ``{success: ...}``: live-путь
+        (``send_command("state.get")``) отдаёт ответ бэкенда пассthrough'ем, и агент,
+        написавший разбор по живой сессии, на записи получал другую форму и молча читал
+        None. Канон — live; реплей подстраивается под него (Task 4.1).
+        """
         with self.driver._telemetry_lock:
             snap = self.driver._telemetry_model.snapshot(path)
         if path in snap:
-            return {"success": True, "path": path, "value": snap[path], "recorded": True}
-        return {"success": True, "path": path, "found": False, "recorded": True}
+            return {"status": "ok", "path": path, "value": snap[path], "recorded": True}
+        # «Пути нет» у живого бэкенда — это status:error, а не успех с found:False.
+        return {
+            "status": "error",
+            "path": path,
+            "error": f"Путь не существует: '{path}'",
+            "recorded": True,
+        }
 
     def state_get_subtree(self, prefix: str = "") -> Dict[str, Any]:
-        """Снимок поддерева (плоские dotted-пути) из read-model записи."""
+        """Снимок поддерева (плоские dotted-пути) из read-model записи.
+
+        Та же бэкендная форма, что у live (``status``/``value``), см. :meth:`state_get`.
+        Ключ ``value``, а не ``subtree``: живой ``handle_state_get_subtree`` кладёт
+        поддерево именно в ``value``.
+        """
         with self.driver._telemetry_lock:
             subtree = self.driver._telemetry_model.snapshot(prefix)
-        return {"success": True, "path": prefix, "subtree": subtree, "recorded": True}
+        return {"status": "ok", "path": prefix, "value": subtree, "recorded": True}
 
     def status(self) -> Dict[str, Any]:
         """Статус загруженного реплея (имя/позиция/total/обрыв) — для record_status."""
