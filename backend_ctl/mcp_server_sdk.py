@@ -95,6 +95,12 @@ def resolve_mode(
     """Определить safety-режим: argv-флаги > env BACKEND_CTL_MCP_MODE > full.
 
     ``--read-only`` и ``--disable-destructive`` — взаимоисключающие (read-only строже).
+
+    Fail-closed (Task 3.1, находка ultra-ревью): раньше опечатка в env (``readonly``
+    вместо ``read-only``, регистр и т.п.) молча давала MODE_FULL — человек думал, что
+    ограничил сервер, а тот пускал запись. Неизвестный НЕПУСТОЙ токен теперь — падение
+    с actionable-ошибкой; пустая/неустановленная переменная — это отсутствие настройки,
+    а не опечатка, поэтому по-прежнему даёт MODE_FULL.
     """
     if read_only:
         return MODE_READ_ONLY
@@ -102,9 +108,14 @@ def resolve_mode(
         return MODE_NO_DESTRUCTIVE
     env = env if env is not None else os.environ
     env_mode = env.get(MODE_ENV_VAR)
+    if not env_mode:
+        return MODE_FULL
     if env_mode in (MODE_FULL, MODE_READ_ONLY, MODE_NO_DESTRUCTIVE):
         return env_mode
-    return MODE_FULL
+    raise ValueError(
+        f"{MODE_ENV_VAR}: недопустимое значение {env_mode!r}; "
+        f"допустимые: {MODE_FULL} | {MODE_READ_ONLY} | {MODE_NO_DESTRUCTIVE}"
+    )
 
 
 class SDKToolServer:
@@ -408,7 +419,11 @@ def main(argv: Optional[list] = None) -> int:
 
     import asyncio  # noqa: PLC0415 — нужен только при реальном запуске
 
-    mode = resolve_mode(read_only=args.read_only, disable_destructive=args.disable_destructive)
+    try:  # Task 3.1: fail-closed на опечатке в BACKEND_CTL_MCP_MODE — понятное сообщение, не трейсбек
+        mode = resolve_mode(read_only=args.read_only, disable_destructive=args.disable_destructive)
+    except ValueError as exc:
+        print(f"[mcp_server_sdk] {exc}", file=sys.stderr, flush=True)
+        return 2
     host, port = resolve_endpoint(args.host, args.port)
 
     if args.http:

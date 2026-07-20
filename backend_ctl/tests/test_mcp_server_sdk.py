@@ -87,8 +87,15 @@ class TestResolveMode:
     def test_env_used_when_no_flags(self) -> None:
         assert resolve_mode(env={MODE_ENV_VAR: MODE_READ_ONLY}) == MODE_READ_ONLY
 
-    def test_unknown_env_falls_back_to_full(self) -> None:
-        assert resolve_mode(env={MODE_ENV_VAR: "garbage"}) == MODE_FULL
+    def test_unset_env_falls_back_to_full(self) -> None:
+        # Пустая/неустановленная переменная — это отсутствие настройки, не опечатка.
+        assert resolve_mode(env={}) == MODE_FULL
+
+    @pytest.mark.parametrize("bad_value", ["readonly", "READ-ONLY", "typo", "garbage"])
+    def test_unknown_env_raises_fail_closed(self, bad_value: str) -> None:
+        """Task 3.1: опечатка в env больше не даёт молчаливый MODE_FULL — падение с перечнем допустимых."""
+        with pytest.raises(ValueError, match=rf"{MODE_ENV_VAR}.*{MODE_FULL}.*{MODE_READ_ONLY}.*{MODE_NO_DESTRUCTIVE}"):
+            resolve_mode(env={MODE_ENV_VAR: bad_value})
 
 
 # --------------------------------------------------------------------------- #
