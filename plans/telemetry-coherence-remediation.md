@@ -3,7 +3,7 @@
 - **Slug:** telemetry-coherence-remediation
 - **Дата:** 2026-07-16
 - **Ветка:** feat/telemetry-coherence (ответвить от feat/telemetry-publish-control)
-- **Статус:** DRAFT
+- **Статус:** **ЗАКРЫТ 2026-07-18** — Фазы 1-3 пройдены, ветка `feat/telemetry-coherence-phase2` слита в `main` (merge `13623920`), финальный вердикт Fable **47/60 «цель достигнута»**. Остаток: Task 3.2 шаг 3 (watcher фанит правку publish-секции детям) — не блокирует, решить до Фазы 4 GUI. *(Шапка стояла `DRAFT` до 2026-07-20 при полностью закрытом теле плана — исправлено на сверке статусов.)*
 - **Продолжает:** [`telemetry-publish-control.md`](telemetry-publish-control.md) (управляемая публикация)
   и [`gui-telemetry-read-model.md`](gui-telemetry-read-model.md) (дешёвое GUI-чтение)
 

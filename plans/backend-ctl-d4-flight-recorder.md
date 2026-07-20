@@ -149,7 +149,7 @@
 - [x] MCP: `record_start`/`record_stop`/`record_status`/`record_load`/`record_unload`/`record_dump`, все SAFETY_READ, path-confinement; в replay-режиме прочие инструменты отказывают обучающе
 - [x] framework-шов clock/`export_history`/`import_history` — аддитивен, дефолт бит-в-бит, контракт-тесты модуля зелёные
 - [x] `AGENTS.md`/`README` обновлены; BCTL-ADR-006 записан; `python scripts/validate.py` чист; sentrux baseline→delta не хуже (трогается framework-модуль)
-- [ ] формальный `/code-review` high (финдеры Sonnet, оценка Fable, 8 углов) — находки закрыты до merge (оркеструет родитель)
+- [x] формальный `/code-review` high (финдеры Sonnet, оценка Fable, 8 углов) — находки закрыты до merge (оркеструет родитель) — **✅ merge `09e576e4` 2026-07-20 «закрытие находок ревью flight recorder»** (фиксы `55585bee`, резидуалы R1-R3 — `7a146c64`)
 
 ## Резидуалы ревью
 

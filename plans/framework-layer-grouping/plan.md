@@ -1,5 +1,11 @@
 # План: группировка модулей `multiprocess_framework` по слоям + enforcement
 
+**Статус (сверено по git 2026-07-20):** **Фаза 2 в основном закрыта** — 3 из 5 пунктов сделаны отдельными коммитами в `main` 2026-07-18 (`92c19f2e`/`d9dddf45`/`bf484bcd`), приёмка фазы (перезамер циклов + прогон suite) **не проводилась**. Фазы 0/3/4/5 — **не начаты**, ветки `refactor/framework-layer-grouping` нет.
+
+⚠️ **Этот план — блокер двух других треков:** Фаза 3 (codemod, ~1970 импортов / 910 файлов) требует **freeze-окна**, во время которого кодовые фазы не выполняются. Ждут его: [frontend-constructor](../frontend-constructor/plan.md) Блок В (Ф3+) и [backend-ctl-framework-module](../backend-ctl-framework-module.md) Task 1.1/1.2 (слой `tooling/` создаётся codemod'ом).
+
+**Учесть при старте:** план написан на 27 модулей и не знает про `telemetry_readmodel_module` (создан 2026-07-18) и переезд `backend_ctl → tooling/` — rename-таблицу Фазы 3 надо пересобрать под факт.
+
 ## Context (зачем это)
 
 Сейчас все 27 модулей фреймворка лежат **физически плоско** в `multiprocess_framework/modules/`. При этом
@@ -298,12 +304,12 @@ layers =
 - [ ] Baseline: `sentrux session_start`; зафиксировать число тестов + `coupling/quality`
 - [ ] Перенести `measure_graph.py` / `cycle_details.py` из scratchpad в `scripts/regroup_modules/`
 
-**Фаза 2 — разорвать 2 runtime-цикла (ДО переноса)**
-- [ ] `process_module/generic/blueprint.py:12` — убрать шим-импорт `process_manager` (ADR-PMM-016), потребители берут типы из `process_manager_module.topology`
-- [ ] `console_module/configs/console_process_config.py:12-13` — импорт `process.configs.*` под `if TYPE_CHECKING:`
-- [ ] `actions_module/interfaces.py` — создать (поднять `IActionLogWriter`/`IActionLogRepository`/`IRegistersManagerGui`) → единообразие 27/27
-- [ ] `measure_graph.py`: раздел «ЦИКЛЫ» пуст, топосортировка без остатка
-- [ ] Тесты зелёные (циклы правились — прогнать `run_framework_tests.py`)
+**Фаза 2 — разорвать 2 runtime-цикла (ДО переноса)** — ✅ **основное закрыто 2026-07-18** (сверено по git 2026-07-20; выполнено вне ветки плана, отдельными коммитами в `main`)
+- [x] `process_module/generic/blueprint.py:12` — убрать шим-импорт `process_manager` (ADR-PMM-016), потребители берут типы из `process_manager_module.topology` — **`92c19f2e`** (шим удалён целиком)
+- [x] `console_module/configs/console_process_config.py:12-13` — импорт `process.configs.*` под `if TYPE_CHECKING:` — **`d9dddf45`**, но **решено иначе, чем планировалось**: `ConsoleProcessConfig` физически перенесён `console_module` → `process_module` (цикл разорван переносом владельца, а не отложенным импортом). План здесь опережён фактом — способ лучше, фиксируем как есть.
+- [x] `actions_module/interfaces.py` — создать (поднять `IActionLogWriter`/`IActionLogRepository`/`IRegistersManagerGui`) → единообразие 27/27 — **`bf484bcd`**
+- [ ] `measure_graph.py`: раздел «ЦИКЛЫ» пуст, топосортировка без остатка — **не перепроверено после трёх фиксов выше**
+- [ ] Тесты зелёные (циклы правились — прогнать `run_framework_tests.py`) — **не прогонялось как приёмка фазы**
 
 **Фаза 3 — codemod (перенос + импорты)**
 - [ ] `scripts/regroup_modules/mapping.py` — rename-таблица 1:1 (27 модулей → `<layer>/<без _module>`)

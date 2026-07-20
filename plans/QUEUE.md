@@ -1,16 +1,20 @@
 # Очередь планов — единая последовательность задач
 
-> Обновлено **2026-07-13** (**C-волна закрыта целиком**: C6(d) движок на ChainRunnable merge 22393392, C6(e) пул на worker_module merge — оба через Fable-ревью 8 углов; RS-7-остаток `workers`→рантайм оказался отдельной задачей (семантика WorkerSpec-тредов, не chain-пула) — в «Открытых решениях владельца»; попутно закрыт регресс RS-4 в layer-контракте merge d5c68d1b; ранее в тот же день — RS-волна целиком: RS-2+RS-3 71d3b479, RS-6+RS-5 7e77e9aa, RS-4 a42747be, RS-7 решение владельца; NEW-D1 bcabd296. Фронт → В4 Ф7 (GATE G3), В3 GUI-конструктор — по решению владельца).
+> **Обновлено 2026-07-20 — гигиена статусов.** Файл простоял без правок с 2026-07-13, за это время в `main` уехали: **Ф7 почти целиком** (G.8/G.9/G.H/G.F закрыты, G.7 в работе — Фазы 0-1 пройдены), **frontend-constructor Блок А целиком**, **layer-grouping Фаза 2 частично** и **целый параллельный трек backend_ctl + телеметрии**, которого в этом файле не было вовсе. Всё сверено по git, не по памяти. Ниже — актуальный порядок.
+>
+> Предыдущая запись (2026-07-13, C-волна закрыта целиком: C6(d) движок на ChainRunnable merge 22393392, C6(e) пул на worker_module merge — оба через Fable-ревью 8 углов; RS-7-остаток `workers`→рантайм оказался отдельной задачей (семантика WorkerSpec-тредов, не chain-пула) — в «Открытых решениях владельца»; попутно закрыт регресс RS-4 в layer-контракте merge d5c68d1b; ранее в тот же день — RS-волна целиком: RS-2+RS-3 71d3b479, RS-6+RS-5 7e77e9aa, RS-4 a42747be, RS-7 решение владельца; NEW-D1 bcabd296. Фронт → В4 Ф7 (GATE G3), В3 GUI-конструктор — по решению владельца).
 >
 > **Иерархия документов — 3 уровня, у каждого своя роль:**
 >
 > | Уровень | Документ | Роль |
 > |---|---|---|
-> | 1. Порядок | **этот файл** | ЧТО делаем и В КАКОЙ последовательности. Статусов задач здесь НЕТ |
+> | 1. Порядок | **этот файл** | ЧТО делаем и В КАКОЙ последовательности + **крупноблочный статус** (закрыт блок / в работе / не начат). Пер-задачных статусов здесь нет — они в constructor-master |
 > | 2. Исполнение | [`2026-07-06_constructor-master/`](2026-07-06_constructor-master/plan.md) | папка: мета-план (plan.md — детали задач, acceptance, **единственный источник статусов**) + файлы-детализации фаз (f3.x/f4.x/c6-design/…) |
 > | 3. Стратегия | [`current-path/plan.md`](current-path/plan.md) | волны В0–В6, обоснование (ревью 2026-07-11), реестр NEW-задач, метрики пути |
 >
 > **Правило против дрейфа:** новые задачи вносятся в constructor-master; этот файл только упорядочивает и обновляется при закрытии блока (не каждой задачи).
+>
+> **Урок 2026-07-20:** правило выше не сработало — файл отстал на неделю, и в нём не оказалось целого трека (backend_ctl + телеметрия), потому что тот шёл не из constructor-master, а отдельными планами. **Дополнение к правилу: любой план, живущий дольше одного дня, обязан иметь строку в этом файле — даже если он вне волн В0–В6.** Иначе следующий заход планируется по неполной картине.
 
 ## Сделано (свёрнуто; детали и merge-хэши — в constructor-master)
 
@@ -18,44 +22,45 @@
 
 ## Строгая последовательность (сверху вниз)
 
-### Сейчас — В4 Ф7 hot-path (строго одним вскрытием, один агент; GATE G3 закрыт 2026-07-13; преамбула Ф7 — 3 требования перф-ревью 2026-07-12)
+### Сейчас — В4 Ф7 hot-path: **остался только G.7 (soak + приёмка + флип дефолтов)**
 
-**C-волна ЗАКРЫТА 2026-07-13 целиком** (C1-C8, включая C6(d)/(e) — детали и merge-хэши в constructor-master). **GATE G3 ЗАКРЫТ владельцем 2026-07-13: старт Ф7 — ДА.** Вердикты: 1.8 record/replay — пропустить (остаётся опц); [frame-pool](2026-07-06_constructor-master/frame-pool-idea.md) — одобрен как дизайн-вход G.3/G.4 (внесён в acceptance; + аналоги индустрии iceoryx2/GStreamer/GenTL; + принцип 6: камер 2–3+, у каждой своя цепочка → пулы per-camera с изоляцией); baseline G.1 — лесенкой (синтетика → вебкамера → Hikvision, G.7 сравнивает same-tier); B-6..B-9 + HP-5-репродьюсер внесены в G.3/G.4 (RS→Ф7 закрыт).
+**Ф7 почти закрыта.** ЗАКРЫТЫ и в `main`: **G.1, G.2, G.3, G.4, G.5, G.6** (2026-07-13/14) · **G.8, G.9, G.H** Этапы 1+2 — merge `baff5f0a` 2026-07-15 с финальным ревью фазы G **APPROVE 8.0/10** (фиксы `0a7f16a6`) · **G.F** реестр из 18 feature-флагов (`c078fbc2`).
 
-| # | Задача | Где детали |
-|---|---|---|
-| 7 | **G.6** — trace-id/OTel-поля (первым: семантика, не hot-path-риск) + runtime-счётчик границ процесса на кадр | constructor-master, Ф7 |
-| 8 | **G.1** — снять TRACE + perf-пробы + повторный baseline (FPS, p50/p99, **хопы/кадр**) | там же |
-| 9 | **G.2** — характеризационные тесты доставки + kind-каналы + единый конверт команд | там же |
-| 10 | **G.3** — FrameShm: одна стратегия записи + seqlock + startup-cleanup SHM + **громкий pickle-fallback (d)** | там же |
-| 11 | **G.4** — QoS-профили kind + боевой RingBuffer (поглощает 3.3-остаток и QoS live-tail 5.21d) | там же |
-| 12 | **G.5** — снятие двойной конверсии (строго после seqlock) | там же |
-| 13 | **G.9** — GC-дисциплина: `gc.freeze()` + сборка по расписанию; per-frame путь без Pydantic (msgspec/dict, стык с TECH_STACK Волна 1); строго после G.5 | там же |
-| 14 | **G.7** — приёмка: flip `use_kind_channels`, soak, FPS/p99 ≥ baseline, p99 без GC-выбросов | там же |
-| 15 | **G.8** — drain→detach→stop воркера (поглощает pipeline-live-control Task 3.3) | там же |
+**G.7 — [~] единственная незакрытая, ход на 2026-07-16** (детали и числа — [g7-flip-plan.md](2026-07-06_constructor-master/g7-flip-plan.md)):
+
+| Фаза G.7 | Статус |
+|---|---|
+| Фаза 0 — прекондиции | ✅ |
+| Фаза 1 — лесенка per-flag | ✅ **закрыта целиком**: 9 флагов флипнуты по одному с замером (receive p99 0.123→0.001; torn=0; restore p99 1.4→0.16 ≈8.5×) |
+| Фаза 2 — fault-инъекции | **частично**: 2.1 kill-9 читателя ✅, 2.2 kill-9 писателя ✅ частично, 2.5 teardown ✅ зафиксирован; **2.3 switch-probe и 2.4 slow-consumer — ⏳** |
+| Фаза 3 — soak + приёмка | **фундамент ✅** (мультикамера на 2 синтетич. камерах, Join-фикс `83d7d48a`); **остаток — основная работа** |
+
+**Остаток G.7 = следующий шаг В4:** soak ≥2ч × 2 рецепта → приёмка (FPS/p99 ≥ baseline, socket backend_ctl жив, drop-счётчики видимы) → флип дефолтов в реестре G.F → замер потолка 50-60 fps.
+
+**Историческая справка (GATE G3, 2026-07-13):** старт Ф7 одобрен владельцем; 1.8 record/replay — пропустить; [frame-pool](2026-07-06_constructor-master/frame-pool-idea.md) одобрен как дизайн-вход G.3/G.4; baseline лесенкой (синтетика → вебкамера → Hikvision, same-tier); B-6..B-9 + HP-5-репродьюсер внесены в G.3/G.4.
 
 ### В5 — Supervision-tree + Ф8
 
 | # | Задача | Где детали |
 |---|---|---|
-| 16 | **3.9** — depends_on: порядок старта по readiness апстрима (поднято из «опц» в обязательное — предусловие Ф8) | constructor-master, Ф3 + current-path В5 |
-| 17 | **NEW-6** — стратегии супервизора (rest_for_one/one_for_all, группы, backoff+jitter, эскалация give-up) | current-path §4 |
-| 18 | **NEW-7** — alerting поверх supervisor-событий (gave_up/failed/drop-растёт/**pickle-fallback G.3(d)** → громко) | current-path §4 |
-| 19 | **H.1** — ярусы core/optional/frozen + enforcement + **NEW-10** (24/24 interfaces.py, Protocol ObservableMixin, «один вход», contract-тест `__all__`) | constructor-master, Ф8 |
-| 20 | **H.2 (GATE G4)** — исполнение kill-вердиктов G0 per-item, отдельными одобренными коммитами | там же |
-| 21 | **H.3** — Registers⇄StateStore merge (с оглядкой на 3 оси ADR-COMM-006) | там же |
-| 22 | **H.4** — один стандарт логирования прототипа | там же |
-| 23 | **H.5** — ужесточение sentrux + разбор complex functions + перекалибровка метрик приёмки (вопрос R5c) | там же |
-| 24 | **H.6** — финальная сверка, закрытие constructor-master | там же |
+| 1 | **3.9** — depends_on: порядок старта по readiness апстрима (поднято из «опц» в обязательное — предусловие Ф8) | constructor-master, Ф3 + current-path В5 |
+| 2 | **NEW-6** — стратегии супервизора (rest_for_one/one_for_all, группы, backoff+jitter, эскалация give-up) | current-path §4 |
+| 3 | **NEW-7** — alerting поверх supervisor-событий (gave_up/failed/drop-растёт/**pickle-fallback G.3(d)** → громко) | current-path §4 |
+| 4 | **H.1** — ярусы core/optional/frozen + enforcement + **NEW-10** (24/24 interfaces.py, Protocol ObservableMixin, «один вход», contract-тест `__all__`) | constructor-master, Ф8 |
+| 5 | **H.2 (GATE G4)** — исполнение kill-вердиктов G0 per-item, отдельными одобренными коммитами | там же |
+| 6 | **H.3** — Registers⇄StateStore merge (с оглядкой на 3 оси ADR-COMM-006) | там же |
+| 7 | **H.4** — один стандарт логирования прототипа | там же |
+| 8 | **H.5** — ужесточение sentrux + разбор complex functions + перекалибровка метрик приёмки (вопрос R5c) | там же |
+| 9 | **H.6** — финальная сверка, закрытие constructor-master | там же |
 
 ### В6 — Конструктор v1.0 (финал)
 
 | # | Задача | Где детали |
 |---|---|---|
-| 25 | **NEW-9** — packaging: тяжёлые deps → extras → env-алиасы `MPF_*` → свой pyproject у framework (стык с TECH_STACK §11 чистка pyproject) | current-path §4/В6 |
-| 26 | **NEW-4** — симметрия ресурсов плагина (configure↔shutdown контракт-тест, SHM owner-теги) | current-path §4 |
-| 27 | **Туториал «своё приложение за час»** + scaffold-генератор (5.14опц) | current-path В6 |
-| 28 | 🏁 **Финальная приёмка: второе продуктовое приложение из «рыбы» за день** + 6 тестов architecture-10-of-10 §0 | [architecture-10-of-10.md](current-path/architecture-10-of-10.md) |
+| 10 | **NEW-9** — packaging: тяжёлые deps → extras → env-алиасы `MPF_*` → свой pyproject у framework (стык с TECH_STACK §11 чистка pyproject) | current-path §4/В6 |
+| 11 | **NEW-4** — симметрия ресурсов плагина (configure↔shutdown контракт-тест, SHM owner-теги) | current-path §4 |
+| 12 | **Туториал «своё приложение за час»** + scaffold-генератор (5.14опц) | current-path В6 |
+| 13 | 🏁 **Финальная приёмка: второе продуктовое приложение из «рыбы» за день** + 6 тестов architecture-10-of-10 §0 | [architecture-10-of-10.md](current-path/architecture-10-of-10.md) |
 
 ### Параллельный трек — TECH_STACK 2026 (вне строгой последовательности конструктора)
 
@@ -63,7 +68,42 @@
 
 ### Параллельный трек — frontend-constructor (исполнение В3 ось NEW-D)
 
-План [`frontend-constructor/plan.md`](frontend-constructor/plan.md) — выделение фронт-конструктора из прототипа во фреймворк (поглощает NEW-D2/`proto-frontend-carve` → SUPERSEDED). **Блок А (Ф0 docs → Ф1 гигиена frontend_module → Ф2 граница фронт/бэк) — parallel-safe ДО codemod layer-grouping**, самодостаточен. Блок В (Ф3+ промоушены) — ПОСЛЕ codemod. Инвариант: кодовые фазы никогда не параллельны Фазе 3-codemod (freeze-окно). Старт Блока А — 2026-07-18.
+План [`frontend-constructor/plan.md`](frontend-constructor/plan.md) — выделение фронт-конструктора из прототипа во фреймворк (поглощает NEW-D2/`proto-frontend-carve` → SUPERSEDED).
+
+**Блок А ✅ ЗАКРЫТ 2026-07-19** (Ф0 `5307a2c2` → Ф1 фасад-флип, 5 коммитов → Ф2 `d6faaa80` граница фронт/бэк + headless-default). T2.5 опционален, пропущен; live headless-гейт T2.1 сознательно отложен.
+
+⚠️ **Долг Ф2:** вынос `gui` из `backend/topology/base.yaml` в `frontend/presentation.yaml` **не сопровождался перегенерацией** характеризационных снапшотов → `test_build_matches_snapshot[phone_sketch]` и `[hikvision_letter_robot]` **красные в `main`** (обнаружено 2026-07-20). Починка — осознанная перегенерация отдельным коммитом, не «заодно».
+
+**Блок В (Ф3+ промоушены) — ПОСЛЕ codemod.** Инвариант: кодовые фазы никогда не параллельны Фазе 3-codemod (freeze-окно).
+
+### Параллельный трек — layer-grouping (блокер двух треков выше)
+
+План [`framework-layer-grouping/plan.md`](framework-layer-grouping/plan.md). **Фаза 2 в основном закрыта 2026-07-18** (`92c19f2e` шим blueprint снесён · `d9dddf45` ConsoleProcessConfig перенесён · `bf484bcd` actions_module/interfaces.py) — но **приёмка фазы не проводилась** (перезамер циклов + прогон suite). Фазы 0/3/4/5 не начаты.
+
+**Фаза 3 (codemod, ~1970 импортов / 910 файлов) — freeze-окно.** Её ждут: frontend-constructor Блок В и backend-ctl-framework-module Task 1.1/1.2 (слой `tooling/`). При старте пересобрать rename-таблицу: план не знает про `telemetry_readmodel_module` (2026-07-18) и переезд `backend_ctl → tooling/`.
+
+### Параллельный трек — backend_ctl + телеметрия (2026-07-16…20; в этом файле раньше не отражался)
+
+Самый активный трек последних дней, шёл целиком мимо QUEUE.md. Всё, кроме отмеченного, — в `main`:
+
+| План | Статус | Осталось |
+|---|---|---|
+| [backend-ctl-debug-console](backend-ctl-debug-console.md) | Phases C/D/E/F закрыты | — |
+| [backend-ctl-d1-session-isolation](backend-ctl-d1-session-isolation.md) | ✅ закрыт | — |
+| [backend-ctl-d2-streamable-http](backend-ctl-d2-streamable-http.md) | ✅ закрыт | — |
+| [backend-ctl-d4-flight-recorder](backend-ctl-d4-flight-recorder.md) | ✅ закрыт (merge `09e576e4`) | — |
+| [backend-ctl-hardening](backend-ctl-hardening.md) | ✅ закрыт — 36/36, ультра-ревью 4.5→7.5/10 | — |
+| [backend-ctl-framework-module](backend-ctl-framework-module.md) | Phase 0+2 в `main`, 15 пунктов открыто | **Task 1.1/1.2** переезд в `tooling/` — **ждёт codemod**; Task 4.1/4.2 живые тесты + doc-regen — можно сейчас |
+| [telemetry-coherence-remediation](telemetry-coherence-remediation.md) | Фазы 1-3 закрыты, merge `13623920`, Fable 47/60 | Task 3.2 шаг 3 (watcher фанит publish-секцию детям); **шапка плана всё ещё врёт `DRAFT`** |
+| [gui-telemetry-read-model](gui-telemetry-read-model.md) | закрыт (ADR-136) | Task 1.3 — live qt-smoke |
+| [telemetry-dashboard](telemetry-dashboard.md) | ✅ закрыт | — |
+| [telemetry-publish-control](telemetry-publish-control.md) | ✅ закрыт (ADR-PM-018) | residual — каскад двух плоскостей |
+
+**Следующий шаг трека (рекомендация ревьюера):** порядок `_system_ready_event` в `orchestrator.py` — снимает 12 красных тестов и возвращает доказуемость introspect-поверхности. Правка рискованная (сигнал ждут SystemLauncher, GUI-старт, harness) → нужен полный suite проекта, не только backend_ctl.
+
+### Параллельный трек — robot-protocol-v2 (авторизован, не стартован)
+
+План [`robot-protocol-v2/`](robot-protocol-v2/plan.md) (+ `tasks.md`, `protocol-spec.md`, `firmware-architecture.md`), заведён 2026-07-19 (`93dd484b`); канон v1-прошивки зафиксирован в git (`a45cff3e`). **Статус: draft, исполнение по команде владельца.** Ветки нет.
 
 ### Опциональные (решаются по ходу, вне строгого порядка)
 
