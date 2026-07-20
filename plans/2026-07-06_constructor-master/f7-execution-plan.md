@@ -81,6 +81,15 @@
 Acceptance: по trace_id в логах восстанавливается путь кадра (лог↔кадр коррелируются); счётчик границ на кадр доступен runtime (для baseline G.1); оверхед — только поля, никаких новых аллокаций-объектов на кадр сверх dict-полей.
 НЕ делать: не трогать каналы/конверт (G.2), не трогать SHM-запись (G.3).
 
+**РЕЗИДУАЛ G.6 (внесён 2026-07-20 из backend-ctl Task D.3):** доставленный скоуп покрыл кадровый
+путь (`frame_trace`, конверт плагина) и `LogRecord.extra`, но **не** конверты наблюдаемости.
+Требование на будущую трассировку: trace-поля обязаны доезжать до `observability.record`
+([record_forward_channel.py](../../multiprocess_framework/modules/channel_routing_module/observability/record_forward_channel.py))
+и до `state.changed`, а не только до `Message`/лога. Без этого агентский `trace(trace_id)`-waterfall
+(аналог OTel/Jaeger) не сошьёт лог/стат-события с кадром — корреляция остаётся по `(process, worker, ts)`.
+Проверено 2026-07-20: `trace_id` в этих двух путях отсутствует. Потребитель требования —
+[plans/backend-ctl-debug-console.md](../backend-ctl-debug-console.md) (Task D.3).
+
 ### G.1 (Sonnet) — TRACE=0 + perf-пробы + baseline tier-1
 
 Скоуп: снять 7 TRACE из on_receive; perf-пробы latency за флагом (HP-1); повторный baseline в `baseline.md`: FPS, p50/p99, **границ/кадр** (счётчик G.6), аллокации — **tier «синтетика»** (синтетический источник кадров нужного размера/частоты; вебкамера и Hikvision — дозамер позже, tier помечать).

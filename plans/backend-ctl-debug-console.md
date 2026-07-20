@@ -217,7 +217,14 @@ Transport/events — mixin (вербатим на том же `self`, макси
 **Level:** Middle (Sonnet) | **Layer:** docs
 **Goal:** зафиксировать в контракте/плане Ф7 G.6 (внешний план) требование: trace-поля обязаны доезжать до `observability.record` и `state.changed`, не только до `Message`. **Сама трассировка** (driver штампует `trace_id` на send_command/set_register; EventHub индексирует; `trace(trace_id)` собирает waterfall — аналог OTel/Jaeger, CDP initiator-chain) — **исполняется в плане G.6**, не здесь: задача с acceptance «после G.6» в этом плане не закрывается и вечно висела бы в `/plan-status`.
 **Acceptance:**
-- [ ] требование записано в контракт G.6 (ссылка на документ); до G.6 корреляция — по (process, worker, ts)
+- [x] требование записано в контракт G.6 (ссылка на документ); до G.6 корреляция — по (process, worker, ts)
+
+**Закрыто 2026-07-20 с поправкой на факт:** G.6 успела закрыться (✅ 2026-07-13) раньше, чем эта
+задача, — «застолбить до исполнения» стало невозможно. Требование внесено в
+[f7-execution-plan.md](2026-07-06_constructor-master/f7-execution-plan.md) §G.6 как **резидуал**:
+доставленный скоуп покрыл кадровый путь и `LogRecord.extra`, но `observability.record` и
+`state.changed` остались без trace-полей (проверено grep'ом — `trace_id` там отсутствует).
+До закрытия резидуала корреляция для агента — по `(process, worker, ts)`, как и планировалось.
 
 ### Task D.4 — Flight recorder (запись → offline-реплей в read-model)
 **Level:** Senior (Opus) | **Layer:** mixed (tools + один additive-шов framework)
