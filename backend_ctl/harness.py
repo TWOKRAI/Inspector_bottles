@@ -338,13 +338,18 @@ class BackendHarness:
             else:
                 self._launcher = build_headless_launcher(recipe=self._recipe, with_base=self._with_base)
             self._launcher.start()
+            # pid оркестратора + снимок его поддерева СРАЗУ после старта, ДО wait_until_ready
+            # (Task 5.1, находка ultra-ревью): раньше снимок снимался только ПОСЛЕ успешной
+            # готовности — таймаут readiness ниже поднимал исключение раньше, чем pid успевал
+            # зафиксироваться, и except-ветка звала stop()→_force_kill_tree с (None, []) —
+            # добивать было нечего, осиротевшие процессы переживали teardown. pid у Process
+            # доступен сразу после launcher.start() (не ждёт готовности), поэтому снимок здесь
+            # безопасен и закрывает kill-net на самом раннем пути отказа.
+            self._orch_pid = self._orchestrator_pid()
+            self._descendants = _subtree(self._orch_pid)
             if not self._launcher.wait_until_ready(self._ready_timeout):
                 self._log(f"[harness] система не готова за {self._ready_timeout}s — останавливаю")
                 raise RuntimeError("headless-бэкенд не поднялся (wait_until_ready timeout)")
-
-            # pid оркестратора + снимок его поддерева ПОСЛЕ старта — для scoped-kill в teardown.
-            self._orch_pid = self._orchestrator_pid()
-            self._descendants = _subtree(self._orch_pid)
 
             # Readiness-проба вместо фиксированных sleep (Task 0.4): опрашиваем PM, пока не
             # ответит успехом. Дедлайн = прежний warmup + запас 3с. connect тоже ретраим —
@@ -390,6 +395,13 @@ class BackendHarness:
                 pass
             self._driver = None
         if self._launcher is not None:
+            # Fallback (Task 5.1): ранний снимок в start() мог не зафиксировать pid (например,
+            # launcher_factory отдал launcher, у которого get_status() ещё не готов к моменту
+            # снимка) — повторная попытка перед teardown, иначе _force_kill_tree останется
+            # без цели.
+            if self._orch_pid is None:
+                self._orch_pid = self._orchestrator_pid()
+                self._descendants = _subtree(self._orch_pid)
             _shutdown_with_watchdog(
                 self._launcher,
                 self._teardown_timeout,

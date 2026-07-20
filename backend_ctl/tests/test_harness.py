@@ -185,3 +185,91 @@ class TestEnvRestore:
 
         after = {k: _os.environ.get(k) for k in keys}
         assert after == before, f"env утёк после падения start(): {before} → {after}"
+
+
+# --- Task 5.1: kill-net на таймауте readiness (регресс ultra-ревью) ---
+
+
+class _TimeoutLauncher:
+    """Launcher, у которого процесс поднимается (pid доступен), но readiness не подтверждается."""
+
+    def start(self):
+        pass
+
+    def wait_until_ready(self, timeout):
+        return False
+
+    def get_status(self):
+        return {"process": {"pid": 4242}}
+
+    def stop(self):
+        pass
+
+
+class TestKillNetOnReadinessTimeout:
+    def test_force_kill_tree_gets_target_when_wait_until_ready_fails(self, monkeypatch) -> None:
+        """Регресс: раньше pid/дерево снимались ПОСЛЕ wait_until_ready — таймаут readiness
+        поднимал RuntimeError раньше снимка, и stop()->_force_kill_tree получал (None, []),
+        оставляя осиротевшие процессы. Снимок теперь снимается сразу после launcher.start(),
+        ДО wait_until_ready, поэтому даже на таймауте цель для force-kill есть.
+        """
+        from backend_ctl import harness as _h
+
+        captured: dict = {}
+
+        def _fake_shutdown(launcher, timeout, orchestrator_pid, snapshot, *, log):
+            captured["orchestrator_pid"] = orchestrator_pid
+            captured["snapshot"] = snapshot
+
+        monkeypatch.setattr(_h, "_subtree", lambda pid: [f"proc-{pid}"] if pid else [])
+        monkeypatch.setattr(_h, "_shutdown_with_watchdog", _fake_shutdown)
+
+        h = BackendHarness(port=8797, launcher_factory=_TimeoutLauncher, ready_timeout=0.01)
+        with pytest.raises(RuntimeError, match="wait_until_ready timeout"):
+            h.start()
+
+        assert captured.get("orchestrator_pid") == 4242, "force-kill не получил pid оркестратора"
+        assert captured.get("snapshot") == ["proc-4242"], "force-kill не получил снимок поддерева"
+
+    def test_stop_falls_back_to_capturing_pid_if_start_missed_it(self, monkeypatch) -> None:
+        """Fallback (Task 5.1): если ранний снимок в start() не зафиксировал pid (например,
+        get_status() на тот момент ещё не отдавал pid), stop() обязан повторить попытку перед
+        teardown — иначе force-kill останется без цели даже на штатном пути.
+        """
+        from backend_ctl import harness as _h
+
+        class _LatePidLauncher:
+            def __init__(self):
+                self._ready = False
+
+            def start(self):
+                pass
+
+            def wait_until_ready(self, timeout):
+                self._ready = True
+                return True
+
+            def get_status(self):
+                # pid появляется только ПОСЛЕ готовности — ранний снимок в start() его не увидит.
+                return {"process": {"pid": 7777 if self._ready else None}}
+
+            def stop(self):
+                pass
+
+        captured: dict = {}
+
+        def _fake_shutdown(launcher, timeout, orchestrator_pid, snapshot, *, log):
+            captured["orchestrator_pid"] = orchestrator_pid
+            captured["snapshot"] = snapshot
+
+        monkeypatch.setattr(_h, "BackendDriver", _FakeDriver)
+        monkeypatch.setattr(_h, "_subtree", lambda pid: [f"proc-{pid}"] if pid else [])
+        monkeypatch.setattr(_h, "_shutdown_with_watchdog", _fake_shutdown)
+
+        h = BackendHarness(port=8796, launcher_factory=_LatePidLauncher)
+        h.start()
+        assert h._orch_pid is None, "ранний снимок не должен был увидеть ещё не готовый pid"
+
+        h.stop()
+        assert captured.get("orchestrator_pid") == 7777, "stop() не подхватил pid fallback'ом"
+        assert captured.get("snapshot") == ["proc-7777"]
