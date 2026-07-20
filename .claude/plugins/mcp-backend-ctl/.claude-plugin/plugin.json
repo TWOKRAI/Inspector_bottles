@@ -4,8 +4,8 @@
   "description": "Live backend control via backend_ctl driver (status/introspect/state/send_command/telemetry/watch) — MCP SDK server, safety modes",
   "mcpServers": {
     "backend-ctl": {
-      "command": ".venv/bin/python",
-      "args": ["-m", "backend_ctl.mcp_server_sdk"]
+      "command": "uv",
+      "args": ["run", "--no-sync", "python", "-m", "backend_ctl.mcp_server_sdk"]
     }
   }
 }

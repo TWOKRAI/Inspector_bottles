@@ -110,7 +110,9 @@ plugins:
   mcp-codegraph:
     enabled: true
   # Live backend control via backend_ctl driver (constructor-master Ф1 Task 1.7).
-  # BUNDLED project-local plugin: wraps backend_ctl/mcp_server.py (stdio, no SDK deps).
+  # BUNDLED project-local plugin: official MCP SDK server backend_ctl/mcp_server_sdk.py
+  # (BCTL-ADR-001). Launched via `uv run --no-sync` — resolves the project .venv on both
+  # Windows and macOS; a hardcoded .venv/bin/python silently failed to start on Windows.
   # Requires a running backend with BACKEND_CTL=1; tools fail with a clear message otherwise.
   # Enabled by owner decision 2026-07-07.
   mcp-backend-ctl:
