@@ -32,8 +32,8 @@
 | Регистры приложения v3 | `multiprocess_prototype/registers/` |
 | Конспект правил | `docs/claude/FRAMEWORK_RULES_EXTRACT.md` |
 | Нарратив «конструктор» | `docs/claude/FRAMEWORK_CONSTRUCTOR_OVERVIEW.md` |
-| Настройка qex | `.claude/mcp/qex/README.md` (quick-start), `.claude/mcp/qex/SETUP_GUIDE.md` (полный) |
-| Гайд по sentrux | [`.claude/mcp/sentrux/README.md`](.claude/mcp/sentrux/README.md) (метрики, slash-команды, сценарии) |
+| Настройка qex | [`.claude/plugins/mcp-qex/README.md`](.claude/plugins/mcp-qex/README.md) (quick-start), [`SETUP_GUIDE.md`](.claude/plugins/mcp-qex/SETUP_GUIDE.md) (полный) |
+| Гайд по sentrux | [`.claude/plugins/mcp-sentrux/README.md`](.claude/plugins/mcp-sentrux/README.md) (метрики, slash-команды, сценарии) |
 | Path-scoped правила | [`.rules/`](.rules/) — загружаются при работе с соответствующими файлами |
 
 ## История версий и архив
@@ -147,7 +147,7 @@ Co-Authored-By: ...
 | **infra/** | `/validate`, `/fw-test`, `/cold-start`, `/run-proto`, `/clean-cache`, `/diagrams` |
 | **team/** | `/team`, `/hire`, `/handoff`, `/docs`, `/wrap-up` |
 
-Гайд по sentrux: [`.claude/mcp/sentrux/README.md`](.claude/mcp/sentrux/README.md). Гайд по скриптам: [`scripts/README.md`](scripts/README.md).
+Гайд по sentrux: [`.claude/plugins/mcp-sentrux/README.md`](.claude/plugins/mcp-sentrux/README.md). Гайд по скриптам: [`scripts/README.md`](scripts/README.md).
 
 ## Makefile
 
