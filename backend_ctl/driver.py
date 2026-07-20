@@ -63,6 +63,7 @@ from .events import (  # noqa: F401 — EventCallback/OBSERVABILITY_RECORD_COMMA
     OBSERVABILITY_RECORD_COMMAND,
     extract_observability_records,
     iter_state_deltas,
+    page_with_reset_retry,
 )
 from .transport import _TransportMixin, _Pending  # noqa: F401 — _Pending re-export для тестов
 from .watch import WatchController, GUI_DEFAULT_PATTERNS  # noqa: F401 — GUI_DEFAULT_PATTERNS re-export
@@ -154,6 +155,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         self._pending: Dict[str, _Pending] = {}
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
+
+        # Task 2.3: приватные курсоры инструментов (_events_tool_cursor, _obs_records_cursor)
+        # читаются, продвигаются и записываются НЕ атомарно, а tools/call идут в параллельных
+        # потоках SDK. Без лока два вызова читают один курсор и оба получают одну страницу —
+        # события дублируются, а часть теряется (курсор перезаписывается младшим значением).
+        self._tool_cursor_lock = threading.Lock()
 
         # Task 1.1: неожиданная смерть соединения (сервер закрыл сокет / OSError в reader'е)
         # в отличие от намеренного close(). Ставит ТОЛЬКО reader-поток; request() по нему
@@ -1342,12 +1349,14 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         threshold = _LOG_SEVERITY_RANK.get(str(effective_level).lower()) if effective_level else None
 
         if events is None:
-            page = self.events_page(cursor=self._obs_records_cursor)
-            if not page.get("success", True):
-                # reset_required (курсор чужого поколения) — начать заново один раз,
-                # прозрачно для вызывающего (симметрично мосту MCP-инструмента events).
-                page = self.events_page(cursor=None)
-            self._obs_records_cursor = page.get("next_cursor")
+            # Триплет «прочитал курсор → взял страницу → записал курсор» под локом
+            # (Task 2.3): иначе параллельный вызов отдаёт ту же страницу второй раз.
+            with self._tool_cursor_lock:
+                page = page_with_reset_retry(
+                    lambda c: self.events_page(cursor=c),
+                    self._obs_records_cursor,
+                )
+                self._obs_records_cursor = page.get("next_cursor")
             source: List[Dict[str, Any]] = [it["event"] for it in page.get("items", [])]
         else:
             source = events

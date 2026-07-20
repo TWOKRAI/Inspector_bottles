@@ -476,9 +476,31 @@ class _EventChannelMixin:
         return self._hub.event_errors
 
 
+def page_with_reset_retry(page_fn: Any, cursor: Any) -> Dict[str, Any]:
+    """Одна страница курсора с прозрачным перечитыванием при ``reset_required``.
+
+    Курсор несёт generation-токен инкарнации hub'а. После реконнекта (или курсора
+    чужого поколения) страница возвращается с ``success: False`` и требует начать
+    заново — вызывающему знать про generation-токены не нужно, это деталь курсора.
+
+    Единая реализация вместо двух копий (Task 2.3): один и тот же retry-цикл жил в
+    ``mcp_tools._events`` и в ``driver.observability_records``, и правка в одном месте
+    молча не доезжала до второго.
+
+    ``page_fn`` принимает курсор и возвращает страницу. При сбросе используется
+    ``resume_cursor`` страницы, если сервер его назвал (граница новой инкарнации),
+    иначе ``None`` — перечитывание с начала доступного кольца.
+    """
+    page = page_fn(cursor)
+    if not page.get("success", True):
+        page = page_fn(page.get("resume_cursor"))
+    return page
+
+
 __all__ = [
     "EventHub",
     "_EventChannelMixin",
+    "page_with_reset_retry",
     "EventCallback",
     "OBSERVABILITY_RECORD_COMMAND",
     "MISSING_MARKER",

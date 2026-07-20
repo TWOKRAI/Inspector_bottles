@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Optional
 from backend_ctl.capability_render import FORMATS, render_concise, render_help
 from backend_ctl.conditions import DEFAULT_AWAIT_TIMEOUT
 from backend_ctl.driver import BackendDriver
-from backend_ctl.events import ALL_PLANE, PLANES
+from backend_ctl.events import ALL_PLANE, PLANES, page_with_reset_retry
 from backend_ctl.mcp_errors import BackendUnavailable
 from backend_ctl.recorder import DEFAULT_MAX_EVENTS, MODE_REPLAY, RecordingError
 
@@ -223,20 +223,20 @@ def _events(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     timeout = min(float(args.get("timeout", 0.0) or 0.0), MAX_EVENTS_TIMEOUT)
     max_items = args.get("max_items")
     limit = int(max_items) if max_items is not None else None
-    cursor = getattr(drv, "_events_tool_cursor", None)
     deadline = time.monotonic() + timeout if timeout > 0 else None
     while True:
-        page = drv.events_page(cursor=cursor, limit=limit)
-        if not page.get("success", True):
-            # reset_required (курсор чужого/прежнего поколения) — начать заново один
-            # раз, прозрачно для агента: тул называется events(), не events_page(), и
-            # не обязан знать про generation-токены курсора.
-            cursor = None
-            page = drv.events_page(cursor=None, limit=limit)
-        cursor = page.get("next_cursor", cursor)
+        # Триплет «прочитал курсор → взял страницу → записал курсор» атомарен (Task 2.3).
+        # Лок держится ТОЛЬКО на итерации, не на всём ожидании: иначе вызов с timeout
+        # блокировал бы соседние чтения на все MAX_EVENTS_TIMEOUT секунд.
+        with drv._tool_cursor_lock:  # noqa: SLF001 — приватное состояние курсоров этого driver'а
+            cursor = getattr(drv, "_events_tool_cursor", None)
+            page = page_with_reset_retry(
+                lambda c: drv.events_page(cursor=c, limit=limit),
+                cursor,
+            )
+            drv._events_tool_cursor = page.get("next_cursor", cursor)  # noqa: SLF001
         items = [it["event"] for it in page.get("items", [])]
         if items or deadline is None or time.monotonic() >= deadline:
-            drv._events_tool_cursor = cursor  # noqa: SLF001 — приватное состояние ИМЕННО этого инструмента
             return items
         time.sleep(0.05)
 
