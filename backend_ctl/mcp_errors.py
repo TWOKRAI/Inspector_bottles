@@ -11,6 +11,19 @@ import difflib
 from collections.abc import Iterable
 
 
+class BackendUnavailable(RuntimeError):
+    """Бэкенд недоступен (сокет не поднят / соединение оборвано) — понятный текст для агента.
+
+    Живёт здесь, а не в :mod:`backend_ctl.mcp_driver_session`, чтобы его мог поднимать
+    и низкоуровневый транспорт: `transport → mcp_driver_session → driver → transport`
+    дал бы цикл импортов. :mod:`mcp_driver_session` ре-экспортирует имя (back-compat).
+
+    Контракт (Task 1.1): смерть соединения посреди сессии — ИСКЛЮЧЕНИЕ, а не error-dict.
+    Только так срабатывает reconnect-аппарат D.1 (reset → replay подписок → resume watch).
+    Таймаут при живом сокете исключением НЕ является (это не смерть соединения).
+    """
+
+
 def suggest_tools(name: str, known: Iterable[str], *, limit: int = 3) -> list[str]:
     """Ближайшие по написанию имена инструментов (опечатки/забытый суффикс)."""
     return difflib.get_close_matches(name, list(known), n=limit, cutoff=0.5)
@@ -42,6 +55,7 @@ def restricted_command_blocked_error(command: str) -> str:
 
 
 __all__ = [
+    "BackendUnavailable",
     "suggest_tools",
     "unknown_tool_error",
     "blocked_tool_error",

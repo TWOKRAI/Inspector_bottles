@@ -26,6 +26,8 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
+from backend_ctl.mcp_errors import BackendUnavailable
+
 _log = logging.getLogger(__name__)
 
 # TTL карантина таймаутнутых request_id (Task 0.2): дольше этого поздний ответ уже
@@ -64,6 +66,8 @@ class _TransportMixin:
         """
         self._session = uuid.uuid4().hex[:12]
         self._subscriber = f"{self._sender}.{self._session}"
+        # Свежее соединение — прошлая смерть больше не актуальна (Task 1.1).
+        self._conn_lost = False
         self._sock = socket.create_connection((self._host, self._port), timeout=timeout)
         self._sock.settimeout(0.5)
         self._running = True
@@ -120,8 +124,20 @@ class _TransportMixin:
         """Отправить router-сообщение и дождаться ответа по request_id.
 
         Если в message нет request_id — назначается; в reply_to ставится self.reply_to,
-        если не задан. Возвращает result из ответа (или error-dict при таймауте/обрыве).
+        если не задан. Возвращает result из ответа.
+
+        Контракт ошибок (Task 1.1) — две РАЗНЫЕ ситуации, две разные реакции:
+
+        * **соединение мертво** (сервер закрыл сокет / OSError в reader'е) →
+          :class:`BackendUnavailable`. Исключение обязано лететь наружу: только по нему
+          ``call_tool`` зовёт ``session.reset()``, а следующий ``ensure()`` реконнектится
+          с replay'ем durable-подписок. Раньше здесь возвращался error-dict — и весь
+          reconnect-аппарат D.1 был недостижим, сессия оставалась мёртвой навсегда.
+        * **таймаут при живом сокете** / вызов без соединения → error-dict как прежде
+          (бэкенд жив, просто не ответил вовремя — сбрасывать соединение незачем).
         """
+        if self._conn_lost:
+            raise BackendUnavailable(self._conn_lost_message())
         if self._sock is None:
             return {"success": False, "error": "not connected"}
 
@@ -141,11 +157,19 @@ class _TransportMixin:
                 self._quarantine_timed_out(cid)
                 return {"success": False, "error": "timeout", "request_id": cid}
             if pending.response is None:
+                # Разбужены без ответа: либо смерть соединения (reader разбудил pending'и),
+                # либо штатный close() из другого потока. Первое — исключение (реконнект),
+                # второе — error-dict (закрытие намеренное, реконнектить нечего).
+                if self._conn_lost:
+                    raise BackendUnavailable(self._conn_lost_message(request_id=cid))
                 return {"success": False, "error": "connection closed", "request_id": cid}
             return pending.response.get("result", pending.response)
         except (ConnectionError, OSError) as exc:
             # Гонка close()/request(): сокет обнулён/закрыт из другого потока во время
-            # отправки → чистый error-dict, не AssertionError/утечка исключения (Task 0.2).
+            # отправки. Смерть соединения → исключение (Task 1.1); намеренное закрытие →
+            # чистый error-dict, не AssertionError/утечка исключения (Task 0.2).
+            if self._conn_lost:
+                raise BackendUnavailable(self._conn_lost_message(request_id=cid)) from exc
             return {"success": False, "error": "connection closed", "detail": str(exc), "request_id": cid}
         finally:
             with self._pending_lock:
@@ -196,16 +220,53 @@ class _TransportMixin:
                 # неожиданный обрыв при живом клиенте — залогировать (не только stderr).
                 if self._running:
                     _log.warning("backend_ctl reader: обрыв соединения при recv (%s)", exc)
+                    self._mark_conn_lost(f"обрыв при recv ({exc})")
                 break
             if not chunk:
                 if self._running:
                     _log.warning("backend_ctl reader: сервер закрыл соединение")
+                    self._mark_conn_lost("сервер закрыл соединение")
                 break
             buf += chunk
             while b"\n" in buf:
                 raw, buf = buf.split(b"\n", 1)
                 if raw.strip():
                     self._dispatch(raw)
+
+    def _mark_conn_lost(self, reason: str) -> None:
+        """Объявить соединение мёртвым и разбудить всех, кто ждёт ответа (Task 1.1).
+
+        Зовётся ТОЛЬКО reader-потоком и ТОЛЬКО при неожиданной смерти (``_running`` ещё
+        True) — намеренный :meth:`close` сюда не попадает. Пробуждённые ``request()``
+        увидят ``response is None`` + флаг и поднимут :class:`BackendUnavailable` вместо
+        того, чтобы досиживать полный таймаут ради error-dict'а.
+
+        Слоты pending НЕ вычищаются: их снимает ``finally`` в :meth:`request` (владелец),
+        иначе гонка «pop уже снятого cid» и потеря карантина поздних ответов.
+        """
+        self._conn_lost = True
+        self._conn_lost_reason = reason
+        with self._pending_lock:
+            pendings = list(self._pending.values())
+        for p in pendings:
+            p.event.set()
+        # Разбудить и тех, кто блокирует в events(timeout): поток событий оборван.
+        self._hub.wake()
+
+    def _conn_lost_message(self, *, request_id: Optional[str] = None) -> str:
+        """Actionable-текст смерти соединения (единый для всех точек подъёма)."""
+        reason = getattr(self, "_conn_lost_reason", "") or "соединение оборвано"
+        tail = f" (request_id={request_id})" if request_id else ""
+        return (
+            f"соединение с бэкендом на {self._host}:{self._port} оборвано: {reason}{tail}. "
+            "Драйвер будет пересоздан на следующем вызове (durable-подписки и watch-профиль "
+            "восстанавливаются автоматически); если бэкенд упал — подними его с BACKEND_CTL=1."
+        )
+
+    @property
+    def connection_lost(self) -> bool:
+        """Умерло ли соединение неожиданно (в отличие от намеренного :meth:`close`)."""
+        return bool(self._conn_lost)
 
     def _dispatch(self, raw: bytes) -> None:
         """Распарсить входящую строку и развести по reply-пути или событийному каналу.

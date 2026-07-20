@@ -155,6 +155,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
 
+        # Task 1.1: неожиданная смерть соединения (сервер закрыл сокет / OSError в reader'е)
+        # в отличие от намеренного close(). Ставит ТОЛЬКО reader-поток; request() по нему
+        # поднимает BackendUnavailable → срабатывает reconnect-аппарат D.1.
+        self._conn_lost: bool = False
+        self._conn_lost_reason: str = ""
+
         # Карантин таймаутнутых request_id (Task 0.2): request() при таймауте кладёт
         # сюда cid → срок годности; поздний ответ, пришедший ПОСЛЕ таймаута, dispatcher
         # опознаёт по этому множеству и дропает (иначе всплыл бы псевдо-событием).

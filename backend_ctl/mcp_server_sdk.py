@@ -206,7 +206,11 @@ class SDKToolServer:
         except BackendUnavailable as exc:
             self._session.reset()
             return self._error(mcp_types, str(exc))
-        except OSError as exc:
+        except ConnectionError as exc:
+            # Task 1.1/1.4: сужено с OSError до ConnectionError — файловые ошибки
+            # (PermissionError/NotADirectoryError из record_*) больше не выдают себя за
+            # обрыв связи и не сбрасывают здоровый driver. Смерть соединения приходит
+            # выше типизированным BackendUnavailable из транспорта.
             self._session.reset()
             return self._error(mcp_types, f"соединение с бэкендом оборвано: {exc}")
         except Exception as exc:  # noqa: BLE001 — ошибка инструмента ≠ ошибка протокола

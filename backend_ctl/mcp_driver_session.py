@@ -25,6 +25,7 @@ from backend_ctl.audit import AuditLog
 from backend_ctl.command_validate import target_unknown, validate_command_args
 from backend_ctl.driver import BackendDriver
 from backend_ctl.endpoint_config import resolve_endpoint
+from backend_ctl.mcp_errors import BackendUnavailable
 from backend_ctl.recorder import (
     MODE_LIVE,
     MODE_REPLAY,
@@ -36,10 +37,6 @@ from backend_ctl.recorder import (
 from backend_ctl.recorder import (
     dump_recording as _dump_recording_file,  # алиас: не путать с методом DriverSession.dump_recording
 )
-
-
-class BackendUnavailable(RuntimeError):
-    """Бэкенд недоступен (сокет не поднят/оборван) — понятный текст для агента."""
 
 
 def _extract_backend_ctl_isolation(stats: Any) -> Optional[bool]:
@@ -370,6 +367,12 @@ class DriverSession:
         """
         if self._mode == MODE_REPLAY and self._replay is not None:
             return self._replay.driver
+        # Task 1.1: driver с мёртвым транспортом бесполезен — сбросить и пересоздать здесь,
+        # не дожидаясь, пока следующий вызов упадёт. reset() успевает снять durable-намерения
+        # и watch-манифест с умирающего driver'а, поэтому реконнект ниже их восстановит.
+        if self._driver is not None and getattr(self._driver, "connection_lost", False):
+            self._log("[mcp] соединение с бэкендом мертво — пересоздаю driver")
+            self.reset()
         if self._driver is None:
             try:
                 self._driver = self._driver_factory()
