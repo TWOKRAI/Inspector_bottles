@@ -3,8 +3,9 @@
 
 - strip_gui — чистая функция фильтрации gui из топологии (юнит, без запуска системы);
 - harness_smoke — live-прогон: старт → introspect.status пары процессов → стоп < 30с;
-- регресс из 1.1: state_subscribe → set_register → ожидаем push state.changed в events().
-  Помечен xfail — push физически не доходит до внешнего сокет-клиента (диагноз в тесте).
+- регресс из 1.1: state_subscribe → set_register → ожидаем push state.changed в
+  событийном канале (events_page). Помечен xfail — push физически не доходит до
+  внешнего сокет-клиента (диагноз в тесте).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import time
 import pytest
 
 from backend_ctl.harness import BackendHarness, strip_gui
+from backend_ctl.tests.conftest import wait_for_events as _wait_events
 
 
 class TestStripGui:
@@ -76,7 +78,7 @@ def test_harness_smoke_start_status_stop() -> None:
 
 @pytest.mark.harness_smoke
 def test_state_changed_push_reaches_driver_regression() -> None:
-    """Регресс 1.1 (закрыт Ф1.1b): живой бэкенд, state_subscribe('**') → set_register → push в events().
+    """Регресс 1.1 (закрыт Ф1.1b): живой бэкенд, state_subscribe('**') → set_register → push в событийный канал.
 
     Мост push→SocketChannel (RouterManager._deliver_by_targets): DeltaDispatcher шлёт
     state.changed с targets=['backend_ctl'] + queue_type='system'; очереди
@@ -93,9 +95,9 @@ def test_state_changed_push_reaches_driver_regression() -> None:
         # поле) — тест зеленел на чужих state.changed от heartbeat'ов.
         res = drv.set_register_verified("preprocessor", "resize", "target_width", 512, timeout=8.0)
         assert res["verified"], res
-        evts = drv.events(timeout=5.0)
+        evts, _ = _wait_events(drv, timeout=5.0)
         changed = [e for e in evts if e.get("command") == "state.changed"]
-        assert changed, "push state.changed не дошёл до driver.events()"
+        assert changed, "push state.changed не дошёл до событийного канала driver'а"
     finally:
         harness.stop()
 

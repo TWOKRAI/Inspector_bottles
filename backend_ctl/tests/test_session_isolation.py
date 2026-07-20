@@ -19,6 +19,8 @@ from typing import Any, Dict, List
 import pytest
 
 from backend_ctl.driver import BackendDriver
+from backend_ctl.tests.conftest import bookmark_cursor as _bookmark
+from backend_ctl.tests.conftest import page_events as _page
 from multiprocess_framework.modules.router_module.adapters.socket_bridge_adapter import (
     SocketBridgeAdapter,
 )
@@ -87,12 +89,13 @@ class TestTwoClientIsolation:
 
     def test_reply_not_leaked_to_other_client(self, two_drivers) -> None:
         a, b, _ = two_drivers
-        b.events()  # drain на всякий случай
+        cursor = _bookmark(b)  # «хвост сейчас» — накопленное до сих пор не в счёт
         res = a.send_command("pA", "introspect.handlers", timeout=3.0)
         assert res["success"] is True  # A получил СВОЙ ответ
         # B не должен увидеть reply A даже как чужое событие (изоляция reply-плоскости).
         time.sleep(0.15)
-        assert b.events() == []
+        evts, _ = _page(b, cursor)
+        assert evts == []
 
     def test_push_addressed_only_to_target_client(self, two_drivers) -> None:
         a, b, channel = two_drivers

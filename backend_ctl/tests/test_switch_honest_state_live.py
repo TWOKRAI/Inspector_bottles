@@ -27,6 +27,8 @@ import pytest
 
 from backend_ctl.driver import _leaf_result
 from backend_ctl.harness import BackendHarness
+from backend_ctl.tests.conftest import bookmark_cursor as _bookmark
+from backend_ctl.tests.conftest import page_events as _page
 
 _SWITCH_PORT = 8782
 _SHUTDOWN_PORT = 8784
@@ -98,7 +100,7 @@ def test_switch_state_matches_os(switch_backend) -> None:
 
     # WARNING-tail PM — ловим тихий state.merge (Ж-3): его быть НЕ должно.
     drv.log_tail("ProcessManager", level="WARNING")
-    drv.events(timeout=0.2)  # осушить возможный хвост до switch
+    cursor = _bookmark(drv)  # осушить возможный хвост до switch
 
     bp_line = _load_bp(_LINE)
     applied = _leaf_result(
@@ -128,8 +130,10 @@ def test_switch_state_matches_os(switch_backend) -> None:
     assert isinstance(detector_cfg, dict) and detector_cfg, "нет config detector в state после switch"
 
     # (4) Ж-3: тихий state.merge WARNING НЕ появился за окно switch.
+    time.sleep(1.0)  # дать возможному хвостовому WARNING доехать
+    evts, cursor = _page(drv, cursor)
     records = []
-    for ev in drv.events(timeout=1.0):
+    for ev in evts:
         data = ev.get("data") if isinstance(ev, dict) else None
         rec = data.get("record") if isinstance(data, dict) else None
         if isinstance(rec, dict):

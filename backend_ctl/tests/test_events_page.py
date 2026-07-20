@@ -4,9 +4,11 @@
 Acceptance плана (plans/backend-ctl-debug-console.md, Task B.1):
 - два независимых курсора читают одну плоскость без взаимной кражи;
 - переполнение кольца → dropped>0 виден читателю;
-- next_cursor монотонен;
-- back-compat: legacy events() (существующие тесты test_driver.py) не регрессирует —
-  здесь дополнительно закреплено взаимное невлияние events() ↔ events_page().
+- next_cursor монотонен.
+
+Легаси-дренаж ``events()`` (был вместе с events_page до F.1 — back-compat тест
+``test_page_and_legacy_drain_do_not_consume_each_other``) удалён вместе с самим
+методом; F.1 см. plans/backend-ctl-debug-console.md.
 
 Инжекция входящих строк — через dispatch_raw (как в TestEventChannel), без сокета
 и без live-бэкенда.
@@ -164,20 +166,6 @@ class TestCursorIndependence:
         b2 = d.events_page("state", cursor=b1["next_cursor"])
         assert _seqs(a3) == [4]
         assert _seqs(b2) == [4]
-
-    def test_page_and_legacy_drain_do_not_consume_each_other(self) -> None:
-        d = BackendDriver()
-        _push_state(d, 1)
-        _push_state(d, 2)
-        assert len(d.events()) == 2  # legacy-дренаж забрал «своё»
-        # ...но курсорный читатель по-прежнему видит всё.
-        assert d.events_page("state")["count"] == 2
-        # ...а повторный legacy-дренаж — нет (его семантика «новое с прошлого раза»).
-        assert d.events() == []
-        # Чтение страницей не съедает события у legacy-дренажа.
-        _push_state(d, 3)
-        assert d.events_page("state", limit=10)["count"] == 3
-        assert len(d.events()) == 1
 
 
 class TestDroppedAndMonotonic:

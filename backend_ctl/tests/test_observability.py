@@ -4,12 +4,17 @@
 harness_smoke (headless_backend, session-фикстура):
   - 1.4: config.reload с inline-override меняет уровень логгера процесса на лету;
   - 1.5: подписка log_tail(level=ERROR) → провокация ERROR (команда к несуществующему
-    плагину) → LogRecord приходит в driver.events() через мост 1.1b.
+    плагину) → LogRecord приходит в событийный канал driver'а через мост 1.1b.
 """
 
 from __future__ import annotations
 
+import time
+
 import pytest
+
+from backend_ctl.tests.conftest import bookmark_cursor as _bookmark
+from backend_ctl.tests.conftest import page_events as _page
 
 
 @pytest.mark.harness_smoke
@@ -31,13 +36,13 @@ def test_config_reload_changes_log_level_live(headless_backend) -> None:
 
 @pytest.mark.harness_smoke
 def test_log_tail_catches_error_live(headless_backend) -> None:
-    """1.5: driver ловит ERROR процесса в events() через мост 1.1b.
+    """1.5: driver ловит ERROR процесса в событийном канале через мост 1.1b.
 
     log_tail подписывает router-push sink (level≥ERROR) на logger процесса. Тейлим
     ProcessManager — процесс-ВЛАДЕЛЕЦ SocketChannel: мост 1.1b (_deliver_by_targets)
     доставляет targets=[backend_ctl] во внешний driver именно там, где канал
     зарегистрирован. Провокация ERROR: команда к несуществующему процессу
-    (process.restart '__ghost__') → PM.log_error("No saved config") → push → events().
+    (process.restart '__ghost__') → PM.log_error("No saved config") → push → канал.
 
     Граница 1.5 (tail дочернего процесса не доходил до внешнего сокета) закрыта в 1.7
     relay'ем через хаб — см. test_log_tail_child_process_reaches_driver_via_relay ниже.
@@ -46,19 +51,21 @@ def test_log_tail_catches_error_live(headless_backend) -> None:
     sub = drv.log_tail("ProcessManager", level="ERROR", timeout=8.0)
     assert sub.get("success") is True, f"log_tail подписка не success: {sub}"
 
-    drv.events()  # осушить накопленное до провокации
+    cursor = _bookmark(drv)  # осушить накопленное до провокации
 
     # Провокация ERROR в PM: рестарт несуществующего процесса → "No saved config".
     drv.system_command({"cmd": "process.restart", "process_name": "__ghost__"}, timeout=3.0)
 
     records = []
     for _ in range(5):
-        for e in drv.events(timeout=2.0):
+        evts, cursor = _page(drv, cursor)
+        for e in evts:
             if e.get("command") == "log.record":
                 records.append(e)
         if records:
             break
-    assert records, "LogRecord (ERROR) не дошёл до driver.events()"
+        time.sleep(0.4)
+    assert records, "LogRecord (ERROR) не дошёл до событийного канала driver'а"
     levels = {(e.get("data") or {}).get("record", {}).get("level") for e in records}
     assert "ERROR" in levels, f"ожидали ERROR среди {levels}"
 
@@ -73,13 +80,13 @@ def test_log_tail_child_process_reaches_driver_via_relay(headless_backend) -> No
     ERROR (register_update с несуществующим полем → log_error PluginOrchestrator) →
     push targets=[backend_ctl] в router'е ребёнка НЕ доставляем (нет ни очереди, ни
     канала) → однократный relay билета хабу (router.relay) → PM доставляет своим
-    router'ом через мост 1.1b → SocketChannel → driver.events().
+    router'ом через мост 1.1b → SocketChannel → событийный канал driver'а.
     """
     drv = headless_backend
     sub = drv.log_tail("preprocessor", level="ERROR", timeout=8.0)
     assert sub.get("success") is True, f"log_tail подписка не success: {sub}"
 
-    drv.events()  # осушить накопленное до провокации
+    cursor = _bookmark(drv)  # осушить накопленное до провокации
 
     # Провокация ERROR в ребёнке: register_update по несуществующему полю регистра.
     # Команда fire-and-forget (manages_own_reply) — ответа не ждём, таймаут не диагноз.
@@ -92,12 +99,14 @@ def test_log_tail_child_process_reaches_driver_via_relay(headless_backend) -> No
 
     records = []
     for _ in range(5):
-        for e in drv.events(timeout=2.0):
+        evts, cursor = _page(drv, cursor)
+        for e in evts:
             if e.get("command") == "log.record" and (e.get("data") or {}).get("process") == "preprocessor":
                 records.append(e)
         if records:
             break
-    assert records, "LogRecord ребёнка не дошёл до driver.events() (relay через хаб)"
+        time.sleep(0.4)
+    assert records, "LogRecord ребёнка не дошёл до событийного канала driver'а (relay через хаб)"
     levels = {(e.get("data") or {}).get("record", {}).get("level") for e in records}
     assert "ERROR" in levels, f"ожидали ERROR среди {levels}"
 

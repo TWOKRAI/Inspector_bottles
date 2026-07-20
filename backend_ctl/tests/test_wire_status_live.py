@@ -27,11 +27,13 @@ import time
 import pytest
 
 from backend_ctl.harness import BackendHarness
+from backend_ctl.tests.conftest import bookmark_cursor as _bookmark
+from backend_ctl.tests.conftest import page_events as _page
 
-_SOURCE = "devices"        # protected → выживает restart соседа
-_PEER = "preprocessor"     # non-protected → пересоздаётся на restart
-_WIRE = "synthetic_wire"   # ASCII-ключ (без «→» в state-пути)
-_PORT = 8782               # уникальный порт (8770-8781 заняты)
+_SOURCE = "devices"  # protected → выживает restart соседа
+_PEER = "preprocessor"  # non-protected → пересоздаётся на restart
+_WIRE = "synthetic_wire"  # ASCII-ключ (без «→» в state-пути)
+_PORT = 8782  # уникальный порт (8770-8781 заняты)
 
 _BROKEN = "system.health.broken_wires"
 _WIRE_STATUS = f"system.wires.{_WIRE}.status"
@@ -55,23 +57,29 @@ def wire_backend():
         harness.stop()
 
 
-def _wait_path(drv, path: str, predicate, deadline: float):
+def _wait_path(drv, path: str, predicate, deadline: float, cursor=None):
     """Дождаться дельты ``path``, чьё new_value удовлетворяет predicate.
 
-    Возвращает последнее увиденное значение (или None). Delta-driven: подписка
-    шлёт push только при РЕАЛЬНОМ изменении, поэтому копим до предиката/дедлайна.
+    Возвращает ``(последнее увиденное значение (или None), новый курсор)``. F.1:
+    events_page вместо legacy events() — courier-курсор передаётся вызывающим между
+    последовательными ожиданиями в одном тесте, чтения не пересекаются с "осушить".
+    Delta-driven: подписка шлёт push только при РЕАЛЬНОМ изменении, поэтому копим
+    до предиката/дедлайна.
     """
     latest = None
     while time.time() < deadline:
-        for e in drv.events(timeout=2.0):
+        evts, cursor = _page(drv, cursor)
+        for e in evts:
             if e.get("command") != "state.changed":
                 continue
             for d in (e.get("data") or {}).get("deltas", []) or []:
                 if d.get("path") == path:
                     latest = d.get("new_value")
         if latest is not None and predicate(latest):
-            return latest
-    return latest
+            return latest, cursor
+        if not evts:
+            time.sleep(0.2)
+    return latest, cursor
 
 
 @pytest.mark.harness_smoke
@@ -84,16 +92,14 @@ def test_broken_wires_honest_and_recovers(wire_backend) -> None:
     from multiprocess_prototype.main import DEFAULT_BLUEPRINT
 
     bp = load_topology_dict(DEFAULT_BLUEPRINT)
-    applied = _result(
-        drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp}, timeout=30.0)
-    )
+    applied = _result(drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp}, timeout=30.0))
     assert applied.get("success") is True, f"topology.apply не success: {applied}"
     time.sleep(3.0)  # дать процессам подняться + первый heartbeat
 
     # --- Подписка на health/wire-ветки ДО манипуляций ---
     sub = _result(drv.state_subscribe("system.**", timeout=8.0))
     assert sub.get("status") == "ok", f"state.subscribe не ok: {sub}"
-    drv.events()  # осушить накопленное
+    cursor = _bookmark(drv)  # осушить накопленное (курсор → «хвост сейчас»)
 
     # --- Синтетический провод devices→preprocessor (путь B, обычно GUI-only) ---
     ws = _result(
@@ -113,25 +119,21 @@ def test_broken_wires_honest_and_recovers(wire_backend) -> None:
     assert ws.get("success") is True, f"wire.setup не success: {ws}"
 
     # Провод активен при живых endpoint'ах (оба процесса running).
-    active = _wait_path(drv, _WIRE_STATUS, lambda v: v == "active", time.time() + 15.0)
+    active, cursor = _wait_path(drv, _WIRE_STATUS, lambda v: v == "active", time.time() + 15.0, cursor)
     assert active == "active", f"wire не 'active' при живой топологии: {active}"
 
     # --- Разрыв: stop peer → endpoint мёртв → broken_wires ≥ 1 (honest) ---
-    stopped = _result(
-        drv.send_command("ProcessManager", "process.stop", {"process_name": _PEER}, timeout=15.0)
-    )
+    stopped = _result(drv.send_command("ProcessManager", "process.stop", {"process_name": _PEER}, timeout=15.0))
     assert stopped.get("success") is True, f"process.stop не success: {stopped}"
 
-    broken = _wait_path(drv, _BROKEN, lambda v: isinstance(v, int) and v >= 1, time.time() + 20.0)
+    broken, cursor = _wait_path(drv, _BROKEN, lambda v: isinstance(v, int) and v >= 1, time.time() + 20.0, cursor)
     assert broken is not None and broken >= 1, (
         f"broken_wires НЕ ≥1 при оборванном проводе (honest-статус не сработал): {broken}"
     )
 
     # --- Восстановление: restart peer → re-issue wire.configure → broken_wires 0 ---
-    drv.events()  # осушить буфер до restart (изолировать post-restart серию)
-    r = _result(
-        drv.send_command("ProcessManager", "process.restart", {"process_name": _PEER}, timeout=30.0)
-    )
+    cursor = _bookmark(drv)  # осушить буфер до restart (изолировать post-restart серию)
+    r = _result(drv.send_command("ProcessManager", "process.restart", {"process_name": _PEER}, timeout=30.0))
     assert r.get("success") is True, f"process.restart не success: {r}"
 
     # Копим серию broken_wires после restart: re-issue вернул wire в active,
@@ -139,7 +141,8 @@ def test_broken_wires_honest_and_recovers(wire_backend) -> None:
     broken_series: list = []
     deadline = time.time() + 30.0
     while time.time() < deadline:
-        for e in drv.events(timeout=2.0):
+        evts, cursor = _page(drv, cursor)
+        for e in evts:
             if e.get("command") != "state.changed":
                 continue
             for d in (e.get("data") or {}).get("deltas", []) or []:
@@ -147,6 +150,6 @@ def test_broken_wires_honest_and_recovers(wire_backend) -> None:
                     broken_series.append(d.get("new_value"))
         if broken_series and broken_series[-1] == 0:
             break
-    assert 0 in broken_series, (
-        f"broken_wires НЕ вернулся к 0 после re-issue провода: series={broken_series}"
-    )
+        if not evts:
+            time.sleep(0.2)
+    assert 0 in broken_series, f"broken_wires НЕ вернулся к 0 после re-issue провода: series={broken_series}"
