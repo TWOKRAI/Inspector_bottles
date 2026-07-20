@@ -27,6 +27,7 @@ from backend_ctl.capability_render import FORMATS, render_concise, render_help
 from backend_ctl.conditions import DEFAULT_AWAIT_TIMEOUT
 from backend_ctl.driver import BackendDriver
 from backend_ctl.events import ALL_PLANE, PLANES
+from backend_ctl.mcp_errors import BackendUnavailable
 from backend_ctl.recorder import DEFAULT_MAX_EVENTS, MODE_REPLAY, RecordingError
 
 #: Handler инструмента: (driver, arguments) → JSON-сериализуемый результат.
@@ -1515,9 +1516,21 @@ def dispatch_tool(session: Any, name: str, arguments: Optional[Dict[str, Any]]) 
         if served is not _REPLAY_REJECT:
             return _cap_heavy(name, served, arguments)  # E.3: тяжёлые ответы усекаются и над записью
         return _replay_rejected(name)
-    driver = session.ensure()
     spec = build_registry()[name]
     safety = TOOL_SAFETY.get(name)
+    # Task 2.2: session.ensure() может поднять BackendUnavailable (Task 1.1 — смерть
+    # соединения посреди сессии — исключение, не error-dict). Раньше это происходило
+    # ДО веток аудита ниже: попытка записи в упавший бэкенд не оставляла В ЖУРНАЛЕ
+    # НИ СЛЕДА — владелец не видел, что write-инструмент вообще пытались вызвать.
+    # Для audited safety записываем попытку с этим исходом и ПЕРЕ-ПОДНИМАЕМ исключение
+    # (не глотаем — на нём держится reconnect-аппарат Task 1.1). Read-путь не аудируется
+    # (как и раньше) — ensure() там просто бросает дальше без записи.
+    try:
+        driver = session.ensure()
+    except BackendUnavailable as exc:
+        if safety in _AUDITED_SAFETY:
+            session.record_audit(name, safety, arguments, error=exc)
+        raise
     # E.2: предполётная сверка send_command со схемой свода — обучающая ошибка вместо
     # таймаута. Блок тоже оседает в аудит (escalated-попытка со своим исходом).
     if name == "send_command":

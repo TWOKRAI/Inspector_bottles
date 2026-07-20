@@ -97,6 +97,14 @@ class AuditLog:
         self._ring: Deque[Dict[str, Any]] = deque(maxlen=ring)
         self._clock = clock
         self._seq = 0
+        # Task 2.2: SDK гоняет tools/call в параллельных потоках (anyio.to_thread +
+        # tg.start_soon), а один DriverSession отдаёт ОДИН AuditLog всем вызовам сессии
+        # (см. _audit_log() в mcp_driver_session.py). Без лока «инкремент _seq → append
+        # в кольцо» — не атомарная пара: два потока читают одно и то же старое значение
+        # _seq → дубли номеров в журнале, либо один append перекрывает другой в узком
+        # окне между чтением deque и записью (в CPython это не потерять сам append, но
+        # порядок seq↔запись гарантированно рвётся под настоящей ОС-конкуренцией).
+        self._lock = threading.Lock()
 
     @property
     def path(self) -> str:
@@ -116,27 +124,39 @@ class AuditLog:
         Возвращает записанную запись (для тестов/инлайна). ``result`` ИЛИ ``error`` —
         одно из двух: успешный/мягко-неуспешный ответ либо перехваченное исключение.
         """
-        self._seq += 1
-        entry: Dict[str, Any] = {
-            "seq": self._seq,
-            "ts": self._clock(),
-            "tool": tool,
-            "safety": safety,
-            "args": _clip(args),
-        }
-        entry.update(_outcome(result, error))
-        self._ring.append(entry)
+        # Инкремент seq и append в кольцо — одна атомарная операция (Task 2.2): иначе
+        # два потока читают одно старое значение _seq (дубль номера) либо расходятся
+        # в порядке seq↔запись. Сериализация файла (_append_file, отдельный _FILE_LOCK)
+        # сознательно вынесена за пределы этого лока — I/O не должен держать сессию.
+        with self._lock:
+            self._seq += 1
+            entry: Dict[str, Any] = {
+                "seq": self._seq,
+                "ts": self._clock(),
+                "tool": tool,
+                "safety": safety,
+                "args": _clip(args),
+            }
+            entry.update(_outcome(result, error))
+            self._ring.append(entry)
         self._append_file(entry)
         return entry
 
     def records(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Последние записи ЭТОЙ сессии (кольцо), новейшие в конце. ``limit`` — хвост.
 
-        ``limit=0`` → пустой список (а не весь журнал: срез ``items[-0:]`` == ``items[0:]``).
+        ``limit=None`` → весь журнал (кольцо). ``limit=0`` → пустой список (а не весь
+        журнал: срез ``items[-0:]`` == ``items[0:]``, поэтому 0 — особый случай).
+        ``limit<0`` (бессмыслица — «последние минус N») → тоже пустой список, зеркало
+        контракта :meth:`driver.BackendDriver.telemetry_history` (driver.py:1156-1160).
         """
-        items = list(self._ring)
-        if limit is not None and limit >= 0:
-            items = items[-limit:] if limit else []
+        # list(deque) под тем же локом, что append (Task 2.2): без него параллельный
+        # record() меняет размер кольца прямо во время итерации list() и деке кидает
+        # «deque mutated during iteration» (RuntimeError) вместо тихой гонки.
+        with self._lock:
+            items = list(self._ring)
+        if limit is not None:
+            items = items[-limit:] if limit > 0 else []
         return items
 
     def _append_file(self, entry: Dict[str, Any]) -> None:
