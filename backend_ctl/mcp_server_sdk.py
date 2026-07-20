@@ -217,9 +217,14 @@ class SDKToolServer:
             return self._error(mcp_types, f"{type(exc).__name__}: {exc}")
 
         # Однократный отчёт о реконнекте — в этот ответ (агент знает: подписки replay'нуты).
-        reconnect_report = self._session.pop_reconnect_report()
-        if reconnect_report is not None and isinstance(result, dict):
-            result = {**result, **reconnect_report}
+        # Task 1.3: pop'аем ТОЛЬКО когда результат dict — инструмент, вернувший list
+        # (например events), раньше безусловно СЪЕДАЛ отчёт мимо merge-условия ниже,
+        # и агент никогда не узнавал о реконнекте. Для не-dict результата отчёт не
+        # трогаем — он доедет со следующим dict-ответом.
+        if isinstance(result, dict):
+            reconnect_report = self._session.pop_reconnect_report()
+            if reconnect_report is not None:
+                result = {**result, **reconnect_report}
         text = json.dumps(result, ensure_ascii=False, default=str)
         return [mcp_types.TextContent(type="text", text=text)]
 

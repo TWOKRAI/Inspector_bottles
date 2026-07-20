@@ -108,13 +108,19 @@ class DriverSession:
         self._mode: str = MODE_LIVE
         self._recorder: Optional[Recorder] = None
         self._replay: Optional[ReplayPlayer] = None
-        # Recorder-секция сериализуется целиком. Каждый tools/call уходит в свой поток
-        # (SDK-сервер: anyio.to_thread.run_sync без per-session очереди), поэтому проверка
-        # «запись уже идёт» и присвоение _recorder обязаны быть одной операцией — иначе
-        # два параллельных record_start оба проходят, и запись, потерявшая ссылку,
-        # остаётся осиротевшим подписчиком на hot-path EventHub навсегда.
-        # RLock (не Lock): start_recording держит его и заходит в ensure().
-        self._rec_lock = threading.RLock()
+        # ОДИН лок на весь жизненный цикл сессии: driver (ensure/reset), recorder,
+        # реплей, кэш capabilities, ленивый аудит-журнал. Каждый tools/call уходит в свой
+        # поток (SDK-сервер: anyio.to_thread.run_sync + tg.start_soon, без per-session
+        # очереди), поэтому все пары «проверил — присвоил» здесь обязаны быть атомарными:
+        # два параллельных record_start иначе оба проходят, и запись, потерявшая ссылку,
+        # навсегда остаётся осиротевшим подписчиком на hot-path EventHub; два параллельных
+        # ensure() создают два driver'а, и один утекает вместе с сокетом и reader-потоком.
+        #
+        # Почему ОДИН лок, а не отдельные (Task 2.1): recorder и driver переплетены в обе
+        # стороны — ensure() → reset() финализирует запись, а start_recording() заходит в
+        # ensure(). Два лока дали бы разный порядок захвата на этих путях (AB-BA) и живой
+        # дедлок под нагрузкой. RLock: перечисленные пути повторно заходят под свой же лок.
+        self._lifecycle_lock = threading.RLock()
         # E.1: аудит-журнал мутаций (write/escalated) сессии. Ленивая инициализация
         # файла — при первой записи (read-only-сессия не создаёт файл). Тест может
         # подставить свой AuditLog.
@@ -155,7 +161,7 @@ class DriverSession:
         В replay-режиме запись не имеет смысла (нет живого потока) — обучающий отказ.
         Уже идёт запись — отказ (одна запись = один файл).
         """
-        with self._rec_lock:
+        with self._lifecycle_lock:
             if self._mode == MODE_REPLAY:
                 return {
                     "success": False,
@@ -179,7 +185,7 @@ class DriverSession:
 
     def stop_recording(self) -> Dict[str, Any]:
         """Остановить активную запись (footer reason=stopped). Нет записи → обучающий отказ."""
-        with self._rec_lock:
+        with self._lifecycle_lock:
             if self._recorder is None:
                 return {"success": False, "error": "нет активной записи (record_start сначала)"}
             status = self._recorder.stop()
@@ -188,7 +194,7 @@ class DriverSession:
 
     def dump_recording(self, path: str) -> Dict[str, Any]:
         """One-shot дамп текущего arrival-кольца live-driver'а (§5.3, чёрный ящик)."""
-        with self._rec_lock:
+        with self._lifecycle_lock:
             if self._mode == MODE_REPLAY:
                 return {
                     "success": False,
@@ -199,7 +205,7 @@ class DriverSession:
 
     def record_status(self) -> Dict[str, Any]:
         """Статус: активная запись (файл/счётчики) ЛИБО загруженный реплей (имя/позиция)."""
-        with self._rec_lock:
+        with self._lifecycle_lock:
             if self._replay is not None:
                 return self._replay.status()
             if self._recorder is not None:
@@ -218,12 +224,17 @@ class DriverSession:
         Активная запись сначала должна быть остановлена (одна активность на сессию).
         Реплей ничего не пишет и не коннектится — session-локальный режим.
         """
-        with self._rec_lock:
+        with self._lifecycle_lock:
             if self._recorder is not None and self._recorder.active:
                 return {"success": False, "error": "идёт запись — сначала record_stop() перед загрузкой реплея"}
             recording = load_recording(path)  # RecordingError ловит сервер (обучающий текст)
             self._replay = ReplayPlayer(recording, position=position, ring_maxlen=ring_maxlen)
             self._mode = MODE_REPLAY
+            # Квиесцировать live-driver (Task 2.1, находка C-3): в replay-режиме ensure()
+            # его больше не отдаёт, но сам он оставался подключённым — сокет, reader-поток
+            # и серверные подписки продолжали жить и копить события в никуда. Намерения
+            # сохраняются, поэтому unload_replay() → ensure() честно переподключится.
+            self._reset_driver_locked()
             out = self._replay.status()
             out["truncated"] = recording.truncated
             out["position_mode"] = position
@@ -231,7 +242,7 @@ class DriverSession:
 
     def unload_replay(self) -> Dict[str, Any]:
         """Выгрузить реплей, вернуть сессию в live (следующий ensure() переподключится)."""
-        with self._rec_lock:
+        with self._lifecycle_lock:
             if self._replay is None:
                 return {"success": False, "error": "нет загруженного реплея (record_load сначала)"}
             self._replay = None
@@ -241,9 +252,16 @@ class DriverSession:
     # ---- Аудит мутаций (E.1) ----
 
     def _audit_log(self) -> AuditLog:
-        """Ленивая инициализация журнала (файл создаётся при первой записи)."""
+        """Ленивая инициализация журнала (файл создаётся при первой записи).
+
+        Под локом (Task 2.1): два параллельных write-инструмента иначе создавали по
+        своему AuditLog, и записи одного из них уходили в потерянный объект — журнал
+        доверия обязан быть один на сессию.
+        """
         if self._audit is None:
-            self._audit = AuditLog()
+            with self._lifecycle_lock:
+                if self._audit is None:
+                    self._audit = AuditLog()
         return self._audit
 
     def record_audit(
@@ -286,12 +304,21 @@ class DriverSession:
             return None
         if self._caps is not None and not refresh:
             return self._caps
-        try:
-            drv = self.ensure()
-            self._caps = drv.capabilities()
-        except Exception:  # noqa: BLE001 — валидация опциональна, не роняем инструмент
-            self._caps = None
-        return self._caps
+        # Пара «проверил — собрал — присвоил» под локом (Task 2.1): иначе два потока
+        # собирают свод дважды, дёргая бэкенд лишний раз.
+        with self._lifecycle_lock:
+            if self._caps is not None and not refresh:
+                return self._caps  # сосед успел собрать, пока мы ждали лок
+            try:
+                drv = self.ensure()
+                self._caps = drv.capabilities()
+            except Exception:  # noqa: BLE001 — валидация опциональна, не роняем инструмент
+                # НЕ затираем удачный кэш соседа своей неудачей: обнуляем только если
+                # кэша всё ещё нет. Иначе один сбойный сбор ослеплял бы валидацию
+                # send_command для всей сессии.
+                if self._caps is None:
+                    self._caps = None
+            return self._caps
 
     def validate_send_command(self, arguments: Dict[str, Any]) -> Optional[str]:
         """Сверить args send_command со схемой свода ДО отправки. ``None`` — ок; строка — ошибка.
@@ -367,6 +394,23 @@ class DriverSession:
         """
         if self._mode == MODE_REPLAY and self._replay is not None:
             return self._replay.driver
+
+        # Быстрый путь БЕЗ лока (Task 2.1): живой driver с уже пройденной isolation-пробой.
+        # Так редкий коннект одного потока не сериализует все параллельные tools/call —
+        # лок берётся только теми, кто реально меняет жизненный цикл.
+        drv = self._driver
+        isolation_settled = self._isolation_ok or not self._require_isolation
+        if drv is not None and isolation_settled and not getattr(drv, "connection_lost", False):
+            return drv
+
+        with self._lifecycle_lock:
+            # Перепроверка под локом: пока мы ждали его, сосед мог уже всё сделать —
+            # иначе двое создадут по driver'у, и один утечёт с сокетом и reader-потоком.
+            self._ensure_locked()
+            return self._driver
+
+    def _ensure_locked(self) -> None:
+        """Тело :meth:`ensure` под ``_lifecycle_lock`` — создание/реконнект driver'а."""
         # Task 1.1: driver с мёртвым транспортом бесполезен — сбросить и пересоздать здесь,
         # не дожидаясь, пока следующий вызов упадёт. reset() успевает снять durable-намерения
         # и watch-манифест с умирающего driver'а, поэтому реконнект ниже их восстановит.
@@ -409,7 +453,6 @@ class DriverSession:
         if self._require_isolation and not self._isolation_ok:
             self._probe_isolation(self._driver)
             self._isolation_ok = True
-        return self._driver
 
     def _probe_isolation(self, drv: BackendDriver) -> None:
         """Проверить, что бэкенд поднят с session_isolation=ON (D.2 §5.4). Иначе broadcast
@@ -448,16 +491,21 @@ class DriverSession:
         D.4: активная запись финализируется footer'ом ``disconnect`` ДО закрытия
         driver'а — файл не остаётся без footer'а на обрыве/реконнекте сессии.
         """
-        # Финализировать активную запись ДО закрытия driver'а (footer=disconnect).
-        # Под тем же локом, что record_start/stop: сброс не должен пересечься с
-        # параллельным стартом записи и оставить её на закрытом driver'е.
-        with self._rec_lock:
+        # Весь сброс — под локом жизненного цикла (Task 2.1): иначе параллельный ensure()
+        # успевал увидеть уже закрытый, но ещё не обнулённый driver, а параллельный
+        # record_start — привязать запись к driver'у, который мы в этот момент закрываем.
+        with self._lifecycle_lock:
+            # Финализировать активную запись ДО закрытия driver'а (footer=disconnect).
             if self._recorder is not None:
                 try:
                     self._recorder.stop(REASON_DISCONNECT)
                 except Exception:  # noqa: BLE001 — финализация не должна ронять сброс
                     pass
                 self._recorder = None
+            self._reset_driver_locked()
+
+    def _reset_driver_locked(self) -> None:
+        """Снять намерения/манифест и закрыть driver. Только под ``_lifecycle_lock``."""
         if self._driver is not None:
             try:
                 # Синхронизируем БЕЗУСЛОВНО (в т.ч. с пустым списком): текущий driver —
