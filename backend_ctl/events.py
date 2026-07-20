@@ -219,6 +219,10 @@ class EventHub:
         # §8: тот же токен ротируется на границе рестарта наблюдаемого процесса.
         self._gen = uuid.uuid4().hex[:6]
         self._gen_rotations = 0  # сколько раз токен ротирован из-за рестарта (диагностика)
+        # Task 2.4: plane → seq на момент последней ротации поколения (граница
+        # инкарнации). Источник resume_cursor в reset_required. Пусто, пока рестартов
+        # не было: тогда возобновляться не с чего, и вызывающий читает с начала.
+        self._gen_boundary: Dict[str, int] = {}
 
         self._arrival: Deque[Tuple[int, Dict[str, Any]]] = deque(maxlen=maxlen)
         self._gseq = 0  # плотный глобальный seq (arrival)
@@ -249,6 +253,12 @@ class EventHub:
                 # закрытый долг ревью B.1. Событие-граница уже в кольцах (см. выше).
                 self._gen = uuid.uuid4().hex[:6]
                 self._gen_rotations += 1
+                # Task 2.4: запомнить seq каждой плоскости на момент ротации — точку,
+                # с которой начинается новая инкарнация. По ней строится resume_cursor
+                # в reset_required: читатель возобновляется РОВНО с границы, а не
+                # перечитывает весь ринг заново. Событие-граница уже добавлено выше,
+                # поэтому его seq <= границы и в новую инкарнацию оно не попадёт.
+                self._gen_boundary = {ALL_PLANE: self._gseq, **{p: self._pseq[p] for p in PLANES}}
             subscribers = list(self._subscribers)  # снимок под локом
             self._cv.notify_all()
         # Колбэки — вне лока: могут быть медленными и/или звать driver повторно.
@@ -324,60 +334,82 @@ class EventHub:
                 "planes": [ALL_PLANE, *PLANES],
             }
         try:
-            cursor_seq = self._parse_cursor(cursor, plane_key)
-        except ValueError as exc:
-            with self._cv:
-                newest = self._gseq if plane_key == ALL_PLANE else self._pseq[plane_key]
-            return {
-                "success": False,
-                "error": str(exc),
-                "reset_required": True,
-                "bookmark": self._fmt_cursor(plane_key, newest),
-            }
-        try:
             page_limit = int(limit) if limit is not None else _DEFAULT_PAGE_LIMIT
         except (TypeError, ValueError):
             return {"success": False, "error": f"limit должен быть целым числом, получено {limit!r}"}
         page_limit = max(1, min(page_limit, _MAX_PAGE_LIMIT))
 
+        # ВЕСЬ цикл «проверил поколение → прочитал кольцо → проштамповал next_cursor»
+        # под ОДНИМ удержанием лока (Task 2.4). Раньше _parse_cursor читал self._gen
+        # снаружи, и emit() успевал ротировать поколение в окне между проверкой и
+        # чтением: курсор валидировался против старого gen, а данные и штамп приходили
+        # из нового — читатель молча проезжал границу инкарнации. Ровно та слепота,
+        # ради которой B.1 и вводил generation-токены.
         with self._cv:
+            try:
+                cursor_seq = self._parse_cursor(cursor, plane_key)
+            except ValueError as exc:
+                return self._reset_response_locked(plane_key, str(exc))
+
             ring = self._arrival if plane_key == ALL_PLANE else self._rings[plane_key]
             newest = self._gseq if plane_key == ALL_PLANE else self._pseq[plane_key]
             bookmark = self._fmt_cursor(plane_key, newest)
             if cursor_seq > newest:
-                return {
-                    "success": False,
-                    "error": (
-                        f"курсор {cursor!r} впереди потока (последний seq {newest}) — "
-                        "вероятно, курсор прежнего соединения; начни заново с cursor=null"
-                    ),
-                    "reset_required": True,
-                    "bookmark": bookmark,
-                }
+                return self._reset_response_locked(
+                    plane_key,
+                    f"курсор {cursor!r} впереди потока (последний seq {newest}) — "
+                    "вероятно, курсор прежнего соединения; начни заново с cursor=null",
+                )
             ring_len = len(ring)
             oldest = ring[0][0] if ring_len else newest + 1
             dropped = max(0, oldest - (cursor_seq + 1))
             offset = max(cursor_seq + 1, oldest) - oldest  # плотный seq ⇒ индекс в деке
             selected = list(islice(ring, offset, offset + page_limit))
 
-        items = [{"seq": s, "event": m} for s, m in selected]
-        if items:
-            next_seq = items[-1]["seq"]
-        elif ring_len == 0:
-            # Всё вытеснено: потеря уже сообщена в dropped — курсор вперёд, чтобы
-            # не рапортовать одну и ту же слепую зону бесконечно.
-            next_seq = newest
-        else:
-            next_seq = cursor_seq  # догнали хвост — курсор стабилен
+            items = [{"seq": s, "event": m} for s, m in selected]
+            if items:
+                next_seq = items[-1]["seq"]
+            elif ring_len == 0:
+                # Всё вытеснено: потеря уже сообщена в dropped — курсор вперёд, чтобы
+                # не рапортовать одну и ту же слепую зону бесконечно.
+                next_seq = newest
+            else:
+                next_seq = cursor_seq  # догнали хвост — курсор стабилен
+            next_cursor = self._fmt_cursor(plane_key, next_seq)
+
         return {
             "success": True,
             "plane": plane_key,
             "items": items,
             "count": len(items),
-            "next_cursor": self._fmt_cursor(plane_key, next_seq),
+            "next_cursor": next_cursor,
             "dropped": dropped,
             "bookmark": bookmark,
         }
+
+    def _reset_response_locked(self, plane_key: str, error: str) -> Dict[str, Any]:
+        """Ответ ``reset_required`` с точкой возобновления. Только под ``self._cv``.
+
+        ``resume_cursor`` — граница инкарнации: seq на момент последней ротации
+        поколения. Восстановление по нему отдаёт ТОЛЬКО события новой инкарнации, тогда
+        как прежнее «начни заново с cursor=null» вываливало читателю весь доступный ринг
+        повторно — всё, что он уже видел до рестарта, приезжало по второму разу
+        (регресс против удалённого drain(), Task 2.4).
+
+        Границы нет (сброс не из-за ротации — например курсор прежнего соединения на
+        свежем hub'е) → ключ не кладём: вызывающий откатится на полное перечитывание.
+        """
+        newest = self._gseq if plane_key == ALL_PLANE else self._pseq[plane_key]
+        out: Dict[str, Any] = {
+            "success": False,
+            "error": error,
+            "reset_required": True,
+            "bookmark": self._fmt_cursor(plane_key, newest),
+        }
+        boundary = self._gen_boundary.get(plane_key)
+        if boundary is not None:
+            out["resume_cursor"] = self._fmt_cursor(plane_key, boundary)
+        return out
 
     def _fmt_cursor(self, plane_key: str, seq: int) -> str:
         return f"{plane_key}:{seq}@{self._gen}"
