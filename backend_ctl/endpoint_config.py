@@ -60,6 +60,23 @@ def resolve_endpoint(
         resolved_port = port
     else:
         env_port = os.environ.get(ENV_PORT)
-        resolved_port = int(env_port) if env_port else DEFAULT_PORT
+        resolved_port = _parse_port(env_port) if env_port else DEFAULT_PORT
 
     return resolved_host, resolved_port
+
+
+def _parse_port(raw: str) -> int:
+    """Разобрать порт из env-строки с actionable-ошибкой (Task 5.2, находка ultra-ревью).
+
+    Раньше нечисло (``'auto'``) ронялось голым ``ValueError`` из ``int()`` без имени
+    переменной и полученного значения, а порт вне диапазона 1-65535 (``'0'``) тихо
+    принимался и падал позже — на bind сокета, далеко от места настройки. Теперь обе
+    беды ловятся здесь, у источника, с понятным текстом (имя env, значение, ожидание).
+    """
+    try:
+        value = int(raw.strip())
+    except ValueError as exc:
+        raise ValueError(f"{ENV_PORT}: недопустимое значение {raw!r} — ожидается целое число 1-65535") from exc
+    if not 1 <= value <= 65535:
+        raise ValueError(f"{ENV_PORT}: значение {value} вне диапазона 1-65535")
+    return value

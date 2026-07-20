@@ -61,3 +61,24 @@ def test_default_port_matches_server_source():
     )
 
     assert DEFAULT_PORT == SERVER_DEFAULT_PORT
+
+
+# --- Task 5.2: валидация BACKEND_CTL_PORT (находка ultra-ревью) ---
+
+
+@pytest.mark.parametrize("bad_value", ["auto", "0", " ", "70000"])
+def test_invalid_env_port_raises_actionable_error(monkeypatch, bad_value):
+    """Нечисло/вне диапазона/пробелы — понятная ошибка, не молчаливый fallback на дефолт."""
+    monkeypatch.setenv(ENV_PORT, bad_value)
+    with pytest.raises(ValueError, match=ENV_PORT):
+        resolve_endpoint()
+
+
+def test_valid_env_port_parsed(monkeypatch):
+    monkeypatch.setenv(ENV_PORT, "9142")
+    assert resolve_endpoint() == (DEFAULT_HOST, 9142)
+
+
+def test_unset_env_port_falls_back_to_default(monkeypatch):
+    monkeypatch.delenv(ENV_PORT, raising=False)
+    assert resolve_endpoint() == (DEFAULT_HOST, DEFAULT_PORT)
