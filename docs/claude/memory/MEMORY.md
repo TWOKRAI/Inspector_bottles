@@ -1,3 +1,4 @@
+- [pre-commit stash collision 2+ агента](feedback_precommit_stash_collision_2plus_agents.md) — global patch-stash пре-коммита рвётся под 2+ конкурентными коммитами без worktree; блэст-радиус растёт с каждым ретраем, cap 2-3 попытки, recovery — `git show :path > path`
 - [fencing-token топологии](project_topology_fencing_token.md) — требование владельца: message-fence по incarnation/epoch (старый процесс не вкидывает stale); кандидат в Ф4.2
 - [авто-рестарт всех процессов](project_all_process_autorestart.md) — идея владельца: default-on + громкая наблюдаемость (упал/восстановился) + chain-level health (Ф4/Ф5)
 - [использовать qex/codegraph/serena/graphify](feedback_use_graph_semantic_tools.md) — звать напрямую, не только через Explore; Ф4 контракты — идеальный кейс
