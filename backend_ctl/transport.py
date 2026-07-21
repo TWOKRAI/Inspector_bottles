@@ -34,6 +34,10 @@ _log = logging.getLogger(__name__)
 # не ждём — запись протухает и вычищается лениво. Запас над самым долгим таймаутом.
 _TIMED_OUT_TTL_SEC: float = 60.0
 
+# На столько сервер ждёт МЕНЬШЕ клиента (запас на дорогу ответа). Клиент, сдавшийся
+# первым, теряет честный ответ сервера и подменяет диагноз своим «таймаутом».
+_SERVER_MARGIN_SEC: float = 0.5
+
 
 class _Pending:
     """Слот ожидания ответа по request_id."""
@@ -149,8 +153,18 @@ class _TransportMixin:
         with self._pending_lock:
             self._pending[cid] = pending
         try:
-            self._send_raw(message)
             wait = timeout if timeout is not None else self._default_timeout
+            # Пробросить бюджет ожидания СЕРВЕРУ. socket_bridge_adapter берёт его из
+            # msg["timeout"], а без поля — свой дефолт (5с) и отвечает
+            # {"success": False, "error": "timeout"} на команде, которая на самом деле
+            # успешно отрабатывает. Наблюдалось живьём: topology.apply с timeout=180
+            # возвращал «таймаут» ровно через 5.00с, при этом переключение проходило
+            # (новая топология в state, ghost-процессов нет).
+            # Серверу даём чуть меньше, чем ждём сами: иначе клиент сдастся первым и
+            # потеряет ЧЕСТНЫЙ ответ сервера — диагноз «сервер не успел» ценнее, чем
+            # «я не дождался». setdefault — явный timeout в сообщении сильнее.
+            message.setdefault("timeout", max(0.5, wait - _SERVER_MARGIN_SEC))
+            self._send_raw(message)
             if not pending.event.wait(wait):
                 # Таймаут: пометить cid в карантин — поздний ответ dispatcher дропнет,
                 # а не выдаст псевдо-событием (Task 0.2).
