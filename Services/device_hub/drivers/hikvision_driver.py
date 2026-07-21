@@ -55,7 +55,12 @@ class HikvisionDriver(BaseDeviceDriver):
         try:
             from Services.hikvision_camera import CameraState
 
-            return self._camera.state == CameraState.OPENED
+            # A-14 (bug-hunt 2026-07-20): CameraState.OPENED не существует
+            # (реальные значения: CLOSED/OPEN/GRABBING) — AttributeError
+            # глотался нижним except, is_connected был всегда False.
+            # "Открыта" = OPEN (настроена, но не захватывает) ИЛИ GRABBING
+            # (активный захват) — оба состояния означают открытый handle.
+            return self._camera.state in (CameraState.OPEN, CameraState.GRABBING)
         except Exception:
             return False
 

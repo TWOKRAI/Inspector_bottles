@@ -82,3 +82,60 @@ class TestSetParameters:
             result = set_parameters(mock_camera, params)
 
         assert result is False
+
+
+class TestSetParametersReturnCodes:
+    """A-8 (bug-hunt 2026-07-20): раньше коды возврата AcquisitionFrameRateEnable
+    и ExposureAuto не проверялись вовсе — функция считалась успешной, даже
+    если SDK эти вызовы отверг (камера оставалась в автоэкспозиции)."""
+
+    def test_frame_rate_enable_error_returns_false(self):
+        """SetBoolValue(AcquisitionFrameRateEnable) вернул код ошибки -> False."""
+        from unittest.mock import MagicMock
+
+        mock_camera = MagicMock()
+        mock_camera.MV_CC_SetBoolValue.return_value = 0x80000004  # MV_E_PARAMETER
+        params = CameraParameters(frame_rate=30.0, exposure_time=10000.0, gain=5.0)
+
+        with (
+            patch("Services.hikvision_camera.core.parameters.SDK_AVAILABLE", True),
+            patch("Services.hikvision_camera.core.parameters.time.sleep"),
+        ):
+            result = set_parameters(mock_camera, params)
+
+        assert result is False
+
+    def test_exposure_auto_error_returns_false(self):
+        """SetEnumValue(ExposureAuto) вернул код ошибки -> False (камера осталась в auto)."""
+        from unittest.mock import MagicMock
+
+        mock_camera = MagicMock()
+        mock_camera.MV_CC_SetBoolValue.return_value = 0  # MV_OK
+        mock_camera.MV_CC_SetEnumValue.return_value = 0x80000004  # MV_E_PARAMETER
+        params = CameraParameters(frame_rate=30.0, exposure_time=10000.0, gain=5.0)
+
+        with (
+            patch("Services.hikvision_camera.core.parameters.SDK_AVAILABLE", True),
+            patch("Services.hikvision_camera.core.parameters.time.sleep"),
+        ):
+            result = set_parameters(mock_camera, params)
+
+        assert result is False
+
+    def test_success_when_all_codes_ok(self):
+        """Все коды возврата MV_OK -> True (фикс не ломает счастливый путь)."""
+        from unittest.mock import MagicMock
+
+        mock_camera = MagicMock()
+        mock_camera.MV_CC_SetBoolValue.return_value = 0
+        mock_camera.MV_CC_SetEnumValue.return_value = 0
+        mock_camera.MV_CC_SetFloatValue.return_value = 0
+        params = CameraParameters(frame_rate=30.0, exposure_time=10000.0, gain=5.0)
+
+        with (
+            patch("Services.hikvision_camera.core.parameters.SDK_AVAILABLE", True),
+            patch("Services.hikvision_camera.core.parameters.time.sleep"),
+        ):
+            result = set_parameters(mock_camera, params)
+
+        assert result is True

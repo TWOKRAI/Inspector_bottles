@@ -1,4 +1,5 @@
 """Runtime-параметры Hikvision камеры (управляемые из GUI)."""
+
 from __future__ import annotations
 
 from typing import Annotated
