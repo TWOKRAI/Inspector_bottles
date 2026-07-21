@@ -123,6 +123,30 @@ def _read_scalar(payload: Any, key: str, missing: List[str]) -> Optional[Any]:
     return None
 
 
+def _read_breakdown(stats: Any) -> Dict[str, int]:
+    """Разбивка счётчиков по kind (``sent_via_channel.system`` и т.п.) — точечные ключи.
+
+    Отдельным словарём, а не полями dataclass, по двум причинам. Во-первых, точка
+    в имени не может быть именем поля. Во-вторых (существенное): состав kind'ов
+    зависит от топологии и заранее не перечислим — так и записано в источнике
+    (``router_manager._inc_stat``: разбивка «заводится на лету»). Поэтому
+    отсутствие такого ключа — законное «груза этого класса не было», а НЕ
+    расхождение формы: в ``missing`` разбивка не участвует, иначе на каждом
+    рецепте без state-трафика инструмент кричал бы о несуществующей пропаже.
+    """
+    out: Dict[str, int] = {}
+    if not isinstance(stats, dict):
+        return out
+    for key, value in stats.items():
+        if "." not in key or isinstance(value, bool):
+            continue
+        try:
+            out[key] = int(value)
+        except (TypeError, ValueError):
+            continue  # не число — не счётчик
+    return out
+
+
 @dataclass
 class RouterStats:
     """Счётчики router'а процесса (introspect.router_stats).
@@ -131,6 +155,15 @@ class RouterStats:
     ответе, равен ``None``, а его имя лежит в ``missing`` — ``None`` и ``0`` здесь
     разные показания: первое «не знаем», второе «трафика не было».
     ``raw`` — весь сырой ответ.
+
+    **Почему полей стало больше.** Четырёх счётчиков не хватало, чтобы ответить
+    «куда делись отправки»: ``sent_attempted`` расходится с ``sent_ok`` на сумму
+    дверей (``sent_via_channel`` + ``sent_via_targets``) и ошибок, и без этих
+    слагаемых тождество приходилось сводить руками через ``raw`` — признак
+    дырявой обёртки, а не диагностики. Агрегаты ниже инициализируются router'ом
+    при старте, поэтому их отсутствие — настоящее расхождение формы и честно
+    попадает в ``missing``. Разбивка по kind живёт в ``by_kind``
+    (см. :func:`_read_breakdown`).
     """
 
     ok: bool
@@ -138,6 +171,18 @@ class RouterStats:
     received: Optional[int]
     middleware_dropped: Optional[int]
     errors: Optional[int]
+    # Куда делись отправки: попытки, двери доставки, асинхронная очередь отправителя.
+    sent_attempted: Optional[int] = None
+    sent_via_channel: Optional[int] = None
+    sent_via_targets: Optional[int] = None
+    queued_async: Optional[int] = None
+    send_queue_size: Optional[int] = None
+    # Потери на очередях получателя: вытеснено из data / заблокировано на never-drop.
+    queue_data_evicted: Optional[int] = None
+    queue_system_evict_blocked: Optional[int] = None
+    frame_loans_released_on_evict: Optional[int] = None
+    #: Точечные ключи разбивки по kind: {"sent_via_targets.state": 12, …}.
+    by_kind: Dict[str, int] = field(default_factory=dict)
     missing: List[str] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict)
 
@@ -153,6 +198,15 @@ class RouterStats:
             received=_read_int(stats, "received", missing),
             middleware_dropped=_read_int(stats, "middleware_dropped", missing),
             errors=_read_int(stats, "errors", missing),
+            sent_attempted=_read_int(stats, "sent_attempted", missing),
+            sent_via_channel=_read_int(stats, "sent_via_channel", missing),
+            sent_via_targets=_read_int(stats, "sent_via_targets", missing),
+            queued_async=_read_int(stats, "queued_async", missing),
+            send_queue_size=_read_int(stats, "send_queue_size", missing),
+            queue_data_evicted=_read_int(stats, "queue_data_evicted", missing),
+            queue_system_evict_blocked=_read_int(stats, "queue_system_evict_blocked", missing),
+            frame_loans_released_on_evict=_read_int(stats, "frame_loans_released_on_evict", missing),
+            by_kind=_read_breakdown(stats),
             missing=missing,
             raw=res if isinstance(res, dict) else {},
         )

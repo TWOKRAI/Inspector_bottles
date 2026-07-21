@@ -13,6 +13,10 @@ from typing import Any, Dict, List
 from backend_ctl.driver import BackendDriver
 
 
+from backend_ctl.tests.conftest import (  # noqa: E402 — общие хелперы
+    ROUTER_COUNTERS,
+    full_router_stats,
+)
 from backend_ctl.tests.conftest import wire_line as _line  # noqa: E402 — общий хелпер
 
 
@@ -47,10 +51,7 @@ def _healthy_responses() -> Dict[str, Dict[str, Any]]:
             "status": "running",
             "workers": {"w1": {"status": "running"}},
         },
-        "introspect.router_stats": {
-            "success": True,
-            "router_stats": {"sent_ok": 10, "received": 20, "middleware_dropped": 0, "errors": 0},
-        },
+        "introspect.router_stats": {"success": True, "router_stats": full_router_stats()},
         "introspect.queues": {"success": True, "queue_sizes": {"system": 1, "data": 2}},
         "introspect.memory": {"success": True, "memory": {}, "pool": {}, "queues": {}, "shm_registry": {}},
     }
@@ -97,7 +98,7 @@ class TestAnomalies:
         responses = _healthy_responses()
         responses["introspect.router_stats"] = {
             "success": True,
-            "router_stats": {"sent_ok": 5, "received": 9, "middleware_dropped": 3, "errors": 1},
+            "router_stats": full_router_stats(sent_ok=5, received=9, middleware_dropped=3, errors=1),
         }
         responses["introspect.queues"] = {"success": True, "queue_sizes": {"data": 120}}
         _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
@@ -172,7 +173,7 @@ class TestAnomalies:
 
         card = res["processes"]["cam"]
         assert card["router"]["sent_ok"] is None, "нет показания ≠ ноль"
-        assert card["missing"] == {"router": ["sent_ok", "received", "middleware_dropped", "errors"]}
+        assert card["missing"] == {"router": list(ROUTER_COUNTERS)}
 
     def test_healthy_shape_has_no_missing_key(self, monkeypatch) -> None:
         """Плечо «ON» той же пары: полная форма → ни аномалии, ни ключа missing."""

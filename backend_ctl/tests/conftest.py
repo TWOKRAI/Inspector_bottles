@@ -29,6 +29,38 @@ def wire_line(msg: Dict[str, Any]) -> bytes:
     return json.dumps(msg, ensure_ascii=False).encode("utf-8")
 
 
+#: Счётчики router'а, которые он инициализирует при старте и потому обязан
+#: отдавать всегда. Порядок — как в ``RouterStats.from_response``.
+ROUTER_COUNTERS = (
+    "sent_ok",
+    "received",
+    "middleware_dropped",
+    "errors",
+    "sent_attempted",
+    "sent_via_channel",
+    "sent_via_targets",
+    "queued_async",
+    "send_queue_size",
+    "queue_data_evicted",
+    "queue_system_evict_blocked",
+    "frame_loans_released_on_evict",
+)
+
+
+def full_router_stats(**overrides: Any) -> Dict[str, Any]:
+    """Полная секция ``router_stats`` для подставных ответов.
+
+    Одна точка правды о составе счётчиков: обёртка судит форму ответа по
+    ``missing``, поэтому фикстура с четырьмя ключами проверяла бы не тот
+    контракт — «здоровый» ответ выглядел бы как расхождение формы.
+    Точечные ключи разбивки по kind сюда не входят (заводятся на лету).
+    """
+    stats: Dict[str, Any] = {name: 0 for name in ROUTER_COUNTERS}
+    stats.update({"sent_ok": 10, "received": 20})
+    stats.update(overrides)
+    return stats
+
+
 def page_events(drv, cursor: Any = None, *, plane: Any = None, limit: int = 200):
     """Одна страница ``events_page`` → (сырые event-dict'ы, next_cursor).
 

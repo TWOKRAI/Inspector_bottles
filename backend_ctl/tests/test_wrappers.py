@@ -20,21 +20,58 @@ import pytest
 from backend_ctl.driver import MemoryStats, QueueDepths, RouterStats, WorkerStatus
 from backend_ctl.protocol import UNWRAP_MISS, unwrap
 
+
 # Реальная форма ответа команды: внешний конверт success + вложенная payload под result
 # (снято с живого бэкенда — см. probe). Парсеры обязаны спускаться по result.
+#: Полный набор счётчиков, которые роутер инициализирует при старте и потому
+#: обязан отдавать всегда. Фикстура держит их все: обёртка судит форму ответа по
+#: ``missing``, поэтому неполная фикстура проверяла бы не тот контракт.
+#: Точечные ключи (разбивка по kind) в этот набор НЕ входят — они заводятся на
+#: лету и живут в ``by_kind`` (см. _read_breakdown).
+def _full_router_stats(**overrides: object) -> dict:
+    stats: dict = {
+        "sent_ok": 10,
+        "received": 21,
+        "middleware_dropped": 0,
+        "errors": 0,
+        "sent_attempted": 10,
+        "sent_via_channel": 3,
+        "sent_via_targets": 7,
+        "queued_async": 0,
+        "send_queue_size": 0,
+        "queue_data_evicted": 0,
+        "queue_system_evict_blocked": 0,
+        "frame_loans_released_on_evict": 0,
+    }
+    stats.update(overrides)
+    return stats
+
+
+#: Имена всех счётчиков строгого края — в порядке чтения из from_response.
+_ALL_COUNTERS = [
+    "sent_ok",
+    "received",
+    "middleware_dropped",
+    "errors",
+    "sent_attempted",
+    "sent_via_channel",
+    "sent_via_targets",
+    "queued_async",
+    "send_queue_size",
+    "queue_data_evicted",
+    "queue_system_evict_blocked",
+    "frame_loans_released_on_evict",
+]
+
 _ROUTER_RESP = {
     "type": "response",
     "success": True,
     "result": {
         "success": True,
         "process": "preprocessor",
-        "router_stats": {
-            "sent_ok": 10,
-            "received": 21,
-            "middleware_dropped": 0,
-            "errors": 0,
-            "sent_attempted": 10,
-        },
+        "router_stats": _full_router_stats(
+            **{"sent_via_targets.state": 5, "sent_via_channel.system": 3},
+        ),
     },
 }
 
@@ -74,13 +111,9 @@ class TestRouterStatsParsing:
         Именно этот случай раньше был неотличим от «трафика не было»: ``int(
         stats.get("sent_ok", 0) or 0)`` отдавал ноль, и агент читал его как факт.
         """
-        renamed = {
-            "success": True,
-            "result": {
-                "success": True,
-                "router_stats": {"sent_okay": 10, "received": 21, "middleware_dropped": 0, "errors": 0},
-            },
-        }
+        stats = _full_router_stats()
+        stats["sent_okay"] = stats.pop("sent_ok")  # сервер переименовал ровно один счётчик
+        renamed = {"success": True, "result": {"success": True, "router_stats": stats}}
         rs = RouterStats.from_response(renamed)
         assert rs.ok is True, "ручка ответила успешно — расхождение только в форме"
         assert rs.sent_ok is None, "нет показания ≠ ноль"
@@ -89,17 +122,17 @@ class TestRouterStatsParsing:
 
     def test_zero_stays_zero_and_is_not_missing(self) -> None:
         """Ноль ОТ СЕРВЕРА — валидное показание, а не пропуск (обратная сторона пары)."""
-        rs = RouterStats.from_response(
-            {"success": True, "router_stats": {"sent_ok": 0, "received": 0, "middleware_dropped": 0, "errors": 0}}
-        )
+        zeros = {name: 0 for name in _ALL_COUNTERS}
+        rs = RouterStats.from_response({"success": True, "router_stats": zeros})
         assert (rs.sent_ok, rs.received, rs.middleware_dropped, rs.errors) == (0, 0, 0, 0)
+        assert (rs.sent_attempted, rs.sent_via_channel, rs.sent_via_targets) == (0, 0, 0)
         assert rs.missing == []
 
     def test_whole_section_absent_marks_every_counter(self) -> None:
         rs = RouterStats.from_response({"success": False, "error": "timeout"})
         assert rs.ok is False
         assert (rs.sent_ok, rs.received, rs.middleware_dropped, rs.errors) == (None, None, None, None)
-        assert rs.missing == ["sent_ok", "received", "middleware_dropped", "errors"]
+        assert rs.missing == _ALL_COUNTERS
 
     def test_non_numeric_value_is_not_a_reading(self) -> None:
         """Значение пришло, но числом не является — показания нет, не ноль."""
@@ -109,7 +142,38 @@ class TestRouterStatsParsing:
     def test_robust_to_garbage(self) -> None:
         rs = RouterStats.from_response(None)  # type: ignore[arg-type]
         assert rs.ok is False and rs.raw == {}
-        assert rs.missing == ["sent_ok", "received", "middleware_dropped", "errors"]
+        assert rs.missing == _ALL_COUNTERS
+
+    def test_delivery_doors_are_readable(self) -> None:
+        """Новые счётчики читаются — тождество «куда делись отправки» сводится обёрткой.
+
+        Раньше слагаемых в дataclass не было и тождество приходилось сводить
+        руками через ``.raw`` — ровно тот признак дырявой обёртки, ради которого
+        счётчики и открыты.
+        """
+        rs = RouterStats.from_response(_ROUTER_RESP)
+        assert rs.sent_attempted == 10
+        assert (rs.sent_via_channel, rs.sent_via_targets) == (3, 7)
+        assert (rs.queued_async, rs.send_queue_size) == (0, 0)
+        assert (rs.queue_data_evicted, rs.queue_system_evict_blocked) == (0, 0)
+        assert rs.frame_loans_released_on_evict == 0
+        assert rs.missing == []
+        assert rs.sent_attempted == rs.sent_via_channel + rs.sent_via_targets
+
+    def test_kind_breakdown_goes_to_by_kind_not_missing(self) -> None:
+        """Точечные ключи — в by_kind; их отсутствие НЕ считается расхождением формы.
+
+        Разбивка по kind заводится на лету (состав зависит от топологии), поэтому
+        рецепт без state-трафика не должен давать ложную пропажу в ``missing``.
+        """
+        rs = RouterStats.from_response(_ROUTER_RESP)
+        assert rs.by_kind == {"sent_via_targets.state": 5, "sent_via_channel.system": 3}
+        assert all("." not in name for name in rs.missing)
+
+        without_breakdown = {"success": True, "router_stats": _full_router_stats()}
+        rs2 = RouterStats.from_response(without_breakdown)
+        assert rs2.by_kind == {}
+        assert rs2.missing == [], "нет разбивки — это не пропажа, а отсутствие такого трафика"
 
 
 class TestQueueDepthsParsing:
