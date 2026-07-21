@@ -12,6 +12,7 @@ from __future__ import annotations
 from backend_ctl.probes.g7_soak_probe import (
     _COUNTER_KEYS,
     _counters,
+    _missing_counter_keys,
     _summarize,
     _worker_metrics,
 )
@@ -146,6 +147,63 @@ class TestSummarize:
 
     def test_no_samples_is_loud(self):
         assert _summarize([])["verdict"] == "NO_SAMPLES"
+
+
+class TestStrictCounterNames:
+    """Третий вид нуля: ключ написан не так, как публикует сервер.
+
+    Регресс 2026-07-21: проба читала ``system_evict_blocked``, роутер публикует
+    ``queue_system_evict_blocked``. Счётчик молча отдавал 0 три прогона подряд —
+    включая soak синтетики, где он числился среди доказательств чистоты.
+    """
+
+    @staticmethod
+    def _server_response(keys) -> dict:
+        # router_id — якорь: без него ответ не опознаётся как статистика роутера.
+        stats = {k: 0 for k in keys}
+        stats["router_id"] = "seg-router"
+        return {"result": {"router_stats": stats}}
+
+    def test_all_expected_keys_present_is_clean(self):
+        assert _missing_counter_keys(self._server_response(_COUNTER_KEYS)) == []
+
+    def test_typo_in_key_is_detected(self):
+        server_keys = [k for k in _COUNTER_KEYS if k != "frame_torn_reads"]
+        assert _missing_counter_keys(self._server_response(server_keys)) == ["frame_torn_reads"]
+
+    def test_regression_2026_07_21_is_caught(self):
+        """Именно тот случай: сервер публикует queue_system_evict_blocked,
+        а проба спросила бы system_evict_blocked."""
+        server_keys = [k for k in _COUNTER_KEYS if k != "queue_system_evict_blocked"]
+        server_keys.append("system_evict_blocked")  # старое (неверное) имя
+
+        missing = _missing_counter_keys(self._server_response(server_keys))
+
+        assert "queue_system_evict_blocked" in missing
+
+    def test_empty_response_is_not_a_name_mismatch(self):
+        """Недоступный процесс — не повод объявлять имена сломанными."""
+        assert _missing_counter_keys({"result": {}}) == []
+
+    def test_garbage_payload_is_not_a_name_mismatch(self):
+        """Мусор в обёртке разворачивается в непустой словарь без единого якоря —
+        честный ответ «судить не могу», а не «сломаны все 11 имён»."""
+        assert _missing_counter_keys({"result": "boom"}) == []
+        assert _missing_counter_keys({"result": {"error": "no handler"}}) == []
+
+    def test_verdict_is_misconfigured_not_clean(self):
+        summary = _summarize([_sample(300), _sample(600)], missing_keys=["frame_torn_reads"])
+
+        assert summary["verdict"] == "PROBE_MISCONFIGURED"
+        assert summary["missing_keys"] == ["frame_torn_reads"]
+
+    def test_misconfigured_wins_over_clean_samples(self):
+        """Чистые сэмплы не должны маскировать невалидную пробу."""
+        summary = _summarize([_sample(300), _sample(600)], synthetic=False, missing_keys=["queue_data_evicted"])
+        assert summary["verdict"] == "PROBE_MISCONFIGURED"
+
+    def test_no_missing_keys_keeps_normal_verdict(self):
+        assert _summarize([_sample(300), _sample(600)], missing_keys=[])["verdict"] == "CLEAN"
 
 
 class TestBackpressureTier:

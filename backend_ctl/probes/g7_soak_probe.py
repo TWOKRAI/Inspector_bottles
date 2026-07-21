@@ -97,6 +97,10 @@ _BACKPRESSURE_KEYS: tuple[str, ...] = (
 #: Рецепты, где источник и потребитель равны по темпу → backpressure = дефект.
 _SYNTHETIC_RECIPES: frozenset[str] = frozenset({"g1_perf_probe.yaml"})
 
+#: Ключи, по которым ответ опознаётся как статистика роутера (а не мусор/ошибка).
+#: Публикуются всегда — независимо от топологии, флагов и наличия middleware.
+_ROUTER_STATS_ANCHORS: tuple[str, ...] = ("router_id", "channels_count", "sent_attempted")
+
 
 def _counters(router_stats_res: dict) -> dict[str, int]:
     """Достать ``_COUNTER_KEYS`` из ответа ``introspect.router_stats``.
@@ -104,11 +108,33 @@ def _counters(router_stats_res: dict) -> dict[str, int]:
     Робастно к обёртке (см. g1_perf_probe._shm_counters): ответ приходит либо
     ``{..., "router_stats": {...}}``, либо плоско. Отсутствующий счётчик → 0.
     """
+    return {k: int(_router_stats(router_stats_res).get(k, 0) or 0) for k in _COUNTER_KEYS}
+
+
+def _router_stats(router_stats_res: dict) -> dict:
+    """Развернуть ответ ``introspect.router_stats`` до плоского словаря счётчиков."""
     payload = unwrap(router_stats_res, leaf=True)
     rs = payload.get("router_stats", payload) if isinstance(payload, dict) else {}
-    if not isinstance(rs, dict):
-        rs = {}
-    return {k: int(rs.get(k, 0) or 0) for k in _COUNTER_KEYS}
+    return rs if isinstance(rs, dict) else {}
+
+
+def _missing_counter_keys(router_stats_res: dict) -> list[str]:
+    """Какие из ожидаемых счётчиков сервер НЕ отдаёт (имя разошлось с реальностью).
+
+    Третий вид нуля. Первые два — «событий не было» и «путь не подключён» — про
+    систему; этот же чисто наш: ключ написан не так, как публикует роутер, и
+    ``rs.get(k, 0)`` молча отдаёт 0. Регресс 2026-07-21: проба три прогона подряд
+    читала ``system_evict_blocked``, роутер публикует ``queue_system_evict_blocked``
+    — leak-ключ не мог сработать НИ РАЗУ, и soak синтетики (§4) числил его среди
+    доказательств чистоты. Ноль, которому нельзя верить, хуже отсутствия метрики.
+    """
+    rs = _router_stats(router_stats_res)
+    # Якорь: ответ мог быть мусором или ошибкой в обёртке — тогда «отсутствуют все
+    # ключи» неверный вывод, честный ответ «судить не могу». Якорные ключи роутер
+    # публикует всегда, независимо от топологии и флагов.
+    if not any(a in rs for a in _ROUTER_STATS_ANCHORS):
+        return []
+    return [k for k in _COUNTER_KEYS if k not in rs]
 
 
 def _rss_mb(pid: int | None) -> float | None:
@@ -195,7 +221,12 @@ def _sample(drv: Any, elapsed: float, processes: list[str]) -> dict[str, Any]:
     return {"elapsed_sec": round(elapsed, 1), "processes": per_process}
 
 
-def _summarize(samples: list[dict[str, Any]], *, synthetic: bool = True) -> dict[str, Any]:
+def _summarize(
+    samples: list[dict[str, Any]],
+    *,
+    synthetic: bool = True,
+    missing_keys: list[str] | None = None,
+) -> dict[str, Any]:
     """Сводка «первый → последний» + вердикт по утечкам.
 
     Вердикт намеренно грубый и громкий: любой ненулевой leak-счётчик или рост
@@ -208,6 +239,19 @@ def _summarize(samples: list[dict[str, Any]], *, synthetic: bool = True) -> dict
     вердикт. Иначе прогон на webcam обречён быть красным всегда — а вердикт,
     который всегда красный, перестают читать.
     """
+    # Раньше любой другой проверки: если проба читает несуществующие имена, её
+    # «чисто» ничего не значит. Такой прогон нельзя чинить постфактум — только
+    # признать недействительным.
+    if missing_keys:
+        return {
+            "verdict": "PROBE_MISCONFIGURED",
+            "missing_keys": sorted(missing_keys),
+            "findings": [
+                f"счётчик '{k}' не публикуется сервером — проба читала бы 0 независимо от системы"
+                for k in sorted(missing_keys)
+            ],
+        }
+
     if not samples:
         return {"verdict": "NO_SAMPLES", "findings": ["soak не снял ни одного сэмпла"]}
 
@@ -333,6 +377,34 @@ def main() -> int:
             print("[g7-soak] топология пуста — бэкенд не поднялся или не прогрет")
             return 2
         print(f"[g7-soak] процессов в топологии: {len(processes)} — {', '.join(processes)}")
+
+        # Task 0.3: сверить ИМЕНА счётчиков с тем, что реально публикует сервер, ДО
+        # цикла. Прогон с несуществующим ключом отдаёт 0 независимо от системы —
+        # два часа замера впустую, а вердикт «чисто» ложный. Берём первый процесс,
+        # который вообще ответил: набор ключей у роутеров одинаков.
+        missing: list[str] = []
+        probe_errors: list[str] = []
+        for proc in processes:
+            probe_rs = None
+            try:
+                probe_rs = drv.introspect_router_stats(proc, timeout=8.0)
+            except Exception as exc:  # noqa: BLE001 — молчащий процесс не повод судить об именах
+                probe_errors.append(f"{proc}: {exc!r}")
+            if probe_rs is not None and _router_stats(probe_rs):
+                missing = _missing_counter_keys(probe_rs)
+                break
+        else:
+            # Ни один процесс не отдал статистику — сверять имена не с чем. Молчать
+            # нельзя: дальше прогон пойдёт на непроверенных именах.
+            why = probe_errors or ["пустые ответы"]
+            print(f"[g7-soak] ВНИМАНИЕ: имена счётчиков не сверены, никто не ответил: {why}")
+
+        if missing:
+            summary = _summarize([], synthetic=synthetic, missing_keys=missing)
+            fp.write(json.dumps({"summary": summary}, ensure_ascii=False) + "\n")
+            print(f"[g7-soak] ПРОБА НЕВАЛИДНА: сервер не публикует {missing}")
+            print("[g7-soak] прогон не начат — 'чисто' от такой пробы ничего бы не доказало")
+            return 3
 
         while True:
             elapsed = time.monotonic() - started
