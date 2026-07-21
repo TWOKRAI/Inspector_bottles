@@ -1030,11 +1030,19 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         ``process`` — имя процесса ИЛИ ``"all"`` (fan-out через PM). Требуется ``enabled``
         и/или ``interval_sec`` (для throttle — обязателен ``interval_sec``), иначе error-dict.
+
+        **Имя сверяемо (BCTL-ADR-007):** если сервер отчитался, что publish-
+        часть команды не дошла ни до одного адресата (``publish.reached == 0`` либо
+        ``publish.target_count == 0``), ответ дополняется клиентским ``hint`` — вероятная
+        причина: опечатка в имени процесса/метрики, либо процесс не жив. Консервативно:
+        только маркировка, ``success`` и остальная форма ответа не трогаются (см.
+        :meth:`_flag_unreached_metric`).
         """
         if plane == "throttle":
             if interval_sec is _UNSET:
                 return {"success": False, "error": "throttle-плоскость требует interval_sec (min-интервал правила)"}
-            return self.telemetry_reconfigure(process, throttle={metric: interval_sec}, mode="merge", timeout=timeout)
+            res = self.telemetry_reconfigure(process, throttle={metric: interval_sec}, mode="merge", timeout=timeout)
+            return self._flag_unreached_metric(res, process, metric)
         if plane != "publisher":
             return {"success": False, "error": f"неизвестная plane '{plane}' (publisher|throttle)"}
 
@@ -1045,7 +1053,33 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             rule["interval_sec"] = interval_sec
         if not rule:
             return {"success": False, "error": "нужен enabled и/или interval_sec"}
-        return self.telemetry_reconfigure(process, publish={"metrics": {metric: rule}}, mode="merge", timeout=timeout)
+        res = self.telemetry_reconfigure(process, publish={"metrics": {metric: rule}}, mode="merge", timeout=timeout)
+        return self._flag_unreached_metric(res, process, metric)
+
+    @staticmethod
+    def _flag_unreached_metric(res: Dict[str, Any], process: str, metric: str) -> Dict[str, Any]:
+        """Клиентская подсказка при ``publish.reached == 0`` / ``target_count == 0`` (BCTL-ADR-007).
+
+        Консервативно — только МАРКИРУЕТ (мутирует и возвращает тот же ``res``): ``success``
+        и остальная форма ответа не меняются, никакого нового отказа не вводится. Сервер
+        уже даёт честный охват доставки (``reached``/``target_count`` — ADR-PM-017), здесь
+        только клиентский перевод «0 из N» в подсказку «проверь имя».
+
+        Throttle-плоскость не несёт ``publish`` (только ``throttle.applied``) — для неё
+        функция no-op: серверного реестра метрик нет, чтобы объявить конкретное
+        throttle-правило «недостигнутым».
+        """
+        publish = res.get("publish") if isinstance(res, dict) else None
+        if not isinstance(publish, dict):
+            return res
+        reached, target_count = publish.get("reached"), publish.get("target_count")
+        if reached == 0 or target_count == 0:
+            res["hint"] = (
+                f"telemetry_set(process={process!r}, metric={metric!r}): publish не достиг "
+                f"ни одного адресата (reached={reached}, target_count={target_count}) — "
+                "проверь имя процесса/метрики (возможна опечатка) либо жив ли процесс."
+            )
+        return res
 
     # ---- Telemetry read-model (Task 2.3: GUI-эквивалент чтения телеметрии, 0 IPC) ----
 

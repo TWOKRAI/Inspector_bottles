@@ -258,6 +258,84 @@ class TestTelemetrySet:
         assert calls[0][1] == "telemetry.broadcast"
 
 
+class TestTelemetrySetUnreachedHint:
+    """BCTL-ADR-007: ``publish.reached=0``/``target_count=0`` → клиентская подсказка, не отказ.
+
+    Консервативно (как и unknown_metric у ``await_condition``): только маркировка —
+    ``success`` и остальная форма ответа не трогаются, пара ON/OFF на ``reached``.
+    """
+
+    def test_addressed_zero_reached_gets_hint(self, monkeypatch) -> None:
+        """Адресный кейс (``target_count`` всегда 1): ``reached=0`` — процесс не доставлен,
+        вероятная опечатка в имени. Ответ не блокируется (``success`` остаётся True)."""
+        response = {
+            "success": True,
+            "result": {
+                "success": True,
+                "process": "ProcessManager",
+                "publish": {
+                    "requested": True,
+                    "target_count": 1,
+                    "reached": 0,
+                    "targets": ["camera_x"],
+                    "complete": False,
+                },
+            },
+        }
+        d, _calls = _recorder(monkeypatch, response=response)
+        res = d.telemetry_set("camera_x", "fps", enabled=True)
+        assert res["success"] is True  # консервативно: не блокируем
+        assert "проверь имя" in res["hint"]
+        assert "camera_x" in res["hint"] and "fps" in res["hint"]
+
+    def test_fanout_zero_target_count_gets_hint(self, monkeypatch) -> None:
+        """Fan-out без единого живого ребёнка (``target_count=0``) — та же подсказка."""
+        response = {
+            "success": True,
+            "result": {
+                "success": True,
+                "process": "ProcessManager",
+                "publish": {"requested": True, "target_count": 0, "reached": 0, "targets": [], "complete": True},
+            },
+        }
+        d, _calls = _recorder(monkeypatch, response=response)
+        res = d.telemetry_set("all", "fps", enabled=True)
+        assert "hint" in res
+
+    def test_reached_nonzero_no_hint(self, monkeypatch) -> None:
+        """Плечо OFF пары: доставка состоялась (``reached=1/1``) — ``hint`` НЕ добавляется,
+        ответ бит-в-бит (см. TestTelemetryFanoutCoverage.test_fanout_coverage_propagated)."""
+        response = {
+            "success": True,
+            "result": {
+                "success": True,
+                "process": "ProcessManager",
+                "publish": {
+                    "requested": True,
+                    "target_count": 1,
+                    "reached": 1,
+                    "targets": ["camera_x"],
+                    "complete": True,
+                },
+            },
+        }
+        d, _calls = _recorder(monkeypatch, response=response)
+        res = d.telemetry_set("camera_x", "fps", enabled=True)
+        assert "hint" not in res
+        assert res["publish"]["reached"] == 1
+
+    def test_throttle_plane_response_has_no_hint(self, monkeypatch) -> None:
+        """Throttle-плоскость не несёт ``publish`` (только ``throttle.applied``) — функция
+        не падает и ничего не маркирует (нет реестра метрик, чтобы судить throttle-правило)."""
+        response = {
+            "success": True,
+            "result": {"success": True, "process": "ProcessManager", "throttle": {"requested": True, "applied": False}},
+        }
+        d, _calls = _recorder(monkeypatch, response=response)
+        res = d.telemetry_set("camera_x", "a.b", interval_sec=1.0, plane="throttle")
+        assert "hint" not in res
+
+
 class TestTelemetryIngestActiveUnit:
     """``ingest_active``/``ingested_total`` на fake-транспорте — плечо OFF и механика счётчика.
 

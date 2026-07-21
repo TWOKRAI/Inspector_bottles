@@ -12,7 +12,12 @@
     событие, чей command или path матчится glob-паттерном (классификация — тот же
     :func:`~backend_ctl.events._classify`, что у колец: нет второго классификатора);
   * ``metric_threshold`` — ``spec={"path", "op", "value"}``: числовая метрика пути
-    пересекла порог (``>``/``>=``/``<``/``<=``/``==``/``!=``).
+    пересекла порог (``>``/``>=``/``<``/``<=``/``==``/``!=``). Путь, не встречавшийся
+    среди наблюдённых read-model и не входящий в трекаемые суффиксы, помечается
+    ``unknown_metric: true`` + ``candidates`` (ближайшие наблюдённые пути, difflib) —
+    и в немедленном ответе, и в диагнозе таймаута (BCTL-ADR-007). Консервативно:
+    пустой свод read-model — проверка пропускается, маркер не ставится (см.
+    :func:`_unknown_metric_diagnosis`).
 
 Механика без поллинга: временный подписчик событийного канала + ``threading.Event``.
 Порядок race-free: подписаться → проверить начальное состояние (read-model) →
@@ -30,6 +35,7 @@
 
 from __future__ import annotations
 
+import difflib
 import fnmatch
 import operator
 import threading
@@ -104,6 +110,9 @@ class _Waiter:
         self.matched: Optional[Dict[str, Any]] = None
         self.events_seen = 0
         self.last_seen: Optional[Dict[str, Any]] = None
+        # Доп. диагностика, собранная на этапе setup_condition (сейчас — unknown_metric
+        # у metric_threshold); пусто для остальных kind — их ответ не меняется ни на байт.
+        self.diagnostics: Dict[str, Any] = {}
 
     def offer(self, msg: Dict[str, Any]) -> None:
         """Колбэк событийного канала (reader-поток): лёгкая проверка + set()."""
@@ -148,8 +157,10 @@ def await_condition(
         Успех: ``{"success": True, "kind", "matched": {...}, "elapsed_sec"}`` —
         ``matched`` несёт сработавшее значение/событие. Таймаут:
         ``{"success": False, "timed_out": True, "waited": spec, "elapsed_sec",
-        "events_seen", "last_seen", "hint"?}`` — диагноз, не пустота. Невалидный
-        вход → error-dict сразу (обучающий текст, без ожидания).
+        "events_seen", "last_seen", "hint"?, "unknown_metric"?, "candidates"?}`` —
+        диагноз, не пустота (``unknown_metric``/``candidates`` — только у
+        ``metric_threshold`` с неопознанным путём, см. :func:`_unknown_metric_diagnosis`).
+        Невалидный вход → error-dict сразу (обучающий текст, без ожидания).
     """
     setup = setup_condition(drv, kind, spec)
     if isinstance(setup, dict):  # ошибка валидации kind/spec
@@ -181,6 +192,10 @@ def await_condition(
         "events_seen": events_seen,
         "last_seen": last_seen,
     }
+    # unknown_metric/candidates (только metric_threshold с неопознанным путём) — собраны
+    # на setup, ДО ожидания; для известных путей и прочих kind словарь пуст — update({})
+    # не меняет ответ ни на байт (BCTL-ADR-007).
+    out.update(waiter.diagnostics)
     # Подсказка — по отсутствию РЕЛЕВАНТНЫХ наблюдений (note), не любых событий:
     # фоновый трафик (log.record/ui.event при активном debug_session) не должен
     # гасить диагноз «нужные дельты/события так и не пришли».
@@ -292,6 +307,7 @@ def _setup_metric_threshold(drv: Any, spec: Dict[str, Any]):
         return check(current, "read-model") if exists else None
 
     waiter = _Waiter(predicate)
+    waiter.diagnostics = _unknown_metric_diagnosis(drv, path)
     return waiter, initial_check
 
 
@@ -372,6 +388,33 @@ def _read_model_entry(drv: Any, path: str) -> tuple[bool, Any]:
     with drv._telemetry_lock:
         snap = drv._telemetry_model.snapshot(path)
     return (True, snap[path]) if path in snap else (False, None)
+
+
+def _unknown_metric_diagnosis(drv: Any, path: str) -> Dict[str, Any]:
+    """Признак «путь метрики не опознан» для ``metric_threshold`` (BCTL-ADR-007).
+
+    Путь считается неопознанным, если он НЕ встречался среди текущих наблюдённых путей
+    read-model И не входит в трекаемые суффиксы (``BackendDriver._telemetry_is_tracked`` —
+    та же проверка, что у ``telemetry_history``, второй такой в модуле нет). Возвращает
+    ``{"unknown_metric": True, "candidates": [...]}`` либо пустой dict (путь опознан —
+    ``out.update({})`` в :func:`await_condition` не меняет ответ ни на байт).
+
+    Консервативно: пустой свод read-model (ничего не наблюдалось вовсе) или сбой его
+    чтения — проверка ПРОПУСКАЕТСЯ, пустой dict без всякого ``unknown_metric``. Ложный
+    признак на легитимной, но ещё не публиковавшейся метрике хуже его отсутствия — он
+    научил бы игнорировать маркер как шумный (тот же аргумент, что для ``last_seen``).
+    """
+    try:
+        with drv._telemetry_lock:
+            observed = list(drv._telemetry_model.snapshot(""))
+    except Exception:  # noqa: BLE001 — деградация read-model не должна ронять await
+        return {}
+    if not observed or drv._telemetry_is_tracked(path) or path in observed:
+        return {}
+    # Стиль подсказки — зеркало BCTL-ADR-003 (mcp_errors.suggest_tools): тот же
+    # difflib с n=3/cutoff=0.5, тот же принцип «назвать ближайшие валидные имена».
+    candidates = difflib.get_close_matches(path, observed, n=3, cutoff=0.5)
+    return {"unknown_metric": True, "candidates": candidates}
 
 
 __all__ = ["await_condition", "setup_condition", "KINDS", "DEFAULT_AWAIT_TIMEOUT"]

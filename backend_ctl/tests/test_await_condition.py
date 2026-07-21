@@ -109,6 +109,64 @@ class TestMetricThreshold:
         assert "op" in res["error"]
 
 
+class TestMetricThresholdUnknownMetric:
+    """BCTL-ADR-007: опечатка в пути metric_threshold — громкий unknown_metric, не тихий
+    таймаут, неотличимый от «порог не достигнут». Пара ON/OFF: известный путь бит-в-бит,
+    опечатка — явный признак + кандидаты; отдельно — риск ложного блока легитимной,
+    но ещё не публиковавшейся метрики."""
+
+    def test_known_tracked_path_pair_unchanged(self) -> None:
+        """Плечо «известно»: путь трекается (суффикс ``.state.fps``) — ответ бит-в-бит,
+        никакого unknown_metric/candidates, таймаут отрабатывает полный бюджет."""
+        d = BackendDriver()
+        th = _feed_later(d, [_state_line("processes.cam.state.fps", 7)])
+        res = d.await_condition(
+            "metric_threshold", {"path": "processes.cam.state.fps", "op": ">", "value": 100}, timeout=0.3
+        )
+        th.join()
+        assert res["success"] is False and res["timed_out"] is True
+        assert "unknown_metric" not in res
+        assert "candidates" not in res
+        assert 0.25 <= res["elapsed_sec"] <= 1.0  # полный бюджет отжидали, не срезали тайминг
+
+    def test_typo_path_pair_flags_unknown_with_candidates(self) -> None:
+        """Плечо «опечатка»: путь на одну букву длиннее реально наблюдённого — unknown_metric
+        + непустой список кандидатов (difflib), таймаут отрабатывает тот же бюджет."""
+        d = BackendDriver()
+        d.dispatch_raw(_state_line("processes.cam.state.fps", 5))  # уже в read-model к моменту setup
+        res = d.await_condition(
+            "metric_threshold", {"path": "processes.cam.state.fpss", "op": ">", "value": 1}, timeout=0.3
+        )
+        assert res["success"] is False and res["timed_out"] is True
+        assert res["unknown_metric"] is True
+        assert res["candidates"]  # непустой список
+        assert "processes.cam.state.fps" in res["candidates"]
+        assert 0.25 <= res["elapsed_sec"] <= 1.0  # тот же бюджет, что и известный путь
+
+    def test_not_yet_published_tracked_metric_not_blocked(self) -> None:
+        """Главный риск: легитимная метрика (трекаемый суффикс), которая ещё не
+        публиковалась, — read-model НЕПУСТ (другая камера уже наблюдалась), но у самого
+        пути ни одной точки не было. Суффикс трекается → маркер НЕ ставится, отказа нет —
+        обычный таймаут «данных пока нет», без изменений."""
+        d = BackendDriver()
+        d.dispatch_raw(_state_line("processes.cam1.state.fps", 5))  # непустой read-model
+        res = d.await_condition(
+            "metric_threshold", {"path": "processes.cam2.state.fps", "op": ">", "value": 1}, timeout=0.3
+        )
+        assert res["success"] is False and res["timed_out"] is True
+        assert "unknown_metric" not in res
+
+    def test_empty_read_model_skips_check(self) -> None:
+        """Пустой свод read-model (ничего не наблюдалось вовсе) — проверка ПРОПУЩЕНА:
+        даже совершенно случайный путь не получает unknown_metric (консервативность)."""
+        d = BackendDriver()
+        res = d.await_condition(
+            "metric_threshold", {"path": "totally.unknown.path", "op": ">", "value": 1}, timeout=0.2
+        )
+        assert res["success"] is False and res["timed_out"] is True
+        assert "unknown_metric" not in res
+
+
 class TestEventMatches:
     def test_matches_plane_event_by_glob(self) -> None:
         d = BackendDriver()
