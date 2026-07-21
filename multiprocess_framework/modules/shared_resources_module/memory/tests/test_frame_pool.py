@@ -116,6 +116,58 @@ class TestRelease:
         assert p.release([{"index": idx, "generation": -1, "reader": "c0"}]) == 1
 
 
+class TestReleaseEvicted:
+    """LIVE-2: release займа кадра, ВЫТЕСНЕННОГО из полной очереди до прочтения. БЕЗ
+    generation-guard (тикет поколения не несёт), но refcount>0-guard и dedup сохранены."""
+
+    def _gen5(self, _idx):
+        return 5  # ненулевое поколение (seqlock активен)
+
+    def test_frees_without_generation_match(self):
+        """При seqlock (реальное поколение=5) штатный release с gen=-1 отверг бы займ;
+        release_evicted игнорирует поколение и освобождает слот (иначе — утечка LIVE-2)."""
+        p = LoanLedger(2, gen_reader=self._gen5)
+        idx = p.acquire()
+        p.commit(idx, 1)
+        # штатный release с чужим поколением → отвергнут (доказательство необходимости пути).
+        assert p.release([{"index": idx, "generation": -1, "reader": "lines"}]) == 0
+        assert p._refcount[idx] == 1
+        # evicted-release игнорирует поколение → слот свободен.
+        assert p.release_evicted([{"index": idx, "generation": -1, "reader": "lines"}]) == 1
+        assert p._refcount[idx] == 0
+        assert p.snapshot_stats()["slots_released_on_evict"] == 1
+
+    def test_refcount_guard_and_dedup(self):
+        p = LoanLedger(1, gen_reader=self._gen5)
+        idx = p.acquire()
+        p.commit(idx, 2)  # fan-out на двоих
+        t = {"index": idx, "generation": -1, "reader": "lines"}
+        assert p.release_evicted([t]) == 1
+        assert p.release_evicted([t]) == 0  # дубль того же reader → игнор
+        assert p._refcount[idx] == 1  # второй потребитель ещё держит
+        assert p.snapshot_stats()["slots_released_on_evict"] == 1
+
+    def test_free_slot_and_malformed_skipped(self):
+        p = LoanLedger(2, gen_reader=self._gen5)
+        assert p.release_evicted([{"index": 0, "generation": -1, "reader": "x"}]) == 0  # refcount==0
+        assert p.release_evicted([{"index": 9, "generation": -1, "reader": "x"}]) == 0  # вне диапазона
+        assert p.release_evicted([{"index": "z", "generation": -1, "reader": "x"}]) == 0  # битый
+        assert p.release_evicted([]) == 0
+
+    def test_counter_separate_from_normal_release(self):
+        """slots_released_on_evict отделён от slots_released (разные причины потери)."""
+        p = LoanLedger(2, gen_reader=self._gen5)
+        i0 = p.acquire()
+        p.commit(i0, 1)
+        i1 = p.acquire()
+        p.commit(i1, 1)
+        p.release([{"index": i0, "generation": 5, "reader": "lines"}])  # штатный
+        p.release_evicted([{"index": i1, "generation": -1, "reader": "points"}])  # вытеснение
+        stats = p.snapshot_stats()
+        assert stats["slots_released"] == 1
+        assert stats["slots_released_on_evict"] == 1
+
+
 class TestReclaim:
     def _gen0(self, _idx):
         return 0

@@ -12,9 +12,11 @@ class _FakeMw:
     def __init__(self):
         self.released: list = []
         self.reclaimed: list = []
+        self.evicted_flags: list = []
 
-    def release_slots(self, releases):
+    def release_slots(self, releases, evicted: bool = False):
         self.released.append(releases)
+        self.evicted_flags.append(evicted)
 
     def reclaim_reader(self, dead_reader):
         self.reclaimed.append(dead_reader)
@@ -33,6 +35,19 @@ def test_handler_delegates_releases_to_middleware():
     mw = _FakeMw()
     gp._handle_shm_release({"data": {"releases": [{"index": 0, "generation": 2, "reader": "c0"}]}}, mw)
     assert mw.released == [[{"index": 0, "generation": 2, "reader": "c0"}]]
+    assert mw.evicted_flags == [False]  # штатный release (не вытеснение)
+
+
+def test_handler_passes_evicted_flag():
+    """LIVE-2: конверт вытеснения (data.evicted=True) → release_slots(evicted=True)."""
+    gp = _bare_process()
+    mw = _FakeMw()
+    gp._handle_shm_release(
+        {"data": {"evicted": True, "releases": [{"slot": "s", "index": 1, "generation": -1, "reader": "lines"}]}},
+        mw,
+    )
+    assert mw.released == [[{"slot": "s", "index": 1, "generation": -1, "reader": "lines"}]]
+    assert mw.evicted_flags == [True]
 
 
 def test_handler_ignores_empty_and_malformed():

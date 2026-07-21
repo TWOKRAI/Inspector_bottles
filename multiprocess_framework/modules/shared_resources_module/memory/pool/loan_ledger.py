@@ -62,6 +62,11 @@ class LoanLedger:
         self._released_count = 0
         self._reclaimed_count = 0
         self._exhausted_count = 0
+        # LIVE-2: займов освобождено при ВЫТЕСНЕНИИ сообщения из полной очереди до
+        # прочтения (release_evicted). Отдельный счётчик — потеря по вытеснению должна
+        # быть ВИДИМОЙ и отличимой от штатного release/reclaim (иначе «кадры не
+        # сохраняются» тихо, как в живом репро).
+        self._evict_released_count = 0
 
     @property
     def depth(self) -> int:
@@ -162,6 +167,46 @@ class LoanLedger:
         self._released_count += freed
         return freed
 
+    def release_evicted(self, tickets: list[LoanTicket]) -> int:
+        """LIVE-2 (release-on-evict): release тикетов, чьё сообщение ВЫТЕСНЕНО из полной
+        очереди раньше, чем потребитель успел его прочитать. Возвращает число освобождённых.
+
+        Отличие от :meth:`release` — БЕЗ generation-guard. Тикет вытеснения поколения не
+        несёт: сообщение никем не читалось, поэтому seqlock-generation с него не снимали
+        (в отличие от штатного тикета потребителя). Guard не нужен И вреден:
+
+        - НЕ нужен — вытеснение всегда относится к ТЕКУЩЕМУ займу слота. Пока refcount>0,
+          писатель этот слот не переиспользует (``acquire`` берёт только refcount==0), значит
+          поколение стабильно = поколению записи. «Прошлого займа» тут быть не может.
+        - вреден — с ``generation=-1`` guard ``gen_reader(idx) != gen`` при seqlock (gen≥0)
+          отверг бы валидный release → займ утёк бы навсегда (ровно баг LIVE-2).
+
+        Сохранены refcount>0-guard (слот уже свободен → пропуск) и dedup-по-reader (тот же
+        потребитель не декрементится дважды — напр. штатный release + вытеснение). Любая
+        ошибка учёта безопасна: В1 post-use re-check дропнет кадр на порванном слоте (drift),
+        не отдаст порчу (§8.2 g5-плана «занижение refcount безопасно»)."""
+        if not tickets:
+            return 0
+        freed = 0
+        for t in tickets:
+            try:
+                idx = int(t.get("index", -1))
+            except (TypeError, ValueError):
+                continue
+            reader = t.get("reader", "")
+            if not (0 <= idx < self._depth) or self._refcount[idx] == 0:
+                continue  # уже свободен (потреблён/реклеймлен/сброшен realloc'ом)
+            if reader in self._released[idx]:
+                continue  # dedup: этот reader уже отпустил (штатно или вытеснением)
+            self._released[idx].add(reader)
+            self._refcount[idx] -= 1
+            freed += 1
+            if self._refcount[idx] <= 0:
+                self._refcount[idx] = 0
+                self._released[idx].clear()
+        self._evict_released_count += freed
+        return freed
+
     def reclaim(self, dead_reader: str) -> int:
         """Реклейм всех незакрытых займов мёртвого читателя. Идемпотентно."""
         if not dead_reader:
@@ -194,6 +239,7 @@ class LoanLedger:
             "slots_released": self._released_count,
             "slots_reclaimed": self._reclaimed_count,
             "loan_exhausted": self._exhausted_count,
+            "slots_released_on_evict": self._evict_released_count,
         }
 
 

@@ -150,6 +150,12 @@ class RouterManager(ChannelRoutingManager):
         # см. register_frame_middleware(). Список короткий (обычно 1 middleware на
         # процесс) — суммирование раз в introspect-запрос, не на send-пути.
         self._frame_middlewares: List[Any] = []
+        # LIVE-2: активен ли где-либо loan-протокол (owner ИЛИ consumer роль). Кэш-флаг
+        # пересчитывается при (un)register_frame_middleware — чтобы на flags-off пути
+        # доставки НЕ навешивать on_evict-хук вовсе (ноль оверхеда, бит-в-бит прежний
+        # send_to_queue). При active — вытеснение кадра из полной очереди чинит утечку
+        # займа через release-on-evict (см. _on_frame_evicted).
+        self._frame_loan_active: bool = False
 
         # P2.2 (Гибрид, control-plane): реестр обработчиков воркеров по имени.
         # Билет с иерархическим адресом `proc.worker[.…]` на приёме уходит в
@@ -182,6 +188,7 @@ class RouterManager(ChannelRoutingManager):
         вызывающие регистрируют один раз при создании).
         """
         self._frame_middlewares.append(middleware)
+        self._recompute_frame_loan_active()
 
     def unregister_frame_middleware(self, middleware: Any) -> None:
         """Снять frame-middleware из агрегации счётчиков (Ф7 G.3 H5b).
@@ -194,6 +201,14 @@ class RouterManager(ChannelRoutingManager):
             self._frame_middlewares.remove(middleware)
         except ValueError:
             pass
+        self._recompute_frame_loan_active()
+
+    def _recompute_frame_loan_active(self) -> None:
+        """LIVE-2: пересчитать кэш-флаг «loan-протокол активен» по зарегистрированным
+        middleware. ``loan_protocol_enabled`` — сырой флаг (роль КОНСЬЮМЕРА тоже считается:
+        процесс без своего пула, но читающий чужие views, обязан релизить вытесненные
+        кадры ВВЕРХ владельцу). Flags-off у всех → False → on_evict-хук не навешивается."""
+        self._frame_loan_active = any(getattr(mw, "loan_protocol_enabled", False) for mw in self._frame_middlewares)
 
     # ================================================================
     # LIFECYCLE
@@ -428,7 +443,16 @@ class RouterManager(ChannelRoutingManager):
                 continue
 
             try:
-                if qr.send_to_queue(process, qtype, ticket):
+                # LIVE-2: под активным loan-протоколом навешиваем on_evict — если очередь
+                # получателя полна, вытесненный кадр несёт займ, который иначе не отпустит
+                # никто (потребитель его не увидит) → free-list владельца утекает. Хук
+                # НЕ на общем пути (только при full → drop_oldest), на flags-off не
+                # передаётся вовсе (сигнатура send_to_queue та же, бит-в-бит).
+                if self._frame_loan_active:
+                    ok = qr.send_to_queue(process, qtype, ticket, on_evict=self._on_frame_evicted)
+                else:
+                    ok = qr.send_to_queue(process, qtype, ticket)
+                if ok:
                     delivered += 1
             except Exception as exc:
                 self._log_debug(f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc}")
@@ -437,6 +461,57 @@ class RouterManager(ChannelRoutingManager):
             self._inc_stat("sent_ok")
             return {"status": "success", "delivered_by_targets": delivered}
         return None
+
+    def _on_frame_evicted(self, evicted_item: Any, reader_process: str) -> None:
+        """LIVE-2 (release-on-evict): кадровое сообщение вытеснено из ПОЛНОЙ data-очереди
+        ``reader_process`` раньше, чем тот успел его прочитать (drop_oldest в
+        ``QueueRegistry.remove_old_if_full``). Потребитель этот кадр НЕ увидит → его loan
+        не отпустит НИКТО → free-list владельца утекает до перманентной смерти кольца
+        («кадры не сохраняются», skipped растёт со скоростью FPS — воспроизведено live).
+
+        Чиним: достаём координаты слота из вытесненного конверта и шлём владельцу
+        ``shm_release`` (та же system-почта, что и штатный release потребителя, тот же
+        owner-handler ``_handle_shm_release`` → ``release_slots``). Флаг ``evicted`` →
+        release без generation-guard (тикет поколения не несёт — сообщение не читалось).
+
+        Почему через почту, а не прямой ``release_slots``: вытеснение идёт на ТРЕДЕ-ПИСАТЕЛЕ
+        (send-путь), а штатный release — на треде message_processor владельца. Прямой вызов
+        отсюда гонялся бы с ним за refcount (пул lock-free по контракту single-thread
+        release). owner==этот процесс → почта ляжет в СВОЮ system-очередь → свой
+        message_processor → тот же тред → инвариант сохранён. owner≠sender (fan-in из
+        нескольких источников) → почта уедет владельцу по IPC. Потеря этой почты
+        безопасна: reclaim соседа + В1 re-check остаются страховкой.
+
+        reader = ``reader_process``: именно тот потребитель (владелец очереди, куда кадр
+        клали) не прочитает вытесненный кадр → его долю refcount и снимаем (dedup-по-reader
+        в пуле не даст задвоить, если он же пришлёт штатный release другого кадра).
+        """
+        qr = self.queue_registry
+        if qr is None or not isinstance(evicted_item, dict):
+            return
+        data = evicted_item.get("data")
+        if not isinstance(data, dict):
+            return
+        owner = data.get("owner") or data.get("shm_owner")
+        shm_name = data.get("shm_name")
+        idx = data.get("shm_index")
+        if not owner or not shm_name or idx is None:
+            return  # не кадровое сообщение (нет SHM-координат) — займа нет, релизить нечего
+        release_msg = {
+            "target": owner,
+            "type": "shm_release",
+            "queue_type": "system",
+            "data": {
+                "evicted": True,
+                "releases": [{"slot": shm_name, "index": idx, "generation": -1, "reader": reader_process}],
+            },
+        }
+        try:
+            # Прямой put в system-очередь владельца (не router.send) — избегаем ре-энтранта
+            # в _do_send из его же send-пути. system never-drop → без вложенного on_evict.
+            qr.send_to_queue(owner, "system", release_msg)
+        except Exception as exc:  # noqa: BLE001 — потеря release покрыта reclaim/В1, не ронять доставку
+            self._log_debug(f"_on_frame_evicted: release owner={owner!r} idx={idx} не отправлен: {exc}")
 
     def _queue_absent(self, process: str, qtype: str) -> bool:
         """True, если у процесса нет очереди `(process, qtype)` в queue_registry.
@@ -1108,6 +1183,12 @@ class RouterManager(ChannelRoutingManager):
             "frame_slots_released": sum(getattr(mw, "frame_slots_released", 0) for mw in self._frame_middlewares),
             # Ф7 G.5.e (В3): займов реклеймлено после смерти читателя (kill-9 без release).
             "frame_slots_reclaimed": sum(getattr(mw, "frame_slots_reclaimed", 0) for mw in self._frame_middlewares),
+            # LIVE-2: займов освобождено при вытеснении кадра из полной очереди до прочтения
+            # (release-on-evict). Рост = устойчивая перегрузка приёмника (кадры вытесняются);
+            # без этого пути займы утекли бы → перманентная смерть кольца. «Потеря видна».
+            "frame_loans_released_on_evict": sum(
+                getattr(mw, "frame_loans_released_on_evict", 0) for mw in self._frame_middlewares
+            ),
             # F6: число frame-middleware с активным loan-протоколом (SHM-кольца). Публичный
             # агрегат для introspect.memory pool-секции — чтобы не читать приватный
             # _frame_middlewares второй точкой агрегации.

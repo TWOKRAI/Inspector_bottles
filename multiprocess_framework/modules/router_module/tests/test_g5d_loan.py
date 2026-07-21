@@ -208,6 +208,84 @@ class TestReleaseSlots:
         assert mw.frame_slots_released == 0
 
 
+class TestReleaseOnEvict:
+    """LIVE-2: кадр вытеснен из полной очереди до прочтения → его займ никто не отпустит
+    (потребитель кадр не увидит) → free-list утекает до перманентной смерти кольца.
+    release-on-evict освобождает займ БЕЗ generation-guard (тикет поколения не несёт)."""
+
+    def _mw(self, monkeypatch, coll=2, num_consumers=1):
+        monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
+        monkeypatch.setenv("FW_SHM_SEQLOCK", "1")  # seqlock → gen_reader отдаёт gen≥0
+        return FrameShmMiddleware(
+            MemoryManager(), owner="cam", slot="output_frames", coll=coll, num_consumers=num_consumers
+        )
+
+    def test_evicted_release_skips_generation_guard(self, monkeypatch):
+        """Тикет вытеснения несёт generation=-1; при seqlock (реальное поколение ≥0)
+        ШТАТНЫЙ release его бы отверг (gen-guard) — а evicted-release освобождает слот."""
+        mw = self._mw(monkeypatch, coll=2)
+        try:
+            i0 = mw.strip_and_write({"frame": _frame(0)})["shm_index"]
+            mw.strip_and_write({"frame": _frame(1)})  # занят i1
+            # исчерпание: третий кадр не проходит (оба слота заняты).
+            assert mw.strip_and_write({"frame": _frame(2)}).get("frame") is not None
+            assert mw.frame_loan_exhausted == 1
+
+            # Контроль: штатный release с generation=-1 НЕ освобождает (gen-guard).
+            mw.release_slots([{"index": i0, "generation": -1, "reader": "lines"}], evicted=False)
+            assert mw._pool._refcount[i0] == 1  # gen-guard отверг
+            assert mw.frame_loans_released_on_evict == 0
+
+            # evicted-release: generation игнорируется → слот свободен, счётчик растёт.
+            mw.release_slots([{"index": i0, "generation": -1, "reader": "lines"}], evicted=True)
+            assert mw._pool._refcount[i0] == 0
+            assert mw.frame_loans_released_on_evict == 1
+            # free-list восстановлен → следующий write занимает i0.
+            out = mw.strip_and_write({"frame": _frame(3)})
+            assert "frame" not in out and out["shm_index"] == i0
+        finally:
+            mw.release_owned_memory()
+
+    def test_evicted_release_dedup_and_partial_fanout(self, monkeypatch):
+        """num_consumers=2: вытеснение снимает долю ОДНОГО reader'а; штатный release
+        второго закрывает слот. Дубль того же reader'а по вытеснению — игнор."""
+        mw = self._mw(monkeypatch, coll=1, num_consumers=2)
+        try:
+            item = mw.strip_and_write({"frame": _frame(1)})
+            idx = item["shm_index"]
+            gen = mw._read_own_slot_generation(idx)
+            assert mw._pool._refcount[idx] == 2
+            # lines не прочитал (вытеснен) → evicted-release его доли.
+            mw.release_slots([{"index": idx, "generation": -1, "reader": "lines"}], evicted=True)
+            assert mw._pool._refcount[idx] == 1
+            mw.release_slots([{"index": idx, "generation": -1, "reader": "lines"}], evicted=True)  # дубль
+            assert mw._pool._refcount[idx] == 1
+            # points дочитал штатно (валидное поколение) → слот свободен.
+            mw.release_slots([{"index": idx, "generation": gen, "reader": "points"}])
+            assert mw._pool._refcount[idx] == 0
+            assert mw.frame_loans_released_on_evict == 1
+            assert mw.frame_slots_released == 1
+        finally:
+            mw.release_owned_memory()
+
+    def test_evicted_release_noop_without_flag(self, monkeypatch):
+        """Без loan-протокола evicted-release — no-op (ноль оверхеда flags-off)."""
+        monkeypatch.delenv("FW_SHM_LOAN_PROTOCOL", raising=False)
+        mw = FrameShmMiddleware(MemoryManager(), owner="cam", slot="s", coll=2)
+        mw.release_slots([{"index": 0, "generation": -1, "reader": "lines"}], evicted=True)
+        assert mw.frame_loans_released_on_evict == 0
+
+    def test_evicted_release_already_free_is_noop(self, monkeypatch):
+        """Вытеснение уже свободного слота (refcount==0) — не уходит в минус."""
+        mw = self._mw(monkeypatch, coll=2)
+        try:
+            mw.release_slots([{"index": 0, "generation": -1, "reader": "lines"}], evicted=True)
+            assert mw._pool._refcount[0] == 0
+            assert mw.frame_loans_released_on_evict == 0
+        finally:
+            mw.release_owned_memory()
+
+
 def _loan_mw(monkeypatch, coll=2, num_consumers=1):
     monkeypatch.setenv("FW_SHM_LOAN_PROTOCOL", "1")
     monkeypatch.setenv("FW_SHM_SEQLOCK", "1")

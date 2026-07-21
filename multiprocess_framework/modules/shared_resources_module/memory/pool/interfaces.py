@@ -60,6 +60,9 @@ class PoolStats(TypedDict):
     slots_released: int
     slots_reclaimed: int
     loan_exhausted: int
+    # LIVE-2: займов освобождено при вытеснении сообщения из полной очереди до прочтения
+    # (release-on-evict). Отдельно от slots_released — вытеснение это иная причина потери.
+    slots_released_on_evict: int
 
 
 # Читатель ТЕКУЩЕГО поколения СВОЕГО слота idx (owner-side seqlock-generation).
@@ -119,6 +122,18 @@ class FramePool(Protocol):
         → пропуск; reader уже в released-множестве этого займа → дубликат → пропуск.
         refcount→0 → слот назад в free-list. Возвращает число реально освобождённых займов.
         """
+        ...
+
+    def release_evicted(self, tickets: list[LoanTicket]) -> int:
+        """LIVE-2: release тикетов, чьё сообщение ВЫТЕСНЕНО из полной очереди до прочтения.
+
+        Как ``release``, но БЕЗ generation-guard (тикет вытеснения поколения не несёт —
+        сообщение не читалось; при этом вытеснение всегда относится к текущему займу, слот
+        под refcount>0 писателем не переиспользуется). refcount>0-guard и dedup-по-reader
+        сохранены; счётчик ``slots_released_on_evict``. Зовёт поток message_processor владельца
+        (тот же, что и ``release`` — инвариант single-thread release; см. класс-докстринг).
+        Без этого пути займ вытесненного кадра НЕ отпустит НИКТО → free-list утекает до
+        перманентной смерти кольца («кадры не сохраняются», воспроизведено live)."""
         ...
 
     def reclaim(self, dead_reader: str) -> int:

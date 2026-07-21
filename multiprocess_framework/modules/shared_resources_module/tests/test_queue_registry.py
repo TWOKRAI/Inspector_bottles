@@ -123,6 +123,47 @@ class TestQueueRegistrySystemGuard:
         assert qr.get_stats()["queues"]["system_evict_blocked"] == 0
 
 
+class TestSendToQueueOnEvict:
+    """LIVE-2: send_to_queue отдаёт вытесненный элемент в on_evict-хук (owner отпустит
+    займ вытесненного кадра). Слой очередей о кадрах не знает — хук это чистый Callable."""
+
+    def test_on_evict_called_with_evicted_item_and_process(self, qr, psr):
+        psr.register_process("lines")
+        qr.create_and_register_queues("lines", {"data": {"maxsize": 1}})
+        seen = []
+        # Заполняем data-очередь одним «старым» кадром.
+        assert qr.send_to_queue("lines", "data", {"data": {"owner": "seg", "shm_index": 3}}) is True
+        time.sleep(0.1)  # macOS/spawn: дать feeder-потоку осесть
+        # Полная очередь → put нового вытесняет старый → on_evict(старый, "lines").
+        ok = qr.send_to_queue(
+            "lines",
+            "data",
+            {"data": {"owner": "seg", "shm_index": 9}},
+            on_evict=lambda item, proc: seen.append((item, proc)),
+        )
+        assert ok is True
+        assert len(seen) == 1
+        evicted_item, proc = seen[0]
+        assert proc == "lines"
+        assert evicted_item["data"]["shm_index"] == 3  # вытеснен именно старый
+
+    def test_on_evict_not_called_when_not_full(self, qr, psr):
+        psr.register_process("lines")
+        qr.create_and_register_queues("lines", {"data": {"maxsize": 4}})
+        seen = []
+        qr.send_to_queue("lines", "data", {"data": {}}, on_evict=lambda item, proc: seen.append(item))
+        assert seen == []  # не полна → вытеснения нет → хук не зван
+
+    def test_on_evict_not_called_for_system_never_drop(self, qr, psr):
+        """system-очередь never-drop: put блокируется, вытеснения нет → хук не зван."""
+        psr.register_process("pm")
+        qr.create_and_register_queues("pm", {"system": {"maxsize": 1}})
+        seen = []
+        qr.send_to_queue("pm", "system", "first")
+        qr.send_to_queue("pm", "system", "second", on_evict=lambda item, proc: seen.append(item))
+        assert seen == []  # never-drop → нет вытеснения
+
+
 class TestQueueRegistryUtils:
     def test_get_queue_sizes(self, qr, psr):
         psr.register_process("p1")
