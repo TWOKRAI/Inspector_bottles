@@ -146,3 +146,61 @@ class TestSummarize:
 
     def test_no_samples_is_loud(self):
         assert _summarize([])["verdict"] == "NO_SAMPLES"
+
+
+class TestBackpressureTier:
+    """Сброс кадра — дефект на синтетике и норма на живом тракте.
+
+    Эмпирика 2026-07-21: 10-мин прогон webcam_sketch дал seg.frame_loan_exhausted
+    476 → 2722 при torn/stale/pickle = 0, всплески совпали с просадками TEED до
+    17 FPS. Это спроектированная backpressure (шапка рецепта: TEED 15-20 FPS
+    против камеры 21-25), и красный вердикт по ней приучает вердикт не читать.
+    """
+
+    def test_synthetic_treats_drop_as_defect(self):
+        summary = _summarize(
+            [_sample(300), _sample(600, camera_0=_proc(counters={"frame_loan_exhausted": 2722}))],
+            synthetic=True,
+        )
+        assert summary["verdict"] == "FINDINGS"
+        assert any("frame_loan_exhausted" in f for f in summary["findings"])
+
+    def test_live_reports_drop_without_failing_verdict(self):
+        summary = _summarize(
+            [_sample(300), _sample(600, camera_0=_proc(counters={"frame_loan_exhausted": 2722}))],
+            synthetic=False,
+        )
+        assert summary["verdict"] == "CLEAN_WITH_BACKPRESSURE"
+        assert summary["findings"] == []
+        assert summary["backpressure"]["camera_0.frame_loan_exhausted"]["total"] == 2722
+
+    def test_live_reports_rate_not_just_total(self):
+        """Стартовый всплеск и устойчивый сброс должны различаться — считаем прирост."""
+        summary = _summarize(
+            [
+                _sample(300, camera_0=_proc(counters={"frame_loan_exhausted": 400})),
+                _sample(600, camera_0=_proc(counters={"frame_loan_exhausted": 1000})),
+            ],
+            synthetic=False,
+        )
+        entry = summary["backpressure"]["camera_0.frame_loan_exhausted"]
+        assert entry["delta"] == 600
+        assert entry["per_sec"] == 2.0
+
+    def test_live_still_fails_on_real_leak(self):
+        """Послабление касается ТОЛЬКО backpressure: битые данные красны везде."""
+        summary = _summarize(
+            [
+                _sample(300),
+                _sample(
+                    600,
+                    camera_0=_proc(counters={"frame_loan_exhausted": 2722, "frame_torn_reads": 1}),
+                ),
+            ],
+            synthetic=False,
+        )
+        assert summary["verdict"] == "FINDINGS"
+        assert any("frame_torn_reads" in f for f in summary["findings"])
+
+    def test_clean_live_run_stays_clean(self):
+        assert _summarize([_sample(300), _sample(600)], synthetic=False)["verdict"] == "CLEAN"
