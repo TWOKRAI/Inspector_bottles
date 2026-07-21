@@ -138,6 +138,18 @@ class RouterManager(ChannelRoutingManager):
             # через system-очередь PM (диагностика: стейл-очередь сброшена refresh'ем
             # → send упал в relay). Попадает в introspect.router_stats автоматически.
             "relayed_to_hub": 0,
+            # План transport-single-policy, Task 0.1: какой «дверью» ушло сообщение.
+            # Двери различаются политикой переполнения: канальная (channels[N].send)
+            # её НЕ применяет, targets-доставка (send_to_queue) применяет. Пока обе
+            # живы — распределение надо видеть, иначе унификацию нечем доказать.
+            # Разбивка по kind (`sent_via_channel.data` и т.п.) заводится на лету.
+            "sent_via_channel": 0,
+            "sent_via_targets": 0,
+            # Сколько раз kind-резолв не собрал ВСЕХ получателей и по правилу F4
+            # (all-or-fallback) вернул пусто → сообщение ушло targets-дверью.
+            # Рост на старте = окно до регистрации kind-каналов (register_router_channels
+            # вызывается один раз, ре-скана нет) — рабочая гипотеза §8.4.
+            "kind_fallback_total": 0,
         }
         self._stats_lock = threading.Lock()
 
@@ -172,8 +184,31 @@ class RouterManager(ChannelRoutingManager):
         self._pending_lock = threading.Lock()
 
     def _inc_stat(self, key: str, value: int = 1) -> None:
+        # get(key, 0): счётчики с разбивкой по kind (``sent_via_channel.data`` и т.п.)
+        # заводятся на лету — состав kind'ов зависит от топологии и не может быть
+        # перечислен в _stats заранее. Для статических ключей поведение прежнее.
         with self._stats_lock:
-            self._stats[key] += value
+            self._stats[key] = self._stats.get(key, 0) + value
+
+    def _count_door(self, door: str, msg_dict: Dict[str, Any]) -> None:
+        """Учесть, какой «дверью» ушло сообщение, + разбивка по kind.
+
+        План transport-single-policy (Task 0.1). Двери различаются политикой
+        переполнения: канальная её не применяет, targets-доставка применяет.
+        Пока обе живы — распределение надо видеть, иначе унификацию нечем
+        доказать, а после неё нечем показать, что дверь осталась одна.
+
+        Разбивка по kind — best-effort: неизвестный тип сообщения НЕ должен
+        ронять отправку, поэтому общий счётчик инкрементится всегда, а
+        под-счётчик — только когда kind разрешился.
+        """
+        self._inc_stat(door)
+        try:
+            kind = resolve_channel_kind(msg_dict)
+        except Exception:  # noqa: BLE001 — включая UnknownMessageTypeError; диагностика не ломает доставку
+            return
+        if kind:
+            self._inc_stat(f"{door}.{kind}")
 
     def register_frame_middleware(self, middleware: Any) -> None:
         """Зарегистрировать FrameShmMiddleware для агрегации счётчика границ (Ф7 G.6).
@@ -287,6 +322,7 @@ class RouterManager(ChannelRoutingManager):
                 # не ломая существующие channel-маршруты.
                 delivered = self._deliver_by_targets(processed)
                 if delivered is not None:
+                    self._count_door("sent_via_targets", processed)
                     return delivered
                 self._inc_stat("errors")
                 return {
@@ -298,6 +334,8 @@ class RouterManager(ChannelRoutingManager):
                         f"type={processed.get('type')!r}"
                     ),
                 }
+
+            self._count_door("sent_via_channel", processed)
 
             if len(channels) == 1:
                 result = channels[0].send(processed)
@@ -1220,6 +1258,13 @@ class RouterManager(ChannelRoutingManager):
             # довёл его до state.shm.* тем же путём, что и SHM-счётчики. «Дроп data виден».
             "queue_data_evicted": int(getattr(self.queue_registry, "data_evicted", 0) or 0),
             "queue_system_evict_blocked": int(getattr(self.queue_registry, "system_evict_blocked", 0) or 0),
+            # Task 0.1: потери на канальной двери (полная очередь → put упёрся в timeout).
+            # Сумма по зарегистрированным каналам — та же схема агрегации, что у
+            # frame-middleware выше: канал копит свой int, роутер суммирует по запросу.
+            # Ненулевое значение = перегрузка, которую сегодня не ловит ни один leak-ключ.
+            "channel_put_timeouts": sum(
+                int(getattr(ch, "put_timeout_total", 0) or 0) for ch in self._channel_registry.all()
+            ),
         }
 
         if isinstance(base, dict):
@@ -1312,6 +1357,10 @@ class RouterManager(ChannelRoutingManager):
             else:
                 unresolved.append(target)
         if unresolved:
+            # Task 0.1: счётчик рядом с WARNING — лог throttl'ится/теряется, а
+            # накопительный счётчик переживает и виден в introspect.router_stats.
+            # Рост на старте = окно до регистрации kind-каналов (рабочая гипотеза §8.4).
+            self._inc_stat("kind_fallback_total")
             self._log_warning(
                 f"kind-каналы: не разрезолвлены получатели {unresolved} (kind={kind!r}) "
                 f"— полный fallback в прежний путь, получатели не теряются"
