@@ -7,6 +7,7 @@ QueueRegistry делегирует хранение в PSR.
 Pickle-safe: Queue ссылки живут в ProcessData (pickle-safe).
 """
 
+import logging
 import time
 from multiprocessing import Queue
 from typing import Any, Dict, List, Optional
@@ -20,6 +21,18 @@ try:
     from multiprocessing.queues import Empty
 except ImportError:
     from queue import Empty
+
+from queue import Full
+
+# Отдельный stdlib-логгер для сообщений о БЕЗВОЗВРАТНОЙ потере груза.
+# Штатная плоскость (self._log_*) здесь молчит по построению: ни один продовый
+# вызов SharedResourcesManager(...) не передаёт logger (spawner.py, bundle_builder.py,
+# process_runner.py — все три без него), поэтому ManagerRegistry пуст и
+# _call_manager('logger', ...) тихо возвращает None. Плюс ObservableMixin.__getstate__
+# выкидывает _registry при pickle, так что даже переданный logger не пережил бы spawn.
+# Итог до этой правки: 26 тысяч событий потери → 0 строк во всём logs/.
+# Тот же приём, что _fallback_logger в logger_module (log_channel.py / logger_core.py).
+_fallback_logger = logging.getLogger(__name__)
 
 
 class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMixin):
@@ -81,6 +94,12 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         # Throttle громкого WARNING про drop_oldest из data-очереди (тот же приём).
         self._data_evict_log_window: float = 5.0
         self._data_evict_last_log: float = 0.0
+        # Учёт безвозвратных потерь never-drop груза (см. _report_never_drop_loss).
+        # Копится всегда, пишется в лог раз в окно; _since_log нужен, чтобы
+        # троттлированная запись честно называла ТЕМП потери, а не только факт.
+        self._never_drop_loss_total: int = 0
+        self._never_drop_loss_since_log: int = 0
+        self._never_drop_loss_last_log: float = 0.0
 
     @staticmethod
     def _resolve_env_flag(explicit: Optional[bool], env_name: str) -> bool:
@@ -211,6 +230,12 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 queue.put_nowait(message)
             return True
         except Exception as e:
+            # Полная never-drop очередь — это не «ошибка отправки», а ПОТЕРЯ груза,
+            # который система сама пометила как нероняемый. Отдельная ветка нужна,
+            # потому что только здесь известно ИМЯ получателя: remove_old_if_full
+            # видит лишь сам объект очереди и назвать адресата не может.
+            if isinstance(e, Full) and self._is_never_drop(queue_type):
+                self._report_never_drop_loss(process_name, queue_type, queue)
             self._log_error(f"send_to_queue('{process_name}', '{queue_type}') failed: {e}")
             self._stats["errors"] += 1
             return False
@@ -368,6 +393,51 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 "устойчивая перегрузка = теряем кадры, чинить пропускную способность"
             )
         return evicted
+
+    #: Не чаще одной записи о потере за это окно (сек). Троттлинг по ВРЕМЕНИ, а не
+    #: «каждая N-я потеря»: на живом рецепте переполнение идёт непрерывно (~17
+    #: событий/с), и порог по счётчику всё равно давал бы несколько записей в
+    #: секунду. Окно даёт предсказуемый потолок независимо от темпа — иначе
+    #: получаем вторую беду того же рода, что раздула messages.log до 645 МБ.
+    _NEVER_DROP_LOSS_LOG_INTERVAL_SEC = 5.0
+
+    def _report_never_drop_loss(
+        self,
+        process_name: str,
+        queue_type: Optional[str],
+        queue: Queue,
+    ) -> None:
+        """Троттлированный отчёт о безвозвратно потерянном never-drop грузе.
+
+        Почему мимо ``self._log_error``: штатная плоскость логов у QueueRegistry
+        не подключена ни в одном процессе (см. ``_fallback_logger``), и запись
+        просто исчезала. Почему с именем получателя: без него запись не отвечает
+        на главный вопрос разбора — КОМУ не доехало; счётчики этого не знают.
+        """
+        self._never_drop_loss_total += 1
+        self._never_drop_loss_since_log += 1
+        now = time.monotonic()
+        if now - self._never_drop_loss_last_log < self._NEVER_DROP_LOSS_LOG_INTERVAL_SEC:
+            return
+        self._never_drop_loss_last_log = now
+        lost_in_window = self._never_drop_loss_since_log
+        self._never_drop_loss_since_log = 0
+        try:
+            size = queue.qsize()
+        except (NotImplementedError, OSError, AttributeError):
+            size = -1  # qsize недоступен (macOS) — не повод молчать о потере
+        _fallback_logger.error(
+            "ПОТЕРЯ СООБЩЕНИЯ: очередь '%s' процесса-получателя '%s' переполнена "
+            "(размер %s), вытеснение запрещено QoS-профилем (never-drop) — "
+            "сообщение отброшено БЕЗВОЗВРАТНО и не будет доставлено. "
+            "Потерь с прошлой записи: %d, всего: %d (запись не чаще раза в %.0f с)",
+            queue_type,
+            process_name,
+            size if size >= 0 else "недоступен",
+            lost_in_window,
+            self._never_drop_loss_total,
+            self._NEVER_DROP_LOSS_LOG_INTERVAL_SEC,
+        )
 
     def _is_never_drop(self, queue_type: Optional[str]) -> bool:
         """Ронять ли груз данного ``queue_type`` при переполнении (Ф7 G.4.a).
