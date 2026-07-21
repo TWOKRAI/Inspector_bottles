@@ -189,6 +189,25 @@ class GenericProcessManagerApp(ProcessManagerProcess):
 
             self._state_store_manager.use(ThrottleMiddleware(throttle_rules))
 
+        # Гейт топологии (FW_STATE_TOPOLOGY_GATE, дефолт ON): поздний state.set от
+        # умирающего инстанса не воскрешает поддерево снятого switch'ем процесса.
+        # Fence этого не ловит — он про ЗАМЕНУ инстанса, а снятый процесс удалён,
+        # его incarnation никто не бампит (см. topology_gate.py).
+        from multiprocess_framework.modules.config_module.feature_flags import is_enabled
+
+        if is_enabled("FW_STATE_TOPOLOGY_GATE"):
+            from multiprocess_framework.modules.state_store_module.middleware.topology_gate import (
+                TopologyGateMiddleware,
+            )
+
+            def _on_gate_reject(path: str, proc_name: str) -> None:
+                self._log_debug(
+                    f"state-гейт: запись '{path}' отклонена — процесса '{proc_name}' "
+                    f"нет в текущей топологии (поздний стейл от снятого инстанса)"
+                )
+
+            self._state_store_manager.use(TopologyGateMiddleware(self.is_known_process, on_reject=_on_gate_reject))
+
         self._state_store_manager.initialize()
 
         # Регистрация команд state.set/get/subscribe/... в CommandManager.

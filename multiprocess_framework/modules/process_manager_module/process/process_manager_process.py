@@ -816,6 +816,31 @@ class ProcessManagerProcess(ProcessModule):
                 protected.add(proc_name)
         return protected
 
+    def is_known_process(self, name: str) -> bool:
+        """Существует ли процесс ``name`` в текущей топологии (сид гейта state).
+
+        Источник правды — тот же, что у lifecycle: применённый конфиг
+        (``_process_configs``) ИЛИ живой объект в реестре. Второе слагаемое не
+        избыточно: ``process.create`` (AD-8, Router-endpoint) поднимает процесс
+        динамически, без предварительной записи в ``_process_configs`` — гейт по
+        одному лишь конфигу отклонял бы его законную телеметрию.
+
+        Сам ProcessManager известен всегда: он публикует собственный узел
+        ``processes.ProcessManager.*``, но в ``_process_configs`` себя не пишет.
+        """
+        if not name or name == self.name:
+            return True
+        if name in self._process_configs:
+            return True
+        registry = getattr(self, "_process_registry", None)
+        getter = getattr(registry, "get_process_by_name", None) if registry is not None else None
+        if not callable(getter):
+            return True  # fail-open: без реестра гейт не судья
+        try:
+            return getter(name) is not None
+        except Exception:  # noqa: BLE001 — сбой реестра не должен глушить запись
+            return True
+
     def live_process_config(self, name: str) -> dict | None:
         """Живой (применённый) конфиг процесса из ``_process_configs`` или ``None``.
 
@@ -2341,9 +2366,15 @@ class ProcessManagerProcess(ProcessModule):
 
         Единственная мутация: удаление процесса из реестра, освобождение
         его SHM-ресурсов и удаление записи из ``_process_configs``.
+
+        Порядок обязателен: конфиг снимается ПЕРВЫМ, и только потом идёт
+        cleanup (внутри которого — ``_delete_process_state``). Иначе между
+        удалением поддерева и снятием конфига остаётся окно, в котором процесс
+        ещё «известен» гейту топологии, и поздний ``state.set`` от умирающего
+        инстанса воскрешает узел — ровно та гонка, ради которой гейт заведён.
         """
-        self._cleanup_process_resources(name)
         self._process_configs.pop(name, None)
+        self._cleanup_process_resources(name)
         return True
 
     def _topology_provision(self, name: str, proc_dict: dict) -> bool:

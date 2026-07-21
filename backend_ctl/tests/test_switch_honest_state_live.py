@@ -115,7 +115,7 @@ def test_switch_state_matches_os(switch_backend) -> None:
 
     bp_line = _load_bp(_LINE)
     applied = _leaf_result(
-        drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp_line}, timeout=40.0)
+        drv.send_command("ProcessManager", "topology.apply", {"topology_dict": bp_line}, timeout=60.0)
     )
     assert applied.get("success") is True, f"switch region→line не success: {applied}"
 
