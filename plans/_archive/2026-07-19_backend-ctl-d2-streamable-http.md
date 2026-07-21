@@ -1,10 +1,12 @@
 # Мини-план D.2 — Streamable-HTTP мультиклиент
 
 - **Slug:** `backend-ctl-d2-streamable-http`
-- **Родитель:** [`backend-ctl-debug-console.md`](backend-ctl-debug-console.md) → Task D.2 (Phase D)
+- **Родитель:** [`backend-ctl-debug-console.md`](2026-07-19_backend-ctl-debug-console.md) → Task D.2 (Phase D)
 - **Ветка:** `feat/bctl-d2-streamable-http`
 - **Дата:** 2026-07-19
 - **Гейт-статус:** ✅ ОДОБРЕН (2026-07-19). Владелец: «давай как лучше» → приняты все пять рекомендаций Fable (§5.1 Вариант B + `anyio.to_thread`; §5.2 graceful-lifespan + idle-TTL; §5.3 аддитивно stdio+`--http`; §5.4 fail-fast isolation-probe; §5.5 per-server safety). Код разрешён. Спот-чек владельца: `StreamableHTTPSessionManager` подтверждён в установленном `mcp` (сигнатура совпала) — подъём пина не нужен.
+
+> **Поглощён** [`plans/backend-ctl-proof-discipline.md`](../backend-ctl-proof-discipline.md) 2026-07-21 — план закрыт, этот файл в архиве. Дальнейшая работа трека backend_ctl — в поглотившем документе.
 
 > Основа — чтение кода 2026-07-19 (все якоря `file:line` верифицированы) + **живая проверка API установленного `mcp==1.27.1`** (не docs с main: сигнатуры сняты интроспекцией пакета в `.venv`). Перед правкой перепроверить якоря — код мог сдвинуться.
 
@@ -12,22 +14,22 @@
 
 ## 1. Зачем (проблема)
 
-SDK-сервер ([mcp_server_sdk.py:217](../backend_ctl/mcp_server_sdk.py#L217) `_run` → `stdio_server()`) работает **только на stdio** и держит **один** `DriverSession` ([mcp_server_sdk.py:116](../backend_ctl/mcp_server_sdk.py#L116)) → один driver → один сокет. Stdio одноклиентен по природе: второй агент (наблюдатель/экспериментатор/ревьюер) на одной живой системе невозможен.
+SDK-сервер ([mcp_server_sdk.py:217](../../backend_ctl/mcp_server_sdk.py#L217) `_run` → `stdio_server()`) работает **только на stdio** и держит **один** `DriverSession` ([mcp_server_sdk.py:116](../../backend_ctl/mcp_server_sdk.py#L116)) → один driver → один сокет. Stdio одноклиентен по природе: второй агент (наблюдатель/экспериментатор/ревьюер) на одной живой системе невозможен.
 
 Дорогая часть мультиклиента уже решена: B.1 (курсорные плоскости — недеструктивное чтение несколькими потребителями) и D.1a (session-isolation на транспорте — reply/push адресуются одному сокету, за флагом). D.2 — сам HTTP-транспорт + мультиплекс MCP-сессий поверх готовой изоляции. BCTL-ADR-001: «смена стека = один файл» — транспорт делает SDK.
 
-**Обязательный долг из D.1 §12** ([backend-ctl-d1-session-isolation.md](backend-ctl-d1-session-isolation.md), §12, строка про осиротевшие подписки): durable-регистрации `backend_ctl.<sid>` мёртвой сессии накапливаются на бэкенде — cleanup/TTL были out-of-scope D.1, **вход D.2**.
+**Обязательный долг из D.1 §12** ([backend-ctl-d1-session-isolation.md](2026-07-19_backend-ctl-d1-session-isolation.md), §12, строка про осиротевшие подписки): durable-регистрации `backend_ctl.<sid>` мёртвой сессии накапливаются на бэкенде — cleanup/TTL были out-of-scope D.1, **вход D.2**.
 
 ---
 
 ## 2. Карта текущего контура (stdio, один клиент)
 
-1. `main` ([mcp_server_sdk.py:226](../backend_ctl/mcp_server_sdk.py#L226)) → создаёт **один** `SDKToolServer` (mode, host, port) → `asyncio.run(_run(...))`.
-2. `SDKToolServer.__init__` ([mcp_server_sdk.py:104](../backend_ctl/mcp_server_sdk.py#L104)) → **один** `DriverSession` на весь процесс сервера; `build_registry()` — реестр ToolSpec.
-3. `build_server` ([mcp_server_sdk.py:201](../backend_ctl/mcp_server_sdk.py#L201)) → lowlevel `Server` + два async-хендлера, замкнутых на этот единственный `tool_server`. ⚠️ `call_tool` — **синхронный блокирующий** код (driver ждёт сокет) внутри async-хендлера: при stdio терпимо (один клиент), при мультиклиенте заблокирует весь event loop (§5.1).
-4. `_run` ([mcp_server_sdk.py:217](../backend_ctl/mcp_server_sdk.py#L217)) → `stdio_server()` → `server.run(read, write, init_options)` до EOF.
-5. Identity per-connection (D.1): `transport.connect()` генерит `session=uuid` ([transport.py:65](../backend_ctl/transport.py#L65)) + dotted-`_subscriber`; `_send_raw` кладёт `session` в каждое сообщение ([transport.py:168](../backend_ctl/transport.py#L168)). Изоляция на бэкенде — за флагом `backend_ctl.session_isolation` / env `BACKEND_CTL_SESSION_ISOLATION=1` ([backend_ctl_endpoint.py:59](../multiprocess_framework/modules/process_manager_module/process/backend_ctl_endpoint.py#L59)), default OFF/broadcast.
-6. Lifecycle driver'а: `DriverSession` ([mcp_driver_session.py:28](../backend_ctl/mcp_driver_session.py#L28)) — lazy-connect + readiness, durable-подписки через реконнект (`export_subscriptions` → replay), watch-resume, reconnect-report. Реестр намерений — `_SubscriptionRegistry` ([subscriptions.py:19](../backend_ctl/subscriptions.py#L19), `export`/`remove`/`load`).
+1. `main` ([mcp_server_sdk.py:226](../../backend_ctl/mcp_server_sdk.py#L226)) → создаёт **один** `SDKToolServer` (mode, host, port) → `asyncio.run(_run(...))`.
+2. `SDKToolServer.__init__` ([mcp_server_sdk.py:104](../../backend_ctl/mcp_server_sdk.py#L104)) → **один** `DriverSession` на весь процесс сервера; `build_registry()` — реестр ToolSpec.
+3. `build_server` ([mcp_server_sdk.py:201](../../backend_ctl/mcp_server_sdk.py#L201)) → lowlevel `Server` + два async-хендлера, замкнутых на этот единственный `tool_server`. ⚠️ `call_tool` — **синхронный блокирующий** код (driver ждёт сокет) внутри async-хендлера: при stdio терпимо (один клиент), при мультиклиенте заблокирует весь event loop (§5.1).
+4. `_run` ([mcp_server_sdk.py:217](../../backend_ctl/mcp_server_sdk.py#L217)) → `stdio_server()` → `server.run(read, write, init_options)` до EOF.
+5. Identity per-connection (D.1): `transport.connect()` генерит `session=uuid` ([transport.py:65](../../backend_ctl/transport.py#L65)) + dotted-`_subscriber`; `_send_raw` кладёт `session` в каждое сообщение ([transport.py:168](../../backend_ctl/transport.py#L168)). Изоляция на бэкенде — за флагом `backend_ctl.session_isolation` / env `BACKEND_CTL_SESSION_ISOLATION=1` ([backend_ctl_endpoint.py:59](../../multiprocess_framework/modules/process_manager_module/process/backend_ctl_endpoint.py#L59)), default OFF/broadcast.
+6. Lifecycle driver'а: `DriverSession` ([mcp_driver_session.py:28](../../backend_ctl/mcp_driver_session.py#L28)) — lazy-connect + readiness, durable-подписки через реконнект (`export_subscriptions` → replay), watch-resume, reconnect-report. Реестр намерений — `_SubscriptionRegistry` ([subscriptions.py:19](../../backend_ctl/subscriptions.py#L19), `export`/`remove`/`load`).
 
 **Вывод:** весь мультиплекс режется в ОДНОМ файле `mcp_server_sdk.py` + graceful-cleanup в `mcp_driver_session.py`/`driver.py`. Бэкенд-транспорт (канал/адаптер/router) — **не трогаем вообще** (сделано D.1).
 
@@ -42,8 +44,8 @@ SDK-сервер ([mcp_server_sdk.py:217](../backend_ctl/mcp_server_sdk.py#L217)
 3. **Встроенный idle-reaper:** `session_idle_timeout=N` — сессия без HTTP-запросов N секунд автоматически терминируется (pop + `transport.terminate()`); активность отодвигает дедлайн. Рекомендация SDK — 1800 s. Крэш сессии тоже вычищается из `_server_instances` (finally-блок раннера). **Собственный TTL/reaper писать НЕ нужно.**
 4. **Ключевой хук — lifespan lowlevel-Server'а:** `Server(name, ..., lifespan=<async-ctx-фабрика>)`; `Server.run()` входит в `lifespan(self)` на каждый вызов. Так как stateful-менеджер зовёт `run()` per-session → **lifespan входит/выходит на каждую MCP-сессию**. Выход lifespan срабатывает на ВСЕ пути завершения (DELETE / idle-timeout / крэш). Хендлеры достают per-session объект через `server.request_context.lifespan_context` (поле верифицировано в `RequestContext`).
 5. `TransportSecuritySettings` — серверная защита от DNS-rebinding (allowed hosts/origins); auth в SDK-клиент не нужен (dev-only localhost, D.1 §5 «отклонено заранее»).
-6. `uvicorn 0.47.0` + `starlette` присутствуют в `.venv` (зависимости `mcp`); extra `ctl` в [pyproject.toml:111](../pyproject.toml#L111) менять не требуется — проверить на чистой установке (Step 4).
-7. **Ручка чтения флага изоляции уже есть:** `SocketChannel.get_info()` отдаёт `session_isolation` ([socket_channel.py:381](../multiprocess_framework/modules/router_module/channels/socket_channel.py#L381)) → `router_manager.get_stats()["channels"]` ([router_manager.py:1090](../multiprocess_framework/modules/router_module/core/router_manager.py#L1090)) → driver `introspect_router_stats("ProcessManager")` ([driver.py:294](../backend_ctl/driver.py#L294)). Инвариант §5.4 проверяется существующей read-ручкой, ноль правок бэкенда.
+6. `uvicorn 0.47.0` + `starlette` присутствуют в `.venv` (зависимости `mcp`); extra `ctl` в [pyproject.toml:111](../../pyproject.toml#L111) менять не требуется — проверить на чистой установке (Step 4).
+7. **Ручка чтения флага изоляции уже есть:** `SocketChannel.get_info()` отдаёт `session_isolation` ([socket_channel.py:381](../../multiprocess_framework/modules/router_module/channels/socket_channel.py#L381)) → `router_manager.get_stats()["channels"]` ([router_manager.py:1090](../../multiprocess_framework/modules/router_module/core/router_manager.py#L1090)) → driver `introspect_router_stats("ProcessManager")` ([driver.py:294](../../backend_ctl/driver.py#L294)). Инвариант §5.4 проверяется существующей read-ручкой, ноль правок бэкенда.
 
 ---
 
@@ -51,11 +53,11 @@ SDK-сервер ([mcp_server_sdk.py:217](../backend_ctl/mcp_server_sdk.py#L217)
 
 | # | Файл | Что сейчас | Что нужно |
 |---|---|---|---|
-| 1 | [mcp_server_sdk.py:104](../backend_ctl/mcp_server_sdk.py#L104) | один `SDKToolServer`/`DriverSession` на процесс | per-session фабрика через lifespan; хендлеры берут из `request_context.lifespan_context` |
-| 2 | [mcp_server_sdk.py:210](../backend_ctl/mcp_server_sdk.py#L210) | блокирующий `call_tool` в async-хендлере | `anyio.to_thread.run_sync` — одна сессия не морозит остальные |
-| 3 | [mcp_server_sdk.py:217](../backend_ctl/mcp_server_sdk.py#L217) | только `stdio_server()` | + HTTP-раннер: `StreamableHTTPSessionManager` (stateful) + uvicorn, opt-in `--http` |
-| 4 | [mcp_driver_session.py:185](../backend_ctl/mcp_driver_session.py#L185) | `close()` = закрыть сокет (регистрации остаются на бэкенде) | `close_graceful()`: снять durable-подписки + unwatch ДО закрытия (долг D.1 §12) |
-| 5 | [driver.py:198](../backend_ctl/driver.py#L198) | `export_subscriptions` (для replay) | + `unsubscribe_all()`: обход registry → снимающая команда на каждое намерение |
+| 1 | [mcp_server_sdk.py:104](../../backend_ctl/mcp_server_sdk.py#L104) | один `SDKToolServer`/`DriverSession` на процесс | per-session фабрика через lifespan; хендлеры берут из `request_context.lifespan_context` |
+| 2 | [mcp_server_sdk.py:210](../../backend_ctl/mcp_server_sdk.py#L210) | блокирующий `call_tool` в async-хендлере | `anyio.to_thread.run_sync` — одна сессия не морозит остальные |
+| 3 | [mcp_server_sdk.py:217](../../backend_ctl/mcp_server_sdk.py#L217) | только `stdio_server()` | + HTTP-раннер: `StreamableHTTPSessionManager` (stateful) + uvicorn, opt-in `--http` |
+| 4 | [mcp_driver_session.py:185](../../backend_ctl/mcp_driver_session.py#L185) | `close()` = закрыть сокет (регистрации остаются на бэкенде) | `close_graceful()`: снять durable-подписки + unwatch ДО закрытия (долг D.1 §12) |
+| 5 | [driver.py:198](../../backend_ctl/driver.py#L198) | `export_subscriptions` (для replay) | + `unsubscribe_all()`: обход registry → снимающая команда на каждое намерение |
 | 6 | README/AGENTS.md/DECISIONS.md | описан stdio | HTTP-режим, инвариант isolation ON, BCTL-ADR-005 |
 
 Бэкенд (`socket_channel` / `socket_bridge_adapter` / `backend_ctl_endpoint`) — **ноль правок**.
@@ -101,7 +103,7 @@ SDK-сервер ([mcp_server_sdk.py:217](../backend_ctl/mcp_server_sdk.py#L217)
 1. **Характеризация stdio (тест-коммит):** пины текущего поведения `SDKToolServer` на fake `driver_factory` — форма `list_tools`/`call_tool`/reconnect-report; инвентаризация существующих `test_mcp_server_sdk*` (не дублировать). Эталон «бит-в-бит» для Step 2.
 2. **`mcp_server_sdk.py` — lifespan-фабрика:** `build_server(...)` принимает фабрику `SDKToolServer` вместо инстанса; lifespan создаёт per-session, `__aexit__` зовёт `close_graceful()` (пока — обычный `close()`, graceful в Step 5); хендлеры — через `request_context.lifespan_context`. stdio-раннер переходит на тот же путь. Пины Step 1 — зелёные без правок.
 3. **`mcp_server_sdk.py` — `anyio.to_thread`:** диспатч `call_tool` в worker-thread. Пин: два параллельных вызова двух сессий не сериализуются глобально (fake-handler со `sleep`; суммарное время < 2×sleep).
-4. **`mcp_server_sdk.py` — HTTP-раннер:** `--http` / `--http-bind` / env; `StreamableHTTPSessionManager(app=server, stateless=False, session_idle_timeout=..., security_settings=<localhost>)`; Starlette-mount + `manager.run()` в lifespan приложения; uvicorn. Проверка зависимостей extra `ctl` на чистой установке. stderr-баннер режима (как stdio-баннер [mcp_server_sdk.py:251](../backend_ctl/mcp_server_sdk.py#L251)).
+4. **`mcp_server_sdk.py` — HTTP-раннер:** `--http` / `--http-bind` / env; `StreamableHTTPSessionManager(app=server, stateless=False, session_idle_timeout=..., security_settings=<localhost>)`; Starlette-mount + `manager.run()` в lifespan приложения; uvicorn. Проверка зависимостей extra `ctl` на чистой установке. stderr-баннер режима (как stdio-баннер [mcp_server_sdk.py:251](../../backend_ctl/mcp_server_sdk.py#L251)).
 5. **`driver.py` + `subscriptions.py` + `mcp_driver_session.py` — graceful-cleanup (долг D.1 §12):** `unsubscribe_all()` (registry → снимающие команды, best-effort, короткий таймаут) + `close_graceful()` (unwatch → unsubscribe_all → close). Пин: закрытие MCP-сессии снимает все durable-намерения и закрывает сокет (fake-driver записывает вызовы).
 6. **`mcp_driver_session.py` — isolation-probe (§5.4):** в HTTP-режиме первый `ensure()` читает `session_isolation` через `introspect_router_stats`; OFF → `BackendUnavailable`-класс ошибки с actionable-текстом. Пин: OFF → ошибка в tool-ответе, ON → работа; stdio — probe отсутствует.
 7. **Мультиплекс-пины (fake):** две MCP-сессии поверх session-manager'а в одном event loop → два разных `DriverSession`, разные `session`-uuid/dotted-subscriber; события/reply одной не попадают во вторую (fake-транспорт); idle-reap (короткий `session_idle_timeout`) → `close_graceful` вызван.

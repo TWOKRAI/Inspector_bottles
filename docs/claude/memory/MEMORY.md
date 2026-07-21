@@ -147,3 +147,4 @@
 - [backend_ctl минует receive-мидлварь](project_backend_ctl_socket_bypasses_mw.md) — сокет-канал не в опросе receive(): fence/контракты команд драйвера не судят
 - [Fencing-тест требует гонки](project_fencing_test_race.md) — механизм исправен (bumped=True), стейла к моменту бампа нет; ghost-гонку закрыл ADR-SS-019
 - [Гейт топологии для state](project_state_topology_gate.md) — поздний state.set воскрешал снятый процесс; FW_STATE_TOPOLOGY_GATE, приёмка парой ON/OFF
+- [Один активный план на инструмент](feedback_one_active_plan_per_tool.md) — раздельные треки backend_ctl дали воскрешение отменённой на GATE G3 задачи + простой санкционированного сплита

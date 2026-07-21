@@ -2,7 +2,7 @@
 
 **Статус (сверено по git 2026-07-20):** **Фаза 2 в основном закрыта** — 3 из 5 пунктов сделаны отдельными коммитами в `main` 2026-07-18 (`92c19f2e`/`d9dddf45`/`bf484bcd`), приёмка фазы (перезамер циклов + прогон suite) **не проводилась**. Фазы 0/3/4/5 — **не начаты**, ветки `refactor/framework-layer-grouping` нет.
 
-⚠️ **Этот план — блокер двух других треков:** Фаза 3 (codemod, ~1970 импортов / 910 файлов) требует **freeze-окна**, во время которого кодовые фазы не выполняются. Ждут его: [frontend-constructor](../frontend-constructor/plan.md) Блок В (Ф3+) и [backend-ctl-framework-module](../backend-ctl-framework-module.md) Task 1.1/1.2 (слой `tooling/` создаётся codemod'ом).
+⚠️ **Этот план — блокер двух других треков:** Фаза 3 (codemod, ~1970 импортов / 910 файлов) требует **freeze-окна**, во время которого кодовые фазы не выполняются. Ждут его: [frontend-constructor](../frontend-constructor/plan.md) Блок В (Ф3+) и Task 1.1/1.2 «скелет модуля»/«generic harness» из [backend-ctl-proof-discipline](../backend-ctl-proof-discipline.md) (раздел «За внешним гейтом codemod»; исходный мини-план в архиве — [backend-ctl-framework-module](../_archive/2026-07-21_backend-ctl-framework-module.md)) — слой `tooling/` создаётся codemod'ом.
 
 **Учесть при старте:** план написан на 27 модулей и не знает про `telemetry_readmodel_module` (создан 2026-07-18) и переезд `backend_ctl → tooling/` — rename-таблицу Фазы 3 надо пересобрать под факт.
 

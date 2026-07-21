@@ -3,7 +3,9 @@
 - **Slug:** `backend-ctl-debug-console`
 - **Дата:** 2026-07-18 (по итогам Fable-ревью всей системы после Phases 0–3)
 - **Ветка:** `feat/backend-ctl-debug-console` (фазы могут ветвиться отдельно)
-- **Предшественник:** [`backend-ctl-framework-module.md`](backend-ctl-framework-module.md) (Phases 0–3 закрыты; Phase 1 переезд в `tooling/` и Phase 4.1 live — гейтнуты codemod/Windows)
+- **Предшественник:** [`backend-ctl-framework-module.md`](2026-07-21_backend-ctl-framework-module.md) (Phases 0–3 закрыты; Phase 1 переезд в `tooling/` и Phase 4.1 live — гейтнуты codemod/Windows)
+
+> **Поглощён** [`plans/backend-ctl-proof-discipline.md`](../backend-ctl-proof-discipline.md) 2026-07-21 — Phases C/D/E/F закрыты, этот файл в архиве. Дальнейшая работа трека backend_ctl — в поглотившем документе.
 
 ---
 
@@ -177,7 +179,7 @@ Transport/events — mixin (вербатим на том же `self`, макси
 **Проблема:** транспорт + протокол + 5 датаклассов + ~30 обёрток + watch-стейт-машина (~15 полей: lock/active/subscribed/listener/queue/thread/манифест) в одном классе. Watch-машина — готовый модуль, живущий полями чужого класса.
 **Files:** новый пакет `backend_ctl/driver/` + re-export-шим `backend_ctl/driver.py`; tests на новых импортах.
 **Steps:**
-1. Распил по картам переноса из [`backend-ctl-framework-module.md`](backend-ctl-framework-module.md) (раздел «Целевая архитектура» / «Развязка сплита ⟂ переезда»): характеризация — существующие unit на новых импортах. Директива владельца «сделать красиво» (вычистить рабочие/процессные комментарии) — применить.
+1. Распил по картам переноса из [`backend-ctl-framework-module.md`](2026-07-21_backend-ctl-framework-module.md) (раздел «Целевая архитектура» / «Развязка сплита ⟂ переезда»): характеризация — существующие unit на новых импортах. Директива владельца «сделать красиво» (вычистить рабочие/процессные комментарии) — применить.
 2. Watch-стейт-машина → отдельный класс (`WatchController`), инъекция в driver.
 3. Последующий `git mv` в `tooling/` (пост-codemod) остаётся чистым.
 **Acceptance:**
@@ -197,13 +199,13 @@ Transport/events — mixin (вербатим на том же `self`, макси
 ### Task D.1 — Session-isolation на транспорте (HIGH-архитектурный) + supervision-ручка
 **Level:** Senior (Opus) | **Layer:** framework
 **Гейт на старт:** самая рискованная задача плана при самой тонкой спецификации — перед исполнением обязателен **мини-план отдельным заходом** (Steps по файлам уровня Phase A, контракт-тесты изоляции, флаг отката). Ниже — рамка, не спецификация.
-**Мини-план (2026-07-19):** [`backend-ctl-d1-session-isolation.md`](backend-ctl-d1-session-isolation.md) — карта транспортного контура + Steps + контракт-тесты + флаг. ✅ Дизайн одобрен (владелец → рассуждение Fable, верифицировано): §5=**Вариант A** (in-band `session` + dotted-subscriber, router/push-строители не трогаем), флаг с env-escape-hatch + pop-always. Гейт открыт, код разрешён.
+**Мини-план (2026-07-19):** [`backend-ctl-d1-session-isolation.md`](2026-07-19_backend-ctl-d1-session-isolation.md) — карта транспортного контура + Steps + контракт-тесты + флаг. ✅ Дизайн одобрен (владелец → рассуждение Fable, верифицировано): §5=**Вариант A** (in-band `session` + dotted-subscriber, router/push-строители не трогаем), флаг с env-escape-hatch + pop-always. Гейт открыт, код разрешён.
 **Goal (D.1a, session-isolation):** per-connection identity в `SocketChannel`/`SocketBridgeAdapter` — реплаи и push адресуются приславшему сокету, не broadcast.
 **Проблема:** один общий канал `"backend_ctl"` рассылает всем подключениям; адаптер не знает, чей запрос → отвечает всем. Изоляция сессий (на которую рассчитаны durable-subscriptions/watch) на транспорте НЕ существует; второй агент/проба → протечка реплаев и событий в чужой read-model ([[project_concurrent_backends_trap]]). **Гейтит мультиклиент (D.2).**
 **Goal (D.1b, supervision):** `supervision_status(process?)` (incarnation/epoch, restarts, last_exit, стратегия, health) + `supervise(process, action=restart|drain_restart|set_policy)`; инкарнацию/epoch светить во всех событиях (основа fencing-token + маркер «до/после рестарта»). Ревью B.1 (2026-07-19): generation-токен курсоров ловит только пересоздание driver'а (транспорт), НЕ рестарт процесса — epoch в событиях должен не только светиться, но и гейтить курсорные плоскости B.1 (`reset_required` при смене инкарнации наблюдаемого процесса), иначе курсор молча читает через границу рестарта.
 **Files:** `socket_channel.py`, `socket_bridge_adapter.py`, `backend_ctl_endpoint.py`, `driver.py`, `mcp_tools.py`, tests.
 **Acceptance:**
-- [x] два клиента на одном порту не видят реплаи/события друг друга; supervision_status читает incarnation/restarts; события несут epoch — **ЗАКРЫТ** (ветка `feat/bctl-d1-session-isolation`, мини-план [`backend-ctl-d1-session-isolation.md`](backend-ctl-d1-session-isolation.md); формальное ревью 2026-07-19 xhigh — 7 находок закрыты; повторное ревью high перед merge — 3 low-находки, не блок). *«события несут epoch»*: supervisor-события несут переход рестарта (сигнал смены инкарнации, гейтит курсоры §8); численный epoch в КАЖДОМ событии — follow-up.
+- [x] два клиента на одном порту не видят реплаи/события друг друга; supervision_status читает incarnation/restarts; события несут epoch — **ЗАКРЫТ** (ветка `feat/bctl-d1-session-isolation`, мини-план [`backend-ctl-d1-session-isolation.md`](2026-07-19_backend-ctl-d1-session-isolation.md); формальное ревью 2026-07-19 xhigh — 7 находок закрыты; повторное ревью high перед merge — 3 low-находки, не блок). *«события несут epoch»*: supervisor-события несут переход рестарта (сигнал смены инкарнации, гейтит курсоры §8); численный epoch в КАЖДОМ событии — follow-up.
 **Аналог:** CDP multi-session, systemctl status/restart, OTP supervisor introspection.
 **Follow-up (не acceptance):** `supervise(action=drain_restart|set_policy)` (нужна drain-machinery + live-мутация RestartPolicy); per-event numeric epoch + per-process/per-plane точность гейтинга курсоров (сейчас — safe superset глобального токена); пин на wire-форму значения supervisor-события (ревью #3); регенерация `CAPABILITIES.yaml` на рабочем харнессе.
 
@@ -211,7 +213,7 @@ Transport/events — mixin (вербатим на том же `self`, макси
 **Level:** Senior (Opus) | **Layer:** tools
 **Goal:** несколько агентов одновременно (наблюдатель/экспериментатор/ревьюер) на одной живой системе. SDK делает транспорт дёшево (BCTL-ADR-001); дорогая часть — per-session изоляция подписок/событий (решается B.1 + D.1a).
 **Acceptance:**
-- [x] две параллельные сессии: одна тейлит observability, другая крутит регистры — без взаимных помех — **ЗАКРЫТ и СЛИТ в main** (ветка `feat/bctl-d2-streamable-http`, мини-план [`backend-ctl-d2-streamable-http.md`](backend-ctl-d2-streamable-http.md); 9 Steps; live-смоук на реальном HTTP; формальное ревью high — 4 low, #1/#2 закрыты; BCTL-ADR-005). Per-session lifespan поверх изоляции D.1a; долг D.1 §12 (осиротевшие подписки) закрыт graceful-cleanup. **Follow-up:** бэкенд-GC при hard-kill сервера; live-прогон против реального бэкенда; deprecation `streamablehttp_client`.
+- [x] две параллельные сессии: одна тейлит observability, другая крутит регистры — без взаимных помех — **ЗАКРЫТ и СЛИТ в main** (ветка `feat/bctl-d2-streamable-http`, мини-план [`backend-ctl-d2-streamable-http.md`](2026-07-19_backend-ctl-d2-streamable-http.md); 9 Steps; live-смоук на реальном HTTP; формальное ревью high — 4 low, #1/#2 закрыты; BCTL-ADR-005). Per-session lifespan поверх изоляции D.1a; долг D.1 §12 (осиротевшие подписки) закрыт graceful-cleanup. **Follow-up:** бэкенд-GC при hard-kill сервера; live-прогон против реального бэкенда; deprecation `streamablehttp_client`.
 
 ### Task D.3 — Застолбить контракт trace-id в Ф7 G.6
 **Level:** Middle (Sonnet) | **Layer:** docs
@@ -228,7 +230,7 @@ Transport/events — mixin (вербатим на том же `self`, макси
 
 ### Task D.4 — Flight recorder (запись → offline-реплей в read-model)
 **Level:** Senior (Opus) | **Layer:** mixed (tools + один additive-шов framework)
-**Мини-план (2026-07-19):** [`backend-ctl-d4-flight-recorder.md`](backend-ctl-d4-flight-recorder.md) — дизайн «detached driver» (единый read-model live+offline через `_emit_event`), формат JSONL-записи, offline-await = playhead-навигация, 6 MCP-инструментов (все READ), 8 Steps. ✅ Дизайн одобрен владельцем (§Записка ратифицирована — все 6 дефолтов). Гейт открыт, код разрешён. BCTL-ADR-006.
+**Мини-план (2026-07-19):** [`backend-ctl-d4-flight-recorder.md`](2026-07-19_backend-ctl-d4-flight-recorder.md) — дизайн «detached driver» (единый read-model live+offline через `_emit_event`), формат JSONL-записи, offline-await = playhead-навигация, 6 MCP-инструментов (все READ), 8 Steps. ✅ Дизайн одобрен владельцем (§Записка ратифицирована — все 6 дефолтов). Гейт открыт, код разрешён. BCTL-ADR-006.
 **Goal:** дешёвый тайм-трэвел: `record_start(path)` (снимок overview+state+telemetry + JSONL событий с seq/ts) + `record_load(path)` (прогрузить в тот же read-model оффлайн — snapshot/history/await_condition работают над записью). Всегда-включённый чёрный ящик (кольцо + dump при обрыве) — бонус. Детерминированный rr — **отклонён** (цена несоизмерима, multiprocess+SHM исключают).
 **Files:** новый `backend_ctl/recorder.py`, `mcp_tools.py`, tests.
 **Acceptance:**

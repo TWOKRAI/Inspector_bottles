@@ -1,6 +1,8 @@
 # backend-ctl-hardening — закрытие находок ultra-ревью
 
 > Slug: `backend-ctl-hardening` · Ветка: `fix/backend-ctl-hardening` · Создан 2026-07-20
+>
+> **Поглощён** [`plans/backend-ctl-proof-discipline.md`](../backend-ctl-proof-discipline.md) 2026-07-21 — план закрыт (36/36), этот файл в архиве как эталон формата. Дальнейшая работа трека backend_ctl — в поглотившем документе.
 
 ## Контекст
 

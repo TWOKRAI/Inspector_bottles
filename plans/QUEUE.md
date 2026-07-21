@@ -88,12 +88,7 @@
 
 | План | Статус | Осталось |
 |---|---|---|
-| [backend-ctl-debug-console](backend-ctl-debug-console.md) | Phases C/D/E/F закрыты | — |
-| [backend-ctl-d1-session-isolation](backend-ctl-d1-session-isolation.md) | ✅ закрыт | — |
-| [backend-ctl-d2-streamable-http](backend-ctl-d2-streamable-http.md) | ✅ закрыт | — |
-| [backend-ctl-d4-flight-recorder](backend-ctl-d4-flight-recorder.md) | ✅ закрыт (merge `09e576e4`) | — |
-| [backend-ctl-hardening](backend-ctl-hardening.md) | ✅ закрыт — 36/36, ультра-ревью 4.5→7.5/10 | — |
-| [backend-ctl-framework-module](backend-ctl-framework-module.md) | Phase 0+2 в `main`, 15 пунктов открыто | **Task 1.1/1.2** переезд в `tooling/` — **ждёт codemod**; Task 4.1/4.2 живые тесты + doc-regen — можно сейчас |
+| [backend-ctl-proof-discipline](backend-ctl-proof-discipline.md) | **Единственный активный план инструмента** — Фаза 0 в работе, Фазы 1-6 расписаны. Поглотил шесть предшественников (debug-console, d1-session-isolation, d2-streamable-http, d4-flight-recorder, hardening, framework-module — архив: `_archive/`, незакрытые хвосты framework-module перенесены целиком) | Фазы 1-6 этого плана (строгий край → сплит → реалтайм-края → приговоры → fencing → доки) |
 | [telemetry-coherence-remediation](telemetry-coherence-remediation.md) | Фазы 1-3 закрыты, merge `13623920`, Fable 47/60 | Task 3.2 шаг 3 (watcher фанит publish-секцию детям); **шапка плана всё ещё врёт `DRAFT`** |
 | [gui-telemetry-read-model](gui-telemetry-read-model.md) | закрыт (ADR-136) | Task 1.3 — live qt-smoke |
 | [telemetry-dashboard](telemetry-dashboard.md) | ✅ закрыт | — |
