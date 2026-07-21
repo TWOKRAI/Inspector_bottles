@@ -33,7 +33,9 @@ def _build_process_entry(process_dict: dict) -> dict:
     # Конфиг берём из topology (плагины, chain_targets, priority)
     plugins = list(process_dict.get("plugins") or [])
     chain_targets = list(process_dict.get("chain_targets") or [])
-    priority = process_dict.get("priority", "normal")
+    # M-1: get(..., default) не защищает от ЯВНОГО null (GUI-редактор пишет
+    # priority: пустым скаляром → None) — та же идиома, что у plugins/chain_targets выше.
+    priority = process_dict.get("priority") or "normal"
 
     config = {
         "plugins": plugins,
