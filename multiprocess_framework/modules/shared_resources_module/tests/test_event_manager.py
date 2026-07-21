@@ -35,6 +35,44 @@ class TestEventManagerLifecycle:
         assert em._subscribers == {}
 
 
+class TestEmitEventOrphanChannelGuard:
+    """LIVE-1: канал system_events осиротел (потребителя нет). emit_event шлёт в роутер
+    ТОЛЬКО когда канал зарегистрирован; без него cross-process рассылка отключена (иначе
+    очередь PM набивалась → errors росли), но локальная семантика (подписчики + _event_queue)
+    сохраняется. Фикс LIVE-1 = перестать регистрировать канал → этот гейт сам разоружает send."""
+
+    def test_no_router_send_without_channel(self):
+        from unittest.mock import Mock
+
+        router = Mock()
+        router.get_channel = Mock(return_value=None)  # канал НЕ зарегистрирован
+        router.send = Mock()
+        em = EventManager(router_manager=router)
+        em.initialize()
+        received: list = []
+        em.subscribe(EventType.PROCESS_REGISTERED, lambda d: received.append(d))
+
+        assert em.emit_event(EventType.PROCESS_REGISTERED, process_name="p1") is True
+        router.send.assert_not_called()  # осиротевшая рассылка отключена
+        assert len(received) == 1  # локальные подписчики целы
+        # локальная очередь цела (mp.Queue async → ждём через wait_for_event, не get_nowait).
+        evt = em.wait_for_event(EventType.PROCESS_REGISTERED, timeout=1.0)
+        assert evt is not None and evt["process_name"] == "p1"
+        assert em._stats["errors"] == 0  # never-drop путь не задействован → errors не растут
+
+    def test_router_send_when_channel_present(self):
+        """Контраст: канал есть → рассылка идёт (гейт — именно регистрация канала)."""
+        from unittest.mock import Mock
+
+        router = Mock()
+        router.get_channel = Mock(return_value=object())  # канал зарегистрирован
+        router.send = Mock(return_value={"status": "success"})
+        em = EventManager(router_manager=router)
+        em.initialize()
+        em.emit_event(EventType.PROCESS_REGISTERED, process_name="p1")
+        router.send.assert_called_once()
+
+
 class TestEventManagerEmit:
     def test_emit_returns_true(self, em):
         assert em.emit_event(EventType.CONFIG_UPDATED) is True
