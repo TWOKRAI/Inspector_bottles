@@ -148,3 +148,5 @@
 - [Fencing-тест требует гонки](project_fencing_test_race.md) — механизм исправен (bumped=True), стейла к моменту бампа нет; ghost-гонку закрыл ADR-SS-019
 - [Гейт топологии для state](project_state_topology_gate.md) — поздний state.set воскрешал снятый процесс; FW_STATE_TOPOLOGY_GATE, приёмка парой ON/OFF
 - [Один активный план на инструмент](feedback_one_active_plan_per_tool.md) — раздельные треки backend_ctl дали воскрешение отменённой на GATE G3 задачи + простой санкционированного сплита
+- [Live-находки webcam 2026-07](project_live_findings_webcam_2026_07.md) — ротация молча не работает (645МБ), 23% ошибок отправки невидимы, config_reload врёт про log_level
+- [Класс «проглоченный сбой»](feedback_swallowed_failure_class.md) — 4 экземпляра за день: except/pass и _log_debug на отказе; следствие без причины хуже отсутствия следствия
