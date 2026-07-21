@@ -10,12 +10,11 @@ channels:
   name: ProcessManager_system
 - kind: SocketChannel
   name: backend_ctl
-- kind: QueueChannel
-  name: system_events
 processes:
   ProcessManager:
     commands:
-    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+    - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
+        на лету
       name: config.reload
       params_schema:
       - name: observability
@@ -65,6 +64,10 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
+      name: introspect.memory
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -145,6 +148,10 @@ processes:
       - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: 'Router endpoint: вложенная команда PM'
@@ -230,6 +237,10 @@ processes:
         type: float
       tags:
       - system
+    - description: Удалить узел/поддерево по пути
+      name: state.delete
+      tags:
+      - state_store
     - description: Прочитать значение из дерева
       name: state.get
       tags:
@@ -263,12 +274,25 @@ processes:
       tags:
       - diagnostics
       - stats
+    - description: 'Supervision-снимок: epoch + per-process incarnation/restart/last_exit/status'
+      name: supervision.status
+      tags:
+      - system
     - description: Завершить систему
       name: system.shutdown
       tags:
       - system
     - description: Статистика системы
       name: system.stats
+      tags:
+      - system
+    - description: 'Телеметрия через PM: publish → всем детям (fan-out) ИЛИ адресно (data.target), throttle
+        → центральный троттл оркестратора; cap-детекция на обоих путях'
+      name: telemetry.broadcast
+      tags:
+      - system
+    - description: 'Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)'
+      name: telemetry.reconfigure
       tags:
       - system
     - description: Применить топологию процессов
@@ -355,6 +379,10 @@ processes:
         type: str
       tags:
       - system
+    - description: Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop
+      name: worker.drain
+      tags:
+      - system
     - description: Поставить все прикладные воркеры процесса на паузу
       name: worker.pause_all
       tags:
@@ -432,7 +460,8 @@ processes:
     - heartbeat
   camera_0:
     commands:
-    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+    - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
+        на лету
       name: config.reload
       params_schema:
       - name: observability
@@ -485,6 +514,10 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
+      name: introspect.memory
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -565,6 +598,10 @@ processes:
       - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -631,6 +668,10 @@ processes:
     - description: ''
       name: stop_capture
       tags: []
+    - description: 'Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)'
+      name: telemetry.reconfigure
+      tags:
+      - system
     - description: ''
       name: unfreeze_capture
       tags: []
@@ -692,6 +733,10 @@ processes:
       - name: worker_type
         required: false
         type: str
+      tags:
+      - system
+    - description: Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop
+      name: worker.drain
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -768,10 +813,13 @@ processes:
       - system
     registers: {}
     router_handlers:
+    - shm_reclaim
+    - shm_release
     - state.changed
   devices:
     commands:
-    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+    - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
+        на лету
       name: config.reload
       params_schema:
       - name: observability
@@ -874,6 +922,10 @@ processes:
       name: introspect.handlers
       tags:
       - system
+    - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
+      name: introspect.memory
+      tags:
+      - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
         discover)'
       name: introspect.plugins
@@ -952,6 +1004,10 @@ processes:
       - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: GUI/процесс обновляет значение регистра
@@ -1094,6 +1150,10 @@ processes:
       tags:
       - diagnostics
       - stats
+    - description: 'Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)'
+      name: telemetry.reconfigure
+      tags:
+      - system
     - description: ''
       name: vfd_get_status
       tags: []
@@ -1167,6 +1227,10 @@ processes:
       - name: worker_type
         required: false
         type: str
+      tags:
+      - system
+    - description: Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop
+      name: worker.drain
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -1251,10 +1315,13 @@ processes:
       - registry_path
       - supervisor_interval_s
     router_handlers:
+    - shm_reclaim
+    - shm_release
     - state.changed
   preprocessor:
     commands:
-    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+    - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
+        на лету
       name: config.reload
       params_schema:
       - name: observability
@@ -1304,6 +1371,10 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
+      name: introspect.memory
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -1384,6 +1455,10 @@ processes:
       - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: GUI/процесс обновляет значение регистра
@@ -1445,6 +1520,10 @@ processes:
       tags:
       - diagnostics
       - stats
+    - description: 'Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)'
+      name: telemetry.reconfigure
+      tags:
+      - system
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
       params_schema:
@@ -1503,6 +1582,10 @@ processes:
       - name: worker_type
         required: false
         type: str
+      tags:
+      - system
+    - description: Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop
+      name: worker.drain
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -1583,10 +1666,13 @@ processes:
       - target_height
       - target_width
     router_handlers:
+    - shm_reclaim
+    - shm_release
     - state.changed
   process_flip:
     commands:
-    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+    - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
+        на лету
       name: config.reload
       params_schema:
       - name: observability
@@ -1636,6 +1722,10 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
+      name: introspect.memory
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -1716,6 +1806,10 @@ processes:
       - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -1770,6 +1864,10 @@ processes:
       tags:
       - diagnostics
       - stats
+    - description: 'Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)'
+      name: telemetry.reconfigure
+      tags:
+      - system
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
       params_schema:
@@ -1828,6 +1926,10 @@ processes:
       - name: worker_type
         required: false
         type: str
+      tags:
+      - system
+    - description: Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop
+      name: worker.drain
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -1904,10 +2006,13 @@ processes:
       - system
     registers: {}
     router_handlers:
+    - shm_reclaim
+    - shm_release
     - state.changed
   process_grayscale:
     commands:
-    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+    - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
+        на лету
       name: config.reload
       params_schema:
       - name: observability
@@ -1957,6 +2062,10 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
+      name: introspect.memory
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2037,6 +2146,10 @@ processes:
       - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -2091,6 +2204,10 @@ processes:
       tags:
       - diagnostics
       - stats
+    - description: 'Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)'
+      name: telemetry.reconfigure
+      tags:
+      - system
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
       params_schema:
@@ -2149,6 +2266,10 @@ processes:
       - name: worker_type
         required: false
         type: str
+      tags:
+      - system
+    - description: Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop
+      name: worker.drain
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -2225,10 +2346,13 @@ processes:
       - system
     registers: {}
     router_handlers:
+    - shm_reclaim
+    - shm_release
     - state.changed
   process_negative:
     commands:
-    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+    - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
+        на лету
       name: config.reload
       params_schema:
       - name: observability
@@ -2278,6 +2402,10 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
+      name: introspect.memory
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2358,6 +2486,10 @@ processes:
       - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -2412,6 +2544,10 @@ processes:
       tags:
       - diagnostics
       - stats
+    - description: 'Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)'
+      name: telemetry.reconfigure
+      tags:
+      - system
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
       params_schema:
@@ -2470,6 +2606,10 @@ processes:
       - name: worker_type
         required: false
         type: str
+      tags:
+      - system
+    - description: Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop
+      name: worker.drain
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -2546,10 +2686,13 @@ processes:
       - system
     registers: {}
     router_handlers:
+    - shm_reclaim
+    - shm_release
     - state.changed
   region_splitter:
     commands:
-    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+    - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
+        на лету
       name: config.reload
       params_schema:
       - name: observability
@@ -2599,6 +2742,10 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
+      name: introspect.memory
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -2679,6 +2826,10 @@ processes:
       - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -2733,6 +2884,10 @@ processes:
       tags:
       - diagnostics
       - stats
+    - description: 'Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)'
+      name: telemetry.reconfigure
+      tags:
+      - system
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
       params_schema:
@@ -2791,6 +2946,10 @@ processes:
       - name: worker_type
         required: false
         type: str
+      tags:
+      - system
+    - description: Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop
+      name: worker.drain
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -2867,10 +3026,13 @@ processes:
       - system
     registers: {}
     router_handlers:
+    - shm_reclaim
+    - shm_release
     - state.changed
   stitcher:
     commands:
-    - description: Перечитать/применить секцию observability (уровень логов, sink'и) на лету
+    - description: Применить секции observability и/или telemetry (логи, sink'и, publisher-gate, троттл)
+        на лету
       name: config.reload
       params_schema:
       - name: observability
@@ -2920,6 +3082,10 @@ processes:
       - system
     - description: Router message-handlers + команды CommandManager процесса
       name: introspect.handlers
+      tags:
+      - system
+    - description: 'Инвентарь памяти процесса: SHM/пул/очереди (статистика, чего нет даже у GUI)'
+      name: introspect.memory
       tags:
       - system
     - description: 'Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на
@@ -3000,6 +3166,10 @@ processes:
       - system
     - description: Снять подписку на live-хвост наблюдаемости процесса
       name: observability.tail.unsubscribe
+      params_schema:
+      - name: subscriber
+        required: false
+        type: str
       tags:
       - system
     - description: ''
@@ -3054,6 +3224,10 @@ processes:
       tags:
       - diagnostics
       - stats
+    - description: 'Рантайм-переконфигурация телеметрии: publisher-gate (publish) и/или троттл (throttle)'
+      name: telemetry.reconfigure
+      tags:
+      - system
     - description: Настроить wire middleware (SHM sender/receiver)
       name: wire.configure
       params_schema:
@@ -3112,6 +3286,10 @@ processes:
       - name: worker_type
         required: false
         type: str
+      tags:
+      - system
+    - description: Дренаж воркера (пауза+дождаться кадра); remove=True → drain→detach→stop
+      name: worker.drain
       tags:
       - system
     - description: Поставить все прикладные воркеры процесса на паузу
@@ -3188,6 +3366,8 @@ processes:
       - system
     registers: {}
     router_handlers:
+    - shm_reclaim
+    - shm_release
     - state.changed
 source: python -m backend_ctl.dump_capabilities
 topology:
