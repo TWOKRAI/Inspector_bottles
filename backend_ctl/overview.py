@@ -28,15 +28,28 @@ from typing import Any, Dict, List, Optional
 QUEUE_DEPTH_HINT: int = 50
 
 
+def _is_positive(value: Any) -> bool:
+    """Счётчик строго больше нуля. ``None`` («показания нет») порогом НЕ считается.
+
+    Отдельный хелпер, а не ``value > 0``: после строгого края счётчик может быть
+    ``None``, и сравнение роняло бы всю сводку — первую команду сессии.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, Any]:
     """Компактная сводка системы + аномалии (см. докстроку модуля).
 
     Returns:
         ``{"success": True, "processes": {name: {ok, status, workers, router,
-        queues, memory_ok}}, "telemetry": {"fps": {path: value}}, "driver":
-        {late_replies, event_errors, watch_resub_errors, events_evicted},
-        "anomalies": [...], "anomaly_count": N}``. Пустая топология (бэкенд не
-        прогрет) → ``processes == {}`` + hint.
+        queues, memory_ok, missing?}}, "telemetry": {"fps": {path: value}},
+        "driver": {late_replies, event_errors, watch_resub_errors,
+        events_evicted}, "anomalies": [...], "anomaly_count": N}``. Пустая
+        топология (бэкенд не прогрет) → ``processes == {}`` + hint.
+
+        Счётчики в ``router`` могут быть ``None`` — «показания нет» (строгий край
+        ``protocol.py``), это НЕ ноль. Ключ ``missing`` появляется только при
+        расхождении формы ответа и дублируется аномалией ``counter_missing``.
     """
     anomalies: List[Dict[str, Any]] = []
     processes: Dict[str, Dict[str, Any]] = {}
@@ -92,12 +105,24 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             continue
         ws, rs, qd, mem = section
         # Воркеры — до статус-строки: сводка компактна, детали — get_status.
-        workers = {name: (w.get("status") if isinstance(w, dict) else w) for name, w in ws.workers.items()}
+        workers = {name: (w.get("status") if isinstance(w, dict) else w) for name, w in (ws.workers or {}).items()}
         failed_handles = [
             name
             for name, ok in (("status", ws.ok), ("router_stats", rs.ok), ("queues", qd.ok), ("memory", mem.ok))
             if not ok
         ]
+        # Ключи, по которым ручка данных не дала. Пусто при здоровой форме — карточка
+        # тогда байт-в-байт прежняя, лишнего шума в типовой сводке нет.
+        missing_by_source = {
+            source: names
+            for source, names in (
+                ("router", rs.missing),
+                ("queues", qd.missing),
+                ("status", ws.missing),
+                ("memory", mem.missing),
+            )
+            if names
+        }
         processes[proc] = {
             "ok": not failed_handles,
             "status": ws.status,
@@ -111,6 +136,8 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             "queues": qd.sizes,
             "memory_ok": mem.ok,
         }
+        if missing_by_source:
+            processes[proc]["missing"] = missing_by_source
 
         if failed_handles:
             anomalies.append(
@@ -120,15 +147,31 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
                     "detail": f"не ответили ручки: {', '.join(failed_handles)}",
                 }
             )
-        if rs.middleware_dropped > 0:
+        # Отсутствующий счётчик — аномалия сам по себе, а не тихий пропуск: раньше
+        # ответ без секции ``router_stats`` давал «0 и тишину», и агент читал это как
+        # доказанное «трафика не было». Ручка, ответившая не тем, отличается от
+        # не ответившей — поэтому причина названа в detail.
+        for source, keys in (("router_stats", rs.missing), ("queues", qd.missing)):
+            if not keys:
+                continue
+            answered = rs.ok if source == "router_stats" else qd.ok
+            cause = "ручка ответила, форма разошлась" if answered else "ручка не ответила"
+            anomalies.append(
+                {
+                    "kind": "counter_missing",
+                    "process": proc,
+                    "detail": f"{source}: нет показаний по {', '.join(keys)} ({cause})",
+                }
+            )
+        if _is_positive(rs.middleware_dropped):
             anomalies.append(
                 {"kind": "router_dropped", "process": proc, "detail": f"middleware_dropped={rs.middleware_dropped}"}
             )
-        if rs.errors > 0:
+        if _is_positive(rs.errors):
             anomalies.append({"kind": "router_errors", "process": proc, "detail": f"errors={rs.errors}"})
         if ws.ok and ws.status not in (None, "running"):
             anomalies.append({"kind": "process_not_running", "process": proc, "detail": f"status={ws.status!r}"})
-        for qname, depth in qd.sizes.items():
+        for qname, depth in (qd.sizes or {}).items():
             if isinstance(depth, int) and depth >= QUEUE_DEPTH_HINT:
                 anomalies.append(
                     {"kind": "queue_depth", "process": proc, "detail": f"очередь {qname!r} глубиной {depth}"}

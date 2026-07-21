@@ -152,6 +152,65 @@ class TestAnomalies:
         assert res["processes"]["cam"]["ok"] is False
         assert any(a["kind"] == "introspect_failed" for a in res["anomalies"])
 
+    def test_missing_router_stats_is_loud_not_zero(self, monkeypatch) -> None:
+        """Ручка ответила успехом, но без секции счётчиков → counter_missing.
+
+        Плечо «OFF» пары: раньше такой ответ давал ``sent_ok=0`` и НИ ОДНОЙ аномалии
+        — «0 и тишина», неотличимое от доказанного «трафика не было».
+        """
+        d = BackendDriver()
+        responses = _healthy_responses()
+        responses["introspect.router_stats"] = {"success": True, "process": "cam"}  # секции нет
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+
+        hits = [a for a in res["anomalies"] if a["kind"] == "counter_missing"]
+        assert hits, "отсутствие счётчиков обязано быть слышно"
+        assert hits[0]["process"] == "cam"
+        assert "sent_ok" in hits[0]["detail"]
+        assert "ручка ответила" in hits[0]["detail"], "причина обязана отличать «не ответила» от «форма разошлась»"
+
+        card = res["processes"]["cam"]
+        assert card["router"]["sent_ok"] is None, "нет показания ≠ ноль"
+        assert card["missing"] == {"router": ["sent_ok", "received", "middleware_dropped", "errors"]}
+
+    def test_healthy_shape_has_no_missing_key(self, monkeypatch) -> None:
+        """Плечо «ON» той же пары: полная форма → ни аномалии, ни ключа missing."""
+        d = BackendDriver()
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=_healthy_responses())
+        res = d.system_overview()
+        assert not [a for a in res["anomalies"] if a["kind"] == "counter_missing"]
+        assert "missing" not in res["processes"]["cam"], "шум в здоровой сводке недопустим"
+        assert res["processes"]["cam"]["router"]["sent_ok"] == 10
+
+    def test_missing_queue_sizes_flagged(self, monkeypatch) -> None:
+        """Пустые очереди и отсутствующая секция очередей — разные факты."""
+        d = BackendDriver()
+        responses = _healthy_responses()
+        responses["introspect.queues"] = {"success": True, "process": "cam"}
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+        hits = [a for a in res["anomalies"] if a["kind"] == "counter_missing"]
+        assert hits and "queue_sizes" in hits[0]["detail"]
+        assert res["processes"]["cam"]["queues"] is None
+
+    def test_none_counters_do_not_crash_thresholds(self, monkeypatch) -> None:
+        """Пороговые проверки None-safe: сводка обязана собраться, а не упасть.
+
+        До строгого края ``rs.middleware_dropped > 0`` было сравнением int'а;
+        с ``None`` оно бросило бы TypeError и убило первую команду сессии.
+        """
+        d = BackendDriver()
+        responses = _healthy_responses()
+        responses["introspect.router_stats"] = {"success": True, "router_stats": {"sent_ok": 3}}
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+        assert res["success"] is True
+        kinds = {a["kind"] for a in res["anomalies"]}
+        assert "router_dropped" not in kinds, "None — не превышение порога"
+        assert "router_errors" not in kinds
+        assert "counter_missing" in kinds
+
     def test_memory_failure_flags_process(self, monkeypatch) -> None:
         """Отказ introspect.memory — тоже introspect_failed, а не тихий memory_ok=False.
 
