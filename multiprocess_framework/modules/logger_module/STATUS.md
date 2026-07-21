@@ -55,7 +55,7 @@
 
 ## Известные проблемы
 
-- На Windows `RotatingFileHandler` может падать при ротации общего файла (WinError 32). Для таких случаев в `ModuleConfig` / `ChannelConfig` есть `rotate: false` → `FileHandler` (см. ADR-051, `app_config.processor_frames`).
+- На Windows `RotatingFileHandler` может падать при ротации общего файла (WinError 32). Для таких случаев в `ModuleConfig` / `ChannelConfig` есть `rotate: false` → `FileHandler` (см. ADR-051, `app_config.processor_frames`). Сам сбой ротации (fail-open — запись продолжается в текущий файл) теперь виден: `_SafeRotatingFileHandler` считает сбои подряд и не чаще раза в 60с пишет WARNING с именем файла, размером и числом неудач — раньше `PermissionError` глушился молча без счётчика и предупреждения (живая находка 2026-07-21, `messages.log` вырос до 645 МБ незамеченным).
 - Стресс-тест BatchBuffer под многопоточной нагрузкой не написан.
 
 ## История изменений
@@ -69,3 +69,4 @@
 | 2026-03-12 | CRM Фаза 5: STATUS.md обновлён | 5 |
 | 2026-03-31 | ADR-108: убран избыточный `build()` у `LoggerManagerConfig` (наследует `SchemaMixin.build`) | — |
 | 2026-04-09 | Удалены LogDispatcher и batcher/; LogRecord → log_types.py; ADR-140…142 | 5 |
+| 2026-07-21 | `_SafeRotatingFileHandler`: счётчик сбоев ротации + троттлированный WARNING (видимость систематического отказа, fail-open не тронут) | 5 |

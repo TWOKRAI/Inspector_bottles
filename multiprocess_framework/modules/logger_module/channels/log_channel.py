@@ -7,6 +7,7 @@
 
 import logging
 import logging.handlers
+import time
 from pathlib import Path
 from typing import Dict, Any
 
@@ -17,6 +18,12 @@ except ImportError:
 
 from ..interfaces import ILogChannel
 from ..configs.logger_manager_config import LoggerChannelSchema
+
+# Отдельный stdlib-логгер для сообщений О САМОМ логировании (сбой ротации).
+# НЕ маршрутизируется через LoggerManager/каналы — тот механизм и есть то,
+# что может быть сломано в этот момент (циклическая зависимость). Тот же
+# приём, что _fallback_logger в core/logger_core.py (LoggerCore._fallback_log).
+_fallback_logger = logging.getLogger(__name__)
 
 
 class LogChannel(ILogChannel):
@@ -46,15 +53,63 @@ class _SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
     """RotatingFileHandler, устойчивый к WinError 32 при multiprocessing.
 
     На Windows несколько процессов не могут одновременно переименовать файл.
-    При PermissionError пропускаем ротацию — запись продолжится в текущий файл.
+    При PermissionError пропускаем ротацию — запись продолжится в текущий файл
+    (fail-open: сбой ротации НЕ должен ронять логирование).
+
+    Раньше PermissionError глушился молча (``except: pass``) — без счётчика и
+    без предупреждения. Расчёт «другой процесс уже отротирует» не выполняется,
+    когда несколько процессов ПОСТОЯННО конкурируют за файл (не разовая
+    коллизия, а систематика): ротация не срабатывает НИКОГДА, и файл растёт
+    неограниченно — так ``messages.log`` в реальном прогоне вырос до 645 МБ
+    при лимите ~60 МБ (10 МБ × 5 бэкапов), и узнать об этом изнутри системы
+    было нельзя. Счётчик + троттлированный WARNING делают систематический
+    отказ видимым, не трогая fail-open поведение записи.
     """
+
+    #: Не чаще одного WARNING за этот интервал (сек), НЕ «раз в N неудач»:
+    #: shouldRollover() у RotatingFileHandler возвращает True на КАЖДОЙ
+    #: записи, пока файл выше max_size, а ротация не срабатывает — при
+    #: тысячах строк/сек в бизнес-логе это тысячи попыток ротации в секунду.
+    #: Счётчик-порог "каждая N-я неудача" на такой скорости всё равно давал
+    #: бы много WARNING в секунду; интервал по времени — предсказуемый
+    #: потолок независимо от частоты записи.
+    _ROLLOVER_WARNING_INTERVAL_SEC = 60.0
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._rollover_failures = 0
+        self._last_rollover_warning_ts = 0.0
 
     def doRollover(self):
         try:
             super().doRollover()
+            self._rollover_failures = 0
         except PermissionError:
-            # Другой процесс уже ротирует или держит файл — пропускаем
-            pass
+            # Другой процесс уже ротирует или держит файл — пропускаем (запись
+            # продолжится в текущий файл), но считаем и предупреждаем — иначе
+            # систематический отказ неотличим от разовой коллизии.
+            self._rollover_failures += 1
+            self._warn_rollover_stuck()
+
+    def _warn_rollover_stuck(self) -> None:
+        """Троттлированное WARNING о застрявшей ротации (не чаще раза в интервал)."""
+        now = time.monotonic()
+        if now - self._last_rollover_warning_ts < self._ROLLOVER_WARNING_INTERVAL_SEC:
+            return
+        self._last_rollover_warning_ts = now
+        try:
+            size_bytes = Path(self.baseFilename).stat().st_size
+            size_str = f"{size_bytes / (1024 * 1024):.1f} МБ"
+        except OSError:
+            size_str = "неизвестен"
+        _fallback_logger.warning(
+            "Ротация лог-файла '%s' не удалась %d раз(а) подряд (PermissionError — файл "
+            "занят другим процессом): лимит max_size НЕ соблюдается, файл растёт "
+            "неограниченно (текущий размер: %s)",
+            self.baseFilename,
+            self._rollover_failures,
+            size_str,
+        )
 
 
 class FileChannel(LogChannel):
