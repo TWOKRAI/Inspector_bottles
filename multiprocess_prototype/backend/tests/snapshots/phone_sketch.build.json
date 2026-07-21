@@ -1060,6 +1060,9 @@
         "enabled": true
       },
       "observability": {
+        "commands": {
+          "log_success": false
+        },
         "console": true,
         "enable_batching": true,
         "errors": {
@@ -1146,6 +1149,7 @@
           "enable_error_tracking": true,
           "enable_logging": true,
           "enable_statistics": true,
+          "log_success": false,
           "manager_name": "CommandManager"
         },
         "console": {
@@ -1425,6 +1429,7 @@
           "enable_error_tracking": true,
           "enable_logging": true,
           "enable_statistics": true,
+          "log_success": false,
           "manager_name": "CommandManager"
         },
         "console": {
@@ -1656,6 +1661,7 @@
           "enable_error_tracking": true,
           "enable_logging": true,
           "enable_statistics": true,
+          "log_success": false,
           "manager_name": "CommandManager"
         },
         "console": {
@@ -1984,6 +1990,7 @@
           "enable_error_tracking": true,
           "enable_logging": true,
           "enable_statistics": true,
+          "log_success": false,
           "manager_name": "CommandManager"
         },
         "console": {
@@ -2270,6 +2277,7 @@
           "enable_error_tracking": true,
           "enable_logging": true,
           "enable_statistics": true,
+          "log_success": false,
           "manager_name": "CommandManager"
         },
         "console": {
@@ -3147,6 +3155,7 @@
           "enable_error_tracking": true,
           "enable_logging": true,
           "enable_statistics": true,
+          "log_success": false,
           "manager_name": "CommandManager"
         },
         "console": {
@@ -3404,6 +3413,7 @@
           "enable_error_tracking": true,
           "enable_logging": true,
           "enable_statistics": true,
+          "log_success": false,
           "manager_name": "CommandManager"
         },
         "console": {

@@ -288,6 +288,10 @@ class ProcessManagers:
             config={
                 "logger": command_config.get("enable_logging", True),
                 "stats": command_config.get("enable_statistics", True),
+                # observability.commands.log_success доезжает сюда через
+                # expand_observability()["command"] + merge_managers (тот же
+                # путь, что enable_logging/enable_statistics выше).
+                "log_success": command_config.get("log_success", False),
             },
             config_manager=self.process.config_manager,
         )

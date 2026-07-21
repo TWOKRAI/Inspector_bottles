@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """CommandManagerConfig — плоская схема CommandManager."""
+
 from __future__ import annotations
 
 from typing import Annotated, Literal
@@ -19,3 +20,10 @@ class CommandManagerConfig(SchemaBase):
     enable_logging: Annotated[bool, FieldMeta("Логирование")] = True
     enable_error_tracking: Annotated[bool, FieldMeta("Трекинг ошибок")] = True
     enable_statistics: Annotated[bool, FieldMeta("Статистика")] = True
+    log_success: Annotated[
+        bool,
+        FieldMeta(
+            "Логировать успешное выполнение каждой команды (рутинный успех — шумно на "
+            "hot-path, по умолчанию выключено; см. observability.commands.log_success)"
+        ),
+    ] = False

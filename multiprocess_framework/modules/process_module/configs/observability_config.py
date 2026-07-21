@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-ObservabilityConfig — единый фасад над тремя конфигами наблюдаемости.
+ObservabilityConfig — единый фасад над конфигами наблюдаемости.
 
-Одна секция `observability` в конфиге процесса управляет Logger / Error / Stats
-вместо трёх разрозненных Pydantic-defaults. ``expand_observability(dict)``
-раскладывает её в ``{"logger": {...}, "error": {...}, "stats": {...}}`` — словари,
-совместимые с ``LoggerManagerConfig`` / ``ErrorManagerConfig`` / ``StatsManagerConfig``.
+Одна секция `observability` в конфиге процесса управляет Logger / Error / Stats /
+Command вместо разрозненных Pydantic-defaults. ``expand_observability(dict)``
+раскладывает её в ``{"logger": {...}, "error": {...}, "stats": {...}, "command": {...}}``
+— словари, совместимые с ``LoggerManagerConfig`` / ``ErrorManagerConfig`` /
+``StatsManagerConfig`` / (``command`` мержится в ``managers['command']`` и читается
+``CommandManager`` напрямую — под ним нет отдельного manager-класса).
 
 Это **фасад**, а не новые менеджеры: новых полей логики нет, expand только
 переименовывает/группирует существующие. Dict at Boundary — между процессами едет dict.
@@ -14,6 +16,12 @@ Reuse-first: тогглы ``console``/``file`` переиспользуют де
 ``LoggerManagerConfig`` (богатый граф scopes/per-module сохраняется), переключая лишь
 ``enabled`` у первичных каналов нужного типа — без дублирования дефолтов и без потери
 per-module логов.
+
+``commands.log_success`` (ADR-PM-018 в духе errors/stats-соседей, живая находка
+2026-07-21): рутинный успех команды — не INFO-событие, на hot-path это тысячи строк/сек
+(``command_manager.handle_command``). Гейт у ИСТОЧНИКА (CommandManager не форматирует
+строку, если выключено), не фильтр на выходе. Дефолт — выключено. Ошибки/неуспех команд
+эта секция не трогает — они логируются всегда, как errors всегда on в фасаде.
 """
 
 from __future__ import annotations
@@ -46,9 +54,28 @@ class ObservabilityStatsConfig(SchemaBase):
     log_level: Annotated[str, FieldMeta("Уровень логирования метрик")] = "INFO"
 
 
+@register_schema("ObservabilityCommandsConfig")
+class ObservabilityCommandsConfig(SchemaBase):
+    """Под-секция логирования команд (фасад над CommandManagerConfig.log_success).
+
+    Рутинный успех команды («Command 'X' executed successfully in Yс») — не
+    ошибка и не редкое событие: на hot-path (``command_manager.handle_command``)
+    это тысячи строк в секунду, и именно этот шум топил ротацию логов (живая
+    находка 2026-07-21 — messages.log вырос до 645 МБ за один прогон). По
+    умолчанию такие записи не производятся вовсе (не «пишем на DEBUG» — гейт
+    у источника, строка не форматируется). Ошибки/неуспех команд эта секция
+    не трогает — они логируются всегда, независимо от log_success.
+    """
+
+    log_success: Annotated[
+        bool,
+        FieldMeta("Логировать успешное выполнение команды (шумно на hot-path — по умолчанию выключено)"),
+    ] = False
+
+
 @register_schema("ObservabilityConfig")
 class ObservabilityConfig(SchemaBase):
-    """Единая секция наблюдаемости процесса (Logger + Error + Stats)."""
+    """Единая секция наблюдаемости процесса (Logger + Error + Stats + Command)."""
 
     log_level: Annotated[str, FieldMeta("Уровень логирования по умолчанию")] = "INFO"
     log_directory: Annotated[
@@ -67,6 +94,10 @@ class ObservabilityConfig(SchemaBase):
         ObservabilityStatsConfig,
         FieldMeta("Секция статистики"),
     ] = Field(default_factory=ObservabilityStatsConfig)
+    commands: Annotated[
+        ObservabilityCommandsConfig,
+        FieldMeta("Секция команд (CommandManager)"),
+    ] = Field(default_factory=ObservabilityCommandsConfig)
 
 
 def _toggled_logger_channels(console: bool, file: bool) -> Dict[str, Dict[str, Any]]:
@@ -86,14 +117,19 @@ def _toggled_logger_channels(console: bool, file: bool) -> Dict[str, Dict[str, A
 
 
 def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
-    """Разложить секцию observability в три manager-конфига.
+    """Разложить секцию observability в четыре manager-конфига.
 
     Args:
         data: dict | ObservabilityConfig | None — единая секция. None/частичная → defaults.
 
     Returns:
-        ``{"logger": {...}, "error": {...}, "stats": {...}}`` — каждый dict валиден для
-        соответствующего manager-конфига; ``error`` всегда непустой (ErrorManager создаётся).
+        ``{"logger": {...}, "error": {...}, "stats": {...}, "command": {...}}`` —
+        ``logger``/``error``/``stats`` валидны для соответствующего manager-конфига
+        (``error`` всегда непустой — ErrorManager создаётся); ``command`` — сырой dict
+        (``{"log_success": bool}``), мержится в ``proc_dict['managers']['command']``
+        (см. ``managers_config.merge_managers`` + ``ManagersConfig``) и читается
+        ``CommandManager`` напрямую — под ``command`` нет отдельного manager-класса,
+        поэтому валидировать через Pydantic-конфиг здесь нечего.
     """
     cfg = data if isinstance(data, ObservabilityConfig) else ObservabilityConfig.model_validate(data or {})
 
@@ -123,4 +159,8 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         "log_level": cfg.stats.log_level,
     }
 
-    return {"logger": logger, "error": error, "stats": stats}
+    command: Dict[str, Any] = {
+        "log_success": cfg.commands.log_success,
+    }
+
+    return {"logger": logger, "error": error, "stats": stats, "command": command}

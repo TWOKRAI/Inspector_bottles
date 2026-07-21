@@ -23,9 +23,9 @@ from multiprocess_framework.modules.statistics_module.configs.stats_config impor
 
 
 def test_expand_shape_default() -> None:
-    """Дефолтная секция → три непустых dict с ключами logger/error/stats."""
+    """Дефолтная секция → четыре dict с ключами logger/error/stats/command."""
     out = expand_observability({})
-    assert set(out) == {"logger", "error", "stats"}
+    assert set(out) == {"logger", "error", "stats", "command"}
     assert out["error"], "error-секция обязана быть непустой (иначе ErrorManager не создаётся)"
 
 
@@ -101,3 +101,15 @@ def test_accepts_config_instance() -> None:
     """expand принимает и готовый ObservabilityConfig, не только dict."""
     out = expand_observability(ObservabilityConfig(log_level="CRITICAL"))
     assert out["logger"]["default_level"] == "CRITICAL"
+
+
+def test_commands_log_success_default_off() -> None:
+    """По умолчанию log_success выключен — рутинный успех команд не логируется."""
+    out = expand_observability({})
+    assert out["command"] == {"log_success": False}
+
+
+def test_commands_log_success_explicit_on() -> None:
+    """observability.commands.log_success=true явно доезжает до command-секции (пара к тесту выше)."""
+    out = expand_observability({"commands": {"log_success": True}})
+    assert out["command"] == {"log_success": True}

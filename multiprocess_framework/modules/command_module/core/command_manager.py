@@ -93,6 +93,13 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             config=cfg,
         )
 
+        # Гейт «рутинный успех команды» (observability.commands.log_success,
+        # ЗАКРЫТ по умолчанию): успех штатной команды — не INFO-событие, на
+        # hot-path это тысячи строк/сек (см. handle_command). Читаем из ТОГО
+        # ЖЕ config-словаря, что enable_logging/enable_statistics выше —
+        # один механизм переключения, не два (ADR-PM-018/ADR-CRM-006).
+        self._log_success_enabled = bool(cfg.get("log_success", False))
+
         # НЕ вызываем initialize() здесь - это делается явно после создания
 
     # ========================================================================
@@ -238,14 +245,31 @@ class CommandManager(BaseManager, ObservableMixin, ICommandManager):
             )
             self._record_metric("command_manager.command.execution.errors", tags={"command": command_name})
         else:
-            self._log_info(
-                f"Command '{command_name}' executed successfully in {duration:.3f}s",
-                module="command_manager",
-            )
+            # Рутинный успех — не INFO-событие: на hot-path (тысячи команд/сек,
+            # напр. state.merge) именно эта строка топила ротацию логов
+            # (messages.log вырос до 645 МБ за один прогон). Гейт у ИСТОЧНИКА:
+            # f-string форматируется, только если log_success явно включён
+            # (observability.commands.log_success) — по умолчанию запись не
+            # производится вовсе, а не просто фильтруется на выходе.
+            if self._log_success_enabled:
+                self._log_info(
+                    f"Command '{command_name}' executed successfully in {duration:.3f}s",
+                    module="command_manager",
+                )
             self._record_metric("command_manager.command.execution.success", tags={"command": command_name})
 
         self._record_timing("command_manager.command.execution.duration", duration, tags={"command": command_name})
         return result
+
+    def set_log_success_enabled(self, enabled: bool) -> None:
+        """Включить/выключить лог рутинного успеха команд (observability control plane).
+
+        Дефолт — выключено (см. ``__init__``: ``cfg.get("log_success", False)``):
+        успешное выполнение штатной команды — не INFO-событие, на hot-path это
+        тысячи строк/сек. Ошибки/неуспех эта настройка не трогает — handle_command
+        логирует их всегда, независимо от значения этого флага.
+        """
+        self._log_success_enabled = bool(enabled)
 
     def get_commands(self) -> List[Dict]:
         """
