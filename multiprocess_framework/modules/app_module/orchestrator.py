@@ -201,7 +201,10 @@ class GenericProcessManagerApp(ProcessManagerProcess):
             )
 
             def _on_gate_reject(path: str, proc_name: str) -> None:
-                self._log_debug(
+                # warning, не debug: отклонённая запись — видимое событие (гонка
+                # воскрешения снятого процесса), а не рутинный шум; на debug'е
+                # отказ был невидим в логах при штатном уровне логирования.
+                self._log_warning(
                     f"state-гейт: запись '{path}' отклонена — процесса '{proc_name}' "
                     f"нет в текущей топологии (поздний стейл от снятого инстанса)"
                 )

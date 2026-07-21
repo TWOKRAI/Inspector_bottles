@@ -74,6 +74,72 @@ def test_provider_exception_fails_open() -> None:
     assert proceed
 
 
+# --- context при отказе (Task 2 — гейт называет себя, ADR-SS-019 follow-up) --
+#
+# Конвенция общая с ThrottleMiddleware ("throttled") / ValidationMiddleware
+# ("validation"): context["rejection_reason"] называет middleware, отклонивший
+# запись, вместо безымянного fallback'а state_store_manager.py
+# (``context.get("rejection_reason", "middleware")``).
+
+
+def test_reject_sets_rejection_reason_and_process_name_before_set() -> None:
+    context: dict = {}
+    proceed, _ = _gate({"camera_0"}).before_set("processes.stitcher.state.fps", 1, "src", context)
+
+    assert proceed is False
+    assert context["rejection_reason"] == "topology_gate"
+    assert context["rejected_process"] == "stitcher"
+
+
+def test_reject_sets_rejection_reason_and_process_name_before_merge() -> None:
+    context: dict = {}
+    proceed, _ = _gate({"camera_0"}).before_merge("processes.stitcher", {"a": 1}, "src", context)
+
+    assert proceed is False
+    assert context["rejection_reason"] == "topology_gate"
+    assert context["rejected_process"] == "stitcher"
+
+
+def test_no_rejection_reason_when_known_process_passes() -> None:
+    """Зеркало test_throttle.py::TestRejectionContext.test_no_rejection_reason_when_passed."""
+    context: dict = {}
+    proceed, _ = _gate({"camera_0"}).before_set("processes.camera_0.state.fps", 1, "src", context)
+
+    assert proceed is True
+    assert "rejection_reason" not in context
+    assert "rejected_process" not in context
+
+
+# --- fail-open границы не сломаны context'ом отказа --------------------------
+
+
+def test_no_rejection_reason_for_path_outside_processes() -> None:
+    context: dict = {}
+    proceed, _ = _gate(set()).before_set("wires.a->b.status", 1, "src", context)
+
+    assert proceed is True
+    assert "rejection_reason" not in context
+
+
+def test_no_rejection_reason_for_root_write() -> None:
+    context: dict = {}
+    proceed, _ = _gate(set()).before_set("processes", 1, "src", context)
+
+    assert proceed is True
+    assert "rejection_reason" not in context
+
+
+def test_no_rejection_reason_when_provider_raises() -> None:
+    def _boom(_name: str) -> bool:
+        raise RuntimeError("PSR недоступен")
+
+    context: dict = {}
+    proceed, _ = TopologyGateMiddleware(_boom).before_set("processes.x.y", 1, "s", context)
+
+    assert proceed is True
+    assert "rejection_reason" not in context
+
+
 # --- сквозь StateStoreManager ------------------------------------------------
 
 

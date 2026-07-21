@@ -88,8 +88,17 @@ class TopologyGateMiddleware(StateMiddleware):
         name = parts[1].strip()
         return name or None
 
-    def _allowed(self, path: str) -> bool:
-        """True, если запись по ``path`` разрешена (см. границы fail-open)."""
+    def _allowed(self, path: str, context: dict) -> bool:
+        """True, если запись по ``path`` разрешена (см. границы fail-open).
+
+        При отказе пишет в ``context`` конвенцию, которой уже следуют
+        ``ThrottleMiddleware`` (``rejection_reason = "throttled"``) и
+        ``ValidationMiddleware`` (``rejection_reason = "validation"``):
+        ``rejection_reason = "topology_gate"`` + имя отклонённого процесса
+        (``rejected_process``). Без этого ``state_store_manager.py`` отдаёт
+        вызывающему безымянный fallback ``context.get("rejection_reason",
+        "middleware")`` — причина отказа неразличима на вызывающей стороне.
+        """
         name = self._process_name(path)
         if name is None:
             return True
@@ -98,6 +107,8 @@ class TopologyGateMiddleware(StateMiddleware):
                 return True
         except Exception:  # noqa: BLE001 — сбой провайдера не должен глушить запись
             return True
+        context["rejection_reason"] = "topology_gate"
+        context["rejected_process"] = name
         if self._on_reject is not None:
             try:
                 self._on_reject(path, name)
@@ -110,7 +121,7 @@ class TopologyGateMiddleware(StateMiddleware):
     # ------------------------------------------------------------------
 
     def before_set(self, path: str, value: Any, source: str, context: dict) -> tuple[bool, Any]:
-        return self._allowed(path), value
+        return self._allowed(path, context), value
 
     def before_merge(self, path: str, data: dict, source: str, context: dict) -> tuple[bool, dict]:
-        return self._allowed(path), data
+        return self._allowed(path, context), data
