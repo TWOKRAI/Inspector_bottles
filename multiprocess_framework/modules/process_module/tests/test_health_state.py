@@ -221,6 +221,64 @@ def test_publish_health_guards() -> None:
     assert publish_health(hs, _FakeProxy(), "") is False
 
 
+# --- C-2: mark_dirty / ретрай публикации при провале proxy.set --------------
+
+
+class _FailingThenOkProxy:
+    """Фейковый proxy: пока ``fail`` True — каждый set() бросает; после "починки"
+    (``fail = False``) — работает нормально и копит вызовы, как _FakeProxy."""
+
+    def __init__(self) -> None:
+        self.sets: list[tuple[str, object]] = []
+        self.fail = True
+
+    def set(self, path: str, value: object) -> None:
+        if self.fail:
+            raise RuntimeError("proxy недоступен")
+        self.sets.append((path, value))
+
+
+def test_mark_dirty_forces_dirty_true() -> None:
+    """mark_dirty() поднимает _dirty напрямую — следующий take_dirty() отдаст снапшот."""
+    hs = HealthState()
+    hs.take_dirty()  # снять стартовый dirty
+    assert hs.take_dirty() is None  # без изменений — нечего публиковать
+
+    hs.mark_dirty()
+    assert hs.take_dirty() is not None
+
+
+def test_publish_health_retries_after_proxy_failure() -> None:
+    """C-2: провал ВСЕХ proxy.set() не должен терять health-снапшот безвозвратно.
+
+    take_dirty() сбрасывает _dirty ДО того, как снапшот реально ушёл в
+    state-дерево. Без mark_dirty() при провале следующий такт heartbeat увидел
+    бы take_dirty() -> None ("изменений нет"), хотя переход в degraded так и не
+    опубликовался — дерево навсегда осталось бы на последнем удачном ok.
+    """
+    proxy = _FailingThenOkProxy()
+    hs = HealthState()
+    hs.take_dirty()  # снять стартовый dirty снапшот, начинаем с чистого состояния
+
+    hs.degraded("boom")  # поднимает dirty
+
+    # Первая публикация: proxy сломан — ни один set() не проходит.
+    published = publish_health(hs, proxy, "cam0")
+    assert published is False
+    assert proxy.sets == []
+
+    # proxy "починили" — следующий такт heartbeat должен забрать снапшот повторно,
+    # а не молчать (dirty не должен быть потерян провалом первой публикации).
+    proxy.fail = False
+    published_retry = publish_health(hs, proxy, "cam0")
+    assert published_retry is True
+
+    paths = {p for p, _ in proxy.sets}
+    assert health_path("cam0", "status") in paths
+    status_val = dict(proxy.sets)[health_path("cam0", "status")]
+    assert status_val == "degraded"
+
+
 # --- get_or_create_health_state (привязка к процессу) -----------------------
 
 

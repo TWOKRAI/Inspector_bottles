@@ -160,14 +160,23 @@ class PluginOrchestrator:
                     )
                     continue
 
-                plugin._do_configure(ctx)
+                # H-2: append ДО _do_configure — если configure() бросит, плагин уже
+                # успел захватить ресурсы (ONNX/CUDA-сессия, камера), и без этого
+                # shutdown() его не увидит (итерирует только self._plugins/self._contexts,
+                # см. shutdown() ниже). _do_shutdown коротко замыкается ТОЛЬКО на состоянии
+                # PluginState.STOPPED (plugins/base.py:_do_shutdown) — для плагина,
+                # оставшегося в IDLE из-за брошенного configure(), это НЕ no-op: shutdown()
+                # реально вызовется и получит шанс освободить захваченное до броска.
                 self._plugins.append(plugin)
                 self._contexts.append(ctx)
+                plugin._do_configure(ctx)
                 self._services.log_info(
                     f"PluginOrchestrator[{self._services.name}]: '{plugin.name}' "
                     f"[{plugin.category}] {plugin.state.value}"
                 )
             except Exception as e:
+                # НЕ убираем плагин из self._plugins/self._contexts — иначе shutdown()
+                # снова его не увидит (см. комментарий выше про H-2).
                 self._services.log_error(f"PluginOrchestrator[{self._services.name}]: configure '{plugin.name}': {e}")
 
         # Фаза 2: READY -> RUNNING (start)
