@@ -48,6 +48,28 @@ class _PendingRequest:
         self.response: Optional[Dict[str, Any]] = None
 
 
+def _result_is_success(result: Any) -> bool:
+    """Успешен ли результат команды — для поля ``success`` конверта-ответа.
+
+    Раньше авто-reply ставил ``success=True`` безусловно, и конверт рапортовал
+    успех поверх ``{"status": "error", "reason": "No handler for key '...'"}``.
+    Наблюдалось живьём 2026-07-21: проба готовности харнесса проверяет именно
+    ``success`` конверта, поэтому считала систему готовой за 3.3 с ДО регистрации
+    ``introspect.*`` — а всё, что спрашивало в этом окне (дамп контракта,
+    live-тесты), получало «нет хендлера» под видом успеха.
+
+    Транспорт доставил — это не то же самое, что команда отработала. Здесь
+    именно вторая, прикладная семантика: ``success`` конверта = «команда
+    выполнена», а не «сообщение доехало».
+    """
+    if isinstance(result, dict):
+        if result.get("status") == "error":
+            return False
+        if "success" in result:
+            return bool(result["success"])
+    return True
+
+
 class RouterManager(ChannelRoutingManager):
     """Фасад маршрутизации: AsyncSender/Receiver, CRM-каналы, channel_dispatcher + event_dispatcher."""
 
@@ -812,7 +834,12 @@ class RouterManager(ChannelRoutingManager):
 
         if not (info and (info.get("metadata") or {}).get("manages_own_reply")):
             try:
-                self.reply_to_request(processed, result)
+                # success ВЫВОДИТСЯ из результата, а не берётся по умолчанию True.
+                # Иначе конверт рапортует успех на провалившейся команде — включая
+                # «No handler for key ...», — и всякий, кто проверяет success (а это
+                # и проба готовности харнесса, и driver), видит зелёное на команде,
+                # которой нет. Докстринг выше обещает fail-loud; здесь он обеспечен.
+                self.reply_to_request(processed, result, success=_result_is_success(result))
             except Exception as exc:
                 self._log_warning(f"reply_to_request '{cmd_name}': {exc}")
 

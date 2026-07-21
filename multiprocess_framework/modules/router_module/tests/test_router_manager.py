@@ -1596,7 +1596,10 @@ class TestDispatchCommand(unittest.TestCase):
         msg = {"type": "command", "command": "worker.create", "request_id": "c1"}
         router._dispatch_command(msg)
         cm.handle_command.assert_called_once_with(msg)
-        router.reply_to_request.assert_called_once_with(msg, {"ok": 1})
+        # success передаётся ЯВНО и выводится из результата: раньше он оставался
+        # True по умолчанию, и конверт рапортовал успех поверх «No handler» (см.
+        # test_reply_success_honesty.py). Здесь результат успешный → True.
+        router.reply_to_request.assert_called_once_with(msg, {"ok": 1}, success=True)
         router.event_dispatcher.dispatch.assert_not_called()
 
     def test_manages_own_reply_skips_auto_reply(self):
