@@ -1,6 +1,6 @@
 # Memory Index
 
-- [LIVE-2 release-on-evict](project_live2_release_on_evict.md) — вытеснение из полной data-очереди теряло loan→смерть кольца; фикс через shm_release IPC владельцу (gen-agnostic, gated), LIVE-1 орфан-канал убран; блокер G.7 Ф3 снят
+- [LIVE-2 release-on-evict](project_live2_release_on_evict.md) — фикс корректен, но на боевой раскладке kind-каналов НЕ исполняется (две двери в очередь); «блокер снят» опровергнуто; план transport-single-policy
 
 - [seqlock contention semantics](project_seqlock_contention_semantics.md) — seqlock голодает при read≈write (всё дропает, но torn=0); тесты доставки в режиме read<<write, heavy-contention asserts только torn==0
 - [commit trailers single-line](feedback_commit_trailers_single_line.md) — Why/Layer/... каждый на ОДНОЙ строке, иначе hook отвергает как «missing trailers»

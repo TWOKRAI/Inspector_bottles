@@ -1,11 +1,13 @@
 ---
 name: live2-release-on-evict
-description: LIVE-2/LIVE-1 fix — вытеснение из полной data-очереди теряло loan → смерть SHM-кольца; release-on-evict через shm_release IPC владельцу
+description: LIVE-2 release-on-evict логически корректен, но на боевой раскладке kind-каналов НЕ исполняется (две двери в очередь); план transport-single-policy
 metadata:
   type: project
 ---
 
 LIVE-2 (CRITICAL, был блокером G.7 Ф3) + LIVE-1 (HIGH) закрыты на ветке fix/bug-hunt-live-findings.
+
+**UPDATE 2026-07-21 (пересмотр, подтверждено чтением кода):** фикс release-on-evict на боевой раскладке (`FW_USE_KIND_CHANNELS=1`) — мёртвая ветка для кадров. `on_evict` навешивается ТОЛЬКО в `_deliver_by_targets` (targets-fallback), а кадры резолвятся в kind-канал → `QueueChannel.send` → голый `put(block=True, timeout=1.0)` без QoS/счётчиков/on_evict («две двери в одну очередь»). Кадры сейчас спасает лишь соотношение кольцо(4) < очередь(50) — займы исчерпываются раньше full. **Утверждение «LIVE-2-фикс снял блокер webcam-soak» опровергнуто**; чем снят блокер — открыто (гипотезы: стартовое окно до регистрации kind-каналов — `register_router_channels` без ре-скана, или non-loan pickle-fallback заполнял очередь). Плюс верифицирован латентный баг: `LoanLedger.release_evicted` декрементит по ЛЮБОМУ имени reader'а (множества loan-aware нет), а конверт несёт SHM-координаты и для copy-out GUI → унификация политики оживит баг, guard обязан идти ДО неё. План: `plans/transport-single-policy.md` (Ф0 замер дверей → Ф1 guard+единая политика → probe-рецепт кольцо64/очередь4 → ADR-поправка RTR-010).
 
 **LIVE-2 — вытеснение из полной data-очереди теряло loan-тикет → перманентная смерть кольца.**
 `QueueRegistry.remove_old_if_full` (drop_oldest) выбрасывал кадр-сообщение вместе с его SHM-займом; release слал только дочитавший исполнитель → за вытесненное не релизил НИКТО → free-list owner'а исчерпан навсегда (skipped растёт со скоростью FPS).
