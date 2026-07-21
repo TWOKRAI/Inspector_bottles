@@ -215,7 +215,25 @@ def _diff(expected: str, actual: str, name: str) -> str:
     )
 
 
+def _make_output_encoding_safe() -> None:
+    """Сделать stdout/stderr устойчивыми к любому символу контракта.
+
+    Диф контракта печатает ПРОИЗВОЛЬНЫЙ текст — описания команд содержат ``≥``,
+    ``→`` и прочее. Консоль Windows по умолчанию cp1251: кириллицу она кодирует, а
+    эти символы — нет, и ``print(drift)`` падал UnicodeEncodeError ровно в тот
+    момент, когда инструменту БЫЛО ЧТО СООБЩИТЬ (дрейф найден → отчёт не напечатан
+    → CI видит краш вместо диагноза). Лечим на границе вывода, а не вычищая символы
+    из описаний: ``errors="replace"`` — потерять глиф лучше, чем потерять отчёт.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, OSError, ValueError):
+            pass  # поток подменён/не перенастраиваем — печатать всё равно пробуем
+
+
 def main(argv: Optional[list[str]] = None) -> int:
+    _make_output_encoding_safe()
     parser = argparse.ArgumentParser(description="Дамп «контактной книжки» бэкенда (capability manifest v1)")
     parser.add_argument("--check", action="store_true", help="не писать, а сравнить с файлами (дрейф → exit 2)")
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR), help="куда писать YAML+MD")

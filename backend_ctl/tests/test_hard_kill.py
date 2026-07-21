@@ -61,4 +61,7 @@ def test_already_dead_is_not_error(monkeypatch):
     logs: list[str] = []
     h._hard_kill_pid(999, log=logs.append)
     assert touched["psutil"] is False
-    assert any("уже мёртв" in m for m in logs)
+    # Строка лога ASCII-only ОСОЗНАННО (см. _hard_kill_pid): консоль Windows в cp1251
+    # не кодирует не-latin символы, и UnicodeEncodeError уронил бы вызывающего уже
+    # ПОСЛЕ kill. Не «чинить» обратно на русский — тест проверяет фактический контракт.
+    assert any("already dead" in m for m in logs)
