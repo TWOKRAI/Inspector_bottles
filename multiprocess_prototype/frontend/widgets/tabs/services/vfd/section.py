@@ -148,6 +148,9 @@ class _VfdSection:
             on_edit=self._crud.on_edit_clicked,
             on_remove=self._crud.on_remove_clicked,
             bindings=self._bindings,
+            # bug-hunt A-5: отвязать controller (stale-таймер + bind_fanout),
+            # когда страница устройства снимается со стека (удалено из рецепта).
+            on_cleanup=controller.unbind,
         )
 
 

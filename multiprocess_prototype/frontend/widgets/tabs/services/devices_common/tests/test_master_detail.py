@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 from PySide6.QtWidgets import QLabel, QWidget
 
 from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.device_list_panel import (
     DeviceListPanel,
 )
 from multiprocess_prototype.frontend.widgets.tabs.services.devices_common.master_detail import (
+    DeviceDetailPage,
     DeviceMasterDetail,
     _render_device_io,
 )
@@ -130,6 +133,58 @@ class TestDeviceMasterDetail:
         md.refresh()
         assert md._stack.currentIndex() == 0  # заглушка
 
+    def test_removed_device_page_is_cleaned_up_and_deleted(self, qtbot):
+        """bug-hunt A-5: страница удалённого из рецепта устройства не просто
+        прячется за заглушку — она снимается со стека целиком: cleanup()
+        вызван (отвязка controller'а: stale-таймер + bind_fanout-подписки),
+        виджет удалён из QStackedWidget и из внутреннего кэша _pages.
+
+        Без фикса cleanup() не вызывался НИКЕМ в проде — controller висел
+        с работающим QTimer(2с) и живой подпиской на state-путь удалённого
+        устройства до конца жизни процесса.
+        """
+        dict_store = _DictRecipeStore(devices=[_robot("r1")])
+        store = RecipeDevicesStore(dict_store)
+        cleanup_calls = []
+
+        def factory(device_id):
+            page = QWidget()
+            page.cleanup = lambda: cleanup_calls.append(device_id)
+            return page
+
+        md = DeviceMasterDetail(kind="robot", recipe_store=store, device_page_factory=factory)
+        qtbot.addWidget(md)
+        md.select_device("r1")
+        page = md._pages["r1"]
+        assert md._stack.indexOf(page) != -1
+
+        # удаляем r1 из рецепта и refresh
+        dict_store.save_raw("demo", {"devices": []})
+        md.refresh()
+
+        assert cleanup_calls == ["r1"]
+        assert "r1" not in md._pages
+        assert md._stack.indexOf(page) == -1  # снят со стека
+        assert md._stack.currentIndex() == 0  # заглушка (регресс прежнего теста)
+
+    def test_refresh_without_removed_devices_does_not_cleanup(self, qtbot):
+        """refresh() без исчезнувших устройств не трогает живые страницы."""
+        cleanup_calls = []
+
+        def factory(device_id):
+            page = QWidget()
+            page.cleanup = lambda: cleanup_calls.append(device_id)
+            return page
+
+        md = DeviceMasterDetail(kind="robot", recipe_store=_store([_robot("r1")]), device_page_factory=factory)
+        qtbot.addWidget(md)
+        md.select_device("r1")
+
+        md.refresh()
+
+        assert cleanup_calls == []
+        assert "r1" in md._pages
+
     def test_add_requested_invokes_on_add(self, qtbot):
         called = []
         md = DeviceMasterDetail(
@@ -146,6 +201,46 @@ class TestDeviceMasterDetail:
         md = DeviceMasterDetail(kind="robot", recipe_store=_store(active=None), device_page_factory=lambda d: QWidget())
         qtbot.addWidget(md)
         assert "Активируйте рецепт" in md._placeholder.text()
+
+
+class TestDeviceDetailPageCleanup:
+    """bug-hunt A-5: DeviceDetailPage.cleanup() вызывает on_cleanup (unbind controller'а)."""
+
+    def _make_page(self, on_cleanup=None) -> DeviceDetailPage:
+        return DeviceDetailPage(
+            device_id="r1",
+            name="Robot 1",
+            inner_widget=QWidget(),
+            devices_presenter=MagicMock(),
+            on_cleanup=on_cleanup,
+        )
+
+    def test_cleanup_invokes_on_cleanup_callback(self, qtbot):
+        calls = []
+        page = self._make_page(on_cleanup=lambda: calls.append(True))
+        qtbot.addWidget(page)
+
+        page.cleanup()
+
+        assert calls == [True]
+
+    def test_cleanup_without_callback_is_noop(self, qtbot):
+        page = self._make_page(on_cleanup=None)
+        qtbot.addWidget(page)
+
+        page.cleanup()  # не должен падать
+
+    def test_cleanup_swallows_callback_exception(self, qtbot):
+        """on_cleanup, бросающий исключение (controller.unbind() сам не должен
+        падать, но защита на случай неидемпотентного вызова), не роняет cleanup()."""
+
+        def _boom():
+            raise RuntimeError("unbind failed")
+
+        page = self._make_page(on_cleanup=_boom)
+        qtbot.addWidget(page)
+
+        page.cleanup()  # не должен пробрасывать исключение
 
 
 class TestDeviceIoRender:

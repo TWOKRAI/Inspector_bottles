@@ -169,6 +169,16 @@ class DisplaysTab(BaseListNavTab):
 
         self._presenter.load()
 
+        # bug-hunt A-6: closeEvent доставляется только top-level окнам — вкладка
+        # здесь дочерний виджет QTabWidget (register_all_tabs -> addTab), поэтому
+        # closeEvent НЕ приходит ни при закрытии MainWindow, ни при разрушении
+        # родителя/removeTab. Дублируем teardown на destroyed (тот же приём, что
+        # PipelineTab — см. pipeline/tab.py) — тогда PreviewWindowManager.close_all()
+        # гарантированно вызывается, каким бы путём вкладка ни умерла. Lambda,
+        # а не bound-метод: PySide6 хранит слоты умирающего QObject-получателя
+        # слабой связью, bound-метод мог бы не сработать.
+        self.destroyed.connect(lambda *_, tab=self: tab.teardown())
+
     # ------------------------------------------------------------------ #
     #  Фабричный метод                                                     #
     # ------------------------------------------------------------------ #
@@ -768,11 +778,20 @@ class DisplaysTab(BaseListNavTab):
     #  Qt lifecycle (teardown)                                             #
     # ------------------------------------------------------------------ #
 
+    def teardown(self) -> None:
+        """Отписаться от EventBus и закрыть окна превью (bug-hunt A-6).
+
+        Вызывается из closeEvent (штатный Qt-путь, если доставлен) И по
+        сигналу destroyed (фактический путь смерти вкладки внутри QTabWidget).
+        DisplaysPresenter.teardown() уже идемпотентен — повторный вызов безопасен.
+        """
+        self._presenter.teardown()
+
     def closeEvent(self, event) -> None:  # noqa: N802
         """Отписаться от EventBus и закрыть окна превью при закрытии вкладки.
 
         Args:
             event: QCloseEvent.
         """
-        self._presenter.teardown()
+        self.teardown()
         super().closeEvent(event)
