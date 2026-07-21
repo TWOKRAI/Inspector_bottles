@@ -197,4 +197,70 @@ class TestMemoryManagerSafeClose:
         mm.create_memory_dict("p1", MEMORY_CONFIG, coll=1)
         mm.shutdown()
         assert len(mm._local_handles) == 0
+
+
+class TestMemoryManagerOwnershipA1:
+    """A-1 (bug-hunt 2026-07-20 §5): владение SHM — ПЕР-БЛОК, не общеменеджерский флаг.
+
+    До фикса ``reinitialize_handles()`` сбрасывал ЕДИНЫЙ ``self._is_owner`` в False
+    при открытии ЛЮБОГО чужого хендла — из-за этого менеджер, который сам СОЗДАЛ
+    свой блок (owner), после открытия хотя бы одного чужого блока переставал
+    unlink'ать СВОИ СОБСТВЕННЫЕ блоки на close_memory/shutdown (рост /dev/shm на
+    POSIX). Тест воспроизводит сценарий из аудита: создал свой блок → открыл
+    чужой → свой блок по-прежнему подлежит unlink.
+    """
+
+    def test_foreign_handle_open_does_not_disown_own_block(self):
+        from multiprocessing import shared_memory as shm_mod
+
+        from ..state.process_state_registry import ProcessStateRegistry
+
+        psr = ProcessStateRegistry()
+        mm = MemoryManager(process_state_registry=psr)
+        mm.initialize()
+
+        # Реальный "чужой" SHM-блок — как будто создан другим owner-менеджером в
+        # другом процессе. Регистрируем в PSR под ИМЕНЕМ p2, но mm.create_memory_dict
+        # для p2 не вызывался — mm его не создавал, только откроет по имени.
+        foreign_shm = shm_mod.SharedMemory(create=True, size=64)
+        try:
+            # 1. mm создаёт СВОЙ блок для p1 (owner-роль).
+            mm.create_memory_dict("p1", MEMORY_CONFIG, coll=1)
+            assert ("p1", "test_mem") in mm._owned_names
+
+            # 2. PSR узнаёт про чужой блок p2/foreign_mem (mm его не создавал).
+            psr.register_process("p2")
+            pd2 = psr.get_process_data("p2")
+            pd2.custom["memory_names"] = {"foreign_mem": [foreign_shm.name]}
+
+            # 3. reinitialize_handles() открывает ЧУЖОЙ блок (create=False) — раньше
+            #    это переводило self._is_owner в False на весь менеджер.
+            assert mm.reinitialize_handles() is True
+            assert mm._local_handles["p2"]["foreign_mem"][0] is not None
+            # Чужой блок НЕ должен попасть во владение.
+            assert ("p2", "foreign_mem") not in mm._owned_names
+
+            # 4. Свой блок p1/test_mem ПО-ПРЕЖНЕМУ подлежит unlink при закрытии.
+            calls = []
+            orig_safe_close = mm._safe_close_shm
+
+            def spy(shm, unlink=False):
+                calls.append(unlink)
+                return orig_safe_close(shm, unlink=unlink)
+
+            mm._safe_close_shm = spy
+            mm.close_memory("p1", "test_mem")
+            assert calls == [True]
+
+            # 5. Симметрично: закрытие ЧУЖОГО блока НЕ должно unlink'ать его.
+            calls.clear()
+            mm.close_memory("p2", "foreign_mem")
+            assert calls == [False]
+        finally:
+            mm.shutdown()
+            foreign_shm.close()
+            try:
+                foreign_shm.unlink()
+            except FileNotFoundError:
+                pass
         assert len(mm._local_meta) == 0

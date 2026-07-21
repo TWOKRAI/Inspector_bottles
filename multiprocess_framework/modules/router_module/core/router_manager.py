@@ -378,9 +378,17 @@ class RouterManager(ChannelRoutingManager):
         Выбор очереди — :meth:`_select_queue_type`.
 
         Returns:
-            dict-результат при успешной доставке хотя бы одному таргету;
-            None — если targets пуст, queue_registry недоступен или ни один таргет
-            не доставлен (вызывающий формирует обычную ошибку).
+            dict-результат, если хотя бы один валидный таргет был найден адресом
+            (после фильтрации пустых/broadcast/невалидных); None — если targets
+            пуст, queue_registry недоступен или ВСЕ таргеты отфильтрованы (нечего
+            было пытаться доставить — вызывающий формирует обычную ошибку).
+
+            A-2 (bug-hunt 2026-07-20 §5): при ЧАСТИЧНОМ fan-out (доставлено не всем
+            валидным таргетам) статус — ``"partial"``, не ``"success"``. Раньше
+            сравнения с числом валидных таргетов не было — ``delivered > 0`` уже
+            давало ``"success"`` при targets=[A,B,C] и доехавшем только A. Поле
+            ``targets_total`` — знаменатель (число валидных таргетов, ПОСЛЕ
+            фильтрации broadcast/невалидных адресов), для наблюдаемости расхождения.
         """
         targets = msg_dict.get("targets")
         if not targets:
@@ -392,6 +400,7 @@ class RouterManager(ChannelRoutingManager):
         qtype = self._select_queue_type(msg_dict)
 
         delivered = 0
+        attempted = 0  # A-2: валидных таргетов (после фильтрации broadcast/невалидных)
         for target in targets:
             if not target or is_broadcast(target):
                 continue
@@ -400,6 +409,7 @@ class RouterManager(ChannelRoutingManager):
             except AddressValidationError as exc:
                 self._log_debug(f"_deliver_by_targets: невалидный адрес {target!r}: {exc}")
                 continue
+            attempted += 1
             process = address[0]
             # len==1 (плоское имя) → исходный билет без копии (паритет, горячий путь).
             # Иначе — per-target копия с полным address (воркер+ резолвится на приёме).
@@ -457,10 +467,19 @@ class RouterManager(ChannelRoutingManager):
             except Exception as exc:
                 self._log_debug(f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc}")
 
-        if delivered > 0:
+        if delivered == 0:
+            return None
+        if delivered < attempted:
+            # A-2: часть валидных таргетов НЕ получила сообщение — честный статус
+            # вместо молчаливого "success". Соседний _resolve_kind_channels
+            # декларирует «частичный fan-out недопустим» — этот путь ту же гарантию
+            # раньше нарушал. delivered>0 остаётся не-None (адресат получил билет,
+            # ретраить с нуля вредно), но status отличим от полного success.
             self._inc_stat("sent_ok")
-            return {"status": "success", "delivered_by_targets": delivered}
-        return None
+            self._log_warning(f"_deliver_by_targets: частичный fan-out — доставлено {delivered}/{attempted} таргетам")
+            return {"status": "partial", "delivered_by_targets": delivered, "targets_total": attempted}
+        self._inc_stat("sent_ok")
+        return {"status": "success", "delivered_by_targets": delivered, "targets_total": attempted}
 
     def _on_frame_evicted(self, evicted_item: Any, reader_process: str) -> None:
         """LIVE-2 (release-on-evict): кадровое сообщение вытеснено из ПОЛНОЙ data-очереди

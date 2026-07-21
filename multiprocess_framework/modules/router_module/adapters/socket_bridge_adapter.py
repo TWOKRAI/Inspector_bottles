@@ -21,6 +21,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from ..._fallback import FallbackLogger
+
+# A-4 (bug-hunt 2026-07-20 §5): в модуле не было ни логов, ни счётчиков — потеря
+# ответа driver'у проходила безмолвно. FallbackLogger — стандартный паттерн
+# проекта для utility-классов без DI (см. multiprocess_framework/modules/_fallback.py).
+_logger = FallbackLogger(__name__)
+
 
 class SocketBridgeAdapter:
     """Колбэк on_inbound для SocketChannel: dict → router.request → router.send.
@@ -44,6 +51,11 @@ class SocketBridgeAdapter:
         # D.1: при True возвращаем обратный адрес session в response (SocketChannel
         # адресует его одному сокету). pop(session) из msg — ВСЕГДА, вне флага.
         self._session_isolation = session_isolation
+        # A-4: число ответов, потерянных при router.send(response) (см. on_inbound).
+        # Раньше терялось молча — MCP-инструменты висели до таймаута, пользователь
+        # повторял уже применённую команду (register_snapshot/record_start — двойное
+        # применение). Публичный счётчик — get_stats().
+        self._lost_responses = 0
 
     def on_inbound(self, msg: Dict[str, Any]) -> None:
         """Обработать входящее сообщение от driver'а и отправить ответ.
@@ -88,5 +100,19 @@ class SocketBridgeAdapter:
             response["session"] = sid
         try:
             self._router.send(response)
-        except Exception:  # noqa: BLE001 — не роняем read-loop, если ответ не ушёл (best-effort)
-            pass
+        except Exception as exc:  # noqa: BLE001 — не роняем read-loop, если ответ не ушёл (best-effort)
+            # A-4: раньше здесь было голое `pass` — потеря ответа проходила без следа.
+            # Не re-raise (симметрично прежнему best-effort), но видимо: счётчик + лог.
+            self._lost_responses += 1
+            _logger.error(
+                "SocketBridgeAdapter.on_inbound: ответ driver'у не отправлен "
+                "(request_id=%s, channel=%s): %s [потеряно всего: %d]",
+                corr,
+                self._channel_name,
+                exc,
+                self._lost_responses,
+            )
+
+    def get_stats(self) -> Dict[str, Any]:
+        """A-4: наблюдаемость потерянных ответов (router.send(response) упал)."""
+        return {"lost_responses": self._lost_responses}
