@@ -87,6 +87,83 @@ class TestWorkerLifecycleStartStop:
         assert lc.stop_worker("missing") is False
 
 
+class TestWorkerLifecycleStopTimeout:
+    """H-1 (docs/audits/2026-07-20_bug-hunt.md): зависший поток (join истёк
+    таймаутом) не должен считаться остановленным — stop_worker обязан
+    вернуть False и НЕ проставлять STOPPED, пока поток реально жив."""
+
+    def test_stop_worker_returns_false_when_thread_hangs(self):
+        mgr, lc = _make_manager()
+        # blocker никогда не устанавливается внутри stop — имитация
+        # зависшего блокирующего вызова (например cv2.read), который
+        # не проверяет stop_event.
+        blocker = threading.Event()
+
+        def hung_target(stop, pause):
+            blocker.wait(timeout=5)
+
+        cfg = ThreadConfig()
+        lc.create_worker("hung", hung_target, cfg)
+        lc.start_worker("hung")
+        time.sleep(0.05)
+        assert mgr._worker_registry.get_status("hung") == WorkerStatus.RUNNING
+
+        result = lc.stop_worker("hung", timeout=0.2)
+
+        assert result is False
+        # Статус НЕ должен стать STOPPED — поток всё ещё жив.
+        assert mgr._worker_registry.get_status("hung") == WorkerStatus.STOPPING
+        info = mgr._worker_registry.get("hung")
+        assert info["thread"].is_alive() is True
+
+        # Освобождаем поток, чтобы не оставлять зависший тред после теста.
+        blocker.set()
+        info["thread"].join(timeout=2.0)
+
+    def test_happy_path_stop_still_returns_true_and_stopped(self):
+        """Прежнее поведение (успешная остановка в срок) не должно быть сломано."""
+        mgr, lc = _make_manager()
+        done = threading.Event()
+
+        def target(stop, pause):
+            done.wait(timeout=5)
+
+        cfg = ThreadConfig()
+        lc.create_worker("w2", target, cfg)
+        lc.start_worker("w2")
+        time.sleep(0.05)
+
+        done.set()
+        result = lc.stop_worker("w2", timeout=2.0)
+
+        assert result is True
+        assert mgr._worker_registry.get_status("w2") == WorkerStatus.STOPPED
+
+    def test_restart_worker_does_not_start_second_thread_when_stop_fails(self):
+        """restart_worker не должен стартовать новый поток поверх зависшего
+        старого — иначе два треда работают на одном плагине (H-1, п.3)."""
+        mgr, lc = _make_manager()
+        blocker = threading.Event()
+
+        def hung_target(stop, pause):
+            blocker.wait(timeout=5)
+
+        cfg = ThreadConfig()
+        lc.create_worker("hung2", hung_target, cfg)
+        lc.start_worker("hung2")
+        time.sleep(0.05)
+        old_thread = mgr._worker_registry.get("hung2")["thread"]
+
+        result = lc.restart_worker("hung2", timeout=0.2)
+
+        assert result is False
+        # Поток НЕ должен быть заменён на новый — старый всё ещё в реестре.
+        assert mgr._worker_registry.get("hung2")["thread"] is old_thread
+
+        blocker.set()
+        old_thread.join(timeout=2.0)
+
+
 class TestWorkerLifecycleExecutionMode:
     def test_task_mode_sets_completed(self):
         mgr, lc = _make_manager()

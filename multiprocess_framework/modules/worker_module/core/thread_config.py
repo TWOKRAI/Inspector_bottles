@@ -24,10 +24,10 @@ __all__ = [
 ]
 
 _POLL_INTERVALS = {
-    ThreadPriority.SYSTEM:     0.001,
-    ThreadPriority.REALTIME:   0.01,
-    ThreadPriority.NORMAL:     0.1,
-    ThreadPriority.BATCH:      1.0,
+    ThreadPriority.SYSTEM: 0.001,
+    ThreadPriority.REALTIME: 0.01,
+    ThreadPriority.NORMAL: 0.1,
+    ThreadPriority.BATCH: 1.0,
     ThreadPriority.BACKGROUND: 5.0,
 }
 

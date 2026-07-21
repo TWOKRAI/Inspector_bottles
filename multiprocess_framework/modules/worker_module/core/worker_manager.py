@@ -113,10 +113,26 @@ class WorkerManager(BaseManager, ObservableMixin, IWorkerManager):
 
         В отличие от stop_worker (поток остановлен, но воркер остаётся в реестре
         и может быть запущен снова) — remove_worker убирает воркер совсем.
+
+        Семантика: удаление ТОЛЬКО после подтверждённой остановки потока. Если
+        stop_worker вернул False (поток завис и не завершился за timeout —
+        например, воркер застрял в блокирующем cv2.read) — unregister НЕ
+        выполняется: воркер остаётся видимым в реестре как проблемный (статус
+        STOPPING), а не исчезает живым потоком-сиротой вне реестра. Раньше
+        результат stop_worker игнорировался и unregister происходил безусловно,
+        из-за чего следующий create_worker с тем же именем создавал ВТОРОЙ поток
+        поверх живого первого (для source-воркера — два писателя в одно SHM-кольцо),
+        см. docs/audits/2026-07-20_bug-hunt.md, H-1.
         """
         if not self._worker_registry.has(worker_name):
             return False
-        self.stop_worker(worker_name, timeout)
+        stopped = self.stop_worker(worker_name, timeout)
+        if not stopped:
+            self._log_error(
+                f"Worker '{worker_name}' не удалён — поток не остановился за "
+                f"{timeout}с (жив после таймаута), воркер остаётся в реестре"
+            )
+            return False
         removed = self._worker_registry.unregister(worker_name)
         if removed:
             self._log_info(f"Worker '{worker_name}' removed")

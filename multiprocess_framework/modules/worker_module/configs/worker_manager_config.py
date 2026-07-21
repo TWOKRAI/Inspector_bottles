@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """WorkerManagerConfig — конфигурация WorkerManager с вложенным ThreadWorkerConfig."""
+
 from __future__ import annotations
 
 from typing import Annotated

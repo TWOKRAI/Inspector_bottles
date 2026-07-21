@@ -126,6 +126,53 @@ class TestWorkerManager:
 
         manager.stop_worker("test_worker")
 
+    def test_remove_worker_keeps_hung_worker_in_registry(self):
+        """H-1 (docs/audits/2026-07-20_bug-hunt.md): если поток завис и не
+        остановился за timeout — remove_worker НЕ должен убирать воркер из
+        реестра (иначе тред-сирота вне реестра, следующий create_worker с тем
+        же именем создал бы второй поток поверх живого первого)."""
+        manager = WorkerManager("test_manager")
+        manager.initialize()
+
+        blocker = threading.Event()
+
+        def hung_worker(stop_event, pause_event):
+            blocker.wait(timeout=5)
+
+        config = ThreadConfig(priority=ThreadPriority.NORMAL)
+        manager.create_worker("hung", hung_worker, config, auto_start=True)
+        time.sleep(0.05)
+        assert manager.is_worker_running("hung")
+
+        result = manager.remove_worker("hung", timeout=0.2)
+
+        assert result is False
+        # Воркер остаётся видимым в реестре как проблемный.
+        assert manager.has_worker("hung")
+
+        # Освобождаем поток, чтобы не оставлять зависший тред после теста.
+        blocker.set()
+        info = manager._worker_registry.get("hung")
+        info["thread"].join(timeout=2.0)
+
+    def test_remove_worker_happy_path_still_removes(self):
+        """Прежнее поведение (успешное удаление в срок) не должно быть сломано."""
+        manager = WorkerManager("test_manager")
+        manager.initialize()
+
+        def worker_func(stop_event, pause_event):
+            while not stop_event.is_set():
+                time.sleep(0.05)
+
+        config = ThreadConfig(priority=ThreadPriority.NORMAL)
+        manager.create_worker("test_worker", worker_func, config, auto_start=True)
+        time.sleep(0.05)
+
+        result = manager.remove_worker("test_worker", timeout=2.0)
+
+        assert result is True
+        assert not manager.has_worker("test_worker")
+
     def test_worker_dependencies(self):
         """Тест зависимостей между воркерами."""
         manager = WorkerManager("test_manager")
@@ -167,9 +214,7 @@ class TestWorkerManager:
             while not stop_event.is_set():
                 time.sleep(0.1)
 
-        config = ThreadConfig(
-            priority=ThreadPriority.NORMAL, restart_on_failure=True, max_restarts=3
-        )
+        config = ThreadConfig(priority=ThreadPriority.NORMAL, restart_on_failure=True, max_restarts=3)
         manager.create_worker("failing", failing_worker, config, auto_start=True)
 
         time.sleep(0.5)  # Даем время на перезапуск
