@@ -140,3 +140,4 @@
 - [backend_ctl ultra-ревью 2026-07](project_backend_ctl_ultra_review.md) — 4.5→7.5→8.0/10; крит-баги ЗАКРЫТЫ hardening'ом 2026-07-20, открытые резидуалы — в plans/backend-ctl-hardening.md
 - [backend_ctl дыры из живой работы](project_backend_ctl_gaps_2026_07.md) — introspect.memory НЕ отдаёт RSS (psutil по pid из introspect_status); D.4 построил отменённую на GATE G3 задачу 1.8; периферия обогнала доказательства
 - [Фичи инструмента до доказательства](feedback_tool_features_before_validation.md) — довести минимум → прогнать реальную задачу → потом фичи; иначе ultra-ревью 4.5/10 и 36 задач возврата долга
+- [Live verification + fixes 2026-07-21](project_live_verification_2026_07_21.md) — 17 находок починено за день (fix/bug-hunt-live-findings, ADR-RTR-010); A-10 опровергнута; next: webcam-репро LIVE-2 + soak + LIVE-3
