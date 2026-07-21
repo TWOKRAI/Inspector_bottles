@@ -317,6 +317,18 @@ def test_build_process_entry_defaults():
     assert entry["state"]["status"] == "stopped"
 
 
+def test_build_process_entry_explicit_null_priority():
+    """M-1: priority: null (явный YAML null, не отсутствие ключа) → default 'normal'.
+
+    GUI-редактор пишет пустой скаляр (priority: без значения) → yaml.safe_load
+    даёт None, а не отсутствующий ключ. .get("priority", "normal") пропускал бы
+    этот случай (default сработал бы только на ОТСУТСТВУЮЩЕМ ключе).
+    """
+    entry = _build_process_entry({"process_name": "x", "priority": None})
+
+    assert entry["config"]["priority"] == "normal"
+
+
 def test_build_system_section_partial():
     """_build_system_section заполняет отсутствующие поля defaults."""
     section = _build_system_section({"system": {"stop_timeout": 15.0}})

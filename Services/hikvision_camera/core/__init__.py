@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Core layer — камера, обнаружение устройств, параметры, конвертер."""
+
 from __future__ import annotations
 
 from .camera import HikvisionCamera, CameraState

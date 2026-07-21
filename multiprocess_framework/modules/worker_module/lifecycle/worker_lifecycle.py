@@ -78,9 +78,7 @@ class WorkerLifecycle(IWorkerLifecycle):
             daemon=True,
         )
 
-        success = self.manager._worker_registry.register(
-            worker_name, target, config, thread, stop_event, pause_event
-        )
+        success = self.manager._worker_registry.register(worker_name, target, config, thread, stop_event, pause_event)
         if not success:
             return False
 
@@ -126,7 +124,17 @@ class WorkerLifecycle(IWorkerLifecycle):
     # ---- Остановка ----
 
     def stop_worker(self, worker_name: str, timeout: float = 5.0) -> bool:
-        """Остановить воркер, дождавшись завершения потока (с таймаутом)."""
+        """Остановить воркер, дождавшись завершения потока (с таймаутом).
+
+        Возвращает True, только если поток ДЕЙСТВИТЕЛЬНО завершился (или никогда
+        не был запущен) — это честный сигнал для remove_worker/restart_worker:
+        можно снимать воркер с реестра или стартовать новый поток поверх.
+        Если join истёк таймаутом, а поток всё ещё жив (завис, например, в
+        блокирующем cv2.read на 5-30с) — статус НЕ переводится в STOPPED
+        (остаётся STOPPING), возвращается False. Раньше метод безусловно
+        возвращал True и ставил STOPPED даже для зависшего потока — система
+        считала воркер остановленным, хотя тред был жив (docs/audits/2026-07-20_bug-hunt.md, H-1).
+        """
         worker_info = self.manager._worker_registry.get(worker_name)
         if not worker_info:
             return False
@@ -134,8 +142,28 @@ class WorkerLifecycle(IWorkerLifecycle):
         self.manager._worker_registry.update_status(worker_name, WorkerStatus.STOPPING)
         worker_info["stop_event"].set()
 
-        if worker_info["thread"].is_alive():
-            worker_info["thread"].join(timeout=timeout)
+        # Единое чтение thread в локальную переменную вместо двух обращений к
+        # worker_info["thread"] (было :137 is_alive, :138 join) — устраняет TOCTOU-гонку:
+        # между двумя чтениями _restart_worker_internal мог подменить объект в реестре
+        # на новый несстартованный Thread → join() на нём бросает RuntimeError (H-1, п.3).
+        thread = worker_info["thread"]
+
+        try:
+            if thread.is_alive():
+                thread.join(timeout=timeout)
+        except RuntimeError:
+            # Поток ещё не был запущен (start() не вызван) — join невозможен,
+            # но и останавливать нечего: считаем воркер остановленным.
+            self.manager._worker_registry.update_status(worker_name, WorkerStatus.STOPPED)
+            return True
+
+        if thread.is_alive():
+            # Таймаут истёк, поток всё ещё жив — не врём реестру про STOPPED.
+            self.manager._log_error(
+                f"Worker '{worker_name}' не остановился за {timeout}с (таймаут join) — "
+                f"поток всё ещё жив, статус оставлен STOPPING"
+            )
+            return False
 
         self.manager._worker_registry.update_status(worker_name, WorkerStatus.STOPPED)
         return True
@@ -143,13 +171,20 @@ class WorkerLifecycle(IWorkerLifecycle):
     # ---- Перезапуск ----
 
     def restart_worker(self, worker_name: str, timeout: float = 5.0) -> bool:
-        """Остановить и запустить воркер заново."""
+        """Остановить и запустить воркер заново.
+
+        Если stop_worker вернул False (поток завис и не остановился за timeout) —
+        НЕ стартуем новый поток поверх живого старого: иначе два треда работают на
+        одном плагине (для source-воркера — два писателя в одно SHM-кольцо), см.
+        H-1 п.3 аудита bug-hunt. Раньше результат stop_worker игнорировался.
+        """
         if not self.manager._worker_registry.has(worker_name):
             return False
 
         worker_info = self.manager._worker_registry.get(worker_name)
         if worker_info and worker_info["status"] == WorkerStatus.RUNNING:
-            self.stop_worker(worker_name, timeout)
+            if not self.stop_worker(worker_name, timeout):
+                return False
 
         return self.start_worker(worker_name)
 
@@ -183,9 +218,7 @@ class WorkerLifecycle(IWorkerLifecycle):
 
             # Одноразовая задача завершилась успешно
             if worker_info.get("execution_mode") == ExecutionMode.TASK:
-                self.manager._worker_registry.update_status(
-                    worker_name, WorkerStatus.COMPLETED
-                )
+                self.manager._worker_registry.update_status(worker_name, WorkerStatus.COMPLETED)
 
         except Exception as e:
             self.manager._worker_registry.update_status(worker_name, WorkerStatus.ERROR)
@@ -214,9 +247,7 @@ class WorkerLifecycle(IWorkerLifecycle):
                 current_status = self.manager._worker_registry.get_status(worker_name)
                 # Не перезаписываем COMPLETED и ERROR (при превышении лимита перезапусков)
                 if current_status not in (WorkerStatus.ERROR, WorkerStatus.COMPLETED):
-                    self.manager._worker_registry.update_status(
-                        worker_name, WorkerStatus.STOPPED
-                    )
+                    self.manager._worker_registry.update_status(worker_name, WorkerStatus.STOPPED)
 
     def _restart_worker_internal(self, worker_name: str) -> bool:
         """Внутренний перезапуск после ошибки (вызывается из потока воркера)."""

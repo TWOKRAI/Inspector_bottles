@@ -100,10 +100,20 @@ def set_parameters(camera: MvCamera, params: CameraParameters) -> bool:
 
     try:
         # Включаем ручной контроль fps
-        camera.MV_CC_SetBoolValue("AcquisitionFrameRateEnable", True)
+        # A-8 (bug-hunt 2026-07-20): раньше код возврата не проверялся —
+        # функция считалась успешной, даже если SDK отверг вызов. Камера
+        # оставалась в auto-fps/автоэкспозиции, яркость/частота "гуляли",
+        # ML тихо теряло точность. Проверяем как соседние SetFloatValue ниже.
+        check_sdk_error(
+            camera.MV_CC_SetBoolValue("AcquisitionFrameRateEnable", True),
+            "set_frame_rate_enable",
+        )
 
         # Выключаем автоэкспозицию
-        camera.MV_CC_SetEnumValue("ExposureAuto", 0)
+        check_sdk_error(
+            camera.MV_CC_SetEnumValue("ExposureAuto", 0),
+            "set_exposure_auto",
+        )
         # Задержка для стабилизации после отключения автоэкспозиции
         time.sleep(0.2)
 

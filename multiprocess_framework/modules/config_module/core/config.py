@@ -5,14 +5,22 @@ Config — runtime-контейнер данных одной конфигура
 Загрузка/сохранение файлов и конвертация моделей — не входят в контракт;
 делегируются DataConverter при необходимости снаружи.
 """
+
 from __future__ import annotations
 
 import copy
+import logging
 import os
 from threading import RLock
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from multiprocess_framework.modules.data_schema_module.core.helpers import merge_with_defaults
+
+# Config — не наследник BaseManager/ObservableMixin (лёгкий runtime-контейнер без
+# доступа к logger_manager), поэтому падение подписчика логируется стандартным
+# logging (идиома уже используется в модулях без ObservableMixin, см. например
+# shared_resources_module/buffers/cleanup.py) — лучше, чем немой except (A-9).
+logger = logging.getLogger(__name__)
 
 
 class Config:
@@ -117,9 +125,11 @@ class Config:
             def on_host_change(key, old, new): ...
         """
         if callback is None:
+
             def decorator(func: Callable) -> Callable:
                 self.subscribe(func, key)
                 return func
+
             return decorator
         with self._lock:
             self._change_callbacks.setdefault(key, []).append(callback)
@@ -231,23 +241,32 @@ class Config:
         return raw
 
     def _notify(self, key: str, old_value: Any, new_value: Any) -> None:
-        """Уведомить подписчиков. Вызывается внутри блокировки."""
+        """Уведомить подписчиков. Вызывается внутри блокировки.
+
+        A-9: падение одного подписчика НЕ должно прервать уведомление остальных
+        (цикл продолжается) — но и не должно молча тонуть: раньше здесь стоял
+        голый ``except Exception: pass`` без единого импорта logging в файле,
+        из-за чего изменение конфигурации могло тихо не примениться где-то в
+        системе без единой строки в логе.
+        """
         for callback in list(self._change_callbacks.get(key, [])):
             try:
                 callback(key, old_value, new_value)
             except Exception:
-                pass
+                logger.exception(f"Config: подписчик на ключ '{key}' упал при уведомлении об изменении")
         if key != "*":
             for callback in list(self._change_callbacks.get("*", [])):
                 try:
                     callback(key, old_value, new_value)
                 except Exception:
-                    pass
+                    logger.exception(f"Config: wildcard-подписчик упал при уведомлении об изменении '{key}'")
 
 
 class _MissingSentinel:
     """Sentinel для обозначения отсутствующего значения."""
+
     __slots__ = ()
+
     def __repr__(self) -> str:
         return "<MISSING>"
 

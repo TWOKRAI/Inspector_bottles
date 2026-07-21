@@ -147,6 +147,26 @@ class TestErrorHandling:
         # send падает, но on_inbound не пробрасывает (read-loop жив)
         adapter.on_inbound(_msg())
 
+    def test_send_error_counted_not_silent_a4(self) -> None:
+        """A-4 (bug-hunt 2026-07-20 §5): потеря ответа driver'у больше не проходит
+        безмолвно — счётчик lost_responses растёт на каждый провал send(), виден
+        через get_stats(). Раньше здесь было голое `except Exception: pass`."""
+        router = FakeRouter(send_raises=True)
+        adapter = SocketBridgeAdapter(router, "backend_ctl")
+        assert adapter.get_stats() == {"lost_responses": 0}
+
+        adapter.on_inbound(_msg())
+        assert adapter.get_stats() == {"lost_responses": 1}
+
+        adapter.on_inbound(_msg())
+        assert adapter.get_stats() == {"lost_responses": 2}
+
+    def test_successful_send_does_not_increment_lost_responses(self) -> None:
+        router = FakeRouter()  # send не падает
+        adapter = SocketBridgeAdapter(router, "backend_ctl")
+        adapter.on_inbound(_msg())
+        assert adapter.get_stats() == {"lost_responses": 0}
+
     def test_missing_request_id_passes_none(self) -> None:
         router = FakeRouter()
         adapter = SocketBridgeAdapter(router, "backend_ctl")

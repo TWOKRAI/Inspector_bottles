@@ -97,8 +97,10 @@ class GenericModbusDriver(BaseDeviceDriver):
             return self.snapshot(quality="bad")
 
         values: dict[str, Any] = {}
+        total = 0
         for name, meta in self.protocol.meta.items():
             if meta.access in ("r", "rw"):
+                total += 1
                 try:
                     t0 = self._clock()
                     val = self.protocol.register_map.read(self._device, name)
@@ -108,7 +110,20 @@ class GenericModbusDriver(BaseDeviceDriver):
                 except Exception:
                     self._record_err()
 
-        return self.snapshot(data={"values": values}, quality="good" if values else "bad")
+        # A-13 (bug-hunt 2026-07-20): раньше quality="good" ставился при ЛЮБОМ
+        # непустом values — частичное чтение (1 регистр из 10) маскировалось
+        # под полный успех, потребитель принимал неполные данные как надёжные.
+        # Теперь good — только полный набор; частичный — "stale" (тот же
+        # деградированный код, что у vfd_driver при bridge_alive=False);
+        # полный провал/нет r-записей вовсе — "bad".
+        if total == 0 or not values:
+            quality = "bad"
+        elif len(values) == total:
+            quality = "good"
+        else:
+            quality = "stale"
+
+        return self.snapshot(data={"values": values}, quality=quality)
 
     # ------------------------------------------------------------------ #
     # Call

@@ -162,6 +162,12 @@ class _RobotSection:
         # Удержать controller'ы от GC (живут пока жива страница устройства).
         tabs._keepalive = (robot_controller, cal_controller, _presenter, _cal_presenter)
 
+        def _cleanup_controllers() -> None:
+            # bug-hunt A-5: отвязать ОБА controller'а (робот + калибровка),
+            # когда страница устройства снимается со стека (удалено из рецепта).
+            robot_controller.unbind()
+            cal_controller.unbind()
+
         entry = self._recipe_store.get(device_id) or {}
         name = entry.get("name") or device_id
         return DeviceDetailPage(
@@ -172,6 +178,7 @@ class _RobotSection:
             on_edit=self._crud.on_edit_clicked,
             on_remove=self._crud.on_remove_clicked,
             bindings=self._bindings,
+            on_cleanup=_cleanup_controllers,
         )
 
 

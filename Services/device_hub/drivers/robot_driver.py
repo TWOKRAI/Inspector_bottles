@@ -101,6 +101,10 @@ class RobotDriver(BaseDeviceDriver):
         self.jobs_done: int = 0
         self.jobs_failed: int = 0
         self.draws_done: int = 0
+        # A-7 (bug-hunt 2026-07-20): счётчик по образцу jobs_failed — отдельно
+        # от draws_done, чтобы отличать "не дождались свободы робота перед
+        # стартом рисования" от штатного done.
+        self.draws_failed: int = 0
         self.returns_done: int = 0
         self.returns_failed: int = 0
 
@@ -323,8 +327,22 @@ class RobotDriver(BaseDeviceDriver):
             try:
                 rz_now = self._client.read_position().rz_deg
             except Exception:
-                rz_now = 0.0
+                # C-1 (bug-hunt 2026-07-20): при обрыве телеметрии НЕЛЬЗЯ подставлять
+                # rz_now=0.0 — это сфабрикованная координата, а не реальный R робота.
+                # Отправка задания под таким R укладывает деталь с неверным поворотом
+                # (порча продукции на тракте «буква+угол»). Поэтому задание НЕ
+                # отправляем вовсе — симметрично провалу send_job ниже (:335-338).
+                # Job в очередь НЕ возвращаем (в отличие от "не принял" на :344-347,
+                # где робот уже получил команду и вернуть в очередь безопасно) —
+                # к моменту вызова _deliver job уже вынут из self._job_queue
+                # (popleft в tick(), см. :242), поэтому без requeue он ТЕРЯЕТСЯ
+                # безвозвратно (не переочередится сам). Ретрай чтения здесь не
+                # добавляем: read_position рвётся вместе с тем же transport, что и
+                # остальные операции клиента — повторный вызов в тот же тик почти
+                # всегда падает так же, а задержка тика ничего не выигрывает.
                 self._record_err()
+                self.jobs_failed += 1
+                return
             place = (px, py, pz, rz_now + dovorot)
         # Помечаем доставку — мост ПЧ не будет дёргать mailbox робота, пока идёт
         # движение (приоритет робота, см. busy).
@@ -372,7 +390,17 @@ class RobotDriver(BaseDeviceDriver):
         self._draw_abort_evt.clear()  # свежий старт: прошлый abort не должен оборвать новый рисунок
 
         try:
-            self._prepare_draw(task, stop_event)
+            if not self._prepare_draw(task, stop_event):
+                # A-7 (bug-hunt 2026-07-20): "робот освободился", "таймаут
+                # MODE_SWITCH_WAIT" и "связь оборвалась" раньше давали один
+                # и тот же путь — set_mode("draw") выполнялся безусловно.
+                # Теперь при таймауте/обрыве связи рисование НЕ запускаем
+                # (задание теряется, как и при провале _run_figure ниже —
+                # существующая семантика "failed" для draw-заданий).
+                self._draw_state = "failed"
+                self.draws_failed += 1
+                self._record_err()
+                return
             ok = self._run_figure(task)
         except Exception:
             self._draw_state = "failed"
@@ -389,18 +417,25 @@ class RobotDriver(BaseDeviceDriver):
         else:
             self._draw_state = "failed"
 
-    def _prepare_draw(self, task: dict, stop_event: Any) -> None:
-        """Переключить в DRAW (дождавшись free) и применить параметры пера."""
-        t_end = self._clock() + _MODE_SWITCH_WAIT_S
-        while self._clock() < t_end:
-            if stop_event is not None and stop_event.is_set():
-                break
-            try:
-                if self._client.is_free():
-                    break
-            except Exception:
-                break
-            self._sleep(0.05)
+    def _prepare_draw(self, task: dict, stop_event: Any) -> bool:
+        """Дождаться свободы робота, переключить в DRAW и применить параметры пера.
+
+        A-7 (bug-hunt 2026-07-20): раньше цикл ожидания не различал три исхода —
+        "робот освободился" (break по is_free), "истёк таймаут
+        MODE_SWITCH_WAIT" (цикл дошёл до конца) и "связь оборвалась" (Exception
+        на is_free, тоже break) — все три вели к одному и тому же безусловному
+        set_mode("draw") ниже. Теперь используем тот же _wait_condition, что и
+        в _deliver (:358, :365) — он честно возвращает False на таймауте И на
+        обрыве связи (плюс уже фиксирует _record_err на обрыве). Вызывающий
+        (_execute_draw) обязан проверить результат и НЕ запускать рисование
+        при False.
+
+        Returns:
+            True — робот подтверждённо свободен, режим переключён в draw.
+            False — таймаут или обрыв связи; режим НЕ тронут, рисовать нельзя.
+        """
+        if not self._wait_condition(self._client.is_free, _MODE_SWITCH_WAIT_S, stop_event):
+            return False
 
         self._client.set_mode("draw")
         self._mode = "draw"
@@ -415,6 +450,7 @@ class RobotDriver(BaseDeviceDriver):
         self._client.set_draw_accel(self._draw_accel)
         self._client.set_pass_size(self._draw_pass_size)
         self._client.set_overlap(self._overlap_mm)
+        return True
 
     def _run_figure(self, task: dict) -> bool:
         """Исполнить фигуру задания."""
@@ -455,7 +491,13 @@ class RobotDriver(BaseDeviceDriver):
         """Исполнить одно задание возврата из очереди (одно за тик, режим RETURN)."""
         # Переключиться в RETURN один раз (дождавшись свободы робота).
         if self._mode != "return":
-            self._wait_condition(self._client.is_free, _MODE_SWITCH_WAIT_S, stop_event)
+            # A-7 (bug-hunt 2026-07-20): тот же класс бага, что и в
+            # _prepare_draw — результат ожидания игнорировался, set_mode
+            # выполнялся при любом исходе (свобода/таймаут/обрыв связи).
+            # Задание ещё в _return_queue (popleft ниже) — при отказе просто
+            # выходим, режим не меняем, попытка повторится на следующем тике.
+            if not self._wait_condition(self._client.is_free, _MODE_SWITCH_WAIT_S, stop_event):
+                return
             try:
                 self._client.set_mode("return")
             except Exception:
@@ -856,6 +898,7 @@ class RobotDriver(BaseDeviceDriver):
             "jobs_done": self.jobs_done,
             "jobs_failed": self.jobs_failed,
             "draws_done": self.draws_done,
+            "draws_failed": self.draws_failed,
             "draw_state": self._draw_state,
             "draw_queued": self._draw_queue.qsize(),
             "draw_progress": self._last_draw_progress,

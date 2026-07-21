@@ -129,6 +129,48 @@ def test_unsubscribe(cfg):
     assert len(events) == 1
 
 
+def test_notify_bad_subscriber_does_not_block_others_and_logs(cfg, caplog):
+    """A-9: падение одного подписчика — остальные всё равно уведомлены, и упавший
+
+    подписчик обязан оставить след в логе (раньше — голый except: pass без
+    единого logging-импорта в файле, изменение тихо «терялось»).
+    """
+    events = []
+
+    def bad_callback(k, o, n):
+        raise ValueError("boom")
+
+    def good_callback(k, o, n):
+        events.append(n)
+
+    cfg.subscribe(bad_callback)
+    cfg.subscribe(good_callback)
+
+    with caplog.at_level("ERROR", logger="multiprocess_framework.modules.config_module.core.config"):
+        cfg.set("key", "value")
+
+    assert events == ["value"]  # остальные подписчики уведомлены несмотря на падение
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert "key" in record.message
+    assert record.exc_info is not None  # logger.exception — трейсбек не потерян
+
+
+def test_notify_bad_wildcard_subscriber_logs(cfg, caplog):
+    """A-9: то же самое для wildcard-ветки (key == '*')."""
+
+    def bad_wildcard(k, o, n):
+        raise RuntimeError("wildcard boom")
+
+    cfg.subscribe(bad_wildcard, key="*")
+
+    with caplog.at_level("ERROR", logger="multiprocess_framework.modules.config_module.core.config"):
+        cfg.set("any_key", 1)
+
+    assert len(caplog.records) == 1
+    assert caplog.records[0].exc_info is not None
+
+
 # ---------------------------------------------------------------------------
 # section
 # ---------------------------------------------------------------------------

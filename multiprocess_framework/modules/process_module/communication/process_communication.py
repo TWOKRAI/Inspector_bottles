@@ -111,18 +111,16 @@ class ProcessCommunication(IProcessCommunication):
                     "communication",
                 )
 
-            # Регистрируем канал system_events для событий (EventManager.emit_event)
-            if not self.router_manager.get_channel("system_events"):
-                events_queue = self.queues.get("events")
-                if not events_queue and self.shared_resources:
-                    event_manager = getattr(self.shared_resources, "event_manager", None)
-                    if event_manager:
-                        events_queue = event_manager.get_event_queue()
-                if not events_queue:
-                    events_queue = Queue()
-                events_channel = QueueChannel("system_events", events_queue)
-                self.router_manager.register_channel(events_channel)
-                self.logger_callback("DEBUG", "Registered system_events channel in router", "communication")
+            # LIVE-1: канал system_events БОЛЬШЕ НЕ регистрируем. Потребителя у него нет
+            # нигде (ни handler типа "system_event", ни читатель очереди в PM/прототипе —
+            # grep=0; live: listening=false, очередь стоит на 94). EventManager.emit_event
+            # слал в него КАЖДОЕ событие (targets=["ProcessManager"]) → очередь набивалась
+            # → put о never-drop → errors PM росли ~13-57/с, перманентно замусоривая счётчик
+            # (настоящую ошибку в нём не увидеть). emit_event гейтит отправку на наличие
+            # канала (`if ch("system_events")`) — незарегистрированный канал сам отключает
+            # cross-process рассылку; локальная семантика emit_event (свой _event_queue +
+            # подписчики) сохраняется. Появится реальный потребитель — вернуть регистрацию
+            # ВМЕСТЕ с его handler'ом (иначе снова осиротеет).
 
         except Exception as e:
             self.logger_callback("ERROR", f"Failed to register queues in router: {e}", "communication")

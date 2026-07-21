@@ -60,19 +60,46 @@ _COUNTER_KEYS: tuple[str, ...] = (
     "frame_handle_cache_size",
     "frame_pickle_fallbacks",
     "queue_data_evicted",
-    "system_evict_blocked",
+    # ВНИМАНИЕ: ключ роутера — queue_system_evict_blocked (router_manager.get_stats).
+    # До 2026-07-21 проба читала "system_evict_blocked" — такого ключа нет, счётчик
+    # молча давал 0, то есть leak-ключ не мог сработать ни разу.
+    "queue_system_evict_blocked",
+    # LIVE-2 (ADR-RTR-010): займ вытесненного кадра возвращён владельцу.
+    # НЕ leak-ключ: всплеск на старте — норма (приёмник ещё разгоняется),
+    # дефект — устойчивый рост в steady-state (перегрузка приёмника).
+    "frame_loans_released_on_evict",
 )
 
-#: Счётчики, рост которых на soak = ДЕФЕКТ (утечка/потеря), а не норма.
-#: ``frame_slots_released`` и ``frame_boundary_crossings`` растут по построению.
+#: Счётчики, рост которых = ДЕФЕКТ на ЛЮБОМ tier'е: битые/потерянные данные и
+#: сорванные инварианты. ``frame_slots_released``/``frame_boundary_crossings``
+#: растут по построению и сюда не входят.
 _LEAK_KEYS: tuple[str, ...] = (
     "frame_torn_reads",
     "frame_stale_drops",
-    "frame_loan_exhausted",
     "frame_pickle_fallbacks",
-    "queue_data_evicted",
-    "system_evict_blocked",
+    "queue_system_evict_blocked",
 )
+
+#: Счётчики ШТАТНОЙ backpressure — осознанный сброс кадра, когда потребитель не
+#: успевает. Дефект они означают только там, где источник и потребитель равны по
+#: темпу (синтетика): любой сброс = что-то сломалось.
+#:
+#: На реальном тракте потребитель медленнее ПО ПРОЕКТУ (webcam_sketch: TEED
+#: 15-20 FPS против камеры 21-25, см. шапку рецепта) — там ненулевой сброс есть
+#: норма, и красный вердикт по нему приучает не читать вердикт вообще.
+#: Эмпирика 2026-07-21: 10-мин прогон webcam дал seg.frame_loan_exhausted 476 →
+#: 2722, всплески совпали с просадками lines до 17 FPS; torn/stale/pickle = 0.
+_BACKPRESSURE_KEYS: tuple[str, ...] = (
+    "frame_loan_exhausted",
+    "queue_data_evicted",
+)
+
+#: Рецепты, где источник и потребитель равны по темпу → backpressure = дефект.
+_SYNTHETIC_RECIPES: frozenset[str] = frozenset({"g1_perf_probe.yaml"})
+
+#: Ключи, по которым ответ опознаётся как статистика роутера (а не мусор/ошибка).
+#: Публикуются всегда — независимо от топологии, флагов и наличия middleware.
+_ROUTER_STATS_ANCHORS: tuple[str, ...] = ("router_id", "channels_count", "sent_attempted")
 
 
 def _counters(router_stats_res: dict) -> dict[str, int]:
@@ -81,11 +108,33 @@ def _counters(router_stats_res: dict) -> dict[str, int]:
     Робастно к обёртке (см. g1_perf_probe._shm_counters): ответ приходит либо
     ``{..., "router_stats": {...}}``, либо плоско. Отсутствующий счётчик → 0.
     """
+    return {k: int(_router_stats(router_stats_res).get(k, 0) or 0) for k in _COUNTER_KEYS}
+
+
+def _router_stats(router_stats_res: dict) -> dict:
+    """Развернуть ответ ``introspect.router_stats`` до плоского словаря счётчиков."""
     payload = unwrap(router_stats_res, leaf=True)
     rs = payload.get("router_stats", payload) if isinstance(payload, dict) else {}
-    if not isinstance(rs, dict):
-        rs = {}
-    return {k: int(rs.get(k, 0) or 0) for k in _COUNTER_KEYS}
+    return rs if isinstance(rs, dict) else {}
+
+
+def _missing_counter_keys(router_stats_res: dict) -> list[str]:
+    """Какие из ожидаемых счётчиков сервер НЕ отдаёт (имя разошлось с реальностью).
+
+    Третий вид нуля. Первые два — «событий не было» и «путь не подключён» — про
+    систему; этот же чисто наш: ключ написан не так, как публикует роутер, и
+    ``rs.get(k, 0)`` молча отдаёт 0. Регресс 2026-07-21: проба три прогона подряд
+    читала ``system_evict_blocked``, роутер публикует ``queue_system_evict_blocked``
+    — leak-ключ не мог сработать НИ РАЗУ, и soak синтетики (§4) числил его среди
+    доказательств чистоты. Ноль, которому нельзя верить, хуже отсутствия метрики.
+    """
+    rs = _router_stats(router_stats_res)
+    # Якорь: ответ мог быть мусором или ошибкой в обёртке — тогда «отсутствуют все
+    # ключи» неверный вывод, честный ответ «судить не могу». Якорные ключи роутер
+    # публикует всегда, независимо от топологии и флагов.
+    if not any(a in rs for a in _ROUTER_STATS_ANCHORS):
+        return []
+    return [k for k in _COUNTER_KEYS if k not in rs]
 
 
 def _rss_mb(pid: int | None) -> float | None:
@@ -172,20 +221,46 @@ def _sample(drv: Any, elapsed: float, processes: list[str]) -> dict[str, Any]:
     return {"elapsed_sec": round(elapsed, 1), "processes": per_process}
 
 
-def _summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
+def _summarize(
+    samples: list[dict[str, Any]],
+    *,
+    synthetic: bool = True,
+    missing_keys: list[str] | None = None,
+) -> dict[str, Any]:
     """Сводка «первый → последний» + вердикт по утечкам.
 
     Вердикт намеренно грубый и громкий: любой ненулевой leak-счётчик или рост
     handle-кэша попадает в ``findings``. Разбор — глазами, скрипт только не даёт
     дефекту утонуть в 24 сэмплах JSONL.
+
+    ``synthetic`` разделяет два tier'а (см. ``_BACKPRESSURE_KEYS``): на синтетике
+    сброс кадра — дефект и идёт в ``findings``; на реальном тракте он штатен и
+    идёт отдельной секцией ``backpressure`` со скоростью в кадрах/с, не роняя
+    вердикт. Иначе прогон на webcam обречён быть красным всегда — а вердикт,
+    который всегда красный, перестают читать.
     """
+    # Раньше любой другой проверки: если проба читает несуществующие имена, её
+    # «чисто» ничего не значит. Такой прогон нельзя чинить постфактум — только
+    # признать недействительным.
+    if missing_keys:
+        return {
+            "verdict": "PROBE_MISCONFIGURED",
+            "missing_keys": sorted(missing_keys),
+            "findings": [
+                f"счётчик '{k}' не публикуется сервером — проба читала бы 0 независимо от системы"
+                for k in sorted(missing_keys)
+            ],
+        }
+
     if not samples:
         return {"verdict": "NO_SAMPLES", "findings": ["soak не снял ни одного сэмпла"]}
 
     first, last = samples[0], samples[-1]
     findings: list[str] = []
+    backpressure: dict[str, Any] = {}
     fps_first_last: dict[str, list] = {}
     rss_first_last: dict[str, list] = {}
+    window_sec = max(1e-6, (last.get("elapsed_sec") or 0) - (first.get("elapsed_sec") or 0))
 
     for proc, entry in (last.get("processes") or {}).items():
         if "error" in entry:
@@ -194,9 +269,26 @@ def _summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
         prev = (first.get("processes") or {}).get(proc, {})
 
         counters = entry.get("counters") or {}
+        prev_counters = prev.get("counters") or {}
         for key in _LEAK_KEYS:
             if counters.get(key):
                 findings.append(f"{proc}.{key} = {counters[key]} (ожидалось 0)")
+
+        # Backpressure: на синтетике — дефект, на живом тракте — наблюдаемая норма.
+        # Считаем ПРИРОСТ за окно, а не абсолют: стартовый всплеск (приёмник ещё
+        # разгоняется) не должен выглядеть так же, как устойчивый сброс.
+        for key in _BACKPRESSURE_KEYS:
+            grew = (counters.get(key) or 0) - (prev_counters.get(key) or 0)
+            if not counters.get(key):
+                continue
+            if synthetic:
+                findings.append(f"{proc}.{key} = {counters[key]} (ожидалось 0 — tier синтетика)")
+            else:
+                backpressure[f"{proc}.{key}"] = {
+                    "total": counters[key],
+                    "delta": grew,
+                    "per_sec": round(grew / window_sec, 2),
+                }
 
         cache_first = (prev.get("counters") or {}).get("frame_handle_cache_size", 0)
         cache_last = counters.get("frame_handle_cache_size", 0)
@@ -223,7 +315,9 @@ def _summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "fps_first_last": fps_first_last,
         "rss_first_last_mb": rss_first_last,
         "counters_last": {p: e.get("counters") for p, e in (last.get("processes") or {}).items() if "error" not in e},
-        "verdict": "CLEAN" if not findings else "FINDINGS",
+        "tier": "synthetic" if synthetic else "live",
+        "backpressure": backpressure,
+        "verdict": ("CLEAN" if not backpressure else "CLEAN_WITH_BACKPRESSURE") if not findings else "FINDINGS",
         "findings": findings,
     }
 
@@ -241,12 +335,21 @@ def main() -> int:
         help="имя рецепта в multiprocess_prototype/recipes (умолч. синтетика g1_perf_probe.yaml; "
         "прод-тракт — webcam_sketch.yaml)",
     )
+    parser.add_argument(
+        "--tier",
+        choices=("auto", "synthetic", "live"),
+        default="auto",
+        help="как трактовать backpressure-счётчики: synthetic = сброс кадра дефект, "
+        "live = штатная норма (потребитель медленнее по проекту). auto — по имени рецепта",
+    )
     args = parser.parse_args()
 
     recipe = _RECIPES / args.recipe
     if not recipe.exists():
         print(f"[g7-soak] нет рецепта {recipe}")
         return 2
+
+    synthetic = args.recipe in _SYNTHETIC_RECIPES if args.tier == "auto" else args.tier == "synthetic"
 
     os.environ.setdefault("BACKEND_CTL", "1")
     os.environ.setdefault("FW_PERF_PROBES", "1")
@@ -257,7 +360,10 @@ def main() -> int:
 
     from backend_ctl.harness import BackendHarness
 
-    print(f"[g7-soak] recipe={recipe.name} duration={args.duration}s interval={args.interval}s")
+    print(
+        f"[g7-soak] recipe={recipe.name} tier={'synthetic' if synthetic else 'live'} "
+        f"duration={args.duration}s interval={args.interval}s"
+    )
     print(f"[g7-soak] флаги ON: {', '.join(_SOAK_FLAGS)} (+FW_PERF_PROBES; FW_GC_SCHEDULED намеренно OFF)")
     print(f"[g7-soak] JSONL: {args.out}")
 
@@ -271,6 +377,34 @@ def main() -> int:
             print("[g7-soak] топология пуста — бэкенд не поднялся или не прогрет")
             return 2
         print(f"[g7-soak] процессов в топологии: {len(processes)} — {', '.join(processes)}")
+
+        # Task 0.3: сверить ИМЕНА счётчиков с тем, что реально публикует сервер, ДО
+        # цикла. Прогон с несуществующим ключом отдаёт 0 независимо от системы —
+        # два часа замера впустую, а вердикт «чисто» ложный. Берём первый процесс,
+        # который вообще ответил: набор ключей у роутеров одинаков.
+        missing: list[str] = []
+        probe_errors: list[str] = []
+        for proc in processes:
+            probe_rs = None
+            try:
+                probe_rs = drv.introspect_router_stats(proc, timeout=8.0)
+            except Exception as exc:  # noqa: BLE001 — молчащий процесс не повод судить об именах
+                probe_errors.append(f"{proc}: {exc!r}")
+            if probe_rs is not None and _router_stats(probe_rs):
+                missing = _missing_counter_keys(probe_rs)
+                break
+        else:
+            # Ни один процесс не отдал статистику — сверять имена не с чем. Молчать
+            # нельзя: дальше прогон пойдёт на непроверенных именах.
+            why = probe_errors or ["пустые ответы"]
+            print(f"[g7-soak] ВНИМАНИЕ: имена счётчиков не сверены, никто не ответил: {why}")
+
+        if missing:
+            summary = _summarize([], synthetic=synthetic, missing_keys=missing)
+            fp.write(json.dumps({"summary": summary}, ensure_ascii=False) + "\n")
+            print(f"[g7-soak] ПРОБА НЕВАЛИДНА: сервер не публикует {missing}")
+            print("[g7-soak] прогон не начат — 'чисто' от такой пробы ничего бы не доказало")
+            return 3
 
         while True:
             elapsed = time.monotonic() - started
@@ -308,7 +442,7 @@ def main() -> int:
             fp.write(json.dumps(sample, ensure_ascii=False) + "\n")
             fp.flush()  # soak длинный — не терять данные при обрыве
 
-        summary = _summarize([s for s in samples if "error" not in s])
+        summary = _summarize([s for s in samples if "error" not in s], synthetic=synthetic)
         fp.write(json.dumps({"summary": summary}, ensure_ascii=False) + "\n")
 
     print("\n[g7-soak] СВОДКА:")

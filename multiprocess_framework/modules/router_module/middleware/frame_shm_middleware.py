@@ -281,6 +281,13 @@ class FrameShmMiddleware:
         return self._pool.snapshot_stats()["slots_reclaimed"] if self._pool else 0
 
     @property
+    def frame_loans_released_on_evict(self) -> int:
+        """LIVE-2: займов освобождено при вытеснении сообщения из полной очереди до
+        прочтения (release-on-evict). Без этого пути займ вытесненного кадра не отпустил
+        бы никто → free-list деградировал до перманентной смерти кольца. Пул=None → 0."""
+        return self._pool.snapshot_stats()["slots_released_on_evict"] if self._pool else 0
+
+    @property
     def frame_stale_drops(self) -> int:
         """Ф7 H-задача (Этап 2): zero-copy view'ов дропнуто post-use re-check'ом —
         read-only проекция счётчика reader'а (единственный источник)."""
@@ -499,7 +506,7 @@ class FrameShmMiddleware:
             pass
         return -1
 
-    def release_slots(self, releases: list) -> None:
+    def release_slots(self, releases: list, evicted: bool = False) -> None:
         """Ф7 G.5.d-2 (В3): owner-side release-handler — тонкий адаптер к пулу (H-задача).
 
         Consumer, дочитав view, шлёт пачку тикетов ``{index, generation, reader}``;
@@ -508,8 +515,17 @@ class FrameShmMiddleware:
         инжектированным ``gen_reader`` = ``_read_own_slot_generation``). refcount мутирует
         ТОЛЬКО этот (owner) процесс. Любая ошибка учёта безопасна: В1 re-check ловит
         преждевременное освобождение (writer перезапишет → drift → drop, не corruption).
+
+        ``evicted=True`` (LIVE-2): пачка пришла не от дочитавшего потребителя, а от
+        транспорта, ВЫТЕСНИВШЕГО кадр из полной очереди до прочтения. Тикеты поколения не
+        несут → делегируем в ``FramePool.release_evicted`` (release БЕЗ generation-guard;
+        handles-кэш не нужен — gen_reader не зовётся). Без этого займ вытесненного кадра
+        утекал бы навсегда (перманентная смерть кольца, воспроизведено live).
         """
         if self._pool is None or not releases:
+            return
+        if evicted:
+            self._pool.release_evicted(releases)
             return
         # H-ревью (E2): снять handles ОДИН раз на пачку — gen_reader читает из кэша, не
         # пересобирает memory-data dict на каждый тикет. finally гарантирует сброс кэша.

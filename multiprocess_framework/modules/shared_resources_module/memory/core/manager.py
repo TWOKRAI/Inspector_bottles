@@ -79,8 +79,14 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         self._local_handles: Dict[str, Dict[str, List[shared_memory.SharedMemory]]] = {}
         # Метаданные для standalone-режима (без PSR)
         self._local_meta: Dict[str, Dict[str, _MemoryMeta]] = {}
-        # Owner создаёт (create=True) и unlink при shutdown
-        self._is_owner: bool = True
+        # A-1 (bug-hunt 2026-07-20 §5): владение — ПЕР-БЛОК, а не общеменеджерский флаг.
+        # Раньше был единый self._is_owner, сбрасываемый в False при открытии ЛЮБОГО
+        # чужого хендла (reinitialize_handles) — из-за этого owner, открывший хоть один
+        # чужой блок, переставал unlink'ать СВОИ СОБСТВЕННЫЕ на shutdown/close_memory
+        # (рост /dev/shm на POSIX, аннулирует H5b). Множество (process_name, shm_name)
+        # блоков, СОЗДАННЫХ этим менеджером (create_memory_dict) — только они unlink'аются.
+        # Открытие чужого блока (reinitialize_handles) в это множество НЕ попадает.
+        self._owned_names: set = set()
         # Ф7 G.3(b): формат слота seqlock (ADR-SRM-011). Стампуется на слот при
         # создании → write/read/size самосогласованы. torn — счётчик дропов гонки
         # (reader поймал перезапись под собой; наблюдаемость через get_stats).
@@ -149,7 +155,11 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
                     existing = self._local_handles.get(process_name, {}).get(shm_base_name)
                     if existing and all(h is not None for h in existing):
                         continue
-                    self._is_owner = False
+                    # A-1: открытие ЧУЖОГО блока НЕ трогает владение. (process_name,
+                    # shm_base_name) сюда попадает только если этот менеджер его НЕ
+                    # создавал (create_memory_dict уже занёс бы существующие handles
+                    # выше и цикл продолжил бы на "continue") — значит он и не входит
+                    # в self._owned_names, close_memory/_close_all_handles его не unlink'ают.
                     handles: List[Optional[shared_memory.SharedMemory]] = []
                     for shm_name in shm_names_list:
                         shm = po.open_shm_block(shm_name)
@@ -223,6 +233,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             # Ф7 G.3(b): формат слота (seqlock) — pickle-safe в PSR, виден consumer-процессам.
             pd.custom["memory_seqlock"][name] = self._seqlock_frames
             self._local_handles.setdefault(process_name, {})[name] = shm_list
+            self._owned_names.add((process_name, name))  # A-1: этот блок создан ЭТИМ менеджером
             self._stats["created"] += 1
 
         self._log_info(f"Created {len(memory_names)} memory blocks for '{process_name}'")
@@ -249,6 +260,7 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             self._local_meta.setdefault(process_name, {})[name] = _MemoryMeta(
                 params, coll, seqlock=self._seqlock_frames
             )
+            self._owned_names.add((process_name, name))  # A-1: этот блок создан ЭТИМ менеджером
             self._stats["created"] += 1
 
         self._log_info(f"Created {len(memory_names)} memory blocks for '{process_name}' (standalone)")
@@ -392,11 +404,20 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
         val.clear_memory_slot(memory_data.get("handles"), index, seqlock=bool(memory_data.get("seqlock", False)))
 
     def close_memory(self, process_name: str, shm_name: str) -> None:
-        """Закрыть и очистить один shm-блок."""
+        """Закрыть и очистить один shm-блок.
+
+        A-1: unlink решается ПЕР-БЛОК — по принадлежности (process_name, shm_name)
+        множеству ``self._owned_names`` (создан ЭТИМ менеджером), а не по
+        общеменеджерскому флагу. Открытие чужого блока где-то ещё (reinitialize_handles)
+        больше не лишает владения СВОИ блоки.
+        """
         handles = self._local_handles.get(process_name, {}).get(shm_name, [])
+        owned_key = (process_name, shm_name)
+        unlink = owned_key in self._owned_names
         for shm in handles:
-            self._safe_close_shm(shm, unlink=self._is_owner)
+            self._safe_close_shm(shm, unlink=unlink)
         self._local_handles.get(process_name, {}).pop(shm_name, None)
+        self._owned_names.discard(owned_key)
 
         if self._process_state_registry:
             pd = self._process_state_registry.get_process_data(process_name)
@@ -476,20 +497,26 @@ class MemoryManager(BaseManager, ObservableMixin, IMemoryManager, ManagerStatsMi
             self._log_error(f"shm.close/unlink failed: {e}")
 
     def _close_all_handles(self) -> None:
+        """A-1: unlink пер-блок (см. ``close_memory``), не по общему флагу."""
         for process_name, shm_map in list(self._local_handles.items()):
             for shm_name, handles in shm_map.items():
+                unlink = (process_name, shm_name) in self._owned_names
                 for shm in handles:
-                    self._safe_close_shm(shm, unlink=self._is_owner)
+                    self._safe_close_shm(shm, unlink=unlink)
         self._local_handles.clear()
+        self._owned_names.clear()
 
     # =========================================================================
     # Статистика (ManagerStatsMixin._merge_stats)
     # =========================================================================
 
     def get_stats(self) -> Dict[str, Any]:
+        # A-1: агрегат "владеет ли этот менеджер хоть одним блоком" — теперь честно
+        # выведен из per-блочного множества, а не из сбрасываемого побочным эффектом
+        # общего флага (владелец, открывший чужой хендл, раньше навсегда показывал False).
         mem_stats = {
             **self._stats,
             "processes_with_handles": len(self._local_handles),
-            "is_owner": self._is_owner,
+            "is_owner": bool(self._owned_names),
         }
         return self._merge_stats("memory", mem_stats)

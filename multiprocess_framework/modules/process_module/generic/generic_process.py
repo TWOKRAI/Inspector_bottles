@@ -257,12 +257,18 @@ class GenericProcess(ProcessModule):
         event_dispatcher → сюда. Делегируем в middleware (release_slots само no-op без
         loan-протокола). Ошибка/битый конверт не роняет процесс (наблюдаемость через
         лог); потеря release покрыта В1-страховкой + reclaim (G.5.e).
+
+        LIVE-2: ``data.evicted=True`` — пачка пришла от транспорта, вытеснившего кадр из
+        полной очереди до прочтения (RouterManager._on_frame_evicted), а не от дочитавшего
+        потребителя. Такие тикеты поколения не несут → ``evicted=True`` включает release
+        без generation-guard (см. release_slots/FramePool.release_evicted).
         """
         try:
             data = msg.get("data", {}) if isinstance(msg, dict) else {}
             releases = data.get("releases", []) if isinstance(data, dict) else []
+            evicted = bool(data.get("evicted")) if isinstance(data, dict) else False
             if releases:
-                shm_middleware.release_slots(releases)
+                shm_middleware.release_slots(releases, evicted=evicted)
         except Exception as exc:  # noqa: BLE001 — release не критичен для такта
             self._log_error(f"GenericProcess[{self.name}]: shm_release handler error: {exc}")
 

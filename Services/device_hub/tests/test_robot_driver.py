@@ -118,6 +118,33 @@ class TestRobotDriverFeeder:
         assert core.regs[REG_PLACE_Z] == (-900) & 0xFFFF
         assert core.regs[REG_PLACE_RZ] == 450  # (реальный R 0 + доворот 45) ×10
 
+    def test_place_job_read_position_failure_drops_job(self, driver, core, clock, monkeypatch) -> None:
+        """C-1 (bug-hunt 2026-07-20): обрыв read_position при доставке позы укладки —
+        задание НЕ отправляется (нельзя подставлять сфабрикованный rz_now=0.0),
+        send_job не вызывается, jobs_failed растёт. Job уже вынут из очереди
+        в tick() (popleft) и НЕ возвращается — теряется безвозвратно (не
+        переочередится сам), см. комментарий в _deliver.
+        """
+        sent_calls: list[tuple] = []
+        monkeypatch.setattr(driver._client, "send_job", lambda *a, **kw: sent_calls.append((a, kw)))
+
+        def _raise_read_position() -> None:
+            raise RuntimeError("телеметрия оборвана")
+
+        monkeypatch.setattr(driver._client, "read_position", _raise_read_position)
+
+        ok = driver.enqueue_job(100.0, 200.0, place=(300.0, -120.0, -90.0, 45.0))
+        assert ok
+        assert len(driver._job_queue) == 1
+
+        stop = threading.Event()
+        driver.tick(stop)
+
+        assert sent_calls == []  # send_job не вызван — задание не отправлено
+        assert driver.jobs_sent == 0
+        assert driver.jobs_failed == 1
+        assert len(driver._job_queue) == 0  # job вынут и потерян, не переочередится
+
     def test_manual_mode_pauses_feeder(self, driver, clock) -> None:
         """manual_mode=True -> очередь не обрабатывается."""
         driver.manual_mode = True
@@ -342,6 +369,65 @@ class TestRobotDriverDraw:
         assert snap["mode"] == "cvt"
 
 
+class TestRobotDriverDrawPrepareOutcomes:
+    """A-7 (bug-hunt 2026-07-20): "робот освободился" / "таймаут
+    MODE_SWITCH_WAIT" / "связь оборвалась" раньше давали ОДИН и тот же путь —
+    set_mode("draw") выполнялся безусловно, рисование стартовало вслепую.
+    Теперь при таймауте/обрыве связи рисование НЕ запускается."""
+
+    def test_draw_timeout_does_not_switch_mode_or_draw(self, driver, monkeypatch) -> None:
+        """is_free() всегда False (таймаут) -> set_mode/draw_circle НЕ вызваны,
+        draw_state=failed, draws_failed растёт, mode не тронут."""
+        set_mode_calls: list[str] = []
+        draw_circle_calls: list[tuple] = []
+        monkeypatch.setattr(driver._client, "is_free", lambda: False)
+        monkeypatch.setattr(driver._client, "set_mode", lambda m: set_mode_calls.append(m))
+        monkeypatch.setattr(driver._client, "draw_circle", lambda *a, **kw: draw_circle_calls.append((a, kw)))
+
+        result = driver.call("draw_circle", {"cx": 100, "cy": 100, "r": 50})
+        assert result["status"] == "ok"
+
+        stop = threading.Event()
+        driver.tick(stop)
+
+        assert set_mode_calls == []  # режим НЕ переключён при таймауте
+        assert draw_circle_calls == []  # рисование НЕ запущено
+        assert driver.mode == "cvt"  # режим не тронут
+        assert driver._draw_state == "failed"
+        assert driver.draws_failed == 1
+        assert driver.draws_done == 0
+
+    def test_draw_connection_lost_does_not_switch_mode_or_draw(self, driver, monkeypatch) -> None:
+        """is_free() бросает исключение (обрыв связи) -> тот же безопасный путь, что и таймаут."""
+        set_mode_calls: list[str] = []
+        draw_circle_calls: list[tuple] = []
+
+        def _raise_is_free() -> bool:
+            raise RuntimeError("связь с роботом оборвана")
+
+        monkeypatch.setattr(driver._client, "is_free", _raise_is_free)
+        monkeypatch.setattr(driver._client, "set_mode", lambda m: set_mode_calls.append(m))
+        monkeypatch.setattr(driver._client, "draw_circle", lambda *a, **kw: draw_circle_calls.append((a, kw)))
+
+        driver.call("draw_circle", {"cx": 100, "cy": 100, "r": 50})
+        stop = threading.Event()
+        driver.tick(stop)
+
+        assert set_mode_calls == []
+        assert draw_circle_calls == []
+        assert driver.mode == "cvt"
+        assert driver._draw_state == "failed"
+        assert driver.draws_failed == 1
+
+    def test_draw_free_immediately_still_works(self, driver) -> None:
+        """Регрессия: честный "свободен" по-прежнему рисует (счастливый путь не сломан)."""
+        driver.call("draw_circle", {"cx": 100, "cy": 100, "r": 50})
+        stop = threading.Event()
+        driver.tick(stop)
+        assert driver.draws_done >= 1
+        assert driver.draws_failed == 0
+
+
 class TestRobotDriverReturn:
     """Возврат буквы на ленту: return_job через call, tick исполняет, режим cvt после."""
 
@@ -364,6 +450,44 @@ class TestRobotDriverReturn:
         snap = driver.snapshot()
         assert snap["returns_done"] == 0
         assert snap["return_queued"] == 0
+
+
+class TestRobotDriverReturnPrepareOutcomes:
+    """A-7 (bug-hunt 2026-07-20): тот же класс бага в _execute_return —
+    set_mode("return") раньше выполнялся безусловно, игнорируя результат
+    ожидания свободы робота (таймаут/обрыв связи)."""
+
+    def test_return_timeout_does_not_switch_mode(self, driver, monkeypatch) -> None:
+        set_mode_calls: list[str] = []
+        monkeypatch.setattr(driver._client, "is_free", lambda: False)
+        monkeypatch.setattr(driver._client, "set_mode", lambda m: set_mode_calls.append(m))
+
+        driver.call("return_job", {"x_mm": 120.0, "y_mm": -60.0, "z_mm": -90.0})
+        stop = threading.Event()
+        driver.tick(stop)
+
+        assert set_mode_calls == []  # режим НЕ переключён при таймауте
+        assert driver.mode == "cvt"  # режим не тронут
+        assert len(driver._return_queue) == 1  # задание НЕ потеряно — повтор на след. тик
+        assert driver.returns_done == 0
+        assert driver.returns_failed == 0  # таймаут — не окончательный провал, а повтор
+
+    def test_return_connection_lost_does_not_switch_mode(self, driver, monkeypatch) -> None:
+        set_mode_calls: list[str] = []
+
+        def _raise_is_free() -> bool:
+            raise RuntimeError("связь с роботом оборвана")
+
+        monkeypatch.setattr(driver._client, "is_free", _raise_is_free)
+        monkeypatch.setattr(driver._client, "set_mode", lambda m: set_mode_calls.append(m))
+
+        driver.call("return_job", {"x_mm": 120.0, "y_mm": -60.0, "z_mm": -90.0})
+        stop = threading.Event()
+        driver.tick(stop)
+
+        assert set_mode_calls == []
+        assert driver.mode == "cvt"
+        assert len(driver._return_queue) == 1
 
 
 class TestRobotDriverTelemetry:

@@ -46,6 +46,11 @@ class RobotWidgetController:
         # н5 ревью Fable: QTimer для периодической проверки устаревания
         # данных. Если hub упал — пуши прекращаются, но индикатор
         # должен перейти в stale через _STALE_THRESHOLD_S.
+        # bug-hunt A-5: без Qt-parent намеренно (тесты конструируют
+        # controller с MagicMock-виджетом — QTimer(parent) требует реальный
+        # QObject). Явный stop() гарантирован через unbind(), вызываемый из
+        # DeviceDetailPage.cleanup() при снятии страницы устройства со стека
+        # (см. devices_common/master_detail.py, robot/section.py).
         self._last_status_ts: float | None = None
         self._stale_timer = QTimer()
         self._stale_timer.setInterval(2000)  # 2 с

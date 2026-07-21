@@ -12,9 +12,10 @@ QueueChannel — канал поверх multiprocessing.Queue / queue.Queue.
     ch = QueueChannel("ctrl", mp_queue)
     ch = QueueChannel("ctrl")          # создаёт внутренний queue.Queue
 """
+
 import threading
 import time
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 from typing import Callable, Dict, Any, List, Optional
 
 from .base_channel import MessageChannel
@@ -28,7 +29,7 @@ class QueueChannel(MessageChannel):
         name: str,
         queue: Optional[Queue] = None,
         log_warning: Optional[Callable[[str], None]] = None,
-        log_error:   Optional[Callable[[str], None]] = None,
+        log_error: Optional[Callable[[str], None]] = None,
     ) -> None:
         super().__init__(log_warning=log_warning, log_error=log_error)
         self._name = name
@@ -36,6 +37,13 @@ class QueueChannel(MessageChannel):
         self._listening = False
         self._listener_thread: Optional[threading.Thread] = None
         self._callback: Optional[Callable] = None
+        # План transport-single-policy (Task 0.1). Этот канал кладёт в очередь БЕЗ
+        # QoS-политики: полная очередь = ожидание до timeout, затем ошибка (по сути
+        # drop_newest), тогда как QueueRegistry.send_to_queue вытеснил бы старейший
+        # и сообщил владельцу кадра. Пока обе двери живы — переполнение здесь должно
+        # быть видно, иначе перегрузка тракта не наблюдаема ничем.
+        self._put_timeout_total = 0
+        self._send_errors = 0
 
     # ---- IMessageChannel: свойства ----
 
@@ -63,7 +71,15 @@ class QueueChannel(MessageChannel):
         try:
             self._queue.put(message, block=True, timeout=timeout)
             return {"status": "success", "channel": self._name}
+        except Full:
+            # Очередь была полна весь timeout — сообщение ПОТЕРЯНО. Отдельный счётчик:
+            # это перегрузка тракта, а не сбой канала, и лечится она политикой
+            # (drop_oldest), а не ретраем. Раньше терялось молча в общем "errors".
+            self._put_timeout_total += 1
+            self._send_errors += 1
+            return {"status": "error", "reason": "queue full (put timeout)", "channel": self._name}
         except Exception as e:
+            self._send_errors += 1
             return {"status": "error", "reason": str(e), "channel": self._name}
 
     # ---- IMessageChannel: получение ----
@@ -134,8 +150,27 @@ class QueueChannel(MessageChannel):
             queue_size = self._queue.qsize()
         except (NotImplementedError, OSError, AttributeError):
             queue_size = None
-        info.update({"queue_size": queue_size, "listening": self._listening})
+        info.update(
+            {
+                "queue_size": queue_size,
+                "listening": self._listening,
+                "put_timeout_total": self._put_timeout_total,
+                "send_errors": self._send_errors,
+            }
+        )
         return info
+
+    # ---- Счётчики двери (Task 0.1) — read-only проекция для RouterManager.get_stats ----
+
+    @property
+    def put_timeout_total(self) -> int:
+        """Сколько сообщений потеряно из-за полной очереди (put упёрся в timeout)."""
+        return self._put_timeout_total
+
+    @property
+    def send_errors(self) -> int:
+        """Все неудачные отправки канала, включая put_timeout_total."""
+        return self._send_errors
 
     # ---- Внутреннее ----
 

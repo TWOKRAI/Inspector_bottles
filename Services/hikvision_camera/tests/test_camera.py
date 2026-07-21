@@ -246,3 +246,56 @@ class TestStartGrabbingNoSdk:
 
         assert result is False
         assert cam.state == CameraState.CLOSED
+
+
+class TestOpenPostOpenFailureCleansUpHandle:
+    """A-3 (bug-hunt 2026-07-20): провал ПОСЛЕ успешного OpenDevice раньше не
+    освобождал handle — cleanup стоял только вокруг самого OpenDevice.
+    Устройство оставалось эксклюзивно открытым, а self._camera не обнулялся,
+    так что следующий open() создавал НОВЫЙ handle поверх уже занятого
+    устройства (ретраи копили неустранимые handle)."""
+
+    def test_post_open_failure_cleans_up_handle(self):
+        """SetEnumValue("TriggerMode", ...) кидает Exception ПОСЛЕ успешного
+        OpenDevice -> handle должен быть закрыт/уничтожен, self._camera=None."""
+        fake_device_list = MagicMock()
+        fake_device_list.nDeviceNum = 1
+        fake_device_list.pDeviceInfo = [MagicMock()]
+
+        # nTLayerType=0 (не GigE) — пропускаем ветку оптимального пакета,
+        # она не относится к сути дефекта.
+        fake_dev_info = MagicMock()
+        fake_dev_info.nTLayerType = 0
+
+        mock_camera_instance = MagicMock()
+        mock_camera_instance.MV_CC_CreateHandle.return_value = 0  # MV_OK
+        mock_camera_instance.MV_CC_OpenDevice.return_value = 0  # MV_OK — устройство ОТКРЫТО эксклюзивно
+        # Провал ПОСЛЕ OpenDevice (например ошибка ctypes/маршалинга при
+        # настройке параметра) — генерик Exception, не SdkError.
+        mock_camera_instance.MV_CC_SetEnumValue.side_effect = OSError("сбой на шаге настройки TriggerMode")
+
+        mock_mv_class = MagicMock()
+        mock_mv_class.MV_CC_EnumDevices.return_value = 0  # MV_OK
+        mock_mv_class.return_value = mock_camera_instance
+
+        error_cb = MagicMock()
+        cam = HikvisionCamera(on_error=error_cb)
+
+        with (
+            patch("Services.hikvision_camera.core.camera.SDK_AVAILABLE", True),
+            patch("Services.hikvision_camera.core.camera.MvCamera", mock_mv_class),
+            patch(
+                "Services.hikvision_camera.core.camera.MV_CC_DEVICE_INFO_LIST",
+                return_value=fake_device_list,
+            ),
+            patch("ctypes.cast", return_value=MagicMock(contents=fake_dev_info)),
+        ):
+            result = cam.open(0)
+
+        assert result is False
+        assert cam.state == CameraState.CLOSED
+        # Ключевая проверка: handle НЕ оставлен висеть на открытом устройстве.
+        assert cam._camera is None
+        mock_camera_instance.MV_CC_CloseDevice.assert_called_once()
+        mock_camera_instance.MV_CC_DestroyHandle.assert_called_once()
+        error_cb.assert_called_once()

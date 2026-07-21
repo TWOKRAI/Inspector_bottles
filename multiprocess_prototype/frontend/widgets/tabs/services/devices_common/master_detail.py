@@ -68,6 +68,10 @@ class DeviceDetailPage(QWidget):
         on_edit:        callback(device_id) — «Изменить» (reuse DeviceCrudActions).
         on_remove:      callback(device_id) — «Удалить» (reuse DeviceCrudActions).
         bindings:       GuiStateBindings — для conn-индикатора (lazy).
+        on_cleanup:     callback() — вызывается при удалении страницы из стека
+            (bug-hunt A-5): отвязывает controller устройства (unbind(), стоп
+            stale-таймера) до deleteLater(). Тот же getattr("cleanup")-приём,
+            что уже используется для страницы добавления (_cleanup_add_page).
     """
 
     def __init__(
@@ -80,6 +84,7 @@ class DeviceDetailPage(QWidget):
         on_edit: Callable[[str], None] | None = None,
         on_remove: Callable[[str], None] | None = None,
         bindings: Any = None,
+        on_cleanup: Callable[[], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -87,6 +92,7 @@ class DeviceDetailPage(QWidget):
         self._presenter = devices_presenter
         self._on_edit = on_edit
         self._on_remove = on_remove
+        self._on_cleanup = on_cleanup
 
         root = QVBoxLayout(self)
         root.setContentsMargins(4, 4, 4, 4)
@@ -145,6 +151,19 @@ class DeviceDetailPage(QWidget):
         if self._on_remove:
             self._on_remove(self._device_id)
 
+    def cleanup(self) -> None:
+        """Отвязать controller устройства (bug-hunt A-5).
+
+        Вызывается DeviceMasterDetail перед удалением страницы из стека
+        (устройство пропало из активного рецепта). Idempotent, если
+        on_cleanup сам идемпотентен (unbind() controller'ов — идемпотентны).
+        """
+        if self._on_cleanup is not None:
+            try:
+                self._on_cleanup()
+            except Exception:
+                pass
+
     def _on_conn_delta(self, path: str, value: Any) -> None:
         parts = path.split(".")
         if len(parts) < 4 or parts[2] != self._device_id:
@@ -175,7 +194,11 @@ class DeviceMasterDetail(QWidget):
         # (Фаза D). on_add — fallback через модальный диалог, если страницы нет.
         self._add_page_factory = add_page_factory
         self._on_add = on_add
-        self._pages: dict[str, int] = {}
+        # bug-hunt A-5: значение — сам виджет страницы (не индекс в стеке).
+        # Индекс инвалидируется при любом removeWidget() на более ранней
+        # позиции — храня виджет, обращаемся к нему через setCurrentWidget()/
+        # indexOf() и не зависим от сдвига индексов при удалении страниц.
+        self._pages: dict[str, QWidget] = {}
         self._add_page: QWidget | None = None
         self._add_index: int | None = None
 
@@ -204,15 +227,36 @@ class DeviceMasterDetail(QWidget):
     # ------------------------------------------------------------------ #
 
     def refresh(self) -> None:
-        """Обновить список устройств; если выбранное исчезло — показать заглушку."""
+        """Обновить список устройств; удалить страницы устройств, исчезнувших из рецепта.
+
+        bug-hunt A-5: раньше страница устройства, пропавшего из активного
+        рецепта (remove из CRUD или переключение на другой рецепт), оставалась
+        в стеке навсегда — вместе с живым controller'ом (bind_fanout-подписка
+        + parentless QTimer stale-проверки раз в 2с). Теперь такая страница
+        полностью снимается: cleanup() отвязывает controller, виджет удаляется
+        из стека и планируется на удаление.
+        """
         self._placeholder.setText(self._placeholder_text())
         self._panel.refresh()
-        # Если текущая страница-устройство удалена из рецепта — на заглушку
         live_ids = set(self._panel.current_device_ids())
-        cur = self._stack.currentIndex()
-        for dev_id, idx in list(self._pages.items()):
-            if dev_id not in live_ids and idx == cur:
+        cur_widget = self._stack.currentWidget()
+        for dev_id, page in list(self._pages.items()):
+            if dev_id in live_ids:
+                continue
+            if page is cur_widget:
                 self._stack.setCurrentIndex(0)
+            self._remove_device_page(dev_id)
+
+    def _remove_device_page(self, device_id: str) -> None:
+        """Снять и уничтожить кэшированную страницу устройства (bug-hunt A-5)."""
+        page = self._pages.pop(device_id, None)
+        if page is None:
+            return
+        cleanup = getattr(page, "cleanup", None)
+        if callable(cleanup):
+            cleanup()
+        self._stack.removeWidget(page)
+        page.deleteLater()
 
     def select_device(self, device_id: str) -> None:
         """Программно выбрать и показать устройство."""
@@ -233,10 +277,12 @@ class DeviceMasterDetail(QWidget):
     def _show_device(self, device_id: str) -> None:
         # Уход со страницы добавления — убрать пробное (несохранённое) подключение
         self._cleanup_add_page()
-        if device_id not in self._pages:
+        page = self._pages.get(device_id)
+        if page is None:
             page = self._device_page_factory(device_id)
-            self._pages[device_id] = self._stack.addWidget(page)
-        self._stack.setCurrentIndex(self._pages[device_id])
+            self._pages[device_id] = page
+            self._stack.addWidget(page)
+        self._stack.setCurrentWidget(page)
 
     def _show_add(self) -> None:
         # Приоритет: встроенная страница добавления (Фаза D) → модальный диалог

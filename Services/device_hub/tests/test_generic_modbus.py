@@ -142,6 +142,49 @@ class TestGenericModbusTick:
         assert snap["quality"] == "bad"
 
 
+class TestGenericModbusPartialReadQuality:
+    """A-13 (bug-hunt 2026-07-20): раньше quality="good" ставился при ЛЮБОМ
+    непустом values — частичное чтение (1 регистр из 2/10) маскировалось под
+    полный успех. Теперь good — только полный набор r/rw-записей."""
+
+    def test_partial_read_is_stale_not_good(self, driver, transport, monkeypatch) -> None:
+        """1 из 2 r/rw записей провалилась -> quality=stale, значения частичные."""
+        transport._regs[0x100] = 250  # temp
+        transport._regs[0x200] = 5000  # setpoint
+
+        original_read = driver.protocol.register_map.read
+
+        def flaky_read(device, name):
+            if name == "setpoint":
+                raise RuntimeError("модбас оборвался на этом регистре")
+            return original_read(device, name)
+
+        monkeypatch.setattr(driver.protocol.register_map, "read", flaky_read)
+
+        stop = threading.Event()
+        snap = driver.tick(stop)
+
+        assert snap is not None
+        assert snap["quality"] == "stale"
+        assert "temp" in snap["values"]
+        assert "setpoint" not in snap["values"]
+
+    def test_full_read_failure_is_bad(self, driver, transport, monkeypatch) -> None:
+        """Все r/rw записи провалились -> quality=bad (не good, не stale)."""
+
+        def always_fail(device, name):
+            raise RuntimeError("транспорт недоступен")
+
+        monkeypatch.setattr(driver.protocol.register_map, "read", always_fail)
+
+        stop = threading.Event()
+        snap = driver.tick(stop)
+
+        assert snap is not None
+        assert snap["quality"] == "bad"
+        assert snap["values"] == {}
+
+
 class TestGenericModbusCallRead:
     """call read — чтение одного регистра."""
 

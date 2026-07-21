@@ -7,8 +7,9 @@
 (потеря обновления, torn-read).
 
 ``ManifestStore`` делает контракт явным:
-  - **межпроцессный лок** (``fcntl.flock`` на sidecar ``<manifest>.lock``) сериализует
-    read-modify-write — параллельные писатели не теряют правки друг друга;
+  - **межпроцессный лок** на sidecar ``<manifest>.lock`` сериализует read-modify-write —
+    параллельные писатели не теряют правки друг друга (``fcntl.flock`` на POSIX,
+    ``msvcrt.locking`` на Windows);
   - **атомарная запись** (temp-файл + ``os.replace``) — читатель никогда не видит
     полу-записанный файл;
   - **сохранение комментариев** (ruamel round-trip) — заголовок/пояснения ``app.yaml``
@@ -31,6 +32,18 @@ try:  # POSIX (macOS/Linux) — межпроцессный advisory-лок.
 except ImportError:  # pragma: no cover - Windows
     _HAVE_FCNTL = False
 
+try:  # Windows — межпроцессный лок диапазона байт (аналог flock для нашей задачи).
+    import msvcrt
+
+    _HAVE_MSVCRT = True
+except ImportError:  # pragma: no cover - POSIX
+    _HAVE_MSVCRT = False
+
+#: Сколько ждать межпроцессный лок на Windows, прежде чем сдаться (сек).
+#: ``msvcrt.locking`` в блокирующем режиме сам сдаётся через ~10с и роняет OSError,
+#: поэтому ждём сами короткими неблокирующими попытками — так ожидание предсказуемо.
+_WIN_LOCK_TIMEOUT_S = 15.0
+
 #: In-process сериализация (flock надёжен между процессами; этот лок — между потоками).
 #: Осознанный компромисс масштаба: ОДИН глобальный лок на ВСЕ сторы/файлы в процессе
 #: (потоковые операции над РАЗНЫМИ app.yaml сериализуются друг с другом без нужды).
@@ -51,7 +64,8 @@ class ManifestStore:
     """Сериализованный read/write ``app.yaml`` — закрывает гонку backend↔GUI.
 
     Один store на путь манифеста. Потокобезопасен; между процессами защищён
-    ``flock`` на sidecar-файле ``<manifest>.lock``.
+    локом на sidecar-файле ``<manifest>.lock``: ``fcntl.flock`` на POSIX,
+    ``msvcrt.locking`` на Windows (см. :class:`_FileLock`).
     """
 
     def __init__(self, path: Path | str) -> None:
@@ -127,7 +141,11 @@ class ManifestStore:
         yaml = _make_yaml()
         if self._path.exists():
             with self._path.open("r", encoding="utf-8") as f:
-                data = yaml.load(f)
+                # nosec B506 — это ruamel YAML() в round-trip режиме
+                # (RoundTripConstructor), а НЕ yaml.load из PyYAML: произвольные
+                # Python-объекты не инстанцируются. Правило bandit различает их по
+                # имени метода и даёт ложное срабатывание.
+                data = yaml.load(f)  # nosec B506
             if data is not None:
                 return data
         from ruamel.yaml.comments import CommentedMap
@@ -155,10 +173,22 @@ class ManifestStore:
 
 
 class _FileLock:
-    """Контекст-менеджер: threading.Lock + ``fcntl.flock`` на sidecar-файле.
+    """Контекст-менеджер: threading.Lock + межпроцессный лок на sidecar-файле.
 
-    In-process лок сериализует потоки; ``flock`` — процессы. На платформах без
-    ``fcntl`` (Windows) деградирует до потокового лока (best-effort).
+    In-process лок сериализует потоки; файловый — процессы. Реализация файлового
+    зависит от платформы:
+
+      - POSIX — ``fcntl.flock``, честные SH/EX (много читателей ИЛИ один писатель);
+      - Windows — ``msvcrt.locking`` на одном байте sidecar'а. Разделяемого режима
+        там нет, поэтому **SH деградирует до EX**: читатели сериализуются между
+        собой. Для манифеста (редкая правка ``pipeline``) цена нулевая, а гарантия
+        честная.
+
+    Раньше ветки Windows не было вовсе: ``_HAVE_FCNTL=False`` оставлял ОДИН
+    потоковый лок, который между процессами не значит ничего. Контракт в шапке
+    модуля («межпроцессный лок сериализует read-modify-write») на Windows просто
+    не выполнялся — параллельные писатели теряли правки, а ``os.replace`` падал
+    ``PermissionError [WinError 5]``, потому что файл был открыт другим процессом.
     """
 
     def __init__(self, lock_path: Path, *, exclusive: bool) -> None:
@@ -166,9 +196,32 @@ class _FileLock:
         self._exclusive = exclusive
         self._fd = None
 
+    def _acquire_win(self) -> None:
+        """Взять эксклюзивный лок байта 0 sidecar'а, дожидаясь освобождения.
+
+        Неблокирующие попытки в цикле вместо блокирующего ``LK_LOCK``: тот сам
+        сдаётся через ~10с своим числом ретраев, и получить предсказуемый дедлайн
+        поверх него нельзя.
+        """
+        import time
+
+        deadline = time.monotonic() + _WIN_LOCK_TIMEOUT_S
+        while True:
+            try:
+                self._fd.seek(0)
+                msvcrt.locking(self._fd.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"ManifestStore: не удалось взять межпроцессный лок "
+                        f"'{self._lock_path}' за {_WIN_LOCK_TIMEOUT_S}s"
+                    ) from None
+                time.sleep(0.01)
+
     def __enter__(self) -> "_FileLock":
         _PROCESS_LOCK.acquire()
-        # Всё после acquire() — под защитой: исключение в mkdir/open/flock (права,
+        # Всё после acquire() — под защитой: исключение в mkdir/open/lock (права,
         # ro-FS) НЕ должно оставить глобальный лок захваченным навсегда (иначе все
         # последующие операции ManifestStore в процессе виснут). release()+raise.
         try:
@@ -177,6 +230,10 @@ class _FileLock:
                 self._fd = open(self._lock_path, "a+")
                 flag = fcntl.LOCK_EX if self._exclusive else fcntl.LOCK_SH
                 fcntl.flock(self._fd.fileno(), flag)
+            elif _HAVE_MSVCRT:
+                self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+                self._fd = open(self._lock_path, "a+")
+                self._acquire_win()
         except BaseException:
             if self._fd is not None:
                 self._fd.close()
@@ -188,8 +245,14 @@ class _FileLock:
     def __exit__(self, *exc: object) -> None:
         try:
             if self._fd is not None:
-                fcntl.flock(self._fd.fileno(), fcntl.LOCK_UN)
-                self._fd.close()
-                self._fd = None
+                try:
+                    if _HAVE_FCNTL:
+                        fcntl.flock(self._fd.fileno(), fcntl.LOCK_UN)
+                    elif _HAVE_MSVCRT:
+                        self._fd.seek(0)
+                        msvcrt.locking(self._fd.fileno(), msvcrt.LK_UNLCK, 1)
+                finally:
+                    self._fd.close()
+                    self._fd = None
         finally:
             _PROCESS_LOCK.release()

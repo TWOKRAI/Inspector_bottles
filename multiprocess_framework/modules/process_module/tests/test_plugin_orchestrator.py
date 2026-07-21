@@ -75,6 +75,27 @@ class BetaPlugin(ProcessModulePlugin):
         AlphaPlugin.shutdown_order.append("beta")
 
 
+class FailingConfigurePlugin(ProcessModulePlugin):
+    """H-2: захватывает "ресурс" в configure(), затем бросает исключение.
+
+    Имитирует, например, ONNX/CUDA-сессию (Services/ml_inference) или открытую
+    камеру — ресурс успевает захватиться ДО броска, значит его обязан увидеть
+    shutdown(), иначе он повиснет до конца жизни OS-процесса без владельца.
+    """
+
+    name = "failing_configure"
+    category = "processing"
+
+    def configure(self, ctx: PluginContext) -> None:
+        self._resource_acquired = True
+        raise RuntimeError("boom in configure() after acquiring resource")
+
+    def start(self, ctx: PluginContext) -> None: ...
+
+    def shutdown(self, ctx: PluginContext) -> None:
+        self._resource_released = True
+
+
 # ---------------------------------------------------------------------------
 # Dotted paths для тестовых плагинов
 # ---------------------------------------------------------------------------
@@ -83,6 +104,7 @@ _MODULE = "multiprocess_framework.modules.process_module.tests.test_plugin_orche
 _SIMPLE_PATH = f"{_MODULE}.SimplePlugin"
 _ALPHA_PATH = f"{_MODULE}.AlphaPlugin"
 _BETA_PATH = f"{_MODULE}.BetaPlugin"
+_FAILING_CONFIGURE_PATH = f"{_MODULE}.FailingConfigurePlugin"
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +252,36 @@ def test_shutdown_reverse_order():
 
     # beta должна завершиться раньше alpha (обратный порядок)
     assert AlphaPlugin.shutdown_order == ["beta", "alpha"]
+
+
+def test_shutdown_releases_resource_after_configure_failure():
+    """H-2: плагин, бросивший исключение из configure() ПОСЛЕ захвата ресурса,
+    всё равно получает _do_shutdown() при shutdown() оркестратора.
+
+    До фикса append() стоял ПОСЛЕ _do_configure() — исключение означало, что
+    плагин никогда не попадал в self._plugins/self._contexts, и shutdown(),
+    итерирующий именно эти списки, его не видел никогда. Ресурс, захваченный
+    до броска (ONNX/CUDA-сессия, камера), оставался висеть без владельца.
+    """
+    services = MockProcessServices(name="test")
+    orch = PluginOrchestrator(services=services)
+    plugin_defs = [{"plugin_class": _FAILING_CONFIGURE_PATH, "plugin_name": "failing"}]
+    orch.load_and_configure_managers(plugin_defs)
+    orch.boot()
+
+    # Несмотря на провал configure() — плагин остался в списках оркестратора.
+    assert len(orch.plugins) == 1
+    plugin = orch.plugins[0]
+    assert getattr(plugin, "_resource_acquired", False) is True
+    # Провал configure() не довёл state до READY — плагин остался в IDLE
+    # (не в STOPPED), поэтому _do_shutdown его короткое замыкание НЕ схлопнет.
+    assert plugin.state == PluginState.IDLE
+
+    orch.shutdown()
+
+    # shutdown() увидел плагин и вызвал его shutdown() — ресурс освобождён.
+    assert getattr(plugin, "_resource_released", False) is True
+    assert plugin.state == PluginState.STOPPED
 
 
 def test_shutdown_sets_stopped_state():

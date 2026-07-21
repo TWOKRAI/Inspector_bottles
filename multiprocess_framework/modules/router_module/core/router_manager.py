@@ -48,6 +48,28 @@ class _PendingRequest:
         self.response: Optional[Dict[str, Any]] = None
 
 
+def _result_is_success(result: Any) -> bool:
+    """Успешен ли результат команды — для поля ``success`` конверта-ответа.
+
+    Раньше авто-reply ставил ``success=True`` безусловно, и конверт рапортовал
+    успех поверх ``{"status": "error", "reason": "No handler for key '...'"}``.
+    Наблюдалось живьём 2026-07-21: проба готовности харнесса проверяет именно
+    ``success`` конверта, поэтому считала систему готовой за 3.3 с ДО регистрации
+    ``introspect.*`` — а всё, что спрашивало в этом окне (дамп контракта,
+    live-тесты), получало «нет хендлера» под видом успеха.
+
+    Транспорт доставил — это не то же самое, что команда отработала. Здесь
+    именно вторая, прикладная семантика: ``success`` конверта = «команда
+    выполнена», а не «сообщение доехало».
+    """
+    if isinstance(result, dict):
+        if result.get("status") == "error":
+            return False
+        if "success" in result:
+            return bool(result["success"])
+    return True
+
+
 class RouterManager(ChannelRoutingManager):
     """Фасад маршрутизации: AsyncSender/Receiver, CRM-каналы, channel_dispatcher + event_dispatcher."""
 
@@ -138,6 +160,18 @@ class RouterManager(ChannelRoutingManager):
             # через system-очередь PM (диагностика: стейл-очередь сброшена refresh'ем
             # → send упал в relay). Попадает в introspect.router_stats автоматически.
             "relayed_to_hub": 0,
+            # План transport-single-policy, Task 0.1: какой «дверью» ушло сообщение.
+            # Двери различаются политикой переполнения: канальная (channels[N].send)
+            # её НЕ применяет, targets-доставка (send_to_queue) применяет. Пока обе
+            # живы — распределение надо видеть, иначе унификацию нечем доказать.
+            # Разбивка по kind (`sent_via_channel.data` и т.п.) заводится на лету.
+            "sent_via_channel": 0,
+            "sent_via_targets": 0,
+            # Сколько раз kind-резолв не собрал ВСЕХ получателей и по правилу F4
+            # (all-or-fallback) вернул пусто → сообщение ушло targets-дверью.
+            # Рост на старте = окно до регистрации kind-каналов (register_router_channels
+            # вызывается один раз, ре-скана нет) — рабочая гипотеза §8.4.
+            "kind_fallback_total": 0,
         }
         self._stats_lock = threading.Lock()
 
@@ -150,6 +184,12 @@ class RouterManager(ChannelRoutingManager):
         # см. register_frame_middleware(). Список короткий (обычно 1 middleware на
         # процесс) — суммирование раз в introspect-запрос, не на send-пути.
         self._frame_middlewares: List[Any] = []
+        # LIVE-2: активен ли где-либо loan-протокол (owner ИЛИ consumer роль). Кэш-флаг
+        # пересчитывается при (un)register_frame_middleware — чтобы на flags-off пути
+        # доставки НЕ навешивать on_evict-хук вовсе (ноль оверхеда, бит-в-бит прежний
+        # send_to_queue). При active — вытеснение кадра из полной очереди чинит утечку
+        # займа через release-on-evict (см. _on_frame_evicted).
+        self._frame_loan_active: bool = False
 
         # P2.2 (Гибрид, control-plane): реестр обработчиков воркеров по имени.
         # Билет с иерархическим адресом `proc.worker[.…]` на приёме уходит в
@@ -166,8 +206,31 @@ class RouterManager(ChannelRoutingManager):
         self._pending_lock = threading.Lock()
 
     def _inc_stat(self, key: str, value: int = 1) -> None:
+        # get(key, 0): счётчики с разбивкой по kind (``sent_via_channel.data`` и т.п.)
+        # заводятся на лету — состав kind'ов зависит от топологии и не может быть
+        # перечислен в _stats заранее. Для статических ключей поведение прежнее.
         with self._stats_lock:
-            self._stats[key] += value
+            self._stats[key] = self._stats.get(key, 0) + value
+
+    def _count_door(self, door: str, msg_dict: Dict[str, Any]) -> None:
+        """Учесть, какой «дверью» ушло сообщение, + разбивка по kind.
+
+        План transport-single-policy (Task 0.1). Двери различаются политикой
+        переполнения: канальная её не применяет, targets-доставка применяет.
+        Пока обе живы — распределение надо видеть, иначе унификацию нечем
+        доказать, а после неё нечем показать, что дверь осталась одна.
+
+        Разбивка по kind — best-effort: неизвестный тип сообщения НЕ должен
+        ронять отправку, поэтому общий счётчик инкрементится всегда, а
+        под-счётчик — только когда kind разрешился.
+        """
+        self._inc_stat(door)
+        try:
+            kind = resolve_channel_kind(msg_dict)
+        except Exception:  # noqa: BLE001 — включая UnknownMessageTypeError; диагностика не ломает доставку
+            return
+        if kind:
+            self._inc_stat(f"{door}.{kind}")
 
     def register_frame_middleware(self, middleware: Any) -> None:
         """Зарегистрировать FrameShmMiddleware для агрегации счётчика границ (Ф7 G.6).
@@ -182,6 +245,7 @@ class RouterManager(ChannelRoutingManager):
         вызывающие регистрируют один раз при создании).
         """
         self._frame_middlewares.append(middleware)
+        self._recompute_frame_loan_active()
 
     def unregister_frame_middleware(self, middleware: Any) -> None:
         """Снять frame-middleware из агрегации счётчиков (Ф7 G.3 H5b).
@@ -194,6 +258,14 @@ class RouterManager(ChannelRoutingManager):
             self._frame_middlewares.remove(middleware)
         except ValueError:
             pass
+        self._recompute_frame_loan_active()
+
+    def _recompute_frame_loan_active(self) -> None:
+        """LIVE-2: пересчитать кэш-флаг «loan-протокол активен» по зарегистрированным
+        middleware. ``loan_protocol_enabled`` — сырой флаг (роль КОНСЬЮМЕРА тоже считается:
+        процесс без своего пула, но читающий чужие views, обязан релизить вытесненные
+        кадры ВВЕРХ владельцу). Flags-off у всех → False → on_evict-хук не навешивается."""
+        self._frame_loan_active = any(getattr(mw, "loan_protocol_enabled", False) for mw in self._frame_middlewares)
 
     # ================================================================
     # LIFECYCLE
@@ -272,6 +344,7 @@ class RouterManager(ChannelRoutingManager):
                 # не ломая существующие channel-маршруты.
                 delivered = self._deliver_by_targets(processed)
                 if delivered is not None:
+                    self._count_door("sent_via_targets", processed)
                     return delivered
                 self._inc_stat("errors")
                 return {
@@ -283,6 +356,8 @@ class RouterManager(ChannelRoutingManager):
                         f"type={processed.get('type')!r}"
                     ),
                 }
+
+            self._count_door("sent_via_channel", processed)
 
             if len(channels) == 1:
                 result = channels[0].send(processed)
@@ -363,9 +438,17 @@ class RouterManager(ChannelRoutingManager):
         Выбор очереди — :meth:`_select_queue_type`.
 
         Returns:
-            dict-результат при успешной доставке хотя бы одному таргету;
-            None — если targets пуст, queue_registry недоступен или ни один таргет
-            не доставлен (вызывающий формирует обычную ошибку).
+            dict-результат, если хотя бы один валидный таргет был найден адресом
+            (после фильтрации пустых/broadcast/невалидных); None — если targets
+            пуст, queue_registry недоступен или ВСЕ таргеты отфильтрованы (нечего
+            было пытаться доставить — вызывающий формирует обычную ошибку).
+
+            A-2 (bug-hunt 2026-07-20 §5): при ЧАСТИЧНОМ fan-out (доставлено не всем
+            валидным таргетам) статус — ``"partial"``, не ``"success"``. Раньше
+            сравнения с числом валидных таргетов не было — ``delivered > 0`` уже
+            давало ``"success"`` при targets=[A,B,C] и доехавшем только A. Поле
+            ``targets_total`` — знаменатель (число валидных таргетов, ПОСЛЕ
+            фильтрации broadcast/невалидных адресов), для наблюдаемости расхождения.
         """
         targets = msg_dict.get("targets")
         if not targets:
@@ -377,6 +460,7 @@ class RouterManager(ChannelRoutingManager):
         qtype = self._select_queue_type(msg_dict)
 
         delivered = 0
+        attempted = 0  # A-2: валидных таргетов (после фильтрации broadcast/невалидных)
         for target in targets:
             if not target or is_broadcast(target):
                 continue
@@ -385,6 +469,7 @@ class RouterManager(ChannelRoutingManager):
             except AddressValidationError as exc:
                 self._log_debug(f"_deliver_by_targets: невалидный адрес {target!r}: {exc}")
                 continue
+            attempted += 1
             process = address[0]
             # len==1 (плоское имя) → исходный билет без копии (паритет, горячий путь).
             # Иначе — per-target копия с полным address (воркер+ резолвится на приёме).
@@ -428,15 +513,84 @@ class RouterManager(ChannelRoutingManager):
                 continue
 
             try:
-                if qr.send_to_queue(process, qtype, ticket):
+                # LIVE-2: под активным loan-протоколом навешиваем on_evict — если очередь
+                # получателя полна, вытесненный кадр несёт займ, который иначе не отпустит
+                # никто (потребитель его не увидит) → free-list владельца утекает. Хук
+                # НЕ на общем пути (только при full → drop_oldest), на flags-off не
+                # передаётся вовсе (сигнатура send_to_queue та же, бит-в-бит).
+                if self._frame_loan_active:
+                    ok = qr.send_to_queue(process, qtype, ticket, on_evict=self._on_frame_evicted)
+                else:
+                    ok = qr.send_to_queue(process, qtype, ticket)
+                if ok:
                     delivered += 1
             except Exception as exc:
                 self._log_debug(f"_deliver_by_targets: send_to_queue('{process}', '{qtype}') failed: {exc}")
 
-        if delivered > 0:
+        if delivered == 0:
+            return None
+        if delivered < attempted:
+            # A-2: часть валидных таргетов НЕ получила сообщение — честный статус
+            # вместо молчаливого "success". Соседний _resolve_kind_channels
+            # декларирует «частичный fan-out недопустим» — этот путь ту же гарантию
+            # раньше нарушал. delivered>0 остаётся не-None (адресат получил билет,
+            # ретраить с нуля вредно), но status отличим от полного success.
             self._inc_stat("sent_ok")
-            return {"status": "success", "delivered_by_targets": delivered}
-        return None
+            self._log_warning(f"_deliver_by_targets: частичный fan-out — доставлено {delivered}/{attempted} таргетам")
+            return {"status": "partial", "delivered_by_targets": delivered, "targets_total": attempted}
+        self._inc_stat("sent_ok")
+        return {"status": "success", "delivered_by_targets": delivered, "targets_total": attempted}
+
+    def _on_frame_evicted(self, evicted_item: Any, reader_process: str) -> None:
+        """LIVE-2 (release-on-evict): кадровое сообщение вытеснено из ПОЛНОЙ data-очереди
+        ``reader_process`` раньше, чем тот успел его прочитать (drop_oldest в
+        ``QueueRegistry.remove_old_if_full``). Потребитель этот кадр НЕ увидит → его loan
+        не отпустит НИКТО → free-list владельца утекает до перманентной смерти кольца
+        («кадры не сохраняются», skipped растёт со скоростью FPS — воспроизведено live).
+
+        Чиним: достаём координаты слота из вытесненного конверта и шлём владельцу
+        ``shm_release`` (та же system-почта, что и штатный release потребителя, тот же
+        owner-handler ``_handle_shm_release`` → ``release_slots``). Флаг ``evicted`` →
+        release без generation-guard (тикет поколения не несёт — сообщение не читалось).
+
+        Почему через почту, а не прямой ``release_slots``: вытеснение идёт на ТРЕДЕ-ПИСАТЕЛЕ
+        (send-путь), а штатный release — на треде message_processor владельца. Прямой вызов
+        отсюда гонялся бы с ним за refcount (пул lock-free по контракту single-thread
+        release). owner==этот процесс → почта ляжет в СВОЮ system-очередь → свой
+        message_processor → тот же тред → инвариант сохранён. owner≠sender (fan-in из
+        нескольких источников) → почта уедет владельцу по IPC. Потеря этой почты
+        безопасна: reclaim соседа + В1 re-check остаются страховкой.
+
+        reader = ``reader_process``: именно тот потребитель (владелец очереди, куда кадр
+        клали) не прочитает вытесненный кадр → его долю refcount и снимаем (dedup-по-reader
+        в пуле не даст задвоить, если он же пришлёт штатный release другого кадра).
+        """
+        qr = self.queue_registry
+        if qr is None or not isinstance(evicted_item, dict):
+            return
+        data = evicted_item.get("data")
+        if not isinstance(data, dict):
+            return
+        owner = data.get("owner") or data.get("shm_owner")
+        shm_name = data.get("shm_name")
+        idx = data.get("shm_index")
+        if not owner or not shm_name or idx is None:
+            return  # не кадровое сообщение (нет SHM-координат) — займа нет, релизить нечего
+        release_msg = {
+            "target": owner,
+            "type": "shm_release",
+            "queue_type": "system",
+            "data": {
+                "evicted": True,
+                "releases": [{"slot": shm_name, "index": idx, "generation": -1, "reader": reader_process}],
+            },
+        }
+        try:
+            # Прямой put в system-очередь владельца (не router.send) — избегаем ре-энтранта
+            # в _do_send из его же send-пути. system never-drop → без вложенного on_evict.
+            qr.send_to_queue(owner, "system", release_msg)
+        except Exception as exc:  # noqa: BLE001 — потеря release покрыта reclaim/В1, не ронять доставку
+            self._log_debug(f"_on_frame_evicted: release owner={owner!r} idx={idx} не отправлен: {exc}")
 
     def _queue_absent(self, process: str, qtype: str) -> bool:
         """True, если у процесса нет очереди `(process, qtype)` в queue_registry.
@@ -680,7 +834,12 @@ class RouterManager(ChannelRoutingManager):
 
         if not (info and (info.get("metadata") or {}).get("manages_own_reply")):
             try:
-                self.reply_to_request(processed, result)
+                # success ВЫВОДИТСЯ из результата, а не берётся по умолчанию True.
+                # Иначе конверт рапортует успех на провалившейся команде — включая
+                # «No handler for key ...», — и всякий, кто проверяет success (а это
+                # и проба готовности харнесса, и driver), видит зелёное на команде,
+                # которой нет. Докстринг выше обещает fail-loud; здесь он обеспечен.
+                self.reply_to_request(processed, result, success=_result_is_success(result))
             except Exception as exc:
                 self._log_warning(f"reply_to_request '{cmd_name}': {exc}")
 
@@ -1108,6 +1267,12 @@ class RouterManager(ChannelRoutingManager):
             "frame_slots_released": sum(getattr(mw, "frame_slots_released", 0) for mw in self._frame_middlewares),
             # Ф7 G.5.e (В3): займов реклеймлено после смерти читателя (kill-9 без release).
             "frame_slots_reclaimed": sum(getattr(mw, "frame_slots_reclaimed", 0) for mw in self._frame_middlewares),
+            # LIVE-2: займов освобождено при вытеснении кадра из полной очереди до прочтения
+            # (release-on-evict). Рост = устойчивая перегрузка приёмника (кадры вытесняются);
+            # без этого пути займы утекли бы → перманентная смерть кольца. «Потеря видна».
+            "frame_loans_released_on_evict": sum(
+                getattr(mw, "frame_loans_released_on_evict", 0) for mw in self._frame_middlewares
+            ),
             # F6: число frame-middleware с активным loan-протоколом (SHM-кольца). Публичный
             # агрегат для introspect.memory pool-секции — чтобы не читать приватный
             # _frame_middlewares второй точкой агрегации.
@@ -1120,6 +1285,13 @@ class RouterManager(ChannelRoutingManager):
             # довёл его до state.shm.* тем же путём, что и SHM-счётчики. «Дроп data виден».
             "queue_data_evicted": int(getattr(self.queue_registry, "data_evicted", 0) or 0),
             "queue_system_evict_blocked": int(getattr(self.queue_registry, "system_evict_blocked", 0) or 0),
+            # Task 0.1: потери на канальной двери (полная очередь → put упёрся в timeout).
+            # Сумма по зарегистрированным каналам — та же схема агрегации, что у
+            # frame-middleware выше: канал копит свой int, роутер суммирует по запросу.
+            # Ненулевое значение = перегрузка, которую сегодня не ловит ни один leak-ключ.
+            "channel_put_timeouts": sum(
+                int(getattr(ch, "put_timeout_total", 0) or 0) for ch in self._channel_registry.all()
+            ),
         }
 
         if isinstance(base, dict):
@@ -1212,6 +1384,10 @@ class RouterManager(ChannelRoutingManager):
             else:
                 unresolved.append(target)
         if unresolved:
+            # Task 0.1: счётчик рядом с WARNING — лог throttl'ится/теряется, а
+            # накопительный счётчик переживает и виден в introspect.router_stats.
+            # Рост на старте = окно до регистрации kind-каналов (рабочая гипотеза §8.4).
+            self._inc_stat("kind_fallback_total")
             self._log_warning(
                 f"kind-каналы: не разрезолвлены получатели {unresolved} (kind={kind!r}) "
                 f"— полный fallback в прежний путь, получатели не теряются"

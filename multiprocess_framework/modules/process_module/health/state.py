@@ -155,10 +155,14 @@ class HealthState:
 
         # Честный breaker: кормится КАЖДЫМ report_error (Task 2.2). Делит clock с
         # HealthState, чтобы тесты двигали единое время.
-        self._breaker = breaker if breaker is not None else CircuitBreaker(
-            fail_threshold=_env_int(BREAKER_THRESHOLD_ENV, DEFAULT_FAIL_THRESHOLD),
-            cooldown_sec=_env_float(BREAKER_COOLDOWN_ENV, DEFAULT_COOLDOWN_SEC),
-            clock=clock,
+        self._breaker = (
+            breaker
+            if breaker is not None
+            else CircuitBreaker(
+                fail_threshold=_env_int(BREAKER_THRESHOLD_ENV, DEFAULT_FAIL_THRESHOLD),
+                cooldown_sec=_env_float(BREAKER_COOLDOWN_ENV, DEFAULT_COOLDOWN_SEC),
+                clock=clock,
+            )
         )
         # Владеет ли breaker текущей деградацией: снимаем degraded по восстановлению
         # ТОЛЬКО если её выставил breaker (не затираем чужой явный degraded/failed).
@@ -328,6 +332,18 @@ class HealthState:
             self._dirty = False
             return self._snapshot_locked()
 
+    def mark_dirty(self) -> None:
+        """C-2: заново поднять dirty после провала публикации снятого снапшота.
+
+        take_dirty() сбрасывает ``_dirty`` ДО того, как снапшот реально ушёл в
+        state-дерево (``publish_health``); если ``proxy.set`` упал — снапшот
+        потерян безвозвратно, дерево навсегда останется на последнем удачном
+        значении. Публикатор зовёт этот метод при провале, чтобы следующий такт
+        heartbeat забрал снапшот повторно (ретрай, а не молчаливая потеря).
+        """
+        with self._lock:
+            self._dirty = True
+
     def _snapshot_locked(self) -> dict[str, Any]:
         return {
             HealthField.STATUS: self._status.value,
@@ -462,6 +478,7 @@ def publish_health(state: HealthState | None, proxy: Any, process_name: str) -> 
         return False
 
     published = False
+    any_failed = False
     for field in HEALTH_FIELDS:
         if field not in snap:
             continue
@@ -469,5 +486,12 @@ def publish_health(state: HealthState | None, proxy: Any, process_name: str) -> 
             proxy.set(health_path(process_name, field), snap[field])
             published = True
         except Exception:  # noqa: BLE001 — телеметрия/health не критичны для работы процесса
-            pass
+            # C-2: молчим (health не должен ронять процесс публикацией), но снапшот
+            # НЕ должен потеряться — take_dirty() уже сбросил _dirty=False, поэтому
+            # без mark_dirty() ниже провалившийся снимок ушёл бы в никуда навсегда.
+            any_failed = True
+
+    if any_failed:
+        state.mark_dirty()
+
     return published

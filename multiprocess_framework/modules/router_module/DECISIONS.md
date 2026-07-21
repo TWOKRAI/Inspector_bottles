@@ -127,3 +127,49 @@ fallback с колбэком в router* — отвергнут (reference-cycle 
 Кэш handles снимает основной syscall-налог cross-process (замер — G.5/soak). Тихий slow-path
 исчез: pickle-fallback виден в state. Три пути (`strip_and_write`/`on_send`/`restore_frame`) под
 общим seqlock- и handle-cache-контрактом. Флаги дефолт-OFF, откат = флаг off.
+
+## ADR-RTR-010: release-on-evict — возврат SHM-займа при вытеснении кадра из полной очереди
+
+**Статус:** accepted (2026-07-21, ветка fix/bug-hunt-live-findings)
+
+**Контекст.** Под loan-протоколом (Ф7 G.5+) writer занимает слот кольца с
+`refcount=num_consumers`; release шлёт дочитавший потребитель. Но
+`QueueRegistry.remove_old_if_full` (drop_oldest) вытесняет кадр из полной data-очереди ДО
+прочтения — потребитель его не увидит, release не пришлёт. `reclaim_reader` покрывает только
+МЁРТВОГО читателя. Итог (воспроизведено live 2026-07-21, webcam_sketch + 9 флагов лесенки):
+≥ring_depth вытеснений на старте (lines грузит TEED ~10 с) → free-list owner'а исчерпан
+навсегда, конвейер заморожен, skipped растёт со скоростью FPS. Это открытая fault-инъекция
+G.7 «2.4 slow-consumer», пойманная первым живым запуском
+(docs/audits/2026-07-20_bug-hunt.md §9, LIVE-2).
+
+**Решение.** Вытесняющая сторона (транспорт) отпускает займ вытесненного кадра, доставляя
+владельцу `shm_release(evicted=True)`:
+
+- `QueueRegistry.send_to_queue` получает опциональный колбэк `on_evict(item, process)` —
+  чистый Callable, слой памяти о кадрах НЕ знает (границы слоёв целы).
+- `RouterManager` регистрирует хук под гейтом `_frame_loan_active` (пересчёт при
+  (un)register_frame_middleware); при flags-off хук не навешивается вовсе — поведение
+  бит-в-бит прежнее.
+- `_on_frame_evicted` шлёт владельцу `shm_release` через **system-почту**, а не прямым
+  вызовом: release обязан исполняться на треде message_processor владельца
+  (single-thread-release инвариант пула), а вытеснение идёт на треде-писателе.
+  owner==self → почта в свою же system-очередь; owner≠sender (fan-in) → IPC владельцу.
+- `LoanLedger.release_evicted` — release БЕЗ generation-guard: тикет вытеснения поколения
+  не несёт (сообщение никем не читалось), а пока refcount>0 слот не переиспользуется, так
+  что «прошлого займа» быть не может. refcount>0-guard и dedup-по-reader сохранены.
+  Отдельный счётчик `slots_released_on_evict` → `frame_loans_released_on_evict` в
+  `RouterManager.get_stats()` — потеря видима; рост в steady-state = устойчивая перегрузка
+  приёмника (чинить пропускную способность, не release-контур).
+
+**Альтернативы (отвергнуты).**
+*Owner-side TTL-reclaim* — требует периодического тика на треде message_processor (нет
+инфраструктуры), тюнинг TTL, риск ложного реклейма живого slow-consumer; ленивый GC вместо
+немедленного точечного release. *Прямой `release_slots` из send-треда* — гонка со штатным
+release за lock-free refcount пула.
+
+**Последствия.** Перманентная смерть кольца при перегрузке приёмника устранена; страховкой
+остаётся В1 post-use re-check (занижение refcount безопасно — drift → drop, не порча,
+§8.2 G.5). Потеря почты release покрыта reclaim соседа + В1.
+
+**Reversible:** yes (flags-off = прежнее поведение).
+**Refs:** docs/audits/2026-07-20_bug-hunt.md §9 LIVE-2.

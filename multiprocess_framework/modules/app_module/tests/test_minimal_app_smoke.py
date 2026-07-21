@@ -24,13 +24,21 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 _APP_YAML = _REPO_ROOT / "examples" / "minimal_app" / "app.yaml"
 
 
+def _ends_with(path: str, *tail: str) -> bool:
+    """Оканчивается ли ``path`` сегментами ``tail`` — кросс-платформенно."""
+    return Path(path).parts[-len(tail) :] == tail
+
+
 def test_minimal_app_manifest_and_discovery() -> None:
     m = load_manifest(_APP_YAML)
     assert m.name == "Minimal App"
     assert m.version == 1
-    # discovery-пути резолвнуты в абсолютные от каталога манифеста
-    assert any(p.endswith("minimal_app/plugins") for p in m.discovery.plugin_paths)
-    assert any(p.endswith("minimal_app/services") for p in m.discovery.service_paths)
+    # discovery-пути резолвнуты в абсолютные от каталога манифеста.
+    # Сверяем СЕГМЕНТАМИ пути, а не подстрокой: строковый `endswith("a/b")` завязан
+    # на POSIX-разделитель и на Windows красный всегда (там `a\b`) — тест ловил
+    # разделитель ОС вместо резолва путей.
+    assert any(_ends_with(p, "minimal_app", "plugins") for p in m.discovery.plugin_paths)
+    assert any(_ends_with(p, "minimal_app", "services") for p in m.discovery.service_paths)
 
 
 def test_minimal_app_boots_headless(tmp_path: Path) -> None:

@@ -1016,6 +1016,52 @@ class TestTargetAwareDeliveryFallback(unittest.TestCase):
         self.assertEqual(result.get("status"), "error")
 
 
+class _PartialFakeQueueRegistry:
+    """A-2: send_to_queue доезжает только до имён из ``present`` — остальные
+    моделируют переполненную/отсутствующую очередь получателя (False, без throw)."""
+
+    def __init__(self, present: tuple = ()) -> None:
+        self._present = set(present)
+        self.sent: list = []
+
+    def send_to_queue(self, target, qtype, msg) -> bool:
+        ok = target in self._present
+        if ok:
+            self.sent.append((target, qtype, msg))
+        return ok
+
+
+class TestPartialFanoutA2(unittest.TestCase):
+    """A-2 (bug-hunt 2026-07-20 §5): targets=[A,B,C], доехал только A → раньше
+    delivered>0 давало status='success' без сравнения с числом таргетов. Теперь
+    честный 'partial' + targets_total."""
+
+    def test_partial_delivery_reports_partial_not_success(self):
+        qr = _PartialFakeQueueRegistry(present=("a",))
+        router = RouterManager(manager_name="r_a2_partial", queue_registry=qr)
+        result = router.send({"type": "event", "command": "ev", "targets": ["a", "b", "c"], "queue_type": "data"})
+        self.assertEqual(result.get("status"), "partial")
+        self.assertEqual(result.get("delivered_by_targets"), 1)
+        self.assertEqual(result.get("targets_total"), 3)
+        self.assertEqual(len(qr.sent), 1)
+
+    def test_full_delivery_still_reports_success(self):
+        qr = _PartialFakeQueueRegistry(present=("a", "b", "c"))
+        router = RouterManager(manager_name="r_a2_full", queue_registry=qr)
+        result = router.send({"type": "event", "command": "ev", "targets": ["a", "b", "c"], "queue_type": "data"})
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(result.get("delivered_by_targets"), 3)
+        self.assertEqual(result.get("targets_total"), 3)
+
+    def test_zero_delivery_stays_none_error_not_partial(self):
+        # Ни один таргет не доехал — вызывающий (_do_send) сам формирует "error",
+        # не 'partial' (delivered=0 — это не частичный, а полный отказ).
+        qr = _PartialFakeQueueRegistry(present=())
+        router = RouterManager(manager_name="r_a2_zero", queue_registry=qr)
+        result = router.send({"type": "event", "command": "ev", "targets": ["a", "b"], "queue_type": "data"})
+        self.assertEqual(result.get("status"), "error")
+
+
 class _NoQueueRegistry:
     """queue_registry без очередей для целевых имён (мост push→канал, Ф1.1b).
 
@@ -1550,7 +1596,10 @@ class TestDispatchCommand(unittest.TestCase):
         msg = {"type": "command", "command": "worker.create", "request_id": "c1"}
         router._dispatch_command(msg)
         cm.handle_command.assert_called_once_with(msg)
-        router.reply_to_request.assert_called_once_with(msg, {"ok": 1})
+        # success передаётся ЯВНО и выводится из результата: раньше он оставался
+        # True по умолчанию, и конверт рапортовал успех поверх «No handler» (см.
+        # test_reply_success_honesty.py). Здесь результат успешный → True.
+        router.reply_to_request.assert_called_once_with(msg, {"ok": 1}, success=True)
         router.event_dispatcher.dispatch.assert_not_called()
 
     def test_manages_own_reply_skips_auto_reply(self):

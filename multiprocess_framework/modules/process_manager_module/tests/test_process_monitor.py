@@ -8,6 +8,7 @@
 - Ошибка в цикле мониторинга
 """
 
+import threading
 import time
 from unittest.mock import MagicMock
 from multiprocessing import Event
@@ -1232,3 +1233,65 @@ class TestSupervisionSnapshot:
     def test_snapshot_empty_when_nothing_tracked(self) -> None:
         monitor = ProcessMonitor(_make_mock_process_manager())
         assert monitor.get_supervision_snapshot() == {}
+
+
+class TestPreviousStatesConcurrency:
+    """A-11: previous_states пишется на state_monitor-потоке (_check_heartbeats и
+    др., см. _run_iteration) и читается на message_processor-потоке через IPC-
+    команды ``system.stats``/``supervision.status`` (get_stats/
+    get_supervision_snapshot). Без снапшота list comprehension по .items() —
+    настоящий байткодовый for-loop, ловящий RuntimeError "dictionary changed
+    size during iteration" при конкурентной вставке из другого потока — падение
+    роняло бы саму IPC-команду. Регресс-гард: конкурентная запись во время
+    чтения не должна бросать исключение.
+    """
+
+    # Писатель ограничен И по числу вставок, И по стене времени — иначе тесная
+    # петля без sleep() в одном потоке "выигрывает" GIL у читателя (main thread)
+    # и previous_states успевает разрастись до миллионов ключей за секунды,
+    # что делает O(n) списковые comprehension'ы в get_stats/snapshot медленными
+    # и тест — нестабильно долгим (а не про то, что мы проверяем).
+    _WRITER_MAX_INSERTS = 20_000
+    _WRITER_MAX_SECONDS = 2.0
+
+    @classmethod
+    def _start_writer(cls, monitor: "ProcessMonitor", stop: threading.Event) -> threading.Thread:
+        def writer() -> None:
+            i = 2000
+            deadline = time.monotonic() + cls._WRITER_MAX_SECONDS
+            while not stop.is_set() and i < 2000 + cls._WRITER_MAX_INSERTS and time.monotonic() < deadline:
+                monitor.previous_states[f"proc_{i}"] = {"status": "running"}
+                i += 1
+            stop.set()
+
+        t = threading.Thread(target=writer, daemon=True)
+        t.start()
+        return t
+
+    def test_get_stats_survives_concurrent_previous_states_write(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor.previous_states = {f"proc_{i}": {"status": "running"} for i in range(2000)}
+
+        stop = threading.Event()
+        writer = self._start_writer(monitor, stop)
+        try:
+            while not stop.is_set():
+                monitor.get_stats()  # не должно бросить RuntimeError
+        finally:
+            stop.set()
+            writer.join(timeout=self._WRITER_MAX_SECONDS + 2.0)
+
+    def test_get_supervision_snapshot_survives_concurrent_previous_states_write(self) -> None:
+        mock_pm = _make_mock_process_manager()
+        monitor = ProcessMonitor(mock_pm)
+        monitor.previous_states = {f"proc_{i}": {"status": "running"} for i in range(2000)}
+
+        stop = threading.Event()
+        writer = self._start_writer(monitor, stop)
+        try:
+            while not stop.is_set():
+                monitor.get_supervision_snapshot()  # не должно бросить RuntimeError
+        finally:
+            stop.set()
+            writer.join(timeout=self._WRITER_MAX_SECONDS + 2.0)

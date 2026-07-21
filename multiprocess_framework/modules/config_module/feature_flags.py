@@ -194,6 +194,14 @@ _FLAG_LIST: Tuple[FeatureFlag, ...] = (
         doc="Fencing-токены сообщений (защита от stale после switch). Default ON.",
     ),
     FeatureFlag(
+        "FW_STATE_TOPOLOGY_GATE",
+        default=True,
+        doc=(
+            "Гейт записей в processes.<name>.* по текущей топологии (защита от "
+            "воскрешения узла снятого процесса поздним state.set). Default ON."
+        ),
+    ),
+    FeatureFlag(
         "FW_HEALTH_RESTART",
         default=False,
         doc="Рестарт процесса по деградации health-статуса (опц., поверх авто-рестарта).",

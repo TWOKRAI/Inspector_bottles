@@ -158,15 +158,36 @@ class HikvisionCamera:
                 self._camera = None
                 raise
 
-            # GigE: оптимальный размер пакета
-            if st_dev.nTLayerType == MV_GIGE_DEVICE:
-                n_pkt = self._camera.MV_CC_GetOptimalPacketSize()
-                if int(n_pkt) > 0:
-                    self._camera.MV_CC_SetIntValue("GevSCPSPacketSize", n_pkt)
+            try:
+                # GigE: оптимальный размер пакета
+                if st_dev.nTLayerType == MV_GIGE_DEVICE:
+                    n_pkt = self._camera.MV_CC_GetOptimalPacketSize()
+                    if int(n_pkt) > 0:
+                        self._camera.MV_CC_SetIntValue("GevSCPSPacketSize", n_pkt)
 
-            # Базовые настройки: без триггера, с контролем fps
-            self._camera.MV_CC_SetEnumValue("TriggerMode", MV_TRIGGER_MODE_OFF)
-            self._camera.MV_CC_SetBoolValue("AcquisitionFrameRateEnable", True)
+                # Базовые настройки: без триггера, с контролем fps
+                self._camera.MV_CC_SetEnumValue("TriggerMode", MV_TRIGGER_MODE_OFF)
+                self._camera.MV_CC_SetBoolValue("AcquisitionFrameRateEnable", True)
+            except Exception:
+                # A-3 (bug-hunt 2026-07-20): устройство УЖЕ открыто эксклюзивно
+                # (OpenDevice выше отработал успешно) — провал на этих шагах
+                # раньше не освобождал handle: cleanup стоял только вокруг
+                # OpenDevice, self._camera не обнулялся. Следующий open()
+                # создавал НОВЫЙ handle поверх уже занятого устройства — ретраи
+                # копили неустранимые эксклюзивные handle (камера заперта до
+                # перезапуска процесса). Симметрично ветке выше: закрываем
+                # устройство и уничтожаем handle перед тем, как отдать
+                # исключение наверх.
+                try:
+                    self._camera.MV_CC_CloseDevice()
+                except Exception:
+                    pass
+                try:
+                    self._camera.MV_CC_DestroyHandle()
+                except Exception:
+                    pass
+                self._camera = None
+                raise
 
             self._state = CameraState.OPEN
             self._on_status("Камера открыта успешно")

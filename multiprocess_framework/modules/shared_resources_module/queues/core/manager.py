@@ -184,13 +184,27 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         queue_type: str,
         message: Any,
         timeout: float = 0.0,
+        on_evict: Optional[Any] = None,
     ) -> bool:
+        """Положить сообщение в очередь процесса (с QoS-вытеснением при переполнении).
+
+        ``on_evict`` (LIVE-2, опционально): колбэк ``(evicted_item, process_name)``,
+        вызываемый КОГДА drop_oldest реально вытеснил элемент (data-очередь полна). Нужен
+        владельцу кадрового кольца, чтобы отпустить займ вытесненного кадра (иначе free-list
+        утекает — см. RouterManager._on_frame_evicted). Слой памяти о кадрах НЕ знает —
+        колбэк это чистый Callable, регистрирует его тот, кто про кадры знает (router). На
+        flags-off пути (on_evict=None) поведение бит-в-бит прежнее."""
         queue = self.get_queue(process_name, queue_type)
         if queue is None:
             self._log_warning(f"Queue '{queue_type}' not found for '{process_name}'")
             return False
         try:
-            self.remove_old_if_full(queue, queue_type)
+            evicted = self.remove_old_if_full(queue, queue_type)
+            if evicted is not None and on_evict is not None:
+                try:
+                    on_evict(evicted, process_name)
+                except Exception as e:  # noqa: BLE001 — хук наблюдаемости не роняет доставку
+                    self._log_error(f"send_to_queue on_evict hook failed: {e}")
             if timeout > 0:
                 queue.put(message, timeout=timeout)
             else:
@@ -300,7 +314,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             self._log_error(f"clear_queue() failed: {e}")
             self._stats["errors"] += 1
 
-    def remove_old_if_full(self, queue: Queue, queue_type: Optional[str] = None) -> None:
+    def remove_old_if_full(self, queue: Queue, queue_type: Optional[str] = None) -> Optional[Any]:
         """Освободить место в полной очереди перед put (QoS-профиль, Ф7 G.4.a).
 
         Решение «ронять или нет» берётся из ЕДИНОГО QoS-профиля класса груза
@@ -318,9 +332,15 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         ``queue_type == "system"`` (бит-в-бит откат); счётчик ``data_evicted`` и его
         throttled-WARNING — всегда-on телеметрия (по образцу G.3, поведение drop не
         меняют). Для system/data вердикт профиля идентичен хардкоду — флип безопасен.
+
+        Returns:
+            вытесненный элемент (drop_oldest сработал) или ``None`` (очередь не полна,
+            never-drop заблокировал вытеснение, либо очередь опустела гонкой). Вызывающий
+            (``send_to_queue``) отдаёт его в ``on_evict``-хук — LIVE-2: у вытесненного
+            кадра есть незакрытый займ SHM-кольца, который иначе не отпустит никто.
         """
         if not queue.full():
-            return
+            return None
         # process_data.QUEUE_SYSTEM == "system" — каноническое имя system-очереди.
         if self._is_never_drop(queue_type):
             self._stats["system_evict_blocked"] += 1
@@ -332,11 +352,11 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                     f"(system_evict_blocked={self._stats['system_evict_blocked']}); "
                     "system-команда может быть потеряна при put"
                 )
-            return
+            return None
         try:
-            queue.get_nowait()
+            evicted = queue.get_nowait()
         except Empty:
-            return
+            return None
         # drop_oldest сработал — громкий счётчик (раньше молчал) + throttled WARNING.
         self._stats["data_evicted"] += 1
         now = time.monotonic()
@@ -347,6 +367,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
                 f"(drop_oldest; data_evicted={self._stats['data_evicted']}); "
                 "устойчивая перегрузка = теряем кадры, чинить пропускную способность"
             )
+        return evicted
 
     def _is_never_drop(self, queue_type: Optional[str]) -> bool:
         """Ронять ли груз данного ``queue_type`` при переполнении (Ф7 G.4.a).

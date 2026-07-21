@@ -106,10 +106,7 @@ class WorkerRegistry(IWorkerRegistry):
     def get_by_type(self, worker_type: WorkerType) -> List[str]:
         """Получить имена воркеров определённого типа."""
         with self._lock:
-            return [
-                name for name, info in self._workers.items()
-                if info.get("worker_type") == worker_type
-            ]
+            return [name for name, info in self._workers.items() if info.get("worker_type") == worker_type]
 
     # ---- Обновление статуса ----
 

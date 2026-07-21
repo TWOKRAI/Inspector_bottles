@@ -3,6 +3,7 @@
 
 Реэкспортирует только реально используемые классы, структуры и константы.
 """
+
 from __future__ import annotations
 
 from .bindings import MvCamera, SDK_AVAILABLE

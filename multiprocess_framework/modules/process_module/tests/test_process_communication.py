@@ -122,6 +122,26 @@ class TestSendToProcessRoutesThroughRouter:
         assert qr.sent[0][1] == "system"
 
 
+class TestSystemEventsChannelNotRegistered:
+    """LIVE-1: канал system_events БОЛЬШЕ не регистрируется (осиротевший — потребителя
+    нет → EventManager.emit_event набивал очередь → рост errors PM ~13-57/с). emit_event
+    гейтит отправку на наличие канала, поэтому его отсутствие само отключает рассылку."""
+
+    def test_register_router_channels_skips_system_events(self):
+        from queue import Queue as _TQ
+
+        registered: list = []
+        router = Mock()
+        router.get_channel = Mock(return_value=None)
+        router.register_channel = Mock(side_effect=lambda ch: registered.append(ch.name))
+        comm = ProcessCommunication("proc1", {"system": _TQ(), "data": _TQ()}, router, shared_resources=None)
+        comm.register_router_channels()
+        # Свои per-qtype и local каналы регистрируются, а system_events — нет.
+        assert "proc1_system" in registered
+        assert "proc1_data" in registered
+        assert "system_events" not in registered
+
+
 class TestProcessCommunicationReceive:
     def test_receive_empty(self):
         router = make_mock_router()

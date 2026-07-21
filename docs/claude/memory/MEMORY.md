@@ -140,3 +140,9 @@
 - [backend_ctl ultra-ревью 2026-07](project_backend_ctl_ultra_review.md) — 4.5→7.5→8.0/10; крит-баги ЗАКРЫТЫ hardening'ом 2026-07-20, открытые резидуалы — в plans/backend-ctl-hardening.md
 - [backend_ctl дыры из живой работы](project_backend_ctl_gaps_2026_07.md) — introspect.memory НЕ отдаёт RSS (psutil по pid из introspect_status); D.4 построил отменённую на GATE G3 задачу 1.8; периферия обогнала доказательства
 - [Фичи инструмента до доказательства](feedback_tool_features_before_validation.md) — довести минимум → прогнать реальную задачу → потом фичи; иначе ultra-ревью 4.5/10 и 36 задач возврата долга
+- [Live verification + fixes 2026-07-21](project_live_verification_2026_07_21.md) — 17 находок починено за день (fix/bug-hunt-live-findings, ADR-RTR-010); A-10 опровергнута; next: webcam-репро LIVE-2 + soak + LIVE-3
+- [Kind-channels: мёртвая ветка вытеснения](project_kind_channels_dead_evict_branch.md) — при FW_USE_KIND_CHANNELS кадры мимо QueueRegistry: on_evict/data_evicted мертвы, QueueChannel.send блокирует 1с вместо drop_oldest
+- [backend_ctl signal integrity](project_backend_ctl_signal_integrity.md) — ложный success/timeout/ноль: сигнал не связан с реальностью; 14 красных → 2 (2026-07-21)
+- [backend_ctl минует receive-мидлварь](project_backend_ctl_socket_bypasses_mw.md) — сокет-канал не в опросе receive(): fence/контракты команд драйвера не судят
+- [Fencing-тест требует гонки](project_fencing_test_race.md) — механизм исправен (bumped=True), стейла к моменту бампа нет; ghost-гонку закрыл ADR-SS-019
+- [Гейт топологии для state](project_state_topology_gate.md) — поздний state.set воскрешал снятый процесс; FW_STATE_TOPOLOGY_GATE, приёмка парой ON/OFF
