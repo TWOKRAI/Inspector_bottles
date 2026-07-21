@@ -149,7 +149,16 @@ def test_switch_state_matches_os(switch_backend) -> None:
         rec = data.get("record") if isinstance(data, dict) else None
         if isinstance(rec, dict):
             records.append(str(rec.get("message", "")))
-    silent_merge = [m for m in records if "state.merge" in m or "Поле 'data' обязательно" in m]
+    # Исключаем штатный лог fence-дропа ("fence: отброшено от устаревшего инстанса
+    # 'camera_0' inc=0 (command='state.merge')", builtin_commands.py:1705-1709):
+    # подстрока "state.merge" в нём сидит внутри command=, а сам дроп легитимен —
+    # camera_0 есть в обоих рецептах, PM бампает incarnation при switch, старый
+    # инстанс продолжает слать до своей смерти. Без исключения фильтр ловит эту
+    # штатную строку под нагрузкой полного прогона (окно гонки шире, дроп успевает
+    # случиться) и путает её с настоящим багом Ж-3 (тихий WARNING с потерянным path).
+    silent_merge = [
+        m for m in records if not m.startswith("fence:") and ("state.merge" in m or "Поле 'data' обязательно" in m)
+    ]
     assert not silent_merge, f"тихий state.merge WARNING на switch (Ж-3 не починен): {silent_merge}"
 
 
