@@ -11,13 +11,27 @@
   - ``publish=None`` доезжает как валидная под-секция (сентинел ≠ None);
   - ``telemetry_set`` строит верные args для publisher- и throttle-плоскостей;
   - результат применения (``applied`` / охват) прокидывается наверх (``_leaf_result``).
+
+Плюс провенанс нулей ``telemetry_snapshot``/``telemetry_history`` (BCTL-ADR-007: сигнал
+без доказанной способности к ненулю не считается подключённым):
+
+  - ``ingest_active``/``ingested_total`` разводят «нет данных» и «нет подписки»
+    (unit — fake-транспорт; live-плечо ненуля — ``TestIngestActiveLive`` ниже);
+  - ``tracked`` разводит «путь не трекается» и «данных пока нет» (unit, пара).
 """
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Tuple
 
+import pytest
+
 from backend_ctl.driver import BackendDriver
+from backend_ctl.harness import BackendHarness
+from backend_ctl.tests.conftest import wire_line
+
+_PORT = 8789  # уникальный порт этого модуля (свободен на момент написания, см. AGENTS.md)
 
 
 def _recorder(monkeypatch, response: Dict[str, Any] | None = None) -> Tuple[BackendDriver, List[tuple]]:
@@ -31,6 +45,37 @@ def _recorder(monkeypatch, response: Dict[str, Any] | None = None) -> Tuple[Back
 
     monkeypatch.setattr(d, "send_command", fake_send)
     return d, calls
+
+
+def _delta(path: str, new_value: Any, old_value: Any = None) -> Dict[str, Any]:
+    """Дельта в проводной форме Delta.to_dict() (тот же формат, что у fake-конвертов driver'а)."""
+    return {
+        "path": path,
+        "old_value": old_value,
+        "new_value": new_value,
+        "source": "test",
+        "timestamp": 0.0,
+        "transaction_id": "t",
+        "revision": 0,
+    }
+
+
+def _state_changed(*deltas: Dict[str, Any]) -> bytes:
+    return wire_line({"command": "state.changed", "data": {"deltas": list(deltas)}})
+
+
+def _wait_ingested(drv: BackendDriver, deadline: float) -> Dict[str, Any]:
+    """Дождаться, пока read-model реально получит дельты (``ingested_total > 0``).
+
+    Строже, чем ждать ``count > 0``: считает и удаления узлов, не только текущие значения.
+    """
+    snap = drv.telemetry_snapshot()
+    while time.time() < deadline:
+        snap = drv.telemetry_snapshot()
+        if snap.get("ingested_total", 0) > 0:
+            return snap
+        time.sleep(0.2)
+    return snap
 
 
 class TestTelemetryReconfigureAddressing:
@@ -211,3 +256,106 @@ class TestTelemetrySet:
         d.telemetry_set("all", "fps", enabled=False)
         assert calls[0][0] == "ProcessManager"
         assert calls[0][1] == "telemetry.broadcast"
+
+
+class TestTelemetryIngestActiveUnit:
+    """``ingest_active``/``ingested_total`` на fake-транспорте — плечо OFF и механика счётчика.
+
+    Плечо ON (доказанный ненуль под живой подпиской) — только live, см.
+    ``TestIngestActiveLive`` ниже (BCTL-ADR-007: сигнал без live-доказательства ненуля
+    не считается подключённым).
+    """
+
+    def test_no_subscription_is_inactive_and_zero(self) -> None:
+        d = BackendDriver()
+        snap = d.telemetry_snapshot()
+        assert snap["count"] == 0
+        assert snap["ingest_active"] is False
+        assert snap["ingested_total"] == 0
+
+    def test_state_subscribe_intent_marks_active(self, monkeypatch) -> None:
+        """Durable-намерение регистрируется реестром сразу при успешном ответе — без
+        реального сервера (``send_command`` замокан). ``ingest_active`` читает РЕЕСТР
+        намерений, а не факт прихода дельт — за дельты отвечает ``ingested_total``."""
+        d, _calls = _recorder(monkeypatch, response={"success": True, "result": {"status": "subscribed"}})
+        d.state_subscribe("processes.**")
+        assert d.telemetry_snapshot()["ingest_active"] is True
+
+    def test_state_unsubscribe_clears_active(self, monkeypatch) -> None:
+        d, _calls = _recorder(monkeypatch, response={"success": True, "result": {"status": "subscribed"}})
+        d.state_subscribe("processes.**")
+        d.state_unsubscribe("processes.**")
+        assert d.telemetry_snapshot()["ingest_active"] is False
+
+    def test_ingested_total_counts_deltas_including_deletions(self) -> None:
+        """Счётчик — «сколько дельт прошло через ingest», а не «сколько путей живо
+        сейчас»: удаление узла тоже проходит через ingest и должно быть учтено."""
+        d = BackendDriver()
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", 1.0)))
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", 2.0)))
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", "__MISSING__", old_value=2.0)))
+        snap = d.telemetry_snapshot()
+        assert snap["ingested_total"] == 3
+        assert snap["count"] == 0  # путь удалён — снимок пуст, но дельты были
+
+
+class TestTelemetryHistoryTracked:
+    """``tracked`` разводит «путь вне DEFAULT_TRACKED_SUFFIXES» и «данных пока нет» (пара)."""
+
+    def test_untracked_path_is_not_tracked(self) -> None:
+        d = BackendDriver()
+        hist = d.telemetry_history("совершенно.не.трекаемый.путь")
+        assert hist["tracked"] is False
+        assert hist["count"] == 0
+
+    def test_tracked_suffix_reports_tracked_true_even_when_empty(self) -> None:
+        """Путь трекается (суффикс ``.state.fps``), но точек ещё не было — count=0
+        не значит то же самое, что untracked: ``tracked`` их различает."""
+        d = BackendDriver()
+        hist = d.telemetry_history("processes.cam.state.fps")
+        assert hist["tracked"] is True
+        assert hist["count"] == 0
+
+    def test_tracked_path_with_points_still_tracked(self) -> None:
+        d = BackendDriver()
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.fps", 25.0)))
+        hist = d.telemetry_history("processes.cam.state.fps")
+        assert hist["tracked"] is True
+        assert hist["count"] == 1
+
+    def test_untracked_metric_path_status(self) -> None:
+        """``status`` не входит в DEFAULT_TRACKED_SUFFIXES — регресс существующего
+        поведения (test_driver.py::test_history_untracked_metric_empty), теперь с явным
+        провенансом ``tracked=False`` вместо голого count=0."""
+        d = BackendDriver()
+        d.dispatch_raw(_state_changed(_delta("processes.cam.state.status", "running")))
+        hist = d.telemetry_history("processes.cam.state.status")
+        assert hist["tracked"] is False
+        assert hist["count"] == 0
+
+
+@pytest.mark.harness_smoke
+def test_ingest_active_and_ingested_total_live() -> None:
+    """Live-плечо ON пары BCTL-ADR-007: без подписки ingest_active=false — это самая
+    дешёвая, детерминированная половина (свежий driver не может иметь намерений),
+    поэтому проверяется на том же харнессе, что и доказанный ненуль. После
+    watch_like_gui на реальном бэкенде — ingest_active=true И ingested_total>0
+    (read-model физически получил дельты, а не просто «подписка объявлена»).
+    """
+    harness = BackendHarness(with_base=True, port=_PORT)
+    try:
+        drv = harness.start()
+
+        off = drv.telemetry_snapshot()
+        assert off["count"] == 0
+        assert off["ingest_active"] is False
+        assert off["ingested_total"] == 0
+
+        res = drv.watch_like_gui()
+        assert res.get("success") is True
+
+        on = _wait_ingested(drv, time.time() + 15.0)
+        assert on["ingest_active"] is True
+        assert on["ingested_total"] > 0, "read-model должен реально получить дельты под watch_like_gui"
+    finally:
+        harness.stop()

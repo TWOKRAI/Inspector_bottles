@@ -30,7 +30,10 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from multiprocess_framework.modules.telemetry_readmodel_module import TelemetryReadModel
+from multiprocess_framework.modules.telemetry_readmodel_module import (
+    DEFAULT_TRACKED_SUFFIXES,
+    TelemetryReadModel,
+)
 from multiprocess_framework.modules.message_module import (
     build_command_message,
     build_system_command_message,
@@ -208,6 +211,9 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         # одновременную запись+итерацию).
         self._telemetry_model = TelemetryReadModel()
         self._telemetry_lock = threading.Lock()
+        # Провенанс нуля: count=0 у snapshot/history сам по себе не отличает «дельт не
+        # было» от «подписки не было». Счётчик — под тем же локом, что и ingest.
+        self._telemetry_ingested_total = 0
         self.subscribe(self._ingest_state_changed)
 
         # commit-confirmed регистры (D.5): армированные, но ещё не подтверждённые
@@ -1059,7 +1065,9 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         распознаётся по ``new_value == "__MISSING__"`` (сериализация MISSING).
 
         Ингест под ``_telemetry_lock`` — читатели snapshot/history зовутся из другого
-        потока и итерируют те же dict/deque.
+        потока и итерируют те же dict/deque. Заодно растёт ``_telemetry_ingested_total``
+        (тот же лок) — провенанс нуля snapshot/history: «дельт не было» и «подписки не
+        было» перестают быть одним и тем же нулём.
         """
         deltas = iter_state_deltas(msg)
         if not deltas:
@@ -1076,6 +1084,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
                     self._telemetry_model.ingest(delta["path"], None, deleted=True)
                 else:
                     self._telemetry_model.ingest(delta["path"], new_value)
+                self._telemetry_ingested_total += 1
 
     @staticmethod
     def _telemetry_key(path: str) -> Dict[str, Optional[str]]:
@@ -1104,6 +1113,28 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """
         return path == metric or path.endswith("." + metric)
 
+    def _telemetry_ingest_active(self) -> bool:
+        """Есть ли живое durable-намерение ``state.subscribe`` (см. :meth:`export_subscriptions`).
+
+        Реестр подписок уже ведёт учёт durable-намерений — здесь только проверка «есть
+        ли среди них ``state.subscribe``», без нового механизма учёта. Не гарантирует,
+        что паттерн покрывает ``processes.**`` (а значит и то, что read-model реально
+        наполняется) — это факт «подписка идёт», а не факт «поток ненулевой»; за сам
+        поток отвечает ``_telemetry_ingested_total``.
+        """
+        return any(intent.get("command") == "state.subscribe" for intent in self.export_subscriptions())
+
+    @staticmethod
+    def _telemetry_is_tracked(path: str) -> bool:
+        """Путь входит в трекаемые суффиксы read-model (``DEFAULT_TRACKED_SUFFIXES``).
+
+        Зеркалит критерий отбора истории ``TelemetryReadModel`` (суффиксное совпадение),
+        не залезая внутрь самого read-model (наружу он суффиксы не отдаёт). Путь вне
+        набора не имеет истории по устройству — пустой результат для него норма, а не
+        поломка, и агенту нужно это отличать от «подписки нет»/«данных нет».
+        """
+        return any(path.endswith(suffix) for suffix in DEFAULT_TRACKED_SUFFIXES)
+
     def telemetry_snapshot(
         self,
         process: Optional[str] = None,
@@ -1123,12 +1154,17 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         Returns:
             ``{"success": True, "process": ..., "metric": ..., "count": N,
-            "metrics": {path: {"value": v, "process": p, "worker": w}}}``. Пустой
-            read-model (не было дельт) → ``count=0`` (не ошибка).
+            "metrics": {path: {"value": v, "process": p, "worker": w}},
+            "ingest_active": bool, "ingested_total": N}``. Пустой read-model
+            (``count=0``) сам по себе не говорит, ПОЧЕМУ пусто — ``ingest_active``
+            и ``ingested_total`` разводят «нет данных» / «нет подписки»: без
+            подписки ``ingest_active=False``; под активной подпиской, но пока без
+            дельт — ``ingest_active=True, ingested_total=0``.
         """
         prefix = f"processes.{process}" if process else ""
         with self._telemetry_lock:
             snap = self._telemetry_model.snapshot(prefix)
+            ingested_total = self._telemetry_ingested_total
         metrics: Dict[str, Any] = {}
         for path, value in snap.items():
             if metric is not None and not self._telemetry_matches_metric(path, metric):
@@ -1140,6 +1176,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             "metric": metric,
             "count": len(metrics),
             "metrics": metrics,
+            "ingest_active": self._telemetry_ingest_active(),
+            "ingested_total": ingested_total,
         }
 
     def telemetry_history(
@@ -1159,8 +1197,12 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         Returns:
             ``{"success": True, "path": ..., "process": ..., "worker": ...,
-            "count": N, "points": [[ts, value], ...]}`` в хронологическом порядке.
-            Нет буфера (путь не трекается / нет данных) → ``count=0``.
+            "count": N, "points": [[ts, value], ...], "tracked": bool,
+            "ingest_active": bool}`` в хронологическом порядке. ``count=0`` сам по
+            себе не говорит, ПОЧЕМУ пусто: ``tracked=False`` — путь вне
+            ``DEFAULT_TRACKED_SUFFIXES``, истории для него не бывает по устройству
+            (норма, не поломка); ``tracked=True`` при пустом буфере — путь трекается,
+            но точек ещё/уже нет (смотри ``ingest_active`` — была ли вообще подписка).
         """
         with self._telemetry_lock:
             points = self._telemetry_model.history(path)
@@ -1175,6 +1217,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             **self._telemetry_key(path),
             "count": len(points),
             "points": [[ts, val] for ts, val in points],
+            "tracked": self._telemetry_is_tracked(path),
+            "ingest_active": self._telemetry_ingest_active(),
         }
 
     # ---- system_overview (B.3): «один вызов = вся картина» ----
