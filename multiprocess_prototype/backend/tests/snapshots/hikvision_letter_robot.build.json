@@ -146,7 +146,7 @@
           "config": {
             "chain_targets": [],
             "plugins": [],
-            "priority": null
+            "priority": "normal"
           },
           "state": {
             "error": null,
