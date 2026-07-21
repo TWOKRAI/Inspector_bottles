@@ -467,7 +467,15 @@ class ProcessMonitor:
                     self._handle_state_change(pname, prev, cur)
                     self.previous_states[pname] = cur.copy()
             cur_names = set(all_states.keys())
-            for pname in set(self.previous_states.keys()) - cur_names:
+            # A-11 (защитный снапшот): previous_states пишется из message_processor
+            # (_on_heartbeat_received) параллельно этой (state_monitor) итерации.
+            # dict(...) — атомарная C-level копия под GIL, а не байткодовый
+            # for-loop — не подвержена RuntimeError "dictionary changed size
+            # during iteration" даже без снапшота (см. get_stats ниже, где та же
+            # защита УЖЕ обязательна), но снапшот делает безопасность явной и не
+            # зависит от деталей реализации set()/dict().
+            previous_snapshot = dict(self.previous_states)
+            for pname in set(previous_snapshot.keys()) - cur_names:
                 self.process._log_info(f"Process removed: {pname}")
                 self.previous_states.pop(pname, None)
                 self._first_seen.pop(pname, None)
@@ -1181,19 +1189,26 @@ class ProcessMonitor:
     # ----------------------------------------------------------------
 
     def get_stats(self) -> dict[str, Any]:
+        # A-11: этот метод вызывается по IPC-команде ``system.stats`` на потоке
+        # message_processor, ПОКА state_monitor-поток параллельно пишет в
+        # previous_states (_check_heartbeats/_handle_dead_process и т.д., см.
+        # _run_iteration). List comprehension ниже — настоящий байткодовый
+        # for-loop по .items(): в отличие от set(dict.keys()) (см. _run_iteration),
+        # он ПРОХОДИТ через диспетчер байткода и ловит RuntimeError "dictionary
+        # changed size during iteration" при конкурентной вставке из другого
+        # потока. dict(...) — атомарная копия под GIL, снимает гонку.
+        previous_snapshot = dict(self.previous_states)
         return {
             "monitoring": self._monitoring,
-            "tracked_processes": len(self.previous_states),
+            "tracked_processes": len(previous_snapshot),
             "poll_interval": self.poll_interval,
             "heartbeat_timeout": self.heartbeat_timeout,
             "restart_policy": self.restart_policy.model_dump(),
             "last_heartbeats": {name: round(time.time() - ts, 1) for name, ts in self._last_heartbeat.items()},
             "restart_counts": {name: len(marks) for name, marks in self._restart_history.items()},
-            "crashed_processes": [n for n, st in self.previous_states.items() if st.get("status") == "crashed"],
-            "unresponsive_processes": [
-                n for n, st in self.previous_states.items() if st.get("status") == "unresponsive"
-            ],
-            "failed_processes": [n for n, st in self.previous_states.items() if st.get("status") == "failed"],
+            "crashed_processes": [n for n, st in previous_snapshot.items() if st.get("status") == "crashed"],
+            "unresponsive_processes": [n for n, st in previous_snapshot.items() if st.get("status") == "unresponsive"],
+            "failed_processes": [n for n, st in previous_snapshot.items() if st.get("status") == "failed"],
         }
 
     def get_supervision_snapshot(self) -> dict[str, dict[str, Any]]:
@@ -1205,7 +1220,11 @@ class ProcessMonitor:
         ``previous_states``/``_restart_history`` (без новых опросов ОС).
         """
         out: dict[str, dict[str, Any]] = {}
-        for name, st in self.previous_states.items():
+        # A-11: тот же снапшот, что и в get_stats — вызывается по IPC-команде
+        # ``supervision.status`` на message_processor-потоке, пока state_monitor
+        # параллельно пишет в previous_states.
+        previous_snapshot = dict(self.previous_states)
+        for name, st in previous_snapshot.items():
             out[name] = {
                 "status": st.get("status"),
                 "last_exit": st.get("exitcode"),

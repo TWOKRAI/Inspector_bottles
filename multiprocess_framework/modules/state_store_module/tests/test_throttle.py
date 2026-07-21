@@ -22,6 +22,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from unittest.mock import patch
 
 
@@ -768,6 +770,85 @@ class TestLazyPrune:
         # Без фикса _pending дорос бы до n_paths; lazy-prune ограничил рост.
         assert len(mw._pending) <= _LAZY_PRUNE_SIZE_THRESHOLD
         assert 0 < len(mw._pending) < n_paths
+
+
+# ---------------------------------------------------------------------------
+# A-12: _timing_lock — before_set/before_merge зовутся из ДВУХ реальных потоков
+# (ProcessMonitor.state_monitor напрямую + обычный message_processor через
+# StateStoreManager IPC), а не из одного, как раньше документировал класс.
+# Регресс-гард: конкурентная запись из двух потоков, достаточная для срабатывания
+# _maybe_lazy_prune (>1000 путей — единственное место с настоящим байткодовым
+# for-loop по .items()), не должна ронять поток RuntimeError'ом.
+# ---------------------------------------------------------------------------
+
+
+class TestTimingLockThreadSafety:
+    def test_concurrent_before_set_from_two_threads_does_not_raise(self):
+        """Два потока хаммерят before_set уникальными путями — без _timing_lock
+        lazy-prune при пересечении порога ловил бы RuntimeError "dictionary
+        changed size during iteration"."""
+        mw = ThrottleMiddleware({"**.state.fps": 0.0001})
+
+        errors: list[Exception] = []
+        stop = threading.Event()
+
+        def hammer(prefix: str) -> None:
+            i = 0
+            try:
+                while not stop.is_set():
+                    mw.before_set(f"{prefix}.{i}.state.fps", i, SOURCE, {})
+                    i += 1
+            except Exception as exc:  # pragma: no cover - фиксируем для assert ниже
+                errors.append(exc)
+
+        threads = [threading.Thread(target=hammer, args=(f"cam{n}",)) for n in range(4)]
+        for t in threads:
+            t.start()
+        time.sleep(0.5)
+        stop.set()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        assert errors == []
+        # Санити: реально дошли до объёма, где включается lazy-prune.
+        assert max(len(mw._last_pass), len(mw._pending)) > 0
+
+    def test_concurrent_prune_and_before_set_does_not_raise(self):
+        """prune() (обычно по state.delete) параллельно с before_set другого пути —
+        оба трогают _last_pass/_pending под одним _timing_lock."""
+        mw = ThrottleMiddleware({"**.state.fps": 0.0001})
+        for i in range(50):
+            mw.before_set(f"processes.cam.{i}.state.fps", i, SOURCE, {})
+
+        errors: list[Exception] = []
+        stop = threading.Event()
+
+        def writer() -> None:
+            i = 1000
+            try:
+                while not stop.is_set():
+                    mw.before_set(f"processes.other.{i}.state.fps", i, SOURCE, {})
+                    i += 1
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+
+        def pruner() -> None:
+            try:
+                while not stop.is_set():
+                    mw.prune("processes.cam")
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+
+        t_writer = threading.Thread(target=writer)
+        t_pruner = threading.Thread(target=pruner)
+        t_writer.start()
+        t_pruner.start()
+        time.sleep(0.3)
+        stop.set()
+        t_writer.join(timeout=5.0)
+        t_pruner.join(timeout=5.0)
+
+        assert errors == []
 
 
 # ---------------------------------------------------------------------------

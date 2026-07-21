@@ -86,24 +86,36 @@ class ThrottleMiddleware(StateMiddleware):
     Троттл применяется и к ``set`` (лист), и к ``merge`` (поддерево — per-leaf,
     см. :meth:`before_merge`).
 
-    Потокобезопасность (PC 0.1):
-        Middleware читается из потока стора (``before_set`` / ``before_merge`` /
-        ``flush``), а правила могут меняться из ДРУГОГО потока (рантайм-команды —
-        Фаза 3). Набор правил ``_rules`` защищён по схеме **copy-on-write**:
-        мутаторы под ``_lock`` строят НОВЫЙ dict и атомарно пере-присваивают
-        ``self._rules`` (мутаторы никогда не правят живой dict «на месте»). Путь
-        чтения (``_find_rule``) берёт локальную ссылку на ``self._rules`` и
-        итерирует её без блокировки — это безопасно, т.к. пере-присваивание ссылки
-        атомарно под GIL, а живой dict неизменен. ``_lock`` сериализует только
-        мутатор-vs-мутатор (без него два одновременных ``update_rule`` могли бы
-        потерять правку). Тайминги (``_last_pass`` / ``_pending`` / ``_pending_since``)
-        трогаются только из потока стора — их синхронизировать не нужно. Это же
-        относится и к :meth:`prune` (Task 3.4): звать его разрешено ТОЛЬКО из
-        потока стора (того же, что обрабатывает ``state.set``/``state.merge``/
-        ``state.delete`` — все IPC-команды ``StateStoreManager`` диспетчерятся
-        серийно одним воркер-тредом ``message_processor``, см.
-        ``StateStoreManager.handle_state_delete``); вызов из другого потока не
-        потокобезопасен (гонка с ``before_set``/``before_merge`` того же процесса).
+    Потокобезопасность (PC 0.1; пересмотрено A-12):
+        Правила и тайминги защищены ДВУМЯ независимыми механизмами.
+
+        - Набор правил ``_rules`` — **copy-on-write**: мутаторы под ``_lock``
+          строят НОВЫЙ dict и атомарно пере-присваивают ``self._rules`` (никогда
+          не правят живой dict «на месте»). Путь чтения (``_find_rule``) берёт
+          локальную ссылку на ``self._rules`` и итерирует её без блокировки — это
+          безопасно, т.к. пере-присваивание ссылки атомарно под GIL, а живой dict
+          неизменен. ``_lock`` сериализует только мутатор-vs-мутатор (без него два
+          одновременных ``update_rule`` могли бы потерять правку).
+
+        - Тайминги (``_last_pass`` / ``_pending`` / ``_pending_since``) —
+          документированный ранее инвариант «трогаются только из потока стора»
+          на практике НЕ соблюдается: :class:`ProcessMonitor` (process_manager_module)
+          зовёт ``StateStoreManager.handle_state_set``/``handle_state_merge``
+          НАПРЯМУЮ (без IPC, см. ``ProcessMonitor._publish_state``) с треда
+          ``state_monitor`` — параллельно обычному потоку ``message_processor``,
+          который обрабатывает IPC-команды ``state.set``/``state.merge`` от
+          остальных процессов через тот же экземпляр ``ThrottleMiddleware``.
+          Т.е. вызывающих потоков минимум два, а не один. Найдено при верификации
+          A-12 (2026-07-21): ``_maybe_lazy_prune`` (сканирование при >1000 путей)
+          — настоящий байткодовый for-loop по ``.items()``, конкурентная запись
+          из другого потока в этот момент даёт ``RuntimeError: dictionary changed
+          size during iteration``. ``_timing_lock`` (``RLock`` — реентерабельность
+          нужна т.к. ``before_set``/``before_merge`` сами вызывают
+          ``_maybe_lazy_prune`` уже под этим же локом) сериализует ВСЕ операции с
+          таймингами: :meth:`before_set`, :meth:`before_merge`, :meth:`flush`,
+          :meth:`prune`, :meth:`_maybe_lazy_prune`. Критическая секция короткая
+          (dict-операции, без I/O) — стоимость лока пренебрежима даже на горячем
+          пути телеметрии.
     """
 
     @property
@@ -117,6 +129,13 @@ class ThrottleMiddleware(StateMiddleware):
 
         # Сериализация мутаторов правил (мутатор-vs-мутатор). Путь чтения — без лока.
         self._lock = threading.Lock()
+
+        # A-12: сериализация ВСЕХ операций с таймингами (_last_pass/_pending/
+        # _pending_since) — ProcessMonitor зовёт before_set/before_merge напрямую
+        # с треда state_monitor, параллельно обычному треду message_processor
+        # (см. docstring класса). RLock — before_set/before_merge вызывают
+        # _maybe_lazy_prune уже под этим же локом (реентерабельность).
+        self._timing_lock = threading.RLock()
 
         # Последний момент пропуска для каждого конкретного пути
         self._last_pass: dict[str, float] = {}
@@ -155,37 +174,42 @@ class ThrottleMiddleware(StateMiddleware):
         Перед основной логикой опционально запускает lazy-prune (Task 3.4,
         см. :meth:`_maybe_lazy_prune`) — недорогая проверка размера на
         каждый вызов, полное сканирование — только при превышении порога.
+
+        A-12: вся работа с таймингами — под ``_timing_lock`` (см. docstring
+        класса) — второй вызывающий поток (ProcessMonitor.state_monitor) не
+        должен видеть частично обновлённый ``_last_pass``/``_pending``.
         """
         now = time.monotonic()
-        self._maybe_lazy_prune(now)
+        with self._timing_lock:
+            self._maybe_lazy_prune(now)
 
-        interval = self._find_rule(path)
+            interval = self._find_rule(path)
 
-        # Путь не покрыт правилами — пропускаем без ограничений
-        if interval is None:
+            # Путь не покрыт правилами — пропускаем без ограничений
+            if interval is None:
+                return True, value
+
+            # Полная блокировка
+            if interval == 0:
+                self._pending[path] = (value, source)
+                self._pending_since[path] = now
+                context["rejection_reason"] = "throttled"
+                return False, value
+
+            last = self._last_pass.get(path)
+
+            if last is not None and (now - last) < interval:
+                # Слишком рано — накапливаем последнее значение
+                self._pending[path] = (value, source)
+                self._pending_since[path] = now
+                context["rejection_reason"] = "throttled"
+                return False, value
+
+            # Пропускаем: обновляем время и убираем pending для этого пути
+            self._last_pass[path] = now
+            self._pending.pop(path, None)
+            self._pending_since.pop(path, None)
             return True, value
-
-        # Полная блокировка
-        if interval == 0:
-            self._pending[path] = (value, source)
-            self._pending_since[path] = now
-            context["rejection_reason"] = "throttled"
-            return False, value
-
-        last = self._last_pass.get(path)
-
-        if last is not None and (now - last) < interval:
-            # Слишком рано — накапливаем последнее значение
-            self._pending[path] = (value, source)
-            self._pending_since[path] = now
-            context["rejection_reason"] = "throttled"
-            return False, value
-
-        # Пропускаем: обновляем время и убираем pending для этого пути
-        self._last_pass[path] = now
-        self._pending.pop(path, None)
-        self._pending_since.pop(path, None)
-        return True, value
 
     # ------------------------------------------------------------------
     # before_merge — троттл поддерева (per-leaf)
@@ -235,59 +259,64 @@ class ThrottleMiddleware(StateMiddleware):
 
         Returns:
             ``(proceed, data_or_pruned)`` — см. «Результат» выше.
+
+        A-12: та же ``_timing_lock``-серилизация, что и в :meth:`before_set` —
+        второй вызывающий поток (ProcessMonitor.state_monitor) не должен видеть
+        частично обновлённый ``_last_pass``/``_pending`` посреди per-leaf обхода.
         """
         now = time.monotonic()
-        self._maybe_lazy_prune(now)  # Task 3.4, см. _maybe_lazy_prune
+        with self._timing_lock:
+            self._maybe_lazy_prune(now)  # Task 3.4, см. _maybe_lazy_prune
 
-        rules = self._rules  # copy-on-write снимок: чтение без блокировки
+            rules = self._rules  # copy-on-write снимок: чтение без блокировки
 
-        if not rules or not isinstance(data, dict) or not data:
-            return True, data
+            if not rules or not isinstance(data, dict) or not data:
+                return True, data
 
-        kept: dict = {}
-        any_ruled = False  # был ли хоть один лист с правилом
+            kept: dict = {}
+            any_ruled = False  # был ли хоть один лист с правилом
 
-        for rel, leaf in self._iter_leaves(data):
-            full = f"{path}.{rel}" if path else rel
-            interval = self._find_rule(full, rules)
+            for rel, leaf in self._iter_leaves(data):
+                full = f"{path}.{rel}" if path else rel
+                interval = self._find_rule(full, rules)
 
-            if interval is None:
-                # Нет правила — консервативно пропускаем лист как есть.
+                if interval is None:
+                    # Нет правила — консервативно пропускаем лист как есть.
+                    self._nested_set(kept, rel, leaf)
+                    continue
+
+                any_ruled = True
+
+                # Полная блокировка
+                if interval == 0:
+                    self._pending[full] = (leaf, source)
+                    self._pending_since[full] = now
+                    continue
+
+                last = self._last_pass.get(full)
+                if last is not None and (now - last) < interval:
+                    # Слишком рано — придерживаем, копим последнее значение.
+                    self._pending[full] = (leaf, source)
+                    self._pending_since[full] = now
+                    continue
+
+                # Пропускаем лист: обновляем тайминг, чистим pending.
+                self._last_pass[full] = now
+                self._pending.pop(full, None)
+                self._pending_since.pop(full, None)
                 self._nested_set(kept, rel, leaf)
-                continue
 
-            any_ruled = True
+            if not any_ruled:
+                # Ни один лист не покрыт правилом — merge проходит как есть (без копии).
+                return True, data
 
-            # Полная блокировка
-            if interval == 0:
-                self._pending[full] = (leaf, source)
-                self._pending_since[full] = now
-                continue
+            if not kept:
+                # Все листья покрыты правилом и все придержаны → отклоняем merge.
+                context["rejection_reason"] = "throttled"
+                return False, data
 
-            last = self._last_pass.get(full)
-            if last is not None and (now - last) < interval:
-                # Слишком рано — придерживаем, копим последнее значение.
-                self._pending[full] = (leaf, source)
-                self._pending_since[full] = now
-                continue
-
-            # Пропускаем лист: обновляем тайминг, чистим pending.
-            self._last_pass[full] = now
-            self._pending.pop(full, None)
-            self._pending_since.pop(full, None)
-            self._nested_set(kept, rel, leaf)
-
-        if not any_ruled:
-            # Ни один лист не покрыт правилом — merge проходит как есть (без копии).
-            return True, data
-
-        if not kept:
-            # Все листья покрыты правилом и все придержаны → отклоняем merge.
-            context["rejection_reason"] = "throttled"
-            return False, data
-
-        # Частичный merge: непокрытые + прошедшие листья; придержанные — вырезаны.
-        return True, kept
+            # Частичный merge: непокрытые + прошедшие листья; придержанные — вырезаны.
+            return True, kept
 
     # ------------------------------------------------------------------
     # Рантайм-мутаторы правил (PC 0.1) — потокобезопасно (copy-on-write)
@@ -370,19 +399,22 @@ class ThrottleMiddleware(StateMiddleware):
             Список кортежей ``(path, value, source)`` для каждого СВЕЖЕГО pending
             значения (stale — отброшены). После вызова ``_pending`` и
             ``_pending_since`` очищаются целиком — и свежие, и отброшенные записи.
+
+        A-12: под ``_timing_lock`` — то же основание, что и у :meth:`before_set`.
         """
-        now = time.monotonic()
-        threshold = self._stale_age_threshold()
+        with self._timing_lock:
+            now = time.monotonic()
+            threshold = self._stale_age_threshold()
 
-        result = [
-            (path, value, source)
-            for path, (value, source) in self._pending.items()
-            if (now - self._pending_since.get(path, now)) <= threshold
-        ]
+            result = [
+                (path, value, source)
+                for path, (value, source) in self._pending.items()
+                if (now - self._pending_since.get(path, now)) <= threshold
+            ]
 
-        self._pending.clear()
-        self._pending_since.clear()
-        return result
+            self._pending.clear()
+            self._pending_since.clear()
+            return result
 
     # ------------------------------------------------------------------
     # prune — точечная чистка таймингов/pending мёртвого поддерева (Task 3.4)
@@ -402,30 +434,36 @@ class ThrottleMiddleware(StateMiddleware):
         начинается с ``prefix + "."`` — точка как граница сегмента пути дерева,
         чтобы ``processes.cam1`` не задел ``processes.cam10``.
 
-        Потокобезопасность: см. docstring класса — звать ТОЛЬКО из потока
-        стора (того же, что обрабатывает ``state.set``/``state.merge``/
-        ``state.delete``).
+        Потокобезопасность (пересмотрено A-12): раньше требовалось звать ТОЛЬКО
+        из потока стора — инвариант оказался ложным (см. docstring класса,
+        ProcessMonitor зовёт таймингующие методы с своего треда). Теперь
+        безопасно из любого потока — см. ``_timing_lock``.
 
         Args:
             prefix: путь корня удалённого поддерева.
 
         Returns:
             Число удалённых записей (тайминги + pending) — для наблюдаемости/лога.
+
+        A-12: под ``_timing_lock`` — раньше docstring класса требовал звать
+        ``prune`` только с потока стора; на практике вызывающих потоков два (см.
+        docstring класса), поэтому лок обязателен и здесь.
         """
 
         def _under_prefix(p: str) -> bool:
             return p == prefix or p.startswith(prefix + ".")
 
-        last_pass_hits = [p for p in self._last_pass if _under_prefix(p)]
-        for p in last_pass_hits:
-            del self._last_pass[p]
+        with self._timing_lock:
+            last_pass_hits = [p for p in self._last_pass if _under_prefix(p)]
+            for p in last_pass_hits:
+                del self._last_pass[p]
 
-        pending_hits = [p for p in self._pending if _under_prefix(p)]
-        for p in pending_hits:
-            del self._pending[p]
-            self._pending_since.pop(p, None)
+            pending_hits = [p for p in self._pending if _under_prefix(p)]
+            for p in pending_hits:
+                del self._pending[p]
+                self._pending_since.pop(p, None)
 
-        return len(last_pass_hits) + len(pending_hits)
+            return len(last_pass_hits) + len(pending_hits)
 
     # ------------------------------------------------------------------
     # Вспомогательные методы
@@ -464,6 +502,10 @@ class ThrottleMiddleware(StateMiddleware):
         Args:
             now: уже посчитанный ``time.monotonic()`` вызывающего метода
                 (переиспользуем — вторым вызовом не платим).
+
+        A-12: вызывается ИСКЛЮЧИТЕЛЬНО из :meth:`before_set`/:meth:`before_merge`,
+        уже держащих ``_timing_lock`` (RLock — реентерабельный вызов безопасен).
+        Отдельно свою блокировку не берёт.
         """
         if max(len(self._last_pass), len(self._pending)) <= _LAZY_PRUNE_SIZE_THRESHOLD:
             return
