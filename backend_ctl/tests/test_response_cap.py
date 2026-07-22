@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from backend_ctl.mcp_tools import RESPONSE_BYTE_CAP, _UNCAPPED_TOOLS, _cap_heavy
+from backend_ctl.dispatch import _cap_heavy
+from backend_ctl.mcp_tools import RESPONSE_BYTE_CAP, _UNCAPPED_TOOLS
 
 
 # --- falsy-slice ---
@@ -85,8 +86,8 @@ def test_cursor_carrying_tools_are_never_capped() -> None:
 
 def test_audited_write_path_is_capped_too() -> None:
     """Write-путь больше не обходит потолок (в журнал при этом идёт полный результат)."""
+    from backend_ctl.dispatch import dispatch_tool
     from backend_ctl.mcp_driver_session import DriverSession
-    from backend_ctl.mcp_tools import dispatch_tool
 
     audited: list = []
 
@@ -130,7 +131,7 @@ def test_session_log_is_capped_too() -> None:
     аудит-запись несёт до 4КБ args + 4КБ result, а дефолтный session_log отдаёт всё
     кольцо — до ~1.6МБ в контекст агента без opt-in full=true.
     """
-    from backend_ctl.mcp_tools import dispatch_tool
+    from backend_ctl.dispatch import dispatch_tool
 
     class _FatAuditSession:
         mode = "live"

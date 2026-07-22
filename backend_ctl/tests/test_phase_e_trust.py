@@ -16,8 +16,9 @@ import pytest
 
 from backend_ctl.audit import AuditLog, resolve_audit_path
 from backend_ctl.command_validate import validate_command_args
+from backend_ctl.dispatch import dispatch_tool
 from backend_ctl.mcp_driver_session import DriverSession
-from backend_ctl.mcp_tools import DEFAULT_HISTORY_LIMIT, RESPONSE_BYTE_CAP, dispatch_tool
+from backend_ctl.mcp_tools import DEFAULT_HISTORY_LIMIT, RESPONSE_BYTE_CAP
 from backend_ctl.protocol import Capabilities, ProcessCapabilities
 
 

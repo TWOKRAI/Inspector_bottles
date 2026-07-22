@@ -20,7 +20,7 @@ import pytest
 
 from backend_ctl.driver import BackendDriver
 from backend_ctl.mcp_driver_session import MODE_REPLAY, DriverSession
-from backend_ctl.mcp_tools import dispatch_tool, resolve_record_path
+from backend_ctl.dispatch import dispatch_tool, resolve_record_path
 
 
 def _state_push(path: str, value: Any) -> Dict[str, Any]:

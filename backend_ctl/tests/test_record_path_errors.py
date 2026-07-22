@@ -18,7 +18,7 @@ from typing import Any, Dict
 
 import pytest
 
-from backend_ctl.mcp_tools import _ArgError, _resolve_or_error
+from backend_ctl.dispatch import _ArgError, _resolve_or_error
 from backend_ctl.recorder import RecordingError, load_recording
 
 
@@ -77,8 +77,8 @@ def test_record_start_on_bad_dir_keeps_driver_alive(tmp_path, monkeypatch) -> No
 
     Это и есть цена находки — из-за файловой ошибки рвалась работающая сессия.
     """
+    from backend_ctl.dispatch import dispatch_tool
     from backend_ctl.mcp_driver_session import DriverSession
-    from backend_ctl.mcp_tools import dispatch_tool
 
     blocker = tmp_path / "not_a_dir"
     blocker.write_text("файл на месте каталога", encoding="utf-8")

@@ -33,6 +33,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Callable, Dict, List, Optional
 
 from backend_ctl import mcp_errors
+from backend_ctl.dispatch import dispatch_tool
 from backend_ctl.endpoint_config import resolve_endpoint
 from backend_ctl.mcp_driver_session import BackendUnavailable, DriverSession
 from backend_ctl.mcp_tools import (
@@ -40,7 +41,6 @@ from backend_ctl.mcp_tools import (
     MODE_NO_DESTRUCTIVE,
     MODE_READ_ONLY,
     build_registry,
-    dispatch_tool,
     is_command_read_safe,
     is_tool_allowed,
     tool_annotations,

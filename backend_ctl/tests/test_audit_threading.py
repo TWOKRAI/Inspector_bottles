@@ -25,7 +25,7 @@ import pytest
 from backend_ctl.audit import AuditLog
 from backend_ctl.mcp_driver_session import DriverSession
 from backend_ctl.mcp_errors import BackendUnavailable
-from backend_ctl.mcp_tools import dispatch_tool
+from backend_ctl.dispatch import dispatch_tool
 
 
 # --------------------------------------------------------------------------- #
