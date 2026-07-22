@@ -137,21 +137,20 @@ def _missing_counter_keys(router_stats_res: dict) -> list[str]:
     return [k for k in _COUNTER_KEYS if k not in rs]
 
 
-def _rss_mb(pid: int | None) -> float | None:
-    """RSS процесса в МБ по pid, или ``None`` если процесс/psutil недоступны.
+def _rss_mb(os_memory: dict | None) -> float | None:
+    """RSS в МБ из секции ``os`` ответа ``introspect.memory`` (bytes → МБ), или ``None``.
 
-    Через ``psutil``, а НЕ через ``introspect.memory``: последний отдаёт инвентарь
-    SHM/пула/очередей (см. ``MemoryStats``), а не RSS ОС — процессной памяти там
-    нет. Soak не должен падать из-за необязательной метрики: любая ошибка → None.
+    Раньше soak ходил за RSS отдельным ``psutil``-путём по pid — ``introspect.memory``
+    ещё не отдавал процессную память ОС. Task 3.2 добавил секцию ``os`` серверу
+    (``MemoryStats.os_memory``), и soak читает её же ручкой, что и остальные метрики —
+    один источник, без второго обхода. Best-effort: секции нет / не число → ``None``.
     """
-    if not pid:
+    if not isinstance(os_memory, dict):
         return None
-    try:
-        import psutil
-
-        return round(psutil.Process(int(pid)).memory_info().rss / (1024 * 1024), 1)
-    except Exception:
+    rss = os_memory.get("rss")
+    if not isinstance(rss, (int, float)) or isinstance(rss, bool):
         return None
+    return round(rss / (1024 * 1024), 1)
 
 
 def discover_processes(drv: Any, timeout: float = 15.0) -> list[str]:
@@ -211,7 +210,10 @@ def _sample(drv: Any, elapsed: float, processes: list[str]) -> dict[str, Any]:
             continue
         entry = _worker_metrics(status.get("workers", {}))
         entry["pid"] = status.get("pid")
-        entry["rss_mb"] = _rss_mb(status.get("pid"))
+        try:
+            entry["rss_mb"] = _rss_mb(drv.introspect_memory(proc, timeout=8.0).os_memory)
+        except Exception:  # noqa: BLE001 — RSS необязателен, один больной ответ не рушит сэмпл
+            entry["rss_mb"] = None
         try:
             entry["counters"] = _counters(drv.introspect_router_stats(proc, timeout=8.0))
         except Exception:  # noqa: BLE001

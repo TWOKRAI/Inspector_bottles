@@ -293,7 +293,9 @@ class MemoryStats:
     SHM-колец из ПУБЛИЧНОГО ``router_manager.get_stats()`` (F6: ``frame_loan_pools``/
     ``frame_slots_*``); ``queues`` — глубины очередей (как introspect.queues);
     ``shm_registry`` — инвентарь SHM-реестра (launcher-level file-marker: в дочернем
-    процессе обычно ``None``). ``raw`` — сырой ответ.
+    процессе обычно ``None``); ``os_memory`` — RSS/VMS процесса ОС (``{rss, vms, pid}``,
+    Task 3.2; секция ответа зовётся ``os``, атрибут — ``os_memory``, чтобы не затенять
+    stdlib-``os``). ``raw`` — сырой ответ.
 
     **Здесь ``None`` двузначен, и различает их ``missing``.** Секция, пришедшая явным
     ``null``, — это ОТВЕТ сервера «подсистема недоступна» (штатный best-effort контракт
@@ -306,12 +308,13 @@ class MemoryStats:
     pool: Optional[Dict[str, Any]]
     queues: Optional[Dict[str, Any]]
     shm_registry: Optional[Dict[str, Any]]
+    os_memory: Optional[Dict[str, Any]] = None
     missing: List[str] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_response(cls, res: Any) -> "MemoryStats":
-        payload = _find_payload(res, "memory", "pool", "queues", "shm_registry")
+        payload = _find_payload(res, "memory", "pool", "queues", "shm_registry", "os")
         missing: List[str] = []
 
         def _sec(key: str) -> Optional[Dict[str, Any]]:
@@ -327,6 +330,7 @@ class MemoryStats:
             pool=_sec("pool"),
             queues=_sec("queues"),
             shm_registry=_sec("shm_registry"),
+            os_memory=_sec("os"),
             missing=missing,
             raw=res if isinstance(res, dict) else {},
         )

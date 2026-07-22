@@ -7,6 +7,9 @@
 
 from __future__ import annotations
 
+import os
+import sys
+
 import pytest
 
 from multiprocess_framework.modules.process_module.commands.builtin_commands import BuiltinCommands
@@ -447,6 +450,23 @@ class TestIntrospectMemory:
         assert result["pool"]["slots_released"] == 4
         assert result["queues"] == {"system": 1}
         assert result["shm_registry"]["count"] == 1
+
+    def test_os_section_has_rss_when_psutil_available(self) -> None:
+        # ON-плечо: psutil установлен в окружении → RSS/VMS процесса ОС по своему pid.
+        _svc, cm = _make()
+        result = cm.dispatch("introspect.memory")
+        os_sec = result["os"]
+        assert os_sec is not None, "psutil доступен — секция os обязана быть заполнена"
+        assert os_sec["rss"] > 0 and os_sec["vms"] > 0, "живой процесс держит ненулевую память"
+        assert os_sec["pid"] == os.getpid(), "RSS — по своему pid (команда выполняется в этом процессе)"
+
+    def test_os_section_null_without_psutil(self, monkeypatch) -> None:
+        # OFF-плечо: нет psutil → секция null, но команда success (best-effort).
+        monkeypatch.setitem(sys.modules, "psutil", None)  # import psutil → ImportError
+        _svc, cm = _make()
+        result = cm.dispatch("introspect.memory")
+        assert result["success"] is True
+        assert result["os"] is None, "недоступный psutil даёт null-секцию, а не ошибку"
 
 
 # ====================================================================== #

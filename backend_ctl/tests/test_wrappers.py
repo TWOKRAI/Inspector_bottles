@@ -209,6 +209,7 @@ _MEMORY_RESP = {
         "pool": {"loan_pools": 1, "slots_released": 5, "slots_reclaimed": 0, "loan_exhausted": 2},
         "queues": {"system": 0, "data": 2},
         "shm_registry": None,
+        "os": {"rss": 123456789, "vms": 234567890, "pid": 4242},
     },
 }
 
@@ -221,7 +222,8 @@ class TestMemoryStatsParsing:
         assert m.pool["slots_released"] == 5
         assert m.queues == {"system": 0, "data": 2}
         assert m.shm_registry is None  # null-секция сохраняется как None
-        assert m.missing == [], "все четыре секции присутствуют — пропусков нет"
+        assert m.os_memory == {"rss": 123456789, "vms": 234567890, "pid": 4242}
+        assert m.missing == [], "все пять секций присутствуют — пропусков нет"
         assert m.raw is _MEMORY_RESP  # сырой ответ сохранён целиком
 
     def test_explicit_null_section_is_an_answer(self) -> None:
@@ -230,32 +232,45 @@ class TestMemoryStatsParsing:
         Контракт introspect.memory best-effort, поэтому null-секция штатна и в
         ``missing`` попадать не должна — иначе аномалией станет норма.
         """
-        bare = {"success": True, "result": {"success": True, "memory": None, "pool": None, "queues": None}}
+        bare = {
+            "success": True,
+            "result": {"success": True, "memory": None, "pool": None, "queues": None, "os": None},
+        }
         m = MemoryStats.from_response(bare)
         assert m.ok is True
-        assert (m.memory, m.pool, m.queues) == (None, None, None)
+        assert (m.memory, m.pool, m.queues, m.os_memory) == (None, None, None, None)
         assert m.missing == ["shm_registry"], "отсутствующая секция — да, явный null — нет"
 
     def test_renamed_section_lands_in_missing(self) -> None:
         """Второе плечо: секцию переименовали → None и имя в missing."""
         renamed = {
             "success": True,
-            "result": {"success": True, "mem": {}, "pool": {}, "queues": {}, "shm_registry": {}},
+            "result": {"success": True, "mem": {}, "pool": {}, "queues": {}, "shm_registry": {}, "os": {}},
         }
         m = MemoryStats.from_response(renamed)
         assert m.memory is None and m.missing == ["memory"]
         assert m.pool == {} and m.queues == {}
 
+    def test_os_section_absent_lands_in_missing(self) -> None:
+        """Секции ``os`` не было вовсе (старый сервер) → os_memory None + имя в missing."""
+        no_os = {
+            "success": True,
+            "result": {"success": True, "memory": {}, "pool": {}, "queues": {}, "shm_registry": {}},
+        }
+        m = MemoryStats.from_response(no_os)
+        assert m.os_memory is None
+        assert m.missing == ["os"], "отсутствие процессной памяти — расхождение формы, а не тишина"
+
     def test_defaults_on_error(self) -> None:
         m = MemoryStats.from_response({"success": False, "error": "timeout"})
         assert m.ok is False
-        assert (m.memory, m.pool, m.queues, m.shm_registry) == (None, None, None, None)
-        assert m.missing == ["memory", "pool", "queues", "shm_registry"]
+        assert (m.memory, m.pool, m.queues, m.shm_registry, m.os_memory) == (None, None, None, None, None)
+        assert m.missing == ["memory", "pool", "queues", "shm_registry", "os"]
 
     def test_robust_to_garbage(self) -> None:
         m = MemoryStats.from_response(None)  # type: ignore[arg-type]
         assert m.ok is False and m.raw == {}
-        assert m.missing == ["memory", "pool", "queues", "shm_registry"]
+        assert m.missing == ["memory", "pool", "queues", "shm_registry", "os"]
 
 
 class TestWorkerStatusParsing:

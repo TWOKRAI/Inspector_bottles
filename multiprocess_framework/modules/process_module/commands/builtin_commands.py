@@ -677,6 +677,9 @@ class BuiltinCommands:
           файл-маркер (Windows cleanup), в штатном дочернем процессе он НЕ
           прикреплён к менеджерам → обычно ``None``; per-process число открытых
           SHM-хендлов доступно в секции ``memory`` (``processes_with_handles``).
+        - ``os`` — RSS/VMS процесса ОС (``{rss, vms, pid}``) по СВОЕМУ pid через
+          ``psutil``. Имя команды обещало «память процесса», но процессной памяти ОС
+          в инвентаре SHM/пула/очередей не было. Best-effort: нет ``psutil`` → ``None``.
         """
         svc = self._services
         sr = getattr(svc, "shared_resources", None)
@@ -737,6 +740,20 @@ class BuiltinCommands:
             except Exception:  # noqa: BLE001 — best-effort
                 shm_registry = None
 
+        # --- os: RSS/VMS процесса ОС по СВОЕМУ pid ---
+        # Имя команды обещает «память процесса», но раньше секции самой процессной
+        # памяти ОС тут не было — инвентарь SHM/пула/очередей её не покрывает. RSS/VMS
+        # добираем через psutil; best-effort: нет psutil / отказ → секция ``None``.
+        os_memory = None
+        try:
+            import psutil
+
+            proc = psutil.Process()  # свой pid
+            mi = proc.memory_info()
+            os_memory = {"rss": int(mi.rss), "vms": int(mi.vms), "pid": proc.pid}
+        except Exception:  # noqa: BLE001 — best-effort: секция null, не ошибка
+            os_memory = None
+
         return {
             "success": True,
             "process": svc.name,
@@ -744,6 +761,7 @@ class BuiltinCommands:
             "pool": pool,
             "queues": queues,
             "shm_registry": shm_registry,
+            "os": os_memory,
         }
 
     # ========================================================================
