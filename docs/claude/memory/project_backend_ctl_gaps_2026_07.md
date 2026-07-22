@@ -7,11 +7,11 @@ metadata:
 
 Найдено НЕ ревью, а живой работой (прогон Ф7 G.7 soak). Резидуалы hardening'а сюда НЕ дублируем — они в `plans/backend-ctl-hardening.md`; здесь то, чего план не ловит.
 
-**1. `introspect.memory` НЕ отдаёт RSS процесса — имя обманывает.**
-Инструмент возвращает `MemoryStats{memory, pool, queues, shm_registry}` — инвентарь SHM / loan-пула / глубин очередей. **Процессной памяти ОС там нет вообще.** Стоил цикла отладки: soak-проба писала `rss: null` и это выглядело как поломка. Правильный путь — `psutil.Process(pid).memory_info().rss`, где `pid` берётся из `introspect_status` (он его отдаёт: ключи `success/process/pid/status/workers`). Реализовано в `backend_ctl/probes/g7_soak_probe.py::_rss_mb`. Либо переименовать инструмент, либо добавить в него RSS — сейчас «инвентарь памяти» читается как «память процесса».
+**1. ✅ ЗАКРЫТО (Фаза 3 Task 3.1, 2026-07-22, `857ed851`). `introspect.memory` теперь отдаёт RSS процесса.**
+Было: `MemoryStats{memory, pool, queues, shm_registry}` — только инвентарь SHM/пула/очередей, процессной памяти ОС нет; soak писала `rss: null` — выглядело поломкой. Стало: секция `os: {rss, vms, pid}` через `psutil.Process()` по своему pid (best-effort → null без psutil), поле `MemoryStats.os_memory` со строгим краем (absent→missing). Soak `_rss_mb` читает секцию `os` ответа, отдельный psutil-обход по pid убран. Live webcam_sketch: PM rss=466 МБ, все процессы тракта >0.
 
-**2. `system_overview` схлопывает воркеров до строк-статусов.**
-Для «одного вызова = вся картина» это верно, но `effective_hz` и `perf_probes` теряются → для перф-метрик всё равно нужен per-process `introspect_status`. Полезен как ПУБЛИЧНЫЙ источник списка процессов (ключи `processes`) вместо приватного `drv._discover_processes`.
+**2. ✅ ЗАКРЫТО (Фаза 3 Task 3.2, 2026-07-22, `6b9d4e1f`). `system_overview` несёт `effective_hz` per-process.**
+Было: воркеры схлопнуты до строк-статусов, `effective_hz` терялся → за перф-сигналом нужен был отдельный `introspect_status`. Стало: карточка несёт `hz` (ведущий effective_hz по воркерам) + аномалия `hz_degraded` (<50% от target). Live: camera_0/seg/pult ~21 Гц. `perf_probes` осознанно НЕ тянем в свод (тяжёлые — по запросу per-process).
 
 **3. D.4 flight recorder построил то, что GATE G3 решил не делать.**
 Задача **1.8 record/replay** (Ф1 backend_ctl, `plans/2026-07-06_constructor-master/plan.md:111`) на GATE G3 2026-07-13 помечена «**пропустить**, остаётся опциональным, вернуться при реальной нужде в offline-отладке». Через 6 дней D.4 (2026-07-19) построил record/replay для сессий backend_ctl — 6 MCP-инструментов + session-режим replay. В мастер-плане 1.8 **до сих пор `[ ] опц`** — треки друг о друге не знали. Не обязательно ошибка (условие «при реальной нужде» могло наступить), но решение владельца было отменено без пересмотра. **Проверить: нужда была реальная или инерция?** Тот же класс дрейфа, что [[feedback_plan_queue_must_list_every_plan]].
