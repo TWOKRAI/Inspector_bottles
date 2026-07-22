@@ -358,11 +358,19 @@
 3. STATUS.md: новые файлы `registers.py`/`dispatch.py`, актуальные размеры.
 
 **Acceptance criteria:**
-- [ ] `dump_capabilities --check` чист (drift-gate зелёный)
-- [ ] `link-check` чист; AGENTS.md упоминает каждый инструмент из `tools/list`
-- [ ] `python -m scripts.sync` без дрифта
+- [x] `dump_capabilities --check` чист (drift-gate зелёный) — манифест backend-команд совпал с runtime (правки Ф1/Ф4 его не тронули); CAPABILITIES.yaml — backend-команды, не MCP-инструменты, регенерация не нужна
+- [x] `link-check` чист по `backend_ctl/` и новому audit-файлу (битые ссылки только в предсуществующих чужих файлах — вне скоупа); AGENTS.md упоминает **ВСЕ 47** инструментов из `tools/list` (добавлены недостающие 10)
+- [x] `python -m scripts.sync` без дрифта
+
+**Статус:** ✅ DONE. AGENTS.md — все 47 (добавлены `supervision_status`/`config_reload`/`logger_sink_*`/`session_log`/`state_get*`/`log_tail`/`introspect_*` MCP-имена); STATUS.md — `dispatch.py` + актуальные размеры (driver 1270, mcp_tools 1193); introspect_memory-строка отражает `os` RSS. CAPABILITIES drift-gate зелёный.
 
 **Out of scope:** документация переезда в `tooling/` (за гейтом).
+
+---
+
+## ✅ ГЕЙТ ВЫХОДА ПЛАНА — ЗАКРЫТ 2026-07-22
+
+Все Фазы 0–6 закрыты. Плюс по требованию владельца — **максимальная live-верификация 47 инструментов + webcam_sketch** ([`docs/audits/2026-07-22_backend-ctl-live-verification.md`](../docs/audits/2026-07-22_backend-ctl-live-verification.md)): 47/47 работают, не обманывают, костылей нет; инструмент дополнительно вскрыл 3 реальные проблемы продукта (PM router_errors 78%, frame-drop, restart >30с — отдельный трек). Раздел «За внешним гейтом codemod» в счёт закрытия НЕ входит (ждёт `framework-layer-grouping`).
 
 ---
 

@@ -108,7 +108,14 @@ PY
 | `record_dump(name)` | one-shot дамп чёрного ящика: снимок + текущее arrival-кольцо (`reason=dump`); грузится тем же `record_load` |
 | `observability_tail(process)` / `observability_untail(process)` | live ЛОГИ+ОШИБКИ+СТАТИСТИКА процесса (то, что GUI получает через `ObservabilityTailActivator`); записи по плоскостям — `observability_records(kind=)` |
 | `watch_like_gui()` / `unwatch()` | ВЕСЬ приёмный профиль GUI одной командой: state.subscribe (processes/system/devices/calibration) + observability.tail на все процессы + **авто-переподписка** после авто-рестарта |
-| `introspect_memory(process)` | инвентарь памяти (SHM/пул займов/очереди) — только статистика; секции best-effort (`null`, не ошибка) |
+| `introspect_memory(process)` | инвентарь памяти (SHM/пул займов/очереди) + **`os` RSS/VMS процесса ОС** (Task 3.1) — только статистика; секции best-effort (`null`, не ошибка) |
+| `introspect_router_stats(p)` / `introspect_queues(p)` / `introspect_plugins(p)` | MCP-имена сырых ручек: счётчики router'а / глубины очередей / каталог плагинов + `failed_imports` (типизированные обёртки — `router_stats`/`queues` выше) |
+| `supervision_status(process=None)` | **D.1b**: epoch топологии + per-process incarnation / restart_count / last_exit / status — маркер «до/после рестарта» (fencing) |
+| `state_get(path)` / `state_get_subtree(path, full=)` | чтение узла/поддерева state-дерева (крупный ответ усекается по `RESPONSE_BYTE_CAP` с hint; `full=true` — целиком) |
+| `log_tail(process, level=)` / `log_untail(process)` | подписка на ЛОГИ процесса по уровню → плоскость `logs` (композитная часть `watch_like_gui`) |
+| `config_reload(process, observability=, path=)` | перечитать/применить observability-секцию на лету (`{log_level: DEBUG}` — сменить уровень логгера без рестарта, ADR-CRM-006) |
+| `logger_sink_enable(process, sink)` / `logger_sink_disable(process, sink)` | вкл/выкл конкретный sink логгера процесса на лету (реестр sink'ов) |
+| `session_log(limit=)` | аудит-журнал write/escalated-вызовов драйвера этой сессии (E.1) |
 | `request(message, timeout=None)` | низкоуровневый: готовый router-dict → ответ по `request_id` |
 
 Все обёртки возвращают `result` из ответа, либо `{"success": False, "error": "timeout"/"not connected"/...}`.
