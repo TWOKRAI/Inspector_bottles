@@ -1,0 +1,69 @@
+======================================================
+ Inspector Bottles
+======================================================
+ system   : system.yaml
+ pipeline : webcam_sketch.yaml
+ plugins  : 57
+ log_dir  : D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\logs\prototype_2
+ processes: 6
+======================================================
+{"t": "_setup", "v": "OK", "d": "процессы=['ProcessManager', 'camera_0', 'devices', 'lines', 'points', 'pult', 'seg']; peer=camera_0; img-процесс(register-write)=camera_0"}
+{"t": "system_overview", "v": "OK", "d": "процессов=7 аномалий=1 hz={'ProcessManager': None, 'camera_0': 21.48, 'devices': 0.0, 'lines': 21.38, 'points': 0.0, 'pult': 21.2, 'seg': 21.4}"}
+{"t": "capabilities[concise]", "v": "OK", "d": "keys=['success', 'format', 'ok', 'topology', 'processes']"}
+{"t": "capabilities[detailed]", "v": "OK", "d": "процессов=0 truncated=True"}
+{"t": "get_status", "v": "OK", "d": "status {'success': True, 'process': 'camera_0', 'pid': 24724, 'status': 'running', 'workers': {'source_producer_captu"}
+{"t": "introspect_memory", "v": "OK", "d": "rss=468.9МБ"}
+{"t": "introspect_router_stats", "v": "OK", "d": "{'router_id': 'router_camera_0', 'is_initialized': True, 'sender_alive': True, 'listener_a"}
+{"t": "introspect_queues", "v": "OK", "d": "queues {'success': True, 'process': 'camera_0', 'queue_sizes': {'system': 0, 'data': 0}}"}
+{"t": "introspect_handlers", "v": "OK", "d": "handlers {'success': True, 'process': 'camera_0', 'router_handlers': ['shm_reclaim', 'shm_release', 'state.changed'], '"}
+{"t": "introspect_plugins", "v": "OK", "d": "plugins {'success': True, 'process': 'camera_0', 'plugins': {'capture': 'source'}, 'manifest': {'capture': {'category'"}
+{"t": "introspect_registers", "v": "OK", "d": "registers {'success': True, 'process': 'camera_0', 'registers': {}, 'note': 'нет RegistersManager (плагины без register_"}
+{"t": "supervision_status", "v": "OK", "d": "epoch=0 процессов=7"}
+{"t": "state_get", "v": "OK", "d": "{'_truncated': True, '_bytes': 45890, '_hint': 'ответ усечён по размеру (45890B > 12000B). full=true — полный "}
+{"t": "state_get_subtree", "v": "OK", "d": "{'_truncated': True, '_bytes': 45908, '_hint': 'ответ усечён по размеру (45908B > 12000B). full=true — полный "}
+{"t": "session_log", "v": "OK", "d": "{'success': True, 'entries': [], 'count': 0, 'path': None}"}
+{"t": "events_page", "v": "OK", "d": "count=0"}
+{"t": "events", "v": "OK", "d": "{}"}
+{"t": "watch_like_gui", "v": "OK", "d": "success=True"}
+{"t": "state_subscribe", "v": "OK", "d": "{'status': 'ok', 'sub_id': '0300cf4a-4b93-4fba-a8ad-b0953c137864'}"}
+{"t": "log_tail", "v": "OK", "d": "{'success': True, 'process': 'camera_0', 'subscriber': 'backend_ctl.1380717c2758', 'level': 'WARNING', 'tap': "}
+{"t": "observability_tail", "v": "OK", "d": "{'success': True, 'process': 'camera_0', 'subscriber': 'backend_ctl.1380717c2758'}"}
+{"t": "observability_untail", "v": "OK", "d": "{'success': True, 'process': 'camera_0', 'subscriber': 'backend_ctl.1380717c2758'}"}
+{"t": "log_untail", "v": "OK", "d": "{'success': True, 'process': 'camera_0', 'tap': 'log_tail::backend_ctl.1380717c2758'}"}
+{"t": "ui_tap", "v": "NA", "d": "gui отсутствует в headless → {'success': False, 'error': 'timeout', 'correlation_id': '8839e825-e3ae-42dd-8079-402edb2d"}
+{"t": "ui_tap_ping", "v": "NA", "d": "gui отсутствует в headless → {'success': False, 'error': 'timeout', 'correlation_id': 'e845e272-7cff-440b-96eb-aae7d1b3"}
+{"t": "ui_untap", "v": "NA", "d": "gui отсутствует в headless → {'success': False, 'error': 'timeout', 'correlation_id': '5ea98aad-9754-4c3b-9e07-bc2880f0"}
+{"t": "telemetry_snapshot", "v": "SUSPECT", "d": "count=None ingested=None"}
+{"t": "telemetry_history", "v": "OK", "d": "path=processes.x.state.fps points=0"}
+{"t": "await_condition[known]", "v": "SUSPECT", "d": "success=False"}
+{"t": "await_condition[typo]", "v": "OK", "d": "unknown_metric=True cand=3"}
+{"t": "telemetry_set", "v": "OK", "d": "reached=6"}
+{"t": "telemetry_reconfigure", "v": "OK", "d": "success=True"}
+{"t": "logger_sink_enable", "v": "OK", "d": "{'success': True, 'sink': 'console', 'enabled': True, 'process': 'camera_0'}"}
+{"t": "logger_sink_disable", "v": "OK", "d": "{'success': True, 'sink': 'console', 'enabled': False, 'process': 'camera_0'}"}
+{"t": "config_reload", "v": "OK", "d": "{'success': True, 'process': 'camera_0', 'source': 'inline', 'applied': {'log_level': 'INFO'}}"}
+{"t": "register_snapshot", "v": "OK", "d": "процессов в снимке=7"}
+{"t": "register_rollback_log", "v": "OK", "d": "{'success': True, 'entries': []}"}
+{"t": "set_register", "v": "NA", "d": "пропущено на webcam (robot-риск); безопасный img-процесс=camera_0 — verify на region_pipeline отдельным прогоном"}
+{"t": "set_register_verified", "v": "NA", "d": "см. set_register — verify на region_pipeline"}
+{"t": "register_confirm", "v": "NA", "d": "требует активного commit-id от set_register — verify на region_pipeline"}
+{"t": "register_restore", "v": "NA", "d": "парой к set_register — verify на region_pipeline"}
+{"t": "send_command", "v": "OK", "d": "{'success': True, 'process': 'camera_0', 'pid': 24724, 'status': 'running', 'workers': {'source_producer_captu"}
+{"t": "system_command", "v": "NA", "d": "деструктивно (process/worker lifecycle) на живом webcam — verify restart на region_pipeline"}
+{"t": "record_start", "v": "OK", "d": "{'success': True, 'path': 'C:\\\\Users\\\\INNOTECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--PROJECT-INNOTECH-Inspector-vi"}
+{"t": "record_status", "v": "OK", "d": "{'success': True, 'recording': True, 'path': 'C:\\\\Users\\\\INNOTECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--PROJECT-IN"}
+{"t": "record_dump", "v": "OK", "d": "{'success': True, 'path': 'C:\\\\Users\\\\INNOTECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--PROJECT-INNOTECH-Inspector-vi"}
+{"t": "record_stop", "v": "OK", "d": "{'success': True, 'recording': False, 'path': 'C:\\\\Users\\\\INNOTECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--PROJECT-I"}
+{"t": "record_load", "v": "OK", "d": "{'success': True, 'mode': 'replay', 'path': 'C:\\\\Users\\\\INNOTECH\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--PROJECT-INNOTECH-Insp"}
+{"t": "record_status", "v": "OK", "d": "replay: {'success': True, 'mode': 'replay', 'path': 'C:\\\\Users\\\\INNOTECH\\\\AppData\\\\Local\\\\Temp\\\\cl"}
+{"t": "record_unload", "v": "OK", "d": "{'success': True, 'mode': 'live', 'unloaded': True}"}
+{"t": "unwatch", "v": "OK", "d": "{'observability': {'ProcessManager': {'success': True, 'process': 'ProcessManager', 'subscriber': 'backend_ctl"}
+{"t": "PIPELINE:effective_hz", "v": "OK", "d": "живой темп у ['camera_0', 'lines', 'points', 'pult', 'seg']; hz={'ProcessManager': None, 'camera_0': 21.31, 'devices': 0.0, 'lines': 21.58, 'points': 21.6, 'pult': 21.18, 'seg': 21.49}"}
+{"t": "PIPELINE:anomalies", "v": "SUSPECT", "d": "аномалий=2: ['router_errors', 'fps_zero_while_running']"}
+
+=== СВОДКА ===
+{"OK": 42, "NA": 8, "SUSPECT": 3}
+--- FAIL/SUSPECT (3) ---
+  [SUSPECT] telemetry_snapshot: count=None ingested=None
+  [SUSPECT] await_condition[known]: success=False
+  [SUSPECT] PIPELINE:anomalies: аномалий=2: ['router_errors', 'fps_zero_while_running']

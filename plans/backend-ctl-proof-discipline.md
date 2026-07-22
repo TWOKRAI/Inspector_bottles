@@ -370,7 +370,7 @@
 
 ## ✅ ГЕЙТ ВЫХОДА ПЛАНА — ЗАКРЫТ 2026-07-22
 
-Все Фазы 0–6 закрыты. Плюс по требованию владельца — **максимальная live-верификация 47 инструментов + webcam_sketch** ([`docs/audits/2026-07-22_backend-ctl-live-verification.md`](../docs/audits/2026-07-22_backend-ctl-live-verification.md)): 47/47 работают, не обманывают, костылей нет; инструмент дополнительно вскрыл 3 реальные проблемы продукта (PM router_errors 78%, frame-drop, restart >30с — отдельный трек). Раздел «За внешним гейтом codemod» в счёт закрытия НЕ входит (ждёт `framework-layer-grouping`).
+Все Фазы 0–6 закрыты (код + тесты + доки). Плюс по требованию владельца — **максимальная live-верификация 47 инструментов + webcam_sketch** ([`docs/audits/2026-07-22_backend-ctl-live-verification.md`](../docs/audits/2026-07-22_backend-ctl-live-verification.md)), **прошедшая адверсариальное ревью Fable** (нашло 10 переоптимистичных вердиктов — все учтены/понижены). Честный итог: **44/47 доказаны live непустыми данными / independent `audit.jsonl`; 0 FAIL; 3 NA (ui_* — нет gui в headless); 3 инструмента с оговоркой UNPROVEN по эффекту** (`system_command`-доставка / `register_restore`-write-путь / `config_reload`-readback — не выданы за рабочие, кандидаты на добор). Инструмент дополнительно вскрыл реальные проблемы продукта (PM router_errors — частью эхо своего discovery `router.relay`/`introspect.status`, frame-drop, restart >30с — отдельный трек). Раздел «За внешним гейтом codemod» в счёт закрытия НЕ входит. **Урок захода:** сам гейт-документ поначалу нарушил proof-discipline (вердикт опережал доказательство) — поймало ревью Fable, класс `feedback_plausible_is_not_verified`.
 
 ---
 

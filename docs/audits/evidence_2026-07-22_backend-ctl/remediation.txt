@@ -1,0 +1,34 @@
+======================================================
+ Inspector Bottles
+======================================================
+ system   : system.yaml
+ pipeline : region_pipeline.yaml
+ plugins  : 57
+ log_dir  : D:\PROJECT_INNOTECH\Inspector_vision\Inspector_bottles\logs\prototype_2
+ processes: 8
+======================================================
+процессы=['ProcessManager', 'camera_0', 'devices', 'preprocessor', 'process_flip', 'process_grayscale', 'process_negative', 'region_splitter', 'stitcher']; peer(restart-цель)=preprocessor
+
+### telemetry: count/ingested (прямой метод)
+{'success': True, 'process': None, 'metric': None, 'count': 335, 'ingest_active': True, 'ingested_total': 378, 'ingest_patterns': ['processes.**', 'system.**', 'devices.**', 'calibration.**']}
+
+### telemetry_history РЕАЛЬНЫЙ path=processes.ProcessManager.state.uptime
+{'path': 'processes.ProcessManager.state.uptime', 'points_count': 3, 'sample': [[1784720632.2491443, 0.0], [1784720632.749051, 0.5]]}
+
+### events_page(state) непустой
+{'count': 5, 'items_len': 5, 'first_cmd': 'state.changed'}
+
+### state_get processes.preprocessor.state (узкий, содержимое)
+{'truncated': None, 'content_keys': ['status', 'request_id', 'value']}
+
+### system_command restart preprocessor: ДОСТАВКА через incarnation
+{'response': {'success': False, 'error': 'timeout', 'correlation_id': '527538a0-63db-410c-9d94-eb40ab2c7f50'}, 'inc_before': 0, 'inc_after': 0, 'delivered': False}
+
+### register_restore written>0 (devices.device_hub.supervisor_interval_s: 0.2→5.2→restore)
+{'success': True, 'written': 0, 'skipped': 7, 'verified': 7, 'mismatches': []}
+
+### session_log ПОСЛЕ write (непустой аудит)
+{'count': 3, 'last3': ['system_command=False', 'set_register=False', 'register_restore=True']}
+
+### config_reload два разных уровня (applied отражает вход)
+{'debug_applied': {'log_level': 'DEBUG'}, 'warning_applied': {'log_level': 'WARNING'}}
