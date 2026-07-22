@@ -1361,6 +1361,9 @@
         "data": {
           "maxsize": 50
         },
+        "state": {
+          "maxsize": 8
+        },
         "system": {
           "maxsize": 100
         }
@@ -1633,6 +1636,9 @@
         "data": {
           "maxsize": 50
         },
+        "state": {
+          "maxsize": 8
+        },
         "system": {
           "maxsize": 100
         }
@@ -1864,6 +1870,9 @@
       "queues": {
         "data": {
           "maxsize": 50
+        },
+        "state": {
+          "maxsize": 8
         },
         "system": {
           "maxsize": 100
@@ -2194,6 +2203,9 @@
         "data": {
           "maxsize": 50
         },
+        "state": {
+          "maxsize": 8
+        },
         "system": {
           "maxsize": 100
         }
@@ -2480,6 +2492,9 @@
       "queues": {
         "data": {
           "maxsize": 50
+        },
+        "state": {
+          "maxsize": 8
         },
         "system": {
           "maxsize": 100
@@ -3359,6 +3374,9 @@
         "data": {
           "maxsize": 50
         },
+        "state": {
+          "maxsize": 8
+        },
         "system": {
           "maxsize": 100
         }
@@ -3616,6 +3634,9 @@
       "queues": {
         "data": {
           "maxsize": 50
+        },
+        "state": {
+          "maxsize": 8
         },
         "system": {
           "maxsize": 100
