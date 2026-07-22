@@ -79,25 +79,31 @@ def render_concise(caps: Capabilities, process: Optional[str] = None) -> Dict[st
     cards = _selected(caps, process)
     if isinstance(cards, dict) and cards.get("success") is False:
         return cards
+    processes: Dict[str, Any] = {}
+    for name, card in cards.items():
+        entry: Dict[str, Any] = {
+            "ok": card.ok,
+            # Пер-элементные гарды: битая карточка (bare-строка вместо dict,
+            # None вместо списка полей) деградирует тихо, не роняет рендер.
+            "commands": sorted(str(c.get("name") or "") for c in card.commands if isinstance(c, dict)),
+            "registers": {
+                reg: (list(fields) if isinstance(fields, (list, tuple)) else [])
+                for reg, fields in sorted(card.registers.items())
+            },
+            "router_handlers": sorted(card.router_handlers),
+        }
+        if card.missing:
+            # Аддитивная пометка расхождения формы ответа (ProcessCapabilities.missing,
+            # довесок к Task 1.1) — не подменяет и не убирает существующие ключи, только
+            # сигнализирует агенту «эта карточка неполна, доверять составу нельзя».
+            entry["missing_warning"] = f"⚠ форма ответа неполна: missing={card.missing}"
+        processes[name] = entry
     return {
         "success": True,
         "format": "concise",
         "ok": caps.ok,
         "topology": sorted(caps.topology),
-        "processes": {
-            name: {
-                "ok": card.ok,
-                # Пер-элементные гарды: битая карточка (bare-строка вместо dict,
-                # None вместо списка полей) деградирует тихо, не роняет рендер.
-                "commands": sorted(str(c.get("name") or "") for c in card.commands if isinstance(c, dict)),
-                "registers": {
-                    reg: (list(fields) if isinstance(fields, (list, tuple)) else [])
-                    for reg, fields in sorted(card.registers.items())
-                },
-                "router_handlers": sorted(card.router_handlers),
-            }
-            for name, card in cards.items()
-        },
+        "processes": processes,
     }
 
 

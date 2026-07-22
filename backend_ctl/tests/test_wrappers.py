@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend_ctl.driver import MemoryStats, QueueDepths, RouterStats, WorkerStatus
+from backend_ctl.driver import MemoryStats, ProcessCapabilities, QueueDepths, RouterStats, WorkerStatus
 from backend_ctl.protocol import UNWRAP_MISS, unwrap
 
 
@@ -287,6 +287,72 @@ class TestWorkerStatusParsing:
         assert ws.missing == ["process", "status", "workers"]
 
 
+_CAPS_RESP_FULL = {
+    "success": True,
+    "result": {
+        "success": True,
+        "process": "preprocessor",
+        "commands": [{"name": "worker.pause_all", "description": "Пауза воркеров", "tags": ["system"]}],
+        "router_handlers": ["state.changed"],
+        "registers": {"resize": ["algo", "scale_factor"]},
+    },
+}
+
+
+class TestProcessCapabilitiesParsing:
+    """G-5 (довесок к Task 1.1): ``ProcessCapabilities`` — единственная обёртка файла,
+    ранее схлопывавшая «ключа нет», «не тот тип» и «реально пусто» в одинаковые
+    ``[]``/``{}``/``None``. Пара ON/OFF + отдельное «пусто-но-легально» плечо, как у
+    остальных обёрток модуля."""
+
+    def test_full_response_missing_is_empty(self) -> None:
+        card = ProcessCapabilities.from_response(_CAPS_RESP_FULL)
+        assert card.ok is True
+        assert card.process == "preprocessor"
+        assert card.commands[0]["name"] == "worker.pause_all"
+        assert card.router_handlers == ["state.changed"]
+        assert card.registers == {"resize": ["algo", "scale_factor"]}
+        assert card.missing == [], "форма полная — пропусков быть не должно"
+
+    def test_empty_but_legal_sections_are_not_missing(self) -> None:
+        """Пустые-но-присутствующие секции («команд/handlers/регистров нет») —
+        валидный ответ, а не пропуск (обратная сторона пары)."""
+        resp = {
+            "success": True,
+            "result": {"success": True, "process": "cam", "commands": [], "router_handlers": [], "registers": {}},
+        }
+        card = ProcessCapabilities.from_response(resp)
+        assert (card.commands, card.router_handlers, card.registers) == ([], [], {})
+        assert card.missing == []
+
+    def test_renamed_keys_land_in_missing_not_silently_empty(self) -> None:
+        """Второе плечо пары: сервер переименовал секции (и не прислал ``process``) →
+        безопасные ``[]``/``{}`` для потребителей, но имена — в ``missing``. Раньше
+        это было неотличимо от «карточка реально пустая»."""
+        renamed = {
+            "success": True,
+            "result": {
+                "success": True,
+                "cmds": [{"name": "x"}],
+                "handlers": ["y"],
+                "regs": {"a": ["b"]},
+            },
+        }
+        card = ProcessCapabilities.from_response(renamed)
+        assert card.ok is True, "ручка ответила успешно — расхождение только в форме"
+        assert (card.commands, card.router_handlers, card.registers) == ([], [], {}), "нет показания ≠ пусто-от-сервера"
+        assert card.process is None
+        assert set(card.missing) == {"process", "commands", "router_handlers", "registers"}
+
+    def test_unwrap_miss_lands_all_fields_in_missing(self) -> None:
+        """Полный промах ``_find_payload`` (``UNWRAP_MISS``) — все четыре поля
+        естественно попадают в ``missing`` через хелперы, спецобработка не нужна."""
+        card = ProcessCapabilities.from_response({"success": False, "error": "timeout"})
+        assert card.ok is False
+        assert set(card.missing) == {"process", "commands", "router_handlers", "registers"}
+        assert (card.commands, card.router_handlers, card.registers) == ([], [], {})
+
+
 class TestUnwrapMiss:
     """``unwrap`` в keys-режиме: ключей нет → служебный признак, а не молчание."""
 
@@ -357,3 +423,17 @@ class TestWrappersLive:
         assert ws.status == "running"
         # у процесса есть защищённый message_processor
         assert "message_processor" in ws.workers
+
+    def test_capabilities_shape_matches_live_server(self, headless_backend) -> None:
+        """G-5 (довесок к Task 1.1): форма ``ProcessCapabilities`` сверена ДЕЛОМ.
+
+        ``missing == []`` у карточки реального процесса — единственное доказательство,
+        что имена полей обёртки (``process``/``commands``/``router_handlers``/
+        ``registers``) совпадают с тем, что публикует ``introspect.capabilities`` на
+        живом ProcessManager, а не додуманы по исходникам.
+        """
+        caps = headless_backend.capabilities(timeout=8.0)
+        assert caps.ok is True
+        card = caps.processes[self._PROC]
+        assert card.missing == [], f"форма карточки {self._PROC!r} разошлась с сервером: {card.missing}"
+        assert card.process == self._PROC

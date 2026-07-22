@@ -1158,6 +1158,18 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """
         return any(intent.get("command") == "state.subscribe" for intent in self.export_subscriptions())
 
+    def _telemetry_ingest_patterns(self) -> List[str]:
+        """Паттерны живых state.subscribe-намерений (провенанс покрытия ingest).
+
+        Агент сам судит, покрывает ли паттерн источник телеметрии (processes.**);
+        второй glob-матчер рядом со state_store НЕ строим — источник расхождений.
+        """
+        return [
+            intent.get("args", {}).get("pattern", "")
+            for intent in self.export_subscriptions()
+            if intent.get("command") == "state.subscribe"
+        ]
+
     @staticmethod
     def _telemetry_is_tracked(path: str) -> bool:
         """Путь входит в трекаемые суффиксы read-model (``DEFAULT_TRACKED_SUFFIXES``).
@@ -1189,11 +1201,19 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         Returns:
             ``{"success": True, "process": ..., "metric": ..., "count": N,
             "metrics": {path: {"value": v, "process": p, "worker": w}},
-            "ingest_active": bool, "ingested_total": N}``. Пустой read-model
-            (``count=0``) сам по себе не говорит, ПОЧЕМУ пусто — ``ingest_active``
-            и ``ingested_total`` разводят «нет данных» / «нет подписки»: без
-            подписки ``ingest_active=False``; под активной подпиской, но пока без
-            дельт — ``ingest_active=True, ingested_total=0``.
+            "ingest_active": bool, "ingested_total": N, "ingest_patterns": [...]}``.
+            Пустой read-model (``count=0``) сам по себе не говорит, ПОЧЕМУ пусто —
+            ``ingest_active`` и ``ingested_total`` разводят «нет данных» / «нет
+            подписки»: без подписки ``ingest_active=False``; под активной подпиской,
+            но пока без дельт — ``ingest_active=True, ingested_total=0``.
+
+            **Осторожно с толкованием ``ingest_active``.** Он значит только «durable-
+            подписка ``state.subscribe`` ОБЪЯВЛЕНА» — НЕ «поток телеметрии идёт»: если
+            паттерн подписки не покрывает ``processes.**`` (источник телеметрии),
+            ``ingest_active`` всё равно будет ``True`` при пустом read-model.
+            Покрывает ли объявленная подписка источник телеметрии — смотри
+            ``ingest_patterns`` (список паттернов активных ``state.subscribe``-намерений)
+            и суди сам: второй glob-матчер здесь сознательно не строится.
         """
         prefix = f"processes.{process}" if process else ""
         with self._telemetry_lock:
@@ -1212,6 +1232,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             "metrics": metrics,
             "ingest_active": self._telemetry_ingest_active(),
             "ingested_total": ingested_total,
+            "ingest_patterns": self._telemetry_ingest_patterns(),
         }
 
     def telemetry_history(
@@ -1232,11 +1253,16 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         Returns:
             ``{"success": True, "path": ..., "process": ..., "worker": ...,
             "count": N, "points": [[ts, value], ...], "tracked": bool,
-            "ingest_active": bool}`` в хронологическом порядке. ``count=0`` сам по
-            себе не говорит, ПОЧЕМУ пусто: ``tracked=False`` — путь вне
-            ``DEFAULT_TRACKED_SUFFIXES``, истории для него не бывает по устройству
-            (норма, не поломка); ``tracked=True`` при пустом буфере — путь трекается,
-            но точек ещё/уже нет (смотри ``ingest_active`` — была ли вообще подписка).
+            "ingest_active": bool, "ingest_patterns": [...]}`` в хронологическом
+            порядке. ``count=0`` сам по себе не говорит, ПОЧЕМУ пусто: ``tracked=False``
+            — путь вне ``DEFAULT_TRACKED_SUFFIXES``, истории для него не бывает по
+            устройству (норма, не поломка); ``tracked=True`` при пустом буфере — путь
+            трекается, но точек ещё/уже нет (смотри ``ingest_active`` — была ли вообще
+            подписка).
+
+            **``ingest_active`` = подписка ОБЪЯВЛЕНА, не «покрывает источник телеметрии».**
+            Как и у :meth:`telemetry_snapshot` — покрытие смотри в ``ingest_patterns``,
+            вердикт «покрывает ли паттерн ``processes.**``» оставлен агенту.
         """
         with self._telemetry_lock:
             points = self._telemetry_model.history(path)
@@ -1253,6 +1279,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             "points": [[ts, val] for ts, val in points],
             "tracked": self._telemetry_is_tracked(path),
             "ingest_active": self._telemetry_ingest_active(),
+            "ingest_patterns": self._telemetry_ingest_patterns(),
         }
 
     # ---- system_overview (B.3): «один вызов = вся картина» ----

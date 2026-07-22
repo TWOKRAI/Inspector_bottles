@@ -377,6 +377,36 @@ class TestTelemetryIngestActiveUnit:
         assert snap["count"] == 0  # путь удалён — снимок пуст, но дельты были
 
 
+class TestTelemetryIngestPatterns:
+    """``ingest_patterns`` (довесок к Task 1.2/BCTL-ADR-007) — провенанс ПОКРЫТИЯ ingest:
+    список паттернов активных ``state.subscribe``-намерений. ``ingest_active`` сам по
+    себе значит только «подписка объявлена», а не «покрывает источник телеметрии»
+    (``processes.**``) — этот пробел и закрывает список: агент сверяет паттерн сам,
+    второй glob-матчер рядом со state_store не строится."""
+
+    def test_no_subscription_is_empty(self) -> None:
+        d = BackendDriver()
+        assert d.telemetry_snapshot()["ingest_patterns"] == []
+        assert d.telemetry_history("processes.cam.state.fps")["ingest_patterns"] == []
+
+    def test_subscribed_pattern_is_listed_in_snapshot(self, monkeypatch) -> None:
+        d, _calls = _recorder(monkeypatch, response={"success": True, "result": {"status": "subscribed"}})
+        d.state_subscribe("calibration.**")
+        assert d.telemetry_snapshot()["ingest_patterns"] == ["calibration.**"]
+
+    def test_subscribed_pattern_is_listed_in_history(self, monkeypatch) -> None:
+        d, _calls = _recorder(monkeypatch, response={"success": True, "result": {"status": "subscribed"}})
+        d.state_subscribe("calibration.**")
+        hist = d.telemetry_history("processes.cam.state.fps")
+        assert hist["ingest_patterns"] == ["calibration.**"]
+
+    def test_unsubscribe_clears_pattern(self, monkeypatch) -> None:
+        d, _calls = _recorder(monkeypatch, response={"success": True, "result": {"status": "subscribed"}})
+        d.state_subscribe("calibration.**")
+        d.state_unsubscribe("calibration.**")
+        assert d.telemetry_snapshot()["ingest_patterns"] == []
+
+
 class TestTelemetryHistoryTracked:
     """``tracked`` разводит «путь вне DEFAULT_TRACKED_SUFFIXES» и «данных пока нет» (пара)."""
 
@@ -435,5 +465,80 @@ def test_ingest_active_and_ingested_total_live() -> None:
         on = _wait_ingested(drv, time.time() + 15.0)
         assert on["ingest_active"] is True
         assert on["ingested_total"] > 0, "read-model должен реально получить дельты под watch_like_gui"
+    finally:
+        harness.stop()
+
+
+_PORT_UNKNOWN_METRIC = 8790  # уникальный порт этого модуля (свободен на момент написания, см. AGENTS.md)
+
+
+@pytest.mark.harness_smoke
+def test_unknown_metric_live() -> None:
+    """Фикс 3 (довесок к Task 1.4/BCTL-ADR-007): ``unknown_metric`` доказан на живом
+    бэкенде, не только на бессокетном driver'е (``TestMetricThresholdUnknownMetric`` в
+    ``test_await_condition.py`` — сплошь fake dispatch_raw, ни одного ``harness_smoke``).
+
+    Плечо ненуля достигается штатным API: ``watch_like_gui`` наполняет read-model
+    реальными дельтами живой системы, из них берётся ЛЮБОЙ реально наблюдённый
+    трекаемый путь (не захардкожен конкретный процесс/метрику — топология рецепта
+    может меняться) и опечатывается на одну букву — по тому же принципу, что unit-тест
+    ``test_typo_path_pair_flags_unknown_with_candidates``.
+    """
+    harness = BackendHarness(with_base=True, port=_PORT_UNKNOWN_METRIC)
+    try:
+        drv = harness.start()
+        assert drv.watch_like_gui().get("success") is True
+
+        snap = _wait_ingested(drv, time.time() + 15.0)
+        assert snap["ingested_total"] > 0
+
+        tracked_paths = [p for p in snap["metrics"] if drv._telemetry_is_tracked(p)]
+        assert tracked_paths, "живая система не опубликовала ни одной трекаемой метрики — нечем опечататься"
+        real_path = sorted(tracked_paths)[0]
+        typo_path = real_path + "s"  # опечатка: не совпадает ни с одним DEFAULT_TRACKED_SUFFIXES
+
+        res = drv.await_condition("metric_threshold", {"path": typo_path, "op": ">", "value": 10**9}, timeout=2.0)
+
+        assert res["success"] is False and res["timed_out"] is True
+        assert res["unknown_metric"] is True
+        assert real_path in res["candidates"], f"{real_path!r} не попал в кандидаты: {res['candidates']}"
+    finally:
+        harness.stop()
+
+
+_PORT_UNREACHED_HINT = 8791  # уникальный порт этого модуля (свободен на момент написания, см. AGENTS.md)
+
+
+@pytest.mark.harness_smoke
+def test_telemetry_set_addressed_delivery_is_fire_and_forget_live() -> None:
+    """Фикс 4 (довесок к Task 1.4/BCTL-ADR-007) — ГРАНИЦА ДОКАЗУЕМОСТИ, замерена живьём.
+
+    Замер 2026-07-22 опроверг и посылку ревью (Fable: «опечатка в метрике → reached=0»),
+    и первую ревизию («несуществующий процесс → reached=0»): ``reached=0`` у publish
+    НЕдостижим детерминированно через публичный API. Адресная доставка — fire-and-forget
+    (``_send_child_command`` → ``comm.send_to_process``, ``process_manager_process.py:
+    1331-1354``): возвращает факт ПОСТАНОВКИ билета в очередь, а не существование
+    адресата. Поэтому ``telemetry_set`` даже НЕсуществующему процессу даёт ``reached=1``
+    (билет ушёл в PSR), а не 0. Единственный False-путь — ``comm is None``
+    (минимальный/тестовый PM), на живом харнессе недостижим.
+
+    Следствие для BCTL-ADR-007: reached=0-ветка клиентского ``hint``
+    (``_flag_unreached_metric``) доказуема только unit'ом (``TestTelemetrySetUnreachedHint``),
+    её live-ненуль — нет; честный уровень сигнала — unit. Этот тест доказывает ЗАМЕРОМ
+    саму границу — и заодно почему клиентский hint вообще нужен: сервер не различает
+    «плохое имя» и «хорошее имя», оба дают reached=1.
+    """
+    harness = BackendHarness(with_base=True, port=_PORT_UNREACHED_HINT)
+    try:
+        drv = harness.start()
+
+        res = drv.telemetry_set("нет_такого_процесса_xyz", "fps", enabled=True)
+
+        assert res["success"] is True, "консервативно: подсказка не блокирует ответ"
+        # Fire-and-forget: билет ушёл в очередь, адресат не проверяется → reached=1, не 0.
+        assert res["publish"]["reached"] == 1
+        # reached≠0 → клиентский hint НЕ навешивается (навесился бы только на живой reached=0,
+        # который через публичный API не воспроизвести — см. докстринг).
+        assert "hint" not in res
     finally:
         harness.stop()

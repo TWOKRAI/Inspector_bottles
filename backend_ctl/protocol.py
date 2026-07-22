@@ -123,6 +123,18 @@ def _read_scalar(payload: Any, key: str, missing: List[str]) -> Optional[Any]:
     return None
 
 
+def _read_list(payload: Any, key: str, missing: List[str]) -> Optional[List[Any]]:
+    """Список-секция: нет ключа или значение не list → None + missing.
+
+    Пустой список — валидный ответ («команд/handlers нет»), НЕ пропуск.
+    """
+    value = payload.get(key, _ABSENT) if isinstance(payload, dict) else _ABSENT
+    if isinstance(value, list):
+        return list(value)
+    missing.append(key)
+    return None
+
+
 def _read_breakdown(stats: Any) -> Dict[str, int]:
     """Разбивка счётчиков по kind (``sent_via_channel.system`` и т.п.) — точечные ключи.
 
@@ -326,7 +338,15 @@ class ProcessCapabilities:
 
     Контракт процесса: ``commands`` — [{name, description, tags}], ``registers`` —
     {имя_регистра: [имена_полей]} (структура, без значений), ``router_handlers`` —
-    НЕ-командные ключи event_dispatcher. ``raw`` — весь сырой ответ.
+    НЕ-командные ключи event_dispatcher.
+
+    **Строгий край (довесок к Task 1.1).** Типы полей `commands`/`router_handlers`/
+    `registers` остаются НЕ-Optional (`[]`/`{}`) — потребители (`capability_render.py`,
+    `command_validate.py`, `dump_capabilities.py`, `mcp_driver_session.py`) итерируют
+    их напрямую без None-проверок. Провенанс не теряется: ключ, которого в ответе не
+    было вовсе, попадает в ``missing`` — секция-пустышка ОТ СЕРВЕРА («команд нет») и
+    секция-пропуск (сервер переименовал ключ / ручка не ответила) дают одинаковый
+    `[]`/`{}`, но различаются наличием имени в ``missing``. ``raw`` — весь сырой ответ.
     """
 
     ok: bool
@@ -334,20 +354,20 @@ class ProcessCapabilities:
     commands: List[Dict[str, Any]]
     router_handlers: List[str]
     registers: Dict[str, List[str]]
+    missing: List[str] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_response(cls, res: Any) -> "ProcessCapabilities":
         payload = _find_payload(res, "commands", "registers")
-        commands = payload.get("commands") if isinstance(payload, dict) else None
-        registers = payload.get("registers") if isinstance(payload, dict) else None
-        handlers = payload.get("router_handlers") if isinstance(payload, dict) else None
+        missing: List[str] = []
         return cls(
             ok=_is_ok(res, payload),
-            process=payload.get("process") if isinstance(payload, dict) else None,
-            commands=list(commands) if isinstance(commands, list) else [],
-            router_handlers=list(handlers) if isinstance(handlers, list) else [],
-            registers=dict(registers) if isinstance(registers, dict) else {},
+            process=_read_scalar(payload, "process", missing),
+            commands=_read_list(payload, "commands", missing) or [],
+            router_handlers=_read_list(payload, "router_handlers", missing) or [],
+            registers=_read_mapping(payload, "registers", missing) or {},
+            missing=missing,
             raw=res if isinstance(res, dict) else {},
         )
 
