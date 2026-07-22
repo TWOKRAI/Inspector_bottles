@@ -257,3 +257,34 @@ def test_ensure_replays_durable_subscriptions_after_death() -> None:
     assert second.replayed, "новый driver обязан переподписаться"
     report = session.pop_reconnect_report()
     assert report is not None and report.get("reconnected") is True
+
+
+def test_pop_reconnect_report_is_delivered_exactly_once() -> None:
+    """Task 6.1 ГАП 3 — ``pop_reconnect_report`` доставляет отчёт РОВНО ОДИН РАЗ.
+
+    ``test_ensure_replays_durable_subscriptions_after_death`` выше доказывает, что отчёт
+    ЕСТЬ после реконнекта, но не проверяет, что второй ``pop`` не вернёт его повторно.
+    Инвариант «доставлен ровно один раз» — это инвариант ОЧИСТКИ состояния
+    (``pop_reconnect_report`` возвращает и тут же обнуляет ``self._reconnect_report``,
+    ``mcp_driver_session.py:528-531``), а не гонка транспорта — честный уровень
+    доказательства здесь unit, не live (в отличие от плеч 1/2 этого гапа, которые
+    требуют реального сокета/бэкенда).
+    """
+    intents = [{"topic": "state.changed", "path": "processes.*"}]
+    created: List[_FakeDriver] = []
+
+    def _factory() -> _FakeDriver:
+        drv = _FakeDriver(intents=intents if not created else [])
+        created.append(drv)
+        return drv
+
+    session = DriverSession(driver_factory=_factory, log=lambda _m: None)
+    first = session.ensure()
+    first.connection_lost = True
+    session.ensure()
+
+    first_pop = session.pop_reconnect_report()
+    assert first_pop is not None and first_pop.get("reconnected") is True
+
+    second_pop = session.pop_reconnect_report()
+    assert second_pop is None, "повторный pop не должен воскрешать уже доставленный отчёт"

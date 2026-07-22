@@ -338,9 +338,11 @@
 3. Reconnect live: durable-подписки восстановлены, reconnect-report доехал ровно один раз.
 
 **Acceptance criteria:**
-- [ ] Новые live-тесты зелёные локально (Windows, реальный spawn), 3/3 подряд
-- [ ] `scripts/run_framework_tests.py` без регрессий
-- [ ] Каждый новый сигнал в тестах удовлетворяет BCTL-ADR-007 (показан ненулевым)
+- [x] Новые live-тесты зелёные локально (Windows, реальный spawn), 3/3 подряд — `test_telemetry_gate_live.py` (2) + `test_watch_planes_live.py` (2) = 4/4 × 3/3; `test_conn_lost.py` +1 unit (exactly-once)
+- [x] `scripts/run_framework_tests.py` без регрессий — backend_ctl 519 unit passed
+- [x] Каждый новый сигнал в тестах удовлетворяет BCTL-ADR-007 (показан ненулевым либо честно признан unit-level)
+
+**Статус:** ✅ DONE. Измерено — большая часть 6.1 предсуществовала (ingest/telemetry_set/reconnect live). Три реальных пробела закрыты: (1) telemetry gate — детерминированная пара `capped_by_throttle` (серверный флаг синхронно в команде, без гонки ingest'а); (2) watch три плоскости — state/telemetry ненулевые live, ui/errors явно зафиксированы как тишина-свойство-рецепта (не пропущены молча); (3) reconnect-report exactly-once — unit-инвариант очистки `pop_reconnect_report` (честный уровень unit, не live).
 
 **Out of scope:** новые фичи; ретроспективное покрытие всех 49 инструментов.
 
