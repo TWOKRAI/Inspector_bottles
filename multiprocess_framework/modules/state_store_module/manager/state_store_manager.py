@@ -463,7 +463,12 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
                 if not isinstance(v, dict)
             ]
             if deltas:
-                self._dispatcher._send_state_changed(subscriber, deltas)
+                # Через enqueue_replay, а не прямой отправкой: при коалесцировании
+                # (FW_STATE_COALESCE) отправка обязана идти из единственного потока-
+                # flusher'а, иначе конверт реплея конкурирует с буферизованным и может
+                # быть отброшен приёмником как устаревший — подписчик остался бы без
+                # начального снимка. При OFF внутри — та же прямая отправка, что и раньше.
+                self._dispatcher.enqueue_replay(subscriber, deltas)
                 self._log_debug(f"Initial replay: {len(deltas)} значений → '{subscriber}' (pattern={pattern})")
         except Exception as exc:  # nosec B110 — реплей best-effort, не критичен для подписки
             self._log_warning(f"Initial replay для '{subscriber}' (pattern={pattern}) не удался: {exc}")

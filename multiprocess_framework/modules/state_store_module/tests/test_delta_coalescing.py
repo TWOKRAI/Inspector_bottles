@@ -376,3 +376,62 @@ def test_on_end_to_end_stateproxy_no_resync() -> None:
     assert proxy._last_revision == 4
     assert proxy.cache["cameras.0.config.fps"] == 31
     assert proxy.cache["cameras.0.config.gain"] == 5
+
+
+# ---------------------------------------------------------------------------
+# Initial-replay через единственного отправителя (ревью Fable, итерация 2)
+# ---------------------------------------------------------------------------
+
+
+def test_off_replay_sends_directly() -> None:
+    """OFF: enqueue_replay шлёт немедленно в вызывающем потоке — бит-в-бит."""
+    disp, router, _subs = _make(coalesce=False)
+
+    disp.enqueue_replay("gui", [_mk_delta("cameras.0.status", "idle", revision=7)])
+
+    assert len(router.sent) == 1
+    assert router.sent[0]["targets"] == ["gui"]
+    assert router.sent[0]["data"]["revision"] == 7
+
+
+def test_on_replay_not_sent_in_caller_thread() -> None:
+    """ON: enqueue_replay НЕ шлёт из вызывающего потока — только буферизует и будит
+    flusher. Иначе конверт реплея конкурировал бы с буферизованным."""
+    disp, router, _subs = _make(coalesce=True)
+    disp._wake.clear()
+
+    disp.enqueue_replay("gui", [_mk_delta("cameras.0.status", "idle", revision=7)])
+
+    assert router.sent == []  # отправки из caller-потока нет
+    assert disp._wake.is_set()  # flusher разбужен
+    assert disp._flush_once() == 1
+    assert len(router.sent) == 1
+
+
+def test_on_replay_appended_after_pending_one_envelope() -> None:
+    """ON: реплей ложится ПОСЛЕ уже накопленных дельт подписчика — один конверт,
+    first_revision = min(pending), непрерывность не рвётся, дропа нет."""
+    disp, router, subs = _make(coalesce=True)
+    subs.subscribe("cameras.**", "gui")
+
+    # Накопленные мутации 10..12 (ещё не отправлены).
+    for rev in (10, 11, 12):
+        disp.dispatch_single(_mk_delta("cameras.0.config.fps", rev, revision=rev))
+    assert router.sent == []
+
+    # Реплей снимка (revision снимка = 12, значения не старше pending).
+    disp.enqueue_replay("gui", [_mk_delta("cameras.0.status", "idle", revision=12)])
+    disp._flush_once()
+
+    assert len(router.sent) == 1  # ровно ОДИН конверт
+    data = router.sent[0]["data"]
+    assert data["first_revision"] == 10  # min pending, а не revision реплея
+    assert data["revision"] == 12
+    # Порядок: сначала pending-дельты, реплей последним (снимок не откатывает pending).
+    paths = [d["path"] for d in data["deltas"]]
+    assert paths == [
+        "cameras.0.config.fps",
+        "cameras.0.config.fps",
+        "cameras.0.config.fps",
+        "cameras.0.status",
+    ]

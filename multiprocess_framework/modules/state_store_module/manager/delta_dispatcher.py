@@ -223,6 +223,43 @@ class DeltaDispatcher:
 
         return stats
 
+    def enqueue_replay(self, subscriber: str, deltas: list[Delta]) -> None:
+        """Поставить initial-replay дельты новому подписчику (state.subscribe).
+
+        Реплей рождается не на пути мутации, а в потоке-обработчике подписки,
+        поэтому ему нужен ТОТ ЖЕ единственный отправитель. Иначе при ON он стал бы
+        вторым отправителем, конкурирующим с flusher'ом: конверт реплея
+        (``first == revision == снимок``) мог бы прийти ПОСЛЕ более свежего
+        буферизованного и быть целиком отброшен приёмником как устаревший —
+        новый подписчик остался бы БЕЗ начального снимка (пусто до следующей
+        мутации его путей), плюс ложные gap-WARNING и лишние resync.
+
+        Реплей кладётся в буфер ПОСЛЕ уже накопленных дельт подписчика: снимок
+        читается из store уже после их мутаций, поэтому его значения не старше —
+        применение реплея последним не откатывает pending. Конверт остаётся
+        непрерывным по revision (``first`` = min pending), клиент применяет всё.
+
+        Args:
+            subscriber: имя процесса-подписчика (адрес доставки).
+            deltas: дельты снимка (все с revision снимка).
+        """
+        if not deltas:
+            return
+
+        if not self._coalesce:
+            # OFF: прямая отправка в вызывающем потоке — бит-в-бит прежнее поведение.
+            self._send_state_changed(subscriber, deltas)
+            return
+
+        with self._buffer_lock:
+            buf = self._buffer.get(subscriber)
+            if buf is None:
+                buf = []
+                self._buffer[subscriber] = buf
+            buf.extend(deltas)
+        # Реплей ждать тика не должен (подписчик стартует) — будим flusher.
+        self._wake.set()
+
     def _flush_once(self) -> int:
         """Один тик flush: swap всего буфера под локом, отправка вне лока.
 
