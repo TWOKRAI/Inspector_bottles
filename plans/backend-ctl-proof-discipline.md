@@ -310,9 +310,11 @@
 **Files:** `backend_ctl/tests/test_fencing_live.py` (переписать в плечо 1; старый тест удалить с комментарием-ссылкой на память `project_fencing_test_race`), тесты message_module (плечо 2), тесты process_module (плечо 3).
 
 **Acceptance criteria:**
-- [ ] Плечо 1 зелёное 3/3 подряд (детерминизм, без гонки)
-- [ ] Плечи 2-3 зелёные, пара ON/OFF в плече 3 явная
-- [ ] В плече 1 комментарий: e2e стейл-дропа вернуть, если появится «парадная дверь» (судимый receive-путь драйвера)
+- [x] Плечо 1 зелёное 3/3 подряд (детерминизм, без гонки) — `test_incarnation_and_epoch_bump_on_instance_replace`: incarnation+epoch строго растут после restart-no-reuse, live 3/3
+- [x] Плечи 2-3 зелёные, пара ON/OFF в плече 3 явная — **замерено: УЖЕ покрыты** (24 passed). Плечо 2 = `message_module/tests/test_fencing.py` (drop/pass/fail-open/data-plane); плечо 3 = `process_module/tests/test_message_guards.py` (`test_receive_drops_stale_instance_and_counts` ON + `test_fence_off_disables_stamp` OFF)
+- [x] В плече 1 комментарий: e2e стейл-дропа вернуть, если появится «парадная дверь» (судимый receive-путь драйвера) — в докстринге модуля
+
+**Статус:** ✅ DONE. Гоночные `test_stale_dropped..._green`/`..._red` удалены (требовали исхода гонки — `project_fencing_test_race`), заменены детерминированным плечом 1. Плечи 2/3 не потребовали новых тестов — предсуществующее покрытие полное и явно-парное. Входной красный `test_fencing_live` снят.
 
 **Out of scope:** «парадная дверь»; правки самого fence-механизма (исправен — `bumped=True` доказан логом из точки решения).
 
