@@ -197,7 +197,7 @@ def await_condition(
     # не меняет ответ ни на байт (BCTL-ADR-007).
     out.update(waiter.diagnostics)
     # Подсказка — по отсутствию РЕЛЕВАНТНЫХ наблюдений (note), не любых событий:
-    # фоновый трафик (log.record/ui.event при активном debug_session) не должен
+    # фоновый трафик (log.record/ui.event при активном watch-профиле) не должен
     # гасить диагноз «нужные дельты/события так и не пришли».
     if last_seen is None:
         out["hint"] = (

@@ -38,7 +38,7 @@
 |-------|-----|-----------|
 | **Бэкенд отдельно** (headless, без Qt) | `BackendHarness` в тестах или `BACKEND_CTL=1` + strip_gui | introspect/state/логи/регистры — весь этот файл |
 | **Фронтенд** (GUI поднят) | полный запуск `BACKEND_CTL=1 python run.py` → `drv.ui_tap("gui")` | нажатия кнопок и переключения табов приходят агенту событиями `ui.event` (`data.record`: kind/text/path/ts); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; инспекция/клики виджетов — qt-mcp (`QT_MCP_PROBE=1`) |
-| **Совместно** (корреляция UI ↔ бэкенд) | **`drv.debug_session()` — одна кнопка**: ui_tap (жесты+команды GUI) + log_tail на все процессы + state_subscribe; выключение — `debug_stop()` | единый событийный поток с ts/seq: «клик (ui.event kind=button, seq=41) → команда GUI→бэкенд (kind=command, seq=42) → log.record → state.changed» — разрыв между уровнями локализует баг |
+| **Совместно** (корреляция UI ↔ бэкенд) | `drv.watch_like_gui()` (весь приёмный профиль GUI: state + логи/observability + авто-переподписка) **+** `drv.ui_tap("gui")` (жесты+команды GUI); смоук цепочки без клика — `drv.ui_tap_ping("gui")`; выключение — `drv.unwatch()` + `drv.ui_untap("gui")` | единый событийный поток с ts/seq: «клик (ui.event kind=button, seq=41) → команда GUI→бэкенд (kind=command, seq=42) → log.record → state.changed» — разрыв между уровнями локализует баг |
 
 **Киллер-фича:** `introspect_handlers(process)` за секунду ловит баг «нет приёмника»
 (команда есть в `CommandManager`, но не в router `message_dispatcher`, или у плагина нет
@@ -93,7 +93,6 @@ PY
 | `state_subscribe(pattern)` | подписка на state-дерево; пуши `state.changed` → событийный канал |
 | `ui_tap("gui")` / `ui_untap("gui")` | подписка на UI-события gui: жесты (kind=button/tab) И намерения — команды GUI→бэкенд через перехват двери CommandSender (kind=command/system_command) → пуши `ui.event` (общий seq) |
 | `ui_tap_ping("gui", note=...)` | синтетическое `ui.event` тем же путём доставки — проверка цепочки без клика |
-| `debug_session(logs_level=, state_pattern=, log_processes=)` / `debug_stop()` | ВСЯ отладочная плоскость одним вызовом: ui_tap + log_tail (по умолчанию на все процессы топологии) + state_subscribe; дизайн — `plans/2026-07-06_constructor-master/debug-plane-idea.md` |
 | `events_page(plane=, cursor=, limit=)` | **B.1**: курсорное НЕдеструктивное чтение событий по плоскостям (`state`/`logs`/`errors`/`stats`/`telemetry`/`ui`/`other`/`all`); ответ `{items[{seq,event}], next_cursor, dropped, bookmark}` — несколько читателей не мешают друг другу, потеря из кольца видна в `dropped`, `bookmark` = «читать только новое» |
 | `await_condition(kind, spec, timeout=)` | **B.2**: серверное ожидание вместо поллинга — `state_path` (`{path, value}` в read-model), `event_matches` (`{plane, pattern}` glob по command/path), `metric_threshold` (`{path, op, value}`); таймаут возвращает диагноз (`waited`/`last_seen`/`events_seen`), не пустоту; требует активной подписки (watch_like_gui/state_subscribe) |
 | `subscribe(cb)` | событийный канал: колбэк на каждый push (исполняется в reader-потоке — держи лёгким) |

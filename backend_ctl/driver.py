@@ -1179,60 +1179,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """Синтетическое ui.event тем же путём доставки — проверка цепочки без клика."""
         return _leaf_result(self.send_command(process, "ui.tap.ping", {"note": note}, timeout=timeout))
 
-    # ---- Debug-plane: полная наблюдаемость одним вызовом ----
-
-    def debug_session(
-        self,
-        *,
-        gui_process: str = "gui",
-        logs_level: str = "WARNING",
-        log_processes: Optional[List[str]] = None,
-        state_pattern: str = "**",
-        timeout: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """Включить отладочную плоскость одним вызовом (debug-plane v1).
-
-        Жест+намерение (``ui_tap`` gui: клики/табы + команды GUI→бэкенд), эффект
-        (``log_tail`` уровня ``logs_level`` на процессы ``log_processes``, по
-        умолчанию — все из state-топологии, + ``state_subscribe(state_pattern)``).
-        Всё приходит в ЕДИНЫЙ событийный канал (:meth:`events_page`, plane ``all``):
-        команды ``ui.event`` / ``log.record`` / ``state.changed``, упорядочивание —
-        ts (+seq у ui.event).
-
-        Возвращает сводку по каждому включённому источнику (best-effort: недоступный
-        источник — честная запись об ошибке, остальные работают).
-        """
-        summary: Dict[str, Any] = {"ui": None, "logs": {}, "state": None}
-        summary["ui"] = self.ui_tap(gui_process, timeout=timeout)
-
-        procs = log_processes if log_processes is not None else self._discover_processes(timeout=timeout)
-        for p in procs:
-            summary["logs"][p] = self.log_tail(p, level=logs_level, timeout=timeout)
-
-        summary["state"] = self.state_subscribe(state_pattern, timeout=timeout)
-        summary["success"] = bool((summary["ui"] or {}).get("success") is not False)
-        return summary
-
-    def debug_stop(
-        self,
-        *,
-        gui_process: str = "gui",
-        log_processes: Optional[List[str]] = None,
-        timeout: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """Выключить отладочную плоскость: ui_untap + log_untail по процессам.
-
-        Подписка state.subscribe снимается вместе с закрытием соединения driver'а
-        (server-side привязана к подписчику) — отдельной команды не требует.
-        """
-        summary: Dict[str, Any] = {"ui": self.ui_untap(gui_process, timeout=timeout), "logs": {}}
-        procs = log_processes if log_processes is not None else self._discover_processes(timeout=timeout)
-        for p in procs:
-            summary["logs"][p] = self.log_untail(p, timeout=timeout)
-        return summary
-
     def _discover_processes(self, *, timeout: Optional[float] = None) -> List[str]:
-        """Список процессов из state-топологии (общий для debug_session/debug_stop, Task 0.4)."""
+        """Список процессов из state-топологии (общий источник для ``watch_like_gui`` и ``system_overview``)."""
         st = self.send_command("ProcessManager", "state.get_subtree", {"path": "processes"}, timeout=timeout)
         tree = unwrap(st, leaf=True)
         node = tree.get("subtree") or tree.get("value") or {}
@@ -1285,8 +1233,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         управляемость watch-профилем). Серверную подписку поштучно НЕ снимаем: сервер
         отписывает по ``sub_id`` (у нас его нет) либо ``state.unsubscribe_all`` по
         подписчику (снёс бы и НЕ-watch подписки того же driver'а — слишком широко).
-        Серверная state-подписка освобождается закрытием соединения (как в
-        :meth:`debug_stop`); durable-намерение — это то, что переживало бы реконнект.
+        Серверная state-подписка освобождается закрытием соединения driver'а;
+        durable-намерение — это то, что переживало бы реконнект.
         """
         sub = subscriber or self._subscriber
         self._subscriptions.remove("state.subscribe", "ProcessManager", {"pattern": pattern})

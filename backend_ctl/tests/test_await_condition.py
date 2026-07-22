@@ -200,7 +200,7 @@ class TestEventMatches:
 
 class TestTimeoutDiagnosis:
     def test_hint_survives_irrelevant_traffic(self) -> None:
-        """Фоновый трафик (логи при активном debug_session) не гасит подсказку.
+        """Фоновый трафик (логи при активном watch-профиле) не гасит подсказку.
 
         Ревью фазы B: hint гейтился на events_seen==0 и подавлялся ЛЮБЫМИ
         событиями — теперь он привязан к отсутствию РЕЛЕВАНТНЫХ наблюдений.

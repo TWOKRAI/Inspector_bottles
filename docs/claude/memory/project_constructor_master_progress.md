@@ -1,7 +1,7 @@
 ---
 name: project-constructor-master-progress
 description: "constructor-master: Ф0-Ф3 + трек F ЦЕЛИКОМ (F.1-F.7) + Ф4.1/4.2 + добор H1-H8 + Ф5-ядро (5.1-5.9/5.14-5.17/5.19-5.21) + post-review R1-R6 ЗАКРЫТЫ; main ЗАПУШЕН (origin/main==a50d1f74). F.7 + открытие C1-C8 в ветке fix/codegraph-routing-single-tool ждут merge. NEXT: Ф5-добор C1-C8 (recipe-модуль C1-C3=4.5+4.6+5.3) + app_module 5.11-5.13 + хвосты Ф4 (4.3/4.4/4.7/4.8/4.9)"
-metadata: 
+metadata:
   node_type: memory
   type: project
   originSessionId: 05a29a24-fbc4-4241-8e6f-a55d2a6b5db0
@@ -69,7 +69,7 @@ metadata:
 
 - В main ВСЁ (merge 2f4e212c, гейт 3536 passed): Ф0, Ф1 (backend_ctl v2), трек F (god-split), Ф2 целиком (health+breaker+discovery+волны C), debug-plane v1, MCP 25. feat/constructor-f2 можно удалить. Урок MERGE-GATE F: repo-wide modularity не видит разрез god-файлов — мерить max-LOC зоны.
 - Состав Ф2 (уже в main): Ф2.1 ctx.health (ADR-PM-010), Ф2.2 честный breaker (ADR-PM-011), Ф2.3 discovery честный (failed_imports + introspect.plugins + счётчик отказов ObservableMixin), волны C (см. ниже), 1.10 UI-tap, 1.11 debug-plane v1. Ф2.6 (JSONL-sink) — опц, не делалась.
-- **Debug-plane — главный инструмент отладки**: `drv.debug_session()` включает всё (жесты+команды GUI через перехват двери CommandSender + log_tail всех процессов + state_subscribe) → единый поток `events()` «клик(seq) → команда(seq+1) → лог → state-дельта». MCP 25 инструментов. Дизайн/ревью: plans/2026-07-06_constructor-master/debug-plane-idea.md (v2: ActionBusTap, автоустановка в «рыбу» Ф5).
+- **Debug-plane — главный инструмент отладки** (~~`drv.debug_session()`~~ УДАЛЁН 2026-07-22, Task 4.1 плана `backend-ctl-proof-discipline`: дублировал `watch_like_gui`). Актуальная замена: `drv.watch_like_gui()` (state+логи/observability+авто-переподписка) **+** `drv.ui_tap("gui")` (жесты+команды GUI через перехват двери CommandSender) → единый поток `events_page()` «клик(seq) → команда(seq+1) → лог → state-дельта». Дизайн/история: plans/2026-07-06_constructor-master/debug-plane-idea.md.
 - Волны C 2.4∥2.5 закрыты (2026-07-07, два агента в worktree параллельно, merge чистый): M-err-1/2 + 31 report_error в 16 файлах, конвенция тега `# no-health: <причина>`, ПОСТОЯННЫЙ AST-гейт `Plugins/tests/test_no_silent_swallows.py` (except-handler обязан: report_error | raise | тег). `SubPluginContext.health` добавлен (log-only fallback + проброс родителя).
 - **Next: Ф3 Supervisor v2** — ветка `feat/constructor-f3` УЖЕ СОЗДАНА (2026-07-08, HEAD aa0fd56f docs-коммит obs-hub; main НЕ содержит его). Порядок 3.1/3.2/3.5 строго до 3.8, GATE G1 за владельцем.
 - **Ф3 ВЛИТА В MAIN (2026-07-08, merge 4c9eda59, --no-ff)**: гейт framework 3598 + prototype 2932 + Plugins/Services 1831 passed (env-gated ошибки pymodbus/hikvision-SDK `MV_OK` — PRE-EXISTING на main, не Ф3); sentrux quality 7075/modularity 5666/acyclicity 10000. main=f3.

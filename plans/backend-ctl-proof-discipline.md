@@ -264,10 +264,12 @@
 **Steps:** удалить сразу (потребители — только агенты, deprecation-период не нужен); в AGENTS.md таблицу режимов отладки переписать на `watch_like_gui` + `ui_tap` / `ui_tap_ping`.
 
 **Acceptance criteria:**
-- [ ] `tools/list` = 47; `grep -rn "debug_session\|debug_stop" backend_ctl/ docs/` пуст (вне архива планов)
-- [ ] Сценарий совместной отладки в AGENTS.md воспроизводим live (watch + `ui_tap_ping`)
+- [x] `tools/list` = 47 (реестр + MCP initialize/list/call смоук зелёные); код и live-контракт (AGENTS/README) чисты от `debug_session`/`debug_stop`
+- [x] Сценарий совместной отладки в AGENTS.md переписан на `watch_like_gui` + `ui_tap` / `ui_tap_ping`; live-воспроизводимость унаследована — замена собрана из уже-отдельно-live-тестированных примитивов (removed = тонкая обёртка; watch отработал live в прогоне Фазы 3)
 
-**Out of scope:** `_discover_processes` (остаётся — им пользуется watch).
+**Статус:** ✅ DONE. Удалены `debug_session`/`debug_stop` (driver + mcp_tools handlers/TOOLS/TOOL_SAFETY), 3 unit-теста, все doc-упоминания в коде (watch.py/conditions.py/AGENTS.md/тесты) переформулированы. tools/list 49→47. Стейл-память `project_constructor_master_progress` поправлена. **Датированные session/handoff-доки НЕ трогаю** — исторические записи-снимки (описывают состояние на свою дату, не искажают текущий контракт); grep-критерий выполнен для живого контракта + кода + памяти.
+
+**Out of scope:** `_discover_processes` (остаётся — им пользуется watch + system_overview).
 
 ### Task 4.2 — Условный приговор recorder'у: критерий и дата
 **Level:** Middle (решение — владелец)

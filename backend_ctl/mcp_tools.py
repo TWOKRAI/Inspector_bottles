@@ -304,24 +304,6 @@ def _ui_tap_ping(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.ui_tap_ping(args.get("process", "gui"), note=args.get("note", "ping"), **_kw_timeout(args))
 
 
-def _debug_session(drv: BackendDriver, args: Dict[str, Any]) -> Any:
-    return drv.debug_session(
-        gui_process=args.get("gui_process", "gui"),
-        logs_level=args.get("logs_level", "WARNING"),
-        log_processes=args.get("log_processes"),
-        state_pattern=args.get("state_pattern", "**"),
-        **_kw_timeout(args),
-    )
-
-
-def _debug_stop(drv: BackendDriver, args: Dict[str, Any]) -> Any:
-    return drv.debug_stop(
-        gui_process=args.get("gui_process", "gui"),
-        log_processes=args.get("log_processes"),
-        **_kw_timeout(args),
-    )
-
-
 def _config_reload(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.config_reload(
         args["process"],
@@ -815,42 +797,6 @@ TOOLS: List[ToolSpec] = [
         _ui_tap_ping,
     ),
     ToolSpec(
-        "debug_session",
-        "Включить ПОЛНУЮ отладочную плоскость одним вызовом: жесты+команды GUI (ui.event), "
-        "логи процессов (log.record, уровень logs_level) и state-дельты (state.changed). "
-        "Дальше читать инструментом events — единый поток «клик → команда → лог → state».",
-        _obj(
-            {
-                "gui_process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"},
-                "logs_level": {"type": "string", "description": "Мин. уровень логов (по умолчанию WARNING)"},
-                "log_processes": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Процессы для log_tail (по умолчанию все из state-топологии)",
-                },
-                "state_pattern": {"type": "string", "description": "Glob подписки state (по умолчанию '**')"},
-                "timeout": _TIMEOUT,
-            }
-        ),
-        _debug_session,
-    ),
-    ToolSpec(
-        "debug_stop",
-        "Выключить отладочную плоскость (ui_untap + log_untail по процессам).",
-        _obj(
-            {
-                "gui_process": {"type": "string", "description": "Имя gui-процесса (по умолчанию 'gui')"},
-                "log_processes": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Процессы для log_untail (по умолчанию все из state-топологии)",
-                },
-                "timeout": _TIMEOUT,
-            }
-        ),
-        _debug_stop,
-    ),
-    ToolSpec(
         "config_reload",
         "Перечитать/применить observability-секцию процесса на лету. "
         "observability={'log_level': 'DEBUG'} — сменить уровень логгера без рестарта.",
@@ -1137,8 +1083,6 @@ TOOL_SAFETY: Dict[str, str] = {
     "observability_untail": SAFETY_SUBSCRIBE,
     "watch_like_gui": SAFETY_SUBSCRIBE,
     "unwatch": SAFETY_SUBSCRIBE,
-    "debug_session": SAFETY_SUBSCRIBE,
-    "debug_stop": SAFETY_SUBSCRIBE,
     "ui_tap": SAFETY_SUBSCRIBE,
     "ui_untap": SAFETY_SUBSCRIBE,
     # write
