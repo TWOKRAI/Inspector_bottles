@@ -166,6 +166,14 @@ _FLAG_LIST: Tuple[FeatureFlag, ...] = (
         "Историческое не-FW имя MULTIPROCESS_USE_KIND_CHANNELS поддержано как alias.",
         aliases=("MULTIPROCESS_USE_KIND_CHANNELS",),
     ),
+    FeatureFlag(
+        "FW_STATE_COALESCE",
+        default=False,
+        doc="Межвызовное коалесцирование state-дельт (гашение gui-шторма): буфер "
+        "дельт per-subscriber + daemon-flusher (тик ~120мс, cap ~200) шлёт один "
+        "state.changed на тик вместо одного на каждую мутацию. Приёмник (StateProxy) "
+        "не меняется — конверт уже несёт first_revision/revision. OFF → путь бит-в-бит.",
+    ),
     # — Контракты сообщений / плагинов (Ф4) —
     FeatureFlag(
         "FW_CONTRACTS_STRICT",

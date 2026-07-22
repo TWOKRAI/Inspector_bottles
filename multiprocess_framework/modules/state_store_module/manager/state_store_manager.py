@@ -123,6 +123,10 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         if self._router is not None and self._auto_register_ipc:
             self.register_message_handlers(self._router)
 
+        # Старт daemon-flusher коалесцирования (FW_STATE_COALESCE).
+        # No-op при OFF (поток не создаётся) — путь остаётся бит-в-бит.
+        self._dispatcher.start_flusher()
+
         self.is_initialized = True
         self._log_info("StateStoreManager инициализирован")
         return True
@@ -133,6 +137,11 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         Returns:
             True если остановка успешна.
         """
+        # Финальный flush + остановка flusher коалесцирования ДО отписки:
+        # гарантирует доставку накопленного буфера дельт перед остановкой.
+        # No-op при OFF (буфер пуст, поток не создавался).
+        self._dispatcher.stop_flusher()
+
         total = 0
         for subscriber in self._subs.subscribers():
             total += self._subs.unsubscribe_all(subscriber)

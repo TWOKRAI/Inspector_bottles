@@ -43,9 +43,9 @@ set_register_verified, system_command-контракт). Остались дыр
 **Files:** `state_store_module/manager/delta_dispatcher.py`, `state_store_module/manager/state_store_manager.py` (lifecycle: старт flusher в initialize, финальный flush в shutdown:130), `config_module/feature_flags.py`, новый `state_store_module/tests/test_delta_coalescing.py`.
 **Суть:** буфер дельт per-subscriber под `threading.Lock` (матчинг подписок — в момент мутации, чтобы новый подписчик не получил чужие буферизованные дельты); собственный daemon-flusher (тик 100–150 мс + cap ~200 дельт); flush = swap буфера под локом, отправка вне лока через существующий `_send_state_changed` (min/max revision уже считаются — **приёмник gui не меняется ни на строку**). Дедуп keep-last-per-path — ЗАПРЕЩЁН в этой задаче (ломает непрерывность revision → resync-шторм).
 **Acceptance (пары):**
-- [ ] OFF: путь бит-в-бит, все тесты state_store зелёные
-- [ ] ON (unit): N set-мутаций внутри тика → ровно 1 конверт, `first_revision=min`, порядок revision; сквозной с реальным StateProxy — resync НЕ запускается; shutdown-flush доставляет буфер
-- [ ] Live-пара до/после флипа (протокол §Флип ниже): глубина `gui_system` 85-94 → 0-2; `system_evict_blocked` дельта за 60с = 0; `get_status("gui")` отвечает; `ui_tap_ping` OK
+- [x] OFF: путь бит-в-бит, все тесты state_store зелёные — 624 passed, немедленная отправка в вызывающем потоке (unit)
+- [x] ON (unit): N set-мутаций внутри тика → ровно 1 конверт, `first_revision=min`, порядок revision; сквозной с реальным StateProxy — resync НЕ запускается; shutdown-flush доставляет буфер — `test_delta_coalescing.py` 13 passed
+- [ ] Live-пара до/после флипа (протокол §Флип ниже): глубина `gui_system` 85-94 → 0-2; `system_evict_blocked` дельта за 60с = 0; `get_status("gui")` отвечает; `ui_tap_ping` OK — **за координатором, live-сессия**
 **Out of scope:** дедуп, смена очереди, правки gui/StateProxy, ThrottleMiddleware.
 
 ### Task 1.2 — Очередь класса "state" для state.changed (`FW_STATE_QUEUE`, default OFF)

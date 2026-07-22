@@ -3,15 +3,32 @@
 DeltaDispatcher получает список дельт, матчит их по подпискам,
 группирует по subscriber (с дедупликацией!) и отправляет
 каждому подписчику одно IPC-сообщение state.changed.
+
+Режим коалесцирования (``FW_STATE_COALESCE``, default OFF) — гашение gui-шторма:
+вместо одного IPC-сообщения на КАЖДУЮ мутацию дельты буферизуются per-subscriber
+и уходят одним конвертом на тик daemon-flusher'а. Матчинг подписок происходит
+В МОМЕНТ мутации (в ``dispatch``), а не при flush — иначе подписчик, появившийся
+между мутацией и тиком, получил бы чужие буферизованные дельты. OFF → путь
+бит-в-бит как раньше (немедленная отправка в вызывающем потоке).
 """
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
+from ...config_module.feature_flags import resolve
 from ..core.delta import Delta
 from ..core.subscription_manager import SubscriptionManager
 from ..interfaces import IRouter
+
+#: Период тика daemon-flusher'а (сек). В диапазоне плана 100–150 мс: достаточно
+#: редко, чтобы схлопнуть burst мутаций в один конверт, но незаметно для GUI.
+_DEFAULT_FLUSH_INTERVAL_SEC = 0.12
+
+#: Порог немедленного flush подписчика (защита от burst): как только в его буфере
+#: накопилось столько дельт, он флашится сразу, не дожидаясь тика.
+_DEFAULT_BUFFER_CAP = 200
 
 
 class DeltaDispatcher:
@@ -28,6 +45,9 @@ class DeltaDispatcher:
         router: IRouter | None = None,
         sender_name: str = "StateStore",
         logger: Any = None,
+        coalesce: bool | None = None,
+        flush_interval_sec: float = _DEFAULT_FLUSH_INTERVAL_SEC,
+        buffer_cap: int = _DEFAULT_BUFFER_CAP,
     ) -> None:
         """
         Args:
@@ -35,11 +55,29 @@ class DeltaDispatcher:
             router: реализация IRouter для отправки IPC-сообщений (None для тестов).
             sender_name: имя отправителя в IPC-сообщениях.
             logger: ObservableMixin-совместимый объект с методами _log_*.
+            coalesce: явный override флага ``FW_STATE_COALESCE`` (ctor > env >
+                default). None → значение флага из env/default. Разрешается ОДИН
+                раз здесь (не на hot-path).
+            flush_interval_sec: период тика daemon-flusher'а (только при ON).
+            buffer_cap: порог немедленного flush подписчика (защита от burst).
         """
         self._subs = subscription_mgr
         self._router = router
         self._sender = sender_name
         self._log = logger
+
+        # --- Коалесцирование (FW_STATE_COALESCE) ---
+        # Флаг разрешается единожды в ctor: hot-path (dispatch) читает готовый bool.
+        self._coalesce = resolve("FW_STATE_COALESCE", explicit=coalesce)
+        self._flush_interval_sec = flush_interval_sec
+        self._buffer_cap = buffer_cap
+        # Буфер сматченных дельт: subscriber -> список дельт (порядок revision
+        # сохраняется). Доступ только под _buffer_lock.
+        self._buffer: dict[str, list[Delta]] = {}
+        self._buffer_lock = threading.Lock()
+        # Daemon-flusher: создаётся ТОЛЬКО при ON (start_flusher), OFF → None.
+        self._flusher: threading.Thread | None = None
+        self._stop_event = threading.Event()
 
     def dispatch(self, deltas: list[Delta]) -> dict[str, int]:
         """Сгруппировать дельты по подписчику, отправить state.changed.
@@ -59,8 +97,37 @@ class DeltaDispatcher:
         if not deltas:
             return {}
 
-        # Группировка: subscriber -> список уникальных дельт
-        # Для дедупликации используем set индексов дельт по subscriber
+        # Матчинг подписок и группировка per-subscriber — ВСЕГДА в момент мутации
+        # (и в OFF, и в ON). Это ключевой инвариант коалесцирования: подписчик,
+        # появившийся между мутацией и flush, не должен получить чужие
+        # буферизованные дельты, поэтому match происходит здесь, а не при flush.
+        subscriber_deltas = self._match_and_group(deltas)
+
+        if not self._coalesce:
+            # OFF: путь бит-в-бит — немедленная отправка в вызывающем потоке.
+            stats: dict[str, int] = {}
+            for subscriber, sub_deltas in subscriber_deltas.items():
+                stats[subscriber] = len(sub_deltas)
+                self._send_state_changed(subscriber, sub_deltas)
+            return stats
+
+        # ON: буферизация (отправка отложена до тика flusher'а или cap-flush).
+        return self._buffer_deltas(subscriber_deltas)
+
+    def _match_and_group(self, deltas: list[Delta]) -> dict[str, list[Delta]]:
+        """Сматчить дельты по подпискам и сгруппировать per-subscriber с дедупом.
+
+        Дедупликация по subscriber: если процесс подписан на пересекающиеся
+        паттерны (``cameras.0.*`` и ``cameras.**``), каждая дельта попадает к
+        нему ровно один раз. Порядок дельт сохраняется (важно для монотонности
+        revision у получателя).
+
+        Args:
+            deltas: список дельт для рассылки.
+
+        Returns:
+            {subscriber: список уникальных дельт в исходном порядке}.
+        """
         subscriber_delta_indices: dict[str, set] = {}
         subscriber_deltas: dict[str, list[Delta]] = {}
 
@@ -76,13 +143,7 @@ class DeltaDispatcher:
                     subscriber_delta_indices[name].add(idx)
                     subscriber_deltas[name].append(delta)
 
-        # Отправка IPC-сообщений
-        stats: dict[str, int] = {}
-        for subscriber, sub_deltas in subscriber_deltas.items():
-            stats[subscriber] = len(sub_deltas)
-            self._send_state_changed(subscriber, sub_deltas)
-
-        return stats
+        return subscriber_deltas
 
     def dispatch_single(self, delta: Delta) -> dict[str, int]:
         """Обёртка для одной дельты.
@@ -94,6 +155,141 @@ class DeltaDispatcher:
             {subscriber: количество_дельт} — статистика рассылки.
         """
         return self.dispatch([delta])
+
+    # -------------------------------------------------------------------
+    # Коалесцирование (FW_STATE_COALESCE)
+    # -------------------------------------------------------------------
+
+    @property
+    def coalescing_enabled(self) -> bool:
+        """True, если активен режим коалесцирования (флаг разрешён в ctor)."""
+        return self._coalesce
+
+    def _buffer_deltas(self, subscriber_deltas: dict[str, list[Delta]]) -> dict[str, int]:
+        """Добавить сматченные дельты в буфер per-subscriber (ON-режим).
+
+        Дельты уже сматчены и сгруппированы (``_match_and_group``). Здесь только
+        конкатенация в буфер под локом с сохранением порядка. Дедуп keep-last
+        ЗАПРЕЩЁН (рвёт непрерывность revision → resync-шторм у клиента) — только
+        накопление. После добавления проверяется cap: подписчики, чей буфер
+        достиг порога, флашатся немедленно (вне лока), не дожидаясь тика.
+
+        Args:
+            subscriber_deltas: {subscriber: список дельт} из ``_match_and_group``.
+
+        Returns:
+            {subscriber: сколько дельт добавлено этим вызовом} — статистика,
+            совместимая по форме с OFF-путём.
+        """
+        stats: dict[str, int] = {}
+        over_cap: list[str] = []
+        with self._buffer_lock:
+            for subscriber, sub_deltas in subscriber_deltas.items():
+                buf = self._buffer.get(subscriber)
+                if buf is None:
+                    buf = []
+                    self._buffer[subscriber] = buf
+                buf.extend(sub_deltas)
+                stats[subscriber] = len(sub_deltas)
+                if len(buf) >= self._buffer_cap:
+                    over_cap.append(subscriber)
+
+        # Cap-flush — вне лока (отправка через _send_state_changed, как на тике).
+        if over_cap:
+            self._flush_subscribers(over_cap)
+
+        return stats
+
+    def _flush_subscribers(self, names: list[str]) -> None:
+        """Немедленно отправить и очистить буфер перечисленных подписчиков.
+
+        Забирает их буферы под локом (pop), отправляет ВНЕ лока. Используется
+        для cap-flush (защита от burst).
+
+        Args:
+            names: имена подписчиков для немедленного flush.
+        """
+        to_send: dict[str, list[Delta]] = {}
+        with self._buffer_lock:
+            for name in names:
+                deltas = self._buffer.pop(name, None)
+                if deltas:
+                    to_send[name] = deltas
+        for name, deltas in to_send.items():
+            self._send_state_changed(name, deltas)
+
+    def _flush_once(self) -> int:
+        """Один тик flush: swap всего буфера под локом, отправка вне лока.
+
+        Тестируемая единица (дёргается тестами напрямую вместо ожидания
+        реального таймера). Каждому подписчику — один конверт ``state.changed``
+        со всеми накопленными дельтами (min/max revision считает
+        ``_send_state_changed``).
+
+        Returns:
+            Число подписчиков, которым ушёл конверт на этом тике.
+        """
+        with self._buffer_lock:
+            local, self._buffer = self._buffer, {}
+        sent = 0
+        for subscriber, deltas in local.items():
+            if deltas:
+                self._send_state_changed(subscriber, deltas)
+                sent += 1
+        return sent
+
+    def _flusher_loop(self) -> None:
+        """Тело daemon-flusher'а: тик каждые ``_flush_interval_sec`` до останова.
+
+        ``_stop_event.wait`` возвращает True при запросе останова (выход из
+        цикла) и False по таймауту (очередной тик) — детерминированно, без
+        busy-sleep. Исключения тика не роняют поток (сам ``_send_state_changed``
+        уже глотает ошибки отправки; здесь — страховочный барьер).
+        """
+        while not self._stop_event.wait(self._flush_interval_sec):
+            try:
+                self._flush_once()
+            except Exception as exc:  # nosec B110 — тик не должен ронять поток
+                if self._log is not None:
+                    self._log._log_error(f"Ошибка flush-тика коалесцирования: {exc}")
+
+    def start_flusher(self) -> None:
+        """Запустить daemon-flusher (только при ON; иначе no-op).
+
+        Вызывается из ``StateStoreManager.initialize()``. При OFF поток не
+        создаётся вовсе. Идемпотентно: повторный вызов при живом потоке —
+        no-op.
+        """
+        if not self._coalesce:
+            return
+        if self._flusher is not None and self._flusher.is_alive():
+            return
+        self._stop_event.clear()
+        self._flusher = threading.Thread(
+            target=self._flusher_loop,
+            name="StateCoalesceFlusher",
+            daemon=True,
+        )
+        self._flusher.start()
+
+    def stop_flusher(self, timeout: float = 2.0) -> None:
+        """Остановить flusher с гарантией доставки буфера (финальный flush).
+
+        Вызывается из ``StateStoreManager.shutdown()``. Порядок: сигнал
+        останова → join потока (с таймаутом) → финальный ``_flush_once`` (дренаж
+        всего, что осталось в буфере на момент останова). Финальный flush
+        выполняется всегда — даже если поток не создавался (OFF: буфер пуст,
+        flush — no-op), — что делает метод безопасным при любом режиме.
+
+        Args:
+            timeout: максимум ожидания join потока (сек).
+        """
+        if self._flusher is not None:
+            self._stop_event.set()
+            self._flusher.join(timeout=timeout)
+            self._flusher = None
+        # Финальный дренаж буфера — гарантия доставки перед остановкой.
+        self._flush_once()
 
     def _send_state_changed(self, subscriber: str, deltas: list[Delta]) -> None:
         """Отправить state.changed сообщение подписчику.
