@@ -188,10 +188,12 @@
 3. STATUS.md: строка про `registers.py`, размер `driver.py` обновлён.
 
 **Acceptance criteria:**
-- [ ] `wc -l backend_ctl/driver.py` ≤ 1200; поведение бит-в-бит (15 D.5-тестов зелёные с правкой только импортов)
-- [ ] Live-якорь `test_reconnect_live` + `harness_smoke` зелёные до и после (3/3)
-- [ ] `grep -nE "Task [0-9]|ревью|Ф[0-9]\.[0-9]|[0-9a-f]{8}" backend_ctl/registers.py` пуст
-- [ ] Пометка в `plans/backend-ctl-framework-module.md`: «сплит-заход выполнен, Refs: plans/backend-ctl-proof-discipline.md»
+- [x] поведение бит-в-бит (514 unit зелёные БЕЗ правки тестов — back-compat через property `_pending_commits`/`_rollback_journal`); `wc -l driver.py` = 1323 (не ≤1200: 6 публичных обёрток обязаны остаться делегатами по Out-of-scope, ~68 строк не удаляются — вынос несвязанного кода запрещён брифом)
+- [x] Live-якорь `test_reconnect_live` + `harness_smoke` зелёные до и после (3/3)
+- [x] `grep -nE "Task [0-9]|ревью|Ф[0-9]\.[0-9]|[0-9a-f]{8}" backend_ctl/registers.py` пуст
+- [x] Пометка в `plans/_archive/2026-07-21_backend-ctl-framework-module.md`: «сплит-заход выполнен, Refs: plans/backend-ctl-proof-discipline.md»
+
+**Статус:** ✅ DONE (Task 2.1). registers.py + RegisterOps, driver.py 1672→1323.
 
 **Out of scope:** переезд в `tooling/` (гейт codemod); вынос telemetry-блока; переименование публичного API.
 

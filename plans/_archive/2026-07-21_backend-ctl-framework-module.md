@@ -5,6 +5,8 @@
 - **Ветки:** Phase 0 — `feat/backend-ctl-hardening` (короткая, от текущей); Phases 1–4 — `feat/backend-ctl-module` (после codemod layer-grouping)
 - **Dual-save:** при одобрении сохранить копию в `plans/backend-ctl-framework-module.md` (правило `feedback_plan_dual_save`), коммит `docs(plans):`
 
+> **Сплит-заход Task 2.1 выполнен** (вынос регистрового аппарата `driver.py` → `registers.py`, `RegisterOps`). Находка «God-file `driver.py`» из этого плана частично закрыта follow-up-заходом. Refs: `plans/backend-ctl-proof-discipline.md`.
+
 ---
 
 ## Context
