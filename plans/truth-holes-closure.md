@@ -64,8 +64,21 @@ set_register_verified, system_command-контракт). Остались дыр
 ### Флип-протокол Фазы 1 (память `project_f7_g7_flip_ladder`)
 baseline-замер → `FW_STATE_COALESCE=1` → замер → `FW_STATE_QUEUE=1` → замер → решение по 1.3 → решение о default-ON обоих флагов (отдельный коммит). Каждый замер (backend_ctl, live webcam_sketch): `introspect_queues` (глубины gui_system/gui_state), `introspect_router_stats` PM (дельты `system_evict_blocked`/`data_evicted` за 60с), `get_status("gui")`, `ui_tap_ping`, `watch_like_gui` 30с (дельты живы), `log_tail(gui)` (нет цикличных resync). **Критерий успеха фазы: gui отвечает на introspect/ui_tap, `gui_system` ≈ 0, `system_evict_blocked` заморожен.**
 
-### Task 1.4 — ui_*-плоскость: доказательство парой (закрытие NA)
-После успеха 1.1-1.2: live-пара `ui_tap` → клик через qt-mcp → `events_page(plane=ui)` несёт `ui.event`; `ui_tap_ping` OK; `ui_untap` → тишина. Закрывает вечное «ui_* NA» прошлых верификаций. Дописать результат в аудит-док.
+### Task 1.4 — ui_*-плоскость: доказательство парой (закрытие NA) — [x] ЗАКРЫТ 2026-07-22
+Live на `webcam_sketch` (флаги ON, `QT_MCP_PROBE=1`):
+- [x] `ui_tap` → `success`, `subscriber=backend_ctl.0b245cfb5956`, `command=ui.event`, `sources=[gesture, command]`
+- [x] `ui_tap_ping` → `events_sent=3, send_errors=0`; событие в `events_page(plane=ui)` (`kind=ping`, note совпал)
+- [x] **Реальный клик** через qt-mcp → `ui.event` с полной атрибуцией: `kind=button`, `text="Audit log"`, `widget=QPushButton`, полный `path` в дереве виджетов; иерархический адрес `_address=[backend_ctl, 0b245cfb5956]`; `dropped=0`
+- [x] `ui_untap` → **тишина**: повторный клик дал 0 событий (проверено курсором)
+
+Вечное «ui_* NA» прошлых верификаций закрыто. Детали — `docs/audits/2026-07-22_phase1-flip-webcam-sketch.md`.
+
+**Побочная находка (residual → Фаза 4/5): «No handler for key» врёт про причину.**
+Первый вызов сразу после boot упал с `No handler for key 'ui.tap.subscribe'`, хотя команда
+существует — gui был объявлен готовым по liveness-fallback (`'gui' ready via liveness-fallback
+(event не пришёл за 5.0s)`) ДО регистрации своих команд. Сообщение читается как «фичи нет»,
+хотя правда — «ещё не готов». На прогретой системе тот же вызов проходит. Инструмент обязан
+различать «нет такого хендлера» и «процесс ещё не поднял хендлеры».
 
 ---
 
