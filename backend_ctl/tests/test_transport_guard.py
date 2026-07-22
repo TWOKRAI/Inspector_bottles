@@ -14,7 +14,7 @@
     потока → штатная работа, guard не срабатывает. Явный background-поток (не главный
     поток теста) — тот же класс вызывающего, что и реальные applier-поток
     WatchController (``backend-ctl-resub``) и threading.Timer commit-confirmed
-    (``driver.py::_set_register_confirmed``): guard сверяет ИДЕНТИЧНОСТЬ объекта
+    (``registers.py::RegisterOps._set_register_confirmed``): guard сверяет ИДЕНТИЧНОСТЬ объекта
     потока, а не имя, поэтому любой посторонний поток проходит одинаково.
 
 Оба сервера — сырые TCP-сокеты на localhost (без живого ProcessManager, без
