@@ -44,3 +44,36 @@ metadata:
 Общий класс всех трёх — [[feedback-swallowed-failure-class]]. Связано:
 [[project-state-topology-gate]] (тот же класс, починен утром того же дня),
 [[project-backend-ctl-gaps-2026-07]].
+
+---
+
+**UPDATE 2026-07-22 — повторный живой прогон: потеря подтверждена до цифры, блокер «глубина очереди» СНЯТ.**
+
+Прогон после закрытия Фазы 1 + довеска Task 1.1b. Находка #2 квантифицирована точно и
+устойчива (не транзиент): два замера с интервалом 22 с, дельта-тождество сходится **до цифры**:
+`Δsent_attempted − Δsent_via_targets − Δsent_via_channel = 2698 − 1211 − 1 = 1486 = Δerrors`;
+`Δerrors 1486 ↔ Δqueue_system_evict_blocked 1492` (~1:1). Кумулятивно **64.5%** отправок PM
+теряется (хуже прежних 23%), ~67 ошибок/с непрерывно. Получатель — **gui**: шторм
+`state.changed` (`sent_via_targets.state` доминирует) в never-drop системную очередь; gui жив
+и разгребает (`received=18806`), но медленнее темпа → переполнение.
+
+**Мнимое противоречие глубины очереди (открытый вопрос #1 handoff) РАЗРЕШЕНО.** Глубина
+читается нормально — `introspect_router_stats("gui").channels.gui_system.queue_size = 60`
+(из 100, осциллирует к полке). Ранний «system: 0» был артефактом инструмента/момента:
+`introspect_queues(gui)` под затором сам **гибнет** с лживым «no channel resolved for channel=None»
+(`router_manager.py:349` — канал резолвится, команда упирается в ту же полную очередь).
+Надёжные инструменты под затором: **отправитель** `queue_system_evict_blocked` (потеря) +
+`router_stats.channels.<proc>_system.queue_size` (бэклог, виден всем держателям канала —
+напр. `lines_data=49` совпал с аномалией). Receiver-side `introspect_queues` — ненадёжен,
+его команда конкурирует с грузом. Это разблокирует фикс потери в `plans/transport-single-policy.md`.
+
+**Архитектурный корень (разговор с владельцем, не задача):** `state.changed` едет
+`queue_type:"system"` (never-drop, глубина 100), хотя по QoS у `state` профиль
+`best_effort`/`drop_oldest`. Класс груза противоречит очереди.
+
+**Ценность Фазы 1 доказана вживую:** RouterStats отдал все 12+ счётчиков (тождество сошлось),
+аномалия `router_errors` кричит `errors=2966+`, неотзывчивый gui честно помечен
+`introspect_failed`/`counter_missing` (не тихие нули). Старый инструмент здесь был слеп.
+Замечание [[feedback-plausible-is-not-verified]]: посылка ревью (Fable) «опечатка метрики →
+reached=0» оказалась неверна — живой `reached=0` недостижим (fire-and-forget доставка);
+довесок Task 1.1b переформулирован по замеру.
