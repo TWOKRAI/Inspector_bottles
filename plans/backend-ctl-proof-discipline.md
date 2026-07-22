@@ -227,9 +227,11 @@
 **Layer коммита:** `framework`.
 
 **Acceptance criteria:**
-- [ ] Live: `introspect_memory("ProcessManager").os_memory["rss"] > 0`
-- [ ] Секция best-effort: отсутствие psutil не ломает ответ (unit с подменой импорта)
-- [ ] Soak-проба больше не ходит за RSS отдельным psutil-путём
+- [ ] Live: `introspect_memory("ProcessManager").os_memory["rss"] > 0` — **PENDING живой прогон**
+- [x] Секция best-effort: отсутствие psutil не ломает ответ (unit с подменой импорта) — `test_os_section_null_without_psutil`
+- [x] Soak-проба больше не ходит за RSS отдельным psutil-путём — `_rss_mb` читает секцию `os` ответа
+
+**Статус:** 🟡 unit DONE (пара ON/OFF psutil в process_module + `MemoryStats.os_memory` строгий край в test_wrappers), live-плечо RSS>0 ждёт живого прогона Фазы 3.
 
 **Out of scope:** переименование команды (аддитивно достаточно); историзация RSS.
 
@@ -242,8 +244,10 @@
 **Steps:** из уже собираемого `introspect_status` пробрасывать `effective_hz` (и `target_interval_ms`, если есть) в per-process сводку; аномалия `hz_degraded` при hz < доли target.
 
 **Acceptance criteria:**
-- [ ] Unit на подставном статусе: hz в сводке, аномалия срабатывает/молчит (пара)
-- [ ] Ответ остаётся под `RESPONSE_BYTE_CAP` на fake-своде 7 процессов
+- [x] Unit на подставном статусе: hz в сводке, аномалия срабатывает/молчит (пара) — `TestEffectiveHz` (5 плеч)
+- [x] Ответ остаётся под `RESPONSE_BYTE_CAP` на fake-своде 7 процессов — `test_seven_process_summary_under_byte_cap`
+
+**Статус:** ✅ DONE (unit). Карточка несёт `hz` (ведущий effective_hz по воркерам), аномалия `hz_degraded` при `effective_hz < 50%` от `1000/target_interval_ms`; воркер без target порогом не судится.
 
 **Out of scope:** `perf_probes` целиком (тяжёлые — по запросу per-process).
 

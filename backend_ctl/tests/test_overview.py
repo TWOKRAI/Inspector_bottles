@@ -53,7 +53,14 @@ def _healthy_responses() -> Dict[str, Dict[str, Any]]:
         },
         "introspect.router_stats": {"success": True, "router_stats": full_router_stats()},
         "introspect.queues": {"success": True, "queue_sizes": {"system": 1, "data": 2}},
-        "introspect.memory": {"success": True, "memory": {}, "pool": {}, "queues": {}, "shm_registry": {}},
+        "introspect.memory": {
+            "success": True,
+            "memory": {},
+            "pool": {},
+            "queues": {},
+            "shm_registry": {},
+            "os": {"rss": 12345, "vms": 23456, "pid": 1},
+        },
     }
 
 
@@ -226,6 +233,85 @@ class TestAnomalies:
         assert res["processes"]["cam"]["ok"] is False
         hits = [a for a in res["anomalies"] if a["kind"] == "introspect_failed"]
         assert hits and "memory" in hits[0]["detail"]
+
+
+class TestEffectiveHz:
+    """Task 3.2 — effective_hz per-process в сводке + аномалия hz_degraded (пара ON/OFF)."""
+
+    @staticmethod
+    def _status_with_workers(workers: Dict[str, Any]) -> Dict[str, Any]:
+        return {"success": True, "process": "cam", "status": "running", "workers": workers}
+
+    def test_effective_hz_surfaces_in_card(self, monkeypatch) -> None:
+        """Ведущий темп процесса виден в карточке — не теряется при схлопывании воркеров."""
+        d = BackendDriver()
+        responses = _healthy_responses()
+        responses["introspect.status"] = self._status_with_workers(
+            {"fast": {"status": "running", "effective_hz": 21.3}, "slow": {"status": "running", "effective_hz": 0.5}}
+        )
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+        assert res["processes"]["cam"]["hz"] == 21.3  # максимум по воркерам — ведущий темп
+        assert not [a for a in res["anomalies"] if a["kind"] == "hz_degraded"]
+
+    def test_hz_degraded_flagged_below_target(self, monkeypatch) -> None:
+        """ON-плечо: effective_hz ниже доли target → hz_degraded с названным воркером."""
+        d = BackendDriver()
+        responses = _healthy_responses()
+        responses["introspect.status"] = self._status_with_workers(
+            {"w1": {"status": "running", "effective_hz": 5.0, "target_interval_ms": 33.0}}  # target ~30 Гц, 5 < 15
+        )
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+        hits = [a for a in res["anomalies"] if a["kind"] == "hz_degraded"]
+        assert hits and hits[0]["process"] == "cam"
+        assert "w1" in hits[0]["detail"]
+
+    def test_hz_at_target_not_flagged(self, monkeypatch) -> None:
+        """OFF-плечо той же пары: темп у цели → карточка несёт hz, аномалии нет."""
+        d = BackendDriver()
+        responses = _healthy_responses()
+        responses["introspect.status"] = self._status_with_workers(
+            {"w1": {"status": "running", "effective_hz": 25.0, "target_interval_ms": 33.0}}  # 25 >= 15
+        )
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+        assert res["processes"]["cam"]["hz"] == 25.0
+        assert not [a for a in res["anomalies"] if a["kind"] == "hz_degraded"]
+
+    def test_hz_without_target_not_judged(self, monkeypatch) -> None:
+        """Воркер без target порогом не судится: hz в карточке есть, hz_degraded — нет."""
+        d = BackendDriver()
+        responses = _healthy_responses()
+        responses["introspect.status"] = self._status_with_workers(
+            {"w1": {"status": "running", "effective_hz": 0.1}}  # медленно, но не с чем сравнить
+        )
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=responses)
+        res = d.system_overview()
+        assert res["processes"]["cam"]["hz"] == 0.1
+        assert not [a for a in res["anomalies"] if a["kind"] == "hz_degraded"]
+
+    def test_no_hz_reported_is_none(self, monkeypatch) -> None:
+        """Воркер без effective_hz → hz=None (running-процесс без темпа — сам по себе сигнал)."""
+        d = BackendDriver()
+        _fake_backend(monkeypatch, d, procs=["cam"], responses=_healthy_responses())
+        res = d.system_overview()
+        assert res["processes"]["cam"]["hz"] is None
+
+    def test_seven_process_summary_under_byte_cap(self, monkeypatch) -> None:
+        """Приёмка: свод 7 процессов с воркерами+hz остаётся под RESPONSE_BYTE_CAP."""
+        from backend_ctl.mcp_tools import RESPONSE_BYTE_CAP
+
+        procs = [f"proc_{i}" for i in range(7)]
+        responses = _healthy_responses()
+        responses["introspect.status"] = self._status_with_workers(
+            {"capture": {"status": "running", "effective_hz": 21.3, "target_interval_ms": 33.0}}
+        )
+        _fake_backend(monkeypatch, d := BackendDriver(), procs=procs, responses=responses)
+        res = d.system_overview()
+        assert all("hz" in res["processes"][p] for p in procs)
+        payload = json.dumps(res, ensure_ascii=False).encode("utf-8")
+        assert len(payload) < RESPONSE_BYTE_CAP, f"свод {len(payload)}Б превысил cap {RESPONSE_BYTE_CAP}"
 
 
 class TestOverviewResilience:

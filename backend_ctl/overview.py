@@ -27,6 +27,11 @@ from typing import Any, Dict, List, Optional
 #: «очередь растёт» без истории не доказать, но глубокая очередь — повод смотреть.
 QUEUE_DEPTH_HINT: int = 50
 
+#: Доля целевого темпа, ниже которой воркер помечается ``hz_degraded``. Снимок, не
+#: тренд: грубый порог-подсказка (философия модуля — «подсказать, куда смотреть»),
+#: тонкий разбор темпа — целевым ``telemetry_history``.
+HZ_DEGRADED_FRACTION: float = 0.5
+
 
 def _is_positive(value: Any) -> bool:
     """Счётчик строго больше нуля. ``None`` («показания нет») порогом НЕ считается.
@@ -37,12 +42,52 @@ def _is_positive(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _num(value: Any) -> Optional[float]:
+    """Число из сырого статуса воркера или ``None`` (bool/строка/отсутствие — не число)."""
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _process_hz(workers: Optional[Dict[str, Any]]) -> tuple[Optional[float], List[Dict[str, Any]]]:
+    """Темп процесса и подсказки о деградации из СЫРЫХ статусов воркеров.
+
+    ``system_overview`` схлопывает воркеров до строк-статусов (компактность), теряя
+    главный перф-сигнал ``effective_hz`` — тот же, что тянет soak-проба отдельным
+    обходом. Возвращаем его прямо в сводку.
+
+    Ведущий темп процесса — максимум ``effective_hz`` по воркерам (как soak-проба):
+    один медленный воркер не занижает картину. Отдельно — список воркеров, чей
+    ``effective_hz`` строго ниже :data:`HZ_DEGRADED_FRACTION` своего целевого темпа
+    (``1000/target_interval_ms``): каждый — подсказка ``hz_degraded``. Воркер без
+    объявленного target порогом не судится (не с чем сравнивать).
+
+    Returns:
+        ``(ведущий effective_hz | None, [{worker, effective_hz, target_hz}])``.
+    """
+    if not isinstance(workers, dict):
+        return None, []
+    rates: List[float] = []
+    degraded: List[Dict[str, Any]] = []
+    for name, w in workers.items():
+        if not isinstance(w, dict):
+            continue
+        hz = _num(w.get("effective_hz"))
+        if hz is not None:
+            rates.append(hz)
+        target_ms = _num(w.get("target_interval_ms"))
+        if hz is not None and target_ms is not None and target_ms > 0:
+            target_hz = 1000.0 / target_ms
+            if hz < HZ_DEGRADED_FRACTION * target_hz:
+                degraded.append({"worker": name, "effective_hz": round(hz, 2), "target_hz": round(target_hz, 2)})
+    leading = round(max(rates), 2) if rates else None
+    return leading, degraded
+
+
 def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, Any]:
     """Компактная сводка системы + аномалии (см. докстроку модуля).
 
     Returns:
         ``{"success": True, "processes": {name: {ok, status, workers, router,
-        queues, memory_ok, missing?}}, "telemetry": {"fps": {path: value}},
+        queues, memory_ok, hz, missing?}}, "telemetry": {"fps": {path: value}},
         "driver": {late_replies, event_errors, watch_resub_errors,
         events_evicted}, "anomalies": [...], "anomaly_count": N}``. Пустая
         топология (бэкенд не прогрет) → ``processes == {}`` + hint.
@@ -106,6 +151,10 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
         ws, rs, qd, mem = section
         # Воркеры — до статус-строки: сводка компактна, детали — get_status.
         workers = {name: (w.get("status") if isinstance(w, dict) else w) for name, w in (ws.workers or {}).items()}
+        # Главный перф-сигнал воркеров (effective_hz) сводка теряла, схлопывая их до
+        # статус-строк — за ним приходилось идти в introspect.status отдельно. Ведём
+        # ведущий темп процесса прямо в карточке; отставание от target — подсказка.
+        leading_hz, hz_degraded = _process_hz(ws.workers)
         failed_handles = [
             name
             for name, ok in (("status", ws.ok), ("router_stats", rs.ok), ("queues", qd.ok), ("memory", mem.ok))
@@ -135,6 +184,7 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             },
             "queues": qd.sizes,
             "memory_ok": mem.ok,
+            "hz": leading_hz,
         }
         if missing_by_source:
             processes[proc]["missing"] = missing_by_source
@@ -171,6 +221,15 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
             anomalies.append({"kind": "router_errors", "process": proc, "detail": f"errors={rs.errors}"})
         if ws.ok and ws.status not in (None, "running"):
             anomalies.append({"kind": "process_not_running", "process": proc, "detail": f"status={ws.status!r}"})
+        for hit in hz_degraded:
+            anomalies.append(
+                {
+                    "kind": "hz_degraded",
+                    "process": proc,
+                    "detail": f"воркер {hit['worker']!r}: {hit['effective_hz']} Гц < {HZ_DEGRADED_FRACTION:.0%} "
+                    f"от target {hit['target_hz']} Гц",
+                }
+            )
         for qname, depth in (qd.sizes or {}).items():
             if isinstance(depth, int) and depth >= QUEUE_DEPTH_HINT:
                 anomalies.append(
@@ -251,4 +310,4 @@ def system_overview(drv: Any, *, timeout: Optional[float] = None) -> Dict[str, A
     }
 
 
-__all__ = ["system_overview", "QUEUE_DEPTH_HINT"]
+__all__ = ["system_overview", "QUEUE_DEPTH_HINT", "HZ_DEGRADED_FRACTION"]
