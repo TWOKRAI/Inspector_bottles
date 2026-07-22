@@ -45,7 +45,7 @@ set_register_verified, system_command-контракт). Остались дыр
 **Acceptance (пары):**
 - [x] OFF: путь бит-в-бит, все тесты state_store зелёные — 624 passed, немедленная отправка в вызывающем потоке (unit)
 - [x] ON (unit): N set-мутаций внутри тика → ровно 1 конверт, `first_revision=min`, порядок revision; сквозной с реальным StateProxy — resync НЕ запускается; shutdown-flush доставляет буфер — `test_delta_coalescing.py` 13 passed
-- [ ] Live-пара до/после флипа (протокол §Флип ниже): глубина `gui_system` 85-94 → 0-2; `system_evict_blocked` дельта за 60с = 0; `get_status("gui")` отвечает; `ui_tap_ping` OK — **за координатором, live-сессия**
+- [x] Live-пара до/после флипа (`webcam_sketch`, 2026-07-22): `gui_system` **100/100 → 0**; `system_evict_blocked` **1466 → 0**; `errors` **1461 → 0**; доставка **267/1728 (15%) → 270/270 (100%)**; `get_status("gui")` **не отвечал → отвечает** (pid 10876, 3 воркера живы). Детали — `docs/audits/2026-07-22_phase1-flip-webcam-sketch.md`
 **Out of scope:** дедуп, смена очереди, правки gui/StateProxy, ThrottleMiddleware.
 
 ### Task 1.2 — Очередь класса "state" для state.changed (`FW_STATE_QUEUE`, default OFF)
@@ -55,7 +55,7 @@ set_register_verified, system_command-контракт). Остались дыр
 **Acceptance (пары):**
 - [x] OFF: полный прогон зелёный (1770 passed по 4 suite), `state`-очередь объявлена аддитивно (`test_default_queues_include_state`), queue_type="system" бит-в-бит (`test_off_routes_to_system`); live-`introspect_queues` `{proc}_state`=0 — за координатором
 - [x] ON (unit): конверт уходит в `state` (`test_on_routes_to_state`, ортогонально коалесцированию); переполнение → `data_evicted`-инкремент, НЕ `system_evict_blocked`, на обоих путях `FW_QOS_PROFILES` (`test_full_state_queue_evicts_not_blocks`); контраст system остаётся never-drop; StateProxy-resync по разрыву revision — механизм покрыт gap-детектором (Task 1.1 сквозной), полная сходимость после дропа — live
-- [ ] Live: под искусственным флудом `state.set` — `gui_system` ≈ 0, `get_status("gui")` и `ui_tap_ping` отвечают ВО ВРЕМЯ флуда; после дропа — один WARNING «разрыв revision» + успешный resync — **за координатором, live-сессия**
+- [x] Live (`webcam_sketch`, 2026-07-22): искусственный флуд не понадобился — **рецепт штормит сам** (baseline: 597+ безвозвратных потерь в gui за ~30с, ~30/с). При ON: `gui_system` **0**, `gui_state` **0**, `get_status("gui")` отвечает; `sent_via_targets.state` **247** (конверты ушли в state-очередь), `queue_data_evicted` **89** — drop_oldest штатно роняет старые снимки вместо блокировки команд; строк «ПОТЕРЯ СООБЩЕНИЯ» в логе **нет**. `ui_tap_ping` — честное «тап не включён (нужен ui.tap.subscribe)» → Task 1.4
 **Out of scope:** kind-каналы (FW_USE_KIND_CHANNELS), канальная дверь (transport-plan), глубины data/system.
 
 ### Task 1.3 (ОПЦИОНАЛЬНАЯ, measure-gated) — Батч-emit в bridge (`FW_GUI_STATE_BATCH`)
