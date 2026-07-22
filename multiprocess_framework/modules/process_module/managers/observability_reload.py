@@ -27,6 +27,96 @@ if TYPE_CHECKING:
     from ...config_module.tools.watcher import ConfigFileWatcher
 
 
+def _current_manager_config(manager: Any) -> Optional[Dict[str, Any]]:
+    """Живой конфиг менеджера как dict (база для merge) или None, если недоступен."""
+    cfg = getattr(manager, "config", None)
+    if cfg is None:
+        return None
+    dump = getattr(cfg, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump()
+        except Exception:  # noqa: BLE001 — недампящийся конфиг: применяем без merge
+            return None
+    return dict(cfg) if isinstance(cfg, dict) else None
+
+
+def _level_profile_scopes(level: str) -> Dict[str, Dict[str, Any]]:
+    """Scopes-профиль под глобальный ``log_level`` (иначе уровень — мёртвый параметр).
+
+    ``default_level`` сам по себе НЕ фильтрует: решение принимает ``min_level``
+    КАЖДОГО скоупа, а все стандартные скоупы всегда присутствуют в конфиге —
+    поэтому смена уровня обязана переписывать их пороги:
+
+      - ``INFO``  — штатный настроенный профиль (дефолты LoggerManagerConfig:
+        SYSTEM=WARNING на консоль, BUSINESS/PERFORMANCE=INFO, DEBUG-scope выключен);
+      - ``DEBUG`` — все скоупы на DEBUG + DEBUG-scope включается (firehose осознанно);
+      - ``WARNING``/``ERROR``/``CRITICAL`` — пороги всех скоупов поднимаются до уровня
+        (DEBUG-scope остаётся выключенным).
+    """
+    from ...logger_module.configs.logger_manager_config import LoggerManagerConfig
+
+    lvl = str(level).upper()
+    scopes: Dict[str, Dict[str, Any]] = {}
+    for name, sc in LoggerManagerConfig().scopes.items():
+        d = sc.model_dump()
+        if lvl == "DEBUG":
+            d["min_level"] = "DEBUG"
+            d["enabled"] = True
+        elif lvl != "INFO":
+            d["min_level"] = lvl
+        scopes[name] = d
+    return scopes
+
+
+def observability_effective(
+    *,
+    logger: Any = None,
+    error: Any = None,
+    stats: Any = None,
+) -> Dict[str, Any]:
+    """Фактическое (readback) состояние менеджеров наблюдаемости — не эхо запроса.
+
+    Читается из ЖИВЫХ менеджеров ПОСЛЕ применения: пороги скоупов логгера,
+    каталог логов, активные каналы (реестр каналов — он отражает и runtime
+    ``logger.sink.enable/disable``, чего конфиг не видит), уровень ошибок,
+    включённость статистики.
+    """
+    out: Dict[str, Any] = {}
+    if logger is not None and getattr(logger, "config", None) is not None:
+        lc = logger.config
+        section: Dict[str, Any] = {
+            "default_level": getattr(lc, "default_level", None),
+            "log_directory": getattr(lc, "log_directory", None),
+        }
+        scopes = getattr(lc, "scopes", None)
+        if isinstance(scopes, dict):
+            section["scopes"] = {
+                str(k): {
+                    "enabled": bool(getattr(v, "enabled", True)),
+                    "min_level": getattr(v, "min_level", None),
+                }
+                for k, v in scopes.items()
+            }
+        registry = getattr(logger, "_channel_registry", None)
+        names = getattr(registry, "names", None)
+        if callable(names):
+            try:
+                section["channels_active"] = sorted(names())
+            except Exception:  # noqa: BLE001 — readback best-effort
+                pass
+        out["logger"] = section
+    if error is not None and getattr(error, "config", None) is not None:
+        out["error"] = {"default_level": getattr(error.config, "default_level", None)}
+    if stats is not None and getattr(stats, "config", None) is not None:
+        sc = stats.config
+        out["stats"] = {
+            "enable_logging": getattr(sc, "enable_logging", None),
+            "aggregation_interval": getattr(sc, "aggregation_interval", None),
+        }
+    return out
+
+
 def apply_observability_reconfigure(
     section: Any,
     *,
@@ -40,21 +130,45 @@ def apply_observability_reconfigure(
     ЕДИНСТВЕННОЕ место, где секция раскладывается (``expand_observability``) и
     применяется (``reconfigure``). И hot-reload watcher (см.
     :func:`make_observability_on_reload`), и IPC-команда ``config.reload`` (Ф1 Task 1.4)
-    зовут именно эту функцию — поэтому файловый и IPC-пути НЕ конфликтуют: оба идут
-    через один идемпотентный full-rebuild ``reconfigure``, а не два разных механизма.
+    зовут именно эту функцию — поэтому файловый и IPC-пути НЕ конфликтуют.
+
+    Семантика — ДЕЛЬТА ПОВЕРХ ЖИВОГО, не сброс: раскрытая секция мержится на
+    текущий конфиг каждого менеджера (``deep_merge``). Частичная секция
+    (``{"log_level": "DEBUG"}``) больше НЕ теряет ``log_directory``/каналы/скоупы,
+    молча пересобирая их из дефолтов (живая находка 2026-07-22: reload уводил
+    файлы логов в чужой каталог). Явный ``log_level`` дополнительно переписывает
+    пороги скоупов профилем :func:`_level_profile_scopes` — без этого смена уровня
+    была no-op'ом (``default_level`` — лишь fallback для отсутствующих скоупов).
 
     None-менеджеры пропускаются (например error/stats отключены).
 
     Returns:
-        Разложенный конфиг ``{"logger": {...}, "error": {...}, "stats": {...}}`` —
-        чтобы вызывающий мог отдать наружу применённый ``log_level`` (диагностика).
+        Разложенный ПРИМЕНЁННЫЙ конфиг ``{"logger": {...}, "error": {...}, "stats": {...}}``
+        (после merge) — вызывающий может отдать наружу ``log_level`` (диагностика).
+        Фактическое состояние менеджеров — :func:`observability_effective`.
     """
+    from ...data_schema_module import deep_merge
+
     expanded = expand_observability(section or {})
+    raw = section if isinstance(section, dict) else {}
+    explicit_level = raw.get("log_level")
+
+    def _merged(manager: Any, target: Dict[str, Any]) -> Dict[str, Any]:
+        current = _current_manager_config(manager)
+        return deep_merge(current, target) if current else target
+
     if logger is not None:
-        logger.reconfigure(expanded["logger"])
+        logger_cfg = _merged(logger, expanded["logger"])
+        if explicit_level is not None:
+            logger_cfg["scopes"] = _level_profile_scopes(explicit_level)
+            logger_cfg["default_level"] = str(explicit_level).upper()
+        expanded["logger"] = logger_cfg
+        logger.reconfigure(logger_cfg)
     if error is not None:
+        expanded["error"] = _merged(error, expanded["error"])
         error.reconfigure(expanded["error"])
     if stats is not None:
+        expanded["stats"] = _merged(stats, expanded["stats"])
         stats.reconfigure(expanded["stats"])
     if log_info is not None:
         log_info(f"[observability] reconfigure применён (log_level={expanded['logger'].get('default_level')})")

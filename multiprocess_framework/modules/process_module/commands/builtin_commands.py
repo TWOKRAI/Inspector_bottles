@@ -890,19 +890,28 @@ class BuiltinCommands:
 
         # --- observability (если задана inline или из файла) ---
         if isinstance(obs_section, dict):
-            from ..managers.observability_reload import apply_observability_reconfigure
+            from ..managers.observability_reload import (
+                apply_observability_reconfigure,
+                observability_effective,
+            )
 
+            _logger = getattr(svc, "logger_manager", None)
+            _error = getattr(svc, "error_manager", None)
+            _stats = getattr(svc, "stats_manager", None)
             try:
                 expanded = apply_observability_reconfigure(
                     obs_section,
-                    logger=getattr(svc, "logger_manager", None),
-                    error=getattr(svc, "error_manager", None),
-                    stats=getattr(svc, "stats_manager", None),
+                    logger=_logger,
+                    error=_error,
+                    stats=_stats,
                     log_info=getattr(svc, "_log_info", None),
                 )
             except Exception as exc:  # noqa: BLE001
                 return {"success": False, "reason": f"reconfigure failed: {exc}"}
             result["applied"] = {"log_level": expanded["logger"].get("default_level")}
+            # Readback: фактическое состояние менеджеров ПОСЛЕ применения — инициатор
+            # видит эффект (пороги скоупов, каталог, активные каналы), а не эхо входа.
+            result["effective"] = observability_effective(logger=_logger, error=_error, stats=_stats)
 
         # --- telemetry (PC 3.1: publisher-gate + центральный троттл) ---
         if isinstance(telemetry_section, dict):
@@ -1201,7 +1210,14 @@ class BuiltinCommands:
         """Впрыснуть синтетическую ошибку в HealthState процесса (диагностика).
 
         data: ``context`` (сайт-тег, по умолч. "diagnostics"), ``message`` (текст),
-        ``status`` (опц.: перевести процесс в degraded/failed после впрыска).
+        ``status`` (опц.: перевести процесс в degraded/failed после впрыска),
+        ``level`` (опц.: DEBUG|INFO|WARNING|ERROR|CRITICAL — ДОПОЛНИТЕЛЬНО провести
+        сообщение через штатный лог-канал процесса ``_log_<level>``).
+
+        ``level`` делает проверяемыми ВСЕ плоскости наблюдаемости, а не только
+        health→state: запись уходит через ObservableMixin в LoggerManager/ErrorManager
+        → live-хвосты (``log.tail``/``observability.tail``) получают детерминированное
+        событие. Без ``level`` — прежнее поведение (только health-state).
         """
         args = self._merge_args(data, kwargs)
         context = str(args.get("context") or "diagnostics")
@@ -1211,6 +1227,19 @@ class BuiltinCommands:
 
         state = get_or_create_health_state(self._services)
         state.report_error(HealthSelfTestError(message), context=context)
+
+        log_emitted = False
+        level = str(args.get("level") or "").upper()
+        if level:
+            log_fn = getattr(self._services, f"_log_{level.lower()}", None)
+            if not callable(log_fn):
+                return {
+                    "success": False,
+                    "process": self._services.name,
+                    "reason": f"неизвестный level '{level}' (DEBUG|INFO|WARNING|ERROR|CRITICAL)",
+                }
+            log_fn(f"[health.report] {message}", module="diagnostics")
+            log_emitted = True
 
         status = args.get("status")
         if status:
@@ -1223,7 +1252,12 @@ class BuiltinCommands:
                     "reason": f"неизвестный status '{status}' (ok|degraded|failed)",
                 }
 
-        return {"success": True, "process": self._services.name, "errors": state.error_count}
+        return {
+            "success": True,
+            "process": self._services.name,
+            "errors": state.error_count,
+            "log_emitted": log_emitted,
+        }
 
     def _cmd_health_status(self, data=None, **kwargs) -> dict:
         """Вернуть снапшот здоровья процесса (status/errors/last_error/...)."""

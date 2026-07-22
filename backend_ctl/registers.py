@@ -159,7 +159,7 @@ class RegisterOps:
         reg = registers.get(register)
         found = isinstance(reg, dict) and field in reg
         actual = reg.get(field) if found else None
-        verified = bool(found and actual == value)
+        verified = bool(found and self._values_match(value, actual))
         return {
             "success": verified,
             "verified": verified,
@@ -172,6 +172,34 @@ class RegisterOps:
             "known_registers": sorted(registers),
             "ack": ack,
         }
+
+    @staticmethod
+    def _values_match(expected: Any, actual: Any) -> bool:
+        """Семантическое равенство expected/actual с терпимостью к строковой коэрции.
+
+        MCP-клиенты коэрсят скаляр без типа в JSON-схеме в строку («0.15» вместо
+        0.15), а приёмник (Pydantic-регистр) приводит её обратно к числу/булю —
+        строгое ``==`` тогда даёт ЛОЖНЫЙ провал verify при реально применённой
+        записи. Сравниваем строгим ``==``, затем — по числовому/булеву значению,
+        если ровно одна сторона строковая.
+        """
+        if actual == expected:
+            return True
+        if isinstance(expected, str) and not isinstance(actual, str):
+            text, other = expected, actual
+        elif isinstance(actual, str) and not isinstance(expected, str):
+            text, other = actual, expected
+        else:
+            return False
+        s = text.strip().lower()
+        if isinstance(other, bool):
+            return (s == "true" and other) or (s == "false" and not other)
+        if isinstance(other, (int, float)):
+            try:
+                return float(s) == float(other)
+            except ValueError:
+                return False
+        return False
 
     # ---- Snapshot / restore регистров: гарантированный откат эксперимента ----
 

@@ -488,13 +488,16 @@ TOOLS: List[ToolSpec] = [
     ),
     ToolSpec(
         "system_command",
-        "System-команда в ProcessManager (форма CommandSender.send_system_command), "
-        "например {'command': 'get_all_processes_status'}.",
+        "System-команда в ProcessManager (форма CommandSender.send_system_command). "
+        "Контракт сервера: ключ команды — 'cmd', процесс — 'process_name', например "
+        "{'cmd': 'process.restart', 'process_name': 'seg'}. Медленные команды "
+        "(process.restart >30с) отвечают timeout'ом при реально доставленной команде — "
+        "эффект доказывать readback'ом (pid через introspect_memory до/после).",
         _obj(
             {
                 "command": {
                     "type": "object",
-                    "description": "Dict system-команды (ключ 'command' + параметры)",
+                    "description": "Dict system-команды: {'cmd': <имя>, ...параметры ('process_name' для process.*)}",
                     "additionalProperties": True,
                 },
                 "timeout": _TIMEOUT,
@@ -513,7 +516,11 @@ TOOLS: List[ToolSpec] = [
                 "process": _PROCESS,
                 "register": {"type": "string", "description": "Имя регистра (обычно = plugin_name владельца)"},
                 "field": {"type": "string", "description": "Имя поля регистра"},
-                "value": {"description": "Новое значение (любой JSON-тип)"},
+                "value": {
+                    "type": ["string", "number", "integer", "boolean", "array", "object", "null"],
+                    "description": "Новое значение (любой JSON-тип; тип объявлен явно — "
+                    "клиенты без него коэрсят числа/були в строки)",
+                },
                 "confirm_within": {
                     "type": "number",
                     "description": "Сек до авто-отката, если нет register_confirm (commit-confirmed, D.5). "
@@ -534,7 +541,11 @@ TOOLS: List[ToolSpec] = [
                 "process": _PROCESS,
                 "register": {"type": "string", "description": "Имя регистра (обычно = plugin_name владельца)"},
                 "field": {"type": "string", "description": "Имя поля регистра"},
-                "value": {"description": "Новое значение (любой JSON-тип)"},
+                "value": {
+                    "type": ["string", "number", "integer", "boolean", "array", "object", "null"],
+                    "description": "Новое значение (любой JSON-тип; тип объявлен явно — "
+                    "клиенты без него коэрсят числа/були в строки)",
+                },
                 "timeout": _TIMEOUT,
             },
             ["process", "register", "field", "value"],
