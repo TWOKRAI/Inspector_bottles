@@ -88,6 +88,14 @@ class DeltaDispatcher:
         # Daemon-flusher: создаётся ТОЛЬКО при ON (start_flusher), OFF → None.
         self._flusher: threading.Thread | None = None
         self._stop_event = threading.Event()
+        # _wake — досрочное пробуждение flusher'а (cap-flush / shutdown). Все
+        # _send_state_changed в ON-режиме уходят ИЗ ОДНОГО потока (flusher): это
+        # даёт тотальный порядок конвертов per-subscriber. cap НЕ шлёт в потоке-
+        # мутаторе (иначе pop-под-локом + send-вне-лока в ≥2 потоках-мутаторах
+        # переупорядочивал бы конверты, и приёмник глушил бы «устаревший» пакет
+        # [1..cap] после обогнавшего его [cap+1] — бесшумная потеря), а лишь будит
+        # flusher, чтобы тот флашнул немедленно.
+        self._wake = threading.Event()
 
     def dispatch(self, deltas: list[Delta]) -> dict[str, int]:
         """Сгруппировать дельты по подписчику, отправить state.changed.
@@ -181,8 +189,12 @@ class DeltaDispatcher:
         Дельты уже сматчены и сгруппированы (``_match_and_group``). Здесь только
         конкатенация в буфер под локом с сохранением порядка. Дедуп keep-last
         ЗАПРЕЩЁН (рвёт непрерывность revision → resync-шторм у клиента) — только
-        накопление. После добавления проверяется cap: подписчики, чей буфер
-        достиг порога, флашатся немедленно (вне лока), не дожидаясь тика.
+        накопление. После добавления проверяется cap: если буфер подписчика достиг
+        порога, flusher БУДИТСЯ (``_wake``) для немедленного тика — но сама отправка
+        выполняется ТОЛЬКО в потоке flusher'а (``_flush_once``), а не здесь. Это
+        критично: dispatch зовётся из ≥2 потоков-мутаторов PM, и отправка из потока-
+        мутатора нарушила бы тотальный порядок конвертов per-subscriber (см. ctor
+        ``_wake``). cap здесь — «флашни как можно скорее», а не «флашни прямо тут».
 
         Args:
             subscriber_deltas: {subscriber: список дельт} из ``_match_and_group``.
@@ -192,7 +204,7 @@ class DeltaDispatcher:
             совместимая по форме с OFF-путём.
         """
         stats: dict[str, int] = {}
-        over_cap: list[str] = []
+        cap_reached = False
         with self._buffer_lock:
             for subscriber, sub_deltas in subscriber_deltas.items():
                 buf = self._buffer.get(subscriber)
@@ -202,31 +214,14 @@ class DeltaDispatcher:
                 buf.extend(sub_deltas)
                 stats[subscriber] = len(sub_deltas)
                 if len(buf) >= self._buffer_cap:
-                    over_cap.append(subscriber)
+                    cap_reached = True
 
-        # Cap-flush — вне лока (отправка через _send_state_changed, как на тике).
-        if over_cap:
-            self._flush_subscribers(over_cap)
+        # cap: разбудить flusher — он сделает _flush_once немедленно (единственный
+        # отправитель). НЕ шлём в этом (мутаторском) потоке.
+        if cap_reached:
+            self._wake.set()
 
         return stats
-
-    def _flush_subscribers(self, names: list[str]) -> None:
-        """Немедленно отправить и очистить буфер перечисленных подписчиков.
-
-        Забирает их буферы под локом (pop), отправляет ВНЕ лока. Используется
-        для cap-flush (защита от burst).
-
-        Args:
-            names: имена подписчиков для немедленного flush.
-        """
-        to_send: dict[str, list[Delta]] = {}
-        with self._buffer_lock:
-            for name in names:
-                deltas = self._buffer.pop(name, None)
-                if deltas:
-                    to_send[name] = deltas
-        for name, deltas in to_send.items():
-            self._send_state_changed(name, deltas)
 
     def _flush_once(self) -> int:
         """Один тик flush: swap всего буфера под локом, отправка вне лока.
@@ -249,14 +244,22 @@ class DeltaDispatcher:
         return sent
 
     def _flusher_loop(self) -> None:
-        """Тело daemon-flusher'а: тик каждые ``_flush_interval_sec`` до останова.
+        """Тело daemon-flusher'а — ЕДИНСТВЕННЫЙ отправитель конвертов в ON-режиме.
 
-        ``_stop_event.wait`` возвращает True при запросе останова (выход из
-        цикла) и False по таймауту (очередной тик) — детерминированно, без
-        busy-sleep. Исключения тика не роняют поток (сам ``_send_state_changed``
-        уже глотает ошибки отправки; здесь — страховочный барьер).
+        Каждую итерацию ждёт либо тик ``_flush_interval_sec``, либо досрочное
+        пробуждение ``_wake`` (cap-flush / shutdown). ``_wake.wait`` возвращает
+        True при set() (разбудили), False по таймауту (регулярный тик) — в обоих
+        случаях делаем flush. Останов проверяется отдельным ``_stop_event`` до и
+        после ожидания: при shutdown wake+stop выставляются вместе, поток выходит
+        не досылая (финальный дренаж делает ``stop_flusher`` уже после join).
+        Исключения тика не роняют поток (``_send_state_changed`` глотает ошибки
+        отправки; здесь — страховочный барьер).
         """
-        while not self._stop_event.wait(self._flush_interval_sec):
+        while not self._stop_event.is_set():
+            self._wake.wait(self._flush_interval_sec)
+            self._wake.clear()
+            if self._stop_event.is_set():
+                break
             try:
                 self._flush_once()
             except Exception as exc:  # nosec B110 — тик не должен ронять поток
@@ -285,20 +288,23 @@ class DeltaDispatcher:
     def stop_flusher(self, timeout: float = 2.0) -> None:
         """Остановить flusher с гарантией доставки буфера (финальный flush).
 
-        Вызывается из ``StateStoreManager.shutdown()``. Порядок: сигнал
-        останова → join потока (с таймаутом) → финальный ``_flush_once`` (дренаж
-        всего, что осталось в буфере на момент останова). Финальный flush
-        выполняется всегда — даже если поток не создавался (OFF: буфер пуст,
-        flush — no-op), — что делает метод безопасным при любом режиме.
+        Вызывается из ``StateStoreManager.shutdown()``. Порядок: сигнал останова
+        → пробуждение flusher'а (чтобы не спал до конца интервала) → join потока
+        (с таймаутом) → финальный ``_flush_once`` (дренаж всего, что осталось в
+        буфере на момент останова). Финальный flush безопасен: поток уже
+        остановлен join'ом — конкурентного отправителя нет, тотальный порядок не
+        нарушается. Выполняется всегда — даже если поток не создавался (OFF: буфер
+        пуст, flush — no-op), — что делает метод безопасным при любом режиме.
 
         Args:
             timeout: максимум ожидания join потока (сек).
         """
         if self._flusher is not None:
             self._stop_event.set()
+            self._wake.set()  # разбудить flusher, чтобы не ждал конца интервала
             self._flusher.join(timeout=timeout)
             self._flusher = None
-        # Финальный дренаж буфера — гарантия доставки перед остановкой.
+        # Финальный дренаж буфера — гарантия доставки перед остановкой (поток мёртв).
         self._flush_once()
 
     def _send_state_changed(self, subscriber: str, deltas: list[Delta]) -> None:

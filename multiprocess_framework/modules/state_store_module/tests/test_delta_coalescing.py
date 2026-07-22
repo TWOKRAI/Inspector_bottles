@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from ..core.delta import MISSING, Delta
 from ..core.subscription_manager import SubscriptionManager
 from ..manager.delta_dispatcher import DeltaDispatcher
@@ -185,39 +187,99 @@ def test_on_no_keep_last_dedup_revision_contiguous() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_on_cap_triggers_immediate_flush() -> None:
-    """ON: буфер достиг cap → немедленный flush подписчика, не дожидаясь тика."""
+def test_on_cap_wakes_flusher_does_not_send_in_caller() -> None:
+    """ON: cap НЕ шлёт в вызывающем (мутаторском) потоке — только будит flusher.
+
+    Инвариант антигонки (ревью Fable): отправка cap-путём из потока-мутатора при
+    ≥2 мутаторах переупорядочила бы конверты (pop-под-локом vs send-вне-лока) и
+    приёмник бесшумно проглотил бы «устаревший» пакет. Здесь: при достижении cap
+    _wake выставлен, буфер НЕ очищен, _send_state_changed из caller-потока НЕ звался.
+    Реальная отправка идёт только через _flush_once (эмулирует поток flusher'а).
+    """
+    disp, router, subs = _make(coalesce=True, buffer_cap=50)
+    subs.subscribe("cameras.**", "gui")
+
+    send_threads: list[int] = []
+    orig_send = disp._send_state_changed
+
+    def _spy(sub: str, deltas) -> None:
+        send_threads.append(threading.get_ident())
+        orig_send(sub, deltas)
+
+    disp._send_state_changed = _spy  # type: ignore[method-assign]
+
+    for i in range(50):  # достигаем cap ровно
+        disp.dispatch_single(_mk_delta("cameras.0.n", i, revision=i + 1))
+
+    # cap достигнут: flusher разбужен, но НИ ОДНОЙ отправки из caller-потока.
+    assert disp._wake.is_set()
+    assert send_threads == []
+    assert len(disp._buffer["gui"]) == 50  # буфер цел, не выслан в мутаторе
+
+    # Отправка происходит только в flush_once (поток flusher'а).
+    sent = disp._flush_once()
+    assert sent == 1
+    assert len(send_threads) == 1
+    assert send_threads[0] == threading.get_ident()  # тут это тот же поток теста
+    assert router.sent[-1]["data"]["revision"] == 50
+    assert "gui" not in disp._buffer
+
+
+def test_on_cap_single_flush_preserves_order_no_gaps() -> None:
+    """ON: серия [1..250] с cap=200 → один _flush_once после wake → строго
+    возрастающие revision без дыр и обгона (тотальный порядок per-subscriber)."""
     disp, router, subs = _make(coalesce=True, buffer_cap=200)
     subs.subscribe("cameras.**", "gui")
 
-    # 199 дельт — ещё под порогом, ничего не ушло.
-    for i in range(199):
+    for i in range(250):
         disp.dispatch_single(_mk_delta("cameras.0.n", i, revision=i + 1))
+
+    # cap по пути достигнут (wake выставлен), но без запущенного flusher'а
+    # в этом unit-тесте отправки не было — всё копится в буфере.
     assert router.sent == []
+    assert disp._wake.is_set()
+    assert len(disp._buffer["gui"]) == 250
 
-    # 200-я дельта достигает cap → немедленный flush.
-    disp.dispatch_single(_mk_delta("cameras.0.n", 199, revision=200))
+    disp._flush_once()
+
     assert len(router.sent) == 1
-    assert len(router.sent[0]["data"]["deltas"]) == 200
-    # Буфер подписчика очищен после cap-flush.
-    assert "gui" not in disp._buffer
+    revs = [d["revision"] for d in router.sent[0]["data"]["deltas"]]
+    assert revs == list(range(1, 251))  # возрастание без дыр, без переупорядочивания
+    assert router.sent[0]["data"]["first_revision"] == 1
+    assert router.sent[0]["data"]["revision"] == 250
 
 
-def test_on_cap_flush_only_over_cap_subscriber() -> None:
-    """ON: cap-flush касается только переполненного подписчика, остальные ждут тика."""
-    disp, router, subs = _make(coalesce=True, buffer_cap=10)
+def test_on_live_flusher_thread_cap_pressure_no_loss_no_reorder() -> None:
+    """ON со СБОРНЫМ потоком-flusher'ом под cap-давлением: единственный отправитель
+    гарантирует, что все дельты доставлены ровно один раз, конверты строго
+    возрастают по revision, потерь/обгона нет.
+
+    Именно этот сценарий раньше ломала гонка: cap-flush в потоке-мутаторе
+    конкурировал с потоком-flusher'ом → конверт [1..cap] обгонялся [cap+1] и
+    бесшумно глотался приёмником. Один поток-отправитель эту гонку исключает.
+    Финальные проверки — на СОБРАННОМ результате (не на таймингах): порядок
+    батчей может варьироваться, но конкатенация обязана быть 1..N без дыр.
+    """
+    disp, router, subs = _make(coalesce=True, buffer_cap=20, flush_interval_sec=0.005)
     subs.subscribe("cameras.**", "gui")
-    subs.subscribe("robots.**", "panel")
+    disp.start_flusher()
+    try:
+        # Единственный поток-мутатор → revision назначаются и буферизуются строго
+        # по возрастанию (кросс-тредовая гонка назначения revision — вне scope 1.1).
+        for i in range(500):
+            disp.dispatch_single(_mk_delta("cameras.0.n", i, revision=i + 1))
+    finally:
+        disp.stop_flusher()  # финальный дренаж остатка буфера
 
-    disp.dispatch_single(_mk_delta("robots.arm.x", 1, revision=1))  # panel: 1 дельта, ждёт
-    for i in range(10):
-        disp.dispatch_single(_mk_delta("cameras.0.n", i, revision=i + 2))  # gui достигает cap
-
-    assert len(router.sent) == 1
-    assert router.sent[0]["targets"] == ["gui"]
-    # panel всё ещё в буфере — cap-flush его не тронул.
-    assert "panel" in disp._buffer
-    assert "gui" not in disp._buffer
+    # Все конверты пришли к gui.
+    assert all(msg["targets"] == ["gui"] for msg in router.sent)
+    # Конверты строго возрастают по revision в порядке отправки (нет обгона/стейла).
+    env_revs = [msg["data"]["revision"] for msg in router.sent]
+    assert env_revs == sorted(env_revs)
+    assert len(set(env_revs)) == len(env_revs)
+    # Конкатенация дельт всех конвертов = 1..500 ровно, без потерь и дублей.
+    all_revs = [d["revision"] for msg in router.sent for d in msg["data"]["deltas"]]
+    assert all_revs == list(range(1, 501))
 
 
 # ---------------------------------------------------------------------------
