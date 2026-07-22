@@ -152,3 +152,4 @@
 - [Класс «проглоченный сбой»](feedback_swallowed_failure_class.md) — 4 экземпляра за день: except/pass и _log_debug на отказе; следствие без причины хуже отсутствия следствия
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — 4 косяка координатора за заход: неверный механизм, живой каталог назван мусором, ложный детектор завершения, образцовый тест сам лгал дважды
 - [Subagent live-test Monitor hang](feedback_subagent_live_test_monitor_hang.md) — субагенты офлоадят live-тесты в фоновый Monitor и виснут; гонять синхронно, координатор забирает финал на 2-й заминке
+- [backend_ctl recorder оставлен](project_backend_ctl_recorder_kept.md) — вердикт владельца 2026-07-22: record/replay НЕ удалять, условный приговор Task 4.2 снят
