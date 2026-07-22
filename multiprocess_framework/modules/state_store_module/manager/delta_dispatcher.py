@@ -48,6 +48,7 @@ class DeltaDispatcher:
         coalesce: bool | None = None,
         flush_interval_sec: float = _DEFAULT_FLUSH_INTERVAL_SEC,
         buffer_cap: int = _DEFAULT_BUFFER_CAP,
+        state_queue: bool | None = None,
     ) -> None:
         """
         Args:
@@ -60,11 +61,20 @@ class DeltaDispatcher:
                 раз здесь (не на hot-path).
             flush_interval_sec: период тика daemon-flusher'а (только при ON).
             buffer_cap: порог немедленного flush подписчика (защита от burst).
+            state_queue: явный override флага ``FW_STATE_QUEUE`` (ctor > env >
+                default). None → значение флага из env/default. Определяет
+                ``queue_type`` конверта state.changed: ON → ``"state"`` (drop_oldest),
+                OFF → ``"system"`` (как раньше). Разрешается ОДИН раз здесь.
         """
         self._subs = subscription_mgr
         self._router = router
         self._sender = sender_name
         self._log = logger
+
+        # --- Очередь класса "state" (FW_STATE_QUEUE) ---
+        # queue_type конверта разрешается единожды в ctor: ON → state.changed едет
+        # в {proc}_state (drop_oldest, QoS _STATE) вместо never-drop system-очереди.
+        self._state_queue_type = "state" if resolve("FW_STATE_QUEUE", explicit=state_queue) else "system"
 
         # --- Коалесцирование (FW_STATE_COALESCE) ---
         # Флаг разрешается единожды в ctor: hot-path (dispatch) читает готовый bool.
@@ -324,11 +334,14 @@ class DeltaDispatcher:
             "type": "event",
             "sender": self._sender,
             "targets": [subscriber],
-            # queue_type="system": доставка в {subscriber}_system, который опрашивает
-            # штатный message_processor подписчика — event_dispatcher синхронно
-            # вызовет handler state.changed при опросе. См. U1-fallback в
-            # RouterManager._deliver_by_targets (доставка по targets через queue_registry).
-            "queue_type": "system",
+            # queue_type: доставка в {subscriber}_<qtype>, который опрашивает штатный
+            # message_processor подписчика — event_dispatcher синхронно вызовет handler
+            # state.changed при опросе. См. U1-fallback в RouterManager._deliver_by_targets
+            # (доставка по targets через queue_registry).
+            # OFF → "system" (never-drop, как раньше). ON (FW_STATE_QUEUE) → "state"
+            # (drop_oldest): burst state.set не топит never-drop system-почту команд;
+            # переполнение {proc}_state → data_evicted + resync клиента по разрыву revision.
+            "queue_type": self._state_queue_type,
             "command": "state.changed",
             "data": {
                 "deltas": [d.to_dict() for d in deltas],

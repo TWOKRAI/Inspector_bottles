@@ -174,6 +174,15 @@ _FLAG_LIST: Tuple[FeatureFlag, ...] = (
         "state.changed на тик вместо одного на каждую мутацию. Приёмник (StateProxy) "
         "не меняется — конверт уже несёт first_revision/revision. OFF → путь бит-в-бит.",
     ),
+    FeatureFlag(
+        "FW_STATE_QUEUE",
+        default=False,
+        doc="Отдельная очередь класса 'state' для state.changed (гашение gui-шторма): "
+        "дельты идут в {proc}_state (drop_oldest, QoS-профиль _STATE) вместо never-drop "
+        "system-очереди, поэтому burst state.set не топит system-почту команд. Приёмный "
+        "system-тред дренирует ['system','state']; переполнение → data_evicted, не "
+        "system_evict_blocked; клиент делает resync по разрыву revision. OFF → 'system' как раньше.",
+    ),
     # — Контракты сообщений / плагинов (Ф4) —
     FeatureFlag(
         "FW_CONTRACTS_STRICT",

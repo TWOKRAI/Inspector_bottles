@@ -194,7 +194,10 @@ class ProcessManagerProcess(ProcessModule):
             if self.shared_resources:
                 self.shared_resources.register_process(
                     self.name,
-                    {"queues": {"system": {"maxsize": 100}, "data": {"maxsize": 50}}},
+                    # "state" (FW_STATE_QUEUE) аддитивно: очередь/канал возникают из
+                    # конфига, при OFF пусты. У PM подписчиков state.changed нет, но
+                    # держим паритет раскладки очередей с дочерними процессами.
+                    {"queues": {"system": {"maxsize": 100}, "data": {"maxsize": 50}, "state": {"maxsize": 8}}},
                 )
 
             if not super().initialize():

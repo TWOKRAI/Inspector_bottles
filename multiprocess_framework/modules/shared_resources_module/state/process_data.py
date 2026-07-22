@@ -32,6 +32,7 @@ class ProcessDataKeys:
     # Стандартные имена очередей
     QUEUE_SYSTEM = "system"
     QUEUE_DATA = "data"
+    QUEUE_STATE = "state"  # FW_STATE_QUEUE: state.changed отдельно от system (drop_oldest)
     QUEUE_COMMANDS = "commands"
     QUEUE_RESULTS = "results"
 
@@ -215,7 +216,8 @@ class ProcessData:
         """Конвертировать в Dict at Boundary (без Queue/Event ссылок)."""
         # Исключить non-picklable объекты из custom (Event, Manager и т.д.)
         custom_safe = {
-            k: v for k, v in self.custom.items()
+            k: v
+            for k, v in self.custom.items()
             if k not in ("stop_event", "error_manager", "pause_event")
             and isinstance(v, (str, int, float, bool, type(None), dict, list))
         }
