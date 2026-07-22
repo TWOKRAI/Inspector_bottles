@@ -151,3 +151,4 @@
 - [Live-находки webcam 2026-07](project_live_findings_webcam_2026_07.md) — ротация молча не работает (645МБ), 23% ошибок отправки невидимы, config_reload врёт про log_level
 - [Класс «проглоченный сбой»](feedback_swallowed_failure_class.md) — 4 экземпляра за день: except/pass и _log_debug на отказе; следствие без причины хуже отсутствия следствия
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — 4 косяка координатора за заход: неверный механизм, живой каталог назван мусором, ложный детектор завершения, образцовый тест сам лгал дважды
+- [Subagent live-test Monitor hang](feedback_subagent_live_test_monitor_hang.md) — субагенты офлоадят live-тесты в фоновый Monitor и виснут; гонять синхронно, координатор забирает финал на 2-й заминке
