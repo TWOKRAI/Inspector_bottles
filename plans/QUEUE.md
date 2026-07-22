@@ -1,5 +1,7 @@
 # Очередь планов — единая последовательность задач
 
+> **Обновлено 2026-07-22 — синхронизация трека backend_ctl.** `backend-ctl-proof-discipline` ЗАКРЫТ и слит в main (ff до `9a0f4137`); активным планом инструмента стал преемник `truth-holes-closure` (gui-шторм + правда инструмента). `transport-single-policy` внесён строкой (активен, после truth-holes). См. таблицу трека ниже.
+>
 > **Обновлено 2026-07-20 — гигиена статусов.** Файл простоял без правок с 2026-07-13, за это время в `main` уехали: **Ф7 почти целиком** (G.8/G.9/G.H/G.F закрыты, G.7 в работе — Фазы 0-1 пройдены), **frontend-constructor Блок А целиком**, **layer-grouping Фаза 2 частично** и **целый параллельный трек backend_ctl + телеметрии**, которого в этом файле не было вовсе. Всё сверено по git, не по памяти. Ниже — актуальный порядок.
 >
 > Предыдущая запись (2026-07-13, C-волна закрыта целиком: C6(d) движок на ChainRunnable merge 22393392, C6(e) пул на worker_module merge — оба через Fable-ревью 8 углов; RS-7-остаток `workers`→рантайм оказался отдельной задачей (семантика WorkerSpec-тредов, не chain-пула) — в «Открытых решениях владельца»; попутно закрыт регресс RS-4 в layer-контракте merge d5c68d1b; ранее в тот же день — RS-волна целиком: RS-2+RS-3 71d3b479, RS-6+RS-5 7e77e9aa, RS-4 a42747be, RS-7 решение владельца; NEW-D1 bcabd296. Фронт → В4 Ф7 (GATE G3), В3 GUI-конструктор — по решению владельца).
@@ -88,8 +90,10 @@
 
 | План | Статус | Осталось |
 |---|---|---|
-| [backend-ctl-proof-discipline](backend-ctl-proof-discipline.md) | **Единственный активный план инструмента** — Фаза 0 в работе, Фазы 1-6 расписаны. Поглотил шесть предшественников (debug-console, d1-session-isolation, d2-streamable-http, d4-flight-recorder, hardening, framework-module — архив: `_archive/`, незакрытые хвосты framework-module перенесены целиком) | Фазы 1-6 этого плана (строгий край → сплит → реалтайм-края → приговоры → fencing → доки) |
-| [telemetry-coherence-remediation](telemetry-coherence-remediation.md) | Фазы 1-3 закрыты, merge `13623920`, Fable 47/60 | Task 3.2 шаг 3 (watcher фанит publish-секцию детям); **шапка плана всё ещё врёт `DRAFT`** |
+| [truth-holes-closure](truth-holes-closure.md) | **Единственный активный план инструмента** (2026-07-22) — преемник закрытого backend-ctl-proof-discipline. Ветка `fix/truth-holes-closure`. Основание: live-анализ 2026-07-22. Ф2/Ф3 ортогональны и параллелятся Ф1 | Ф1 gui-шторм (флип-лесенка) → Ф2 supervision-правда ∥ Ф3 ротация логов → Ф4 инструмент → Ф5 закрывающий live-прогон |
+| [backend-ctl-proof-discipline](backend-ctl-proof-discipline.md) | ✅ **ЗАКРЫТ** 2026-07-22 (`5b6838e0` «ГЕЙТ ПЛАНА ЗАКРЫТ», 47 инструментов live-верифицированы; слит в main ff до `9a0f4137`). Поглотил шесть предшественников (архив: `_archive/`) | — (хвосты → truth-holes-closure) |
+| [transport-single-policy](transport-single-policy.md) | Активный план **транспорта** (продукт, не инструмент) — ортогонален gui-шторму (state идёт targets-дверью, кадры — канальной). Не начат, ветки нет. **Порядок: после truth-holes** (унификация двери на здоровой, наблюдаемой системе + готовых счётчиках Ф4.3) | Фаза 0 доказ.база → Ф1 умная дверь → Ф2 release/reclaim → Ф3 backend_ctl типиз.ноль |
+| [telemetry-coherence-remediation](telemetry-coherence-remediation.md) | ✅ закрыт 2026-07-18, merge `13623920`, Fable 47/60 (шапка исправлена с DRAFT 2026-07-20) | Task 3.2 шаг 3 (watcher фанит publish-секцию детям) — не блокирует, до Ф4 GUI |
 | [gui-telemetry-read-model](gui-telemetry-read-model.md) | закрыт (ADR-136) | Task 1.3 — live qt-smoke |
 | [telemetry-dashboard](telemetry-dashboard.md) | ✅ закрыт | — |
 | [telemetry-publish-control](telemetry-publish-control.md) | ✅ закрыт (ADR-PM-018) | residual — каскад двух плоскостей |
