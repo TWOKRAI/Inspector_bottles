@@ -1,0 +1,50 @@
+{"t": "system_overview", "v": "OK", "d": "процессов=8 аномалий=4"}
+{"t": "capabilities", "v": "OK", "d": "карточек=8 gui=ЕСТЬ"}
+{"t": "get_status", "v": "OK", "d": "gui pid=31252 воркеров=3"}
+{"t": "introspect_handlers", "v": "OK", "d": "commands=['config.reload', 'flush_stats', 'freeze_capture', 'get_metric', 'get_metrics', 'health.re"}
+{"t": "introspect_registers", "v": "OK", "d": "registers={}"}
+{"t": "introspect_plugins", "v": "OK", "d": "plugins={'capture': 'source'}"}
+{"t": "introspect_queues", "v": "OK", "d": "queue_sizes={'system': 0, 'data': 0, 'state': 0}"}
+{"t": "introspect_router_stats", "v": "OK", "d": "sent_ok=1311 senders_очередей=9 потери=0"}
+{"t": "introspect_telemetry", "v": "OK", "d": "gate_active=True метрик=5"}
+{"t": "introspect_memory", "v": "OK", "d": "rss=137.2МБ"}
+{"t": "supervision_status", "v": "OK", "d": "процессов=8 у camera_0 pid=22648"}
+{"t": "state_get", "v": "OK", "d": "{'_truncated': True, '_bytes': 47744, '_hint': 'ответ усечён по размеру (47744B > 12000B). full=true"}
+{"t": "state_get_subtree", "v": "OK", "d": "{'_truncated': True, '_bytes': 47763, '_hint': 'ответ усечён по размеру (47763B > 12000B). full=true"}
+{"t": "watch_like_gui", "v": "OK", "d": "{'state': {'processes.**': {'type': 'response', 'command': 'command.response', 'sender': 'ProcessManager', 'targets': ['"}
+{"t": "state_subscribe", "v": "OK", "d": "{'status': 'ok', 'sub_id': '99faa782-5ff4-47cd-bf3a-e787837ad171'}"}
+{"t": "log_tail", "v": "OK", "d": "{'success': True, 'process': 'camera_0', 'subscriber': 'backend_ctl.452cb78ae8de', 'level': 'WARNING', 'tap': "}
+{"t": "observability_tail", "v": "OK", "d": "{'success': True, 'process': 'camera_0', 'subscriber': 'backend_ctl.452cb78ae8de'}"}
+{"t": "ui_tap", "v": "OK", "d": "{'success': True, 'process': 'gui', 'subscriber': 'backend_ctl.452cb78ae8de', 'command': 'ui.event', 'sources': ['gesture', 'command'], 'events_sent':"}
+{"t": "ui_tap_ping", "v": "OK", "d": "events_sent=8 errors=0"}
+{"t": "events_page", "v": "OK", "d": "items=50 dropped=0"}
+{"t": "events", "v": "OK", "d": "[{'type': 'event', 'sender': 'StateStore', 'targets': ['backend_ctl.fdaf8ad4a37c'], 'queue_type': 'state', 'co"}
+{"t": "telemetry_snapshot", "v": "SUSPECT", "d": "count=None ingested=None"}
+{"t": "telemetry_history", "v": "OK", "d": "path=None точек=25"}
+{"t": "await_condition", "v": "OK", "d": "{'success': False, 'timed_out': True, 'kind': 'state_path', 'waited': {'path': 'x', 'value': None}, 'elapsed_sec': 4.016, 'events_"}
+{"t": "telemetry_set", "v": "OK", "d": "off.verified=True on.verified=True semantics=delivered"}
+{"t": "telemetry_reconfigure", "v": "OK", "d": "{'success': True, 'process': 'ProcessManager', 'publish': {'requested': True, 'target_count': 1, 'reached': 1, 'targets': ['camera"}
+{"t": "config_reload", "v": "OK", "d": "DEBUG->DEBUG INFO->INFO"}
+{"t": "logger_sink_disable", "v": "OK", "d": "{'success': True, 'sink': 'console', 'enabled': False, 'process': 'camera_0'}"}
+{"t": "logger_sink_enable", "v": "OK", "d": "{'success': True, 'sink': 'console', 'enabled': True, 'process': 'camera_0'}"}
+{"t": "register_snapshot", "v": "SUSPECT", "d": "процессов с регистрами=0 мишень=None"}
+{"t": "set_register_verified", "v": "NA", "d": "в рецепте нет булева поля регистра — писать нечего (регистры пусты)"}
+{"t": "set_register", "v": "NA", "d": "в рецепте нет булева поля регистра — писать нечего (регистры пусты)"}
+{"t": "register_confirm", "v": "NA", "d": "в рецепте нет булева поля регистра — писать нечего (регистры пусты)"}
+{"t": "register_restore", "v": "NA", "d": "в рецепте нет булева поля регистра — писать нечего (регистры пусты)"}
+{"t": "register_rollback_log", "v": "OK", "d": "{'success': True, 'entries': []}"}
+{"t": "record_start", "v": "OK", "d": "{'success': True, 'path': 'D:\\\\PROJECT_INNOTECH\\\\Inspector_vision\\\\Inspector_bottles\\\\backend_ctl_records\\\\pha"}
+{"t": "record_status", "v": "OK", "d": "{'success': True, 'recording': True, 'path': 'D:\\\\PROJECT_INNOTECH\\\\Inspector_vision\\\\Inspector_bottles\\\\backend_ctl_records\\\\phas"}
+{"t": "record_stop", "v": "OK", "d": "events_written=70"}
+{"t": "record_load", "v": "OK", "d": "{'success': True, 'mode': 'replay', 'path': 'D:\\\\PROJECT_INNOTECH\\\\Inspector_vision\\\\Inspector_bottles\\\\backend_ctl_records\\\\phase"}
+{"t": "record_unload", "v": "OK", "d": "{'success': True, 'mode': 'live', 'unloaded': True}"}
+{"t": "record_dump", "v": "OK", "d": "{'success': True, 'path': 'D:\\\\PROJECT_INNOTECH\\\\Inspector_vision\\\\Inspector_bottles\\\\backend_ctl_records\\\\phase5dump.jsonl', 'eve"}
+{"t": "send_command", "v": "SUSPECT", "d": "{'success': False, 'error': 'not connected'}"}
+{"t": "system_command", "v": "OK", "d": "{'success': False, 'error': 'not connected'}"}
+{"t": "process_restart_verified", "v": "SUSPECT", "d": "pid None->None restarts None->None за Noneс"}
+{"t": "ui_untap", "v": "SUSPECT", "d": "{'success': False, 'error': 'not connected'}"}
+{"t": "log_untail", "v": "SUSPECT", "d": "{'success': False, 'error': 'not connected'}"}
+{"t": "observability_untail", "v": "SUSPECT", "d": "{'success': False, 'error': 'not connected'}"}
+{"t": "unwatch", "v": "OK", "d": "{'observability': {'ProcessManager': {'success': False, 'error': 'not connected'}, 'camera_0': {'success': Fal"}
+{"t": "session_log", "v": "OK", "d": "записей аудита=10"}
+{

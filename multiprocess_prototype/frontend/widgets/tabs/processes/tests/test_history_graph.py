@@ -200,7 +200,6 @@ class TestStaleHistoryResponseDiscarded:
         """Ring читается по wall-окну: после остановки потока метрики старые точки
         (deque вытесняет их лишь при append) не должны рисоваться как текущие.
         Регресс на `history(path)` без since — стейл-окно из прошлого."""
-        import collections
         import time
 
         vm = TelemetryViewModel()
@@ -210,7 +209,9 @@ class TestStaleHistoryResponseDiscarded:
         t_now = time.time()
         path = "processes.camera_0.state.fps"
         # Старая точка (за окном 10м = 600с) + свежая точка внутри окна.
-        vm._history[path] = collections.deque([(t_now - 3600.0, 11.0), (t_now - 1.0, 22.0)], maxlen=600)
+        # Засев через публичный import_history ядра read-model: приватного
+        # vm._history больше нет — кольца уехали в TelemetryReadModel (ADR-136).
+        vm._model.import_history({path: [(t_now - 3600.0, 11.0), (t_now - 1.0, 22.0)]})
 
         panel._refresh_graph_from_ring()
 

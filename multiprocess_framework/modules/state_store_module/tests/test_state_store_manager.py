@@ -13,6 +13,19 @@ from multiprocess_framework.modules.state_store_module.core.delta import (
 from multiprocess_framework.modules.state_store_module.core.subscription_manager import SubscriptionManager
 from multiprocess_framework.modules.state_store_module.manager.delta_dispatcher import DeltaDispatcher
 from multiprocess_framework.modules.state_store_module.manager.state_store_manager import StateStoreManager
+import pytest
+from ._deterministic_delivery import apply_deterministic_delivery
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_state_delivery(monkeypatch):
+    """Ф6.1: коалесцирование ON по дефолту — flush детерминированный, без тика.
+
+    Тесты этого модуля проверяют ЧТО доставлено, а не КОГДА; расписание доставки —
+    предмет ``test_delta_coalescing.py``. Подробности — в ``_deterministic_delivery``.
+    """
+    apply_deterministic_delivery(monkeypatch)
+
 
 # ---------------------------------------------------------------------------
 # MockRouter — мок RouterManager для тестов

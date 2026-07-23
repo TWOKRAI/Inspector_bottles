@@ -153,4 +153,8 @@
 - [Правдоподобное ≠ проверенное](feedback_plausible_is_not_verified.md) — 4 косяка координатора за заход: неверный механизм, живой каталог назван мусором, ложный детектор завершения, образцовый тест сам лгал дважды
 - [Subagent live-test Monitor hang](feedback_subagent_live_test_monitor_hang.md) — субагенты офлоадят live-тесты в фоновый Monitor и виснут; гонять синхронно, координатор забирает финал на 2-й заминке
 - [backend_ctl recorder оставлен](project_backend_ctl_recorder_kept.md) — вердикт владельца 2026-07-22: record/replay НЕ удалять, условный приговор Task 4.2 снят
-- [gui задушен system-очередью](project_gui_system_queue_storm.md) — PM per-delta пуши топят очередь gui (85-94/100, дренаж 18/с) → gui слеп для команд; router_errors PM = этот backpressure; + incarnation не бампается на process.restart
+- [gui задушен system-очередью](project_gui_system_queue_storm.md) — ПОЧИНЕНО 2026-07-22 (Ф1 truth-holes: коалесцирование+очередь state, флаги OFF): evict_blocked 1466→0, доставка 15%→100%, gui заговорил; грабли — гонка тихой потери, поймало ревью
+- [Флаги не должны стать костылями](feedback_flags_must_not_become_crutches.md) — dark-launch закрыт только когда флаг УДАЛЁН, а не флипнут; две вечные ветки = нужно структурное различие, не флаг
+- [Спека плана может врать](feedback_plan_spec_can_lie.md) — имя поля из плана сверять с кодом (manual_restarts → instance_restarts: авто-рестарт идёт той же командой)
+- [Красный — сперва проверить на main](feedback_check_red_on_main_first.md) — 6 падений прототипа жили и на main; индексные проверки в тестах ломаются на соседе
+- [Вердикт по одному маркеру врёт](feedback_single_marker_verdict_lies.md) — pid переиспользуется, смена pid ≠ живой инстанс; пара маркеров + признак жизни, полуудача отдельным полем

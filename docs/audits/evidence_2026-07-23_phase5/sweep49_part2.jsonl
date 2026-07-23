@@ -1,0 +1,21 @@
+{"t": "telemetry_snapshot", "v": "SUSPECT", "d": "count=None ingested=None active=None"}
+{"t": "telemetry_history", "v": "SUSPECT", "d": "path=None -> {'success': True, 'path': 'x', 'process': None, 'worker': None, 'count': 0, 'points': [], 'tracked': False, 'ingest_acti"}
+{"t": "await_condition", "v": "SUSPECT", "d": "{'success': False, 'timed_out': True, 'kind': 'metric_threshold', 'waited': {'path': 'x', 'op': '>', 'value': 0.0}, 'elapsed_sec': 10.015, 'events_seen': 272, '"}
+{"t": "register_snapshot", "v": "OK", "d": "процессов с регистрами=5 из 8: ['devices', 'lines', 'points', 'pult', 'seg']"}
+{"t": "_target", "v": "OK", "d": "мишень записи=('lines', 'edge_detection', 'invert', False)"}
+{"t": "set_register_verified", "v": "OK", "d": "{'success': True, 'verified': True, 'found': True, 'process': 'lines', 'register': 'edge_detection', 'field': 'invert', 'expected': True, 'actual': True, 'known_registers': ['blob_filter', '"}
+{"t": "set_register", "v": "OK", "d": "{'type': 'response', 'command': 'command.response', 'sender': 'lines', 'targets': ['ProcessManager'], 'queue_type': 'system', 'request_id': '0c519626-"}
+{"t": "register_confirm", "v": "OK", "d": "commit_id=lines:edge_detection.invert#1 -> {'success': True, 'commit_id': 'lines:edge_detection.invert#1', 'confirmed': True, 'process': 'lines', 'register': 'edge"}
+{"t": "register_restore", "v": "OK", "d": "{'success': True, 'written': 1, 'skipped': 127, 'verified': 128, 'mismatches': []}"}
+{"t": "register_rollback_log", "v": "OK", "d": "{'success': True, 'entries': []}"}
+{"t": "send_command", "v": "OK", "d": "{'success': True, 'process': 'camera_0', 'pid': 22648, 'status': 'running', 'workers': {'source_producer_capture': {'name': 'source_producer_capture',"}
+{"t": "system_command", "v": "OK", "d": "процессов=8"}
+{"t": "process_restart_verified", "v": "OK", "d": "pid 11492->31280 restarts 0->1 за 6.59с alive=True"}
+{"t": "ui_tap", "v": "OK", "d": "{'success': True, 'process': 'gui', 'subscriber': 'backend_ctl.871c5d0c9811', 'command': 'ui.event', 'sources': ['gesture', 'command'], 'events_sent':"}
+{"t": "ui_tap_ping", "v": "OK", "d": "events_sent=9 errors=0"}
+{"t": "ui_untap", "v": "OK", "d": "{'success': True, 'process': 'gui', 'was_subscriber': 'backend_ctl.871c5d0c9811'}"}
+{"t": "log_untail", "v": "SUSPECT", "d": "{'success': False, 'process': 'camera_0', 'tap': 'log_tail::backend_ctl.871c5d0c9811'}"}
+{"t": "observability_untail", "v": "OK", "d": "{'success': True, 'process': 'camera_0', 'subscriber': 'backend_ctl.871c5d0c9811'}"}
+{"t": "unwatch", "v": "OK", "d": "{'observability': {'ProcessManager': {'success': True, 'process': 'ProcessManager', 'subscriber': 'backend_ctl.871c5d0c9811'}, 'ca"}
+{"t": "session_log", "v": "OK", "d": "записей аудита=8"}
+{"SUSPECT": 4, "OK": 16}

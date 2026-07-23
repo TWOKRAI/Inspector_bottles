@@ -157,12 +157,23 @@ def _introspect_plugins(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.introspect_plugins(args["process"], **_kw_timeout(args))
 
 
+def _introspect_telemetry(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.introspect_telemetry(args["process"], **_kw_timeout(args))
+
+
 def _introspect_memory(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return _jsonable(drv.introspect_memory(args["process"], **_kw_timeout(args)))
 
 
 def _supervision_status(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return _jsonable(drv.supervision_status(args.get("process"), **_kw_timeout(args)))
+
+
+def _process_restart_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    kw: Dict[str, Any] = {}
+    if args.get("wait") is not None:
+        kw["wait"] = float(args["wait"])
+    return drv.process_restart_verified(args["process"], **kw, **_kw_timeout(args))
 
 
 def _send_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
@@ -342,6 +353,10 @@ def _telemetry_set(drv: BackendDriver, args: Dict[str, Any]) -> Any:
         kw["interval_sec"] = args["interval_sec"]
     if args.get("plane"):
         kw["plane"] = args["plane"]
+    if args.get("verify"):
+        kw["verify"] = True
+    if args.get("verify_within") is not None:
+        kw["verify_within"] = float(args["verify_within"])
     return drv.telemetry_set(args["process"], args["metric"], **kw, **_kw_timeout(args))
 
 
@@ -447,6 +462,16 @@ TOOLS: List[ToolSpec] = [
         _introspect_plugins,
     ),
     ToolSpec(
+        "introspect_telemetry",
+        "Readback телеметрийного gate процесса (read-only): gate_active, эффективная "
+        "publish-секция, resolved (per-метрика enabled + interval_sec с уже применённым "
+        "наследованием), unknown_metrics (опечатки в именах) и throttle_rules центральной "
+        "плоскости. Отвечает «публикуется ли fps прямо сейчас» без гадания по эффекту в дереве. "
+        "gate_active=false → секции telemetry.publish нет, все метрики идут каждый тик.",
+        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        _introspect_telemetry,
+    ),
+    ToolSpec(
         "introspect_memory",
         "Инвентарь памяти процесса: SHM / пул займов / очереди — только СТАТИСТИКА "
         "(read-only; кадры/содержимое SHM не отдаёт). Секции memory/pool/queues/shm_registry "
@@ -457,8 +482,11 @@ TOOLS: List[ToolSpec] = [
     ToolSpec(
         "supervision_status",
         "Supervision-снимок (D.1b): epoch топологии + per-process incarnation, restart_count, "
-        "last_exit, status. Смена incarnation процесса = пересечён его рестарт (маркер «до/после» "
-        "для fencing и курсоров B.1). process — сузить до одного. Read-only.",
+        "last_exit, status, pid, started_at, instance_restarts. Маркер «до/после рестарта» — "
+        "пара pid+instance_restarts (видит замену инстанса и при reuse-очередей, дефолт; "
+        "считает и ручные, и авто-рестарты supervision — та же команда process.restart). "
+        "incarnation растёт только при смене identity очередей (fencing/курсоры B.1), "
+        "restart_count — краш-рестарты монитора. process — сузить до одного. Read-only.",
         _obj(
             {
                 "process": {"type": "string", "description": "Сузить до одного процесса. Опц."},
@@ -492,7 +520,8 @@ TOOLS: List[ToolSpec] = [
         "Контракт сервера: ключ команды — 'cmd', процесс — 'process_name', например "
         "{'cmd': 'process.restart', 'process_name': 'seg'}. Медленные команды "
         "(process.restart >30с) отвечают timeout'ом при реально доставленной команде — "
-        "эффект доказывать readback'ом (pid через introspect_memory до/после).",
+        "эффект доказывать readback'ом (для рестарта готовый инструмент — "
+        "process_restart_verified: pid до/после одним вызовом).",
         _obj(
             {
                 "command": {
@@ -505,6 +534,26 @@ TOOLS: List[ToolSpec] = [
             ["command"],
         ),
         _system_command,
+    ),
+    ToolSpec(
+        "process_restart_verified",
+        "Рестарт процесса с PID-ДОКАЗАТЕЛЬСТВОМ за один вызов: pid до → process.restart → "
+        "поллинг supervision до живого процесса с ДРУГИМ pid. Ответ команды не судится "
+        "(медленный рестарт штатно отвечает timeout'ом при доставленной команде) — вердикт "
+        "выносит факт: {restarted, pid_before, pid_after, instance_restarts_*, elapsed}. "
+        "Несуществующий процесс → restarted=false + reason. Разрушающий (перезапускает процесс).",
+        _obj(
+            {
+                "process": {"type": "string", "description": "Имя перезапускаемого процесса"},
+                "wait": {
+                    "type": "number",
+                    "description": "Сколько секунд ждать смены pid (дефолт 60 — graceful-stop бывает долгим).",
+                },
+                "timeout": _TIMEOUT,
+            },
+            ["process"],
+        ),
+        _process_restart_verified,
     ),
     ToolSpec(
         "set_register",
@@ -883,7 +932,10 @@ TOOLS: List[ToolSpec] = [
         "Точечно поменять ОДНУ метрику/правило телеметрии (merge поверх живого состояния — соседние "
         "override'ы и правила сохраняются). plane='publisher' (дефолт, главный рычаг частоты публикации) "
         "или plane='throttle' (central rate-limit; metric трактуется как glob-путь, требуется interval_sec). "
-        "Безопаснее telemetry_reconfigure(mode='replace') для правки одной метрики. Меняет поведение бэкенда.",
+        "Безопаснее telemetry_reconfigure(mode='replace') для правки одной метрики. Меняет поведение бэкенда. "
+        "verify=true — после записи READBACK через introspect.telemetry и поле verified_effect: "
+        "серверный reached означает ДОСТАВКУ (semantics='delivered'), не применение — verify отвечает "
+        "«правило реально в живом gate». Опечатка в имени метрики → verified_effect=false + причина.",
         _obj(
             {
                 "process": {"type": "string", "description": "Имя процесса или 'all' (fan-out через PM)."},
@@ -900,6 +952,14 @@ TOOLS: List[ToolSpec] = [
                     "type": "string",
                     "enum": ["publisher", "throttle"],
                     "description": "publisher (дефолт) — частота публикации | throttle — central rate-limit.",
+                },
+                "verify": {
+                    "type": "boolean",
+                    "description": "Readback после записи → verified_effect (правило реально в живом gate).",
+                },
+                "verify_within": {
+                    "type": "number",
+                    "description": "Сколько секунд поллить readback до вердикта (дефолт 3.0). Только с verify.",
                 },
                 "timeout": _TIMEOUT,
             },
@@ -1065,6 +1125,7 @@ TOOL_SAFETY: Dict[str, str] = {
     "introspect_queues": SAFETY_READ,
     "introspect_plugins": SAFETY_READ,
     "introspect_memory": SAFETY_READ,
+    "introspect_telemetry": SAFETY_READ,
     "supervision_status": SAFETY_READ,
     "register_snapshot": SAFETY_READ,
     "register_rollback_log": SAFETY_READ,
@@ -1109,6 +1170,9 @@ TOOL_SAFETY: Dict[str, str] = {
     # escalated
     "send_command": SAFETY_ESCALATED,
     "system_command": SAFETY_ESCALATED,
+    # Ф4 Task 4.4: обёртка над той же system-командой process.restart — класс тот же
+    # (перезапуск процесса разрушителен), сужение аргументов класса не меняет.
+    "process_restart_verified": SAFETY_ESCALATED,
 }
 
 # Префиксы команд, безопасных для чтения через escalated send_command в read-only

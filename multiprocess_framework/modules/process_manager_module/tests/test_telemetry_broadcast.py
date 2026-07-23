@@ -111,6 +111,18 @@ class TestPublishFanout:
         # publish=None доехал как валидная под-секция «выключить gate».
         assert _telemetry_broadcasts(pm)[0]["data"] == {"publish": None}
 
+    def test_coverage_declares_delivered_semantics(self) -> None:
+        """Ф4 Task 4.2: охват честно называет, ЧТО он измеряет — доставку, не применение.
+
+        Путь fire-and-forget: ``reached`` считает положенные в очередь сообщения, gate
+        перестраивается уже в ребёнке. Раньше читатель принимал охват за применение —
+        теперь семантика объявлена прямо в ответе (проверка применения — readback
+        ``introspect.telemetry`` / ``telemetry_set(verify=True)``).
+        """
+        pm = _pm({"camera_0": {"class": "m.Cam"}}, reach=1)
+        res = pm._cmd_telemetry_broadcast({"publish": {}})
+        assert res["publish"]["semantics"] == "delivered"
+
     def test_incomplete_coverage_is_visible(self) -> None:
         """reached < target_count → complete=False (наблюдаемость «no silent caps»)."""
         pm = _pm({"a": {"class": "m.A"}, "b": {"class": "m.B"}, "c": {"class": "m.C"}}, reach=2)

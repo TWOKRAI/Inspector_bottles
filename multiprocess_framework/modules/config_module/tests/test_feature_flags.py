@@ -60,6 +60,28 @@ def test_env_zero_overrides_default_true(monkeypatch):
     assert ff.resolve("FW_AUTORESTART") is False
 
 
+# ── Ф6.1: флип дефолтов гашения gui-шторма (plans/truth-holes-closure.md) ─────
+
+
+def test_state_storm_flags_are_on_by_default(monkeypatch):
+    """Флаг гашения шторма включён без env.
+
+    Живой замер 2026-07-23: БЕЗ них тот же рецепт за ~45с даёт 1702 безвозвратные
+    потери в never-drop очереди gui (`StateStore` put=1871/lost=1687). Дефолт-OFF
+    означал бы, что штатный запуск идёт по заведомо худшему пути.
+    """
+    # FW_STATE_QUEUE удалён в Ф6.2 (единственный путь, без переключателя) —
+    # проверять остался только FW_STATE_COALESCE (его удаление — Ф6.3).
+    monkeypatch.delenv("FW_STATE_COALESCE", raising=False)
+    assert ff.resolve("FW_STATE_COALESCE") is True
+
+
+def test_state_storm_flags_rollback_via_env(monkeypatch):
+    """Плечо пары: откат через env работает, а не только объявлен в докстринге."""
+    monkeypatch.setenv("FW_STATE_COALESCE", "0")
+    assert ff.resolve("FW_STATE_COALESCE") is False
+
+
 def test_ctor_beats_env(monkeypatch):
     # given env говорит off
     monkeypatch.setenv("FW_SHM_SEQLOCK", "0")

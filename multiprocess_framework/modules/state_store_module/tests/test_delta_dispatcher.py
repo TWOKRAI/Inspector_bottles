@@ -1,7 +1,9 @@
 """Тесты DeltaDispatcher — формат рассылки state.changed подписчикам.
 
-Ключевая проверка (U1/1.0b): сообщение state.changed несёт queue_type="system",
-чтобы лечь в {subscriber}_system и быть обработанным штатным message_processor.
+Ключевая проверка: сообщение state.changed несёт queue_type="state" (Ф1.2/Ф6.1),
+чтобы лечь в {subscriber}_state — очередь класса "state" с drop_oldest. Раньше
+конверт шёл в never-drop {subscriber}_system, и burst state.set топил почту команд
+подписчика (gui переставал отвечать вовсе — см. plans/truth-holes-closure.md Ф1).
 """
 
 from __future__ import annotations
@@ -9,6 +11,18 @@ from __future__ import annotations
 from ..core.delta import MISSING, Delta
 from ..core.subscription_manager import SubscriptionManager
 from ..manager.delta_dispatcher import DeltaDispatcher
+import pytest
+from ._deterministic_delivery import apply_deterministic_delivery
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_state_delivery(monkeypatch):
+    """Ф6.1: коалесцирование ON по дефолту — flush детерминированный, без тика.
+
+    Тесты этого модуля проверяют ЧТО доставлено, а не КОГДА; расписание доставки —
+    предмет ``test_delta_coalescing.py``. Подробности — в ``_deterministic_delivery``.
+    """
+    apply_deterministic_delivery(monkeypatch)
 
 
 class _CapturingRouter:
@@ -28,8 +42,8 @@ def _make_dispatcher() -> tuple[DeltaDispatcher, _CapturingRouter, SubscriptionM
     return disp, router, subs
 
 
-def test_state_changed_carries_system_queue_type() -> None:
-    """state.changed → queue_type='system' (доставка в {sub}_system)."""
+def test_state_changed_carries_state_queue_type() -> None:
+    """state.changed → queue_type='state' (доставка в {sub}_state, drop_oldest)."""
     disp, router, subs = _make_dispatcher()
     subs.subscribe("processes.**", "gui")
 
@@ -43,7 +57,7 @@ def test_state_changed_carries_system_queue_type() -> None:
 
     assert len(router.sent) == 1
     msg = router.sent[0]
-    assert msg["queue_type"] == "system"
+    assert msg["queue_type"] == "state"
     assert msg["command"] == "state.changed"
     assert msg["targets"] == ["gui"]
     assert msg["data"]["deltas"][0]["path"] == "processes.cam.state.status"
@@ -72,7 +86,7 @@ def test_worker_telemetry_path_matches_subscription() -> None:
 
     assert len(router.sent) == 1
     assert router.sent[0]["targets"] == ["gui"]
-    assert router.sent[0]["queue_type"] == "system"
+    assert router.sent[0]["queue_type"] == "state"
 
 
 # ---------------------------------------------------------------------------

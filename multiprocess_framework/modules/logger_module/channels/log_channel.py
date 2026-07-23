@@ -7,9 +7,11 @@
 
 import logging
 import logging.handlers
+import os
+import threading
 import time
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 try:
     import requests
@@ -112,6 +114,118 @@ class _SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
         )
 
 
+# =============================================================================
+# Реестр общих rotating-хэндлеров по абсолютному пути (в рамках процесса)
+# =============================================================================
+#
+# Несколько каналов НАМЕРЕННО пишут в один файл. Пример из боевого конфига:
+# ``messages.log`` получают и scope-канал ``messages_file``, и module-канал
+# ``router_messages`` — это единый лог сообщений (продуктовое поведение, менять
+# нельзя). Если каждый канал создаёт СВОЙ ``_SafeRotatingFileHandler`` на один
+# путь, в процессе открывается два fd на один файл. На Windows ``doRollover()``
+# сперва закрывает СВОЙ stream, затем ``os.rename(messages.log -> .1)`` — и этот
+# rename падает WinError 32, пока ВТОРОЙ хэндлер держит свой fd открытым. Ротация
+# не срабатывает НИКОГДА, файл растёт без предела (в живом прогоне ``messages.log``
+# дорос до 645 МБ при лимите ~60 МБ).
+#
+# Решение: один ``_SafeRotatingFileHandler`` на абсолютный путь в рамках процесса.
+# Каналы с тем же файлом делят его — один ротатор, один fd, конкуренции нет.
+# Реестр потокобезопасен (lock) и refcounted: физическое закрытие хэндлера
+# происходит только когда его отпустил ПОСЛЕДНИЙ владелец-канал.
+
+_handler_registry_lock = threading.RLock()
+_shared_handlers: Dict[str, "_SafeRotatingFileHandler"] = {}
+_shared_handler_refs: Dict[str, int] = {}
+
+
+def _handler_key(path: Any) -> str:
+    """Канонический ключ реестра — тот же abspath, что RotatingFileHandler кладёт в ``baseFilename``."""
+    return os.path.abspath(os.fspath(path))
+
+
+def acquire_shared_rotating_handler(
+    path: Any, max_bytes: int, backup_count: int
+) -> Tuple["_SafeRotatingFileHandler", bool]:
+    """Вернуть общий rotating-хэндлер для пути (создать при первом обращении).
+
+    Повторный вызов с тем же путём в этом процессе отдаёт уже созданный хэндлер
+    (refcount++), а не открывает второй fd на тот же файл. Расхождение
+    ``max_bytes``/``backup_count`` с первым зарегистрировавшим — WARNING; побеждают
+    параметры первого владельца (менять их на живом хэндлере нельзя — это сменило
+    бы политику ротации под ногами уже пишущего канала).
+
+    Returns:
+        (handler, created): ``created=True`` только если хэндлер создан этим
+        вызовом (первый владелец) — тогда вызывающему стоит выставить formatter;
+        для переиспользованного (``created=False``) formatter первого сохраняется.
+    """
+    key = _handler_key(path)
+    with _handler_registry_lock:
+        handler = _shared_handlers.get(key)
+        if handler is not None:
+            if handler.maxBytes != max_bytes or handler.backupCount != backup_count:
+                _fallback_logger.warning(
+                    "Канал открывает уже используемый лог-файл '%s' с другими параметрами "
+                    "ротации (max_size %d против %d, backup %d против %d): применяются "
+                    "параметры первого зарегистрировавшего канала.",
+                    key,
+                    handler.maxBytes,
+                    max_bytes,
+                    handler.backupCount,
+                    backup_count,
+                )
+            _shared_handler_refs[key] += 1
+            return handler, False
+        handler = _SafeRotatingFileHandler(
+            filename=key,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+        )
+        _shared_handlers[key] = handler
+        _shared_handler_refs[key] = 1
+        return handler, True
+
+
+def release_shared_rotating_handler(handler: "_SafeRotatingFileHandler") -> None:
+    """Отпустить общий rotating-хэндлер; физически закрыть, когда отпустил последний владелец.
+
+    Идемпотентность — на совести вызывающего: :class:`FileChannel` обнуляет ссылку
+    после release, поэтому повторный ``close()`` не даёт двойной decrement.
+    """
+    key = _handler_key(handler.baseFilename)
+    with _handler_registry_lock:
+        refs = _shared_handler_refs.get(key)
+        if refs is None:
+            # Хэндлер не из реестра (например, создан напрямую в тесте) — просто закрыть.
+            try:
+                handler.close()
+            except Exception:  # nosec B110 — закрытие best-effort
+                pass
+            return
+        if refs <= 1:
+            _shared_handlers.pop(key, None)
+            _shared_handler_refs.pop(key, None)
+            try:
+                handler.close()
+            except Exception:  # nosec B110 — закрытие best-effort
+                pass
+        else:
+            _shared_handler_refs[key] = refs - 1
+
+
+def _reset_shared_handler_registry() -> None:
+    """Закрыть и очистить все общие хэндлеры (тест-хелпер для teardown между тестами)."""
+    with _handler_registry_lock:
+        for handler in list(_shared_handlers.values()):
+            try:
+                handler.close()
+            except Exception:  # nosec B110 — закрытие best-effort
+                pass
+        _shared_handlers.clear()
+        _shared_handler_refs.clear()
+
+
 class FileChannel(LogChannel):
     """Канал записи в файл"""
 
@@ -122,15 +236,21 @@ class FileChannel(LogChannel):
 
         formatter = logging.Formatter(config.format)
         if getattr(config, "rotate", True):
-            self.handler = _SafeRotatingFileHandler(
-                filename=self.file_path,
-                maxBytes=config.max_size,
-                backupCount=config.backup_count,
-                encoding="utf-8",
+            # Общий хэндлер на путь: несколько каналов на один файл делят один
+            # ротатор (иначе конкуренция fd ломает ротацию на Windows — см. реестр
+            # выше). formatter выставляет только первый владелец пути.
+            self.handler, created = acquire_shared_rotating_handler(
+                self.file_path,
+                config.max_size,
+                config.backup_count,
             )
+            self._shared_handler = True
+            if created:
+                self.handler.setFormatter(formatter)
         else:
             self.handler = logging.FileHandler(self.file_path, encoding="utf-8", mode="a")
-        self.handler.setFormatter(formatter)
+            self._shared_handler = False
+            self.handler.setFormatter(formatter)
 
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -153,9 +273,19 @@ class FileChannel(LogChannel):
             return {"status": "error", "error": str(e), "channel": self.name}
 
     def close(self):
-        """Закрывает файловый канал"""
-        if self.handler:
+        """Закрывает файловый канал.
+
+        Общий rotating-хэндлер отпускается через реестр (refcount--): физически
+        закрывается, только когда его отпустил последний канал. Обнуление
+        ``self.handler`` защищает от двойного decrement при повторном ``close()``.
+        """
+        if self.handler is None:
+            return
+        if getattr(self, "_shared_handler", False):
+            release_shared_rotating_handler(self.handler)
+        else:
             self.handler.close()
+        self.handler = None
 
 
 class ConsoleChannel(LogChannel):

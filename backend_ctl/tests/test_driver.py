@@ -217,6 +217,14 @@ class TestIntegration:
         assert calls[0]["command"] == "introspect.plugins"
         assert calls[0]["targets"] == ["camera"]
 
+    def test_introspect_telemetry_wrapper(self, loopback) -> None:
+        """Ф4.1: обёртка шлёт introspect.telemetry адресату (readback телеметрийного gate)."""
+        driver, calls = loopback
+        res = driver.introspect_telemetry("camera", timeout=3.0)
+        assert res["result"]["command"] == "introspect.telemetry"
+        assert calls[0]["command"] == "introspect.telemetry"
+        assert calls[0]["targets"] == ["camera"]
+
     def test_introspect_memory_wrapper(self, loopback) -> None:
         """Ф2 Task 2.4: обёртка шлёт introspect.memory адресату и парсит в MemoryStats.
 

@@ -11,6 +11,18 @@ from multiprocess_framework.modules.state_store_module.core.delta import MISSING
 from multiprocess_framework.modules.state_store_module.manager.state_store_manager import StateStoreManager
 from multiprocess_framework.modules.state_store_module.proxy.state_proxy import StateProxy
 from multiprocess_framework.modules.state_store_module.proxy.gui_state_proxy import GuiStateProxy
+import pytest
+from ._deterministic_delivery import apply_deterministic_delivery
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_state_delivery(monkeypatch):
+    """Ф6.1: коалесцирование ON по дефолту — flush детерминированный, без тика.
+
+    Тесты этого модуля проверяют ЧТО доставлено, а не КОГДА; расписание доставки —
+    предмет ``test_delta_coalescing.py``. Подробности — в ``_deterministic_delivery``.
+    """
+    apply_deterministic_delivery(monkeypatch)
 
 
 # ---------------------------------------------------------------------------

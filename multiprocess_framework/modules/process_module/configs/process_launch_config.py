@@ -14,6 +14,13 @@ from ..types import ProcessPriorityLevel
 DEFAULT_QUEUES: dict[str, Any] = {
     "system": {"maxsize": 100},
     "data": {"maxsize": 50},
+    # "state": очередь для state.changed отдельно от never-drop
+    # system-почты команд. Создаётся ВСЕГДА (аддитивно) — канал {proc}_state и его
+    # приём возникают из этого конфига автоматически (process_communication); при
+    # OFF в неё просто ничего не кладётся, поведение бит-в-бит. Глубина 8 (не 1 из
+    # QoS-профиля _STATE): каждый evict = resync round-trip у клиента, 8 амортизирует
+    # burst state.set, не заставляя ресинкать на каждое переполнение.
+    "state": {"maxsize": 8},
 }
 
 
@@ -109,7 +116,14 @@ class ProcessLaunchConfig(SchemaBase):
         # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
         workers = payload.pop("workers", None) or {}
 
+        # Очередь "state" ОБЯЗАТЕЛЬНА (Ф6.2: выбор транспорта удалён — state.changed
+        # едет только ею). Кастомный `queues` без неё означал бы, что подписчик молча
+        # не получает ни одной дельты: у отправителя лишь warning «Queue 'state' not
+        # found», у получателя — тишина и вечный стейл. Поэтому не «берём как дали», а
+        # домердживаем обязательную очередь, оставляя пользовательские глубины.
         queues = self.queues if self.queues is not None else DEFAULT_QUEUES
+        if "state" not in queues:
+            queues = {**queues, "state": DEFAULT_QUEUES["state"]}
         priority = self.priority.value if hasattr(self.priority, "value") else self.priority
 
         log_dir = self._resolve_log_dir()

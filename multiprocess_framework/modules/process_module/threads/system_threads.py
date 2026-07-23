@@ -61,12 +61,18 @@ class SystemThreads:
                 continue
 
             try:
-                # Получаем ТОЛЬКО команды из system-очереди (channel_types=['system']).
-                # DATA/EVENT остаются в data-очереди для воркеров — устраняет гонку потоков.
+                # Получаем команды из system-очереди И конверты state.changed из
+                # state-очереди (channel_types=['system','state']). DATA/EVENT остаются в
+                # data-очереди для воркеров — устраняет гонку потоков.
+                # "state": дренируется ТЕМ ЖЕ message_processor'ом — тот же
+                # event_dispatcher синхронно зовёт handler state.changed. При OFF конверты
+                # идут в system (как раньше), а {proc}_state пуста → опрос её = no-op,
+                # поведение бит-в-бит. Процессы без state-очереди: канала нет → фильтр
+                # receive его не находит, ошибок нет.
                 if self.process.router_manager:
                     messages = self.process.router_manager.receive(
                         timeout=0.0,
-                        channel_types=["system"],
+                        channel_types=["system", "state"],
                     )
                     for message in messages:
                         self._handle_message(message)

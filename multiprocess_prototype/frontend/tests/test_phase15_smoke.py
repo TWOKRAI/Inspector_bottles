@@ -16,22 +16,26 @@ from unittest.mock import MagicMock
 # Путь к реальной topology
 _TOPOLOGY_PATH = Path(__file__).resolve().parents[2] / "backend" / "topology" / "inspection_basic.yaml"
 _BASE_PATH = Path(__file__).resolve().parents[2] / "backend" / "topology" / "base.yaml"
+_PRESENTATION_PATH = Path(__file__).resolve().parents[1] / "presentation.yaml"
 _PLUGINS_DIR = Path(__file__).resolve().parents[3] / "Plugins"
 
 
 @pytest.fixture
 def topology_dict():
-    """Загрузить реальную topology как в проде: фундамент ⊕ pipeline.
+    """Загрузить реальную topology как в проде: фундамент ⊕ presentation ⊕ pipeline.
 
-    Phase 2 вынес процесс gui в base.yaml; app.py / SystemBuilder мёржат
-    base ⊕ pipeline перед StartupChecker. Тест воспроизводит ту же сборку —
-    иначе chain_targets:[gui] из pipeline не резолвится и валидация падает.
+    Ф2 frontend-constructor (d6faaa80) вынес процесс ``gui`` из `base.yaml` в
+    презентационный overlay `frontend/presentation.yaml` — фундамент стал
+    headless-only. Тест воспроизводит сборку `SystemBuilder.from_manifest`
+    (порядок важен: overlay мёржится ПЕРЕД pipeline), иначе `chain_targets:[gui]`
+    из pipeline не резолвится и StartupChecker честно падает.
     """
     from multiprocess_prototype.backend.launch import merge_topologies
 
     pipeline = yaml.safe_load(_TOPOLOGY_PATH.read_text(encoding="utf-8"))
     base = yaml.safe_load(_BASE_PATH.read_text(encoding="utf-8"))
-    return merge_topologies(base, pipeline)
+    presentation = yaml.safe_load(_PRESENTATION_PATH.read_text(encoding="utf-8"))
+    return merge_topologies(merge_topologies(base, presentation), pipeline)
 
 
 @pytest.fixture

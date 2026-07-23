@@ -152,3 +152,38 @@ class TestBuildGenericHookWiring:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestShutdownStopsStatePlane:
+    """Симметрия initialize/shutdown для state-plane (предмерж-ревью Ф6).
+
+    Оркестратор поднимал StateStoreManager, но НИКОГДА не звал его ``shutdown()`` —
+    обещанный в докстринге финальный дренаж буфера коалесцирования был мёртвым кодом,
+    а daemon-flusher переживал остановку оркестратора.
+    """
+
+    def test_shutdown_calls_state_store_shutdown(self, monkeypatch) -> None:
+        orch = _make_orchestrator({"initial_state": {"system": {"x": 1}}})
+        orch._setup_state_store()
+        assert orch._state_store_manager is not None
+        orch._state_store_manager.shutdown = MagicMock(return_value=True)
+        monkeypatch.setattr(type(orch).__mro__[1], "shutdown", lambda self: True, raising=False)
+
+        orch.shutdown()
+
+        orch._state_store_manager.shutdown.assert_called_once()
+
+    def test_shutdown_without_state_plane_is_noop(self, monkeypatch) -> None:
+        """Процесс без state-plane (minimal_app) — shutdown не падает."""
+        orch = _make_orchestrator({})
+        monkeypatch.setattr(type(orch).__mro__[1], "shutdown", lambda self: True, raising=False)
+        assert orch.shutdown() is True
+
+    def test_state_store_shutdown_failure_does_not_block(self, monkeypatch) -> None:
+        """Сбой остановки state-plane не срывает остановку ядра (best-effort)."""
+        orch = _make_orchestrator({"initial_state": {"system": {"x": 1}}})
+        orch._setup_state_store()
+        orch._state_store_manager.shutdown = MagicMock(side_effect=RuntimeError("бум"))
+        monkeypatch.setattr(type(orch).__mro__[1], "shutdown", lambda self: True, raising=False)
+
+        assert orch.shutdown() is True

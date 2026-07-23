@@ -83,13 +83,26 @@ class GenericProcessManagerApp(ProcessManagerProcess):
         """
 
     def shutdown(self) -> bool:
-        """Остановить watcher (нет висящих потоков), затем штатный shutdown ядра."""
+        """Остановить watcher и state-plane (нет висящих потоков), затем shutdown ядра.
+
+        ``StateStoreManager.shutdown()`` обещает финальный дренаж буфера коалесцирования
+        и остановку daemon-flusher'а — но на прод-пути его никто не звал: оркестратор
+        создавал SSM и звал только ``initialize()``. Обещание в докстринге было мёртвым
+        кодом, а поток-flusher переживал остановку оркестратора. Симметрия
+        initialize/shutdown восстановлена здесь (найдено предмерж-ревью Ф6).
+        """
         if self._observability_watcher is not None:
             try:
                 self._observability_watcher.stop()
             except Exception as exc:  # noqa: BLE001 — shutdown best-effort
                 self._log_error(f"[observability] watcher stop: {exc}")
             self._observability_watcher = None
+        store_manager = getattr(self, "_state_store_manager", None)
+        if store_manager is not None and hasattr(store_manager, "shutdown"):
+            try:
+                store_manager.shutdown()
+            except Exception as exc:  # noqa: BLE001 — shutdown best-effort
+                self._log_error(f"[state_store] shutdown: {exc}")
         return super().shutdown()
 
     # ------------------------------------------------------------------

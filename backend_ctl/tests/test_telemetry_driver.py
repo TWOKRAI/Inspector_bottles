@@ -258,6 +258,178 @@ class TestTelemetrySet:
         assert calls[0][1] == "telemetry.broadcast"
 
 
+def _verify_recorder(monkeypatch, *, readback: Dict[str, Any]) -> Tuple[BackendDriver, List[tuple]]:
+    """Driver, у которого запись отвечает охватом, а ``introspect.telemetry`` — заданным readback'ом.
+
+    Разные ответы по команде — иначе verify «проверял» бы эхо собственной записи.
+    """
+    d = BackendDriver()
+    calls: List[tuple] = []
+
+    def fake_send(process, command, args=None, **kw):
+        calls.append((process, command, args))
+        if command == "introspect.telemetry":
+            return {"success": True, "result": readback}
+        return {
+            "success": True,
+            "result": {
+                "success": True,
+                "process": "ProcessManager",
+                "publish": {
+                    "requested": True,
+                    "target_count": 1,
+                    "reached": 1,
+                    "targets": [process],
+                    "complete": True,
+                    "semantics": "delivered",
+                },
+            },
+        }
+
+    monkeypatch.setattr(d, "send_command", fake_send)
+    return d, calls
+
+
+def _readback(
+    metrics: Dict[str, Any],
+    *,
+    unknown: List[str] | None = None,
+    raw_metrics: Dict[str, Any] | None = None,
+    **extra: Any,
+) -> Dict[str, Any]:
+    """Ответ ``introspect.telemetry`` с заданным ``resolved`` (форма Task 4.1).
+
+    ``raw_metrics`` — сырая секция ``publish.metrics``. По умолчанию зеркалит ключи
+    ``resolved``: правило метрики РЕАЛЬНО присутствует в живом gate. Расхождение
+    (``raw_metrics={}``) моделирует «значение совпало с дефолтом, но правила нет» —
+    случай вакуумного True из ревью Ф4.
+    """
+    return {
+        "success": True,
+        "process": "camera_0",
+        "gate_active": True,
+        "publish": {"metrics": raw_metrics if raw_metrics is not None else {k: {} for k in metrics}},
+        "resolved": metrics,
+        "unknown_metrics": unknown or [],
+        "gated_metrics": ["fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm"],
+        "throttle_rules": None,
+        **extra,
+    }
+
+
+class TestTelemetrySetVerify:
+    """Ф4 Task 4.2: доставка ≠ применение — ``verify=True`` даёт вердикт по READBACK'у.
+
+    Пары: применилось → ``verified_effect=True``; опечатка/не применилось → ``False``
+    с названной причиной. Серверный ``reached`` во всех этих случаях = 1 (доставка
+    состоялась) — именно поэтому одного его мало.
+    """
+
+    def test_applied_rule_verifies_true(self, monkeypatch) -> None:
+        d, calls = _verify_recorder(monkeypatch, readback=_readback({"fps": {"enabled": False, "interval_sec": 1.0}}))
+        res = d.telemetry_set("camera_0", "fps", enabled=False, verify=True)
+        assert res["verified_effect"] is True
+        assert res["verification"]["observed"]["enabled"] is False
+        # readback реально сходил на процесс-адресат отдельной командой
+        assert ("camera_0", "introspect.telemetry", None) in calls
+
+    def test_typo_metric_verifies_false_with_reason(self, monkeypatch) -> None:
+        """Опечатка: правило записано, но метрики нет в GATED_METRICS → ничего не гейтит."""
+        d, _calls = _verify_recorder(
+            monkeypatch,
+            readback=_readback({"fps": {"enabled": True, "interval_sec": 1.0}}, unknown=["latency"]),
+        )
+        res = d.telemetry_set("camera_0", "latency", enabled=False, verify=True, verify_within=0.0)
+        assert res["success"] is True  # консервативно: не блокируем
+        assert res["verified_effect"] is False
+        assert "GATED_METRICS" in res["verification"]["reason"]
+
+    def test_value_mismatch_verifies_false(self, monkeypatch) -> None:
+        """Правило есть, но значение чужое (перезаписал кто-то другой) → честный False."""
+        d, _calls = _verify_recorder(monkeypatch, readback=_readback({"fps": {"enabled": True, "interval_sec": 1.0}}))
+        res = d.telemetry_set("camera_0", "fps", enabled=False, verify=True, verify_within=0.0)
+        assert res["verified_effect"] is False
+        assert res["verification"]["observed"]["enabled"] is True
+
+    def test_interval_only_delta_ignores_enabled(self, monkeypatch) -> None:
+        """Дельта несла только interval_sec → enabled в readback не сверяется (иначе ложный False)."""
+        d, _calls = _verify_recorder(
+            monkeypatch, readback=_readback({"latency_ms": {"enabled": True, "interval_sec": 5.0}})
+        )
+        res = d.telemetry_set("camera_0", "latency_ms", interval_sec=5.0, verify=True)
+        assert res["verified_effect"] is True
+
+    def test_gate_off_verifies_false_with_reason(self, monkeypatch) -> None:
+        """Gate выключен → правило негде наблюдать; «не проверено» не выдаётся за «применено»."""
+        d, _calls = _verify_recorder(
+            monkeypatch,
+            readback={
+                "success": True,
+                "process": "camera_0",
+                "gate_active": False,
+                "publish": None,
+                "resolved": None,
+                "unknown_metrics": [],
+                "gated_metrics": [],
+                "throttle_rules": None,
+            },
+        )
+        res = d.telemetry_set("camera_0", "fps", enabled=False, verify=True, verify_within=0.0)
+        assert res["verified_effect"] is False
+        assert "gate выключен" in res["verification"]["reason"]
+
+    def test_default_match_without_rule_is_not_verified(self, monkeypatch) -> None:
+        """Значение совпало с ДЕФОЛТОМ, но правила метрики в gate нет → не «да».
+
+        Ревью Ф4 (находка 4): ``resolved`` разворачивает наследование, поэтому запрос
+        ``enabled=True`` совпал бы с дефолтом даже при полностью потерянной дельте —
+        вакуумное подтверждение. Теперь требуется наличие ключа в сырой секции.
+        """
+        d, _calls = _verify_recorder(
+            monkeypatch,
+            readback=_readback({"fps": {"enabled": True, "interval_sec": 1.0}}, raw_metrics={}),
+        )
+        res = d.telemetry_set("camera_0", "fps", enabled=True, verify=True, verify_within=0.0)
+        assert res["verified_effect"] is False
+        assert "дефолт" in res["verification"]["reason"].lower()
+
+    def test_rule_present_in_raw_section_verifies(self, monkeypatch) -> None:
+        """Плечо пары: то же значение, но правило РЕАЛЬНО есть в секции → verified_effect=True."""
+        d, _calls = _verify_recorder(
+            monkeypatch,
+            readback=_readback(
+                {"fps": {"enabled": True, "interval_sec": 1.0}},
+                raw_metrics={"fps": {"enabled": True}},
+            ),
+        )
+        res = d.telemetry_set("camera_0", "fps", enabled=True, verify=True, verify_within=0.0)
+        assert res["verified_effect"] is True
+
+    def test_fanout_cannot_verify_and_says_so(self, monkeypatch) -> None:
+        """process='all' — одного адресата для readback'а нет; причина названа, эффект не выдуман."""
+        d, _calls = _verify_recorder(monkeypatch, readback=_readback({}))
+        res = d.telemetry_set("all", "fps", enabled=False, verify=True)
+        assert res["verified_effect"] is False
+        assert "fan-out" in res["verification"]["reason"]
+
+    def test_without_verify_no_fields_and_no_readback(self, monkeypatch) -> None:
+        """Плечо OFF пары: без verify ответ бит-в-бит прежний, лишнего IPC нет."""
+        d, calls = _verify_recorder(monkeypatch, readback=_readback({"fps": {"enabled": False, "interval_sec": 1.0}}))
+        res = d.telemetry_set("camera_0", "fps", enabled=False)
+        assert "verified_effect" not in res and "verification" not in res
+        assert [c[1] for c in calls] == ["telemetry.broadcast"]
+
+    def test_throttle_plane_verifies_against_central_rules(self, monkeypatch) -> None:
+        """Throttle-плоскость сверяется с правилами оркестратора (readback ProcessManager)."""
+        d, calls = _verify_recorder(
+            monkeypatch,
+            readback=_readback({}, throttle_rules={"processes.**.state.fps": 2.0}),
+        )
+        res = d.telemetry_set("all", "processes.**.state.fps", interval_sec=2.0, plane="throttle", verify=True)
+        assert res["verified_effect"] is True
+        assert ("ProcessManager", "introspect.telemetry", None) in calls
+
+
 class TestTelemetrySetUnreachedHint:
     """BCTL-ADR-007: ``publish.reached=0``/``target_count=0`` → клиентская подсказка, не отказ.
 
