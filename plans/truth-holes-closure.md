@@ -84,12 +84,18 @@ Live на `webcam_sketch` (флаги ON, `QT_MCP_PROBE=1`):
 
 ## Фаза 2 — Правда supervision: замена инстанса видима
 
-### Task 2.1 — pid/started_at/manual_restarts в supervision.status
+### Task 2.1 — pid/started_at/instance_restarts в supervision.status
 **Files:** `process_manager_module/process/process_manager_process.py` (`_cmd_supervision_status` :485-512, `restart_process` :1875-1949), `monitor/process_monitor.py` (snapshot :1220-1231), `backend_ctl/protocol.py`/`driver.py` (проброс полей), тесты обоих модулей + `backend_ctl/tests/test_fencing_live.py` (дополнить плечом «reuse-restart: incarnation 0→0, но pid сменился и manual_restarts вырос»).
-**Суть:** не трогая fence-семантику (reuse-restart осознанно не фенсится), сделать замену инстанса ВИДИМОЙ: в per-process supervision-снимок добавить `pid` (истина ОС), `started_at` и счётчик `manual_restarts` (безусловный инкремент в `restart_process`, в отличие от условного `_bump_incarnation`). `restart_count` оставить как есть (краш-рестарты) с пояснением в описании команды.
+**Суть:** не трогая fence-семантику (reuse-restart осознанно не фенсится), сделать замену инстанса ВИДИМОЙ: в per-process supervision-снимок добавить `pid` (истина ОС), `started_at` и счётчик `instance_restarts` (безусловный инкремент в `restart_process`, в отличие от условного `_bump_incarnation`). `restart_count` оставить как есть (краш-рестарты) с пояснением в описании команды.
+
+**Правка спеки по ревью Fable (2026-07-23):** имя `manual_restarts` из исходной спеки — **ложь**: авто-рестарт монитора приходит в PM той же командой `process.restart` и попадает в тот же счётчик. Поле названо `instance_restarts` (любая замена инстанса оркестратором), происхождение замены не заявляется.
+
 **Acceptance:**
-- [ ] Пара: reuse-restart → incarnation прежняя, но `pid` новый + `manual_restarts` +1 (live); no-reuse-restart (конфиг теста) → incarnation бампается как раньше
-- [ ] `supervision_status` через MCP несёт новые поля; AGENTS.md: пометка «маркер до/после рестарта = pid+manual_restarts, incarnation — только для no-reuse полосы»
+- [x] Пара (unit): reuse-restart → incarnation прежняя, `instance_restarts` +1, `started_at` обновлён; no-reuse-restart (форс `ids_before != ids_after`) → incarnation бампается как раньше — `test_supervision_instance_truth.py`, 12 passed. **Смена самого `pid` — live-плечо** (mock даёт детерминированный pid по имени), см. ниже
+- [x] `supervision_status` несёт новые поля (`pid`/`alive`/`started_at`/`instance_restarts`) — passthrough драйвера сырым dict, описания MCP/driver/AGENTS.md обновлены, `docs/contracts/CAPABILITIES.*` перегенерированы
+- [x] Ревью Fable (итерация 1, 7/10 → фиксы): (1) честное имя поля + тест авто-пути; (2) `_cleanup_process_resources` снимает хвосты — иначе снятый процесс висит призраком в снимке, а новый одноимённый наследует чужой счётчик (`_incarnations` НЕ чистится осознанно — fence-плоскость); (3) bulk-старт метит только реально стартовавших; (4) оговорка про тривиальность reuse-плеча в моке
+- [x] **Live (`webcam_sketch`, 2026-07-23)**: два рестарта `lines` → `pid` **24808 → 26476 → 17748**, `instance_restarts` **0 → 1 → 2**, `started_at` обновился, `incarnation` **0 всё время** (reuse-очередей, fence цел), `restart_count` **0** (краш-счётчик не подменён), `epoch` 0→1→2 как раньше. Дыра «замена инстанса неотличима» закрыта
+- [x] **Live-находка, починена**: PM отдавал про СЕБЯ `pid=null/alive=null` — он не состоит в собственном реестре. Теперь подставляет `os.getpid()` для своего имени (у чужих имён без записи в реестре остаётся `null` — тест-контраст). Перепроверено свежим boot: `pid=29592, alive=true`
 
 ---
 

@@ -7,6 +7,8 @@ channels:
 - kind: QueueChannel
   name: ProcessManager_local
 - kind: QueueChannel
+  name: ProcessManager_state
+- kind: QueueChannel
   name: ProcessManager_system
 - kind: SocketChannel
   name: backend_ctl
@@ -274,7 +276,10 @@ processes:
       tags:
       - diagnostics
       - stats
-    - description: 'Supervision-снимок: epoch + per-process incarnation/restart/last_exit/status'
+    - description: 'Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/status/pid/started_at/instance_restarts.
+        Маркер замены инстанса = pid+instance_restarts (считает и ручные, и авто-рестарты supervision
+        — они идут той же process.restart). incarnation растёт только при смене identity очередей; restart_count
+        — краш-рестарты монитора'
       name: supervision.status
       tags:
       - system

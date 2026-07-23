@@ -110,7 +110,7 @@ PY
 | `watch_like_gui()` / `unwatch()` | ВЕСЬ приёмный профиль GUI одной командой: state.subscribe (processes/system/devices/calibration) + observability.tail на все процессы + **авто-переподписка** после авто-рестарта |
 | `introspect_memory(process)` | инвентарь памяти (SHM/пул займов/очереди) + **`os` RSS/VMS процесса ОС** (Task 3.1) — только статистика; секции best-effort (`null`, не ошибка) |
 | `introspect_router_stats(p)` / `introspect_queues(p)` / `introspect_plugins(p)` | MCP-имена сырых ручек: счётчики router'а / глубины очередей / каталог плагинов + `failed_imports` (типизированные обёртки — `router_stats`/`queues` выше) |
-| `supervision_status(process=None)` | **D.1b**: epoch топологии + per-process incarnation / restart_count / last_exit / status — маркер «до/после рестарта» (fencing) |
+| `supervision_status(process=None)` | **D.1b**: epoch топологии + per-process incarnation / restart_count / last_exit / status / **pid / started_at / instance_restarts** (Ф2). Маркер «до/после рестарта» = **pid + instance_restarts** (считает и ручные, и авто-рестарты supervision — обе идут командой `process.restart`); `incarnation` — только для no-reuse полосы (fencing-token), `restart_count` — краш-рестарты в окне истории монитора |
 | `state_get(path)` / `state_get_subtree(path, full=)` | чтение узла/поддерева state-дерева (крупный ответ усекается по `RESPONSE_BYTE_CAP` с hint; `full=true` — целиком) |
 | `log_tail(process, level=)` / `log_untail(process)` | подписка на ЛОГИ процесса по уровню → плоскость `logs` (композитная часть `watch_like_gui`) |
 | `config_reload(process, observability=, path=)` | перечитать/применить observability-секцию на лету (`{log_level: DEBUG}` — сменить уровень логгера без рестарта, ADR-CRM-006) |

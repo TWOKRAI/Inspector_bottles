@@ -9,6 +9,7 @@ ProcessManagerProcess — процесс-оркестратор (Refactored).
 """
 
 import copy
+import os
 import threading
 import time
 from typing import Any
@@ -68,6 +69,19 @@ class ProcessManagerProcess(ProcessModule):
         self._routing_epoch: int = 0
         self._incarnations: dict[str, int] = {}
         self._routing_lock = threading.Lock()
+        # Ф2 Task 2.1 (правда supervision): замена инстанса видима БЕЗ участия
+        # incarnation. При reuse-очередей (дефолт) incarnation осознанно не растёт
+        # (DECISIONS PMM:311-333), поэтому маркер «до/после рестарта» — пара
+        # pid + instance_restarts: pid берётся из ОС в момент запроса,
+        # instance_restarts инкрементируется на КАЖДЫЙ успешный restart_process.
+        # Имя честное: сюда попадают И ручные рестарты, И авто-рестарты
+        # supervision — монитор перезапускает упавшего той же командой
+        # ``process.restart`` (process_monitor: _dispatch_due_restarts), поэтому
+        # «manual» было бы ложью. Отличие от restart_count монитора: тот считает
+        # краш-рестарты в окне (история монитора), этот — фактические замены
+        # инстанса, выполненные оркестратором.
+        self._instance_restarts: dict[str, int] = {}
+        self._instance_started_at: dict[str, float] = {}
         self._create_components()
 
     def _create_components(self) -> None:
@@ -309,7 +323,10 @@ class ProcessManagerProcess(ProcessModule):
             "system.stats": (self._cmd_system_stats, "Статистика системы"),
             "supervision.status": (
                 self._cmd_supervision_status,
-                "Supervision-снимок: epoch + per-process incarnation/restart/last_exit/status",
+                "Supervision-снимок: epoch + per-process incarnation/restart_count/last_exit/"
+                "status/pid/started_at/instance_restarts. Маркер замены инстанса = pid+instance_restarts "
+                "(считает и ручные, и авто-рестарты supervision — они идут той же process.restart). "
+                "incarnation растёт только при смене identity очередей; restart_count — краш-рестарты монитора",
             ),
             "topology.apply": (self._cmd_topology_apply, "Применить топологию процессов"),
             "topology.get": (self._cmd_topology_get, "Получить текущую топологию"),
@@ -414,6 +431,7 @@ class ProcessManagerProcess(ProcessModule):
         if auto_start:
             try:
                 process.start()
+                self._mark_instance_started(process_name)
                 self._priority.apply_priority(process)
             except Exception as exc:
                 self._log_error(f"Автостарт процесса '{process_name}' не удался: {exc}")
@@ -487,12 +505,22 @@ class ProcessManagerProcess(ProcessModule):
 
     def _cmd_supervision_status(self, data=None, **kwargs) -> dict:
         """Supervision-снимок (D.1b): epoch топологии + per-process incarnation,
-        restart_count, last_exit, status. Опц. фильтр ``data["process"]``.
+        restart_count, last_exit, status, pid, started_at, manual_restarts.
+        Опц. фильтр ``data["process"]``.
 
         Наружу отдаём routing-fence-истину PM (``_incarnations``/``_routing_epoch``)
-        + monitor-срез (restart/exit/status) одним ответом — основа fencing-token
-        и маркера «до/после рестарта». incarnation процесса растёт на каждое
-        пересоздание его очередей → смена incarnation = пересечён рестарт.
+        + monitor-срез (restart/exit/status) + ОС-истину инстанса одним ответом.
+
+        Ф2 Task 2.1 — маркер «до/после рестарта»:
+          - ``pid`` (истина ОС, читается из реестра в момент запроса) и
+            ``instance_restarts`` (счётчик выполненных ``restart_process`` —
+            и ручных, и авто-рестартов supervision) видят замену инстанса
+            ВСЕГДА, включая дефолтный reuse-очередей;
+          - ``incarnation`` растёт только когда сменилась identity очередей
+            (reuse=off) — это fence-семантика, а не «был ли рестарт»;
+          - ``restart_count`` — краш-рестарты в окне истории монитора; ручной
+            рестарт в него не попадает (пересечение с instance_restarts —
+            только по авто-рестартам).
         """
         self._ensure_routing_state()
         with self._routing_lock:
@@ -500,17 +528,34 @@ class ProcessManagerProcess(ProcessModule):
             incarnations = dict(self._incarnations)
         mon = getattr(self, "_process_monitor", None)
         snap = mon.get_supervision_snapshot() if mon is not None else {}
+        instance_restarts = getattr(self, "_instance_restarts", None) or {}
+        started_at = getattr(self, "_instance_started_at", None) or {}
+        registry = getattr(self, "_process_registry", None)
         target = data.get("process") if isinstance(data, dict) else None
         processes: dict = {}
-        for name in sorted(set(snap) | set(incarnations)):
+        for name in sorted(set(snap) | set(incarnations) | set(instance_restarts) | set(started_at)):
             if target and name != target:
                 continue
             s = snap.get(name, {})
+            proc = registry.get_process_by_name(name) if registry is not None else None
+            if proc is None and name == getattr(self, "name", None):
+                # PM не состоит в собственном реестре (он оркестратор, не ребёнок) —
+                # без этого он вечно отдавал бы про СЕБЯ pid=null/alive=null, хотя
+                # знает свой pid точно. Найдено на live-прогоне Ф2 Task 2.1.
+                pid_val: int | None = os.getpid()
+                alive_val: bool | None = True
+            else:
+                pid_val = getattr(proc, "pid", None)
+                alive_val = bool(proc.is_alive()) if proc is not None else None
             processes[name] = {
                 "incarnation": incarnations.get(name, 0),
                 "restart_count": s.get("restart_count", 0),
                 "last_exit": s.get("last_exit"),
                 "status": s.get("status"),
+                "pid": pid_val,
+                "alive": alive_val,
+                "started_at": started_at.get(name),
+                "instance_restarts": instance_restarts.get(name, 0),
             }
         return {"success": True, "epoch": epoch, "processes": processes}
 
@@ -877,6 +922,13 @@ class ProcessManagerProcess(ProcessModule):
            PSR чистился побочным эффектом release_process_memory.
         3. Хвосты монитора (heartbeat-таймер, счётчик рестартов, статусы) —
            иначе новый процесс с тем же именем наследует чужую историю.
+           Сюда же (Ф2 Task 2.1) — supervision-хвосты PM: ``_instance_restarts``
+           и ``_instance_started_at``. Без этого снятый switch'ем процесс вечно
+           висел бы в ``supervision.status`` (снимок итерируется и по ним), а
+           новый одноимённый рождался бы с чужим счётчиком замен — ровно тот
+           ложный маркер, против которого задача и делалась.
+           ``_incarnations`` НЕ чистится осознанно: это fence-плоскость, её
+           монотонность защищает соседей от стейл-ссылок на снятое имя.
 
         Используется сидом ``_topology_cleanup`` и ``_rollback_to_snapshot``.
         Не бросает исключений.
@@ -894,6 +946,11 @@ class ProcessManagerProcess(ProcessModule):
                 self.shared_resources.unregister_process(name)
             except Exception as exc:
                 self._log_warning(f"cleanup_process_resources: SRM unregister '{name}' не удался: {exc}")
+
+        for tail in ("_instance_restarts", "_instance_started_at"):
+            store = getattr(self, tail, None)
+            if isinstance(store, dict):
+                store.pop(name, None)
 
         monitor = getattr(self, "_process_monitor", None)
         forget_fn = getattr(monitor, "forget_process", None)
@@ -946,6 +1003,21 @@ class ProcessManagerProcess(ProcessModule):
             {"path": f"processes.{name}", "source": "ProcessManager"},
             f"delete_state:{name}",
         )
+
+    def _mark_instance_started(self, name: str) -> None:
+        """Запомнить момент запуска ИНСТАНСА процесса (Ф2 Task 2.1).
+
+        Вызывается на всех путях старта (boot, start_process, restart, автостарт).
+        Вместе с pid из ОС даёт ответ на вопрос «это тот же инстанс или новый?»
+        даже когда incarnation не менялась (reuse-очередей).
+        Защитный getattr — unit-тесты строят PM с no-op ``__init__``
+        (та же философия, что ``_ensure_routing_state``).
+        """
+        started = getattr(self, "_instance_started_at", None)
+        if started is None:
+            started = {}
+            self._instance_started_at = started
+        started[name] = time.time()
 
     def _publish_process_identity(self, name: str) -> None:
         """Опубликовать ОС-идентичность процесса в StateStore: pid + актуальный config.
@@ -1770,6 +1842,7 @@ class ProcessManagerProcess(ProcessModule):
                 process = self._process_registry.get_process_by_name(name)
                 if process:
                     process.start()
+                    self._mark_instance_started(name)
                     self._priority.apply_priority(process)
             else:
                 self._log_error(f"boot: создание '{name}' не удалось — конфиг и ресурсы откатываются (не призрак)")
@@ -1849,13 +1922,21 @@ class ProcessManagerProcess(ProcessModule):
                 )
                 return False
             process.start()
+            self._mark_instance_started(process_name)
             self._priority.apply_priority(process)
             return True
+        # Ф2 Task 2.1: отметку старта получают ТОЛЬКО реально стартовавшие.
+        # start_all пропускает живых — если бы мы метили всех подряд, у живого
+        # процесса started_at «омолаживался» бы без замены инстанса (pid тот же),
+        # т.е. маркер врал бы ровно в ту сторону, против которой задача.
+        was_dead = {p.name for p in self._process_registry.os_processes if not p.is_alive()}
         self._process_registry.start_all()
         for process in self._process_registry.os_processes:
             self._priority.apply_priority(process)
         # RS-2: boot-путь — опубликовать pid+config всех стартованных процессов.
         for process in self._process_registry.os_processes:
+            if process.name in was_dead:
+                self._mark_instance_started(process.name)
             self._publish_process_identity(process.name)
         return True
 
@@ -1923,6 +2004,17 @@ class ProcessManagerProcess(ProcessModule):
             self._log_error(f"Failed to recreate process '{process_name}'")
             return False
         process.start()
+        self._mark_instance_started(process_name)
+        # Ф2 Task 2.1: инкремент БЕЗУСЛОВНЫЙ — в отличие от _bump_incarnation выше,
+        # который срабатывает только при смене identity очередей (reuse=off).
+        # Именно этот счётчик + новый pid делают reuse-рестарт видимым в supervision.
+        # Считает ЛЮБУЮ замену инстанса через restart_process, включая авто-рестарт
+        # монитора (он приходит той же командой process.restart) — см. __init__.
+        restarts = getattr(self, "_instance_restarts", None)
+        if restarts is None:
+            restarts = {}
+            self._instance_restarts = restarts
+        restarts[process_name] = restarts.get(process_name, 0) + 1
         self._priority.register_priority(process_name, priority)
         self._priority.apply_priority(process)
         # Ф3.2: дождаться self-reported ready пересозданного инстанса (тот же

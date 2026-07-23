@@ -416,11 +416,17 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Supervision-снимок (D.1b): epoch топологии + per-process incarnation,
-        restart_count, last_exit, status. ``process`` фильтрует один процесс.
+        restart_count, last_exit, status, pid, started_at, instance_restarts.
+        ``process`` фильтрует один процесс.
 
-        Сырой dict (Dict at Boundary). incarnation растёт на каждое пересоздание
-        очередей процесса → смена incarnation = пересечён рестарт (маркер «до/после»
-        для fencing-token и курсорной плоскости B.1).
+        Сырой dict (Dict at Boundary). Маркер «до/после рестарта» — пара
+        ``pid`` + ``instance_restarts`` (видит замену инстанса всегда, включая
+        дефолтный reuse-очередей). ``instance_restarts`` считает ЛЮБУЮ замену
+        через ``process.restart`` — и ручную, и авто-рестарт supervision (монитор
+        перезапускает упавшего той же командой). ``incarnation`` растёт только при
+        смене identity очередей (reuse=off) — это fencing-token и курсорная
+        плоскость B.1, а не ответ на вопрос «был ли рестарт». ``restart_count`` —
+        краш-рестарты в окне истории монитора.
         """
         args = {"process": process} if process else {}
         return self.send_command(pm_name, "supervision.status", args, timeout=timeout)

@@ -457,8 +457,11 @@ TOOLS: List[ToolSpec] = [
     ToolSpec(
         "supervision_status",
         "Supervision-снимок (D.1b): epoch топологии + per-process incarnation, restart_count, "
-        "last_exit, status. Смена incarnation процесса = пересечён его рестарт (маркер «до/после» "
-        "для fencing и курсоров B.1). process — сузить до одного. Read-only.",
+        "last_exit, status, pid, started_at, instance_restarts. Маркер «до/после рестарта» — "
+        "пара pid+instance_restarts (видит замену инстанса и при reuse-очередей, дефолт; "
+        "считает и ручные, и авто-рестарты supervision — та же команда process.restart). "
+        "incarnation растёт только при смене identity очередей (fencing/курсоры B.1), "
+        "restart_count — краш-рестарты монитора. process — сузить до одного. Read-only.",
         _obj(
             {
                 "process": {"type": "string", "description": "Сузить до одного процесса. Опц."},
