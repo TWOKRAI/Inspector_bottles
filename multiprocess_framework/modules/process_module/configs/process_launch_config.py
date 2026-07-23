@@ -116,7 +116,14 @@ class ProcessLaunchConfig(SchemaBase):
         # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
         workers = payload.pop("workers", None) or {}
 
+        # Очередь "state" ОБЯЗАТЕЛЬНА (Ф6.2: выбор транспорта удалён — state.changed
+        # едет только ею). Кастомный `queues` без неё означал бы, что подписчик молча
+        # не получает ни одной дельты: у отправителя лишь warning «Queue 'state' not
+        # found», у получателя — тишина и вечный стейл. Поэтому не «берём как дали», а
+        # домердживаем обязательную очередь, оставляя пользовательские глубины.
         queues = self.queues if self.queues is not None else DEFAULT_QUEUES
+        if "state" not in queues:
+            queues = {**queues, "state": DEFAULT_QUEUES["state"]}
         priority = self.priority.value if hasattr(self.priority, "value") else self.priority
 
         log_dir = self._resolve_log_dir()

@@ -75,3 +75,23 @@ def test_default_queues_include_state() -> None:
 
     assert "state" in DEFAULT_QUEUES
     assert DEFAULT_QUEUES["state"]["maxsize"] == 8
+
+
+def test_custom_queues_still_get_state(monkeypatch) -> None:
+    """Кастомный ``queues`` НЕ может отменить обязательную очередь "state".
+
+    Предмерж-ревью Ф6: после удаления FW_STATE_QUEUE выбора транспорта нет, поэтому
+    процесс без очереди "state" молча не получал бы НИ ОДНОЙ дельты (у отправителя —
+    warning «Queue 'state' not found», у получателя — тишина и вечный стейл).
+    Пользовательские глубины при этом сохраняются.
+    """
+    from multiprocess_framework.modules.process_module.configs.process_launch_config import (
+        DEFAULT_QUEUES,
+        ProcessLaunchConfig,
+    )
+
+    cfg = ProcessLaunchConfig(name="p", class_path="m.C", queues={"system": {"maxsize": 7}})
+    _name, proc_dict = cfg.build()
+    queues = proc_dict["queues"]
+    assert queues["system"]["maxsize"] == 7  # своё уважено
+    assert queues["state"] == DEFAULT_QUEUES["state"]  # обязательное добавлено

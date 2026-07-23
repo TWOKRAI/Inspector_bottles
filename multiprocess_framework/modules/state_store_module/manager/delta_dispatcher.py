@@ -333,13 +333,26 @@ class DeltaDispatcher:
         Args:
             timeout: максимум ожидания join потока (сек).
         """
+        stuck = False
         if self._flusher is not None:
             self._stop_event.set()
             self._wake.set()  # разбудить flusher, чтобы не ждал конца интервала
             self._flusher.join(timeout=timeout)
+            # Поток НЕ завершился за timeout (завис в отправке) — финальный flush из
+            # ЭТОГО потока дал бы двух конкурентных отправителей и переупорядочил бы
+            # конверты, а приёмник глушит «устаревший» пакет целиком. Инвариант
+            # «единственный отправитель» дороже дренажа остатка буфера: теряем хвост
+            # дельт при аварийном shutdown, но не портим порядок у живого подписчика.
+            stuck = self._flusher.is_alive()
+            if stuck and self._log is not None:
+                self._log._log_error(
+                    f"flusher коалесцирования не завершился за {timeout}s — финальный "
+                    "дренаж буфера пропущен (инвариант единственного отправителя)"
+                )
             self._flusher = None
-        # Финальный дренаж буфера — гарантия доставки перед остановкой (поток мёртв).
-        self._flush_once()
+        if not stuck:
+            # Финальный дренаж буфера — гарантия доставки перед остановкой (поток мёртв).
+            self._flush_once()
 
     def _send_state_changed(self, subscriber: str, deltas: list[Delta]) -> None:
         """Отправить state.changed сообщение подписчику.

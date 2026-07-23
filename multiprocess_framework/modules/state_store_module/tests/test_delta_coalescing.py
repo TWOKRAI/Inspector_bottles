@@ -442,3 +442,43 @@ def test_on_replay_appended_after_pending_one_envelope() -> None:
         "cameras.0.config.fps",
         "cameras.0.status",
     ]
+
+
+def test_stuck_flusher_skips_final_flush() -> None:
+    """Зависший flusher → финальный дренаж ПРОПУСКАЕТСЯ (единственный отправитель).
+
+    Предмерж-ревью Ф6: при join-таймауте старый код всё равно звал ``_flush_once`` из
+    вызывающего потока, пока поток-flusher ещё жив, — два конкурентных отправителя
+    переупорядочили бы конверты, а приёмник глушит «устаревший» пакет целиком.
+    Инвариант порядка дороже хвоста буфера при аварийном shutdown.
+    """
+    disp, router, subs = _make(coalesce=True)
+    subs.subscribe("processes.**", "gui")
+
+    class _ZombieThread:
+        """Двойник потока, который не завершился за timeout."""
+
+        def join(self, timeout=None):
+            return None
+
+        def is_alive(self):
+            return True
+
+    disp._flusher = _ZombieThread()
+    disp.dispatch_single(_mk_delta("processes.cam.n", 1, revision=1))
+    disp.stop_flusher(timeout=0.01)
+
+    assert router.sent == []  # ничего не отправлено вторым отправителем
+    assert disp._flusher is None
+
+
+def test_finished_flusher_does_final_flush() -> None:
+    """Плечо пары: поток честно завершился → буфер дренируется, как и обещано."""
+    disp, router, subs = _make(coalesce=True, flush_interval_sec=5.0)
+    subs.subscribe("processes.**", "gui")
+    disp.start_flusher()
+    disp.dispatch_single(_mk_delta("processes.cam.n", 1, revision=1))
+    disp.stop_flusher(timeout=2.0)
+
+    assert len(router.sent) == 1
+    assert disp._flusher is None
