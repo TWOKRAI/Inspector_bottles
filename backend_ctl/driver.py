@@ -371,6 +371,17 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         """Каталог плагинов процесса + failed_imports (Ф2.3: опечатка в плагине видна)."""
         return self.send_command(process, "introspect.plugins", **kw)
 
+    def introspect_telemetry(self, process: str, **kw: Any) -> Dict[str, Any]:
+        """Readback телеметрийного gate процесса (Ф4 Task 4.1): что публикуется и как часто.
+
+        Сырой dict команды ``introspect.telemetry`` (симметрия с ``introspect_queues``/
+        ``introspect_router_stats``): ``gate_active``, эффективная ``publish``-секция,
+        развёрнутое ``resolved`` (per-метрика enabled/interval_sec), ``unknown_metrics``
+        (опечатки) и ``throttle_rules`` центральной плоскости. Только чтение — состояние
+        gate перестаёт быть видимым лишь по эффекту в дереве.
+        """
+        return self.send_command(process, "introspect.telemetry", **kw)
+
     def introspect_memory(self, process: str, *, timeout: Optional[float] = None) -> MemoryStats:
         """Инвентарь памяти процесса (SHM / пул займов / очереди) как :class:`MemoryStats`.
 
@@ -649,6 +660,8 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         enabled: Any = _UNSET,
         interval_sec: Any = _UNSET,
         plane: str = "publisher",
+        verify: bool = False,
+        verify_within: float = 3.0,
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Точечно поменять ОДНУ метрику/правило (узкая обёртка над :meth:`telemetry_reconfigure`).
@@ -693,12 +706,29 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         причина: опечатка в имени процесса/метрики, либо процесс не жив. Консервативно:
         только маркировка, ``success`` и остальная форма ответа не трогаются (см.
         :meth:`_flag_unreached_metric`).
+
+        **``verify=True`` — доставка ≠ применение (Ф4 Task 4.2, plans/truth-holes-closure.md).**
+        Серверный охват (``publish.reached``, ``semantics="delivered"``) говорит лишь, что
+        сообщение положено в очередь адресата: путь fire-and-forget, gate перестраивается
+        уже в ребёнке. С ``verify=True`` обёртка делает READBACK через ``introspect.telemetry``
+        (Task 4.1) и добавляет в ответ ``verified_effect`` (``True`` — новое правило видно в
+        живом gate; ``False`` — не видно) + ``verification`` с наблюдённым значением. Как и
+        ``_flag_unreached_metric``, это КОНСЕРВАТИВНО: только маркировка, ``success`` и форма
+        ответа не трогаются (E.2). Поллинг до ``verify_within`` секунд — применение
+        асинхронно, мгновенный readback гонялся бы с доставкой. Плоскость ``publisher`` и
+        адресный ``process`` (не ``"all"``): у fan-out нет одного адресата для readback'а —
+        причина возвращается в ``verification.reason``, эффект не выдумывается.
         """
         if plane == "throttle":
             if interval_sec is _UNSET:
                 return {"success": False, "error": "throttle-плоскость требует interval_sec (min-интервал правила)"}
             res = self.telemetry_reconfigure(process, throttle={metric: interval_sec}, mode="merge", timeout=timeout)
-            return self._flag_unreached_metric(res, process, metric)
+            res = self._flag_unreached_metric(res, process, metric)
+            if verify:
+                res = self._verify_telemetry_effect(
+                    res, process, metric, {"interval_sec": interval_sec}, plane, verify_within, timeout
+                )
+            return res
         if plane != "publisher":
             return {"success": False, "error": f"неизвестная plane '{plane}' (publisher|throttle)"}
 
@@ -710,7 +740,114 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         if not rule:
             return {"success": False, "error": "нужен enabled и/или interval_sec"}
         res = self.telemetry_reconfigure(process, publish={"metrics": {metric: rule}}, mode="merge", timeout=timeout)
-        return self._flag_unreached_metric(res, process, metric)
+        res = self._flag_unreached_metric(res, process, metric)
+        if verify:
+            res = self._verify_telemetry_effect(res, process, metric, rule, plane, verify_within, timeout)
+        return res
+
+    def _verify_telemetry_effect(
+        self,
+        res: Dict[str, Any],
+        process: str,
+        metric: str,
+        rule: Dict[str, Any],
+        plane: str,
+        verify_within: float,
+        timeout: Optional[float],
+    ) -> Dict[str, Any]:
+        """Readback после записи телеметрии → ``verified_effect`` (Ф4 Task 4.2).
+
+        Мутирует и возвращает тот же ``res`` (паттерн :meth:`_flag_unreached_metric`):
+        добавляет ``verified_effect: bool`` и ``verification`` с деталями. ``success``
+        и остальная форма ответа НЕ трогаются — verify только маркирует, а не вводит
+        новый отказ (консервативность E.2).
+
+        Отказ от вердикта тоже честный: если проверить нечем (fan-out ``process="all"``,
+        throttle-плоскость, недоступный readback), ``verified_effect`` = ``False`` c
+        ``verification.reason`` — «не проверено» не выдаётся за «не применилось наоборот»,
+        но и за «применилось» тоже.
+        """
+        import time
+
+        if not isinstance(res, dict):
+            return res
+
+        def _mark(ok: bool, **extra: Any) -> Dict[str, Any]:
+            res["verified_effect"] = bool(ok)
+            res["verification"] = {"process": process, "metric": metric, "plane": plane, **extra}
+            return res
+
+        if plane == "throttle":
+            # Central-троттл оркестратор-глобален: адресат readback'а всегда PM, поэтому
+            # проверка возможна и при process="all" (в отличие от publisher-fan-out ниже).
+            deadline = time.monotonic() + max(0.0, verify_within)
+            observed: Any = None
+            while True:
+                back = _leaf_result(self.introspect_telemetry("ProcessManager", timeout=timeout))
+                rules = back.get("throttle_rules") if isinstance(back, dict) else None
+                observed = rules.get(metric) if isinstance(rules, dict) else None
+                if observed == rule.get("interval_sec"):
+                    return _mark(True, observed={"interval_sec": observed})
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.1)
+            return _mark(
+                False,
+                observed={"interval_sec": observed},
+                expected=rule,
+                reason="правило троттла не видно в readback (проверь имя паттерна)",
+            )
+
+        if process in (None, "", "all", "*"):
+            return _mark(False, reason="fan-out (process='all') — нет одного адресата для readback")
+
+        deadline = time.monotonic() + max(0.0, verify_within)
+        observed_rule: Any = None
+        unknown: List[str] = []
+        while True:
+            back = _leaf_result(self.introspect_telemetry(process, timeout=timeout))
+            if not isinstance(back, dict) or back.get("success") is False:
+                return _mark(False, reason=f"readback introspect.telemetry недоступен: {back}")
+            unknown = back.get("unknown_metrics") or []
+            resolved = back.get("resolved")
+            if not back.get("gate_active"):
+                # Gate выключен — правило метрики физически негде наблюдать.
+                if time.monotonic() >= deadline:
+                    return _mark(False, reason="gate выключен — правило метрики не применяется (publish=None)")
+            elif isinstance(resolved, dict):
+                observed_rule = resolved.get(metric)
+                if isinstance(observed_rule, dict) and self._rule_matches(rule, observed_rule):
+                    return _mark(True, observed=observed_rule)
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.1)
+
+        extra: Dict[str, Any] = {"expected": rule, "observed": observed_rule}
+        if metric in unknown:
+            extra["reason"] = (
+                f"метрика {metric!r} не входит в GATED_METRICS — вероятна опечатка "
+                f"(правило записано, но ничего не гейтит); известные имена — "
+                f"introspect_telemetry(process).gated_metrics"
+            )
+        elif observed_rule is None:
+            extra["reason"] = "метрики нет в readback — проверь имя метрики/процесса"
+        else:
+            extra["reason"] = "правило в gate отличается от запрошенного (кто-то перезаписал или дельта не дошла)"
+        return _mark(False, **extra)
+
+    @staticmethod
+    def _rule_matches(expected: Dict[str, Any], observed: Dict[str, Any]) -> bool:
+        """Совпало ли запрошенное правило с наблюдённым (сверяются ТОЛЬКО заданные поля).
+
+        ``telemetry_set`` шлёт дельту (может нести только ``enabled`` ИЛИ только
+        ``interval_sec``) — сверять незаданное поле было бы ложным несовпадением.
+        """
+        if "enabled" in expected and bool(observed.get("enabled")) is not bool(expected["enabled"]):
+            return False
+        if "interval_sec" in expected and expected["interval_sec"] is not None:
+            if float(observed.get("interval_sec", -1)) != float(expected["interval_sec"]):
+                return False
+        return True
 
     @staticmethod
     def _flag_unreached_metric(res: Dict[str, Any], process: str, metric: str) -> Dict[str, Any]:

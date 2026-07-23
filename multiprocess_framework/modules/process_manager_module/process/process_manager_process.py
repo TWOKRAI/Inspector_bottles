@@ -1640,6 +1640,14 @@ class ProcessManagerProcess(ProcessModule):
                 "targets": targets,
                 # Полный охват = доставили всем адресатам (иначе сигнал наверх).
                 "complete": int(reached) >= len(targets),
+                # Ф4 Task 4.2 (plans/truth-holes-closure.md): ЧЕСТНОЕ имя того, что
+                # измеряет reached. Путь fire-and-forget (сбор ответов детей дедлочил бы
+                # message_processor), поэтому reached = «сообщение положено в очередь
+                # адресата», а НЕ «gate перестроен». Читатель, принимавший reached за
+                # применение, ошибался в пользу системы — теперь семантика объявлена
+                # в самом ответе. Проверка применения — readback introspect.telemetry
+                # (Task 4.1) / driver telemetry_set(verify=True).
+                "semantics": "delivered",
             }
             self._log_info(f"telemetry.broadcast: publish → target={target!r} reached={reached}/{len(targets)}")
             # Task 3.2: персист эффективной fan-out publish-дельты — доиграть пересозданным

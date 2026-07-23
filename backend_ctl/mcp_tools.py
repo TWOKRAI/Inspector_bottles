@@ -157,6 +157,10 @@ def _introspect_plugins(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.introspect_plugins(args["process"], **_kw_timeout(args))
 
 
+def _introspect_telemetry(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    return drv.introspect_telemetry(args["process"], **_kw_timeout(args))
+
+
 def _introspect_memory(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return _jsonable(drv.introspect_memory(args["process"], **_kw_timeout(args)))
 
@@ -342,6 +346,10 @@ def _telemetry_set(drv: BackendDriver, args: Dict[str, Any]) -> Any:
         kw["interval_sec"] = args["interval_sec"]
     if args.get("plane"):
         kw["plane"] = args["plane"]
+    if args.get("verify"):
+        kw["verify"] = True
+    if args.get("verify_within") is not None:
+        kw["verify_within"] = float(args["verify_within"])
     return drv.telemetry_set(args["process"], args["metric"], **kw, **_kw_timeout(args))
 
 
@@ -445,6 +453,16 @@ TOOLS: List[ToolSpec] = [
         "(модули, упавшие на discover — «куда делся мой плагин»).",
         _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
         _introspect_plugins,
+    ),
+    ToolSpec(
+        "introspect_telemetry",
+        "Readback телеметрийного gate процесса (read-only): gate_active, эффективная "
+        "publish-секция, resolved (per-метрика enabled + interval_sec с уже применённым "
+        "наследованием), unknown_metrics (опечатки в именах) и throttle_rules центральной "
+        "плоскости. Отвечает «публикуется ли fps прямо сейчас» без гадания по эффекту в дереве. "
+        "gate_active=false → секции telemetry.publish нет, все метрики идут каждый тик.",
+        _obj({"process": _PROCESS, "timeout": _TIMEOUT}, ["process"]),
+        _introspect_telemetry,
     ),
     ToolSpec(
         "introspect_memory",
@@ -886,7 +904,10 @@ TOOLS: List[ToolSpec] = [
         "Точечно поменять ОДНУ метрику/правило телеметрии (merge поверх живого состояния — соседние "
         "override'ы и правила сохраняются). plane='publisher' (дефолт, главный рычаг частоты публикации) "
         "или plane='throttle' (central rate-limit; metric трактуется как glob-путь, требуется interval_sec). "
-        "Безопаснее telemetry_reconfigure(mode='replace') для правки одной метрики. Меняет поведение бэкенда.",
+        "Безопаснее telemetry_reconfigure(mode='replace') для правки одной метрики. Меняет поведение бэкенда. "
+        "verify=true — после записи READBACK через introspect.telemetry и поле verified_effect: "
+        "серверный reached означает ДОСТАВКУ (semantics='delivered'), не применение — verify отвечает "
+        "«правило реально в живом gate». Опечатка в имени метрики → verified_effect=false + причина.",
         _obj(
             {
                 "process": {"type": "string", "description": "Имя процесса или 'all' (fan-out через PM)."},
@@ -903,6 +924,14 @@ TOOLS: List[ToolSpec] = [
                     "type": "string",
                     "enum": ["publisher", "throttle"],
                     "description": "publisher (дефолт) — частота публикации | throttle — central rate-limit.",
+                },
+                "verify": {
+                    "type": "boolean",
+                    "description": "Readback после записи → verified_effect (правило реально в живом gate).",
+                },
+                "verify_within": {
+                    "type": "number",
+                    "description": "Сколько секунд поллить readback до вердикта (дефолт 3.0). Только с verify.",
                 },
                 "timeout": _TIMEOUT,
             },
@@ -1068,6 +1097,7 @@ TOOL_SAFETY: Dict[str, str] = {
     "introspect_queues": SAFETY_READ,
     "introspect_plugins": SAFETY_READ,
     "introspect_memory": SAFETY_READ,
+    "introspect_telemetry": SAFETY_READ,
     "supervision_status": SAFETY_READ,
     "register_snapshot": SAFETY_READ,
     "register_rollback_log": SAFETY_READ,

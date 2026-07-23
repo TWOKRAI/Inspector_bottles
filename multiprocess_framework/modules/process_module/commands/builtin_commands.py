@@ -395,6 +395,11 @@ class BuiltinCommands:
                 self._cmd_introspect_plugins,
                 "Каталог плагинов процесса: зарегистрированные + failed_imports (модули, упавшие на discover)",
             ),
+            (
+                "introspect.telemetry",
+                self._cmd_introspect_telemetry,
+                "Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval)",
+            ),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
@@ -763,6 +768,96 @@ class BuiltinCommands:
             "shm_registry": shm_registry,
             "os": os_memory,
         }
+
+    def _cmd_introspect_telemetry(self, data=None, **kwargs) -> dict:
+        """Readback телеметрийного gate процесса (Ф4 Task 4.1 плана truth-holes-closure).
+
+        Закрывает дыру «gate виден только по эффекту»: до этой команды единственным
+        способом узнать, публикуется ли метрика, было наблюдать её появление/пропажу
+        в дереве — то есть догадываться по следствию. Теперь состояние читается прямо.
+
+        **Только чтение** — ни одна плоскость не трогается (в отличие от
+        ``telemetry.reconfigure``). Тонкая обёртка над уже существующими
+        ``ProcessHeartbeat.current_telemetry_publish()`` / ``current_unknown_metrics()``.
+
+        Секции ответа:
+
+        - ``gate_active`` — есть ли живой publisher-gate. ``False`` → секции
+          ``telemetry.publish`` нет/она выключена, и ВСЕ метрики публикуются каждый
+          тик (backward-compat, PC 1.2) — тогда ``publish``/``resolved`` пусты, а
+          причина названа в ``note`` (не «нет данных», а «нечего резолвить»);
+        - ``publish`` — эффективная секция живого gate (``TelemetryPublishConfig.to_dict``):
+          ровно то, из чего gate принимает решения;
+        - ``resolved`` — развёрнутое ``{metric: {enabled, interval_sec}}`` по ВСЕМ
+          :data:`GATED_METRICS` с уже применённым наследованием ``default_interval_sec``.
+          Отвечает на вопрос оператора «а fps сейчас публикуется?» без пересчёта правил
+          в голове;
+        - ``unknown_metrics`` — ключи ``metrics``, которых нет в ``GATED_METRICS``
+          (опечатка вида ``latency`` вместо ``latency_ms``);
+        - ``gated_metrics`` — каталог известных метрик (справочник против опечаток);
+        - ``throttle_rules`` — правила ЦЕНТРАЛЬНОГО store-троттла, если процесс их
+          держит (только оркестратор; у остальных ``None``). Вторая плоскость
+          (IPC-страховка, ADR-PM-017) тоже перестаёт быть невидимой.
+
+        Best-effort по образцу ``introspect.memory``: недоступная подсистема → ``None``
+        в своей секции, а не ошибка всей команды.
+        """
+        from ..configs.telemetry_publish_config import GATED_METRICS
+
+        svc = self._services
+        heartbeat = getattr(svc, "_heartbeat", None)
+
+        result: dict = {
+            "success": True,
+            "process": svc.name,
+            "gate_active": False,
+            "publish": None,
+            "resolved": None,
+            "unknown_metrics": [],
+            "gated_metrics": list(GATED_METRICS),
+            "throttle_rules": None,
+        }
+
+        if heartbeat is None:
+            result["note"] = "у процесса нет ProcessHeartbeat — publisher-gate не применяется"
+        else:
+            try:
+                publish = heartbeat.current_telemetry_publish()
+            except Exception as exc:  # noqa: BLE001 — readback не должен ронять команду
+                return {"success": False, "process": svc.name, "reason": f"current_telemetry_publish: {exc}"}
+            if publish is None:
+                result["note"] = "gate выключен — все метрики публикуются каждый тик (нет секции telemetry.publish)"
+            else:
+                result["gate_active"] = True
+                result["publish"] = publish
+                result["resolved"] = self._resolve_gated_metrics(publish)
+                try:
+                    result["unknown_metrics"] = heartbeat.current_unknown_metrics()
+                except Exception:  # noqa: BLE001 — best-effort секция
+                    result["unknown_metrics"] = []
+
+        # Вторая плоскость: central-троттл (живёт только у оркестратора).
+        throttle = self._resolve_store_throttle()
+        rules = getattr(throttle, "rules", None) if throttle is not None else None
+        if isinstance(rules, dict):
+            result["throttle_rules"] = dict(rules)
+        return result
+
+    @staticmethod
+    def _resolve_gated_metrics(publish: dict) -> dict:
+        """Развернуть эффективную секцию в ``{metric: {enabled, interval_sec}}``.
+
+        Наследование ``default_interval_sec`` считает сам конфиг (``resolve``) — здесь
+        только обход :data:`GATED_METRICS`, чтобы читатель видел итог, а не правила.
+        """
+        from ..configs.telemetry_publish_config import GATED_METRICS, TelemetryPublishConfig
+
+        config = TelemetryPublishConfig.from_dict(publish)
+        out: dict = {}
+        for metric in GATED_METRICS:
+            enabled, interval = config.resolve(metric)
+            out[metric] = {"enabled": bool(enabled), "interval_sec": float(interval)}
+        return out
 
     # ========================================================================
     # OBSERVABILITY CONTROL PLANE — config.reload / logger.sink.* (Ф1 Task 1.4)
