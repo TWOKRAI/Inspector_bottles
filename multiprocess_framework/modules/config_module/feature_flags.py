@@ -168,15 +168,19 @@ _FLAG_LIST: Tuple[FeatureFlag, ...] = (
     ),
     FeatureFlag(
         "FW_STATE_COALESCE",
-        default=False,
+        default=True,  # Ф6.1: флипнут 2026-07-23 — см. doc ниже
         doc="Межвызовное коалесцирование state-дельт (гашение gui-шторма): буфер "
         "дельт per-subscriber + daemon-flusher (тик ~120мс, cap ~200) шлёт один "
         "state.changed на тик вместо одного на каждую мутацию. Приёмник (StateProxy) "
-        "не меняется — конверт уже несёт first_revision/revision. OFF → путь бит-в-бит.",
+        "не меняется — конверт уже несёт first_revision/revision. "
+        "ДЕФОЛТ ON с 2026-07-23 (Ф6.1): без него gui захлёбывается — живой замер дал "
+        "1702 безвозвратные потери за ~45с. Откат — env FW_STATE_COALESCE=0. "
+        "Флаг подлежит УДАЛЕНИЮ (Ф6.3) после инвентаря levels-vs-edges: фронты "
+        "(ошибка/смерть процесса) не должны ждать тик буфера, уровни — должны.",
     ),
     FeatureFlag(
         "FW_STATE_QUEUE",
-        default=False,
+        default=True,  # Ф6.1: флипнут 2026-07-23, удаляется в Ф6.2 вместе с OFF-веткой
         doc="Отдельная очередь класса 'state' для state.changed (гашение gui-шторма): "
         "дельты идут в {proc}_state (drop_oldest, QoS-профиль _STATE) вместо never-drop "
         "system-очереди, поэтому burst state.set не топит system-почту команд. Приёмный "

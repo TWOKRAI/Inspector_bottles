@@ -61,7 +61,9 @@ def test_off_is_bit_for_bit_one_envelope_per_mutation() -> None:
     # Каждый конверт несёт ровно одну дельту, first_revision == revision.
     for i, msg in enumerate(router.sent):
         assert msg["command"] == "state.changed"
-        assert msg["queue_type"] == "system"
+        # queue_type здесь — от FW_STATE_QUEUE (дефолт ON, Ф6.1), а не от режима
+        # коалесцирования: плоскости ортогональны.
+        assert msg["queue_type"] == "state"
         assert msg["targets"] == ["gui"]
         assert len(msg["data"]["deltas"]) == 1
         assert msg["data"]["first_revision"] == i + 1
@@ -315,8 +317,13 @@ def test_shutdown_flushes_buffer_and_stops_thread(monkeypatch) -> None:
 
 
 def test_off_manager_lifecycle_no_thread(monkeypatch) -> None:
-    """OFF через менеджер: initialize/shutdown не создают flusher, путь бит-в-бит."""
-    monkeypatch.delenv("FW_STATE_COALESCE", raising=False)
+    """OFF через менеджер: initialize/shutdown не создают flusher, путь бит-в-бит.
+
+    Ф6.1: дефолт флага флипнут в ON, поэтому OFF-ветка достижима только через env —
+    и именно так задокументирован откат. Тест заодно доказывает, что откат РАБОТАЕТ
+    (env > default), а не только объявлен.
+    """
+    monkeypatch.setenv("FW_STATE_COALESCE", "0")
 
     router = _CapturingRouter()
     mgr = StateStoreManager(router=router, auto_register_ipc=False)

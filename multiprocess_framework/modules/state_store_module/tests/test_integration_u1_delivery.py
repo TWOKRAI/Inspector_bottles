@@ -5,7 +5,9 @@
     StateStoreManager.handle_state_set         (как ProcessMonitor._publish_state)
       → DeltaDispatcher (match подписки)
       → RouterManager.send_async → _do_send → _resolve_channels()=[] (route нет)
-      → _deliver_by_targets (U1) → queue_registry.send_to_queue(subscriber, "system", msg)
+      → _deliver_by_targets (U1) → queue_registry.send_to_queue(subscriber, "state", msg)
+        (Ф1.2/Ф6.1: state.changed едет очередью класса "state", а не never-drop
+         "system" — иначе burst state.set топит почту команд подписчика)
       → сообщение РЕАЛЬНО оказывается в очереди подписчика.
 
 Закрывает баг, из-за которого cross-process подписка StateStore не работала в проде
@@ -21,6 +23,17 @@ import pytest
 
 from ...router_module.core.router_manager import RouterManager
 from ..manager.state_store_manager import StateStoreManager
+from ._deterministic_delivery import apply_deterministic_delivery
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_state_delivery(monkeypatch):
+    """Ф6.1: коалесцирование ON по дефолту — flush детерминированный, без тика.
+
+    Тесты этого модуля проверяют ЧТО доставлено, а не КОГДА; расписание доставки —
+    предмет ``test_delta_coalescing.py``. Подробности — в ``_deterministic_delivery``.
+    """
+    apply_deterministic_delivery(monkeypatch)
 
 
 class _RealQueueRegistry:
@@ -38,7 +51,7 @@ class _RealQueueRegistry:
     def _q(self, process: str, qtype: str) -> _queue.Queue:
         return self._queues.setdefault((process, qtype), _queue.Queue())
 
-    def register(self, process: str, qtypes: tuple[str, ...] = ("system", "data")) -> None:
+    def register(self, process: str, qtypes: tuple[str, ...] = ("system", "data", "state")) -> None:
         for qt in qtypes:
             self._q(process, qt)
 
@@ -61,8 +74,8 @@ def _make_server() -> tuple[StateStoreManager, RouterManager, _RealQueueRegistry
     return ssm, router, qr
 
 
-def test_published_state_delivered_to_subscriber_system_queue() -> None:
-    """Публикация (как ProcessMonitor) → state.changed РЕАЛЬНО в gui_system-очереди."""
+def test_published_state_delivered_to_subscriber_state_queue() -> None:
+    """Публикация (как ProcessMonitor) → state.changed РЕАЛЬНО в gui_state-очереди."""
     ssm, router, qr = _make_server()
     try:
         # GUI подписывается (зеркало GuiStateProxy.subscribe, exclude_self=True)
@@ -82,10 +95,13 @@ def test_published_state_delivered_to_subscriber_system_queue() -> None:
             }
         )
 
-        # Сообщение должно реально оказаться в SYSTEM-очереди подписчика 'gui'
-        msg = qr.get("gui", "system", timeout=2.0)
+        # Сообщение должно реально оказаться в STATE-очереди подписчика 'gui'
+        msg = qr.get("gui", "state", timeout=2.0)
         assert msg["command"] == "state.changed"
-        assert msg["queue_type"] == "system"
+        assert msg["queue_type"] == "state"
+        # ...и НЕ в system: почта команд подписчика остаётся свободной (смысл Ф1.2)
+        with pytest.raises(_queue.Empty):
+            qr.get("gui", "system", timeout=0.2)
         assert msg["targets"] == ["gui"]
         deltas = msg["data"]["deltas"]
         assert deltas[0]["path"] == "processes.cam0.workers.w1.effective_hz"
@@ -104,7 +120,7 @@ def test_process_status_change_delivered() -> None:
         ssm.handle_state_set(
             {"data": {"path": "processes.cam0.state.status", "value": "running", "source": "ProcessMonitor"}}
         )
-        msg = qr.get("gui", "system", timeout=2.0)
+        msg = qr.get("gui", "state", timeout=2.0)
         assert msg["data"]["deltas"][0]["path"] == "processes.cam0.state.status"
         assert msg["data"]["deltas"][0]["new_value"] == "running"
     finally:
@@ -121,6 +137,6 @@ def test_path_outside_subscription_not_delivered() -> None:
         # Путь вне "processes.**"
         ssm.handle_state_set({"data": {"path": "system.health.active", "value": 3, "source": "pm"}})
         with pytest.raises(_queue.Empty):
-            qr.get("gui", "system", timeout=0.5)
+            qr.get("gui", "state", timeout=0.5)
     finally:
         router.shutdown()
