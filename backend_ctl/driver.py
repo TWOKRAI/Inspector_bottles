@@ -457,67 +457,112 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         отдаёт ``{"error": "timeout"}`` при РЕАЛЬНО доставленной команде — сигнал не
         связан с реальностью. Здесь вердикт выносит **факт**, а не ответ:
 
-        1. ``pid_before`` — из ``supervision.status`` (истина ОС, поле Task 2.1);
+        1. ``pid_before``/``instance_restarts`` — из ``supervision.status`` (Task 2.1);
         2. ``process.restart`` в PM; таймаут ОТВЕТА терпим (он ничего не доказывает);
         3. поллинг ``supervision.status`` до ``wait`` секунд, пока не появится ЖИВОЙ
-           процесс с другим ``pid``.
+           процесс, чья ЗАМЕНА подтверждена маркером Task 2.1 — **pid + instance_restarts**.
+
+        **Почему маркер парный (ревью Фазы 4, находка 2).** Один pid недостаточен в
+        обе стороны: ОС (особенно Windows) переиспользует pid'ы — совпадение pid у нового
+        инстанса дало бы ложное «рестарта не было», хотя `instance_restarts` вырос;
+        а смена pid без ``alive`` — это «новый инстанс поднялся и умер», что не «успех».
+        Поэтому: ``restarted = (pid сменился ИЛИ instance_restarts вырос) И новый инстанс жив``.
+        Полуудача (замена произошла, инстанс мёртв) отдаётся как ``restarted=False`` с
+        ``reason`` и ``replaced=True`` — она не должна читаться ни как успех, ни как
+        «ничего не произошло».
 
         Returns:
-            ``{restarted, pid_before, pid_after, instance_restarts_before/after,
-            elapsed, process}``. ``restarted=False`` при неизвестном процессе (тогда
-            ``reason``) либо если pid не сменился за ``wait`` — и то и другое честнее
-            «успеха по факту отправки».
+            ``{restarted, replaced, alive, pid_before, pid_after,
+            instance_restarts_before/after, elapsed, process}`` (+ ``reason`` при неуспехе).
         """
         import time
 
         def _snapshot() -> Dict[str, Any]:
+            """Запись процесса из supervision-снимка + провенанс неудачи чтения.
+
+            Пустой dict — это ДВА разных факта: «PM не ответил» и «такого процесса нет».
+            Схлопывать их нельзя (ревью Фазы 4, находка 8): при лежащем PM подсказка
+            «проверь имя» уводит разбор в сторону.
+            """
             res = _leaf_result(self.supervision_status(process, pm_name=pm_name, timeout=timeout))
-            procs = res.get("processes") if isinstance(res, dict) else None
+            if not isinstance(res, dict) or res.get("success") is False or "processes" not in res:
+                return {"__error__": res}
+            procs = res.get("processes")
             entry = procs.get(process) if isinstance(procs, dict) else None
             return entry if isinstance(entry, dict) else {}
 
         before = _snapshot()
-        pid_before = before.get("pid")
+        if "__error__" in before:
+            return {
+                "restarted": False,
+                "process": process,
+                "reason": f"supervision.status недоступен (PM не ответил): {before['__error__']}",
+            }
         if not before:
             return {
                 "restarted": False,
                 "process": process,
                 "reason": f"процесс {process!r} не найден в supervision-снимке (проверь имя)",
             }
+        pid_before = before.get("pid")
+        restarts_before = before.get("instance_restarts")
 
         started = time.monotonic()
         # Ответ команды НЕ судим: timeout здесь — норма для медленного рестарта.
         restart_reply = self.system_command({"cmd": "process.restart", "process_name": process}, timeout=timeout)
 
-        pid_after = pid_before
+        def _replaced(snap: Dict[str, Any]) -> bool:
+            """Инстанс заменён: сменился pid ЛИБО вырос счётчик замен (маркер Task 2.1)."""
+            pid_now = snap.get("pid")
+            restarts_now = snap.get("instance_restarts")
+            if pid_now and pid_before and pid_now != pid_before:
+                return True
+            return isinstance(restarts_now, int) and isinstance(restarts_before, int) and restarts_now > restarts_before
+
         after: Dict[str, Any] = before
         deadline = started + max(0.0, wait)
         while time.monotonic() < deadline:
             time.sleep(0.5)
-            after = _snapshot()
-            pid_after = after.get("pid")
-            if pid_after and pid_after != pid_before and after.get("alive"):
+            snap = _snapshot()
+            if "__error__" in snap:
+                continue  # PM моргнул на рестарте — это не вердикт, продолжаем ждать
+            after = snap
+            if _replaced(after) and after.get("alive"):
                 break
 
-        restarted = bool(pid_after and pid_after != pid_before)
+        replaced = _replaced(after)
+        alive = after.get("alive")
+        restarted = bool(replaced and alive)
         result: Dict[str, Any] = {
             "restarted": restarted,
+            # Разведено сознательно: «замена произошла» и «новый инстанс жив» — разные
+            # факты, и полуудача не должна прятаться ни в успехе, ни в «ничего не было».
+            "replaced": replaced,
             "process": process,
             "pid_before": pid_before,
-            "pid_after": pid_after,
-            "instance_restarts_before": before.get("instance_restarts"),
+            "pid_after": after.get("pid"),
+            "instance_restarts_before": restarts_before,
             "instance_restarts_after": after.get("instance_restarts"),
-            "alive": after.get("alive"),
+            "alive": alive,
             "elapsed": round(time.monotonic() - started, 2),
             # Ответ команды сохранён как СПРАВКА, а не как вердикт: он мог быть timeout'ом
             # при успешном рестарте (и наоборот — success при неудавшемся старте нового).
             "restart_reply": restart_reply if isinstance(restart_reply, dict) else None,
         }
         if not restarted:
-            result["reason"] = (
-                f"pid не сменился за {wait}s (было {pid_before}, стало {pid_after}) — "
-                "процесс мог не остановиться (graceful-stop) либо рестарт не был выполнен"
-            )
+            if replaced:
+                result["reason"] = (
+                    f"инстанс заменён (pid {pid_before} → {after.get('pid')}, "
+                    f"instance_restarts {restarts_before} → {after.get('instance_restarts')}), "
+                    "но НОВЫЙ инстанс не жив — рестарт выполнен и провалился на старте"
+                )
+            else:
+                result["reason"] = (
+                    f"замена инстанса не подтверждена за {wait}s (pid {pid_before} → "
+                    f"{after.get('pid')}, instance_restarts {restarts_before} → "
+                    f"{after.get('instance_restarts')}) — процесс мог не остановиться "
+                    "(graceful-stop) либо рестарт не был выполнен"
+                )
         return result
 
     def capabilities(
@@ -832,6 +877,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         plane: str,
         verify_within: float,
         timeout: Optional[float],
+        pm_name: str = "ProcessManager",
     ) -> Dict[str, Any]:
         """Readback после записи телеметрии → ``verified_effect`` (Ф4 Task 4.2).
 
@@ -844,6 +890,15 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         throttle-плоскость, недоступный readback), ``verified_effect`` = ``False`` c
         ``verification.reason`` — «не проверено» не выдаётся за «не применилось наоборот»,
         но и за «применилось» тоже.
+
+        **Против вакуумного True (ревью Фазы 4, находка 4).** ``resolved`` разворачивает
+        ДЕФОЛТЫ: метрика без правила читается как ``(enabled=True, default_interval_sec)``.
+        Поэтому одного совпадения с ``resolved`` мало — запрос ``enabled=True`` совпал бы
+        с дефолтом даже при полностью потерянной дельте. Дополнительно требуем НАЛИЧИЯ
+        ключа метрики в сырой эффективной секции (``publish.metrics``): правило должно
+        реально существовать в живом gate, а не совпадать с наследованием. Совпадение
+        ``resolved`` при отсутствующем ключе → ``verified_effect=False`` с явной причиной
+        «readback неразличим», а не тихое «да».
         """
         import time
 
@@ -861,7 +916,7 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             deadline = time.monotonic() + max(0.0, verify_within)
             observed: Any = None
             while True:
-                back = _leaf_result(self.introspect_telemetry("ProcessManager", timeout=timeout))
+                back = _leaf_result(self.introspect_telemetry(pm_name, timeout=timeout))
                 rules = back.get("throttle_rules") if isinstance(back, dict) else None
                 observed = rules.get(metric) if isinstance(rules, dict) else None
                 if observed == rule.get("interval_sec"):
@@ -895,7 +950,23 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
             elif isinstance(resolved, dict):
                 observed_rule = resolved.get(metric)
                 if isinstance(observed_rule, dict) and self._rule_matches(rule, observed_rule):
-                    return _mark(True, observed=observed_rule)
+                    # Правило ДОЛЖНО присутствовать в сырой секции, а не только совпадать
+                    # с развёрнутым дефолтом (см. «Против вакуумного True» в докстринге).
+                    publish = back.get("publish")
+                    metrics = publish.get("metrics") if isinstance(publish, dict) else None
+                    if isinstance(metrics, dict) and metric in metrics:
+                        return _mark(True, observed=observed_rule)
+                    if time.monotonic() >= deadline:
+                        return _mark(
+                            False,
+                            observed=observed_rule,
+                            expected=rule,
+                            reason=(
+                                f"значение совпало с ДЕФОЛТОМ gate, но правила метрики "
+                                f"{metric!r} в эффективной секции нет — readback неразличим "
+                                "(дельта могла не дойти); запроси отличающееся от дефолта значение"
+                            ),
+                        )
             if time.monotonic() >= deadline:
                 break
             time.sleep(0.1)
@@ -919,6 +990,11 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
 
         ``telemetry_set`` шлёт дельту (может нести только ``enabled`` ИЛИ только
         ``interval_sec``) — сверять незаданное поле было бы ложным несовпадением.
+
+        ``interval_sec=None`` (легитимная дельта «наследуй ``default_interval_sec``»)
+        сверять НЕЧЕМ — значение по определению совпадёт с любым. Такой запрос
+        доказывается не значением, а НАЛИЧИЕМ ключа метрики в эффективной секции
+        (проверка в вызывающем: «Против вакуумного True»).
         """
         if "enabled" in expected and bool(observed.get("enabled")) is not bool(expected["enabled"]):
             return False

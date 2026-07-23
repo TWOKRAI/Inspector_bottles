@@ -102,7 +102,9 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         self._never_drop_loss_last_log: float = 0.0
         # Ф4 Task 4.3 (plans/truth-holes-closure.md): «кто душит очередь X».
         # {"{process}_{queue_type}": {sender: {"put": n, "lost": n}}} — счётчик
-        # положенных в очередь сообщений ПО ОТПРАВИТЕЛЮ. Счётчики очереди отвечали
+        # ПОПЫТОК put ПО ОТПРАВИТЕЛЮ (put считается ДО самой отправки, поэтому это
+        # attempted, а не delivered: для never-drop очередей доставлено = put − lost;
+        # прочие исключения put в lost не попадают). Счётчики очереди отвечали
         # «сколько потеряно», но не «чьими сообщениями она забита» — а разбор затора
         # начинается именно с этого вопроса. Кардинальность ограничена
         # :data:`_SENDER_CARDINALITY_CAP` (сверх — общее ведро ``__other__``), чтобы
@@ -496,14 +498,23 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             queue_key: ``"{process}_{queue_type}"`` — сузить до одной очереди.
                 ``None`` → все известные очереди.
 
+        Итерация идёт по ``list(...)``-снимкам СОЗНАТЕЛЬНО (ревью Фазы 4, находка 1):
+        писатели (:meth:`_count_sender`) вставляют новые ключи без лока из других
+        потоков, а comprehension по живому dict исполняется побайткодово и упал бы
+        с ``RuntimeError: dictionary changed size during iteration`` — причём ровно
+        в момент появления НОВОГО отправителя/очереди, то есть под тем самым чурном,
+        который эта диагностика и должна показывать. ``list()`` — атомарный C-вызов.
+        Потеря одного инкремента при гонке допустима, падение интроспекции — нет.
+
         Returns:
             ``{queue_key: {sender: {"put": n, "lost": n}}}`` — копия (снимок не
             должен мутировать под читателем).
         """
         if queue_key is not None:
-            per_queue = self._sender_puts.get(queue_key, {})
-            return {queue_key: {s: dict(v) for s, v in per_queue.items()}}
-        return {k: {s: dict(v) for s, v in per_queue.items()} for k, per_queue in self._sender_puts.items()}
+            per_queue = self._sender_puts.get(queue_key)
+            items = list(per_queue.items()) if per_queue is not None else []
+            return {queue_key: {s: dict(v) for s, v in items}}
+        return {k: {s: dict(v) for s, v in list(per_queue.items())} for k, per_queue in list(self._sender_puts.items())}
 
     def _is_never_drop(self, queue_type: Optional[str]) -> bool:
         """Ронять ли груз данного ``queue_type`` при переполнении (Ф7 G.4.a).

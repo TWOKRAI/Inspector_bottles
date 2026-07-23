@@ -290,13 +290,25 @@ def _verify_recorder(monkeypatch, *, readback: Dict[str, Any]) -> Tuple[BackendD
     return d, calls
 
 
-def _readback(metrics: Dict[str, Any], *, unknown: List[str] | None = None, **extra: Any) -> Dict[str, Any]:
-    """Ответ ``introspect.telemetry`` с заданным ``resolved`` (форма Task 4.1)."""
+def _readback(
+    metrics: Dict[str, Any],
+    *,
+    unknown: List[str] | None = None,
+    raw_metrics: Dict[str, Any] | None = None,
+    **extra: Any,
+) -> Dict[str, Any]:
+    """Ответ ``introspect.telemetry`` с заданным ``resolved`` (форма Task 4.1).
+
+    ``raw_metrics`` — сырая секция ``publish.metrics``. По умолчанию зеркалит ключи
+    ``resolved``: правило метрики РЕАЛЬНО присутствует в живом gate. Расхождение
+    (``raw_metrics={}``) моделирует «значение совпало с дефолтом, но правила нет» —
+    случай вакуумного True из ревью Ф4.
+    """
     return {
         "success": True,
         "process": "camera_0",
         "gate_active": True,
-        "publish": {"metrics": {}},
+        "publish": {"metrics": raw_metrics if raw_metrics is not None else {k: {} for k in metrics}},
         "resolved": metrics,
         "unknown_metrics": unknown or [],
         "gated_metrics": ["fps", "latency_ms", "effective_hz", "cycle_duration_ms", "shm"],
@@ -365,6 +377,33 @@ class TestTelemetrySetVerify:
         res = d.telemetry_set("camera_0", "fps", enabled=False, verify=True, verify_within=0.0)
         assert res["verified_effect"] is False
         assert "gate выключен" in res["verification"]["reason"]
+
+    def test_default_match_without_rule_is_not_verified(self, monkeypatch) -> None:
+        """Значение совпало с ДЕФОЛТОМ, но правила метрики в gate нет → не «да».
+
+        Ревью Ф4 (находка 4): ``resolved`` разворачивает наследование, поэтому запрос
+        ``enabled=True`` совпал бы с дефолтом даже при полностью потерянной дельте —
+        вакуумное подтверждение. Теперь требуется наличие ключа в сырой секции.
+        """
+        d, _calls = _verify_recorder(
+            monkeypatch,
+            readback=_readback({"fps": {"enabled": True, "interval_sec": 1.0}}, raw_metrics={}),
+        )
+        res = d.telemetry_set("camera_0", "fps", enabled=True, verify=True, verify_within=0.0)
+        assert res["verified_effect"] is False
+        assert "дефолт" in res["verification"]["reason"].lower()
+
+    def test_rule_present_in_raw_section_verifies(self, monkeypatch) -> None:
+        """Плечо пары: то же значение, но правило РЕАЛЬНО есть в секции → verified_effect=True."""
+        d, _calls = _verify_recorder(
+            monkeypatch,
+            readback=_readback(
+                {"fps": {"enabled": True, "interval_sec": 1.0}},
+                raw_metrics={"fps": {"enabled": True}},
+            ),
+        )
+        res = d.telemetry_set("camera_0", "fps", enabled=True, verify=True, verify_within=0.0)
+        assert res["verified_effect"] is True
 
     def test_fanout_cannot_verify_and_says_so(self, monkeypatch) -> None:
         """process='all' — одного адресата для readback'а нет; причина названа, эффект не выдуман."""

@@ -136,13 +136,16 @@ Live на `webcam_sketch` (флаги ON, `QT_MCP_PROBE=1`):
 **Acceptance:**
 - [x] Unit: 8 тестов (`TestTelemetrySetVerify`) — применилось/не применилось/опечатка/gate off/fan-out без адресата/дельта только с `interval_sec`; плечо OFF (без verify — ответ бит-в-бит, лишнего IPC нет) + `semantics="delivered"` на стороне PM
 - [x] **Live (`webcam_sketch`, 2026-07-23)**: `fps enabled=false` → `verified_effect=true` (`observed.enabled=false`); обратно `enabled=true` → `verified_effect=true`; опечатка `latency` → **`verified_effect=false`** + «не входит в GATED_METRICS». У ВСЕХ трёх `reached=1` — охват одинаков, различает только readback
+- [x] **Фикс по ревью (Fable, minor 4)**: `resolved` разворачивает дефолты, поэтому запрос `enabled=True` совпал бы с наследованием даже при потерянной дельте — вакуумное «да». Теперь требуется НАЛИЧИЕ ключа метрики в сырой `publish.metrics`; совпадение с дефолтом без правила → `false` с причиной. Пара тестов (правило есть / только совпадение)
 
 ### Task 4.3 — «Кто душит очередь X»: per-sender учёт + потери в introspect
 **Files:** `router_module/core/router_manager.py` (`_deliver_by_targets` :416+), `shared_resources_module/queues/core/manager.py` (`_report_never_drop_loss` :404-440 — счётчики в `get_stats`, а не только в лог), `queue_channel.py` (`get_info`), `backend_ctl/protocol.py` (missing-контракт для новых полей — BCTL-ADR-007), тесты.
 **Суть:** словарь-счётчик put'ов по `message["sender"]` per-очередь (cap кардинальности ~32 отправителя), экспонировать в `introspect.router_stats`/`introspect.queues`; `never_drop_loss_total` — в `get_stats` (сейчас только `_fallback_logger`, мимо introspect). Новый счётчик обязан показать ненуль live (BCTL-ADR-007).
+**Сужение против Files (осознанно):** `queue_channel.py::get_info` и `introspect.queues` НЕ тронуты — учёт живёт на стороне ОТПРАВИТЕЛЯ (`QueueRegistry` → `router_stats`), а `introspect.queues` receiver-side и под затором сам не доходит (то самое ограничение из Task 4.5). Вторая точка агрегации не заводилась намеренно.
 **Acceptance:**
 - [x] Unit: 11 тестов (`test_queue_sender_attribution.py`) — атрибуция put/lost, `__unknown__` для груза без `sender` (пропуск исказил бы сумму), потолок кардинальности с ведром `__other__`, снимок-копия, экспозиция в `get_stats`; + 2 теста `RouterStats` (missing-контракт: `None` ≠ `0`)
-- [x] **Live (`webcam_sketch`, 2026-07-23)**: 9 очередей под учётом; `gui_state` → топ-отправитель **`StateStore`, put=901**; `*_system` → **`ProcessManager`** (31–35); `queue_never_drop_loss_total`=**0**, `system_evict_blocked`=**0**, `data_evicted`=**106** (drop_oldest штатно). Вопрос «кто душит» получает ответ ИМЕНЕМ, а не только глубиной
+- [x] **Live С флагами Ф1 (`webcam_sketch`, 2026-07-23)**: 9 очередей под учётом; `gui_state` → топ-отправитель **`StateStore`, put=901**; `*_system` → **`ProcessManager`** (31–35); потерь **0**, `data_evicted`=**106** (drop_oldest штатно)
+- [x] **Live БЕЗ флагов Ф1 — плечо ненуля (BCTL-ADR-007, по требованию ревью)**: `queue_never_drop_loss_total`=**1702**; в `gui_system` **`StateStore` put=1871/lost=1687** против `ProcessManager` put=32/lost=15. Счётчик не просто ненулевой — он **назвал душителя поимённо** (подозреваемые различаются в ~100 раз); прежний `system_evict_blocked` давал только факт затора. Вопрос «кто душит» получает ответ ИМЕНЕМ, а не глубиной
 
 ### Task 4.4 — `process_restart_verified`: pid-proof одним вызовом (решение владельца: tool сейчас)
 **Files:** `backend_ctl/driver.py`, `backend_ctl/mcp_tools.py`, live-тест.
@@ -150,6 +153,7 @@ Live на `webcam_sketch` (флаги ON, `QT_MCP_PROBE=1`):
 **Acceptance:**
 - [x] Unit: 6 тестов (`test_restart_verified.py`) — главный: **ответ `timeout` при сменившемся pid → `restarted=true`** (ответ команды стал справкой, не вердиктом); обратное плечо: `success` при неизменном pid → `restarted=false` + причина
 - [x] **Live (`webcam_sketch`, 2026-07-23)**: рестарт `lines` — `restarted=true`, **pid 4712 → 22124**, `instance_restarts` **0 → 1**, `elapsed` **6.42 с**, за ОДИН вызов; `linez` (опечатка) → `restarted=false` + «не найден» и **ни одной разрушающей команды**
+- [x] **Фикс по ревью (Fable, major)**: вердикт был по ОДНОЙ смене pid → «поднялся и сразу умер» читалось как успех, а переиспользованный ОС pid дал бы ложный отказ. Теперь `restarted = (pid ИЛИ instance_restarts изменились) И alive`; полуудача видна отдельным `replaced=true` + причина. Плюс «PM недоступен» больше не выдаётся за опечатку в имени. Тесты: +3 (мёртвый инстанс судится по вердикту, а не по полю; переиспользование pid; лежащий PM)
 
 ### Task 4.5 — Доки: «Известные ограничения» + stale-MCP — [x] ЗАКРЫТ 2026-07-23
 **Files:** `backend_ctl/README.md` (новый раздел «Известные ограничения»), `backend_ctl/AGENTS.md` (`## Подводные камни`).
