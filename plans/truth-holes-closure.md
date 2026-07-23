@@ -125,26 +125,36 @@ Live на `webcam_sketch` (флаги ON, `QT_MCP_PROBE=1`):
 ### Task 4.1 — `introspect.telemetry`: readback телеметрийного gate
 **Files:** `process_module/commands/builtin_commands.py` (`_register_introspect_commands` :348, шаблон — `_cmd_introspect_queues` :637), `backend_ctl/driver.py`, `backend_ctl/mcp_tools.py` (новый read-инструмент `introspect_telemetry`), тесты.
 **Суть:** тонкая обёртка над уже существующими `heartbeat.current_telemetry_publish()` (`process_heartbeat.py:362`) + `current_unknown_metrics()` (:350): эффективная publish-секция без записи. Закрывает «gate виден только по эффекту».
-**Acceptance:** [ ] пара: после `telemetry_set(fps, enabled=false)` readback показывает `fps.enabled=false`; после включения — true (live).
+**Acceptance:**
+- [x] Unit: 14 тестов (`test_introspect_telemetry.py`) — gate off даёт честную `note` (не пустоту), `resolved` разворачивает наследование `default_interval_sec`, опечатка видна после факта, throttle-плоскость `null` у процесса без StateStoreManager, readback ничего не пересобирает
+- [x] **Live (`webcam_sketch`, 2026-07-23)**: `lines` на boot — `gate_active=false` + причина; `gated_metrics` полон; у ProcessManager видны **7 правил central-троттла** (все 0.05с) — вторая плоскость перестала быть невидимой. Детали — `docs/audits/2026-07-23_phase4-live-acceptance.md`
+- [x] Пара после записи (см. Task 4.2): `fps.enabled` **false → true** читается в `resolved`
 
 ### Task 4.2 — Честная семантика fan-out: `delivered`, не `reached`
 **Files:** `process_manager_process.py` (`_cmd_telemetry_broadcast` :1561-1568), `backend_ctl/driver.py` (`_flag_unreached_metric`), доки/тесты.
 **Суть:** в ответ добавить `semantics: "delivered"` (или переименовать с алиасом) + в driver-обёртке `telemetry_set` опциональный `verify=true`: после команды — readback через Task 4.1 и поле `verified_effect` (паттерн `set_register_verified`). Не блокируем, только маркируем (консервативность E.2).
-**Acceptance:** [ ] пара: verify=true при живом процессе → `verified_effect=true`; при опечатке метрики → `verified_effect=false` + подсказка.
+**Acceptance:**
+- [x] Unit: 8 тестов (`TestTelemetrySetVerify`) — применилось/не применилось/опечатка/gate off/fan-out без адресата/дельта только с `interval_sec`; плечо OFF (без verify — ответ бит-в-бит, лишнего IPC нет) + `semantics="delivered"` на стороне PM
+- [x] **Live (`webcam_sketch`, 2026-07-23)**: `fps enabled=false` → `verified_effect=true` (`observed.enabled=false`); обратно `enabled=true` → `verified_effect=true`; опечатка `latency` → **`verified_effect=false`** + «не входит в GATED_METRICS». У ВСЕХ трёх `reached=1` — охват одинаков, различает только readback
 
 ### Task 4.3 — «Кто душит очередь X»: per-sender учёт + потери в introspect
 **Files:** `router_module/core/router_manager.py` (`_deliver_by_targets` :416+), `shared_resources_module/queues/core/manager.py` (`_report_never_drop_loss` :404-440 — счётчики в `get_stats`, а не только в лог), `queue_channel.py` (`get_info`), `backend_ctl/protocol.py` (missing-контракт для новых полей — BCTL-ADR-007), тесты.
 **Суть:** словарь-счётчик put'ов по `message["sender"]` per-очередь (cap кардинальности ~32 отправителя), экспонировать в `introspect.router_stats`/`introspect.queues`; `never_drop_loss_total` — в `get_stats` (сейчас только `_fallback_logger`, мимо introspect). Новый счётчик обязан показать ненуль live (BCTL-ADR-007).
-**Acceptance:** [ ] live: на живом рецепте у `gui_system`/`gui_state` виден топ-отправитель (ProcessManager) с ненулевым счётчиком; `never_drop_loss_total` доступен инструменту.
+**Acceptance:**
+- [x] Unit: 11 тестов (`test_queue_sender_attribution.py`) — атрибуция put/lost, `__unknown__` для груза без `sender` (пропуск исказил бы сумму), потолок кардинальности с ведром `__other__`, снимок-копия, экспозиция в `get_stats`; + 2 теста `RouterStats` (missing-контракт: `None` ≠ `0`)
+- [x] **Live (`webcam_sketch`, 2026-07-23)**: 9 очередей под учётом; `gui_state` → топ-отправитель **`StateStore`, put=901**; `*_system` → **`ProcessManager`** (31–35); `queue_never_drop_loss_total`=**0**, `system_evict_blocked`=**0**, `data_evicted`=**106** (drop_oldest штатно). Вопрос «кто душит» получает ответ ИМЕНЕМ, а не только глубиной
 
 ### Task 4.4 — `process_restart_verified`: pid-proof одним вызовом (решение владельца: tool сейчас)
 **Files:** `backend_ctl/driver.py`, `backend_ctl/mcp_tools.py`, live-тест.
 **Суть:** обёртка: pid-до (`introspect_memory`) → `system_command{cmd: process.restart}` (терпим timeout ответа) → поллинг pid/ready (до N сек) → `{restarted: true, pid_before, pid_after, elapsed}`. Плюс `supervision_status`-поля из Task 2.1 в ответе.
-**Acceptance:** [ ] live: рестарт лёгкого процесса → `restarted=true, pid_before≠pid_after` за один вызов; несуществующий процесс → честная ошибка.
+**Acceptance:**
+- [x] Unit: 6 тестов (`test_restart_verified.py`) — главный: **ответ `timeout` при сменившемся pid → `restarted=true`** (ответ команды стал справкой, не вердиктом); обратное плечо: `success` при неизменном pid → `restarted=false` + причина
+- [x] **Live (`webcam_sketch`, 2026-07-23)**: рестарт `lines` — `restarted=true`, **pid 4712 → 22124**, `instance_restarts` **0 → 1**, `elapsed` **6.42 с**, за ОДИН вызов; `linez` (опечатка) → `restarted=false` + «не найден» и **ни одной разрушающей команды**
 
-### Task 4.5 — Доки: «Известные ограничения» + stale-MCP
-**Files:** `backend_ctl/README.md` (новый раздел), `backend_ctl/AGENTS.md` (`## Подводные камни` :191-208).
-**Суть:** зафиксировать: (а) MCP-сервер держит код на момент старта — свежие правки драйвера проверять свежим процессом или рестартом MCP; (б) gui-шторм до Фазы 1 / после — снят (обновить по факту); (в) receiver-side `introspect_queues` ненадёжен под затором — надёжны счётчики отправителя; (г) `reached=delivered`.
+### Task 4.5 — Доки: «Известные ограничения» + stale-MCP — [x] ЗАКРЫТ 2026-07-23
+**Files:** `backend_ctl/README.md` (новый раздел «Известные ограничения»), `backend_ctl/AGENTS.md` (`## Подводные камни`).
+**Записано:** (а) MCP-сервер держит код на момент старта; (б) `reached` = доставка (`semantics="delivered"`), применение — через readback/verify; (в) receiver-side `introspect_queues` под затором молчит (сама команда не доходит) — надёжны счётчики отправителя `queue_senders`/`queue_never_drop_loss_total`; (г) live гонять с флагами Ф1 до флипа дефолтов; (д) медленные команды выглядят отказом → `process_restart_verified`.
+**Подтверждено ходом приёмки:** запущенный MCP-сервер новых ручек не знал, и live-прогон пошёл свежим процессом-драйвером — ограничение (а) сработало на первом же шаге.
 
 ---
 
