@@ -14,7 +14,7 @@ from ..types import ProcessPriorityLevel
 DEFAULT_QUEUES: dict[str, Any] = {
     "system": {"maxsize": 100},
     "data": {"maxsize": 50},
-    # "state" (FW_STATE_QUEUE): очередь для state.changed отдельно от never-drop
+    # "state": очередь для state.changed отдельно от never-drop
     # system-почты команд. Создаётся ВСЕГДА (аддитивно) — канал {proc}_state и его
     # приём возникают из этого конфига автоматически (process_communication); при
     # OFF в неё просто ничего не кладётся, поведение бит-в-бит. Глубина 8 (не 1 из

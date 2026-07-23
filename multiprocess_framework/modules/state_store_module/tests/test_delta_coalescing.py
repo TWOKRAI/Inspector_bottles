@@ -61,8 +61,8 @@ def test_off_is_bit_for_bit_one_envelope_per_mutation() -> None:
     # Каждый конверт несёт ровно одну дельту, first_revision == revision.
     for i, msg in enumerate(router.sent):
         assert msg["command"] == "state.changed"
-        # queue_type здесь — от FW_STATE_QUEUE (дефолт ON, Ф6.1), а не от режима
-        # коалесцирования: плоскости ортогональны.
+        # queue_type всегда "state" (Ф6.2: флаг удалён) — от режима коалесцирования
+        # он не зависит, плоскости ортогональны.
         assert msg["queue_type"] == "state"
         assert msg["targets"] == ["gui"]
         assert len(msg["data"]["deltas"]) == 1

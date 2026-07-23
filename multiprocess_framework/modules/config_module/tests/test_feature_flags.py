@@ -64,22 +64,22 @@ def test_env_zero_overrides_default_true(monkeypatch):
 
 
 def test_state_storm_flags_are_on_by_default(monkeypatch):
-    """Оба флага гашения шторма включены без env.
+    """Флаг гашения шторма включён без env.
 
     Живой замер 2026-07-23: БЕЗ них тот же рецепт за ~45с даёт 1702 безвозвратные
     потери в never-drop очереди gui (`StateStore` put=1871/lost=1687). Дефолт-OFF
     означал бы, что штатный запуск идёт по заведомо худшему пути.
     """
-    for name in ("FW_STATE_COALESCE", "FW_STATE_QUEUE"):
-        monkeypatch.delenv(name, raising=False)
-        assert ff.resolve(name) is True, name
+    # FW_STATE_QUEUE удалён в Ф6.2 (единственный путь, без переключателя) —
+    # проверять остался только FW_STATE_COALESCE (его удаление — Ф6.3).
+    monkeypatch.delenv("FW_STATE_COALESCE", raising=False)
+    assert ff.resolve("FW_STATE_COALESCE") is True
 
 
 def test_state_storm_flags_rollback_via_env(monkeypatch):
     """Плечо пары: откат через env работает, а не только объявлен в докстринге."""
-    for name in ("FW_STATE_COALESCE", "FW_STATE_QUEUE"):
-        monkeypatch.setenv(name, "0")
-        assert ff.resolve(name) is False, name
+    monkeypatch.setenv("FW_STATE_COALESCE", "0")
+    assert ff.resolve("FW_STATE_COALESCE") is False
 
 
 def test_ctor_beats_env(monkeypatch):

@@ -32,7 +32,7 @@ class ProcessDataKeys:
     # Стандартные имена очередей
     QUEUE_SYSTEM = "system"
     QUEUE_DATA = "data"
-    QUEUE_STATE = "state"  # FW_STATE_QUEUE: state.changed отдельно от system (drop_oldest)
+    QUEUE_STATE = "state"  # state.changed отдельно от system (drop_oldest, Ф1.2/Ф6.2)
     QUEUE_COMMANDS = "commands"
     QUEUE_RESULTS = "results"
 

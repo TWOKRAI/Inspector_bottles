@@ -1,4 +1,4 @@
-"""Очередь класса "state" (FW_STATE_QUEUE): drop_oldest, а не never-drop.
+"""Очередь класса "state": drop_oldest, а не never-drop (флаг снят в Ф6.2).
 
 Task 1.2 (truth-holes-closure): state.changed уходит в ``{proc}_state`` вместо
 never-drop system-очереди. Ключевой инвариант — переполнение state-очереди

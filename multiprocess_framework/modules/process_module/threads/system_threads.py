@@ -64,7 +64,7 @@ class SystemThreads:
                 # Получаем команды из system-очереди И конверты state.changed из
                 # state-очереди (channel_types=['system','state']). DATA/EVENT остаются в
                 # data-очереди для воркеров — устраняет гонку потоков.
-                # "state" (FW_STATE_QUEUE): дренируется ТЕМ ЖЕ message_processor'ом — тот же
+                # "state": дренируется ТЕМ ЖЕ message_processor'ом — тот же
                 # event_dispatcher синхронно зовёт handler state.changed. При OFF конверты
                 # идут в system (как раньше), а {proc}_state пуста → опрос её = no-op,
                 # поведение бит-в-бит. Процессы без state-очереди: канала нет → фильтр
