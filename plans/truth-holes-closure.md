@@ -164,9 +164,19 @@ Live на `webcam_sketch` (флаги ON, `QT_MCP_PROBE=1`):
 
 ## Фаза 5 — Закрывающий live-прогон
 
-### Task 5.1 — Полная верификация на webcam_sketch (обновлённая методика)
-Прогон всех 47+новых инструментов по методике аудита 2026-07-22: пары ON/OFF, readback-эффекты, ui_* с живым GUI (Task 1.4), `capabilities` с карточкой gui (должна ожить после Фазы 1). Новый аудит-док + обновление памяти (`project_gui_system_queue_storm` → закрыт/остатки).
-**Гейт выхода плана:** [ ] gui отвечает live; [ ] ui_* доказаны; [ ] ротация живая; [ ] supervision показывает замену инстанса; [ ] 0 инструментов с UNPROVEN-эффектом (или честно помечены с причиной вне инструмента).
+### Task 5.1 — Полная верификация на webcam_sketch — [x] ЗАКРЫТ 2026-07-23
+Прогон **всех 49** инструментов через ТОТ ЖЕ путь, что MCP-сервер (`dispatch_tool(DriverSession, …)`), на живом `webcam_sketch` с GUI (`QT_MCP_PROBE=1`, флаги Ф1). Аудит — [`docs/audits/2026-07-23_phase5-full-sweep.md`](../docs/audits/2026-07-23_phase5-full-sweep.md), сырые вердикты — `docs/audits/evidence_2026-07-23_phase5/`.
+
+**Результат: 49 вызвано / 49 OK / 0 SUSPECT / 0 NA.** Плоскость `register_*` доказана на реальной мишени (`lines.edge_detection.invert`: verified → confirm → restore `written=1, skipped=127, verified=128, mismatches=[]`); `await_condition` доказан ПАРОЙ (выполнимое → `success`; невыполнимое → `timed_out` + `events_seen=342` + `last_seen` — таймаут отдаёт диагноз, не пустоту).
+
+**Урок прогона:** первый заход дал 7 SUSPECT, и НИ ОДИН не был дефектом инструмента — все пять причин в проверяющем скрипте (чтение не того уровня конверта; усечённый ответ принят за пустой; своя фабрика драйвера без `connect()`; значения read-model — dict, а не число; отписка без подписки). Записано в `backend_ctl/README.md` § «Известные ограничения» — это ловушки ЧИТАТЕЛЯ ответов, и они уже повторялись (verify-скрипт 2026-07-17).
+
+**Гейт выхода плана:**
+- [x] gui отвечает live — `get_status(gui)` с pid, карточка `gui` в `capabilities` (8 карточек)
+- [x] `ui_*` доказаны — tap (атрибуция `sources=[gesture, command]`) / ping (`events_sent=9, errors=0`) / untap
+- [x] ротация живая — Фаза 3 (`system.log.1` = 10 485 676 байт; `messages.log` ротировался дважды)
+- [x] supervision показывает замену инстанса — pid **11492 → 31280**, `instance_restarts` 0→1, `alive=true`
+- [x] 0 инструментов с UNPROVEN-эффектом
 
 ---
 

@@ -32,8 +32,16 @@ Live-пара `webcam_sketch` ([аудит](../../audits/2026-07-22_phase1-flip-
 Закрыто инвариантом «единственный отправитель» (`d1ee9402`) + replay через него же (`d1d3e4ef`).
 Урок: unit-тесты и самопроверка гонку НЕ поймали, поймало независимое ревью.
 
-Осталось: Task 1.4 (ui_*-плоскость, нужен `ui.tap.subscribe`), флип дефолтов и
-**удаление флагов** — Фаза 6, см. [[feedback-flags-must-not-become-crutches]].
+**Task 1.4 ЗАКРЫТ** (2026-07-22, ui_* доказаны кликом через qt-mcp) и подтверждён
+повторно закрывающим прогоном Фазы 5 (2026-07-23): `capabilities` отдаёт карточку `gui`,
+`get_status(gui)` с pid, `ui_tap`/`ping`(`events_sent=9, errors=0`)/`untap` — все OK.
+Прогон всех 49 инструментов: 49 OK / 0 SUSPECT / 0 NA
+(`docs/audits/2026-07-23_phase5-full-sweep.md`).
+
+Осталось: флип дефолтов и **удаление флагов** — Фаза 6, см.
+[[feedback-flags-must-not-become-crutches]]. **Пока флаги OFF, шторм возвращается:**
+живой прогон без них 2026-07-23 дал `never_drop_loss_total`=1702 за ~45 с, из них
+`StateStore` put=1871/lost=1687 (счётчик Ф4.3 называет душителя поимённо).
 
 Смежное: [[project_backend_ctl_framework_module]], [[project_webcam_sketch_freeze]],
 [[project_telemetry_coherence_remediation]].
