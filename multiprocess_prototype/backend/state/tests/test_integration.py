@@ -69,6 +69,16 @@ def throttle_rules():
 # ---------------------------------------------------------------------------
 
 
+def _throttle_of(pipeline):
+    """Найти ThrottleMiddleware в пайплайне ПО ИМЕНИ, а не по индексу.
+
+    В пайплайне живёт не только throttle: TopologyGateMiddleware подключается
+    независимо (FW_STATE_TOPOLOGY_GATE, дефолт ON). Индексные проверки на этом
+    ломались, хотя throttle работал — тесты падали на соседе, а не на предмете.
+    """
+    return next((m for m in pipeline._middlewares if m.name == "throttle"), None)
+
+
 def _make_pm_app(router, initial_state, throttle_rules):
     """Создать ProcessManagerProcessApp с минимальными mock-зависимостями.
 
@@ -121,18 +131,21 @@ class TestProcessManagerProcessApp:
         pm._setup_state_store()
 
         pipeline = pm._state_store_manager.pipeline
-        # Pipeline содержит хотя бы один middleware
-        assert len(pipeline._middlewares) > 0
-        assert pipeline._middlewares[0].name == "throttle"
+        assert _throttle_of(pipeline) is not None
 
     def test_no_middleware_without_rules(self, router, initial_state):
-        """Без throttle_rules middleware не подключается."""
+        """Без throttle_rules ThrottleMiddleware не подключается.
+
+        Проверяем именно throttle по имени, а не «пайплайн пуст»: рядом штатно
+        живёт TopologyGateMiddleware (FW_STATE_TOPOLOGY_GATE, дефолт ON) — он к
+        throttle-правилам отношения не имеет.
+        """
         pm = _make_pm_app(router, initial_state, throttle_rules=None)
         pm.config["state_throttle_rules"] = None
         pm._setup_state_store()
 
         pipeline = pm._state_store_manager.pipeline
-        assert len(pipeline._middlewares) == 0
+        assert _throttle_of(pipeline) is None
 
     def test_commands_registered(self, router, initial_state, throttle_rules):
         """state.set/get/subscribe зарегистрированы в CommandManager."""
@@ -482,10 +495,8 @@ class TestBuildThrottleRulesReachesThrottleMiddleware:
         pm = _make_pm_app(router, initial_state, rules)
         pm._setup_state_store()
 
-        pipeline = pm._state_store_manager.pipeline
-        assert len(pipeline._middlewares) == 1
-        middleware = pipeline._middlewares[0]
-        assert middleware.name == "throttle"
+        middleware = _throttle_of(pm._state_store_manager.pipeline)
+        assert middleware is not None
         assert middleware.rules == custom_rules
 
     def test_default_sys_config_rules_reach_middleware(self, router, initial_state):
@@ -497,5 +508,6 @@ class TestBuildThrottleRulesReachesThrottleMiddleware:
         pm = _make_pm_app(router, initial_state, rules)
         pm._setup_state_store()
 
-        middleware = pm._state_store_manager.pipeline._middlewares[0]
+        middleware = _throttle_of(pm._state_store_manager.pipeline)
+        assert middleware is not None
         assert middleware.rules == TestManagerSetup._DEFAULT_RULES

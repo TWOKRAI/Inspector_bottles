@@ -308,17 +308,21 @@ class TestTopologyParses:
         topo_dir = Path(__file__).parent.parent.parent / "backend" / "topology"
         pipeline_path = topo_dir / "hello_world.yaml"
         base_path = topo_dir / "base.yaml"
+        presentation_path = Path(__file__).parent.parent / "presentation.yaml"
         assert pipeline_path.exists(), f"Файл не найден: {pipeline_path}"
 
         with pipeline_path.open(encoding="utf-8") as f:
             pipeline = yaml.safe_load(f)
         with base_path.open(encoding="utf-8") as f:
             base = yaml.safe_load(f)
+        with presentation_path.open(encoding="utf-8") as f:
+            presentation = yaml.safe_load(f)
 
-        # Phase 2: процесс gui вынесен в base.yaml. Запуск суммирует фундамент ⊕
-        # pipeline (как app.py / SystemBuilder), поэтому тест валидирует смёрженную
-        # топологию — иначе gui отсутствует и chain_targets:[gui] не резолвится.
-        data = merge_topologies(base, pipeline)
+        # Ф2 frontend-constructor (d6faaa80): gui уехал из base.yaml в
+        # презентационный overlay presentation.yaml, фундамент стал headless-only.
+        # Тест валидирует сборку SystemBuilder.from_manifest: base ⊕ presentation
+        # ⊕ pipeline — иначе gui отсутствует и chain_targets:[gui] не резолвится.
+        data = merge_topologies(merge_topologies(base, presentation), pipeline)
         blueprint = SystemBlueprint.model_validate(data)
 
         assert blueprint.name == "hello_world"
