@@ -100,6 +100,14 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         self._never_drop_loss_total: int = 0
         self._never_drop_loss_since_log: int = 0
         self._never_drop_loss_last_log: float = 0.0
+        # Ф4 Task 4.3 (plans/truth-holes-closure.md): «кто душит очередь X».
+        # {"{process}_{queue_type}": {sender: {"put": n, "lost": n}}} — счётчик
+        # положенных в очередь сообщений ПО ОТПРАВИТЕЛЮ. Счётчики очереди отвечали
+        # «сколько потеряно», но не «чьими сообщениями она забита» — а разбор затора
+        # начинается именно с этого вопроса. Кардинальность ограничена
+        # :data:`_SENDER_CARDINALITY_CAP` (сверх — общее ведро ``__other__``), чтобы
+        # трафик со случайными именами отправителей не тёк в память.
+        self._sender_puts: Dict[str, Dict[str, Dict[str, int]]] = {}
 
     @staticmethod
     def _resolve_env_flag(explicit: Optional[bool], env_name: str) -> bool:
@@ -217,6 +225,7 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         if queue is None:
             self._log_warning(f"Queue '{queue_type}' not found for '{process_name}'")
             return False
+        self._count_sender(process_name, queue_type, message, "put")
         try:
             evicted = self.remove_old_if_full(queue, queue_type)
             if evicted is not None and on_evict is not None:
@@ -236,6 +245,9 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             # видит лишь сам объект очереди и назвать адресата не может.
             if isinstance(e, Full) and self._is_never_drop(queue_type):
                 self._report_never_drop_loss(process_name, queue_type, queue)
+                # Ф4 Task 4.3: потеря записывается ТОМУ ЖЕ отправителю — иначе видно
+                # «очередь теряет», но не видно, чей груз пропадает.
+                self._count_sender(process_name, queue_type, message, "lost")
             self._log_error(f"send_to_queue('{process_name}', '{queue_type}') failed: {e}")
             self._stats["errors"] += 1
             return False
@@ -439,6 +451,60 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             self._NEVER_DROP_LOSS_LOG_INTERVAL_SEC,
         )
 
+    #: Потолок числа РАЗЛИЧНЫХ отправителей, учитываемых по одной очереди (Ф4 Task 4.3).
+    #: Сверх потолка счёт идёт в общее ведро :data:`_SENDER_OTHER_BUCKET`: диагностика
+    #: «кто душит» интересуется топ-виновником, а не длинным хвостом, зато память
+    #: остаётся ограниченной при трафике со случайными именами отправителей.
+    _SENDER_CARDINALITY_CAP = 32
+    _SENDER_OTHER_BUCKET = "__other__"
+    #: Отправитель не назвался (не-dict груз или конверт без ``sender``). Отдельное
+    #: имя, а не пропуск: «не знаем, кто» — это тоже показание, и оно не должно
+    #: молча уменьшать сумму put'ов относительно реального трафика.
+    _SENDER_UNKNOWN = "__unknown__"
+
+    def _count_sender(self, process_name: str, queue_type: str, message: Any, kind: str) -> None:
+        """Учесть put/потерю по имени отправителя (Ф4 Task 4.3, hot-path).
+
+        Дешёвость важнее полноты: один ``dict.get`` по конверту + пара инкрементов.
+        Блокировки нет СОЗНАТЕЛЬНО — та же дисциплина, что у ``self._stats`` (инкременты
+        int под GIL); гонка двух потоков может стоить одного несчитанного put'а, что для
+        диагностики «кто душит очередь» несущественно, а лок на горячем пути кадров —
+        существенен.
+        """
+        try:
+            sender = message.get("sender") if isinstance(message, dict) else None
+            name = str(sender) if sender else self._SENDER_UNKNOWN
+            key = f"{process_name}_{queue_type}"
+            per_queue = self._sender_puts.get(key)
+            if per_queue is None:
+                per_queue = {}
+                self._sender_puts[key] = per_queue
+            if name not in per_queue and len(per_queue) >= self._SENDER_CARDINALITY_CAP:
+                name = self._SENDER_OTHER_BUCKET
+            entry = per_queue.get(name)
+            if entry is None:
+                entry = {"put": 0, "lost": 0}
+                per_queue[name] = entry
+            entry[kind] += 1
+        except Exception:  # noqa: BLE001 — учёт наблюдаемости не смеет ломать доставку
+            pass
+
+    def get_sender_stats(self, queue_key: Optional[str] = None) -> Dict[str, Any]:
+        """Снимок «кто сколько положил/потерял» по очередям (Ф4 Task 4.3).
+
+        Args:
+            queue_key: ``"{process}_{queue_type}"`` — сузить до одной очереди.
+                ``None`` → все известные очереди.
+
+        Returns:
+            ``{queue_key: {sender: {"put": n, "lost": n}}}`` — копия (снимок не
+            должен мутировать под читателем).
+        """
+        if queue_key is not None:
+            per_queue = self._sender_puts.get(queue_key, {})
+            return {queue_key: {s: dict(v) for s, v in per_queue.items()}}
+        return {k: {s: dict(v) for s, v in per_queue.items()} for k, per_queue in self._sender_puts.items()}
+
     def _is_never_drop(self, queue_type: Optional[str]) -> bool:
         """Ронять ли груз данного ``queue_type`` при переполнении (Ф7 G.4.a).
 
@@ -466,6 +532,17 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
         """Ф7 G.4.a: сколько раз заблокировано вытеснение из полной system-очереди."""
         return self._stats["system_evict_blocked"]
 
+    @property
+    def never_drop_loss_total(self) -> int:
+        """Ф4 Task 4.3: сколько never-drop сообщений потеряно БЕЗВОЗВРАТНО.
+
+        Раньше счётчик существовал только внутри ``_report_never_drop_loss`` и уходил
+        в stdlib-логгер — инструменту (``introspect.router_stats``/``introspect.queues``)
+        он был недоступен, то есть самая тяжёлая потеря системы была невидима из
+        интроспекции.
+        """
+        return self._never_drop_loss_total
+
     def get_stats(self) -> Dict[str, Any]:
         process_names = self.get_registered_processes()
         total = 0
@@ -479,5 +556,9 @@ class QueueRegistry(BaseManager, ObservableMixin, IQueueRegistry, ManagerStatsMi
             "total_queues": total,
             "processes_count": len(process_names),
             "processes": process_names,
+            # Ф4 Task 4.3: безвозвратные потери и топ-отправители — в интроспекцию,
+            # а не только в stdlib-лог (см. never_drop_loss_total / _count_sender).
+            "never_drop_loss_total": self._never_drop_loss_total,
+            "senders": self.get_sender_stats(),
         }
         return self._merge_stats("queues", queue_stats)

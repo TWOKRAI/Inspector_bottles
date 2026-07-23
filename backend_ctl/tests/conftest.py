@@ -44,6 +44,10 @@ ROUTER_COUNTERS = (
     "queue_data_evicted",
     "queue_system_evict_blocked",
     "frame_loans_released_on_evict",
+    # Ф4 Task 4.3: безвозвратные потери never-drop груза (раньше только в stdlib-логе).
+    "queue_never_drop_loss_total",
+    # Мапа, не счётчик — но в ``missing`` попадает так же, поэтому в списке порядка есть.
+    "queue_senders",
 )
 
 
@@ -56,6 +60,9 @@ def full_router_stats(**overrides: Any) -> Dict[str, Any]:
     Точечные ключи разбивки по kind сюда не входят (заводятся на лету).
     """
     stats: Dict[str, Any] = {name: 0 for name in ROUTER_COUNTERS}
+    # Ф4 Task 4.3: секция «кто душит очередь» — мапа, а не счётчик (пустая = трафика
+    # не было; отсутствие ключа = сборка без учёта, что честно попадает в missing).
+    stats["queue_senders"] = {}
     stats.update({"sent_ok": 10, "received": 20})
     stats.update(overrides)
     return stats

@@ -42,6 +42,9 @@ def _full_router_stats(**overrides: object) -> dict:
         "queue_data_evicted": 0,
         "queue_system_evict_blocked": 0,
         "frame_loans_released_on_evict": 0,
+        # Ф4 Task 4.3: потери never-drop груза + атрибуция «кто душит очередь X».
+        "queue_never_drop_loss_total": 0,
+        "queue_senders": {},
     }
     stats.update(overrides)
     return stats
@@ -61,6 +64,8 @@ _ALL_COUNTERS = [
     "queue_data_evicted",
     "queue_system_evict_blocked",
     "frame_loans_released_on_evict",
+    "queue_never_drop_loss_total",
+    "queue_senders",
 ]
 
 _ROUTER_RESP = {
@@ -122,7 +127,8 @@ class TestRouterStatsParsing:
 
     def test_zero_stays_zero_and_is_not_missing(self) -> None:
         """Ноль ОТ СЕРВЕРА — валидное показание, а не пропуск (обратная сторона пары)."""
-        zeros = {name: 0 for name in _ALL_COUNTERS}
+        zeros: dict = {name: 0 for name in _ALL_COUNTERS}
+        zeros["queue_senders"] = {}  # секция-мапа: её «ноль» — пустой dict, не 0
         rs = RouterStats.from_response({"success": True, "router_stats": zeros})
         assert (rs.sent_ok, rs.received, rs.middleware_dropped, rs.errors) == (0, 0, 0, 0)
         assert (rs.sent_attempted, rs.sent_via_channel, rs.sent_via_targets) == (0, 0, 0)
@@ -159,6 +165,35 @@ class TestRouterStatsParsing:
         assert rs.frame_loans_released_on_evict == 0
         assert rs.missing == []
         assert rs.sent_attempted == rs.sent_via_channel + rs.sent_via_targets
+
+    def test_queue_loss_and_sender_attribution_readable(self) -> None:
+        """Ф4 Task 4.3: безвозвратная потеря и «кто душит очередь X» доступны обёртке.
+
+        Раньше ``never_drop_loss_total`` жил только в stdlib-логе — инструмент видел
+        следствие (пустой ответ, затор), но не мог назвать ни объём потерь, ни виновника.
+        """
+        resp = {
+            "success": True,
+            "result": {
+                "success": True,
+                "router_stats": _full_router_stats(
+                    queue_never_drop_loss_total=597,
+                    queue_senders={"gui_system": {"ProcessManager": {"put": 1728, "lost": 597}}},
+                ),
+            },
+        }
+        rs = RouterStats.from_response(resp)
+        assert rs.queue_never_drop_loss_total == 597
+        assert rs.queue_senders["gui_system"]["ProcessManager"]["lost"] == 597
+        assert rs.missing == []
+
+    def test_missing_loss_counter_is_none_not_zero(self) -> None:
+        """Старая сборка без счётчика → None + имя в missing (не тихий ноль)."""
+        stats = _full_router_stats()
+        del stats["queue_never_drop_loss_total"]
+        rs = RouterStats.from_response({"success": True, "router_stats": stats})
+        assert rs.queue_never_drop_loss_total is None
+        assert "queue_never_drop_loss_total" in rs.missing
 
     def test_kind_breakdown_goes_to_by_kind_not_missing(self) -> None:
         """Точечные ключи — в by_kind; их отсутствие НЕ считается расхождением формы.

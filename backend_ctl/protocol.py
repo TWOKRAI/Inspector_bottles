@@ -193,6 +193,14 @@ class RouterStats:
     queue_data_evicted: Optional[int] = None
     queue_system_evict_blocked: Optional[int] = None
     frame_loans_released_on_evict: Optional[int] = None
+    #: Ф4 Task 4.3: БЕЗВОЗВРАТНО потерянный never-drop груз (раньше жил только в
+    #: stdlib-логе, мимо интроспекции). ``None`` = процесс старой сборки, ``0`` =
+    #: потерь не было — разные показания.
+    queue_never_drop_loss_total: Optional[int] = None
+    #: Ф4 Task 4.3: «кто душит очередь X» — {"{proc}_{qtype}": {sender: {put, lost}}}
+    #: со СТОРОНЫ ОТПРАВИТЕЛЯ (глубины получателя под затором врут). Пусто — либо
+    #: процесс ничего не слал, либо сборка без счётчика (см. ``missing``).
+    queue_senders: Dict[str, Any] = field(default_factory=dict)
     #: Точечные ключи разбивки по kind: {"sent_via_targets.state": 12, …}.
     by_kind: Dict[str, int] = field(default_factory=dict)
     missing: List[str] = field(default_factory=list)
@@ -218,6 +226,8 @@ class RouterStats:
             queue_data_evicted=_read_int(stats, "queue_data_evicted", missing),
             queue_system_evict_blocked=_read_int(stats, "queue_system_evict_blocked", missing),
             frame_loans_released_on_evict=_read_int(stats, "frame_loans_released_on_evict", missing),
+            queue_never_drop_loss_total=_read_int(stats, "queue_never_drop_loss_total", missing),
+            queue_senders=_read_mapping(stats, "queue_senders", missing) or {},
             by_kind=_read_breakdown(stats),
             missing=missing,
             raw=res if isinstance(res, dict) else {},

@@ -442,6 +442,84 @@ class BackendDriver(_TransportMixin, _EventChannelMixin):
         args = {"process": process} if process else {}
         return self.send_command(pm_name, "supervision.status", args, timeout=timeout)
 
+    def process_restart_verified(
+        self,
+        process: str,
+        *,
+        wait: float = 60.0,
+        pm_name: str = "ProcessManager",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Рестарт процесса с PID-ДОКАЗАТЕЛЬСТВОМ за один вызов (Ф4 Task 4.4).
+
+        Закрывает дыру «медленная команда выглядит отказом»: `process.restart` штатно
+        занимает больше таймаута ответа (graceful-stop), поэтому сырой ``system_command``
+        отдаёт ``{"error": "timeout"}`` при РЕАЛЬНО доставленной команде — сигнал не
+        связан с реальностью. Здесь вердикт выносит **факт**, а не ответ:
+
+        1. ``pid_before`` — из ``supervision.status`` (истина ОС, поле Task 2.1);
+        2. ``process.restart`` в PM; таймаут ОТВЕТА терпим (он ничего не доказывает);
+        3. поллинг ``supervision.status`` до ``wait`` секунд, пока не появится ЖИВОЙ
+           процесс с другим ``pid``.
+
+        Returns:
+            ``{restarted, pid_before, pid_after, instance_restarts_before/after,
+            elapsed, process}``. ``restarted=False`` при неизвестном процессе (тогда
+            ``reason``) либо если pid не сменился за ``wait`` — и то и другое честнее
+            «успеха по факту отправки».
+        """
+        import time
+
+        def _snapshot() -> Dict[str, Any]:
+            res = _leaf_result(self.supervision_status(process, pm_name=pm_name, timeout=timeout))
+            procs = res.get("processes") if isinstance(res, dict) else None
+            entry = procs.get(process) if isinstance(procs, dict) else None
+            return entry if isinstance(entry, dict) else {}
+
+        before = _snapshot()
+        pid_before = before.get("pid")
+        if not before:
+            return {
+                "restarted": False,
+                "process": process,
+                "reason": f"процесс {process!r} не найден в supervision-снимке (проверь имя)",
+            }
+
+        started = time.monotonic()
+        # Ответ команды НЕ судим: timeout здесь — норма для медленного рестарта.
+        restart_reply = self.system_command({"cmd": "process.restart", "process_name": process}, timeout=timeout)
+
+        pid_after = pid_before
+        after: Dict[str, Any] = before
+        deadline = started + max(0.0, wait)
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            after = _snapshot()
+            pid_after = after.get("pid")
+            if pid_after and pid_after != pid_before and after.get("alive"):
+                break
+
+        restarted = bool(pid_after and pid_after != pid_before)
+        result: Dict[str, Any] = {
+            "restarted": restarted,
+            "process": process,
+            "pid_before": pid_before,
+            "pid_after": pid_after,
+            "instance_restarts_before": before.get("instance_restarts"),
+            "instance_restarts_after": after.get("instance_restarts"),
+            "alive": after.get("alive"),
+            "elapsed": round(time.monotonic() - started, 2),
+            # Ответ команды сохранён как СПРАВКА, а не как вердикт: он мог быть timeout'ом
+            # при успешном рестарте (и наоборот — success при неудавшемся старте нового).
+            "restart_reply": restart_reply if isinstance(restart_reply, dict) else None,
+        }
+        if not restarted:
+            result["reason"] = (
+                f"pid не сменился за {wait}s (было {pid_before}, стало {pid_after}) — "
+                "процесс мог не остановиться (graceful-stop) либо рестарт не был выполнен"
+            )
+        return result
+
     def capabilities(
         self,
         *,

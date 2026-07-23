@@ -169,6 +169,13 @@ def _supervision_status(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return _jsonable(drv.supervision_status(args.get("process"), **_kw_timeout(args)))
 
 
+def _process_restart_verified(drv: BackendDriver, args: Dict[str, Any]) -> Any:
+    kw: Dict[str, Any] = {}
+    if args.get("wait") is not None:
+        kw["wait"] = float(args["wait"])
+    return drv.process_restart_verified(args["process"], **kw, **_kw_timeout(args))
+
+
 def _send_command(drv: BackendDriver, args: Dict[str, Any]) -> Any:
     return drv.send_command(args["target"], args["command"], args.get("args"), **_kw_timeout(args))
 
@@ -513,7 +520,8 @@ TOOLS: List[ToolSpec] = [
         "Контракт сервера: ключ команды — 'cmd', процесс — 'process_name', например "
         "{'cmd': 'process.restart', 'process_name': 'seg'}. Медленные команды "
         "(process.restart >30с) отвечают timeout'ом при реально доставленной команде — "
-        "эффект доказывать readback'ом (pid через introspect_memory до/после).",
+        "эффект доказывать readback'ом (для рестарта готовый инструмент — "
+        "process_restart_verified: pid до/после одним вызовом).",
         _obj(
             {
                 "command": {
@@ -526,6 +534,26 @@ TOOLS: List[ToolSpec] = [
             ["command"],
         ),
         _system_command,
+    ),
+    ToolSpec(
+        "process_restart_verified",
+        "Рестарт процесса с PID-ДОКАЗАТЕЛЬСТВОМ за один вызов: pid до → process.restart → "
+        "поллинг supervision до живого процесса с ДРУГИМ pid. Ответ команды не судится "
+        "(медленный рестарт штатно отвечает timeout'ом при доставленной команде) — вердикт "
+        "выносит факт: {restarted, pid_before, pid_after, instance_restarts_*, elapsed}. "
+        "Несуществующий процесс → restarted=false + reason. Разрушающий (перезапускает процесс).",
+        _obj(
+            {
+                "process": {"type": "string", "description": "Имя перезапускаемого процесса"},
+                "wait": {
+                    "type": "number",
+                    "description": "Сколько секунд ждать смены pid (дефолт 60 — graceful-stop бывает долгим).",
+                },
+                "timeout": _TIMEOUT,
+            },
+            ["process"],
+        ),
+        _process_restart_verified,
     ),
     ToolSpec(
         "set_register",
@@ -1142,6 +1170,9 @@ TOOL_SAFETY: Dict[str, str] = {
     # escalated
     "send_command": SAFETY_ESCALATED,
     "system_command": SAFETY_ESCALATED,
+    # Ф4 Task 4.4: обёртка над той же system-командой process.restart — класс тот же
+    # (перезапуск процесса разрушителен), сужение аргументов класса не меняет.
+    "process_restart_verified": SAFETY_ESCALATED,
 }
 
 # Префиксы команд, безопасных для чтения через escalated send_command в read-only

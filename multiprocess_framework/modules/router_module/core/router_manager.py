@@ -1285,6 +1285,16 @@ class RouterManager(ChannelRoutingManager):
             # довёл его до state.shm.* тем же путём, что и SHM-счётчики. «Дроп data виден».
             "queue_data_evicted": int(getattr(self.queue_registry, "data_evicted", 0) or 0),
             "queue_system_evict_blocked": int(getattr(self.queue_registry, "system_evict_blocked", 0) or 0),
+            # Ф4 Task 4.3 (plans/truth-holes-closure.md): БЕЗВОЗВРАТНЫЕ потери never-drop
+            # груза. Счётчик существовал, но уходил только в stdlib-логгер — самая тяжёлая
+            # потеря системы была недоступна интроспекции. Тот же дешёвый property-surface,
+            # что у соседей выше.
+            "queue_never_drop_loss_total": int(getattr(self.queue_registry, "never_drop_loss_total", 0) or 0),
+            # Ф4 Task 4.3: «кто душит очередь X» — put'ы/потери ПО ОТПРАВИТЕЛЮ, счётчики
+            # СТОРОНЫ-ОТПРАВИТЕЛЯ (receiver-side глубины под затором врут, см. AGENTS.md).
+            "queue_senders": (
+                self.queue_registry.get_sender_stats() if hasattr(self.queue_registry, "get_sender_stats") else {}
+            ),
             # Task 0.1: потери на канальной двери (полная очередь → put упёрся в timeout).
             # Сумма по зарегистрированным каналам — та же схема агрегации, что у
             # frame-middleware выше: канал копит свой int, роутер суммирует по запросу.
