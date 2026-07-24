@@ -529,7 +529,16 @@ class ProcessModulePlugin(ABC):
         has_register = getattr(self, "register_class", None) is not None
         explicit_set_config = "set_config" in self.commands
         if has_register and not explicit_set_config:
-            ctx.command_manager.register_command("set_config", self.cmd_set_config)
+            # set_config — ПРОЦЕССНАЯ команда: CommandManager один на процесс, а
+            # плагинов с register_class — несколько. Достаточно зарегистрировать
+            # ОДИН раз (первым плагином); остальные пропускают, иначе dispatcher
+            # шумит 'set_config already exists' на каждый следующий плагин.
+            # Живые правки полей адресуются по регистрам (register_name == plugin_name),
+            # а не через эту команду, поэтому единственного handler'а достаточно.
+            get_info = getattr(ctx.command_manager, "get_command_info", None)
+            already = bool(get_info("set_config")) if callable(get_info) else False
+            if not already:
+                ctx.command_manager.register_command("set_config", self.cmd_set_config)
 
     def cmd_set_config(self, data: dict) -> dict:
         """Generic handler для bridge.on_field_set → applied dict из GUI.
