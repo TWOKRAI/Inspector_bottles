@@ -137,6 +137,14 @@ class StartupChecker:
         for proc in topology.get("processes", []):
             pname = proc.get("process_name", "?")
             for plugin_cfg in proc.get("plugins", []):
+                # plugin_class задан → загрузчик резолвит плагин ПО КЛАССУ, а
+                # plugin_name здесь — instance-id (напр. два TextVectorPlugin как
+                # text_main/text_name). Реестр индексирует по имени ТИПА
+                # ("text_vector"), поэтому сверять instance-id с реестром бессмысленно —
+                # был бы ложный warning. Ср. PluginOrchestrator._resolve_plugin_class:
+                # `class_path or plugin_name`.
+                if plugin_cfg.get("plugin_class"):
+                    continue
                 plugin_name = plugin_cfg.get("plugin_name", "")
                 if plugin_name and plugin_name not in registered:
                     issues.append(f"Процесс '{pname}': плагин '{plugin_name}' не найден в PluginRegistry")

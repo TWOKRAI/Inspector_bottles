@@ -92,6 +92,35 @@ class TestCheckPlugins:
         issues = checker.check_plugins(registry, valid_topology)
         assert any("camera_service" in i for i in issues)
 
+    def test_instance_id_with_plugin_class_not_warned(self, checker):
+        """instance-id (plugin_name ≠ тип) с заданным plugin_class → не ругаемся.
+
+        Два экземпляра TextVectorPlugin как text_main/text_name: реестр знает тип
+        'text_vector', а не instance-id. plugin_class задан → загрузчик резолвит по
+        классу, поэтому проверка instance-id против реестра даёт ложный warning.
+        """
+        topo = {
+            "processes": [
+                {
+                    "process_name": "lines",
+                    "plugins": [
+                        {
+                            "plugin_name": "text_main",
+                            "plugin_class": "Plugins.processing.text_vector.plugin.TextVectorPlugin",
+                        },
+                        {
+                            "plugin_name": "text_name",
+                            "plugin_class": "Plugins.processing.text_vector.plugin.TextVectorPlugin",
+                        },
+                    ],
+                },
+            ],
+        }
+        registry = MagicMock()
+        registry.list_plugins.return_value = ["text_vector"]  # тип, не instance-id
+        issues = checker.check_plugins(registry, topo)
+        assert issues == []
+
 
 class TestCheckAll:
     def test_ok_report(self, checker, valid_topology):
