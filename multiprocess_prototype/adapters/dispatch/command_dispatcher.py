@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from multiprocess_prototype.domain.commands import ProjectCommand
+from multiprocess_prototype.domain.commands import ProjectCommand, SetPluginConfig
 from multiprocess_prototype.domain.entities.project import ApplyContext, Project
 from multiprocess_prototype.domain.events import PluginConfigChanged, ProjectEvent
 from multiprocess_prototype.domain.protocols import EventBusProtocol, HistoryEntry
@@ -44,12 +44,43 @@ from .project_holder import ProjectHolder  # re-export для backward-compat
 logger = logging.getLogger(__name__)
 
 
-def _describe(command: ProjectCommand) -> str:
+def _fmt_value(value: object) -> str:
+    """Компактное строковое представление значения поля для label истории.
+
+    None → «∅»; строки берём в кавычки; длинные значения обрезаем до 40 символов.
+    """
+    if value is None:
+        return "∅"
+    text = f'"{value}"' if isinstance(value, str) else str(value)
+    return text if len(text) <= 40 else text[:37] + "…"
+
+
+def _describe_set_plugin_config(cmd: SetPluginConfig, before: Project | None) -> str:
+    """Информативный label для SetPluginConfig: «плагин · поле: старое → новое».
+
+    Имя плагина и старое значение извлекаются из снимка ``before`` (до правки);
+    при его отсутствии деградируем до process_name без старого значения.
+    """
+    plugin_name = cmd.process_name
+    old_repr = "?"
+    if before is not None:
+        proc = before.topology.find_process(cmd.process_name)
+        if proc is not None and 0 <= cmd.plugin_index < len(proc.plugins):
+            plugin = proc.plugins[cmd.plugin_index]
+            plugin_name = plugin.plugin_name
+            old_repr = _fmt_value(plugin.config.get(cmd.field))
+    return f"{plugin_name} · {cmd.field}: {old_repr} → {_fmt_value(cmd.value)}"
+
+
+def _describe(command: ProjectCommand, before: Project | None = None) -> str:
     """Человекочитаемый label команды для History tab (G.4.1).
 
-    Берёт наиболее информативный атрибут команды; fallback — имя класса.
+    Для SetPluginConfig — «плагин · поле: старое → новое» (нужен снимок ``before``).
+    Для остальных команд берёт наиболее информативный атрибут; fallback — имя класса.
     """
     name = type(command).__name__
+    if isinstance(command, SetPluginConfig):
+        return _describe_set_plugin_config(command, before)
     for attr in ("process_name", "old_name", "slug", "node_id", "source", "reason"):
         val = getattr(command, attr, None)
         if val:
@@ -137,7 +168,7 @@ class CommandDispatcherOrchestrator:
             self._history.record(
                 before=current,
                 after=new_project,
-                label=_describe(command),
+                label=_describe(command, before=current),
                 command_type=type(command).__name__,
                 coalesce_key=coalesce_key,
             )
