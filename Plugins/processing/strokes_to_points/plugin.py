@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import cv2
+import numpy as np
 
 from multiprocess_framework.modules.process_module.plugins import (
     PluginContext,
@@ -67,9 +68,39 @@ class StrokesToPointsPlugin(ProcessModulePlugin):
     def configure(self, ctx: PluginContext) -> None:
         self._ctx = ctx
         self._reg: StrokesToPointsRegisters = self._init_register(ctx)
+        # Кэш результата: пока маска И параметры не менялись — не пересчитываем
+        # геометрию заново (edge_detection при inference_every_n>1 отдаёт ту же маску,
+        # статичная сцена — тоже; пересчёт был чистой тратой ~20-50 мс/кадр).
+        self._cache_mask: np.ndarray | None = None
+        self._cache_params: tuple | None = None
+        self._cache_out: tuple[list[dict], list[float], int, int] | None = None
         ctx.log_info(
             f"StrokesToPointsPlugin: reduce={self._reg.reduce_mode} "
             f"scale=({self._reg.scale_x},{self._reg.scale_y}) flip_y={self._reg.flip_y}"
+        )
+
+    def _params_signature(self) -> tuple:
+        """Снимок всех register-полей, влияющих на выход (для инвалидации кэша)."""
+        r = self._reg
+        return (
+            bool(r.centerline),
+            str(r.reduce_mode),
+            float(r.simplify_epsilon),
+            float(r.step_px),
+            float(r.angle_threshold_deg),
+            float(r.min_stroke_len),
+            float(r.max_stroke_len),
+            bool(r.zone_mode),
+            float(r.zone_x0),
+            float(r.zone_y0),
+            float(r.zone_x1),
+            float(r.zone_y1),
+            float(r.scale_x),
+            float(r.scale_y),
+            float(r.offset_x),
+            float(r.offset_y),
+            bool(r.flip_y),
+            int(r.max_points),
         )
 
     # ------------------------------------------------------------------ #
@@ -83,24 +114,43 @@ class StrokesToPointsPlugin(ProcessModulePlugin):
         if mask is None:
             return item
 
-        points = self._build_points(mask)
-        self._reg.points_last = len(points)
-        # Фиксированные мм-границы кадра — стабильное окно для points_render
-        # (чтобы карта точек не «гуляла» при смене контента).
-        bounds = geometry.image_mm_bounds(
-            int(mask.shape[1]),
-            int(mask.shape[0]),
-            zone_mode=bool(self._reg.zone_mode),
-            zone_x0=float(self._reg.zone_x0),
-            zone_y0=float(self._reg.zone_y0),
-            zone_x1=float(self._reg.zone_x1),
-            zone_y1=float(self._reg.zone_y1),
-            scale_x=float(self._reg.scale_x),
-            scale_y=float(self._reg.scale_y),
-            offset_x=float(self._reg.offset_x),
-            offset_y=float(self._reg.offset_y),
-            flip_y=bool(self._reg.flip_y),
-        )
+        params = self._params_signature()
+        cached = self._cache_out
+        if (
+            cached is not None
+            and self._cache_params == params
+            and self._cache_mask is not None
+            and self._cache_mask.shape == mask.shape
+            and np.array_equal(self._cache_mask, mask)
+        ):
+            points, bounds, strokes_last, points_last = cached
+        else:
+            points = self._build_points(mask)  # выставляет self._reg.strokes_last
+            # Фиксированные мм-границы кадра — стабильное окно для points_render
+            # (чтобы карта точек не «гуляла» при смене контента).
+            bounds = geometry.image_mm_bounds(
+                int(mask.shape[1]),
+                int(mask.shape[0]),
+                zone_mode=bool(self._reg.zone_mode),
+                zone_x0=float(self._reg.zone_x0),
+                zone_y0=float(self._reg.zone_y0),
+                zone_x1=float(self._reg.zone_x1),
+                zone_y1=float(self._reg.zone_y1),
+                scale_x=float(self._reg.scale_x),
+                scale_y=float(self._reg.scale_y),
+                offset_x=float(self._reg.offset_x),
+                offset_y=float(self._reg.offset_y),
+                flip_y=bool(self._reg.flip_y),
+            )
+            bounds = list(bounds)
+            strokes_last = int(self._reg.strokes_last)
+            points_last = len(points)
+            self._cache_mask = mask.copy()
+            self._cache_params = params
+            self._cache_out = (points, bounds, strokes_last, points_last)
+
+        self._reg.strokes_last = strokes_last
+        self._reg.points_last = points_last
         return {**item, "draw_points": points, "draw_bounds": list(bounds)}
 
     def _build_points(self, mask) -> list[dict]:

@@ -45,6 +45,32 @@ def test_sort_nearest_neighbor_orders_by_proximity() -> None:
     assert np.allclose(ordered[1][0], near[0])
 
 
+def test_sort_nearest_neighbor_matches_reference() -> None:
+    """Вектор. версия совпадает со ссылочной жадной реализацией на случайных штрихах."""
+
+    def _reference(strokes: list[np.ndarray]) -> list[np.ndarray]:
+        if len(strokes) <= 1:
+            return strokes
+        ordered = [strokes[0]]
+        remaining = list(strokes[1:])
+        cur = ordered[-1][-1]
+        while remaining:
+            starts = np.array([s[0] for s in remaining])
+            idx = int(np.argmin(np.linalg.norm(starts - cur, axis=1)))
+            ordered.append(remaining.pop(idx))
+            cur = ordered[-1][-1]
+        return ordered
+
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        n = int(rng.integers(1, 60))
+        strokes = [rng.uniform(0, 640, (int(rng.integers(2, 12)), 2)) for _ in range(n)]
+        ref = _reference([s.copy() for s in strokes])
+        got = geometry.sort_nearest_neighbor([s.copy() for s in strokes])
+        assert len(got) == len(ref)
+        assert all(np.array_equal(x, y) for x, y in zip(got, ref))
+
+
 # --- px → мм + перо -------------------------------------------------------- #
 
 

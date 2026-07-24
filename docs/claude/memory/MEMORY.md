@@ -158,3 +158,4 @@
 - [Спека плана может врать](feedback_plan_spec_can_lie.md) — имя поля из плана сверять с кодом (manual_restarts → instance_restarts: авто-рестарт идёт той же командой)
 - [Красный — сперва проверить на main](feedback_check_red_on_main_first.md) — 6 падений прототипа жили и на main; индексные проверки в тестах ломаются на соседе
 - [Вердикт по одному маркеру врёт](feedback_single_marker_verdict_lies.md) — pid переиспользуется, смена pid ≠ живой инстанс; пара маркеров + признак жизни, полуудача отдельным полем
+- [strokes_to_points перф](project_strokes_points_perf.md) — webcam_sketch FPS-просадка = O(n²) sort_nearest_neighbor + пересчёт каждый кадр; trace_skeleton граф-walk NumPy не берёт → Numba не Rust

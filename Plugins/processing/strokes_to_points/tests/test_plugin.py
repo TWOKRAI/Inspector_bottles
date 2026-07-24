@@ -57,3 +57,35 @@ def test_counters_updated() -> None:
 
 def test_no_commands() -> None:
     assert StrokesToPointsPlugin.commands == {}
+
+
+def test_cache_reused_on_identical_mask() -> None:
+    """Та же маска и параметры → результат берётся из кэша (без пересчёта)."""
+    plugin = _make_plugin({"min_stroke_len": 5.0})
+    mask = _square_mask()
+    out1 = plugin.process([{"mask": mask}])[0]
+    # Другой объект той же формы/содержимого — кэш обязан сработать.
+    out2 = plugin.process([{"mask": mask.copy()}])[0]
+    assert out2["draw_points"] is out1["draw_points"]  # тот же list из кэша
+    assert out2["draw_bounds"] == out1["draw_bounds"]
+
+
+def test_cache_invalidated_on_param_change() -> None:
+    """Смена register-параметра (live-тюнинг) → кэш сбрасывается, идёт пересчёт."""
+    plugin = _make_plugin({"min_stroke_len": 5.0, "simplify_epsilon": 0.0})
+    mask = _square_mask()
+    out1 = plugin.process([{"mask": mask}])[0]
+    plugin._reg.simplify_epsilon = 5.0  # сильнее прореживание → меньше точек
+    out2 = plugin.process([{"mask": mask}])[0]
+    assert out2["draw_points"] is not out1["draw_points"]
+    assert len(out2["draw_points"]) <= len(out1["draw_points"])
+
+
+def test_cache_invalidated_on_mask_change() -> None:
+    """Другая маска → пересчёт, а не устаревший кэш."""
+    plugin = _make_plugin({"min_stroke_len": 5.0})
+    out1 = plugin.process([{"mask": _square_mask()}])[0]
+    other = np.zeros((100, 100), dtype=np.uint8)
+    other[10:90, 50:53] = 255  # одна вертикальная линия
+    out2 = plugin.process([{"mask": other}])[0]
+    assert out2["draw_points"] is not out1["draw_points"]

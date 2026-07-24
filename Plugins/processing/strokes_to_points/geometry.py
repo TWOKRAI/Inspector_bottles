@@ -294,19 +294,33 @@ def reduce_angle(stroke: np.ndarray, angle_threshold_deg: float) -> np.ndarray:
 
 
 def sort_nearest_neighbor(strokes: list[np.ndarray]) -> list[np.ndarray]:
-    """Сортировка штрихов ближайшим соседом — минимизирует холостые ходы."""
-    if len(strokes) <= 1:
+    """Сортировка штрихов ближайшим соседом — минимизирует холостые ходы.
+
+    Жадный обход: на каждом шаге берётся штрих, чьё НАЧАЛО ближе всего к КОНЦУ
+    предыдущего. Массив начал `starts` строится ОДИН раз, «занятые» гасятся в inf —
+    без пересборки массива на каждой итерации (было O(n²) с аллокацией на шаг и
+    росло квадратично с числом контуров, роняя FPS на детальных кадрах). Результат
+    побайтово тот же: сравнивается квадрат расстояния (монотонен → argmin не меняется),
+    ничьи разрешаются по меньшему исходному индексу — как и раньше.
+    """
+    n = len(strokes)
+    if n <= 1:
         return strokes
-    ordered = [strokes[0]]
-    remaining = list(strokes[1:])
-    current_end = ordered[-1][-1]
-    while remaining:
-        starts = np.array([s[0] for s in remaining])
-        dists = np.linalg.norm(starts - current_end, axis=1)
-        idx = int(np.argmin(dists))
-        ordered.append(remaining.pop(idx))
-        current_end = ordered[-1][-1]
-    return ordered
+    starts = np.array([s[0] for s in strokes], dtype=np.float64)  # (n, 2) — один раз
+    used = np.zeros(n, dtype=bool)
+    order = np.empty(n, dtype=np.int64)
+    order[0] = 0
+    used[0] = True
+    current_end = strokes[0][-1]
+    for k in range(1, n):
+        delta = starts - current_end
+        dist_sq = np.einsum("ij,ij->i", delta, delta)  # квадрат расстояния
+        dist_sq[used] = np.inf
+        idx = int(np.argmin(dist_sq))
+        order[k] = idx
+        used[idx] = True
+        current_end = strokes[idx][-1]
+    return [strokes[i] for i in order]
 
 
 def extract_polylines(
