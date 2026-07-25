@@ -10,6 +10,7 @@
     IRemoteExecutable  — шаг с cross-process исполнением (execute_remote через WorkerPoolDispatcher)
     IChainLogger       — узкий публичный логгер для исполнителей (log_info/log_warning/log_error)
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable

@@ -185,3 +185,14 @@ class IWorkerManager(ABC):
 
     @abstractmethod
     def get_stats(self) -> Dict[str, Any]: ...
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "WorkerStatus",
+    "WorkerType",
+    "IWorkerRegistry",
+    "IWorkerLifecycle",
+    "IWorkerManager",
+]

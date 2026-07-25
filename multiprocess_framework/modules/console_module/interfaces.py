@@ -6,6 +6,7 @@ IConsoleManager  — менеджер терминальных окон.
 
 Правило: внешние модули импортируют только из interfaces.py.
 """
+
 from abc import ABC, abstractmethod
 from typing import Callable, List, Optional
 
@@ -15,6 +16,7 @@ from ..base_manager.interfaces import IBaseManager
 # =============================================================================
 # IPlatformConsole
 # =============================================================================
+
 
 class IPlatformConsole(ABC):
     """Платформо-зависимая абстракция терминала.
@@ -59,6 +61,7 @@ class IPlatformConsole(ABC):
 # =============================================================================
 # IConsoleManager
 # =============================================================================
+
 
 class IConsoleManager(IBaseManager, ABC):
     """Менеджер терминальных окон процесса.
@@ -124,3 +127,11 @@ class IConsoleManager(IBaseManager, ABC):
     @abstractmethod
     def setup_redirect(self, enabled: bool = True) -> bool:
         """Перенаправить / восстановить stdout/stderr."""
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "IPlatformConsole",
+    "IConsoleManager",
+]

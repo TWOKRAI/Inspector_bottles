@@ -5,6 +5,7 @@
 IStatsManager — контракт менеджера статистики и метрик.
 Наследует IChannelRoutingManager, добавляет методы записи и чтения метрик.
 """
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
@@ -53,3 +54,10 @@ class IStatsManager(IChannelRoutingManager, ABC):
     @abstractmethod
     def get_stats(self) -> Dict[str, Any]:
         """Получить полную диагностику (каналы, буфер, метрики)."""
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "IStatsManager",
+]

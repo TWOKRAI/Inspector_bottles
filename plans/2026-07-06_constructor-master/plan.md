@@ -360,7 +360,7 @@ P3.2 StateChannel остаётся DEFERRED. Ничего из анти-карг
 
 | Task | Статус | Суть | Acceptance | Усилие |
 |---|---|---|---|---|
-| H.1 | [ ] | Ярусы core-8/optional/frozen: доки + enforcement в `.sentrux/rules.toml` (boundaries на frozen) + сверка «20/21/22 модулей» | ярусная карта = код | M |
+| H.1 | [x] | Ярусы core/optional/frozen + NEW-10. Сделано: [`docs/MODULE_TIERS.md`](../../multiprocess_framework/docs/MODULE_TIERS.md) (27 модулей: core 17 / optional 10 / frozen 0) · контракт-тест `modules/tests/test_module_tiers.py` (карта↔диск, ярусы, `interfaces.py` 27/27, `__all__` 27/27 ×2 входа, видимость тестов, заморозка Gen-1) · boundaries на frozen-флагман Gen-1 в `.sentrux/rules.toml` · счётчик сведён 25→27 в MODULES_STATUS/RESPONSIBILITY_MAP/CLAUDE.md · `__all__` дописан в 20 `interfaces.py`. **Три находки:** ① вердикт G0 №1 «chain_module frozen, 0 потребителей» устарел (C6(d) поставил на него pipeline-движок) → ярус core, boundary НЕ заведён, ждёт переподтверждения владельца (MODULE_TIERS §2); ② 58 тестов не гонялись (3 каталога мимо `testpaths`) → включены; ③ «один вход на модуль» вынесен из H.1 (682 глубоких импорта против 116 плоских — отдельная задача) | ярусная карта = код ✓ (тест); fw 5478 passed / 6 skipped, proto 643 passed | M |
 | H.2 | [ ] | **GATE G4**: исполнение вердиктов G0 per-item — каждое удаление/freeze отдельным ОДОБРЕННЫМ коммитом | pytest/qt-smoke после каждого | M |
 | H.3 | [ ] | **Registers⇄StateStore merge**: ADR (реком.: StateStore = истина, RM = view-model) → адаптерный период → снятие «**»-подписки и анти-луп адаптеров после soak; 2-3 захода | 7 реактивных механизмов → 2-3; анти-луп костылей нет | L |
 | H.4 | [ ] | Один стандарт логирования прототипа | grep нестандартных логгеров = 0 | S/M |

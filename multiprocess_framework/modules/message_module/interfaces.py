@@ -68,3 +68,10 @@ class IMessage(Protocol):
     def clone(self) -> "IMessage": ...
 
     def get_schema_info(self) -> Optional[Dict[str, str]]: ...
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "IMessage",
+]

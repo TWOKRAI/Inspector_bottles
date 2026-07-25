@@ -1,12 +1,13 @@
 # Карта ответственности модулей — где что живёт
 
-**Назначение:** зафиксировать за каждым из 25 модулей фреймворка **одну зону ответственности** и явно развести оси, которые легко перепутать. Цель — чтобы при переносе кода из `multiprocess_prototype/` во фреймворк не появлялось дублирования: для каждой задачи есть ровно один «правильный» модуль.
+**Назначение:** зафиксировать за каждым из 27 модулей фреймворка **одну зону ответственности** и явно развести оси, которые легко перепутать. Цель — чтобы при переносе кода из `multiprocess_prototype/` во фреймворк не появлялось дублирования: для каждой задачи есть ровно один «правильный» модуль.
 
 - Быстрая карта по слоям и API — [`MODULES_OVERVIEW.md`](MODULES_OVERVIEW.md).
 - Статусы/LOC/тесты — [`../MODULES_STATUS.md`](../MODULES_STATUS.md).
 - Детали одного модуля — `modules/<имя>/README.md`.
 
-**Обновлено:** 2026-07-12 — C8 docs-sync (constructor-master Ф5-добор): `recipe` — yaml_io/реестр миграций владеет модуль (C2/C3, ADR-RCP-003/005), assembler/planner явно НЕ в модуле; `process_manager_module` — топология (`SystemBlueprint`/`ProcessConfig`/`Wire`, ADR-PMM-016) и структурный вывод join/inspector (ADR-PMM-017) добавлены в зону ответственности.
+**Обновлено:** 2026-07-26 — Ф8 H.1: счётчик 25 → **27**, добавлены зоны `app_module` и `telemetry_readmodel_module` (существовали в коде, но не в карте). Ярусы `core`/`optional`/`frozen` — отдельным документом [`MODULE_TIERS.md`](MODULE_TIERS.md).
+**Ранее** 2026-07-12 — C8 docs-sync (constructor-master Ф5-добор): `recipe` — yaml_io/реестр миграций владеет модуль (C2/C3, ADR-RCP-003/005), assembler/planner явно НЕ в модуле; `process_manager_module` — топология (`SystemBlueprint`/`ProcessConfig`/`Wire`, ADR-PMM-016) и структурный вывод join/inspector (ADR-PMM-017) добавлены в зону ответственности.
 **Ранее** 2026-07-08 — первичная сверка с фактическим кодом (25 модулей; `sql_module` в `Services/sql`).
 
 ---
@@ -34,6 +35,8 @@
 | `command_module` | реестр `имя команды → handler` (тонкий фасад над dispatch) | откатом/undo (это `actions_module`) |
 | `actions_module` | building-blocks undo/redo (`ActionBus` PATCH + `SnapshotHistory` SNAPSHOT) | IPC-командами без отката. **NB:** сейчас прод-undo в прототипе идёт через domain `CommandDispatcherOrchestrator`, `ActionBus` как прод-путь не задействован; модуль **сохраняется** как переиспользуемый building-block (решение владельца, 2026-07-08) — ADR-COMM-002 о его удалении **не исполняется** |
 | `event_module` | **in-proc** typed pub/sub «фактов» (по `type(event)`) | межпроцессными событиями (`EventManager`), командами, состоянием |
+| `telemetry_readmodel_module` | **read-model телеметрии для GUI** (ADR-136): локальная проекция для чтения, история по запросу | сбором/публикацией метрик (это источник + `statistics_module`), транспортом |
+| `app_module` | **композиционная крыша** приложения («рыба», Ф5.11): манифест + дискавери, сборка proc-dicts, bootstrap состояния, `run_app`/`build_app` | внутренностями конкретных подсистем; внутри framework его **не импортирует никто** |
 | `worker_module` | потоки внутри процесса (LOOP/TASK, lifecycle) | процессами, DAG-пайплайнами |
 | `chain_module` | DAG/Chain/Parallel **исполнение** пайплайна + worker-pool | сетевым IPC, потоками общего назначения |
 | `process_module` | база дочернего процесса (собирает подсистемы) | оркестрацией нескольких процессов |

@@ -5,6 +5,7 @@
 Полный runtime-контракт ``RegistersManager`` для подстановки в тестах, роутинг и UI
 (``build_routing_map``, ``FrontendRegistersBridge``). См. ADR-RM-001, ADR-RM-005.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
@@ -96,3 +97,10 @@ class IRegistersManager(Protocol):
         ``None`` отключает отправку.
         """
         ...
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "IRegistersManager",
+]

@@ -4,7 +4,10 @@
 Прикладные сервисы (`Services/`) — см. [`Services/STATUS.md`](../Services/STATUS.md).
 Карта ответственности и границы (где что, чтобы не дублировать) — [`docs/MODULES_RESPONSIBILITY_MAP.md`](docs/MODULES_RESPONSIBILITY_MAP.md).
 
-**Обновлено:** 2026-07-12 — C8 docs-sync: `recipe` дозаписан по факту C2/C3 (реестр step-миграций + generic `yaml_io`-writer, ADR-RCP-003/005; ~1400 LOC, 98 тестов).
+Ярус каждого модуля (`core` / `optional` / `frozen`) — [`docs/MODULE_TIERS.md`](docs/MODULE_TIERS.md); здесь он намеренно не дублируется, чтобы карты не разъезжались.
+
+**Обновлено:** 2026-07-26 — Ф8 H.1, сверка счётчика с диском: добавлены `app_module` (Ф5.11, композиционная крыша) и `telemetry_readmodel_module` (2026-07-18, ADR-136) — они существовали в коде, но отсутствовали в таблице; счётчик 25 → **27** (шапка обещала 27 при 25 строках). Дрейф теперь ловится контракт-тестом [`modules/tests/test_module_tiers.py`](modules/tests/test_module_tiers.py).
+**Ранее** 2026-07-12 — C8 docs-sync: `recipe` дозаписан по факту C2/C3 (реестр step-миграций + generic `yaml_io`-writer, ADR-RCP-003/005; ~1400 LOC, 98 тестов).
 **Ранее** 2026-07-11 — добавлен `recipe` (крыша над рецептами: RecipeEngine + RecipeManager + detect + format консолидированы; C1, ADR-RCP-001/002); счётчик 24 → **25**.
 **Ранее** 2026-07-08 — сверка с фактом: в таблицу добавлены `actions_module` (carve-out из frontend, ADR-124) и `event_module` (carve-out из prototype, in-proc pub/sub); счётчик 20/22 → **24**; удалён cruft-каталог `modules/sql_module/` (пустой, только `.pyc` после Phase 4.1).
 **Ранее** 2026-05-27 — добавлены `service_module` (Phase 3, ADR-129) и `display_module` (Phase 4, ADR-130); тесты 2904 passed (verification-report Phase 8).
@@ -37,12 +40,14 @@
 | `statistics_module` | production | 1 500 | + | StatsManager, AggregationWindow |
 | `frontend_module` | production | 12 039 | + | PySide6-виджеты с привязкой к регистрам |
 | `actions_module` | stable | ~700 | + | Building-blocks undo/redo (ActionBus PATCH + SnapshotHistory SNAPSHOT); carve-out из frontend (ADR-124). Прод-undo сейчас через domain `CommandDispatcherOrchestrator`; модуль сохраняется (решение владельца 2026-07-08, ADR-COMM-002 не исполняется) |
+| `app_module` | stable | ~2 234 | 48 | Композиционная крыша («рыба», Ф5.11): AppSpec, ManifestStore + дискавери по `service.yaml`, BlueprintLoader, ProcDictsBuilder, StateBootstrap, `run_app`/`build_app`. Внутри framework его не импортирует никто (boundary + контракт-тест) |
+| `telemetry_readmodel_module` | stable | ~641 | 25 | Read-model телеметрии для GUI (ADR-136): запись всегда / чтение локально / история по запросу. Снимает блокирующий IPC из main thread |
 | `event_module` | stable | ~150 | + | Generic typed in-proc pub/sub (EventBus по `type(event)`); carve-out из prototype. In-proc факты — не путать с cross-proc `EventManager` (SRM) |
 
-**Итого framework:** 25 пакетов, ~75 850 LOC (с тестами).
+**Итого framework:** 27 пакетов, ~78 700 LOC (с тестами).
 **Прикладной слой (Services):** `sql` (~3 775 LOC), `hikvision_camera` — см. [`Services/STATUS.md`](../Services/STATUS.md).
 
-**Тесты:** 2904 passed / 8 skipped / 0 failed (Phase 8 verification-report, 2026-05-27). Полный прогон:
+**Тесты:** 5477 passed / 6 skipped / 0 failed (Ф8 H.1, 2026-07-26). Из них 58 были невидимы прогону до H.1 — `telemetry_readmodel_module/tests`, `config_module/tools/tests`, `frontend_module/actions/handlers/tests` лежали на диске мимо `testpaths`. Полный прогон:
 
 ```bash
 python scripts/run_framework_tests.py

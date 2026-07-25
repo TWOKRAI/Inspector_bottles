@@ -145,3 +145,10 @@ ErrorConfigLike = Union[Dict[str, Any], Any]
   - ``LoggerManagerConfig`` → используется как есть
   - объект с ``build() -> (str, dict)`` → dict из build + expand (совместимость)
 """
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "IErrorManager",
+]

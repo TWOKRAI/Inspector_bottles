@@ -330,3 +330,13 @@ class IStateStoreManager(ABC):
             router: реализация IRouter (RouterManager или InMemoryRouter в тестах).
         """
         ...
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "IRouter",
+    "IStateStore",
+    "IStateProxy",
+    "IStateStoreManager",
+]

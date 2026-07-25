@@ -319,3 +319,12 @@ class IProcessRegistry(ABC):
     def remove_process(self, name: str) -> None:
         """Удалить запись из реестра (после остановки), освободить stop_event."""
         ...
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "ISystemLauncher",
+    "IProcessManagerProcess",
+    "IProcessRegistry",
+]

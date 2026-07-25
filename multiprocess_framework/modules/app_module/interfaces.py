@@ -101,3 +101,15 @@ class ManifestStoreProtocol(Protocol):
     def read_raw(self) -> Dict[str, Any]: ...
 
     def update(self, updates: Mapping[str, Any]) -> Dict[str, Any]: ...
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "BlueprintLoader",
+    "ProcDictsBuilder",
+    "StateBootstrap",
+    "ThrottleRules",
+    "LauncherFactory",
+    "ManifestStoreProtocol",
+]

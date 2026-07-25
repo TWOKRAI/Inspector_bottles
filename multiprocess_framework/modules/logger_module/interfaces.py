@@ -202,3 +202,13 @@ class ILoggerManager(IBaseManager, ABC):
 
         Используется внутренне, но полезен для внешних валидаций производительности.
         """
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "LogLevel",
+    "LogScope",
+    "ILogChannel",
+    "ILoggerManager",
+]

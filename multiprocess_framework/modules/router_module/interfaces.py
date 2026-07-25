@@ -227,3 +227,11 @@ class IMessageChannel(IChannel):
     def get_info(self) -> Dict[str, Any]:
         """Информация о состоянии канала для мониторинга."""
         return {"name": self.name, "type": self.channel_type, "active": True}
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "IRouterManager",
+    "IMessageChannel",
+]

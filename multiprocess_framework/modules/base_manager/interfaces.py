@@ -213,3 +213,12 @@ class IObservableMixin(ABC):
     @abstractmethod
     def _track_error(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> None:
         """Отслеживание ошибки."""
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "IBaseManager",
+    "IBaseAdapter",
+    "IObservableMixin",
+]

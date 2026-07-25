@@ -50,7 +50,7 @@
 | 1 ✅ | **3.9** — depends_on: boot волнами по readiness апстрима, флаг `FW_DEPENDS_ON_BOOT_ORDER`, guard'ы (цикл/missing/self). Merge `db81ab27`, ADR-PMM-018 | [depends-on-readiness.md](depends-on-readiness.md) |
 | 2 ✅ | **NEW-6** — супервизор: **(a)** exp-backoff + jitter (`fc983743`, ADR-PMM-019) · **(b)** OTP-стратегии `rest_for_one`/`one_for_all` + группы `supervision_group` (порядок из depends_on) + эскалация give-up на группу (`0fe1f467`, ADR-PMM-020) | [supervisor-backoff-jitter.md](supervisor-backoff-jitter.md), [supervisor-strategies.md](supervisor-strategies.md) |
 | 3 ✅ | **NEW-7** — alerting поверх supervisor-событий: `gave_up`→critical, `unresponsive`/рост дропов→warning, `system.alerts.*`, флаг `FW_SUPERVISOR_ALERTS`. Merge `3dcdab65`, ADR-PMM-021. **Остаток:** pickle-fallback G.3(d) как источник алерта — не подключён (правило не заведено) | [supervisor-alerting.md](supervisor-alerting.md) |
-| 4 | **H.1** — ярусы core/optional/frozen + enforcement + **NEW-10** (24/24 interfaces.py, Protocol ObservableMixin, «один вход», contract-тест `__all__`) | constructor-master, Ф8 |
+| 4 ✅ | **H.1** — ярусная карта [`MODULE_TIERS.md`](../multiprocess_framework/docs/MODULE_TIERS.md) (27 модулей) + контракт-тест «карта = код» + frozen-boundaries + NEW-10 (`interfaces.py` 27/27, `__all__` 27/27). Счётчик сведён 25→27. **Открыто владельцу:** вердикт G0 №1 по `chain_module` устарел — модуль ожил в C6(d), переведён в core вместо frozen (MODULE_TIERS §2). **Побочно:** +58 тестов, которые не гонялись (каталоги мимо `testpaths`) | constructor-master, Ф8 |
 | 5 | **H.2 (GATE G4)** — исполнение kill-вердиктов G0 per-item, отдельными одобренными коммитами | там же |
 | 6 | **H.3** — Registers⇄StateStore merge (с оглядкой на 3 оси ADR-COMM-006) | там же |
 | 7 | **H.4** — один стандарт логирования прототипа | там же |
@@ -120,6 +120,7 @@
 | 3 | current-path §5: формальное одобрение Master plan; ранний вынос frozen-boundaries из H.1; R2-residual (гейт `recovered` на `health.status==ok`) | формально (В1 де-факто исполнен) |
 | 4 | Снятие blueprint-шима C6(c) — 0 импортёров | нет (гигиена) |
 | 5 | **Доводка `Process.workers`→рантайм (RS-7-остаток)** — разведка C6(e) 2026-07-13: поле = `tuple[WorkerSpec]` (декларативные именованные треды процесса), НЕ chain-пул; нужны адаптер формата + проброс через ассемблер + решение: спавнить ли idle-треды без Pipeline-нагрузки (сейчас спавн = no-op треды). Пометка «пока не влияет» в схеме стоит | нет (отдельная задача; поле честно помечено) |
+| 7 | **Ярус `chain_module`: вердикт G0 №1 устарел** (найдено Ф8 H.1, 2026-07-26). G0 замораживал модуль как «0 потребителей», но C6(d) (merge `22393392`) поставил на `ChainRunnable` pipeline-движок `ProcessModule` — сейчас 2 прод-импортёра + реэкспорт в фасаде. Карта переведена в `core`, boundary «никто не импортирует» сознательно НЕ заведён (уронил бы прод). Нужно: подтвердить core ЛИБО назначить путь обратно во frozen | нет (карта честна по коду); влияет на H.2/G4 — из списка KILL/FREEZE позиция №1 де-факто выбыла |
 | 6 | ~~GATE G3 перед Ф7~~ — **ЗАКРЫТ владельцем 2026-07-13**: старт Ф7 ДА; frame-pool одобрен (в acceptance G.3/G.4); 1.8 пропустить; baseline лесенкой | нет (снято; В4 Ф7 стартован) |
 
 ## Отложено / hardware-gated (вне последовательности)

@@ -163,3 +163,13 @@ class IProcessCommunication(Protocol):
     def get_queue_stats(self) -> Dict[str, Any]:
         """Получить статистику очередей."""
         ...
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "ProcessStatsDict",
+    "IProcessModule",
+    "ISharedResources",
+    "IProcessCommunication",
+]

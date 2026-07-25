@@ -237,3 +237,12 @@ class IDisplayRegistry(Protocol):
                        закрытие окон). Если None — уведомление пропускается.
         """
         ...
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "DisplayEntry",
+    "IDisplayChannel",
+    "IDisplayRegistry",
+]

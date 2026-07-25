@@ -151,6 +151,43 @@ from   = "Plugins/*"
 to     = "multiprocess_prototype/*"
 reason = "плагин — переиспользуемая единица, не должен зависеть от конкретного app (Phase 5.2)"
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Ярус frozen (Ф8 H.1, карта — docs/MODULE_TIERS.md §3)
+# ──────────────────────────────────────────────────────────────────────────────
+# Флагман Gen-1 frontend_module (FrontendManager / WindowManager / LayoutComposer)
+# заморожен вердиктом G0 №5: код остаётся рабочим, но новых потребителей не заводим.
+# Из публичного фасада framework он уже убран (`multiprocess_framework/__init__.py`
+# кидает AttributeError с указателем на живое место). Здесь закрываем вход снаружи.
+#
+# Почему только прикладные слои, а не `multiprocess_framework/*`: внутри самого
+# frontend_module остаются его же тесты Gen-1 (маркер `legacy_gen1`), которые
+# импортируют `application/` абсолютным путём — широкое правило ложно ругалось бы
+# на них. Реальный риск — новый потребитель в приложении, его и запрещаем.
+[[boundaries]]
+from   = "multiprocess_prototype/*"
+to     = "multiprocess_framework/modules/frontend_module/application/*"
+reason = "флагман Gen-1 frontend заморожен (G0 №5, MODULE_TIERS §3) — новых потребителей не заводим"
+
+[[boundaries]]
+from   = "Services/*"
+to     = "multiprocess_framework/modules/frontend_module/application/*"
+reason = "флагман Gen-1 frontend заморожен (G0 №5) — Services его не импортируют"
+
+[[boundaries]]
+from   = "Plugins/*"
+to     = "multiprocess_framework/modules/frontend_module/application/*"
+reason = "флагман Gen-1 frontend заморожен (G0 №5) — плагин тем более не знает про Gen-1"
+
+[[boundaries]]
+from   = "examples/*"
+to     = "multiprocess_framework/modules/frontend_module/application/*"
+reason = "флагман Gen-1 frontend заморожен (G0 №5) — «рыба» строится на Gen-2, не на нём"
+
+# ПРИМЕЧАНИЕ про chain_module: вердикт G0 №1 «FREEZE, 0 потребителей» УСТАРЕЛ —
+# C6(d) (merge 22393392) поставил pipeline-движок ProcessModule на ChainRunnable.
+# Boundary «никто не импортирует chain_module» уронил бы прод, поэтому НЕ заводится.
+# Модуль переведён в ярус core, разбор — MODULE_TIERS.md §2 (ждёт переподтверждения владельца).
+
 # Архивные / удалённые модули — никто не должен импортировать
 [[boundaries]]
 from   = "*"

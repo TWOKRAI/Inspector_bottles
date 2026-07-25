@@ -177,3 +177,12 @@ class IChannelRoutingManager(IBaseManager):
             True при успешной пересборке; False при невалидном config или ошибке
             (процесс не роняется — ошибка логируется).
         """
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "IChannel",
+    "IBufferStrategy",
+    "IChannelRoutingManager",
+]

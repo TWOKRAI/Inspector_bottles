@@ -3,6 +3,7 @@
 
 Единственный файл, от которого разрешено зависеть другим модулям.
 """
+
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 
@@ -102,3 +103,12 @@ class IConfigManager(IBaseManager, ABC):
     @abstractmethod
     def load_config_from_storage(self, name: str) -> bool:
         """Загрузить конфигурацию из ConfigStore."""
+
+
+# Публичный контракт модуля (Ф8 H.1 / NEW-10): перечислен явно, чтобы
+# случайный top-level импорт не становился частью API.
+__all__ = [
+    "IConfigObserver",
+    "IConfig",
+    "IConfigManager",
+]

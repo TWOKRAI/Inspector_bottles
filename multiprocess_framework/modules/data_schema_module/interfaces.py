@@ -31,6 +31,7 @@ from multiprocess_framework.modules.data_schema_module import (
 Прямой импорт `from data_schema_module.interfaces import ...` тоже работает —
 файл реэкспортирует всё.
 """
+
 from __future__ import annotations
 
 from .core.interfaces import (
