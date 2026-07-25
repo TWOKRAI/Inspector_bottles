@@ -195,8 +195,8 @@ class TestGroupGiveupEscalation:
 
         assert mon.previous_states["cam"]["status"] == "failed"
         paths = [p for p, _ in published]
-        assert any("seg" in p and "degraded_reason" in p for p in paths)
-        assert any("lines" in p and "degraded_reason" in p for p in paths)
+        assert any("seg" in p and "supervisor.note" in p for p in paths)
+        assert any("lines" in p and "supervisor.note" in p for p in paths)
         assert pm._log_error.called
 
     def test_no_escalation_for_one_for_one(self, monitor_factory) -> None:
@@ -218,8 +218,100 @@ class TestGroupGiveupEscalation:
         self._exhaust(mon, "cam", 1)
         mon._try_auto_restart("cam", reason="crashed")
 
-        assert not any("seg" in p and "degraded_reason" in p for p, _ in published)
-        assert any("lines" in p and "degraded_reason" in p for p, _ in published)
+        assert not any("seg" in p and "supervisor.note" in p for p, _ in published)
+        assert any("lines" in p and "supervisor.note" in p for p, _ in published)
+
+
+class TestCascadeHardening:
+    """Находки Fable-ревью NEW-6b: H3-watchdog у induced, re-entrancy, симметрия, порядок."""
+
+    def test_induced_heartbeat_does_not_fake_recovered(self, monitor_factory) -> None:
+        """HIGH-1: induced-член ЖИВ и heartbeat'ит — это не 'recovered'.
+
+        Иначе снимался бы watchdog H3 у рестарта, который всё равно исполнится, и
+        тихий провал этого рестарта снова стал бы невидим (рецидив R2/ADR-PMM-015).
+        """
+        _pm, mon = monitor_factory("rest_for_one")
+        mon._try_auto_restart("cam", reason="crashed")
+        assert {"seg", "lines"} <= mon._induced_restarts
+
+        # штатный heartbeat живого члена до диспатча
+        mon._last_heartbeat["seg"] = 12345.0
+        assert "seg" in mon._pending_recovery  # recovered НЕ снял ожидание
+        assert "seg" in mon._recovery_deadline  # watchdog H3 на месте
+
+    def test_induced_flag_cleared_on_dispatch(self, monitor_factory) -> None:
+        """После диспатча пометка снята → heartbeat НОВОЙ инкарнации = честное recovered."""
+        _pm, mon = monitor_factory("rest_for_one")
+        mon._try_auto_restart("cam", reason="crashed")
+        for name in list(mon._pending_restarts):
+            mon._pending_restarts[name] = 0.0  # срок вышел
+        mon._dispatch_due_restarts()
+        assert mon._induced_restarts == set()
+
+    def test_forget_process_clears_induced(self, monitor_factory) -> None:
+        _pm, mon = monitor_factory("rest_for_one")
+        mon._try_auto_restart("cam", reason="crashed")
+        mon.forget_process("seg")
+        assert "seg" not in mon._induced_restarts
+
+    def test_no_cascade_on_watchdog_reinitiation(self, monitor_factory) -> None:
+        """MED-2: пере-инициация watchdog'ом H3 не запускает каскад повторно."""
+        _pm, mon = monitor_factory("one_for_all")
+        mon._try_auto_restart("cam", reason="restart-not-confirmed")
+        assert set(mon._pending_restarts) == {"cam"}  # только сам, без группы
+
+    def test_rest_for_one_escalates_without_group(self) -> None:
+        """MED-1: у rest_for_one состав задан графом — эскалация обязана работать и без группы."""
+        pm = _make_pm(_configs({n: "" for n in _DEPS}, _DEPS))
+        pol = RestartPolicy(enabled=True, backoff_sec=0.0, strategy="rest_for_one", max_retries=1, window_sec=0.0)
+        mon = ProcessMonitor(pm, restart_policy=pol)
+        published: list[tuple[str, object]] = []
+        mon._publish_state = lambda p, v: published.append((p, v))  # type: ignore[assignment]
+
+        mon._try_auto_restart("cam", reason="crashed")
+        mon._pending_restarts.clear()
+        mon._try_auto_restart("cam", reason="crashed")  # give-up
+
+        assert any("seg" in p and "supervisor.note" in p for p, _ in published)
+
+    def test_cascade_stagger_preserves_topo_order(self, monitor_factory) -> None:
+        """Дедлайны идут лесенкой в топо-порядке (апстрим раньше зависимого)."""
+        _pm, mon = monitor_factory("rest_for_one")
+        mon._try_auto_restart("cam", reason="crashed")
+        assert mon._pending_restarts["cam"] < mon._pending_restarts["seg"]
+        assert mon._pending_restarts["seg"] < mon._pending_restarts["lines"]
+
+    def test_dispatch_order_follows_topo(self, monitor_factory) -> None:
+        """Интеграционно: команды process.restart уходят в топо-порядке."""
+        pm, mon = monitor_factory("rest_for_one")
+        mon._try_auto_restart("cam", reason="crashed")
+        for name in list(mon._pending_restarts):
+            mon._pending_restarts[name] = 0.0
+        mon._dispatch_due_restarts()
+        sent = [c[0][1]["data"]["process_name"] for c in pm.communication.send_message.call_args_list]
+        assert sent == ["cam", "seg", "lines"]
+
+    @pytest.mark.parametrize("reason", ["crashed", "unresponsive", "health-failed"])
+    def test_cascade_on_all_failure_reasons(self, monitor_factory, reason: str) -> None:
+        """Каскад работает на всех путях отказа, а не только crashed."""
+        _pm, mon = monitor_factory("rest_for_one")
+        mon._try_auto_restart("cam", reason=reason)
+        assert {"seg", "lines"} <= set(mon._pending_restarts)
+
+    def test_snapshot_tolerates_malformed_configs(self) -> None:
+        """Защитные ветки _supervision_snapshot: не-dict cfg и не-list depends_on."""
+        pm = _make_pm({"a": "not-a-dict", "b": {"class": "m", "depends_on": "oops"}})
+        mon = ProcessMonitor(pm, restart_policy=RestartPolicy(enabled=True, strategy="rest_for_one"))
+        groups, deps = mon._supervision_snapshot()
+        assert "a" not in groups  # не-dict пропущен
+        assert deps["b"] == []  # строка вместо списка → пустой
+
+    def test_snapshot_missing_configs_degrades(self) -> None:
+        pm = MagicMock()
+        pm._process_configs = None
+        mon = ProcessMonitor(pm, restart_policy=RestartPolicy(enabled=True, strategy="one_for_all"))
+        assert mon._supervision_snapshot() == ({}, {})
 
 
 # ── Уровень 3: проброс supervision_group ─────────────────────────────────────

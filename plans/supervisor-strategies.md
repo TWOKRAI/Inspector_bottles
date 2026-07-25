@@ -37,10 +37,15 @@ OTP-стратегии супервизии: падение процесса к�
   **Induced НЕ пишет метку в `_restart_history` члена**: интенсивность (max_retries/window)
   — свойство супервизора и считается по триггеру (семантика OTP), иначе каскад «сдавался»
   бы на здоровых членах. Пропускаются protected / уже запланированные / `_given_up`.
-- `_escalate_group_giveup` — при give-up по триггеру члены группы получают
-  `health.degraded_reason` + громкий ERROR (иначе группа тихо полумёртвая). Новый вид
-  supervisor-события НЕ вводится: словарь {crashed, unresponsive, restarting, recovered,
-  gave_up} — контракт GUI и будущего alerting (NEW-7).
+- `_escalate_group_giveup` — при give-up по триггеру члены получают
+  `processes.<name>.supervisor.note` + громкий ERROR (иначе группа тихо полумёртвая).
+  Путь supervisor-owned, НЕ `health.degraded_reason`: health член публикует полным
+  снапшотом, чужая метка в его поддереве затиралась бы через такт (фикс HIGH-2 ревью).
+  Новый вид supervisor-события НЕ вводится: словарь {crashed, unresponsive, restarting,
+  recovered, gave_up} — контракт GUI и будущего alerting (NEW-7).
+- Hardening по ревью: `_induced_restarts` (heartbeat живого члена каскада ≠ `recovered`,
+  watchdog H3 сохраняется), нет повторного каскада на `restart-not-confirmed`,
+  лесенка `_CASCADE_STAGGER_SEC` между induced-рестартами.
 
 ## Acceptance
 
@@ -53,7 +58,11 @@ OTP-стратегии супервизии: падение процесса к�
 - [x] Эскалация give-up метит группу `degraded_reason` + ERROR; не трогает `one_for_one` и уже сдавшихся.
 - [x] `supervision_group` доходит до `proc_dict`; пустой отсутствует.
 - [x] Тесты: `test_supervision_strategies.py` (31) + регресс 1464 passed.
-- [ ] Полный framework-suite; Fable-ревью.
+- [x] Полный framework-suite (5315 passed на первой редакции).
+- [x] Fable-ревью (graphify сработал, вскрыл re-entrancy-путь): 2 HIGH + 2 MED + 3 LOW закрыты —
+  induced-пометка против ложного recovered/потери H3, supervisor-owned путь эскалации,
+  симметрия rest_for_one без группы, отказ от повторного каскада на watchdog-переинициации,
+  лесенка induced, документирование семантики. Тесты: 51 (+20 hardening).
 
 ## Out of scope
 

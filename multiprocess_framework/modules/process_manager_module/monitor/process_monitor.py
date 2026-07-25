@@ -19,6 +19,14 @@ from ...process_module.health.schema import HealthField, HealthStatus, health_pa
 from ...worker_module import ThreadConfig, ThreadPriority
 from ..core.restart_policy import RestartPolicy
 
+#: Причина пере-инициации рестарта watchdog'ом H3 (рестарт тихо не подтвердился).
+#: Каскад NEW-6b на этой причине НЕ повторяется — см. _try_auto_restart.
+_REASON_RESTART_NOT_CONFIRMED = "restart-not-confirmed"
+
+#: Шаг лесенки induced-рестартов каскада (NEW-6b): i-й член группы стартует на
+#: i*шаг позже — сохраняет топо-порядок и не отдаёт message_processor PM под burst.
+_CASCADE_STAGGER_SEC = 0.05
+
 _CUSTOM_EXCLUDE_KEYS = frozenset(
     {
         "stop_event",
@@ -132,6 +140,11 @@ class ProcessMonitor:
         # гейта дал бы бесконечную петлю. Снимается только при health.status=ok
         # (истинное выздоровление) или forget_process.
         self._given_up: set[str] = set()
+        # NEW-6b: имена, чей рестарт запланирован КАСКАДОМ (induced), а не своим отказом.
+        # Пока имя здесь, его heartbeat не считается 'recovered' (он и не падал) —
+        # иначе снялся бы watchdog H3 у рестарта, который всё равно будет исполнен.
+        # Снимается при диспатче (рестарт пошёл) и в forget_process (switch).
+        self._induced_restarts: set[str] = set()
 
         # Замок текущей итерации цикла: stop(wait=True) дожидается его
         # освобождения — после возврата stop() ни одна проверка/рестарт
@@ -559,7 +572,19 @@ class ProcessMonitor:
             # heartbeat в окне до диспатча давал ложное 'recovered' и снимал watchdog
             # H3. Здесь не-None => heartbeat пришёл после сброса: само-исцеление до
             # диспатча ИЛИ новая инкарнация после рестарта — оба легитимны.
-            if proc.name in self._pending_recovery and self._last_heartbeat.get(proc.name) is not None:
+            # NEW-6b: у INDUCED-члена каскада heartbeat до диспатча — НЕ recovery.
+            # Он жив и heartbeat'ит штатно (в отличие от триггера он ничем не болел),
+            # его тик приходит раньше диспатча (интервал heartbeat < backoff) → это
+            # давало бы ложное 'recovered', снимало watchdog H3, а рестарт всё равно
+            # выполнялся → член пересоздавался БЕЗ watchdog, и тихий провал его рестарта
+            # снова стал бы невидим (рецидив R2/ADR-PMM-015 для нового класса участников).
+            # Семантика ТРИГГЕРА не тронута: его self-heal до диспатча остаётся честным
+            # recovered (осознанное решение R2 — рестарт при этом не отменяется).
+            if (
+                proc.name in self._pending_recovery
+                and proc.name not in self._induced_restarts
+                and self._last_heartbeat.get(proc.name) is not None
+            ):
                 self._pending_recovery.discard(proc.name)
                 self._recovery_deadline.pop(proc.name, None)  # H3: восстановился — снять watchdog
                 self._emit_supervisor_event(
@@ -1090,7 +1115,11 @@ class ProcessMonitor:
             level="warning",
         )
         # NEW-6b: каскад по стратегии супервизии (one_for_one → ничего не делает).
-        self._cascade_restart(process_name, policy, backoff, now_m, protected)
+        # НЕ каскадим на пере-инициации watchdog'ом H3 ("restart-not-confirmed"):
+        # там рестарт уже был запланирован (вместе со своим каскадом), а повторный
+        # каскад дал бы пинг-понг рестартов между членами группы (O(N²) команд).
+        if reason != _REASON_RESTART_NOT_CONFIRMED:
+            self._cascade_restart(process_name, policy, backoff, now_m, protected)
 
     def _escalate_group_giveup(
         self,
@@ -1104,7 +1133,14 @@ class ProcessMonitor:
 
         Супервизор сдался по ``trigger``. При групповой стратегии это значит, что
         зависимые/сокомандники остаются ЖИВЫМИ, но без апстрима — молча деградировавшими.
-        Помечаем их ``health.degraded_reason`` и говорим об этом громко (ERROR).
+        Помечаем их и говорим об этом громко (ERROR).
+
+        **Пишем в supervisor-owned путь** ``processes.<name>.supervisor.note``, а НЕ в
+        ``health.degraded_reason``: health член публикует ПОЛНЫМ снапшотом (dirty
+        поднимает любой ``report_error``), поэтому чужая метка в его поддереве
+        затиралась бы через такт — ровно в сценарии «упал апстрим → член сыплет
+        ошибки», для которого эскалация и нужна. Поддерево ``supervisor.*`` принадлежит
+        монитору, конфликта владения нет.
 
         Сознательно НЕ вводим новый вид supervisor-события: словарь
         {crashed, unresponsive, restarting, recovered, gave_up} — контракт для GUI и
@@ -1114,20 +1150,24 @@ class ProcessMonitor:
             return
         groups, deps = self._supervision_snapshot()
         group = groups.get(trigger, "")
-        if not group:
+        # one_for_all без группы — «все» не определены. Для rest_for_one группа НЕ
+        # обязательна: состав задан графом depends_on (симметрия с _cascade_restart,
+        # который в этом случае каскадит по всему графу).
+        if not group and policy.strategy != "rest_for_one":
             return
         affected = self._resolve_restart_set(trigger, policy.strategy, groups, deps)
         affected = [n for n in affected if n not in self._given_up]
         if not affected:
             return
+        scope = f"группа '{group}'" if group else "зависимые (без группы)"
         txt = (
-            f"группа '{group}': супервизор сдался по '{trigger}' "
+            f"{scope}: супервизор сдался по '{trigger}' "
             f"({count} рестартов за {window_sec}с, {reason}) — апстрим не восстановлен"
         )
         self.process._log_error(f"Эскалация {txt}; затронуты: {affected}")
         for name in affected:
-            self._publish_state(health_path(name, HealthField.DEGRADED_REASON), txt)
-            self._publish_state(health_path(name, HealthField.UPDATED_AT), time.time())
+            self._publish_state(f"processes.{name}.supervisor.note", txt)
+            self._publish_state(f"processes.{name}.supervisor.at", time.time())
 
     def _cascade_restart(
         self,
@@ -1145,6 +1185,17 @@ class ProcessMonitor:
 
         Пропускаются: protected, уже запланированные, уже сдавшиеся (``_given_up`` —
         терминальное состояние), сам триггер.
+
+        Семантика, о которой стоит знать (OTP, задокументировано осознанно):
+          - применяется политика ТРИГГЕРА, а не члена: член с собственным
+            ``restart_policy.enabled=False`` всё равно будет перезапущен каскадом —
+            стратегия принадлежит супервизору, а не ребёнку;
+          - ``rest_for_one`` фильтрует по группе ПОСЛЕ транзитивного замыкания: член
+            группы, зависящий от триггера только через внегрупповое звено, будет
+            перезапущен, а само звено — нет (граница группы не обрывает обход);
+          - induced-рестарты разносятся во времени лесенкой (см. ниже): джиттер 6a
+            размазывает старт группы, здесь тот же мотив — не отдать message_processor
+            PM под burst из N stop/start подряд.
         """
         if policy.strategy == "one_for_one":
             return
@@ -1156,17 +1207,23 @@ class ProcessMonitor:
                 f"каскад невозможен, рестартуем только упавший (one_for_one)"
             )
             return
+        step = 0
         for name in induced:
             if name in protected or name in self._pending_restarts or name in self._given_up:
                 continue
-            self._pending_restarts[name] = now_m + backoff
+            step += 1
+            # Лесенка: каждый следующий член стартует чуть позже — сохраняет
+            # топо-порядок при диспатче и не даёт burst'а stop/start на PM-потоке.
+            delay = backoff + step * _CASCADE_STAGGER_SEC
+            self._pending_restarts[name] = now_m + delay
+            self._induced_restarts.add(name)
             self._pending_recovery.add(name)
             self._last_heartbeat.pop(name, None)
-            self._recovery_deadline[name] = now_m + backoff + self.heartbeat_timeout + 5.0
+            self._recovery_deadline[name] = now_m + delay + self.heartbeat_timeout + 5.0
             self._emit_supervisor_event(
                 name,
                 "restarting",
-                reason=f"каскад {policy.strategy} от '{trigger}', backoff {backoff:.2f}с",
+                reason=f"каскад {policy.strategy} от '{trigger}', backoff {delay:.2f}с",
                 attempt="induced",
                 level="warning",
             )
@@ -1194,6 +1251,10 @@ class ProcessMonitor:
         due = [name for name, ts in self._pending_restarts.items() if ts <= now]
         for name in due:
             self._pending_restarts.pop(name, None)
+            # NEW-6b: рестарт пошёл — снимаем induced-пометку. Дальше heartbeat уже
+            # НОВОЙ инкарнации честно означает recovered (watchdog H3 продолжает жить
+            # до этого момента).
+            self._induced_restarts.discard(name)
             # Второй сброс heartbeat-базы — на момент фактического исполнения рестарта
             # (первый — при планировании, R2/ADR-PMM-015). Если процесс само-исцелился
             # в окне backoff и heartbeat поднялся, здесь снова обнуляем: рестарт
@@ -1258,7 +1319,7 @@ class ProcessMonitor:
                 f"Monitor: рестарт '{name}' не подтвердился восстановлением к дедлайну "
                 f"— повторная попытка (тихий провал рестарта)"
             )
-            self._try_auto_restart(name, reason="restart-not-confirmed")
+            self._try_auto_restart(name, reason=_REASON_RESTART_NOT_CONFIRMED)
 
     def reset_restart_count(self, process_name: str) -> None:
         """Сбросить счётчик рестартов для процесса.
@@ -1287,6 +1348,7 @@ class ProcessMonitor:
         self._pending_recovery.discard(process_name)  # Ф4-добор: не тащить recovery через switch
         self._recovery_deadline.pop(process_name, None)  # H3: и watchdog-дедлайн
         self._given_up.discard(process_name)  # H4: имя переиспользуется — снять give-up-гейт
+        self._induced_restarts.discard(process_name)  # NEW-6b: и каскадную пометку
 
     # ----------------------------------------------------------------
     # Полный broadcast статуса (для синхронизации с GUI)
