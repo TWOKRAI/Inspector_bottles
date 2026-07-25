@@ -450,3 +450,20 @@ is_alive-liveness.
 **Отклонённые альтернативы:** гейтить каждую волну по ВСЕМ ранее стартовавшим (проще, но ждёт несвязанных сиблингов) — отвергнуто в пользу точечного ожидания только своих апстримов. Блокировать boot при не-ready апстриме — отвергнуто (boot не должен виснуть; сигнал отдаётся WARNING'ом).
 
 **Последствия:** аддитивно; без `depends_on` поведение бит-в-бит прежнее (порядок dict, барьер `_wait_boot_ready`). Reversible: yes — env `FW_DEPENDS_ON_BOOT_ORDER=0`. Risk: low — новый путь активируется только при наличии `depends_on` в рецепте.
+
+## ADR-PMM-019: exponential backoff + jitter авто-рестарта (В5 NEW-6a, 2026-07-26)
+
+**Статус:** принято
+**Дата:** 2026-07-26
+**Refs:** plans/supervisor-backoff-jitter.md, plans/current-path/plan.md (В5 NEW-6), `monitor/process_monitor.py::_compute_backoff`, `core/restart_policy.py`
+
+**Контекст:** backoff авто-рестарта был фиксированным (`policy.backoff_sec`) — при crash-loop это N рестартов подряд с одинаковой паузой (нагрузка на систему не спадает), а одновременный рестарт группы процессов даёт thundering herd.
+
+**Решение:**
+1. `RestartPolicy` (+ backward-safe дефолты): `backoff_mode: Literal["fixed","exponential"]="fixed"`, `backoff_max_sec=60.0`, `backoff_jitter=0.0`. Literal (не str): опечатка → ValidationError → `_resolve_policy` падает на глобальную политику с WARNING, а не молча в fixed.
+2. `_compute_backoff(policy, attempt, rand=None)` — чистый staticmethod: fixed → `backoff_sec`; exponential → `min(backoff_sec*2**min(attempt-1,63), backoff_max_sec)` (clamp показателя от OverflowError); jitter → множитель `[1-j,1+j]` (clamp `j∈[0,1]`), финал `max(0.0, base)`. `rand`-инъекция для детерминизма тестов.
+3. Подключён в `_try_auto_restart` (`attempt=count+1`, count = рестарты в окне); одно значение питает `_pending_restarts` и `_recovery_deadline` (=pending+heartbeat_timeout+5 — gap постоянен, watchdog H3 растёт вместе с backoff, ложного истечения нет).
+
+**Известная граница (эрозия окна give-up):** exp-пауза расходует то же окно `window_sec`, в котором считается `max_retries`. При `backoff_max_sec ≈ window_sec/max_retries` старые метки протухают быстрее, чем счётчик дойдёт до лимита → `gave_up` может не наступить (throttled crash-loop без терминала). Дефолты (`max_retries=3`, 2/4/8с) безопасны; при exponential держать `backoff_max_sec << window_sec/max_retries`. Полное решение (экспонента от consecutive-failure счётчика, сбрасываемого по recovered) — NEW-6b. Задокументировано в docstring `RestartPolicy`.
+
+**Последствия:** аддитивно; дефолт (fixed, jitter=0) = прежнее детерминированное поведение бит-в-бит. Reversible: yes — рецепт не задаёт `backoff_mode` → fixed. Risk: low. Джиттер на `random` (не крипто, `# nosec B311`).

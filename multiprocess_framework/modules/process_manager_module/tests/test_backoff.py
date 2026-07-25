@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ..core.restart_policy import RestartPolicy
 from ..monitor.process_monitor import ProcessMonitor
 
@@ -93,3 +95,21 @@ class TestBackwardCompat:
         assert p.backoff_mode == "exponential"
         assert p.backoff_max_sec == 30.0
         assert p.backoff_jitter == 0.2
+
+
+class TestEdgeGuards:
+    def test_invalid_mode_raises(self) -> None:
+        # Literal: опечатка → ValidationError (не тихий fixed), ловит _resolve_policy
+        with pytest.raises(Exception):
+            RestartPolicy(backoff_mode="exponentail")
+
+    def test_huge_attempt_no_overflow(self) -> None:
+        # attempt ≳ 1025 (window_sec=0 + огромный max_retries) не даёт OverflowError
+        p = RestartPolicy(backoff_sec=2.0, backoff_mode="exponential", backoff_max_sec=50.0)
+        assert _cb(p, 5000) == 50.0  # clamp показателя + cap
+
+    def test_negative_base_clamped_to_zero(self) -> None:
+        # docstring Post: результат >= 0 даже при backoff_sec<0 и jitter=0
+        p = RestartPolicy(backoff_sec=-3.0)
+        assert _cb(p, 1) == 0.0
+        assert _cb(p, 1, rand=0.5) == 0.0

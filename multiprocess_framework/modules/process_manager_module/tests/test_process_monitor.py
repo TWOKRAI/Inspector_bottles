@@ -281,6 +281,54 @@ class TestRestartWindow:
 
         assert monitor.previous_states["cam"]["status"] == "failed"
 
+
+class TestExponentialBackoffIntegration:
+    """NEW-6a: связка _try_auto_restart → _compute_backoff передаёт attempt=count+1.
+
+    Чистая функция покрыта в test_backoff.py; здесь ловим регресс «attempt всегда 1»
+    (fixed-тесты его не поймают): вторая запланированная пауза должна быть вдвое больше
+    первой при exponential, и _recovery_deadline растёт вместе с backoff.
+    """
+
+    def _monitor(self):
+        mock_pm = _make_mock_process_manager()
+        mock_pm.name = "ProcessManager"
+        mock_pm._get_protected_names.return_value = set()
+        mock_pm.communication.send_message.return_value = True
+        pol = RestartPolicy(
+            enabled=True,
+            backoff_sec=2.0,
+            backoff_mode="exponential",
+            backoff_max_sec=100.0,
+            backoff_jitter=0.0,
+            window_sec=0.0,  # метки не протухают → count растёт детерминированно
+            max_retries=10,
+        )
+        return mock_pm, ProcessMonitor(mock_pm, restart_policy=pol)
+
+    def test_second_attempt_doubles_backoff(self) -> None:
+        _mock_pm, monitor = self._monitor()
+
+        before1 = time.monotonic()
+        monitor._try_auto_restart("cam", reason="crashed")  # attempt=1 → backoff≈2
+        delay1 = monitor._pending_restarts["cam"] - before1
+        rec_gap1 = monitor._recovery_deadline["cam"] - monitor._pending_restarts["cam"]
+
+        # Симулируем диспатч: снять pending, история [t1] остаётся → следующий count=1
+        monitor._pending_restarts.pop("cam")
+        monitor._pending_recovery.discard("cam")
+
+        before2 = time.monotonic()
+        monitor._try_auto_restart("cam", reason="crashed")  # attempt=2 → backoff≈4
+        delay2 = monitor._pending_restarts["cam"] - before2
+        rec_gap2 = monitor._recovery_deadline["cam"] - monitor._pending_restarts["cam"]
+
+        assert 1.8 < delay1 < 2.3, delay1
+        assert 3.6 < delay2 < 4.4, delay2  # ~2× первой
+        assert abs(delay2 - 2 * delay1) < 0.4
+        # recovery_deadline = pending + heartbeat_timeout + 5 → gap постоянен (растёт ВМЕСТЕ с backoff)
+        assert abs(rec_gap1 - rec_gap2) < 0.05
+
     def test_giveup_publishes_health_failed(self) -> None:
         """Ф3.6: give-up публикует processes.<name>.health.status=failed в дерево."""
         from multiprocess_framework.modules.state_store_module import StateStoreManager

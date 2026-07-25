@@ -868,14 +868,16 @@ class ProcessMonitor:
         """
         base = float(policy.backoff_sec)
         if policy.backoff_mode == "exponential":
-            grown = base * (2 ** max(0, attempt - 1))
+            # clamp показателя: attempt может дорасти до тысяч при window_sec=0 +
+            # огромном max_retries → 2**attempt даст OverflowError на потоке монитора.
+            grown = base * (2 ** min(max(0, attempt - 1), 63))
             base = min(grown, float(policy.backoff_max_sec))
         jitter = min(max(float(policy.backoff_jitter or 0.0), 0.0), 1.0)
         if jitter > 0.0:
             r = random.random() if rand is None else rand  # nosec B311 — не крипто, размазывание рестартов
             factor = 1.0 + (2.0 * r - 1.0) * jitter  # r=0→1-j, r→1→1+j
-            base = max(0.0, base * factor)
-        return base
+            base = base * factor
+        return max(0.0, base)  # инвариант Post: результат >= 0 (в т.ч. при backoff_sec<0)
 
     def _try_auto_restart(self, process_name: str, reason: str) -> None:
         """Попытка авто-рестарта процесса с учётом RestartPolicy.
@@ -992,7 +994,7 @@ class ProcessMonitor:
         self._emit_supervisor_event(
             process_name,
             "restarting",
-            reason=f"причина: {reason}, backoff {backoff}с",
+            reason=f"причина: {reason}, backoff {backoff:.2f}с",
             attempt=f"{attempt}/{max_retries}",
             level="warning",
         )
