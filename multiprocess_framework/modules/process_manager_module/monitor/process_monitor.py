@@ -17,6 +17,14 @@ from typing import Any
 from ...config_module.feature_flags import is_enabled
 from ...process_module.health.schema import HealthField, HealthStatus, health_path
 from ...worker_module import ThreadConfig, ThreadPriority
+from ..core.alert_rules import (
+    DEFAULT_RULES,
+    AlertRule,
+    counter_growth,
+    counter_rules,
+    rules_for_event,
+    should_fire,
+)
 from ..core.restart_policy import RestartPolicy
 
 #: Причина пере-инициации рестарта watchdog'ом H3 (рестарт тихо не подтвердился).
@@ -145,6 +153,11 @@ class ProcessMonitor:
         # иначе снялся бы watchdog H3 у рестарта, который всё равно будет исполнен.
         # Снимается при диспатче (рестарт пошёл) и в forget_process (switch).
         self._induced_restarts: set[str] = set()
+        # NEW-7 alerting: правила + антидребезг + база счётчиков.
+        # {(rule, process): monotonic} последнего срабатывания; {(rule, process): int} базы.
+        self._alert_rules: tuple[AlertRule, ...] = DEFAULT_RULES
+        self._alert_last_fired: dict[tuple[str, str], float] = {}
+        self._counter_baseline: dict[tuple[str, str], int] = {}
 
         # Замок текущей итерации цикла: stop(wait=True) дожидается его
         # освобождения — после возврата stop() ни одна проверка/рестарт
@@ -324,6 +337,87 @@ class ProcessMonitor:
             parts.append(f"— {reason}")
         msg = " ".join(parts)
         log = getattr(self.process, f"_log_{level}", None) or self.process._log_warning
+        log(msg)
+
+        # NEW-7: событийные правила алертинга поверх того же потока событий.
+        self._maybe_alert_on_event(process_name, event, reason)
+
+    # ── NEW-7: alerting ──────────────────────────────────────────────────────
+
+    def _maybe_alert_on_event(self, process_name: str, event: str, reason: str) -> None:
+        """Поднять алерты по событийным правилам (``gave_up``/``unresponsive``/…).
+
+        Тихо ничего не делает при выключенном ``FW_SUPERVISOR_ALERTS``. Антидребезг —
+        per (правило, процесс), см. ``AlertRule.cooldown_sec``.
+        """
+        if not is_enabled("FW_SUPERVISOR_ALERTS"):
+            return
+        for rule in rules_for_event(self._alert_rules, event):
+            self._fire_alert(rule, process_name, reason or event)
+
+    def _check_counter_alerts(self) -> None:
+        """Счётчиковые правила: прирост счётчика в StateStore → алерт (NEW-7).
+
+        Первая проверка только ЗАПОМИНАЕТ базу (алерта нет — иначе счётчик,
+        накопленный до старта монитора, дал бы ложную тревогу). Сброс счётчика
+        (рестарт процесса) приростом не считается — база просто опускается.
+        """
+        if not is_enabled("FW_SUPERVISOR_ALERTS"):
+            return
+        rules = counter_rules(self._alert_rules)
+        if not rules:
+            return
+        for proc in self.process._process_registry.os_processes:
+            name = proc.name
+            for rule in rules:
+                current = self._read_state_int(rule.path_for(name))
+                if current is None:
+                    continue
+                key = (rule.name, name)
+                baseline = self._counter_baseline.get(key)
+                growth = counter_growth(baseline, current)
+                self._counter_baseline[key] = current
+                if baseline is None:
+                    continue  # первый замер — только база
+                if growth >= rule.min_growth:
+                    self._fire_alert(rule, name, f"счётчик вырос на {growth} (сейчас {current})")
+
+    def _read_state_int(self, path: str) -> int | None:
+        """Прочитать целочисленное значение из локального StateStore (или ``None``)."""
+        if not path:
+            return None
+        ssm = getattr(self.process, "_state_store_manager", None)
+        if ssm is None:
+            return None
+        try:
+            resp = ssm.handle_state_get({"data": {"path": path}})
+            if resp.get("status") != "ok":
+                return None
+            value = resp.get("value")
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
+        except Exception:  # nosec B110 — чтение счётчика не критично для монитора
+            return None
+
+    def _fire_alert(self, rule: AlertRule, process_name: str, reason: str) -> None:
+        """Опубликовать алерт (с антидребезгом) в ``system.alerts.*`` + громкий лог.
+
+        Дерево алертов — отдельная ветка ``system.alerts.<process>.<rule>``: это
+        supervisor-owned плоскость (как ``processes.<name>.supervisor.*``), она не
+        конкурирует с health-поддеревом процесса, которое он публикует своим снапшотом.
+        """
+        key = (rule.name, process_name)
+        now_m = time.monotonic()
+        if not should_fire(self._alert_last_fired.get(key), now_m, rule.cooldown_sec):
+            return
+        self._alert_last_fired[key] = now_m
+
+        base = f"system.alerts.{process_name}.{rule.name}"
+        self._publish_state(f"{base}.severity", rule.severity)
+        self._publish_state(f"{base}.reason", reason)
+        self._publish_state(f"{base}.at", time.time())
+
+        msg = f"[alert:{rule.severity}] {process_name}: {rule.name} — {reason}"
+        log = self.process._log_error if rule.severity == "critical" else self.process._log_warning
         log(msg)
 
     def _publish_uptime(self, all_states: dict[str, dict[str, Any]]) -> None:
@@ -509,6 +603,10 @@ class ProcessMonitor:
             # H3: тихо-провалившиеся рестарты (не вернулись к жизни в дедлайн) →
             # пере-инициировать (ретрай в окне политики / громкий give-up).
             self._check_recovery_timeouts()
+
+            # NEW-7: счётчиковые алерты (рост дропов) — событийные поднимаются
+            # прямо в _emit_supervisor_event.
+            self._check_counter_alerts()
 
             # Периодический полный broadcast для новых подписчиков (GUI)
             self._full_broadcast_counter += 1

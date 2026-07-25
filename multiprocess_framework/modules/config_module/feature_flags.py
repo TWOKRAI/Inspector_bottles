@@ -226,6 +226,14 @@ _FLAG_LIST: Tuple[FeatureFlag, ...] = (
         ),
     ),
     FeatureFlag(
+        "FW_SUPERVISOR_ALERTS",
+        default=True,
+        doc="Алертинг поверх supervisor-событий и счётчиков (NEW-7): gave_up → critical, "
+        "unresponsive / рост дропов → warning. Публикует system.alerts.<process>.<rule> "
+        "+ громкий лог, антидребезг per правило/процесс. Default ON: терминальные "
+        "состояния не должны теряться в потоке логов. Откат — env =0.",
+    ),
+    FeatureFlag(
         "FW_HEALTH_RESTART",
         default=False,
         doc="Рестарт процесса по деградации health-статуса (опц., поверх авто-рестарта).",
