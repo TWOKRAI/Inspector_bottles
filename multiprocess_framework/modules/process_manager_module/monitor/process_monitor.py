@@ -361,6 +361,15 @@ class ProcessMonitor:
         Первая проверка только ЗАПОМИНАЕТ базу (алерта нет — иначе счётчик,
         накопленный до старта монитора, дал бы ложную тревогу). Сброс счётчика
         (рестарт процесса) приростом не считается — база просто опускается.
+
+        Путь берётся ПЕРВЫЙ резолвящийся из ``rule.counter_paths`` (имя поля —
+        конвенция публикующей стороны: capture-плагин пишет ``drops``).
+
+        Известная семантика: база продвигается на каждом замере, поэтому прирост,
+        пришедшийся на окно ``cooldown``, НЕ аккумулируется — после окна алерт
+        сообщит величину последнего интервала, а не суммарную. Это осознанно:
+        цель — «дропы растут прямо сейчас», а не точный учёт потерь (для него есть
+        сами счётчики в дереве).
         """
         if not is_enabled("FW_SUPERVISOR_ALERTS"):
             return
@@ -370,7 +379,11 @@ class ProcessMonitor:
         for proc in self.process._process_registry.os_processes:
             name = proc.name
             for rule in rules:
-                current = self._read_state_int(rule.path_for(name))
+                current = None
+                for path in rule.paths_for(name):
+                    current = self._read_state_int(path)
+                    if current is not None:
+                        break
                 if current is None:
                     continue
                 key = (rule.name, name)
@@ -397,6 +410,23 @@ class ProcessMonitor:
             return value if isinstance(value, int) and not isinstance(value, bool) else None
         except Exception:  # nosec B110 — чтение счётчика не критично для монитора
             return None
+
+    def _clear_alerts_subtree(self, process_name: str) -> None:
+        """Удалить ``system.alerts.<process>`` из StateStore (NEW-7).
+
+        Алерт — не вечная истина: имя, ушедшее из топологии (switch/hot-apply), не
+        должно оставлять в дереве critical навсегда. Резидуал (зафиксирован в
+        ADR-PMM-021): снятия алерта по ``recovered``/TTL пока нет — только по
+        удалению процесса; давность видна по полю ``at``.
+        """
+        ssm = getattr(self.process, "_state_store_manager", None)
+        handler = getattr(ssm, "handle_state_delete", None) if ssm is not None else None
+        if handler is None:
+            return
+        try:
+            handler({"data": {"path": f"system.alerts.{process_name}"}})
+        except Exception:  # nosec B110 — чистка алертов best-effort, сбой не критичен
+            pass
 
     def _fire_alert(self, rule: AlertRule, process_name: str, reason: str) -> None:
         """Опубликовать алерт (с антидребезгом) в ``system.alerts.*`` + громкий лог.
@@ -1447,6 +1477,14 @@ class ProcessMonitor:
         self._recovery_deadline.pop(process_name, None)  # H3: и watchdog-дедлайн
         self._given_up.discard(process_name)  # H4: имя переиспользуется — снять give-up-гейт
         self._induced_restarts.discard(process_name)  # NEW-6b: и каскадную пометку
+        # NEW-7: снять алерт-состояние имени. Иначе cooldown СТАРОГО инстанса глушил
+        # бы critical нового (имя переиспользуется после switch/hot-swap), а стейл-база
+        # счётчика маскировала первый интервал роста.
+        for key in [k for k in self._alert_last_fired if k[1] == process_name]:
+            self._alert_last_fired.pop(key, None)
+        for key in [k for k in self._counter_baseline if k[1] == process_name]:
+            self._counter_baseline.pop(key, None)
+        self._clear_alerts_subtree(process_name)
 
     # ----------------------------------------------------------------
     # Полный broadcast статуса (для синхронизации с GUI)

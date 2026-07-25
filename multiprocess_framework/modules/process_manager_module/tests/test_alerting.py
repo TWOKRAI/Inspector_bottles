@@ -38,12 +38,24 @@ class TestRuleSelection:
         got = counter_rules(DEFAULT_RULES)
         assert [r.name for r in got] == ["drops_growing"]
 
-    def test_path_for_substitutes_process(self) -> None:
-        rule = AlertRule("r", counter_path="processes.{process}.state.drops_count")
-        assert rule.path_for("cam") == "processes.cam.state.drops_count"
+    def test_paths_for_substitutes_process(self) -> None:
+        rule = AlertRule("r", counter_paths=("processes.{process}.state.drops",))
+        assert rule.paths_for("cam") == ["processes.cam.state.drops"]
 
-    def test_path_for_empty_when_event_rule(self) -> None:
-        assert AlertRule("r", events=("crashed",)).path_for("cam") == ""
+    def test_paths_for_empty_when_event_rule(self) -> None:
+        assert AlertRule("r", events=("crashed",)).paths_for("cam") == []
+
+    def test_default_drops_rule_uses_real_published_field(self) -> None:
+        """Регресс-страж находки ревью: путь обязан совпадать с реальным публикатором.
+
+        Живой публикатор — capture-плагин: merge в ``processes.<name>.state`` с полем
+        ``drops``. Дефолт, указывающий на непубликуемое имя, делает правило молча
+        мёртвым (алерт «дропы растут» не сработает никогда).
+        """
+        rule = next(r for r in DEFAULT_RULES if r.name == "drops_growing")
+        assert "processes.{process}.state.drops" in rule.counter_paths
+        # первым кандидатом идёт реально публикуемое имя
+        assert rule.counter_paths[0].endswith(".state.drops")
 
 
 class TestShouldFire:
@@ -75,6 +87,11 @@ class TestCounterGrowth:
         assert counter_growth(None, 5) == 0
         assert counter_growth(5, None) == 0
         assert counter_growth(5, "7") == 0
+
+    def test_bool_is_not_counter(self) -> None:
+        # bool — подкласс int: True не должен становиться «счётчиком 1»
+        assert counter_growth(False, True) == 0
+        assert counter_growth(0, True) == 0
 
 
 # ── Интеграция в монитор ─────────────────────────────────────────────────────
@@ -151,7 +168,7 @@ class TestEventAlerts:
 
 
 class TestCounterAlerts:
-    _PATH = "processes.cam.state.drops_count"
+    _PATH = "processes.cam.state.drops"
 
     def test_first_pass_only_baselines(self) -> None:
         _pm, mon, _store, published = _monitor({self._PATH: 5}, procs=["cam"])
@@ -198,3 +215,78 @@ class TestCounterAlerts:
     def test_bool_is_not_counter(self) -> None:
         _pm, mon, _store, _published = _monitor({self._PATH: True}, procs=["cam"])
         assert mon._read_state_int(self._PATH) is None
+
+
+class TestAlertHardening:
+    """Находки Fable-ревью NEW-7: fallback путей, сброс на switch, cooldown счётчика."""
+
+    def test_falls_back_to_second_candidate_path(self) -> None:
+        """Первый путь не резолвится → берём следующий кандидат (правило не умирает)."""
+        alt = "processes.cam.state.drops_count"
+        _pm, mon, store, published = _monitor({alt: 3}, procs=["cam"])
+        mon._check_counter_alerts()  # база по второму кандидату
+        assert mon._counter_baseline[("drops_growing", "cam")] == 3
+        store[alt] = 7
+        mon._check_counter_alerts()
+        assert [v for p, v in published if p.endswith("drops_growing.severity")] == ["warning"]
+
+    def test_forget_process_resets_cooldown(self) -> None:
+        """MED-1: cooldown СТАРОГО инстанса не должен глушить алерт нового имени."""
+        _pm, mon, _store, published = _monitor()
+        mon._emit_supervisor_event("cam", "gave_up", reason="старый инстанс")
+        mon.forget_process("cam")  # switch/hot-swap
+        mon._emit_supervisor_event("cam", "gave_up", reason="новый инстанс")
+
+        sev = [p for p, _ in published if p.endswith("supervisor_gave_up.severity")]
+        assert len(sev) == 2, "второй critical подавлен чужим cooldown'ом"
+
+    def test_forget_process_clears_alert_state(self) -> None:
+        _pm, mon, _store, _published = _monitor({"processes.cam.state.drops": 1}, procs=["cam"])
+        mon._check_counter_alerts()
+        mon._emit_supervisor_event("cam", "gave_up", reason="x")
+        mon.forget_process("cam")
+        assert not [k for k in mon._alert_last_fired if k[1] == "cam"]
+        assert not [k for k in mon._counter_baseline if k[1] == "cam"]
+
+    def test_forget_process_deletes_alerts_subtree(self) -> None:
+        """MED-2: имя ушло из топологии → его алерты не остаются в дереве навсегда."""
+        deleted: list[str] = []
+        pm = MagicMock()
+        pm._process_configs = {}
+
+        class _SSM:
+            def handle_state_get(self, msg):
+                return {"status": "error"}
+
+            def handle_state_delete(self, msg):
+                deleted.append(msg["data"]["path"])
+                return {"status": "ok"}
+
+        pm._state_store_manager = _SSM()
+        mon = ProcessMonitor(pm, restart_policy=RestartPolicy(enabled=True))
+        mon.forget_process("cam")
+        assert "system.alerts.cam" in deleted
+
+    def test_counter_alert_respects_cooldown(self) -> None:
+        """Непрерывный рост в окне cooldown даёт ОДИН алерт, а не поток."""
+        _pm, mon, store, published = _monitor({"processes.cam.state.drops": 0}, procs=["cam"])
+        mon._check_counter_alerts()  # база
+        for i in range(1, 6):
+            store["processes.cam.state.drops"] = i
+            mon._check_counter_alerts()
+        assert len([p for p, _ in published if p.endswith("drops_growing.severity")]) == 1
+
+    def test_min_growth_threshold(self) -> None:
+        """min_growth > 1: прирост ниже порога алерт не поднимает."""
+        from ..core.alert_rules import AlertRule
+
+        _pm, mon, store, published = _monitor({"processes.cam.state.drops": 0}, procs=["cam"])
+        mon._alert_rules = (AlertRule("big_drops", counter_paths=("processes.{process}.state.drops",), min_growth=5),)
+        mon._check_counter_alerts()  # база
+        store["processes.cam.state.drops"] = 3  # ниже порога
+        mon._check_counter_alerts()
+        assert not any("big_drops" in p for p, _ in published)
+
+        store["processes.cam.state.drops"] = 20  # прирост 17 ≥ 5
+        mon._check_counter_alerts()
+        assert any("big_drops.severity" in p for p, _ in published)

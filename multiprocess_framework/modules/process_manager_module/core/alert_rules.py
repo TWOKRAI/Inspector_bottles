@@ -59,13 +59,19 @@ class AlertRule:
     name: str
     severity: Severity = "warning"
     events: Tuple[str, ...] = ()
-    counter_path: str = ""
+    counter_paths: Tuple[str, ...] = ()
     min_growth: int = 1
     cooldown_sec: float = 60.0
 
-    def path_for(self, process: str) -> str:
-        """Путь счётчика для конкретного процесса (пусто, если правило не счётчиковое)."""
-        return self.counter_path.format(process=process) if self.counter_path else ""
+    def paths_for(self, process: str) -> list[str]:
+        """Пути-кандидаты счётчика для процесса (пусто — правило не счётчиковое).
+
+        Кандидатов несколько, потому что имя поля счётчика — конвенция публикующей
+        стороны, а не проверяемый инвариант: capture-плагин публикует ``drops``,
+        другие источники могут писать ``drops_count``. Монитор берёт ПЕРВЫЙ путь,
+        который реально резолвится, — правило не умирает молча от переименования.
+        """
+        return [p.format(process=process) for p in self.counter_paths]
 
 
 #: Набор по умолчанию. Терминальный ``gave_up`` — critical с длинным cooldown
@@ -87,7 +93,17 @@ DEFAULT_RULES: Tuple[AlertRule, ...] = (
     AlertRule(
         "drops_growing",
         severity="warning",
-        counter_path="processes.{process}.state.drops_count",
+        # ВАЖНО: путь обязан совпадать с тем, что РЕАЛЬНО публикуют источники.
+        # Живой публикатор — capture-плагин (`Plugins/sources/capture/plugin.py`):
+        # `processes.<name>.state` ⊃ поле `drops`. Вариант `drops_count` оставлен
+        # вторым кандидатом (так поле зовётся в camera-адаптере прототипа под
+        # другим корнем и в RingBuffer). Первый резолвящийся путь выигрывает —
+        # иначе правило молча мертво (находка ревью NEW-7: дефолт указывал на
+        # `drops_count` под `processes.*`, который не публикует НИКТО).
+        counter_paths=(
+            "processes.{process}.state.drops",
+            "processes.{process}.state.drops_count",
+        ),
         min_growth=1,
         cooldown_sec=60.0,
     ),
@@ -103,8 +119,8 @@ def rules_for_event(rules: Iterable[AlertRule], event: str) -> list[AlertRule]:
 
 
 def counter_rules(rules: Iterable[AlertRule]) -> list[AlertRule]:
-    """Счётчиковые правила (непустой ``counter_path``)."""
-    return [r for r in rules if r.counter_path]
+    """Счётчиковые правила (непустой ``counter_paths``)."""
+    return [r for r in rules if r.counter_paths]
 
 
 def should_fire(last_fired_at: Optional[float], now: float, cooldown_sec: float) -> bool:
@@ -126,6 +142,10 @@ def counter_growth(baseline: Optional[int], current: Optional[int]) -> int:
     (``current < baseline`` — например, процесс перезапущен) тоже даёт ``0``:
     рестарт не должен выглядеть как всплеск потерь.
     """
+    # bool — подкласс int: True стал бы «счётчиком 1». Контракт модуля: не-int
+    # (в том числе bool) сигнала не даёт — симметрично фильтру _read_state_int.
+    if isinstance(current, bool) or isinstance(baseline, bool):
+        return 0
     if not isinstance(current, int) or not isinstance(baseline, int):
         return 0
     delta = current - baseline
