@@ -74,11 +74,14 @@ class _FakeProc:
 
 
 class _FakeRegistry:
-    def __init__(self, rec: List[Tuple[str, Any]]) -> None:
+    def __init__(self, rec: List[Tuple[str, Any]], fail_names: set[str] | None = None) -> None:
         self._rec = rec
         self._procs: dict[str, _FakeProc] = {}
+        self._fail = fail_names or set()
 
-    def create_and_register(self, name: str, class_path: str, config: dict, priority: str) -> _FakeProc:
+    def create_and_register(self, name: str, class_path: str, config: dict, priority: str) -> _FakeProc | None:
+        if name in self._fail:
+            return None  # имитируем провал создания процесса
         proc = _FakeProc(name, self._rec)
         self._procs[name] = proc
         return proc
@@ -92,15 +95,17 @@ class _FakePriority:
     def apply_priority(self, *a: Any) -> None: ...
 
 
-def _make_pm(rec: List[Tuple[str, Any]], *, timeout: float = 5.0) -> ProcessManagerProcess:
+def _make_pm(
+    rec: List[Tuple[str, Any]], *, timeout: float = 5.0, fail_names: set[str] | None = None
+) -> ProcessManagerProcess:
     """Лёгкий PM без тяжёлого initialize: только атрибуты для boot-пути."""
     pm = object.__new__(ProcessManagerProcess)
     pm._process_configs = {}
     pm.shared_resources = None
-    pm._process_registry = _FakeRegistry(rec)  # type: ignore[attr-defined]
+    pm._process_registry = _FakeRegistry(rec, fail_names)  # type: ignore[attr-defined]
     pm._priority = _FakePriority()  # type: ignore[attr-defined]
     pm._mark_instance_started = lambda name: None  # type: ignore[assignment]
-    pm._cleanup_process_resources = lambda name: None  # type: ignore[assignment]
+    pm._cleanup_process_resources = lambda name: rec.append(("cleanup", name))  # type: ignore[assignment]
     pm._log_info = lambda *a, **k: None  # type: ignore[assignment]
     pm._log_warning = lambda *a, **k: rec.append(("warn", a[0] if a else ""))  # type: ignore[assignment]
     pm._log_error = lambda *a, **k: rec.append(("error", a[0] if a else ""))  # type: ignore[assignment]
@@ -202,6 +207,24 @@ class TestBootGate:
         pm._create_processes_from_config({"a": _cfg(depends_on=["a"])})
         assert any(e[0] == "warn" and "сам на себя" in e[1] for e in rec)
         assert [e for e in rec if e[0] == "start"] == [("start", "a")]
+
+    def test_upstream_create_failure_not_awaited_by_gate(self) -> None:
+        """Провал create апстрима: он НЕ в ``started`` → гейт зависимой волны его не ждёт.
+
+        Покрывает строку-предохранитель ``if d in started`` (:1861): регрессия, ждущая
+        никогда не стартовавший апстрим, повесила бы +timeout на волну. Также
+        проверяем откат ресурсов упавшего процесса.
+        """
+        rec: List[Tuple[str, Any]] = []
+        pm = _make_pm(rec, fail_names={"a"})
+        pm._create_processes_from_config({"a": _cfg(), "b": _cfg(depends_on=["a"])})
+        # 'a' не стартовал → в waits НЕ фигурирует; 'b' стартует всё равно (boot не блокируем)
+        assert ("wait", ("a",)) not in rec
+        assert [e for e in rec if e[0] == "wait"] == []
+        assert [e for e in rec if e[0] == "start"] == [("start", "b")]
+        # откат ресурсов упавшего 'a' вызван
+        assert ("cleanup", "a") in rec
+        assert any(e[0] == "error" and "'a'" in e[1] for e in rec)
 
 
 # ── Уровень 3: проброс depends_on до proc_dict ───────────────────────────────

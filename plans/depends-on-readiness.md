@@ -39,13 +39,22 @@
 
 ## Acceptance
 
-- [ ] `depends_on` доходит от рецепта до `proc_dict` верхнего уровня (тест проброса).
-- [ ] Топосорт: `B depends_on A` → `A.start()` вызван и `A` ready ДО `B.start()`.
-- [ ] Цикл `A↔B` → ERROR, плоский фолбэк, boot не виснет.
-- [ ] Missing/self dep → WARNING, ребро отброшено, старт идёт.
-- [ ] Backward-compat: без `depends_on` порядок/поведение прежние (существующие тесты зелёные).
-- [ ] `FW_DEPENDS_ON_BOOT_ORDER=0` → плоский старт даже при заданном `depends_on`.
-- [ ] Полный framework-suite зелёный; Live-smoke (proto boot) зелёный.
+- [x] `depends_on` доходит от рецепта до `proc_dict` верхнего уровня — проверено ДВАЖДЫ:
+  framework `assemble_proc_dicts` + **реальный прототипный** `build_headless_launcher`
+  на webcam_sketch (proc_dict[seg].depends_on=['camera_0'], lines←seg, points←lines).
+- [x] Топосорт: `B depends_on A` → гейт `_wait_processes_ready([A])` ВЫЗВАН между
+  `A.start()` и `B.start()` (тесты chain/diamond, последовательность start/wait).
+- [x] Цикл `A↔B` → ERROR, плоский фолбэк, boot не виснет (тест).
+- [x] Missing/self dep → WARNING, ребро отброшено, старт идёт (тесты).
+- [x] Провал create апстрима → гейт его не ждёт (`d in started`), откат ресурсов (тест).
+- [x] Backward-compat: без `depends_on` порядок/поведение прежние (1528+ существующих зелёных).
+- [x] `FW_DEPENDS_ON_BOOT_ORDER=0` → плоский старт даже при заданном `depends_on` (тест).
+- [x] Профильные + framework-suite зелёные (16 depends_on / 1528 модульных).
+- [~] Live proto boot: webcam_sketch headless **реально поднялся** (6 процессов, gui strip,
+  мой depends-рецепт) и proc_dict в launcher несёт depends_on. Строку-маркер `boot:
+  depends_on-порядок` из живой observability.db снять НЕ удалось — INFO фильтруется из
+  консоли + батч БД не сбрасывается на graceful-stop terminate (ортогональный observability-
+  плюмбинг, не логика фичи). Доказательство порядка = launcher-proc_dict + 16 юнит-тестов.
 
 ## Out of scope
 

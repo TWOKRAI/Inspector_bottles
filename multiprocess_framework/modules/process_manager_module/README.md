@@ -368,7 +368,8 @@ SystemLauncher
    → process_instance.initialize()
      → _create_processes_from_config(processes_config)
        → Фаза 1: create_and_register_queues для всех
-       → Фаза 2: _registry.create_and_register + start + _priority.apply для каждого
+       → Фаза 2: старт волнами по depends_on (топосорт + гейт readiness апстрима,
+                 ADR-PMM-018/FW_DEPENDS_ON_BOOT_ORDER); без depends_on — одна плоская волна
      → process_monitor.start()
    → process_instance.run()
 4. При stop_event оркестратора или shutdown:

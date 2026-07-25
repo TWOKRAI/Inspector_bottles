@@ -1861,7 +1861,16 @@ class ProcessManagerProcess(ProcessModule):
                     {d for name in wave for d in (config_by_name[name].get("depends_on") or []) if d in started}
                 )
                 if upstreams:
-                    self._wait_processes_ready(upstreams, timeout_s, "boot-deps")
+                    ready = self._wait_processes_ready(upstreams, timeout_s, "boot-deps")
+                    # Не глотать сигнал: подтверждённо не-ready апстрим → зависимые
+                    # волны стартуют ВСЁ РАВНО (boot не блокируем), но это должно быть
+                    # видно на уровне гейта, а не тонуть в generic-warning примитива.
+                    not_ready = sorted(n for n, ok in ready.items() if not ok)
+                    if not_ready:
+                        self._log_warning(
+                            f"boot-deps: волна {wave_index} ({wave}) стартует при не-ready "
+                            f"апстримах {not_ready} — зависимые могут не получить данные апстрима"
+                        )
             for name in wave:
                 if self._boot_create_and_start(config_by_name[name], name):
                     started.add(name)
