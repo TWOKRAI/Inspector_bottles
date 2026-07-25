@@ -74,6 +74,15 @@ class ProcessLaunchConfig(SchemaBase):
         ),
     ] = []
 
+    supervision_group: Annotated[
+        str,
+        FieldMeta(
+            "Supervision group",
+            info="Имя группы супервизии (OTP, NEW-6b): каскад рестарта по strategy. "
+            "Пусто → one_for_one. Читает ProcessMonitor.",
+        ),
+    ] = ""
+
     queues: dict[str, Any] | None = None
 
     log_dir: str | None = None
@@ -126,6 +135,8 @@ class ProcessLaunchConfig(SchemaBase):
         # ProcessManagerProcess на boot для порядка старта по readiness. Пустой
         # список НЕ кладём — форму proc_dict не меняем (как restart_policy).
         depends_on = payload.pop("depends_on", None) or []
+        # supervision_group (NEW-6b) — на верхний уровень proc_dict (читает ProcessMonitor).
+        supervision_group = payload.pop("supervision_group", None) or ""
         # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
         workers = payload.pop("workers", None) or {}
 
@@ -156,6 +167,8 @@ class ProcessLaunchConfig(SchemaBase):
             proc_dict["restart_policy"] = restart_policy
         if depends_on:
             proc_dict["depends_on"] = list(depends_on)
+        if supervision_group:
+            proc_dict["supervision_group"] = supervision_group
         if self.memory is not None:
             proc_dict["memory"] = self.memory
         return name, proc_dict

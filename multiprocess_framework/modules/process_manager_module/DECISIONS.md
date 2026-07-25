@@ -467,3 +467,22 @@ is_alive-liveness.
 **Известная граница (эрозия окна give-up):** exp-пауза расходует то же окно `window_sec`, в котором считается `max_retries`. При `backoff_max_sec ≈ window_sec/max_retries` старые метки протухают быстрее, чем счётчик дойдёт до лимита → `gave_up` может не наступить (throttled crash-loop без терминала). Дефолты (`max_retries=3`, 2/4/8с) безопасны; при exponential держать `backoff_max_sec << window_sec/max_retries`. Полное решение (экспонента от consecutive-failure счётчика, сбрасываемого по recovered) — NEW-6b. Задокументировано в docstring `RestartPolicy`.
 
 **Последствия:** аддитивно; дефолт (fixed, jitter=0) = прежнее детерминированное поведение бит-в-бит. Reversible: yes — рецепт не задаёт `backoff_mode` → fixed. Risk: low. Джиттер на `random` (не крипто, `# nosec B311`).
+
+## ADR-PMM-020: OTP-стратегии супервизии — группы + rest_for_one/one_for_all (В5 NEW-6b, 2026-07-26)
+
+**Статус:** принято
+**Дата:** 2026-07-26
+**Refs:** plans/supervisor-strategies.md, `monitor/process_monitor.py::_resolve_restart_set/_cascade_restart/_escalate_group_giveup`
+
+**Контекст:** супервизор был плоским (`one_for_one`): рестартовал только упавшего. Зависимые оставались ЖИВЫМИ, но без апстрима — молчаливая деградация конвейера (`camera_0` умер → `seg`/`lines` крутят пустоту). Ф8 (supervision-tree) требует каскадных стратегий.
+
+**Решение:**
+1. **Группа = тег, не иерархия.** `ProcessConfig.supervision_group: str` (одно имя = одна группа) → верхний уровень `proc_dict`. Отвергнута отдельная сущность «supervisor node с детьми»: тег + уже существующий граф `depends_on` (3.9) дают ту же выразительность без новой оси конфигурации.
+2. **Порядок каскада — из `depends_on`** (`_topo_order`, Kahn; цикл не роняет каскад, остаток идёт как есть). Переиспользование графа 3.9 вместо второго списка «порядок в группе».
+3. **`RestartPolicy.strategy: Literal["one_for_one"(деф),"rest_for_one","one_for_all"]`.** `rest_for_one` — транзитивные зависимые упавшего (при заданной группе — только её члены); `one_for_all` — остальные члены группы (без группы → WARNING + деградация в one_for_one, а не тихий no-op).
+4. **Induced-рестарт НЕ заряжает `_restart_history` члена.** Интенсивность (`max_retries`/`window_sec`) — свойство супервизора и считается по процессу-триггеру (семантика OTP). Иначе каскад «сдавался» бы на здоровых членах группы, которых уронил чужой отказ. Пропускаются protected / уже запланированные (чужой план не затирается) / `_given_up` (терминальное состояние не воскрешаем каскадом).
+5. **Эскалация give-up на группу.** Супервизор сдался по триггеру → члены получают `health.degraded_reason` + громкий ERROR со списком затронутых. Статус членов НЕ ставим `failed` (они живы). Новый вид supervisor-события сознательно НЕ вводится: словарь {crashed, unresponsive, restarting, recovered, gave_up} — контракт GUI и будущего alerting NEW-7.
+
+**Границы:** стратегии живут только на supervision-пути монитора; switch/hot-apply/replace_blueprint каскад не применяют. Каскадные рестарты идут тем же IPC-путём (`_pending_restarts` → `process.restart`), т.е. сериализуются с apply_topology — гонки нет.
+
+**Последствия:** аддитивно; дефолт `one_for_one` + отсутствие `supervision_group` = прежнее поведение бит-в-бит. Reversible: yes — рецепт не задаёт strategy/group. Risk: low-medium (каскад трогает несколько процессов сразу — ограничен группой и топо-порядком, induced-рестарты не копят give-up).

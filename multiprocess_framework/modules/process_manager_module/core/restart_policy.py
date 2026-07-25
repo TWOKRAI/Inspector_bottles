@@ -61,6 +61,11 @@ class RestartPolicy(SchemaBase):
     # см. process_manager_process._resolve_policy. Т.е. дефолт off, прод on.
     enabled: bool = False
     max_retries: int = 3
+    # Стратегия супервизии (OTP, NEW-6b): что ещё рестартить при падении процесса.
+    # one_for_one — только упавший (прежнее поведение). rest_for_one — упавший + все,
+    # кто транзитивно depends_on него (порядок из 3.9). one_for_all — вся группа
+    # supervision_group. rest_for_one/one_for_all требуют supervision_group у процесса.
+    strategy: Literal["one_for_one", "rest_for_one", "one_for_all"] = "one_for_one"
     backoff_sec: float = 2.0
     # Literal (не str): опечатка в рецепте ("exponentail") → ValidationError →
     # _resolve_policy падает на глобальную политику с WARNING, а НЕ молча в fixed

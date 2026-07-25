@@ -855,6 +855,94 @@ class ProcessMonitor:
         return self.restart_policy
 
     @staticmethod
+    def _topo_order(names: list[str], deps: dict[str, list[str]]) -> list[str]:
+        """Упорядочить ``names`` так, чтобы апстрим шёл раньше зависимого (Kahn).
+
+        Рёбра учитываются только ВНУТРИ ``names`` (внешние зависимости игнорируются —
+        они не рестартуются этим каскадом). Цикл → остаток возвращается в исходном
+        порядке (не роняем каскад).
+        """
+        pending = {n: {d for d in deps.get(n, ()) if d in names and d != n} for n in names}
+        placed: list[str] = []
+        placed_set: set[str] = set()
+        while pending:
+            wave = [n for n in names if n in pending and not (pending[n] - placed_set)]
+            if not wave:  # цикл — отдаём остаток как есть
+                placed.extend(n for n in names if n in pending)
+                break
+            for n in wave:
+                del pending[n]
+            placed.extend(wave)
+            placed_set.update(wave)
+        return placed
+
+    @staticmethod
+    def _resolve_restart_set(
+        failed: str,
+        strategy: str,
+        groups: dict[str, str],
+        deps: dict[str, list[str]],
+    ) -> list[str]:
+        """Кого ЕЩЁ рестартить вместе с ``failed`` (OTP-стратегии, NEW-6b).
+
+        - ``one_for_one`` → ``[]`` (прежнее поведение: только упавший);
+        - ``rest_for_one`` → все, кто транзитивно ``depends_on`` упавшего (данные от
+          него больше не идут). Если у упавшего задана ``supervision_group`` — только
+          члены той же группы;
+        - ``one_for_all`` → все ОСТАЛЬНЫЕ члены группы упавшего. Без группы вернёт
+          ``[]`` (нечего считать «всеми») — вызывающий деградирует в one_for_one.
+
+        Результат упорядочен топологически (апстрим раньше зависимого) и НЕ содержит
+        ``failed``. Чистая функция: ``groups`` (имя→группа) и ``deps`` (имя→depends_on)
+        — снимки конфига.
+        """
+        if strategy == "one_for_one":
+            return []
+        group = groups.get(failed, "")
+        if strategy == "one_for_all":
+            if not group:
+                return []
+            members = [n for n in groups if groups.get(n, "") == group and n != failed]
+            return ProcessMonitor._topo_order(members, deps)
+        if strategy == "rest_for_one":
+            # транзитивные зависимые: обходим обратные рёбра depends_on от failed
+            dependents: set[str] = set()
+            frontier = {failed}
+            while frontier:
+                nxt: set[str] = set()
+                for name, dl in deps.items():
+                    if name in dependents or name == failed:
+                        continue
+                    if frontier & set(dl or ()):
+                        nxt.add(name)
+                dependents |= nxt
+                frontier = nxt
+            if group:  # каскад не выходит за пределы группы упавшего
+                dependents = {n for n in dependents if groups.get(n, "") == group}
+            return ProcessMonitor._topo_order(sorted(dependents), deps)
+        return []
+
+    def _supervision_snapshot(self) -> tuple[dict[str, str], dict[str, list[str]]]:
+        """Снимки ``{имя: supervision_group}`` и ``{имя: depends_on}`` из конфигов PM.
+
+        Ссылка на ``_process_configs`` берётся живьём (как ``_resolve_policy``) — без
+        своей копии/рассинхрона. Сбой/отсутствие → пустые снимки (каскад не сработает,
+        деградация в one_for_one).
+        """
+        configs = getattr(self.process, "_process_configs", None)
+        if not isinstance(configs, dict):
+            return {}, {}
+        groups: dict[str, str] = {}
+        deps: dict[str, list[str]] = {}
+        for name, cfg in configs.items():
+            if not isinstance(cfg, dict):
+                continue
+            groups[name] = str(cfg.get("supervision_group") or "")
+            raw = cfg.get("depends_on") or []
+            deps[name] = [str(d) for d in raw] if isinstance(raw, (list, tuple)) else []
+        return groups, deps
+
+    @staticmethod
     def _compute_backoff(policy: RestartPolicy, attempt: int, rand: float | None = None) -> float:
         """Задержка перед рестартом для попытки ``attempt`` (1-based, NEW-6a).
 
@@ -960,6 +1048,9 @@ class ProcessMonitor:
                         psr.update_state(process_name, status="failed")
                 except Exception:  # nosec B110 — best-effort обновление статуса в SR, сбой некритичен
                     pass
+            # NEW-6b: эскалация give-up на уровень группы (иначе группа тихо
+            # остаётся полумёртвой: упавший FAILED, остальные «ok», но без апстрима).
+            self._escalate_group_giveup(process_name, policy, count, window_sec, reason)
             return
 
         # Запланировать рестарт после backoff (Task 3.1): БЕЗ sleep и БЕЗ
@@ -998,6 +1089,87 @@ class ProcessMonitor:
             attempt=f"{attempt}/{max_retries}",
             level="warning",
         )
+        # NEW-6b: каскад по стратегии супервизии (one_for_one → ничего не делает).
+        self._cascade_restart(process_name, policy, backoff, now_m, protected)
+
+    def _escalate_group_giveup(
+        self,
+        trigger: str,
+        policy: RestartPolicy,
+        count: int,
+        window_sec: float,
+        reason: str,
+    ) -> None:
+        """Эскалация give-up на группу супервизии (NEW-6b).
+
+        Супервизор сдался по ``trigger``. При групповой стратегии это значит, что
+        зависимые/сокомандники остаются ЖИВЫМИ, но без апстрима — молча деградировавшими.
+        Помечаем их ``health.degraded_reason`` и говорим об этом громко (ERROR).
+
+        Сознательно НЕ вводим новый вид supervisor-события: словарь
+        {crashed, unresponsive, restarting, recovered, gave_up} — контракт для GUI и
+        будущего alerting (NEW-7). Статус членов НЕ ставим failed — они живы.
+        """
+        if policy.strategy == "one_for_one":
+            return
+        groups, deps = self._supervision_snapshot()
+        group = groups.get(trigger, "")
+        if not group:
+            return
+        affected = self._resolve_restart_set(trigger, policy.strategy, groups, deps)
+        affected = [n for n in affected if n not in self._given_up]
+        if not affected:
+            return
+        txt = (
+            f"группа '{group}': супервизор сдался по '{trigger}' "
+            f"({count} рестартов за {window_sec}с, {reason}) — апстрим не восстановлен"
+        )
+        self.process._log_error(f"Эскалация {txt}; затронуты: {affected}")
+        for name in affected:
+            self._publish_state(health_path(name, HealthField.DEGRADED_REASON), txt)
+            self._publish_state(health_path(name, HealthField.UPDATED_AT), time.time())
+
+    def _cascade_restart(
+        self,
+        trigger: str,
+        policy: RestartPolicy,
+        backoff: float,
+        now_m: float,
+        protected: set[str],
+    ) -> None:
+        """Запланировать induced-рестарты по стратегии (rest_for_one/one_for_all).
+
+        Induced-рестарт НЕ пишет метку в ``_restart_history`` члена: интенсивность
+        (max_retries/window) — свойство супервизора и считается по процессу-триггеру
+        (семантика OTP). Иначе каскад «сдавался» бы на здоровых членах группы.
+
+        Пропускаются: protected, уже запланированные, уже сдавшиеся (``_given_up`` —
+        терминальное состояние), сам триггер.
+        """
+        if policy.strategy == "one_for_one":
+            return
+        groups, deps = self._supervision_snapshot()
+        induced = self._resolve_restart_set(trigger, policy.strategy, groups, deps)
+        if not induced and policy.strategy == "one_for_all" and not groups.get(trigger):
+            self.process._log_warning(
+                f"Process '{trigger}': strategy=one_for_all без supervision_group — "
+                f"каскад невозможен, рестартуем только упавший (one_for_one)"
+            )
+            return
+        for name in induced:
+            if name in protected or name in self._pending_restarts or name in self._given_up:
+                continue
+            self._pending_restarts[name] = now_m + backoff
+            self._pending_recovery.add(name)
+            self._last_heartbeat.pop(name, None)
+            self._recovery_deadline[name] = now_m + backoff + self.heartbeat_timeout + 5.0
+            self._emit_supervisor_event(
+                name,
+                "restarting",
+                reason=f"каскад {policy.strategy} от '{trigger}', backoff {backoff:.2f}с",
+                attempt="induced",
+                level="warning",
+            )
 
     def _dispatch_due_restarts(self) -> None:
         """Отправить в PM рестарты, чей backoff истёк (IPC, не прямой вызов).

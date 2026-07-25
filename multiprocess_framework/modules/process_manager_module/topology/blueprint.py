@@ -131,6 +131,16 @@ class ProcessConfig(SchemaBase):
         ),
     ] = []
 
+    supervision_group: Annotated[
+        str,
+        FieldMeta(
+            "Supervision group",
+            info="Имя группы супервизии (OTP, NEW-6b): процессы с одним именем — одна группа. "
+            "Стратегия rest_for_one/one_for_all (restart_policy.strategy) каскадит рестарт "
+            "по членам группы. Пусто → процесс сам по себе (one_for_one).",
+        ),
+    ] = ""
+
     # --- Data Pipeline routing (Phase 5) ---
 
     chain_targets: Annotated[
@@ -210,6 +220,10 @@ class ProcessConfig(SchemaBase):
         # волнами по readiness апстрима. Пустой не кладём (форму proc_dict не меняем).
         if self.depends_on:
             base_kwargs["depends_on"] = list(self.depends_on)
+        # supervision_group (NEW-6b): непустой → верхний уровень proc_dict → монитор
+        # каскадит рестарт по членам группы (strategy). Пустой не кладём.
+        if self.supervision_group:
+            base_kwargs["supervision_group"] = self.supervision_group
 
         # Data Pipeline routing.
         # C6 рычаг 1: приоритет typed-поля, ИНАЧЕ extras[key] — 100% back-compat для старых
