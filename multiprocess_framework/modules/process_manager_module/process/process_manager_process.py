@@ -1827,12 +1827,17 @@ class ProcessManagerProcess(ProcessModule):
         return None
 
     def _create_processes_from_config(self, processes_config: dict[str, dict[str, Any]]) -> None:
-        """Двухфазно: очереди для всех, затем create + start.
+        """Двухфазно: очереди для всех, затем create + start волнами по depends_on.
 
         Провал create → конфиг и provisioned-ресурсы (очереди/PSR) процесса
         откатываются: «призрак» (конфиг без Process-объекта) не должен
         попадать в ``_topology_current_names``/stop-фазу, а его очереди —
         в routing_map остальных детей.
+
+        Ф5 3.9: если ``FW_DEPENDS_ON_BOOT_ORDER`` включён и хоть один процесс задал
+        ``depends_on``, старт идёт волнами топосорта — перед каждой волной ждём
+        self-reported ready её апстримов (``_wait_processes_ready``). Без depends_on
+        (или флаг off / цикл) — одна плоская волна = прежнее поведение.
         """
         valid = [(n, c) for n, c in processes_config.items() if isinstance(c, dict) and c.get("class")]
         if not valid:
@@ -1843,19 +1848,102 @@ class ProcessManagerProcess(ProcessModule):
             if self.shared_resources:
                 self.shared_resources.register_process(name, proc_config)
 
-        for name, proc_config in valid:
-            priority = proc_config.get("priority", "normal")
-            if self._process_registry.create_and_register(name, proc_config["class"], proc_config, priority):
-                self._priority.register_priority(name, priority)
-                process = self._process_registry.get_process_by_name(name)
-                if process:
-                    process.start()
-                    self._mark_instance_started(name)
-                    self._priority.apply_priority(process)
-            else:
-                self._log_error(f"boot: создание '{name}' не удалось — конфиг и ресурсы откатываются (не призрак)")
-                self._cleanup_process_resources(name)
-                self._process_configs.pop(name, None)
+        ordered_names = [n for n, _ in valid]
+        config_by_name = {n: c for n, c in valid}
+        waves = self._plan_boot_waves(ordered_names, config_by_name)
+
+        started: set[str] = set()
+        timeout_s = self._boot_ready_timeout()
+        for wave_index, wave in enumerate(waves):
+            if wave_index > 0 and timeout_s > 0:
+                # Гейт: дождаться ready апстримов этой волны, реально стартовавших.
+                upstreams = sorted(
+                    {d for name in wave for d in (config_by_name[name].get("depends_on") or []) if d in started}
+                )
+                if upstreams:
+                    self._wait_processes_ready(upstreams, timeout_s, "boot-deps")
+            for name in wave:
+                if self._boot_create_and_start(config_by_name[name], name):
+                    started.add(name)
+
+    def _boot_create_and_start(self, proc_config: dict[str, Any], name: str) -> bool:
+        """Создать+стартовать один процесс на boot. ``True`` если реально стартован.
+
+        Провал create → откат конфига и ресурсов (не «призрак»), ``False``.
+        """
+        priority = proc_config.get("priority", "normal")
+        if self._process_registry.create_and_register(name, proc_config["class"], proc_config, priority):
+            self._priority.register_priority(name, priority)
+            process = self._process_registry.get_process_by_name(name)
+            if process:
+                process.start()
+                self._mark_instance_started(name)
+                self._priority.apply_priority(process)
+                return True
+            return False
+        self._log_error(f"boot: создание '{name}' не удалось — конфиг и ресурсы откатываются (не призрак)")
+        self._cleanup_process_resources(name)
+        self._process_configs.pop(name, None)
+        return False
+
+    def _boot_ready_timeout(self) -> float:
+        """Таймаут ожидания ready на boot (``boot_ready_timeout_s``, дефолт 5.0с; 0 → без ожидания)."""
+        raw = self.get_config("boot_ready_timeout_s")
+        return 5.0 if raw is None else float(raw)
+
+    def _plan_boot_waves(self, ordered_names: list[str], config_by_name: dict[str, dict[str, Any]]) -> list[list[str]]:
+        """Волны старта по ``depends_on`` (Ф5 3.9).
+
+        Флаг ``FW_DEPENDS_ON_BOOT_ORDER`` off / нет зависимостей / цикл в графе →
+        одна плоская волна (исходный порядок, прежнее поведение). Рёбра на
+        несуществующий процесс или сам-на-себя — отброшены с WARNING (boot не рушим).
+        """
+        if not is_enabled("FW_DEPENDS_ON_BOOT_ORDER"):
+            return [ordered_names]
+        valid_set = set(ordered_names)
+        deps_map: dict[str, list[str]] = {}
+        any_deps = False
+        for name in ordered_names:
+            deps: list[str] = []
+            for d in config_by_name[name].get("depends_on") or []:
+                if d == name:
+                    self._log_warning(f"boot: '{name}' depends_on сам на себя — ребро отброшено")
+                elif d not in valid_set:
+                    self._log_warning(f"boot: '{name}' depends_on '{d}' — нет такого процесса, ребро отброшено")
+                elif d not in deps:
+                    deps.append(d)
+            if deps:
+                any_deps = True
+            deps_map[name] = deps
+        if not any_deps:
+            return [ordered_names]
+        waves, had_cycle = self._compute_boot_waves(ordered_names, deps_map)
+        if had_cycle:
+            self._log_error("boot: цикл в depends_on — плоский старт (порядок не гарантирован)")
+            return [ordered_names]
+        self._log_info(f"boot: depends_on-порядок, волн {len(waves)} (размеры {[len(w) for w in waves]})")
+        return waves
+
+    @staticmethod
+    def _compute_boot_waves(ordered_names: list[str], deps_map: dict[str, list[str]]) -> tuple[list[list[str]], bool]:
+        """Топосорт (Kahn) на волны. Внутри волны — исходный порядок ``ordered_names``.
+
+        ``deps_map`` — уже отфильтрован (рёбра только на валидные процессы, без self).
+        Возвращает ``(waves, had_cycle)``: при цикле ``([], True)`` — вызывающий
+        делает плоский фолбэк.
+        """
+        remaining = {n: set(deps_map.get(n, ())) for n in ordered_names}
+        waves: list[list[str]] = []
+        placed: set[str] = set()
+        while remaining:
+            wave = [n for n in ordered_names if n in remaining and not (remaining[n] - placed)]
+            if not wave:
+                return [], True  # ни один узел не разрешим → цикл
+            waves.append(wave)
+            for n in wave:
+                del remaining[n]
+            placed.update(wave)
+        return waves, False
 
     def shutdown(self) -> bool:
         """
@@ -2376,8 +2464,7 @@ class ProcessManagerProcess(ProcessModule):
         РАВНО (boot не блокировать навсегда) — не-ready логируются WARNING'ом.
         Медленный ребёнок (ML-веса) не ломает boot: liveness-фолбэк → ready.
         """
-        raw_timeout = self.get_config("boot_ready_timeout_s")
-        timeout_s = 5.0 if raw_timeout is None else float(raw_timeout)
+        timeout_s = self._boot_ready_timeout()
         if timeout_s <= 0:
             return
         names = [p.name for p in self._process_registry.os_processes]

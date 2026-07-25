@@ -65,6 +65,15 @@ class ProcessLaunchConfig(SchemaBase):
         ),
     ] = {}
 
+    depends_on: Annotated[
+        list[str],
+        FieldMeta(
+            "Depends on",
+            info="Имена процессов-апстримов для boot-порядка по readiness (Ф5 3.9). "
+            "Пусто → без ограничений. Читает ProcessManagerProcess на boot.",
+        ),
+    ] = []
+
     queues: dict[str, Any] | None = None
 
     log_dir: str | None = None
@@ -113,6 +122,10 @@ class ProcessLaunchConfig(SchemaBase):
         # dict в proc_dict НЕ кладём — иначе меняли бы форму каждого proc_dict;
         # монитор трактует отсутствие как «глобальная политика».
         restart_policy = payload.pop("restart_policy", None) or {}
+        # depends_on — на верхний уровень proc_dict (Ф5 3.9): его читает
+        # ProcessManagerProcess на boot для порядка старта по readiness. Пустой
+        # список НЕ кладём — форму proc_dict не меняем (как restart_policy).
+        depends_on = payload.pop("depends_on", None) or []
         # workers выносим на верхний уровень proc_dict (читает ProcessModule), не в config.
         workers = payload.pop("workers", None) or {}
 
@@ -141,6 +154,8 @@ class ProcessLaunchConfig(SchemaBase):
         }
         if restart_policy:
             proc_dict["restart_policy"] = restart_policy
+        if depends_on:
+            proc_dict["depends_on"] = list(depends_on)
         if self.memory is not None:
             proc_dict["memory"] = self.memory
         return name, proc_dict

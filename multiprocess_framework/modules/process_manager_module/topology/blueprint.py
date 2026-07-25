@@ -121,6 +121,16 @@ class ProcessConfig(SchemaBase):
         ),
     ] = {}
 
+    depends_on: Annotated[
+        list[str],
+        FieldMeta(
+            "Depends on",
+            info="Имена процессов-апстримов: на boot этот процесс стартует ТОЛЬКО после "
+            "того, как все перечисленные сообщили ready (Ф5 3.9, гейт FW_DEPENDS_ON_BOOT_ORDER). "
+            "Пусто → без ограничений порядка. Предусловие supervision-tree (Ф8).",
+        ),
+    ] = []
+
     # --- Data Pipeline routing (Phase 5) ---
 
     chain_targets: Annotated[
@@ -196,6 +206,10 @@ class ProcessConfig(SchemaBase):
         # build() вынесет на верхний уровень proc_dict → ProcessMonitor._resolve_policy.
         if self.restart_policy:
             base_kwargs["restart_policy"] = self.restart_policy
+        # depends_on (Ф5 3.9): непустой → верхний уровень proc_dict → PM boot-порядок
+        # волнами по readiness апстрима. Пустой не кладём (форму proc_dict не меняем).
+        if self.depends_on:
+            base_kwargs["depends_on"] = list(self.depends_on)
 
         # Data Pipeline routing.
         # C6 рычаг 1: приоритет typed-поля, ИНАЧЕ extras[key] — 100% back-compat для старых

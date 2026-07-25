@@ -201,6 +201,13 @@ _FLAG_LIST: Tuple[FeatureFlag, ...] = (
         doc="Авто-рестарт упавших дочерних процессов супервизором. Default ON.",
     ),
     FeatureFlag(
+        "FW_DEPENDS_ON_BOOT_ORDER",
+        default=True,
+        doc="Boot-порядок процессов по ProcessConfig.depends_on: апстрим стартует и "
+        "сообщает ready ДО зависимого (Ф5 3.9, предусловие Ф8). Инертен без depends_on "
+        "в рецепте (одна волна = прежний плоский старт). Откат — env =0. Default ON.",
+    ),
+    FeatureFlag(
         "FW_ROUTING_REFRESH",
         default=True,
         doc="Refresh routing-epoch при изменении топологии. Default ON.",
