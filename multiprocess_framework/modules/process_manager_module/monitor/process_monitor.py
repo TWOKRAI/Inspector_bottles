@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import random
 import threading
 import time
 from multiprocessing import Event
@@ -853,6 +854,29 @@ class ProcessMonitor:
                         )
         return self.restart_policy
 
+    @staticmethod
+    def _compute_backoff(policy: RestartPolicy, attempt: int, rand: float | None = None) -> float:
+        """Задержка перед рестартом для попытки ``attempt`` (1-based, NEW-6a).
+
+        - ``backoff_mode="fixed"`` → ``backoff_sec`` (прежнее детерминированное поведение);
+        - ``backoff_mode="exponential"`` → ``min(backoff_sec * 2**(attempt-1), backoff_max_sec)``;
+        - джиттер (``backoff_jitter>0``): множитель в ``[1-j, 1+j]`` размазывает
+          одновременный рестарт группы. ``rand`` (в ``[0,1)``) — для детерминизма в
+          тестах; ``None`` → ``random.random()``.
+
+        Post: результат ``>= 0``. При ``jitter=0`` и ``mode="fixed"`` == ``backoff_sec``.
+        """
+        base = float(policy.backoff_sec)
+        if policy.backoff_mode == "exponential":
+            grown = base * (2 ** max(0, attempt - 1))
+            base = min(grown, float(policy.backoff_max_sec))
+        jitter = min(max(float(policy.backoff_jitter or 0.0), 0.0), 1.0)
+        if jitter > 0.0:
+            r = random.random() if rand is None else rand  # nosec B311 — не крипто, размазывание рестартов
+            factor = 1.0 + (2.0 * r - 1.0) * jitter  # r=0→1-j, r→1→1+j
+            base = max(0.0, base * factor)
+        return base
+
     def _try_auto_restart(self, process_name: str, reason: str) -> None:
         """Попытка авто-рестарта процесса с учётом RestartPolicy.
 
@@ -941,7 +965,7 @@ class ProcessMonitor:
         # IPC-командой в PM (_dispatch_due_restarts), где оно сериализуется
         # с apply_topology на message_processor-потоке (гонка исключена).
         attempt = count + 1
-        backoff = policy.backoff_sec
+        backoff = self._compute_backoff(policy, attempt)
         if process_name in self._pending_restarts:
             return  # уже запланирован
         # Записываем метку текущей попытки (уже отфильтрованный по окну список +

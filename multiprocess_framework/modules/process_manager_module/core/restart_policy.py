@@ -16,7 +16,18 @@ class RestartPolicy(SchemaBase):
     Attributes:
         enabled: Включён ли авто-рестарт
         max_retries: Максимальное число попыток рестарта В ОКНЕ window_sec
-        backoff_sec: Задержка перед рестартом (секунды)
+        backoff_sec: Базовая задержка перед рестартом (секунды). При
+            ``backoff_mode="exponential"`` — задержка ПЕРВОЙ попытки, дальше растёт.
+        backoff_mode: ``"fixed"`` (по умолчанию, прежнее поведение — постоянный
+            ``backoff_sec``) или ``"exponential"`` (``backoff_sec * 2**(attempt-1)``,
+            ограничено ``backoff_max_sec``). Экспонента гасит crash-loop-шторм:
+            частые падения → быстро растущая пауза (NEW-6a).
+        backoff_max_sec: Потолок задержки для ``exponential`` (секунды). Защита от
+            ухода паузы в бесконечность при большом числе попыток.
+        backoff_jitter: Доля случайного разброса задержки, ``0.0..1.0``. Итоговая
+            задержка = base * (1 ± uniform(0, jitter)). ``0`` → без джиттера (прежнее
+            детерминированное поведение). Джиттер размазывает одновременный рестарт
+            группы процессов (thundering herd), NEW-6a.
         window_sec: Окно стабильности (секунды) для подсчёта попыток. Метки
             рестартов старше ``now - window_sec`` протухают и не считаются —
             это защищает от вечной flap-петли (пожизненный счётчик сдавался
@@ -38,6 +49,9 @@ class RestartPolicy(SchemaBase):
     enabled: bool = False
     max_retries: int = 3
     backoff_sec: float = 2.0
+    backoff_mode: str = "fixed"  # "fixed" | "exponential"
+    backoff_max_sec: float = 60.0
+    backoff_jitter: float = 0.0  # доля 0.0..1.0
     window_sec: float = 60.0
     restart_on_crash: bool = True
     restart_on_unresponsive: bool = True
