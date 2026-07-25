@@ -127,7 +127,10 @@ class RecordHistoryPanel(BaseAdminPanel):
         self._table.itemDoubleClicked.connect(self._on_row_double_clicked)
         root.addWidget(self._table, stretch=1)
 
-        # Кнопки: Обновить / Копировать / Очистить.
+        # Кнопки Обновить / Копировать / Очистить создаём здесь, но НЕ кладём в
+        # контент — они уходят в action-колонку вкладки (колонка 1) через
+        # action_buttons(), чтобы «Наблюдаемость» выглядела как остальные вкладки
+        # (BaseTreeNavTab: кнопки | список разделов | контент).
         self._btn_reload = QPushButton("Обновить")
         self._btn_reload.setToolTip("Перечитать историю из стора")
         self._btn_reload.clicked.connect(self.reload)
@@ -140,11 +143,8 @@ class RecordHistoryPanel(BaseAdminPanel):
         self._btn_clear.setToolTip("Очистить историю этой вкладки (необратимо)")
         self._btn_clear.clicked.connect(self._on_clear)
 
-        # Пагинация ← / → + метка страницы.
+        # Пагинация ← / → + метка страницы (остаётся в контенте под таблицей).
         pagination_layout = QHBoxLayout()
-        pagination_layout.addWidget(self._btn_reload)
-        pagination_layout.addWidget(self._btn_copy)
-        pagination_layout.addWidget(self._btn_clear)
         pagination_layout.addStretch()
 
         self._btn_prev = QPushButton("←")
@@ -162,6 +162,14 @@ class RecordHistoryPanel(BaseAdminPanel):
 
         pagination_layout.addStretch()
         root.addLayout(pagination_layout)
+
+    def action_buttons(self) -> List[QWidget]:
+        """Кнопки для action-колонки вкладки (колонка 1): Обновить / Копировать / Очистить.
+
+        Контракт SectionProtocol.action_buttons — BaseTreeNavTab кладёт их в
+        action-стек и переключает по активной секции (как в Settings).
+        """
+        return [self._btn_reload, self._btn_copy, self._btn_clear]
 
     # ------------------------------------------------------------------
     # Фильтры / загрузка

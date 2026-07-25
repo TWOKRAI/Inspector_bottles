@@ -119,7 +119,8 @@ class TestPanel:
         src = FakeSource([_rec("log", "L1"), _rec("error", "E1"), _rec("stats", "fps", severity="gauge")])
         tabs = ObservabilityTabs(source=src)
         qtbot.addWidget(tabs)
-        assert tabs.count() == 3
+        # BaseTreeNavTab: три раздела — проверяем через panel() (не QTabWidget.count()).
+        assert all(tabs.panel(kind) is not None for kind in ("log", "error", "stats"))
         assert tabs.panel("log")._table.rowCount() == 1
         assert tabs.panel("error")._table.rowCount() == 1
         assert tabs.panel("stats")._table.rowCount() == 1
