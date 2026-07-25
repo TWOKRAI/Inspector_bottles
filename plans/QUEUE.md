@@ -43,11 +43,13 @@
 
 ### В5 — Supervision-tree + Ф8
 
+> **Supervision-подблок ЗАКРЫТ 2026-07-26** (пп. 1-3): всё в `main`, каждый инкремент — отдельная ветка → Fable-ревью → фиксы → ff-merge; финальный гейт **5361 passed / 6 skipped**. Осталась ось Ф8 (H.1–H.6, пп. 4-9).
+
 | # | Задача | Где детали |
 |---|---|---|
-| 1 | **3.9** — depends_on: порядок старта по readiness апстрима (поднято из «опц» в обязательное — предусловие Ф8) | constructor-master, Ф3 + current-path В5 |
-| 2 | **NEW-6** — стратегии супервизора (rest_for_one/one_for_all, группы, backoff+jitter, эскалация give-up) | current-path §4 |
-| 3 | **NEW-7** — alerting поверх supervisor-событий (gave_up/failed/drop-растёт/**pickle-fallback G.3(d)** → громко) | current-path §4 |
+| 1 ✅ | **3.9** — depends_on: boot волнами по readiness апстрима, флаг `FW_DEPENDS_ON_BOOT_ORDER`, guard'ы (цикл/missing/self). Merge `db81ab27`, ADR-PMM-018 | [depends-on-readiness.md](depends-on-readiness.md) |
+| 2 ✅ | **NEW-6** — супервизор: **(a)** exp-backoff + jitter (`fc983743`, ADR-PMM-019) · **(b)** OTP-стратегии `rest_for_one`/`one_for_all` + группы `supervision_group` (порядок из depends_on) + эскалация give-up на группу (`0fe1f467`, ADR-PMM-020) | [supervisor-backoff-jitter.md](supervisor-backoff-jitter.md), [supervisor-strategies.md](supervisor-strategies.md) |
+| 3 ✅ | **NEW-7** — alerting поверх supervisor-событий: `gave_up`→critical, `unresponsive`/рост дропов→warning, `system.alerts.*`, флаг `FW_SUPERVISOR_ALERTS`. Merge `3dcdab65`, ADR-PMM-021. **Остаток:** pickle-fallback G.3(d) как источник алерта — не подключён (правило не заведено) | [supervisor-alerting.md](supervisor-alerting.md) |
 | 4 | **H.1** — ярусы core/optional/frozen + enforcement + **NEW-10** (24/24 interfaces.py, Protocol ObservableMixin, «один вход», contract-тест `__all__`) | constructor-master, Ф8 |
 | 5 | **H.2 (GATE G4)** — исполнение kill-вердиктов G0 per-item, отдельными одобренными коммитами | там же |
 | 6 | **H.3** — Registers⇄StateStore merge (с оглядкой на 3 оси ADR-COMM-006) | там же |

@@ -161,3 +161,4 @@
 - [strokes_to_points перф](project_strokes_points_perf.md) — webcam_sketch FPS-просадка = O(n²) sort_nearest_neighbor + пересчёт каждый кадр; trace_skeleton граф-walk NumPy не берёт → Numba не Rust
 - [graphify-MCP setup](project_graphify_mcp_setup.md) — mcp вшивать через `uv tool install --with mcp` (рантайм --with = таймаут коннекта); единый AST-граф по 5 каталогам (29950 узлов), скоуп в .graphifyignore
 - [GUI-save сносит комментарии yaml](feedback_gui_save_strips_yaml_comments.md) — Settings→Система Save round-trip'ит system.yaml через safe_dump(model_dump): все комментарии стёрты + дефолты всплывают; git diff перед add
+- [Дефолтный путь сверять с публикатором](feedback_default_path_must_match_publisher.md) — правило читало несуществующий `drops_count` (реальный `drops`): фича мертва при 26 зелёных тестах на моке; регресс-страж + список кандидатов
