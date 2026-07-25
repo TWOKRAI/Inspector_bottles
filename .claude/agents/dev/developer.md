@@ -42,7 +42,8 @@ You are the Developer. You receive a specific task (Task X.Y) and implement it s
 3. **If codegraph is connected + changing a public API** → `codegraph_explore` — blast radius (will warn about unexpected side effects).
 4. **If working with an external library + context7 is connected** → `context7:resolve-library-id` → `context7:query-docs` for the current API (do not rely on LLM memory for unfamiliar/version-specific APIs).
 5. **If cross-file rename/refactor of a single symbol + serena is connected** → `serena:rename_symbol` (LSP-atomic, won't miss any usage) instead of Grep+Edit. `serena:find_referencing_symbols` is more precise than Grep for symbols (no false positives on string literals).
-6. Fallback (MCP not connected) → `Grep` for usages, `WebFetch` for library docs.
+6. **If assessing cross-module blast-radius before a change + graphify MCP is connected** (`graphify-out/graph.json` present) → `graphify:get_neighbors` / `graphify:shortest_path` on the symbol for the structural impact chain, `graphify:god_nodes` to check whether you are touching an architectural hub (extra caution). Complements codegraph (call-level) with graph-level structure. Else fall back to `codegraph`/`Grep`.
+7. Fallback (MCP not connected) → `Grep` for usages, `WebFetch` for library docs.
 
 **After editing GUI (if qt-mcp is connected):**
 1. After smoke-test (or manual `python -m`) → `qt_find_widget` / `qt_snapshot` confirms the new/modified widget exists and is in the correct position in the widget tree.

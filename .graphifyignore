@@ -44,3 +44,22 @@ logs/
 # === Артефакты сторонних инструментов ===
 milvus-docker/
 .sentrux/baseline.json
+
+# === Scope: только 5 целевых каталогов (единый граф с межмодульными связями) ===
+# Ведущий слэш якорит паттерн на корне — вложенные config/ внутри framework/prototype
+# НЕ исключаются. Исключаем все прочие top-level каталоги.
+/Utils/
+/config/
+/data/
+/docs/
+/examples/
+/plans/
+/qex/
+/robot/
+/robot_info/
+/scripts/
+/templates/
+/workspace/
+/backend_ctl_records/
+/run.py
+/conftest.py
