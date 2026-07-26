@@ -187,6 +187,7 @@ total_enqueued == total_flushed + Σ pending + dropped + flush_failed + in_fligh
 | `remove_tap(name)` | str | bool | Отключить tap |
 | `_fallback_log(level, msg)` | str, str | None | Последний рубеж через stdlib |
 | `_recreate_channel(name)` | str | bool | **Хук наследника:** собрать канал по имени из своего конфига |
+| `_on_channels_changed()` | — | None | **Хук наследника:** состав каналов изменился в рантайме (Ф0.8) |
 
 ### Control-plane наблюдаемости (Ф0.6)
 
@@ -205,6 +206,15 @@ total_enqueued == total_flushed + Σ pending + dropped + flush_failed + in_fligh
 > по **whitelist'у** `logger|error|stats` (`_SINK_ADDRESSABLE_MANAGERS` в
 > `builtin_commands.py`), а не через `hasattr`. Резолв «любой менеджер с методом»
 > дал бы способ одной командой тихо снять message-канал и отрезать процессу IPC.
+
+`_on_channels_changed()` вызывается **только когда состав действительно
+изменился** — неудачный toggle (неизвестное имя) хук не дёргает: «ничего не
+произошло» не должно выглядеть как событие, иначе опечатка оператора в имени
+канала стоила бы наследнику полного сброса кэша. `LoggerCore` вешает на него
+инвалидацию `_decision_cache` (Ф0.8) — **профилактика, а не починка симптома**:
+сегодня решение `should_log` не зависит от состава каналов, поэтому стейла не
+бывает; с Ф2.2 в то же решение попадёт резолв `effective_channels`, и без хука
+`logger.sink.disable` оставлял бы ответ про уже снятый канал.
 
 Tap'ы (`add_tap`) отличаются от каналов реестра тем, что не участвуют в
 маршрутизации и **переживают `reconfigure()`** — подписка на tail не рвётся при

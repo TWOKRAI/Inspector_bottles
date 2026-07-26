@@ -393,10 +393,30 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         """Очистить кэш решений should_log.
 
         После смены default_level / scope-конфигурации старые закэшированные
-        решения становятся неверными. Вызывается из ``_rebuild_from_config``;
-        также доступен публично для точечной инвалидации.
+        решения становятся неверными. Вызывается из ``_rebuild_from_config``
+        и из ``_on_channels_changed``; также доступен публично.
         """
         self._decision_cache.clear()
+
+    def _on_channels_changed(self) -> None:
+        """Состав каналов изменился в рантайме → решение should_log больше не доверенное.
+
+        Ф0.8. **Сегодня это профилактика, а не починка симптома**, и врать об
+        этом нельзя: ``_should_log_direct`` считает решение только по
+        scope/level/module, состав каналов в него не входит — значит стейла
+        сейчас физически не бывает.
+
+        Правка сделана до появления симптома потому, что Ф2.2 кладёт в то же
+        решение резолв ``effective_channels``. С этого момента ``logger.sink.disable``
+        начал бы оставлять кэш с ответом про уже снятый канал — и симптом был
+        бы не «лог не пишется», а «лог пишется в никуда», что ищется днями.
+        Дешевле поставить инвалидацию сейчас, чем вспоминать про неё потом.
+
+        Проверяемость обеспечена тестом-симуляцией Ф2.2: наследник, чьё
+        ``_should_log_direct`` зависит от реестра каналов, без этого хука
+        отвечает старой правдой.
+        """
+        self.invalidate_decision_cache()
 
     # =========================================================================
     # УЧЁТ ПОТЕРЬ НА СТЫКЕ «ИМЯ → КАНАЛ» (Ф0.4)
@@ -695,16 +715,20 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
 
     def enable_module_logging(self, module_name: str, file_path: Optional[str] = None):
         self._setup_module_channel(module_name, LoggerModuleSchema(enabled=True, file_path=file_path))
+        # Ф0.8: module-канал — такая же часть состава каналов, как sink.
+        self._on_channels_changed()
 
     def disable_module_logging(self, module_name: str):
-        if module_name in self._module_channels:
-            channel = self._module_channels[module_name]
-            try:
-                channel.close()
-            except Exception:  # nosec B110 — закрытие канала best-effort, ошибка не должна валить disable
-                pass
-            self._channel_registry.unregister(f"module_{module_name}")
-            del self._module_channels[module_name]
+        if module_name not in self._module_channels:
+            return
+        channel = self._module_channels[module_name]
+        try:
+            channel.close()
+        except Exception:  # nosec B110 — закрытие канала best-effort, ошибка не должна валить disable
+            pass
+        self._channel_registry.unregister(f"module_{module_name}")
+        del self._module_channels[module_name]
+        self._on_channels_changed()
 
     # =========================================================================
     # SINK CONTROL PLANE — хук базы (Ф0.6)

@@ -405,7 +405,10 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             отсутствовал в реестре (disable).
         """
         if enabled:
-            return self._recreate_channel(str(name))
+            changed = self._recreate_channel(str(name))
+            if changed:
+                self._on_channels_changed()
+            return changed
 
         channel = self._channel_registry.get(name)
         if channel is None:
@@ -414,7 +417,24 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             channel.close()
         except Exception as exc:  # noqa: BLE001 — закрытие best-effort, не должно валить disable
             self._log_debug(f"[{self.manager_name}] close error on '{name}': {exc}")
-        return self._channel_registry.unregister(name)
+        changed = self._channel_registry.unregister(name)
+        if changed:
+            self._on_channels_changed()
+        return changed
+
+    def _on_channels_changed(self) -> None:
+        """Хук: состав каналов изменился в рантайме (Ф0.8).
+
+        Зовётся ТОЛЬКО когда состав действительно поменялся — неудачный toggle
+        (неизвестное имя) хук не дёргает: «ничего не произошло» не должно
+        выглядеть как событие.
+
+        Наследник, кэширующий что-либо, зависящее от состава каналов, обязан
+        сбросить кэш здесь. Хук, а не переопределение публичного
+        ``set_sink_enabled``: точка расширения одна, а плоскостей три, и
+        каждая кэширует своё.
+        """
+        return None
 
     def _recreate_channel(self, name: str) -> bool:
         """Пересоздать и зарегистрировать канал по имени из собственного конфига.
