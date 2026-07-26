@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: feedback
   originSessionId: 4ed2135f-17e6-4937-9a20-79432d839934
-  modified: 2026-07-26T15:17:45.810Z
+  modified: 2026-07-26T15:25:14.650Z
 ---
 
 Требование владельца 2026-07-26: «logger_manager, error_manager, statistics_manager — братья-близнецы и должны иметь одну базу, чтоб не дублировать. Наследоваться.»
@@ -19,7 +19,14 @@ ChannelRoutingManager
     └── StatsManager   ← мимо LoggerCore
 ```
 
-Отсюда дубли: резолв путей файлов (`_resolved_file_path` vs прямой импорт `resolve_log_file_path`) и батчинг (`_setup_batcher`/`_flush_batch` vs `_enqueue_to_buffer`/`_do_flush`). И дыры: у stats нет `set_sink_enabled`, `add_log_tap`/`_emit_to_taps`, `_fallback_log`.
+Настоящие дыры: у stats нет `set_sink_enabled`, `add_log_tap`/`_emit_to_taps`, `_fallback_log` — их поднимать.
+
+**Ревью Fable поправило первичный диагноз (важно, чтобы не повторить):**
+- **Резолв путей — НЕ дубль:** stats импортирует ТУ ЖЕ `resolve_log_file_path`. Проблемы другие — направление зависимости `statistics → logger` и отсутствие per-process подпапки у stats.
+- **Батчинг — НЕ дубль:** общий механизм уже поднят (`IBufferStrategy` + `CRM._buffer`). `BatchBuffer` = pass-through, `AggregationWindow` = lossy-агрегация с анти-дубль-счётом при N каналах. Слить = сломать.
+- **`ErrorManager` уже имеет** sink-control и tap'ы (от `LoggerCore`); его дыра — адресуемость командой, не методы.
+- **Риск подъёма:** `RouterManager` тоже наследует CRM (транспорт, не наблюдаемость) — получит `set_sink_enabled` и станет адресуем командой, снимающей message-канал. Нужен whitelist `logger|error|stats` + тест.
+- **Не вводить** промежуточный `ObservabilityManagerBase(CRM)` — это новый слой в MRO, запрещён инвариантом «меньше слоёв».
 
 **Why:** увидев «у stats нет set_sink_enabled», естественно дописать его в `stats_manager.py` — и получить третью копию. Владелец требует обратного направления: общее едет ВВЕРХ в базу, потомки только специализируются. Совпадает с инвариантом «меньше слоёв»: подъём в существующую базу — не новый слой, а снятие дублей.
 
