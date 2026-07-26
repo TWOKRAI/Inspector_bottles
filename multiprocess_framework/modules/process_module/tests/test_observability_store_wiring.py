@@ -22,11 +22,11 @@ class FakeLoggerCore:
     def __init__(self):
         self._taps = {}
 
-    def add_log_tap(self, channel, *, min_level="ERROR", name=None):
+    def add_tap(self, channel, *, min_level="ERROR", name=None):
         self._taps[name or channel.name] = channel
         return name or channel.name
 
-    def remove_log_tap(self, name):
+    def remove_tap(self, name):
         return self._taps.pop(name, None) is not None
 
     def emit_error(self, message, module="worker_module", level="ERROR"):

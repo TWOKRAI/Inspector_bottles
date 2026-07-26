@@ -46,7 +46,7 @@ from ...channel_routing_module.observability import (
     hub_record_to_display,
 )
 
-# Имена store-tap'ов (хэндлы для remove_log_tap на teardown). Вешаем на ОБА
+# Имена store-tap'ов (хэндлы для remove_tap на teardown). Вешаем на ОБА
 # менеджера: error_manager (track_error/write-through) и logger_manager
 # (logger.error/ctx.log_error) — приложение логирует ошибки и туда, и туда.
 STORE_ERROR_TAP = "observability_store::error"
@@ -254,7 +254,7 @@ def wire_observability_forward(
         router: живой RouterManager процесса (``send_async``). None → forwarder-no-op.
         subscriber: адрес GUI-процесса (``targets=[subscriber]``).
         sender: имя процесса-источника.
-        logger_manager/error_manager: менеджеры с ``add_log_tap`` (error-хвост).
+        logger_manager/error_manager: менеджеры с ``add_tap`` (error-хвост).
 
     Returns:
         (forwarder, taps) — forwarder: Callable для drain-петли; taps: список
@@ -269,10 +269,10 @@ def wire_observability_forward(
 
     taps: list[Tuple[Any, str]] = []
     for mgr, tap_name in ((error_manager, error_name), (logger_manager, logger_name)):
-        if mgr is None or not hasattr(mgr, "add_log_tap"):
+        if mgr is None or not hasattr(mgr, "add_tap"):
             continue
         channel = RecordForwardChannel(router=router, subscriber=subscriber, sender=sender, name=tap_name)
-        mgr.add_log_tap(channel, min_level="ERROR", name=tap_name)
+        mgr.add_tap(channel, min_level="ERROR", name=tap_name)
         taps.append((mgr, tap_name))
     return forwarder, taps
 
@@ -280,9 +280,9 @@ def wire_observability_forward(
 def unwire_observability_forward(taps: Optional[list]) -> None:
     """Снять forward-tap'ы live-хвоста с их менеджеров (unsubscribe/teardown)."""
     for mgr, tap_name in taps or []:
-        if mgr is not None and hasattr(mgr, "remove_log_tap"):
+        if mgr is not None and hasattr(mgr, "remove_tap"):
             try:
-                mgr.remove_log_tap(tap_name)
+                mgr.remove_tap(tap_name)
             except Exception:  # nosec B110 — teardown best-effort
                 pass
 
@@ -313,8 +313,8 @@ def wire_observability_store(
     одна запись у одного tap'а.
 
     Args:
-        error_manager: реальный ErrorManager (LoggerCore с add_log_tap).
-        logger_manager: реальный LoggerManager (LoggerCore с add_log_tap).
+        error_manager: реальный ErrorManager (LoggerCore с add_tap).
+        logger_manager: реальный LoggerManager (LoggerCore с add_tap).
         db_path: путь к SQLite-файлу стора. None → resolve_default_db_path().
         process: имя процесса-источника (5.21 (c)) — tap проставит колонку
             ``process`` в стор-записи (иначе виден только scope логгера).
@@ -325,10 +325,10 @@ def wire_observability_store(
     store = ObservabilityStore(db_path)
     taps: list[Tuple[Any, str]] = []
     for mgr, tap_name in ((error_manager, STORE_ERROR_TAP), (logger_manager, STORE_LOGGER_TAP)):
-        if mgr is None or not hasattr(mgr, "add_log_tap"):
+        if mgr is None or not hasattr(mgr, "add_tap"):
             continue
         # min_level=ERROR → ловим error + critical, ниже не пишем (вкладка «Ошибки»).
-        mgr.add_log_tap(StoreTapChannel(store, name=tap_name, process=process), min_level="ERROR", name=tap_name)
+        mgr.add_tap(StoreTapChannel(store, name=tap_name, process=process), min_level="ERROR", name=tap_name)
         taps.append((mgr, tap_name))
     return store, taps
 
@@ -339,9 +339,9 @@ def unwire_observability_store(
 ) -> None:
     """Снять store-tap'ы с их менеджеров и закрыть стор (graceful teardown)."""
     for mgr, tap_name in taps or []:
-        if mgr is not None and hasattr(mgr, "remove_log_tap"):
+        if mgr is not None and hasattr(mgr, "remove_tap"):
             try:
-                mgr.remove_log_tap(tap_name)
+                mgr.remove_tap(tap_name)
             except Exception:  # nosec B110 — teardown best-effort
                 pass
     if store is not None:

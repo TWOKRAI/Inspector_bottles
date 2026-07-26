@@ -56,7 +56,7 @@ class RecordForwardChannel(IChannel):
             router: RouterManager с ``send_async(dict, priority)`` — живой роутер процесса.
             subscriber: адрес получателя (GUI-процесс), ``targets=[subscriber]``.
             sender: имя процесса-источника (в сообщении и в ``data.process``).
-            name: имя канала (хэндл tap'а для remove_log_tap).
+            name: имя канала (хэндл tap'а для remove_tap).
             kind: kind при нормализации LogRecord-dict в ``write`` (обычно 'error').
             command: поле ``command`` пуша (роутинг-ключ у GUI-хендлера).
         """

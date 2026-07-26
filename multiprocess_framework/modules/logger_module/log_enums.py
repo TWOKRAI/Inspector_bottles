@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Уровни и области логирования — enum для рантайма LoggerManager (без Pydantic)."""
+"""Уровни и области логирования — enum для рантайма LoggerManager (без Pydantic).
+
+Ранги уровней (``LEVEL_ORDER`` / ``level_rank`` / ``is_error_level``) здесь
+БОЛЬШЕ НЕ ЖИВУТ: они общее хозяйство трёх плоскостей наблюдаемости и переехали
+в ``channel_routing_module.levels`` (Ф0.6, резидуал R6). База не имеет права
+зависеть от своего потомка, а tap-механика с порогом уровня поднята именно в
+базу. Здесь остались только enum'ы формата лог-записи — статистике они не нужны.
+"""
 
 from enum import Enum
 
@@ -23,39 +30,3 @@ class LogScope(Enum):
     AUDIT = "audit"
     SECURITY = "security"
     DEBUG = "debug"
-
-
-#: Каноничный порядок уровней (растёт по важности). Единый источник для сравнения
-#: «level ≥ порог» (log tail, should_log). Строки — как в LogRecord.to_dict().
-LEVEL_ORDER = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-
-
-def level_rank(level) -> int:
-    """Числовой ранг уровня (DEBUG=0 … CRITICAL=4). Принимает ``LogLevel`` или строку.
-
-    Неизвестный уровень → 0 (не фильтруем — безопасный дефолт «пропустить»).
-    """
-    val = getattr(level, "value", level)
-    try:
-        return LEVEL_ORDER.index(str(val).upper())
-    except ValueError:
-        return 0
-
-
-#: Ранг, начиная с которого запись считается аварийной: её нельзя ни буферизовать,
-#: ни потерять при выключенных приёмниках (инвариант 1 плана observability-unified-routing).
-ERROR_RANK = LEVEL_ORDER.index("ERROR")
-
-
-def is_error_level(level) -> bool:
-    """ERROR/CRITICAL? Принимает ``LogLevel`` или строку.
-
-    Единственный предикат «эта запись — аварийная» на весь лог-слой. По нему
-    ``LoggerCore.log()`` и severity-путь ``ErrorManager.log()`` решают писать
-    синхронно, мимо ``BatchBuffer``, и подстилать floor (Ф0.9, вариант B).
-
-    Заменил ``buffer_priority()`` из временной меры Ф0.1: та выталкивала запись
-    из пачки приоритетом (сбрасывая заодно всю пачку), теперь запись просто не
-    попадает в пачку.
-    """
-    return level_rank(level) >= ERROR_RANK

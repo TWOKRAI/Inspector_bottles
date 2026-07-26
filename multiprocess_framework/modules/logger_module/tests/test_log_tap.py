@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Тесты Ф1 Task 1.5: log tap + RouterPushChannel (tail логов ≥ level).
 
-- LoggerManager.add_log_tap: КАЖДАЯ запись ≥ порога уходит в tap-sink; ниже — нет;
+- LoggerManager.add_tap: КАЖДАЯ запись ≥ порога уходит в tap-sink; ниже — нет;
 - tap переживает reconfigure() (подписка на tail не рвётся при hot-reload);
 - RouterPushChannel.write: пушит запись адресным router-сообщением (мост 1.1b).
 """
@@ -44,7 +44,7 @@ class TestLogTap:
         mgr = LoggerManager(manager_name="TapTest")
         mgr.initialize()
         sink = _CollectSink()
-        mgr.add_log_tap(sink, min_level="ERROR")
+        mgr.add_tap(sink, min_level="ERROR")
 
         mgr.error("boom", module="test")
         mgr.info("noise", module="test")
@@ -57,7 +57,7 @@ class TestLogTap:
         mgr = LoggerManager(manager_name="TapTest")
         mgr.initialize()
         sink = _CollectSink()
-        mgr.add_log_tap(sink, min_level="WARNING")
+        mgr.add_tap(sink, min_level="WARNING")
 
         mgr.warning("w", module="test")
         mgr.error("e", module="test")
@@ -70,18 +70,18 @@ class TestLogTap:
         mgr = LoggerManager(manager_name="TapTest")
         mgr.initialize()
         sink = _CollectSink()
-        name = mgr.add_log_tap(sink, min_level="ERROR")
-        assert mgr.remove_log_tap(name) is True
+        name = mgr.add_tap(sink, min_level="ERROR")
+        assert mgr.remove_tap(name) is True
 
         mgr.error("after-remove", module="test")
         assert sink.records == []
-        assert mgr.remove_log_tap(name) is False  # уже нет
+        assert mgr.remove_tap(name) is False  # уже нет
 
     def test_tap_survives_reconfigure(self) -> None:
         mgr = LoggerManager(manager_name="TapTest")
         mgr.initialize()
         sink = _CollectSink()
-        mgr.add_log_tap(sink, min_level="ERROR")
+        mgr.add_tap(sink, min_level="ERROR")
 
         # reconfigure закрывает каналы реестра, но tap живёт отдельно.
         assert mgr.reconfigure({"default_level": "DEBUG"}) is True
@@ -115,7 +115,7 @@ class TestRouterPushChannel:
         mgr = LoggerManager(manager_name="TapTest")
         mgr.initialize()
         router = _FakeRouter()
-        mgr.add_log_tap(
+        mgr.add_tap(
             RouterPushChannel("log_tail::backend_ctl", router=router, subscriber="backend_ctl", sender="proc"),
             min_level="ERROR",
         )

@@ -110,7 +110,7 @@ def test_error_via_logger_slot_write_through_before_drain(tmp_path):
     hub, _adapter = wire_process_observability("cam0", worker, logger, None, None)
 
     sink = _CollectSink()
-    logger.add_log_tap(sink, min_level="ERROR")
+    logger.add_tap(sink, min_level="ERROR")
 
     worker._log_error("crash", module="cam0")
 
@@ -132,7 +132,7 @@ def test_critical_via_logger_slot_write_through_before_drain(tmp_path):
     hub, _adapter = wire_process_observability("cam0", worker, logger, None, None)
 
     sink = _CollectSink()
-    logger.add_log_tap(sink, min_level="ERROR")
+    logger.add_tap(sink, min_level="ERROR")
 
     worker._log_critical("fatal", module="cam0")
 
@@ -153,7 +153,7 @@ def test_info_via_logger_slot_still_buffered_not_write_through(tmp_path):
     hub, _adapter = wire_process_observability("cam0", worker, logger, None, None)
 
     sink = _CollectSink()
-    logger.add_log_tap(sink, min_level="ERROR")
+    logger.add_tap(sink, min_level="ERROR")
 
     worker._log_info("hello", module="cam0")
 

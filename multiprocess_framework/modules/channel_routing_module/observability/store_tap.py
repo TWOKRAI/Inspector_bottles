@@ -9,7 +9,7 @@ error_manager (track_error) И через logger_manager (расщепитель
 и стор, наполняемый только из drain-петли, вкладку «Ошибки» не покажет. Решение
 (владелец 2026-07-09): повесить этот tap на error_manager И logger_manager — он
 ловит КАЖДУЮ error/critical-запись у реального sink'а (тот же проверенный
-механизм, что log_tail: `LoggerCore.add_log_tap(channel, min_level)`), и кладёт
+механизм, что log_tail: `LoggerCore.add_tap(channel, min_level)`), и кладёт
 её в стор РОВНО один раз (write-through исключает переигровку из drain → нет
 дубля). log (severity < ERROR)/stats при этом идут в стор пачкой из drain-петли.
 
@@ -42,7 +42,7 @@ class StoreTapChannel(IChannel):
         Args:
             store: целевой ObservabilityStore.
             kind: kind стор-записи (обычно 'error' — tap висит на error_manager).
-            name: имя tap'а (хэндл для remove_log_tap).
+            name: имя tap'а (хэндл для remove_tap).
             process: имя процесса-источника (5.21 (c)) — стор проставит колонку
                 ``process``; пусто → падаем на ``module`` LogRecord.
         """

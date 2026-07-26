@@ -293,7 +293,7 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             if not self._observability_store_taps:
                 self._log_warning(
                     f"Process '{self.name}': ObservabilityStore без error-tap "
-                    "(ни logger_manager, ни error_manager не поддержали add_log_tap) "
+                    "(ни logger_manager, ни error_manager не поддержали add_tap) "
                     "— ошибки в стор попадать НЕ будут",
                     module="observability",
                 )

@@ -16,13 +16,19 @@ ChannelRoutingManager — базовый менеджер маршрутизац
   - StatsManager   — key=metric_name,  buffer=AggregationWindow, channels=IMetricChannel
 """
 
+import logging as _stdlib_logging
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from ...base_manager import BaseManager, ObservableMixin
 from ...dispatch_module import Dispatcher, DispatchStrategy
 from ..interfaces import IChannel, IBufferStrategy, IChannelRoutingManager
+from ..levels import level_rank
 from .channel_registry import ChannelRegistry
 from .config_normalizer import normalize_config
+
+#: Приёмник последней надежды. Именно stdlib, а не собственные каналы: сообщение
+#: о поломке маршрута наблюдаемости не имеет права идти по этому же маршруту.
+_fallback_logger = _stdlib_logging.getLogger(__name__)
 
 
 class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager):
@@ -104,6 +110,11 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
             process=process,
             default_strategy=dispatcher_strategy or DispatchStrategy.EXACT_MATCH,
         )
+
+        # Tap-приёмники (Ф0.6 — подъём из LoggerCore). Живут ОТДЕЛЬНО от
+        # _channel_registry: reconfigure() их не сбрасывает, подписка на tail
+        # переживает hot-reload. {имя: (IChannel, min_rank)}.
+        self._tap_sinks: Dict[str, tuple] = {}
 
         self._routed: int = 0
         self._errors: int = 0
@@ -370,6 +381,117 @@ class ChannelRoutingManager(BaseManager, ObservableMixin, IChannelRoutingManager
         if self._buffer is not None:
             stats["buffer"] = self._buffer.stats
         return stats
+
+    # =========================================================================
+    # SINK CONTROL PLANE (Ф0.6 — общее хозяйство трёх плоскостей)
+    # =========================================================================
+
+    def set_sink_enabled(self, name: str, enabled: bool) -> bool:
+        """Включить/выключить приёмник по имени на лету — IPC control-plane.
+
+        Якорь ADR-CRM-006 п.3. До Ф0.6 метод жил только у ``LoggerCore``, и
+        оператор мог снять приёмник логов, но не приёмник статистики: одна и
+        та же операция была доступна одному брату из трёх.
+
+        **Выключение полностью generic** — закрыть канал и снять с реестра;
+        оно ничего не знает о том, откуда канал взялся. **Включение** требует
+        пересоздать канал из конфига КОНКРЕТНОГО менеджера (у логгера это
+        ``config.channels[name]``, у статистики — секция dict-конфига), и это
+        единственная часть, которую наследник обязан реализовать сам —
+        :meth:`_recreate_channel`.
+
+        Returns:
+            True при успехе; False если канал неизвестен (enable) или
+            отсутствовал в реестре (disable).
+        """
+        if enabled:
+            return self._recreate_channel(str(name))
+
+        channel = self._channel_registry.get(name)
+        if channel is None:
+            return False
+        try:
+            channel.close()
+        except Exception as exc:  # noqa: BLE001 — закрытие best-effort, не должно валить disable
+            self._log_debug(f"[{self.manager_name}] close error on '{name}': {exc}")
+        return self._channel_registry.unregister(name)
+
+    def _recreate_channel(self, name: str) -> bool:
+        """Пересоздать и зарегистрировать канал по имени из собственного конфига.
+
+        Хук для :meth:`set_sink_enabled` (``enabled=True``). База не знает
+        формата конфига наследника, поэтому реализация — на наследнике.
+        Базовый ответ «не умею» честнее, чем молчаливый ``True``: оператор
+        увидит ``success=False``, а не «включил» при выключенном приёмнике.
+        """
+        return False
+
+    def _fallback_log(self, level: str, message: str, module: str = "system") -> None:
+        """Последний рубеж: написать через stdlib, когда штатный маршрут недоступен.
+
+        Нужен всем троим и по одной причине: менеджер наблюдаемости не может
+        сообщить о собственной поломке тем самым маршрутом, который сломан.
+        До Ф0.6 был только у ``LoggerCore`` — сбой ``StatsManager`` при мёртвом
+        логгере не оставлял следа вообще.
+
+        Падать здесь запрещено: это уже аварийный путь.
+        """
+        try:
+            _fallback_logger.warning("[%s] [%s] [%s] %s", level, self.manager_name, module, message)
+        except Exception:  # nosec B110 — последний рубеж; исключение отсюда некуда деть
+            pass
+
+    # =========================================================================
+    # TAP-ПРИЁМНИКИ (Ф0.6 — подъём из LoggerCore; Ф1 Task 1.5 по происхождению)
+    # =========================================================================
+
+    def add_tap(self, channel: Any, *, min_level: Any = "ERROR", name: Optional[str] = None) -> str:
+        """Подключить tap: получать КАЖДУЮ эмитируемую запись с уровнем ≥ ``min_level``.
+
+        В отличие от каналов реестра, tap не участвует в маршрутизации и не
+        лежит в ``_channel_registry`` — значит переживает ``reconfigure()``
+        (подписка на tail не рвётся при hot-reload). Идемпотентно по ``name``.
+
+        Args:
+            channel: приёмник (``write(dict)``), напр. RouterPushChannel.
+            min_level: порог (``LogLevel`` или строка "ERROR"); ниже — не доставляем.
+                       У плоскостей без уровней (статистика) порог не мешает:
+                       записи без уровня получают ранг 0 и проходят при "DEBUG".
+            name: имя tap'а (хэндл для remove); по умолчанию ``channel.name``.
+
+        Returns:
+            Имя tap'а.
+        """
+        tap_name = name or getattr(channel, "name", None) or f"tap_{len(self._tap_sinks)}"
+        self._tap_sinks[tap_name] = (channel, level_rank(min_level))
+        return tap_name
+
+    def remove_tap(self, name: str) -> bool:
+        """Отключить tap по имени. Возвращает True, если он был."""
+        entry = self._tap_sinks.pop(name, None)
+        if entry is None:
+            return False
+        try:
+            entry[0].close()
+        except Exception as exc:  # noqa: BLE001 — закрытие tap'а best-effort
+            self._log_debug(f"[{self.manager_name}] tap close error on '{name}': {exc}")
+        return True
+
+    def _emit_to_taps(self, record_dict: Dict[str, Any], level: Any = None) -> None:
+        """Разослать запись всем tap'ам, чей порог ≤ уровня записи.
+
+        Ошибка доставки в один tap не мешает остальным и не роняет эмитента:
+        tail — наблюдение за работой, а не сама работа.
+        """
+        if not self._tap_sinks:
+            return
+        rank = level_rank(level)
+        for channel, min_rank in list(self._tap_sinks.values()):
+            if rank >= min_rank:
+                try:
+                    channel.write(record_dict)
+                except Exception:  # nosec B110 — tail не должен влиять на наблюдаемое
+                    pass
 
     # =========================================================================
     # ВНУТРЕННИЕ МЕТОДЫ (для использования наследниками)

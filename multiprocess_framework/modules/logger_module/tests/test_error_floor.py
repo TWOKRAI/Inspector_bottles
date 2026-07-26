@@ -34,7 +34,7 @@ from multiprocess_framework.modules.logger_module.core.log_config import (
 )
 from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
 from multiprocess_framework.modules.logger_module.channels.log_channel import LogChannel
-from multiprocess_framework.modules.logger_module.log_enums import is_error_level
+from multiprocess_framework.modules.channel_routing_module.levels import is_error_level
 
 _CHILD = Path(__file__).parent / "_crash_log_child.py"
 _CRASH_MARKER = "URGENT-FLUSH-CRASH-MARKER"
@@ -407,7 +407,7 @@ def test_tap_and_floor_are_different_planes(tmp_path: Path) -> None:
             pass
 
     with _logger(tmp_path, with_channel=False) as manager:
-        manager.add_log_tap(_Tap(), min_level=LogLevel.ERROR, name="probe")
+        manager.add_tap(_Tap(), min_level=LogLevel.ERROR, name="probe")
 
         manager.error(_CRASH_MARKER, module="unit")
 
@@ -419,7 +419,7 @@ def test_tap_and_floor_are_different_planes(tmp_path: Path) -> None:
     other.mkdir()
     received.clear()
     with _logger(other) as manager:
-        manager.add_log_tap(_Tap(), min_level=LogLevel.ERROR, name="probe")
+        manager.add_tap(_Tap(), min_level=LogLevel.ERROR, name="probe")
 
         manager.error(_CRASH_MARKER, module="unit")
 

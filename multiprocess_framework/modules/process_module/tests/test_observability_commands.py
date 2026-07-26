@@ -50,19 +50,19 @@ class _FakeLogger:
 
 
 class _FakeTapLogger:
-    """Логгер с tap-API (add_log_tap / remove_log_tap)."""
+    """Логгер с tap-API (add_tap / remove_tap)."""
 
     manager_name = "LoggerManager"
 
     def __init__(self) -> None:
         self.taps: dict = {}
 
-    def add_log_tap(self, channel, *, min_level="ERROR", name=None) -> str:
+    def add_tap(self, channel, *, min_level="ERROR", name=None) -> str:
         tap = name or getattr(channel, "name", "tap")
         self.taps[tap] = (channel, min_level)
         return tap
 
-    def remove_log_tap(self, name) -> bool:
+    def remove_tap(self, name) -> bool:
         return self.taps.pop(name, None) is not None
 
 

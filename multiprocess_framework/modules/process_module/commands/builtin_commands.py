@@ -1212,7 +1212,7 @@ class BuiltinCommands:
         if router is None:
             return {"success": False, "reason": "router_manager недоступен"}
         logger = getattr(svc, "logger_manager", None)
-        if logger is None or not hasattr(logger, "add_log_tap"):
+        if logger is None or not hasattr(logger, "add_tap"):
             return {"success": False, "reason": "logger_manager недоступен"}
 
         from multiprocess_framework.modules.logger_module import RouterPushChannel
@@ -1228,7 +1228,7 @@ class BuiltinCommands:
                 sender=svc.name,
                 command=command,
             )
-            mgr.add_log_tap(channel, min_level=level, name=tap_name)
+            mgr.add_tap(channel, min_level=level, name=tap_name)
             installed.append(getattr(mgr, "manager_name", mgr.__class__.__name__))
 
         if not installed:
@@ -1252,7 +1252,7 @@ class BuiltinCommands:
             return {"success": False, "reason": "subscriber или tap обязателен"}
         removed = False
         for mgr in self._log_tail_managers():
-            removed = mgr.remove_log_tap(tap_name) or removed
+            removed = mgr.remove_tap(tap_name) or removed
         return {"success": bool(removed), "process": svc.name, "tap": tap_name}
 
     def _cmd_observability_tail_subscribe(self, data=None, **kwargs) -> dict:
@@ -1298,7 +1298,7 @@ class BuiltinCommands:
         managers = []
         for attr in ("logger_manager", "error_manager"):
             mgr = getattr(svc, attr, None)
-            if mgr is not None and hasattr(mgr, "add_log_tap"):
+            if mgr is not None and hasattr(mgr, "add_tap"):
                 managers.append(mgr)
         return managers
 

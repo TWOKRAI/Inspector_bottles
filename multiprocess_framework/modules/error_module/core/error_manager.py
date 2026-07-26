@@ -28,7 +28,7 @@ from ...channel_routing_module import resolve_build_result
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
 from ...logger_module.core.log_types import LogRecord
 from ...logger_module.core.logger_core import LoggerCore
-from ...logger_module.log_enums import is_error_level
+from ...channel_routing_module.levels import is_error_level
 from ..configs.error_manager_config import ErrorManagerConfig
 from ..interfaces import IErrorManager
 from .error_config_assembly import expand_error_manager_config

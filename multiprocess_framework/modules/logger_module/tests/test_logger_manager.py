@@ -257,7 +257,7 @@ class TestTraceIdExtraField:
         mgr = LoggerManager(manager_name="TestLoggerTraceId")
         mgr.initialize()
         tap = _FakeTapChannel()
-        mgr.add_log_tap(tap, min_level=LogLevel.DEBUG)
+        mgr.add_tap(tap, min_level=LogLevel.DEBUG)
 
         trace_id = "0123456789abcdef0123456789abcdef"
         mgr.info("frame processed", module="detector", trace_id=trace_id, frame_hops=2)
@@ -274,7 +274,7 @@ class TestTraceIdExtraField:
         mgr = LoggerManager(manager_name="TestLoggerTraceIdCorrelate")
         mgr.initialize()
         tap = _FakeTapChannel()
-        mgr.add_log_tap(tap, min_level=LogLevel.DEBUG)
+        mgr.add_tap(tap, min_level=LogLevel.DEBUG)
 
         # info() (BUSINESS/INFO) — включён в дефолтном конфиге (в отличие от DEBUG,
         # см. test_reconfigure_invalidates_decision_cache); суть теста — корреляция
