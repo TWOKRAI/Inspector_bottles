@@ -57,12 +57,39 @@
 | 0.3 | **Ограничить `BatchBuffer`** — `max_pending` на канал, политика overflow, `dropped_by_channel` в stats | `channel_routing_module/buffers/batch_buffer.py` | Пара: медленный сток → счётчик растёт, память ограничена. **Видимый путь назван явно:** счётчик появляется в `introspect.observability` (Ф5.1) либо в `get_stats` с точным именем ключа, сверенным с публикатором; ненулёвость доказана live |
 | 0.4 | **Счётчик записи в несуществующий канал** — сейчас батч теряется молча под `except: pass` | `logger_core.py:356-374`, `:439-450` | Пара unit: имя не резолвится → счётчик + одноразовый WARNING |
 | 0.5 | **Контекст — thread-local.** `_context_stack` — список на инстансе (`:100`) вопреки имени `_get_thread_context()` (`:465-466`); `log_context: ContextVar` мёртв (пишет только README) | `logger_core.py` | Два потока с разным контекстом → записи не перемешаны |
-| 0.6 | **Симметрия sink-control с адресацией менеджера.** `logger.sink.*` бьёт только в `logger_manager`; у `StatsManager` нет ни `set_sink_enabled`, ни `add_log_tap` (grep = 0). Команда получает параметр `manager=logger\|error\|stats` — **не «один вызов бьёт во все три»** | `builtin_commands.py:1145-1156`, `stats_manager.py` | Каждый из трёх адресуем отдельно; тест на каждый |
+| 0.6 | **Симметрия sink-control — ПОДЪЁМОМ В ОБЩУЮ БАЗУ, а не третьей копией** (решение владельца 2026-07-26, см. ниже). `logger.sink.*` бьёт только в `logger_manager`; у `StatsManager` нет ни `set_sink_enabled`, ни `add_log_tap` (grep = 0). Команда получает параметр `manager=logger\|error\|stats` — **не «один вызов бьёт во все три»** | `channel_routing_manager.py` (подъём), `builtin_commands.py:1145-1156`, `stats_manager.py` | Каждый из трёх адресуем отдельно; тест на каждый. **Плюс: дубли резолва путей и батчинга исчезли — `grep` их вторых реализаций в `stats_manager.py` = 0** |
 | 0.7 | **Ретеншен и компрессия** — по возрасту и по суммарному потолку. Факт: `logs/` = 1.5 ГБ. **Правится в коде канала/ротации (`log_channel.py`), не полем конфига** | `logger_module/channels/log_channel.py` + секция observability | Тест на удаление по возрасту и по суммарному потолку; применяется hot-reload'ом |
 | 0.8 | **`set_sink_enabled` инвалидирует `_decision_cache`.** Сегодня безвредно (кэш не учитывает состав каналов), но Ф2.2 кэширует `effective_channels` — после чего runtime-тоггл даст стейловый резолв | `logger_core.py:527-557`, `:344-354` | Инвалидация и на `reconfigure`, и на `set_sink_enabled`; тест на стейл |
 | **0.9** | **Floor ошибок, вариант B — заменяет временную меру 0.1.** Путь `error`/`critical` делается синхронным и конфиго-независимым **в обоих местах**: `LoggerCore.log()` и severity-override `ErrorManager.log()` (`error_manager.py:241-273`, который родителя не вызывает). Запись несёт **полный трейсбек и контекст** — усечение запрещено | `logger_core.py`, `error_manager.py:190-273` | Пара: kill -9 в момент ошибки → запись на диске **с трейсбеком**; конфиг с выключенными приёмниками ошибок → запись всё равно на диске; **дублей нет** (одна ошибка = одна запись в одном месте, проверено тестом на все 4 известных пути: floor, `system_file` через сплиттер, `errors_file` при `_track_error`, store/forward-taps); после 0.9 временный `priority="urgent"` из 0.1 снят или обоснован явно |
 
 **Out of scope Ф0:** модель адресации, формат записи, реестры.
+
+### Решение владельца 2026-07-26 — три менеджера братья, общее живёт в базе
+
+> «logger_manager, error_manager, statistics_manager — братья-близнецы и должны иметь одну базу, чтоб не дублировать. Наследоваться.»
+
+Сверено с кодом: общая база **уже есть** — `ChannelRoutingManager` (`BaseManager` + `ObservableMixin`). Но она слишком тонкая: всё хозяйство наблюдаемости лежит в `LoggerCore`, которого `StatsManager` не наследует.
+
+```
+BaseManager + ObservableMixin
+        ↓
+ChannelRoutingManager          ← общая база
+    ├── LoggerCore ──┬── LoggerManager
+    │                └── ErrorManager
+    └── StatsManager           ← мимо LoggerCore
+```
+
+| Что | LoggerCore | StatsManager | Диагноз |
+|---|---|---|---|
+| Резолв путей файлов | `_resolved_file_path()` | импортирует `resolve_log_file_path` сам | **дубль** |
+| Батчинг | `_setup_batcher()` + `_flush_batch()` | свои `_enqueue_to_buffer()` + `_do_flush()` | **дубль** |
+| `set_sink_enabled` | есть | нет | дыра |
+| `add_log_tap` / `_emit_to_taps` | есть | нет | дыра |
+| `_fallback_log` | есть | нет | дыра |
+
+**Следствие для плана:** задача 0.6 исполняется **подъёмом общего в `ChannelRoutingManager`**, а не дописыванием третьей копии в `stats_manager.py`. Совпадает с инвариантом 5 («меньше слоёв»): подъём в существующую базу — не новый слой, а снятие дублей. Ф8.1 (три реестра → один каталог) после этого ложится на уже общую базу.
+
+**Что НЕ поднимать:** `ErrorFloor` (Ф0.9) — он про записи severity `error`/`critical`, которых у `StatsManager` нет; в базе он стал бы мёртвым кодом. Страховка stats от потери — `dropped_by_channel` (0.3), другая механика.
 
 ### Ход исполнения Ф0
 

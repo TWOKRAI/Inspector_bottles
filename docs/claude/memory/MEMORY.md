@@ -165,3 +165,4 @@
 - [Тесты-невидимки мимо testpaths](feedback_tests_invisible_to_testpaths.md) — 3 каталога tests/ вне testpaths = 58 зелёных тестов не гонялись; покрытие судить по конфигу прогона + страж-тест
 - [Глобальный патч часов = флейк](feedback_global_clock_patch_flake.md) — patch("time.monotonic") с конечным side_effect доедают чужие потоки → StopIteration в невиновном тесте; часы — зависимость объекта
 - [Тест не доказан, пока не красный без правки](feedback_prove_test_red_without_fix.md) — откатить call-site через stash, сверить число упавших арифметически
+- [Три менеджера — одна база](feedback_three_managers_share_base.md) — logger/error/stats братья: общее поднимать в ChannelRoutingManager, не дописывать третью копию
