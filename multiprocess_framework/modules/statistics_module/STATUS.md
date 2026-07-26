@@ -56,3 +56,4 @@
 | 2026-03-31 | ADR-108: убран избыточный `build()` у `StatsManagerConfig` (наследует `SchemaMixin.build`) |
 | 2026-04-03 | Импорт `ChannelRoutingConfig` из публичного `channel_routing_module` (ADR-114) |
 | 2026-04-10 | DECISIONS.md (ADR-SM-001…006), ARCHITECTURE.md §6.15, тесты integration/adapter/thread-safety, README fix; этап 4→5 |
+| 2026-07-26 | **Ф0.6:** StatsManager получил симметрию с логгером — `set_sink_enabled` / `add_tap` / `remove_tap` / `_fallback_log` (наследуются из CRM) + собственный `_recreate_channel`. `_setup_channels` разложен на сборщики по одному имени (`_build_log_channel` / `_build_file_channel` / `_build_fallback_channel`), служебные имена каналов названы константами `STATS_LOG_CHANNEL` / `STATS_FALLBACK_CHANNEL`. Адресуется командой `logger.sink.*` с `manager="stats"`. Анти-дубль-счёт (`_STATS_SENTINEL` + broadcast в `_do_flush`) НЕ тронут — закреплён характеризационным тестом | Ф0.6 |

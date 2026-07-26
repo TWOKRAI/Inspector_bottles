@@ -128,6 +128,9 @@ class LoggerSinkParams(BaseModel):
 
     sink: Optional[str] = None
     name: Optional[str] = None  # алиас sink (см. _toggle_logger_sink)
+    # Ф0.6: какую плоскость наблюдаемости адресуем — logger (дефолт) | error | stats.
+    # Значения вне whitelist'а отвергает обработчик (роутер — транспорт, не плоскость).
+    manager: Optional[str] = None
 
 
 class LogTailSubscribeParams(BaseModel):

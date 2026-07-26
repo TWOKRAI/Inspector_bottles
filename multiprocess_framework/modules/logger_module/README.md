@@ -318,6 +318,17 @@ logger.flush()
 Для `ERROR`/`CRITICAL` «канала нет» не означает потерю: запись подхватывает пол (см. выше),
 поэтому `unresolved_channel_records` и `errors_to_floor` растут вместе и не противоречат.
 
+**Sink-control и tap'ы живут в базе (Ф0.6).** `set_sink_enabled`, `add_tap` / `remove_tap`
+и `_fallback_log` подняты в `ChannelRoutingManager` — они одинаковы у логов, ошибок и
+статистики, и держать три копии было бы третьей копией одной операции. У логгера остался
+только хук `_recreate_channel`: «откуда взять параметры канала при включении обратно»
+(из `config.channels[name]`, даже если там `enabled=False` — включение через control-plane
+это явный override оператора).
+
+Методы переименованы: `add_log_tap` / `remove_log_tap` → **`add_tap` / `remove_tap`**.
+Старые имена удалены, а не оставлены обёртками. Команда `logger.sink.enable|disable`
+принимает `manager=logger|error|stats` (дефолт `logger` — старые вызовы бьют туда же).
+
 **Thread-safety:** `BatchBuffer` использует `threading.Lock` — несколько потоков одного процесса
 могут одновременно вызывать `logger.info()` без гонок данных. Счётчики потерь Ф0.4 защищены
 отдельным локом, который берётся **только** на пути потери (замер: 12 потоков × 3000 записей без

@@ -31,6 +31,11 @@ from ..channels.file_stats_channel import FileStatsChannel
 
 _STATS_SENTINEL = "__stats__"
 
+#: Служебные имена каналов: их нет в секции ``channels`` конфига, но снять и
+#: вернуть их через ``set_sink_enabled`` оператор вправе так же, как остальные.
+STATS_LOG_CHANNEL = "log_stats"
+STATS_FALLBACK_CHANNEL = "file_stats"
+
 
 def _metric_key(name: str, tags: Optional[Dict] = None) -> str:
     """Ключ для словаря метрик: name или name|k1:v1|k2:v2 (sorted)."""
@@ -46,9 +51,10 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
     Ключевые особенности:
     - Хранит два уровня: live-метрики (self._metrics) для get_metric() и
       буфер агрегации (AggregationWindow) для периодического flush в каналы.
-    - _enqueue_to_buffer ставит данные в буфер ОДИН раз под ключом _STATS_SENTINEL.
-      _do_flush транслирует снапшот во ВСЕ зарегистрированные каналы.
-      Это предотвращает N-кратный счёт метрик при наличии N каналов.
+    - _emit_record — единственная точка эмиссии: сырая запись в tap'ы + ОДНА
+      запись в буфер под ключом _STATS_SENTINEL. _do_flush транслирует снапшот
+      во ВСЕ зарегистрированные каналы. Это предотвращает N-кратный счёт
+      метрик при наличии N каналов.
     - Теги: user tags имеют приоритет над default_tags (для обоих слоёв).
     """
 
@@ -134,18 +140,10 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         """Создать и зарегистрировать каналы из конфига."""
         cfg = self._config_dict
 
-        # LogStatsChannel — берём logger_manager из ObservableMixin или process
-        logger_manager = self.get_manager("logger")
-        if logger_manager is None and self.process is not None:
-            logger_manager = getattr(self.process, "logger_manager", None)
-
-        if cfg.get("enable_logging", True) and logger_manager is not None:
-            log_ch = LogStatsChannel(
-                logger_manager=logger_manager,
-                level=cfg.get("log_level", "INFO"),
-                name="log_stats",
-            )
-            self.register_channel(log_ch)
+        if cfg.get("enable_logging", True):
+            log_ch = self._build_log_channel()
+            if log_ch is not None:
+                self.register_channel(log_ch)
 
         # FileStatsChannel из секции channels конфига
         channels_cfg = cfg.get("channels", {})
@@ -155,27 +153,83 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
                     continue
                 if not ch_params.get("enabled", True):
                     continue
-                if ch_params.get("type", "file") == "file":
-                    fb = f"logs/stats_{self.manager_name}.json"
-                    file_ch = FileStatsChannel(
-                        file_path=resolve_log_file_path(
-                            ch_params.get("file_path"),
-                            fallback=fb,
-                            log_directory=None,
-                        ),
-                        format=ch_params.get("format", "json"),
-                        name=ch_name,
-                    )
+                file_ch = self._build_file_channel(str(ch_name), ch_params)
+                if file_ch is not None:
                     self.register_channel(file_ch)
 
         # Fallback: всегда хотя бы один канал
         if not self._channel_registry.names():
-            fb = f"logs/stats_{self.manager_name}.json"
-            file_ch = FileStatsChannel(
-                file_path=resolve_log_file_path(None, fallback=fb, log_directory=None),
-                name="file_stats",
-            )
-            self.register_channel(file_ch)
+            self.register_channel(self._build_fallback_channel())
+
+    # --- сборщики каналов: по одному имени за раз ----------------------------
+    # Вынесены из _setup_channels ради Ф0.6: set_sink_enabled(name, True) обязан
+    # пересоздать ОДИН канал по имени, а не перестроить весь набор.
+
+    def _build_log_channel(self) -> Optional[LogStatsChannel]:
+        """Канал «метрики в лог». None, если логгер-менеджер недоступен."""
+        cfg = self._config_dict
+        logger_manager = self.get_manager("logger")
+        if logger_manager is None and self.process is not None:
+            logger_manager = getattr(self.process, "logger_manager", None)
+        if logger_manager is None:
+            return None
+        return LogStatsChannel(
+            logger_manager=logger_manager,
+            level=cfg.get("log_level", "INFO"),
+            name=STATS_LOG_CHANNEL,
+        )
+
+    def _build_file_channel(self, name: str, params: Dict[str, Any]) -> Optional[FileStatsChannel]:
+        """Файловый канал по описанию из секции ``channels``."""
+        if params.get("type", "file") != "file":
+            return None
+        return FileStatsChannel(
+            file_path=resolve_log_file_path(
+                params.get("file_path"),
+                fallback=self._default_stats_file(),
+                log_directory=None,
+            ),
+            format=params.get("format", "json"),
+            name=name,
+        )
+
+    def _build_fallback_channel(self) -> FileStatsChannel:
+        """Приёмник по умолчанию: у статистики всегда есть куда писать."""
+        return FileStatsChannel(
+            file_path=resolve_log_file_path(None, fallback=self._default_stats_file(), log_directory=None),
+            name=STATS_FALLBACK_CHANNEL,
+        )
+
+    def _default_stats_file(self) -> str:
+        return f"logs/stats_{self.manager_name}.json"
+
+    def _recreate_channel(self, name: str) -> bool:
+        """Пересоздать приёмник статистики по имени — хук ``CRM.set_sink_enabled``.
+
+        Симметрия с логгером (Ф0.6): «включить обратно» пересоздаёт канал из
+        собственного конфига этого менеджера. Описание берётся из секции
+        ``channels``; два служебных имени (лог-канал и fallback) собираются
+        своими сборщиками — в ``channels`` их нет, но снимать и возвращать их
+        оператор вправе так же, как остальные.
+
+        ``enabled=False`` в описании канала намеренно игнорируется: включение
+        через control-plane — явный override оператора над конфигом, как и у
+        логгера.
+        """
+        if name == STATS_LOG_CHANNEL:
+            channel = self._build_log_channel()
+        elif name == STATS_FALLBACK_CHANNEL:
+            channel = self._build_fallback_channel()
+        else:
+            params = (self._config_dict.get("channels") or {}).get(name)
+            if not isinstance(params, dict):
+                return False
+            channel = self._build_file_channel(name, params)
+
+        if channel is None:
+            return False
+        self.register_channel(channel)
+        return self._channel_registry.get(name) is not None
 
     # =========================================================================
     # FLUSH CALLBACK
@@ -221,13 +275,30 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
                 )
             return self._metrics[key]
 
-    def _enqueue_to_buffer(self, data: Dict[str, Any]) -> None:
-        """Поместить данные в AggregationWindow ОДИН раз.
+    def _emit_record(self, data: Dict[str, Any]) -> None:
+        """Единственная точка эмиссии метрики: tap'ы + буфер агрегации.
 
-        Используем sentinel _STATS_SENTINEL вместо перебора каналов:
-        это предотвращает N-кратную агрегацию при N зарегистрированных каналах.
-        _do_flush транслирует снапшот во все реальные каналы при flush.
+        Порядок и роли:
+
+        1. **Tap'ы получают СЫРУЮ запись сразу.** Это симметрия с логами и
+           ошибками: tap не участвует в маршрутизации и не ждёт буфера — он
+           видит то, что эмитировано, а не то, что осталось после агрегации.
+           Для статистики разница принципиальна: ``AggregationWindow``
+           намеренно lossy (counter суммируется, gauge перезаписывается), и
+           tail, подключённый к сбросу, увидел бы уже свёрнутую картину.
+           У метрики нет уровня, поэтому её ранг 0 — tap с порогом ``DEBUG``
+           получает всё, с порогом по умолчанию (``ERROR``) не получает ничего.
+        2. **Буфер получает запись ОДИН раз**, под ключом ``_STATS_SENTINEL``:
+           перебор каналов здесь дал бы N-кратную агрегацию при N каналах.
+           ``_do_flush`` уже сам транслирует снапшот во все реальные каналы.
+
+        Ф0.6: до этой правки ``StatsManager`` получил ``add_tap`` из базы, но
+        звать ``_emit_to_taps`` было некому — метод существовал, а поток был
+        мёртв. Нашёл независимый тестировщик: «tap регистрируется, буфер
+        считает сбросы, файловый канал пишет — а write у tap'а не вызван ни
+        разу».
         """
+        self._emit_to_taps(data)
         if self._buffer is not None:
             self._buffer.enqueue(_STATS_SENTINEL, data)
 
@@ -241,7 +312,7 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         merged = self._merged_tags(tags)
         rec = self._ensure_record(name, MetricType.COUNTER, merged)
         rec.add_counter(float(value))
-        self._enqueue_to_buffer({"type": "counter", "name": name, "value": float(value), "tags": merged})
+        self._emit_record({"type": "counter", "name": name, "value": float(value), "tags": merged})
 
     def increment(self, name: str, tags: Optional[Dict] = None) -> None:
         """Увеличить счётчик на 1."""
@@ -257,21 +328,21 @@ class StatsManager(ChannelRoutingManager, IStatsManager):
         merged = self._merged_tags(tags)
         rec = self._ensure_record(name, MetricType.TIMING, merged)
         rec.add_timing(duration)
-        self._enqueue_to_buffer({"type": "timing", "name": name, "value": duration, "tags": merged})
+        self._emit_record({"type": "timing", "name": name, "value": duration, "tags": merged})
 
     def gauge(self, name: str, value: float, tags: Optional[Dict] = None) -> None:
         """Записать текущее значение (gauge — перезаписывает предыдущее)."""
         merged = self._merged_tags(tags)
         rec = self._ensure_record(name, MetricType.GAUGE, merged)
         rec.set_gauge(value)
-        self._enqueue_to_buffer({"type": "gauge", "name": name, "value": value, "tags": merged})
+        self._emit_record({"type": "gauge", "name": name, "value": value, "tags": merged})
 
     def histogram(self, name: str, value: float, tags: Optional[Dict] = None) -> None:
         """Записать значение в гистограмму."""
         merged = self._merged_tags(tags)
         rec = self._ensure_record(name, MetricType.HISTOGRAM, merged)
         rec.add_histogram(value)
-        self._enqueue_to_buffer({"type": "histogram", "name": name, "value": value, "tags": merged})
+        self._emit_record({"type": "histogram", "name": name, "value": value, "tags": merged})
 
     # =========================================================================
     # ЧТЕНИЕ МЕТРИК

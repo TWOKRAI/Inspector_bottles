@@ -342,6 +342,10 @@ em.register_channel(alert_ch)
 (JSON Lines, полный трейсбек и `extra`). Пол срабатывает **только** при непринявшем канале,
 поэтому дубля «и в канал, и в пол» не бывает. Счётчик: `get_stats()["errors_to_floor"]`.
 
+**Ф0.6:** `ErrorManager` адресуется командой `logger.sink.enable|disable` отдельно от
+логгера — параметром `manager="error"`. Раньше команда била только в `logger_manager`,
+хотя методы у `ErrorManager` были: дыра была не в методах, а в адресуемости.
+
 **Thread-safety:** `BatchBuffer` использует `threading.Lock` — несколько потоков одного процесса
 могут одновременно вызывать `em.error()` без гонок данных.
 

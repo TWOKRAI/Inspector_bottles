@@ -182,6 +182,38 @@ total_enqueued == total_flushed + Σ pending + dropped + flush_failed + in_fligh
 | `route(data, key_field?)` | dict | dict | Маршрутизировать данные |
 | `flush()` | — | None | Сбросить buffer |
 | `get_stats()` | — | dict | channels + buffer + routing |
+| `set_sink_enabled(name, on)` | str, bool | bool | Снять/вернуть приёмник на лету (Ф0.6) |
+| `add_tap(ch, min_level=, name=)` | IChannel | str | Приёмник **всех** записей ≥ порога, переживает `reconfigure()` |
+| `remove_tap(name)` | str | bool | Отключить tap |
+| `_fallback_log(level, msg)` | str, str | None | Последний рубеж через stdlib |
+| `_recreate_channel(name)` | str | bool | **Хук наследника:** собрать канал по имени из своего конфига |
+
+### Control-plane наблюдаемости (Ф0.6)
+
+`set_sink_enabled` живёт в базе, потому что операция одна и та же у всех трёх
+плоскостей — логов, ошибок и статистики. До Ф0.6 она была только у логгера:
+оператор мог снять приёмник логов, но не приёмник статистики.
+
+**Выключение полностью generic** — закрыть канал и снять с реестра; откуда канал
+взялся, знать не нужно. **Включение** требует пересоздать канал из конфига
+конкретного менеджера, и это единственная часть на наследнике — `_recreate_channel`.
+База отвечает `False` («не умею») вместо молчаливого `True`: оператор увидит
+`success=False`, а не «включил» при выключенном приёмнике.
+
+> ⚠️ **`RouterManager` тоже наследует `set_sink_enabled` — и это транспорт, а не
+> плоскость наблюдаемости.** Поэтому команда `logger.sink.enable|disable` ищет цель
+> по **whitelist'у** `logger|error|stats` (`_SINK_ADDRESSABLE_MANAGERS` в
+> `builtin_commands.py`), а не через `hasattr`. Резолв «любой менеджер с методом»
+> дал бы способ одной командой тихо снять message-канал и отрезать процессу IPC.
+
+Tap'ы (`add_tap`) отличаются от каналов реестра тем, что не участвуют в
+маршрутизации и **переживают `reconfigure()`** — подписка на tail не рвётся при
+hot-reload. Порог задаётся уровнем; у плоскостей без уровней (статистика) записи
+получают ранг 0 и проходят при пороге `"DEBUG"`.
+
+Ранги уровней (`LEVEL_ORDER` / `level_rank` / `is_error_level`) лежат в
+[`levels.py`](levels.py) этого модуля, а не в `logger_module`: они нужны всем троим,
+и база не имеет права зависеть от своего потомка.
 
 ### `ChannelRoutingConfig`
 

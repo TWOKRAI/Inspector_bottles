@@ -13,6 +13,18 @@ if TYPE_CHECKING:
     pass
 
 
+#: Кого команда sink-control имеет право трогать: плоскость → атрибут в services.
+#: WHITELIST, а не резолв по наличию метода. После Ф0.6 ``set_sink_enabled``
+#: живёт в ``ChannelRoutingManager``, и его унаследовал в том числе
+#: ``RouterManager`` — транспорт, а не наблюдаемость. Резолв «любой менеджер с
+#: методом» сделал бы message-канал IPC снимаемым одной командой.
+_SINK_ADDRESSABLE_MANAGERS = {
+    "logger": "logger_manager",
+    "error": "error_manager",
+    "stats": "stats_manager",
+}
+
+
 class BuiltinCommands:
     """Встроенные команды ProcessModule через IProcessServices.
 
@@ -1170,25 +1182,60 @@ class BuiltinCommands:
         return result
 
     def _cmd_logger_sink_enable(self, data=None, **kwargs) -> dict:
-        """Включить sink логгера по имени (ADR-CRM-006 п.3: register_channel)."""
+        """Включить sink по имени (ADR-CRM-006 п.3: register_channel).
+
+        Параметр ``manager``: ``logger`` (дефолт) | ``error`` | ``stats``.
+        """
         return self._toggle_logger_sink(data, kwargs, enabled=True)
 
     def _cmd_logger_sink_disable(self, data=None, **kwargs) -> dict:
-        """Выключить sink логгера по имени (ADR-CRM-006 п.3: unregister_channel)."""
+        """Выключить sink по имени (ADR-CRM-006 п.3: unregister_channel).
+
+        Параметр ``manager``: ``logger`` (дефолт) | ``error`` | ``stats``.
+        """
         return self._toggle_logger_sink(data, kwargs, enabled=False)
 
     def _toggle_logger_sink(self, data, kwargs, *, enabled: bool) -> dict:
-        """Общий обработчик logger.sink.enable|disable — делегирует в set_sink_enabled."""
+        """Общий обработчик logger.sink.enable|disable — делегирует в set_sink_enabled.
+
+        Ф0.6: адресуем каждый из ТРЁХ братьев отдельно, по параметру ``manager``.
+        Дефолт ``logger`` — команда существовала до параметра, и старые вызовы
+        обязаны продолжать бить туда же.
+
+        Цель ищется по WHITELIST'у, а не через ``hasattr(set_sink_enabled)``.
+        Причина конкретная: после подъёма метода в ``ChannelRoutingManager``
+        его унаследовал и ``RouterManager``, который наблюдаемостью не является
+        вовсе — это транспорт. Generic-резолв «любой менеджер с методом» сделал
+        бы message-канал IPC снимаемым одной командой, то есть дал бы способ
+        тихо отрезать процессу связь.
+        """
         args = self._merge_args(data, kwargs)
         svc = self._services
         name = str(args.get("sink") or args.get("name") or "").strip()
         if not name:
             return {"success": False, "reason": "sink (имя канала) обязателен"}
-        logger = getattr(svc, "logger_manager", None)
-        if logger is None or not hasattr(logger, "set_sink_enabled"):
-            return {"success": False, "reason": "logger_manager недоступен"}
-        ok = logger.set_sink_enabled(name, enabled)
-        return {"success": bool(ok), "sink": name, "enabled": enabled, "process": svc.name}
+
+        plane = str(args.get("manager") or "logger").strip().lower()
+        attr = _SINK_ADDRESSABLE_MANAGERS.get(plane)
+        if attr is None:
+            allowed = "|".join(sorted(_SINK_ADDRESSABLE_MANAGERS))
+            return {
+                "success": False,
+                "reason": f"manager={plane!r} не адресуем командой sink-control; допустимы {allowed}",
+                "process": svc.name,
+            }
+
+        target = getattr(svc, attr, None)
+        if target is None or not hasattr(target, "set_sink_enabled"):
+            return {"success": False, "reason": f"{attr} недоступен", "process": svc.name}
+        ok = target.set_sink_enabled(name, enabled)
+        return {
+            "success": bool(ok),
+            "sink": name,
+            "enabled": enabled,
+            "manager": plane,
+            "process": svc.name,
+        }
 
     def _cmd_log_tail_subscribe(self, data=None, **kwargs) -> dict:
         """Подписать адрес на LogRecord'ы процесса с level ≥ порога (Ф1 Task 1.5).
