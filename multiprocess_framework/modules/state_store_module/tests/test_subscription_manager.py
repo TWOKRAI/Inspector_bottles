@@ -382,8 +382,17 @@ class TestPerformance:
 
         assert mgr.subscription_count == 100
 
-        # 1000 вызовов match()
         delta = _make_delta("cameras.5.config.fps")
+
+        # Прогрев. Без него тест мерил не скорость match(), а холодный старт:
+        # первый прогон компилирует regex-паттерны подписок и наполняет кэши,
+        # и на холодную давал 132-145мс против 100 порога, а сразу следом —
+        # уверенно проходил. Тест-флейк по этой причине не ловит регресс, он
+        # ловит загрузку машины. Меряем установившийся режим.
+        for _ in range(100):
+            mgr.match(delta)
+
+        # 1000 вызовов match()
         start = time.perf_counter()
         for _ in range(1000):
             mgr.match(delta)

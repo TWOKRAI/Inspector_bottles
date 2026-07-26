@@ -7,8 +7,15 @@ from Services.hikvision_camera.sdk.constants import (
     PixelType,
     MV_GIGE_DEVICE,
     MV_USB_DEVICE,
-    MV_OK,
 )
+
+# MV_OK живёт в errors.py, а не в constants.py. Раньше constants реэкспортировал
+# его строкой `from .errors import MV_OK  # реэкспорт для удобства`, но ruff --fix
+# снёс её как F401 (unused import) — коммит 6a37c470, 2026-05-14. С тех пор этот
+# файл не собирался, роняя collection всего каталога Services/. Импортируем из
+# настоящего дома символа: явный путь переживает авто-фиксы линтера.
+# Не через фасад `sdk/__init__`: тот тянет bindings и бинарный SDK.
+from Services.hikvision_camera.sdk.errors import MV_OK
 
 
 class TestPixelType:

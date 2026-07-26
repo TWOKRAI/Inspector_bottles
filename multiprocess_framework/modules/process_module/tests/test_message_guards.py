@@ -8,9 +8,9 @@ Fake-services поверх реального ProcessStateRegistry и реаль
 - контракт warn: нарушение логируется + contract_violations, но проходит;
 - контракт strict: нарушение дропается.
 """
+
 from __future__ import annotations
 
-import pytest
 from pydantic import BaseModel, ConfigDict
 
 from multiprocess_framework.modules.message_module import FENCE_KEY, read_fence
@@ -83,6 +83,7 @@ def _wire(monkeypatch, *, fence="1", strict=None, own_inc=2, peer_inc=3):
 # Fencing
 # --------------------------------------------------------------------------- #
 
+
 def test_registry_attached_with_builtin_contracts(monkeypatch):
     """Ф4.2 шаг 6: реестр наполнен контрактами built-in команд (wire.configure и т.п.)."""
     svc, _ = _wire(monkeypatch)
@@ -137,6 +138,7 @@ def test_fence_off_disables_stamp(monkeypatch):
 # --------------------------------------------------------------------------- #
 # Контракты (warn / strict)
 # --------------------------------------------------------------------------- #
+
 
 def test_contract_warn_logs_but_passes(monkeypatch):
     svc, router = _wire(monkeypatch, fence="0")  # fence off — изолируем контракт

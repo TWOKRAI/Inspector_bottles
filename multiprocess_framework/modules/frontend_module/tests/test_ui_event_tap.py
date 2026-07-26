@@ -143,10 +143,7 @@ class _FakeServices:
 
 def _registered_handlers(services: _FakeServices) -> Dict[str, Any]:
     """Достать зарегистрированные обработчики из вызовов register_command."""
-    return {
-        call.args[0]: call.args[1]
-        for call in services.command_manager.register_command.call_args_list
-    }
+    return {call.args[0]: call.args[1] for call in services.command_manager.register_command.call_args_list}
 
 
 class TestUiTapCommands:
@@ -237,7 +234,11 @@ class TestCommandSenderTap:
         tap = CommandSenderTap(sender, events.append)
         tap.install()
 
-        sender.send_command("preprocessor", "register_update", {"register": "resize", "field": "target_width", "value": 512})
+        sender.send_command(
+            "preprocessor",
+            "register_update",
+            {"register": "resize", "field": "target_width", "value": 512},
+        )
         sender.send_system_command({"cmd": "process.start", "process_name": "camera"})
 
         # события эмитятся

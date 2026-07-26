@@ -12,7 +12,7 @@ binding-aware путь (`builders_binding`), иначе строит raw Qt-ви
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, get_args
+from typing import get_args
 
 from PySide6.QtWidgets import (
     QComboBox,
