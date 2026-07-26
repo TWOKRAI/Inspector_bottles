@@ -637,6 +637,83 @@ def test_exclude_dirs_applied_in_git_tracked_mode(tmp_path: Path, capsys):
 
 
 # ---------------------------------------------------------------------------
+# Регресс-стражи по находкам ревью коммита 8c681408 (тесты автора)
+# ---------------------------------------------------------------------------
+
+
+def test_same_relative_name_in_two_roots_stays_two_rows(tmp_path: Path, capsys):
+    """Одинаковые имена в разных выбранных папках не схлопываются в одну строку.
+
+    Регресс: ключ строился относительно ПЕРВОЙ подходящей папки, поэтому
+    `a/same.py` и `b/same.py` давали один ключ `same.py` (files=2 в одной строке)
+    и одну общую папку (dirs=1) вместо двух.
+    """
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "same.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "b" / "same.py").write_text("y = 2\n", encoding="utf-8")
+
+    cfg = write_config(tmp_path, group_by="none", include=[".py"])
+    rc, data = run_json(["--config", str(cfg), str(tmp_path / "a"), str(tmp_path / "b")], capsys)
+
+    assert rc == 0
+    assert data["total"]["files"] == 2
+    assert len(data["rows"]) == 2, "два разных файла обязаны дать две строки"
+    assert sorted(r["group"].replace("\\", "/") for r in data["rows"]) == ["a/same.py", "b/same.py"]
+    assert data["total"]["dirs"] == 2, "две физически разные папки"
+
+
+def test_unreadable_file_is_reported_not_silently_dropped(tmp_path: Path, capsys, monkeypatch):
+    """Нечитаемый файл не исчезает молча: в stderr есть предупреждение.
+
+    Класс «проглоченный сбой»: без предупреждения пользователь видит заниженную
+    цифру и не может объяснить разницу.
+    """
+    (tmp_path / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "broken.py").write_text("y = 2\n", encoding="utf-8")
+
+    real_read_text = Path.read_text
+
+    def fake_read_text(self, *args, **kwargs):
+        if self.name == "broken.py":
+            raise OSError("файл заблокирован (симуляция)")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fake_read_text)
+
+    cfg = write_config(tmp_path, group_by="none", include=[".py"])
+    rc, data, stderr = run_json_err(["--config", str(cfg), str(tmp_path)], capsys)
+
+    assert rc == 0
+    assert data["total"]["files"] == 1, "нечитаемый файл в счёт не идёт"
+    assert "broken.py" in stderr, f"пропуск файла обязан быть виден в stderr, получено: {stderr!r}"
+
+
+def test_tokei_total_counts_all_languages_when_limited():
+    """tokei-обёртка: TOTAL считается до обрезки limit'ом, как и в основном счётчике.
+
+    Тот же дефект, что был исправлен в code_stats.py, жил во второй реализации.
+    Работает без установленного бинаря tokei — проверяется чистая конвертация.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "scripts" / "code_stats"))
+    import code_stats_tokei
+
+    payload = {
+        "Python": {"code": 100, "comments": 10, "blanks": 5, "reports": [{}, {}]},
+        "Markdown": {"code": 50, "comments": 0, "blanks": 3, "reports": [{}]},
+        "TOML": {"code": 7, "comments": 1, "blanks": 1, "reports": [{}]},
+    }
+    cfg = code_stats.load_config(REPO_ROOT / "scripts" / "code_stats" / "code_stats.toml")
+    cfg = code_stats.replace(cfg, output=code_stats.replace(cfg.output, limit=1))
+
+    rows, total = code_stats_tokei.tokei_to_rows(payload, cfg)
+
+    assert len(rows) == 1, "вывод обрезан limit'ом"
+    assert total.lines_code == 157, "TOTAL суммирует все языки, а не только видимые"
+    assert total.files == 4
+
+
+# ---------------------------------------------------------------------------
 # Smoke: реальный корень проекта
 # ---------------------------------------------------------------------------
 

@@ -24,6 +24,7 @@ import csv
 import fnmatch
 import io
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -181,7 +182,7 @@ def iter_files(scan: ScanCfg, formats: FormatsCfg, exclude: ExcludeCfg) -> Itera
         root = raw_root.resolve()
         if not root.exists():
             raise FileNotFoundError(f"Scan root not found: {root}")
-        source = _iter_git_files(root, scan) if scan.git_tracked else _iter_walk_files(root, scan, exclude)
+        source = _iter_git_files(root, scan, exclude) if scan.git_tracked else _iter_walk_files(root, scan, exclude)
         for path in source:
             resolved = path.resolve()
             if resolved in seen:
@@ -204,7 +205,10 @@ def _iter_walk_files(root: Path, scan: ScanCfg, exclude: ExcludeCfg) -> Iterator
         current = stack.pop()
         try:
             entries = list(current.iterdir())
-        except (PermissionError, OSError):
+        except OSError as e:
+            # Молча пропущенная папка = молча заниженная цифра: пользователь
+            # увидит меньший счёт и не узнает, что часть дерева не читалась.
+            print(f"warning: папка пропущена, нет доступа: {current} ({e})", file=sys.stderr)
             continue
         for entry in entries:
             if entry.is_symlink() and not scan.follow_symlinks:
@@ -216,7 +220,7 @@ def _iter_walk_files(root: Path, scan: ScanCfg, exclude: ExcludeCfg) -> Iterator
                 yield entry
 
 
-def _iter_git_files(root: Path, scan: ScanCfg) -> Iterator[Path]:
+def _iter_git_files(root: Path, scan: ScanCfg, exclude: ExcludeCfg) -> Iterator[Path]:
     """
     Файлы, о которых знает git: tracked + untracked, но НЕ попавшие в .gitignore.
 
@@ -235,7 +239,9 @@ def _iter_git_files(root: Path, scan: ScanCfg) -> Iterator[Path]:
         )
     except (OSError, subprocess.CalledProcessError) as e:
         print(f"warning: git_tracked недоступен для {root} ({e}); обхожу файловую систему", file=sys.stderr)
-        yield from _iter_walk_files(root, scan, ExcludeCfg())
+        # Тот же exclude, что и в обычном режиме: без него обход заходит в
+        # .git/ и __pycache__/ — результат тот же, но I/O впустую.
+        yield from _iter_walk_files(root, scan, exclude)
         return
 
     for rel in proc.stdout.decode("utf-8", errors="replace").split("\0"):
@@ -454,7 +460,10 @@ def count_words(text: str) -> int:
 def measure_file(path: Path, cfg: Config) -> FileStats | None:
     try:
         text = path.read_text(encoding=cfg.count.encoding, errors="replace")
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError) as e:
+        # Непрочитанный файл просто исчезает из отчёта — без этой строки
+        # разница в цифрах ничем не объясняется.
+        print(f"warning: файл не прочитан: {path} ({e})", file=sys.stderr)
         return None
 
     ext = path.suffix.lower()
@@ -518,29 +527,47 @@ class GroupRow:
         self.dir_paths.add(dir_key)
 
 
-def _rel_to_roots(path: Path, roots: tuple[Path, ...]) -> str:
-    """Путь относительно первой подходящей выбранной папки (иначе — абсолютный)."""
-    for root in roots:
+def display_base(roots: tuple[Path, ...]) -> Path | None:
+    """
+    База, относительно которой строятся ключи отчёта.
+
+    Одна папка → она сама. Несколько → их общий родитель: иначе `a/same.py` и
+    `b/same.py` дают одинаковый ключ `same.py` и схлопываются в одну строку, а
+    две разные папки считаются одной. None = общего родителя нет (разные диски),
+    тогда ключи абсолютные.
+    """
+    resolved = [r.resolve() for r in roots]
+    if len(resolved) == 1:
+        return resolved[0]
+    try:
+        return Path(os.path.commonpath(resolved))
+    except ValueError:
+        return None
+
+
+def _rel_to_base(path: Path, base: Path | None) -> str:
+    """Путь относительно базы (иначе — абсолютный)."""
+    if base is not None:
         try:
-            return path.relative_to(root.resolve()).as_posix()
+            return path.relative_to(base).as_posix()
         except ValueError:
-            continue
+            pass
     return path.as_posix()
 
 
 def group_results(stats: Iterable[FileStats], cfg: Config) -> tuple[list[GroupRow], GroupRow]:
     """Возвращает (строки отчёта, TOTAL). TOTAL считается ДО обрезки limit'ом."""
-    roots = tuple(r.resolve() for r in cfg.scan.roots)
+    base = display_base(cfg.scan.roots)
     groups: dict[str, GroupRow] = {}
 
     for s in stats:
-        rel_dir = _rel_to_roots(s.path.parent.resolve(), roots) or "."
+        rel_dir = _rel_to_base(s.path.parent.resolve(), base) or "."
         if cfg.output.group_by == "extension":
             key = s.ext
         elif cfg.output.group_by == "directory":
             key = _trim_depth(rel_dir, cfg.output.dir_depth)
         else:  # none — каждый файл отдельной строкой
-            key = _rel_to_roots(s.path.resolve(), roots)
+            key = _rel_to_base(s.path.resolve(), base)
 
         row = groups.get(key)
         if row is None:

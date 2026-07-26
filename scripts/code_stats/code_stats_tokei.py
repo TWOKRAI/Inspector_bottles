@@ -32,6 +32,7 @@ from code_stats import (  # type: ignore[import-not-found]
     build_parser as build_base_parser,
     load_config,
     render,
+    total_row,
 )
 
 
@@ -121,7 +122,7 @@ def run_tokei(tokei: str, cfg: Config) -> dict:
     return json.loads(proc.stdout)
 
 
-def tokei_to_rows(payload: dict, cfg: Config) -> list[GroupRow]:
+def tokei_to_rows(payload: dict, cfg: Config) -> tuple[list[GroupRow], GroupRow]:
     """Конвертирует JSON tokei в GroupRow-ы, совместимые с render() из code_stats."""
     rows: list[GroupRow] = []
     # tokei v12+ кладёт языки на верхний уровень, ключ "Total" — сумма (её игнорим — мы строим свою).
@@ -158,9 +159,11 @@ def tokei_to_rows(payload: dict, cfg: Config) -> list[GroupRow]:
     }.get(cfg.output.sort_by, lambda r: r.lines_code)
     rows.sort(key=sort_key, reverse=(cfg.output.sort_order != "asc"))
 
+    # TOTAL — до обрезки limit'ом, иначе итог сложил бы только видимые языки.
+    total = total_row(rows)
     if cfg.output.limit > 0:
         rows = rows[: cfg.output.limit]
-    return rows
+    return rows, total
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -190,8 +193,8 @@ def main(argv: list[str] | None = None) -> int:
 
     tokei = ensure_tokei()
     payload = run_tokei(tokei, cfg)
-    rows = tokei_to_rows(payload, cfg)
-    sys.stdout.write(render(rows, cfg))
+    rows, total = tokei_to_rows(payload, cfg)
+    sys.stdout.write(render(rows, cfg, total))
     return 0
 
 
