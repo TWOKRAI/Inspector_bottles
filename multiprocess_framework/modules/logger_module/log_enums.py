@@ -40,3 +40,27 @@ def level_rank(level) -> int:
         return LEVEL_ORDER.index(str(val).upper())
     except ValueError:
         return 0
+
+
+#: Значения priority, которые понимает ``BatchBuffer.enqueue``
+#: (channel_routing_module/buffers/batch_buffer.py).
+URGENT_PRIORITY = "urgent"
+NORMAL_PRIORITY = "normal"
+
+#: Ранг, начиная с которого запись считается аварийной и не должна ждать пачку.
+_URGENT_RANK = LEVEL_ORDER.index("ERROR")
+
+
+def buffer_priority(level) -> str:
+    """Приоритет ``BatchBuffer`` для уровня: ERROR/CRITICAL → ``urgent``, иначе ``normal``.
+
+    Ф0.1 плана ``observability-unified-routing``. До этой правки ни ``LoggerCore.log()``,
+    ни severity-путь ``ErrorManager.log()`` не передавали priority в ``enqueue`` —
+    поэтому ветка немедленного сброса в ``BatchBuffer`` была недостижима, а окно
+    потери crash-лога при аварийном завершении процесса равнялось ``batch_interval``
+    (1.0 с у логгера, 0.5 с у ошибок).
+
+    ВРЕМЕННАЯ МЕРА: снимается задачей 0.9 (floor ошибок, вариант B) — там путь
+    error/critical становится синхронным и конфиго-независимым.
+    """
+    return URGENT_PRIORITY if level_rank(level) >= _URGENT_RANK else NORMAL_PRIORITY

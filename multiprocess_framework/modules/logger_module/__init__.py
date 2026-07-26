@@ -28,7 +28,13 @@ from .channels.log_channel import (
     get_registered_sink_types,
 )
 from .channels.router_push_channel import RouterPushChannel
-from .log_enums import LEVEL_ORDER, level_rank
+from .log_enums import (
+    LEVEL_ORDER,
+    NORMAL_PRIORITY,
+    URGENT_PRIORITY,
+    buffer_priority,
+    level_rank,
+)
 from .adapters.logger_adapter import LoggerAdapter
 from .adapters.std_facade import StdLoggerFacade, get_std_logger
 from .interfaces import ILoggerManager, ILogChannel
@@ -51,6 +57,9 @@ __all__ = [
     "RouterPushChannel",
     "LEVEL_ORDER",
     "level_rank",
+    "buffer_priority",
+    "URGENT_PRIORITY",
+    "NORMAL_PRIORITY",
     "LoggerAdapter",
     "StdLoggerFacade",
     "get_std_logger",

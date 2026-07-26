@@ -215,6 +215,57 @@ class TestBatchBuffer:
         time.sleep(0.1)
         assert "ch" in flushed
 
+    def test_urgent_flush_drains_whole_batch(self):
+        """Ф0.1: urgent сбрасывает ВСЮ пачку канала, а не одну приоритетную запись.
+
+        Это тот размен, который зафиксирован в logger_module/STATUS.md: цена
+        сброса растёт с накопленным, а не с числом ошибок.
+        """
+        flushed: Dict[str, List] = {}
+
+        def _flush(ch, batch):
+            flushed.setdefault(ch, []).extend(batch)
+
+        config = BatchConfig(max_size=1000, flush_interval=60.0, priority_flush=True)
+        buf = BatchBuffer(flush_fn=_flush, config=config)
+
+        for i in range(10):
+            buf.enqueue("ch", {"n": i})
+        assert "ch" not in flushed, "обычные записи не должны сбрасываться сами"
+
+        buf.enqueue("ch", {"n": "boom"}, priority="urgent")
+
+        assert len(flushed["ch"]) == 11
+        assert buf.stats["pending"]["ch"] == 0
+
+    def test_urgent_flushes_counter_is_separate_from_total_batches(self):
+        """Новый сигнал показан ненулевым и отделён от сбросов по заполнению."""
+        config = BatchConfig(max_size=2, flush_interval=60.0, priority_flush=True)
+        buf = BatchBuffer(flush_fn=lambda ch, batch: None, config=config)
+
+        assert buf.stats["urgent_flushes"] == 0
+
+        # Сброс по заполнению — urgent-счётчик не должен шевелиться.
+        buf.enqueue("ch", {"n": 1})
+        buf.enqueue("ch", {"n": 2})
+        assert buf.stats["urgent_flushes"] == 0
+        batches_after_size_flush = buf.stats["total_batches"]
+        assert batches_after_size_flush > 0
+
+        buf.enqueue("ch", {"n": 3}, priority="urgent")
+        assert buf.stats["urgent_flushes"] == 1
+        assert buf.stats["total_batches"] > batches_after_size_flush
+
+    def test_urgent_counter_ignored_when_priority_flush_disabled(self):
+        """priority_flush=False → приоритет не действует, счётчик не растёт."""
+        config = BatchConfig(max_size=1000, flush_interval=60.0, priority_flush=False)
+        buf = BatchBuffer(flush_fn=lambda ch, batch: None, config=config)
+
+        buf.enqueue("ch", {"n": 1}, priority="urgent")
+
+        assert buf.stats["urgent_flushes"] == 0
+        assert buf.stats["pending"]["ch"] == 1
+
     def test_stats(self):
         buf = BatchBuffer(flush_fn=lambda ch, batch: None)
         buf.start()

@@ -28,6 +28,7 @@ from ...channel_routing_module import resolve_build_result
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
 from ...logger_module.core.log_types import LogRecord
 from ...logger_module.core.logger_core import LoggerCore
+from ...logger_module.log_enums import buffer_priority
 from ..configs.error_manager_config import ErrorManagerConfig
 from ..interfaces import IErrorManager
 from .error_config_assembly import expand_error_manager_config
@@ -262,7 +263,11 @@ class ErrorManager(LoggerCore, IErrorManager):
             self._emit_to_taps(record_dict, level)
 
         if self._buffer is not None:
-            self._buffer.enqueue(channel_name, record_dict)
+            # Ф0.1 (ВРЕМЕННО — снимается задачей 0.9, floor ошибок): severity-путь —
+            # тот же приоритет, что и в LoggerCore.log(). Сюда попадают ровно
+            # WARNING/ERROR/CRITICAL, и именно эти записи нельзя терять в пачке при
+            # аварийном завершении процесса. Размен — logger_module/STATUS.md.
+            self._buffer.enqueue(channel_name, record_dict, buffer_priority(level))
             self.stats["messages_batched"] += 1
         else:
             ch = self._channel_registry.get(channel_name)

@@ -36,7 +36,7 @@ from ..configs.logger_manager_config import (
     LoggerScopeSchema,
 )
 from .log_config import LogLevel, LogScope
-from ..log_enums import level_rank
+from ..log_enums import buffer_priority, level_rank
 from .log_types import LogRecord
 from ..channels.log_channel import create_channel, LogChannel
 from .log_paths import resolve_log_file_path
@@ -430,8 +430,15 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             self._emit_to_taps(record.to_dict(), level)
 
         if self._buffer:
+            # Ф0.1 (ВРЕМЕННО — снимается задачей 0.9, floor ошибок): ERROR/CRITICAL
+            # уходят с priority="urgent" — BatchBuffer сбрасывает их немедленно, а не
+            # через batch_interval. Иначе crash-лог остаётся в памяти и теряется целиком
+            # при аварийном завершении процесса.
+            # Размен измерен: сброс тянет ВСЮ пачку канала синхронно в этом потоке —
+            # см. logger_module/STATUS.md, «Известные ограничения».
+            priority = buffer_priority(level)
             for ch_name in channels:
-                self._buffer.enqueue(ch_name, record.to_dict())
+                self._buffer.enqueue(ch_name, record.to_dict(), priority)
             self.stats["messages_batched"] += 1
         else:
             self._write_record_to_channels(record, channels)
