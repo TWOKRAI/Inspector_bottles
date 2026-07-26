@@ -1,22 +1,23 @@
 # -*- coding: utf-8 -*-
-"""Дочерний процесс для пары Ф0.1 «ERROR за 100 мс до аварийной смерти».
+"""Дочерний процесс для пары Ф0.9 «ERROR за 100 мс до аварийной смерти».
 
-Запускается тестом ``test_urgent_flush.py`` как ОТДЕЛЬНЫЙ процесс:
+Запускается тестом ``test_error_floor.py`` как ОТДЕЛЬНЫЙ процесс:
 
-    python _crash_log_child.py <baseline|fixed> <log_dir>
+    python _crash_log_child.py <baseline|fixed> <log_dir> [nosinks]
 
-  * ``baseline`` — воспроизводит поведение ДО фикса: ``buffer_priority``
-    подменён на константу ``"normal"``, то есть третий аргумент ``enqueue``
-    снова не несёт информации об уровне. Это болезнь.
+  * ``baseline`` — воспроизводит поведение ДО фикса: ``is_error_level``
+    подменён на «всегда False», то есть ошибка снова уходит в ``BatchBuffer``
+    и ждёт ``batch_interval``. Это болезнь.
   * ``fixed``    — прод-путь как есть.
+  * ``nosinks``  — третий аргумент: собрать конфиг БЕЗ единого включённого
+    приёмника ошибок. Проверяет конфиго-независимость floor'а.
 
 Подмена делается здесь, а не флагом в проде: ветка «до фикса» не должна
 существовать в рабочем коде (правило «флаги не должны стать костылями»).
 
 После записи ERROR процесс печатает ``logged`` в stdout и засыпает надолго —
 убивает его родитель, чтобы ни ``shutdown()``, ни ``atexit``, ни таймер
-``BatchBuffer`` не успели сбросить пачку. Единственный шанс записи попасть
-на диск — немедленный сброс по ``priority="urgent"``.
+``BatchBuffer`` не успели ничего сбросить.
 
 Имя начинается с ``_`` — файл не собирается pytest (``python_files = test_*.py``).
 """
@@ -30,55 +31,82 @@ from multiprocess_framework.modules.logger_module.configs.logger_manager_config 
     LoggerScopeSchema,
 )
 
-#: Маркер, который родитель ищет в файле лога.
+#: Маркер, который родитель ищет в записи.
 CRASH_MARKER = "URGENT-FLUSH-CRASH-MARKER"
+
+#: Уникальный фрагмент traceback'а — доказывает, что запись НЕ усечена.
+TRACEBACK_MARKER = "_deliberate_boom"
 
 #: Сколько ждать смерти от родителя (процесс должен быть убит задолго до этого).
 _SLEEP_UNTIL_KILLED = 60.0
 
 
-def main(mode: str, log_dir: str) -> None:
+def _deliberate_boom() -> None:
+    """Функция с говорящим именем — её имя обязано оказаться в traceback."""
+    raise ValueError(CRASH_MARKER)
+
+
+def main(mode: str, log_dir: str, sinks: str = "with-sinks") -> None:
     from multiprocess_framework.modules.logger_module.core import logger_core
+    from multiprocess_framework.modules.error_module.core import error_manager as error_manager_mod
+    from multiprocess_framework.modules.error_module.core.error_manager import ErrorManager
 
     if mode == "baseline":
-        logger_core.buffer_priority = lambda _level: "normal"
+        # До Ф0.9 ошибка ничем не отличалась от INFO: уходила в пачку и ждала.
+        # Подменять надо ОБА неймспейса: severity-путь ErrorManager — полный
+        # override, он импортировал предикат к себе и на патч logger_core не
+        # смотрит. Первая редакция патчила только logger_core — и baseline
+        # позеленел (то есть болезнь не воспроизвелась), тест это поймал.
+        logger_core.is_error_level = lambda _level: False
+        error_manager_mod.is_error_level = lambda _level: False
 
-    from multiprocess_framework.modules.logger_module.core.logger_manager import LoggerManager
+    channels = {}
+    scopes_channels = []
+    if sinks != "nosinks":
+        channels["errors_file"] = LoggerChannelSchema(
+            name="errors_file",
+            type="file",
+            enabled=True,
+            file_path="errors.log",
+            rotate=False,
+        )
+        scopes_channels = ["errors_file"]
 
     config = LoggerManagerConfig(
-        app_name="urgent_flush_pair",
+        app_name="error_floor_pair",
         log_directory=log_dir,
         enable_batching=True,
         # Ни один другой триггер сброса не должен сработать: ни размер пачки,
-        # ни таймер. Остаётся ровно priority-ветка.
+        # ни таймер. Остаётся ровно синхронный путь ошибок.
         batch_size=10_000,
         batch_interval=_SLEEP_UNTIL_KILLED * 10,
         modules={},
-        channels={
-            "system_file": LoggerChannelSchema(
-                name="system_file",
-                type="file",
-                enabled=True,
-                file_path="system.log",
-                rotate=False,
-            )
-        },
+        channels=channels,
         scopes={
             "SYSTEM": LoggerScopeSchema(
                 enabled=True,
                 min_level="DEBUG",
-                channels=["system_file"],
+                channels=scopes_channels,
             )
         },
     )
 
-    manager = LoggerManager(manager_name="CrashLogger", config=config)
+    manager = ErrorManager(config=config)
     manager.initialize()
-    manager.error(CRASH_MARKER, module="crash_test")
+
+    # Немного обычных записей ДО ошибки: они должны лечь на диск раньше неё
+    # (порядок), а в baseline — умереть вместе с процессом.
+    for i in range(5):
+        manager.info(f"routine before crash {i}", module="crash_test")
+
+    try:
+        _deliberate_boom()
+    except ValueError as exc:
+        manager.log_exception(exc, "падение перед смертью", module="crash_test")
 
     print("logged", flush=True)
     time.sleep(_SLEEP_UNTIL_KILLED)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(*sys.argv[1:])

@@ -28,7 +28,7 @@ from ...channel_routing_module import resolve_build_result
 from ...logger_module.core.log_config import LoggerManagerConfig, LogLevel, LogScope
 from ...logger_module.core.log_types import LogRecord
 from ...logger_module.core.logger_core import LoggerCore
-from ...logger_module.log_enums import buffer_priority
+from ...logger_module.log_enums import is_error_level
 from ..configs.error_manager_config import ErrorManagerConfig
 from ..interfaces import IErrorManager
 from .error_config_assembly import expand_error_manager_config
@@ -262,12 +262,14 @@ class ErrorManager(LoggerCore, IErrorManager):
         if self._tap_sinks:
             self._emit_to_taps(record_dict, level)
 
-        if self._buffer is not None:
-            # Ф0.1 (ВРЕМЕННО — снимается задачей 0.9, floor ошибок): severity-путь —
-            # тот же приоритет, что и в LoggerCore.log(). Сюда попадают ровно
-            # WARNING/ERROR/CRITICAL, и именно эти записи нельзя терять в пачке при
-            # аварийном завершении процесса. Размен — logger_module/STATUS.md.
-            self._buffer.enqueue(channel_name, record_dict, buffer_priority(level))
+        if is_error_level(level):
+            # Ф0.9 (floor, вариант B): error/critical синхронно и с гарантией.
+            # Этот путь — полный override, LoggerCore.log() он не зовёт, поэтому
+            # floor должен стоять здесь отдельно, а не только у родителя.
+            self._write_error_to_channel(channel_name, record_dict)
+        elif self._buffer is not None:
+            # WARNING остаётся батченым: он не crash-лог и терпит batch_interval.
+            self._buffer.enqueue(channel_name, record_dict)
             self.stats["messages_batched"] += 1
         else:
             ch = self._channel_registry.get(channel_name)
@@ -276,6 +278,33 @@ class ErrorManager(LoggerCore, IErrorManager):
                     ch.write(record_dict)
                 except Exception as e:
                     self._fallback_log("ERROR", f"write to {channel_name} failed: {e}")
+
+    def _write_error_to_channel(self, channel_name: str, record_dict: Dict[str, Any]) -> None:
+        """Синхронно записать error/critical в severity-канал; ноль → floor.
+
+        Симметрия с ``LoggerCore._write_error_record``: сперва на диск уходит
+        накопленное до ошибки (порядок), затем сама запись напрямую, и только
+        при нуле принявших приёмников — floor. Дубля нет: floor включается
+        ровно тогда, когда канал не записал.
+        """
+        if self._buffer is not None:
+            try:
+                self._buffer.flush(channel_name)
+            except Exception:  # nosec B110 — сбой сброса не должен съесть саму ошибку
+                pass
+
+        ch = self._channel_registry.get(channel_name)
+        if ch is not None:
+            try:
+                ch.write(record_dict)
+                return
+            except Exception as e:
+                self._fallback_log("ERROR", f"write to {channel_name} failed: {e}")
+
+        # Канал снят (logger.sink.disable), не создался или упал на записи —
+        # severity-маршрут конфиго-зависим целиком, поэтому пол обязателен.
+        self.stats["errors_to_floor"] += 1
+        self.error_floor.write(record_dict)
 
     def log_exception(
         self,

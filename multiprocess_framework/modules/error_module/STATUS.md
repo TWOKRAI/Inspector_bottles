@@ -67,3 +67,4 @@
 | 2026-03-12 | CRM Фаза 5: STATUS.md обновлён | 5 |
 | 2026-04-10 | DECISIONS.md, ARCHITECTURE.md §6.14, тесты level routing/integration, README fix, `core/__init__.py` export | 4–5 |
 | 2026-07-26 | Ф0.1: severity-путь `log()` передаёт `priority="urgent"` для ERROR/CRITICAL (WARNING остаётся `normal`). Путь — полный override, фикс в `LoggerCore` на него не распространяется, поэтому доказан отдельными тестами. Временно, снимается Ф0.9; размен измерен в `logger_module/STATUS.md` | — |
+| 2026-07-26 | **Ф0.9 (floor, вариант B):** `_write_error_to_channel()` — `error`/`critical` синхронно мимо буфера, при недоступном severity-канале запись уходит в общий `ErrorFloor`. WARNING остаётся батченым (не crash-лог). Мера Ф0.1 снята. Севирити-маршрут конфиго-зависим целиком (`_setup_level_routes`), floor — его страховка | — |

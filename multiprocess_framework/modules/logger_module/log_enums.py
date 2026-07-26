@@ -42,25 +42,20 @@ def level_rank(level) -> int:
         return 0
 
 
-#: Значения priority, которые понимает ``BatchBuffer.enqueue``
-#: (channel_routing_module/buffers/batch_buffer.py).
-URGENT_PRIORITY = "urgent"
-NORMAL_PRIORITY = "normal"
-
-#: Ранг, начиная с которого запись считается аварийной и не должна ждать пачку.
-_URGENT_RANK = LEVEL_ORDER.index("ERROR")
+#: Ранг, начиная с которого запись считается аварийной: её нельзя ни буферизовать,
+#: ни потерять при выключенных приёмниках (инвариант 1 плана observability-unified-routing).
+ERROR_RANK = LEVEL_ORDER.index("ERROR")
 
 
-def buffer_priority(level) -> str:
-    """Приоритет ``BatchBuffer`` для уровня: ERROR/CRITICAL → ``urgent``, иначе ``normal``.
+def is_error_level(level) -> bool:
+    """ERROR/CRITICAL? Принимает ``LogLevel`` или строку.
 
-    Ф0.1 плана ``observability-unified-routing``. До этой правки ни ``LoggerCore.log()``,
-    ни severity-путь ``ErrorManager.log()`` не передавали priority в ``enqueue`` —
-    поэтому ветка немедленного сброса в ``BatchBuffer`` была недостижима, а окно
-    потери crash-лога при аварийном завершении процесса равнялось ``batch_interval``
-    (1.0 с у логгера, 0.5 с у ошибок).
+    Единственный предикат «эта запись — аварийная» на весь лог-слой. По нему
+    ``LoggerCore.log()`` и severity-путь ``ErrorManager.log()`` решают писать
+    синхронно, мимо ``BatchBuffer``, и подстилать floor (Ф0.9, вариант B).
 
-    ВРЕМЕННАЯ МЕРА: снимается задачей 0.9 (floor ошибок, вариант B) — там путь
-    error/critical становится синхронным и конфиго-независимым.
+    Заменил ``buffer_priority()`` из временной меры Ф0.1: та выталкивала запись
+    из пачки приоритетом (сбрасывая заодно всю пачку), теперь запись просто не
+    попадает в пачку.
     """
-    return URGENT_PRIORITY if level_rank(level) >= _URGENT_RANK else NORMAL_PRIORITY
+    return level_rank(level) >= ERROR_RANK

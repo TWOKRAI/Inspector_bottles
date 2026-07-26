@@ -20,6 +20,7 @@ Task 5.14 (CRM-развязка):
 
 import logging as _stdlib_logging
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from contextvars import ContextVar
 
@@ -36,7 +37,8 @@ from ..configs.logger_manager_config import (
     LoggerScopeSchema,
 )
 from .log_config import LogLevel, LogScope
-from ..log_enums import buffer_priority, level_rank
+from ..log_enums import is_error_level, level_rank
+from .error_floor import FLOOR_FILE_NAME, ErrorFloor, get_error_floor
 from .log_types import LogRecord
 from ..channels.log_channel import create_channel, LogChannel
 from .log_paths import resolve_log_file_path
@@ -108,11 +110,17 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         self._decision_cache: Dict[str, bool] = {}
         self._cache_enabled = True
 
+        # Пол ошибок (Ф0.9) — ленивый: резолвится на первой записи, ушедшей в floor.
+        self._error_floor: Optional[ErrorFloor] = None
+
         self.stats = {
             "messages_processed": 0,
             "messages_skipped": 0,
             "messages_batched": 0,
             "module_files_created": 0,
+            # Сколько раз штатный маршрут ошибок не принял запись и сработал floor.
+            # Ненулевое значение — сигнал «маршрут ошибок сломан», а не норма.
+            "errors_to_floor": 0,
         }
 
         self._setup_channels()
@@ -429,23 +437,84 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         if self._tap_sinks:
             self._emit_to_taps(record.to_dict(), level)
 
-        if self._buffer:
-            # Ф0.1 (ВРЕМЕННО — снимается задачей 0.9, floor ошибок): ERROR/CRITICAL
-            # уходят с priority="urgent" — BatchBuffer сбрасывает их немедленно, а не
-            # через batch_interval. Иначе crash-лог остаётся в памяти и теряется целиком
-            # при аварийном завершении процесса.
-            # Размен измерен: сброс тянет ВСЮ пачку канала синхронно в этом потоке —
-            # см. logger_module/STATUS.md, «Известные ограничения».
-            priority = buffer_priority(level)
+        if is_error_level(level):
+            # Ф0.9 (floor, вариант B): error/critical НЕ буферизуются. Пачку целевых
+            # каналов сбрасываем первой — иначе запись легла бы на диск раньше
+            # предшествовавших ей INFO, и контекст перед падением потерял бы порядок.
+            self._write_error_record(record, channels)
+        elif self._buffer:
             for ch_name in channels:
-                self._buffer.enqueue(ch_name, record.to_dict(), priority)
+                self._buffer.enqueue(ch_name, record.to_dict())
             self.stats["messages_batched"] += 1
         else:
             self._write_record_to_channels(record, channels)
 
-    def _write_record_to_channels(self, record: LogRecord, channel_names: List[str]) -> None:
-        """Write log record directly to named channels (no buffer)."""
+    # =========================================================================
+    # FLOOR ОШИБОК (Ф0.9, вариант B — инвариант 1 плана observability-unified-routing)
+    # =========================================================================
+
+    @property
+    def error_floor(self) -> ErrorFloor:
+        """Пол ошибок. Ленивый: файл создаётся на первой реальной ошибке."""
+        if self._error_floor is None:
+            self._error_floor = get_error_floor(self._resolve_floor_path())
+        return self._error_floor
+
+    def _resolve_floor_path(self) -> str:
+        """Куда класть floor: рядом с теми логами, которые он подстраховывает.
+
+        ``log_directory`` есть не у всех менеджеров: прод собирает ErrorManager из
+        ``ErrorManagerConfig`` с АБСОЛЮТНЫМИ путями каналов и без ``log_directory``
+        (`managers_config.managers_from_log_dir`). Наивный резолв отправил бы его
+        floor в системный temp, тогда как сам ``errors.log`` лежит в каталоге логов —
+        пол оказался бы не там, где его станут искать.
+
+        Поэтому: ``log_directory``, если задан; иначе каталог первого файлового
+        канала; иначе общий дефолт.
+        """
+        if self.config.log_directory:
+            return self._resolved_file_path(None, FLOOR_FILE_NAME)
+
+        for channel_config in self.config.channels.values():
+            raw = getattr(channel_config, "file_path", None)
+            if getattr(channel_config, "type", None) == "file" and raw:
+                parent = Path(raw).expanduser().parent
+                if parent.is_absolute():
+                    return str(parent / FLOOR_FILE_NAME)
+
+        return self._resolved_file_path(None, FLOOR_FILE_NAME)
+
+    def _write_error_record(self, record: LogRecord, channel_names: List[str]) -> None:
+        """Синхронно записать error/critical; при нуле приёмников — в floor.
+
+        Инвариант «одно место, без дублей»: floor пишет ТОЛЬКО когда обычный
+        маршрут не записал НИ ОДНОГО канала. Пока хоть один канал жив, второй
+        копии записи не появляется (это и отличает вариант B от отклонённого A).
+        """
+        if self._buffer is not None:
+            # Порядок: сначала на диск уходит то, что накоплено ДО ошибки.
+            for ch_name in channel_names:
+                try:
+                    self._buffer.flush(ch_name)
+                except Exception:  # nosec B110 — сбой сброса не должен съесть саму ошибку
+                    pass
+
+        written = self._write_record_to_channels(record, channel_names)
+        if written == 0:
+            # Ни одного живого приёмника: каналы выключены конфигом, сняты
+            # logger.sink.disable или все write упали. Запись обязана уцелеть.
+            self.stats["errors_to_floor"] += 1
+            self.error_floor.write(record.to_dict())
+
+    def _write_record_to_channels(self, record: LogRecord, channel_names: List[str]) -> int:
+        """Записать запись напрямую в названные каналы (мимо буфера).
+
+        Returns:
+            Число каналов, принявших запись. Ноль означает «запись никуда не легла» —
+            по этому признаку ``_write_error_record`` включает floor.
+        """
         record_dict = record.to_dict()
+        written = 0
         for ch_name in channel_names:
             ch = self._channel_registry.get(ch_name)
             if ch is None:
@@ -453,8 +522,10 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             if ch is not None:
                 try:
                     ch.write(record_dict)
+                    written += 1
                 except Exception:  # nosec B110 — глушим ошибку записи в канал, чтобы не порождать лог-шторм внутри логгера
                     pass
+        return written
 
     # =========================================================================
     # КОНТЕКСТ
