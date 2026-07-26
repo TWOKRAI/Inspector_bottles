@@ -83,7 +83,8 @@ def ensure_tokei() -> str:
 
 
 def build_tokei_argv(tokei: str, cfg: Config) -> list[str]:
-    argv = [tokei, "--output", "json", str(cfg.scan.root.resolve())]
+    # tokei принимает несколько путей — выбор папок из конфига/CLI работает как есть.
+    argv = [tokei, "--output", "json", *(str(r.resolve()) for r in cfg.scan.roots)]
 
     # --types фильтр (tokei v12+ принимает --types, v11 — --type).
     # Используем длинную форму --types, она поддержана начиная с v12.
@@ -149,9 +150,9 @@ def tokei_to_rows(payload: dict, cfg: Config) -> list[GroupRow]:
             )
         )
 
+    # words/chars/dirs tokei не выдаёт — сортировка по ним вырождается в lines.
     sort_key = {
         "lines": lambda r: r.lines_code,
-        "chars": lambda r: r.chars,
         "files": lambda r: r.files,
         "name": lambda r: r.key,
     }.get(cfg.output.sort_by, lambda r: r.lines_code)
@@ -179,6 +180,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
     cfg = apply_overrides(cfg, args)
+
+    if cfg.scan.git_tracked:
+        # Молчать нельзя: пользователь просил git-фильтрацию, а получил бы обычный обход.
+        print(
+            "warning: git_tracked не поддержан в tokei-режиме — считаю всё, что проходит exclude-фильтры конфига.",
+            file=sys.stderr,
+        )
 
     tokei = ensure_tokei()
     payload = run_tokei(tokei, cfg)

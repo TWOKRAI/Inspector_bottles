@@ -1,16 +1,19 @@
 """
-Универсальный счётчик файлов / строк / символов с TOML-конфигом.
+Универсальный счётчик файлов / папок / строк / слов / символов с TOML-конфигом.
 
 Принципы:
 - stdlib-only (Python 3.12+): tomllib, fnmatch, pathlib, argparse, dataclasses.
 - Strategy для подсчёта по типу файла (Python / Markdown / Shell / Plain).
 - Pruning исключений на уровне обхода (не читаем то, что отброшено).
+- Правдивость по умолчанию: `git_tracked` считает только то, что реально лежит
+  в репозитории (сгенерированные кэши и всё из .gitignore не искажают цифры).
 - CLI-флаги перекрывают TOML.
 
 Запуск:
     python scripts/code_stats/code_stats.py
-    python scripts/code_stats/code_stats.py --root multiprocess_framework
+    python scripts/code_stats/code_stats.py multiprocess_framework Services
     python scripts/code_stats/code_stats.py --format json --group-by directory
+    python scripts/code_stats/code_stats.py --group-by directory --dir-depth 1
     python scripts/code_stats/code_stats.py --config path/to/other.toml
 """
 
@@ -21,9 +24,10 @@ import csv
 import fnmatch
 import io
 import json
+import subprocess
 import sys
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable, Iterator
 
@@ -35,9 +39,18 @@ from typing import Iterable, Iterator
 
 @dataclass(frozen=True)
 class ScanCfg:
-    root: Path
+    # Одна или несколько папок для анализа. Первая — база для относительных путей.
+    roots: tuple[Path, ...] = (Path("."),)
     recursive: bool = True
     follow_symlinks: bool = False
+    # Считать только файлы, известные git (tracked + untracked не-ignored).
+    # Это отсекает сгенерированные кэши/артефакты из .gitignore — цифры честнее.
+    git_tracked: bool = False
+
+    @property
+    def root(self) -> Path:
+        """База для относительных путей и обратная совместимость с одной папкой."""
+        return self.roots[0]
 
 
 @dataclass(frozen=True)
@@ -58,17 +71,21 @@ class CountCfg:
     comments: bool = True
     docstrings: bool = True
     chars: bool = True
+    words: bool = True
     encoding: str = "utf-8"
 
 
 @dataclass(frozen=True)
 class OutputCfg:
-    format: str = "table"      # table | json | csv
+    format: str = "table"  # table | json | csv
     group_by: str = "extension"  # extension | directory | none
-    sort_by: str = "lines"      # lines | chars | files | name
-    sort_order: str = "desc"    # desc | asc
+    sort_by: str = "lines"  # lines | words | chars | files | dirs | name
+    sort_order: str = "desc"  # desc | asc
     show_total: bool = True
     limit: int = 0
+    # Глубина группировки при group_by = "directory": 1 = только верхний
+    # сегмент пути (зоны проекта), 2 = два сегмента, 0 = полный путь.
+    dir_depth: int = 0
 
 
 @dataclass(frozen=True)
@@ -95,11 +112,17 @@ def load_config(path: Path) -> Config:
     cnt_raw = raw.get("count", {})
     out_raw = raw.get("output", {})
 
+    # `paths` (список) — новый способ выбрать несколько папок; `root` (строка) —
+    # старый, поддержан для совместимости. Пусто → текущая директория.
+    raw_paths = scan_raw.get("paths") or ([scan_raw["root"]] if "root" in scan_raw else ["."])
+    roots = tuple(Path(str(p)).expanduser() for p in raw_paths) or (Path("."),)
+
     return Config(
         scan=ScanCfg(
-            root=Path(scan_raw.get("root", ".")).expanduser(),
+            roots=roots,
             recursive=bool(scan_raw.get("recursive", True)),
             follow_symlinks=bool(scan_raw.get("follow_symlinks", False)),
+            git_tracked=bool(scan_raw.get("git_tracked", False)),
         ),
         formats=FormatsCfg(
             include=frozenset(ext.lower() for ext in fmt_raw.get("include", [])),
@@ -114,6 +137,7 @@ def load_config(path: Path) -> Config:
             comments=bool(cnt_raw.get("comments", True)),
             docstrings=bool(cnt_raw.get("docstrings", True)),
             chars=bool(cnt_raw.get("chars", True)),
+            words=bool(cnt_raw.get("words", True)),
             encoding=str(cnt_raw.get("encoding", "utf-8")),
         ),
         output=OutputCfg(
@@ -123,6 +147,7 @@ def load_config(path: Path) -> Config:
             sort_order=str(out_raw.get("sort_order", "desc")).lower(),
             show_total=bool(out_raw.get("show_total", True)),
             limit=int(out_raw.get("limit", 0)),
+            dir_depth=int(out_raw.get("dir_depth", 0)),
         ),
     )
 
@@ -145,17 +170,32 @@ def _file_excluded(name: str, rel_path: str, cfg: ExcludeCfg) -> bool:
 
 
 def iter_files(scan: ScanCfg, formats: FormatsCfg, exclude: ExcludeCfg) -> Iterator[Path]:
-    """Итеративный обход с pruning исключённых директорий."""
-    root = scan.root.resolve()
-    if not root.exists():
-        raise FileNotFoundError(f"Scan root not found: {root}")
+    """
+    Файлы всех выбранных папок, без дублей.
 
-    include = formats.include  # пустой -> все
+    Дубли реальны: `--path . --path scripts` даёт пересекающиеся деревья.
+    Ключ дедупликации — resolved-путь.
+    """
+    seen: set[Path] = set()
+    for raw_root in scan.roots:
+        root = raw_root.resolve()
+        if not root.exists():
+            raise FileNotFoundError(f"Scan root not found: {root}")
+        source = _iter_git_files(root, scan) if scan.git_tracked else _iter_walk_files(root, scan, exclude)
+        for path in source:
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            if not _accept_file(resolved, root, formats.include, exclude):
+                continue
+            seen.add(resolved)
+            yield resolved
 
+
+def _iter_walk_files(root: Path, scan: ScanCfg, exclude: ExcludeCfg) -> Iterator[Path]:
+    """Обход файловой системы с pruning исключённых директорий."""
     if not scan.recursive:
-        for entry in root.iterdir():
-            if entry.is_file() and _accept_file(entry, root, include, exclude):
-                yield entry
+        yield from (e for e in root.iterdir() if e.is_file())
         return
 
     # Ручной DFS вместо Path.rglob — даёт честный pruning директорий.
@@ -170,22 +210,54 @@ def iter_files(scan: ScanCfg, formats: FormatsCfg, exclude: ExcludeCfg) -> Itera
             if entry.is_symlink() and not scan.follow_symlinks:
                 continue
             if entry.is_dir():
-                if _dir_excluded(entry.name, exclude.dirs):
-                    continue
-                stack.append(entry)
+                if not _dir_excluded(entry.name, exclude.dirs):
+                    stack.append(entry)
             elif entry.is_file():
-                if _accept_file(entry, root, include, exclude):
-                    yield entry
+                yield entry
+
+
+def _iter_git_files(root: Path, scan: ScanCfg) -> Iterator[Path]:
+    """
+    Файлы, о которых знает git: tracked + untracked, но НЕ попавшие в .gitignore.
+
+    Зачем: сгенерированные кэши (graphify-out, дампы, датасеты) не должны
+    попадать в оценку проекта. .gitignore — уже готовое и поддерживаемое
+    описание «что тут не наше».
+
+    Если git недоступен или папка не в репозитории — падаем обратно на обход ФС
+    с явным предупреждением в stderr (тихая подмена метода = вранью в цифрах).
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as e:
+        print(f"warning: git_tracked недоступен для {root} ({e}); обхожу файловую систему", file=sys.stderr)
+        yield from _iter_walk_files(root, scan, ExcludeCfg())
+        return
+
+    for rel in proc.stdout.decode("utf-8", errors="replace").split("\0"):
+        if not rel:
+            continue
+        path = root / rel
+        # git знает и про удалённые из ФС, но ещё не закоммиченные удаления.
+        if path.is_file():
+            yield path
 
 
 def _accept_file(path: Path, root: Path, include: frozenset[str], exclude: ExcludeCfg) -> bool:
     if include and path.suffix.lower() not in include:
         return False
     try:
-        rel = path.relative_to(root).as_posix()
+        rel_parts = path.relative_to(root).parts
     except ValueError:
-        rel = path.as_posix()
-    return not _file_excluded(path.name, rel, exclude)
+        rel_parts = path.parts
+    # Исключённые папки проверяем и здесь: в git-режиме pruning обхода не было.
+    if any(_dir_excluded(part, exclude.dirs) for part in rel_parts[:-1]):
+        return False
+    return not _file_excluded(path.name, "/".join(rel_parts), exclude)
 
 
 # --------------------------------------------------------------------------- #
@@ -198,11 +270,12 @@ class FileStats:
     path: Path
     ext: str
     files: int = 1
-    lines_total: int = 0   # все физические строки
-    lines_code: int = 0    # эффективные строки (с учётом флагов конфига)
+    lines_total: int = 0  # все физические строки
+    lines_code: int = 0  # эффективные строки (с учётом флагов конфига)
     lines_blank: int = 0
     lines_comment: int = 0
     lines_docstring: int = 0
+    words: int = 0
     chars: int = 0
 
 
@@ -367,6 +440,17 @@ def counter_for(ext: str) -> Counter:
 # --------------------------------------------------------------------------- #
 
 
+def count_words(text: str) -> int:
+    """
+    Слова = последовательности непробельных символов (модель `wc -w`).
+
+    Осознанно НЕ пытаемся понимать «слова кода»: любая умная эвристика
+    (идентификаторы, snake_case → 2 слова) непереносима между языками и
+    непроверяема. `wc -w` — определение, которое читатель отчёта уже знает.
+    """
+    return len(text.split())
+
+
 def measure_file(path: Path, cfg: Config) -> FileStats | None:
     try:
         text = path.read_text(encoding=cfg.count.encoding, errors="replace")
@@ -383,6 +467,7 @@ def measure_file(path: Path, cfg: Config) -> FileStats | None:
         lines_blank=blank,
         lines_comment=comment,
         lines_docstring=doc,
+        words=count_words(text) if cfg.count.words else 0,
         chars=len(text) if cfg.count.chars else 0,
     )
     return stats
@@ -411,55 +496,80 @@ class GroupRow:
     lines_blank: int = 0
     lines_comment: int = 0
     lines_docstring: int = 0
+    words: int = 0
     chars: int = 0
+    # Папки считаем как множество, а не счётчиком: иначе TOTAL по группам
+    # сложил бы одну и ту же папку столько раз, сколько в ней расширений.
+    dir_paths: set[str] = field(default_factory=set)
 
-    def add(self, s: FileStats) -> None:
+    @property
+    def dirs(self) -> int:
+        return len(self.dir_paths)
+
+    def add(self, s: FileStats, dir_key: str) -> None:
         self.files += s.files
         self.lines_total += s.lines_total
         self.lines_code += s.lines_code
         self.lines_blank += s.lines_blank
         self.lines_comment += s.lines_comment
         self.lines_docstring += s.lines_docstring
+        self.words += s.words
         self.chars += s.chars
+        self.dir_paths.add(dir_key)
 
 
-def group_results(stats: Iterable[FileStats], cfg: Config) -> list[GroupRow]:
-    root = cfg.scan.root.resolve()
+def _rel_to_roots(path: Path, roots: tuple[Path, ...]) -> str:
+    """Путь относительно первой подходящей выбранной папки (иначе — абсолютный)."""
+    for root in roots:
+        try:
+            return path.relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue
+    return path.as_posix()
+
+
+def group_results(stats: Iterable[FileStats], cfg: Config) -> tuple[list[GroupRow], GroupRow]:
+    """Возвращает (строки отчёта, TOTAL). TOTAL считается ДО обрезки limit'ом."""
+    roots = tuple(r.resolve() for r in cfg.scan.roots)
     groups: dict[str, GroupRow] = {}
 
     for s in stats:
+        rel_dir = _rel_to_roots(s.path.parent.resolve(), roots) or "."
         if cfg.output.group_by == "extension":
             key = s.ext
         elif cfg.output.group_by == "directory":
-            try:
-                rel_dir = s.path.parent.resolve().relative_to(root).as_posix() or "."
-            except ValueError:
-                rel_dir = s.path.parent.as_posix()
-            key = rel_dir
+            key = _trim_depth(rel_dir, cfg.output.dir_depth)
         else:  # none — каждый файл отдельной строкой
-            try:
-                key = s.path.resolve().relative_to(root).as_posix()
-            except ValueError:
-                key = s.path.as_posix()
+            key = _rel_to_roots(s.path.resolve(), roots)
 
         row = groups.get(key)
         if row is None:
             row = GroupRow(key=key)
             groups[key] = row
-        row.add(s)
+        row.add(s, rel_dir)
 
     rows = list(groups.values())
     sort_key = {
         "lines": lambda r: r.lines_code,
+        "words": lambda r: r.words,
         "chars": lambda r: r.chars,
         "files": lambda r: r.files,
+        "dirs": lambda r: r.dirs,
         "name": lambda r: r.key,
     }.get(cfg.output.sort_by, lambda r: r.lines_code)
     rows.sort(key=sort_key, reverse=(cfg.output.sort_order != "asc"))
 
+    total = total_row(rows)
     if cfg.output.limit > 0:
         rows = rows[: cfg.output.limit]
-    return rows
+    return rows, total
+
+
+def _trim_depth(rel_dir: str, depth: int) -> str:
+    """`a/b/c` при depth=1 → `a`. depth <= 0 — полный путь."""
+    if depth <= 0 or rel_dir == ".":
+        return rel_dir
+    return "/".join(rel_dir.split("/")[:depth])
 
 
 def total_row(rows: list[GroupRow]) -> GroupRow:
@@ -471,7 +581,9 @@ def total_row(rows: list[GroupRow]) -> GroupRow:
         total.lines_blank += r.lines_blank
         total.lines_comment += r.lines_comment
         total.lines_docstring += r.lines_docstring
+        total.words += r.words
         total.chars += r.chars
+        total.dir_paths |= r.dir_paths
     return total
 
 
@@ -479,18 +591,20 @@ def total_row(rows: list[GroupRow]) -> GroupRow:
 # Форматирование вывода
 # --------------------------------------------------------------------------- #
 
-_HEADERS = ["group", "files", "lines", "code", "blank", "comment", "docstr", "chars"]
+_HEADERS = ["group", "files", "dirs", "lines", "code", "blank", "comment", "docstr", "words", "chars"]
 
 
 def _row_to_list(r: GroupRow) -> list:
     return [
         r.key,
         r.files,
+        r.dirs,
         r.lines_total,
         r.lines_code,
         r.lines_blank,
         r.lines_comment,
         r.lines_docstring,
+        r.words,
         r.chars,
     ]
 
@@ -541,8 +655,13 @@ def render_csv(rows: list[GroupRow], total: GroupRow | None) -> str:
     return out.getvalue()
 
 
-def render(rows: list[GroupRow], cfg: Config) -> str:
-    total = total_row(rows) if cfg.output.show_total else None
+def render(rows: list[GroupRow], cfg: Config, total: GroupRow | None = None) -> str:
+    # total передаётся явно, когда он посчитан ДО обрезки limit'ом: иначе строка
+    # TOTAL врала бы, показывая сумму только видимых строк.
+    if cfg.output.show_total:
+        total = total if total is not None else total_row(rows)
+    else:
+        total = None
     fmt = cfg.output.format
     if fmt == "json":
         return render_json(rows, total)
@@ -559,56 +678,109 @@ def render(rows: list[GroupRow], cfg: Config) -> str:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="code_stats",
-        description="Подсчёт файлов, строк и символов по конфигу TOML.",
+        description="Подсчёт файлов, папок, строк, слов и символов по конфигу TOML.",
     )
-    p.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH,
-                   help=f"Путь к TOML-конфигу (default: {DEFAULT_CONFIG_PATH}).")
-    p.add_argument("--root", type=Path, default=None, help="Перекрыть scan.root.")
-    p.add_argument("--format", choices=["table", "json", "csv"], default=None,
-                   help="Перекрыть output.format.")
-    p.add_argument("--group-by", choices=["extension", "directory", "none"], default=None,
-                   help="Перекрыть output.group_by.")
-    p.add_argument("--sort-by", choices=["lines", "chars", "files", "name"], default=None,
-                   help="Перекрыть output.sort_by.")
+    p.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="Папки для анализа (можно несколько). Пусто — берётся scan.paths из конфига.",
+    )
+    p.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help=f"Путь к TOML-конфигу (default: {DEFAULT_CONFIG_PATH}).",
+    )
+    p.add_argument(
+        "--root", type=Path, default=None, help="Синоним одиночного позиционного пути (обратная совместимость)."
+    )
+    p.add_argument(
+        "--git-tracked",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Считать только известное git (без .gitignore-артефактов).",
+    )
+    p.add_argument("--format", choices=["table", "json", "csv"], default=None, help="Перекрыть output.format.")
+    p.add_argument(
+        "--group-by", choices=["extension", "directory", "none"], default=None, help="Перекрыть output.group_by."
+    )
+    p.add_argument(
+        "--dir-depth", type=int, default=None, help="Глубина группировки директорий (1 = зоны верхнего уровня)."
+    )
+    p.add_argument(
+        "--sort-by",
+        choices=["lines", "words", "chars", "files", "dirs", "name"],
+        default=None,
+        help="Перекрыть output.sort_by.",
+    )
+    p.add_argument(
+        "--no-comments", action="store_true", help="Не считать комментарии строками кода (колонка code → SLOC)."
+    )
+    p.add_argument(
+        "--no-docstrings",
+        action="store_true",
+        help="Не считать docstring строками кода (вместе с --no-comments = чистый SLOC).",
+    )
     p.add_argument("--no-total", action="store_true", help="Скрыть строку TOTAL.")
     p.add_argument("--limit", type=int, default=None, help="Максимум строк в выводе.")
     return p
 
 
 def apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
-    scan = cfg.scan
-    out = cfg.output
+    scan_updates: dict = {}
+    roots = tuple(getattr(args, "paths", None) or ())
     if args.root is not None:
-        scan = ScanCfg(root=args.root, recursive=scan.recursive, follow_symlinks=scan.follow_symlinks)
+        roots = (*roots, args.root)
+    if roots:
+        scan_updates["roots"] = roots
+    if args.git_tracked is not None:
+        scan_updates["git_tracked"] = args.git_tracked
+
+    count_updates: dict = {}
+    if args.no_comments:
+        count_updates["comments"] = False
+    if args.no_docstrings:
+        count_updates["docstrings"] = False
+
+    out_updates: dict = {}
     if args.format is not None:
-        out = OutputCfg(
-            format=args.format, group_by=out.group_by, sort_by=out.sort_by,
-            sort_order=out.sort_order, show_total=out.show_total, limit=out.limit,
-        )
+        out_updates["format"] = args.format
     if args.group_by is not None:
-        out = OutputCfg(
-            format=out.format, group_by=args.group_by, sort_by=out.sort_by,
-            sort_order=out.sort_order, show_total=out.show_total, limit=out.limit,
-        )
+        out_updates["group_by"] = args.group_by
+    if args.dir_depth is not None:
+        out_updates["dir_depth"] = args.dir_depth
     if args.sort_by is not None:
-        out = OutputCfg(
-            format=out.format, group_by=out.group_by, sort_by=args.sort_by,
-            sort_order=out.sort_order, show_total=out.show_total, limit=out.limit,
-        )
+        out_updates["sort_by"] = args.sort_by
     if args.no_total:
-        out = OutputCfg(
-            format=out.format, group_by=out.group_by, sort_by=out.sort_by,
-            sort_order=out.sort_order, show_total=False, limit=out.limit,
-        )
+        out_updates["show_total"] = False
     if args.limit is not None:
-        out = OutputCfg(
-            format=out.format, group_by=out.group_by, sort_by=out.sort_by,
-            sort_order=out.sort_order, show_total=out.show_total, limit=args.limit,
-        )
-    return Config(scan=scan, formats=cfg.formats, exclude=cfg.exclude, count=cfg.count, output=out)
+        out_updates["limit"] = args.limit
+
+    return replace(
+        cfg,
+        scan=replace(cfg.scan, **scan_updates),
+        count=replace(cfg.count, **count_updates),
+        output=replace(cfg.output, **out_updates),
+    )
+
+
+def _force_utf8_streams() -> None:
+    """
+    Вывод всегда в UTF-8, независимо от кодовой страницы консоли Windows.
+
+    Без этого русские сообщения уходят в cp866/cp1251: потребитель, читающий
+    stdout/stderr как UTF-8 (агент, CI, `subprocess(text=True)`), получает
+    UnicodeDecodeError вместо отчёта — и это выглядит как «скрипт молчал».
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_streams()
     args = build_parser().parse_args(argv)
     try:
         cfg = load_config(args.config)
@@ -623,8 +795,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    rows = group_results(stats, cfg)
-    sys.stdout.write(render(rows, cfg))
+    rows, total = group_results(stats, cfg)
+    sys.stdout.write(render(rows, cfg, total))
     return 0
 
 

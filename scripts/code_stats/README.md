@@ -1,6 +1,6 @@
 # code_stats
 
-Универсальный счётчик файлов / строк / символов на stdlib (Python 3.12+).
+Универсальный счётчик файлов / папок / строк / слов / символов на stdlib (Python 3.12+).
 
 ## Быстрый старт
 
@@ -8,13 +8,19 @@
 # Дефолтный конфиг (scripts/code_stats/code_stats.toml), сканирует "."
 python scripts/code_stats/code_stats.py
 
-# Конкретная папка
-python scripts/code_stats/code_stats.py --root multiprocess_framework
+# Несколько конкретных папок сразу
+python scripts/code_stats/code_stats.py multiprocess_framework Services Plugins
+
+# Зоны проекта верхнего уровня (одна строка на папку верхнего уровня)
+python scripts/code_stats/code_stats.py --group-by directory --dir-depth 1
+
+# Чистый SLOC: комментарии и docstring не считаются кодом
+python scripts/code_stats/code_stats.py --no-comments --no-docstrings
 
 # JSON вместо таблицы
 python scripts/code_stats/code_stats.py --format json
 
-# Группировка по директориям, топ-20
+# Топ-20 директорий (TOTAL всё равно считается по всем)
 python scripts/code_stats/code_stats.py --group-by directory --limit 20
 
 # Свой конфиг
@@ -25,25 +31,63 @@ python scripts/code_stats/code_stats.py --config path/to/other.toml
 
 | Секция | Параметр | Назначение |
 |--------|----------|------------|
-| `[scan]` | `root`, `recursive`, `follow_symlinks` | Что обходить |
+| `[scan]` | `paths`, `recursive`, `follow_symlinks`, `git_tracked` | Какие папки обходить и чем ограничить набор файлов |
 | `[formats]` | `include` | Список расширений (`[]` = все файлы) |
 | `[exclude]` | `dirs`, `file_patterns`, `path_patterns` | Glob-паттерны пропуска |
-| `[count]` | `blank_lines`, `comments`, `docstrings`, `chars`, `encoding` | Что считать как «строка кода» |
-| `[output]` | `format`, `group_by`, `sort_by`, `sort_order`, `show_total`, `limit` | Как показать |
+| `[count]` | `blank_lines`, `comments`, `docstrings`, `chars`, `words`, `encoding` | Что считать как «строка кода» и считать ли слова |
+| `[output]` | `format`, `group_by`, `dir_depth`, `sort_by`, `sort_order`, `show_total`, `limit` | Как показать |
 
-CLI-флаги (`--root`, `--format`, `--group-by`, `--sort-by`, `--limit`, `--no-total`)
-перекрывают значения из конфига.
+CLI перекрывает конфиг: позиционные пути, `--root`, `--git-tracked` / `--no-git-tracked`,
+`--format`, `--group-by`, `--dir-depth`, `--sort-by`, `--limit`, `--no-total`,
+`--no-comments`, `--no-docstrings`.
+
+`[scan] paths` принимает несколько папок; пересекающиеся пути (`.` и `./scripts`)
+не дают двойного учёта — дедупликация по resolved-пути.
+
+## Правдивость цифр
+
+Три решения, из-за которых числа отличаются от наивного обхода:
+
+1. **`git_tracked = true` (по умолчанию).** Считаются только файлы, известные git
+   (tracked + untracked, не попавшие в `.gitignore`). Без этого сгенерированные кэши
+   забивают отчёт: в этом репозитории `graphify-out/cache` давал +914 000 строк `.json` —
+   в 2 раза больше, чем весь Python-код проекта. Вне git-репозитория режим сам падает
+   обратно на обход ФС **с предупреждением в stderr** (тихая подмена метода = вранью).
+2. **TOTAL считается по всем группам**, даже когда вывод обрезан `--limit`.
+3. **`chars` — символы, а не байты.** `wc -c` на UTF-8-кириллице даёт примерно вдвое
+   больше. И осторожно с `wc -w` как «эталоном»: в C-локали он режет UTF-8-кириллицу по
+   байту `0xA0` — слово `РРРР` он считает как 4 слова, поэтому на русских комментариях
+   его цифра завышена.
 
 ## Колонки отчёта
 
 - `group` — расширение / папка / файл (зависит от `group_by`)
 - `files` — количество файлов в группе
+- `dirs` — количество **уникальных папок**, в которых лежат учтённые файлы
+  (в строке TOTAL папки объединяются, а не суммируются: `.py` и `.md` в одной папке → 1)
 - `lines` — все физические строки
-- `code` — эффективные строки кода (с учётом флагов `blank_lines`/`comments`/`docstrings`)
+- `code` — эффективные строки (см. «Что считается кодом» ниже)
 - `blank` — пустые строки
 - `comment` — строки-комментарии (`#`, `<!-- -->`)
 - `docstr` — строки внутри `"""..."""` / `'''...'''` для `.py`
+- `words` — слова по правилу `wc -w`: последовательности непробельных символов
 - `chars` — суммарное число символов
+
+## Что считается кодом (`code`)
+
+`code` = все строки минус то, что выключено флагами `[count]`:
+
+| Конфиг | Что получается в `code` | Когда так честнее |
+|--------|-------------------------|-------------------|
+| `comments = true`, `docstrings = true` (**дефолт**) | все непустые строки, включая комментарии и docstring | «сколько всего написано руками» |
+| `comments = false`, `docstrings = false` (`--no-comments --no-docstrings`) | чистый **SLOC** — только исполняемые строки | сравнение с cloc/tokei/scc, оценка объёма логики |
+
+Общепринятый в индустрии SLOC (cloc, tokei, scc) — это **второй** вариант: комментарии
+кодом не считаются, они идут отдельной колонкой. Дефолт здесь другой осознанно: в этом
+проекте комментарии и docstring — 24% строк `.py`, и для оценки проделанной работы их
+выкидывать неправильно. Для сравнения с внешними инструментами бери `--no-comments
+--no-docstrings`, для «объёма написанного» — дефолт. Обе цифры честные, врёт только
+та, у которой не назван режим.
 
 ## Поддерживаемые типы файлов
 
