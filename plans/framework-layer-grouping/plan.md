@@ -318,6 +318,7 @@ layers =
 - [ ] Codemod: relative cross-module → absolute (чинит слепоту sentrux)
 - [ ] Обновить `__init__.py`-реэкспорты и обращения к пакету `modules` целиком
 - [ ] Обновить якоря: `.sentrux/rules.toml`, `pyproject.toml`, `Makefile`, `scripts/validate.py`, диаграммы, CLAUDE.md
+- [ ] Обновить якоря Ф8 H.1 (появились 2026-07-26): `docs/MODULE_TIERS.md` §1 (таблица по именам модулей — после снятия суффикса имена меняются), `modules/tests/test_module_tiers.py` (сканирует `modules/`, парсит §1 и `testpaths` — после переноса покраснеет по построению), `modules/pytest.ini` (`testpaths` переезжают в per-layer или корневой конфиг)
 - [ ] Проверить хардкод путей: `app_module/discovery.py`, `service_module/scanner.py` (динамический скан)
 - [ ] qex/grep-свип: 0 остаточных `\.modules\.` и `_module\b` в импортах
 - [ ] LLM-ревью diff (агент `reviewer`) — семантический дрейф, пропущенные сайты
@@ -336,7 +337,7 @@ layers =
 
 ## Критерии приёмки
 - [ ] 27 модулей физически лежат в 9 папках-слоях, суффикс `_module` снят
-- [ ] Все 26 имеют `interfaces.py` + фасад + `README/STATUS/DECISIONS/tests` (единообразие сохранено)
+- [ ] Все **27** имеют `interfaces.py` + фасад + `README/STATUS/DECISIONS/tests` (единообразие сохранено; «26/27» в тексте плана устарело — `actions_module` закрыт `bf484bcd`, а `interfaces.py` 27/27 закреплён контракт-тестом Ф8 H.1)
 - [ ] `import-linter` layers зелёный, runtime-граф ацикличен (доказано `measure_graph.py`, не ложно)
 - [ ] Число тестов не упало, прототип запускается
 - [ ] Один канонический путь импорта (нет вечных шимов)
