@@ -92,16 +92,16 @@
 
 | План | Статус | Осталось |
 |---|---|---|
-| [truth-holes-closure](truth-holes-closure.md) | **Единственный активный план инструмента** (2026-07-22) — преемник закрытого backend-ctl-proof-discipline. Ветка `fix/truth-holes-closure`. Основание: live-анализ 2026-07-22. Ф2/Ф3 ортогональны и параллелятся Ф1 | Ф1 gui-шторм (флип-лесенка) → Ф2 supervision-правда ∥ Ф3 ротация логов → Ф4 инструмент → Ф5 закрывающий live-прогон |
+| [truth-holes-closure](truth-holes-closure.md) | ✅ **ЗАКРЫТ 2026-07-26.** Ф1–Ф5 закрыты 22-23.07; последняя задача 6.3 исполнена по решению владельца (вариант A): `FW_STATE_COALESCE` удалён вместе с OFF-веткой (`0d8d1e3d`), флагов Фазы 1 в коде не осталось. Live-пара — `docs/audits/2026-07-26_phase6.3-live-pair.md`. Побочно закрыт чужой флейк часов троттла (`4f192eb8`) | — (активного плана инструмента больше нет) |
 | [backend-ctl-proof-discipline](backend-ctl-proof-discipline.md) | ✅ **ЗАКРЫТ** 2026-07-22 (`5b6838e0` «ГЕЙТ ПЛАНА ЗАКРЫТ», 47 инструментов live-верифицированы; слит в main ff до `9a0f4137`). Поглотил шесть предшественников (архив: `_archive/`) | — (хвосты → truth-holes-closure) |
-| [transport-single-policy](transport-single-policy.md) | Активный план **транспорта** (продукт, не инструмент) — ортогонален gui-шторму (state идёт targets-дверью, кадры — канальной). Не начат, ветки нет. **Порядок: после truth-holes** (унификация двери на здоровой, наблюдаемой системе + готовых счётчиках Ф4.3) | Фаза 0 доказ.база → Ф1 умная дверь → Ф2 release/reclaim → Ф3 backend_ctl типиз.ноль |
-| [telemetry-pull-on-demand](telemetry-pull-on-demand.md) | **DRAFT** (2026-07-22) — направление владельца: уровни (FPS/latency/глубины) отдавать **по опросу**, процесс копит их локально; фронты (ошибки/смерти/переходы) остаются push. Ветки нет, ждёт go-ahead | инвентарь метрик levels-vs-edges → декомпозиция |
+| [transport-single-policy](transport-single-policy.md) | Активный план **транспорта** (продукт, не инструмент) — ортогонален gui-шторму (state идёт targets-дверью, кадры — канальной). Не начат, ветки нет. **Гейт «после truth-holes» снят 2026-07-26** — предшественник закрыт | Фаза 0 доказ.база → Ф1 умная дверь → Ф2 release/reclaim → Ф3 backend_ctl типиз.ноль |
+| [telemetry-pull-on-demand](telemetry-pull-on-demand.md) | **DRAFT** (2026-07-22) — направление владельца: уровни (FPS/latency/глубины) отдавать **по опросу**, процесс копит их локально; фронты (ошибки/смерти/переходы) остаются push. Ветки нет, ждёт go-ahead. **Частично обогнан:** инвентарь levels-vs-edges сделан внутри truth-holes 6.3 (2026-07-23, 506 путей → 41 форма) — при старте переписать под остаток, а не гонять заново | декомпозиция от готового инвентаря |
 | [telemetry-coherence-remediation](telemetry-coherence-remediation.md) | ✅ закрыт 2026-07-18, merge `13623920`, Fable 47/60 (шапка исправлена с DRAFT 2026-07-20) | Task 3.2 шаг 3 (watcher фанит publish-секцию детям) — не блокирует, до Ф4 GUI |
 | [gui-telemetry-read-model](gui-telemetry-read-model.md) | закрыт (ADR-136) | Task 1.3 — live qt-smoke |
 | [telemetry-dashboard](telemetry-dashboard.md) | ✅ закрыт | — |
 | [telemetry-publish-control](telemetry-publish-control.md) | ✅ закрыт (ADR-PM-018) | residual — каскад двух плоскостей |
 
-**Следующий шаг трека (рекомендация ревьюера):** порядок `_system_ready_event` в `orchestrator.py` — снимает 12 красных тестов и возвращает доказуемость introspect-поверхности. Правка рискованная (сигнал ждут SystemLauncher, GUI-старт, harness) → нужен полный suite проекта, не только backend_ctl.
+~~**Следующий шаг трека:** порядок `_system_ready_event` в `orchestrator.py` — снимает 12 красных тестов.~~ **Строка устарела (снято 2026-07-26):** в `app_module/orchestrator.py` этого события нет вовсе (`grep` = 0), барьер живёт в `process_manager_process.py` (`_wait_boot_ready` перед `_system_ready_event.set()`, Ф3.2/ADR-PMM-011), а последние полные прогоны зелёные. Рекомендация 2026-07-20 относилась к раскладке, которой больше нет.
 
 ### Наблюдаемость — observability-unified-routing (в оси Ф8, вместо H.4)
 
@@ -140,7 +140,8 @@
 | План | Статус | Осталось |
 |------|--------|----------|
 | [constructor-maturity](2026-05-29_constructor-maturity/plan.md) | **Отложено владельцем** (product > engine) | P1.2+ |
-| [sql-insert-many-atomic](2026-06-05_sql-insert-many-atomic.md) | DRAFT, не начат | атомарный/батчевый `insert_many` |
+| [sql-insert-many-atomic](2026-06-05_sql-insert-many-atomic.md) | **ПОГЛОЩЁН** планом `storage-stack-embedded-first` (Этап 1) — самостоятельно не исполняется | — (см. строку ниже) |
+| [storage-stack-embedded-first](storage-stack-embedded-first.md) | **DRAFT, не начат, ветки нет** (заведён 2026-07-21, строки в очереди не имел до 2026-07-26 — дыра правила «план живёт дольше дня → строка здесь») | вердикт зафиксирован (embedded: SQLite `Services/sql` + плоские файлы, 0 новых зависимостей); Этапы 1-3 — ретенция, файловая политика, `insert_many` |
 | [pipeline-color-inspection](pipeline-color-inspection.md) | **Отложено владельцем** | атомарные плагины цвет-инспекции |
 | [telemetry-delivery-simplification](telemetry-delivery-simplification.md) | **DEFERRED (Option D)** | ждёт 2-го реактивного потребителя |
 | [device-tree-recipe](device-tree-recipe.md) | Фаза D DONE | Фаза E частично — ждёт go-ahead владельца |
