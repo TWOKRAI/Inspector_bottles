@@ -174,10 +174,15 @@ class ProcessModule(BaseManager, ObservableMixin, IProcessModule):
             # 8. Обновляем статус на "ready"
             self.update_process_state(status=ProcessStatus.READY.value)
 
-            # 9. Контекст логирования (proc_name в extra для логов)
+            # 9. Контекст логирования (proc_name в extra для логов).
+            #    Ф0.5: именно БАЗА процесса, а не push_context. proc_name — факт
+            #    про процесс целиком, а этот вызов делается из главного потока,
+            #    тогда как пишут логи потоки-воркеры. После того как контекст
+            #    push_context стал потоковым, proc_name отсюда до воркеров бы
+            #    не доехал — запись потеряла бы имя процесса.
             logger = self.get_manager("logger")
-            if logger and hasattr(logger, "push_context"):
-                logger.push_context(proc_name=self.name)
+            if logger and hasattr(logger, "set_base_context"):
+                logger.set_base_context(proc_name=self.name)
 
             # 10. Регистрация state.changed handler (ADR-SS-006) — только в
             #     success-пути. Раньше вызов стоял в finally и при исключении

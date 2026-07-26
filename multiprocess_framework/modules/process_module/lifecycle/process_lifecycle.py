@@ -120,10 +120,10 @@ class ProcessLifecycle:
             # 1. Устанавливаем флаг остановки
             self.process._stop_requested = True
 
-            # 1b. Снять контекст логирования
+            # 1b. Снять контекст логирования (парно к set_base_context на старте, Ф0.5)
             logger = self.process.get_manager("logger")
-            if logger and hasattr(logger, "pop_context"):
-                logger.pop_context()
+            if logger and hasattr(logger, "clear_base_context"):
+                logger.clear_base_context()
 
             # 2. Останавливаем системные потоки
             self.process._stop_system_threads()

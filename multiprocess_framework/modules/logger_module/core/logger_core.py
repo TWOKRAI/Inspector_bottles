@@ -18,6 +18,7 @@ Task 5.14 (CRM-развязка):
 Публичный API не изменён (info, error, log, flush, get_stats и т.д.).
 """
 
+import itertools
 import threading
 import time
 from pathlib import Path
@@ -43,7 +44,29 @@ from .log_types import LogRecord
 from ..channels.log_channel import create_channel, LogChannel
 from .log_paths import resolve_log_file_path
 
+#: Публичная «форточка» контекста: любой код может положить сюда поля, и они
+#: попадут в extra записи. Самый низкий приоритет — её перекрывают и база
+#: процесса, и потоковый контекст, и явный ``extra`` вызова.
 log_context: ContextVar[Dict[str, Any]] = ContextVar("log_context", default={})
+
+#: Стеки контекста ``push_context`` — ОДИН ContextVar на модуль, внутри
+#: словарь «ключ менеджера → стек уровней».
+#:
+#: Почему ContextVar, а не ``threading.local``: изоляция нужна и между
+#: потоками, и между asyncio-тасками одного потока (тестировщик подтвердил
+#: утечку между тасками на старой реализации). Почему один общий, а не по
+#: ContextVar на инстанс: ContextVar'ы не рассчитаны на создание в рантайме —
+#: каждый тест, создающий менеджер, оставлял бы новый.
+#:
+#: Значение ОБЯЗАНО пересоздаваться целиком (`{**stacks, key: ...}`), а не
+#: мутироваться на месте: мутация общего словаря видна всем потокам сразу и
+#: вернула бы ровно ту утечку, ради которой всё это.
+_context_stacks: ContextVar[Dict[int, tuple]] = ContextVar("logger_context_stacks", default={})
+
+#: Раздатчик ключей инстансов. Не ``id(self)``: id переиспользуется после сборки
+#: мусора, и новый менеджер унаследовал бы контекст покойного в том потоке,
+#: который не сделал pop.
+_ctx_key_counter = itertools.count()
 
 
 def _channel_accepted(result: Any) -> bool:
@@ -114,7 +137,14 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         # Module-specific channels (separate from main registry)
         self._module_channels: Dict[str, LogChannel] = {}
 
-        self._context_stack: List[Dict[str, Any]] = []
+        # Ф0.5: контекст в двух слоях. База — факт про процесс целиком, видна
+        # всем потокам; стек push_context — факт про текущую работу текущего
+        # потока/таска, соседям не виден. Один слой не покрывает оба случая:
+        # чисто потоковый потерял бы proc_name у воркеров, чисто общий —
+        # перемешал бы записи разных потоков (это и был дефект).
+        self._ctx_key: int = next(_ctx_key_counter)
+        self._base_context: Dict[str, Any] = {}
+        self._base_context_lock = threading.Lock()
 
         self._decision_cache: Dict[str, bool] = {}
         self._cache_enabled = True
@@ -545,8 +575,12 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             channels = list(channels)
             channels.append(f"module_{module}")
 
+        # Приоритет снизу вверх: форточка log_context → база процесса →
+        # контекст потока → явный extra вызова. Каждый следующий слой знает
+        # больше про конкретную запись, поэтому и перекрывает предыдущий.
         context = {
             **log_context.get(),
+            **self._get_base_context(),
             **self._get_thread_context(),
             **extra,
         }
@@ -660,16 +694,61 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
     # =========================================================================
 
     def push_context(self, **context_vars):
-        current_context = self._get_thread_context()
-        new_context = {**current_context, **context_vars}
-        self._context_stack.append(new_context)
+        """Добавить поля контекста ТЕКУЩЕМУ потоку (и текущему asyncio-таску).
+
+        Вложенность работает: внутренний уровень перекрывает внешний по
+        совпадающим ключам. Соседний поток этого не видит и не теряет своего.
+        """
+        stacks = _context_stacks.get()
+        stack = stacks.get(self._ctx_key, ())
+        merged = {**(stack[-1] if stack else {}), **context_vars}
+        _context_stacks.set({**stacks, self._ctx_key: stack + (merged,)})
 
     def pop_context(self):
-        if self._context_stack:
-            self._context_stack.pop()
+        """Снять верхний уровень контекста ТЕКУЩЕГО потока.
+
+        В потоке, который ничего не клал, — тихий no-op. Раньше такой вызов
+        снимал уровень, положенный ЧУЖИМ потоком: стек был один на инстанс.
+        """
+        stacks = _context_stacks.get()
+        stack = stacks.get(self._ctx_key, ())
+        if not stack:
+            return
+        _context_stacks.set({**stacks, self._ctx_key: stack[:-1]})
 
     def _get_thread_context(self) -> Dict[str, Any]:
-        return self._context_stack[-1] if self._context_stack else {}
+        """Верхний уровень контекста текущего потока/таска (без базы процесса)."""
+        stack = _context_stacks.get().get(self._ctx_key, ())
+        return stack[-1] if stack else {}
+
+    def set_base_context(self, **context_vars):
+        """Задать поля контекста, видимые из ВСЕХ потоков процесса.
+
+        Ф0.5, и это не украшение API, а необходимость. Единственный
+        производственный потребитель контекста — процесс, который на старте
+        кладёт ``proc_name`` из своего главного потока
+        (``process_module.py``), а пишут логи потоки-воркеры. Сделай контекст
+        просто thread-local — и ``proc_name`` молча исчезнет из всех записей
+        воркеров, потому что новый поток стартует с чистым контекстом (это
+        верно и для ``ContextVar``, не только для ``threading.local``).
+
+        Фактов действительно два, и слоёв поэтому тоже два: база — про процесс
+        целиком, стек ``push_context`` — про текущую работу текущего потока.
+        Ключи базы перекрываются потоковым контекстом, а тот — явным ``extra``.
+
+        Вызовы накапливаются (merge), не затирают друг друга.
+        """
+        with self._base_context_lock:
+            self._base_context = {**self._base_context, **context_vars}
+
+    def clear_base_context(self):
+        """Очистить базу процесса — парная операция к :meth:`set_base_context`."""
+        with self._base_context_lock:
+            self._base_context = {}
+
+    def _get_base_context(self) -> Dict[str, Any]:
+        with self._base_context_lock:
+            return self._base_context
 
     # =========================================================================
     # УДОБНЫЕ МЕТОДЫ ПО ОБЛАСТИ
