@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from ..core import match_pattern, split_pattern
 from .base import StateMiddleware
@@ -122,7 +122,23 @@ class ThrottleMiddleware(StateMiddleware):
     def name(self) -> str:
         return "throttle"
 
-    def __init__(self, rules: dict[str, float]) -> None:
+    def __init__(self, rules: dict[str, float], clock: Callable[[], float] = time.monotonic) -> None:
+        """
+        Args:
+            rules: паттерн → интервал в секундах (0 = полная блокировка).
+            clock: источник монотонного времени. Вынесен в зависимость СОЗНАТЕЛЬНО:
+                пока часы читались глобально (``time.monotonic()``), тест мог задать
+                их только патчем модуля ``time`` — то есть для ВСЕГО процесса. В
+                полном прогоне рядом живут чужие потоки (ProcessMonitor, flusher'ы,
+                батч-буферы логов), они читают те же патченые часы и доедают конечный
+                ``side_effect`` теста → ``StopIteration`` в чужом тесте (пойман
+                2026-07-26 на `TestLazyPrune`, воспроизводится ~1 прогон из 3).
+                С этим параметром подставленные часы видит ТОЛЬКО испытуемый
+                экземпляр, и тест перестаёт зависеть от соседей по процессу.
+        """
+        # Часы читаются как ``self._now()`` — единственная точка чтения времени.
+        self._now = clock
+
         # Словарь правил: паттерн → интервал (0 = полная блокировка).
         # Мутируется только пере-присваиванием (copy-on-write), см. docstring.
         self._rules: dict[str, float] = dict(rules)
@@ -179,7 +195,7 @@ class ThrottleMiddleware(StateMiddleware):
         класса) — второй вызывающий поток (ProcessMonitor.state_monitor) не
         должен видеть частично обновлённый ``_last_pass``/``_pending``.
         """
-        now = time.monotonic()
+        now = self._now()
         with self._timing_lock:
             self._maybe_lazy_prune(now)
 
@@ -264,7 +280,7 @@ class ThrottleMiddleware(StateMiddleware):
         второй вызывающий поток (ProcessMonitor.state_monitor) не должен видеть
         частично обновлённый ``_last_pass``/``_pending`` посреди per-leaf обхода.
         """
-        now = time.monotonic()
+        now = self._now()
         with self._timing_lock:
             self._maybe_lazy_prune(now)  # Task 3.4, см. _maybe_lazy_prune
 
@@ -403,7 +419,7 @@ class ThrottleMiddleware(StateMiddleware):
         A-12: под ``_timing_lock`` — то же основание, что и у :meth:`before_set`.
         """
         with self._timing_lock:
-            now = time.monotonic()
+            now = self._now()
             threshold = self._stale_age_threshold()
 
             result = [
@@ -500,7 +516,7 @@ class ThrottleMiddleware(StateMiddleware):
         ``_pending``, и проверка одного ``_last_pass`` его слепо пропустила бы.
 
         Args:
-            now: уже посчитанный ``time.monotonic()`` вызывающего метода
+            now: уже посчитанный ``self._now()`` вызывающего метода
                 (переиспользуем — вторым вызовом не платим).
 
         A-12: вызывается ИСКЛЮЧИТЕЛЬНО из :meth:`before_set`/:meth:`before_merge`,

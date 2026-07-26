@@ -18,6 +18,13 @@
 - prune(prefix) чистит тайминги/pending только своего поддерева (Task 3.4)
 - lazy-prune ограничивает рост _last_pass при потоке уникальных путей (Task 3.4)
 - flush() отбрасывает stale pending-значения (Task 3.4)
+
+Часы подставляются НА ЭКЗЕМПЛЯРЕ (``patch.object(mw, "_now", ...)``), а не глобальным
+патчем модуля ``time``. Глобальный патч 2026-07-26 пойман на лжи: в полном прогоне
+чужие живые потоки читают те же патченые часы и доедают конечный ``side_effect``
+теста → ``StopIteration`` в ЭТОМ файле (2 падения из 4 прогонов, суть — не в троттле).
+Пара «болезнь → исчезла» воспроизводима: глобальные часы под соседним потоком падают
+3/3, часы экземпляра — проходят 3/3.
 """
 
 from __future__ import annotations
@@ -114,10 +121,10 @@ class TestThrottleInterval:
         """Второй вызов подряд (без паузы) блокируется."""
         mw = ThrottleMiddleware({"**.state.actual_fps": 1.0})
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set("cameras.0.state.actual_fps", 25.0, SOURCE, {})
 
-        with patch("time.monotonic", return_value=100.1):
+        with patch.object(mw, "_now", return_value=100.1):
             context: dict = {}
             proceed, _ = mw.before_set("cameras.0.state.actual_fps", 26.0, SOURCE, context)
 
@@ -128,11 +135,11 @@ class TestThrottleInterval:
         """После истечения interval вызов снова пропускается."""
         mw = ThrottleMiddleware({"**.state.actual_fps": 1.0})
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set("cameras.0.state.actual_fps", 25.0, SOURCE, {})
 
         # Прошло ровно 1.0 сек — должно пропустить
-        with patch("time.monotonic", return_value=101.0):
+        with patch.object(mw, "_now", return_value=101.0):
             context: dict = {}
             proceed, value = mw.before_set("cameras.0.state.actual_fps", 27.0, SOURCE, context)
 
@@ -144,10 +151,10 @@ class TestThrottleInterval:
         """Вызов непосредственно до истечения interval блокируется."""
         mw = ThrottleMiddleware({"**.state.actual_fps": 2.0})
 
-        with patch("time.monotonic", return_value=200.0):
+        with patch.object(mw, "_now", return_value=200.0):
             mw.before_set("cameras.0.state.actual_fps", 25.0, SOURCE, {})
 
-        with patch("time.monotonic", return_value=201.99):
+        with patch.object(mw, "_now", return_value=201.99):
             context: dict = {}
             proceed, _ = mw.before_set("cameras.0.state.actual_fps", 30.0, SOURCE, context)
 
@@ -165,10 +172,10 @@ class TestPending:
         mw = ThrottleMiddleware({"**.state.actual_fps": 1.0})
         path = "cameras.0.state.actual_fps"
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set(path, 25.0, SOURCE, {})
 
-        with patch("time.monotonic", return_value=100.3):
+        with patch.object(mw, "_now", return_value=100.3):
             mw.before_set(path, 26.0, SOURCE, {})
 
         assert path in mw._pending
@@ -179,13 +186,13 @@ class TestPending:
         mw = ThrottleMiddleware({"**.state.actual_fps": 1.0})
         path = "cameras.0.state.actual_fps"
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set(path, 25.0, SOURCE, {})
 
-        with patch("time.monotonic", return_value=100.2):
+        with patch.object(mw, "_now", return_value=100.2):
             mw.before_set(path, 26.0, SOURCE, {})
 
-        with patch("time.monotonic", return_value=100.4):
+        with patch.object(mw, "_now", return_value=100.4):
             mw.before_set(path, 27.0, SOURCE, {})
 
         # Только последнее значение
@@ -196,17 +203,17 @@ class TestPending:
         mw = ThrottleMiddleware({"**.state.actual_fps": 1.0})
         path = "cameras.0.state.actual_fps"
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set(path, 25.0, SOURCE, {})
 
-        with patch("time.monotonic", return_value=100.3):
+        with patch.object(mw, "_now", return_value=100.3):
             mw.before_set(path, 26.0, SOURCE, {})
 
         # Убеждаемся, что pending есть
         assert path in mw._pending
 
         # Ждём interval
-        with patch("time.monotonic", return_value=101.5):
+        with patch.object(mw, "_now", return_value=101.5):
             mw.before_set(path, 28.0, SOURCE, {})
 
         # После пропуска pending должен очиститься
@@ -224,15 +231,15 @@ class TestFlush:
         mw = ThrottleMiddleware({"**.state.actual_fps": 1.0})
         path = "cameras.0.state.actual_fps"
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set(path, 25.0, SOURCE, {})
 
-        with patch("time.monotonic", return_value=100.3):
+        with patch.object(mw, "_now", return_value=100.3):
             mw.before_set(path, 26.0, SOURCE, {})
 
         # flush() вызван сразу после (100.4) — в пределах порога свежести
         # (Task 3.4): pending-значение не stale, возвращается как раньше.
-        with patch("time.monotonic", return_value=100.4):
+        with patch.object(mw, "_now", return_value=100.4):
             result = mw.flush()
 
         assert len(result) == 1
@@ -243,10 +250,10 @@ class TestFlush:
         mw = ThrottleMiddleware({"**.state.drops_count": 0.5})
         path = "cameras.1.state.drops_count"
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set(path, 5, SOURCE, {})
 
-        with patch("time.monotonic", return_value=100.1):
+        with patch.object(mw, "_now", return_value=100.1):
             mw.before_set(path, 6, SOURCE, {})
 
         mw.flush()
@@ -285,7 +292,7 @@ class TestGlobMatching:
         mw = ThrottleMiddleware({"**.state.actual_fps": 1.0})
         context: dict = {}
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             proceed, _ = mw.before_set("cameras.0.state.actual_fps", 30.0, SOURCE, context)
 
         assert proceed is True
@@ -317,11 +324,11 @@ class TestFirstMatchingRule:
         )
         path = "cameras.0.state.actual_fps"
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set(path, 25.0, SOURCE, {})
 
         # Прошло 2 сек — достаточно для правила 1.0, но мало для 5.0
-        with patch("time.monotonic", return_value=102.0):
+        with patch.object(mw, "_now", return_value=102.0):
             context: dict = {}
             proceed, _ = mw.before_set(path, 26.0, SOURCE, context)
 
@@ -355,10 +362,10 @@ class TestRejectionContext:
         mw = ThrottleMiddleware({"**.state.fps": 1.0})
         path = "cameras.0.state.fps"
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set(path, 25.0, SOURCE, {})
 
-        with patch("time.monotonic", return_value=100.1):
+        with patch.object(mw, "_now", return_value=100.1):
             context: dict = {}
             proceed, _ = mw.before_set(path, 26.0, SOURCE, context)
 
@@ -379,7 +386,7 @@ class TestRejectionContext:
         mw = ThrottleMiddleware({"**.state.fps": 1.0})
         context: dict = {}
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             proceed, _ = mw.before_set("cameras.0.state.fps", 25.0, SOURCE, context)
 
         assert proceed is True
@@ -434,10 +441,10 @@ class TestBeforeMergeThrottle:
         mw = ThrottleMiddleware({"processes.**.state.fps": 1.0})
         full = "processes.cam.state.fps"
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             proceed1, out1 = mw.before_merge("processes.cam", {"state": {"fps": 25.0}}, SOURCE, {})
 
-        with patch("time.monotonic", return_value=100.1):
+        with patch.object(mw, "_now", return_value=100.1):
             context: dict = {}
             proceed2, _ = mw.before_merge("processes.cam", {"state": {"fps": 26.0}}, SOURCE, context)
 
@@ -453,10 +460,10 @@ class TestBeforeMergeThrottle:
         """После истечения interval merge-лист снова проходит."""
         mw = ThrottleMiddleware({"processes.**.state.fps": 1.0})
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_merge("processes.cam", {"state": {"fps": 25.0}}, SOURCE, {})
 
-        with patch("time.monotonic", return_value=101.0):
+        with patch.object(mw, "_now", return_value=101.0):
             proceed, out = mw.before_merge("processes.cam", {"state": {"fps": 27.0}}, SOURCE, {})
 
         assert proceed is True
@@ -489,7 +496,7 @@ class TestBeforeMergeThrottle:
             }
         )
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             proceed, out = mw.before_merge(
                 "processes.cam",
                 {
@@ -551,16 +558,16 @@ class TestRuntimeRuleMutation:
         mw = ThrottleMiddleware({"**.state.fps": 100.0})
         path = "cameras.0.state.fps"
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             assert mw.before_set(path, 25.0, SOURCE, {})[0] is True  # первый проход
 
         # При интервале 100с второй вызов через 1с был бы придержан.
-        with patch("time.monotonic", return_value=101.0):
+        with patch.object(mw, "_now", return_value=101.0):
             assert mw.before_set(path, 26.0, SOURCE, {})[0] is False
 
         # Живьём уменьшаем интервал → тот же тайминг теперь достаточен.
         mw.update_rule("**.state.fps", 0.1)
-        with patch("time.monotonic", return_value=101.0):
+        with patch.object(mw, "_now", return_value=101.0):
             assert mw.before_set(path, 27.0, SOURCE, {})[0] is True
 
     def test_set_rules_replaces_whole_set(self):
@@ -663,7 +670,7 @@ class TestPrune:
         """prune(prefix) убирает _last_pass только своего поддерева — соседи целы."""
         mw = ThrottleMiddleware({"processes.**.state.fps": 1.0})
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set("processes.cam1.state.fps", 25.0, SOURCE, {})
             mw.before_set("processes.cam10.state.fps", 25.0, SOURCE, {})
             mw.before_set("processes.cam2.state.fps", 25.0, SOURCE, {})
@@ -696,7 +703,7 @@ class TestPrune:
         """prune(prefix) убирает и путь, совпадающий с prefix ЦЕЛИКОМ (не только дочерние)."""
         mw = ThrottleMiddleware({"processes.cam1": 1.0})
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set("processes.cam1", 1, SOURCE, {})
 
         assert "processes.cam1" in mw._last_pass
@@ -729,9 +736,9 @@ class TestLazyPrune:
 
         n_paths = _LAZY_PRUNE_SIZE_THRESHOLD + 200  # заведомо больше порога
 
-        # Монотонные "секунды" 0, 1, 2, ... — по одному вызову time.monotonic()
+        # Монотонные "секунды" 0, 1, 2, ... — по одному вызову часов экземпляра
         # на каждый before_set (одна точка чтения времени в начале метода).
-        with patch("time.monotonic", side_effect=[float(i) for i in range(n_paths)]):
+        with patch.object(mw, "_now", side_effect=[float(i) for i in range(n_paths)]):
             for i in range(n_paths):
                 mw.before_set(f"cameras.{i}.state.fps", i, SOURCE, {})
 
@@ -745,7 +752,7 @@ class TestLazyPrune:
         """Ниже порога lazy-prune не трогает _last_pass (регресс-инвариант)."""
         mw = ThrottleMiddleware({"**.state.fps": 1.0})
 
-        with patch("time.monotonic", side_effect=[float(i) for i in range(50)]):
+        with patch.object(mw, "_now", side_effect=[float(i) for i in range(50)]):
             for i in range(50):
                 mw.before_set(f"cameras.{i}.state.fps", i, SOURCE, {})
 
@@ -762,7 +769,7 @@ class TestLazyPrune:
         mw = ThrottleMiddleware({"**.debug": 0})
         n_paths = _LAZY_PRUNE_SIZE_THRESHOLD + 200
 
-        with patch("time.monotonic", side_effect=[float(i) for i in range(n_paths)]):
+        with patch.object(mw, "_now", side_effect=[float(i) for i in range(n_paths)]):
             for i in range(n_paths):
                 mw.before_set(f"workers.{i}.debug", i, SOURCE, {})
 
@@ -863,14 +870,14 @@ class TestFlushStaleDiscard:
         mw = ThrottleMiddleware({"**.state.fps": 1.0})
         path = "cameras.0.state.fps"
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set(path, 25.0, SOURCE, {})  # первый проход
 
-        with patch("time.monotonic", return_value=100.1):
+        with patch.object(mw, "_now", return_value=100.1):
             mw.before_set(path, 26.0, SOURCE, {})  # придержано, _pending_since=100.1
 
         # flush спустя 20с (> порога 10с) — значение мертво, не возвращается.
-        with patch("time.monotonic", return_value=120.1):
+        with patch.object(mw, "_now", return_value=120.1):
             result = mw.flush()
 
         assert result == []
@@ -882,19 +889,19 @@ class TestFlushStaleDiscard:
         stale_path = "cameras.1.state.seq"
         fresh_path = "cameras.0.state.fps"
 
-        with patch("time.monotonic", return_value=0.0):
+        with patch.object(mw, "_now", return_value=0.0):
             mw.before_set(stale_path, 1, SOURCE, {})
-        with patch("time.monotonic", return_value=0.1):
+        with patch.object(mw, "_now", return_value=0.1):
             mw.before_set(stale_path, 2, SOURCE, {})  # _pending_since=0.1
 
-        with patch("time.monotonic", return_value=100.0):
+        with patch.object(mw, "_now", return_value=100.0):
             mw.before_set(fresh_path, 25.0, SOURCE, {})
-        with patch("time.monotonic", return_value=100.1):
+        with patch.object(mw, "_now", return_value=100.1):
             mw.before_set(fresh_path, 26.0, SOURCE, {})  # _pending_since=100.1
 
         # На момент flush: stale_path возраст 100.1-0.1=100с (> 10с порога);
         # fresh_path возраст 100.1-100.1=0с (<= 10с порога).
-        with patch("time.monotonic", return_value=100.1):
+        with patch.object(mw, "_now", return_value=100.1):
             result = mw.flush()
 
         assert result == [(fresh_path, 26.0, SOURCE)]
