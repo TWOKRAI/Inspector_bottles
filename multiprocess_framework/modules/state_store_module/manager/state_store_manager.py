@@ -123,8 +123,8 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         if self._router is not None and self._auto_register_ipc:
             self.register_message_handlers(self._router)
 
-        # Старт daemon-flusher коалесцирования (FW_STATE_COALESCE).
-        # No-op при OFF (поток не создаётся) — путь остаётся бит-в-бит.
+        # Старт daemon-flusher коалесцирования — единственного отправителя
+        # конвертов state.changed (Ф6.3: переключателя больше нет).
         self._dispatcher.start_flusher()
 
         self.is_initialized = True
@@ -464,10 +464,10 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
             ]
             if deltas:
                 # Через enqueue_replay, а не прямой отправкой: при коалесцировании
-                # (FW_STATE_COALESCE) отправка обязана идти из единственного потока-
-                # flusher'а, иначе конверт реплея конкурирует с буферизованным и может
-                # быть отброшен приёмником как устаревший — подписчик остался бы без
-                # начального снимка. При OFF внутри — та же прямая отправка, что и раньше.
+                # отправка обязана идти из единственного потока-flusher'а, иначе
+                # конверт реплея конкурирует с буферизованным и может быть отброшен
+                # приёмником как устаревший — подписчик остался бы без начального
+                # снимка.
                 self._dispatcher.enqueue_replay(subscriber, deltas)
                 self._log_debug(f"Initial replay: {len(deltas)} значений → '{subscriber}' (pattern={pattern})")
         except Exception as exc:  # nosec B110 — реплей best-effort, не критичен для подписки

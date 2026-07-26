@@ -4,7 +4,8 @@
 ON — ``state`` с drop_oldest), Ф6.1 флипнул дефолт, Ф6.2 **удалила флаг вместе с OFF-веткой**.
 Переключателя больше нет: конверт всегда несёт ``queue_type == "state"``, поэтому burst
 ``state.set`` не топит system-почту команд подписчика (до этого gui переставал отвечать
-вовсе — см. `plans/truth-holes-closure.md` Фаза 1).
+вовсе — см. `plans/truth-holes-closure.md` Фаза 1). Ф6.3 сняла и второй переключатель
+(``FW_STATE_COALESCE``), поэтому конверт здесь забирается после явного ``_flush_once``.
 
 Плечо OFF удалено ОСОЗНАННО, а не «забыто»: тестировать снятую ветку — значит держать её
 живой в тестах и создавать иллюзию, что путь поддерживается.
@@ -27,15 +28,14 @@ class _CapturingRouter:
         self.sent.append(msg)
 
 
-def _dispatch_one(coalesce: bool | None = False):
+def _dispatch_one():
     """Разослать одну дельту подписчику 'gui', вернуть захваченный конверт."""
     subs = SubscriptionManager()
     router = _CapturingRouter()
-    disp = DeltaDispatcher(subs, router=router, sender_name="StateStore", coalesce=coalesce)
+    disp = DeltaDispatcher(subs, router=router, sender_name="StateStore")
     subs.subscribe("processes.**", "gui")
     disp.dispatch_single(Delta(path="processes.cam.n", old_value=MISSING, new_value=1, source="s", revision=1))
-    if coalesce:
-        disp._flush_once()
+    disp._flush_once()  # тик flusher'а заменён детерминированным вызовом
     assert len(router.sent) == 1
     return router.sent[0]
 
@@ -47,25 +47,24 @@ def test_routes_to_state_queue() -> None:
     assert msg["queue_type"] == "state"
 
 
-def test_queue_type_independent_of_coalescing() -> None:
-    """Плоскости ортогональны: режим буферизации на класс очереди не влияет."""
-    assert _dispatch_one(coalesce=False)["queue_type"] == "state"
-    assert _dispatch_one(coalesce=True)["queue_type"] == "state"
+def test_no_delivery_switches_left() -> None:
+    """Регресс-якорь снятия лесов: у DeltaDispatcher НЕТ переключателей доставки.
 
-
-def test_no_state_queue_switch_left() -> None:
-    """Регресс-якорь снятия лесов: у DeltaDispatcher НЕТ параметра выбора очереди.
-
-    Если переключатель вернётся — тест упадёт и напомнит, что dark-launch закрывается
-    удалением ветки, а не вечным флагом (установка владельца, Фаза 6).
+    Ф6.2 сняла выбор очереди (``FW_STATE_QUEUE``), Ф6.3 — выбор режима отправки
+    (``FW_STATE_COALESCE``, ctor-параметр ``coalesce``). Если любой вернётся — тест
+    упадёт и напомнит, что dark-launch закрывается удалением ветки, а не вечным
+    флагом (установка владельца, Фаза 6).
     """
     import inspect
 
-    assert "state_queue" not in inspect.signature(DeltaDispatcher.__init__).parameters
+    params = inspect.signature(DeltaDispatcher.__init__).parameters
+    assert "state_queue" not in params
+    assert "coalesce" not in params
 
     from multiprocess_framework.modules.config_module import feature_flags
 
     assert "FW_STATE_QUEUE" not in feature_flags.FLAGS
+    assert "FW_STATE_COALESCE" not in feature_flags.FLAGS
 
 
 def test_default_queues_include_state() -> None:

@@ -1,15 +1,14 @@
-"""Тесты tick-коалесцирования DeltaDispatcher (FW_STATE_COALESCE, Task 1.1).
+"""Тесты tick-коалесцирования DeltaDispatcher (Task 1.1 + Ф6.3).
 
-Матрица:
-  - OFF: путь бит-в-бит — N мутаций → N конвертов, поток flusher'а не создаётся.
-  - ON: N мутаций внутри тика → ровно 1 конверт per-subscriber (first_revision=min,
-    revision=max, монотонный порядок дельт); cap-flush при burst; shutdown-flush
-    доставляет буфер и останавливает поток; сквозной сценарий с реальным StateProxy
-    (непрерывность revision → resync НЕ запускается).
+Что проверяется: N мутаций внутри тика → ровно 1 конверт per-subscriber
+(first_revision=min, revision=max, монотонный порядок дельт); cap-flush при burst;
+shutdown-flush доставляет буфер и останавливает поток; сквозной сценарий с реальным
+StateProxy (непрерывность revision → resync НЕ запускается).
 
-Флаг разрешается в ctor DeltaDispatcher (ctor > env > default), поэтому большинство
-тестов задают режим явным аргументом ``coalesce=`` и дёргают ``_flush_once()``
-детерминированно, НЕ ожидая реального таймера.
+Плечо OFF удалено вместе с флагом ``FW_STATE_COALESCE`` (Ф6.3, решение владельца —
+вариант A): коалесцирование стало единственным путём, и тестировать снятую ветку
+значило бы держать её живой. Тесты дёргают ``_flush_once()`` детерминированно,
+НЕ ожидая реального таймера.
 """
 
 from __future__ import annotations
@@ -33,10 +32,10 @@ class _CapturingRouter:
         self.sent.append(msg)
 
 
-def _make(coalesce: bool | None, **kw) -> tuple[DeltaDispatcher, _CapturingRouter, SubscriptionManager]:
+def _make(**kw) -> tuple[DeltaDispatcher, _CapturingRouter, SubscriptionManager]:
     subs = SubscriptionManager()
     router = _CapturingRouter()
-    disp = DeltaDispatcher(subs, router=router, sender_name="StateStore", coalesce=coalesce, **kw)
+    disp = DeltaDispatcher(subs, router=router, sender_name="StateStore", **kw)
     return disp, router, subs
 
 
@@ -45,55 +44,39 @@ def _mk_delta(path: str, value, revision: int) -> Delta:
 
 
 # ---------------------------------------------------------------------------
-# OFF — путь бит-в-бит
+# Конверт: формат и адресация (единственный путь)
 # ---------------------------------------------------------------------------
 
 
-def test_off_is_bit_for_bit_one_envelope_per_mutation() -> None:
-    """OFF: N set-мутаций → N конвертов, немедленно, без буфера."""
-    disp, router, subs = _make(coalesce=False)
+def test_envelope_format_and_queue_class() -> None:
+    """Конверт state.changed адресован подписчику и едет очередью класса "state".
+
+    Ф6.2 сняла выбор очереди, Ф6.3 — выбор режима доставки: обе плоскости стали
+    единственным путём, поэтому формат проверяется один раз здесь.
+    """
+    disp, router, subs = _make()
     subs.subscribe("processes.**", "gui")
 
-    for i in range(5):
-        disp.dispatch_single(_mk_delta("processes.cam.n", i, revision=i + 1))
-
-    assert len(router.sent) == 5
-    # Каждый конверт несёт ровно одну дельту, first_revision == revision.
-    for i, msg in enumerate(router.sent):
-        assert msg["command"] == "state.changed"
-        # queue_type всегда "state" (Ф6.2: флаг удалён) — от режима коалесцирования
-        # он не зависит, плоскости ортогональны.
-        assert msg["queue_type"] == "state"
-        assert msg["targets"] == ["gui"]
-        assert len(msg["data"]["deltas"]) == 1
-        assert msg["data"]["first_revision"] == i + 1
-        assert msg["data"]["revision"] == i + 1
-
-
-def test_off_start_flusher_creates_no_thread() -> None:
-    """OFF: start_flusher() не создаёт поток (поток не существует вовсе)."""
-    disp, _router, _subs = _make(coalesce=False)
-    disp.start_flusher()
-    assert disp.coalescing_enabled is False
-    assert disp._flusher is None
-
-
-def test_off_buffer_stays_empty() -> None:
-    """OFF: буфер не используется, dispatch не оставляет в нём ничего."""
-    disp, _router, subs = _make(coalesce=False)
-    subs.subscribe("processes.**", "gui")
     disp.dispatch_single(_mk_delta("processes.cam.n", 1, revision=1))
-    assert disp._buffer == {}
+    disp._flush_once()
+
+    assert len(router.sent) == 1
+    msg = router.sent[0]
+    assert msg["command"] == "state.changed"
+    assert msg["queue_type"] == "state"
+    assert msg["targets"] == ["gui"]
+    assert msg["data"]["first_revision"] == 1
+    assert msg["data"]["revision"] == 1
 
 
 # ---------------------------------------------------------------------------
-# ON — буферизация до тика
+# Буферизация до тика
 # ---------------------------------------------------------------------------
 
 
-def test_on_buffers_until_flush_one_envelope() -> None:
-    """ON: несколько мутаций → в буфере, router молчит; _flush_once → 1 конверт."""
-    disp, router, subs = _make(coalesce=True)
+def test_buffers_until_flush_one_envelope() -> None:
+    """Несколько мутаций → в буфере, router молчит; _flush_once → 1 конверт."""
+    disp, router, subs = _make()
     subs.subscribe("processes.**", "gui")
 
     for i in range(4):
@@ -115,16 +98,16 @@ def test_on_buffers_until_flush_one_envelope() -> None:
     assert revs == [1, 2, 3, 4]
 
 
-def test_on_flush_is_empty_when_nothing_buffered() -> None:
-    """ON: пустой тик → 0 конвертов, router молчит."""
-    disp, router, _subs = _make(coalesce=True)
+def test_flush_is_empty_when_nothing_buffered() -> None:
+    """Пустой тик → 0 конвертов, router молчит."""
+    disp, router, _subs = _make()
     assert disp._flush_once() == 0
     assert router.sent == []
 
 
-def test_on_per_subscriber_isolation() -> None:
-    """ON: два подписчика на разные паттерны → по одному конверту каждому на тике."""
-    disp, router, subs = _make(coalesce=True)
+def test_per_subscriber_isolation() -> None:
+    """Два подписчика на разные паттерны → по одному конверту каждому на тике."""
+    disp, router, subs = _make()
     subs.subscribe("cameras.**", "gui")
     subs.subscribe("robots.**", "panel")
 
@@ -143,13 +126,13 @@ def test_on_per_subscriber_isolation() -> None:
     assert len(by_target["panel"]["data"]["deltas"]) == 1
 
 
-def test_on_match_at_mutation_not_at_flush() -> None:
-    """ON: подписчик, появившийся ПОСЛЕ мутации, не получает буферизованные дельты.
+def test_match_at_mutation_not_at_flush() -> None:
+    """Подписчик, появившийся ПОСЛЕ мутации, не получает буферизованные дельты.
 
     Ключевой инвариант: матчинг подписок происходит в момент dispatch, а не при
     flush. Дельта замучена ДО подписки 'late' → в конверт 'late' не попадает.
     """
-    disp, router, subs = _make(coalesce=True)
+    disp, router, subs = _make()
     subs.subscribe("cameras.**", "gui")
 
     disp.dispatch_single(_mk_delta("cameras.0.fps", 30, revision=1))
@@ -163,13 +146,13 @@ def test_on_match_at_mutation_not_at_flush() -> None:
     assert targets == {"gui"}  # 'late' не получил чужую буферизованную дельту
 
 
-def test_on_no_keep_last_dedup_revision_contiguous() -> None:
-    """ON: дедуп keep-last-per-path ЗАПРЕЩЁН — все мутации одного пути сохранены.
+def test_no_keep_last_dedup_revision_contiguous() -> None:
+    """Дедуп keep-last-per-path ЗАПРЕЩЁН — все мутации одного пути сохранены.
 
     Три записи в ОДИН путь → три дельты в конверте (непрерывный диапазон revision),
     а не одна «последняя». Иначе рвётся непрерывность revision у клиента.
     """
-    disp, router, subs = _make(coalesce=True)
+    disp, router, subs = _make()
     subs.subscribe("cameras.**", "gui")
 
     disp.dispatch_single(_mk_delta("cameras.0.fps", 30, revision=1))
@@ -185,12 +168,12 @@ def test_on_no_keep_last_dedup_revision_contiguous() -> None:
 
 
 # ---------------------------------------------------------------------------
-# ON — cap-flush (защита от burst)
+# cap-flush (защита от burst)
 # ---------------------------------------------------------------------------
 
 
-def test_on_cap_wakes_flusher_does_not_send_in_caller() -> None:
-    """ON: cap НЕ шлёт в вызывающем (мутаторском) потоке — только будит flusher.
+def test_cap_wakes_flusher_does_not_send_in_caller() -> None:
+    """Cap НЕ шлёт в вызывающем (мутаторском) потоке — только будит flusher.
 
     Инвариант антигонки (ревью Fable): отправка cap-путём из потока-мутатора при
     ≥2 мутаторах переупорядочила бы конверты (pop-под-локом vs send-вне-лока) и
@@ -198,7 +181,7 @@ def test_on_cap_wakes_flusher_does_not_send_in_caller() -> None:
     _wake выставлен, буфер НЕ очищен, _send_state_changed из caller-потока НЕ звался.
     Реальная отправка идёт только через _flush_once (эмулирует поток flusher'а).
     """
-    disp, router, subs = _make(coalesce=True, buffer_cap=50)
+    disp, router, subs = _make(buffer_cap=50)
     subs.subscribe("cameras.**", "gui")
 
     send_threads: list[int] = []
@@ -227,10 +210,10 @@ def test_on_cap_wakes_flusher_does_not_send_in_caller() -> None:
     assert "gui" not in disp._buffer
 
 
-def test_on_cap_single_flush_preserves_order_no_gaps() -> None:
-    """ON: серия [1..250] с cap=200 → один _flush_once после wake → строго
+def test_cap_single_flush_preserves_order_no_gaps() -> None:
+    """Серия [1..250] с cap=200 → один _flush_once после wake → строго
     возрастающие revision без дыр и обгона (тотальный порядок per-subscriber)."""
-    disp, router, subs = _make(coalesce=True, buffer_cap=200)
+    disp, router, subs = _make(buffer_cap=200)
     subs.subscribe("cameras.**", "gui")
 
     for i in range(250):
@@ -251,8 +234,8 @@ def test_on_cap_single_flush_preserves_order_no_gaps() -> None:
     assert router.sent[0]["data"]["revision"] == 250
 
 
-def test_on_live_flusher_thread_cap_pressure_no_loss_no_reorder() -> None:
-    """ON со СБОРНЫМ потоком-flusher'ом под cap-давлением: единственный отправитель
+def test_live_flusher_thread_cap_pressure_no_loss_no_reorder() -> None:
+    """Со СБОРНЫМ потоком-flusher'ом под cap-давлением: единственный отправитель
     гарантирует, что все дельты доставлены ровно один раз, конверты строго
     возрастают по revision, потерь/обгона нет.
 
@@ -262,7 +245,7 @@ def test_on_live_flusher_thread_cap_pressure_no_loss_no_reorder() -> None:
     Финальные проверки — на СОБРАННОМ результате (не на таймингах): порядок
     батчей может варьироваться, но конкатенация обязана быть 1..N без дыр.
     """
-    disp, router, subs = _make(coalesce=True, buffer_cap=20, flush_interval_sec=0.005)
+    disp, router, subs = _make(buffer_cap=20, flush_interval_sec=0.005)
     subs.subscribe("cameras.**", "gui")
     disp.start_flusher()
     try:
@@ -285,17 +268,14 @@ def test_on_live_flusher_thread_cap_pressure_no_loss_no_reorder() -> None:
 
 
 # ---------------------------------------------------------------------------
-# ON — lifecycle через StateStoreManager (start/shutdown-flush)
+# Lifecycle через StateStoreManager (start/shutdown-flush)
 # ---------------------------------------------------------------------------
 
 
-def test_shutdown_flushes_buffer_and_stops_thread(monkeypatch) -> None:
-    """ON через менеджер: буфер в flusher'е + shutdown() → буфер доставлен, поток стоит."""
-    monkeypatch.setenv("FW_STATE_COALESCE", "1")
-
+def test_shutdown_flushes_buffer_and_stops_thread() -> None:
+    """Через менеджер: буфер в flusher'е + shutdown() → буфер доставлен, поток стоит."""
     router = _CapturingRouter()
     mgr = StateStoreManager(router=router, auto_register_ipc=False)
-    assert mgr.dispatcher.coalescing_enabled is True
 
     mgr.subscription_manager.subscribe("cameras.**", "gui")
     mgr.initialize()
@@ -316,40 +296,40 @@ def test_shutdown_flushes_buffer_and_stops_thread(monkeypatch) -> None:
     assert mgr.dispatcher._flusher is None
 
 
-def test_off_manager_lifecycle_no_thread(monkeypatch) -> None:
-    """OFF через менеджер: initialize/shutdown не создают flusher, путь бит-в-бит.
+def test_manager_lifecycle_has_no_immediate_send_switch(monkeypatch) -> None:
+    """Переключателя режима нет: env снятого флага ничего не меняет (Ф6.3).
 
-    Ф6.1: дефолт флага флипнут в ON, поэтому OFF-ветка достижима только через env —
-    и именно так задокументирован откат. Тест заодно доказывает, что откат РАБОТАЕТ
-    (env > default), а не только объявлен.
+    Страж от «отката по памяти»: `FW_STATE_COALESCE=0` в окружении когда-то
+    возвращал немедленную отправку в потоке-мутаторе. Флаг удалён — env обязан
+    быть проигнорирован, а не молча вернуть снятую ветку.
     """
     monkeypatch.setenv("FW_STATE_COALESCE", "0")
 
     router = _CapturingRouter()
     mgr = StateStoreManager(router=router, auto_register_ipc=False)
-    assert mgr.dispatcher.coalescing_enabled is False
 
     mgr.subscription_manager.subscribe("cameras.**", "gui")
     mgr.initialize()
-    assert mgr.dispatcher._flusher is None
+    assert mgr.dispatcher._flusher is not None  # поток есть вопреки env
 
     mgr.dispatcher.dispatch_single(_mk_delta("cameras.0.fps", 30, revision=1))
-    assert len(router.sent) == 1  # немедленно, без буфера
+    assert router.sent == []  # буфер, а не немедленная отправка
 
     mgr.shutdown()
     assert mgr.dispatcher._flusher is None
+    assert len(router.sent) == 1  # финальный дренаж доставил
 
 
 # ---------------------------------------------------------------------------
-# ON — сквозной с реальным StateProxy: непрерывность revision → resync НЕ запускается
+# Сквозной с реальным StateProxy: непрерывность revision → resync НЕ запускается
 # ---------------------------------------------------------------------------
 
 
-def test_on_end_to_end_stateproxy_no_resync() -> None:
-    """ON: коалесцированный конверт с непрерывным диапазоном revision → StateProxy
+def test_end_to_end_stateproxy_no_resync() -> None:
+    """Коалесцированный конверт с непрерывным диапазоном revision → StateProxy
     применяет дельты и НЕ запускает resync (диапазон [first_revision..revision]
     стыкуется с предыдущим)."""
-    disp, router, subs = _make(coalesce=True)
+    disp, router, subs = _make()
     subs.subscribe("cameras.0.**", "gui")
 
     proxy = StateProxy("gui", router=None)
@@ -390,21 +370,10 @@ def test_on_end_to_end_stateproxy_no_resync() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_off_replay_sends_directly() -> None:
-    """OFF: enqueue_replay шлёт немедленно в вызывающем потоке — бит-в-бит."""
-    disp, router, _subs = _make(coalesce=False)
-
-    disp.enqueue_replay("gui", [_mk_delta("cameras.0.status", "idle", revision=7)])
-
-    assert len(router.sent) == 1
-    assert router.sent[0]["targets"] == ["gui"]
-    assert router.sent[0]["data"]["revision"] == 7
-
-
-def test_on_replay_not_sent_in_caller_thread() -> None:
-    """ON: enqueue_replay НЕ шлёт из вызывающего потока — только буферизует и будит
+def test_replay_not_sent_in_caller_thread() -> None:
+    """Вызов enqueue_replay НЕ шлёт из вызывающего потока — только буферизует и будит
     flusher. Иначе конверт реплея конкурировал бы с буферизованным."""
-    disp, router, _subs = _make(coalesce=True)
+    disp, router, _subs = _make()
     disp._wake.clear()
 
     disp.enqueue_replay("gui", [_mk_delta("cameras.0.status", "idle", revision=7)])
@@ -415,10 +384,10 @@ def test_on_replay_not_sent_in_caller_thread() -> None:
     assert len(router.sent) == 1
 
 
-def test_on_replay_appended_after_pending_one_envelope() -> None:
-    """ON: реплей ложится ПОСЛЕ уже накопленных дельт подписчика — один конверт,
+def test_replay_appended_after_pending_one_envelope() -> None:
+    """Реплей ложится ПОСЛЕ уже накопленных дельт подписчика — один конверт,
     first_revision = min(pending), непрерывность не рвётся, дропа нет."""
-    disp, router, subs = _make(coalesce=True)
+    disp, router, subs = _make()
     subs.subscribe("cameras.**", "gui")
 
     # Накопленные мутации 10..12 (ещё не отправлены).
@@ -452,7 +421,7 @@ def test_stuck_flusher_skips_final_flush() -> None:
     переупорядочили бы конверты, а приёмник глушит «устаревший» пакет целиком.
     Инвариант порядка дороже хвоста буфера при аварийном shutdown.
     """
-    disp, router, subs = _make(coalesce=True)
+    disp, router, subs = _make()
     subs.subscribe("processes.**", "gui")
 
     class _ZombieThread:
@@ -474,7 +443,7 @@ def test_stuck_flusher_skips_final_flush() -> None:
 
 def test_finished_flusher_does_final_flush() -> None:
     """Плечо пары: поток честно завершился → буфер дренируется, как и обещано."""
-    disp, router, subs = _make(coalesce=True, flush_interval_sec=5.0)
+    disp, router, subs = _make(flush_interval_sec=5.0)
     subs.subscribe("processes.**", "gui")
     disp.start_flusher()
     disp.dispatch_single(_mk_delta("processes.cam.n", 1, revision=1))
