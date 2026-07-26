@@ -48,14 +48,28 @@
 (**приёмника нет, отбрасывается**). Метод возвращал `True`. Результат: процесс продолжал
 работать, но провода ему уже оторвали — «зомби» без ввода-вывода, при видимости успеха.
 
-**Корневая причина.** У frontend-процесса не было обработчика `process.command.response`.
-PM честно отвечает `success=False` на неизвестный ключ, ответ приходил в GUI-роутер, не
-находил ожидающего (GUI шлёт fire-and-forget) и исчезал. Отказ был структурно неотличим
-от успеха — для всего семейства команд сразу.
+**Корневая причина (уточнена ревью 2026-07-26 — первая формулировка была неверной).**
+Дыра оказалась глубже, чем «нет обработчика ответа». `RouterManager.reply_to_request` —
+документированный **no-op без correlation-id** (`router_module/core/router_manager.py:773-775`),
+а GUI-путь `CommandSender.send_system_command` → `build_system_command_message`
+`request_id` **не проставлял**. То есть PM не «отвечал в пустоту» — он вообще не отвечал,
+и добавить один только handler было недостаточно: он молчал бы на всём GUI-трафике.
+Живое свидетельство «No handler for key 'process.hot_remove'» было получено через driver
+(коррелированный путь), а не через GUI — отсюда и ошибка в первой диагностике.
+
+Закрыто двумя правками сразу: `send_system_command` проставляет `request_id` (ответа никто
+не ждёт, блокировки нет — но PM теперь физически может сообщить об отказе), а handler
+`process.command.response` этот отказ логирует.
 
 **Сделано:**
 1. `frontend/process.py` — зарегистрирован handler `process.command.response`, неуспех
    логируется WARNING с причиной от PM. Успех не логируется (шум на hot-path).
+   `CommandSender.send_system_command` проставляет `request_id` — без него handler был бы
+   мёртв на GUI-пути (правка по ревью). Причина отказа читается из `result` **верхнего**
+   уровня ответа: первая версия читала `data.result`, которого в форме `reply_to_request`
+   нет, и WARNING всегда писал «причина не указана». Handler покрыт 6 тестами
+   (`frontend/tests/test_gui_process.py::TestOnCommandResponse`) — их отсутствие и дало
+   пройти этой ошибке.
 2. `hot_remove_process` — каскад не запускается, пока сам remove неисполним; `False` +
    WARNING. Половина операции хуже отказа целиком.
 3. `hot_add_process` — `False` вместо `True`, команда в никуда не отправляется.
@@ -85,7 +99,7 @@ GUI-обёртка.
 
 | # | Путь | Характер | Статус |
 |---|---|---|---|
-| 1 | нет handler'а `process.command.response` во frontend | корневая дыра класса | ✅ закрыто `6ef985e7` |
+| 1 | PM не мог сообщить об отказе на GUI-пути: `reply_to_request` — no-op без correlation-id, а `send_system_command` не ставил `request_id`; handler'а ответа тоже не было | корневая дыра класса | ✅ закрыто (`6ef985e7` + правки по ревью: `request_id` в отправителе, чтение `result` с верхнего уровня, 6 тестов). **Требует live-подтверждения**: fire-and-forget с request_id → WARNING в GUI-логе |
 | 2 | `hot_add_process` | `True` без приёмника | ✅ закрыто |
 | 3 | `hot_remove_process` | `True` + частичный разрушительный эффект | ✅ закрыто |
 | 4 | `apply_topology_diff` | успех за отброшенные команды | ✅ закрыто |
@@ -93,6 +107,7 @@ GUI-обёртка.
 | 6 | `ProcessManagerProxy._dispatch` (`:140-144`) | `{"success": True, "dispatched": True}` — sync-путь не узнает об отказе PM | ⏳ открыто (пограничный: документированный оптимизм, ключи с приёмниками) |
 | 7 | `processes/presenter.py:133` | `cmd_map.get(action_id, action_id)` отправит любой незнакомый ключ сырым | ⏳ открыто (латентная лазейка) |
 | 8 | `build_process_start/stop/restart` | 0 прод-вызовов, все шлют сырые dict мимо билдеров | ⏳ открыто (не ложь; «один источник правды» по форме команд не используется) |
+| 9 | `TopologyBridge.get_capabilities` | обещал `hot_add: True` / `diff_apply: True` для неисполнимых путей, тест это закреплял | ✅ закрыто правкой по ревью (`hot_add: False`, `diff_apply: False`, `wire: True` — честно) |
 
 ## 5. Что не проверено
 

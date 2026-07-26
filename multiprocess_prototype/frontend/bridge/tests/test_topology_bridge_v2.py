@@ -570,13 +570,17 @@ class TestApplyTopologyDiff:
 
 class TestGetCapabilities:
     def test_returns_full_dict(self, bridge: TopologyBridge) -> None:
-        """get_capabilities возвращает все ключи."""
+        """get_capabilities отражает ФАКТ, а не замысел (G4).
+
+        hot_add/diff_apply — False: у process.hot_add/hot_remove нет приёмника
+        в PM. Витрина возможностей не должна обещать неисполнимое.
+        """
         caps = bridge.get_capabilities()
         assert caps == {
             "field_set": True,
-            "hot_add": True,
+            "hot_add": False,
             "wire": True,
-            "diff_apply": True,
+            "diff_apply": False,
         }
 
     def test_all_values_are_bool(self, bridge: TopologyBridge) -> None:

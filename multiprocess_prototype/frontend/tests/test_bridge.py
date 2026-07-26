@@ -69,6 +69,37 @@ class TestStateListeners:
 class TestCommandSender:
     """Тесты CommandSender."""
 
+    def test_send_system_command_sets_request_id(self):
+        """G4: fire-and-forget system-команда всё равно несёт request_id.
+
+        Без correlation-id ``RouterManager.reply_to_request`` — документированный
+        no-op, то есть PM физически не может сообщить об отказе, и отклонённая
+        команда выглядит выполненной. С request_id ответ приходит и попадает в
+        ``GuiProcess._on_command_response``. Ответа никто не ждёт — блокировки нет.
+        """
+        mock_process = MagicMock()
+        mock_process.name = "gui"
+        sender = CommandSender(mock_process)
+
+        sender.send_system_command({"cmd": "process.hot_add", "process_name": "x"})
+
+        envelope = mock_process.send_message.call_args[0][1]
+        assert envelope["request_id"], "без request_id PM не ответит — отказ снова станет невидимым"
+        assert envelope["command"] == "process.command"
+        assert envelope["data"]["cmd"] == "process.hot_add"
+
+    def test_send_system_command_request_ids_are_unique(self):
+        """Каждая команда — свой correlation-id, иначе ответы неразличимы."""
+        mock_process = MagicMock()
+        mock_process.name = "gui"
+        sender = CommandSender(mock_process)
+
+        sender.send_system_command({"cmd": "process.start", "process_name": "a"})
+        sender.send_system_command({"cmd": "process.start", "process_name": "b"})
+
+        ids = {call[0][1]["request_id"] for call in mock_process.send_message.call_args_list}
+        assert len(ids) == 2
+
     def test_send_command_format(self):
         """send_command формирует корректный dict и доставляет через PM-relay."""
         mock_process = MagicMock()

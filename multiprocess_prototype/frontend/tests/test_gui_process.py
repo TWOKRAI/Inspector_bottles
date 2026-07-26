@@ -885,3 +885,78 @@ class TestStateDeltasToBridge:
         assert received[0]["value"] == "running"
         # кэш обновлён в потоке-источнике (до пересечения границы)
         assert proxy.cache["processes.cam.state.status"] == "running"
+
+
+# ============================================================================
+# test_on_command_response — сток отказов ProcessManager (GATE G4)
+# ============================================================================
+
+
+class TestOnCommandResponse:
+    """GuiProcess._on_command_response: отказ PM не должен пропадать бесследно.
+
+    Мотивация теста — дефект, найденный ревью: handler читал причину из
+    ``message["data"]["result"]``, а ``reply_to_request`` кладёт ``result`` на
+    ВЕРХНИЙ уровень ответа. Тестов не было, поэтому ошибку не поймали: WARNING
+    писался всегда с «причина не указана». Здесь фиксируем реальную форму.
+    """
+
+    @staticmethod
+    def _make_process() -> "object":
+        """GuiProcess без запуска: интересует только метод-handler."""
+        from multiprocess_prototype.frontend.process import GuiProcess
+
+        proc = GuiProcess.__new__(GuiProcess)
+        proc._log_warning = MagicMock()  # type: ignore[attr-defined]
+        return proc
+
+    def test_failure_logs_reason_from_top_level_result(self) -> None:
+        """success=False + result.reason на верхнем уровне → WARNING с причиной."""
+        proc = self._make_process()
+        proc._on_command_response(  # type: ignore[attr-defined]
+            {
+                "type": "response",
+                "command": "process.command.response",
+                "request_id": "abc-123",
+                "success": False,
+                "result": {"status": "error", "reason": "No handler for key 'process.hot_add'"},
+            }
+        )
+        proc._log_warning.assert_called_once()  # type: ignore[attr-defined]
+        text = proc._log_warning.call_args[0][0]  # type: ignore[attr-defined]
+        assert "No handler for key 'process.hot_add'" in text
+        assert "abc-123" in text
+
+    def test_success_is_silent(self) -> None:
+        """Успешный ответ не логируется — иначе шум на каждую команду."""
+        proc = self._make_process()
+        proc._on_command_response({"success": True, "result": {"ok": 1}})  # type: ignore[attr-defined]
+        proc._log_warning.assert_not_called()  # type: ignore[attr-defined]
+
+    def test_missing_success_key_is_treated_as_success(self) -> None:
+        """Ответ без ключа success считаем успехом — не шумим на чужих формах."""
+        proc = self._make_process()
+        proc._on_command_response({"result": {"ok": 1}})  # type: ignore[attr-defined]
+        proc._log_warning.assert_not_called()  # type: ignore[attr-defined]
+
+    def test_non_dict_message_is_noop(self) -> None:
+        """Не-dict не роняет приёмный поток."""
+        proc = self._make_process()
+        proc._on_command_response("мусор")  # type: ignore[attr-defined]
+        proc._on_command_response(None)  # type: ignore[attr-defined]
+        proc._log_warning.assert_not_called()  # type: ignore[attr-defined]
+
+    def test_failure_without_reason_still_logs(self) -> None:
+        """Отказ без причины всё равно виден — молчать про неуспех нельзя."""
+        proc = self._make_process()
+        proc._on_command_response({"success": False, "result": None})  # type: ignore[attr-defined]
+        proc._log_warning.assert_called_once()  # type: ignore[attr-defined]
+        assert "причина не указана" in proc._log_warning.call_args[0][0]  # type: ignore[attr-defined]
+
+    def test_legacy_nested_result_still_read(self) -> None:
+        """Fallback на data.result — совместимость с legacy-обёрткой."""
+        proc = self._make_process()
+        proc._on_command_response(  # type: ignore[attr-defined]
+            {"success": False, "data": {"result": {"reason": "legacy-форма"}}}
+        )
+        assert "legacy-форма" in proc._log_warning.call_args[0][0]  # type: ignore[attr-defined]

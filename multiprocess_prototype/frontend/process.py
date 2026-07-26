@@ -176,23 +176,36 @@ class GuiProcess(ProcessModule):
     def _on_command_response(self, message) -> None:
         """Handler command="process.command.response": не дать отказу PM пропасть.
 
-        GUI шлёт системные команды fire-and-forget (без ``correlation_id``), а PM
-        честно отвечает ``success=False`` на неизвестный ключ. До G4 этот ответ
-        приходил в роутер, не находил ожидающего и исчезал — вызывающий видел
-        «успешно» там, где бэкенд отказал (`process.hot_add`/`hot_remove`).
+        GUI шлёт системные команды fire-and-forget, но с ``request_id`` (см.
+        ``CommandSender.send_system_command``): без correlation-id
+        ``RouterManager.reply_to_request`` — no-op, и PM физически не мог
+        сообщить об отказе. Ответ прилетает сюда, не находит ожидающего (никто
+        не блокируется) и логируется — иначе отклонённая команда неотличима от
+        выполненной.
 
-        Успешные ответы не логируем: их и так видно по эффекту, а шум на hot-path
-        не нужен. Логируем только неуспех — один раз, с причиной от PM.
+        Сюда же попадают опоздавшие ответы на коррелированные ``request()``
+        после таймаута: резолв pending идёт ДО диспетчеризации и потребляет
+        билет, так что чужие ответы этот handler не крадёт.
+
+        Успешные ответы не логируем: их видно по эффекту, шум не нужен.
+        Логируем только неуспех — один раз, с причиной от PM.
         """
         if not isinstance(message, dict):
             return
         if message.get("success", True):
             return
-        data = message.get("data") or {}
-        result = data.get("result") if isinstance(data, dict) else None
+        # Форма ответа reply_to_request: success/result на ВЕРХНЕМ уровне
+        # (router_manager.reply_to_request), а не внутри data. Fallback на
+        # data.result — для legacy-обёртки, если такая встретится.
+        result = message.get("result")
+        if result is None:
+            data = message.get("data")
+            result = data.get("result") if isinstance(data, dict) else None
         reason = ""
         if isinstance(result, dict):
             reason = str(result.get("reason") or result.get("error") or "")
+        elif result:
+            reason = str(result)
         self._log_warning(
             f"ProcessManager отклонил системную команду: {reason or 'причина не указана'} "
             f"(request_id={message.get('request_id') or '—'}). Команда НЕ выполнена — "

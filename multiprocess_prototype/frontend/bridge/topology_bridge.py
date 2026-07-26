@@ -621,15 +621,23 @@ class TopologyBridge:
         return result
 
     def get_capabilities(self) -> dict[str, bool]:
-        """Вернуть возможности bridge.
+        """Вернуть возможности bridge — по факту, а не по замыслу.
 
-        Позволяет GUI узнать какие операции поддерживаются.
+        G4: раньше здесь стояло ``hot_add: True`` и ``diff_apply: True``, хотя
+        у команд ``process.hot_add``/``hot_remove`` нет приёмника в PM. Витрина
+        возможностей, которая обещает неисполнимое, — тот же врущий API, с
+        которым разбирался гейт.
+
+        ``wire`` — True честно: ``wire.setup``/``wire.teardown`` имеют приёмники
+        и работают. ``diff_apply`` — False: применение diff'а покрывает только
+        wire-ветки, процессные молча не исполняются (уходят в ``errors``);
+        живой путь целиком — ``topology.apply`` на стороне PM.
         """
         return {
             "field_set": True,
-            "hot_add": True,
+            "hot_add": False,
             "wire": True,
-            "diff_apply": True,
+            "diff_apply": False,
         }
 
     # --- Wire helpers ---

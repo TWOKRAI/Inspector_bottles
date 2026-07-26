@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Protocol, runtime_checkable
+from uuid import uuid4
 
 from multiprocess_framework.modules.message_module import (
     build_command_message,
@@ -199,14 +200,23 @@ class CommandSender:
     # --- v2: system command ---
 
     def send_system_command(self, command: dict[str, Any]) -> None:
-        """Отправить system-level команду в ProcessManager.
+        """Отправить system-level команду в ProcessManager (fire-and-forget).
 
         Используется для горячего добавления/удаления процессов,
         управления wire'ами и прочих системных операций.
+
+        **request_id проставляется, хотя ответа никто не ждёт** (G4). Причина:
+        ``RouterManager.reply_to_request`` — документированный no-op без
+        correlation-id, поэтому раньше PM физически не мог сообщить об отказе,
+        и любая отклонённая system-команда выглядела успешной. С correlation-id
+        PM отвечает всегда; ответ не находит ожидающего и попадает в handler
+        ``process.command.response`` (см. ``frontend/process.py``), который
+        логирует неуспех. Стоимость — одно сообщение в system-очередь на
+        команду; GUI шлёт их по нажатию кнопки, не на hot-path.
         """
         target = "ProcessManager"
         # Форма сообщения — общий билдер протокола (один источник правды с driver'ом).
-        msg = build_system_command_message(command, sender=self._process.name)
+        msg = build_system_command_message(command, sender=self._process.name, request_id=str(uuid4()))
         self._process.send_message(target, msg)
 
     # --- request/response (command-result-bridge): GUI узнаёт результат ---
