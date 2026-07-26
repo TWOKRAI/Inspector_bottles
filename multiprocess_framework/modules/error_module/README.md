@@ -328,6 +328,13 @@ em.register_channel(alert_ch)
 | `enable_batching` | `True` | Включить батчинг **для WARNING**. На ERROR/CRITICAL не влияет |
 | `batch_size` | `50` | Максимальный размер пачки |
 | `batch_interval` | `0.5 сек` | Интервал принудительного сброса |
+| `batch_max_pending` | `10 000` | Потолок неотправленных записей **на канал**. `0` — без потолка |
+| `batch_overflow_policy` | `drop_oldest` | Что терять при переполнении: `drop_oldest` (кольцо) или `drop_newest` |
+
+**Потолок буфера (Ф0.3).** Касается только батченого пути (`WARNING` и ниже) — `ERROR`/`CRITICAL`
+идут мимо буфера и потолком не затрагиваются. Потери названы: `get_stats()["batch_stats"]`
+содержит `dropped` и `dropped_by_channel`. Параметры задаются секцией `observability` (общие
+с логгером) и читаются командой `introspect.observability`.
 
 **Пол ошибок.** Severity-маршрут конфиго-зависим целиком (`_setup_level_routes` строит
 `_level_to_channel` из фактически созданных каналов). Если канал уровня отсутствует, снят через

@@ -4,6 +4,7 @@ ErrorManagerConfig — плоская SchemaBase-схема (только пол
 
 Сборка полного dict с severity-каналами — в ``core/error_config_assembly.expand_error_manager_config``.
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Dict, Optional
@@ -32,6 +33,14 @@ class ErrorManagerConfig(SchemaBase):
     enable_batching: Annotated[bool, FieldMeta("Батчинг записи")] = True
     batch_size: Annotated[int, FieldMeta("Размер батча", min=1, max=1000)] = 50
     batch_interval: Annotated[float, FieldMeta("Интервал flush, сек", min=0.1, max=60.0)] = 0.5
+    batch_max_pending: Annotated[
+        int,
+        FieldMeta("Потолок неотправленных записей на канал (0 — без потолка)", min=0, max=1_000_000),
+    ] = 10_000
+    batch_overflow_policy: Annotated[
+        str,
+        FieldMeta("Что терять при переполнении: drop_oldest | drop_newest"),
+    ] = "drop_oldest"
 
     channels: Annotated[
         Dict[str, dict],

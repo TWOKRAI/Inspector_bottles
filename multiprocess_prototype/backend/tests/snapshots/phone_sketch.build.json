@@ -1060,6 +1060,8 @@
         "enabled": true
       },
       "observability": {
+        "batch_max_pending": 10000,
+        "batch_overflow_policy": "drop_oldest",
         "commands": {
           "log_success": false
         },
@@ -1161,6 +1163,8 @@
         "error": {
           "app_name": "errors",
           "batch_interval": 0.5,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
@@ -1174,6 +1178,8 @@
         "logger": {
           "app_name": "inspector",
           "batch_interval": 1.0,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
             "console": {
@@ -1444,6 +1450,8 @@
         "error": {
           "app_name": "errors",
           "batch_interval": 0.5,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
@@ -1457,6 +1465,8 @@
         "logger": {
           "app_name": "inspector",
           "batch_interval": 1.0,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
             "console": {
@@ -1679,6 +1689,8 @@
         "error": {
           "app_name": "errors",
           "batch_interval": 0.5,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
@@ -1692,6 +1704,8 @@
         "logger": {
           "app_name": "inspector",
           "batch_interval": 1.0,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
             "console": {
@@ -2011,6 +2025,8 @@
         "error": {
           "app_name": "errors",
           "batch_interval": 0.5,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
@@ -2024,6 +2040,8 @@
         "logger": {
           "app_name": "inspector",
           "batch_interval": 1.0,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
             "console": {
@@ -2301,6 +2319,8 @@
         "error": {
           "app_name": "errors",
           "batch_interval": 0.5,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
@@ -2314,6 +2334,8 @@
         "logger": {
           "app_name": "inspector",
           "batch_interval": 1.0,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
             "console": {
@@ -3182,6 +3204,8 @@
         "error": {
           "app_name": "errors",
           "batch_interval": 0.5,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
@@ -3195,6 +3219,8 @@
         "logger": {
           "app_name": "inspector",
           "batch_interval": 1.0,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
             "console": {
@@ -3443,6 +3469,8 @@
         "error": {
           "app_name": "errors",
           "batch_interval": 0.5,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 50,
           "channels": {},
           "critical_file_path": "<ROOT>/logs/prototype_2/critical.log",
@@ -3456,6 +3484,8 @@
         "logger": {
           "app_name": "inspector",
           "batch_interval": 1.0,
+          "batch_max_pending": 10000,
+          "batch_overflow_policy": "drop_oldest",
           "batch_size": 100,
           "channels": {
             "console": {

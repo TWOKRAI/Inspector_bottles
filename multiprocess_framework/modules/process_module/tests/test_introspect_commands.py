@@ -514,3 +514,123 @@ class TestIntrospectPlugins:
         assert result["plugins"] == {}
         assert result["count"] == 0
         assert result["failed_imports"] == {}
+
+
+# ====================================================================== #
+#  introspect.observability (Ф0.3)                                        #
+# ====================================================================== #
+
+
+class _FakeLoggerConfig:
+    default_level = "INFO"
+    log_directory = "/logs"
+    scopes: dict = {}
+
+
+class _FakeLoggerManager:
+    """Менеджер логов, отдающий буфер под своим ключом ``batch_stats``."""
+
+    def __init__(self, *, dropped_by_channel=None, errors_to_floor=0) -> None:
+        self.config = _FakeLoggerConfig()
+        self._dropped = dropped_by_channel or {}
+        self._errors_to_floor = errors_to_floor
+        self.get_stats_calls = 0
+
+    def get_stats(self) -> dict:
+        self.get_stats_calls += 1
+        return {
+            "app_name": "fake",
+            "errors_to_floor": self._errors_to_floor,
+            "error_floor": None,
+            "batch_stats": {
+                "type": "batch",
+                "dropped": sum(self._dropped.values()),
+                "dropped_by_channel": dict(self._dropped),
+                "pending": {"system_file": 5},
+            },
+        }
+
+
+class _FakeStatsConfig:
+    enable_logging = True
+    aggregation_interval = 1.0
+
+
+class _FakeStatsManager:
+    """Менеджер статистики: буфер лежит под ключом ``buffer`` (от CRM)."""
+
+    def __init__(self) -> None:
+        self.config = _FakeStatsConfig()
+
+    def get_stats(self) -> dict:
+        return {"buffer": {"type": "aggregation", "pending": {}}, "metrics_count": 3}
+
+
+class TestIntrospectObservability:
+    """Видимый путь наружу для счётчиков потерь наблюдаемости (задача Ф0.3)."""
+
+    def test_command_is_registered(self) -> None:
+        _svc, cm = _make()
+        assert "introspect.observability" in cm.handlers
+
+    def test_reports_drops_with_the_guilty_channel(self) -> None:
+        svc, cm = _make()
+        svc.logger_manager = _FakeLoggerManager(dropped_by_channel={"system_file": 42})
+
+        result = cm.dispatch("introspect.observability")
+
+        assert result["success"] is True
+        assert result["process"] == "preprocessor"
+        buffer = result["counters"]["logger"]["buffer"]
+        assert buffer["dropped"] == 42
+        assert buffer["dropped_by_channel"] == {"system_file": 42}
+
+    def test_reports_errors_that_never_reached_a_channel(self) -> None:
+        svc, cm = _make()
+        svc.logger_manager = _FakeLoggerManager(errors_to_floor=3)
+
+        result = cm.dispatch("introspect.observability")
+
+        assert result["counters"]["logger"]["errors_to_floor"] == 3
+
+    def test_buffer_key_is_normalized_across_planes(self) -> None:
+        """logger отдаёт batch_stats, stats — buffer; наружу оба как ``buffer``."""
+        svc, cm = _make()
+        svc.logger_manager = _FakeLoggerManager()
+        svc.stats_manager = _FakeStatsManager()
+
+        counters = cm.dispatch("introspect.observability")["counters"]
+
+        assert counters["logger"]["buffer"]["type"] == "batch"
+        assert counters["stats"]["buffer"]["type"] == "aggregation"
+
+    def test_effective_section_is_readback_not_echo(self) -> None:
+        svc, cm = _make()
+        svc.logger_manager = _FakeLoggerManager()
+
+        effective = cm.dispatch("introspect.observability")["effective"]
+
+        assert effective["logger"]["default_level"] == "INFO"
+        assert effective["logger"]["log_directory"] == "/logs"
+
+    def test_missing_managers_are_omitted_not_faked(self) -> None:
+        """Нет менеджера — нет секции. Пустой словарь вместо честного отсутствия врал бы."""
+        _svc, cm = _make()
+
+        result = cm.dispatch("introspect.observability")
+
+        assert result["success"] is True
+        assert result["counters"] == {}
+        assert result["effective"] == {}
+
+    def test_command_does_not_mutate_managers(self) -> None:
+        """Read-команда: менеджер только опрашивается, дважды подряд — тот же ответ."""
+        svc, cm = _make()
+        logger = _FakeLoggerManager(dropped_by_channel={"system_file": 1})
+        svc.logger_manager = logger
+
+        first = cm.dispatch("introspect.observability")
+        second = cm.dispatch("introspect.observability")
+
+        assert first["counters"] == second["counters"]
+        assert logger.get_stats_calls == 2  # только чтение, по разу на вызов

@@ -201,6 +201,7 @@ BUILTIN_COMMAND_CONTRACTS: Dict[str, Type[BaseModel]] = {
     "introspect.memory": NoParams,
     "introspect.capabilities": NoParams,
     "introspect.plugins": NoParams,
+    "introspect.observability": NoParams,
     # observability control plane (Ф1 Task 1.4/1.5, Ф5.20b)
     "config.reload": ConfigReloadParams,
     "logger.sink.enable": LoggerSinkParams,

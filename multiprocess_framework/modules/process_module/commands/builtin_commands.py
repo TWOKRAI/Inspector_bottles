@@ -400,6 +400,11 @@ class BuiltinCommands:
                 self._cmd_introspect_telemetry,
                 "Readback телеметрийного gate: эффективная publish-секция + per-метрика (enabled, interval)",
             ),
+            (
+                "introspect.observability",
+                self._cmd_introspect_observability,
+                "Readback logger/error/stats: пороги и каналы + потери (buffer.dropped_by_channel, errors_to_floor)",
+            ),
         ]
         for name, handler, desc in specs:
             cm.register_command(name, handler, metadata={"description": desc}, tags=["system"])
@@ -638,6 +643,36 @@ class BuiltinCommands:
         except Exception:  # noqa: BLE001 — наблюдаемость не критична
             pass
         return result
+
+    def _cmd_introspect_observability(self, data=None, **kwargs) -> dict:
+        """Плоскости наблюдаемости процесса: что настроено и что уже потеряно.
+
+        Ф0.3. До этой команды счётчики логгера/ошибок/статистики наружу не выходили
+        вовсе (``get_stats()`` читали только тесты) — потолок буфера и пол ошибок
+        были бы очередным невидимым сигналом. Две секции:
+
+          - ``effective`` — readback конфигурации (пороги скоупов, каталог, активные
+            каналы). Та же функция, что отдаёт readback у ``config.reload``;
+          - ``counters`` — потери: ``buffer.pending`` / ``buffer.dropped_by_channel``
+            (медленный сток) и ``errors_to_floor`` (ошибка не дошла ни до одного канала).
+
+        Не мутирует состояние: только чтение живых менеджеров.
+        """
+        from ..managers.observability_reload import (
+            observability_counters,
+            observability_effective,
+        )
+
+        svc = self._services
+        logger = getattr(svc, "logger_manager", None)
+        error = getattr(svc, "error_manager", None)
+        stats = getattr(svc, "stats_manager", None)
+        return {
+            "success": True,
+            "process": svc.name,
+            "effective": observability_effective(logger=logger, error=error, stats=stats),
+            "counters": observability_counters(logger=logger, error=error, stats=stats),
+        }
 
     def _cmd_introspect_queues(self, data=None, **kwargs) -> dict:
         """Глубины собственных очередей процесса (backpressure-диагностика).

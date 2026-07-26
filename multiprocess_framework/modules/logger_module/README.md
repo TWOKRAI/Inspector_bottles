@@ -272,6 +272,15 @@ logger.flush()
 | `enable_batching` | `True` | Включить батчинг **для DEBUG/INFO/WARNING**. На ERROR/CRITICAL не влияет |
 | `batch_size` | `100` | Максимальный размер пачки |
 | `batch_interval` | `1.0 сек` | Интервал принудительного сброса |
+| `batch_max_pending` | `10 000` | Потолок неотправленных записей **на канал**. `0` — без потолка |
+| `batch_overflow_policy` | `drop_oldest` | Что терять при переполнении: `drop_oldest` (кольцо) или `drop_newest` |
+
+**Потолок буфера (Ф0.3).** Медленный сток (диск под нагрузкой, зависший stdout, канал под
+удержанным локом) раньше копил записи в памяти без предела и без следа. Теперь пачка канала
+ограничена, а потеря названа: `get_stats()["batch_stats"]` содержит `dropped` и
+`dropped_by_channel` с именем канала-виновника. Оба параметра задаются и секцией
+`observability` (`batch_max_pending`, `batch_overflow_policy`) — то есть меняются на живой
+системе через `config.reload`, а читаются командой `introspect.observability`.
 
 **Цена синхронного пути.** Сброс пачки перед записью ошибки стоит ~1.3 мс p50 / 1.6 мс p95 на
 полной пачке из 100 записей — **на каждый канал scope** (дефолт `SYSTEM → [console, system_file]`,
@@ -283,7 +292,8 @@ logger.flush()
 `errors_floor.jsonl` рядом с логами — JSON Lines, полная запись с трейсбеком и `extra`.
 Пол пишет **только** при нуле принявших каналов, поэтому второй копии записи не создаёт.
 Непустой `errors_floor.jsonl` — сигнал «штатный маршрут ошибок сломан», а не норма.
-Счётчик: `get_stats()["errors_to_floor"]`.
+Счётчики: `get_stats()["errors_to_floor"]` и секция `error_floor` (`path` / `written` /
+`failures`); у живого процесса — `introspect.observability`.
 
 **Thread-safety:** `BatchBuffer` использует `threading.Lock` — несколько потоков одного процесса
 могут одновременно вызывать `logger.info()` без гонок данных.

@@ -294,6 +294,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
                 config=CRMBatchConfig(
                     max_size=self.config.batch_size,
                     flush_interval=self.config.batch_interval,
+                    # Ф0.3: потолок операбелен из конфига — иначе «ограничили»
+                    # означало бы «зашили константу», и оператор не может ни
+                    # поднять его под свою нагрузку, ни проверить срабатывание.
+                    max_pending=getattr(self.config, "batch_max_pending", 10_000),
+                    overflow_policy=getattr(self.config, "batch_overflow_policy", "drop_oldest"),
                 ),
             )
         else:
@@ -696,6 +701,11 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             "module_channels_count": len(self._module_channels),
             "module_files_created": self.stats["module_files_created"],
             "batching_enabled": self.config.enable_batching,
+            # Ф0.3: до этой правки счётчик жил только в self.stats и наружу не
+            # выходил — «сколько ошибок не дошло ни до одного канала» нельзя было
+            # спросить у живого процесса. Тот же класс, что потери буфера ниже.
+            "errors_to_floor": self.stats["errors_to_floor"],
+            "error_floor": (self._error_floor.stats if self._error_floor is not None else None),
         }
 
         if self._buffer:

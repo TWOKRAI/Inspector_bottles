@@ -38,6 +38,12 @@ ChannelRoutingManager
 
 - **configs/ vs core:** `ChannelRoutingManagerConfig` (реестр/UI) и `ChannelRoutingConfig` в `core/` (база для наследников CRM) — оба нужны; см. **ADR-108**
 - `AsyncSenderBuffer.flush()` — не гарантирует синхронное ожидание; используй `stop()` + `start()`.
+- `BatchBuffer.max_pending` ограничивает **накопленную пачку**, но не то, что уже отдано в `flush_fn`: медленный сток удерживает свою пачку в памяти сверх потолка. Верхняя граница — `max_pending + размер пачки в полёте` на канал.
+- `urgent_flush_requests` считает запросы, а не записанные пачки (сброс идёт вне lock-а). При гонке может превысить `total_batches` — это не ошибка учёта, а семантика имени.
+
+## История изменений
+
+- **2026-07-26 (Ф0.3 `observability-unified-routing`):** у `BatchBuffer` появился потолок `max_pending` на канал + политика переполнения (`drop_oldest` / `drop_newest`) и учёт потерь `dropped` / `dropped_by_channel`. До этого потолка не было вовсе — медленный сток копил записи в памяти без предела и без следа. Счётчик `urgent_flushes` переименован в `urgent_flush_requests` (семантика: запросы, а не записанные пачки). Инвариант учёта `total_enqueued == total_flushed + Σ pending + dropped` зафиксирован тестом. Наружу счётчики выходят командой `introspect.observability`; на живом стенде `dualcam_synth` при `max_pending=3` получено `dropped=581` с разбивкой по каналам.
 - `BatchBuffer` timer thread запускается в `start()` — вызывай `initialize()` перед использованием.
 - `RouterManager` не использует `IBufferStrategy` из CRM — см. ADR-015.
 

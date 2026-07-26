@@ -83,6 +83,16 @@ class ObservabilityConfig(SchemaBase):
         FieldMeta("Корень логов (None — из env MULTIPROCESS_LOG_DIR / INSPECTOR_LOG_DIR)"),
     ] = None
     enable_batching: Annotated[bool, FieldMeta("Батчинг записи (Logger + Error)")] = True
+    # Ф0.3: потолок буфера — операторский параметр, а не константа в коде. Без него
+    # медленный сток копит записи в памяти без предела и без следа (см. batch_buffer.py).
+    batch_max_pending: Annotated[
+        int,
+        FieldMeta("Потолок неотправленных записей на канал (0 — без потолка)", min=0, max=1_000_000),
+    ] = 10_000
+    batch_overflow_policy: Annotated[
+        str,
+        FieldMeta("Что терять при переполнении: drop_oldest (кольцо) | drop_newest"),
+    ] = "drop_oldest"
     console: Annotated[bool, FieldMeta("Включить консольный sink")] = True
     file: Annotated[bool, FieldMeta("Включить файловые sink-каналы (первичные)")] = True
 
@@ -136,6 +146,8 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
     logger: Dict[str, Any] = {
         "default_level": cfg.log_level,
         "enable_batching": cfg.enable_batching,
+        "batch_max_pending": cfg.batch_max_pending,
+        "batch_overflow_policy": cfg.batch_overflow_policy,
     }
     # log_directory эмитим ТОЛЬКО если задан явно: при overlay-merge поверх дефолтов
     # None затёр бы уже резолвнутый абсолютный путь (managers_from_log_dir). None =
@@ -151,6 +163,8 @@ def expand_observability(data: Any) -> Dict[str, Dict[str, Any]]:
         "default_level": cfg.errors.level,
         "include_stacktrace": cfg.errors.include_stacktrace,
         "enable_batching": cfg.enable_batching,
+        "batch_max_pending": cfg.batch_max_pending,
+        "batch_overflow_policy": cfg.batch_overflow_policy,
     }
 
     stats: Dict[str, Any] = {

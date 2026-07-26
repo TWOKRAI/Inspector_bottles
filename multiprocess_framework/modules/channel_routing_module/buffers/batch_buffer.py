@@ -15,8 +15,21 @@ BatchBuffer — буферная стратегия с пакетной запи
     ВАЖНО про триггер 1: сбрасывается ВСЯ накопленная пачка канала, а не одна
     приоритетная запись, и делает это поток-эмитент. Замер на дефолтной пачке
     100 записей — 1.3 мс p50 / 1.6 мс p95; последующие urgent-записи стоят
-    ~0.02 мс, потому что пачка уже осушена. Счётчик ``urgent_flushes`` в stats
-    отделяет такие сбросы от сбросов по заполнению.
+    ~0.02 мс, потому что пачка уже осушена. Счётчик ``urgent_flush_requests``
+    в stats отделяет такие сбросы от сбросов по заполнению.
+
+Потолок и потери (Ф0.3):
+    Пачка канала ограничена ``max_pending``. Раньше потолка не было вовсе: если
+    сток тормозил (медленный диск, зависший stdout, канал под удержанным
+    файловым локом), deque рос без предела — процесс съедал память тихо, а
+    наблюдаемость (которая и должна была об этом сказать) сама и была причиной.
+    При переполнении запись НЕ теряется молча: ``dropped_by_channel`` называет
+    канал-виновник, ``dropped`` даёт итог. Инвариант, проверяемый тестом:
+
+        total_enqueued == total_flushed + Σ pending + dropped
+
+    (в момент, когда ни один flush не выполняется). ``total_enqueued`` считает
+    ВСЕ вызовы ``enqueue()``, включая отвергнутые потолком.
 
     Кто этим пользуется: с Ф0.9 — НИКТО из лог-слоя. ``LoggerCore`` и
     ``ErrorManager`` больше не кладут error/critical в буфер вообще (пишут
@@ -41,6 +54,12 @@ from typing import Any, Callable, Dict, Deque, List, Optional
 from ..interfaces import IBufferStrategy
 
 
+#: Политики поведения при переполнении пачки канала.
+OVERFLOW_DROP_OLDEST = "drop_oldest"
+OVERFLOW_DROP_NEWEST = "drop_newest"
+_OVERFLOW_POLICIES = (OVERFLOW_DROP_OLDEST, OVERFLOW_DROP_NEWEST)
+
+
 @dataclass
 class BatchConfig:
     """Параметры пакетной буферизации."""
@@ -48,6 +67,14 @@ class BatchConfig:
     max_size: int = 100  # Максимальный размер пачки
     flush_interval: float = 1.0  # Интервал принудительного сброса (сек)
     priority_flush: bool = True  # "urgent" priority → немедленный сброс
+
+    #: Потолок неотправленных записей НА КАНАЛ. При достижении срабатывает
+    #: overflow_policy. Значение <= 0 — без потолка (поведение до Ф0.3;
+    #: оставлено осознанной опцией, не дефолтом).
+    max_pending: int = 10_000
+    #: "drop_oldest" — выбросить самую старую запись канала (кольцо: ближний к
+    #: падению контекст важнее давнего). "drop_newest" — не принять новую.
+    overflow_policy: str = OVERFLOW_DROP_OLDEST
 
 
 class BatchBuffer(IBufferStrategy):
@@ -84,10 +111,17 @@ class BatchBuffer(IBufferStrategy):
         self._batches: Dict[str, Deque[Dict[str, Any]]] = defaultdict(deque)
         self._last_flush_time: Dict[str, float] = {}
 
+        if self._config.overflow_policy not in _OVERFLOW_POLICIES:
+            raise ValueError(
+                f"BatchConfig.overflow_policy={self._config.overflow_policy!r} — допустимы {_OVERFLOW_POLICIES}"
+            )
+
         self._total_enqueued: int = 0
         self._total_batches: int = 0
         self._total_flushed: int = 0
-        self._urgent_flushes: int = 0
+        self._urgent_flush_requests: int = 0
+        self._dropped: int = 0
+        self._dropped_by_channel: Dict[str, int] = defaultdict(int)
         self._errors: int = 0
 
         self._timer_thread: Optional[threading.Thread] = None
@@ -130,7 +164,8 @@ class BatchBuffer(IBufferStrategy):
         """Добавить данные в буфер канала.
 
         При необходимости (priority_flush, max_size, flush_interval) немедленно
-        сбрасывает накопленную пачку.
+        сбрасывает накопленную пачку. При достижении ``max_pending`` применяет
+        ``overflow_policy`` и считает потерю в ``dropped_by_channel``.
         """
         should_flush = False
 
@@ -138,9 +173,20 @@ class BatchBuffer(IBufferStrategy):
             if channel not in self._last_flush_time:
                 self._last_flush_time[channel] = time.time()
 
-            self._batches[channel].append(data)
+            batch = self._batches[channel]
             self._total_enqueued += 1
-            current_size = len(self._batches[channel])
+
+            limit = self._config.max_pending
+            if 0 < limit <= len(batch):
+                self._dropped += 1
+                self._dropped_by_channel[channel] += 1
+                if self._config.overflow_policy == OVERFLOW_DROP_NEWEST:
+                    # Новую запись не принимаем — пачка остаётся как была.
+                    return
+                batch.popleft()
+
+            batch.append(data)
+            current_size = len(batch)
             elapsed = time.time() - self._last_flush_time[channel]
 
             if self._config.priority_flush and priority == "urgent":
@@ -149,7 +195,10 @@ class BatchBuffer(IBufferStrategy):
                 # observability-unified-routing) число сбросов перестало быть мерой
                 # эффективности батчинга — часть из них вызвана приоритетом, а не
                 # заполнением пачки. Считаем их отдельно, чтобы сигнал не врал.
-                self._urgent_flushes += 1
+                # Имя говорит «запросов», а не «сбросов»: фактический сброс делает
+                # _flush_channel уже вне lock-а, и при гонке пачку может осушить
+                # соседний поток — тогда запросов больше, чем записанных пачек.
+                self._urgent_flush_requests += 1
             elif current_size >= self._config.max_size:
                 should_flush = True
             elif elapsed >= self._config.flush_interval:
@@ -183,12 +232,19 @@ class BatchBuffer(IBufferStrategy):
     def stats(self) -> Dict[str, Any]:
         with self._lock:
             pending = {ch: len(buf) for ch, buf in self._batches.items()}
+            dropped_by_channel = dict(self._dropped_by_channel)
         return {
             "type": "batch",
             "total_enqueued": self._total_enqueued,
             "total_batches": self._total_batches,
-            "urgent_flushes": self._urgent_flushes,
+            "urgent_flush_requests": self._urgent_flush_requests,
             "total_flushed": self._total_flushed,
+            # Имя ключа совпадает с AsyncSenderBuffer.stats["dropped"] — у соседней
+            # стратегии потолок и счётчик потерь были с самого начала.
+            "dropped": self._dropped,
+            "dropped_by_channel": dropped_by_channel,
+            "max_pending": self._config.max_pending,
+            "overflow_policy": self._config.overflow_policy,
             "errors": self._errors,
             "pending": pending,
             "running": bool(self._timer_thread and self._timer_thread.is_alive()),

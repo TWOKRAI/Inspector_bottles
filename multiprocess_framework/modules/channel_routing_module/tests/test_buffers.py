@@ -238,22 +238,22 @@ class TestBatchBuffer:
         assert len(flushed["ch"]) == 11
         assert buf.stats["pending"]["ch"] == 0
 
-    def test_urgent_flushes_counter_is_separate_from_total_batches(self):
+    def test_urgent_flush_requests_counter_is_separate_from_total_batches(self):
         """Новый сигнал показан ненулевым и отделён от сбросов по заполнению."""
         config = BatchConfig(max_size=2, flush_interval=60.0, priority_flush=True)
         buf = BatchBuffer(flush_fn=lambda ch, batch: None, config=config)
 
-        assert buf.stats["urgent_flushes"] == 0
+        assert buf.stats["urgent_flush_requests"] == 0
 
         # Сброс по заполнению — urgent-счётчик не должен шевелиться.
         buf.enqueue("ch", {"n": 1})
         buf.enqueue("ch", {"n": 2})
-        assert buf.stats["urgent_flushes"] == 0
+        assert buf.stats["urgent_flush_requests"] == 0
         batches_after_size_flush = buf.stats["total_batches"]
         assert batches_after_size_flush > 0
 
         buf.enqueue("ch", {"n": 3}, priority="urgent")
-        assert buf.stats["urgent_flushes"] == 1
+        assert buf.stats["urgent_flush_requests"] == 1
         assert buf.stats["total_batches"] > batches_after_size_flush
 
     def test_urgent_counter_ignored_when_priority_flush_disabled(self):
@@ -263,7 +263,7 @@ class TestBatchBuffer:
 
         buf.enqueue("ch", {"n": 1}, priority="urgent")
 
-        assert buf.stats["urgent_flushes"] == 0
+        assert buf.stats["urgent_flush_requests"] == 0
         assert buf.stats["pending"]["ch"] == 1
 
     def test_stats(self):

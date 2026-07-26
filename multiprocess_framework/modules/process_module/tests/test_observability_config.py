@@ -113,3 +113,37 @@ def test_commands_log_success_explicit_on() -> None:
     """observability.commands.log_success=true явно доезжает до command-секции (пара к тесту выше)."""
     out = expand_observability({"commands": {"log_success": True}})
     assert out["command"] == {"log_success": True}
+
+
+class TestBufferCeilingIsOperable:
+    """Ф0.3: потолок буфера доезжает из секции observability до обоих менеджеров.
+
+    Без этого «ограничили BatchBuffer» означало бы зашитую константу: оператор
+    не может ни поднять потолок под свою нагрузку, ни проверить срабатывание
+    на живой системе через config.reload.
+    """
+
+    def test_defaults_are_emitted_for_logger_and_error(self) -> None:
+        result = expand_observability({})
+        for plane in ("logger", "error"):
+            assert result[plane]["batch_max_pending"] == 10_000
+            assert result[plane]["batch_overflow_policy"] == "drop_oldest"
+
+    def test_explicit_values_reach_both_planes(self) -> None:
+        result = expand_observability({"batch_max_pending": 25, "batch_overflow_policy": "drop_newest"})
+        for plane in ("logger", "error"):
+            assert result[plane]["batch_max_pending"] == 25
+            assert result[plane]["batch_overflow_policy"] == "drop_newest"
+
+    def test_emitted_keys_are_valid_for_the_manager_configs(self) -> None:
+        """Секция обязана раскладываться в поля, которые конфиги реально принимают."""
+        from multiprocess_framework.modules.error_module.configs.error_manager_config import (
+            ErrorManagerConfig,
+        )
+        from multiprocess_framework.modules.logger_module.configs.logger_manager_config import (
+            LoggerManagerConfig,
+        )
+
+        result = expand_observability({"batch_max_pending": 7})
+        assert LoggerManagerConfig(**result["logger"]).batch_max_pending == 7
+        assert ErrorManagerConfig(**result["error"]).batch_max_pending == 7

@@ -117,6 +117,68 @@ def observability_effective(
     return out
 
 
+def _plane_counters(manager: Any) -> Optional[Dict[str, Any]]:
+    """Счётчики одной плоскости наблюдаемости из её ``get_stats()``.
+
+    Нормализует расхождение имён между менеджерами: буфер логгера лежит под
+    ключом ``batch_stats`` (``LoggerCore.get_stats`` собирает словарь сам),
+    буфер статистики — под ``buffer`` (``ChannelRoutingManager.get_stats``).
+    Наружу отдаётся один ключ ``buffer`` — потребителю не должно быть нужно
+    знать, какой из двух менеджеров он спрашивает.
+    """
+    if manager is None or not hasattr(manager, "get_stats"):
+        return None
+    try:
+        raw = manager.get_stats()
+    except Exception:  # noqa: BLE001 — наблюдаемость не имеет права ронять команду
+        return None
+    if not isinstance(raw, dict):
+        return None
+
+    out: Dict[str, Any] = {}
+    buffer = raw.get("batch_stats", raw.get("buffer"))
+    if isinstance(buffer, dict):
+        out["buffer"] = buffer
+    for key in (
+        "messages_processed",
+        "messages_skipped",
+        "messages_batched",
+        "errors_to_floor",
+        "error_floor",
+        "metrics_count",
+        "errors",
+    ):
+        if key in raw:
+            out[key] = raw[key]
+    return out
+
+
+def observability_counters(
+    *,
+    logger: Any = None,
+    error: Any = None,
+    stats: Any = None,
+) -> Dict[str, Any]:
+    """Потери и глубина буферов трёх плоскостей — «сколько наблюдаемости не доехало».
+
+    Отвечает на вопросы, которые до Ф0.3 нельзя было задать живому процессу
+    снаружи вообще: ``get_stats()`` менеджеров не читал никто, кроме тестов.
+
+      * ``buffer.pending`` растёт, ``buffer.dropped_by_channel`` непустой —
+        сток тормозит и записи уже теряются, с именем канала-виновника;
+      * ``errors_to_floor`` > 0 — ошибка не дошла ни до одного канала и легла
+        в пол (``error_floor.path``); штатный маршрут ошибок сломан.
+
+    Команда не мутирует ничего: только чтение живых менеджеров.
+    """
+    out: Dict[str, Any] = {}
+    for name, manager in (("logger", logger), ("error", error), ("stats", stats)):
+        section = _plane_counters(manager)
+        if section is not None:
+            out[name] = section
+    return out
+
+
 def apply_observability_reconfigure(
     section: Any,
     *,

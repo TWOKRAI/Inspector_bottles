@@ -112,6 +112,35 @@ normalize_config(MyConfig())   # → config.build()[1] → dict
 | `AsyncSenderBuffer` | Message-очереди, низкая задержка | Тесты CRM |
 | `AsyncSender` (в RouterManager) | Полный pipeline с middleware | `RouterManager` |
 
+### Потолок и потери (Ф0.3)
+
+Обе очередные стратегии ограничены и считают потери — «сток не успевает» не бывает молчаливым:
+
+| Стратегия | Потолок | Счётчики в `stats` |
+|---|---|---|
+| `BatchBuffer` | `BatchConfig.max_pending` на канал (дефолт 10 000; `0` — без потолка) | `dropped`, `dropped_by_channel` (имя канала-виновника), `max_pending`, `overflow_policy` |
+| `AsyncSenderBuffer` | `queue_size` на очередь | `dropped` |
+
+Политика переполнения `BatchBuffer`:
+
+- `drop_oldest` (дефолт) — кольцо: выбрасывается самая старая запись канала. Ближний к падению контекст ценнее давнего;
+- `drop_newest` — пачка замораживается, новая запись не принимается.
+
+Инвариант учёта (проверяется тестом `test_batch_buffer_limits.py`):
+
+```
+total_enqueued == total_flushed + Σ pending + dropped
+```
+
+Для логгера и менеджера ошибок потолок задаётся секцией `observability`
+(`batch_max_pending`, `batch_overflow_policy`) и меняется на живой системе через
+`config.reload`. Прочитать фактическое состояние — команда `introspect.observability`
+(секция `counters`).
+
+> **Осторожно со счётчиком `urgent_flush_requests`:** это число *запросов* сброса по
+> приоритету, а не записанных пачек. Фактический сброс идёт вне lock-а, и при гонке
+> пачку может осушить соседний поток — значение может превысить `total_batches`.
+
 > **Почему RouterManager не использует AsyncSenderBuffer?**
 > `AsyncSenderBuffer` работает с pre-resolved каналами: `enqueue(channel_name, data)`.
 > RouterManager буферизует ПОЛНЫЙ pipeline: `enqueue(msg) → middleware → resolve → send`.

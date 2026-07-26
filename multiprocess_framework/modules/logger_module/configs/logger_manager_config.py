@@ -89,6 +89,17 @@ class LoggerManagerConfig(ChannelRoutingConfig):
     enable_batching: bool = True
     batch_size: int = 100
     batch_interval: float = 1.0
+    batch_max_pending: Annotated[
+        int,
+        FieldMeta(
+            "Потолок неотправленных записей НА КАНАЛ. Медленный сток без потолка "
+            "съедает память тихо (Ф0.3). 0 — без потолка."
+        ),
+    ] = 10_000
+    batch_overflow_policy: Annotated[
+        str,
+        FieldMeta("Что терять при переполнении: drop_oldest (кольцо) | drop_newest"),
+    ] = "drop_oldest"
 
     modules: Annotated[
         Dict[str, LoggerModuleSchema],
