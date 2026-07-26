@@ -46,7 +46,7 @@
 - [Cross-tab Phase G final](project_cross_tab_phase_g.md) — ЗАВЕРШЕНА 2026-05-29: все G.0–G.6 DONE. G.6 UX (auto-reveal/validation/selection/diff + RecipeActivated prod вариант A + cross-tab Services-highlight); reviewer APPROVED; 2035 passed/sentrux 9-9/quality 7136; boot-smoke — долг перед merge
 - [Commit message format](feedback_commit_msg_format.md) — trailer предпочтительно одной строкой, но хук с 2026-07-14 ТЕРПИТ перенос (git-стиль фолдинг, корень починен); pre-commit ruff-format → re-stage + re-commit
 - [ruff убирает свежий импорт](feedback_ruff_strips_unused_import.md) — PostToolUse ruff --fix вырезает импорт, добавленный Edit'ом раньше его использования → добавлять импорт+использование одним Edit
-- [Priority: product over engine](project_priority_product_over_engine.md) — 2026-05-29 владелец: запускать прототип/функции/цепочки важнее красоты движка; constructor-maturity отложен
+- [Priority: ENGINE first (развёрнут 2026-07-26)](project_priority_product_over_engine.md) — движок в первую очередь, прототип = параллельный стенд для проверок; прежняя установка «продукт важнее движка» (2026-05-29) отменена
 - [Command-engine P1.1 audit](project_command_engine_audit.md) — ActionBus в проде мёртв (0 потребителей), domain-dispatch единственный живой; «двух движков» нет; RBAC field-edit дыра
 - [Pipeline reuse Plugins widgets](feedback_pipeline_reuse_plugins_widgets.md) — карточка ноды Pipeline переиспользует config-виджеты Plugins (поля по plugin_name); gui скрыт (protected); auto-layout на старте; дисплеи в палитре
 - [Pipeline node→process→worker](project_pipeline_node_process_worker.md) — Phase A+B done (uncommitted): блок «Исполнение» + MovePlugin/«Перенести в процесс»; Phase B+ долг и Phase C (worker A/B решение) — в новом чате
