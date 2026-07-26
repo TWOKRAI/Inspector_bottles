@@ -74,6 +74,13 @@ _RETENTION_STAT_KEYS = (
     "retention_bytes_freed",
 )
 
+#: Обратное давление приёмников (R2). Считает КАНАЛ, спрашивают у менеджера —
+#: суммируется по реестру. Канал, не умеющий этих полей, даёт 0.
+_CHANNEL_BACKPRESSURE_KEYS = (
+    "console_writes_dropped",
+    "console_slow_writes",
+)
+
 #: Раздатчик ключей инстансов. Не ``id(self)``: id переиспользуется после сборки
 #: мусора, и новый менеджер унаследовал бы контекст покойного в том потоке,
 #: который не сделал pop.
@@ -950,6 +957,13 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # обратное сочетание — «настроена, но не может удалить».
             for key in _RETENTION_STAT_KEYS:
                 base_stats[key] = self.stats[key]
+
+        # R2: обратное давление консоли живёт НА КАНАЛЕ (он один умеет измерить
+        # свою запись), но спрашивают о нём у менеджера. Суммируем по каналам
+        # вместо копии счётчика в менеджере: копия разъезжается при
+        # пересоздании канала, сумма — нет. Ключи присутствуют всегда, нулями.
+        for key in _CHANNEL_BACKPRESSURE_KEYS:
+            base_stats[key] = sum(getattr(ch, key, 0) for ch in self._channel_registry.all())
 
         if self._buffer:
             base_stats.update(

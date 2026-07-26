@@ -144,6 +144,9 @@ PLANE_COUNTER_KEYS: tuple = (
     "retention_delete_failures",
     "retention_compress_failures",
     "retention_bytes_freed",
+    # R2 — обратное давление консоли: запись отброшена по пределу ожидания.
+    "console_writes_dropped",
+    "console_slow_writes",
 )
 
 

@@ -562,7 +562,38 @@ class FileChannel(LogChannel):
 
 
 class ConsoleChannel(LogChannel):
-    """Канал записи в консоль"""
+    """Канал записи в консоль — с пределом ожидания занятой консоли (R2).
+
+    Запись в консоль синхронна в потоке-эмитенте, и после Ф0.9 путь
+    ``error``/``critical`` идёт мимо батч-буфера вообще: прямо в
+    ``stream.write()`` вызывающего потока. Если stdout перенаправлен в трубу,
+    которую никто не читает, поток виснет навсегда — и до этой правки за ним
+    выстраивались ВСЕ остальные потоки-эмитенты: один заткнувшийся приёмник
+    останавливал процесс целиком.
+
+    Предел ставится там, где он достижим: ожидание ОСВОБОЖДЕНИЯ консоли
+    ограничено :attr:`_BUSY_WAIT_SEC`, после чего запись отбрасывается со
+    статусом ``error`` (не ``skipped``: запись никуда не попала, и floor
+    ошибок обязан это узнать). Обычная конкуренция стоит микросекунды и в
+    предел не упирается никогда — потери начинаются только на реально
+    застрявшей консоли.
+
+    ЧЕГО ЭТО НЕ ДЕЛАЕТ, и это надо знать честно: поток, который УЖЕ вошёл в
+    блокирующий ``stream.write()``, остаётся заблокированным. Ограничить его
+    можно только вынеся запись в отдельный поток-писатель, а это размен
+    «консоль переживает падение» на «консоль ограничена» — решение про
+    диагностический канал, которое принимает владелец, а не эта правка.
+    Захват сокращён с «весь процесс» до «один поток», и он теперь считается.
+    """
+
+    #: Сколько ждать освобождения консоли, прежде чем бросить запись.
+    #: Здоровая запись занимает микросекунды — этот предел на неё не влияет.
+    _BUSY_WAIT_SEC = 0.25
+    #: С какой длительности запись считается подозрительно медленной.
+    _SLOW_WRITE_SEC = 0.05
+    #: Не чаще одного предупреждения за интервал — по тем же соображениям,
+    #: что у ``_SafeRotatingFileHandler``: затык даёт отказ на КАЖДОЙ записи.
+    _WARNING_INTERVAL_SEC = 60.0
 
     def __init__(self, config: LoggerChannelSchema):
         super().__init__(config)
@@ -570,7 +601,26 @@ class ConsoleChannel(LogChannel):
         formatter = logging.Formatter(config.format)
         self.handler.setFormatter(formatter)
 
+        self._write_lock = threading.Lock()
+        self._counter_lock = threading.Lock()
+        self.console_writes_dropped = 0
+        self.console_slow_writes = 0
+        self._max_write_sec = 0.0
+        self._last_warning_ts = 0.0
+
     def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        if not self._write_lock.acquire(timeout=self._BUSY_WAIT_SEC):
+            with self._counter_lock:
+                self.console_writes_dropped += 1
+                dropped = self.console_writes_dropped
+            self._warn_console_stuck(dropped)
+            return {
+                "status": "error",
+                "error": "console busy: запись отброшена по пределу ожидания",
+                "channel": self.name,
+            }
+
+        started = time.monotonic()
         try:
             log_record = logging.LogRecord(
                 name=record["module"],
@@ -589,6 +639,46 @@ class ConsoleChannel(LogChannel):
             return {"status": "success", "channel": self.name}
         except Exception as e:
             return {"status": "error", "error": str(e), "channel": self.name}
+        finally:
+            elapsed = time.monotonic() - started
+            self._write_lock.release()
+            if elapsed >= self._SLOW_WRITE_SEC:
+                with self._counter_lock:
+                    self.console_slow_writes += 1
+                    self._max_write_sec = max(self._max_write_sec, elapsed)
+
+    def _warn_console_stuck(self, dropped_total: int) -> None:
+        """Троттлированное предупреждение о занятой консоли.
+
+        Уходит через fallback-логгер (stdlib), а не через собственную
+        маршрутизацию: сообщение о том, что консоль не принимает записи, не
+        имеет права идти в консоль тем же путём, который сейчас затык.
+        """
+        now = time.monotonic()
+        with self._counter_lock:
+            if now - self._last_warning_ts < self._WARNING_INTERVAL_SEC:
+                return
+            self._last_warning_ts = now
+        _fallback_logger.warning(
+            "Консольный канал '%s' не освободился за %.2f с — запись отброшена "
+            "(всего отброшено: %d). Похоже, поток вывода перенаправлен туда, где его "
+            "никто не читает: записи в консоль теряются, файловые каналы не затронуты.",
+            self.name,
+            self._BUSY_WAIT_SEC,
+            dropped_total,
+        )
+
+    def get_info(self) -> Dict[str, Any]:
+        info = super().get_info()
+        with self._counter_lock:
+            info.update(
+                {
+                    "console_writes_dropped": self.console_writes_dropped,
+                    "console_slow_writes": self.console_slow_writes,
+                    "max_write_sec": round(self._max_write_sec, 4),
+                }
+            )
+        return info
 
     def close(self):
         """Закрывает консольный канал"""
