@@ -19,6 +19,7 @@ Task 5.14 (CRM-развязка):
 """
 
 import logging as _stdlib_logging
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -138,7 +139,27 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             # Сколько раз штатный маршрут ошибок не принял запись и сработал floor.
             # Ненулевое значение — сигнал «маршрут ошибок сломан», а не норма.
             "errors_to_floor": 0,
+            # Ф0.4: запись адресована каналу, которого нет (опечатка в scopes,
+            # канал снят logger.sink.disable, module-канал удалён). До этой правки
+            # такая запись исчезала молча — ни счётчика, ни следа.
+            "unresolved_channel_records": 0,
+            # Ф0.4: канал есть, но его write() бросил исключение. Отличается от
+            # отказа статусом {"status": "error"} — тот учтён как flush_failed
+            # буфера; здесь именно проглоченное исключение.
+            "channel_write_errors": 0,
         }
+
+        # Разбивка потерь по именам каналов + «кому уже сказали». Живут отдельно
+        # от self.stats: там только числа, здесь словари/множество.
+        self._unresolved_channels: Dict[str, int] = {}
+        self._channel_write_errors: Dict[str, int] = {}
+        self._warned_unknown_channels: set = set()
+        self._warned_write_error_channels: set = set()
+        # Берётся ТОЛЬКО на пути потери (канала нет / write бросил), поэтому на
+        # здоровом пути не стоит ничего. Без него два потока-эмитента и поток
+        # таймера буфера теряют инкременты — счётчик потерь врал бы в меньшую
+        # сторону, то есть ровно в опасную.
+        self._miss_lock = threading.Lock()
 
         self._setup_channels()
         self._setup_batcher()
@@ -386,6 +407,63 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
         """
         self._decision_cache.clear()
 
+    # =========================================================================
+    # УЧЁТ ПОТЕРЬ НА СТЫКЕ «ИМЯ → КАНАЛ» (Ф0.4)
+    # =========================================================================
+
+    def _count_unresolved_channel(self, channel_name: str, count: int = 1) -> None:
+        """Учесть ``count`` записей, ушедших в несуществующий канал, и один раз сказать об этом.
+
+        Предупреждение — РОВНО ОДНО на имя за жизнь процесса: имя канала не
+        меняется от записи к записи, а лог-шторм внутри логгера — та самая
+        болезнь, ради которой соседние ``except`` стоят молча. Учёт при этом
+        не глушится никогда: заглушённое предупреждение не должно означать
+        «потерь нет».
+
+        Предупреждение уходит через fallback-логгер (stdlib), а НЕ через
+        собственную маршрутизацию: сообщение о том, что канал не резолвится,
+        не имеет права зависеть от резолва каналов.
+        """
+        with self._miss_lock:
+            self.stats["unresolved_channel_records"] += 1 * count
+            self._unresolved_channels[channel_name] = self._unresolved_channels.get(channel_name, 0) + count
+            total = self._unresolved_channels[channel_name]
+            first_time = channel_name not in self._warned_unknown_channels
+            if first_time:
+                self._warned_unknown_channels.add(channel_name)
+
+        if first_time:
+            # Вне lock-а: fallback-логгер пишет в stderr/handlers, его цена
+            # не должна удерживать счётчик потерь.
+            self._fallback_log(
+                "WARNING",
+                f"канал {channel_name!r} не резолвится — записи до него не доходят "
+                f"(учтено {total}; error/critical подстрахованы floor'ом, остальные "
+                f"уровни потеряны; дальше считаем молча, счётчик в "
+                f"get_stats['unresolved_channels'])",
+            )
+
+    def _count_channel_write_error(self, channel_name: str) -> None:
+        """Учесть запись, потерянную из-за ИСКЛЮЧЕНИЯ в ``write()`` канала.
+
+        Отказ статусом (``{"status": "error"}``) сюда НЕ попадает: он честно
+        виден как разница «отдано минус принято» (``flush_failed`` буфера,
+        Ф0.3). Здесь — только то, что раньше молча съедал ``except: pass``.
+        """
+        with self._miss_lock:
+            self.stats["channel_write_errors"] += 1
+            self._channel_write_errors[channel_name] = self._channel_write_errors.get(channel_name, 0) + 1
+            first_time = channel_name not in self._warned_write_error_channels
+            if first_time:
+                self._warned_write_error_channels.add(channel_name)
+
+        if first_time:
+            self._fallback_log(
+                "WARNING",
+                f"канал {channel_name!r} бросил исключение при записи — запись потеряна "
+                f"(дальше считаем молча, счётчик в get_stats['channel_write_errors_by_channel'])",
+            )
+
     def _flush_batch(self, channel: str, batch: List[Dict]) -> int:
         """Callback для BatchBuffer — записать пачку в канал.
 
@@ -403,6 +481,9 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             ch = self._module_channels.get(channel.replace("module_", "", 1))
         if ch is None:
             # Канала нет — вся пачка потеряна. Не событие «ничего не произошло».
+            # Ф0.4: считаем ПОКАЗАПИСНО (не «одна пачка»), иначе размер потери
+            # зависел бы от настроек батчинга, а не от числа потерянных записей.
+            self._count_unresolved_channel(channel, len(batch))
             return 0
 
         written = 0
@@ -410,8 +491,8 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             try:
                 if _channel_accepted(ch.write(record_dict)):
                     written += 1
-            except Exception:  # nosec B110 — глушим per-record ошибки записи, чтобы не порождать лог-шторм внутри логгера
-                pass
+            except Exception:  # noqa: BLE001 — сбой одного канала не имеет права уронить эмитента; счётчик ниже делает потерю видимой
+                self._count_channel_write_error(channel)
         return written
 
     # =========================================================================
@@ -553,12 +634,15 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             ch = self._channel_registry.get(ch_name)
             if ch is None:
                 ch = self._module_channels.get(ch_name.replace("module_", "", 1))
-            if ch is not None:
-                try:
-                    if _channel_accepted(ch.write(record_dict)):
-                        written += 1
-                except Exception:  # nosec B110 — глушим ошибку записи в канал, чтобы не порождать лог-шторм внутри логгера
-                    pass
+            if ch is None:
+                # Ф0.4: прямой путь теряет запись так же молча, как батчевый.
+                self._count_unresolved_channel(ch_name)
+                continue
+            try:
+                if _channel_accepted(ch.write(record_dict)):
+                    written += 1
+            except Exception:  # noqa: BLE001 — сбой одного канала не должен съесть запись целиком; потеря учтена счётчиком
+                self._count_channel_write_error(ch_name)
         return written
 
     # =========================================================================
@@ -736,6 +820,15 @@ class LoggerCore(ChannelRoutingManager, ILoggerManager):
             "errors_to_floor": self.stats["errors_to_floor"],
             "error_floor": (self._error_floor.stats if self._error_floor is not None else None),
         }
+
+        # Ф0.4: потери на стыке «имя канала → объект канала». Ключи присутствуют
+        # ВСЕГДА (нулями), а не появляются по факту потери: «ключа нет» и
+        # «потерь нет» — разные факты, и потребитель не должен их путать.
+        with self._miss_lock:
+            base_stats["unresolved_channel_records"] = self.stats["unresolved_channel_records"]
+            base_stats["unresolved_channels"] = dict(self._unresolved_channels)
+            base_stats["channel_write_errors"] = self.stats["channel_write_errors"]
+            base_stats["channel_write_errors_by_channel"] = dict(self._channel_write_errors)
 
         if self._buffer:
             base_stats.update(

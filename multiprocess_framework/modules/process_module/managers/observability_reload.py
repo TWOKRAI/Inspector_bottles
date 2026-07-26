@@ -117,6 +117,30 @@ def observability_effective(
     return out
 
 
+# Что пересылается из get_stats() менеджера наружу в introspect.observability.
+# Список ЖЁСТКИЙ намеренно (get_stats несёт и конфиг, и имена — наружу нужны
+# только счётчики), но именно поэтому он и есть отдельная точка забывания:
+# новый счётчик, добавленный в get_stats и НЕ добавленный сюда, существует и
+# при этом невидим. Ровно этот класс уже стрелял в Ф0.3. Страж — тесты
+# logger_module/tests/test_counters_visible_path.py и
+# test_unknown_channel_accounting.py, сверяющие список с живым словарём.
+PLANE_COUNTER_KEYS: tuple = (
+    "messages_processed",
+    "messages_skipped",
+    "messages_batched",
+    "errors_to_floor",
+    "error_floor",
+    "metrics_count",
+    "errors",
+    "flush_failed",
+    # Ф0.4 — потери на стыке «имя канала → объект канала».
+    "unresolved_channel_records",
+    "unresolved_channels",
+    "channel_write_errors",
+    "channel_write_errors_by_channel",
+)
+
+
 def _plane_counters(manager: Any) -> Optional[Dict[str, Any]]:
     """Счётчики одной плоскости наблюдаемости из её ``get_stats()``.
 
@@ -142,16 +166,7 @@ def _plane_counters(manager: Any) -> Optional[Dict[str, Any]]:
     buffer = raw.get("batch_stats", raw.get("buffer"))
     if isinstance(buffer, dict):
         out["buffer"] = buffer
-    for key in (
-        "messages_processed",
-        "messages_skipped",
-        "messages_batched",
-        "errors_to_floor",
-        "error_floor",
-        "metrics_count",
-        "errors",
-        "flush_failed",
-    ):
+    for key in PLANE_COUNTER_KEYS:
         if key in raw:
             out[key] = raw[key]
     return out
