@@ -86,6 +86,12 @@ class GuiProcess(ProcessModule):
             # handler превращает его в bridge.dispatch(data_type="observability_record")
             # — ОТДЕЛЬНЫЙ канал, НЕ state-дельта. Подписку активирует app-wiring.
             self.router_manager.register_message_handler("observability.record", self._on_observability_record)
+            # G4/H.2: ответы PM на системные команды. GUI шлёт их fire-and-forget,
+            # поэтому ответ приходил в роутер и молча исчезал — отказ бэкенда был
+            # неотличим от успеха (класс «проглоченный сбой»). Handler не корреллирует
+            # запросы (для этого есть request/response-мост), он только не даёт
+            # неуспеху пропасть бесследно.
+            self.router_manager.register_message_handler("process.command.response", self._on_command_response)
             # Серверная подписка на телеметрию (callback пуст — доставку в виджеты
             # делает emitter через bridge; подписка нужна, чтобы DeltaDispatcher слал
             # дельты на 'gui'). Не блокирует старт: subscribe — fire-and-forget.
@@ -165,6 +171,32 @@ class GuiProcess(ProcessModule):
                 "process": data.get("process", message.get("sender", "") if isinstance(message, dict) else ""),
                 "records": records,
             }
+        )
+
+    def _on_command_response(self, message) -> None:
+        """Handler command="process.command.response": не дать отказу PM пропасть.
+
+        GUI шлёт системные команды fire-and-forget (без ``correlation_id``), а PM
+        честно отвечает ``success=False`` на неизвестный ключ. До G4 этот ответ
+        приходил в роутер, не находил ожидающего и исчезал — вызывающий видел
+        «успешно» там, где бэкенд отказал (`process.hot_add`/`hot_remove`).
+
+        Успешные ответы не логируем: их и так видно по эффекту, а шум на hot-path
+        не нужен. Логируем только неуспех — один раз, с причиной от PM.
+        """
+        if not isinstance(message, dict):
+            return
+        if message.get("success", True):
+            return
+        data = message.get("data") or {}
+        result = data.get("result") if isinstance(data, dict) else None
+        reason = ""
+        if isinstance(result, dict):
+            reason = str(result.get("reason") or result.get("error") or "")
+        self._log_warning(
+            f"ProcessManager отклонил системную команду: {reason or 'причина не указана'} "
+            f"(request_id={message.get('request_id') or '—'}). Команда НЕ выполнена — "
+            f"если вызывающий счёл её успешной, это расхождение конфига и рантайма."
         )
 
     def _data_receiver_loop(self, stop_event, pause_event) -> None:

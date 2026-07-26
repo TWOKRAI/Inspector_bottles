@@ -20,9 +20,13 @@ from multiprocess_framework.modules.logger_module import get_logger
 
 from .diff_engine import compute_diff
 from .wire_protocol import WireConfig, ShmConfig, validate_wire
+
+# build_hot_add_process / build_hot_remove_process намеренно НЕ импортируются:
+# у команд process.hot_add/hot_remove нет приёмника в ProcessManager, и вызовы
+# сняты на GATE G4. Сами конструкторы остаются в system_commands (ярус frozen,
+# docs/MODULE_TIERS.md §3) — когда приёмник появится, вернуть импорт и снять
+# ранние выходы в hot_add_process/hot_remove_process/apply_topology_diff.
 from .system_commands import (
-    build_hot_add_process,
-    build_hot_remove_process,
     build_wire_setup,
     build_wire_teardown,
 )
@@ -386,21 +390,34 @@ class TopologyBridge:
         *,
         auto_start: bool = True,
     ) -> bool:
-        """Горячее добавление нового процесса.
+        """Горячее добавление процесса — НЕ ИСПОЛНИМО: у команды нет приёмника.
 
-        Проверяет что процесс ещё НЕ существует в topology,
-        формирует IPC-команду и отправляет в ProcessManager.
+        У ``process.hot_add`` нет зарегистрированного хендлера в ProcessManager
+        (реестр — ``process_manager_process._register_builtin_commands``), поэтому
+        отправка команды гарантированно закончится «No handler». Раньше метод
+        возвращал ``True`` («команда отправлена»), и вызывающий читал это как успех.
+
+        Живой путь добавления процесса — ``topology.apply``
+        (``ProcessManagerProxy.apply_topology``): PM сам считает diff, провижнит
+        процессы транзакционно и умеет rollback.
+
+        Код метода сохранён намеренно (ярус frozen, `docs/MODULE_TIERS.md`): когда
+        приёмник появится, достаточно снять этот ранний выход.
 
         Returns:
-            True если команда отправлена, False если процесс уже есть.
+            Всегда ``False`` — операция не поддержана бэкендом.
         """
         if self._process_exists(process_name):
             logger.warning("TopologyBridge.hot_add: процесс '%s' уже существует", process_name)
             return False
 
-        cmd = build_hot_add_process(process_name, plugin_name, plugin_config, auto_start=auto_start)
-        self._sender.send_system_command(cmd)
-        return True
+        logger.warning(
+            "TopologyBridge.hot_add('%s'): команда process.hot_add НЕ поддержана "
+            "ProcessManager (приёмника нет) — процесс НЕ создан. Живой путь: "
+            "topology.apply через ProcessManagerProxy.apply_topology",
+            process_name,
+        )
+        return False
 
     def hot_remove_process(
         self,
@@ -408,26 +425,38 @@ class TopologyBridge:
         *,
         graceful: bool = True,
     ) -> bool:
-        """Горячее удаление процесса.
+        """Горячее удаление процесса — НЕ ИСПОЛНИМО: у команды нет приёмника.
 
-        Каскадно отключает все wire'ы процесса перед удалением.
+        **Почему здесь ранний выход, а не «как было».** У ``process.hot_remove``
+        нет хендлера в ProcessManager (проверено вживую: ответ
+        ``{"status": "error", "reason": "No handler for key 'process.hot_remove'"}``).
+        Прежняя реализация при этом успевала выполнить каскад ``disconnect_wire``,
+        а ``wire.teardown`` приёмник ИМЕЕТ и отрабатывает по-настоящему. Итог был
+        разрушительным: сам процесс продолжал жить, но провода ему уже оторвали —
+        оставался «зомби» без ввода-вывода, и метод возвращал ``True``.
+
+        Пока remove неисполним, каскад не запускается: половина операции хуже, чем
+        отказ целиком. Живой путь удаления — ``topology.apply``
+        (PM считает diff и делает ``process.stop_all``/``cleanup`` транзакционно).
+
+        Код каскада и построение команды сохранены намеренно (ярус frozen): когда
+        приёмник появится, снять ранний выход.
 
         Returns:
-            True если команда отправлена, False если процесс не найден.
+            Всегда ``False`` — операция не поддержана бэкендом.
         """
         if not self._process_exists(process_name):
             logger.warning("TopologyBridge.hot_remove: процесс '%s' не найден", process_name)
             return False
 
-        # Каскадное отключение wire'ов процесса
-        process_wires = self._find_process_wires(process_name)
-        for wire in process_wires:
-            wire_key = f"{wire.get('source', '')}|{wire.get('target', '')}"
-            self.disconnect_wire(wire_key)
-
-        cmd = build_hot_remove_process(process_name, graceful=graceful)
-        self._sender.send_system_command(cmd)
-        return True
+        logger.warning(
+            "TopologyBridge.hot_remove('%s'): команда process.hot_remove НЕ поддержана "
+            "ProcessManager (приёмника нет) — процесс НЕ удалён, каскад wire.teardown "
+            "НЕ запускался (иначе живой процесс остался бы без проводов). Живой путь: "
+            "topology.apply через ProcessManagerProxy.apply_topology",
+            process_name,
+        )
+        return False
 
     def connect_wire(
         self,
@@ -530,15 +559,17 @@ class TopologyBridge:
             if not diff.has_changes:
                 return result
 
-            # 1. Отключить wire'ы удалённых процессов
+            # 1. Wire'ы удалённых процессов НЕ отключаем.
+            # Раньше здесь шёл каскад disconnect_wire, а на шаге 3 — hot_remove,
+            # у которого нет приёмника. `wire.teardown` при этом отрабатывает
+            # по-настоящему → процесс оставался жив, но без проводов («зомби»).
+            # Пока шаг 3 неисполним, каскад запрещён: половина операции хуже отказа.
             for pdiff in diff.removed_processes:
-                try:
-                    process_wires = self._find_process_wires(pdiff.process_name)
-                    for wire in process_wires:
-                        wk = f"{wire.get('source', '')}|{wire.get('target', '')}"
-                        self.disconnect_wire(wk)
-                except Exception as exc:
-                    result.errors.append(f"Ошибка отключения wire'ов процесса '{pdiff.process_name}': {exc}")
+                result.errors.append(
+                    f"Процесс '{pdiff.process_name}': удаление на лету не поддержано "
+                    "(нет приёмника process.hot_remove); wire'ы намеренно НЕ отключены, "
+                    "чтобы не оставить процесс без ввода-вывода. Живой путь: topology.apply"
+                )
 
             # 2. Отключить wire'ы из removed_wires
             for wdiff in diff.removed_wires:
@@ -548,27 +579,16 @@ class TopologyBridge:
                 except Exception as exc:
                     result.errors.append(f"Ошибка отключения wire '{wdiff.wire_key}': {exc}")
 
-            # 3. Удалить процессы
-            for pdiff in diff.removed_processes:
-                try:
-                    # Прямая отправка — wire'ы уже отключены на шаге 1
-                    cmd = build_hot_remove_process(pdiff.process_name)
-                    self._sender.send_system_command(cmd)
-                    result.processes_removed.append(pdiff.process_name)
-                except Exception as exc:
-                    result.errors.append(f"Ошибка удаления процесса '{pdiff.process_name}': {exc}")
+            # 3. Удаление процессов — не исполняется (см. шаг 1). Ошибка уже записана там.
 
-            # 4. Добавить процессы
+            # 4. Добавление процессов — не исполняется: у process.hot_add нет приёмника.
+            # Раньше команда уходила в никуда, а имя писалось в processes_added как
+            # успех. Теперь отказ попадает в errors — вызывающий видит правду.
             for pdiff in diff.added_processes:
-                try:
-                    new_cfg = pdiff.new_config or {}
-                    plugin_name = new_cfg.get("plugin_name", pdiff.process_name)
-                    plugin_config = new_cfg.get("plugin_config")
-                    cmd = build_hot_add_process(pdiff.process_name, plugin_name, plugin_config)
-                    self._sender.send_system_command(cmd)
-                    result.processes_added.append(pdiff.process_name)
-                except Exception as exc:
-                    result.errors.append(f"Ошибка добавления процесса '{pdiff.process_name}': {exc}")
+                result.errors.append(
+                    f"Процесс '{pdiff.process_name}': добавление на лету не поддержано "
+                    "(нет приёмника process.hot_add). Живой путь: topology.apply"
+                )
 
             # 5. Подключить новые wire'ы
             for wdiff in diff.added_wires:

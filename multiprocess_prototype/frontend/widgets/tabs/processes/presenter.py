@@ -449,14 +449,23 @@ class ProcessesPresenter:
         self._services.topology.save(new_topo)
         if self._topology_bridge is not None:
             try:
-                self._topology_bridge.hot_remove_process(name)
+                removed = self._topology_bridge.hot_remove_process(name)
             except Exception as e:  # nosec B110 — рантайм может быть недоступен, конфиг уже сохранён
+                removed = False
+                logger.warning(
+                    "delete_process(%s): live-удаление упало с ошибкой: %s",
+                    name,
+                    e,
+                )
+            if not removed:
+                # G4: раньше это предупреждение висело только в except, а мост
+                # исключений не кидал и возвращал True — расхождение конфига и
+                # рантайма было невидимым. Теперь судим по возвращаемому значению.
                 logger.warning(
                     "delete_process(%s): процесс удалён из конфигурации, но live-удаление "
                     "не поддержано бэкендом (нет приёмника process.hot_remove) — рантайм "
-                    "разойдётся с конфигом до рестарта: %s",
+                    "разойдётся с конфигом до рестарта",
                     name,
-                    e,
                 )
         return True
 

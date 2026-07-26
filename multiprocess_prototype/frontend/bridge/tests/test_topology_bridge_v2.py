@@ -209,17 +209,19 @@ def bridge(
 
 
 class TestHotAddProcess:
-    def test_happy_path(self, bridge: TopologyBridge, sender: MockSender) -> None:
-        """hot_add нового процесса → send_system_command вызван."""
+    """Контракт после GATE G4: операция НЕ поддержана бэкендом и честно об этом говорит.
+
+    У ``process.hot_add`` нет зарегистрированного приёмника в ProcessManager.
+    Раньше метод возвращал True («команда отправлена») — вызывающий читал это как
+    успех. Тесты ниже фиксируют отказ, чтобы ложь не вернулась незамеченной.
+    """
+
+    def test_reports_failure_and_sends_nothing(self, bridge: TopologyBridge, sender: MockSender) -> None:
+        """hot_add нового процесса → False, команда НЕ отправлена (нет приёмника)."""
         ok = bridge.hot_add_process("new_proc", "my_plugin", {"key": "val"})
-        assert ok is True
-        assert len(sender.system_commands) == 1
-        cmd = sender.system_commands[0]
-        assert cmd["cmd"] == "process.hot_add"
-        assert cmd["process_name"] == "new_proc"
-        assert cmd["plugin_name"] == "my_plugin"
-        assert cmd["plugin_config"] == {"key": "val"}
-        assert cmd["auto_start"] is True
+        assert ok is False
+        assert sender.system_commands == []
+        assert sender.commands == []
 
     def test_process_already_exists(self, bridge: TopologyBridge, sender: MockSender) -> None:
         """hot_add существующего процесса → False, команда не отправлена."""
@@ -227,39 +229,30 @@ class TestHotAddProcess:
         assert ok is False
         assert len(sender.system_commands) == 0
 
-    def test_send_system_command_called(self, bridge: TopologyBridge, sender: MockSender) -> None:
-        """Проверка что именно send_system_command (не send_command) вызван."""
-        bridge.hot_add_process("proc_x", "plugin_x")
-        assert len(sender.system_commands) == 1
-        assert len(sender.commands) == 0  # НЕ send_command
-
-    def test_auto_start_false(self, bridge: TopologyBridge, sender: MockSender) -> None:
-        """auto_start=False передаётся в команду."""
-        bridge.hot_add_process("proc_y", "plugin_y", auto_start=False)
-        cmd = sender.system_commands[0]
-        assert cmd["auto_start"] is False
-
-    def test_no_plugin_config(self, bridge: TopologyBridge, sender: MockSender) -> None:
-        """Без plugin_config → пустой dict в команде."""
-        bridge.hot_add_process("proc_z", "plugin_z")
-        cmd = sender.system_commands[0]
-        assert cmd["plugin_config"] == {}
+    def test_auto_start_and_config_do_not_change_verdict(self, bridge: TopologyBridge, sender: MockSender) -> None:
+        """Ни auto_start, ни plugin_config не делают операцию исполнимой."""
+        assert bridge.hot_add_process("proc_y", "plugin_y", auto_start=False) is False
+        assert bridge.hot_add_process("proc_z", "plugin_z") is False
+        assert sender.system_commands == []
 
 
 # --- Тесты hot_remove_process ---
 
 
 class TestHotRemoveProcess:
-    def test_happy_path(self, bridge: TopologyBridge, sender: MockSender) -> None:
-        """hot_remove существующего процесса → True."""
+    """Контракт после GATE G4: отказ целиком вместо разрушительной половины.
+
+    Регресс, который здесь закрыт: ``process.hot_remove`` приёмника не имеет, а
+    каскадный ``wire.teardown`` — имеет и отрабатывает. Прежняя реализация рвала
+    провода живому процессу и возвращала True. Процесс оставался «зомби» без
+    ввода-вывода.
+    """
+
+    def test_reports_failure_and_sends_nothing(self, bridge: TopologyBridge, sender: MockSender) -> None:
+        """hot_remove существующего процесса → False, ни одной команды."""
         ok = bridge.hot_remove_process("camera_0")
-        assert ok is True
-        # Должна быть команда wire.teardown + process.hot_remove
-        cmds = sender.system_commands
-        # Как минимум hot_remove отправлен
-        hot_remove_cmds = [c for c in cmds if c["cmd"] == "process.hot_remove"]
-        assert len(hot_remove_cmds) == 1
-        assert hot_remove_cmds[0]["process_name"] == "camera_0"
+        assert ok is False
+        assert sender.system_commands == []
 
     def test_process_not_found(self, bridge: TopologyBridge, sender: MockSender) -> None:
         """hot_remove несуществующего процесса → False."""
@@ -267,19 +260,21 @@ class TestHotRemoveProcess:
         assert ok is False
         assert len(sender.system_commands) == 0
 
-    def test_cascade_wire_disconnect(self, bridge: TopologyBridge, sender: MockSender) -> None:
-        """hot_remove каскадно отключает wire'ы процесса."""
-        bridge.hot_remove_process("camera_0")
-        # wire camera_0.capture.output|processor_0.color_mask.input должен быть отключён
-        teardown_cmds = [c for c in sender.system_commands if c["cmd"] == "wire.teardown"]
-        assert len(teardown_cmds) == 1
-        assert teardown_cmds[0]["source_process"] == "camera_0"
+    def test_no_cascade_wire_teardown(self, bridge: TopologyBridge, sender: MockSender) -> None:
+        """РЕГРЕСС-СТРАЖ: каскад wire.teardown НЕ запускается, пока remove неисполним.
 
-    def test_graceful_false(self, bridge: TopologyBridge, sender: MockSender) -> None:
-        """graceful=False передаётся в команду."""
-        bridge.hot_remove_process("camera_0", graceful=False)
-        hot_remove_cmds = [c for c in sender.system_commands if c["cmd"] == "process.hot_remove"]
-        assert hot_remove_cmds[0]["graceful"] is False
+        У ``camera_0`` есть wire camera_0.capture.output|processor_0.color_mask.input.
+        Раньше он отключался — и это единственное место, где «ложь про успех»
+        производила реальный разрушительный эффект.
+        """
+        bridge.hot_remove_process("camera_0")
+        teardown_cmds = [c for c in sender.system_commands if c["cmd"] == "wire.teardown"]
+        assert teardown_cmds == [], "wire.teardown не должен уходить: процесс останется без проводов"
+
+    def test_graceful_flag_does_not_change_verdict(self, bridge: TopologyBridge, sender: MockSender) -> None:
+        """graceful=False не делает операцию исполнимой."""
+        assert bridge.hot_remove_process("camera_0", graceful=False) is False
+        assert sender.system_commands == []
 
 
 # --- Тесты connect_wire ---
@@ -379,7 +374,12 @@ class TestApplyTopologyDiff:
         rm: MockRegistersManager,
         wire_monitor: WireStatusMonitor,
     ) -> None:
-        """apply_diff с добавлением и удалением процессов."""
+        """apply_diff с добавлением и удалением процессов → честный отказ (G4).
+
+        Ветки процессов декомпозировались в process.hot_add/hot_remove, у которых
+        нет приёмников. Раньше имена писались в processes_added/removed как успех.
+        Теперь отказ уходит в errors, а списки успеха остаются пустыми.
+        """
         old = {
             "processes": [
                 {"process_name": "old_proc", "plugin_name": "old_plugin"},
@@ -396,9 +396,13 @@ class TestApplyTopologyDiff:
         bridge = TopologyBridge(sender, catalog, validator, rm, holder, wire_monitor=wire_monitor)
 
         result = bridge.apply_topology_diff(old, new)
-        assert result.ok is True
-        assert "new_proc" in result.processes_added
-        assert "old_proc" in result.processes_removed
+        assert result.ok is False
+        assert result.processes_added == []
+        assert result.processes_removed == []
+        assert any("new_proc" in e and "hot_add" in e for e in result.errors)
+        assert any("old_proc" in e and "hot_remove" in e for e in result.errors)
+        # Разрушительного каскада быть не должно
+        assert [c for c in sender.system_commands if c["cmd"] == "wire.teardown"] == []
 
     def test_empty_diff(self, bridge: TopologyBridge) -> None:
         """Одинаковые topology → пустой результат."""
@@ -414,7 +418,13 @@ class TestApplyTopologyDiff:
         rm: MockRegistersManager,
         wire_monitor: WireStatusMonitor,
     ) -> None:
-        """Частичная ошибка: sender бросает exception на hot_remove."""
+        """Обе ветки процессов отказывают независимо друг от друга (G4).
+
+        До G4 тест проверял частичный сбой: sender бросал исключение на
+        hot_remove, а hot_add «проходил». Теперь обе операции неисполнимы по
+        построению — приёмников нет ни у одной, — поэтому в errors ровно две
+        записи, и ни одна не попадает в списки успеха.
+        """
 
         class FailingSender(MockSender):
             def send_system_command(self, command: dict[str, Any]) -> None:
@@ -442,10 +452,12 @@ class TestApplyTopologyDiff:
 
         result = bridge.apply_topology_diff(old, new)
         assert result.ok is False
-        assert len(result.errors) == 1
-        assert "to_remove" in result.errors[0]
-        # Добавление должно было пройти
-        assert "to_add" in result.processes_added
+        assert len(result.errors) == 2
+        assert any("to_remove" in e for e in result.errors)
+        assert any("to_add" in e for e in result.errors)
+        # Ни одна ветка процессов больше не рапортует успех
+        assert result.processes_added == []
+        assert result.processes_removed == []
 
     def test_operation_order(
         self,
