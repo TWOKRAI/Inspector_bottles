@@ -6,7 +6,16 @@ Middleware вставляется между IPC-обработчиком и Tre
 
 Порядок вызова: первый зарегистрированный → первый вызванный.
 Пустой pipeline — нулевой overhead (проверка `if self._middlewares:`).
-Потокобезопасность НЕ нужна — StateStoreManager однопоточный.
+
+**Потокобезопасность НУЖНА, если middleware держит состояние.** Прежняя строка
+«StateStoreManager однопоточный» неверна и опровергнута верификацией A-12 (2026-07-21):
+``ProcessMonitor._publish_state`` зовёт ``handle_state_set``/``handle_state_merge``
+НАПРЯМУЮ с треда ``state_monitor``, параллельно треду ``message_processor``, который
+обрабатывает те же IPC-команды от остальных процессов через ТОТ ЖЕ экземпляр middleware.
+Вызывающих потоков минимум два. Пример цены ошибки — ``ThrottleMiddleware``: сканирование
+словаря таймингов без лока давало ``RuntimeError: dictionary changed size during iteration``
+(теперь всё под ``_timing_lock``, см. его docstring). Middleware без собственного состояния
+(чистая валидация аргументов) блокировки не требует.
 """
 
 from __future__ import annotations

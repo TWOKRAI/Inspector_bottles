@@ -19,7 +19,7 @@
 | match_pattern, split_pattern | core/subscription_manager.py (re-export через core/__init__) | Готов | Публичные хелперы glob-матчинга (ADR-SS-004) |
 | **manager/** | | | |
 | StateStoreManager | manager/state_store_manager.py | Готов | Server-фасад: TreeStore + SubscriptionManager + DeltaDispatcher + 7 IPC-handlers |
-| DeltaDispatcher | manager/delta_dispatcher.py | Готов | Адресная рассылка дельт подписчикам через `targets`, дедупликация по subscriber |
+| DeltaDispatcher | manager/delta_dispatcher.py | Готов | Адресная рассылка дельт подписчикам через `targets`, дедупликация по subscriber; **доставка коалесцированная** — буфер per-subscriber + daemon-flusher (~120 мс, cap ~200), очередь класса `state`, переключателей нет (ADR-SS-020) |
 | **proxy/** | | | |
 | StateProxy | proxy/state_proxy.py | Готов | Client-прокси: локальный кэш + IPC + per-pattern фильтрация callbacks (ADR-SS-012); watch-from-revision + resync (Ф4.9, ADR-SS-015) |
 | GuiStateProxy | proxy/gui_state_proxy.py | Готов | Qt-safe: callbacks через `QMetaObject.invokeMethod(QueuedConnection)`, ленивый PySide6; наследует watch-from-revision из StateProxy |

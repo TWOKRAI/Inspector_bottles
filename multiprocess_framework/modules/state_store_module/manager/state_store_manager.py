@@ -139,7 +139,8 @@ class StateStoreManager(BaseManager, ObservableMixin, IStateStoreManager):
         """
         # Финальный flush + остановка flusher коалесцирования ДО отписки:
         # гарантирует доставку накопленного буфера дельт перед остановкой.
-        # No-op при OFF (буфер пуст, поток не создавался).
+        # Поток создаётся всегда в initialize(); вызов до неё безопасен —
+        # буфер пуст, дренаж вырождается в no-op.
         self._dispatcher.stop_flusher()
 
         total = 0

@@ -276,13 +276,17 @@ def test_shutdown_flushes_buffer_and_stops_thread() -> None:
     """Через менеджер: буфер в flusher'е + shutdown() → буфер доставлен, поток стоит."""
     router = _CapturingRouter()
     mgr = StateStoreManager(router=router, auto_register_ipc=False)
+    # Тик отодвинут ДО старта потока: иначе ассерт «конверт ещё не ушёл» гоняется
+    # наперегонки с живым таймером (стойл >120мс на нагруженной машине = красный
+    # тест без вины кода). Проверяется факт буферизации, а не расписание.
+    mgr.dispatcher._flush_interval_sec = 5.0
 
     mgr.subscription_manager.subscribe("cameras.**", "gui")
     mgr.initialize()
     assert mgr.dispatcher._flusher is not None
     assert mgr.dispatcher._flusher.is_alive()
 
-    # Мутация → в буфер, конверт ещё не ушёл (тик 120мс не наступил).
+    # Мутация → в буфер, конверт ещё не ушёл (тик не наступил).
     mgr.store.set("cameras.0.fps", 30, source="test")
     mgr.dispatcher.dispatch_single(_mk_delta("cameras.0.fps", 30, revision=mgr.store.revision))
     assert router.sent == []
@@ -307,6 +311,7 @@ def test_manager_lifecycle_has_no_immediate_send_switch(monkeypatch) -> None:
 
     router = _CapturingRouter()
     mgr = StateStoreManager(router=router, auto_register_ipc=False)
+    mgr.dispatcher._flush_interval_sec = 5.0  # см. пояснение в тесте выше
 
     mgr.subscription_manager.subscribe("cameras.**", "gui")
     mgr.initialize()
